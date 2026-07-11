@@ -178,8 +178,10 @@ func (app *kanbanBoardApp) runSlopClassifierOnce(agent ambientAgentConfig, ctx c
 		return nil
 	}
 
+	model := meetingBrainModel()
 	text, err := responder(ctx, apiKey, openAITextRequest{
-		Model:           meetingBrainModel(),
+		Model:           model,
+		Seat:            seatSlop,
 		Instructions:    slopClassifierInstructions(),
 		Input:           app.buildSlopClassifierInput(candidates, time.Now().UTC()),
 		ReasoningEffort: "low",
@@ -193,6 +195,7 @@ func (app *kanbanBoardApp) runSlopClassifierOnce(agent ambientAgentConfig, ctx c
 	if !ok {
 		// Never advance the cursor on unparseable output: the next pass retries
 		// the same window (decision-ledger precedent).
+		recordEvalEvent(seatSlop, evalKindParseFailure, map[string]any{"seat": seatSlop, "model": model})
 		log.Errorf("%s returned non-JSON output; skipping this pass", slopClassifierAgentName)
 		return nil
 	}

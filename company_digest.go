@@ -327,6 +327,7 @@ func (app *kanbanBoardApp) runCompanyDigestPass(ctx context.Context, apiKey stri
 	model := meetingBrainModel()
 	text, err := responder(ctx, apiKey, openAITextRequest{
 		Model:           model,
+		Seat:            seatCompanyDigest,
 		Instructions:    companyDigestInstructions(),
 		Input:           buildCompanyDigestInput(state, deltas, priorNarrative, now.UTC()),
 		ReasoningEffort: "low",
@@ -337,6 +338,17 @@ func (app *kanbanBoardApp) runCompanyDigestPass(ctx context.Context, apiKey stri
 		return meetingMemoryEntry{}, err
 	}
 	narrative := trimForStorage(strings.TrimSpace(text), companyDigestNarrativeLimit)
+	// W0 item 6 structural checks, evaluated BEFORE the prior-narrative
+	// fallback so an empty model pass is visible even though the artifact
+	// self-heals; state_nonempty covers the deterministic ledger fold.
+	recordEvalEvent(seatCompanyDigest, evalKindDigestStructure, map[string]any{
+		"check": "narrative_present", "pass": narrative != "",
+	})
+	recordEvalEvent(seatCompanyDigest, evalKindDigestStructure, map[string]any{
+		"check": "state_nonempty",
+		"pass": len(state.Decisions) > 0 || len(state.ActionItems) > 0 ||
+			len(state.Topics) > 0 || len(state.OpenQuestions) > 0,
+	})
 	if narrative == "" {
 		narrative = priorNarrative
 	}

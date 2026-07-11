@@ -3386,3 +3386,194 @@ func TestLaunchSubtaskStampsOutputContractOnChild(t *testing.T) {
 		t.Fatalf("child outputContract=%q, want the stage's contract", child.Artifact.Metadata["outputContract"])
 	}
 }
+
+// --- W0 items 3 + 6: ledger seat tags, gate-by-runner + parse-failure events ---
+
+// Every goal-engine model call carries its ledger seat to the wire seam:
+// orchestration lanes (decompose/panel/report/verify) bill as goal_engine on
+// the orchestrator model; review/gate scoring bills as goal_review on the
+// review model.
+func TestGoalEngineCallsCarrySeatTags(t *testing.T) {
+	var seats []string
+	var models []string
+	engine := &goalEngine{
+		apiKey:      func() string { return "test-key" },
+		model:       "claude-fable-5",
+		reviewModel: "claude-opus-4-8",
+		effort:      "high",
+		maxTokens:   2048,
+		responder: func(_ context.Context, _ string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+			seats = append(seats, request.Seat)
+			models = append(models, request.Model)
+			return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock("ok")}}, nil
+		},
+	}
+	if _, err := engine.callModel(context.Background(), "sys", "user"); err != nil {
+		t.Fatalf("callModel: %v", err)
+	}
+	if _, err := engine.callReviewModel(context.Background(), "sys", "user"); err != nil {
+		t.Fatalf("callReviewModel: %v", err)
+	}
+	if len(seats) != 2 || seats[0] != seatGoalEngine || seats[1] != seatGoalReview {
+		t.Fatalf("seats=%v, want [%s %s]", seats, seatGoalEngine, seatGoalReview)
+	}
+	if models[0] != "claude-fable-5" || models[1] != "claude-opus-4-8" {
+		t.Fatalf("models=%v, want the orchestrator then the review model", models)
+	}
+}
+
+// pinGoalEvalLedger points the ledger at a temp dir with a fixed clock and
+// returns the eval file path the events land in.
+func pinGoalEvalLedger(t *testing.T) string {
+	t.Helper()
+	dir := ledgerTestDir(t)
+	originalNow := usageLedgerNow
+	usageLedgerNow = func() time.Time { return time.Date(2026, time.July, 11, 12, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { usageLedgerNow = originalNow })
+	return filepath.Join(dir, "eval-2026-07-11.jsonl")
+}
+
+// goalEvalEventFields splits an eval ledger file's rows by kind, returning
+// each row's fields map.
+func goalEvalEventFields(t *testing.T, path string, kind string) []map[string]any {
+	t.Helper()
+	var matched []map[string]any
+	for _, row := range readLedgerLines(t, path) {
+		if row["kind"] != kind {
+			continue
+		}
+		fields, _ := row["fields"].(map[string]any)
+		matched = append(matched, fields)
+	}
+	return matched
+}
+
+// A reviewer reply that fails strict-JSON decoding increments the goal_review
+// parse-failure series (the designated flip-regression metric) AND the review
+// verdict still lands as a runner-tagged gate_result — the per-runner
+// gate-failure series the model_choice adoption gate reads.
+func TestGoalEngineReviewEmitsGateResultAndParseFailureEvents(t *testing.T) {
+	evalPath := pinGoalEvalLedger(t)
+	app := newIsolatedKanbanBoardApp(t)
+	engine := &goalEngine{
+		app:         app,
+		apiKey:      func() string { return "test-key" },
+		model:       "claude-fable-5",
+		reviewModel: "claude-opus-4-8",
+		effort:      "high",
+		maxTokens:   2048,
+		responder: func(_ context.Context, _ string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+			// Brace-carrying invalid JSON: extractJSONObject finds an object,
+			// Unmarshal fails — the strict-JSON parse-failure path.
+			return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(`{"verdict": broken}`)}}, nil
+		},
+	}
+	plan := &goalPlan{
+		GoalID:    "goal-1",
+		Objective: "test objective",
+		Subtasks: []goalSubtask{{
+			ID:     "st-1",
+			Title:  "produce the thing",
+			Mode:   "research",
+			Status: subtaskComplete,
+			Runner: agentRunnerAnthropicFable,
+		}},
+	}
+
+	if outcome := engine.reviewSubtasks(context.Background(), plan); outcome != goalReviewOutcomeRequeue {
+		t.Fatalf("outcome=%v, want requeue (malformed reviewer JSON folds to revise)", outcome)
+	}
+
+	parseFailures := goalEvalEventFields(t, evalPath, evalKindParseFailure)
+	if len(parseFailures) != 1 || parseFailures[0]["seat"] != seatGoalReview || parseFailures[0]["model"] != "claude-opus-4-8" {
+		t.Fatalf("parse_failure events=%v, want one on goal_review/claude-opus-4-8", parseFailures)
+	}
+	gateResults := goalEvalEventFields(t, evalPath, evalKindGateResult)
+	if len(gateResults) != 1 {
+		t.Fatalf("gate_result events=%v, want exactly one", gateResults)
+	}
+	if gateResults[0]["runner"] != agentRunnerAnthropicFable || gateResults[0]["verdict"] != goalReviewRevise || gateResults[0]["goal_id"] != "goal-1" {
+		t.Fatalf("gate_result fields=%v, want runner/verdict/goal_id provenance", gateResults[0])
+	}
+}
+
+// The plan-level ship gate settles into a runner-tagged gate_result on every
+// branch: a clean pass records "passed" against the runner whose work was
+// judged (the last sink subtask on a free-form goal).
+func TestGoalEngineShipGateEmitsGateResultEvent(t *testing.T) {
+	evalPath := pinGoalEvalLedger(t)
+	app := newIsolatedKanbanBoardApp(t)
+	engine := &goalEngine{
+		app:         app,
+		apiKey:      func() string { return "test-key" },
+		model:       "claude-fable-5",
+		reviewModel: "claude-opus-4-8",
+		effort:      "high",
+		maxTokens:   2048,
+		responder: func(_ context.Context, _ string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+			return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(`{"safe":true,"external_write_required":false,"command":"","reason":"clean"}`)}}, nil
+		},
+	}
+	plan := &goalPlan{
+		GoalID:    "goal-2",
+		Objective: "ship it",
+		Subtasks: []goalSubtask{{
+			ID:     "st-1",
+			Title:  "write it",
+			Mode:   "research",
+			Status: subtaskComplete,
+			Runner: agentRunnerCodexSidecar,
+		}},
+	}
+
+	engine.gate(context.Background(), plan)
+	if plan.Gate.Status != "passed" {
+		t.Fatalf("gate status=%q, want passed", plan.Gate.Status)
+	}
+
+	gateResults := goalEvalEventFields(t, evalPath, evalKindGateResult)
+	if len(gateResults) != 1 {
+		t.Fatalf("gate_result events=%v, want exactly one", gateResults)
+	}
+	if gateResults[0]["runner"] != agentRunnerCodexSidecar || gateResults[0]["verdict"] != "passed" || gateResults[0]["goal_id"] != "goal-2" {
+		t.Fatalf("gate_result fields=%v, want codex_sidecar/passed/goal-2", gateResults[0])
+	}
+}
+
+// A ship-gate reply that fails strict-JSON decoding blocks the gate AND
+// counts on the goal_review parse-failure series, with the blocked verdict
+// still landing as a gate_result.
+func TestGoalEngineShipGateMalformedJSONEmitsParseFailure(t *testing.T) {
+	evalPath := pinGoalEvalLedger(t)
+	app := newIsolatedKanbanBoardApp(t)
+	engine := &goalEngine{
+		app:         app,
+		apiKey:      func() string { return "test-key" },
+		model:       "claude-fable-5",
+		reviewModel: "claude-opus-4-8",
+		effort:      "high",
+		maxTokens:   2048,
+		responder: func(_ context.Context, _ string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+			return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock(`{"safe": nope}`)}}, nil
+		},
+	}
+	plan := &goalPlan{
+		GoalID:    "goal-3",
+		Objective: "ship it",
+		Subtasks:  []goalSubtask{{ID: "st-1", Title: "write it", Mode: "research", Status: subtaskComplete, Runner: agentRunnerAnthropicFable}},
+	}
+
+	engine.gate(context.Background(), plan)
+	if plan.Gate.Status != subtaskBlocked {
+		t.Fatalf("gate status=%q, want blocked on malformed JSON", plan.Gate.Status)
+	}
+
+	parseFailures := goalEvalEventFields(t, evalPath, evalKindParseFailure)
+	if len(parseFailures) != 1 || parseFailures[0]["seat"] != seatGoalReview {
+		t.Fatalf("parse_failure events=%v, want one on goal_review", parseFailures)
+	}
+	gateResults := goalEvalEventFields(t, evalPath, evalKindGateResult)
+	if len(gateResults) != 1 || gateResults[0]["verdict"] != subtaskBlocked || gateResults[0]["runner"] != agentRunnerAnthropicFable {
+		t.Fatalf("gate_result events=%v, want one blocked verdict tagged anthropic_fable", gateResults)
+	}
+}

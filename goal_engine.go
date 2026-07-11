@@ -1011,6 +1011,7 @@ func (e *goalEngine) decompose(ctx context.Context, plan *goalPlan) error {
 		Subtasks []goalSubtask `json:"subtasks"`
 	}
 	if err := json.Unmarshal([]byte(extractJSONObject(text)), &decoded); err != nil {
+		e.recordGoalParseFailure(seatGoalEngine)
 		return fmt.Errorf("malformed decompose JSON: %w", err)
 	}
 	for index := range decoded.Subtasks {
@@ -1820,6 +1821,16 @@ func (e *goalEngine) runProcessGateStage(ctx context.Context, plan *goalPlan, pa
 			return e.scoreProcessGateRound(ctx, plan, st, stage)
 		},
 	})
+	// Gate-by-runner provenance (W0 item 6): the judged work came from the
+	// gate's input stage, so the event carries that stage's runner (the gate
+	// subtask itself is inline — its own runner never wrote the work).
+	gateRunner := st.Runner
+	if len(stage.InputFrom) > 0 {
+		if input := plan.subtaskByID(strings.TrimSpace(stage.InputFrom[0])); input != nil {
+			gateRunner = firstNonEmptyString(input.Runner, st.Runner)
+		}
+	}
+	recordGoalGateResult(gateRunner, decision.Outcome, plan.GoalID)
 	// Reasons AND gaps together: a revise's requeue notes must name every
 	// below-floor dimension, not just the scorer's one-liner.
 	noteParts := make([]string, 0, 1+len(decision.Gaps))
@@ -1873,6 +1884,7 @@ func (e *goalEngine) scoreProcessGateRound(ctx context.Context, plan *goalPlan, 
 		Reasons string `json:"reasons"`
 	}
 	if err := json.Unmarshal([]byte(extractJSONObject(text)), &decoded); err != nil {
+		e.recordGoalParseFailure(seatGoalReview)
 		return goalGateRound{Verdict: goalReviewRevise, Reasons: "gate scorer returned malformed JSON"}
 	}
 	round := goalGateRound{Reasons: strings.TrimSpace(decoded.Reasons)}
@@ -2418,6 +2430,10 @@ func (e *goalEngine) reviewSubtasks(ctx context.Context, plan *goalPlan) goalRev
 			continue
 		}
 		verdict, reasons, score := e.reviewOneSubtask(ctx, plan, st)
+		// Gate-by-runner provenance (W0 item 6): every reviewer verdict lands
+		// in the eval ledger tagged with the runner that produced the artifact,
+		// so gate-failure rates are comparable per runner.
+		recordGoalGateResult(st.Runner, verdict, plan.GoalID)
 		// A law-sweep verdict is mechanical (a grep, not a judgement); stamp its
 		// provenance honestly so the card never claims a model reviewed it.
 		reviewedBy := "reviewer_model"
@@ -2587,6 +2603,7 @@ func (e *goalEngine) scoreSubtaskAgainstRubric(ctx context.Context, plan *goalPl
 		Strengths []string `json:"strengths_to_keep"`
 	}
 	if err := json.Unmarshal([]byte(extractJSONObject(text)), &decoded); err != nil {
+		e.recordGoalParseFailure(seatGoalReview)
 		return goalGateRound{Verdict: goalReviewRevise, Reasons: "reviewer returned malformed JSON"}
 	}
 	// Fold the reviewer's explicit praise into the subtask's protect list. The
@@ -2612,6 +2629,12 @@ func (e *goalEngine) scoreSubtaskAgainstRubric(ctx context.Context, plan *goalPl
 // approval_required and the engine stops — no code path lets the orchestrator
 // self-approve an external write.
 func (e *goalEngine) gate(ctx context.Context, plan *goalPlan) {
+	// Gate-by-runner provenance (W0 item 6): whichever branch settles the gate
+	// (model verdict, malformed JSON, call failure, approval park), the outcome
+	// lands in the eval ledger tagged with the runner whose work was judged.
+	defer func() {
+		recordGoalGateResult(goalShipGateRunner(plan), plan.Gate.Status, plan.GoalID)
+	}()
 	system := "You are Scout's ship gate for Bonfire OS. Answer one question: is the work safe and complete to publish/deliver? Return STRICT JSON only: {\"safe\":true|false,\"external_write_required\":true|false,\"command\":\"\",\"reason\":\"one line\"}. Set external_write_required true only if shipping needs a commit, push, deploy, email, or other production side effect."
 	tool, hasTool := e.resolvedTool(plan)
 	if hasTool {
@@ -2636,6 +2659,7 @@ func (e *goalEngine) gate(ctx context.Context, plan *goalPlan) {
 		Reason                string `json:"reason"`
 	}
 	if err := json.Unmarshal([]byte(extractJSONObject(text)), &decoded); err != nil {
+		e.recordGoalParseFailure(seatGoalReview)
 		plan.Gate.Status = subtaskBlocked
 		plan.Gate.Reason = "gate returned malformed JSON"
 		return
@@ -2900,6 +2924,7 @@ func (e *goalEngine) report(ctx context.Context, plan *goalPlan) {
 		Decision          string `json:"decision"`
 	}
 	if err := json.Unmarshal([]byte(extractJSONObject(text)), &decoded); err != nil {
+		e.recordGoalParseFailure(seatGoalEngine)
 		plan.Report.Headline = compactAssistantLine(text)
 		return
 	}
@@ -2954,6 +2979,7 @@ func (e *goalEngine) verify(ctx context.Context, plan *goalPlan) bool {
 		Reasons string `json:"reasons"`
 	}
 	if err := json.Unmarshal([]byte(extractJSONObject(text)), &decoded); err != nil {
+		e.recordGoalParseFailure(seatGoalEngine)
 		plan.Verification.Reasons = "verifier returned malformed JSON"
 		return false
 	}
@@ -3911,22 +3937,27 @@ func (app *kanbanBoardApp) nowUnixNano() int64 { return time.Now().UnixNano() }
 
 // callModel is a single no-tools orchestrator model call returning the
 // concatenated text. It reuses the Wave-1 injectable anthropic responder.
+// Every callModel lane (decompose, panel, stage synthesis, report, verify)
+// bills to the goal_engine seat (W0 item 3).
 func (e *goalEngine) callModel(ctx context.Context, system string, user string) (string, error) {
-	return e.callModelAs(ctx, e.model, system, user)
+	return e.callModelAs(ctx, e.model, seatGoalEngine, system, user)
 }
 
 // callReviewModel routes a call to the dedicated review model (Wave 3 item 16
 // — the per-subtask review and the ship gate read WHOLE artifact bodies, which
 // wants Opus-tier context at Opus rates, not the Fable ceiling). Orchestration
 // calls (decompose, panel, report, verify) stay on callModel. Same
-// env-with-override shape as the assignedRunner per-subtask pattern.
+// env-with-override shape as the assignedRunner per-subtask pattern. Review
+// and gate scoring bill to the goal_review seat (W0 item 3).
 func (e *goalEngine) callReviewModel(ctx context.Context, system string, user string) (string, error) {
-	return e.callModelAs(ctx, firstNonEmptyString(e.reviewModel, e.model), system, user)
+	return e.callModelAs(ctx, firstNonEmptyString(e.reviewModel, e.model), seatGoalReview, system, user)
 }
 
-// callModelAs is callModel with the model chosen per call; everything else
-// (key, effort, token ceiling, refusal handling) is shared.
-func (e *goalEngine) callModelAs(ctx context.Context, model string, system string, user string) (string, error) {
+// callModelAs is callModel with the model and ledger seat chosen per call;
+// everything else (key, effort, token ceiling, refusal handling) is shared.
+// The seat rides the request struct to the wire seam, which files the usage
+// entry — mocked responders in tests record nothing, exactly like the runner.
+func (e *goalEngine) callModelAs(ctx context.Context, model string, seat string, system string, user string) (string, error) {
 	apiKey := strings.TrimSpace(e.apiKey())
 	if apiKey == "" {
 		return "", fmt.Errorf("ANTHROPIC_API_KEY is not configured")
@@ -3937,6 +3968,7 @@ func (e *goalEngine) callModelAs(ctx context.Context, model string, system strin
 		Messages:  []anthropicMessage{{Role: "user", Content: []json.RawMessage{anthropicTextBlock(user)}}},
 		MaxTokens: e.maxTokens,
 		Effort:    e.effort,
+		Seat:      seat,
 	})
 	if err != nil {
 		return "", err
@@ -3957,6 +3989,49 @@ func anthropicResponseText(response anthropicMessagesResponse) string {
 		}
 	}
 	return strings.TrimSpace(builder.String())
+}
+
+// --- W0 item 6: gate-by-runner + parse-failure eval events --------------------
+
+// recordGoalGateResult files one gate_result eval event tagged with the runner
+// whose work was judged — the per-runner gate-failure series the model_choice
+// adoption gate reads (anthropic_sonnet_worker must hold ≤1.5x Fable's rate
+// before the gate ever moves). Never fails the caller (ledger discipline).
+func recordGoalGateResult(runner string, verdict string, goalID string) {
+	recordEvalEvent(seatGoalReview, evalKindGateResult, map[string]any{
+		"runner":  runner,
+		"verdict": verdict,
+		"goal_id": goalID,
+	})
+}
+
+// recordGoalParseFailure counts one malformed strict-JSON model reply on a
+// goal lane — the designated regression metric for any model flip. seat is
+// the lane whose model produced the reply (goal_engine for callModel lanes,
+// goal_review for callReviewModel lanes), and the model field names the
+// culprit so a flip's parse-failure delta is attributable per model id.
+func (e *goalEngine) recordGoalParseFailure(seat string) {
+	model := e.model
+	if seat == seatGoalReview {
+		model = firstNonEmptyString(e.reviewModel, e.model)
+	}
+	recordEvalEvent(seat, evalKindParseFailure, map[string]any{"seat": seat, "model": model})
+}
+
+// goalShipGateRunner names the runner whose work the plan-level ship gate is
+// clearing: the deliverable subtask's runner when one is resolvable, else the
+// last subtask's (free-form goals stamp no deliverable). Empty on an empty
+// plan — the gate event still lands, just unattributed.
+func goalShipGateRunner(plan *goalPlan) string {
+	if id := goalDeliverableSubtaskID(plan); id != "" {
+		if st := plan.subtaskByID(id); st != nil {
+			return st.Runner
+		}
+	}
+	if len(plan.Subtasks) > 0 {
+		return plan.Subtasks[len(plan.Subtasks)-1].Runner
+	}
+	return ""
 }
 
 // extractJSONObject pulls the first balanced {...} out of a model response,

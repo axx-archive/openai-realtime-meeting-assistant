@@ -25,6 +25,17 @@ var domainTermCorrections = []struct {
 	{regexp.MustCompile(`(?i)\bs[\s.-]*r[\s.-]*t[\s.-]*p\b`), "SRTP"},
 	{regexp.MustCompile(`(?i)\br[\s.-]*t[\s.-]*p\b`), "RTP"},
 	{regexp.MustCompile(`(?i)\bn[\s.-]*a[\s.-]*c[\s.-]*k\b`), "NACK"},
+	// W1-17 phase-1 additions with mangling-by-construction evidence: an STT
+	// without vocabulary bias can never emit these canonical compound spellings
+	// ("StationTenn" surfaces as "station ten(n)"/"Station 10", "fiscal.ai" as
+	// "fiscal AI"/"fiscal dot ai") — the same split-brand class as "bon fire" →
+	// Bonfire above. The rest of the phase-1 vocabulary (Fable, Sonnet, Luna,
+	// ...) stays regex-free: those canonical forms are ordinary words an STT
+	// already produces, and W0 correction-hit data shows no mangling evidence
+	// yet — never invent aggressive rewrites.
+	{regexp.MustCompile(`(?i)\bstation[\s.-]*ten{1,2}\b`), "StationTenn"},
+	{regexp.MustCompile(`(?i)\bstation[\s.-]*10\b`), "StationTenn"},
+	{regexp.MustCompile(`(?i)\bfiscal\s+(?:dot\s+)?ai\b`), "fiscal.ai"},
 }
 
 var (
@@ -57,6 +68,22 @@ var meetingDomainVocabulary = []string{
 	"DigitalOcean",
 	"VPS",
 	"Kanban",
+	// W1-17 phase-1 gaps (model-routing master plan 2026-07-11): the live
+	// client, the grounded-data vendor, and the model/tooling vocabulary the
+	// team actually speaks in standups.
+	"StationTenn",
+	"fiscal.ai",
+	"Fable",
+	"Claude Fable",
+	"Sonnet",
+	"Haiku",
+	"Codex",
+	"Resend",
+	"Luna",
+	"Terra",
+	"Sol",
+	"BonfireOS",
+	"Bonfire OS",
 }
 
 // recallSynonymGroups is the curated synonym table that powers query
@@ -157,6 +184,14 @@ func domainVocabulary() []string {
 	return uniqueStrings(terms)
 }
 
+// canonicalizeDomainTerms applies the known-mistranscription corrections and
+// records one correction_hit eval event per rule that actually changed text
+// (W0-5: every non-identity hit is a known term the STT got wrong — the live
+// vocab-error proxy that baselines the transcription-model swap). Matches that
+// already read exactly as the canonical value (a literal "RTP", which the
+// acronym patterns also match) are NOT hits and record nothing. This seam has
+// no room in hand (memory.go's transcript writer and the board canonicalizers
+// share it), so the events carry the term + hit count only.
 func canonicalizeDomainTerms(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -164,7 +199,26 @@ func canonicalizeDomainTerms(value string) string {
 	}
 
 	for _, correction := range domainTermCorrections {
+		matches := correction.pattern.FindAllStringIndex(value, -1)
+		if len(matches) == 0 {
+			continue
+		}
+		hits := 0
+		for _, match := range matches {
+			if value[match[0]:match[1]] != correction.value {
+				hits++
+			}
+		}
+		if hits == 0 {
+			// Every match already reads canonically — nothing to correct,
+			// nothing to count.
+			continue
+		}
 		value = correction.pattern.ReplaceAllString(value, correction.value)
+		recordEvalEvent(seatTranscriptionLane, evalKindCorrectionHit, map[string]any{
+			"term":  correction.value,
+			"count": hits,
+		})
 	}
 
 	return value

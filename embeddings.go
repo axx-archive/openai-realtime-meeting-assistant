@@ -61,7 +61,6 @@ const (
 	// mirror, so this file owns the wire.
 	defaultEmbeddingModel = "text-embedding-3-small"
 	embeddingDims         = 1536
-	embeddingsOpenAIURL   = "https://api.openai.com/v1/embeddings"
 
 	// defaultEmbeddingInterval is the maintainer's safety-floor sweep cadence.
 	// Embedding is a background enrichment, not a latency surface — several
@@ -109,6 +108,12 @@ const (
 	// memory answer) the full embeddingQueryTimeout inline. A success clears it.
 	embeddingQueryFailureCooldown = 60 * time.Second
 )
+
+// embeddingsOpenAIURL is a package VAR where most wire URLs are consts (the
+// openAIImagesURL precedent): the W0-5 metering test drives the real request
+// encoding + usage decode path against a fake HTTP server, so the seam is the
+// endpoint itself.
+var embeddingsOpenAIURL = "https://api.openai.com/v1/embeddings"
 
 // embeddingCorpusKinds is the ALLOWLIST of consolidated knowledge kinds the
 // maintainer embeds. Everything else — the transcript firehose, signals, and
@@ -752,6 +757,12 @@ type openAIEmbeddingsBody struct {
 		Index     int       `json:"index"`
 		Embedding []float32 `json:"embedding"`
 	} `json:"data"`
+	// Usage rides every embeddings response; the W0-5 metering records
+	// prompt_tokens per call (seat embeddings).
+	Usage struct {
+		PromptTokens int64 `json:"prompt_tokens"`
+		TotalTokens  int64 `json:"total_tokens"`
+	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message,omitempty"`
 	} `json:"error,omitempty"`
@@ -762,7 +773,7 @@ type openAIEmbeddingsBody struct {
 // idioms in openai_responses.go (Bearer auth, bounded body read, status check).
 func openAIEmbeddingFunc(apiKey string, model string) embeddingFunc {
 	apiKey = strings.TrimSpace(apiKey)
-	return func(ctx context.Context, inputs []string) ([][]float32, error) {
+	return func(ctx context.Context, inputs []string) (vectors [][]float32, err error) {
 		if apiKey == "" {
 			return nil, fmt.Errorf("OPENAI_API_KEY is not configured")
 		}
@@ -785,6 +796,30 @@ func openAIEmbeddingFunc(apiKey string, model string) embeddingFunc {
 		httpRequest.Header.Set("Authorization", "Bearer "+apiKey)
 		httpRequest.Header.Set("Content-Type", "application/json")
 
+		// W0-5 lane metering (seat embeddings): one ledger row per API call —
+		// wire prompt_tokens when the response reports them, else a ~4-bytes/
+		// token estimate flagged Estimated; failed calls carry Error (they cost
+		// latency and often still bill).
+		started := time.Now()
+		promptTokens := int64(0)
+		defer func() {
+			entry := llmUsageEntry{
+				Provider:    providerOpenAI,
+				Model:       model,
+				Seat:        seatEmbeddings,
+				InputTokens: promptTokens,
+				DurationMS:  time.Since(started).Milliseconds(),
+			}
+			if entry.InputTokens == 0 {
+				entry.InputTokens = estimateEmbeddingInputTokens(inputs)
+				entry.Estimated = true
+			}
+			if err != nil {
+				entry.Error = err.Error()
+			}
+			recordLLMUsage(entry)
+		}()
+
 		response, err := (&http.Client{Timeout: embeddingRequestTimeout}).Do(httpRequest)
 		if err != nil {
 			return nil, fmt.Errorf("create embeddings response: %w", err)
@@ -801,6 +836,7 @@ func openAIEmbeddingFunc(apiKey string, model string) embeddingFunc {
 		if err := json.Unmarshal(rawBody, &body); err != nil {
 			return nil, fmt.Errorf("decode embeddings response: %w", err)
 		}
+		promptTokens = body.Usage.PromptTokens
 		if body.Error != nil && strings.TrimSpace(body.Error.Message) != "" {
 			return nil, fmt.Errorf("OpenAI embeddings error: %s", strings.TrimSpace(body.Error.Message))
 		}
@@ -818,6 +854,16 @@ func openAIEmbeddingFunc(apiKey string, model string) embeddingFunc {
 		}
 		return out, nil
 	}
+}
+
+// estimateEmbeddingInputTokens is the fallback meter when the wire reports no
+// usage: ~4 bytes per token, rounded up, summed across the batch.
+func estimateEmbeddingInputTokens(inputs []string) int64 {
+	total := 0
+	for _, input := range inputs {
+		total += len(input)
+	}
+	return int64((total + 3) / 4)
 }
 
 // ---------------------------------------------------------------------------

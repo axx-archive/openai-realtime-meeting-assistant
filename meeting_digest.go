@@ -242,6 +242,40 @@ type meetingDigestPayload struct {
 	Aliases []string `json:"aliases,omitempty"`
 }
 
+// meetingDigestStructureChecks runs the W0 item-6 deterministic structural
+// checks over a freshly parsed digest payload — evaluated BEFORE the clamp and
+// carry-forward guard so a model that drops every section is visible even when
+// the server rescues the facts. Ordered so the eval series is stable.
+func meetingDigestStructureChecks(payload meetingDigestPayload) []struct {
+	Check string
+	Pass  bool
+} {
+	hasContent := len(payload.Topics) > 0 || len(payload.Decisions) > 0 ||
+		len(payload.ActionItems) > 0 || len(payload.OpenQuestions) > 0
+	return []struct {
+		Check string
+		Pass  bool
+	}{
+		{"title_present", strings.TrimSpace(payload.Title) != ""},
+		{"attendees_present", len(payload.Attendees) > 0},
+		{"topics_present", len(payload.Topics) > 0},
+		{"sections_nonempty", hasContent},
+	}
+}
+
+// recordMeetingDigestStructureChecks emits one digest_structure eval event per
+// check ({check, pass} fields per the frozen ledger contract), stamped with
+// the digest's meeting key for drill-down.
+func recordMeetingDigestStructureChecks(meetingKey string, payload meetingDigestPayload) {
+	for _, check := range meetingDigestStructureChecks(payload) {
+		recordEvalEvent(seatMeetingDigest, evalKindDigestStructure, map[string]any{
+			"check":      check.Check,
+			"pass":       check.Pass,
+			"meeting_id": meetingKey,
+		})
+	}
+}
+
 // parseMeetingDigest validates digest JSON with the same stray-markdown-fence
 // tolerance as parseMissionInsight. Bad JSON → ok=false: the caller keeps the
 // prior digest and leaves the cursor put so the window retries next pass.
@@ -846,6 +880,7 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 		prior, hasPrior := current[group.key]
 		text, err := responder(ctx, apiKey, openAITextRequest{
 			Model:           model,
+			Seat:            seatMeetingDigest,
 			Instructions:    meetingDigestInstructions(),
 			Input:           app.buildMeetingDigestInput(group.key, prior, hasPrior, group.brains, time.Now().UTC()),
 			ReasoningEffort: "low",
@@ -860,9 +895,13 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 			// mission-intel precedent: never persist unparseable output — the
 			// prior digest stays current, the cursor stays put, and the same
 			// window (plus anything newer) retries next pass.
+			recordEvalEvent(seatMeetingDigest, evalKindParseFailure, map[string]any{"seat": seatMeetingDigest, "model": model})
 			log.Errorf("%s returned non-JSON output for %s; keeping the prior digest", meetingDigestAgentName, group.key)
 			return newest, nil
 		}
+		// W0 item 6: deterministic structural checks on the model-written digest
+		// (sections present, non-empty) — no LLM judge, one event per check.
+		recordMeetingDigestStructureChecks(group.key, payload)
 
 		processed[group.key] = true
 		spanStart, spanEnd := meetingDigestSpan(prior, hasPrior, group.brains)
@@ -1367,6 +1406,7 @@ func (app *kanbanBoardApp) maybeEmitDailyReflection(ctx context.Context, apiKey 
 	model := meetingBrainModel()
 	text, err := responder(ctx, apiKey, openAITextRequest{
 		Model:           model,
+		Seat:            seatMeetingDigest,
 		Instructions:    reflectionInstructions(),
 		Input:           buildReflectionInput(day, digests, decisions, prior, hasPrior, now.UTC()),
 		ReasoningEffort: "low",

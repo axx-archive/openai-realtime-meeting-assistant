@@ -35,7 +35,10 @@ OPENAI_REALTIME_MODEL=gpt-realtime-2
 OPENAI_REALTIME_REASONING_EFFORT=high
 OPENAI_REALTIME_VAD_TYPE=server_vad
 MEETING_TRANSCRIPT_LANE_ENABLED=true
-OPENAI_TRANSCRIPT_MODEL=gpt-realtime-whisper
+# OPENAI_TRANSCRIPT_MODEL: leave unset — the code default is gpt-4o-transcribe,
+# the only family that accepts the domain-vocabulary prompt. Whisper-family ids
+# (gpt-realtime-whisper) silently disable vocabulary biasing and, before the
+# session-config gate, broke the transcript lane outright. Do not pin whisper.
 MEETING_ROOM_PASSWORD=<room-passcode>
 MEETING_ROOM_MAX_PARTICIPANTS=10
 MEETING_ALLOWED_ORIGINS=https://<droplet-public-ip>.nip.io

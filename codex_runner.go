@@ -325,7 +325,7 @@ func appendCodexWorkerEvidence(output string, cfg codexExecConfig) string {
 	return strings.Join(lines, "\n")
 }
 
-func runCodexExecCommandContext(ctx context.Context, cfg codexExecConfig, prompt string) (codexExecResult, error) {
+func runCodexExecCommandContext(ctx context.Context, cfg codexExecConfig, prompt string) (result codexExecResult, err error) {
 	outputFile, err := os.CreateTemp("", "bonfire-codex-thread-*.md")
 	if err != nil {
 		return codexExecResult{}, fmt.Errorf("create Codex output file: %w", err)
@@ -375,9 +375,32 @@ func runCodexExecCommandContext(ctx context.Context, cfg codexExecConfig, prompt
 	command.Stdout = &stdout
 	command.Stderr = &stderr
 
+	// W0-5 lane metering (seat codex): the Codex CLI reports no token usage in
+	// its exec output, so each job records a duration-only entry (Estimated —
+	// wall-clock, not wire-reported usage) under whatever model the job pinned.
+	// An empty BONFIRE_CODEX_MODEL records model "" and trips the pricing
+	// table's price_missing tripwire — exactly the unpinned-fossil visibility
+	// the master plan wants. This meters the local_exec path; sidecar-queued
+	// jobs run in the codex-runner container and land through their callback
+	// seam.
+	started := time.Now()
+	defer func() {
+		entry := llmUsageEntry{
+			Provider:   providerOpenAI,
+			Model:      cfg.Model,
+			Seat:       seatCodex,
+			DurationMS: time.Since(started).Milliseconds(),
+			Estimated:  true,
+		}
+		if err != nil {
+			entry.Error = err.Error()
+		}
+		recordLLMUsage(entry)
+	}()
+
 	err = command.Run()
 	finalMessage, readErr := readLimitedTextFile(outputPath, cfg.MaxOutputBytes)
-	result := codexExecResult{
+	result = codexExecResult{
 		FinalMessage: strings.TrimSpace(firstNonEmptyString(finalMessage, stdout.String())),
 		Stdout:       stdout.String(),
 		Stderr:       stderr.String(),

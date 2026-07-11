@@ -722,6 +722,13 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 				if err != nil {
 					return nil, err
 				}
+				// W0 item 7: one minted event per PERSISTED card, with message
+				// lineage — the proposal_id is the card's message id, which the
+				// resolve route later joins on. Source is the verdict's
+				// provenance stamp (chat_router or deterministic_guard).
+				recordProposalEvent(proposalEventMinted, proposalMessage.ID, scoutChatProposalMintFields(
+					verdict.source, threadID, userMessage.ID, proposal,
+				))
 				response["answer"] = proposalMessage
 				response["proposal"] = proposal
 				response["thread"] = saved
@@ -796,6 +803,29 @@ func scoutWorkstreamReplyText(mode string) string {
 	return ""
 }
 
+// scoutChatProposalMintFields builds the proposal_minted lineage payload for
+// one persisted chat proposal card (W0 item 7 taxonomy, usage_ledger.go):
+// source (a proposalSource* constant; a blank verdict stamp defaults to
+// chat_router), the owning chat thread, the message that produced the card,
+// and the card's kind/route/lane so acceptance is measurable per source and
+// lane. Event metadata lives only in the eval ledger — it never feeds Scout
+// search context.
+func scoutChatProposalMintFields(source string, threadID string, fromMessageID string, proposal *scoutRouterProposal) map[string]any {
+	fields := map[string]any{
+		"source":    firstNonEmptyString(strings.TrimSpace(source), proposalSourceChatRouter),
+		"thread_id": threadID,
+		"kind":      proposal.Kind,
+		"lane":      proposal.Lane,
+	}
+	if fromMessageID != "" {
+		fields["from_message_id"] = fromMessageID
+	}
+	if id := firstNonEmptyString(strings.TrimSpace(proposal.ToolID), strings.TrimSpace(proposal.Mode)); id != "" {
+		fields["tool_id"] = id
+	}
+	return fields
+}
+
 // scoutChatProposalAction is the POST /assistant/chat-threads/{id}/proposal
 // body: the user's verdict on one router proposal card. The card, not this
 // route, is the trust surface — this route records the verdict signal, flips
@@ -850,9 +880,22 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 	}
 
 	signalEvent, valence := signalEventRouterProposalAccepted, signalValencePositive
+	resolution := routerVerdictConfirmed
 	if verb == "dismissed" {
 		signalEvent, valence = signalEventRouterProposalDismissed, signalValenceNegative
+		resolution = routerVerdictDismissed
 	}
+	// W0 items 6+7: the resolve leg of the proposal funnel. The proposal event
+	// joins the minted event on the card's message id; the router_outcome
+	// confirm/dismiss event is the acceptance-rate series the rollup reads.
+	recordProposalEvent(proposalEventResolved, messageID, map[string]any{
+		"resolution": resolution,
+		"thread_id":  threadID,
+	})
+	recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
+		"verdict":     resolution,
+		"proposal_id": messageID,
+	})
 	// The objective is the ONE field the card lets the user edit before
 	// confirming, so the request value wins over the stored one; kind, mode,
 	// toolId, and query always ride the stored record.
@@ -884,10 +927,18 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 			if objective == "" {
 				return nil, fmt.Errorf("workstream objective is required")
 			}
-			agentThread, err := app.launchAgentThreadWithOrigin(mode, objective, user.Name, map[string]string{
+			// W0 item 7: the confirm turned into a launch on this route (the
+			// workstream path is the one proposal kind THIS handler launches). The
+			// card id + chat_workstream path ride the spec so the single launched
+			// emitter (launchAgentThreadWithSpec's choke point) stamps them — no
+			// second emission here.
+			agentThread, err := app.launchAgentThreadWithSpec(mode, objective, user.Name, map[string]string{
 				"originKind": agentThreadOriginPrivateThread,
 				"originId":   threadID,
-			})
+			}, agentThreadGoalSpec{Launch: launchFunnelLineage{
+				ProposalID: messageID,
+				Path:       "chat_workstream",
+			}})
 			if err != nil {
 				return nil, err
 			}
@@ -936,6 +987,12 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 				return nil, err
 			}
 			startScoutChatImageAsync(app, threadID, user.Email, objective, user.Name)
+			// W0 item 7: the concept-render confirm is the explicit generate —
+			// the launch leg of this card's funnel (tool_run/goal_run confirms
+			// launch via POST /assistant/goal, stamped by that door instead).
+			recordProposalEvent(proposalEventLaunched, messageID, map[string]any{
+				"path": "chat_image_render",
+			})
 			response["answer"] = statusMessage
 			response["thread"] = saved
 		}
@@ -1043,6 +1100,12 @@ func (app *kanbanBoardApp) resolveScoutChatChoice(ctx context.Context, user *use
 		if err != nil {
 			return nil, err
 		}
+		// W0 item 7: a tool-armed pill mints a NEW card — same chat_router
+		// provenance (the router authored the pill), lineage back to the
+		// choices card the tap resolved.
+		mintFields := scoutChatProposalMintFields(proposalSourceChatRouter, threadID, messageID, proposal)
+		mintFields["via"] = "choice_pill"
+		recordProposalEvent(proposalEventMinted, proposalMessage.ID, mintFields)
 		response["answer"] = proposalMessage
 		response["proposal"] = proposal
 		response["thread"] = saved

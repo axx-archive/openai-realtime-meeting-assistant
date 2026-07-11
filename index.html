@@ -30250,6 +30250,12 @@
               handlePrivateRealtimeToolCall(item)
             }
           }
+          // W0 usage beacon: the private voice peer is browser-owned, so this
+          // page is the only place its usage exists — post each response.done
+          // usage object to the server ledger (seat voice_private).
+          // Fire-and-forget and fully defensive: a failed beacon must never
+          // disturb the voice surface.
+          postPrivateRealtimeUsageBeacon(event)
         }
         if (type === 'error') {
           const message = event.error?.message || 'voice needs attention'
@@ -30264,6 +30270,26 @@
           if (privateRealtimeVoiceActive()) {
             setVoiceIslandState('listening', 'listening…')
           }
+        }
+      }
+
+      // W0 private-voice usage beacon (model-routing plan, founder decision 3):
+      // relay the response.done usage object to POST /assistant/realtime/usage
+      // so the browser-owned lane is metered like every server-owned one.
+      // Fire-and-forget by design — no await, no retry, no UX impact.
+      function postPrivateRealtimeUsageBeacon(event) {
+        try {
+          const usage = event?.response?.usage
+          if (!usage || typeof usage !== 'object') {
+            return
+          }
+          postAuthJSON('/assistant/realtime/usage', {
+            callId: String(event.response?.id || ''),
+            model: String(event.response?.model || ''),
+            usage
+          }).catch(() => {})
+        } catch {
+          // Never let telemetry disturb the voice surface.
         }
       }
 

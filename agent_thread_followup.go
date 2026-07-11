@@ -332,7 +332,10 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponder(run agentThreadFo
 				return "", fmt.Errorf("OPENAI_API_KEY is not configured")
 			}
 			raw, responderErr = responder(ctx, apiKey, openAITextRequest{
-				Model:           meetingBrainModel(),
+				Model: meetingBrainModel(),
+				// Keyless-fallback twin: same seat as the keyed follow-up
+				// path, provider openai recorded at the wire seam (W0 item 4).
+				Seat:            seatFollowup,
 				Instructions:    agentThreadFollowUpInstructions(run.thread.Mode, run.version),
 				Input:           run.input,
 				ReasoningEffort: "low",

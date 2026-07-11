@@ -1346,7 +1346,10 @@ func TestPackagingStudioShipManifestPostsOnProceed(t *testing.T) {
 	if manifest.Status != manifestStatusShipped || manifest.GoalID != parentID {
 		t.Fatalf("manifest status/goal=%q/%q, want shipped/%q", manifest.Status, manifest.GoalID, parentID)
 	}
-	if !strings.Contains(message.Text, "manifest filed — five deliverables attached to Station Tenn") {
+	// The package name is canonicalized at creation ("Station Tenn" →
+	// "StationTenn", the split-brand vocabulary correction), so the manifest
+	// line carries the canonical brand.
+	if !strings.Contains(message.Text, "manifest filed — five deliverables attached to StationTenn") {
 		t.Fatalf("manifest message text=%q", message.Text)
 	}
 
@@ -1395,8 +1398,8 @@ func TestPackagingStudioShipManifestPostsOnProceed(t *testing.T) {
 	if manifest.Provenance.WallClock == "" {
 		t.Error("provenance wallClock is empty")
 	}
-	if manifest.AttachedTo != "Station Tenn" || manifest.PackageID != pkg.ID {
-		t.Errorf("attachment=%q/%q, want Station Tenn/%s", manifest.AttachedTo, manifest.PackageID, pkg.ID)
+	if manifest.AttachedTo != "StationTenn" || manifest.PackageID != pkg.ID {
+		t.Errorf("attachment=%q/%q, want StationTenn/%s", manifest.AttachedTo, manifest.PackageID, pkg.ID)
 	}
 
 	// The disclosed skips: both pdf exports (sidecar absent) + the slide jury.

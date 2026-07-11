@@ -195,6 +195,7 @@ func (app *kanbanBoardApp) produceMissionInsight(ctx context.Context, apiKey str
 	model := meetingBrainModel()
 	text, err := responder(ctx, apiKey, openAITextRequest{
 		Model:           model,
+		Seat:            seatMissionIntel,
 		Instructions:    missionIntelInstructions(),
 		Input:           app.buildMissionIntelInput(inputs, time.Now().UTC()),
 		ReasoningEffort: "low",
@@ -208,6 +209,7 @@ func (app *kanbanBoardApp) produceMissionInsight(ctx context.Context, apiKey str
 	if !ok {
 		// Never persist unparseable output: the cursor stays put, so the
 		// next pass (or an on-demand refresh) retries with more input.
+		recordEvalEvent(seatMissionIntel, evalKindParseFailure, map[string]any{"seat": seatMissionIntel, "model": model})
 		log.Errorf("%s returned non-JSON output; skipping this pass", missionIntelAgentName)
 		return meetingMemoryEntry{}, nil
 	}

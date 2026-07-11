@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMeetingBoardWorkerAppliesSummaryUpdatesAndWritesArtifact(t *testing.T) {
@@ -394,5 +395,141 @@ func TestParseMeetingBoardAnalysisAcceptsFencedJSON(t *testing.T) {
 	}
 	if len(analysis.Operations) != 1 || normalizeMeetingBoardToolName(analysis.Operations[0]) != "do_nothing" {
 		t.Fatalf("operations=%v, want one do_nothing", analysis.Operations)
+	}
+}
+
+// boardWorkerLedgerDir points the usage ledger at a temp dir with a frozen
+// 2026-07-11 clock so the W0 eval/proposal events land in deterministic files.
+func boardWorkerLedgerDir(t *testing.T) string {
+	t.Helper()
+	dir := ledgerTestDir(t)
+	fixed := time.Date(2026, time.July, 11, 10, 0, 0, 0, time.UTC)
+	prevNow := usageLedgerNow
+	usageLedgerNow = func() time.Time { return fixed }
+	t.Cleanup(func() { usageLedgerNow = prevNow })
+	return dir
+}
+
+// boardLedgerEventsOfKind filters the day's eval ledger rows by event kind.
+func boardLedgerEventsOfKind(t *testing.T, dir string, kind string) []map[string]any {
+	t.Helper()
+	rows := readLedgerLines(t, filepath.Join(dir, "eval-2026-07-11.jsonl"))
+	var out []map[string]any
+	for _, row := range rows {
+		if row["kind"] == kind {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+func TestMeetingBoardWorkerEmitsFidelityEventWithSeatTag(t *testing.T) {
+	dir := boardWorkerLedgerDir(t)
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(t.TempDir(), "board.json"))
+	t.Setenv("MEETING_BOARD_MIN_SUMMARIES", "1")
+
+	app := newKanbanBoardApp()
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-1", "## Follow-ups\n- Someone wants a card deleted.", nil); err != nil || !appended {
+		t.Fatalf("append brain write-up: appended=%v err=%v", appended, err)
+	}
+
+	seenSeat := ""
+	if _, err := app.runMeetingBoardOnce(context.Background(), "test-key", func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		seenSeat = request.Seat
+		return `{"summary":"Deleted a card.","operations":[{"tool":"delete_ticket","reason":"cleanup","arguments":{"card_id":"card-1"}}]}`, nil
+	}); err != nil {
+		t.Fatalf("runMeetingBoardOnce: %v", err)
+	}
+	if seenSeat != seatBoard {
+		t.Fatalf("request.Seat=%q, want %q (W0 seat threading)", seenSeat, seatBoard)
+	}
+
+	events := boardLedgerEventsOfKind(t, dir, evalKindBoardOpFidelity)
+	if len(events) != 1 {
+		t.Fatalf("board_op_fidelity events=%d, want 1", len(events))
+	}
+	event := events[0]
+	if event["lane"] != seatBoard {
+		t.Fatalf("event lane=%v, want %q", event["lane"], seatBoard)
+	}
+	fields := event["fields"].(map[string]any)
+	if fields["op_count"].(float64) != 1 || fields["error_count"].(float64) != 1 {
+		t.Fatalf("fidelity counts wrong: %v", fields)
+	}
+	classes, ok := fields["error_classes"].([]any)
+	if !ok || len(classes) != 1 || classes[0] != "unsupported_tool" {
+		t.Fatalf("error_classes=%v, want [unsupported_tool]", fields["error_classes"])
+	}
+}
+
+func TestMeetingBoardWorkerEmitsParseFailureEvent(t *testing.T) {
+	dir := boardWorkerLedgerDir(t)
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(t.TempDir(), "board.json"))
+	t.Setenv("OPENAI_BOARD_MODEL", "gpt-board")
+	t.Setenv("MEETING_BOARD_MIN_SUMMARIES", "1")
+
+	app := newKanbanBoardApp()
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-1", "## Follow-ups\n- Anything.", nil); err != nil || !appended {
+		t.Fatalf("append brain write-up: appended=%v err=%v", appended, err)
+	}
+
+	// Non-JSON output: the pass errors, the cursor stays put — and the W0
+	// parse-failure counter must tick for the board lane.
+	if _, err := app.runMeetingBoardOnce(context.Background(), "test-key", func(context.Context, string, openAITextRequest) (string, error) {
+		return "definitely not JSON", nil
+	}); err == nil {
+		t.Fatal("expected a parse error from non-JSON board output")
+	}
+
+	events := boardLedgerEventsOfKind(t, dir, evalKindParseFailure)
+	if len(events) != 1 {
+		t.Fatalf("parse_failure events=%d, want 1", len(events))
+	}
+	fields := events[0]["fields"].(map[string]any)
+	if fields["seat"] != seatBoard || fields["model"] != "gpt-board" {
+		t.Fatalf("parse_failure fields=%v, want seat=board model=gpt-board", fields)
+	}
+}
+
+func TestMeetingBoardWorkerMintedProposalCarriesLineage(t *testing.T) {
+	dir := boardWorkerLedgerDir(t)
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(t.TempDir(), "board.json"))
+	t.Setenv("MEETING_BOARD_MIN_SUMMARIES", "1")
+
+	app := newKanbanBoardApp()
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-1", "## Follow-ups\n- The room committed to a StationTenn churn analysis brief.", map[string]string{
+		"fromTranscriptId":           "event-1",
+		"throughTranscriptId":        "event-9",
+		"throughTranscriptCreatedAt": "2026-07-11T09:55:00Z",
+	}); err != nil || !appended {
+		t.Fatalf("append brain write-up: appended=%v err=%v", appended, err)
+	}
+
+	if _, err := app.runMeetingBoardOnce(context.Background(), "test-key", func(context.Context, string, openAITextRequest) (string, error) {
+		return `{"summary":"Proposed the churn analysis.","operations":[{"tool":"propose_codex_task","reason":"clear deliverable","arguments":{"title":"StationTenn churn analysis","mode":"research","query":"Analyze StationTenn churn drivers and draft a brief."}}]}`, nil
+	}); err != nil {
+		t.Fatalf("runMeetingBoardOnce: %v", err)
+	}
+
+	events := boardLedgerEventsOfKind(t, dir, proposalEventMinted)
+	if len(events) != 1 {
+		t.Fatalf("minted proposal events=%d, want 1", len(events))
+	}
+	fields := events[0]["fields"].(map[string]any)
+	if fields["source"] != proposalSourceBoardWorker {
+		t.Fatalf("source=%v, want %q", fields["source"], proposalSourceBoardWorker)
+	}
+	proposalID, _ := fields["proposal_id"].(string)
+	if strings.TrimSpace(proposalID) == "" {
+		t.Fatalf("minted event missing proposal_id: %v", fields)
+	}
+	if fields["from_brain_id"] != "brain-1" || fields["through_transcript_id"] != "event-9" {
+		t.Fatalf("lineage wrong: %v", fields)
+	}
+	if fields["transcript_created_at"] != "2026-07-11T09:55:00Z" {
+		t.Fatalf("transcript_created_at=%v, want the brain window's through stamp", fields["transcript_created_at"])
 	}
 }

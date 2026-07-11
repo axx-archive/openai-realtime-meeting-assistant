@@ -135,6 +135,7 @@ func (app *kanbanBoardApp) produceResearchSuggestions(ctx context.Context, apiKe
 	model := researchSuggestionModel()
 	text, err := responder(ctx, apiKey, openAITextRequest{
 		Model:        model,
+		Seat:         seatSuggestion,
 		Instructions: researchSuggestionInstructions(),
 		Input:        buildResearchSuggestionInput(summaries, known, app.participantSnapshotForRoom(roomID), time.Now().UTC()),
 		// A suggestion is lighter than a board mutation, but the output is still
@@ -153,9 +154,15 @@ func (app *kanbanBoardApp) produceResearchSuggestions(ctx context.Context, apiKe
 
 	analysis, err := parseResearchSuggestionAnalysis(text)
 	if err != nil {
+		// W0 item 6: strict-JSON parse-failure counter for the suggestion lane.
+		recordEvalEvent(seatSuggestion, evalKindParseFailure, map[string]any{"seat": seatSuggestion, "model": model})
 		return meetingMemoryEntry{}, err
 	}
 
+	// W0 item 7 lineage: minted events stamp the brain window that volunteered
+	// the proposal so time-to-proposal is computable from events alone.
+	firstSummary := summaries[0]
+	lastSummary := summaries[len(summaries)-1]
 	proposed := 0
 	for _, suggestion := range analysis.Suggestions {
 		if proposed >= researchSuggestionMaxPerPass {
@@ -173,17 +180,27 @@ func (app *kanbanBoardApp) produceResearchSuggestions(ctx context.Context, apiKe
 		if researchTopicIsKnown(title+" "+query, known) {
 			continue
 		}
-		if _, _, err := app.proposeCodexTask(map[string]any{
+		result, _, err := app.proposeCodexTask(map[string]any{
 			"title":          title,
 			"mode":           "research",
 			"query":          query,
 			"origin_room_id": roomID,
-		}, "suggestion_worker"); err != nil {
+		}, "suggestion_worker")
+		if err != nil {
 			// Log-and-continue: a single rejected suggestion (e.g. an empty field
 			// the model slipped through) must not fail the whole pass and re-feed
 			// the window. The others still get their shot.
 			log.Errorf("research suggestion propose failed for %q: %v", title, err)
 			continue
+		}
+		if proposalID := codexProposalIDFromToolResult(result); proposalID != "" {
+			recordProposalEvent(proposalEventMinted, proposalID, map[string]any{
+				"source":                proposalSourceSuggestionWorker,
+				"from_brain_id":         firstSummary.ID,
+				"through_transcript_id": strings.TrimSpace(lastSummary.Metadata["throughTranscriptId"]),
+				"transcript_created_at": strings.TrimSpace(lastSummary.Metadata["throughTranscriptCreatedAt"]),
+				"room_id":               roomID,
+			})
 		}
 		// Only the topics we actually proposed extend the dedupe set within this
 		// pass, so two near-identical suggestions in one batch collapse to one.

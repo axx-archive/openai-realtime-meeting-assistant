@@ -128,7 +128,12 @@ func (app *kanbanBoardApp) proposeCodexTask(args map[string]any, proposedBy stri
 	}
 
 	payload := codexProposalPayload(entry)
-	broadcastOfficeKanbanEvent("codex_proposal", payload)
+	// W1-19: proposal cards broadcast on the signed-in tier (office sockets +
+	// member ROOM sockets, deduped, guests structurally excluded) so a named
+	// room mid-sitting renders the confirm card live instead of waiting for a
+	// rejoin replay. codex_proposal payloads are id-keyed, so a double
+	// delivery is a harmless re-render.
+	broadcastSignedInKanbanEvent("codex_proposal", payload)
 	// Unified push channel: the same proposal on the typed stream (title only)
 	// so surfaces beyond the room cards learn of it. Wave 8's approval
 	// round-trip subscribes to these proposal events.
@@ -270,10 +275,20 @@ func (app *kanbanBoardApp) resolveCodexProposal(id string, action string, userNa
 				}
 			}
 		}
-		payload, err := app.launchApprovedProposal(entry, userName, userEmail, origin)
+		// The HTTP confirm relies on the choke point's canonical launched event
+		// (proposal_id-less, joined on thread_id) — pass no funnel lineage so its
+		// row is unchanged.
+		payload, err := app.launchApprovedProposal(entry, userName, userEmail, origin, launchFunnelLineage{})
 		if err != nil {
 			return nil, false, err
 		}
+		// W0-7 proposal taxonomy: resolved only after the launch stuck — a
+		// failed launch reverts the proposal to proposed and must not settle
+		// the funnel row.
+		recordProposalEvent(proposalEventResolved, id, map[string]any{
+			"resolution": "approved",
+			"approver":   firstNonEmptyString(strings.TrimSpace(userName), normalizeAccountEmail(userEmail)),
+		})
 		return payload, true, nil
 	}
 
@@ -297,8 +312,15 @@ func (app *kanbanBoardApp) resolveCodexProposal(id string, action string, userNa
 		"mode":       entry.Metadata["mode"],
 	})
 
+	// W0-7 proposal taxonomy: a dismissal settles this proposal's funnel row.
+	recordProposalEvent(proposalEventResolved, id, map[string]any{
+		"resolution": "dismissed",
+		"approver":   firstNonEmptyString(strings.TrimSpace(userName), normalizeAccountEmail(userEmail)),
+	})
+
 	payload := codexProposalPayload(updated)
-	broadcastOfficeKanbanEvent("codex_proposal", payload)
+	// W1-19: resolutions ride the same signed-in tier as the propose-time card.
+	broadcastSignedInKanbanEvent("codex_proposal", payload)
 	app.settleProposalNotification(id, codexProposalSettledText(updated), userEmail, "")
 	app.notifyProposalResolution(updated, codexProposalActionDismiss, userName)
 	return payload, false, nil
@@ -315,7 +337,7 @@ func (app *kanbanBoardApp) resolveCodexProposal(id string, action string, userNa
 // the notification + fans the resolution. actorName/actorEmail attribute the
 // launch — a human for the confirm, "workflow ticker · standing approval: X"
 // for a ticker lane launch. Returns the settled proposal payload.
-func (app *kanbanBoardApp) launchApprovedProposal(entry meetingMemoryEntry, actorName string, actorEmail string, origin map[string]string) (map[string]any, error) {
+func (app *kanbanBoardApp) launchApprovedProposal(entry meetingMemoryEntry, actorName string, actorEmail string, origin map[string]string, launch launchFunnelLineage) (map[string]any, error) {
 	if app == nil || app.memory == nil {
 		return nil, fmt.Errorf("proposals are unavailable")
 	}
@@ -331,7 +353,7 @@ func (app *kanbanBoardApp) launchApprovedProposal(entry meetingMemoryEntry, acto
 		return nil, err
 	}
 
-	thread, err := app.launchAgentThreadWithOrigin(entry.Metadata["mode"], entry.Metadata["query"], actorName, origin)
+	thread, err := app.launchAgentThreadWithSpec(entry.Metadata["mode"], entry.Metadata["query"], actorName, origin, agentThreadGoalSpec{Launch: launch})
 	if err != nil {
 		if _, _, revertErr := app.memory.updateEntryWithMetadata(meetingMemoryKindCodexProposal, id, entry.Text, map[string]string{
 			"status":           codexProposalStatusProposed,
@@ -408,7 +430,8 @@ func (app *kanbanBoardApp) launchApprovedProposal(entry meetingMemoryEntry, acto
 	})
 
 	payload := codexProposalPayload(updated)
-	broadcastOfficeKanbanEvent("codex_proposal", payload)
+	// W1-19: the confirmed/launched card update rides the signed-in tier too.
+	broadcastSignedInKanbanEvent("codex_proposal", payload)
 	// The launched run's artifact rides onto the settled nudge so the bell entry
 	// routes to the resulting workflow status.
 	app.settleProposalNotification(id, codexProposalSettledText(updated), actorEmail, updated.Metadata["threadArtifactId"])

@@ -157,7 +157,11 @@ type kanbanRealtimeEvent struct {
 		Code    string `json:"code,omitempty"`
 		Message string `json:"message,omitempty"`
 	} `json:"error,omitempty"`
-	Item     *kanbanRealtimeOutputItem `json:"item,omitempty"`
+	Item *kanbanRealtimeOutputItem `json:"item,omitempty"`
+	// Usage rides transcription events
+	// (conversation.item.input_audio_transcription.completed): the voice
+	// peer's own STT billing, metered per segment (W0-5).
+	Usage    *kanbanRealtimeUsage `json:"usage,omitempty"`
 	Response *struct {
 		Status        string `json:"status,omitempty"`
 		StatusDetails *struct {
@@ -165,6 +169,9 @@ type kanbanRealtimeEvent struct {
 			Reason string `json:"reason,omitempty"`
 		} `json:"status_details,omitempty"`
 		Output []kanbanRealtimeOutputItem `json:"output,omitempty"`
+		// Usage is the voice turn's wire-reported audio+text token splits
+		// on response.done (W0-5 room-voice metering).
+		Usage *kanbanRealtimeUsage `json:"usage,omitempty"`
 	} `json:"response,omitempty"`
 }
 
@@ -174,6 +181,71 @@ type kanbanRealtimeOutputItem struct {
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
 	CallID    string `json:"call_id,omitempty"`
+}
+
+// kanbanRealtimeUsage decodes the usage object the Realtime API attaches to
+// response.done (voice turns: per-modality token splits with cached shares)
+// and to input_audio_transcription.completed (transcription billing, token-
+// or duration-based). Absent fields decode to zero; unknown fields are
+// ignored, so the decode is inert on events that carry no usage.
+type kanbanRealtimeUsage struct {
+	Type              string  `json:"type,omitempty"` // transcription events: "tokens" | "duration"
+	Seconds           float64 `json:"seconds,omitempty"`
+	TotalTokens       int64   `json:"total_tokens,omitempty"`
+	InputTokens       int64   `json:"input_tokens,omitempty"`
+	OutputTokens      int64   `json:"output_tokens,omitempty"`
+	InputTokenDetails *struct {
+		TextTokens          int64 `json:"text_tokens,omitempty"`
+		AudioTokens         int64 `json:"audio_tokens,omitempty"`
+		CachedTokens        int64 `json:"cached_tokens,omitempty"`
+		CachedTokensDetails *struct {
+			TextTokens  int64 `json:"text_tokens,omitempty"`
+			AudioTokens int64 `json:"audio_tokens,omitempty"`
+		} `json:"cached_tokens_details,omitempty"`
+	} `json:"input_token_details,omitempty"`
+	OutputTokenDetails *struct {
+		TextTokens  int64 `json:"text_tokens,omitempty"`
+		AudioTokens int64 `json:"audio_tokens,omitempty"`
+	} `json:"output_token_details,omitempty"`
+}
+
+// realtimeUsageTokens maps a Realtime usage payload onto the ledger entry's
+// token splits. Cached tokens are subtracted out of the per-modality totals so
+// Input/AudioInput carry only the full-price share (the pricing table bills
+// cached reads separately). Reports false when the payload carries no billable
+// signal at all, so callers skip zero rows.
+func realtimeUsageTokens(usage *kanbanRealtimeUsage, entry *llmUsageEntry) bool {
+	if usage == nil {
+		return false
+	}
+	textIn := usage.InputTokens
+	var audioIn, cachedText, cachedAudio int64
+	if details := usage.InputTokenDetails; details != nil {
+		textIn, audioIn = details.TextTokens, details.AudioTokens
+		if cached := details.CachedTokensDetails; cached != nil {
+			cachedText, cachedAudio = cached.TextTokens, cached.AudioTokens
+		} else if details.CachedTokens > 0 {
+			// No per-modality cached split: attribute the cached share to
+			// text. Cached text and cached audio bill identically on the
+			// realtime family, so the cost estimate is unaffected.
+			cachedText = min(details.CachedTokens, textIn)
+		}
+	}
+	entry.InputTokens = max(textIn-cachedText, 0)
+	entry.CachedInputTokens = cachedText
+	entry.AudioInputTokens = max(audioIn-cachedAudio, 0)
+	entry.CachedAudioInputTokens = cachedAudio
+	if details := usage.OutputTokenDetails; details != nil {
+		entry.OutputTokens = details.TextTokens
+		entry.AudioOutputTokens = details.AudioTokens
+	} else {
+		entry.OutputTokens = usage.OutputTokens
+	}
+	entry.AudioSeconds = usage.Seconds
+	return entry.InputTokens > 0 || entry.CachedInputTokens > 0 ||
+		entry.AudioInputTokens > 0 || entry.CachedAudioInputTokens > 0 ||
+		entry.OutputTokens > 0 || entry.AudioOutputTokens > 0 ||
+		entry.AudioSeconds > 0
 }
 
 type kanbanBoardApp struct {
@@ -1128,11 +1200,32 @@ func drainRTCP(sender *webrtc.RTPSender) {
 }
 
 func (app *kanbanBoardApp) createRealtimeCall(apiKey string, model string, offerSDP string) (string, error) {
+	warnRealtimeVoiceSessionNoVocab("room")
 	return app.createRealtimeCallWithSession(apiKey, offerSDP, app.sessionConfig(model))
 }
 
 func (app *kanbanBoardApp) createPrivateRealtimeVoiceCall(apiKey string, model string, offerSDP string) (string, error) {
+	warnRealtimeVoiceSessionNoVocab("private")
 	return app.createRealtimeCallWithSession(apiKey, offerSDP, app.privateRealtimeVoiceSessionConfig(model))
+}
+
+// warnRealtimeVoiceSessionNoVocab makes a degraded voice-session transcription
+// config LOUD (W1-12): when the configured transcription model rejects the
+// domain-vocabulary prompt (whisper family), the voice peer's fallback
+// transcription lane loses vocabulary biasing entirely — proper nouns start
+// mangling silently. Logged + funneled once per session CREATE, deliberately
+// not inside sessionConfig itself, which is re-sent on every board-context
+// session.update.
+func warnRealtimeVoiceSessionNoVocab(surface string) {
+	model := realtimeTranscriptionModel()
+	if transcriptionModelAcceptsPrompt(model) {
+		return
+	}
+	log.Warnf("Realtime %s voice session transcription model %q rejects the domain-vocabulary prompt — transcription fidelity is degraded (set OPENAI_REALTIME_TRANSCRIPTION_MODEL to a gpt-4o transcription model to restore vocabulary biasing)", surface, model)
+	recordEvalEvent(seatTranscriptionSession, evalKindNoVocabWarning, map[string]any{
+		"model":   model,
+		"surface": surface,
+	})
 }
 
 func (app *kanbanBoardApp) createRealtimeCallWithSession(apiKey string, offerSDP string, session map[string]any) (string, error) {
@@ -1284,22 +1377,33 @@ func (app *kanbanBoardApp) SendEvent(payload any) error {
 }
 
 func (app *kanbanBoardApp) sessionConfig(model string) map[string]any {
+	transcriptionModel := realtimeTranscriptionModel()
+	transcription := map[string]any{
+		"model":    transcriptionModel,
+		"language": "en",
+	}
+	input := map[string]any{
+		"transcription":  transcription,
+		"turn_detection": realtimeTurnDetectionConfig(),
+	}
+	// W1-12: the domain-vocabulary prompt + near-field noise reduction are
+	// gated by transcription model exactly like transcription_lane.go — the
+	// realtime whisper family rejects both fields live ("The 'prompt'
+	// parameter is not supported for this model"), so sending them
+	// unconditionally would break the whole voice session the way prod broke
+	// on 2026-07-08. A model that rejects the prompt still transcribes, just
+	// without vocabulary biasing — warnRealtimeVoiceSessionNoVocab makes that
+	// degraded state loud at session create.
+	if transcriptionModelAcceptsPrompt(transcriptionModel) {
+		input["noise_reduction"] = map[string]any{"type": "near_field"}
+		transcription["prompt"] = realtimeTranscriptionPrompt()
+	}
 	session := map[string]any{
 		"type":              "realtime",
 		"model":             model,
 		"output_modalities": []string{"audio"},
 		"audio": map[string]any{
-			"input": map[string]any{
-				"noise_reduction": map[string]any{
-					"type": "near_field",
-				},
-				"transcription": map[string]any{
-					"model":    realtimeTranscriptionModel(),
-					"language": "en",
-					"prompt":   realtimeTranscriptionPrompt(),
-				},
-				"turn_detection": realtimeTurnDetectionConfig(),
-			},
+			"input": input,
 			"output": map[string]any{
 				"voice": realtimeVoice(),
 			},
@@ -1491,9 +1595,81 @@ func isRealtimeActiveResponseError(event kanbanRealtimeEvent) bool {
 		strings.Contains(message, "wait until the response is finished")
 }
 
+// usesAdvancedCommandProfile reports whether the realtime model accepts the
+// session "reasoning" effort block. W1-13: match the gpt-realtime-2 FAMILY
+// (gpt-realtime-2, gpt-realtime-2.1, future point releases) instead of the
+// old exact string, so an env model bump no longer silently drops the effort
+// pin — but EXCLUDE -mini variants until their session.reasoning support is
+// live-verified (the official model page is silent on it).
 func usesAdvancedCommandProfile(model string) bool {
 	normalizedModel := strings.ToLower(strings.TrimSpace(model))
-	return normalizedModel == "gpt-realtime-2"
+	if strings.Contains(normalizedModel, "mini") {
+		return false
+	}
+	if normalizedModel == "gpt-realtime-2" {
+		return true
+	}
+	// Point releases and dashed variants only — a hypothetical
+	// "gpt-realtime-20" is a different family and must not match.
+	return strings.HasPrefix(normalizedModel, "gpt-realtime-2.") ||
+		strings.HasPrefix(normalizedModel, "gpt-realtime-2-")
+}
+
+// telemetryLaneSnapshot reports the effective realtime + transcription lane
+// configuration for healthz surfacing (W0-9). Pure config read: env-backed
+// accessors only, no app state, no wire calls. Both voice surfaces share
+// OPENAI_REALTIME_MODEL today (the W5 OPENAI_PRIVATE_REALTIME_MODEL dial does
+// not exist yet), so private_voice_model mirrors realtime_model.
+func telemetryLaneSnapshot() map[string]any {
+	laneModel := transcriptionLaneModel()
+	sessionModel := realtimeTranscriptionModel()
+	return map[string]any{
+		"realtime_model":            realtimeModel(),
+		"realtime_reasoning_effort": realtimeReasoningEffort(),
+		"transcription_lane_model":  laneModel,
+		"transcription_lane_vocab":  transcriptionModelAcceptsPrompt(laneModel),
+		"voice_transcription_model": sessionModel,
+		"voice_transcription_vocab": transcriptionModelAcceptsPrompt(sessionModel),
+		"private_voice_model":       realtimeModel(),
+	}
+}
+
+// validateRealtimeConfig checks the realtime/transcription dials at boot
+// (W1-12 tail) and logs one warning per problem: a whisper-family
+// transcription model silently loses vocabulary biasing, a model id missing
+// from the pricing table is usually an env typo (typo'd dials fail
+// per-request in prod while mocked tests stay green), and an out-of-enum
+// effort value silently falls back to the default. Returns the warning list
+// so the boot caller and tests can assert on it; an empty slice means the
+// config is clean.
+func validateRealtimeConfig() []string {
+	var warnings []string
+	now := time.Now().UTC()
+	for _, lane := range []struct{ label, model string }{
+		{"transcript lane (OPENAI_TRANSCRIPT_MODEL)", transcriptionLaneModel()},
+		{"voice-session transcription (OPENAI_REALTIME_TRANSCRIPTION_MODEL)", realtimeTranscriptionModel()},
+	} {
+		if !transcriptionModelAcceptsPrompt(lane.model) {
+			warnings = append(warnings, fmt.Sprintf("%s model %q rejects the domain-vocabulary prompt — transcription fidelity is degraded", lane.label, lane.model))
+		}
+		if _, priced := priceForModel(lane.model, now); !priced {
+			warnings = append(warnings, fmt.Sprintf("%s model %q has no pricing-table row — likely an env typo", lane.label, lane.model))
+		}
+	}
+	if _, priced := priceForModel(realtimeModel(), now); !priced {
+		warnings = append(warnings, fmt.Sprintf("realtime voice (OPENAI_REALTIME_MODEL) model %q has no pricing-table row — likely an env typo", realtimeModel()))
+	}
+	if raw := strings.ToLower(strings.TrimSpace(os.Getenv("OPENAI_REALTIME_REASONING_EFFORT"))); raw != "" {
+		switch raw {
+		case "minimal", "low", "medium", "high", "xhigh":
+		default:
+			warnings = append(warnings, fmt.Sprintf("OPENAI_REALTIME_REASONING_EFFORT=%q is not one of minimal/low/medium/high/xhigh — falling back to %q", raw, defaultReasoningEffort))
+		}
+	}
+	for _, warning := range warnings {
+		log.Warnf("Realtime config: %s", warning)
+	}
+	return warnings
 }
 
 // scoutWakeFillerWords are leading throwaway tokens ASR often prepends to an
@@ -2634,8 +2810,13 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 			broadcastAssistantEvent("status", "assistant hit a server error", map[string]any{"code": event.Error.Code, "message": event.Error.Message})
 		}
 	case "conversation.item.input_audio_transcription.completed":
+		// W0-5: the voice peer's in-session transcription bills at the
+		// transcription model's rates regardless of which lane persists, so
+		// meter every segment that reports usage.
+		app.recordVoicePeerTranscriptionUsage(event)
 		app.armScoutVoiceResponse(event.Transcript)
 		if !app.transcriptionLaneConnected() {
+			app.recordVoicePeerTranscriptSegment(event, "completed")
 			app.rememberTranscript(officeRoomID, event, "scout_realtime", app.currentRealtimeModel())
 		}
 	case "conversation.item.input_audio_transcription.failed":
@@ -2644,6 +2825,9 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 		// pop it (discard) so the FIFO stays aligned and later transcripts keep their
 		// correct speaker. When the lane is up it owns the FIFO, so skip here.
 		if !app.transcriptionLaneConnected() {
+			// Every .failed here is speech the brain never heard — feed the
+			// W0 transcript funnel so drop-off is countable per sitting.
+			app.recordVoicePeerTranscriptSegment(event, "failed")
 			app.popPendingAttributionWindow()
 		}
 	case "conversation.item.input_audio_transcription.delta":
@@ -2712,6 +2896,9 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 		if !hadFunctionCall {
 			app.markScoutSpokenResponseDelivered()
 		}
+		// W0-5: response.done over the datachannel is the authoritative
+		// server-side metering point for the room voice seat.
+		app.recordRealtimeResponseUsage(event)
 		app.flushScoutSpokenResponseIfPending()
 		broadcastAssistantEvent("audio", "Scout is listening", map[string]any{"eventType": event.Type, "voiceState": "listening"})
 	default:
@@ -2739,6 +2926,66 @@ func realtimeResponseStatusReason(event kanbanRealtimeEvent) string {
 	}
 
 	return firstNonEmptyString(event.Response.StatusDetails.Reason, event.Response.StatusDetails.Type)
+}
+
+// recordRealtimeResponseUsage ledgers one voice turn's wire-reported usage
+// (W0-5): the room voice session is server-owned, so the response.done usage
+// object arriving over the datachannel is the authoritative metering point
+// for seat voice_room. Turns whose events carry no usage record nothing —
+// visible gaps beat invented numbers.
+func (app *kanbanBoardApp) recordRealtimeResponseUsage(event kanbanRealtimeEvent) {
+	if event.Response == nil {
+		return
+	}
+	model := app.currentRealtimeModel()
+	if model == "" {
+		// The peer records its live model at start; before that (or on a
+		// bare test app) the configured dial is the honest best guess.
+		model = realtimeModel()
+	}
+	entry := llmUsageEntry{
+		Provider: providerOpenAI,
+		Model:    model,
+		Seat:     seatVoiceRoom,
+		RoomID:   officeRoomID,
+	}
+	if !realtimeUsageTokens(event.Response.Usage, &entry) {
+		return
+	}
+	recordLLMUsage(entry)
+}
+
+// recordVoicePeerTranscriptionUsage ledgers the voice peer's own per-segment
+// transcription billing when the wire reports it (W0-5). The in-session
+// transcription bills at the transcription model's rates whether or not this
+// peer is the persisting session, so this runs on every .completed event.
+func (app *kanbanBoardApp) recordVoicePeerTranscriptionUsage(event kanbanRealtimeEvent) {
+	entry := llmUsageEntry{
+		Provider: providerOpenAI,
+		Model:    realtimeTranscriptionModel(),
+		Seat:     seatTranscriptionSession,
+		RoomID:   officeRoomID,
+	}
+	if !realtimeUsageTokens(event.Usage, &entry) {
+		return
+	}
+	recordLLMUsage(entry)
+}
+
+// recordVoicePeerTranscriptSegment feeds the W0 transcript funnel for the
+// voice-peer FALLBACK transcription path — callers gate on the transcript
+// lane being down, i.e. the Scout peer is the persisting session (the lane
+// emits its own segments when it owns persistence).
+func (app *kanbanBoardApp) recordVoicePeerTranscriptSegment(event kanbanRealtimeEvent, status string) {
+	fields := map[string]any{
+		"status":  status,
+		"room_id": officeRoomID,
+		"source":  "scout_realtime",
+	}
+	if event.Usage != nil && event.Usage.Seconds > 0 {
+		fields["audio_seconds"] = event.Usage.Seconds
+	}
+	recordEvalEvent(seatTranscriptionSession, evalKindTranscriptSegment, fields)
 }
 
 func realtimeFunctionCallFromArgumentsDone(event kanbanRealtimeEvent) kanbanRealtimeOutputItem {
@@ -2873,6 +3120,12 @@ func (app *kanbanBoardApp) finishToolCall(outputItem kanbanRealtimeOutputItem, a
 			"error": err.Error(),
 		}
 		broadcastAssistantEvent("error", err.Error(), map[string]any{"tool": outputItem.Name})
+	} else {
+		// W0-7: finishToolCall is the one seam that is EXCLUSIVELY the room
+		// voice datachannel loop (the shared applyToolCallArgs dispatch also
+		// serves the board worker), so spoken proposal mints and direct
+		// launches stamp their room_voice provenance here.
+		app.recordRoomVoiceToolProvenance(outputItem.Name, result)
 	}
 	app.markScoutSpokenResponsePending(outputItem.Name, result, changed, armedAtStart)
 
@@ -2919,6 +3172,47 @@ func (app *kanbanBoardApp) applyToolCall(outputItem kanbanRealtimeOutputItem) (m
 	}
 
 	return app.applyToolCallArgs(outputItem.Name, args)
+}
+
+// recordRoomVoiceToolProvenance stamps the W0-7 proposal-chain funnel for
+// successful tool calls that arrived over the room-voice datachannel: a
+// spoken propose_codex_task mints with source=room_voice. A spoken
+// launch_agent_thread is a direct launch, but its funnel lineage now rides the
+// spec onto the single launched emitter (see the room-voice dispatch), so no
+// second launched event is recorded here.
+func (app *kanbanBoardApp) recordRoomVoiceToolProvenance(toolName string, result map[string]any) {
+	switch toolName {
+	case "propose_codex_task":
+		app.recordVoiceProposalMinted(proposalSourceRoomVoice, "", result)
+	}
+}
+
+// recordVoiceProposalMinted emits the proposal-funnel minted event for a
+// voice-surface propose_codex_task. Spoken asks have no brain/transcript
+// lineage (they never passed through a brain window), so the available
+// lineage is the origin room + active meeting (room voice) and the proposing
+// account (private voice).
+func (app *kanbanBoardApp) recordVoiceProposalMinted(source string, proposer string, result map[string]any) {
+	if result == nil {
+		return
+	}
+	proposal, ok := result["proposal"].(map[string]any)
+	if !ok {
+		return
+	}
+	fields := map[string]any{"source": source}
+	if proposer != "" {
+		fields["proposer"] = proposer
+	}
+	if source == proposalSourceRoomVoice {
+		fields["room_id"] = officeRoomID
+		if app.memory != nil {
+			if meetingID := app.memory.currentMeetingID(officeRoomID); meetingID != "" {
+				fields["meeting_id"] = meetingID
+			}
+		}
+	}
+	recordProposalEvent(proposalEventMinted, asString(proposal["id"]), fields)
 }
 
 // errTruncatedToolArguments marks a tool-argument parse failure caused by the
@@ -3032,11 +3326,18 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 		// The shared dispatch serves the room voice loop and the board
 		// worker: both act on the live meeting, so completion delivers back
 		// to the room. The private dashboard voice path intercepts this tool
-		// in applyPrivateRealtimeVoiceTool and passes no origin.
+		// in applyPrivateRealtimeVoiceTool and passes no origin. Only the room
+		// voice loop reaches THIS case (the board worker and orchestrator
+		// allowlists both exclude launch_agent_thread), so the direct-launch
+		// funnel lineage (source=room_voice, path=launch_agent_thread) rides the
+		// spec onto the single launched emitter.
 		return app.launchRealtimeAgentThread(args, map[string]string{
 			"originKind":      agentThreadOriginRoom,
 			"originMeetingId": app.memory.currentMeetingID(officeRoomID),
-		})
+		}, agentThreadGoalSpec{Launch: launchFunnelLineage{
+			Source: proposalSourceRoomVoice,
+			Path:   "launch_agent_thread",
+		}})
 	case "update_artifact":
 		return app.updateRealtimeArtifact(args)
 	case "publish_artifact":
@@ -3313,7 +3614,13 @@ func (app *kanbanBoardApp) applyPrivateRealtimeVoiceTool(requesterEmail string, 
 		return app.sendRealtimeNotification(args, requesterEmail)
 	}
 	if toolName == "propose_codex_task" {
-		return app.proposeCodexTask(args, normalizeAccountEmail(requesterEmail))
+		result, changed, err := app.proposeCodexTask(args, normalizeAccountEmail(requesterEmail))
+		if err == nil {
+			// W0-7: private-voice mints carry the signed-in proposer as their
+			// lineage — this surface has exactly one human behind it.
+			app.recordVoiceProposalMinted(proposalSourcePrivateVoice, normalizeAccountEmail(requesterEmail), result)
+		}
+		return result, changed, err
 	}
 	// Channel and recap tools carry the signed-in requester so posts attribute
 	// to the real author and catch-me-up recaps land in the right bell.
@@ -3343,9 +3650,15 @@ func (app *kanbanBoardApp) applyPrivateRealtimeVoiceTool(requesterEmail string, 
 		return app.advancePackageStageTool(args, packageToolActor(requesterEmail))
 	}
 	// The private dashboard voice is not the room's work: launches carry no
-	// room origin, so completion stays with the creator notification.
+	// room origin, so completion stays with the creator notification. The
+	// direct-launch funnel lineage (source=private_voice, proposer) rides the
+	// spec onto the single launched emitter — no second launched event here.
 	if toolName == "launch_agent_thread" {
-		return app.launchRealtimeAgentThread(args, nil)
+		return app.launchRealtimeAgentThread(args, nil, agentThreadGoalSpec{Launch: launchFunnelLineage{
+			Source:   proposalSourcePrivateVoice,
+			Path:     "launch_agent_thread",
+			Proposer: normalizeAccountEmail(requesterEmail),
+		}})
 	}
 	// read_thread_aloud resolves recent text scoped to the signed-in requester
 	// (private threads and notifications are theirs); the session speaks it.
@@ -3375,7 +3688,10 @@ func (app *kanbanBoardApp) applyPrivateRealtimeVoiceTool(requesterEmail string, 
 		return app.startChatAsUser(args, requesterEmail)
 	}
 	// initiate_goal launches the /goal engine as the signed-in requester and can
-	// never request external_write (the dispatch clamps it below).
+	// never request external_write (the dispatch clamps it below). Each goal
+	// subtask launches through launchAgentThreadWithSpec's choke point and emits
+	// its own launched event, so the goal-level direct launch records none of its
+	// own — that would double the ProposalsLaunched counter against the subtasks.
 	if toolName == "initiate_goal" {
 		return app.initiateGoalTool(args, requesterEmail)
 	}
@@ -3762,7 +4078,7 @@ func (app *kanbanBoardApp) createRealtimeArtifact(args map[string]any) (map[stri
 	}, false, nil
 }
 
-func (app *kanbanBoardApp) launchRealtimeAgentThread(args map[string]any, origin map[string]string) (map[string]any, bool, error) {
+func (app *kanbanBoardApp) launchRealtimeAgentThread(args map[string]any, origin map[string]string, spec agentThreadGoalSpec) (map[string]any, bool, error) {
 	mode := normalizeAgentThreadMode(asString(args["mode"]))
 	if mode == "" {
 		return nil, false, fmt.Errorf("mode is required")
@@ -3772,7 +4088,7 @@ func (app *kanbanBoardApp) launchRealtimeAgentThread(args map[string]any, origin
 		return nil, false, fmt.Errorf("query is required")
 	}
 
-	thread, err := app.launchAgentThreadWithOrigin(mode, query, scoutParticipantName, origin)
+	thread, err := app.launchAgentThreadWithSpec(mode, query, scoutParticipantName, origin, spec)
 	if err != nil {
 		return nil, false, err
 	}

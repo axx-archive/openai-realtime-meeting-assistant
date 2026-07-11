@@ -243,6 +243,10 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 	// .completed never arrived before the socket dropped) so it cannot drift this
 	// connection's attribution FIFO.
 	lane.app.resetPendingAttributionWindowsForRoom(lane.roomID)
+	// W0-5: same discipline for the metering FIFO — a committed duration whose
+	// terminal event never arrived must not stamp itself onto this session's
+	// first segment.
+	resetTranscriptionSegmentSecondsForRoom(lane.roomID)
 	lane.setConnected(true)
 
 	readErr := make(chan error, 1)
@@ -345,7 +349,8 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 }
 
 func (lane *meetingTranscriptionLane) commitPendingTranscriptionAudio(conn *websocket.Conn, pendingSamples int) error {
-	if paddingSamples := transcriptionLaneCommitPaddingSamples(pendingSamples); paddingSamples > 0 {
+	paddingSamples := transcriptionLaneCommitPaddingSamples(pendingSamples)
+	if paddingSamples > 0 {
 		if err := lane.writeJSON(conn, map[string]any{
 			"type":  "input_audio_buffer.append",
 			"audio": base64.StdEncoding.EncodeToString(make([]byte, paddingSamples*transcriptionLanePCMBytesPerSample)),
@@ -357,6 +362,10 @@ func (lane *meetingTranscriptionLane) commitPendingTranscriptionAudio(conn *webs
 	if err := lane.writeJSON(conn, map[string]any{"type": "input_audio_buffer.commit"}); err != nil {
 		return fmt.Errorf("commit transcription audio: %w", err)
 	}
+	// W0-5: the commit is the billing moment on this duration-billed lane —
+	// meter it here (padding included: the API transcribes those samples too),
+	// whether or not the transcription later completes.
+	lane.noteCommittedSegment(pendingSamples + paddingSamples)
 	return nil
 }
 
@@ -397,6 +406,82 @@ func transcriptionLaneCommitPaddingSamples(pendingSamples int) int {
 		return 0
 	}
 	return transcriptionLaneMinCommitSamples - pendingSamples
+}
+
+// ---------------------------------------------------------------------------
+// W0-5 lane metering (seat transcription_lane): the lane is duration-billed
+// (gpt-4o-transcribe / gpt-realtime-whisper price per audio minute), so every
+// committed segment records its AudioSeconds at commit time — the audio is
+// billed whether or not the transcription later succeeds. Committed durations
+// also queue in a small per-room FIFO so the .completed/.failed terminal event
+// (which arrives in commit order on the same socket) can stamp audio_seconds
+// onto its transcript_segment eval event. A reconnect resets the room's queue
+// alongside the attribution windows.
+// ---------------------------------------------------------------------------
+
+// transcriptionSegmentSecondsCap bounds each room's pending queue: if terminal
+// events ever stop arriving, the oldest committed durations fall off instead of
+// growing without bound (usage rows are unaffected — written at commit time).
+const transcriptionSegmentSecondsCap = 64
+
+var (
+	transcriptionSegmentSecondsMu sync.Mutex
+	transcriptionSegmentSeconds   = map[string][]float64{}
+)
+
+func pushTranscriptionSegmentSeconds(roomID string, seconds float64) {
+	roomID = normalizeRoomID(roomID)
+	transcriptionSegmentSecondsMu.Lock()
+	defer transcriptionSegmentSecondsMu.Unlock()
+	queue := append(transcriptionSegmentSeconds[roomID], seconds)
+	if len(queue) > transcriptionSegmentSecondsCap {
+		queue = queue[len(queue)-transcriptionSegmentSecondsCap:]
+	}
+	transcriptionSegmentSeconds[roomID] = queue
+}
+
+// popTranscriptionSegmentSeconds returns the oldest committed segment duration
+// for the room, or 0 when nothing is queued (a terminal event for a segment
+// committed before the last reconnect).
+func popTranscriptionSegmentSeconds(roomID string) float64 {
+	roomID = normalizeRoomID(roomID)
+	transcriptionSegmentSecondsMu.Lock()
+	defer transcriptionSegmentSecondsMu.Unlock()
+	queue := transcriptionSegmentSeconds[roomID]
+	if len(queue) == 0 {
+		return 0
+	}
+	seconds := queue[0]
+	if len(queue) == 1 {
+		delete(transcriptionSegmentSeconds, roomID)
+	} else {
+		transcriptionSegmentSeconds[roomID] = queue[1:]
+	}
+	return seconds
+}
+
+func resetTranscriptionSegmentSecondsForRoom(roomID string) {
+	roomID = normalizeRoomID(roomID)
+	transcriptionSegmentSecondsMu.Lock()
+	delete(transcriptionSegmentSeconds, roomID)
+	transcriptionSegmentSecondsMu.Unlock()
+}
+
+// noteCommittedSegment writes the ledger row for one committed segment and
+// queues its duration for the terminal transcript_segment eval event.
+func (lane *meetingTranscriptionLane) noteCommittedSegment(committedSamples int) {
+	if lane == nil || committedSamples <= 0 {
+		return
+	}
+	seconds := float64(committedSamples) / float64(transcriptionLaneInputSampleRate)
+	recordLLMUsage(llmUsageEntry{
+		Provider:     providerOpenAI,
+		Model:        lane.transcriptionModel,
+		Seat:         seatTranscriptionLane,
+		RoomID:       lane.roomID,
+		AudioSeconds: seconds,
+	})
+	pushTranscriptionSegmentSeconds(lane.roomID, seconds)
 }
 
 func (lane *meetingTranscriptionLane) stopping() bool {
@@ -494,8 +579,20 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEventForRoom(roomID string, ra
 			broadcastAssistantEvent("status", "transcript lane hit a server error", map[string]any{"code": event.Error.Code, "message": event.Error.Message, "lane": "transcript"})
 		}
 	case "conversation.item.input_audio_transcription.completed":
+		recordEvalEvent(seatTranscriptionLane, evalKindTranscriptSegment, map[string]any{
+			"status":        "completed",
+			"room_id":       roomID,
+			"audio_seconds": popTranscriptionSegmentSeconds(roomID),
+		})
 		app.rememberTranscript(roomID, event, "transcript_lane", model)
 	case "conversation.item.input_audio_transcription.failed":
+		// W0-5: a failed segment is speech the brain never heard — this event
+		// series is the raw feed for the >2% drop-off alarm.
+		recordEvalEvent(seatTranscriptionLane, evalKindTranscriptSegment, map[string]any{
+			"status":        "failed",
+			"room_id":       roomID,
+			"audio_seconds": popTranscriptionSegmentSeconds(roomID),
+		})
 		// A6: a failed segment yields no transcript to persist, but it still had a
 		// window frozen at its commit. Pop it (discard) so the FIFO stays aligned;
 		// otherwise the next .completed inherits this dead turn's boundaries and every

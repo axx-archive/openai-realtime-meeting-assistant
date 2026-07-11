@@ -320,7 +320,10 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModelAttachments(ctx context.
 		})
 	}
 	return createOpenAITextResponse(ctx, apiKey, openAITextRequest{
-		Model:           meetingBrainModel(),
+		Model: meetingBrainModel(),
+		// Keyless-fallback twin: same seat as the keyed chat path, provider
+		// openai recorded at the wire seam (W0 item 4).
+		Seat:            seatChat,
 		Instructions:    assistantQueryInstructions(),
 		Input:           input,
 		ReasoningEffort: "low",
@@ -1544,7 +1547,9 @@ func (app *kanbanBoardApp) answerMemoryQuestionWithModel(query string, entries [
 		})
 	}
 	return createOpenAITextResponse(ctx, apiKey, openAITextRequest{
-		Model:           meetingBrainModel(),
+		Model: meetingBrainModel(),
+		// Keyless-fallback twin of the spoken-recall seat (W0 item 4).
+		Seat:            seatVoiceRecall,
 		Instructions:    memoryQuestionInstructions(),
 		Input:           input,
 		ReasoningEffort: "low",

@@ -820,6 +820,35 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 		kanbanApp.appendAgentRunLogEntryForArtifact(artifact, "error", text)
 	}
 
+	// W0-5 lane metering (seat codex), sidecar path: the local exec meters each
+	// job with a wall-clock defer (codex_runner.go), but sidecar-queued jobs run
+	// in the codex-runner container and terminate through THIS callback, so the
+	// codex seat only books the sidecar lane if we meter it here. Mirror the
+	// local entry — duration-only, Estimated, model from BONFIRE_CODEX_MODEL so
+	// an unpinned fossil still trips price_missing — deriving duration from the
+	// artifact's launch stamp. Gate on the terminal statuses AND `changed` so a
+	// retried callback cannot double-meter (the notify/deliver guards below do
+	// the same). Non-blocking and error-safe, like every recordLLMUsage caller.
+	switch strings.ToLower(strings.TrimSpace(payload.Status)) {
+	case codexJobStatusComplete, codexJobStatusFailed:
+		if changed {
+			usageEntry := llmUsageEntry{
+				Provider:  providerOpenAI,
+				Model:     strings.TrimSpace(os.Getenv("BONFIRE_CODEX_MODEL")),
+				Seat:      seatCodex,
+				ThreadID:  firstNonEmptyString(strings.TrimSpace(payload.ThreadID), strings.TrimSpace(existing.Metadata["threadId"])),
+				Estimated: true,
+			}
+			if startedAt, parseErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(existing.Metadata["startedAt"])); parseErr == nil {
+				usageEntry.DurationMS = time.Since(startedAt).Milliseconds()
+			}
+			if jobErr := strings.TrimSpace(payload.Error); jobErr != "" {
+				usageEntry.Error = jobErr
+			}
+			recordLLMUsage(usageEntry)
+		}
+	}
+
 	// Durable milestone: queued Codex jobs land through this callback instead
 	// of the synchronous runner paths (agent_thread_runner.go), so the creator
 	// notification has to happen here too. Gate on `changed` so a retried

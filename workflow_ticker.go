@@ -41,6 +41,12 @@ const (
 	// is still in flight (status persisted, thread not yet stamped) is never
 	// double-launched. Belt-and-suspenders on top of the shared proposalMu.
 	workflowTickerConfirmGrace = 2 * time.Minute
+
+	// triggerSurfaceTicker extends the usage_ledger trigger-surface vocabulary
+	// (W0-8) for the ticker's two launch shapes — Case A crash recovery and
+	// Case B standing approval. Ticker launches are neither a fresh human
+	// surface nor the W4 registry scheduler, so they carry their own tag.
+	triggerSurfaceTicker = "ticker"
 )
 
 // workflowTickerInterval parses BONFIRE_WORKFLOW_TICKER_INTERVAL exactly like
@@ -179,10 +185,32 @@ func (app *kanbanBoardApp) runWorkflowTickerOnce(now time.Time) int {
 		if !ok {
 			continue
 		}
-		if _, err := app.launchApprovedProposal(entry, actorName, actorEmail, origin); err != nil {
+		// W0-7/8: the ticker's proposal id, path, and lane ride the spec so the
+		// single launched emitter (launchAgentThreadWithSpec's choke point) stamps
+		// them — no second launched emission here. The terminal outcome
+		// (completed/failed/needs_attention) is recorded by the agent-thread runner
+		// when the run settles — join on thread_id; the ticker never observes
+		// completion itself.
+		payload, err := app.launchApprovedProposal(entry, actorName, actorEmail, origin, launchFunnelLineage{
+			ProposalID: entry.ID,
+			Path:       triggerSurfaceTicker,
+			Lane:       proposalLane(entry),
+		})
+		if err != nil {
 			log.Errorf("Workflow ticker failed to launch approved proposal %s: %v", entry.ID, err)
 			continue
 		}
+		recordWorkflowRun(workflowRunEntry{
+			WorkflowID:     normalizeAgentThreadMode(entry.Metadata["mode"]),
+			TriggerSurface: triggerSurfaceTicker,
+			Proposer:       strings.TrimSpace(entry.Metadata["proposedBy"]),
+			Approver:       workflowTickerApprover(entry),
+			Lane:           strings.TrimSpace(entry.Metadata["approvalLane"]),
+			Outcome:        workflowOutcomeLaunched,
+			ProposalID:     entry.ID,
+			ThreadID:       asString(payload["threadId"]),
+			RoomID:         strings.TrimSpace(entry.Metadata["originRoomId"]),
+		})
 		launched++
 	}
 	recordWorkflowTickerPass(now, launched)
@@ -253,6 +281,17 @@ func (app *kanbanBoardApp) workflowTickerEligible(entry meetingMemoryEntry, now 
 
 	origin := app.routeProposalOrigin(entry, actorName, actorEmail)
 	return actorName, actorEmail, origin, true
+}
+
+// workflowTickerApprover resolves the human whose recorded approval authorizes
+// a ticker launch for the provenance ledger: Case B's standing-approval stamp
+// (laneApprovedBy), else Case A's original confirmer.
+func workflowTickerApprover(entry meetingMemoryEntry) string {
+	return firstNonEmptyString(
+		strings.TrimSpace(entry.Metadata["laneApprovedBy"]),
+		strings.TrimSpace(entry.Metadata["confirmedBy"]),
+		strings.TrimSpace(entry.Metadata["confirmedByEmail"]),
+	)
 }
 
 // proposalConfirmSignalRecorded reports whether launchApprovedProposal has

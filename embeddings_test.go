@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -617,5 +620,101 @@ func TestFuseRawCandidatesSkipsHiddenSemanticCandidate(t *testing.T) {
 	}
 	if memoryEntriesContain(fused, "hidden") {
 		t.Fatal("a hidden-from-recall candidate must be excluded from the fused band (F29)")
+	}
+}
+
+// W0-5 lane metering (seat embeddings): the production embedder records one
+// ledger row per API call — wire-reported prompt_tokens when present, a
+// ~4-bytes/token estimate flagged Estimated when absent, and Error on failed
+// calls. Drives the REAL request/decode path against a fake HTTP server (the
+// openAIImagesURL var-seam precedent).
+func TestOpenAIEmbeddingFuncRecordsUsage(t *testing.T) {
+	dir := ledgerTestDir(t)
+	fixed := time.Date(2026, time.July, 11, 20, 0, 0, 0, time.UTC)
+	prevNow := usageLedgerNow
+	usageLedgerNow = func() time.Time { return fixed }
+	defer func() { usageLedgerNow = prevNow }()
+
+	var modeMu sync.Mutex
+	withUsage := true
+	failNext := false
+	setMode := func(usage bool, fail bool) {
+		modeMu.Lock()
+		withUsage, failNext = usage, fail
+		modeMu.Unlock()
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		modeMu.Lock()
+		usage, fail := withUsage, failNext
+		modeMu.Unlock()
+		if fail {
+			http.Error(w, `{"error":{"message":"synthetic outage"}}`, http.StatusInternalServerError)
+			return
+		}
+		var payload openAIEmbeddingsPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode embeddings request: %v", err)
+		}
+		data := make([]map[string]any, 0, len(payload.Input))
+		for i := range payload.Input {
+			data = append(data, map[string]any{"index": i, "embedding": []float32{0.1, 0.2}})
+		}
+		body := map[string]any{"data": data}
+		if usage {
+			body["usage"] = map[string]any{"prompt_tokens": 7, "total_tokens": 7}
+		}
+		json.NewEncoder(w).Encode(body)
+	}))
+	defer server.Close()
+	originalURL := embeddingsOpenAIURL
+	embeddingsOpenAIURL = server.URL
+	t.Cleanup(func() { embeddingsOpenAIURL = originalURL })
+
+	embed := openAIEmbeddingFunc("test-embed-key", "text-embedding-3-small")
+
+	// 1. Wire-reported usage.
+	vectors, err := embed(context.Background(), []string{"alpha", "beta"})
+	if err != nil || len(vectors) != 2 {
+		t.Fatalf("embed: vectors=%d err=%v", len(vectors), err)
+	}
+	// 2. No usage block -> byte-estimate flagged Estimated.
+	setMode(false, false)
+	if _, err := embed(context.Background(), []string{"alpha", "beta"}); err != nil {
+		t.Fatalf("embed without usage: %v", err)
+	}
+	// 3. Failure -> Error stamped, still one row.
+	setMode(false, true)
+	if _, err := embed(context.Background(), []string{"alpha"}); err == nil {
+		t.Fatal("synthetic outage must error")
+	}
+
+	rows := readLedgerLines(t, filepath.Join(dir, "usage-2026-07-11.jsonl"))
+	if len(rows) != 3 {
+		t.Fatalf("usage rows = %d, want one per API call", len(rows))
+	}
+	wired := rows[0]
+	if wired["provider"] != providerOpenAI || wired["model"] != "text-embedding-3-small" || wired["seat"] != seatEmbeddings {
+		t.Fatalf("wired row identity wrong: %v", wired)
+	}
+	if got := wired["input_tokens"].(float64); got != 7 {
+		t.Fatalf("wired input_tokens = %v, want the reported 7", got)
+	}
+	if _, present := wired["estimated"]; present {
+		t.Fatalf("wire-reported usage must not flag estimated: %v", wired)
+	}
+	if got := wired["est_cost_usd"].(float64); !floatClose(got, 7.0/1e6*0.02) {
+		t.Fatalf("wired est_cost_usd = %v, want %v", got, 7.0/1e6*0.02)
+	}
+	estimated := rows[1]
+	// len("alpha")+len("beta") = 9 bytes -> ceil(9/4) = 3 tokens.
+	if got := estimated["input_tokens"].(float64); got != 3 {
+		t.Fatalf("estimated input_tokens = %v, want 3", got)
+	}
+	if estimated["estimated"] != true {
+		t.Fatalf("byte-estimate row must flag estimated: %v", estimated)
+	}
+	failed := rows[2]
+	if errText, _ := failed["error"].(string); !strings.Contains(errText, "api request failed") {
+		t.Fatalf("failed row must carry the wire error: %v", failed)
 	}
 }

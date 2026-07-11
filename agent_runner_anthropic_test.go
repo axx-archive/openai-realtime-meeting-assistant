@@ -6,6 +6,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -538,12 +542,22 @@ func TestAnthropicFableRunnerRefusalFallbackSuccess(t *testing.T) {
 	if requests[1].Model != "claude-opus-4-8" {
 		t.Fatalf("fallback request model=%q, want claude-opus-4-8", requests[1].Model)
 	}
-	// The retry is the SAME request: only the model changes.
+	// The retry is the SAME request: only the model and the ledger provenance
+	// change (the wire payload is byte-identical beyond the model id).
 	if requests[1].System != requests[0].System || requests[1].Effort != requests[0].Effort ||
 		requests[1].MaxTokens != requests[0].MaxTokens ||
 		len(requests[1].Messages) != len(requests[0].Messages) ||
 		len(requests[1].Tools) != len(requests[0].Tools) {
 		t.Fatalf("fallback request differs beyond the model: %+v vs %+v", requests[1], requests[0])
+	}
+	// Ledger provenance (W0 item 3): the primary leg bills to the orchestrator
+	// seat with the thread id; the replay leg bills to the fallback seat with
+	// FallbackLeg stamped so the entry carries FallbackUsed.
+	if requests[0].Seat != seatOrchestrator || requests[0].ThreadID != "t" || requests[0].FallbackLeg {
+		t.Fatalf("primary request provenance=%q/%q/%v, want orchestrator/t/false", requests[0].Seat, requests[0].ThreadID, requests[0].FallbackLeg)
+	}
+	if requests[1].Seat != seatFallback || !requests[1].FallbackLeg || requests[1].ThreadID != "t" {
+		t.Fatalf("fallback request provenance=%q/%v/%q, want fallback/true/t", requests[1].Seat, requests[1].FallbackLeg, requests[1].ThreadID)
 	}
 
 	last := progresses[len(progresses)-1]
@@ -949,10 +963,12 @@ func sseBody(events ...string) string {
 // non-stream path produced: text via content_block_delta/text_delta, tool_use
 // input via input_json_delta fragments, stop_reason and usage via
 // message_delta. Proven by decoding the equivalent non-stream JSON body and
-// comparing field by field.
+// comparing field by field. The usage fold includes the cache splits (W0 item
+// 3): cache_read/cache_creation are what make the cache-heavy Fable lane's
+// books honest, and dropping them was up to a 10x cost error.
 func TestDecodeAnthropicSSEStreamMatchesNonStream(t *testing.T) {
 	stream := sseBody(
-		`{"type":"message_start","message":{"model":"claude-fable-5","usage":{"input_tokens":120,"output_tokens":3},"content":[],"stop_reason":null}}`,
+		`{"type":"message_start","message":{"model":"claude-fable-5","usage":{"input_tokens":120,"cache_creation_input_tokens":88,"cache_read_input_tokens":2400,"output_tokens":3},"content":[],"stop_reason":null}}`,
 		`{"type":"ping"}`,
 		`{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}`,
 		`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}}`,
@@ -978,7 +994,7 @@ func TestDecodeAnthropicSSEStreamMatchesNonStream(t *testing.T) {
 	nonStreamBody := `{
 		"model": "claude-fable-5",
 		"stop_reason": "tool_use",
-		"usage": {"input_tokens": 120, "output_tokens": 58},
+		"usage": {"input_tokens": 120, "cache_creation_input_tokens": 88, "cache_read_input_tokens": 2400, "output_tokens": 58},
 		"content": [
 			{"type": "thinking", "thinking": "", "signature": "sig-abc"},
 			{"type": "text", "text": "Starting on the Aurora package."},
@@ -1620,5 +1636,179 @@ func TestAnthropicFableRunnerBroadcastsBoardOnlyOnMutatingTurn(t *testing.T) {
 		if inner.Event == "memory" {
 			break
 		}
+	}
+}
+
+// --- W0 item 3 + W1 item 14: cache-token parsing, base-URL seam, wire ledger ---
+
+// message_delta can carry the cache splits alongside the cumulative output
+// count on newer API revisions; nonzero delta values win over message_start's
+// early numbers, and omitted fields never zero a split the ledger bills on.
+func TestDecodeAnthropicSSEStreamFoldsCacheTokensFromMessageDelta(t *testing.T) {
+	stream := sseBody(
+		`{"type":"message_start","message":{"model":"claude-fable-5","usage":{"input_tokens":10,"output_tokens":1}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":9,"cache_creation_input_tokens":55,"cache_read_input_tokens":7200}}`,
+		`{"type":"message_stop"}`,
+	)
+	got, err := decodeAnthropicSSEStream(strings.NewReader(stream))
+	if err != nil {
+		t.Fatalf("decodeAnthropicSSEStream: %v", err)
+	}
+	if got.Usage.InputTokens != 10 || got.Usage.CacheCreationInputTokens != 55 ||
+		got.Usage.CacheReadInputTokens != 7200 || got.Usage.OutputTokens != 9 {
+		t.Fatalf("usage=%+v, want input 10 / cacheCreation 55 / cacheRead 7200 / output 9", got.Usage)
+	}
+}
+
+// ANTHROPIC_BASE_URL swaps the wire host for gateways/proxies (W1 item 14):
+// unset keeps the public endpoint byte-identical; set values get /v1/messages
+// appended with trailing slashes normalized.
+func TestAnthropicMessagesURLOverride(t *testing.T) {
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	if got := anthropicMessagesURL(); got != "https://api.anthropic.com/v1/messages" {
+		t.Fatalf("default URL=%q, want the public api.anthropic.com endpoint", got)
+	}
+	t.Setenv("ANTHROPIC_BASE_URL", "https://gateway.example.com")
+	if got := anthropicMessagesURL(); got != "https://gateway.example.com/v1/messages" {
+		t.Fatalf("override URL=%q, want the gateway host with /v1/messages appended", got)
+	}
+	t.Setenv("ANTHROPIC_BASE_URL", "https://gateway.example.com/")
+	if got := anthropicMessagesURL(); got != "https://gateway.example.com/v1/messages" {
+		t.Fatalf("trailing-slash override URL=%q, want the normalized gateway endpoint", got)
+	}
+}
+
+// The HTTP seam files exactly one ledger entry per wire call (W0 item 3):
+// a successful stream records the full token splits — cache reads and writes
+// included — under the request's seat and thread id.
+func TestCreateAnthropicMessagesResponseHTTPRecordsUsage(t *testing.T) {
+	dir := ledgerTestDir(t)
+	fixed := time.Date(2026, time.July, 11, 12, 0, 0, 0, time.UTC)
+	originalNow := usageLedgerNow
+	usageLedgerNow = func() time.Time { return fixed }
+	t.Cleanup(func() { usageLedgerNow = originalNow })
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, sseBody(
+			`{"type":"message_start","message":{"model":"claude-fable-5","usage":{"input_tokens":100,"cache_creation_input_tokens":40,"cache_read_input_tokens":9000,"output_tokens":1}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":12}}`,
+			`{"type":"message_stop"}`,
+		))
+	}))
+	defer server.Close()
+	t.Setenv("ANTHROPIC_BASE_URL", server.URL)
+
+	response, err := createAnthropicMessagesResponseHTTP(context.Background(), "sk-ant-test", anthropicMessagesRequest{
+		Model:     "claude-fable-5",
+		MaxTokens: 256,
+		Seat:      seatOrchestrator,
+		ThreadID:  "thread-1",
+		Messages:  []anthropicMessage{{Role: "user", Content: []json.RawMessage{anthropicTextBlock("hi")}}},
+	})
+	if err != nil {
+		t.Fatalf("createAnthropicMessagesResponseHTTP: %v", err)
+	}
+	if response.Usage.InputTokens != 100 || response.Usage.CacheCreationInputTokens != 40 ||
+		response.Usage.CacheReadInputTokens != 9000 || response.Usage.OutputTokens != 12 {
+		t.Fatalf("response usage=%+v, want 100/40/9000/12", response.Usage)
+	}
+
+	rows := readLedgerLines(t, filepath.Join(dir, "usage-2026-07-11.jsonl"))
+	if len(rows) != 1 {
+		t.Fatalf("ledger rows=%d, want exactly one entry per wire call", len(rows))
+	}
+	row := rows[0]
+	if row["provider"] != providerAnthropic || row["model"] != "claude-fable-5" ||
+		row["seat"] != seatOrchestrator || row["thread_id"] != "thread-1" {
+		t.Fatalf("entry identity=%v, want anthropic/claude-fable-5/orchestrator/thread-1", row)
+	}
+	if row["input_tokens"] != float64(100) || row["cached_input_tokens"] != float64(9000) ||
+		row["cache_creation_tokens"] != float64(40) || row["output_tokens"] != float64(12) {
+		t.Fatalf("entry token splits=%v, want 100/9000(cached)/40(creation)/12", row)
+	}
+	if _, failed := row["error"]; failed {
+		t.Fatalf("successful call recorded an error: %v", row)
+	}
+	if cost, _ := row["est_cost_usd"].(float64); cost <= 0 {
+		t.Fatalf("est_cost_usd=%v, want a computed nonzero cost for a priced model", row["est_cost_usd"])
+	}
+	if _, missing := row["price_missing"]; missing {
+		t.Fatalf("claude-fable-5 is priced; entry stamped price_missing: %v", row)
+	}
+}
+
+// Failed wire calls land in the books too (W0 item 3 error paths): a 429
+// records the status-only error string — never the upstream body — with zero
+// tokens, and the request's fallback provenance survives onto the entry.
+func TestCreateAnthropicMessagesResponseHTTPRecordsErrorEntry(t *testing.T) {
+	dir := ledgerTestDir(t)
+	fixed := time.Date(2026, time.July, 11, 12, 0, 0, 0, time.UTC)
+	originalNow := usageLedgerNow
+	usageLedgerNow = func() time.Time { return fixed }
+	t.Cleanup(func() { usageLedgerNow = originalNow })
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		io.WriteString(w, `{"type":"error","error":{"type":"rate_limit_error","message":"secret upstream detail"}}`)
+	}))
+	defer server.Close()
+	t.Setenv("ANTHROPIC_BASE_URL", server.URL)
+
+	_, err := createAnthropicMessagesResponseHTTP(context.Background(), "sk-ant-test", anthropicMessagesRequest{
+		Model:       "claude-opus-4-8",
+		MaxTokens:   256,
+		Seat:        seatFallback,
+		ThreadID:    "thread-2",
+		FallbackLeg: true,
+		Messages:    []anthropicMessage{{Role: "user", Content: []json.RawMessage{anthropicTextBlock("hi")}}},
+	})
+	if err == nil {
+		t.Fatal("429 must surface as an error")
+	}
+
+	rows := readLedgerLines(t, filepath.Join(dir, "usage-2026-07-11.jsonl"))
+	if len(rows) != 1 {
+		t.Fatalf("ledger rows=%d, want exactly one error entry", len(rows))
+	}
+	row := rows[0]
+	if row["seat"] != seatFallback || row["fallback_used"] != true {
+		t.Fatalf("error entry provenance=%v, want fallback seat with fallback_used", row)
+	}
+	message, _ := row["error"].(string)
+	if strings.TrimSpace(message) == "" {
+		t.Fatalf("error entry carries no error string: %v", row)
+	}
+	if strings.Contains(message, "secret upstream detail") {
+		t.Fatalf("ledger error leaked the upstream body: %q", message)
+	}
+	if _, hasTokens := row["input_tokens"]; hasTokens {
+		t.Fatalf("failed call must not record token counts: %v", row)
+	}
+}
+
+// The runner bills each job to one seat: the /goal deliverable subtask (the
+// goalDeliverable metadata flag newAgentJob reads for its heavier budget)
+// bills as deliverable; every other orchestrator job bills as orchestrator.
+func TestAnthropicJobSeat(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	plain := app.newAgentJob(scoutAgentThread{ID: "t1", Mode: "workflow", Query: "x"})
+	if got := anthropicJobSeat(plain); got != seatOrchestrator {
+		t.Fatalf("plain job seat=%q, want orchestrator", got)
+	}
+
+	deliverable := app.newAgentJob(scoutAgentThread{
+		ID: "t2", Mode: "workflow", Query: "x",
+		Artifact: meetingMemoryEntry{Metadata: map[string]string{"goalDeliverable": "true"}},
+	})
+	if got := anthropicJobSeat(deliverable); got != seatDeliverable {
+		t.Fatalf("deliverable job seat=%q, want deliverable", got)
 	}
 }

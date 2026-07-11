@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -742,5 +743,141 @@ func TestAgentThreadDisplayTitleRejectsGenericContractHeadings(t *testing.T) {
 				t.Fatalf("agentThreadDisplayTitle=%q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// The W0 trigger-surface mapping: fine-grained originSurface stamps win,
+// coarse originKind decides otherwise, and a bare launch reads as palette.
+func TestAgentThreadTriggerSurfaceMapping(t *testing.T) {
+	cases := []struct {
+		name     string
+		metadata map[string]string
+		want     string
+	}{
+		{"chat surface", map[string]string{"originSurface": "chat:thread-1"}, triggerSurfaceChatRouter},
+		{"goal surface", map[string]string{"originSurface": "goal_door"}, triggerSurfaceGoalDoor},
+		{"palette surface", map[string]string{"originSurface": "palette"}, triggerSurfacePalette},
+		{"scheduler surface", map[string]string{"originSurface": "scheduler"}, triggerSurfaceScheduler},
+		{"suggestion surface", map[string]string{"originSurface": "suggestion_agent"}, triggerSurfaceSuggestionAgent},
+		{"channel origin", map[string]string{"originKind": agentThreadOriginChannel}, triggerSurfaceChannel},
+		{"room origin", map[string]string{"originKind": agentThreadOriginRoom}, triggerSurfaceRoomVoice},
+		{"private thread origin", map[string]string{"originKind": agentThreadOriginPrivateThread}, triggerSurfaceChatRouter},
+		{"bare launch", map[string]string{}, triggerSurfacePalette},
+	}
+	for _, testCase := range cases {
+		if got := agentThreadTriggerSurface(testCase.metadata); got != testCase.want {
+			t.Fatalf("%s: surface=%q, want %q", testCase.name, got, testCase.want)
+		}
+	}
+}
+
+func TestLaunchAgentThreadRecordsWorkflowProvenance(t *testing.T) {
+	dir := boardWorkerLedgerDir(t)
+	app := newIsolatedKanbanBoardApp(t)
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	thread, err := app.launchAgentThreadWithOrigin("research", "map the churn drivers", "AJ", map[string]string{
+		"originKind": agentThreadOriginChannel,
+		"originId":   "channel-1",
+	})
+	if err != nil {
+		t.Fatalf("launchAgentThreadWithOrigin: %v", err)
+	}
+
+	rows := readLedgerLines(t, filepath.Join(dir, "eval-2026-07-11.jsonl"))
+	var run map[string]any
+	var launched map[string]any
+	for _, row := range rows {
+		switch row["type"] {
+		case telemetryTypeWorkflowRun:
+			run = row
+		case telemetryTypeProposal:
+			if row["kind"] == proposalEventLaunched {
+				launched = row
+			}
+		}
+	}
+	if run == nil {
+		t.Fatalf("no workflow_run event recorded at launch; rows=%v", rows)
+	}
+	entry := run["fields"].(map[string]any)["run"].(map[string]any)
+	if entry["workflow_id"] != "agent_thread_research" {
+		t.Fatalf("workflow_id=%v, want agent_thread_research", entry["workflow_id"])
+	}
+	if entry["trigger_surface"] != triggerSurfaceChannel {
+		t.Fatalf("trigger_surface=%v, want %q", entry["trigger_surface"], triggerSurfaceChannel)
+	}
+	if entry["outcome"] != workflowOutcomeLaunched {
+		t.Fatalf("outcome=%v, want %q", entry["outcome"], workflowOutcomeLaunched)
+	}
+	if entry["thread_id"] != thread.ID {
+		t.Fatalf("thread_id=%v, want %q", entry["thread_id"], thread.ID)
+	}
+	if entry["proposer"] != "AJ" {
+		t.Fatalf("proposer=%v, want AJ", entry["proposer"])
+	}
+	if launched == nil {
+		t.Fatal("no proposal launched event recorded at launch")
+	}
+	launchedFields := launched["fields"].(map[string]any)
+	if launchedFields["path"] != triggerSurfaceChannel || launchedFields["thread_id"] != thread.ID {
+		t.Fatalf("launched fields=%v, want channel path + thread id", launchedFields)
+	}
+}
+
+func TestAgentRunLogRecordsTerminalProvenance(t *testing.T) {
+	dir := boardWorkerLedgerDir(t)
+	app := newIsolatedKanbanBoardApp(t)
+
+	artifact := meetingMemoryEntry{
+		ID: "artifact-1",
+		Metadata: map[string]string{
+			"startedAt":    time.Now().UTC().Add(-90 * time.Second).Format(time.RFC3339Nano),
+			"proposalId":   "codex-proposal-1",
+			"approvalLane": "standard",
+			"originKind":   agentThreadOriginRoom,
+			"title":        "Churn brief",
+		},
+	}
+	thread := scoutAgentThread{ID: "agent-thread-research-1", Mode: "research", Query: "churn", Artifact: artifact}
+	app.appendAgentRunLogEntry(thread, artifact, "complete", "## Executive Summary\nDone.")
+
+	rows := readLedgerLines(t, filepath.Join(dir, "eval-2026-07-11.jsonl"))
+	var run map[string]any
+	var terminal map[string]any
+	for _, row := range rows {
+		switch row["type"] {
+		case telemetryTypeWorkflowRun:
+			run = row
+		case telemetryTypeProposal:
+			if row["kind"] == proposalEventTerminal {
+				terminal = row
+			}
+		}
+	}
+	if run == nil {
+		t.Fatalf("no terminal workflow_run event; rows=%v", rows)
+	}
+	entry := run["fields"].(map[string]any)["run"].(map[string]any)
+	if entry["outcome"] != workflowOutcomeCompleted {
+		t.Fatalf("outcome=%v, want %q", entry["outcome"], workflowOutcomeCompleted)
+	}
+	if entry["proposal_id"] != "codex-proposal-1" {
+		t.Fatalf("proposal_id=%v, want codex-proposal-1", entry["proposal_id"])
+	}
+	if entry["trigger_surface"] != triggerSurfaceRoomVoice {
+		t.Fatalf("trigger_surface=%v, want %q", entry["trigger_surface"], triggerSurfaceRoomVoice)
+	}
+	if duration, _ := entry["duration_ms"].(float64); duration <= 0 {
+		t.Fatalf("duration_ms=%v, want > 0 from the startedAt stamp", entry["duration_ms"])
+	}
+	if terminal == nil {
+		t.Fatal("no proposal terminal event recorded")
+	}
+	terminalFields := terminal["fields"].(map[string]any)
+	if terminalFields["proposal_id"] != "codex-proposal-1" || terminalFields["outcome"] != "complete" {
+		t.Fatalf("terminal fields=%v, want proposal id + complete outcome", terminalFields)
 	}
 }

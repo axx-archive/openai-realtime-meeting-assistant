@@ -725,8 +725,10 @@ func (app *kanbanBoardApp) detectDecisionReversals(ctx context.Context, apiKey s
 		pairs = pairs[:decisionReversalCandidateCap]
 	}
 
+	model := meetingBrainModel()
 	text, err := responder(ctx, apiKey, openAITextRequest{
-		Model:           meetingBrainModel(),
+		Model:           model,
+		Seat:            seatDecisionLedger,
 		Instructions:    decisionReversalInstructions(),
 		Input:           buildDecisionReversalInput(pairs, time.Now().UTC()),
 		ReasoningEffort: "low",
@@ -741,6 +743,7 @@ func (app *kanbanBoardApp) detectDecisionReversals(ctx context.Context, apiKey s
 	}
 	output, ok := parseLedgerAdjudication(text)
 	if !ok {
+		recordEvalEvent(seatDecisionLedger, evalKindParseFailure, map[string]any{"seat": seatDecisionLedger, "model": model})
 		log.Errorf("%s reversal adjudication returned non-JSON; no supersession proposed", decisionLedgerAgentName)
 		return nil
 	}
@@ -762,6 +765,7 @@ func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey
 	model := meetingBrainModel()
 	text, err := responder(ctx, apiKey, openAITextRequest{
 		Model:        model,
+		Seat:         seatDecisionLedger,
 		Instructions: decisionLedgerInstructions(),
 		Input:        app.buildDecisionLedgerInput(inputs, time.Now().UTC()),
 		// Effort raise to the doctrine floor (medium): the ledger judges firm vs
@@ -779,6 +783,7 @@ func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey
 		// Never advance the cursor on unparseable output: with no decision_pass
 		// entry appended, the next pass retries the same brain window
 		// (mission-intel precedent).
+		recordEvalEvent(seatDecisionLedger, evalKindParseFailure, map[string]any{"seat": seatDecisionLedger, "model": model})
 		log.Errorf("%s returned non-JSON output; skipping this pass", decisionLedgerAgentName)
 		return meetingMemoryEntry{}, nil
 	}

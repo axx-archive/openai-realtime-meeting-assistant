@@ -188,6 +188,8 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 		"/assistant/portfolio":           {handler: assistantPortfolioHandler, memberGated: true},
 		"/assistant/realtime-offer":      {handler: assistantRealtimeOfferHandler, memberGated: true},
 		"/assistant/realtime-tool":       {handler: assistantRealtimeToolHandler, memberGated: true},
+		"/assistant/realtime/usage":      {handler: assistantRealtimeUsageHandler, memberGated: true},
+		"/api/usage/rollup":              {handler: usageRollupHandler, memberGated: true},
 		"/internal/codex/jobs/result":    {handler: internalCodexRunnerResultHandler, memberGated: true},
 		"/internal/render/jobs/result":   {handler: internalRenderRunnerResultHandler, memberGated: true},
 		"/artifacts":                     {handler: artifactsHandler, memberGated: true},

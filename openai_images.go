@@ -100,13 +100,24 @@ type openAIImagePayload struct {
 }
 
 // openAIImageBody is the slice of the Images response this stage reads: the
-// b64 payload, the emitted format, and the error envelope.
+// b64 payload, the emitted format, the usage block (W0-5 metering), and the
+// error envelope.
 type openAIImageBody struct {
 	Data []struct {
 		B64JSON string `json:"b64_json,omitempty"`
 	} `json:"data,omitempty"`
 	OutputFormat string `json:"output_format,omitempty"`
-	Error        *struct {
+	// Usage: gpt-image responses report token usage with a text/image input
+	// split; the ledger prices the split via models_pricing.go.
+	Usage *struct {
+		InputTokens        int64 `json:"input_tokens,omitempty"`
+		OutputTokens       int64 `json:"output_tokens,omitempty"`
+		InputTokensDetails struct {
+			TextTokens  int64 `json:"text_tokens,omitempty"`
+			ImageTokens int64 `json:"image_tokens,omitempty"`
+		} `json:"input_tokens_details"`
+	} `json:"usage,omitempty"`
+	Error *struct {
 		Message string `json:"message,omitempty"`
 	} `json:"error,omitempty"`
 }
@@ -136,7 +147,7 @@ func openAIImageMime(outputFormat string, data []byte) string {
 // Images API, decode the base64 payload, putBlob the bytes, return the
 // content-addressed ref plus the pinned mime. Keyless returns the same clear
 // error every OpenAI seam does — never a crash.
-func createOpenAIImage(ctx context.Context, prompt string, opts openAIImageOptions) (string, string, error) {
+func createOpenAIImage(ctx context.Context, prompt string, opts openAIImageOptions) (ref string, mime string, err error) {
 	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	if apiKey == "" {
 		return "", "", fmt.Errorf("OPENAI_API_KEY is not configured")
@@ -165,6 +176,38 @@ func createOpenAIImage(ctx context.Context, prompt string, opts openAIImageOptio
 	httpRequest.Header.Set("Authorization", "Bearer "+apiKey)
 	httpRequest.Header.Set("Content-Type", "application/json")
 
+	// W0-5 lane metering (seat images): one ledger row per generation call.
+	// llmUsageEntry carries no image-token field, so InputTokens records the
+	// TOTAL input tokens while EstCostUSD is computed HERE from the text/image
+	// split (the ledger never recomputes a caller-supplied nonzero cost). A
+	// response without a usage block records flagged Estimated; failures carry
+	// Error.
+	started := time.Now()
+	var usage llmTokenUsage
+	usageReported := false
+	defer func() {
+		entry := llmUsageEntry{
+			Provider:     providerOpenAI,
+			Model:        payload.Model,
+			Seat:         seatImages,
+			InputTokens:  usage.InputTokens + usage.ImageInputTokens,
+			OutputTokens: usage.OutputTokens,
+			DurationMS:   time.Since(started).Milliseconds(),
+			Estimated:    !usageReported,
+		}
+		// Only the image-input tier needs the split priced here; text-only
+		// usage recomputes correctly from the entry fields inside the ledger.
+		if usageReported && usage.ImageInputTokens > 0 {
+			if cost, priced := estimateCostUSD(payload.Model, usage); priced {
+				entry.EstCostUSD = cost
+			}
+		}
+		if err != nil {
+			entry.Error = err.Error()
+		}
+		recordLLMUsage(entry)
+	}()
+
 	// Image generation is the slowest OpenAI call the OS makes; 120s is the
 	// generous ceiling (the Responses neighbor runs text at 45s).
 	response, err := (&http.Client{Timeout: 120 * time.Second}).Do(httpRequest)
@@ -187,6 +230,20 @@ func createOpenAIImage(ctx context.Context, prompt string, opts openAIImageOptio
 	if err := json.Unmarshal(rawBody, &body); err != nil {
 		return "", "", fmt.Errorf("decode OpenAI image response: %w", err)
 	}
+	if body.Usage != nil {
+		usageReported = true
+		textTokens := body.Usage.InputTokensDetails.TextTokens
+		imageTokens := body.Usage.InputTokensDetails.ImageTokens
+		if textTokens == 0 && imageTokens == 0 {
+			// No split reported: bill everything at the text-input tier.
+			textTokens = body.Usage.InputTokens
+		}
+		usage = llmTokenUsage{
+			InputTokens:      textTokens,
+			ImageInputTokens: imageTokens,
+			OutputTokens:     body.Usage.OutputTokens,
+		}
+	}
 	if body.Error != nil && strings.TrimSpace(body.Error.Message) != "" {
 		return "", "", fmt.Errorf("OpenAI image error: %s", strings.TrimSpace(body.Error.Message))
 	}
@@ -198,8 +255,8 @@ func createOpenAIImage(ctx context.Context, prompt string, opts openAIImageOptio
 	if err != nil {
 		return "", "", fmt.Errorf("decode OpenAI image payload: %w", err)
 	}
-	mime := openAIImageMime(body.OutputFormat, data)
-	ref, err := putBlob(data, mime)
+	mime = openAIImageMime(body.OutputFormat, data)
+	ref, err = putBlob(data, mime)
 	if err != nil {
 		return "", "", fmt.Errorf("store generated image: %w", err)
 	}

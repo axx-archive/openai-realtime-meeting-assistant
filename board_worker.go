@@ -98,6 +98,7 @@ func (app *kanbanBoardApp) produceMeetingBoardUpdate(ctx context.Context, apiKey
 	model := meetingBoardModel()
 	text, err := responder(ctx, apiKey, openAITextRequest{
 		Model:        model,
+		Seat:         seatBoard,
 		Instructions: meetingBoardInstructions(),
 		Input:        buildMeetingBoardInput(summaries, app.snapshotState(), app.participantSnapshotForRoom(roomID), time.Now().UTC()),
 		// A2: the board step emits structured tool calls with exact args — the
@@ -113,12 +114,44 @@ func (app *kanbanBoardApp) produceMeetingBoardUpdate(ctx context.Context, apiKey
 
 	analysis, err := parseMeetingBoardAnalysis(text)
 	if err != nil {
+		// W0 item 6: the strict-JSON parse-failure counter — the designated
+		// gate metric for any board-lane model flip (Terra pin included).
+		recordEvalEvent(seatBoard, evalKindParseFailure, map[string]any{"seat": seatBoard, "model": model})
 		return meetingMemoryEntry{}, err
 	}
 	runResult := app.applyMeetingBoardAnalysisForRoom(analysis, roomID)
 
 	firstSummary := summaries[0]
 	lastSummary := summaries[len(summaries)-1]
+	// W0 item 6: board-op fidelity — the regression alarm for the Terra pin.
+	// meetingBoardRunResult already computes the per-op error rail; fold it
+	// into one eval event per pass (op_count, error_count, error classes).
+	recordEvalEvent(seatBoard, evalKindBoardOpFidelity, map[string]any{
+		"op_count":      len(runResult.Applications),
+		"error_count":   runResult.ErrorCount,
+		"error_classes": meetingBoardErrorClasses(runResult),
+		"changed_count": runResult.ChangedCount,
+		"room_id":       roomID,
+	})
+	// W0 item 7: proposal lineage — every proposal this pass minted carries its
+	// source surface + the brain-window/transcript ids so time-to-proposal
+	// (minted TS − transcript TS) is computable from events alone.
+	for _, application := range runResult.Applications {
+		if application.Tool != "propose_codex_task" || application.Error != "" {
+			continue
+		}
+		proposalID := codexProposalIDFromToolResult(application.Result)
+		if proposalID == "" {
+			continue
+		}
+		recordProposalEvent(proposalEventMinted, proposalID, map[string]any{
+			"source":                proposalSourceBoardWorker,
+			"from_brain_id":         firstSummary.ID,
+			"through_transcript_id": strings.TrimSpace(lastSummary.Metadata["throughTranscriptId"]),
+			"transcript_created_at": strings.TrimSpace(lastSummary.Metadata["throughTranscriptCreatedAt"]),
+			"room_id":               roomID,
+		})
+	}
 	metadata := map[string]string{
 		"source": "openai_responses",
 		"model":  model,
@@ -633,6 +666,66 @@ func renderMeetingBoardUpdateArtifact(summaries []meetingMemoryEntry, result mee
 	}
 
 	return strings.TrimSpace(builder.String())
+}
+
+// meetingBoardErrorClasses buckets a pass's per-operation errors into the
+// stable class vocabulary the board_op_fidelity eval event reports (W0 item
+// 6). Classes are unique, in first-occurrence order, so the rollup can trend
+// "bad_card_id spiked after the Terra pin" without string-diffing error rails.
+func meetingBoardErrorClasses(result meetingBoardRunResult) []string {
+	seen := map[string]struct{}{}
+	classes := make([]string, 0, 4)
+	for _, application := range result.Applications {
+		class := meetingBoardErrorClass(application.Error)
+		if class == "" {
+			continue
+		}
+		if _, ok := seen[class]; ok {
+			continue
+		}
+		seen[class] = struct{}{}
+		classes = append(classes, class)
+	}
+	return classes
+}
+
+// meetingBoardErrorClass maps one operation error onto its fidelity class.
+// bad_card_id (dropped/invented card ids) and invalid_status (invented
+// statuses) are the two A2-documented regressions the Terra gate watches.
+func meetingBoardErrorClass(message string) string {
+	switch {
+	case strings.TrimSpace(message) == "":
+		return ""
+	case strings.Contains(message, "operation tool is required"):
+		return "missing_tool"
+	case strings.Contains(message, "unsupported board worker tool"):
+		return "unsupported_tool"
+	case strings.Contains(message, "listen-only"):
+		return "listen_only_refused"
+	case strings.Contains(message, "business cards require"):
+		return "doctrine_rejected"
+	case strings.Contains(message, "card_id"):
+		return "bad_card_id"
+	case strings.Contains(message, "status"):
+		return "invalid_status"
+	default:
+		return "apply_error"
+	}
+}
+
+// codexProposalIDFromToolResult digs the minted proposal's id out of a
+// propose_codex_task tool result ({"ok":true,"proposal":{"id":...}} per
+// proposeCodexTask) — the join key for the minted→resolved→launched→terminal
+// proposal funnel.
+func codexProposalIDFromToolResult(result map[string]any) string {
+	if result == nil {
+		return ""
+	}
+	proposal, ok := result["proposal"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(asString(proposal["id"]))
 }
 
 // meetingBoardChangedCardIDs collects the unique card ids of the operations

@@ -265,6 +265,134 @@ func TestTranscriptionLaneCompletedTranscriptWritesSourceMetadata(t *testing.T) 
 	}
 }
 
+// W0-5: the per-room committed-seconds FIFO pops in commit order, returns 0
+// when drained (a terminal event for a pre-reconnect commit), and caps its
+// depth instead of growing without bound.
+func TestTranscriptionSegmentSecondsQueueOrderAndCap(t *testing.T) {
+	room := "room-fifo-test"
+	resetTranscriptionSegmentSecondsForRoom(room)
+	t.Cleanup(func() { resetTranscriptionSegmentSecondsForRoom(room) })
+
+	if got := popTranscriptionSegmentSeconds(room); got != 0 {
+		t.Fatalf("empty pop = %v, want 0", got)
+	}
+	pushTranscriptionSegmentSeconds(room, 1.5)
+	pushTranscriptionSegmentSeconds(room, 2.5)
+	if got := popTranscriptionSegmentSeconds(room); got != 1.5 {
+		t.Fatalf("first pop = %v, want commit order (1.5)", got)
+	}
+	if got := popTranscriptionSegmentSeconds(room); got != 2.5 {
+		t.Fatalf("second pop = %v, want 2.5", got)
+	}
+	if got := popTranscriptionSegmentSeconds(room); got != 0 {
+		t.Fatalf("drained pop = %v, want 0", got)
+	}
+
+	for i := 0; i < transcriptionSegmentSecondsCap+10; i++ {
+		pushTranscriptionSegmentSeconds(room, float64(i))
+	}
+	// The oldest 10 fell off; the queue holds exactly the cap, oldest first.
+	if got := popTranscriptionSegmentSeconds(room); got != 10 {
+		t.Fatalf("post-cap first pop = %v, want 10 (oldest evicted)", got)
+	}
+	drained := 1
+	for popTranscriptionSegmentSeconds(room) != 0 {
+		drained++
+	}
+	if drained != transcriptionSegmentSecondsCap {
+		t.Fatalf("queue depth = %d, want the cap %d", drained, transcriptionSegmentSecondsCap)
+	}
+
+	resetTranscriptionSegmentSecondsForRoom(room)
+	pushTranscriptionSegmentSeconds(room, 9)
+	resetTranscriptionSegmentSecondsForRoom(room)
+	if got := popTranscriptionSegmentSeconds(room); got != 0 {
+		t.Fatalf("reset must clear the room queue, popped %v", got)
+	}
+}
+
+// W0-5 lane metering: a committed segment writes one duration-billed usage row
+// (seat transcription_lane, AudioSeconds, per-minute est cost) and queues its
+// duration so the terminal .completed/.failed event stamps audio_seconds onto
+// its transcript_segment eval event.
+func TestTranscriptionLaneCommitMetersSegmentAndTerminalEventsPop(t *testing.T) {
+	dir := ledgerTestDir(t)
+	fixed := time.Date(2026, time.July, 11, 16, 0, 0, 0, time.UTC)
+	prevNow := usageLedgerNow
+	usageLedgerNow = func() time.Time { return fixed }
+	defer func() { usageLedgerNow = prevNow }()
+
+	app := newIsolatedKanbanBoardApp(t)
+	room := "room-meter-test"
+	resetTranscriptionSegmentSecondsForRoom(room)
+	t.Cleanup(func() { resetTranscriptionSegmentSecondsForRoom(room) })
+
+	lane := newMeetingTranscriptionLaneForRoom(app, "test-key", "gpt-4o-transcribe", room)
+	lane.noteCommittedSegment(2 * transcriptionLaneInputSampleRate) // 2.0s
+	lane.noteCommittedSegment(transcriptionLaneInputSampleRate / 2) // 0.5s
+
+	rows := readLedgerLines(t, filepath.Join(dir, "usage-2026-07-11.jsonl"))
+	if len(rows) != 2 {
+		t.Fatalf("usage rows = %d, want one per committed segment", len(rows))
+	}
+	first := rows[0]
+	if first["provider"] != providerOpenAI || first["model"] != "gpt-4o-transcribe" ||
+		first["seat"] != seatTranscriptionLane || first["room_id"] != room {
+		t.Fatalf("segment row identity wrong: %v", first)
+	}
+	if got := first["audio_seconds"].(float64); !floatClose(got, 2.0) {
+		t.Fatalf("audio_seconds = %v, want 2.0", got)
+	}
+	// Duration-billed: 2s of gpt-4o-transcribe at $0.006/min.
+	if got := first["est_cost_usd"].(float64); !floatClose(got, 2.0/60*0.006) {
+		t.Fatalf("est_cost_usd = %v, want %v", got, 2.0/60*0.006)
+	}
+
+	// .completed pops the first committed duration, .failed the next; neither
+	// requests a reconnect.
+	if app.handleTranscriptionLaneEventForRoom(room, []byte(`{
+		"type":"conversation.item.input_audio_transcription.completed",
+		"event_id":"event-meter-1",
+		"item_id":"item-meter-1",
+		"transcript":"Tom reviewed the launch checklist for the week."
+	}`), "gpt-4o-transcribe") {
+		t.Fatal("completed event must not request reconnect")
+	}
+	if app.handleTranscriptionLaneEventForRoom(room, []byte(`{
+		"type":"conversation.item.input_audio_transcription.failed"
+	}`), "gpt-4o-transcribe") {
+		t.Fatal("failed event must not request reconnect")
+	}
+
+	evalRows := readLedgerLines(t, filepath.Join(dir, "eval-2026-07-11.jsonl"))
+	segments := []map[string]any{}
+	for _, row := range evalRows {
+		if row["kind"] == evalKindTranscriptSegment {
+			segments = append(segments, row)
+		}
+	}
+	if len(segments) != 2 {
+		t.Fatalf("transcript_segment rows = %d, want 2: %v", len(segments), evalRows)
+	}
+	completed := segments[0]["fields"].(map[string]any)
+	if completed["status"] != "completed" || completed["room_id"] != room {
+		t.Fatalf("completed fields = %v", completed)
+	}
+	if got := completed["audio_seconds"].(float64); !floatClose(got, 2.0) {
+		t.Fatalf("completed audio_seconds = %v, want the first committed 2.0", got)
+	}
+	failed := segments[1]["fields"].(map[string]any)
+	if failed["status"] != "failed" {
+		t.Fatalf("failed fields = %v", failed)
+	}
+	if got := failed["audio_seconds"].(float64); !floatClose(got, 0.5) {
+		t.Fatalf("failed audio_seconds = %v, want the second committed 0.5", got)
+	}
+	if segments[0]["lane"] != seatTranscriptionLane || segments[1]["lane"] != seatTranscriptionLane {
+		t.Fatalf("transcript_segment lane wrong: %v / %v", segments[0]["lane"], segments[1]["lane"])
+	}
+}
+
 func TestTranscriptionLaneSessionExpiredRequestsReconnect(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 

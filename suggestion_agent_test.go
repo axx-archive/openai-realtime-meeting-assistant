@@ -194,3 +194,42 @@ func TestResearchSuggestionInstructionsCarryLooserBar(t *testing.T) {
 		}
 	}
 }
+
+func TestResearchSuggestionWorkerMintsLineageStampedEventWithSeat(t *testing.T) {
+	dir := boardWorkerLedgerDir(t)
+	app := newIsolatedKanbanBoardApp(t)
+
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-1", "## Discussion\n- The room kept circling StationTenn churn and wants someone to dig in.", map[string]string{
+		"fromTranscriptId":           "event-1",
+		"throughTranscriptId":        "event-7",
+		"throughTranscriptCreatedAt": "2026-07-11T09:40:00Z",
+	}); err != nil || !appended {
+		t.Fatalf("append brain write-up: appended=%v err=%v", appended, err)
+	}
+
+	seenSeat := ""
+	if _, err := app.runResearchSuggestionOnce(context.Background(), "test-key", func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		seenSeat = request.Seat
+		return `{"suggestions":[{"title":"StationTenn churn brief","query":"Research StationTenn churn drivers and draft a brief.","reason":"The room circled it."}]}`, nil
+	}); err != nil {
+		t.Fatalf("runResearchSuggestionOnce: %v", err)
+	}
+	if seenSeat != seatSuggestion {
+		t.Fatalf("request.Seat=%q, want %q (W0 seat threading)", seenSeat, seatSuggestion)
+	}
+
+	events := boardLedgerEventsOfKind(t, dir, proposalEventMinted)
+	if len(events) != 1 {
+		t.Fatalf("minted events=%d, want 1", len(events))
+	}
+	fields := events[0]["fields"].(map[string]any)
+	if fields["source"] != proposalSourceSuggestionWorker {
+		t.Fatalf("source=%v, want %q", fields["source"], proposalSourceSuggestionWorker)
+	}
+	if id, _ := fields["proposal_id"].(string); strings.TrimSpace(id) == "" {
+		t.Fatalf("minted event missing proposal_id: %v", fields)
+	}
+	if fields["from_brain_id"] != "brain-1" || fields["through_transcript_id"] != "event-7" || fields["transcript_created_at"] != "2026-07-11T09:40:00Z" {
+		t.Fatalf("lineage wrong: %v", fields)
+	}
+}

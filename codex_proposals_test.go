@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -717,6 +718,163 @@ func TestCodexProposalNudgePersistsUntilActedOn(t *testing.T) {
 	if marked != 1 {
 		t.Fatalf("legacy marked=%d, want the settled-proposal nudge to accept the receipt", marked)
 	}
+}
+
+// W0-7 proposal taxonomy: a human confirm records resolved{approved, approver}
+// and a dismiss records resolved{dismissed, approver} — and a FAILED launch
+// records nothing (the proposal reverts to proposed, so its funnel row must
+// stay open).
+func TestResolveCodexProposalRecordsResolvedEvents(t *testing.T) {
+	dir := ledgerTestDir(t)
+	fixed := time.Date(2026, time.July, 11, 18, 0, 0, 0, time.UTC)
+	prevNow := usageLedgerNow
+	usageLedgerNow = func() time.Time { return fixed }
+	defer func() { usageLedgerNow = prevNow }()
+
+	app := newIsolatedKanbanBoardApp(t)
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	propose := func(title string) string {
+		t.Helper()
+		result, _, err := app.applyToolCallArgs("propose_codex_task", map[string]any{
+			"title": title,
+			"mode":  "research",
+			"query": "Research " + title + " and draft a brief.",
+		})
+		if err != nil {
+			t.Fatalf("propose %s: %v", title, err)
+		}
+		return asString(result["proposal"].(map[string]any)["id"])
+	}
+	resolvedEvents := func() map[string]map[string]any {
+		t.Helper()
+		byProposal := map[string]map[string]any{}
+		for _, row := range readLedgerLines(t, filepath.Join(dir, "eval-2026-07-11.jsonl")) {
+			if row["type"] != telemetryTypeProposal || row["kind"] != proposalEventResolved {
+				continue
+			}
+			fields := row["fields"].(map[string]any)
+			byProposal[fields["proposal_id"].(string)] = fields
+		}
+		return byProposal
+	}
+
+	confirmID := propose("Resolved-event confirm")
+	dismissID := propose("Resolved-event dismiss")
+	if _, launched, err := app.resolveCodexProposal(confirmID, "confirm", "Tom", "tom@shareability.com"); err != nil || !launched {
+		t.Fatalf("confirm: launched=%v err=%v", launched, err)
+	}
+	if _, _, err := app.resolveCodexProposal(dismissID, "dismiss", "Tyler", "tyler@shareability.com"); err != nil {
+		t.Fatalf("dismiss: %v", err)
+	}
+
+	events := resolvedEvents()
+	confirmed, ok := events[confirmID]
+	if !ok || confirmed["resolution"] != "approved" || confirmed["approver"] != "Tom" {
+		t.Fatalf("confirm resolved event = %v, want approved by Tom", confirmed)
+	}
+	dismissed, ok := events[dismissID]
+	if !ok || dismissed["resolution"] != "dismissed" || dismissed["approver"] != "Tyler" {
+		t.Fatalf("dismiss resolved event = %v, want dismissed by Tyler", dismissed)
+	}
+
+	// A failed launch (empty query never launches) reverts to proposed and
+	// records NO resolved event.
+	badID := durableTimestampID("codex-proposal", time.Now())
+	if _, appended, err := app.memory.appendCodexProposal(badID, "Scout proposes a task with no query", map[string]string{
+		"title":      "No query",
+		"mode":       "research",
+		"query":      "",
+		"status":     codexProposalStatusProposed,
+		"proposedBy": "board_worker",
+	}); err != nil || !appended {
+		t.Fatalf("append bad proposal: appended=%v err=%v", appended, err)
+	}
+	if _, _, err := app.resolveCodexProposal(badID, "confirm", "Tom", "tom@shareability.com"); err == nil {
+		t.Fatal("confirm of an unlaunchable proposal must error")
+	}
+	if _, present := resolvedEvents()[badID]; present {
+		t.Fatal("a failed launch must not record a resolved event (the funnel row stays open)")
+	}
+}
+
+// W1-19 broadcast scope: proposal cards ride the signed-in tier, so a member
+// seated in a ROOM's media fan-out pool (never an office socket — this
+// connection deliberately skips the office hello) sees the propose-time card
+// AND its resolution live. Before the tier switch these frames reached office
+// sockets only. Guest exclusion is broadcastSignedInKanbanEvent's own tested
+// contract (guest_allowlist_test.go pins signed-in frames never leak to guest
+// sockets).
+func TestCodexProposalBroadcastReachesRoomMemberSockets(t *testing.T) {
+	server := newIsolatedWebsocketServer(t)
+	t.Setenv("USAGE_LEDGER_PATH", t.TempDir())
+
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	conn := dialIsolatedWebsocket(t, server, "tom@shareability.com")
+	writeNativeWebsocketEvent(t, conn, "participant", map[string]any{})
+	waitForKanbanEvent(t, conn, "access_granted", 5*time.Second)
+	// Enter the media fan-out pool: broadcasts reach room seats only from here.
+	writeNativeWebsocketEvent(t, conn, "media_ready", map[string]any{})
+	poolDeadline := time.Now().Add(5 * time.Second)
+	for {
+		pooled := false
+		listLock.RLock()
+		for _, state := range peerConnections {
+			if state.websocket != nil && !state.websocket.guest {
+				pooled = true
+			}
+		}
+		listLock.RUnlock()
+		if pooled {
+			break
+		}
+		if time.Now().After(poolDeadline) {
+			t.Fatal("member socket never entered the room fan-out pool")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	result, _, err := kanbanApp.applyToolCallArgs("propose_codex_task", map[string]any{
+		"title": "Live proposal visibility",
+		"mode":  "research",
+		"query": "Research live proposal visibility and draft a brief.",
+	})
+	if err != nil {
+		t.Fatalf("propose_codex_task: %v", err)
+	}
+	proposalID := asString(result["proposal"].(map[string]any)["id"])
+
+	waitForProposalStatus := func(wantStatus string) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			raw := waitForKanbanEvent(t, conn, "codex_proposal", 5*time.Second)
+			var card map[string]any
+			if err := json.Unmarshal(raw, &card); err != nil {
+				t.Fatalf("decode codex_proposal frame: %v", err)
+			}
+			if card["id"] == proposalID && card["status"] == wantStatus {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("room-member socket never saw proposal %s at status %s", proposalID, wantStatus)
+			}
+		}
+	}
+
+	// The propose-time confirm card lands live on the room seat...
+	waitForProposalStatus(codexProposalStatusProposed)
+
+	// ...and so does the resolution card.
+	if _, _, err := kanbanApp.resolveCodexProposal(proposalID, "dismiss", "Tyler", "tyler@shareability.com"); err != nil {
+		t.Fatalf("dismiss: %v", err)
+	}
+	waitForProposalStatus(codexProposalStatusDismissed)
 }
 
 // Frontend wiring guard, following the repo's index.html grep-test pattern:

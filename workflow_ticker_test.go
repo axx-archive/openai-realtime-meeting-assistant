@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -168,6 +169,100 @@ func TestWorkflowTickerAutoRunLaneRequiresStandingApproval(t *testing.T) {
 	}
 	if by := entry.Metadata["confirmedBy"]; !strings.HasPrefix(by, workflowTickerAgentName+" · standing approval:") {
 		t.Fatalf("confirmedBy=%q, want the standing-approval provenance", by)
+	}
+}
+
+// W0-7/8: a ticker launch records the proposal-lifecycle launched event
+// (path=ticker) plus one workflow-run provenance row per launch shape — Case A
+// carries the original confirmer as approver, Case B the standing approval's
+// grantor. The terminal outcome is the agent-thread runner's row (joined on
+// thread_id), so the ticker records exactly the launch.
+func TestWorkflowTickerLaunchRecordsProposalAndWorkflowProvenance(t *testing.T) {
+	dir := ledgerTestDir(t)
+	fixed := time.Date(2026, time.July, 11, 17, 0, 0, 0, time.UTC)
+	prevNow := usageLedgerNow
+	usageLedgerNow = func() time.Time { return fixed }
+	defer func() { usageLedgerNow = prevNow }()
+
+	app := newIsolatedKanbanBoardApp(t)
+	t.Setenv("BONFIRE_WORKFLOW_TICKER_MAX_PER_PASS", "2")
+	launches := stubTickerLaunches(t, nil)
+
+	caseA := "codex-proposal-provenance-a"
+	appendTickerProposal(t, app, caseA, map[string]string{
+		"status":           codexProposalStatusConfirmed,
+		"confirmedBy":      "Tom",
+		"confirmedByEmail": "tom@shareability.com",
+		"resolvedAt":       time.Now().Add(-5 * time.Minute).UTC().Format(time.RFC3339Nano),
+		"proposedBy":       "board_worker",
+		"approvalLane":     "standard",
+	})
+	caseB := "codex-proposal-provenance-b"
+	appendTickerProposal(t, app, caseB, map[string]string{
+		"status":         codexProposalStatusProposed,
+		"lane":           codexProposalLaneAutoRun,
+		"laneApprovedBy": "aj@shareability.com",
+		"proposedBy":     "board_worker",
+		"approvalLane":   "auto",
+	})
+
+	if got := app.runWorkflowTickerOnce(time.Now()); got != 2 || *launches != 2 {
+		t.Fatalf("pass launched=%d stub=%d, want both provenance proposals", got, *launches)
+	}
+
+	rows := readLedgerLines(t, filepath.Join(dir, "eval-2026-07-11.jsonl"))
+	launchedPaths := map[string]map[string]any{}
+	runs := map[string]map[string]any{}
+	for _, row := range rows {
+		switch row["type"] {
+		case telemetryTypeProposal:
+			if row["kind"] != proposalEventLaunched {
+				continue
+			}
+			fields := row["fields"].(map[string]any)
+			id, _ := fields["proposal_id"].(string)
+			if id == "" {
+				// The ticker threads its proposal id onto the choke point's
+				// single launched row, so its rows carry the id; any id-less
+				// launched row is not the ticker's.
+				continue
+			}
+			launchedPaths[id] = fields
+		case telemetryTypeWorkflowRun:
+			run := row["fields"].(map[string]any)["run"].(map[string]any)
+			if run["trigger_surface"] == triggerSurfaceTicker {
+				runs[run["proposal_id"].(string)] = run
+			}
+		}
+	}
+
+	fieldsA, ok := launchedPaths[caseA]
+	if !ok || fieldsA["path"] != triggerSurfaceTicker || fieldsA["lane"] != codexProposalLaneStandard {
+		t.Fatalf("case-A launched event = %v, want path=ticker lane=standard", fieldsA)
+	}
+	fieldsB, ok := launchedPaths[caseB]
+	if !ok || fieldsB["path"] != triggerSurfaceTicker || fieldsB["lane"] != codexProposalLaneAutoRun {
+		t.Fatalf("case-B launched event = %v, want path=ticker lane=auto_run", fieldsB)
+	}
+
+	runA, ok := runs[caseA]
+	if !ok {
+		t.Fatalf("case-A workflow_run row missing: %v", runs)
+	}
+	if runA["workflow_id"] != "research" || runA["approver"] != "Tom" ||
+		runA["proposer"] != "board_worker" || runA["lane"] != "standard" ||
+		runA["outcome"] != workflowOutcomeLaunched {
+		t.Fatalf("case-A run provenance = %v", runA)
+	}
+	if threadID, _ := runA["thread_id"].(string); strings.TrimSpace(threadID) == "" {
+		t.Fatalf("case-A run must carry the launched thread id: %v", runA)
+	}
+	runB, ok := runs[caseB]
+	if !ok {
+		t.Fatalf("case-B workflow_run row missing: %v", runs)
+	}
+	if runB["approver"] != "aj@shareability.com" || runB["lane"] != "auto" {
+		t.Fatalf("case-B run must carry the standing approval's grantor: %v", runB)
 	}
 }
 

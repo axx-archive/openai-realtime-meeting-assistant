@@ -6,9 +6,11 @@ import (
 	"io"
 	"mime"
 	"mime/multipart"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRealtimeSessionConfigUsesGptRealtime2Optimizations(t *testing.T) {
@@ -16,6 +18,7 @@ func TestRealtimeSessionConfigUsesGptRealtime2Optimizations(t *testing.T) {
 	t.Setenv("OPENAI_REALTIME_REASONING_EFFORT", "")
 	t.Setenv("OPENAI_REALTIME_VAD_TYPE", "")
 	t.Setenv("OPENAI_REALTIME_VAD_EAGERNESS", "")
+	t.Setenv("OPENAI_REALTIME_TRANSCRIPTION_MODEL", "")
 
 	app := newKanbanBoardApp()
 	session := app.sessionConfig("gpt-realtime-2")
@@ -1046,4 +1049,380 @@ func findSnapshotCard(cards []kanbanCard, cardID string) (kanbanCard, bool) {
 	}
 
 	return kanbanCard{}, false
+}
+
+// realtimeLedgerSetup points the usage ledger at a temp dir and pins its
+// clock so file rotation lands on a known date. Reuses the usage_ledger_test
+// helpers (same package).
+func realtimeLedgerSetup(t *testing.T) string {
+	t.Helper()
+	dir := ledgerTestDir(t)
+	fixed := time.Date(2026, time.July, 11, 12, 0, 0, 0, time.UTC)
+	prevNow := usageLedgerNow
+	usageLedgerNow = func() time.Time { return fixed }
+	t.Cleanup(func() { usageLedgerNow = prevNow })
+	return dir
+}
+
+func TestRealtimeSessionConfigGatesTranscriptionPromptByModel(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	// Whisper family: prompt + noise_reduction must be ABSENT — sending them
+	// is rejected live and breaks the whole voice session (the 2026-07-08
+	// prod incident class).
+	t.Setenv("OPENAI_REALTIME_TRANSCRIPTION_MODEL", "gpt-realtime-whisper")
+	session := app.sessionConfig("gpt-realtime-2")
+	input := session["audio"].(map[string]any)["input"].(map[string]any)
+	if _, present := input["noise_reduction"]; present {
+		t.Fatalf("noise_reduction sent to a whisper-family transcription model: %v", input)
+	}
+	transcription := input["transcription"].(map[string]any)
+	if _, present := transcription["prompt"]; present {
+		t.Fatalf("prompt sent to a whisper-family transcription model: %v", transcription)
+	}
+	if model := transcription["model"]; model != "gpt-realtime-whisper" {
+		t.Fatalf("transcription.model=%v, want gpt-realtime-whisper", model)
+	}
+
+	// The gpt-4o transcription family keeps the full vocabulary config.
+	t.Setenv("OPENAI_REALTIME_TRANSCRIPTION_MODEL", "gpt-4o-transcribe")
+	session = app.sessionConfig("gpt-realtime-2")
+	input = session["audio"].(map[string]any)["input"].(map[string]any)
+	noiseReduction, ok := input["noise_reduction"].(map[string]any)
+	if !ok || noiseReduction["type"] != "near_field" {
+		t.Fatalf("noise_reduction missing for gpt-4o-transcribe: %v", input["noise_reduction"])
+	}
+	transcription = input["transcription"].(map[string]any)
+	prompt, ok := transcription["prompt"].(string)
+	if !ok || !strings.Contains(prompt, "Boot Barn") {
+		t.Fatalf("vocabulary prompt missing for gpt-4o-transcribe: %v", transcription["prompt"])
+	}
+}
+
+func TestUsesAdvancedCommandProfileMatchesRealtime2Family(t *testing.T) {
+	cases := []struct {
+		model string
+		want  bool
+	}{
+		{"gpt-realtime-2", true},
+		{" GPT-Realtime-2 ", true},
+		{"gpt-realtime-2.1", true},
+		{"gpt-realtime-2.2", true},
+		{"gpt-realtime-2.1-mini", false}, // session.reasoning support unverified on mini
+		{"gpt-realtime-2-mini", false},
+		{"gpt-realtime-20", false}, // different family, not a point release
+		{"gpt-realtime-1", false},
+		{"gpt-4o-realtime-preview", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := usesAdvancedCommandProfile(tc.model); got != tc.want {
+			t.Errorf("usesAdvancedCommandProfile(%q)=%v, want %v", tc.model, got, tc.want)
+		}
+	}
+}
+
+func TestWarnRealtimeVoiceSessionNoVocabEmitsFunnelEvent(t *testing.T) {
+	dir := realtimeLedgerSetup(t)
+
+	// A prompt-accepting model stays silent.
+	t.Setenv("OPENAI_REALTIME_TRANSCRIPTION_MODEL", "gpt-4o-transcribe")
+	warnRealtimeVoiceSessionNoVocab("room")
+	if _, err := os.Stat(filepath.Join(dir, "eval-2026-07-11.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("no event expected for a prompt-accepting model (stat err=%v)", err)
+	}
+
+	// A whisper-family pin screams once per session create.
+	t.Setenv("OPENAI_REALTIME_TRANSCRIPTION_MODEL", "gpt-realtime-whisper")
+	warnRealtimeVoiceSessionNoVocab("room")
+	rows := readLedgerLines(t, filepath.Join(dir, "eval-2026-07-11.jsonl"))
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 eval row, got %d", len(rows))
+	}
+	row := rows[0]
+	if row["type"] != telemetryTypeEval || row["kind"] != evalKindNoVocabWarning || row["lane"] != seatTranscriptionSession {
+		t.Fatalf("wrong event shape: %v", row)
+	}
+	fields := row["fields"].(map[string]any)
+	if fields["model"] != "gpt-realtime-whisper" || fields["surface"] != "room" {
+		t.Fatalf("wrong fields: %v", fields)
+	}
+}
+
+func TestValidateRealtimeConfigWarnings(t *testing.T) {
+	t.Setenv("OPENAI_REALTIME_MODEL", "")
+	t.Setenv("OPENAI_TRANSCRIPT_MODEL", "")
+	t.Setenv("OPENAI_REALTIME_TRANSCRIPTION_MODEL", "")
+	t.Setenv("OPENAI_REALTIME_REASONING_EFFORT", "")
+	if warnings := validateRealtimeConfig(); len(warnings) != 0 {
+		t.Fatalf("defaults should validate clean, got %v", warnings)
+	}
+
+	// Whisper lane pin: vocabulary warning (the model itself is priced).
+	t.Setenv("OPENAI_TRANSCRIPT_MODEL", "gpt-realtime-whisper")
+	warnings := validateRealtimeConfig()
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "domain-vocabulary") || !strings.Contains(warnings[0], "OPENAI_TRANSCRIPT_MODEL") {
+		t.Fatalf("whisper lane pin warnings=%v, want one no-vocab warning", warnings)
+	}
+	t.Setenv("OPENAI_TRANSCRIPT_MODEL", "")
+
+	// A typo'd realtime model id has no pricing-table row.
+	t.Setenv("OPENAI_REALTIME_MODEL", "gpt-realtime-2migthy")
+	warnings = validateRealtimeConfig()
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "pricing-table") || !strings.Contains(warnings[0], "OPENAI_REALTIME_MODEL") {
+		t.Fatalf("typo'd realtime model warnings=%v, want one pricing warning", warnings)
+	}
+	t.Setenv("OPENAI_REALTIME_MODEL", "")
+
+	// Out-of-enum effort silently falls back to the default — warn loudly.
+	t.Setenv("OPENAI_REALTIME_REASONING_EFFORT", "turbo")
+	warnings = validateRealtimeConfig()
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "OPENAI_REALTIME_REASONING_EFFORT") {
+		t.Fatalf("effort warnings=%v, want one enum warning", warnings)
+	}
+}
+
+func TestTelemetryLaneSnapshotReportsLaneModels(t *testing.T) {
+	t.Setenv("OPENAI_REALTIME_MODEL", "")
+	t.Setenv("OPENAI_REALTIME_REASONING_EFFORT", "")
+	t.Setenv("OPENAI_TRANSCRIPT_MODEL", "gpt-realtime-whisper")
+	t.Setenv("OPENAI_REALTIME_TRANSCRIPTION_MODEL", "")
+
+	snapshot := telemetryLaneSnapshot()
+	if snapshot["realtime_model"] != "gpt-realtime-2" || snapshot["realtime_reasoning_effort"] != "high" {
+		t.Fatalf("realtime config wrong: %v", snapshot)
+	}
+	if snapshot["transcription_lane_model"] != "gpt-realtime-whisper" || snapshot["transcription_lane_vocab"] != false {
+		t.Fatalf("whisper lane must report vocab OFF: %v", snapshot)
+	}
+	if snapshot["voice_transcription_model"] != "gpt-4o-transcribe" || snapshot["voice_transcription_vocab"] != true {
+		t.Fatalf("voice transcription lane wrong: %v", snapshot)
+	}
+	if snapshot["private_voice_model"] != "gpt-realtime-2" {
+		t.Fatalf("private voice model should mirror the shared dial today: %v", snapshot)
+	}
+}
+
+func TestRealtimeResponseDoneRecordsVoiceRoomUsage(t *testing.T) {
+	dir := realtimeLedgerSetup(t)
+	t.Setenv("OPENAI_REALTIME_MODEL", "")
+	app := newIsolatedKanbanBoardApp(t)
+
+	app.handleRealtimeEvent([]byte(`{
+		"type": "response.done",
+		"response": {
+			"status": "completed",
+			"output": [],
+			"usage": {
+				"total_tokens": 1300,
+				"input_tokens": 1100,
+				"output_tokens": 200,
+				"input_token_details": {
+					"text_tokens": 600,
+					"audio_tokens": 500,
+					"cached_tokens": 100,
+					"cached_tokens_details": {"text_tokens": 80, "audio_tokens": 20}
+				},
+				"output_token_details": {"text_tokens": 50, "audio_tokens": 150}
+			}
+		}
+	}`))
+
+	rows := readLedgerLines(t, filepath.Join(dir, "usage-2026-07-11.jsonl"))
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 usage row, got %d", len(rows))
+	}
+	row := rows[0]
+	if row["seat"] != seatVoiceRoom || row["provider"] != providerOpenAI || row["model"] != "gpt-realtime-2" {
+		t.Fatalf("wrong identity fields: %v", row)
+	}
+	if row["room_id"] != officeRoomID {
+		t.Fatalf("room_id=%v, want %q", row["room_id"], officeRoomID)
+	}
+	// Cached shares subtract out of the full-price splits.
+	if row["input_tokens"].(float64) != 520 || row["cached_input_tokens"].(float64) != 80 {
+		t.Fatalf("text split wrong: %v", row)
+	}
+	if row["audio_input_tokens"].(float64) != 480 || row["cached_audio_input_tokens"].(float64) != 20 {
+		t.Fatalf("audio split wrong: %v", row)
+	}
+	if row["output_tokens"].(float64) != 50 || row["audio_output_tokens"].(float64) != 150 {
+		t.Fatalf("output split wrong: %v", row)
+	}
+	if _, present := row["price_missing"]; present {
+		t.Fatalf("gpt-realtime-2 should be priced: %v", row)
+	}
+
+	// A turn without usage records nothing — no invented numbers.
+	app.handleRealtimeEvent([]byte(`{"type":"response.done","response":{"status":"completed","output":[]}}`))
+	if rows := readLedgerLines(t, filepath.Join(dir, "usage-2026-07-11.jsonl")); len(rows) != 1 {
+		t.Fatalf("usage-free turn must not append: got %d rows", len(rows))
+	}
+}
+
+func TestVoicePeerTranscriptionSegmentsFeedLedgerAndFunnel(t *testing.T) {
+	dir := realtimeLedgerSetup(t)
+	t.Setenv("OPENAI_REALTIME_TRANSCRIPTION_MODEL", "")
+	app := newIsolatedKanbanBoardApp(t)
+
+	app.handleRealtimeEvent([]byte(`{
+		"type": "conversation.item.input_audio_transcription.completed",
+		"event_id": "evt-1",
+		"item_id": "item-1",
+		"transcript": "Boot Barn pipeline update",
+		"usage": {
+			"type": "tokens",
+			"total_tokens": 442,
+			"input_tokens": 412,
+			"output_tokens": 30,
+			"input_token_details": {"text_tokens": 12, "audio_tokens": 400}
+		}
+	}`))
+
+	usageRows := readLedgerLines(t, filepath.Join(dir, "usage-2026-07-11.jsonl"))
+	if len(usageRows) != 1 {
+		t.Fatalf("expected 1 usage row, got %d", len(usageRows))
+	}
+	row := usageRows[0]
+	if row["seat"] != seatTranscriptionSession || row["model"] != "gpt-4o-transcribe" {
+		t.Fatalf("wrong transcription usage identity: %v", row)
+	}
+	if row["input_tokens"].(float64) != 12 || row["audio_input_tokens"].(float64) != 400 || row["output_tokens"].(float64) != 30 {
+		t.Fatalf("wrong transcription splits: %v", row)
+	}
+
+	// Lane down => the voice peer is the persisting session, so the funnel
+	// records the segment; a .failed segment lands too — that is speech the
+	// brain never heard.
+	app.handleRealtimeEvent([]byte(`{"type": "conversation.item.input_audio_transcription.failed", "item_id": "item-2"}`))
+
+	evalRows := readLedgerLines(t, filepath.Join(dir, "eval-2026-07-11.jsonl"))
+	var segments []map[string]any
+	for _, evalRow := range evalRows {
+		if evalRow["kind"] == evalKindTranscriptSegment {
+			segments = append(segments, evalRow)
+		}
+	}
+	if len(segments) != 2 {
+		t.Fatalf("expected completed+failed segments, got %v", evalRows)
+	}
+	first := segments[0]["fields"].(map[string]any)
+	second := segments[1]["fields"].(map[string]any)
+	if first["status"] != "completed" || second["status"] != "failed" {
+		t.Fatalf("segment statuses wrong: %v %v", first, second)
+	}
+	if first["room_id"] != officeRoomID || segments[0]["lane"] != seatTranscriptionSession {
+		t.Fatalf("segment lane/room wrong: %v", segments[0])
+	}
+}
+
+func TestRoomVoiceProposalMintStampsProvenance(t *testing.T) {
+	dir := realtimeLedgerSetup(t)
+	app := newIsolatedKanbanBoardApp(t)
+
+	app.finishToolCall(kanbanRealtimeOutputItem{
+		Type:   "function_call",
+		Name:   "propose_codex_task",
+		CallID: "call-1",
+	}, map[string]any{
+		"title": "Research comparable exits",
+		"mode":  "research",
+		"query": "comparable exits for StationTenn",
+	}, nil, false)
+
+	rows := readLedgerLines(t, filepath.Join(dir, "eval-2026-07-11.jsonl"))
+	var minted map[string]any
+	for _, row := range rows {
+		if row["type"] != telemetryTypeProposal || row["kind"] != proposalEventMinted {
+			continue
+		}
+		if fields := row["fields"].(map[string]any); fields["source"] == proposalSourceRoomVoice {
+			minted = row
+		}
+	}
+	if minted == nil {
+		t.Fatalf("no room_voice minted event in %v", rows)
+	}
+	fields := minted["fields"].(map[string]any)
+	if asString(fields["proposal_id"]) == "" {
+		t.Fatalf("minted event missing proposal_id: %v", fields)
+	}
+	if fields["room_id"] != officeRoomID {
+		t.Fatalf("minted event missing room lineage: %v", fields)
+	}
+}
+
+func TestPrivateVoiceProposalMintStampsProvenance(t *testing.T) {
+	dir := realtimeLedgerSetup(t)
+	app := newIsolatedKanbanBoardApp(t)
+
+	if _, _, err := app.applyPrivateRealtimeVoiceTool("aj@bonfire.os", "propose_codex_task", map[string]any{
+		"title": "Draft the weekly memo",
+		"mode":  "artifacts",
+		"query": "draft this week's investor memo",
+	}); err != nil {
+		t.Fatalf("propose_codex_task: %v", err)
+	}
+
+	rows := readLedgerLines(t, filepath.Join(dir, "eval-2026-07-11.jsonl"))
+	var minted map[string]any
+	for _, row := range rows {
+		if row["type"] != telemetryTypeProposal || row["kind"] != proposalEventMinted {
+			continue
+		}
+		if fields := row["fields"].(map[string]any); fields["source"] == proposalSourcePrivateVoice {
+			minted = row
+		}
+	}
+	if minted == nil {
+		t.Fatalf("no private_voice minted event in %v", rows)
+	}
+	fields := minted["fields"].(map[string]any)
+	if fields["proposer"] != "aj@bonfire.os" {
+		t.Fatalf("minted event missing proposer: %v", fields)
+	}
+	if asString(fields["proposal_id"]) == "" {
+		t.Fatalf("minted event missing proposal_id: %v", fields)
+	}
+	if _, present := fields["room_id"]; present {
+		t.Fatalf("private-voice mint must not claim a room: %v", fields)
+	}
+}
+
+func TestRoomVoiceDirectLaunchRecordsLaunchProvenance(t *testing.T) {
+	dir := realtimeLedgerSetup(t)
+	app := newIsolatedKanbanBoardApp(t)
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	app.finishToolCall(kanbanRealtimeOutputItem{
+		Type:   "function_call",
+		Name:   "launch_agent_thread",
+		CallID: "call-2",
+	}, map[string]any{
+		"mode":  "research",
+		"query": "map the exit landscape",
+	}, nil, false)
+
+	rows := readLedgerLines(t, filepath.Join(dir, "eval-2026-07-11.jsonl"))
+	var launched map[string]any
+	for _, row := range rows {
+		if row["type"] == telemetryTypeProposal && row["kind"] == proposalEventLaunched {
+			launched = row
+		}
+	}
+	if launched == nil {
+		t.Fatalf("no launched event in %v", rows)
+	}
+	fields := launched["fields"].(map[string]any)
+	if fields["source"] != proposalSourceRoomVoice || fields["path"] != "launch_agent_thread" {
+		t.Fatalf("launch provenance wrong: %v", fields)
+	}
+	if asString(fields["thread_id"]) == "" {
+		t.Fatalf("launched event missing thread_id: %v", fields)
+	}
+	if _, present := fields["proposal_id"]; present {
+		t.Fatalf("direct launch must not carry a proposal_id: %v", fields)
+	}
 }

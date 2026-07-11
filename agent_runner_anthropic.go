@@ -39,11 +39,11 @@ import (
 // through the same doctrineModelOrDefault guard, so the never-Haiku and
 // effort-floor rules bind worker seats automatically.
 const (
-	anthropicMessagesURL       = "https://api.anthropic.com/v1/messages"
-	anthropicAPIVersion        = "2023-06-01"
-	defaultOrchestratorModel   = "claude-fable-5"
-	defaultFallbackModel       = "claude-opus-4-8"
-	controlToolReportGoalState = "report_goal_state"
+	defaultAnthropicMessagesURL = "https://api.anthropic.com/v1/messages"
+	anthropicAPIVersion         = "2023-06-01"
+	defaultOrchestratorModel    = "claude-fable-5"
+	defaultFallbackModel        = "claude-opus-4-8"
+	controlToolReportGoalState  = "report_goal_state"
 
 	// doctrineEffortFloor is the minimum thinking depth any Anthropic surface
 	// may run at. Configured dials below it clamp UP, never down.
@@ -99,6 +99,20 @@ const (
 // The key is never logged or persisted.
 func currentAnthropicAPIKey() string {
 	return strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
+}
+
+// anthropicMessagesURL resolves the Messages wire endpoint (W1 item 14 — the
+// base-URL override seam): ANTHROPIC_BASE_URL, when set, replaces the API host
+// (a gateway/proxy base like https://gw.internal, with or without a trailing
+// slash — the /v1/messages path is appended, mirroring how Anthropic's own
+// SDKs treat the variable). Unset keeps the public default byte-identical.
+// The resolved URL is deliberately never logged: gateway URLs can carry
+// routing credentials in the host.
+func anthropicMessagesURL() string {
+	if base := strings.TrimSpace(os.Getenv("ANTHROPIC_BASE_URL")); base != "" {
+		return strings.TrimRight(base, "/") + "/v1/messages"
+	}
+	return defaultAnthropicMessagesURL
 }
 
 func orchestratorModel() string {
@@ -252,15 +266,33 @@ type anthropicMessagesRequest struct {
 	// stay false for the Fable 5 orchestrator: an explicit disabled is a 400
 	// there (thinking is always on; the field must be omitted).
 	DisableThinking bool
+
+	// --- Usage-ledger provenance (W0 item 3) — NOT wire fields. ---------------
+	// buildAnthropicMessagesPayload assembles the wire body explicitly and never
+	// reads these; they ride the request struct so the HTTP seam can file one
+	// llmUsageEntry per call without new plumbing. Seat is a seat* constant from
+	// usage_ledger.go — an empty seat records as "untagged" so an unlabeled call
+	// site is loud in the rollup, never silently blended. FallbackLeg marks a
+	// same-request replay on a fallback model so the entry carries FallbackUsed.
+	Seat        string
+	ThreadID    string
+	FallbackLeg bool
 }
 
 type anthropicMessagesResponse struct {
 	Model      string            `json:"model"`
 	StopReason string            `json:"stop_reason"`
 	Content    []json.RawMessage `json:"content"`
-	Usage      struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
+	// Usage carries the full billing splits. The cache fields are load-bearing
+	// for the books (W0 item 3): the Fable loop is cache-heavy by design
+	// (buildAnthropicMessagesPayload spends breakpoints every turn), so
+	// input_tokens alone understates the true token flow while cache reads bill
+	// at ~10% — dropping them made the ledger up to 10x wrong on this lane.
+	Usage struct {
+		InputTokens              int `json:"input_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
 	} `json:"usage"`
 	Error *struct {
 		Type    string `json:"type"`
@@ -308,7 +340,7 @@ func createAnthropicMessagesResponseHTTP(ctx context.Context, apiKey string, req
 		return anthropicMessagesResponse{}, err
 	}
 
-	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, anthropicMessagesURL, bytes.NewReader(rawPayload))
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, anthropicMessagesURL(), bytes.NewReader(rawPayload))
 	if err != nil {
 		return anthropicMessagesResponse{}, fmt.Errorf("create Anthropic messages request: %w", err)
 	}
@@ -324,9 +356,15 @@ func createAnthropicMessagesResponseHTTP(ctx context.Context, apiKey string, req
 		httpRequest.Header.Set("anthropic-beta", beta)
 	}
 
+	// Every wire attempt from here down lands in the usage ledger (W0 item 3):
+	// successes with full token splits, failures with the error string — a
+	// 429/529 storm costs real latency and must be visible in the books.
+	started := time.Now()
 	response, err := (&http.Client{}).Do(httpRequest)
 	if err != nil {
-		return anthropicMessagesResponse{}, fmt.Errorf("call Anthropic messages: %w", err)
+		err = fmt.Errorf("call Anthropic messages: %w", err)
+		recordAnthropicWireUsage(request, anthropicMessagesResponse{}, started, err)
+		return anthropicMessagesResponse{}, err
 	}
 	defer response.Body.Close()
 
@@ -334,15 +372,49 @@ func createAnthropicMessagesResponseHTTP(ctx context.Context, apiKey string, req
 		// Errors arrive as a plain JSON body even on stream:true requests.
 		// Reuse the OpenAI failure helper: log the upstream body server-side,
 		// return a status-only error so a 401/429 body never reaches the browser.
+		// The status-only error is also what the ledger records — never the body.
 		rawBody, _ := io.ReadAll(io.LimitReader(response.Body, 4*1024*1024))
-		return anthropicMessagesResponse{}, apiRequestFailedError("Anthropic messages failed", response.Status, rawBody)
+		failure := apiRequestFailedError("Anthropic messages failed", response.Status, rawBody)
+		recordAnthropicWireUsage(request, anthropicMessagesResponse{}, started, failure)
+		return anthropicMessagesResponse{}, failure
 	}
 
 	body, err := decodeAnthropicSSEStream(io.LimitReader(response.Body, 64*1024*1024))
 	if err != nil {
+		recordAnthropicWireUsage(request, anthropicMessagesResponse{}, started, err)
 		return anthropicMessagesResponse{}, err
 	}
+	recordAnthropicWireUsage(request, body, started, nil)
 	return body, nil
+}
+
+// recordAnthropicWireUsage files one llmUsageEntry per wire call through the
+// Messages seam — the single choke point every production Anthropic call
+// (runner loop, goal engine, text helper) already routes through, so seat
+// coverage falls out of the request struct's provenance fields rather than
+// per-caller plumbing. Cache reads and writes are recorded separately from
+// plain input (they bill at ~0.1x / 1.25x); on a failed call the error string
+// is recorded with zero tokens (status-only by construction — the upstream
+// body never reaches the ledger). The kill switch and never-fail discipline
+// live in recordLLMUsage.
+func recordAnthropicWireUsage(request anthropicMessagesRequest, response anthropicMessagesResponse, started time.Time, err error) {
+	entry := llmUsageEntry{
+		Provider:     providerAnthropic,
+		Model:        request.Model,
+		Seat:         request.Seat,
+		ThreadID:     request.ThreadID,
+		DurationMS:   time.Since(started).Milliseconds(),
+		FallbackUsed: request.FallbackLeg,
+	}
+	if err != nil {
+		entry.Error = err.Error()
+	} else {
+		entry.InputTokens = int64(response.Usage.InputTokens)
+		entry.CachedInputTokens = int64(response.Usage.CacheReadInputTokens)
+		entry.CacheCreationTokens = int64(response.Usage.CacheCreationInputTokens)
+		entry.OutputTokens = int64(response.Usage.OutputTokens)
+	}
+	recordLLMUsage(entry)
 }
 
 // buildAnthropicMessagesPayload renders the wire body, placing cache_control
@@ -502,8 +574,10 @@ type anthropicSSEEvent struct {
 	Message *struct {
 		Model string `json:"model"`
 		Usage struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
+			InputTokens              int `json:"input_tokens"`
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+			OutputTokens             int `json:"output_tokens"`
 		} `json:"usage"`
 	} `json:"message"`
 	ContentBlock json.RawMessage `json:"content_block"`
@@ -515,8 +589,13 @@ type anthropicSSEEvent struct {
 		Signature   string `json:"signature"`
 		StopReason  string `json:"stop_reason"`
 	} `json:"delta"`
+	// message_delta usage: output_tokens is the cumulative count; the cache
+	// fields ride along on newer API revisions and win over message_start's
+	// early estimate when present (W0 item 3 cache-token parsing).
 	Usage *struct {
-		OutputTokens int `json:"output_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
 	} `json:"usage"`
 	Error *struct {
 		Type    string `json:"type"`
@@ -630,6 +709,8 @@ func decodeAnthropicSSEStream(reader io.Reader) (anthropicMessagesResponse, erro
 			if event.Message != nil {
 				response.Model = event.Message.Model
 				response.Usage.InputTokens = event.Message.Usage.InputTokens
+				response.Usage.CacheCreationInputTokens = event.Message.Usage.CacheCreationInputTokens
+				response.Usage.CacheReadInputTokens = event.Message.Usage.CacheReadInputTokens
 				response.Usage.OutputTokens = event.Message.Usage.OutputTokens
 			}
 		case "content_block_start":
@@ -655,8 +736,17 @@ func decodeAnthropicSSEStream(reader io.Reader) (anthropicMessagesResponse, erro
 			if event.Delta.StopReason != "" {
 				response.StopReason = event.Delta.StopReason
 			}
+			// Nonzero delta counts win over message_start's early numbers; a
+			// delta that omits a field keeps the start value rather than
+			// zeroing a split the ledger bills on.
 			if event.Usage != nil && event.Usage.OutputTokens > 0 {
 				response.Usage.OutputTokens = event.Usage.OutputTokens
+			}
+			if event.Usage != nil && event.Usage.CacheCreationInputTokens > 0 {
+				response.Usage.CacheCreationInputTokens = event.Usage.CacheCreationInputTokens
+			}
+			if event.Usage != nil && event.Usage.CacheReadInputTokens > 0 {
+				response.Usage.CacheReadInputTokens = event.Usage.CacheReadInputTokens
 			}
 		case "message_stop":
 			return response, nil
@@ -716,6 +806,18 @@ func newAnthropicFableRunner(app *kanbanBoardApp) *anthropicFableRunner {
 	}
 }
 
+// anthropicJobSeat resolves the ledger seat for one runner job: the /goal
+// deliverable subtask bills as its own seat (it runs a heavier effort + token
+// budget, so blending it with planning turns would hide the spend that
+// matters), keyed off the same goalDeliverable metadata flag newAgentJob reads
+// to stamp that budget. Every other orchestrator turn bills as orchestrator.
+func anthropicJobSeat(job AgentJob) string {
+	if strings.EqualFold(strings.TrimSpace(job.thread.Artifact.Metadata["goalDeliverable"]), "true") {
+		return seatDeliverable
+	}
+	return seatOrchestrator
+}
+
 func (r *anthropicFableRunner) Name() string { return agentRunnerAnthropicFable }
 
 func (r *anthropicFableRunner) Capabilities() AgentCapabilities {
@@ -766,6 +868,10 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 		// must not spend the maxTurns budget (turn is decremented back on a
 		// pause) — but this budget still caps an infinite pause loop.
 		pausesRemaining := r.maxPauses
+		// Ledger provenance (W0 item 3): every turn of this run bills to one
+		// seat — deliverable for the /goal deliverable subtask, orchestrator
+		// otherwise — with the thread id joining usage to the run record.
+		seat := anthropicJobSeat(job)
 		for turn := 1; turn <= r.maxTurns; turn++ {
 			request := anthropicMessagesRequest{
 				Model:     r.model,
@@ -774,6 +880,8 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 				Tools:     tools,
 				MaxTokens: r.maxTokens,
 				Effort:    r.effort,
+				Seat:      seat,
+				ThreadID:  job.ThreadID,
 			}
 			response, err := r.responder(ctx, apiKey, request)
 			if err != nil {
@@ -794,6 +902,11 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 				// TestAnthropicFableRunnerRefusalFallbackMidRunReplaysThinkingBlocks).
 				fallbackRequest := request
 				fallbackRequest.Model = r.fallbackModel
+				// Ledger provenance: the replay leg bills to the fallback seat
+				// with FallbackUsed stamped, so refusal storms and their Opus
+				// spend are countable per the frozen ledger contract.
+				fallbackRequest.Seat = seatFallback
+				fallbackRequest.FallbackLeg = true
 				fallbackResponse, fallbackErr := r.responder(ctx, apiKey, fallbackRequest)
 				if fallbackErr != nil {
 					out <- terminalErrorProgress(r.evidence(turn), fallbackErr)

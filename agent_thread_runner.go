@@ -96,6 +96,25 @@ type agentThreadGoalSpec struct {
 	// packaging_deck_v1 child's response IS the HTML file, not a workflow
 	// report). Only process writer stages set it.
 	OutputContract string
+	// Launch carries proposal-funnel lineage for the SINGLE launched event this
+	// launch emits at the choke point below. It is telemetry, not goal metadata,
+	// so it never rides spec.metadata() into the artifact — the emitter reads it
+	// directly. An empty Launch reproduces today's proposal_id-less,
+	// trigger-surface-path launched row exactly.
+	Launch launchFunnelLineage
+}
+
+// launchFunnelLineage is the proposal-funnel lineage a launch call site threads
+// onto the ONE launched event emitted at launchAgentThreadWithSpec's choke
+// point. Folding the lineage here keeps a single canonical `launched` emitter,
+// so a surface never doubles the ProposalsLaunched counter with a second
+// emission. Every field is optional.
+type launchFunnelLineage struct {
+	ProposalID string // joins mint→resolve→launch (chat card id, ticker proposal id); empty on a direct launch
+	Source     string // proposalSource* surface of a direct voice launch; empty otherwise
+	Path       string // fields.path override (chat_workstream, launch_agent_thread, ticker); empty ⇒ trigger surface
+	Proposer   string // account attribution for a direct voice launch
+	Lane       string // approval lane carried by the ticker's launched row
 }
 
 func (spec agentThreadGoalSpec) metadata() map[string]string {
@@ -227,8 +246,74 @@ func (app *kanbanBoardApp) launchAgentThreadWithSpec(mode string, query string, 
 		"voiceState": "listening",
 	})
 
+	// W0 items 7+8: every thread launch — all callers route through this one
+	// seam — records workflow-run provenance plus THE proposal-chain launched
+	// event. This is the SINGLE canonical `launched` emitter: surfaces that
+	// used to emit a second launched row (chat workstream, room/private voice,
+	// ticker) now thread their lineage through spec.Launch so this one event
+	// carries it, and nothing double-counts ProposalsLaunched. A launch with no
+	// lineage (spec.Launch empty) keeps the proposal_id-less, trigger-surface
+	// row joined on thread_id. Terminal twins land in appendAgentRunLogEntry,
+	// shared by the in-process and codex-callback terminal paths.
+	recordWorkflowRun(workflowRunEntry{
+		WorkflowID:     firstNonEmptyString(spec.ToolTemplate, "agent_thread_"+mode),
+		TriggerSurface: agentThreadTriggerSurface(metadata),
+		Proposer:       firstNonEmptyString(spec.RequestedBy, createdBy),
+		Lane:           metadata["approvalLane"],
+		Outcome:        workflowOutcomeLaunched,
+		ThreadID:       threadID,
+		GoalID:         spec.ParentGoalID,
+	})
+	launchedFields := map[string]any{
+		"path":      firstNonEmptyString(strings.TrimSpace(spec.Launch.Path), agentThreadTriggerSurface(metadata)),
+		"thread_id": threadID,
+		"mode":      mode,
+	}
+	if source := strings.TrimSpace(spec.Launch.Source); source != "" {
+		launchedFields["source"] = source
+	}
+	if proposer := strings.TrimSpace(spec.Launch.Proposer); proposer != "" {
+		launchedFields["proposer"] = proposer
+	}
+	if lane := strings.TrimSpace(spec.Launch.Lane); lane != "" {
+		launchedFields["lane"] = lane
+	}
+	recordProposalEvent(proposalEventLaunched, strings.TrimSpace(spec.Launch.ProposalID), launchedFields)
+
 	startAgentThreadAsync(app, thread)
 	return thread, nil
+}
+
+// agentThreadTriggerSurface maps a launch's origin metadata onto the W0
+// trigger-surface vocabulary (usage_ledger.go). The fine-grained originSurface
+// stamp ("chat:<threadId>", "goal_door", ...) wins when it names a surface;
+// otherwise the coarse originKind decides. A bare tool/HTTP launch with no
+// origin reads as palette — the direct launch door. Private-voice launches
+// carry no origin today and also land on palette (known imprecision until the
+// W4 provenance items stamp their surface).
+func agentThreadTriggerSurface(metadata map[string]string) string {
+	surface := strings.ToLower(strings.TrimSpace(metadata["originSurface"]))
+	switch {
+	case strings.HasPrefix(surface, "chat"):
+		return triggerSurfaceChatRouter
+	case strings.HasPrefix(surface, "goal"):
+		return triggerSurfaceGoalDoor
+	case surface == "palette":
+		return triggerSurfacePalette
+	case surface == "scheduler":
+		return triggerSurfaceScheduler
+	case strings.HasPrefix(surface, "suggestion"):
+		return triggerSurfaceSuggestionAgent
+	}
+	switch strings.TrimSpace(metadata["originKind"]) {
+	case agentThreadOriginChannel:
+		return triggerSurfaceChannel
+	case agentThreadOriginRoom:
+		return triggerSurfaceRoomVoice
+	case agentThreadOriginPrivateThread:
+		return triggerSurfaceChatRouter
+	}
+	return triggerSurfacePalette
 }
 
 func normalizeAgentThreadMode(mode string) string {
@@ -667,6 +752,39 @@ func (app *kanbanBoardApp) appendAgentRunLogEntry(thread scoutAgentThread, artif
 	if _, _, err := app.memory.appendRunLog("run-log-"+thread.ID, text, metadata); err != nil {
 		log.Errorf("Failed to append run log for thread %s: %v", thread.ID, err)
 	}
+
+	// W0 items 7+8 terminal twins: BOTH terminal paths (the in-process
+	// runAgentThread seam and the codex-callback seam via
+	// appendAgentRunLogEntryForArtifact) pass through here, so one hook covers
+	// the whole funnel. The proposal id rides the artifact when the confirm
+	// seam stamped it (launchApprovedProposal); joins otherwise happen on
+	// thread_id.
+	outcome := workflowOutcomeCompleted
+	if status != "complete" {
+		outcome = workflowOutcomeNeedsAttention
+	}
+	var durationMS int64
+	if startedAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(artifact.Metadata["startedAt"])); err == nil {
+		if elapsed := time.Since(startedAt); elapsed > 0 {
+			durationMS = elapsed.Milliseconds()
+		}
+	}
+	recordWorkflowRun(workflowRunEntry{
+		WorkflowID:     firstNonEmptyString(strings.TrimSpace(artifact.Metadata["toolTemplate"]), "agent_thread_"+thread.Mode),
+		TriggerSurface: agentThreadTriggerSurface(artifact.Metadata),
+		Proposer:       requestedBy,
+		Lane:           strings.TrimSpace(artifact.Metadata["approvalLane"]),
+		Outcome:        outcome,
+		ProposalID:     strings.TrimSpace(artifact.Metadata["proposalId"]),
+		ThreadID:       thread.ID,
+		GoalID:         strings.TrimSpace(artifact.Metadata["goalParentId"]),
+		DurationMS:     durationMS,
+	})
+	recordProposalEvent(proposalEventTerminal, strings.TrimSpace(artifact.Metadata["proposalId"]), map[string]any{
+		"outcome":   status,
+		"thread_id": thread.ID,
+		"mode":      thread.Mode,
+	})
 }
 
 // appendAgentRunLogEntryForArtifact is the run ledger's codex-queue seam:
@@ -844,6 +962,7 @@ func (app *kanbanBoardApp) produceAgentThreadArtifact(ctx context.Context, threa
 
 	output, err := responder(ctx, apiKey, openAITextRequest{
 		Model:           meetingBrainModel(),
+		Seat:            seatAgentThreadText,
 		Instructions:    app.agentThreadInstructionsForThread(thread),
 		Input:           buildAgentThreadInput(thread, app.snapshotState(), app.memorySnapshotForClients(20), time.Now()),
 		ReasoningEffort: "low",

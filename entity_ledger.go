@@ -1015,6 +1015,7 @@ func (app *kanbanBoardApp) adjudicateLedgerAmbiguities(ctx context.Context, apiK
 	model := meetingBrainModel()
 	text, err := responder(ctx, apiKey, openAITextRequest{
 		Model:           model,
+		Seat:            seatEntityLedger,
 		Instructions:    ledgerAdjudicationInstructions(),
 		Input:           buildLedgerAdjudicationInput(pairs, working, now),
 		ReasoningEffort: "low",
@@ -1026,6 +1027,7 @@ func (app *kanbanBoardApp) adjudicateLedgerAmbiguities(ctx context.Context, apiK
 	}
 	output, ok := parseLedgerAdjudication(text)
 	if !ok {
+		recordEvalEvent(seatEntityLedger, evalKindParseFailure, map[string]any{"seat": seatEntityLedger, "model": model})
 		return nil, fmt.Errorf("adjudicator returned non-JSON output")
 	}
 

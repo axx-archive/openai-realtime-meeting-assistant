@@ -17,8 +17,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // withFakeImagesAPI points openAIImagesURL at a fake server for one test.
@@ -94,6 +97,90 @@ func TestCreateOpenAIImageRequestShapeAndBlobRoundTrip(t *testing.T) {
 	}
 	if meta.Mime != "image/png" {
 		t.Fatalf("pinned blob mime=%q, want image/png", meta.Mime)
+	}
+}
+
+// W0-5 lane metering (seat images): each generation call records one ledger
+// row — token usage decoded off the response, est cost computed from the
+// text/image input split via the pricing table — and a failed call records
+// with Error stamped.
+func TestCreateOpenAIImageRecordsUsage(t *testing.T) {
+	setupIsolatedBlobStore(t)
+	ledgerDir := ledgerTestDir(t)
+	fixed := time.Date(2026, time.July, 11, 21, 0, 0, 0, time.UTC)
+	prevNow := usageLedgerNow
+	usageLedgerNow = func() time.Time { return fixed }
+	defer func() { usageLedgerNow = prevNow }()
+
+	t.Setenv("OPENAI_API_KEY", "test-image-key")
+	t.Setenv("OPENAI_IMAGE_MODEL", "")
+
+	imageBytes := []byte("\x89PNG\r\n\x1a\nmetered-plate")
+	var modeMu sync.Mutex
+	failNext := false
+	setFailNext := func(fail bool) {
+		modeMu.Lock()
+		failNext = fail
+		modeMu.Unlock()
+	}
+	withFakeImagesAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		modeMu.Lock()
+		fail := failNext
+		modeMu.Unlock()
+		if fail {
+			http.Error(w, `{"error":{"message":"synthetic image outage"}}`, http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"data":          []map[string]string{{"b64_json": base64.StdEncoding.EncodeToString(imageBytes)}},
+			"output_format": "png",
+			"usage": map[string]any{
+				"input_tokens":  60,
+				"output_tokens": 4160,
+				"input_tokens_details": map[string]any{
+					"text_tokens":  50,
+					"image_tokens": 10,
+				},
+			},
+		})
+	})
+
+	if _, _, err := createOpenAIImage(context.Background(), "a metered harbor plate", openAIImageOptions{}); err != nil {
+		t.Fatalf("createOpenAIImage: %v", err)
+	}
+	setFailNext(true)
+	if _, _, err := createOpenAIImage(context.Background(), "a failing plate", openAIImageOptions{}); err == nil {
+		t.Fatal("synthetic outage must error")
+	}
+
+	rows := readLedgerLines(t, filepath.Join(ledgerDir, "usage-2026-07-11.jsonl"))
+	if len(rows) != 2 {
+		t.Fatalf("usage rows = %d, want one per generation call", len(rows))
+	}
+	metered := rows[0]
+	if metered["provider"] != providerOpenAI || metered["model"] != "gpt-image-2" || metered["seat"] != seatImages {
+		t.Fatalf("image row identity wrong: %v", metered)
+	}
+	if got := metered["input_tokens"].(float64); got != 60 {
+		t.Fatalf("input_tokens = %v, want the reported total 60", got)
+	}
+	if got := metered["output_tokens"].(float64); got != 4160 {
+		t.Fatalf("output_tokens = %v, want 4160", got)
+	}
+	// Split-priced: 50 text at $5/MTok + 10 image at $8/MTok + 4160 out at $30/MTok.
+	wantCost := 50.0/1e6*5 + 10.0/1e6*8 + 4160.0/1e6*30
+	if got := metered["est_cost_usd"].(float64); !floatClose(got, wantCost) {
+		t.Fatalf("est_cost_usd = %v, want %v", got, wantCost)
+	}
+	if _, present := metered["estimated"]; present {
+		t.Fatalf("wire-reported usage must not flag estimated: %v", metered)
+	}
+	failed := rows[1]
+	if errText, _ := failed["error"].(string); !strings.Contains(errText, "api request failed") {
+		t.Fatalf("failed row must carry the wire error: %v", failed)
+	}
+	if failed["estimated"] != true {
+		t.Fatalf("a no-usage failure row must flag estimated: %v", failed)
 	}
 }
 

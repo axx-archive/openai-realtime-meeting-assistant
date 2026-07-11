@@ -299,6 +299,7 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 	} else {
 		text, err = responder(ctx, apiKey, openAITextRequest{
 			Model:           model,
+			Seat:            seatNarrative,
 			Instructions:    narrativeMaintainerInstructions(),
 			Input:           input,
 			ReasoningEffort: effort,
@@ -313,6 +314,9 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 	if !ok {
 		// Never persist unparseable output: the cursor stays put, so the next
 		// pass retries with more input (the mission-intel contract).
+		// model here is whichever provider actually wrote the output (Sonnet
+		// when keyed, the OpenAI brain model keyless).
+		recordEvalEvent(seatNarrative, evalKindParseFailure, map[string]any{"seat": seatNarrative, "model": model})
 		log.Errorf("%s returned non-JSON output; skipping this pass", narrativeMaintainerAgentName)
 		return meetingMemoryEntry{}, nil
 	}

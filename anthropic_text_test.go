@@ -62,6 +62,7 @@ func TestCreateAnthropicTextResponseWrapsMessagesSeam(t *testing.T) {
 		Input:        "what did we decide on pricing?",
 		Effort:       "low",
 		MaxTokens:    anthropicChatMaxTokens,
+		Seat:         seatMemoryQA,
 	})
 	if err != nil {
 		t.Fatalf("createAnthropicTextResponse: %v", err)
@@ -83,6 +84,12 @@ func TestCreateAnthropicTextResponseWrapsMessagesSeam(t *testing.T) {
 	}
 	if got.System != "Answer from memory only." {
 		t.Fatalf("system=%q, want the instructions", got.System)
+	}
+	// The caller's ledger seat rides through to the wire seam untouched (W0
+	// item 3): each text-helper caller owns its tag, and the wire seam files
+	// the usage entry under it.
+	if got.Seat != seatMemoryQA {
+		t.Fatalf("seat=%q, want %q threaded through to the wire request", got.Seat, seatMemoryQA)
 	}
 	if len(got.Tools) != 0 {
 		t.Fatalf("chat request carries %d tools, want none", len(got.Tools))
@@ -142,6 +149,11 @@ func TestCreateAnthropicTextResponseModelAndBudgetDials(t *testing.T) {
 	}
 	if got.MaxTokens != anthropicChatMaxTokens || got.Effort != "medium" {
 		t.Fatalf("fallback budget=%d/%q, want %d/medium (the doctrine floor)", got.MaxTokens, got.Effort, anthropicChatMaxTokens)
+	}
+	// No seat on the request: the helper passes empty through and the ledger
+	// records "untagged" at the seam — an unlabeled call site stays visible.
+	if got.Seat != "" {
+		t.Fatalf("seat=%q, want empty when the caller sets none (untagged at the seam)", got.Seat)
 	}
 }
 

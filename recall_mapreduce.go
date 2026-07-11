@@ -203,9 +203,11 @@ func (app *kanbanBoardApp) mapMeetingForBriefing(ctx context.Context, apiKey str
 
 	var payload meetingDigestPayload
 	title := app.meetingRecordTitle(meetingKey)
+	model := meetingBrainModel()
 	for _, chunk := range chunkEntriesForMap(source, mapReduceChunkBudgetChars, mapReduceMaxChunksPerMeeting) {
 		text, err := responder(ctx, apiKey, openAITextRequest{
-			Model:           meetingBrainModel(),
+			Model:           model,
+			Seat:            seatRecallMapReduce,
 			Instructions:    meetingDigestInstructions(),
 			Input:           buildBriefingMapInput(meetingKey, title, carryJSON, chunk, time.Now().UTC()),
 			ReasoningEffort: "low",
@@ -217,6 +219,7 @@ func (app *kanbanBoardApp) mapMeetingForBriefing(ctx context.Context, apiKey str
 		}
 		parsed, ok := parseMeetingDigest(text)
 		if !ok {
+			recordEvalEvent(seatRecallMapReduce, evalKindParseFailure, map[string]any{"seat": seatRecallMapReduce, "model": model})
 			return meetingDigestPayload{}, windowStart, windowEnd, fmt.Errorf("map stage returned non-JSON output for %s", meetingKey)
 		}
 		chunkEnd := chunk[len(chunk)-1].CreatedAt

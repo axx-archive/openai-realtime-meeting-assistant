@@ -313,7 +313,33 @@ const (
 	// per-option acceptance signal that tells us which offered routes people
 	// actually take.
 	signalEventRouterChoiceSelected = "router_choice_selected"
+
+	// Router eval-funnel verdicts (W0 item 6, docs/model-routing-master-plan):
+	// the fields["verdict"] vocabulary on evalKindRouterOutcome events. Exactly
+	// one outcome event per routing turn — proposed_tool / choice_pills /
+	// inline / deterministic_guard — plus the confirm-funnel pair stamped when
+	// a persisted card resolves, so acceptance rate and the mint→confirm join
+	// are computable from the eval ledger alone.
+	routerVerdictProposedTool       = "proposed_tool"
+	routerVerdictChoicePills        = "choice_pills"
+	routerVerdictInline             = "inline"
+	routerVerdictDeterministicGuard = "deterministic_guard"
+	routerVerdictConfirmed          = "confirmed"
+	routerVerdictDismissed          = "dismissed"
 )
+
+// isRouterRoutingVerdict reports whether a router_outcome verdict names a
+// routing TURN — the denominator for the truncation rate. The confirm/dismiss
+// pair rides the same evalKindRouterOutcome kind but is stamped at resolve
+// time, not a turn, so it must never inflate "turns".
+func isRouterRoutingVerdict(verdict string) bool {
+	switch verdict {
+	case routerVerdictProposedTool, routerVerdictChoicePills, routerVerdictInline, routerVerdictDeterministicGuard:
+		return true
+	default:
+		return false
+	}
+}
 
 // routerModel is the routing-turn dial, distinct from chatModel() and
 // orchestratorModel(). It rides the same never-Haiku guard as every other
@@ -395,6 +421,11 @@ type scoutChatChoices struct {
 type scoutRouterVerdict struct {
 	proposal *scoutRouterProposal
 	choices  *scoutChatChoices
+	// source is the provenance stamp (usage_ledger.go proposalSource*
+	// constant) the chat thread's proposal_minted event records:
+	// deterministic_guard when the pre-router guard committed the card,
+	// chat_router for a model-routed verdict (W0 item 7 lineage).
+	source string
 }
 
 // scoutRouterSystemPrompt pins the three-tier policy. The trust asymmetry is
@@ -679,7 +710,7 @@ func deterministicRouterGuard(text string) *scoutRouterVerdict {
 		for _, phrase := range scoutRouterImagePhrases {
 			if strings.Contains(lower, phrase) {
 				if proposal := scoutRouterImageProposal(text, text); proposal != nil {
-					return &scoutRouterVerdict{proposal: proposal}
+					return &scoutRouterVerdict{proposal: proposal, source: proposalSourceDeterministicGuard}
 				}
 			}
 		}
@@ -690,7 +721,7 @@ func deterministicRouterGuard(text string) *scoutRouterVerdict {
 	for _, phrase := range scoutRouterFullRunPhrases {
 		if strings.Contains(lower, phrase) {
 			if proposal := scoutRouterProposalForToolID(packagingStudioProcessID, "", text); proposal != nil {
-				return &scoutRouterVerdict{proposal: proposal}
+				return &scoutRouterVerdict{proposal: proposal, source: proposalSourceDeterministicGuard}
 			}
 		}
 	}
@@ -706,7 +737,7 @@ func deterministicRouterGuard(text string) *scoutRouterVerdict {
 			}
 			if strings.Contains(lower, name) {
 				if proposal := scoutRouterProposalForToolID(tool.ID, "", text); proposal != nil {
-					return &scoutRouterVerdict{proposal: proposal}
+					return &scoutRouterVerdict{proposal: proposal, source: proposalSourceDeterministicGuard}
 				}
 			}
 		}
@@ -729,6 +760,9 @@ func (app *kanbanBoardApp) routeScoutChatTurn(ctx context.Context, text string, 
 	// so thread-context gravity can never drag the literal words off the flagship
 	// again. Propose-only, never a launch (see deterministicRouterGuard).
 	if verdict := deterministicRouterGuard(text); verdict != nil {
+		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
+			"verdict": routerVerdictDeterministicGuard,
+		})
 		return verdict
 	}
 	if ctx == nil {
@@ -746,26 +780,60 @@ func (app *kanbanBoardApp) routeScoutChatTurn(ctx context.Context, text string, 
 		// The router runs Sonnet 5 at the doctrine floor (routerEffort): Sonnet 5
 		// accepts output_config.effort, unlike the retired Haiku router.
 		Effort: routerEffort(),
+		// W1 item 11: Sonnet 5 runs ADAPTIVE thinking when the field is
+		// omitted, and max_tokens caps thinking + tool call COMBINED — inside
+		// the 700-token routing budget the thinking burn truncated the
+		// tool_use mid-JSON, so a typed work ask silently degraded to an
+		// inline answer with NO proposal card. Disabled exactly like the chat
+		// path (anthropic_text.go): the budget belongs to the tool call.
+		DisableThinking: true,
 	})
 	if err != nil {
 		log.Errorf("Scout router turn failed (degrading to inline answer): %v", err)
+		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
+			"verdict":  routerVerdictInline,
+			"degraded": "router_error",
+		})
 		return nil
 	}
+	sawToolUse := false
 	for _, raw := range response.Content {
 		block := decodeAnthropicBlock(raw)
 		if block.Type != "tool_use" {
 			continue
 		}
+		sawToolUse = true
 		if block.Name == "offer_choices" {
 			if choices := scoutChatChoicesFromToolUse(block, text); choices != nil {
-				return &scoutRouterVerdict{choices: choices}
+				recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
+					"verdict": routerVerdictChoicePills,
+				})
+				return &scoutRouterVerdict{choices: choices, source: proposalSourceChatRouter}
 			}
 			continue
 		}
 		if proposal := scoutRouterProposalFromToolUse(block, text); proposal != nil {
-			return &scoutRouterVerdict{proposal: proposal}
+			recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
+				"verdict": routerVerdictProposedTool,
+				"kind":    proposal.Kind,
+			})
+			return &scoutRouterVerdict{proposal: proposal, source: proposalSourceChatRouter}
 		}
 	}
+	// W0 item 6 truncation telemetry: a max_tokens stop (the silent-degrade
+	// signature DisableThinking exists to kill — the rollup alarms when its
+	// rate is not ~0) or a tool call the validators could not use both fall
+	// through to an inline answer; record WHY before degrading.
+	if response.StopReason == "max_tokens" || sawToolUse {
+		fields := map[string]any{"stop_reason": response.StopReason}
+		if sawToolUse {
+			fields["unusable_tool_call"] = true
+		}
+		recordEvalEvent(seatRouter, evalKindRouterTruncation, fields)
+	}
+	recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
+		"verdict": routerVerdictInline,
+	})
 	return nil
 }
 
@@ -820,6 +888,19 @@ func scoutProposalLane(mode string, toolTemplate string, authority string) strin
 	return approvalLaneFor(mode, toolTemplate, authority, true)
 }
 
+// recordRouterParseFailure emits one strict-JSON parse-failure event for the
+// router lane (W0 item 6 — the designated gate metric for any router change):
+// a tool_use block whose input the validators could not decode. tool names
+// which routing schema failed; seat + model ride the fields per the
+// evalKindParseFailure contract in usage_ledger.go.
+func recordRouterParseFailure(tool string) {
+	recordEvalEvent(seatRouter, evalKindParseFailure, map[string]any{
+		"seat":  seatRouter,
+		"model": routerModel(),
+		"tool":  tool,
+	})
+}
+
 // scoutChatChoicesFromToolUse validates one offer_choices call: a non-empty
 // question and 2-4 usable options. An option with an unknown tool_id keeps its
 // label as a plain reply pill (the arm is dropped, the conversation survives);
@@ -836,6 +917,7 @@ func scoutChatChoicesFromToolUse(block anthropicBlock, query string) *scoutChatC
 	}{}
 	if err := json.Unmarshal(block.Input, &args); err != nil {
 		log.Errorf("Scout router offer_choices input undecodable: %v", err)
+		recordRouterParseFailure("offer_choices")
 		return nil
 	}
 	question := trimForStorage(args.Question, 240)
@@ -890,6 +972,7 @@ func scoutRouterProposalFromToolUse(block anthropicBlock, query string) *scoutRo
 		}{}
 		if err := json.Unmarshal(block.Input, &args); err != nil {
 			log.Errorf("Scout router propose_tool_run input undecodable: %v", err)
+			recordRouterParseFailure("propose_tool_run")
 			return nil
 		}
 		tool, ok := routerToolByID(args.ToolID)
@@ -920,6 +1003,7 @@ func scoutRouterProposalFromToolUse(block anthropicBlock, query string) *scoutRo
 		}{}
 		if err := json.Unmarshal(block.Input, &args); err != nil {
 			log.Errorf("Scout router propose_workstream input undecodable: %v", err)
+			recordRouterParseFailure("propose_workstream")
 			return nil
 		}
 		mode := strings.ToLower(strings.TrimSpace(args.Mode))
@@ -947,6 +1031,7 @@ func scoutRouterProposalFromToolUse(block anthropicBlock, query string) *scoutRo
 		}{}
 		if err := json.Unmarshal(block.Input, &args); err != nil {
 			log.Errorf("Scout router propose_goal input undecodable: %v", err)
+			recordRouterParseFailure("propose_goal")
 			return nil
 		}
 		return scoutRouterGoalProposal(firstNonBlank(strings.TrimSpace(args.Objective), strings.TrimSpace(query)), args.AuthorityHint, strings.TrimSpace(args.PackageID), query)
@@ -957,6 +1042,7 @@ func scoutRouterProposalFromToolUse(block anthropicBlock, query string) *scoutRo
 		}{}
 		if err := json.Unmarshal(block.Input, &args); err != nil {
 			log.Errorf("Scout router propose_image input undecodable: %v", err)
+			recordRouterParseFailure("propose_image")
 			return nil
 		}
 		return scoutRouterImageProposal(firstNonBlank(strings.TrimSpace(args.Prompt), strings.TrimSpace(query)), query)

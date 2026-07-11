@@ -96,7 +96,7 @@ The board should update in place. Card moves animate, completed work triggers co
 
 Scout listens continuously for board updates, but spoken answers are wake-phrase gated. Start a turn with "Hey Scout" when you want Scout to answer aloud, for example: "Hey Scout, what is blocked?"
 
-Scout also saves speaker-attributed transcripts as meeting memory. By default, a separate `gpt-realtime-whisper` transcription-only lane records the mixed room audio while Scout's `gpt-realtime-2` lane stays focused on board tools and spoken answers. A scheduled brain worker reuses `OPENAI_API_KEY` to summarize new transcript windows into durable `brain` entries with transcript references, so later questions can use both the write-ups and the raw transcript. A second board worker analyzes those brain summaries, applies grounded card updates through the same Kanban tool path as live Scout, and writes durable `board_update` artifacts so conversations compound into auditable board state instead of disappearing after the call.
+Scout also saves speaker-attributed transcripts as meeting memory. By default, a separate `gpt-4o-transcribe` transcription-only lane (with domain-vocabulary biasing) records the mixed room audio while Scout's `gpt-realtime-2` lane stays focused on board tools and spoken answers. A scheduled brain worker reuses `OPENAI_API_KEY` to summarize new transcript windows into durable `brain` entries with transcript references, so later questions can use both the write-ups and the raw transcript. A second board worker analyzes those brain summaries, applies grounded card updates through the same Kanban tool path as live Scout, and writes durable `board_update` artifacts so conversations compound into auditable board state instead of disappearing after the call.
 
 ### Codex goal workflows
 
@@ -130,7 +130,7 @@ You can update:
 - The tools exposed to the model in `kanbanTools` in `kanban.go`.
 - The default Realtime model by setting `OPENAI_REALTIME_MODEL`; otherwise the app uses `gpt-realtime-2`.
 - The input transcription model by setting `OPENAI_REALTIME_TRANSCRIPTION_MODEL`; otherwise the app uses `gpt-4o-transcribe` with domain vocabulary hints.
-- The dedicated transcript lane with `MEETING_TRANSCRIPT_LANE_ENABLED`; it defaults to enabled. Set `OPENAI_TRANSCRIPT_MODEL` to change the transcript-only model from `gpt-realtime-whisper`.
+- The dedicated transcript lane with `MEETING_TRANSCRIPT_LANE_ENABLED`; it defaults to enabled. The transcript-only model defaults to `gpt-4o-transcribe`, which accepts the domain-vocabulary prompt the lane sends. Set `OPENAI_TRANSCRIPT_MODEL` only to deliberately override it — whisper-family ids (`gpt-realtime-whisper`) silently disable vocabulary biasing (the prompt parameter is unsupported there) and, before the session-config gate, broke the lane outright.
 - The spoken Scout voice by setting `OPENAI_REALTIME_VOICE`; otherwise the app uses `marin`.
 - The Realtime reasoning effort with `OPENAI_REALTIME_REASONING_EFFORT` (`minimal`, `low`, `medium`, `high`, or `xhigh`); the default is `high` for stronger orchestration across company context, meeting memory, app tools, and artifact workflows on `gpt-realtime-2`.
 - The Realtime turn detector with `OPENAI_REALTIME_VAD_TYPE` (`server_vad` or `semantic_vad`) and `OPENAI_REALTIME_VAD_EAGERNESS` (`low`, `medium`, `high`, or `auto` for semantic VAD); the default is `server_vad` with a 300 ms silence window for faster turn endings.

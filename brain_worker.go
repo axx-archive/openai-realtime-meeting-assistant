@@ -82,6 +82,7 @@ func (app *kanbanBoardApp) produceMeetingBrainWriteUp(ctx context.Context, apiKe
 	model := meetingBrainModel()
 	text, err := responder(ctx, apiKey, openAITextRequest{
 		Model:           model,
+		Seat:            seatBrain,
 		Instructions:    meetingBrainInstructions(),
 		Input:           buildMeetingBrainInput(transcripts, app.snapshotState(), app.participantSnapshotForRoom(roomID), time.Now().UTC()),
 		ReasoningEffort: "low",

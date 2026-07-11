@@ -50,6 +50,14 @@ type anthropicTextRequest struct {
 	// The keyless OpenAI fallback paths never see this field, so keyless
 	// deploys keep today's text-only behavior byte-for-byte.
 	Attachments []json.RawMessage
+	// Seat tags this call's usage-ledger entry (W0 item 3): a seat* constant
+	// from usage_ledger.go — the text helper's callers own their tag
+	// (seatChat, seatMemoryQA, seatVoiceRecall, seatFollowup, seatAttachments,
+	// seatNarrative, seatTaste, seatHouseStyle). It rides through to the
+	// Messages wire seam, where the entry is recorded; an empty seat records
+	// as "untagged" so an unlabeled call site is visible in the rollup, never
+	// silently blended into another seat's books.
+	Seat string
 }
 
 // anthropicTextResponder mirrors openAITextResponder: the injectable seam so
@@ -97,6 +105,7 @@ func createAnthropicTextResponseHTTP(ctx context.Context, apiKey string, request
 		}},
 		MaxTokens: maxTokens,
 		Effort:    effort,
+		Seat:      strings.TrimSpace(request.Seat),
 		// Sonnet 5 defaults to ADAPTIVE thinking when the field is omitted,
 		// and max_tokens caps thinking + text combined — a hard question could
 		// burn most of the 800-token chat budget on thinking and truncate the

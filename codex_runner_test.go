@@ -449,6 +449,7 @@ func TestApproveCodexArtifactExternalWriteRefusesStaleDoubleApprove(t *testing.T
 }
 
 func TestRunCodexExecCommandContextBuildsNoninteractiveCommand(t *testing.T) {
+	t.Setenv("USAGE_LEDGER_PATH", t.TempDir())
 	dir := t.TempDir()
 	recordArgs := filepath.Join(dir, "args.txt")
 	recordPrompt := filepath.Join(dir, "prompt.txt")
@@ -507,6 +508,79 @@ done
 	}
 	if strings.TrimSpace(string(rawPrompt)) != "hello codex worker" {
 		t.Fatalf("prompt=%q", string(rawPrompt))
+	}
+}
+
+// W0-5 lane metering (seat codex): the CLI reports no token usage, so every
+// local_exec job records a duration-only ledger row flagged Estimated under
+// the job's pinned model; a failed run still records, carrying Error.
+func TestRunCodexExecCommandContextRecordsDurationOnlyUsage(t *testing.T) {
+	ledgerDir := ledgerTestDir(t)
+	fixed := time.Date(2026, time.July, 11, 19, 0, 0, 0, time.UTC)
+	prevNow := usageLedgerNow
+	usageLedgerNow = func() time.Time { return fixed }
+	defer func() { usageLedgerNow = prevNow }()
+
+	dir := t.TempDir()
+	fakeCodex := filepath.Join(dir, "codex")
+	script := `#!/bin/sh
+cat > /dev/null
+previous=""
+for arg in "$@"; do
+  if [ "$previous" = "--output-last-message" ]; then
+    printf 'metered codex run\n' > "$arg"
+  fi
+  previous="$arg"
+done
+`
+	if err := os.WriteFile(fakeCodex, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+
+	cfg := codexExecConfig{
+		Command:        fakeCodex,
+		CWD:            dir,
+		Sandbox:        "workspace-write",
+		ApprovalPolicy: "never",
+		Model:          "gpt-5.5",
+		Reasoning:      "high",
+		Timeout:        defaultCodexExecTimeout,
+		MaxOutputBytes: 4096,
+	}
+	if _, err := runCodexExecCommandContext(context.Background(), cfg, "meter this job"); err != nil {
+		t.Fatalf("runCodexExecCommandContext: %v", err)
+	}
+
+	// A failed run (missing binary) still records, with Error stamped.
+	badCfg := cfg
+	badCfg.Command = filepath.Join(dir, "missing-codex")
+	if _, err := runCodexExecCommandContext(context.Background(), badCfg, "meter the failure"); err == nil {
+		t.Fatal("missing binary must error")
+	}
+
+	rows := readLedgerLines(t, filepath.Join(ledgerDir, "usage-2026-07-11.jsonl"))
+	if len(rows) != 2 {
+		t.Fatalf("usage rows = %d, want one per job", len(rows))
+	}
+	success := rows[0]
+	if success["provider"] != providerOpenAI || success["model"] != "gpt-5.5" || success["seat"] != seatCodex {
+		t.Fatalf("job row identity wrong: %v", success)
+	}
+	if success["estimated"] != true {
+		t.Fatalf("codex rows must flag Estimated (duration-only, no wire usage): %v", success)
+	}
+	if _, present := success["error"]; present {
+		t.Fatalf("successful job must not carry an error: %v", success)
+	}
+	if _, present := success["input_tokens"]; present {
+		t.Fatalf("codex rows are duration-only (tokens unavailable): %v", success)
+	}
+	failure := rows[1]
+	if errText, _ := failure["error"].(string); !strings.Contains(errText, "codex") {
+		t.Fatalf("failed job must record its error: %v", failure)
+	}
+	if failure["estimated"] != true {
+		t.Fatalf("failed job row must stay flagged Estimated: %v", failure)
 	}
 }
 

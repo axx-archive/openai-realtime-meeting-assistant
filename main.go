@@ -622,6 +622,16 @@ func main() {
 	// restarts). No Gmail code ships — the team ratifies via the doc's
 	// Decision sentence, which the decision ledger extracts verbatim.
 	seedGmailConsentProposal(kanbanApp)
+	// W1-12 tail: validate the realtime/transcription dials once at boot so a
+	// whisper-family pin, a typo'd model id, or an out-of-enum effort value is
+	// loud in the deploy logs instead of failing per-request in prod.
+	validateRealtimeConfig()
+	// W0-9: the usage-rollup worker folds the LLM usage/eval ledgers into the
+	// living "LLM Spend & Health" artifact and runs the alert engine
+	// (spend cap, unknown models, parse-failure/board-op/router spikes,
+	// no-vocab warnings, transcript drop-off) with a 6h per-kind dedupe.
+	// Killable via USAGE_ROLLUP_DISABLED / USAGE_ALERTS_DISABLED.
+	startUsageRollupWorker(kanbanApp)
 
 	// Read index.html from disk into memory, serve whenever anyone requests /
 	var err error
@@ -696,6 +706,12 @@ func main() {
 	http.HandleFunc("/assistant/portfolio", assistantPortfolioHandler)
 	http.HandleFunc("/assistant/realtime-offer", assistantRealtimeOfferHandler)
 	http.HandleFunc("/assistant/realtime-tool", assistantRealtimeToolHandler)
+	// W0 private-voice usage beacon (founder decision 3): the browser owns the
+	// private voice peer, so the page posts each response.done usage object
+	// here and the server ledgers it under seat voice_private.
+	http.HandleFunc("/assistant/realtime/usage", assistantRealtimeUsageHandler)
+	// W0-9: signed-in JSON twin of the living Spend & Health artifact.
+	http.HandleFunc("/api/usage/rollup", usageRollupHandler)
 	http.HandleFunc("/internal/codex/jobs/result", internalCodexRunnerResultHandler)
 	http.HandleFunc("/artifacts", artifactsHandler)
 	http.HandleFunc("/artifacts/action", artifactRunnerActionHandler)
@@ -831,6 +847,11 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 		"service": "meetingassist",
 		"version": serverBuildVersion,
 		"time":    time.Now().UTC().Format(time.RFC3339Nano),
+		// W0-9: effective realtime/transcription lane models + vocab posture +
+		// ledger/alert switches, so a whisper-family fossil pin or a dead
+		// ledger is visible from the outside. Additive — the existing
+		// ok/service/version/time contract is untouched.
+		"telemetry": healthTelemetrySnapshot(),
 	})
 }
 
