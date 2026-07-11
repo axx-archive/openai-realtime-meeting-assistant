@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1180,7 +1182,7 @@ func (app *kanbanBoardApp) privateRealtimeVoiceSessionInstructions() string {
 	return strings.Join([]string{
 		"# Role and Objective\nYou are Scout, the private Bonfire OS voice assistant on the dashboard. This is a one-user Realtime 2 conversation outside the video room. You can act across the whole OS on this user's behalf: navigate, recall, run the board, edit and publish artifacts, notify the team, post as the user, and launch goals.",
 		"# Boundary\nYou act on this one user's behalf — you are NOT the room's shared voice. Do not describe yourself as the shared room Scout, do not say the room can hear you, and do not treat the user as a meeting participant. You MAY update the shared Kanban board on the user's behalf (create, move, update, tag, date, delete, or undo cards) — announce what you changed. External writes (commit, push, deploy, production side effects) stay gated: you never perform them directly, and initiate_goal cannot request them. When you post as the user with start_chat_as_user, the message is always stamped and shown as posted via Scout — disclosure is mandatory and automatic. If the user asks for the live room, use control_app to open the Room surface; do not claim you joined as the shared room voice operator.",
-		"# OS actions\nUse control_app to open office, room, chat, artifacts, research, design, grill, board, memory, or files; pass also_open to open several surfaces at once. Use the board tools (create_ticket, move_ticket, update_ticket, add_tags, add_key_date, remove_key_dates, delete_ticket, undo_delete_ticket) to run the board for the user. Use update_artifact / publish_artifact to edit or publish a saved artifact the user owns. Use launch_agent_thread for a single research, investigate, source, design, grill, pressure-test, or plan request so Chat becomes the live work surface and the finished Markdown is saved as an artifact. Use initiate_goal for a multi-step objective the user wants Scout to plan and drive end to end (\"package the Aurora IP\", \"take this from idea to investor-ready\"). Use create_artifact only when the user asks to save a quick, explicit piece of already-known content. Use answer_memory_question for recall across saved meetings and artifacts. Use read_thread_aloud to fetch and then speak the recent messages of a channel or private thread, an artifact, or the user's notifications. Use organize_files when the user asks to file, sort, or group files or deliverables into a folder on the Files surface; name the folder and pass the file-name fragments to match. Use save_to_files when the user asks to save, keep, or add a finished deliverable (a research report, deck, or goal output) to the Files surface — deliverables no longer appear there automatically, so pass the title fragments to match and optionally a folder to file them under. Use send_notification when the user asks to notify the team, post an alert, or leave a reminder in the notification bell; audience everyone reaches all signed-in users, audience me notifies only this user, and deliver \"after_meeting\" queues it until the meeting is archived when the user says after this meeting, remind. Use propose_codex_task when the user asks to queue, delegate, or staff agent work for later; it only posts a proposal card that a human must confirm before any agent thread launches. Use create_package / attach_to_package / advance_package_stage to manage venture packages — the per-IP mission binders shown in Mission Intelligence. Use do_nothing for unclear speech or requests that require shared-room controls.",
+		"# OS actions\nUse control_app to open office, room, chat, artifacts, research, design, grill, board, memory, or files; pass also_open to open several surfaces at once. Use the board tools (create_ticket, move_ticket, update_ticket, add_tags, add_key_date, remove_key_dates, delete_ticket, undo_delete_ticket) to run the board for the user. Use update_artifact / publish_artifact to edit or publish a saved artifact the user owns. Use launch_agent_thread for a single research, investigate, source, design, grill, pressure-test, or plan request so Chat becomes the live work surface and the finished Markdown is saved as an artifact. Use initiate_goal for a multi-step objective the user wants Scout to plan and drive end to end (\"package the Aurora IP\", \"take this from idea to investor-ready\"). Use create_artifact only when the user asks to save a quick, explicit piece of already-known content. Use answer_memory_question for recall across saved meetings and artifacts. Use read_thread_aloud to fetch and then speak the recent messages of a channel or private thread, an artifact, or the user's notifications. Use organize_files when the user asks to file, sort, or group files or deliverables into a folder on the Files surface; name the folder and pass the file-name fragments to match. Use save_to_files when the user asks to save, keep, or add a finished deliverable (a research report, deck, or goal output) to the Files surface — deliverables no longer appear there automatically, so pass the title fragments to match and optionally a folder to file them under. Use note_for_the_record when the user explicitly wants something remembered in company memory (\"note for the record…\", \"remember that…\", \"put on record that…\"); pass kind=decision for an explicit decision or stated position and it lands as a proposed decision the team can ratify. Use send_notification when the user asks to notify the team, post an alert, or leave a reminder in the notification bell; audience everyone reaches all signed-in users, audience me notifies only this user, and deliver \"after_meeting\" queues it until the meeting is archived when the user says after this meeting, remind. Use propose_codex_task when the user asks to queue, delegate, or staff agent work for later; it only posts a proposal card that a human must confirm before any agent thread launches. Use create_package / attach_to_package / advance_package_stage to manage venture packages — the per-IP mission binders shown in Mission Intelligence. Use do_nothing for unclear speech or requests that require shared-room controls.",
 		"# Channels and posting as the user\nUse post_to_channel when the user says put/post/share that in #channel or tell the team; quote their content faithfully, never embellish. Use start_chat_as_user to START a new channel or private thread and post the user's message into it on their behalf — the post is always disclosed as via Scout. Before posting as the user, read the draft back and get a yes. Use mention to flag one person by name. Use create_channel to make a new public team channel when asked.",
 		"# Meeting recap\nUse meeting_recap with audience \"me\" (or catch_me_up) for catch-me-up requests about the live meeting; it lands in the user's bell and you read the headline aloud. For catch-up SPANNING meetings or days — what did I miss this week, what happened yesterday, catch me up on the last few days — use cross_meeting_briefing instead: it returns a day-by-day briefing of decisions, action items, topics, and open questions across every meeting in the range; read the top decisions and blockers, not every line. Use get_meeting_detail with a meeting_id from a briefing for one past meeting's digest, and pass an anchor id to quote the verbatim exchange.",
 		"# Private grill\nWhen the user says grill me, pressure-test me, or play investor with me, call start_private_grill (optionally naming a package to ground the question bank) and follow the returned instructions to run the three-act ritual privately — this is one-on-one, never the shared room. Call end_private_grill after you deliver the spoken readiness report; it files the graded scorecard and restores your normal behavior.",
@@ -2565,6 +2567,26 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		},
 		{
 			"type":        "function",
+			"name":        "note_for_the_record",
+			"description": "File a durable, author-certain note into the company memory so it grounds future recall — the deliberate \"for the record\" path. Use when the user explicitly wants a statement, stance, or decision remembered (\"note for the record: we never ship Q4 launches\", \"remember that Tim is against the Samsung deal\", \"put on record that we decided to lead with Ball Dogs\"). The note is company-recallable even when filed from a private thread — the explicit request IS the consent. Set kind to decision for an explicit decision or stance (recorded as a proposed decision the team can ratify); leave it as note otherwise.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"note":  map[string]any{"type": "string", "description": "The statement to remember, self-contained and in the user's own framing."},
+					"topic": map[string]any{"type": "string", "description": "Optional short subject label the note is about (\"Samsung deal\", \"Q4 launches\")."},
+					"kind": map[string]any{
+						"type":        "string",
+						"description": "note for a plain fact/reminder (default); decision for an explicit decision or stated position, recorded as a proposed decision on the ledger.",
+						"enum":        []string{"note", "decision"},
+					},
+					"owner": map[string]any{"type": "string", "description": "Optional person the note or stance is attributed to when it is about someone other than the speaker (\"Tim\"); used as the decision maker for kind=decision."},
+				},
+				"required":             []string{"note"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"type":        "function",
 			"name":        "do_nothing",
 			"description": "Use this when the user is not asking to operate on the Kanban board, is only wrapping up, or says a handoff phrase like That's it from me.",
 			"parameters": map[string]any{
@@ -3032,6 +3054,15 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 		// the empty requester only leaves the savedToFilesBy attribution to
 		// Scout. The private voice path passes the real requester below.
 		return app.saveToFilesTool(args, "")
+	case "note_for_the_record":
+		// Shared room-voice entry point: no single session author (the room is
+		// shared), so the note is filed author-uncertain unless an explicit owner is
+		// named. No per-call id exists here, so the scope carries an hour bucket
+		// (F14) — an accidental double-fire in the hour dedupes, a later deliberate
+		// re-file does not. The private-voice path passes the signed-in requester,
+		// and the agent-thread orchestrator passes job.RequestedBy + thread + tool-
+		// call id, so those file author-certain with their own idempotency scope.
+		return app.noteForTheRecordTool(args, "", hourBucketedNoteScope("room-voice", time.Now()))
 	case "portfolio_health":
 		// Read-only aggregation over the venture packages; no requester needed,
 		// so the shared dispatch serves both the room and private voice paths.
@@ -3252,6 +3283,9 @@ func privateRealtimeVoiceToolAllowed(toolName string) bool {
 		// Save a finished deliverable onto the Files surface (explicit-save
 		// gate); attribution carries the signed-in requester.
 		"save_to_files",
+		// Deliberate-write path: file an author-certain "for the record" note into
+		// company memory. The private user owns filing their own notes.
+		"note_for_the_record",
 		// Private grill (Wave 12) — client-driven session.update swap, private
 		// only. The room grill (start_grill_session/end_grill_session) swaps the
 		// SHARED room persona server-side and stays room-only above; this variant
@@ -3327,6 +3361,13 @@ func (app *kanbanBoardApp) applyPrivateRealtimeVoiceTool(requesterEmail string, 
 	// is the savedToFilesBy attribution.
 	if toolName == "save_to_files" {
 		return app.saveToFilesTool(args, requesterEmail)
+	}
+	// note_for_the_record files an author-certain memory entry; the signed-in
+	// requester is the certain author. There is no per-call id on the voice path,
+	// so the scope carries an hour bucket (F14): a double-call within the hour
+	// files once, a later deliberate re-file lands as its own record.
+	if toolName == "note_for_the_record" {
+		return app.noteForTheRecordTool(args, requesterEmail, hourBucketedNoteScope("private-voice:"+normalizeAccountEmail(requesterEmail), time.Now()))
 	}
 	// start_chat_as_user posts on the user's behalf with a mandatory,
 	// server-stamped disclosure — the requester identity, never a model arg.
@@ -3941,11 +3982,33 @@ func (app *kanbanBoardApp) deleteRoomChatMessage(entryID string, requesterEmail 
 	if !roomChatEntryAuthoredBy(entry, requesterEmail, requesterName) {
 		return nil, false
 	}
-	if _, removed, err := app.memory.deleteEntryByID(entryID); err != nil || !removed {
+	removed, deleted, err := app.memory.deleteEntryByID(entryID)
+	if err != nil || !deleted {
 		if err != nil {
 			log.Errorf("Failed to delete room chat message %s: %v", entryID, err)
 		}
 		return nil, false
+	}
+	// Tombstone the delete (memory study 1.5b, gap #13): the message CONTENT is
+	// gone — that is the point of a delete — but a dated, recall-hidden stub
+	// records the FACT that the author removed it, so the deletion is never
+	// trace-free. Mirrors the slop-quarantine expiry-stub discipline; best-effort,
+	// so a stub write failure never blocks the delete itself.
+	deleter := firstNonEmptyString(participantNameForEmail(requesterEmail), strings.TrimSpace(requesterName), normalizeAccountEmail(requesterEmail), "a member")
+	tombstoneMetadata := map[string]string{
+		relevanceMetadataKey: relevanceExpired,
+		"deletedId":          entryID,
+		"deletedKind":        removed.Kind,
+		"deletedBy":          deleter,
+		"deletedAt":          time.Now().UTC().Format(time.RFC3339Nano),
+		"roomId":             firstNonEmptyString(normalizeRoomID(removed.Metadata["roomId"]), officeRoomID),
+	}
+	if meetingID := strings.TrimSpace(removed.Metadata["meetingId"]); meetingID != "" {
+		tombstoneMetadata["meetingId"] = meetingID
+	}
+	tombstoneID := fmt.Sprintf("chat-delete-%s", entryID)
+	if _, _, tombErr := app.memory.appendChatDeleteTombstone(tombstoneID, "Room chat message deleted by "+deleter, tombstoneMetadata); tombErr != nil {
+		log.Errorf("Failed to write chat-delete tombstone for %s: %v", entryID, tombErr)
 	}
 	return map[string]any{"id": entryID}, true
 }
@@ -4100,6 +4163,163 @@ func (app *kanbanBoardApp) answerMemoryQuestion(args map[string]any) (map[string
 		"answer":  answer,
 		"matches": len(matches),
 		"context": len(contextEntries),
+	}, false, nil
+}
+
+// noteForTheRecordTool files the deliberate-write "for the record" entry (memory
+// study 2.1, gap #5): an author-certain, recall-eligible note that lets a stance
+// argued to Scout reach company memory WITHOUT breaching the private-thread
+// privacy contract — the explicit tool call IS the consent surface, so ambient
+// thread text stays out while a deliberately-filed note enters.
+//
+// certainAuthor is the signed-in session user (private-voice requester,
+// agent-thread requestedBy); it is empty on the shared room-voice path, where no
+// single author exists and the note is filed author-uncertain. idScope
+// namespaces the idempotency id (thread/session) so identical notes in different
+// threads stay distinct while a double-call in the SAME scope files exactly once
+// via the store seen-map — the run-log id discipline.
+//
+// Per-path idScope semantics (F14 — accidental double-fires dedupe, deliberate
+// re-filing later works):
+//   - orchestrator: "agent-thread:<threadID>:<toolCallID>" — the tool-call id is
+//     stable across a transport retry (same assistant block) but distinct on a
+//     genuine re-emission, so it needs no time component.
+//   - private-voice / room-voice: no per-call id exists, so hourBucketedNoteScope
+//     appends a UTC hour bucket. Two identical notes in the same hour file once;
+//     the same note filed a later hour is a fresh, deliberate record — never a
+//     permanent forever-dedupe.
+//
+// kind=decision routes the statement onto the decision ledger as a PROPOSED
+// decision (the directional-decision path) the team can ratify, attributed to a
+// named owner or the certain author; anything else files a note. Never mutates
+// the board, so changed is always false.
+// hourBucketedNoteScope namespaces a note idempotency scope that lacks a natural
+// per-call id (room voice, private voice) with a UTC hour bucket (F14): accidental
+// double-fires within the hour dedupe against the store seen-map, but the same
+// note filed a later hour is a deliberate, distinct record. Injectable clock so
+// the bucket boundary is testable.
+func hourBucketedNoteScope(namespace string, at time.Time) string {
+	return namespace + "@" + at.UTC().Format("2006-01-02T15")
+}
+
+func (app *kanbanBoardApp) noteForTheRecordTool(args map[string]any, certainAuthor string, idScope string) (map[string]any, bool, error) {
+	if app == nil || app.memory == nil {
+		return nil, false, fmt.Errorf("meeting memory is unavailable")
+	}
+	note := normalizeMemoryText(asString(args["note"]))
+	if note == "" {
+		return nil, false, fmt.Errorf("note is required")
+	}
+	topic := normalizeMemoryText(asString(args["topic"]))
+	ownerRaw := normalizeMemoryText(asString(args["owner"]))
+	kind := strings.ToLower(strings.TrimSpace(asString(args["kind"])))
+	if kind != "decision" {
+		kind = "note"
+	}
+
+	// The author is stamped from the SESSION user, never a transcript heuristic:
+	// a signed-in requester resolves to a roster display name when possible, else
+	// their own email — either way a certain identity. No session user (room
+	// voice) files author-uncertain.
+	certain := strings.TrimSpace(certainAuthor)
+	author := ""
+	authorCertain := false
+	if certain != "" {
+		author = firstNonEmptyString(participantNameForEmail(certain), normalizeAccountEmail(certain), certain)
+		authorCertain = true
+	}
+
+	// Deterministic id: identical (scope, author, kind, topic, note) files once.
+	sum := sha256.Sum256([]byte(strings.Join([]string{idScope, author, kind, topic, note}, "\x00")))
+	id := "note-" + hex.EncodeToString(sum[:])[:16]
+
+	// Pre-stamp the meetingId (the live office sitting, or "none" at idle) so a
+	// note filed outside a meeting never lazily opens a phantom sitting — the
+	// files.go grandfather-marker discipline.
+	meetingID := firstNonEmptyString(app.memory.currentMeetingID(officeRoomID), "none")
+
+	if kind == "decision" {
+		// Attribution discipline (F12/F27): when an owner is NAMED, attribute the
+		// stance ONLY if it grounds to a real participant — a non-roster name is
+		// NEVER silently replaced by the filer, which would fabricate a stance in
+		// the who-thinks-what position index ("remember Jordan wants X" filed as if
+		// the filer holds it). Ungroundable → madeBy stays blank (the decision
+		// ledger's own unknown-name discipline; the statement text still names the
+		// party). The filer-fallback is reserved for the NO-owner case: filing one's
+		// own stance ("for the record, I want us to pass").
+		madeBy := ""
+		ownerUngrounded := false
+		if ownerRaw != "" {
+			madeBy = normalizeTranscriptSpeaker(ownerRaw)
+			ownerUngrounded = madeBy == ""
+		} else {
+			madeBy = author
+		}
+		metadata := map[string]string{
+			"madeBy":        madeBy,
+			"context":       firstNonEmptyString(topic, "filed via note_for_the_record"),
+			"dedupeKey":     decisionDedupeKey(note),
+			"status":        decisionStatusProposed,
+			"source":        "note_for_the_record",
+			"authorCertain": strconv.FormatBool(authorCertain),
+			"roomId":        officeRoomID,
+			"meetingId":     meetingID,
+		}
+		if author != "" {
+			metadata["filedBy"] = author
+		}
+		entry, appended, err := app.memory.appendDecision(id, note, metadata)
+		if err != nil {
+			return nil, false, err
+		}
+		if appended {
+			broadcastOfficeKanbanEvent("decision", decisionPayload(entry))
+			broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
+			broadcastAssistantEvent("action", "Scout recorded a decision for the record.", map[string]any{"kind": "decision"})
+		}
+		result := map[string]any{
+			"ok":       true,
+			"kind":     "decision",
+			"id":       entry.ID,
+			"status":   decisionStatusProposed,
+			"madeBy":   madeBy,
+			"recorded": appended,
+		}
+		if ownerUngrounded {
+			// Honest tool message: the named owner could not be grounded, so the
+			// decision is on record but attributed to nobody rather than to the filer.
+			result["message"] = "Recorded as a proposed decision, but \"" + ownerRaw + "\" is not a known team member, so no owner attribution was set (the statement text still names them)."
+		}
+		return result, false, nil
+	}
+
+	metadata := map[string]string{
+		"author":        author,
+		"authorCertain": strconv.FormatBool(authorCertain),
+		"source":        "note_for_the_record",
+		"roomId":        officeRoomID,
+		"meetingId":     meetingID,
+	}
+	if topic != "" {
+		metadata["topic"] = topic
+	}
+	if ownerRaw != "" {
+		metadata["owner"] = ownerRaw
+	}
+	entry, appended, err := app.memory.appendNote(id, note, metadata)
+	if err != nil {
+		return nil, false, err
+	}
+	if appended {
+		broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
+		broadcastAssistantEvent("action", "Scout filed a note for the record.", map[string]any{"kind": "note"})
+	}
+	return map[string]any{
+		"ok":       true,
+		"kind":     "note",
+		"id":       entry.ID,
+		"author":   author,
+		"recorded": appended,
 	}, false, nil
 }
 

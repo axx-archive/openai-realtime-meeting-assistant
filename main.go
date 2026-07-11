@@ -605,6 +605,14 @@ func main() {
 	// zombie/backgrounded room socket can never hold occupancy above zero and
 	// keep a finished sitting from finalizing into a fresh meeting id.
 	kanbanApp.startParticipantLivenessSweeper()
+	// Memory-architecture study §6 Phase 0.1 (gap #1): nightly encrypted snapshot
+	// of the whole data dir to a local ring + optional offsite S3/Spaces, so a
+	// droplet disk loss is no longer total permanent loss of the company brain.
+	// Boot-once background worker (not room-scoped, no app lock); the first
+	// snapshot runs a few minutes after boot so a fresh deploy proves the path.
+	// No-ops when BACKUP_DISABLED / BACKUP_INTERVAL_HOURS=0, and never fires under
+	// `go test` (main() isn't invoked there; the first-run delay is a second guard).
+	startBackupTicker()
 	// Card 069: the DEFAULT approval-governance decision rides the ledger as
 	// PROPOSED from boot (keyless included — this is a store write, not a
 	// worker) so the team can see and ratify it in Mission Intelligence.

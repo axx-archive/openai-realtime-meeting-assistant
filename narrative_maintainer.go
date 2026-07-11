@@ -100,6 +100,11 @@ type narrativeUpdatePayload struct {
 	Title  string `json:"title"`
 	Status string `json:"status"`
 	Body   string `json:"body"`
+	// Aliases (item 1.3b): 3-5 alternate phrasings for this storyline —
+	// synonyms, nicknames, acronyms — stored in metadata so a slug-fork synonym
+	// ("samsung-tv" vs "samsung-tv-plus") resolves to the existing dossier and
+	// so store.search matches vocabulary-drifted queries.
+	Aliases []string `json:"aliases,omitempty"`
 }
 
 type narrativeMaintainerOutput struct {
@@ -151,9 +156,10 @@ func narrativeMaintainerInstructions() string {
 	return strings.Join([]string{
 		"You are Bonfire's narrative maintainer: you keep one living dossier per active storyline — an opportunity, client, or project the team is moving (e.g. the Samsung TV Plus opportunity).",
 		"From the new brain write-ups plus the supplied workspace context, return STRICT JSON only, no markdown fence, matching:",
-		`{"narratives":[{"slug":string(kebab-case, stable across passes),"title":string(<=8 words),"status":string(<=140 chars, the one-line current status),"body":string(markdown)}]}.`,
+		`{"narratives":[{"slug":string(kebab-case, stable across passes),"title":string(<=8 words),"status":string(<=140 chars, the one-line current status),"aliases":[string],"body":string(markdown)}]}.`,
 		"Return ONLY storylines the new window creates or materially changes; omit untouched storylines entirely — their existing dossiers stay live.",
 		"Reuse the EXACT slug of an existing dossier when updating it; never mint a second slug for the same storyline.",
+		"aliases = 3-5 short alternate phrasings someone might SEARCH this storyline by — synonyms, nicknames, acronyms (e.g. 'Samsung TV Plus' also 'the Korean TV deal', 'CTV partnership'); empty when nothing is ambiguous. Max 5, each <=60 chars.",
 		"Each body is the FULL replacement dossier with exactly these markdown sections: ## Storyline, ## Current status, ## Timeline (dated bullets, oldest first), ## Key people, ## Concerns & counterpoints, ## Deliverables & runs (titles + artifact ids), ## Feedback so far, ## Open questions.",
 		"Carry still-true facts forward from the previous dossier version; add new dated Timeline bullets from the window.",
 		"Reference deliverables by title and artifact id only — never inline an artifact body.",
@@ -328,7 +334,18 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 		if slug == "" || body == "" {
 			continue
 		}
+		aliases := clampDigestAliases(update.Aliases)
 		predecessor, hasPredecessor := app.activeNarrativeBySlug(slug)
+		// item 1.3b: a fresh slug that is really a synonym of an existing dossier
+		// ("samsung-tv-plus" for an existing "samsung-tv") resolves to that
+		// dossier via alias/title overlap BEFORE it forks a second storyline.
+		if !hasPredecessor {
+			if resolved, resolvedEntry, ok := app.resolveNarrativeByAlias(slug, update.Title, aliases); ok {
+				slug = resolved
+				predecessor = resolvedEntry
+				hasPredecessor = true
+			}
+		}
 		metadata := map[string]string{
 			"slug":             slug,
 			"title":            compactAssistantLine(firstNonEmptyString(strings.TrimSpace(update.Title), slug)),
@@ -344,20 +361,40 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 		if strings.TrimSpace(meetingID) != "" {
 			metadata["meetingId"] = meetingID
 		}
+		// item 1.3b: carry the alias union forward (predecessor's aliases ∪ this
+		// pass's), stored under the same key store.search reads so a drifted query
+		// finds the dossier; also the resolution source above.
+		aliasUnion := aliases
+		if hasPredecessor {
+			aliasUnion = mergeLedgerAliases(splitNarrativeAliases(predecessor.Metadata[digestAliasesMetadataKey]), aliases)
+		}
+		if len(aliasUnion) > 0 {
+			metadata[digestAliasesMetadataKey] = strings.Join(aliasUnion, ", ")
+		}
 		// Cross-call narrative arc (kanban-card-107): accumulate a capped,
 		// de-duped union of every meeting this dossier has spanned (the
 		// entity-ledger meetingIds precedent, cap ledgerMeetingIDCap) instead of
 		// overwriting to the latest sitting — so a storyline discussed across
-		// many meetings keeps its full provenance for later recall.
-		var meetingIDs []string
+		// many meetings keeps its full provenance for later recall. item Q6:
+		// meetings evicted off the cap SPILL into an overflow list instead of
+		// being lost, so a months-long arc keeps its origin meetings.
+		var meetingIDs, meetingIDsOverflow []string
 		if hasPredecessor {
 			meetingIDs = splitNarrativeMeetingIDs(predecessor.Metadata["meetingIds"])
+			meetingIDsOverflow = splitNarrativeMeetingIDs(predecessor.Metadata["meetingIdsOverflow"])
 		}
 		if id := strings.TrimSpace(meetingID); id != "" {
-			meetingIDs, _ = appendUniqueCapped(meetingIDs, id, ledgerMeetingIDCap)
+			var spilled string
+			meetingIDs, spilled, _ = appendUniqueCappedSpill(meetingIDs, id, ledgerMeetingIDCap)
+			if spilled != "" {
+				meetingIDsOverflow, _ = appendUniqueCapped(meetingIDsOverflow, spilled, ledgerProvenanceOverflowCap)
+			}
 		}
 		if len(meetingIDs) > 0 {
 			metadata["meetingIds"] = strings.Join(meetingIDs, ",")
+		}
+		if len(meetingIDsOverflow) > 0 {
+			metadata["meetingIdsOverflow"] = strings.Join(meetingIDsOverflow, ",")
 		}
 		if !windowFirst.IsZero() {
 			metadata["firstSeenAt"] = windowFirst.Format(time.RFC3339Nano)
@@ -453,15 +490,30 @@ func (app *kanbanBoardApp) stampNarrativeCursor(roomID string, throughBrainID st
 
 // activeNarrativeEntries returns the active storyline dossiers, newest first,
 // one per slug (defensive dedupe — the lifecycle law already keeps one active
-// entry per slug).
+// entry per slug), capped at limit.
 func (app *kanbanBoardApp) activeNarrativeEntries(limit int) []meetingMemoryEntry {
-	if app == nil || app.memory == nil || limit <= 0 {
+	if limit <= 0 {
+		return nil
+	}
+	all := app.allActiveNarrativeEntries()
+	if len(all) > limit {
+		all = all[:limit]
+	}
+	return all
+}
+
+// allActiveNarrativeEntries returns EVERY active storyline dossier, newest first,
+// one per slug — the unbounded scan the alias resolver needs so a synonym of a
+// dossier past the pinned context window still resolves instead of forking a
+// second storyline (F18). Bounded in practice by the number of live storylines.
+func (app *kanbanBoardApp) allActiveNarrativeEntries() []meetingMemoryEntry {
+	if app == nil || app.memory == nil {
 		return nil
 	}
 	entries := app.memory.entriesOfKind(meetingMemoryKindNarrative, 0)
 	seen := map[string]struct{}{}
-	newest := make([]meetingMemoryEntry, 0, limit)
-	for index := len(entries) - 1; index >= 0 && len(newest) < limit; index-- {
+	newest := make([]meetingMemoryEntry, 0, 8)
+	for index := len(entries) - 1; index >= 0; index-- {
 		entry := entries[index]
 		if memoryEntryRelevance(entry) != relevanceActive {
 			continue
@@ -515,6 +567,72 @@ func splitNarrativeMeetingIDs(joined string) []string {
 		}
 	}
 	return ids
+}
+
+// splitNarrativeAliases parses the ", "-joined alias metadata back into a slice
+// (item 1.3b), so the union carries forward across passes and feeds resolution.
+func splitNarrativeAliases(joined string) []string {
+	return splitNarrativeMeetingIDs(joined)
+}
+
+// narrativeAliasMatchThreshold is the containment a candidate storyline's
+// alias/title/slug tokens must reach against an existing dossier's to be judged
+// the SAME storyline (item 1.3b). Deliberately high (2-of-2 or 2-of-3) so only a
+// real synonym merges — a merely-adjacent storyline keeps its own slug.
+const narrativeAliasMatchThreshold = 0.67
+
+// narrativeMatchTokens is the stemmed token set that identifies a storyline for
+// alias resolution: its slug words, title, and alias phrasings folded together.
+func narrativeMatchTokens(slug string, title string, aliases []string) []string {
+	parts := make([]string, 0, len(aliases)+2)
+	parts = append(parts, strings.ReplaceAll(slug, "-", " "), title)
+	parts = append(parts, aliases...)
+	set := stemmedMemoryTokenSet(strings.Join(parts, " "))
+	tokens := make([]string, 0, len(set))
+	for token := range set {
+		tokens = append(tokens, token)
+	}
+	return tokens
+}
+
+// resolveNarrativeByAlias finds an existing active dossier that a fresh slug is
+// really a synonym of (item 1.3b), returning its slug + entry so the update
+// supersedes it instead of forking a second storyline. Conservative: needs >=2
+// identifying tokens on both sides and a high containment, so distinct
+// storylines that merely share a word never merge.
+func (app *kanbanBoardApp) resolveNarrativeByAlias(candidateSlug string, title string, aliases []string) (string, meetingMemoryEntry, bool) {
+	if app == nil || app.memory == nil {
+		return "", meetingMemoryEntry{}, false
+	}
+	candidateTokens := narrativeMatchTokens(candidateSlug, title, aliases)
+	if len(candidateTokens) < 2 {
+		return "", meetingMemoryEntry{}, false
+	}
+	var best meetingMemoryEntry
+	bestSlug := ""
+	bestScore := 0.0
+	// F18: scan ALL active dossiers, not just the pinned context window, so a
+	// synonym of an older storyline still resolves to it instead of forking.
+	for _, dossier := range app.allActiveNarrativeEntries() {
+		slug := strings.TrimSpace(dossier.Metadata["slug"])
+		if slug == "" || slug == candidateSlug {
+			continue
+		}
+		dossierTokens := narrativeMatchTokens(slug, dossier.Metadata["title"], splitNarrativeAliases(dossier.Metadata[digestAliasesMetadataKey]))
+		if len(dossierTokens) < 2 {
+			continue
+		}
+		if score := tokenSetContainment(candidateTokens, dossierTokens); score > bestScore {
+			bestScore = score
+			bestSlug = slug
+			best = dossier
+		}
+	}
+	if bestScore >= narrativeAliasMatchThreshold {
+		return bestSlug, best, true
+	}
+
+	return "", meetingMemoryEntry{}, false
 }
 
 // narrativeStatusLine is the one-line status a storyline shows outside its

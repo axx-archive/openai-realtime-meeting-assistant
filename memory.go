@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -128,6 +130,35 @@ const (
 	// latest. Excluded from the client memory timeline (the intel surface
 	// renders storylines from the mission snapshot instead).
 	meetingMemoryKindNarrative = "narrative"
+	// meetingMemoryKindNote is the deliberate-write path (memory study 2.1, gap
+	// #5): one AUTHOR-CERTAIN "for the record" entry filed by an explicit
+	// note_for_the_record tool call — the escape hatch that lets a position
+	// argued in a Scout chat thread reach recall without breaching the
+	// private-thread privacy contract (the explicit call IS the consent). entry.Text
+	// = the note statement, so store.search matches it for free. Deliberately NOT
+	// a UI-state kind: notes ARE knowledge and must ground Scout's answers exactly
+	// like kind=decision. Unlike decision/narrative it renders in the client
+	// memory timeline (visibleMeetingMemoryEntries keeps it) — a deliberate note
+	// is timeline-worthy. author/authorCertain metadata records who filed it.
+	meetingMemoryKindNote = "note"
+	// meetingMemoryKindDeadLetter is the synthesis-abandonment tombstone (memory
+	// study 1.4, gap #9): when the ambient runner dead-letters a head input after
+	// repeated failures (agent_runner.go recordAmbientAgentFailure), a stub
+	// records the agent, room, meeting, and skipped window so the FACT that a
+	// synthesis window was abandoned survives — the raw transcripts still exist on
+	// disk but were never folded into knowledge. UI-state AND relevance=expired so
+	// it never pollutes recall; read only by the coverage machinery
+	// (hasDeadLetterForMeeting) to flip a meeting to partial_synthesis. Written
+	// mint-free (appendAmbientEntry) with a pre-stamped meetingId so appending at
+	// idle never opens a phantom sitting.
+	meetingMemoryKindDeadLetter = "dead_letter"
+	// meetingMemoryKindChatDelete is the own-chat delete tombstone (memory study
+	// 1.5b, gap #13): deleteRoomChatMessage hard-deletes the message content (that
+	// is the point of a delete), but a dated "message deleted by <author>" stub
+	// survives so the FACT of the deletion is never trace-free — matching the
+	// slop-quarantine expiry-stub discipline. UI-state AND relevance=expired: the
+	// stub is bookkeeping, never recall material or a client-timeline row.
+	meetingMemoryKindChatDelete = "chat_delete"
 	defaultMeetingMemoryPath   = "data/meeting-memory.jsonl"
 	// transcriptSourceRoomChat marks transcript entries injected from the
 	// in-meeting text chat rather than the audio transcription lanes.
@@ -633,6 +664,23 @@ func (store *meetingMemoryStore) appendRoomChatTranscriptForMeeting(roomID strin
 	return store.appendAttributedTranscriptEntry(roomID, eventID, "", speaker, "", text, metadata, true, expectedMeetingID)
 }
 
+// fallbackTranscriptID derives the content-addressed id for an id-less STT
+// event: sha256 of meetingId|speaker|text|hourBucket, prefixed "transcript-"
+// and truncated to 16 hex chars (item 1.5a). The coarse UTC-hour bucket (F9)
+// means a near-immediate redelivery still collapses to one entry (it lands in
+// the same hour → same id → INSERT-OR-IGNORE through the seen-map), while the
+// SAME speaker genuinely repeating the SAME words a few hours later in one
+// meeting files as a DISTINCT entry instead of being silently swallowed as a
+// dedupe. Residuals, accepted honestly: two identical utterances inside one
+// clock hour still dedupe (a true same-hour verbatim repeat is rare and
+// indistinguishable from a redelivery), and a redelivery straddling an hour
+// boundary files twice (also rare).
+func fallbackTranscriptID(meetingID string, speaker string, transcript string, at time.Time) string {
+	hourBucket := at.UTC().Format("2006-01-02T15")
+	sum := sha256.Sum256([]byte(meetingID + "|" + normalizeTranscriptSpeaker(speaker) + "|" + transcript + "|" + hourBucket))
+	return "transcript-" + hex.EncodeToString(sum[:])[:16]
+}
+
 func (store *meetingMemoryStore) appendAttributedTranscriptEntry(roomID string, eventID string, itemID string, speaker string, speakerConfidence string, transcript string, extraMetadata map[string]string, bypassUsefulnessFilter bool, expectedMeetingID string) (meetingMemoryEntry, bool, error) {
 	transcript = normalizeMemoryText(canonicalizeDomainTerms(transcript))
 	if store == nil || transcript == "" {
@@ -647,7 +695,24 @@ func (store *meetingMemoryStore) appendAttributedTranscriptEntry(roomID string, 
 		id = strings.TrimSpace(itemID)
 	}
 	if id == "" {
-		id = fmt.Sprintf("transcript-%d", time.Now().UnixNano())
+		// No provider/item id (a re-delivered STT event whose id was dropped):
+		// derive a content-addressed fallback so an identical redelivery no-ops
+		// through the existing seen-map (their INSERT-OR-IGNORE, biting only
+		// where we lack a natural id) instead of minting a fresh nanosecond id
+		// every time. Speaker-scoped BY DESIGN (study §4.1, item 1.5a): speaker
+		// attribution is the raw-tier payload, so two people saying the same
+		// words stay two entries, while the same speaker's same words in the
+		// same meeting AND the same clock hour collapse to one (F9).
+		meetingID := strings.TrimSpace(expectedMeetingID)
+		if meetingID == "" {
+			// ensureMeetingID (not the read-only currentMeetingID) so the hash is
+			// stable across the mint boundary: the first id-less transcript of a
+			// meeting mints the id, and an identical redelivery reads the same
+			// minted id and therefore the same content hash — appendEntryForMeeting
+			// would mint it on append anyway.
+			meetingID = store.ensureMeetingID(roomID)
+		}
+		id = fallbackTranscriptID(meetingID, speaker, transcript, time.Now())
 	}
 
 	metadata := map[string]string{
@@ -722,6 +787,31 @@ func (store *meetingMemoryStore) appendRunLog(id string, text string, metadata m
 
 func (store *meetingMemoryStore) appendNarrative(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
 	return store.appendEntry(meetingMemoryKindNarrative, id, text, metadata)
+}
+
+// appendNote files the deliberate-write "for the record" entry (memory study
+// 2.1). Recall-eligible knowledge, so it routes through the ordinary appendEntry
+// path — the caller pre-stamps meetingId (the live sitting, or "none" at idle)
+// so a note filed outside a meeting never opens a phantom sitting. A
+// deterministic id makes a double-call idempotent via the seen-map (run-log
+// discipline).
+func (store *meetingMemoryStore) appendNote(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.appendEntry(meetingMemoryKindNote, id, text, metadata)
+}
+
+// appendDeadLetter records a synthesis-abandonment tombstone (memory study 1.4).
+// Mint-free (appendAmbientEntry) so appending a dead-letter at idle can never
+// open a phantom sitting; the caller carries the abandoned input's own meetingId
+// in metadata for the coverage overlap check.
+func (store *meetingMemoryStore) appendDeadLetter(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.appendAmbientEntry(meetingMemoryKindDeadLetter, id, text, metadata)
+}
+
+// appendChatDeleteTombstone records that an own-chat message was deleted (memory
+// study 1.5b). Mint-free like the other bookkeeping stubs; the caller carries the
+// deleted message's meetingId so the stub stays attributable without minting.
+func (store *meetingMemoryStore) appendChatDeleteTombstone(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.appendAmbientEntry(meetingMemoryKindChatDelete, id, text, metadata)
 }
 
 func (store *meetingMemoryStore) updateScoutChatThread(id string, text string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
@@ -1520,6 +1610,17 @@ const (
 	coverageLabelPartialLateStart = "partial_late_start" // capture began well after the sitting started
 	coverageLabelPartialGaps      = "partial_gaps"       // a long stretch mid-sitting with no captured transcript (quiet OR a capture gap)
 	coverageLabelUnknown          = "unknown"            // legacy synthetic key, no directory record, or no captured span
+	// coverageLabelPartialSynthesis (memory study 1.4, gap #9): the transcript
+	// was captured but the per-meeting digest-synthesis lane (transcript→brain→
+	// digest) abandoned a window of this meeting after repeated failures (a
+	// dead_letter stub). This is orthogonal to the capture labels above — capture
+	// looked complete, synthesis did not — so the coverage read overrides even a
+	// "full" capture stamp with it: the honest signal is "captured but not fully
+	// synthesized". Scoped to the digest lane only (isSynthesisDeadLetterAgent,
+	// finding F13): a board / mission / ledger dead-letter loses cards / insights /
+	// records, not the digest, and never flips coverage. Detected live at read
+	// time (hasDeadLetterForMeeting), never a stamped label.
+	coverageLabelPartialSynthesis = "partial_synthesis"
 
 	// coverageStartTolerance: a digest whose captured window opens within this
 	// of the sitting start still counts as covering the start — it absorbs the
@@ -1606,6 +1707,85 @@ func meetingCoverageFromDigest(entry meetingMemoryEntry) meetingCoverageSummary 
 		summary.SpanStart, summary.SpanEnd = start, end
 	}
 	return summary
+}
+
+// Dead-letter tombstone metadata (memory study 1.4): the fields a dead_letter
+// stub carries so the coverage machinery can attribute an abandoned synthesis
+// window back to its meeting.
+const (
+	deadLetterAgentMetadataKey     = "deadLetterAgent"     // ambient agent that gave up (agent.name)
+	deadLetterRoomMetadataKey      = "deadLetterRoom"      // room whose window was abandoned
+	deadLetterInputKindMetadataKey = "deadLetterInputKind" // kind of the abandoned head input
+	deadLetterAttemptsMetadataKey  = "deadLetterAttempts"  // failed passes before giving up
+	deadLetterSpanStartMetadataKey = "deadLetterSpanStart" // start of the abandoned window (RFC3339)
+	deadLetterSpanEndMetadataKey   = "deadLetterSpanEnd"   // end of the abandoned window (RFC3339)
+)
+
+// isSynthesisDeadLetterAgent reports whether a dead-lettered agent belongs to the
+// per-meeting digest-synthesis lane (transcript→brain→digest). Only that lane's
+// abandonment leaves a meeting's own transcript captured-but-not-folded into the
+// digest the coverage read is about, so only it may flip a meeting to
+// partial_synthesis. The board worker, mission-intelligence, and the decision /
+// entity ledgers and narrative maintainer are shared-loop side lanes whose
+// abandonment loses cards / insights / records — real losses, but NOT the digest
+// summary — so a dead-letter from any of them must never move meeting coverage
+// (gate finding F13). Day-/company-digest rollups sit ABOVE the per-meeting
+// digest: their abandonment leaves the meeting's own digest intact, so they are
+// excluded too.
+func isSynthesisDeadLetterAgent(agentName string) bool {
+	switch strings.TrimSpace(agentName) {
+	case meetingBrainAgentName, meetingDigestAgentName:
+		return true
+	}
+	return false
+}
+
+// hasDeadLetterForMeeting reports whether a digest-SYNTHESIS pass abandoned a
+// window belonging to meetingID (memory study 1.4). Only the transcript→brain→
+// digest lane counts (isSynthesisDeadLetterAgent, finding F13); a board /
+// mission / ledger dead-letter is skipped so it can never masquerade as
+// unsummarized-transcript coverage. Primary match is meetingId equality — a
+// dead-lettered head input (a brain/digest row) carries the meeting it covered,
+// so its tombstone names the same meeting. A stub that carries no meetingId (a
+// cross-meeting input) still matches when its recorded window overlaps the
+// meeting's captured span, so the honesty signal is never lost to a missing
+// stamp. Reads raw (entriesOfKind), because the stub is deliberately hidden from
+// recall.
+func (store *meetingMemoryStore) hasDeadLetterForMeeting(meetingID string, spanStart, spanEnd time.Time) bool {
+	meetingID = strings.TrimSpace(meetingID)
+	if store == nil {
+		return false
+	}
+	for _, stub := range store.entriesOfKind(meetingMemoryKindDeadLetter, 0) {
+		if !isSynthesisDeadLetterAgent(stub.Metadata[deadLetterAgentMetadataKey]) {
+			// A non-synthesis lane (board worker, mission intelligence, decision
+			// or entity ledger, narrative maintainer) abandoned this window; that
+			// is orthogonal to whether the transcript was summarized, so it must
+			// not flip meeting coverage (finding F13).
+			continue
+		}
+		if meetingID != "" && strings.TrimSpace(stub.Metadata["meetingId"]) == meetingID {
+			return true
+		}
+		if spanStart.IsZero() || spanEnd.IsZero() {
+			continue
+		}
+		if strings.TrimSpace(stub.Metadata["meetingId"]) != "" {
+			// A stub with a DIFFERENT meetingId belongs to another meeting; do
+			// not let a span overlap steal its blame.
+			continue
+		}
+		stubStart, startErr := time.Parse(time.RFC3339, strings.TrimSpace(stub.Metadata[deadLetterSpanStartMetadataKey]))
+		stubEnd, endErr := time.Parse(time.RFC3339, strings.TrimSpace(stub.Metadata[deadLetterSpanEndMetadataKey]))
+		if startErr != nil || endErr != nil {
+			continue
+		}
+		// Overlap: the abandoned window and the captured span intersect.
+		if stubStart.Before(spanEnd) && spanStart.Before(stubEnd) {
+			return true
+		}
+	}
+	return false
 }
 
 // isMeetingDigestKind reports the three digest tiers. They are recall-eligible
@@ -2134,7 +2314,7 @@ func (store *meetingMemoryStore) deleteEntryByID(id string) (meetingMemoryEntry,
 // deliberately absent: decision statements ARE knowledge and must ground
 // Scout's answers.
 func isUIStateMemoryKind(kind string) bool {
-	return kind == meetingMemoryKindScoutChat || kind == meetingMemoryKindCodexProposal || kind == meetingMemoryKindMissionInsight || kind == meetingMemoryKindDecisionPass || kind == meetingMemoryKindPackage || kind == meetingMemoryKindDealRoom || kind == meetingMemoryKindSlopPass || kind == meetingMemoryKindSignal || kind == meetingMemoryKindDayDigestPass || kind == meetingMemoryKindLedgerEvent || kind == meetingMemoryKindLedgerPass
+	return kind == meetingMemoryKindScoutChat || kind == meetingMemoryKindCodexProposal || kind == meetingMemoryKindMissionInsight || kind == meetingMemoryKindDecisionPass || kind == meetingMemoryKindPackage || kind == meetingMemoryKindDealRoom || kind == meetingMemoryKindSlopPass || kind == meetingMemoryKindSignal || kind == meetingMemoryKindDayDigestPass || kind == meetingMemoryKindLedgerEvent || kind == meetingMemoryKindLedgerPass || kind == meetingMemoryKindDeadLetter || kind == meetingMemoryKindChatDelete
 }
 
 func (store *meetingMemoryStore) search(query string, limit int) []meetingMemoryMatch {
@@ -2163,6 +2343,12 @@ func (store *meetingMemoryStore) search(query string, limit int) []meetingMemory
 
 	matches := make([]meetingMemoryMatch, 0, len(entries))
 	lowerQuery := strings.ToLower(query)
+	// Item 1.6: match STEMMED query/synonym tokens against the entry's stemmed
+	// token SET rather than raw substrings, so "art" no longer scores against
+	// "startup" (a false positive that wasted slots in the recall budget) while
+	// "launch" still finds "launched"/"launching". Stem once up front.
+	queryStems := stemMemoryTokens(queryTokens)
+	synonymStems := stemMemoryTokens(synonymTokens)
 	for _, entry := range entries {
 		if isUIStateMemoryKind(entry.Kind) {
 			continue
@@ -2172,18 +2358,33 @@ func (store *meetingMemoryStore) search(query string, limit int) []meetingMemory
 			continue
 		}
 		lowerText := strings.ToLower(entry.Text)
+		entryStems := stemmedMemoryTokenSet(entry.Text)
 		score := 0
-		if strings.Contains(lowerText, lowerQuery) {
+		// Exact phrase bonus, now word-boundary anchored so a sub-word hit
+		// ("art" inside "startup") never earns it — a whole-word single-token
+		// query keeps its bonus exactly as before.
+		if containsWordBoundedPhrase(lowerText, lowerQuery) {
 			score += 10
 		}
-		for _, token := range queryTokens {
-			if strings.Contains(lowerText, token) {
+		for _, stem := range queryStems {
+			if _, ok := entryStems[stem]; ok {
 				score += 3
 			}
 		}
-		for _, token := range synonymTokens {
-			if strings.Contains(lowerText, token) {
+		for _, stem := range synonymStems {
+			if _, ok := entryStems[stem]; ok {
 				score += 2
+			}
+		}
+		// Item 1.3a: write-time alias phrasings stamped by the digest/narrative
+		// producers (digestAliases metadata) match query tokens at synonym
+		// weight, so "korean tv" finds a "Samsung TV Plus" digest carrying the
+		// alias "the Korean TV deal". Same stemmed word-boundary discipline.
+		if aliasStems := stemmedMemoryTokenSet(entry.Metadata[digestAliasesMetadataKey]); len(aliasStems) > 0 {
+			for _, stem := range queryStems {
+				if _, ok := aliasStems[stem]; ok {
+					score += 2
+				}
 			}
 		}
 		if score == 0 {
@@ -2384,6 +2585,129 @@ func uniqueMemoryTokens(value string) []string {
 	}
 
 	return tokens
+}
+
+// stemMemoryToken applies a deliberately small suffix stripper (item 1.6):
+// plural s/es, then ing/ed, each removed only while the remaining stem stays
+// >=4 characters, then two convergence steps so inflected and base forms land
+// on the SAME stem (F6+F25 — the earlier stripper left inflected forms stranded
+// on a stem the base never reached, silently regressing recall):
+//
+//   - a doubled trailing consonant collapses ("plann"→"plan", "shipp"→"ship"),
+//     so gemination in -ing/-ed forms folds back to the base and a base that
+//     already ends in a double consonant (press, call) folds the same way;
+//   - a silent trailing 'e' is dropped ("change"→"chang", "decide"→"decid"),
+//     so the base meets the stem "changes"/"changed"/"changing" already fold to.
+//
+// Both steps keep the result >=4, so short tokens and acronyms ("AJ", "TKO",
+// "art") are untouched and never collide (art !↔ startup). It folds
+// "launch"/"launched"/"launching"/"launches" to one stem and "meeting"/
+// "meetings" to "meet", and is applied symmetrically to query and entry tokens
+// so both sides fold identically.
+func stemMemoryToken(token string) string {
+	switch {
+	case strings.HasSuffix(token, "es") && len(token)-2 >= 4:
+		token = token[:len(token)-2]
+	case strings.HasSuffix(token, "s") && !strings.HasSuffix(token, "ss") && len(token)-1 >= 4:
+		token = token[:len(token)-1]
+	}
+	switch {
+	case strings.HasSuffix(token, "ing") && len(token)-3 >= 4:
+		token = token[:len(token)-3]
+	case strings.HasSuffix(token, "ed") && len(token)-2 >= 4:
+		token = token[:len(token)-2]
+	}
+	// Collapse a doubled trailing consonant (>=5 so the result stays >=4).
+	// Consonants only — a doubled vowel ("ee" in agree) is left to the silent-e
+	// step so it does not over-fold.
+	if n := len(token); n >= 5 && token[n-1] == token[n-2] && isMemoryStemConsonant(token[n-1]) {
+		token = token[:n-1]
+	}
+	// Drop a silent trailing 'e' (result must stay >=4, so "code" is untouched).
+	if n := len(token); n >= 5 && token[n-1] == 'e' {
+		token = token[:n-1]
+	}
+	return token
+}
+
+// isMemoryStemConsonant reports whether b is an ASCII consonant — the guard for
+// the doubled-consonant collapse in stemMemoryToken (tokens are lowercased
+// before stemming, so only the a-z range is considered).
+func isMemoryStemConsonant(b byte) bool {
+	switch b {
+	case 'a', 'e', 'i', 'o', 'u':
+		return false
+	default:
+		return b >= 'a' && b <= 'z'
+	}
+}
+
+// stemMemoryTokens stems a token slice and de-duplicates the result.
+func stemMemoryTokens(tokens []string) []string {
+	if len(tokens) == 0 {
+		return nil
+	}
+	stems := make([]string, 0, len(tokens))
+	seen := make(map[string]struct{}, len(tokens))
+	for _, token := range tokens {
+		stem := stemMemoryToken(token)
+		if _, ok := seen[stem]; ok {
+			continue
+		}
+		seen[stem] = struct{}{}
+		stems = append(stems, stem)
+	}
+	return stems
+}
+
+// stemmedMemoryTokenSet tokenizes text (uniqueMemoryTokens: lowercased, >=3
+// chars) and returns the set of stemmed tokens for word-boundary membership
+// matching. Nil when the text has no keyable tokens.
+func stemmedMemoryTokenSet(value string) map[string]struct{} {
+	tokens := uniqueMemoryTokens(value)
+	if len(tokens) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(tokens))
+	for _, token := range tokens {
+		set[stemMemoryToken(token)] = struct{}{}
+	}
+	return set
+}
+
+// memoryTextByteIsWordChar reports whether the byte at index is an ASCII
+// alphanumeric — the word-character test for phrase boundary checks. Indices
+// outside the string (before the start / past the end) read as non-word so a
+// match flush against a string edge still counts as bounded.
+func memoryTextByteIsWordChar(text string, index int) bool {
+	if index < 0 || index >= len(text) {
+		return false
+	}
+	c := text[index]
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+}
+
+// containsWordBoundedPhrase reports whether phrase occurs in text on word
+// boundaries (item 1.6), so "art" no longer matches inside "startup" and "now"
+// no longer matches inside "know". Both arguments are expected pre-lowercased.
+func containsWordBoundedPhrase(text string, phrase string) bool {
+	phrase = strings.TrimSpace(phrase)
+	if phrase == "" {
+		return false
+	}
+	for from := 0; from <= len(text)-len(phrase); {
+		idx := strings.Index(text[from:], phrase)
+		if idx < 0 {
+			return false
+		}
+		start := from + idx
+		end := start + len(phrase)
+		if !memoryTextByteIsWordChar(text, start-1) && !memoryTextByteIsWordChar(text, end) {
+			return true
+		}
+		from = start + 1
+	}
+	return false
 }
 
 func tailMemoryEntries(entries []meetingMemoryEntry, limit int) []meetingMemoryEntry {

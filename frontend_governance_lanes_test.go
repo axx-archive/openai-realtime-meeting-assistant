@@ -46,6 +46,40 @@ func TestIndexDecisionLedgerProposedRatifyDoor(t *testing.T) {
 	}
 }
 
+// F15+F21: a proposed-supersession (a proposed REVERSAL) is reachable — it
+// carries the ratify affordance via the SAME endpoint, labeled distinctly as a
+// reversal — and unknown statuses never mislabel as an active decision.
+func TestIndexDecisionLedgerProposedSupersessionRatifyDoor(t *testing.T) {
+	html := readIndexForGovernanceLanes(t)
+	body := functionBody(html, "function intelDecisionNode(decision, rerender)")
+	if body == "" {
+		t.Fatal("could not extract intelDecisionNode body")
+	}
+	for _, want := range []string{
+		// the reversal status is recognized and drives the ratify affordance.
+		"=== 'proposed-supersession'",
+		"awaitingRatification",
+		// distinct labeling on the meta line and the status detail row.
+		"'proposed reversal · awaiting ratification'",
+		"proposed reversal — ratify to supersede",
+		"supersedesSummary",
+		// wired to the SAME ratify action as a plain proposed default.
+		"postAuthJSON('/assistant/decisions/ratify', { decisionId: decision.id })",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("intelDecisionNode body missing %q", want)
+		}
+	}
+	// F21: the active label must be guarded on an EXPLICIT active/empty status, and
+	// an unknown status falls through to its literal value — never "active".
+	if !strings.Contains(body, "status === 'active' || status === ''") {
+		t.Error("the active-decision label must be guarded on an explicit active status (F21)")
+	}
+	if !strings.Contains(body, "addRow('status', status)") {
+		t.Error("an unknown decision status must render literally, never as an active decision on record (F21)")
+	}
+}
+
 // The approve seam surfaces the server's endorsement progress ("endorsement
 // recorded (1/2)") instead of silence — the heavy-lane consensus is honest.
 func TestIndexSubmitApprovalSurfacesEndorsementProgress(t *testing.T) {

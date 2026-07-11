@@ -78,9 +78,34 @@ const (
 	meetingDigestQuestionCap = 10
 	meetingDigestThemeCap    = 8
 	meetingDigestAttendeeCap = 12
+	// meetingDigestAliasCap/meetingDigestAliasLen bound the item-1.3a alias
+	// enrichment: at most 5 alternate phrasings, each <=60 chars.
+	meetingDigestAliasCap = 5
+	meetingDigestAliasLen = 60
 	// meetingDigestDefaultImportance is stamped when the model omits a score
 	// (0) — mid-scale, never accidentally top-ranked.
 	meetingDigestDefaultImportance = 3
+)
+
+const (
+	// digestAliasesMetadataKey holds the clamped alias phrasings joined as
+	// searchable text (item 1.3a). Server-mirrored from the payload; a later
+	// wave reads it in store.search / ledger alias matching.
+	digestAliasesMetadataKey = "digestAliases"
+	// digestDroppedFactsMetadataKey counts the still-live prior facts the
+	// carry-forward guard (item 0.2) could NOT re-append because the section
+	// was already at cap — the honest "we lost N" stamp when silence-preserves
+	// runs out of headroom, so the loss is at least visible instead of silent.
+	digestDroppedFactsMetadataKey = "droppedFacts"
+	// digestAttributionHedge is the intentional who-said-what hedge the model
+	// prepends to a by/owner field. The verification trio (item 1.1c) peels it
+	// off, grounds the underlying name against the roster, then restores it —
+	// so grounding never eats the hedge.
+	digestAttributionHedge = "attributed to "
+	// meetingDigestFactAtGrace absorbs minor boundary/clock rounding when the
+	// temporal-accuracy check (item 1.1b) tests a fact `at` against the
+	// server-known span; a wrong-DAY `at` is off by hours, well past this.
+	meetingDigestFactAtGrace = 5 * time.Minute
 )
 
 // T3 section caps (day_digest): a day folds several meetings, so the sections
@@ -150,40 +175,52 @@ func meetingDigestMaxMeetingsPerTick() int {
 // a meeting_digest (the digest itself is meeting-scoped) and is stamped by the
 // day fold so a day_digest fact still points at its source meeting.
 
+// CarriedForward on any fact marks it as re-appended by the server-side
+// carry-forward guard (item 0.2): the model dropped it on rebuild but it was a
+// still-live prior fact, so EXISTENCE is server-owned even though status stays
+// model-owned. Serialized as carriedForwardByServer so a reader can tell a
+// preserved fact from a model-fresh one. The flag is server-set ONLY:
+// clampMeetingDigestPayload zeroes it on parse so a model echoing the field back
+// from the prior digest in the prompt can never forge the provenance.
+
 type meetingDigestTopic struct {
-	T          string `json:"t"`
-	Anchor     string `json:"anchor,omitempty"`
-	At         string `json:"at,omitempty"`
-	Importance int    `json:"importance,omitempty"`
-	MeetingID  string `json:"meetingId,omitempty"`
+	T              string `json:"t"`
+	Anchor         string `json:"anchor,omitempty"`
+	At             string `json:"at,omitempty"`
+	Importance     int    `json:"importance,omitempty"`
+	MeetingID      string `json:"meetingId,omitempty"`
+	CarriedForward bool   `json:"carriedForwardByServer,omitempty"`
 }
 
 type meetingDigestDecision struct {
-	D          string `json:"d"`
-	By         string `json:"by,omitempty"`
-	Status     string `json:"status,omitempty"`
-	Anchor     string `json:"anchor,omitempty"`
-	At         string `json:"at,omitempty"`
-	Importance int    `json:"importance,omitempty"`
-	MeetingID  string `json:"meetingId,omitempty"`
+	D              string `json:"d"`
+	By             string `json:"by,omitempty"`
+	Status         string `json:"status,omitempty"`
+	Anchor         string `json:"anchor,omitempty"`
+	At             string `json:"at,omitempty"`
+	Importance     int    `json:"importance,omitempty"`
+	MeetingID      string `json:"meetingId,omitempty"`
+	CarriedForward bool   `json:"carriedForwardByServer,omitempty"`
 }
 
 type meetingDigestAction struct {
-	A          string `json:"a"`
-	Owner      string `json:"owner,omitempty"`
-	Status     string `json:"status,omitempty"`
-	Anchor     string `json:"anchor,omitempty"`
-	At         string `json:"at,omitempty"`
-	Importance int    `json:"importance,omitempty"`
-	MeetingID  string `json:"meetingId,omitempty"`
+	A              string `json:"a"`
+	Owner          string `json:"owner,omitempty"`
+	Status         string `json:"status,omitempty"`
+	Anchor         string `json:"anchor,omitempty"`
+	At             string `json:"at,omitempty"`
+	Importance     int    `json:"importance,omitempty"`
+	MeetingID      string `json:"meetingId,omitempty"`
+	CarriedForward bool   `json:"carriedForwardByServer,omitempty"`
 }
 
 type meetingDigestQuestion struct {
-	Q          string `json:"q"`
-	Anchor     string `json:"anchor,omitempty"`
-	At         string `json:"at,omitempty"`
-	Importance int    `json:"importance,omitempty"`
-	MeetingID  string `json:"meetingId,omitempty"`
+	Q              string `json:"q"`
+	Anchor         string `json:"anchor,omitempty"`
+	At             string `json:"at,omitempty"`
+	Importance     int    `json:"importance,omitempty"`
+	MeetingID      string `json:"meetingId,omitempty"`
+	CarriedForward bool   `json:"carriedForwardByServer,omitempty"`
 }
 
 type meetingDigestPayload struct {
@@ -198,6 +235,11 @@ type meetingDigestPayload struct {
 	ActionItems   []meetingDigestAction   `json:"actionItems,omitempty"`
 	OpenQuestions []meetingDigestQuestion `json:"openQuestions,omitempty"`
 	Themes        []string                `json:"themes,omitempty"`
+	// Aliases (item 1.3a): 3-5 model-written alternate phrasings for this
+	// meeting's topics/storyline — the write-time search-enrichment trick. Kept
+	// on the body AND mirrored into digestAliases metadata as searchable text;
+	// a later wave wires them into store.search + ledgerTitleKey matching.
+	Aliases []string `json:"aliases,omitempty"`
 }
 
 // parseMeetingDigest validates digest JSON with the same stray-markdown-fence
@@ -234,8 +276,12 @@ func clampImportance(value int) int {
 // clampMeetingDigestPayload bounds every model-written field before the
 // canonical re-marshal is persisted: server-derived truth (meetingId, day,
 // span fallbacks) overrides whatever the model claimed, sections are capped,
-// strings trimForStorage-bound, importance clamped, and the day-fold-only
-// MeetingID provenance fields cleared.
+// strings trimForStorage-bound, importance clamped, and the two server-owned
+// provenance fields cleared — the day-fold-only MeetingID and CarriedForward.
+// CarriedForward is stripped here because the prior digest JSON echoed into the
+// prompt carries the flag, so the model can copy it onto a model-kept (or
+// invented) row; zeroing it in the clamp means only the server-side
+// carry-forward guard (which runs after) ever marks a fact server-carried.
 func clampMeetingDigestPayload(payload *meetingDigestPayload, meetingID string, day string, spanStart time.Time, spanEnd time.Time) {
 	payload.MeetingID = meetingID
 	payload.Day = day
@@ -262,6 +308,7 @@ func clampMeetingDigestPayload(payload *meetingDigestPayload, meetingID string, 
 		topic.At = trimForStorage(topic.At, 40)
 		topic.Importance = clampImportance(topic.Importance)
 		topic.MeetingID = ""
+		topic.CarriedForward = false
 	}
 	if len(payload.Decisions) > meetingDigestDecisionCap {
 		payload.Decisions = payload.Decisions[:meetingDigestDecisionCap]
@@ -275,6 +322,7 @@ func clampMeetingDigestPayload(payload *meetingDigestPayload, meetingID string, 
 		decision.At = trimForStorage(decision.At, 40)
 		decision.Importance = clampImportance(decision.Importance)
 		decision.MeetingID = ""
+		decision.CarriedForward = false
 	}
 	if len(payload.ActionItems) > meetingDigestActionCap {
 		payload.ActionItems = payload.ActionItems[:meetingDigestActionCap]
@@ -288,6 +336,7 @@ func clampMeetingDigestPayload(payload *meetingDigestPayload, meetingID string, 
 		action.At = trimForStorage(action.At, 40)
 		action.Importance = clampImportance(action.Importance)
 		action.MeetingID = ""
+		action.CarriedForward = false
 	}
 	if len(payload.OpenQuestions) > meetingDigestQuestionCap {
 		payload.OpenQuestions = payload.OpenQuestions[:meetingDigestQuestionCap]
@@ -299,6 +348,7 @@ func clampMeetingDigestPayload(payload *meetingDigestPayload, meetingID string, 
 		question.At = trimForStorage(question.At, 40)
 		question.Importance = clampImportance(question.Importance)
 		question.MeetingID = ""
+		question.CarriedForward = false
 	}
 	if len(payload.Themes) > meetingDigestThemeCap {
 		payload.Themes = payload.Themes[:meetingDigestThemeCap]
@@ -306,6 +356,297 @@ func clampMeetingDigestPayload(payload *meetingDigestPayload, meetingID string, 
 	for index := range payload.Themes {
 		payload.Themes[index] = trimForStorage(payload.Themes[index], 80)
 	}
+	// item 1.3a: bound the alias enrichment like every other model-written
+	// field (dedupe, <=60 chars each, <=5 total). Pure — safe on every caller.
+	payload.Aliases = clampDigestAliases(payload.Aliases)
+}
+
+// clampDigestAliases trims, case-insensitively dedupes, and caps the model's
+// alias phrasings (item 1.3a). Empty/whitespace entries drop out.
+func clampDigestAliases(aliases []string) []string {
+	if len(aliases) == 0 {
+		return nil
+	}
+	cleaned := make([]string, 0, len(aliases))
+	seen := map[string]struct{}{}
+	for _, alias := range aliases {
+		trimmed := trimForStorage(alias, meetingDigestAliasLen)
+		if trimmed == "" {
+			continue
+		}
+		lower := strings.ToLower(trimmed)
+		if _, ok := seen[lower]; ok {
+			continue
+		}
+		seen[lower] = struct{}{}
+		cleaned = append(cleaned, trimmed)
+		if len(cleaned) >= meetingDigestAliasCap {
+			break
+		}
+	}
+	if len(cleaned) == 0 {
+		return nil
+	}
+
+	return cleaned
+}
+
+// digestAliasesMetadata joins the clamped aliases into one searchable string
+// for the digestAliases metadata stamp (item 1.3a). Empty when there are none.
+func digestAliasesMetadata(aliases []string) string {
+	return strings.Join(aliases, ", ")
+}
+
+/* ---------- verification trio (item 1.1) + carry-forward guard (item 0.2) ---------- */
+
+// digestFactKey normalizes a fact's text into the comparable token string the
+// carry-forward guard (item 0.2) diffs on. It REPLICATES the
+// decisionDedupeKey/ledgerTitleKey discipline (lowercase -> domain-term
+// canonicalization -> >=3-char unique tokens) locally rather than calling the
+// entity_ledger/decision_ledger helper, so this file's guard never couples to a
+// symbol a later memory-architecture wave owns. Empty when nothing keyable
+// survives normalization (a degenerate all-stopword fact is left uncarried).
+func digestFactKey(text string) string {
+	return strings.Join(uniqueMemoryTokens(canonicalizeDomainTerms(strings.ToLower(text))), " ")
+}
+
+// isTerminalDigestFactStatus reports a status that CLOSES a fact so the
+// carry-forward guard must not resurrect it. Replicates the entity_ledger
+// terminal vocabulary (done/closed/answered/superseded + synonyms) locally to
+// avoid coupling to isTerminalLedgerStatus (owned by a later wave).
+func isTerminalDigestFactStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "done", "complete", "completed", "finished", "shipped", "delivered",
+		"closed", "resolved", "cancelled", "canceled", "dropped", "abandoned", "retracted",
+		"answered", "superseded", "reversed", "replaced", "overturned", "rescinded":
+		return true
+	}
+
+	return false
+}
+
+// groundDigestAttribution grounds a model-written by/owner field against the
+// roster exactly as decision_ledger.go:584 does (unknown names blanked, never
+// invented) while preserving the digest's intentional "attributed to X" hedge
+// and any server-enforced Guest prefix. The hedge marker is peeled off, the
+// underlying name grounded via normalizeTranscriptSpeaker, then the hedge is
+// restored; a name that does not ground to the roster blanks the whole field.
+func groundDigestAttribution(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	hedge := ""
+	rest := trimmed
+	if strings.HasPrefix(strings.ToLower(trimmed), digestAttributionHedge) {
+		hedge = trimmed[:len(digestAttributionHedge)] // keep the model's own casing
+		rest = strings.TrimSpace(trimmed[len(digestAttributionHedge):])
+	}
+	grounded := normalizeTranscriptSpeaker(rest)
+	if grounded == "" {
+		return ""
+	}
+	if hedge != "" {
+		return hedge + grounded
+	}
+
+	return grounded
+}
+
+// factAtOutsideSpan reports whether a fact's RFC3339 `at` falls (beyond a small
+// grace) outside the server-known meeting span. An unparseable or empty `at`,
+// or a zero/degenerate span, is never "outside" — we only clamp a claim we can
+// actually contradict (item 1.1b).
+func factAtOutsideSpan(at string, spanStart time.Time, spanEnd time.Time) bool {
+	if spanStart.IsZero() || spanEnd.IsZero() || spanEnd.Before(spanStart) {
+		return false
+	}
+	parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(at))
+	if err != nil {
+		return false
+	}
+
+	return parsed.Before(spanStart.Add(-meetingDigestFactAtGrace)) || parsed.After(spanEnd.Add(meetingDigestFactAtGrace))
+}
+
+// verifyMeetingDigestPayload is the item-1.1 deterministic verification trio —
+// server truth overriding model claims, zero model calls, mirroring the
+// coverage-stamp doctrine. Run in the T2 producer AFTER clampMeetingDigestPayload
+// AND after the carry-forward guard, so carried facts are grounded on the same
+// footing as fresh model output — a legacy pre-deploy digest was never verified,
+// and an anchor can be quarantined after the pass that first carried it, so
+// "the predecessor already verified it" does not hold. Grounding is idempotent
+// (same-meeting carried anchors, cumulative span), so re-checking an
+// already-verified model fact is a no-op.
+//
+//	(a) anchor-exists     — blank any transcript anchor absent from this
+//	                        meeting's transcript-id set. transcriptIDs==nil means
+//	                        "unresolvable" (legacy key / no stored raw lines) and
+//	                        skips the check rather than destroying every anchor.
+//	(b) temporal accuracy — blank any fact `at` outside the server-known span so
+//	                        factDay falls back to the digest day (no misfiled
+//	                        day-folds) instead of trusting a wrong model time.
+//	(c) attribution        — pass by/owner through the roster grounding, keeping
+//	                        the hedge and Guest prefixes.
+func verifyMeetingDigestPayload(payload *meetingDigestPayload, spanStart time.Time, spanEnd time.Time, transcriptIDs map[string]struct{}) {
+	if payload == nil {
+		return
+	}
+	anchorOK := func(anchor string) bool {
+		if transcriptIDs == nil || strings.TrimSpace(anchor) == "" {
+			return true
+		}
+		_, ok := transcriptIDs[strings.TrimSpace(anchor)]
+		return ok
+	}
+	for index := range payload.Topics {
+		topic := &payload.Topics[index]
+		if !anchorOK(topic.Anchor) {
+			topic.Anchor = ""
+		}
+		if factAtOutsideSpan(topic.At, spanStart, spanEnd) {
+			topic.At = ""
+		}
+	}
+	for index := range payload.Decisions {
+		decision := &payload.Decisions[index]
+		if !anchorOK(decision.Anchor) {
+			decision.Anchor = ""
+		}
+		if factAtOutsideSpan(decision.At, spanStart, spanEnd) {
+			decision.At = ""
+		}
+		decision.By = groundDigestAttribution(decision.By)
+	}
+	for index := range payload.ActionItems {
+		action := &payload.ActionItems[index]
+		if !anchorOK(action.Anchor) {
+			action.Anchor = ""
+		}
+		if factAtOutsideSpan(action.At, spanStart, spanEnd) {
+			action.At = ""
+		}
+		action.Owner = groundDigestAttribution(action.Owner)
+	}
+	for index := range payload.OpenQuestions {
+		question := &payload.OpenQuestions[index]
+		if !anchorOK(question.Anchor) {
+			question.Anchor = ""
+		}
+		if factAtOutsideSpan(question.At, spanStart, spanEnd) {
+			question.At = ""
+		}
+	}
+}
+
+// carryForwardSection re-appends prior non-terminal facts absent from the
+// rebuild into a section's REMAINING cap headroom, importance-ranked, never
+// evicting a model-fresh fact. Returns the section plus the count that did NOT
+// fit (headroom exhausted) for the droppedFacts stamp. This is item 0.2's
+// "silence preserves facts" made structural: EXISTENCE is server-owned, statuses
+// stay model-owned.
+func carryForwardSection[T any](current []T, prior []T, sectionCap int, key func(T) string, terminal func(T) bool, importance func(T) int, mark func(*T)) ([]T, int) {
+	present := make(map[string]struct{}, len(current))
+	for _, fact := range current {
+		if k := key(fact); k != "" {
+			present[k] = struct{}{}
+		}
+	}
+	candidates := make([]T, 0)
+	for _, fact := range prior {
+		if terminal(fact) {
+			continue
+		}
+		k := key(fact)
+		if k == "" {
+			continue
+		}
+		if _, ok := present[k]; ok {
+			continue
+		}
+		present[k] = struct{}{} // a prior fact never collides with another carried candidate
+		candidates = append(candidates, fact)
+	}
+	if len(candidates) == 0 {
+		return current, 0
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return importance(candidates[i]) > importance(candidates[j])
+	})
+	dropped := 0
+	for index := range candidates {
+		if len(current) >= sectionCap {
+			dropped = len(candidates) - index
+			break
+		}
+		fact := candidates[index]
+		mark(&fact)
+		current = append(current, fact)
+	}
+
+	return current, dropped
+}
+
+// carryForwardMeetingDigestFacts diffs the prior current digest against the
+// rebuild and re-appends every still-live prior fact the model silently dropped
+// (item 0.2). Returns the total droppedFacts count (live facts that could not be
+// re-appended because their section was already at cap). Topics/questions carry
+// no status field so they are always non-terminal; decisions/actions honor a
+// terminal status. Runs on the CLAMPED rebuild BEFORE the verification trio
+// (which then grounds both model-fresh and carried facts), so section caps and
+// fact-key normalization agree on both sides.
+func carryForwardMeetingDigestFacts(payload *meetingDigestPayload, prior meetingDigestPayload) int {
+	dropped := 0
+	var d int
+	payload.Topics, d = carryForwardSection(payload.Topics, prior.Topics, meetingDigestTopicCap,
+		func(t meetingDigestTopic) string { return digestFactKey(t.T) },
+		func(meetingDigestTopic) bool { return false },
+		func(t meetingDigestTopic) int { return clampImportance(t.Importance) },
+		func(t *meetingDigestTopic) { t.CarriedForward = true; t.MeetingID = "" })
+	dropped += d
+	payload.Decisions, d = carryForwardSection(payload.Decisions, prior.Decisions, meetingDigestDecisionCap,
+		func(x meetingDigestDecision) string { return digestFactKey(x.D) },
+		func(x meetingDigestDecision) bool { return isTerminalDigestFactStatus(x.Status) },
+		func(x meetingDigestDecision) int { return clampImportance(x.Importance) },
+		func(x *meetingDigestDecision) { x.CarriedForward = true; x.MeetingID = "" })
+	dropped += d
+	payload.ActionItems, d = carryForwardSection(payload.ActionItems, prior.ActionItems, meetingDigestActionCap,
+		func(x meetingDigestAction) string { return digestFactKey(x.A) },
+		func(x meetingDigestAction) bool { return isTerminalDigestFactStatus(x.Status) },
+		func(x meetingDigestAction) int { return clampImportance(x.Importance) },
+		func(x *meetingDigestAction) { x.CarriedForward = true; x.MeetingID = "" })
+	dropped += d
+	payload.OpenQuestions, d = carryForwardSection(payload.OpenQuestions, prior.OpenQuestions, meetingDigestQuestionCap,
+		func(x meetingDigestQuestion) string { return digestFactKey(x.Q) },
+		func(meetingDigestQuestion) bool { return false },
+		func(x meetingDigestQuestion) int { return clampImportance(x.Importance) },
+		func(x *meetingDigestQuestion) { x.CarriedForward = true; x.MeetingID = "" })
+	dropped += d
+
+	return dropped
+}
+
+// digestTranscriptIDSet returns the set of transcript entry ids captured for a
+// real meeting — the anchor-exists ground truth for the verification trio (item
+// 1.1a). Returns nil (skip the check) for a legacy synthetic key or a meeting
+// with no stored raw lines (e.g. a listen-only digest), so anchors we cannot
+// resolve are left intact rather than all blanked. Read-only use of the store's
+// exported snapshotForMeeting; matches transcriptWindowAround's visibility.
+func (app *kanbanBoardApp) digestTranscriptIDSet(meetingKey string) map[string]struct{} {
+	if app == nil || app.memory == nil || isLegacyMeetingKey(meetingKey) {
+		return nil
+	}
+	ids := map[string]struct{}{}
+	for _, entry := range app.memory.snapshotForMeeting(meetingKey, 0) {
+		if entry.Kind == meetingMemoryKindTranscript {
+			ids[entry.ID] = struct{}{}
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
+	return ids
 }
 
 /* ---------- meeting digest producer ---------- */
@@ -417,14 +758,16 @@ func meetingDigestInstructions() string {
 		"You are Bonfire's meeting digest compiler.",
 		"Fold the previous digest (when present) and the new brain write-ups into ONE cumulative digest of this meeting so far.",
 		"Return STRICT JSON only, no markdown fence, matching:",
-		`{"meetingId":string,"title":string(<=80 chars),"day":"YYYY-MM-DD","started":RFC3339,"ended":RFC3339,"attendees":[string](<=12),"topics":[{"t":string(<=160),"anchor":string,"at":RFC3339,"importance":int}],"decisions":[{"d":string(<=240),"by":string,"status":string,"anchor":string,"at":RFC3339,"importance":int}],"actionItems":[{"a":string(<=200),"owner":string,"status":string,"anchor":string,"at":RFC3339,"importance":int}],"openQuestions":[{"q":string(<=200),"anchor":string,"at":RFC3339,"importance":int}],"themes":[string]}.`,
+		`{"meetingId":string,"title":string(<=80 chars),"day":"YYYY-MM-DD","started":RFC3339,"ended":RFC3339,"attendees":[string](<=12),"topics":[{"t":string(<=160),"anchor":string,"at":RFC3339,"importance":int}],"decisions":[{"d":string(<=240),"by":string,"status":string,"anchor":string,"at":RFC3339,"importance":int}],"actionItems":[{"a":string(<=200),"owner":string,"status":string,"anchor":string,"at":RFC3339,"importance":int}],"openQuestions":[{"q":string(<=200),"anchor":string,"at":RFC3339,"importance":int}],"themes":[string],"aliases":[string]}.`,
 		"importance scores each fact 1-5: 5 = blocking or company-critical, 4 = a real commitment or decision, 3 = notable, 2 = context, 1 = passing chatter.",
 		"anchor = one transcript entry id copied VERBATIM from a Transcript reference in the write-ups; empty string when uncertain — never fabricate ids.",
 		"at = the RFC3339 time within the covered window when the fact surfaced; empty string when unknown.",
+		"Resolve every spoken relative date ('yesterday', 'next Friday', 'end of the month') to an absolute YYYY-MM-DD using the generation date and the covered-window timestamps above; never leave a relative date in a fact's text, and put an absolute RFC3339 in 'at'.",
+		"aliases = 3-5 short alternate phrasings someone might SEARCH this meeting's topics or storyline by — synonyms, nicknames, acronyms (e.g. 'Samsung TV Plus' also 'the Korean TV deal', 'CTV partnership'); empty when nothing is ambiguous. Max 5, each <=60 chars.",
 		"Carry forward still-relevant facts from the previous digest and update their statuses; a decision stays until explicitly reversed; an action item marked done keeps its row with status done.",
 		"Speaker attribution upstream is an energy heuristic and can be wrong: hedge who-said-what ('attributed to X'), never assert it as certain.",
 		"Never invent facts, people, clients, dates, decisions, or action items.",
-		"Caps: topics<=12, decisions<=12, actionItems<=16, openQuestions<=10, themes<=8. If the window is thin, return fewer items, never filler.",
+		"Caps: topics<=12, decisions<=12, actionItems<=16, openQuestions<=10, themes<=8, aliases<=5. If the window is thin, return fewer items, never filler.",
 	}, " ")
 }
 
@@ -525,6 +868,26 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 		spanStart, spanEnd := meetingDigestSpan(prior, hasPrior, group.brains)
 		day := dayBucket(spanEnd)
 		clampMeetingDigestPayload(&payload, group.key, day, spanStart, spanEnd)
+		// item 0.2: silence-preserves-facts. Re-append still-live prior facts the
+		// model dropped on rebuild; droppedFacts counts what did not fit the caps.
+		droppedFacts := 0
+		if hasPrior {
+			if priorPayload, priorOK := parseMeetingDigest(prior.Text); priorOK {
+				droppedFacts = carryForwardMeetingDigestFacts(&payload, priorPayload)
+				// item 1.3a silence-preservation: union the predecessor's aliases so a
+				// rebuild that omits aliases never deletes earned recall paths (mirrors
+				// narrative_maintainer's mergeLedgerAliases). Current phrasings lead, so
+				// the clamp keeps them at priority and prior ones fill the cap tail.
+				payload.Aliases = clampDigestAliases(append(payload.Aliases, priorPayload.Aliases...))
+			}
+		}
+		// item 1.1: deterministic verification trio against server truth
+		// (transcript-id set, meeting span, roster) — zero model calls. Runs AFTER
+		// the carry-forward guard so carried facts (legacy pre-deploy digests never
+		// verified before, or anchors whose transcript was later quarantined) are
+		// grounded on the same footing as fresh model output; grounding is
+		// idempotent, so re-checking an already-verified model fact is a no-op.
+		verifyMeetingDigestPayload(&payload, spanStart, spanEnd, app.digestTranscriptIDSet(group.key))
 		canonical, err := json.Marshal(payload)
 		if err != nil {
 			return newest, err
@@ -544,6 +907,15 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 			meetingDigestCursorMetadataKey: digestPassCursor(inputs, processed, group),
 			"brainCount":                   strconv.Itoa(len(group.brains)),
 			"generatedAt":                  time.Now().UTC().Format(time.RFC3339),
+		}
+		// item 1.3a: mirror the clamped aliases into searchable metadata text.
+		if aliases := digestAliasesMetadata(payload.Aliases); aliases != "" {
+			metadata[digestAliasesMetadataKey] = aliases
+		}
+		// item 0.2: stamp the honest "we could not carry N" count when a section
+		// was already at cap; absent when nothing was dropped.
+		if droppedFacts > 0 {
+			metadata[digestDroppedFactsMetadataKey] = strconv.Itoa(droppedFacts)
 		}
 		// Server-authored coverage stamps (kanban-card-107): compare the CAPTURED
 		// span to the room-occupancy sitting so every reader can state, honestly,

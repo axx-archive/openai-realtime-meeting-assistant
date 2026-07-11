@@ -118,13 +118,18 @@ func (briefing crossMeetingBriefingResult) empty() bool {
 // state up front how complete the captured picture is. Degrades to an explicit
 // "coverage unknown" when nothing carried a coverage stamp.
 func (briefing crossMeetingBriefingResult) coverageSummaryLine() string {
-	var full, partial, unknown, listenOnly int
+	var full, partial, synthesis, unknown, listenOnly int
 	for _, summary := range briefing.MeetingCoverage {
 		switch summary.Label {
 		case coverageLabelFull:
 			full++
 		case coverageLabelUnknown:
 			unknown++
+		case coverageLabelPartialSynthesis:
+			// Captured-but-not-summarized is called out on its own line rather than
+			// folded into "partial" (a capture caveat) — a synthesis dead-letter is
+			// a distinct, quieter failure the reader should be able to see (F11).
+			synthesis++
 		default:
 			partial++
 		}
@@ -132,13 +137,16 @@ func (briefing crossMeetingBriefingResult) coverageSummaryLine() string {
 			listenOnly++
 		}
 	}
-	total := full + partial + unknown
+	total := full + partial + synthesis + unknown
 	if total == 0 {
 		return "coverage unknown for this range"
 	}
 	parts := []string{fmt.Sprintf("%d of %d meetings fully captured", full, total)}
 	if partial > 0 {
 		parts = append(parts, fmt.Sprintf("%d partial", partial))
+	}
+	if synthesis > 0 {
+		parts = append(parts, fmt.Sprintf("%d not fully synthesized", synthesis))
 	}
 	if unknown > 0 {
 		parts = append(parts, fmt.Sprintf("%d unknown", unknown))
@@ -215,7 +223,19 @@ func (app *kanbanBoardApp) composeBriefingFromDigests(rangeStart time.Time, rang
 	// the briefing shows the captured window and caveats partial/unknown/listen-
 	// only meetings without recomputing anything.
 	for key, digest := range meetingDigests {
-		result.MeetingCoverage[key] = meetingCoverageFromDigest(digest)
+		summary := meetingCoverageFromDigest(digest)
+		// Coverage honesty (finding F11): the stamped label was written when the
+		// digest was produced and cannot know about a synthesis dead-letter that
+		// landed afterward, so a meeting whose transcript→brain→digest lane
+		// abandoned a window would otherwise ride into the briefing as "full".
+		// Consult the live tombstones here — the same override
+		// meetingCoverageDetail applies for get_meeting_detail — so the day-header
+		// caveat and the coverage roll-up both see it. Overrides even a "full"
+		// stamp: partial_synthesis is strictly worse (captured but unsummarized).
+		if app.memory.hasDeadLetterForMeeting(key, summary.SpanStart, summary.SpanEnd) {
+			summary.Label = coverageLabelPartialSynthesis
+		}
+		result.MeetingCoverage[key] = summary
 	}
 	ledgerByDay := app.activeDecisionTextsByDay(rangeStart, rangeEnd)
 	digestedMeetings := map[string]struct{}{}
@@ -334,6 +354,8 @@ func briefingCapturedSuffix(summary meetingCoverageSummary) string {
 		builder.WriteString(" (partial — capture began late)")
 	case coverageLabelPartialGaps:
 		builder.WriteString(" (partial — a quiet or uncaptured stretch)")
+	case coverageLabelPartialSynthesis:
+		builder.WriteString(" (not fully synthesized)")
 	}
 	if summary.ListenOnly {
 		builder.WriteString(" (listen-only)")
@@ -352,6 +374,8 @@ func coverageDetailNote(summary meetingCoverageSummary) string {
 		parts = append(parts, "capture began after the meeting was already underway, so the opening is not captured")
 	case coverageLabelPartialGaps:
 		parts = append(parts, "there is a stretch with no captured transcript — a quiet spell or a capture gap")
+	case coverageLabelPartialSynthesis:
+		parts = append(parts, "the transcript was captured but an automated synthesis pass did not finish folding part of it in, so some of the detail may not be summarized yet")
 	case coverageLabelUnknown:
 		parts = append(parts, "how completely this captured the meeting is unknown")
 	}
@@ -539,9 +563,13 @@ func briefingRangeFromArgs(args map[string]any, now time.Time) (time.Time, time.
 	if phrase == "" {
 		phrase = "this week"
 	}
+	// The natural-language range shares the recall lane's parser (item 1.2), so
+	// this understands today/yesterday, this/last week, this/last month, "N
+	// days/weeks/months ago", month names ("in June"), weekdays, and absolute
+	// dates in addition to the explicit start_day/end_day pair above.
 	start, end, ok := relativeQueryTimeRange(phrase, now)
 	if !ok {
-		return time.Time{}, time.Time{}, "", fmt.Errorf("could not understand range %q; try today, yesterday, this week, last week, or start_day/end_day", phrase)
+		return time.Time{}, time.Time{}, "", fmt.Errorf("could not understand range %q; try today, yesterday, this week, last month, \"in June\", \"3 weeks ago\", a weekday, YYYY-MM-DD, or start_day/end_day", phrase)
 	}
 	return start, end, phrase, nil
 }
@@ -715,22 +743,33 @@ func (app *kanbanBoardApp) meetingCoverageDetail(meetingID string) meetingCovera
 	if record.ListenOnly {
 		summary.ListenOnly = true
 	}
-	// Prefer the durable server-authored stamp over a live recompute.
+	// Prefer the durable server-authored stamp over a live recompute; otherwise
+	// recompute from whatever transcript evidence survives (best effort).
 	if stamped != "" {
 		summary.Label = stamped
-		return summary
-	}
-	// Legacy fallback: no stamp exists, so recompute from whatever transcript
-	// evidence survives (best effort).
-	resolvable := hasRecord && !isLegacyMeetingKey(meetingID)
-	var sittingStart time.Time
-	if resolvable {
-		if parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(record.StartedAt)); err == nil {
-			sittingStart = parsed
+	} else {
+		resolvable := hasRecord && !isLegacyMeetingKey(meetingID)
+		var sittingStart time.Time
+		if resolvable {
+			if parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(record.StartedAt)); err == nil {
+				sittingStart = parsed
+			}
 		}
+		coverage := app.memory.transcriptCoverageForMeeting(meetingID)
+		summary.Label = meetingCoverageLabel(resolvable, sittingStart, summary.SpanStart, coverage.MaxInternalGap)
 	}
-	coverage := app.memory.transcriptCoverageForMeeting(meetingID)
-	summary.Label = meetingCoverageLabel(resolvable, sittingStart, summary.SpanStart, coverage.MaxInternalGap)
+	// Dead-letter override (memory study 1.4, gap #9): the digest-synthesis lane
+	// (transcript→brain→digest) abandoned a window of this meeting after repeated
+	// failures — transcripts exist but were never folded into the digest. That is
+	// orthogonal to (and strictly worse than) the capture labels above, so it
+	// overrides even a "full" capture stamp: the honest read is captured-but-not-
+	// fully-synthesized. hasDeadLetterForMeeting scopes this to the digest lane
+	// (finding F13) so a board / mission / ledger dead-letter — which loses cards /
+	// insights / records, not the digest — never flips coverage. Detected live
+	// because a dead-letter can land long after the digest stamped its coverage.
+	if app.memory.hasDeadLetterForMeeting(meetingID, summary.SpanStart, summary.SpanEnd) {
+		summary.Label = coverageLabelPartialSynthesis
+	}
 	return summary
 }
 

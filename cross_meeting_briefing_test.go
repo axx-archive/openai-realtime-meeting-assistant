@@ -459,3 +459,127 @@ func TestMeetingCoverageDetailPrefersStampOverLiveRecompute(t *testing.T) {
 		t.Fatalf("captured window should still come from the digest span: %+v", summary)
 	}
 }
+
+/* ---------- synthesis dead-letter honesty (findings F11 + F13) ---------- */
+
+// appendCoverageDeadLetter files a dead-letter tombstone for meetingID as agent
+// would (agent_runner.appendAmbientDeadLetterTombstone): mint-free, expired, and
+// meetingId-stamped so hasDeadLetterForMeeting matches on identity.
+func appendCoverageDeadLetter(t *testing.T, app *kanbanBoardApp, agent string, meetingID string) {
+	t.Helper()
+	id := "dead-letter-" + strings.ReplaceAll(agent, " ", "-") + "-" + meetingID
+	if _, _, err := app.memory.appendDeadLetter(id, agent+" abandoned a window of "+meetingID, map[string]string{
+		relevanceMetadataKey:           relevanceExpired,
+		deadLetterAgentMetadataKey:     agent,
+		"meetingId":                    meetingID,
+		deadLetterSpanStartMetadataKey: "2026-06-01T17:20:00Z",
+		deadLetterSpanEndMetadataKey:   "2026-06-01T17:20:00Z",
+	}); err != nil {
+		t.Fatalf("appendDeadLetter(%s): %v", agent, err)
+	}
+}
+
+// F11: a briefing must reflect a synthesis dead-letter, not just get_meeting_detail.
+// A meeting whose transcript→brain→digest lane abandoned a window is captured-but-
+// not-synthesized: the day-header caveats it and the coverage roll-up stops
+// counting it as fully captured. A non-synthesis (board-worker) dead-letter must
+// leave the briefing exactly as it was — the meeting is still fully summarized.
+func TestBriefingReflectsSynthesisDeadLetter(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	location := meetingTimeLocation()
+	rangeStart := time.Date(2026, 6, 1, 0, 0, 0, 0, location)
+
+	// A fully-captured (stamped) digest with a decision, so the day-header renders
+	// the meeting and its captured suffix. Span 17:05–17:50Z = 10:05–10:50 PDT.
+	seed := func(app *kanbanBoardApp) {
+		digest := `{"meetingId":"meeting-a","title":"Pilot","day":"2026-06-01",` +
+			`"decisions":[{"d":"Ship it","status":"decided","at":"2026-06-01T18:00:00Z","importance":5}]}`
+		if _, err := app.memory.upsertDigest(meetingMemoryKindMeetingDigest, "meeting-a", digest, map[string]string{
+			"meetingId":                "meeting-a",
+			digestDayMetadataKey:       "2026-06-01",
+			digestSpanStartMetadataKey: "2026-06-01T17:05:00Z",
+			digestSpanEndMetadataKey:   "2026-06-01T17:50:00Z",
+			digestCoverageMetadataKey:  coverageLabelFull,
+		}); err != nil {
+			t.Fatalf("upsertDigest: %v", err)
+		}
+	}
+
+	t.Run("synthesis lane flips the briefing", func(t *testing.T) {
+		app := newIsolatedKanbanBoardApp(t)
+		seed(app)
+		appendCoverageDeadLetter(t, app, meetingBrainAgentName, "meeting-a")
+
+		briefing := app.composeCrossMeetingBriefing(rangeStart.UTC(), rangeStart.AddDate(0, 0, 1).UTC())
+		text := renderCrossMeetingBriefing(briefing)
+		if !strings.Contains(text, "captured 10:05–10:50 (not fully synthesized)") {
+			t.Fatalf("day-header missing the not-fully-synthesized caveat:\n%s", text)
+		}
+		summary := briefing.coverageSummaryLine()
+		if !strings.Contains(summary, "0 of 1 meetings fully captured") || !strings.Contains(summary, "1 not fully synthesized") {
+			t.Fatalf("coverage summary = %q, want the synthesis roll-up", summary)
+		}
+	})
+
+	t.Run("board-worker dead-letter does not flip the briefing", func(t *testing.T) {
+		app := newIsolatedKanbanBoardApp(t)
+		seed(app)
+		appendCoverageDeadLetter(t, app, meetingBoardAgentName, "meeting-a")
+
+		briefing := app.composeCrossMeetingBriefing(rangeStart.UTC(), rangeStart.AddDate(0, 0, 1).UTC())
+		text := renderCrossMeetingBriefing(briefing)
+		if strings.Contains(text, "not fully synthesized") {
+			t.Fatalf("a board-worker dead-letter must not caveat the briefing:\n%s", text)
+		}
+		if !strings.Contains(text, "captured 10:05–10:50") {
+			t.Fatalf("captured window should still render plainly:\n%s", text)
+		}
+		if summary := briefing.coverageSummaryLine(); !strings.Contains(summary, "1 of 1 meetings fully captured") {
+			t.Fatalf("coverage summary = %q, want the meeting still fully captured", summary)
+		}
+	})
+}
+
+// F13: meetingCoverageDetail flips to partial_synthesis ONLY for the digest-
+// synthesis lane (transcript→brain→digest). A board-worker or mission-intelligence
+// dead-letter loses cards/insights, not the digest, so it must leave a fully-
+// captured meeting reading "full".
+func TestMeetingCoverageDetailSynthesisScope(t *testing.T) {
+	seed := func(app *kanbanBoardApp, meetingID string) {
+		digest := `{"meetingId":"` + meetingID + `","title":"Pilot"}`
+		if _, err := app.memory.upsertDigest(meetingMemoryKindMeetingDigest, meetingID, digest, map[string]string{
+			"meetingId":                meetingID,
+			digestSpanStartMetadataKey: "2026-06-01T16:55:00Z",
+			digestSpanEndMetadataKey:   "2026-06-01T17:30:00Z",
+			digestCoverageMetadataKey:  coverageLabelFull,
+		}); err != nil {
+			t.Fatalf("upsertDigest: %v", err)
+		}
+	}
+
+	t.Run("meeting-brain flips to partial_synthesis", func(t *testing.T) {
+		app := newIsolatedKanbanBoardApp(t)
+		meetingID := "meeting-20260601-101500-000000001"
+		seed(app, meetingID)
+		appendCoverageDeadLetter(t, app, meetingBrainAgentName, meetingID)
+		summary := app.meetingCoverageDetail(meetingID)
+		if summary.Label != coverageLabelPartialSynthesis {
+			t.Fatalf("coverage = %q, want %q for a digest-lane dead-letter", summary.Label, coverageLabelPartialSynthesis)
+		}
+		if note := coverageDetailNote(summary); !strings.Contains(strings.ToLower(note), "synthes") {
+			t.Fatalf("coverage note = %q, want a synthesis caveat", note)
+		}
+	})
+
+	for _, agent := range []string{meetingBoardAgentName, missionIntelAgentName} {
+		t.Run(agent+" does not flip coverage", func(t *testing.T) {
+			app := newIsolatedKanbanBoardApp(t)
+			meetingID := "meeting-20260601-120000-000000002"
+			seed(app, meetingID)
+			appendCoverageDeadLetter(t, app, agent, meetingID)
+			if got := app.meetingCoverageDetail(meetingID).Label; got != coverageLabelFull {
+				t.Fatalf("coverage = %q, want %q (a %s dead-letter must not flip the digest read)", got, coverageLabelFull, agent)
+			}
+		})
+	}
+}

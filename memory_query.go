@@ -23,7 +23,50 @@ const (
 var (
 	pastDurationQueryPattern = regexp.MustCompile(`\b(?:last|past)\s+(\d{1,3})\s*(minutes?|mins?|hours?|hrs?)\b`)
 	agoDurationQueryPattern  = regexp.MustCompile(`\b(\d{1,3})\s*(minutes?|mins?|hours?|hrs?)\s+ago\b`)
+
+	// item 1.2: calendar-scale relative ranges, absolute dates, month names,
+	// and weekdays — all resolved deterministically in Go (amendment A5: date
+	// math is never delegated to the model).
+	calendarAgoQueryPattern  = regexp.MustCompile(`\b(\d{1,3})\s*(days?|weeks?|months?)\s+ago\b`)
+	calendarPastQueryPattern = regexp.MustCompile(`\b(?:last|past)\s+(\d{1,3})\s*(days?|weeks?|months?)\b`)
+	isoDateQueryPattern      = regexp.MustCompile(`\b(\d{4})-(\d{2})-(\d{2})\b`)
+	monthNameToken           = `jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?`
+	monthDayQueryPattern     = regexp.MustCompile(`\b(` + monthNameToken + `)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b`)
+	dayMonthQueryPattern     = regexp.MustCompile(`\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(` + monthNameToken + `)(?:\s+(\d{4}))?\b`)
+	// The leading preposition is a CAPTURE group (F7+F22): "since X" is an open
+	// range to now, not just the named day/month, so the resolver needs to see it.
+	monthNameQueryPattern = regexp.MustCompile(`\b(in|during|for|of|since|back\s+in)\s+(` + monthNameToken + `)(?:\s+(\d{4}))?\b`)
+	weekdayQueryPattern   = regexp.MustCompile(`\b(on|last|this|since)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)\b`)
 )
+
+// memoryMonthByToken maps a lowercase month name/abbreviation (as captured by
+// monthNameToken) to its calendar month.
+var memoryMonthByToken = map[string]time.Month{
+	"jan": time.January, "january": time.January,
+	"feb": time.February, "february": time.February,
+	"mar": time.March, "march": time.March,
+	"apr": time.April, "april": time.April,
+	"may": time.May,
+	"jun": time.June, "june": time.June,
+	"jul": time.July, "july": time.July,
+	"aug": time.August, "august": time.August,
+	"sep": time.September, "sept": time.September, "september": time.September,
+	"oct": time.October, "october": time.October,
+	"nov": time.November, "november": time.November,
+	"dec": time.December, "december": time.December,
+}
+
+// memoryWeekdayByToken maps a lowercase weekday name/abbreviation to its
+// weekday.
+var memoryWeekdayByToken = map[string]time.Weekday{
+	"sunday": time.Sunday, "sun": time.Sunday,
+	"monday": time.Monday, "mon": time.Monday,
+	"tuesday": time.Tuesday, "tue": time.Tuesday, "tues": time.Tuesday,
+	"wednesday": time.Wednesday, "wed": time.Wednesday,
+	"thursday": time.Thursday, "thu": time.Thursday, "thur": time.Thursday, "thurs": time.Thursday,
+	"friday": time.Friday, "fri": time.Friday,
+	"saturday": time.Saturday, "sat": time.Saturday,
+}
 
 // assistantQueryResult is the broadcast-free outcome of answering a query, so
 // the room-wide ask bar and the private scout chat share one answer engine.
@@ -251,12 +294,27 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModelAttachments(ctx context.
 	// Sonnet 5 fronts chat whenever an Anthropic key is present (packaging-os
 	// §1 role matrix, Wave 2 item 7); keyless-Anthropic keeps the gpt-5.5 path
 	// below byte-for-byte so keyless deploys degrade exactly as before.
+	// Item Q7 (AJ-approved): the memory study found synthesis is the only stage
+	// where more reasoning parameters consistently helped, so this TYPED chat
+	// seam (private Scout chat, chat threads, /assistant, and artifact-content
+	// drafting) synthesizes at medium on the KEYED Anthropic path. The Effort
+	// field there is self-documenting: the doctrine floor already clamps low->
+	// medium for this seam, so it is a harmless no-op that records the intent.
+	// It is NOT the interactive voice path: a live meeting answers recall through
+	// the answer_memory_question tool (answerMemoryQuestionWithModel), spoken back
+	// in the room (kanban.go realtimeToolRunsAsync "Memory answers block ... up to
+	// 45s"), so that seam stays at effort=low to protect the spoken turn's
+	// latency. The keyless OpenAI fallback below stays at effort=low too (F33):
+	// its 500-token MaxOutputTokens was sized for low, and medium reasoning under
+	// the same cap risks truncating the visible answer — the keyed path already
+	// gets medium via the floor, so the fallback keeps pre-wave behavior.
+	// MaxTokens/Verbosity are unchanged.
 	if anthropicKey != "" {
 		return createAnthropicTextResponse(ctx, anthropicKey, anthropicTextRequest{
 			Model:        chatModel(),
 			Instructions: assistantQueryInstructions(),
 			Input:        input,
-			Effort:       "low",
+			Effort:       "medium",
 			MaxTokens:    anthropicChatMaxTokens,
 			Attachments:  attachments,
 		})
@@ -1278,7 +1336,14 @@ func buildAssistantQueryInput(query string, cards []kanbanCard, entries []meetin
 			builder.WriteString(firstNonEmptyString(strings.TrimSpace(decision.Metadata["madeBy"]), "unknown"))
 			builder.WriteString(", ")
 			builder.WriteString(decision.CreatedAt.In(location).Format("2006-01-02"))
-			builder.WriteString(")\n")
+			builder.WriteString(")")
+			// item 2.3a: a ratified reversal renders its chain inline, so the answer
+			// engine can say "current: X — previously: Y (until date)".
+			if summary := strings.TrimSpace(decision.Metadata["supersedesSummary"]); summary != "" {
+				builder.WriteString(" — previously: ")
+				builder.WriteString(summary)
+			}
+			builder.WriteByte('\n')
 		}
 	}
 	// Active storylines ride along unconditionally, like the decisions above:
@@ -1538,6 +1603,10 @@ const (
 	// It is NEVER persisted — it exists only inside one model input — which
 	// is why it is deliberately not registered as a meetingMemoryKind const.
 	memoryContextKindLedgerState = "ledger_state"
+	// memoryContextKindLedgerEvolution labels the synthetic, prompt-only entry
+	// carrying a record's dated transition history (item 2.3b). Prompt-only, like
+	// the state entry — never persisted.
+	memoryContextKindLedgerEvolution = "ledger_evolution"
 	// ledgerContextMaxRecords bounds how many canonical records ride into
 	// context for one status question.
 	ledgerContextMaxRecords = 6
@@ -1620,18 +1689,173 @@ func currentStateQuerySubject(query string) []string {
 	return subject
 }
 
+/* ---------- item 2.2c: who-thinks-what (position) routing ---------- */
+
+// positionStanceMarkers are the stance verbs/nouns that, PAIRED with a named
+// roster member, mark a "what does <person> think about <topic>" question.
+// Requiring a name keeps ordinary status questions ("what's the thinking on X")
+// off this lane.
+var positionStanceMarkers = []string{
+	"think", "thinks", "thinking", "thought",
+	"feel about", "feels about", "feeling about",
+	"stand on", "stands on", "position on", "positions on", "position of",
+	"view on", "views on", "viewpoint on", "take on", "takes on", "stance on",
+	"opinion on", "opinion of", "say about", "says about", "said about",
+	"believe", "believes", "favor", "favors", "prefer", "prefers",
+	"lean", "leans", "leaning", "want", "wants",
+}
+
+// positionStanceStopTokens strip stance scaffolding from a position query's
+// topic (post decisionDedupeKey normalization, so all lowercase, ≥3 chars).
+var positionStanceStopTokens = map[string]struct{}{
+	"think": {}, "thinks": {}, "thinking": {}, "thought": {},
+	"feel": {}, "feels": {}, "feeling": {}, "position": {}, "positions": {},
+	"view": {}, "views": {}, "viewpoint": {}, "take": {}, "takes": {}, "stance": {},
+	"opinion": {}, "opinions": {}, "believe": {}, "believes": {}, "favor": {}, "favors": {},
+	"prefer": {}, "prefers": {}, "lean": {}, "leans": {}, "leaning": {},
+	"want": {}, "wants": {}, "say": {}, "says": {}, "said": {}, "stand": {}, "stands": {},
+}
+
+// positionQueryOwner returns the roster member named in the query (word-bounded,
+// so "AJ's take" matches AJ), or empty when no member is named.
+func positionQueryOwner(query string) string {
+	lower := strings.ToLower(query)
+	for _, name := range meetingParticipantNames {
+		if containsWordBoundedPhrase(lower, strings.ToLower(name)) {
+			return name
+		}
+	}
+
+	return ""
+}
+
+// isPositionQuery reports a "what does <person> think about <topic>" question,
+// returning the owner and topic. Requires BOTH a named roster member and a
+// stance marker so it never poaches current-state or generic recall questions.
+func isPositionQuery(query string) (string, string, bool) {
+	owner := positionQueryOwner(query)
+	if owner == "" {
+		return "", "", false
+	}
+	lower := strings.ToLower(query)
+	stance := false
+	for _, marker := range positionStanceMarkers {
+		if strings.Contains(lower, marker) {
+			stance = true
+			break
+		}
+	}
+	if !stance {
+		return "", "", false
+	}
+
+	return owner, positionQueryTopic(query, owner), true
+}
+
+// positionQueryTopic isolates the TOPIC of a position question — the query
+// tokens minus the owner's name and the stance/current-state scaffolding.
+func positionQueryTopic(query string, owner string) string {
+	ownerTokens := map[string]struct{}{}
+	for _, token := range strings.Fields(decisionDedupeKey(owner)) {
+		ownerTokens[token] = struct{}{}
+	}
+	subject := make([]string, 0, 8)
+	for _, token := range strings.Fields(decisionDedupeKey(query)) {
+		if _, stop := currentStateSubjectStopTokens[token]; stop {
+			continue
+		}
+		if _, stop := positionStanceStopTokens[token]; stop {
+			continue
+		}
+		if _, own := ownerTokens[token]; own {
+			continue
+		}
+		subject = append(subject, token)
+	}
+
+	return strings.Join(subject, " ")
+}
+
+/* ---------- item 2.3b: evolution-query routing ---------- */
+
+// evolutionQueryMarkers are the unambiguous history/change phrases that route a
+// question to the deterministic evolution lane.
+var evolutionQueryMarkers = []string{
+	"evolve", "evolved", "evolving", "evolution",
+	"history of", "over time", "track record", "trajectory",
+	"changed since", "change since", "changed over", "change over",
+}
+
+// evolutionStanceStopTokens strip evolution scaffolding from the subject.
+var evolutionStanceStopTokens = map[string]struct{}{
+	"evolve": {}, "evolved": {}, "evolving": {}, "evolution": {},
+	"history": {}, "over": {}, "time": {}, "track": {}, "record": {}, "trajectory": {},
+	"change": {}, "changed": {}, "changing": {}, "shift": {}, "shifted": {}, "shifting": {},
+	"become": {}, "became": {}, "becoming": {}, "get": {}, "got": {}, "since": {},
+	"how": {}, "did": {}, "has": {}, "have": {}, "our": {}, "thinking": {},
+}
+
+// isEvolutionQuery reports a "how did X evolve / history of X / has X changed"
+// question and returns the subject. "how did/has/have … change/evolve/shift/
+// become" is caught as a compound even without a single-word marker.
+func isEvolutionQuery(query string) (string, bool) {
+	lower := strings.ToLower(query)
+	evolution := false
+	for _, marker := range evolutionQueryMarkers {
+		if strings.Contains(lower, marker) {
+			evolution = true
+			break
+		}
+	}
+	if !evolution {
+		if strings.Contains(lower, "how did") || strings.Contains(lower, "how has") || strings.Contains(lower, "how have") {
+			if strings.Contains(lower, "chang") || strings.Contains(lower, "evolv") || strings.Contains(lower, "shift") || strings.Contains(lower, "becom") {
+				evolution = true
+			}
+		}
+	}
+	if !evolution {
+		return "", false
+	}
+	subject := evolutionQuerySubject(query)
+	if subject == "" {
+		return "", false
+	}
+
+	return subject, true
+}
+
+// evolutionQuerySubject strips both current-state and evolution scaffolding to
+// isolate what the history question is about.
+func evolutionQuerySubject(query string) string {
+	subject := make([]string, 0, 8)
+	for _, token := range strings.Fields(decisionDedupeKey(query)) {
+		if _, stop := currentStateSubjectStopTokens[token]; stop {
+			continue
+		}
+		if _, stop := evolutionStanceStopTokens[token]; stop {
+			continue
+		}
+		subject = append(subject, token)
+	}
+
+	return strings.Join(subject, " ")
+}
+
 // ledgerRecordsForStateQuery resolves a current-state question to canonical
 // ledger records: subject-matched lookup when the question names a thing
 // (searchLedgerRecords ranks current records above closed history, then
 // match strength, then importance), or the importance-ranked current state
 // view when the question is generic. A named subject with no ledger match
 // returns nothing — the normal recall lanes handle it, never a state dump.
+// Position records are excluded here — they answer the owner-aware position
+// lane, not "status of X".
 func (app *kanbanBoardApp) ledgerRecordsForStateQuery(query string) []ledgerRecord {
 	if app == nil || app.memory == nil {
 		return nil
 	}
 	if subject := currentStateQuerySubject(query); len(subject) > 0 {
-		return app.searchLedgerRecords(strings.Join(subject, " "), ledgerContextMaxRecords)
+		return excludeLedgerPositions(app.searchLedgerRecords(strings.Join(subject, " "), ledgerContextMaxRecords+2), ledgerContextMaxRecords)
 	}
 
 	view := app.ledgerCurrentStateView(ledgerContextMaxRecords)
@@ -1647,10 +1871,57 @@ func (app *kanbanBoardApp) ledgerRecordsForStateQuery(query string) []ledgerReco
 	return records
 }
 
+// excludeLedgerPositions drops position records from a state-query result and
+// caps the remainder — positions are owned by the who-thinks-what lane.
+func excludeLedgerPositions(records []ledgerRecord, limit int) []ledgerRecord {
+	filtered := make([]ledgerRecord, 0, len(records))
+	for _, record := range records {
+		if record.Entity == ledgerEntityPosition {
+			continue
+		}
+		filtered = append(filtered, record)
+		if limit > 0 && len(filtered) >= limit {
+			break
+		}
+	}
+
+	return filtered
+}
+
+// ledgerPositionRecordsForQuery resolves a position question to one owner's
+// stance records (current above closed, so the chain reads current/previous).
+func (app *kanbanBoardApp) ledgerPositionRecordsForQuery(query string) []ledgerRecord {
+	owner, topic, ok := isPositionQuery(query)
+	if !ok {
+		return nil
+	}
+
+	return app.searchPositionRecords(owner, topic, ledgerContextMaxRecords)
+}
+
+// ledgerEvolutionRecordsForQuery resolves an evolution question to the subject
+// record(s) whose dated history answers it. A named holder prefers that
+// person's positions; otherwise the general ledger (decisions/topics/etc.).
+func (app *kanbanBoardApp) ledgerEvolutionRecordsForQuery(query string) []ledgerRecord {
+	subject, ok := isEvolutionQuery(query)
+	if !ok {
+		return nil
+	}
+	if owner := positionQueryOwner(query); owner != "" {
+		if positions := app.searchPositionRecords(owner, subject, 3); len(positions) > 0 {
+			return positions
+		}
+	}
+
+	return app.searchLedgerRecords(subject, 3)
+}
+
 // formatLedgerRecordLine renders one canonical record deterministically —
 // status, owner, importance, validity window, provenance — so both the model
-// context and the model-outage fallback answer speak from the same fold.
-func formatLedgerRecordLine(record ledgerRecord) string {
+// context and the model-outage fallback answer speak from the same fold. An
+// optional predecessor (the record this one superseded) renders the version
+// chain inline (item 2.3a): "… — previously: <prior title> (until <date>)".
+func formatLedgerRecordLine(record ledgerRecord, predecessor ...ledgerRecord) string {
 	var builder strings.Builder
 	builder.WriteString("- [")
 	builder.WriteString(record.Entity)
@@ -1693,23 +1964,133 @@ func formatLedgerRecordLine(record ledgerRecord) string {
 		builder.WriteString(" meetings=")
 		builder.WriteString(strings.Join(meetings, ","))
 	}
+	if len(predecessor) > 0 && strings.TrimSpace(predecessor[0].Title) != "" {
+		prior := predecessor[0]
+		builder.WriteString(" — previously: ")
+		builder.WriteString(prior.Title)
+		if until := strings.TrimSpace(prior.ValidTo); until != "" {
+			builder.WriteString(" (until ")
+			builder.WriteString(until)
+			builder.WriteString(")")
+		}
+	}
 
 	return builder.String()
 }
 
-// ledgerStateContextEntry packs the matched records into ONE synthetic,
-// prompt-only context entry that leads the model input for a status query.
-func ledgerStateContextEntry(records []ledgerRecord, now time.Time) meetingMemoryEntry {
-	var builder strings.Builder
-	builder.WriteString("Canonical entity-ledger state (folded in Go from the consolidation log; authoritative for status, ownership, and validity — closed records are history, not current):\n")
+// writeLedgerRecordLines renders each record, resolving its predecessor (item
+// 2.3a) so a superseding record carries its "previously: …" chain inline.
+func writeLedgerRecordLines(builder *strings.Builder, records []ledgerRecord, predecessors map[string]ledgerRecord) {
 	for _, record := range records {
-		builder.WriteString(formatLedgerRecordLine(record))
+		if prior, ok := predecessors[record.ID]; ok {
+			builder.WriteString(formatLedgerRecordLine(record, prior))
+		} else {
+			builder.WriteString(formatLedgerRecordLine(record))
+		}
 		builder.WriteByte('\n')
 	}
+}
+
+// ledgerStateContextEntry packs the matched records into ONE synthetic,
+// prompt-only context entry that leads the model input for a status query.
+func ledgerStateContextEntry(records []ledgerRecord, predecessors map[string]ledgerRecord, now time.Time) meetingMemoryEntry {
+	var builder strings.Builder
+	builder.WriteString("Canonical entity-ledger state (folded in Go from the consolidation log; authoritative for status, ownership, and validity — closed records are history, not current):\n")
+	writeLedgerRecordLines(&builder, records, predecessors)
 
 	return meetingMemoryEntry{
 		ID:        "ledger-state",
 		Kind:      memoryContextKindLedgerState,
+		Text:      strings.TrimRight(builder.String(), "\n"),
+		CreatedAt: now,
+		Metadata:  map[string]string{"source": "entity_ledger"},
+	}
+}
+
+// ledgerPositionContextEntry packs one owner's stance records (with their
+// supersession chains) into a synthetic prompt-only entry (item 2.2c).
+func ledgerPositionContextEntry(records []ledgerRecord, predecessors map[string]ledgerRecord, now time.Time) meetingMemoryEntry {
+	var builder strings.Builder
+	builder.WriteString("Recorded positions from the entity ledger (who holds what stance, folded from directional leans; each shows owner, dated stance, and any supersession chain — a closed position is a stance the holder has since changed):\n")
+	writeLedgerRecordLines(&builder, records, predecessors)
+
+	return meetingMemoryEntry{
+		ID:        "ledger-positions",
+		Kind:      memoryContextKindLedgerState,
+		Text:      strings.TrimRight(builder.String(), "\n"),
+		CreatedAt: now,
+		Metadata:  map[string]string{"source": "entity_ledger"},
+	}
+}
+
+// formatLedgerTransitionLine renders one dated post-state from the event log —
+// the atomic row of the evolution history (item 2.3b).
+func formatLedgerTransitionLine(transition ledgerTransition) string {
+	var builder strings.Builder
+	builder.WriteString("- ")
+	if at := strings.TrimSpace(transition.At); at != "" {
+		builder.WriteString(at)
+		builder.WriteString(" ")
+	}
+	builder.WriteString("[")
+	builder.WriteString(transition.Op)
+	builder.WriteString("] ")
+	builder.WriteString(transition.Title)
+	builder.WriteString(" — status=")
+	builder.WriteString(transition.Status)
+	if owner := strings.TrimSpace(transition.Owner); owner != "" {
+		builder.WriteString(" owner=")
+		builder.WriteString(owner)
+	}
+	if until := strings.TrimSpace(transition.ValidTo); until != "" {
+		builder.WriteString(" closed=")
+		builder.WriteString(until)
+	}
+	if reason := strings.TrimSpace(transition.Reason); reason != "" {
+		builder.WriteString(" (")
+		builder.WriteString(reason)
+		builder.WriteString(")")
+	}
+
+	return builder.String()
+}
+
+// evolutionTransitionRenderCap bounds how many dated transitions a lineage
+// renders into recall (F31+F19). The evolution lane was the only unbounded text
+// in any recall lane: a long-lived subject's history grows forever, so a single
+// mature lineage could dominate the model context. We render the newest ~12
+// (transitions are oldest-first, so the tail) and announce the elided head; the
+// full history stays on the record for any drill-down.
+const evolutionTransitionRenderCap = 12
+
+// renderEvolutionTransitions writes the transition lines (chronological, oldest
+// first within the kept window) to builder, capped to the newest
+// evolutionTransitionRenderCap and prefixed with an explicit elision line when
+// older transitions were dropped (F31+F19).
+func renderEvolutionTransitions(builder *strings.Builder, transitions []ledgerTransition) {
+	if elided := len(transitions) - evolutionTransitionRenderCap; elided > 0 {
+		transitions = transitions[elided:]
+		fmt.Fprintf(builder, "- … %d earlier transitions elided (full history on the record)\n", elided)
+	}
+	for _, transition := range transitions {
+		builder.WriteString(formatLedgerTransitionLine(transition))
+		builder.WriteByte('\n')
+	}
+}
+
+// ledgerEvolutionContextEntry packs a subject's dated transition history into a
+// synthetic prompt-only entry (item 2.3b) — replayed deterministically from the
+// event log, oldest first, capped to the newest transitions (F31+F19).
+func ledgerEvolutionContextEntry(subject ledgerRecord, transitions []ledgerTransition, now time.Time) meetingMemoryEntry {
+	var builder strings.Builder
+	builder.WriteString("Dated evolution of \"")
+	builder.WriteString(subject.Title)
+	builder.WriteString("\" (replayed deterministically from the entity-ledger event log; oldest first — each line is a recorded transition, not a paraphrase):\n")
+	renderEvolutionTransitions(&builder, transitions)
+
+	return meetingMemoryEntry{
+		ID:        "ledger-evolution",
+		Kind:      memoryContextKindLedgerEvolution,
 		Text:      strings.TrimRight(builder.String(), "\n"),
 		CreatedAt: now,
 		Metadata:  map[string]string{"source": "entity_ledger"},
@@ -1752,11 +2133,24 @@ func (app *kanbanBoardApp) ledgerAnchorContextEntries(records []ledgerRecord) []
 	return windows
 }
 
-// ledgerContextLane builds the leading context block for a current-state
-// query: one canonical state entry plus its verbatim anchor windows. Empty
-// for every other query shape.
+// ledgerContextLane builds the leading context block a ledger-shaped query
+// leads its model input with. It dispatches to the most specific lane: an
+// evolution question renders a dated transition history; a position question
+// renders one owner's stances; a current-state question renders the canonical
+// fold. Empty for every other query shape. Anchor drill-downs ride along for
+// the record-shaped lanes (position/current-state), never for the synthesized
+// evolution history.
 func (app *kanbanBoardApp) ledgerContextLane(query string, now time.Time) []meetingMemoryEntry {
-	if app == nil || app.memory == nil || !isCurrentStateQuery(query, now) {
+	if app == nil || app.memory == nil {
+		return nil
+	}
+	if lane := app.ledgerEvolutionLane(query, now); len(lane) > 0 {
+		return lane
+	}
+	if lane := app.ledgerPositionLane(query, now); len(lane) > 0 {
+		return lane
+	}
+	if !isCurrentStateQuery(query, now) {
 		return nil
 	}
 	records := app.ledgerRecordsForStateQuery(query)
@@ -1765,19 +2159,58 @@ func (app *kanbanBoardApp) ledgerContextLane(query string, now time.Time) []meet
 	}
 
 	lane := make([]meetingMemoryEntry, 0, 1+ledgerContextAnchorEntries)
-	lane = append(lane, ledgerStateContextEntry(records, now))
+	lane = append(lane, ledgerStateContextEntry(records, app.memory.ledgerPredecessors(), now))
 	lane = append(lane, app.ledgerAnchorContextEntries(records)...)
 
 	return lane
 }
 
-// ledgerStatusAnswer is the deterministic model-outage fallback for a
-// current-state question: the canonical fold rendered directly (A5's
-// O(lookup) promise holds even with no model), replacing the old collapse to
-// eight keyword hits for exactly the queries the ledger can answer.
+// ledgerPositionLane builds the leading context for a "what does <person> think
+// about <topic>" question (item 2.2c): one owner's stance records plus their
+// anchor drill-downs. Empty for every other query shape.
+func (app *kanbanBoardApp) ledgerPositionLane(query string, now time.Time) []meetingMemoryEntry {
+	records := app.ledgerPositionRecordsForQuery(query)
+	if len(records) == 0 {
+		return nil
+	}
+	lane := make([]meetingMemoryEntry, 0, 1+ledgerContextAnchorEntries)
+	lane = append(lane, ledgerPositionContextEntry(records, app.memory.ledgerPredecessors(), now))
+	lane = append(lane, app.ledgerAnchorContextEntries(records)...)
+
+	return lane
+}
+
+// ledgerEvolutionLane builds the leading context for an evolution question
+// (item 2.3b): the top subject record's dated transition history. Empty for
+// every other query shape (or when the subject has no ledger record).
+func (app *kanbanBoardApp) ledgerEvolutionLane(query string, now time.Time) []meetingMemoryEntry {
+	records := app.ledgerEvolutionRecordsForQuery(query)
+	if len(records) == 0 {
+		return nil
+	}
+	transitions := app.memory.ledgerRecordEvolution(records[0].ID)
+	if len(transitions) == 0 {
+		return nil
+	}
+
+	return []meetingMemoryEntry{ledgerEvolutionContextEntry(records[0], transitions, now)}
+}
+
+// ledgerStatusAnswer is the deterministic model-outage fallback for the ledger
+// query classes: evolution history, who-thinks-what positions, and current
+// state (A5's O(lookup) promise holds even with no model). It is the umbrella
+// both answer paths (chat + Scout tool) call, so a keyless/model-down deploy
+// still answers all three deterministically. Evolution is tried first (most
+// specific), then positions, then current state.
 func (app *kanbanBoardApp) ledgerStatusAnswer(query string) (string, bool) {
 	if app == nil || app.memory == nil {
 		return "", false
+	}
+	if answer, ok := app.ledgerEvolutionAnswer(query); ok {
+		return answer, true
+	}
+	if answer, ok := app.ledgerPositionAnswer(query); ok {
+		return answer, true
 	}
 	if !isCurrentStateQuery(query, time.Now()) {
 		return "", false
@@ -1789,11 +2222,54 @@ func (app *kanbanBoardApp) ledgerStatusAnswer(query string) (string, bool) {
 
 	var builder strings.Builder
 	builder.WriteString("Current ledger state:\n")
-	for _, record := range records {
-		builder.WriteString(formatLedgerRecordLine(record))
-		builder.WriteByte('\n')
-	}
+	writeLedgerRecordLines(&builder, records, app.memory.ledgerPredecessors())
 	builder.WriteString("(Composed from the entity ledger; anchors point at the verbatim transcript exchanges.)")
+
+	return builder.String(), true
+}
+
+// ledgerPositionAnswer is the deterministic fallback for a "what does <person>
+// think about <topic>" question (item 2.2c): the owner's stance records with
+// their supersession chains, rendered from the fold.
+func (app *kanbanBoardApp) ledgerPositionAnswer(query string) (string, bool) {
+	if app == nil || app.memory == nil {
+		return "", false
+	}
+	records := app.ledgerPositionRecordsForQuery(query)
+	if len(records) == 0 {
+		return "", false
+	}
+
+	var builder strings.Builder
+	builder.WriteString("Recorded positions:\n")
+	writeLedgerRecordLines(&builder, records, app.memory.ledgerPredecessors())
+	builder.WriteString("(Folded from directional leans on the entity ledger; a closed position is a stance the holder has since changed.)")
+
+	return builder.String(), true
+}
+
+// ledgerEvolutionAnswer is the deterministic fallback for an evolution question
+// (item 2.3b): the subject record's dated transition history, replayed from the
+// event log — something a stochastic synthesizer cannot reproduce identically.
+func (app *kanbanBoardApp) ledgerEvolutionAnswer(query string) (string, bool) {
+	if app == nil || app.memory == nil {
+		return "", false
+	}
+	records := app.ledgerEvolutionRecordsForQuery(query)
+	if len(records) == 0 {
+		return "", false
+	}
+	transitions := app.memory.ledgerRecordEvolution(records[0].ID)
+	if len(transitions) == 0 {
+		return "", false
+	}
+
+	var builder strings.Builder
+	builder.WriteString("Dated evolution of \"")
+	builder.WriteString(records[0].Title)
+	builder.WriteString("\":\n")
+	renderEvolutionTransitions(&builder, transitions)
+	builder.WriteString("(Replayed deterministically from the entity-ledger event log.)")
 
 	return builder.String(), true
 }
@@ -1927,12 +2403,31 @@ func compactSearchText(value string) string {
 	return strings.Join(memoryTokenPattern.FindAllString(strings.ToLower(value), -1), "")
 }
 
+// currentBoardQueryMarkers are the single-token cues that route a question to
+// the live board, pre-stemmed for word-boundary membership matching (item
+// 1.6): the query's stemmed token set is checked against them instead of raw
+// substrings, so "know" no longer trips "now" and "download" no longer trips
+// "own". Inflections the light stemmer folds ("cards"→card, "owners"→owner)
+// route automatically; the short forms it can't fold without dropping below the
+// 4-char stem floor ("owns"/"owned"/"currently") are listed explicitly so the
+// common "who owns X" / "currently" phrasings keep routing.
+var currentBoardQueryMarkers = buildStemmedMarkerSet(
+	"current", "currently", "status", "owner", "own", "owns", "owned", "assigned",
+	"blocked", "done", "progress", "backlog", "board", "card", "ticket", "notes",
+	"tags", "date", "due", "deadline", "milestone", "now",
+)
+
+func buildStemmedMarkerSet(markers ...string) map[string]struct{} {
+	set := make(map[string]struct{}, len(markers))
+	for _, marker := range markers {
+		set[stemMemoryToken(marker)] = struct{}{}
+	}
+	return set
+}
+
 func isCurrentBoardQuery(query string) bool {
-	normalized := strings.ToLower(query)
-	for _, marker := range []string{
-		"current", "status", "owner", "own", "assigned", "blocked", "done", "progress", "backlog", "board", "card", "ticket", "notes", "tags", "date", "due", "deadline", "milestone", "now",
-	} {
-		if strings.Contains(normalized, marker) {
+	for _, stem := range stemMemoryTokens(uniqueMemoryTokens(query)) {
+		if _, ok := currentBoardQueryMarkers[stem]; ok {
 			return true
 		}
 	}
@@ -1942,10 +2437,14 @@ func isCurrentBoardQuery(query string) bool {
 
 func isMemoryRecallQuery(query string) bool {
 	normalized := strings.ToLower(query)
+	// Word-boundary matching (item 1.6) so a marker only fires as a whole word
+	// or whole phrase — these markers include multi-word cues ("what did",
+	// "last week"), so phrase boundaries, not stemmed tokens, are the right
+	// discipline here.
 	for _, marker := range []string{
 		"what did", "who said", "said", "decided", "discussed", "mentioned", "remember", "earlier", "yesterday", "last meeting", "last week", "meeting went",
 	} {
-		if strings.Contains(normalized, marker) {
+		if containsWordBoundedPhrase(normalized, marker) {
 			return true
 		}
 	}
@@ -2225,8 +2724,10 @@ func (app *kanbanBoardApp) queryPrefersArtifactContext(query string) bool {
 
 // digestContextMaxEntries bounds the pinned digest lane inside one recall
 // context: a week of recall is ~7 day digests plus a handful of meeting
-// digests, so 24 covers every range relativeQueryTimeRange can produce while
-// still leaving budget for raw entries at the default 60-entry limit.
+// digests, so 24 covers a week-or-less range with room for raw entries at the
+// default 60-entry limit. Wider ranges (item 1.2 emits month/quarter spans)
+// collapse to day rollups only in digestContextLane, so the cap holds ~24 days
+// of coverage rather than overflowing on per-meeting digests.
 const digestContextMaxEntries = 24
 
 // noRangeMeetingDigestContextEntries is how many of the newest per-meeting
@@ -2255,8 +2756,37 @@ func (store *meetingMemoryStore) digestContextLane(hasTimeRange bool, rangeStart
 	}
 
 	var lane []meetingMemoryEntry
+	wideRange := false
 	if hasTimeRange {
 		lane = store.digestsInRange(rangeStart, rangeEnd)
+		// Item 1.2 rider: the temporal parser now emits month/quarter ranges,
+		// which can carry far more day+meeting digests than digestContextMaxEntries.
+		// For ranges wider than a week keep the day rollups (the deterministic Go
+		// fold of each day's meetings) and drop the per-meeting digests, so a long
+		// briefing reads day-by-day across the whole span instead of losing its tail
+		// to the cap. Ranges of a week or less keep both — the cap was sized for
+		// them and the week gold-eval pins meeting-digest presence.
+		wideRange = rangeEnd.Sub(rangeStart) > 7*24*time.Hour
+		if wideRange {
+			dayOnly := make([]meetingMemoryEntry, 0, len(lane))
+			for _, entry := range lane {
+				if entry.Kind == meetingMemoryKindDayDigest {
+					dayOnly = append(dayOnly, entry)
+				}
+			}
+			if len(dayOnly) > 0 {
+				lane = dayOnly
+			}
+		}
+		// F8+F32: digestsInRange is oldest-first, so a plain lane[:limit] head-trim
+		// silently drops the NEWEST rollups — a month query loses its most recent
+		// ~week (wrong-era). For a wide range keep the newest `limit` rollups (the
+		// tail), still in chronological order so the briefing reads day by day
+		// across the most recent window; the older head is elided (its full detail
+		// stays on the record as the underlying digests).
+		if wideRange && len(lane) > limit {
+			lane = lane[len(lane)-limit:]
+		}
 	} else {
 		if company, ok := store.latestCompanyDigest(); ok {
 			lane = append(lane, company)
@@ -2345,9 +2875,21 @@ func (store *meetingMemoryStore) contextEntriesForQuery(query string, limit int,
 		pinnedIDs[digest.ID] = struct{}{}
 	}
 
-	for _, match := range store.search(query, limit) {
-		if entryAllowedByTime(match.Entry) {
-			add(match.Entry)
+	// Item 2.4 — semantic + lexical raw-candidate band, weighted-RRF fused.
+	// The lexical search lane and the in-process embedding lane are two ranked
+	// views of the SAME raw-candidate band; fusing them (recency tiebreak) lets
+	// a semantically-close but lexically-absent entry ("the Korean TV thing" ↔
+	// "Samsung TV Plus") join the band, while the pinned digest lane above and
+	// the ledger lane in the caller stay untouched — our stronger form of their
+	// "fact-key weighs highest". Keyless (no published index) or on query-embed
+	// failure the semantic side is empty and this is exactly the prior
+	// lexical-only search lane. The fused band is capped at limit, mirroring the
+	// slot share store.search took, so the other lanes below are not starved.
+	lexicalMatches := store.search(query, limit)
+	semanticHits := semanticLaneCandidates(query, embeddingLaneTopK())
+	for _, entry := range fuseRawCandidates(lexicalMatches, semanticHits, store, limit) {
+		if entryAllowedByTime(entry) {
+			add(entry)
 		}
 	}
 
@@ -2491,7 +3033,16 @@ func relativeQueryTimeRange(query string, now time.Time) (time.Time, time.Time, 
 	localNow := now.In(location)
 	dayStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, location)
 
+	// Sub-day durations (minutes/hours) first — unchanged.
 	if start, end, ok := relativeDurationQueryTimeRange(normalized, localNow); ok {
+		return start, end, true
+	}
+	// Calendar-scale N days/weeks/months (ago | last/past N ...), item 1.2.
+	if start, end, ok := calendarDurationQueryTimeRange(normalized, dayStart); ok {
+		return start, end, true
+	}
+	// Absolute dates: ISO YYYY-MM-DD, then "July 3" / "3 July" (item 1.2).
+	if start, end, ok := absoluteDateQueryTimeRange(normalized, dayStart, localNow); ok {
 		return start, end, true
 	}
 
@@ -2501,16 +3052,255 @@ func relativeQueryTimeRange(query string, now time.Time) (time.Time, time.Time, 
 		return start.UTC(), dayStart.UTC(), true
 	case strings.Contains(normalized, "today"):
 		return dayStart.UTC(), dayStart.AddDate(0, 0, 1).UTC(), true
+	}
+
+	// Calendar week/month ranges (this/last week, this/last month), item 1.2.
+	if start, end, ok := calendarUnitQueryTimeRange(normalized, dayStart); ok {
+		return start, end, true
+	}
+	// Bare month name ("in June"), disambiguated to the most recent occurrence
+	// on/before the current month unless a year is stated (item 1.2).
+	if start, end, ok := monthNameQueryTimeRange(normalized, dayStart, localNow); ok {
+		return start, end, true
+	}
+	// Weekday ("on Tuesday") → the most recent occurrence on/before today.
+	if start, end, ok := weekdayQueryTimeRange(normalized, dayStart, localNow); ok {
+		return start, end, true
+	}
+
+	return time.Time{}, time.Time{}, false
+}
+
+// startOfWeek returns the Monday 00:00 of dayStart's week, matching the
+// pre-existing last-week/this-week arithmetic.
+func startOfWeek(dayStart time.Time) time.Time {
+	return dayStart.AddDate(0, 0, -int((int(dayStart.Weekday())+6)%7))
+}
+
+// startOfMonth returns the first-of-month 00:00 in dayStart's location.
+func startOfMonth(dayStart time.Time) time.Time {
+	return time.Date(dayStart.Year(), dayStart.Month(), 1, 0, 0, 0, 0, dayStart.Location())
+}
+
+func positiveCount(value string) (int, bool) {
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+func calendarUnit(unit string) string {
+	switch {
+	case strings.HasPrefix(unit, "day"):
+		return "day"
+	case strings.HasPrefix(unit, "week"):
+		return "week"
+	case strings.HasPrefix(unit, "month"):
+		return "month"
+	}
+	return ""
+}
+
+// calendarDurationQueryTimeRange resolves "N days/weeks/months ago" (the single
+// day/week/month that far back) and "last/past N days/weeks/months" (a window
+// ending today, inclusive). AddDate is used so calendar boundaries (short
+// months, DST) resolve correctly (item 1.2).
+func calendarDurationQueryTimeRange(normalized string, dayStart time.Time) (time.Time, time.Time, bool) {
+	tomorrow := dayStart.AddDate(0, 0, 1)
+	if match := calendarAgoQueryPattern.FindStringSubmatch(normalized); len(match) == 3 {
+		if n, ok := positiveCount(match[1]); ok {
+			switch calendarUnit(match[2]) {
+			case "day":
+				start := dayStart.AddDate(0, 0, -n)
+				return start.UTC(), start.AddDate(0, 0, 1).UTC(), true
+			case "week":
+				start := startOfWeek(dayStart).AddDate(0, 0, -7*n)
+				return start.UTC(), start.AddDate(0, 0, 7).UTC(), true
+			case "month":
+				start := startOfMonth(dayStart).AddDate(0, -n, 0)
+				return start.UTC(), start.AddDate(0, 1, 0).UTC(), true
+			}
+		}
+	}
+	if match := calendarPastQueryPattern.FindStringSubmatch(normalized); len(match) == 3 {
+		if n, ok := positiveCount(match[1]); ok {
+			switch calendarUnit(match[2]) {
+			case "day": // N days including today
+				return dayStart.AddDate(0, 0, -(n - 1)).UTC(), tomorrow.UTC(), true
+			case "week": // N weeks including this week
+				weekStart := startOfWeek(dayStart)
+				return weekStart.AddDate(0, 0, -7*(n-1)).UTC(), weekStart.AddDate(0, 0, 7).UTC(), true
+			case "month": // N months including this month
+				monthStart := startOfMonth(dayStart)
+				return monthStart.AddDate(0, -(n - 1), 0).UTC(), monthStart.AddDate(0, 1, 0).UTC(), true
+			}
+		}
+	}
+	return time.Time{}, time.Time{}, false
+}
+
+// calendarUnitQueryTimeRange resolves the fixed this/last week and this/last
+// month phrases (item 1.2 extends the original week-only pair with months).
+func calendarUnitQueryTimeRange(normalized string, dayStart time.Time) (time.Time, time.Time, bool) {
+	weekStart := startOfWeek(dayStart)
+	monthStart := startOfMonth(dayStart)
+	switch {
 	case strings.Contains(normalized, "last week"):
-		thisWeek := dayStart.AddDate(0, 0, -int((int(localNow.Weekday())+6)%7))
-		lastWeek := thisWeek.AddDate(0, 0, -7)
-		return lastWeek.UTC(), thisWeek.UTC(), true
+		return weekStart.AddDate(0, 0, -7).UTC(), weekStart.UTC(), true
 	case strings.Contains(normalized, "this week"):
-		thisWeek := dayStart.AddDate(0, 0, -int((int(localNow.Weekday())+6)%7))
-		return thisWeek.UTC(), thisWeek.AddDate(0, 0, 7).UTC(), true
-	default:
+		return weekStart.UTC(), weekStart.AddDate(0, 0, 7).UTC(), true
+	case strings.Contains(normalized, "last month"):
+		return monthStart.AddDate(0, -1, 0).UTC(), monthStart.UTC(), true
+	case strings.Contains(normalized, "this month"):
+		return monthStart.UTC(), monthStart.AddDate(0, 1, 0).UTC(), true
+	}
+	return time.Time{}, time.Time{}, false
+}
+
+// absoluteDateQueryTimeRange resolves a single explicit calendar day: ISO
+// YYYY-MM-DD, or "July 3" / "July 3rd" / "3 July" / "3rd of July" with an
+// optional trailing year (item 1.2). A bare month/day is disambiguated to the
+// most recent occurrence on/before today. When the date is governed by "since"
+// ("since July 3"), the range opens from that day to now (F7+F22) rather than
+// covering only the single day.
+func absoluteDateQueryTimeRange(normalized string, dayStart time.Time, localNow time.Time) (time.Time, time.Time, bool) {
+	location := dayStart.Location()
+	if loc := isoDateQueryPattern.FindStringSubmatchIndex(normalized); loc != nil {
+		match := isoDateQueryPattern.FindStringSubmatch(normalized)
+		year, _ := strconv.Atoi(match[1])
+		month, _ := strconv.Atoi(match[2])
+		day, _ := strconv.Atoi(match[3])
+		if month >= 1 && month <= 12 && day >= 1 && day <= 31 {
+			start := time.Date(year, time.Month(month), day, 0, 0, 0, 0, location)
+			if start.Day() == day && int(start.Month()) == month { // reject Feb 30 etc.
+				return absoluteDateResult(normalized, loc[0], start, localNow)
+			}
+		}
+	}
+
+	var month time.Month
+	var day, year, matchStart int
+	found := false
+	if loc := monthDayQueryPattern.FindStringSubmatchIndex(normalized); loc != nil {
+		match := monthDayQueryPattern.FindStringSubmatch(normalized)
+		if m, ok := memoryMonthByToken[match[1]]; ok {
+			month = m
+			day, _ = strconv.Atoi(match[2])
+			if match[3] != "" {
+				year, _ = strconv.Atoi(match[3])
+			}
+			matchStart = loc[0]
+			found = day >= 1 && day <= 31
+		}
+	}
+	if !found {
+		if loc := dayMonthQueryPattern.FindStringSubmatchIndex(normalized); loc != nil {
+			match := dayMonthQueryPattern.FindStringSubmatch(normalized)
+			if m, ok := memoryMonthByToken[match[2]]; ok {
+				month = m
+				day, _ = strconv.Atoi(match[1])
+				if match[3] != "" {
+					year, _ = strconv.Atoi(match[3])
+				}
+				matchStart = loc[0]
+				found = day >= 1 && day <= 31
+			}
+		}
+	}
+	if !found {
 		return time.Time{}, time.Time{}, false
 	}
+	if year == 0 {
+		year = dayStart.Year()
+		if time.Date(year, month, day, 0, 0, 0, 0, location).After(dayStart) {
+			year--
+		}
+	}
+	start := time.Date(year, month, day, 0, 0, 0, 0, location)
+	if start.Day() != day || start.Month() != month { // impossible date
+		return time.Time{}, time.Time{}, false
+	}
+	return absoluteDateResult(normalized, matchStart, start, localNow)
+}
+
+// absoluteDateResult returns the [start, start+1day) single-day range for a
+// matched absolute date, OR the open [start, now) range when the date is
+// governed by "since" (F7+F22).
+func absoluteDateResult(normalized string, matchStart int, start time.Time, localNow time.Time) (time.Time, time.Time, bool) {
+	if phraseGovernedBySince(normalized, matchStart) {
+		return start.UTC(), localNow.UTC(), true
+	}
+	return start.UTC(), start.AddDate(0, 0, 1).UTC(), true
+}
+
+// phraseGovernedBySince reports whether the token starting at byteStart in
+// normalized is directly preceded by the word "since" (F7+F22). It powers the
+// open-range handling for absolute dates, whose patterns carry no preposition of
+// their own (month names and weekdays capture it inline instead).
+func phraseGovernedBySince(normalized string, byteStart int) bool {
+	if byteStart <= 0 {
+		return false
+	}
+	prefix := strings.TrimRight(normalized[:byteStart], " ")
+	if !strings.HasSuffix(prefix, "since") {
+		return false
+	}
+	before := len(prefix) - len("since")
+	return before == 0 || !memoryTextByteIsWordChar(prefix, before-1)
+}
+
+// monthNameQueryTimeRange resolves a bare month name gated by a preposition
+// ("in June", "during March 2026") to that whole calendar month (item 1.2).
+// Without a stated year it picks the most recent occurrence on/before the
+// current month. "since June" instead opens the range from June 1 to now
+// (F7+F22) — otherwise everything after the named month would be silently
+// hidden.
+func monthNameQueryTimeRange(normalized string, dayStart time.Time, localNow time.Time) (time.Time, time.Time, bool) {
+	match := monthNameQueryPattern.FindStringSubmatch(normalized)
+	if len(match) != 4 {
+		return time.Time{}, time.Time{}, false
+	}
+	month, ok := memoryMonthByToken[match[2]]
+	if !ok {
+		return time.Time{}, time.Time{}, false
+	}
+	year := 0
+	if match[3] != "" {
+		year, _ = strconv.Atoi(match[3])
+	}
+	if year == 0 {
+		year = dayStart.Year()
+		if month > dayStart.Month() {
+			year--
+		}
+	}
+	start := time.Date(year, month, 1, 0, 0, 0, 0, dayStart.Location())
+	if match[1] == "since" {
+		return start.UTC(), localNow.UTC(), true
+	}
+	return start.UTC(), start.AddDate(0, 1, 0).UTC(), true
+}
+
+// weekdayQueryTimeRange resolves a weekday gated by on/last/this/since ("on
+// Tuesday") to the most recent occurrence of that weekday on/before today
+// (item 1.2). "since Tuesday" opens the range from that day to now (F7+F22)
+// instead of covering only the single day.
+func weekdayQueryTimeRange(normalized string, dayStart time.Time, localNow time.Time) (time.Time, time.Time, bool) {
+	match := weekdayQueryPattern.FindStringSubmatch(normalized)
+	if len(match) != 3 {
+		return time.Time{}, time.Time{}, false
+	}
+	weekday, ok := memoryWeekdayByToken[match[2]]
+	if !ok {
+		return time.Time{}, time.Time{}, false
+	}
+	diff := (int(dayStart.Weekday()) - int(weekday) + 7) % 7
+	start := dayStart.AddDate(0, 0, -diff)
+	if match[1] == "since" {
+		return start.UTC(), localNow.UTC(), true
+	}
+	return start.UTC(), start.AddDate(0, 0, 1).UTC(), true
 }
 
 func relativeDurationQueryTimeRange(normalized string, localNow time.Time) (time.Time, time.Time, bool) {

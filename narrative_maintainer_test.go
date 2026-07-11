@@ -454,3 +454,112 @@ func TestNarrativeMaintainerAccumulatesMeetingIds(t *testing.T) {
 		t.Fatalf("meetingId=%q, want the current sitting %q", v2.Metadata["meetingId"], meetingB)
 	}
 }
+
+/* ---------- item 1.3b / Q6: alias resolution + overflow spill ---------- */
+
+func TestNarrativeMaintainerAliasPreventsSlugFork(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	app := newIsolatedKanbanBoardApp(t)
+	// an existing dossier under slug "samsung-tv" carrying its aliases.
+	if _, appended, err := app.memory.appendNarrative("narrative-samsung-tv", "## Storyline\nSamsung TV Plus opportunity.", map[string]string{
+		"slug": "samsung-tv", "title": "Samsung TV", "status": "pitch",
+		"roomId": officeRoomID, digestAliasesMetadataKey: "Samsung TV Plus, the Korean deal",
+	}); err != nil || !appended {
+		t.Fatalf("seed dossier: appended=%v err=%v", appended, err)
+	}
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-1", "## Overview\nSamsung TV Plus advanced.", nil); err != nil || !appended {
+		t.Fatalf("append brain-1: appended=%v err=%v", appended, err)
+	}
+
+	// the model forks a NEW slug for the SAME storyline; alias resolution catches it.
+	runNarrativeMaintainerOnceForTest(t, app, func(context.Context, string, openAITextRequest) (string, error) {
+		return `{"narratives":[{"slug":"samsung-tv-plus","title":"Samsung TV Plus","status":"advancing","aliases":["Samsung TV Plus deal"],"body":"## Storyline\nSamsung TV Plus advancing."}]}`, nil
+	})
+
+	active := app.activeNarrativeEntries(10)
+	if len(active) != 1 {
+		t.Fatalf("active dossiers = %d, want ONE (the fork resolved to the existing storyline)", len(active))
+	}
+	if slug := active[0].Metadata["slug"]; slug != "samsung-tv" {
+		t.Fatalf("resolved slug = %q, want the existing samsung-tv (no fork)", slug)
+	}
+	if active[0].Metadata["previousVersionId"] != "narrative-samsung-tv" {
+		t.Fatalf("new version = %+v, want it to supersede the existing dossier", active[0].Metadata)
+	}
+}
+
+func TestNarrativeMeetingIdsOverflowSpill(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	app := newIsolatedKanbanBoardApp(t)
+	// a predecessor dossier already at the meetingIds cap.
+	full := make([]string, 0, ledgerMeetingIDCap)
+	for index := 0; index < ledgerMeetingIDCap; index++ {
+		full = append(full, fmt.Sprintf("m-%02d", index))
+	}
+	if _, appended, err := app.memory.appendNarrative("narrative-samsung", "## Storyline\nSamsung.", map[string]string{
+		"slug": "samsung", "title": "Samsung", "roomId": officeRoomID,
+		"meetingIds": strings.Join(full, ","),
+	}); err != nil || !appended {
+		t.Fatalf("seed dossier: appended=%v err=%v", appended, err)
+	}
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-1", "## Overview\nSamsung.", nil); err != nil || !appended {
+		t.Fatalf("append brain-1: appended=%v err=%v", appended, err)
+	}
+	meetingNow := app.memory.currentMeetingID(officeRoomID)
+
+	version := runNarrativeMaintainerOnceForTest(t, app, func(context.Context, string, openAITextRequest) (string, error) {
+		return `{"narratives":[{"slug":"samsung","title":"Samsung","status":"live","body":"## Storyline\nSamsung."}]}`, nil
+	})
+	ids := splitNarrativeMeetingIDs(version.Metadata["meetingIds"])
+	if len(ids) != ledgerMeetingIDCap {
+		t.Fatalf("meetingIds len = %d, want capped at %d", len(ids), ledgerMeetingIDCap)
+	}
+	if !ledgerSliceContains(splitNarrativeMeetingIDs(version.Metadata["meetingIdsOverflow"]), "m-00") {
+		t.Fatalf("overflow = %q, want the evicted m-00 preserved (spill-never-shed)", version.Metadata["meetingIdsOverflow"])
+	}
+	if !ledgerSliceContains(ids, meetingNow) {
+		t.Fatalf("primary meetingIds = %+v, want the current sitting %q on the list", ids, meetingNow)
+	}
+}
+
+// F18: resolveNarrativeByAlias must scan ALL active dossiers, not just the pinned
+// newest-N context window — a synonym of an older storyline resolves to it
+// instead of forking a second slug.
+func TestResolveNarrativeByAliasScansBeyondContextWindow(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	// the TARGET storyline is the OLDEST dossier, carrying a distinctive alias.
+	if _, appended, err := app.memory.appendNarrative("narrative-zephyr", "## Storyline\nZephyr launch.", map[string]string{
+		"slug": "zephyr-launch", "title": "Zephyr Launch", "status": "active",
+		"roomId": officeRoomID, digestAliasesMetadataKey: "the zephyr rollout, zephyr GA",
+	}); err != nil || !appended {
+		t.Fatalf("seed target dossier: appended=%v err=%v", appended, err)
+	}
+	// push it well past the newest-N window with unrelated newer dossiers.
+	for index := 0; index < narrativeStorylineContextLimit+2; index++ {
+		slug := fmt.Sprintf("filler-%d", index)
+		if _, appended, err := app.memory.appendNarrative(fmt.Sprintf("narrative-%s", slug), "## Storyline\n"+slug, map[string]string{
+			"slug": slug, "title": slug, "status": "active", "roomId": officeRoomID,
+		}); err != nil || !appended {
+			t.Fatalf("seed filler %s: appended=%v err=%v", slug, appended, err)
+		}
+	}
+	// sanity: the target is NOT in the pinned context window anymore.
+	inWindow := false
+	for _, dossier := range app.activeNarrativeEntries(narrativeStorylineContextLimit) {
+		if dossier.Metadata["slug"] == "zephyr-launch" {
+			inWindow = true
+		}
+	}
+	if inWindow {
+		t.Fatal("test setup wrong: the target must be past the pinned window")
+	}
+
+	// a fresh fork slug that is really a synonym of the OLD target.
+	resolvedSlug, entry, ok := app.resolveNarrativeByAlias("zephyr-ga", "Zephyr GA rollout", []string{"the zephyr rollout"})
+	if !ok {
+		t.Fatal("alias resolution missed the older storyline (F18 — the unbounded scan should find it)")
+	}
+	if resolvedSlug != "zephyr-launch" || entry.Metadata["slug"] != "zephyr-launch" {
+		t.Fatalf("resolved to %q, want zephyr-launch", resolvedSlug)
+	}
+}

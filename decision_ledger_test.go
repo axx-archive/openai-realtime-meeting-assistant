@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,18 @@ import (
 	"testing"
 	"time"
 )
+
+// decisionEntryByStatus returns the first decision entry with the given status.
+func decisionEntryByStatus(t *testing.T, app *kanbanBoardApp, status string) meetingMemoryEntry {
+	t.Helper()
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindDecision, 0) {
+		if firstNonEmptyString(entry.Metadata["status"], decisionStatusActive) == status {
+			return entry
+		}
+	}
+	t.Fatalf("no decision entry with status %q", status)
+	return meetingMemoryEntry{}
+}
 
 func runDecisionLedgerOnceForTest(t *testing.T, app *kanbanBoardApp, responder openAITextResponder) meetingMemoryEntry {
 	t.Helper()
@@ -694,5 +707,231 @@ func TestDirectionalDedupesButCanUpgradeToFirm(t *testing.T) {
 	active := app.activeDecisionEntries(10)
 	if len(active) != 1 || !strings.Contains(active[0].Text, "Ball Dogs") {
 		t.Fatalf("active=%v, want the directional lean upgraded to a firm decision", active)
+	}
+}
+
+/* ---------- item 2.2b: reversal adjudication (propose-first) ---------- */
+
+// A new firm decision that adjudication judges to reverse an existing active
+// decision is held as proposed-supersession — NOT auto-superseded. The old
+// decision stays active until a human ratifies the reversal.
+func TestDecisionLedgerProposesSupersessionOnReversal(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	existing := "Grill pricing is set at 500 per month."
+	if _, appended, err := app.memory.appendDecision("decision-old", existing, map[string]string{
+		"status":    decisionStatusActive,
+		"dedupeKey": decisionDedupeKey(existing),
+	}); err != nil || !appended {
+		t.Fatalf("seed decision: appended=%v err=%v", appended, err)
+	}
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-1", "## Decisions\nWe are repricing the grill tier.", nil); err != nil || !appended {
+		t.Fatalf("append brain-1: appended=%v err=%v", appended, err)
+	}
+
+	calls := 0
+	entry := runDecisionLedgerOnceForTest(t, app, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		calls++
+		if strings.Contains(request.Instructions, "reversal adjudicator") {
+			if !strings.Contains(request.Input, existing) {
+				t.Errorf("reversal input missing the existing decision:\n%s", request.Input)
+			}
+			return `{"verdicts":[{"i":0,"verdict":"supersedes"}]}`, nil
+		}
+		return `{"decisions":[{"statement":"Grill pricing is set at 750 per month.","madeBy":"AJ","context":"repricing"}]}`, nil
+	})
+	if calls != 2 {
+		t.Fatalf("model calls = %d, want extraction + one batched reversal adjudication", calls)
+	}
+	if entry.Kind != meetingMemoryKindDecisionPass {
+		t.Fatalf("pass entry kind = %q, want decision_pass", entry.Kind)
+	}
+
+	proposed := decisionEntryByStatus(t, app, decisionStatusProposedSupersession)
+	if !strings.Contains(proposed.Text, "750") {
+		t.Fatalf("proposed-supersession statement = %q, want the new 750 decision", proposed.Text)
+	}
+	if proposed.Metadata["supersedes"] != "decision-old" {
+		t.Fatalf("supersedes link = %q, want decision-old", proposed.Metadata["supersedes"])
+	}
+	// the old decision is NOT auto-superseded — it stays active until ratified.
+	old, _ := app.memory.entryByKindAndID(meetingMemoryKindDecision, "decision-old")
+	if firstNonEmptyString(old.Metadata["status"], decisionStatusActive) != decisionStatusActive {
+		t.Fatalf("old decision status = %q, want it STILL active (never auto-superseded)", old.Metadata["status"])
+	}
+	// held out of the active lane, so the two contradictory decisions are never co-pinned.
+	for _, active := range app.activeDecisionEntries(10) {
+		if active.ID == proposed.ID {
+			t.Fatal("a proposed-supersession must not appear in the active decision lane")
+		}
+	}
+}
+
+// A model failure on the reversal adjudication degrades to no supersession: the
+// new decision simply goes active (a missed reversal is recoverable).
+func TestDecisionReversalDegradesToActiveOnModelFailure(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	existing := "Grill pricing is set at 500 per month."
+	if _, appended, err := app.memory.appendDecision("decision-old", existing, map[string]string{
+		"status": decisionStatusActive, "dedupeKey": decisionDedupeKey(existing),
+	}); err != nil || !appended {
+		t.Fatalf("seed decision: appended=%v err=%v", appended, err)
+	}
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-1", "## Decisions\nRepricing.", nil); err != nil || !appended {
+		t.Fatalf("append brain-1: appended=%v err=%v", appended, err)
+	}
+
+	runDecisionLedgerOnceForTest(t, app, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if strings.Contains(request.Instructions, "reversal adjudicator") {
+			return "", errors.New("model unavailable")
+		}
+		return `{"decisions":[{"statement":"Grill pricing is set at 750 per month.","madeBy":"AJ","context":"repricing"}]}`, nil
+	})
+
+	newDecision := decisionEntryByStatus(t, app, decisionStatusActive)
+	// the newest active decision must be the new 750 one — it went active, not held.
+	found := false
+	for _, entry := range app.activeDecisionEntries(10) {
+		if strings.Contains(entry.Text, "750") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("new decision (750) = %+v, want it active after adjudication failed", newDecision)
+	}
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindDecision, 0) {
+		if entry.Metadata["status"] == decisionStatusProposedSupersession {
+			t.Fatal("adjudication failure must NOT leave a proposed-supersession")
+		}
+	}
+}
+
+// Ratifying a proposed-supersession flips it active AND supersedes the decision
+// it contradicts — the one-click reversal, only on explicit human confirmation.
+func TestMarkDecisionRatifiedResolvesSupersession(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	old := "Grill pricing is set at 500 per month."
+	if _, _, err := app.memory.appendDecision("decision-old", old, map[string]string{
+		"status": decisionStatusActive, "dedupeKey": decisionDedupeKey(old),
+	}); err != nil {
+		t.Fatalf("seed old: %v", err)
+	}
+	fresh := "Grill pricing is set at 750 per month."
+	if _, _, err := app.memory.appendDecision("decision-new", fresh, map[string]string{
+		"status": decisionStatusProposedSupersession, "supersedes": "decision-old", "dedupeKey": decisionDedupeKey(fresh),
+	}); err != nil {
+		t.Fatalf("seed new: %v", err)
+	}
+
+	updated, changed, err := app.markDecisionRatified("decision-new", "AJ")
+	if err != nil || !changed {
+		t.Fatalf("ratify: changed=%v err=%v", changed, err)
+	}
+	if updated.Metadata["status"] != decisionStatusActive || updated.Metadata["ratifiedBy"] != "AJ" {
+		t.Fatalf("ratified decision = %+v, want active + ratifiedBy AJ", updated.Metadata)
+	}
+	if !strings.Contains(updated.Metadata["supersedesSummary"], "500") {
+		t.Fatalf("supersedesSummary = %q, want the retired 500 statement for chain rendering", updated.Metadata["supersedesSummary"])
+	}
+	// the contradicted decision is now superseded, pointing forward at the new one.
+	oldEntry, _ := app.memory.entryByKindAndID(meetingMemoryKindDecision, "decision-old")
+	if oldEntry.Metadata["status"] != decisionStatusSuperseded || oldEntry.Metadata["supersededBy"] != "decision-new" {
+		t.Fatalf("old decision = %+v, want superseded by decision-new", oldEntry.Metadata)
+	}
+	// the reversal only retired ONE decision; the new one is the sole active row.
+	active := app.activeDecisionEntries(10)
+	if len(active) != 1 || active[0].ID != "decision-new" {
+		t.Fatalf("active decisions = %+v, want just the ratified reversal", active)
+	}
+}
+
+/* ---------- F16: a restated reversal files exactly ONCE ---------- */
+
+// countDecisionsByStatus returns how many kind=decision rows carry the status.
+func countDecisionsByStatus(app *kanbanBoardApp, status string) int {
+	count := 0
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindDecision, 0) {
+		if firstNonEmptyString(entry.Metadata["status"], decisionStatusActive) == status {
+			count++
+		}
+	}
+	return count
+}
+
+// A reversal restated across two windows must not re-file: the first pass holds
+// it as proposed-supersession, the second recognizes it is already pending (F16)
+// — no duplicate pending row, and no wasted second adjudication call.
+func TestDecisionLedgerRestatedReversalFilesOnce(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	existing := "Grill pricing is set at 500 per month."
+	if _, appended, err := app.memory.appendDecision("decision-old", existing, map[string]string{
+		"status": decisionStatusActive, "dedupeKey": decisionDedupeKey(existing),
+	}); err != nil || !appended {
+		t.Fatalf("seed decision: appended=%v err=%v", appended, err)
+	}
+
+	reversal := `{"decisions":[{"statement":"Grill pricing is set at 750 per month.","madeBy":"AJ","context":"repricing"}]}`
+	responder := func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if strings.Contains(request.Instructions, "reversal adjudicator") {
+			return `{"verdicts":[{"i":0,"verdict":"supersedes"}]}`, nil
+		}
+		return reversal, nil
+	}
+
+	// window 1: the reversal is detected and held as proposed-supersession.
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-1", "## Decisions\nRepricing the grill tier.", nil); err != nil || !appended {
+		t.Fatalf("append brain-1: appended=%v err=%v", appended, err)
+	}
+	runDecisionLedgerOnceForTest(t, app, responder)
+	if got := countDecisionsByStatus(app, decisionStatusProposedSupersession); got != 1 {
+		t.Fatalf("pending reversals after window 1 = %d, want 1", got)
+	}
+
+	// window 2: the SAME reversal is re-extracted (the mock ignores the exclusion
+	// list) — it must NOT re-file, and the reversal adjudicator must not be called.
+	adjudications := 0
+	responder2 := func(ctx context.Context, key string, request openAITextRequest) (string, error) {
+		if strings.Contains(request.Instructions, "reversal adjudicator") {
+			adjudications++
+		}
+		return responder(ctx, key, request)
+	}
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-2", "## Decisions\nStill repricing the grill tier.", nil); err != nil || !appended {
+		t.Fatalf("append brain-2: appended=%v err=%v", appended, err)
+	}
+	runDecisionLedgerOnceForTest(t, app, responder2)
+
+	if got := countDecisionsByStatus(app, decisionStatusProposedSupersession); got != 1 {
+		t.Fatalf("pending reversals after window 2 = %d, want STILL 1 (restated reversal must not duplicate)", got)
+	}
+	if got := countDecisionsByStatus(app, decisionStatusActive); got != 1 {
+		t.Fatalf("active decisions after window 2 = %d, want just the untouched original (the reversal never went active)", got)
+	}
+	if adjudications != 0 {
+		t.Fatalf("reversal adjudications in window 2 = %d, want 0 (the pending reversal is skipped before pairing)", adjudications)
+	}
+}
+
+// The already-recorded exclusion list the extraction prompt carries includes
+// pending reversals, so the model is TOLD not to re-emit them (F16).
+func TestDecisionLedgerInputListsPendingReversals(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	pending := "Grill pricing moves to 750 per month."
+	if _, appended, err := app.memory.appendDecision("decision-rev", pending, map[string]string{
+		"status": decisionStatusProposedSupersession, "supersedes": "decision-old",
+		"dedupeKey": decisionDedupeKey(pending),
+	}); err != nil || !appended {
+		t.Fatalf("seed pending reversal: appended=%v err=%v", appended, err)
+	}
+	input := app.buildDecisionLedgerInput(nil, time.Now().UTC())
+	if !strings.Contains(input, "Already recorded decisions") || !strings.Contains(input, pending) {
+		t.Fatalf("extraction input must list the pending reversal as already-recorded:\n%s", input)
+	}
+}
+
+// F28b: the extraction prompt resolves relative dates, mirroring the digest.
+func TestDecisionLedgerInstructionsResolveRelativeDates(t *testing.T) {
+	if !strings.Contains(decisionLedgerInstructions(), "Resolve every spoken relative date") {
+		t.Fatal("decision extraction prompt missing the relative→absolute date-resolution instruction (F28b)")
 	}
 }

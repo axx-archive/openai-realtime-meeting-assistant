@@ -160,6 +160,7 @@ func meetingBrainInstructions() string {
 		"Create a faithful, high-signal memory write-up from the supplied transcript window.",
 		"Preserve who said what. Do not invent facts, participants, clients, dates, decisions, or action items.",
 		"When the transcript is unclear, say it is unclear instead of guessing.",
+		"Resolve every spoken relative date ('yesterday', 'next Friday', 'end of the month') to an absolute YYYY-MM-DD using the generation date above; never leave a relative date unresolved in the write-up.",
 		"Write compact markdown with these sections: Overview, People, Topics, Decisions, Follow-ups, Project and client notes, Transcript reference.",
 		"Keep the Transcript reference brief but include the transcript IDs that matter so raw transcript entries can be checked later.",
 	}, " ")

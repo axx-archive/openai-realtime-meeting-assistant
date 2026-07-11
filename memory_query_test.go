@@ -138,6 +138,88 @@ func TestContextEntriesForQueryUnderstandsPastDuration(t *testing.T) {
 	}
 }
 
+// Item 1.2: the temporal parser understands calendar months, month names,
+// "N days/weeks/months ago", weekdays, and absolute dates — all resolved in Go
+// in MEETING_TIME_ZONE, including the month boundary that differs from UTC.
+func TestRelativeQueryTimeRangeBroadVocabulary(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	location := meetingTimeLocation()
+	now := time.Date(2026, 7, 15, 10, 0, 0, 0, location) // Wednesday
+	day := func(y int, m time.Month, d int) time.Time {
+		return time.Date(y, m, d, 0, 0, 0, 0, location).UTC()
+	}
+
+	cases := []struct {
+		query string
+		start time.Time
+		end   time.Time
+	}{
+		{"what did we cover this week?", day(2026, 7, 13), day(2026, 7, 20)},
+		{"what did I miss last week?", day(2026, 7, 6), day(2026, 7, 13)},
+		{"what happened this month?", day(2026, 7, 1), day(2026, 8, 1)},
+		{"recap last month for me", day(2026, 6, 1), day(2026, 7, 1)},
+		{"what did we decide 3 days ago?", day(2026, 7, 12), day(2026, 7, 13)},
+		{"anything from 2 weeks ago?", day(2026, 6, 29), day(2026, 7, 6)},
+		{"catch me up on 2 months ago", day(2026, 5, 1), day(2026, 6, 1)},
+		{"summarize the last 3 days", day(2026, 7, 13), day(2026, 7, 16)},
+		{"what did we discuss in June?", day(2026, 6, 1), day(2026, 7, 1)},
+		{"remind me what happened in August", day(2025, 8, 1), day(2025, 9, 1)},
+		{"what did we cover on Tuesday?", day(2026, 7, 14), day(2026, 7, 15)},
+		{"what did we cover on Wednesday?", day(2026, 7, 15), day(2026, 7, 16)},
+		{"pull up 2026-07-03", day(2026, 7, 3), day(2026, 7, 4)},
+		{"what did we decide on July 3?", day(2026, 7, 3), day(2026, 7, 4)},
+		{"what about July 3rd?", day(2026, 7, 3), day(2026, 7, 4)},
+		{"recap 3 July for me", day(2026, 7, 3), day(2026, 7, 4)},
+		{"what happened on July 20?", day(2025, 7, 20), day(2025, 7, 21)}, // future this year -> last year
+		{"what about December 25?", day(2025, 12, 25), day(2025, 12, 26)},
+	}
+	for _, tc := range cases {
+		start, end, ok := relativeQueryTimeRange(tc.query, now)
+		if !ok {
+			t.Fatalf("relativeQueryTimeRange(%q) not recognized", tc.query)
+		}
+		if !start.Equal(tc.start) || !end.Equal(tc.end) {
+			t.Fatalf("relativeQueryTimeRange(%q) = [%s, %s), want [%s, %s)", tc.query, start.UTC(), end.UTC(), tc.start, tc.end)
+		}
+	}
+
+	// Month-boundary edge: at 23:00 local on July 31 it is already Aug 1 in UTC,
+	// but the LA local month is still July.
+	edge := time.Date(2026, 7, 31, 23, 0, 0, 0, location)
+	if start, end, ok := relativeQueryTimeRange("what happened this month?", edge); !ok ||
+		!start.Equal(day(2026, 7, 1)) || !end.Equal(day(2026, 8, 1)) {
+		t.Fatalf("this-month at the LA month boundary = [%s, %s] ok=%v, want July in local time", start.UTC(), end.UTC(), ok)
+	}
+	if start, end, ok := relativeQueryTimeRange("recap last month", edge); !ok ||
+		!start.Equal(day(2026, 6, 1)) || !end.Equal(day(2026, 7, 1)) {
+		t.Fatalf("last-month at the LA month boundary = [%s, %s] ok=%v, want June in local time", start.UTC(), end.UTC(), ok)
+	}
+}
+
+// Item 1.6: board-query routing matches markers on word boundaries, so "know"
+// no longer trips "now" and "known" no longer trips "own", while inflected and
+// explicit forms ("owns", "cards", "currently") still route.
+func TestIsCurrentBoardQueryWordBoundary(t *testing.T) {
+	cases := []struct {
+		query string
+		want  bool
+	}{
+		{"what is the current status?", true},
+		{"who owns the pricing sheet?", true},
+		{"are any cards blocked?", true},
+		{"what's currently in progress?", true},
+		{"where do we stand on the deadline?", true},
+		{"do you know what happened?", false},
+		{"is this widely known?", false},
+		{"tell me about the startup pitch", false},
+	}
+	for _, tc := range cases {
+		if got := isCurrentBoardQuery(tc.query); got != tc.want {
+			t.Fatalf("isCurrentBoardQuery(%q) = %v, want %v", tc.query, got, tc.want)
+		}
+	}
+}
+
 func TestAssistantQueryAnswersCurrentBoardCardStatus(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	if _, changed, err := app.createTicket(map[string]any{
@@ -575,8 +657,12 @@ func TestAnswerAssistantQueryRoutesToSonnetWithAnthropicKey(t *testing.T) {
 	if got.Model != "claude-sonnet-5" {
 		t.Fatalf("model=%q, want claude-sonnet-5", got.Model)
 	}
-	if got.MaxTokens != 800 || got.Effort != "low" {
-		t.Fatalf("chat budget=%d/%q, want 800/low", got.MaxTokens, got.Effort)
+	// Item Q7: the typed chat seam is bumped to effort=medium (synthesis is the
+	// only stage the study found parameters help); the 800-token budget is
+	// unchanged. The spoken voice recall seam (answerMemoryQuestionWithModel)
+	// stays low — see TestAnswerMemoryQuestionRoutesToSonnetWithAnthropicKey.
+	if got.MaxTokens != 800 || got.Effort != "medium" {
+		t.Fatalf("chat budget=%d/%q, want 800/medium", got.MaxTokens, got.Effort)
 	}
 	if got.Instructions != assistantQueryInstructions() {
 		t.Fatal("Sonnet request must carry the same assistant-query instructions as the OpenAI path")
@@ -586,8 +672,11 @@ func TestAnswerAssistantQueryRoutesToSonnetWithAnthropicKey(t *testing.T) {
 	}
 }
 
-// Keyless-Anthropic keeps the gpt-5.5 Responses path byte-for-byte: same
-// model dial, same 500-token budget, Anthropic seam untouched.
+// Keyless-Anthropic keeps the gpt-5.5 Responses path: same model dial, same
+// 500-token budget, Anthropic seam untouched. The keyless fallback stays at
+// effort=low (F33): its 500-token cap was sized for low, so medium reasoning
+// under it would risk truncating the answer; the keyed Anthropic path gets
+// medium via the doctrine floor instead.
 func TestAnswerAssistantQueryKeylessAnthropicKeepsOpenAIPath(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	app.apiKey = "openai-key"
@@ -613,7 +702,7 @@ func TestAnswerAssistantQueryKeylessAnthropicKeepsOpenAIPath(t *testing.T) {
 		t.Fatalf("model=%q, want meetingBrainModel()", got.Model)
 	}
 	if got.MaxOutputTokens != 500 || got.ReasoningEffort != "low" {
-		t.Fatalf("openai budget=%d/%q, want unchanged 500/low", got.MaxOutputTokens, got.ReasoningEffort)
+		t.Fatalf("openai budget=%d/%q, want 500/low (F33: keyless fallback stays low)", got.MaxOutputTokens, got.ReasoningEffort)
 	}
 }
 
@@ -1298,4 +1387,217 @@ func TestCoverageAndLedgerInstructionsPresent(t *testing.T) {
 	if !strings.Contains(assistantQueryInstructions(), "CAPTURED window") {
 		t.Fatal("assistantQueryInstructions missing the coverage-honesty sentence")
 	}
+}
+
+/* ---------- item 2.2c / 2.3b: position + evolution recall routing ---------- */
+
+func TestPositionAndEvolutionQueryDetection(t *testing.T) {
+	if owner, topic, ok := isPositionQuery("what does Tim think about pricing?"); !ok || owner != "Tim" || topic != "pricing" {
+		t.Fatalf("position detect = (%q,%q,%v), want (Tim, pricing, true)", owner, topic, ok)
+	}
+	if _, _, ok := isPositionQuery("what is the status of pricing?"); ok {
+		t.Fatal("a plain status question must not route to the position lane")
+	}
+	if _, _, ok := isPositionQuery("what does the team think"); ok {
+		t.Fatal("a question naming no roster member must not route to the position lane")
+	}
+	if subject, ok := isEvolutionQuery("how did our pricing strategy evolve?"); !ok || !strings.Contains(subject, "pricing") {
+		t.Fatalf("evolution detect = (%q,%v), want a pricing subject", subject, ok)
+	}
+	if _, ok := isEvolutionQuery("what is the current pricing?"); ok {
+		t.Fatal("a current-state question must not route to the evolution lane")
+	}
+}
+
+func TestLedgerPositionAnswerIsOwnerFiltered(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	appendProposedLean(t, app, "dec-tim", "Tim favors holding the current pricing.", "Tim", "meeting-a")
+	appendProposedLean(t, app, "dec-aj", "AJ favors cutting the current pricing.", "AJ", "meeting-a")
+	upsertLedgerTestDigest(t, app, "meeting-a", meetingDigestPayload{})
+	runLedgerPass(t, app, forbiddenLedgerResponder(t))
+
+	answer, ok := app.ledgerPositionAnswer("what does Tim think about pricing?")
+	if !ok {
+		t.Fatal("position question should resolve to the ledger position lane")
+	}
+	if !strings.Contains(answer, "Tim") || !strings.Contains(answer, "holding") {
+		t.Fatalf("answer = %q, want Tim's holding stance", answer)
+	}
+	if strings.Contains(answer, "AJ favors cutting") {
+		t.Fatalf("answer leaked AJ's stance across owners: %q", answer)
+	}
+	// the umbrella fallback routes the same question the same way.
+	umbrella, ok := app.ledgerStatusAnswer("what does Tim think about pricing?")
+	if !ok || !strings.Contains(umbrella, "holding") {
+		t.Fatalf("ledgerStatusAnswer umbrella = (%q,%v), want Tim's position", umbrella, ok)
+	}
+}
+
+func TestLedgerEvolutionAnswerRendersDatedTransitions(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	upsertLedgerTestDigest(t, app, "meeting-a", meetingDigestPayload{Decisions: []meetingDigestDecision{{
+		D: "Ship the pilot with vendor Zebra packaging", By: "AJ", Anchor: "tx-1", Importance: 4,
+	}}})
+	runLedgerPass(t, app, forbiddenLedgerResponder(t))
+	upsertLedgerTestDigest(t, app, "meeting-b", meetingDigestPayload{Decisions: []meetingDigestDecision{{
+		D: "Use vendor Kappa for the packaging pilot instead of Zebra", By: "AJ", Anchor: "tx-7", Importance: 5,
+	}}})
+	runLedgerPass(t, app, func(context.Context, string, openAITextRequest) (string, error) {
+		return `{"verdicts":[{"i":0,"verdict":"supersedes"}]}`, nil
+	})
+
+	answer, ok := app.ledgerEvolutionAnswer("how did the packaging vendor decision evolve?")
+	if !ok {
+		t.Fatal("evolution question should resolve to the ledger evolution lane")
+	}
+	if !strings.Contains(answer, "Zebra") || !strings.Contains(answer, "Kappa") {
+		t.Fatalf("answer = %q, want both the original and superseding statements", answer)
+	}
+	// rendered deterministically — no model call, byte-identical across calls.
+	if again, _ := app.ledgerEvolutionAnswer("how did the packaging vendor decision evolve?"); answer != again {
+		t.Fatal("evolution answer is not deterministic across calls")
+	}
+}
+
+func TestDecisionsLaneRendersSupersessionChain(t *testing.T) {
+	now := time.Now()
+	decision := meetingMemoryEntry{
+		ID:        "decision-new",
+		Kind:      meetingMemoryKindDecision,
+		Text:      "Grill pricing is set at 750 per month.",
+		CreatedAt: now,
+		Metadata: map[string]string{
+			"madeBy":            "AJ",
+			"status":            decisionStatusActive,
+			"supersedesSummary": "Grill pricing is set at 500 per month. (until 2026-07-11)",
+		},
+	}
+	input := buildAssistantQueryInput("what did we decide on grill pricing?", nil, nil, []meetingMemoryEntry{decision}, nil, nil, now, false)
+	if !strings.Contains(input, "previously: Grill pricing is set at 500 per month.") {
+		t.Fatalf("decisions lane missing the supersession chain render:\n%s", input)
+	}
+}
+
+// F7+F22: "since <month>/<weekday>/<date>" resolves to an OPEN range from the
+// named point to now, not just that single day/month — otherwise everything
+// after the named point is silently hidden (the wrong-era class). The bounded
+// "in June" / "on Tuesday" forms are unaffected.
+func TestRelativeQueryTimeRangeSince(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	location := meetingTimeLocation()
+	now := time.Date(2026, 7, 15, 10, 0, 0, 0, location) // Wednesday
+	day := func(y int, m time.Month, d int) time.Time {
+		return time.Date(y, m, d, 0, 0, 0, 0, location).UTC()
+	}
+
+	cases := []struct {
+		query string
+		start time.Time
+		end   time.Time
+	}{
+		{"what changed since June?", day(2026, 6, 1), now.UTC()},
+		{"what have we shipped since Tuesday?", day(2026, 7, 14), now.UTC()},
+		{"anything decided since July 3?", day(2026, 7, 3), now.UTC()},
+	}
+	for _, tc := range cases {
+		start, end, ok := relativeQueryTimeRange(tc.query, now)
+		if !ok {
+			t.Fatalf("relativeQueryTimeRange(%q) not recognized", tc.query)
+		}
+		if !start.Equal(tc.start) || !end.Equal(tc.end) {
+			t.Fatalf("relativeQueryTimeRange(%q) = [%s, %s), want [%s, %s)", tc.query, start.UTC(), end.UTC(), tc.start, tc.end)
+		}
+	}
+
+	// Contrast: the bounded "in June" form still covers only that month.
+	if start, end, ok := relativeQueryTimeRange("what did we discuss in June?", now); !ok ||
+		!start.Equal(day(2026, 6, 1)) || !end.Equal(day(2026, 7, 1)) {
+		t.Fatalf("\"in June\" = [%s, %s) ok=%v, want the bounded month June 1..July 1", start.UTC(), end.UTC(), ok)
+	}
+}
+
+// F8+F32: for a range wider than a week the digest lane collapses to day
+// rollups, but the oldest-first ordering meant a plain head-trim to the cap
+// dropped the NEWEST days (wrong-era). The lane must keep the newest `limit`
+// rollups instead.
+func TestDigestContextLaneWideRangeKeepsNewest(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "UTC")
+	store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "memory.jsonl"))
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+	var entries []meetingMemoryEntry
+	for d := 1; d <= 30; d++ {
+		day := fmt.Sprintf("2026-06-%02d", d)
+		entries = append(entries, testDigestContextEntry(
+			"day-"+day, meetingMemoryKindDayDigest, day,
+			"Day rollup for "+day, time.Date(2026, 6, d, 12, 0, 0, 0, time.UTC),
+			map[string]string{digestDayMetadataKey: day},
+		))
+	}
+	store.entries = entries
+
+	rangeStart := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	rangeEnd := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC) // 30-day span > one week
+	limit := 10
+	lane := store.digestContextLane(true, rangeStart, rangeEnd, limit)
+	if len(lane) != limit {
+		t.Fatalf("lane size = %d, want %d", len(lane), limit)
+	}
+	if !memoryEntriesContain(lane, "day-2026-06-30") {
+		t.Fatal("the NEWEST day rollup must survive the cap (recency doctrine)")
+	}
+	if memoryEntriesContain(lane, "day-2026-06-01") {
+		t.Fatal("the oldest day rollup must be the one elided, not the newest")
+	}
+	// Chronological order preserved within the kept (newest) window.
+	if lane[0].ID != "day-2026-06-21" || lane[len(lane)-1].ID != "day-2026-06-30" {
+		t.Fatalf("kept window = [%s .. %s], want [day-2026-06-21 .. day-2026-06-30]", lane[0].ID, lane[len(lane)-1].ID)
+	}
+}
+
+// F31+F19: the evolution lane was the only unbounded recall text — a lineage
+// rendered its ENTIRE transition history. It now caps at the newest ~12 with an
+// explicit elision line, in both the synthetic context entry and the fallback.
+func TestEvolutionTransitionsCapped(t *testing.T) {
+	transitions := make([]ledgerTransition, 0, 15)
+	for i := 0; i < 15; i++ { // oldest-first
+		transitions = append(transitions, ledgerTransition{
+			Op:     "set",
+			Title:  fmt.Sprintf("rev-%02d", i),
+			Status: "active",
+			At:     fmt.Sprintf("2026-06-%02d", i+1),
+		})
+	}
+	record := ledgerRecord{ID: "rec-1", Title: "Packaging vendor decision"}
+	entry := ledgerEvolutionContextEntry(record, transitions, time.Now())
+
+	if renderedTransitionLines(entry.Text) != evolutionTransitionRenderCap {
+		t.Fatalf("rendered %d transition lines, want the %d cap", renderedTransitionLines(entry.Text), evolutionTransitionRenderCap)
+	}
+	if !strings.Contains(entry.Text, "3 earlier transitions elided (full history on the record)") {
+		t.Fatalf("missing the elision line (15-12=3 elided):\n%s", entry.Text)
+	}
+	if !strings.Contains(entry.Text, "rev-14") { // newest kept
+		t.Fatal("the newest transition must be rendered")
+	}
+	if strings.Contains(entry.Text, "rev-00") || strings.Contains(entry.Text, "rev-02") {
+		t.Fatal("the oldest transitions (rev-00..rev-02) must be the ones elided")
+	}
+	if !strings.Contains(entry.Text, "rev-03") { // first kept after the elided head
+		t.Fatal("rev-03 should be the first kept transition")
+	}
+
+	// A short lineage renders in full, with no elision line.
+	short := transitions[:5]
+	shortEntry := ledgerEvolutionContextEntry(record, short, time.Now())
+	if renderedTransitionLines(shortEntry.Text) != 5 || strings.Contains(shortEntry.Text, "elided") {
+		t.Fatalf("a 5-transition lineage must render all 5 with no elision:\n%s", shortEntry.Text)
+	}
+}
+
+// renderedTransitionLines counts rendered transition rows (each carries a
+// " — status=" segment; the elision line does not).
+func renderedTransitionLines(text string) int {
+	return strings.Count(text, " — status=")
 }

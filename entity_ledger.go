@@ -52,6 +52,14 @@ const (
 	// the newest kind=decision entry the pass swept (amendment A9 fold source).
 	// Carried forward on every pass so it survives decision-free ticks.
 	entityLedgerDecisionCursorMetadataKey = "throughDecisionId"
+	// entityLedgerRefeedMetadataKey flags a kind=decision row (behind the sweep
+	// cursor) whose status changed AFTER it was consumed and must be re-folded
+	// (F20): a ratified reversal flips its own row active and supersedes another,
+	// but the position-based cursor already advanced past both, so neither reaches
+	// the ledger through the normal decision lane. markDecisionRatified stamps this
+	// marker; unconsumedDecisionEntriesForLedger re-includes the flagged rows and
+	// the pass clears the marker once it has folded them.
+	entityLedgerRefeedMetadataKey = "ledgerRefeed"
 	// entityLedgerDecisionSweepCap bounds the decision rows folded per pass;
 	// the cursor defers the rest to the next tick, never drops them.
 	entityLedgerDecisionSweepCap = 16
@@ -73,14 +81,32 @@ const (
 	ledgerMeetingIDCap = 12
 	ledgerTitleLimit   = 240
 	ledgerOwnerLimit   = 60
+
+	// ledgerAliasCap bounds the accumulated alias phrasings stored on a record
+	// (item 1.3a) — the union of every digest's aliases the record folded, used
+	// to catch a renamed entity before the <0.4-Jaccard band mints a duplicate.
+	ledgerAliasCap = 8
+	// ledgerPastOwnersCap bounds the ownership-evolution trail (item 2.3a): when
+	// owner drifts newest-wins, the prior owner is retained here so the evolution
+	// lane can read who held a record before the current owner.
+	ledgerPastOwnersCap = 6
+	// ledgerProvenanceOverflowCap bounds the spill list that catches meetingIds /
+	// anchors evicted off the primary cap (item Q6, spill-never-shed): the fold
+	// and prompt paths keep using the primary list (no prompt-size change), but a
+	// month-long arc's origin meetings survive on the record for the evolution
+	// lane and future drill-downs instead of being lost to the oldest-drop.
+	ledgerProvenanceOverflowCap = 48
 )
 
-// Ledger entity kinds — the four fact classes the T2 digest schema extracts.
+// Ledger entity kinds — the four fact classes the T2 digest schema extracts,
+// plus `position` (item 2.2): a keyed (Owner + topic) stance record fed from
+// directional leans, so "what does <person> think about <topic>" is O(lookup).
 const (
 	ledgerEntityDecision     = "decision"
 	ledgerEntityActionItem   = "action_item"
 	ledgerEntityTopic        = "topic"
 	ledgerEntityOpenQuestion = "open_question"
+	ledgerEntityPosition     = "position"
 )
 
 // Consolidation ops (the mem0 pattern).
@@ -120,6 +146,19 @@ type ledgerRecord struct {
 	MeetingIDs   []string `json:"meetingIds,omitempty"`
 	Importance   int      `json:"importance,omitempty"`
 	UpdatedAt    string   `json:"updatedAt,omitempty"`
+	// Aliases (item 1.3a) is the accumulated set of alternate phrasings this
+	// record has folded from digest aliases — matched against a new fact's title
+	// so a renamed entity consolidates instead of forking a duplicate.
+	Aliases []string `json:"aliases,omitempty"`
+	// PastOwners (item 2.3a) is the capped ownership-evolution trail: prior
+	// owners displaced by newest-wins drift, oldest-first, so recall can read
+	// who held the record before the current owner.
+	PastOwners []string `json:"pastOwners,omitempty"`
+	// MeetingIDsOverflow / AnchorsOverflow (item Q6) catch provenance evicted
+	// off the primary caps — spill-never-shed. Never rendered into a prompt; a
+	// durable tail for the evolution lane and future drill-downs.
+	MeetingIDsOverflow []string `json:"meetingIdsOverflow,omitempty"`
+	AnchorsOverflow    []string `json:"anchorsOverflow,omitempty"`
 }
 
 // current reports whether the record's validity window is still open.
@@ -269,6 +308,9 @@ type ledgerFact struct {
 	At         string
 	MeetingID  string
 	Importance int
+	// Aliases (item 1.3a) rides in from the source digest's model-written alias
+	// phrasings; carried onto the record so a later renamed restatement matches.
+	Aliases []string
 }
 
 // ledgerFactsFromDigest flattens a meeting_digest's four fact sections. The
@@ -282,6 +324,14 @@ func ledgerFactsFromDigest(entry meetingMemoryEntry) []ledgerFact {
 		return nil
 	}
 	meetingID := digestEntryKey(entry)
+	// item 1.3a: the digest's aliases describe this meeting's storyline, so they
+	// ride onto the storyline-shaped facts (topics + decisions) — the records a
+	// rename would fork. F17: they are gated PER-FACT (aliasesForFact) rather than
+	// stamped onto every one, so an unrelated sibling decision never inherits the
+	// storyline's aliases and gets dragged into the alias-bridge adjudication band.
+	// A lone topic unambiguously IS the storyline, so it always carries them.
+	aliases := clampDigestAliases(payload.Aliases)
+	soleTopic := len(payload.Topics) == 1
 	facts := make([]ledgerFact, 0, len(payload.Decisions)+len(payload.ActionItems)+len(payload.Topics)+len(payload.OpenQuestions))
 	for _, decision := range payload.Decisions {
 		facts = append(facts, ledgerFact{
@@ -293,6 +343,7 @@ func ledgerFactsFromDigest(entry meetingMemoryEntry) []ledgerFact {
 			At:         decision.At,
 			MeetingID:  meetingID,
 			Importance: clampImportance(decision.Importance),
+			Aliases:    aliasesForFact(aliases, decision.D, false),
 		})
 	}
 	for _, action := range payload.ActionItems {
@@ -315,6 +366,7 @@ func ledgerFactsFromDigest(entry meetingMemoryEntry) []ledgerFact {
 			At:         topic.At,
 			MeetingID:  meetingID,
 			Importance: clampImportance(topic.Importance),
+			Aliases:    aliasesForFact(aliases, topic.T, soleTopic),
 		})
 	}
 	for _, question := range payload.OpenQuestions {
@@ -331,25 +383,123 @@ func ledgerFactsFromDigest(entry meetingMemoryEntry) []ledgerFact {
 	return facts
 }
 
+// aliasesForFact gates digest-level storyline aliases onto ONE fact (item 1.3a /
+// F17). An alias attaches only when it plausibly renames THIS fact — it shares a
+// normalized title token — or forceAttach is set for the lone topic that
+// unambiguously IS the storyline. The record-side accumulated-alias bridge
+// (matchLedgerFact / searchLedgerRecords over record.Aliases) is untouched, so a
+// genuine rename still consolidates.
+func aliasesForFact(aliases []string, title string, forceAttach bool) []string {
+	if len(aliases) == 0 {
+		return nil
+	}
+	if forceAttach || aliasesShareTitleToken(aliases, title) {
+		return aliases
+	}
+
+	return nil
+}
+
+// aliasGateStopTokens are common function words that survive the ≥3-char token
+// cut and would otherwise let any alias "share a token" with any title ("the"
+// appears in both "the Samsung deal" and "approve the hiring budget"). Filtered
+// on BOTH sides of the alias-attachment gate so only a DISTINCTIVE shared token
+// counts as a plausible rename (F17).
+var aliasGateStopTokens = map[string]struct{}{
+	"the": {}, "and": {}, "for": {}, "our": {}, "its": {}, "with": {},
+	"that": {}, "this": {}, "from": {}, "into": {}, "per": {}, "are": {},
+	"was": {}, "has": {}, "had": {}, "your": {}, "their": {}, "his": {},
+	"her": {}, "any": {}, "all": {}, "not": {}, "but": {},
+}
+
+// distinctiveTitleTokens returns a title's normalized tokens with the alias-gate
+// stopwords removed.
+func distinctiveTitleTokens(title string) map[string]struct{} {
+	set := map[string]struct{}{}
+	for _, token := range strings.Fields(ledgerTitleKey(title)) {
+		if _, stop := aliasGateStopTokens[token]; stop {
+			continue
+		}
+		set[token] = struct{}{}
+	}
+
+	return set
+}
+
+// aliasesShareTitleToken reports whether any alias phrasing shares a DISTINCTIVE
+// (non-stopword) normalized token with the fact title — the cheapest
+// plausible-rename signal (F17).
+func aliasesShareTitleToken(aliases []string, title string) bool {
+	titleSet := distinctiveTitleTokens(title)
+	if len(titleSet) == 0 {
+		return false
+	}
+	for _, alias := range aliases {
+		for token := range distinctiveTitleTokens(alias) {
+			if _, ok := titleSet[token]; ok {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 // ledgerFactFromDecisionEntry adapts one kind=decision row (amendment A9: the
 // ledger consolidates OVER the existing decision log). The decision entry id
 // itself is the anchor, so every canonical decision record points back at the
-// ledger row it folded. Proposed defaults (card 069) are skipped until
-// ratified — they are not team decisions yet.
+// ledger row it folded.
+//
+// Routing by status (item 2.2a):
+//   - active → a canonical DECISION record (the original A9 behavior).
+//   - proposed WITH a roster-groundable holder → a POSITION record (Owner =
+//     holder): a directional lean IS someone's stance, so "what does <person>
+//     think about <topic>" becomes O(lookup). Positions never enter the
+//     firm-decision lanes.
+//   - proposed WITHOUT a roster-groundable holder → skipped: a floating lean with
+//     nobody real attached is not a team position, and a non-roster/system owner
+//     (the card-069 governance default's madeBy="Scout") must NEVER mint a bogus
+//     position under an ungroundable name (F23).
+//   - proposed-supersession → skipped: a proposed reversal awaiting human
+//     ratification is not a team decision yet (mirrors the proposed skip).
 func ledgerFactFromDecisionEntry(entry meetingMemoryEntry) (ledgerFact, bool) {
 	status := firstNonEmptyString(strings.TrimSpace(entry.Metadata["status"]), decisionStatusActive)
-	if status == decisionStatusProposed {
+	owner := strings.TrimSpace(entry.Metadata["madeBy"])
+	meetingID := strings.TrimSpace(entry.Metadata["meetingId"])
+	at := entry.CreatedAt.UTC().Format(time.RFC3339)
+
+	switch status {
+	case decisionStatusProposedSupersession:
 		return ledgerFact{}, false
+	case decisionStatusProposed:
+		// Roster-ground the holder BEFORE minting — an ungroundable owner is not a
+		// team member's stance (F23). normalizeTranscriptSpeaker is the same
+		// grounding the extraction pass applies to madeBy, so "Scout" and other
+		// non-roster names resolve to "" and are skipped.
+		holder := normalizeTranscriptSpeaker(owner)
+		if holder == "" {
+			return ledgerFact{}, false
+		}
+		return ledgerFact{
+			Entity:     ledgerEntityPosition,
+			Title:      entry.Text,
+			Status:     ledgerStatusActive,
+			Owner:      holder,
+			Anchor:     entry.ID,
+			At:         at,
+			MeetingID:  meetingID,
+			Importance: 3, // a stance is real signal but not a firm commitment
+		}, true
 	}
 
 	return ledgerFact{
 		Entity:     ledgerEntityDecision,
 		Title:      entry.Text,
 		Status:     status,
-		Owner:      entry.Metadata["madeBy"],
+		Owner:      owner,
 		Anchor:     entry.ID,
-		At:         entry.CreatedAt.UTC().Format(time.RFC3339),
-		MeetingID:  strings.TrimSpace(entry.Metadata["meetingId"]),
+		At:         at,
+		MeetingID:  meetingID,
 		Importance: 4, // A4 scale: "4 = a real commitment or decision"
 	}, true
 }
@@ -399,6 +549,25 @@ func (app *kanbanBoardApp) unconsumedDecisionEntriesForLedger(limit int) ([]meet
 		through = swept[len(swept)-1].ID
 	}
 
+	// F20: re-include rows flagged for re-feed that sit BEHIND the cursor (a
+	// ratified reversal whose row was swept past while it was skipped). They do
+	// NOT advance `through` — the forward cursor keeps moving normally, and the
+	// pass clears each flag once it has folded the row. Prepended so the closure
+	// of a retired decision is folded before its successor's fresh window opens.
+	inSwept := make(map[string]bool, len(swept))
+	for _, entry := range swept {
+		inSwept[entry.ID] = true
+	}
+	var refeed []meetingMemoryEntry
+	for _, entry := range all[:start] {
+		if entry.Metadata[entityLedgerRefeedMetadataKey] == "1" && !inSwept[entry.ID] {
+			refeed = append(refeed, entry)
+		}
+	}
+	if len(refeed) > 0 {
+		swept = append(refeed, swept...)
+	}
+
 	return swept, through
 }
 
@@ -443,6 +612,33 @@ func tokenSetContainment(a []string, b []string) float64 {
 	return float64(intersection) / float64(smaller)
 }
 
+// aliasAugmentedTokens unions a base title-key token slice with the tokens of
+// every alias phrasing (item 1.3a), so alias overlap counts toward a match.
+func aliasAugmentedTokens(base []string, aliases []string) []string {
+	tokens := append([]string(nil), base...)
+	for _, alias := range aliases {
+		tokens = append(tokens, strings.Fields(ledgerTitleKey(alias))...)
+	}
+
+	return tokens
+}
+
+// ledgerAliasBridgeScore is the best containment/Jaccard between a fact and a
+// record once BOTH are widened by their alias phrasings (item 1.3a). Containment
+// (min-set denominator) is what catches a short renamed restatement fully
+// covered by an alias — e.g. fact "korean tv deal" vs a record aliased "the
+// Korean TV deal" scores 1.0 even though the raw titles share nothing.
+func ledgerAliasBridgeScore(factTokens []string, factAliases []string, recordTokens []string, recordAliases []string) float64 {
+	factAug := aliasAugmentedTokens(factTokens, factAliases)
+	recordAug := aliasAugmentedTokens(recordTokens, recordAliases)
+	score := tokenSetContainment(factAug, recordAug)
+	if jaccard := tokenSetJaccard(factAug, recordAug); jaccard > score {
+		score = jaccard
+	}
+
+	return score
+}
+
 const (
 	ledgerMatchNone = iota
 	ledgerMatchAmbiguous
@@ -460,12 +656,18 @@ func matchLedgerFact(fact ledgerFact, records []ledgerRecord) (ledgerRecord, int
 		return ledgerRecord{}, ledgerMatchNone
 	}
 
+	factOwner := normalizeLedgerOwner(fact.Owner)
 	var best ledgerRecord
 	bestClass := ledgerMatchNone
 	bestScore := 0.0
 	bestCurrent := false
 	for _, record := range records {
 		if record.Entity != fact.Entity {
+			continue
+		}
+		// item 2.2a: a position is keyed by Owner + topic, so one person's stance
+		// never consolidates against another's — only same-owner records compete.
+		if fact.Entity == ledgerEntityPosition && normalizeLedgerOwner(record.Owner) != factOwner {
 			continue
 		}
 		recordKey := ledgerTitleKey(record.Title)
@@ -495,7 +697,19 @@ func matchLedgerFact(fact ledgerFact, records []ledgerRecord) (ledgerRecord, int
 		case jaccard >= ledgerAmbiguousMatchJaccard:
 			class = ledgerMatchAmbiguous
 		default:
-			continue
+			// item 1.3a: the title alone says "different", but a renamed entity
+			// (record folded aliases, or the fact carries them) can still match an
+			// existing record's alias set. A bridged hit only rises to AMBIGUOUS —
+			// adjudication decides same/supersedes/different — never an auto-merge.
+			if len(record.Aliases) == 0 && len(fact.Aliases) == 0 {
+				continue
+			}
+			bridge := ledgerAliasBridgeScore(factTokens, fact.Aliases, recordTokens, record.Aliases)
+			if bridge < ledgerAmbiguousMatchJaccard {
+				continue
+			}
+			class = ledgerMatchAmbiguous
+			score = bridge
 		}
 		better := class > bestClass ||
 			(class == bestClass && record.current() && !bestCurrent) ||
@@ -534,7 +748,7 @@ func normalizeLedgerStatus(entity string, raw string) string {
 }
 
 func defaultLedgerStatus(entity string) string {
-	if entity == ledgerEntityDecision || entity == ledgerEntityTopic {
+	if entity == ledgerEntityDecision || entity == ledgerEntityTopic || entity == ledgerEntityPosition {
 		return ledgerStatusActive
 	}
 
@@ -583,6 +797,29 @@ func appendUniqueCapped(values []string, value string, limit int) ([]string, boo
 	return values, true
 }
 
+// appendUniqueCappedSpill is appendUniqueCapped that also reports the element
+// evicted off the front when the cap overflows (item Q6): the caller spills the
+// returned value into an overflow list instead of losing it (spill-never-shed).
+// spilled is "" when nothing was dropped (no append, a duplicate, or under cap).
+func appendUniqueCappedSpill(values []string, value string, limit int) (kept []string, spilled string, added bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return values, "", false
+	}
+	for _, existing := range values {
+		if existing == value {
+			return values, "", false
+		}
+	}
+	values = append(values, value)
+	if limit > 0 && len(values) > limit {
+		spilled = values[0]
+		values = values[len(values)-limit:]
+	}
+
+	return values, spilled, true
+}
+
 // recordFromLedgerFact mints a fresh record (a new validity window). A fact
 // arriving already terminal (e.g. a decision row superseded before the ledger
 // ever saw it) is recorded with the window closed on arrival — knowledge for
@@ -605,11 +842,40 @@ func recordFromLedgerFact(fact ledgerFact, id string, nowStamp string) ledgerRec
 	}
 	record.Anchors, _ = appendUniqueCapped(nil, fact.Anchor, ledgerAnchorCap)
 	record.MeetingIDs, _ = appendUniqueCapped(nil, fact.MeetingID, ledgerMeetingIDCap)
+	record.Aliases = mergeLedgerAliases(nil, fact.Aliases)
 	if isTerminalLedgerStatus(status) {
 		record.ValidTo = nowStamp
 	}
 
 	return record
+}
+
+// mergeLedgerAliases unions alias phrasings into a record's accumulated set,
+// case-insensitive-deduped and capped (item 1.3a). The clamp mirrors the
+// digest's own alias discipline so a poisoned alias can never balloon a record.
+func mergeLedgerAliases(existing []string, incoming []string) []string {
+	if len(incoming) == 0 {
+		return existing
+	}
+	merged := existing
+	for _, alias := range clampDigestAliases(incoming) {
+		duplicate := false
+		for _, have := range merged {
+			if strings.EqualFold(have, alias) {
+				duplicate = true
+				break
+			}
+		}
+		if duplicate {
+			continue
+		}
+		merged = append(merged, alias)
+		if len(merged) > ledgerAliasCap {
+			merged = merged[len(merged)-ledgerAliasCap:]
+		}
+	}
+
+	return merged
 }
 
 // mergeLedgerFact folds a non-terminal fact into an existing record: owner
@@ -621,6 +887,11 @@ func recordFromLedgerFact(fact ledgerFact, id string, nowStamp string) ledgerRec
 func mergeLedgerFact(record ledgerRecord, fact ledgerFact, nowStamp string) (ledgerRecord, bool) {
 	changed := false
 	if owner := normalizeLedgerOwner(fact.Owner); owner != "" && owner != record.Owner {
+		// ownership drift newest-wins, but the displaced owner is retained on the
+		// evolution trail (item 2.3a) instead of being lost.
+		if record.Owner != "" {
+			record.PastOwners, _ = appendUniqueCapped(record.PastOwners, record.Owner, ledgerPastOwnersCap)
+		}
 		record.Owner = owner
 		changed = true
 	}
@@ -633,10 +904,24 @@ func mergeLedgerFact(record ledgerRecord, fact ledgerFact, nowStamp string) (led
 		changed = true
 	}
 	var added bool
-	if record.Anchors, added = appendUniqueCapped(record.Anchors, fact.Anchor, ledgerAnchorCap); added {
+	var spilled string
+	if record.Anchors, spilled, added = appendUniqueCappedSpill(record.Anchors, fact.Anchor, ledgerAnchorCap); added {
+		if spilled != "" {
+			record.AnchorsOverflow, _ = appendUniqueCapped(record.AnchorsOverflow, spilled, ledgerProvenanceOverflowCap)
+		}
 		changed = true
 	}
-	if record.MeetingIDs, added = appendUniqueCapped(record.MeetingIDs, fact.MeetingID, ledgerMeetingIDCap); added {
+	if record.MeetingIDs, spilled, added = appendUniqueCappedSpill(record.MeetingIDs, fact.MeetingID, ledgerMeetingIDCap); added {
+		if spilled != "" {
+			record.MeetingIDsOverflow, _ = appendUniqueCapped(record.MeetingIDsOverflow, spilled, ledgerProvenanceOverflowCap)
+		}
+		changed = true
+	}
+	// Compare CONTENT, not length: at the alias cap an add-one-evict-one rotation
+	// keeps the length identical, so a length check would silently discard the
+	// newer phrasing and freeze the set (F24).
+	if merged := mergeLedgerAliases(record.Aliases, fact.Aliases); !stringSlicesEqual(merged, record.Aliases) {
+		record.Aliases = merged
 		changed = true
 	}
 	if changed {
@@ -812,10 +1097,22 @@ func (app *kanbanBoardApp) runLedgerConsolidationPass(ctx context.Context, apiKe
 		count, err := app.consolidateLedgerFacts(ctx, apiKey, facts, responder, now)
 		if err != nil {
 			// nothing persisted (consolidate appends all-or-nothing) and no
-			// cursor landed: the whole window re-feeds and retries next tick.
+			// cursor landed: the whole window re-feeds and retries next tick. The
+			// re-feed markers stay set, so a failed pass retries them too (F20).
 			return meetingMemoryEntry{}, err
 		}
 		appended = count
+	}
+
+	// F20: the pass has now folded the swept rows, so clear any re-feed markers —
+	// done AFTER consolidation succeeds so a failed pass leaves them set to retry.
+	for _, decision := range decisions {
+		if decision.Metadata[entityLedgerRefeedMetadataKey] != "1" {
+			continue
+		}
+		if _, _, err := app.memory.updateEntryWithMetadata(meetingMemoryKindDecision, decision.ID, decision.Text, map[string]string{entityLedgerRefeedMetadataKey: ""}); err != nil {
+			log.Errorf("%s could not clear the re-feed marker on %s: %v", entityLedgerAgentName, decision.ID, err)
+		}
 	}
 
 	passText := "entity ledger pass: no changes"
@@ -1086,7 +1383,10 @@ func (app *kanbanBoardApp) searchLedgerRecords(query string, limit int) []ledger
 	}
 	matched := make([]scoredRecord, 0, 8)
 	for _, record := range app.memory.ledgerState() {
-		recordTokens := strings.Fields(ledgerTitleKey(record.Title))
+		// item 1.3a: widen the record's comparable tokens by its folded aliases so
+		// a vocabulary-drifted query ("the korean tv deal") still finds the record
+		// titled "Samsung TV Plus".
+		recordTokens := aliasAugmentedTokens(strings.Fields(ledgerTitleKey(record.Title)), record.Aliases)
 		if len(recordTokens) == 0 {
 			continue
 		}
@@ -1121,4 +1421,191 @@ func (app *kanbanBoardApp) searchLedgerRecords(query string, limit int) []ledger
 	}
 
 	return records
+}
+
+/* ---------- item 2.2c: position lookup (who-thinks-what) ---------- */
+
+// searchPositionRecords is the O(lookup) answer to "what does <person> think
+// about <topic>": position records for one owner, ranked current-above-closed
+// so the supersession chain reads as "current stance / previous stance". An
+// empty owner matches every holder (the team's stance on a topic); an empty
+// topic returns all of that owner's positions. Alias-augmented, like the
+// current-state lookup, so a renamed topic still resolves.
+func (app *kanbanBoardApp) searchPositionRecords(owner string, topic string, limit int) []ledgerRecord {
+	if app == nil || app.memory == nil || limit <= 0 {
+		return nil
+	}
+	ownerKey := normalizeLedgerOwner(owner)
+	topicTokens := strings.Fields(ledgerTitleKey(topic))
+
+	type scoredRecord struct {
+		record ledgerRecord
+		score  float64
+	}
+	matched := make([]scoredRecord, 0, 8)
+	for _, record := range app.memory.ledgerState() {
+		if record.Entity != ledgerEntityPosition {
+			continue
+		}
+		if ownerKey != "" && !strings.EqualFold(normalizeLedgerOwner(record.Owner), ownerKey) {
+			continue
+		}
+		score := 1.0 // owner-only match when the question names no topic
+		if len(topicTokens) > 0 {
+			recordTokens := aliasAugmentedTokens(strings.Fields(ledgerTitleKey(record.Title)), record.Aliases)
+			score = tokenSetContainment(topicTokens, recordTokens)
+			if jaccard := tokenSetJaccard(topicTokens, recordTokens); jaccard > score {
+				score = jaccard
+			}
+			if score < ledgerAmbiguousMatchJaccard {
+				continue
+			}
+		}
+		matched = append(matched, scoredRecord{record: record, score: score})
+	}
+	sort.SliceStable(matched, func(i, j int) bool {
+		if matched[i].record.current() != matched[j].record.current() {
+			return matched[i].record.current()
+		}
+		if matched[i].score != matched[j].score {
+			return matched[i].score > matched[j].score
+		}
+		if matched[i].record.UpdatedAt != matched[j].record.UpdatedAt {
+			return matched[i].record.UpdatedAt > matched[j].record.UpdatedAt
+		}
+		return matched[i].record.ID < matched[j].record.ID
+	})
+	if len(matched) > limit {
+		matched = matched[:limit]
+	}
+
+	records := make([]ledgerRecord, 0, len(matched))
+	for _, scored := range matched {
+		records = append(records, scored.record)
+	}
+
+	return records
+}
+
+/* ---------- item 2.3a/b: evolution / supersession-chain reads ---------- */
+
+// ledgerPredecessors maps each record id to the record it DIRECTLY superseded
+// (the reverse of the SupersededBy forward pointer), so a current record can
+// render "previously: <prior title> (until <date>)" inline without a second
+// fold. A record that never superseded anything is simply absent from the map.
+func (store *meetingMemoryStore) ledgerPredecessors() map[string]ledgerRecord {
+	if store == nil {
+		return nil
+	}
+	predecessors := map[string]ledgerRecord{}
+	for _, record := range store.ledgerState() {
+		if by := strings.TrimSpace(record.SupersededBy); by != "" {
+			predecessors[by] = record
+		}
+	}
+
+	return predecessors
+}
+
+// ledgerTransition is one dated post-state in a record's history (item 2.3b),
+// replayed from the ledger_event log. Every event carries the FULL post-state,
+// so the transition trail is materialized deterministically — no model call.
+type ledgerTransition struct {
+	RecordID     string
+	Op           string
+	Entity       string
+	Title        string
+	Status       string
+	Owner        string
+	At           string
+	ValidFrom    string
+	ValidTo      string
+	SupersededBy string
+	Reason       string
+}
+
+// ledgerLineage returns the supersession chain of record ids that subjectID
+// belongs to, ordered oldest→newest, so a query landing on ANY link renders the
+// whole arc. It walks backward over "the record I superseded" and forward over
+// SupersededBy; a subject with no chain returns just itself.
+func (store *meetingMemoryStore) ledgerLineage(subjectID string) []string {
+	subjectID = strings.TrimSpace(subjectID)
+	if store == nil || subjectID == "" {
+		return nil
+	}
+	state := store.ledgerState()
+	if _, ok := state[subjectID]; !ok {
+		return nil
+	}
+	// predecessorOf[newID] = the id of the record newID superseded.
+	predecessorOf := map[string]string{}
+	for id, record := range state {
+		if by := strings.TrimSpace(record.SupersededBy); by != "" {
+			predecessorOf[by] = id
+		}
+	}
+	origin := subjectID
+	guard := map[string]bool{subjectID: true}
+	for {
+		prev, ok := predecessorOf[origin]
+		if !ok || guard[prev] {
+			break
+		}
+		origin = prev
+		guard[prev] = true
+	}
+	lineage := make([]string, 0, len(guard))
+	visited := map[string]bool{}
+	for cursor := origin; cursor != "" && !visited[cursor]; {
+		if _, ok := state[cursor]; !ok {
+			break
+		}
+		visited[cursor] = true
+		lineage = append(lineage, cursor)
+		cursor = strings.TrimSpace(state[cursor].SupersededBy)
+	}
+
+	return lineage
+}
+
+// ledgerRecordEvolution replays the dated transition history for subjectID's
+// whole supersession lineage in chronological (log) order (item 2.3b): the
+// deterministic answer to "how did X evolve". Zero new storage — the data is
+// already on disk in the ledger_event log.
+func (store *meetingMemoryStore) ledgerRecordEvolution(subjectID string) []ledgerTransition {
+	lineage := store.ledgerLineage(subjectID)
+	if len(lineage) == 0 {
+		return nil
+	}
+	inLineage := make(map[string]bool, len(lineage))
+	for _, id := range lineage {
+		inLineage[id] = true
+	}
+
+	transitions := make([]ledgerTransition, 0, len(lineage)+2)
+	for _, entry := range store.entriesOfKind(meetingMemoryKindLedgerEvent, 0) {
+		var event ledgerEventPayload
+		if json.Unmarshal([]byte(entry.Text), &event) != nil {
+			continue
+		}
+		id := strings.TrimSpace(event.Record.ID)
+		if !inLineage[id] {
+			continue
+		}
+		transitions = append(transitions, ledgerTransition{
+			RecordID:     id,
+			Op:           event.Op,
+			Entity:       event.Record.Entity,
+			Title:        event.Record.Title,
+			Status:       event.Record.Status,
+			Owner:        event.Record.Owner,
+			At:           firstNonEmptyString(strings.TrimSpace(event.At), strings.TrimSpace(event.Record.UpdatedAt)),
+			ValidFrom:    event.Record.ValidFrom,
+			ValidTo:      event.Record.ValidTo,
+			SupersededBy: event.Record.SupersededBy,
+			Reason:       event.Reason,
+		})
+	}
+
+	return transitions
 }

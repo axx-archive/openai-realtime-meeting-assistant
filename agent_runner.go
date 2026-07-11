@@ -18,7 +18,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -191,6 +193,12 @@ func (app *kanbanBoardApp) startAmbientAgent(agent ambientAgentConfig, apiKey st
 		// seventh instance, per-office and Anthropic-keyed, so it registers
 		// alongside on its own key gate too. Keyless it silently never starts.
 		app.ensureHouseStyleDistillerStarted()
+		// The Embedding Maintainer (embeddings.go, study §6 item 2.4) rides the
+		// same seam: it is OpenAI-keyed like this loop, so it registers with the
+		// key this seam already proved non-empty above. It builds the in-process
+		// semantic index the retrieval lane fuses with; keyless deploys never
+		// reach here, so the index stays nil and recall degrades to lexical-only.
+		app.ensureEmbeddingMaintainerStarted(apiKey)
 	}
 	interval := agent.interval()
 	if interval <= 0 {
@@ -682,6 +690,48 @@ func (app *kanbanBoardApp) recordAmbientAgentFailure(agent ambientAgentConfig, h
 		// unlock above (app.mu is not reentrant).
 		app.setAmbientAgentBaselineID(key, headID)
 		log.Errorf("%s worker dead-lettered input %s after %d failed attempts; advancing the baseline past it", key, headID, attempts)
+		// Coverage honesty (memory study 1.4, gap #9): the raw input still exists
+		// on disk but is now permanently skipped, so leave a tombstone the
+		// coverage machinery can see. Without it, meetingCoverageDetail would keep
+		// reading a "full" capture stamp for a meeting whose synthesis silently
+		// lost a window.
+		app.appendAmbientDeadLetterTombstone(agent, headID, roomID, attempts)
+	}
+}
+
+// appendAmbientDeadLetterTombstone records that the runner abandoned a synthesis
+// window (memory study 1.4). It resolves the abandoned head input to recover the
+// meeting it belonged to and the moment it landed, so meetingCoverageDetail can
+// flip that meeting to partial_synthesis. The tombstone is mint-free and
+// relevance=expired, so it never enters recall or opens a phantom sitting; a
+// missing head input (already swept) still leaves a span-less stub so the FACT of
+// the skip survives. Best-effort: a write failure only loses the honesty flag,
+// never the dead-letter itself (the baseline already advanced above).
+func (app *kanbanBoardApp) appendAmbientDeadLetterTombstone(agent ambientAgentConfig, headID string, roomID string, attempts int) {
+	if app == nil || app.memory == nil {
+		return
+	}
+	roomID = normalizeRoomID(roomID)
+	metadata := map[string]string{
+		relevanceMetadataKey:           relevanceExpired,
+		deadLetterAgentMetadataKey:     agent.name,
+		deadLetterRoomMetadataKey:      roomID,
+		deadLetterInputKindMetadataKey: agent.inputKind,
+		deadLetterAttemptsMetadataKey:  strconv.Itoa(attempts),
+		"roomId":                       roomID,
+	}
+	if head, ok := app.memory.entryByKindAndID(agent.inputKind, headID); ok {
+		if meetingID := strings.TrimSpace(head.Metadata["meetingId"]); meetingID != "" {
+			metadata["meetingId"] = meetingID
+		}
+		at := head.CreatedAt.UTC().Format(time.RFC3339)
+		metadata[deadLetterSpanStartMetadataKey] = at
+		metadata[deadLetterSpanEndMetadataKey] = at
+	}
+	text := fmt.Sprintf("%s abandoned %s input %s after %d failed synthesis attempts; the raw window was captured but never folded in.", agent.name, agent.inputKind, headID, attempts)
+	id := fmt.Sprintf("dead-letter-%s-%s-%s", agent.name, roomID, headID)
+	if _, _, err := app.memory.appendDeadLetter(id, text, metadata); err != nil {
+		log.Errorf("%s failed to write dead-letter tombstone for %s: %v", agent.name, headID, err)
 	}
 }
 

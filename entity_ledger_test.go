@@ -4,11 +4,33 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 )
+
+// ledgerSliceContains reports slice membership for the provenance-spill tests.
+func ledgerSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+// appendProposedLean records a directional lean (status=proposed) with a holder
+// the way the decision extraction does — the fold source for a position record.
+func appendProposedLean(t *testing.T, app *kanbanBoardApp, id string, statement string, holder string, meetingID string) {
+	t.Helper()
+	if _, appended, err := app.memory.appendDecision(id, statement, map[string]string{
+		"status": decisionStatusProposed, "madeBy": holder, "meetingId": meetingID,
+	}); err != nil || !appended {
+		t.Fatalf("append proposed lean %s: appended=%v err=%v", id, appended, err)
+	}
+}
 
 /* ---------- helpers ---------- */
 
@@ -502,6 +524,205 @@ func TestLedgerStatusAndOwnerNormalization(t *testing.T) {
 	}
 }
 
+/* ---------- item 2.2: keyed position records ---------- */
+
+func TestEntityLedgerMintsPositionFromDirectionalLean(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	// a directional lean WITH a holder → a keyed position record.
+	appendProposedLean(t, app, "dec-lean-tim", "Tim favors holding the current pricing rather than discounting.", "Tim", "meeting-a")
+	// a floating lean with NO holder is not a personal position → skipped.
+	appendProposedLean(t, app, "dec-lean-team", "The team is leaning toward Ball Dogs as the lead IP.", "", "meeting-a")
+	upsertLedgerTestDigest(t, app, "meeting-a", meetingDigestPayload{})
+
+	runLedgerPass(t, app, forbiddenLedgerResponder(t))
+
+	positions := ledgerRecordsOfEntity(app.memory.ledgerState(), ledgerEntityPosition)
+	if len(positions) != 1 {
+		t.Fatalf("positions = %+v, want exactly one (the held lean; the ownerless lean is skipped)", positions)
+	}
+	position := positions[0]
+	if position.Owner != "Tim" {
+		t.Fatalf("position owner = %q, want Tim", position.Owner)
+	}
+	if position.Status != ledgerStatusActive || !position.current() {
+		t.Fatalf("position = %+v, want an active current stance", position)
+	}
+	if !reflect.DeepEqual(position.Anchors, []string{"dec-lean-tim"}) {
+		t.Fatalf("position anchors = %+v, want [dec-lean-tim]", position.Anchors)
+	}
+	// a lean is a position, never ALSO a firm decision record.
+	if decisions := ledgerRecordsOfEntity(app.memory.ledgerState(), ledgerEntityDecision); len(decisions) != 0 {
+		t.Fatalf("decisions = %+v, want none (a lean routes to a position)", decisions)
+	}
+}
+
+func TestEntityLedgerPositionsAreOwnerScopedAndSupersede(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	appendProposedLean(t, app, "dec-tim-1", "Tim favors holding the current pricing.", "Tim", "meeting-a")
+	appendProposedLean(t, app, "dec-aj-1", "AJ favors cutting the current pricing to win share.", "AJ", "meeting-a")
+	upsertLedgerTestDigest(t, app, "meeting-a", meetingDigestPayload{})
+	runLedgerPass(t, app, forbiddenLedgerResponder(t))
+	if positions := ledgerRecordsOfEntity(app.memory.ledgerState(), ledgerEntityPosition); len(positions) != 2 {
+		t.Fatalf("positions = %+v, want two owner-scoped stances (never merged across owners)", positions)
+	}
+
+	// Tim changes his mind on the SAME topic: owner-scoped ambiguous match → one
+	// batched adjudication → supersedes. AJ's stance is never a candidate.
+	appendProposedLean(t, app, "dec-tim-2", "Tim favors cutting the current pricing.", "Tim", "meeting-b")
+	upsertLedgerTestDigest(t, app, "meeting-b", meetingDigestPayload{})
+	calls := 0
+	responder := func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		calls++
+		if strings.Contains(request.Input, "AJ favors cutting") {
+			t.Errorf("adjudication compared across owners; AJ's stance must never be a candidate:\n%s", request.Input)
+		}
+		return `{"verdicts":[{"i":0,"verdict":"supersedes"}]}`, nil
+	}
+	runLedgerPass(t, app, responder)
+	if calls != 1 {
+		t.Fatalf("adjudication calls = %d, want exactly one batched call", calls)
+	}
+
+	positions := ledgerRecordsOfEntity(app.memory.ledgerState(), ledgerEntityPosition)
+	timCurrent, timClosed, ajCount := 0, 0, 0
+	for _, position := range positions {
+		switch position.Owner {
+		case "Tim":
+			if position.current() {
+				timCurrent++
+			} else {
+				timClosed++
+			}
+		case "AJ":
+			ajCount++
+		}
+	}
+	if timCurrent != 1 || timClosed != 1 {
+		t.Fatalf("Tim positions current=%d closed=%d, want one current + one superseded", timCurrent, timClosed)
+	}
+	if ajCount != 1 {
+		t.Fatalf("AJ positions = %d, want the single untouched stance", ajCount)
+	}
+}
+
+/* ---------- item 1.3a: alias union prevents a rename fork ---------- */
+
+func TestEntityLedgerAliasUnionPreventsRenameFork(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	seed := meetingDigestPayload{
+		Topics:  []meetingDigestTopic{{T: "Samsung TV Plus partnership", Anchor: "tx-1", Importance: 4}},
+		Aliases: []string{"the Korean TV deal", "CTV partnership"},
+	}
+	upsertLedgerTestDigest(t, app, "meeting-a", seed)
+	runLedgerPass(t, app, forbiddenLedgerResponder(t))
+	topics := ledgerRecordsOfEntity(app.memory.ledgerState(), ledgerEntityTopic)
+	if len(topics) != 1 || len(topics[0].Aliases) == 0 {
+		t.Fatalf("seed topic = %+v, want one record carrying its folded aliases", topics)
+	}
+
+	// a later meeting renames the topic to one of its aliases. The raw titles
+	// share nothing, so ONLY the folded alias set can bridge the match into the
+	// ambiguous band → one adjudication → "same" → merge (no second record).
+	renamed := meetingDigestPayload{
+		Topics: []meetingDigestTopic{{T: "the Korean TV deal", Anchor: "tx-9", Importance: 4}},
+	}
+	upsertLedgerTestDigest(t, app, "meeting-b", renamed)
+	calls := 0
+	responder := func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
+		calls++
+		return `{"verdicts":[{"i":0,"verdict":"same"}]}`, nil
+	}
+	runLedgerPass(t, app, responder)
+	if calls != 1 {
+		t.Fatalf("adjudication calls = %d, want one alias-bridged pair", calls)
+	}
+	topics = ledgerRecordsOfEntity(app.memory.ledgerState(), ledgerEntityTopic)
+	if len(topics) != 1 {
+		t.Fatalf("topics = %+v, want the rename merged into ONE record (no fork)", topics)
+	}
+	if !ledgerSliceContains(topics[0].MeetingIDs, "meeting-a") || !ledgerSliceContains(topics[0].MeetingIDs, "meeting-b") {
+		t.Fatalf("merged meetingIds = %+v, want both source meetings", topics[0].MeetingIDs)
+	}
+}
+
+/* ---------- item Q6: provenance-cap overflow spill ---------- */
+
+func TestLedgerProvenanceOverflowSpill(t *testing.T) {
+	ids := make([]string, 0, ledgerMeetingIDCap)
+	for index := 0; index < ledgerMeetingIDCap; index++ {
+		ids = append(ids, fmt.Sprintf("m-%02d", index))
+	}
+	anchors := make([]string, 0, ledgerAnchorCap)
+	for index := 0; index < ledgerAnchorCap; index++ {
+		anchors = append(anchors, fmt.Sprintf("a-%02d", index))
+	}
+	record := ledgerRecord{Entity: ledgerEntityTopic, Title: "Recurring topic", Status: ledgerStatusActive, MeetingIDs: ids, Anchors: anchors}
+	fact := ledgerFact{Entity: ledgerEntityTopic, Title: "Recurring topic", MeetingID: "m-new", Anchor: "a-new"}
+
+	merged, changed := mergeLedgerFact(record, fact, "2026-07-06T10:00:00Z")
+	if !changed {
+		t.Fatal("merge should register the new provenance")
+	}
+	if len(merged.MeetingIDs) != ledgerMeetingIDCap {
+		t.Fatalf("meetingIds len = %d, want the cap %d", len(merged.MeetingIDs), ledgerMeetingIDCap)
+	}
+	if merged.MeetingIDs[len(merged.MeetingIDs)-1] != "m-new" {
+		t.Fatalf("newest meetingId = %q, want m-new at the tail", merged.MeetingIDs[len(merged.MeetingIDs)-1])
+	}
+	if !ledgerSliceContains(merged.MeetingIDsOverflow, "m-00") {
+		t.Fatalf("meetingIds overflow = %+v, want the evicted m-00 preserved (spill-never-shed)", merged.MeetingIDsOverflow)
+	}
+	if !ledgerSliceContains(merged.AnchorsOverflow, "a-00") {
+		t.Fatalf("anchor overflow = %+v, want the evicted a-00 preserved", merged.AnchorsOverflow)
+	}
+}
+
+/* ---------- item 2.3b: evolution replay from the event log ---------- */
+
+func TestLedgerRecordEvolutionReplaysTransitions(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	upsertLedgerTestDigest(t, app, "meeting-a", meetingDigestPayload{Decisions: []meetingDigestDecision{{
+		D: "Ship the pilot with vendor Zebra packaging", By: "AJ", Anchor: "tx-1", Importance: 4,
+	}}})
+	runLedgerPass(t, app, forbiddenLedgerResponder(t))
+	upsertLedgerTestDigest(t, app, "meeting-b", meetingDigestPayload{Decisions: []meetingDigestDecision{{
+		D: "Use vendor Kappa for the packaging pilot instead of Zebra", By: "AJ", Anchor: "tx-7", Importance: 5,
+	}}})
+	runLedgerPass(t, app, func(context.Context, string, openAITextRequest) (string, error) {
+		return `{"verdicts":[{"i":0,"verdict":"supersedes"}]}`, nil
+	})
+
+	var fresh ledgerRecord
+	for _, record := range ledgerRecordsOfEntity(app.memory.ledgerState(), ledgerEntityDecision) {
+		if record.current() {
+			fresh = record
+		}
+	}
+	if fresh.ID == "" {
+		t.Fatal("expected a current superseding record")
+	}
+
+	// lineage spans the two-record chain, oldest→newest.
+	if lineage := app.memory.ledgerLineage(fresh.ID); len(lineage) != 2 {
+		t.Fatalf("lineage = %+v, want the two-record supersession chain", lineage)
+	}
+	// evolution replays the whole arc (old add → supersede → new add), oldest first.
+	transitions := app.memory.ledgerRecordEvolution(fresh.ID)
+	if len(transitions) < 3 {
+		t.Fatalf("transitions = %+v, want at least add/supersede/add across the lineage", transitions)
+	}
+	if !strings.Contains(transitions[0].Title, "Zebra") {
+		t.Fatalf("first transition = %+v, want the original Zebra decision", transitions[0])
+	}
+	if last := transitions[len(transitions)-1]; !strings.Contains(last.Title, "Kappa") {
+		t.Fatalf("final transition = %+v, want the superseding Kappa decision", last)
+	}
+	// deterministic: a second replay is byte-identical — no model, pure fold.
+	if again := app.memory.ledgerRecordEvolution(fresh.ID); !reflect.DeepEqual(transitions, again) {
+		t.Fatal("evolution replay is not deterministic across calls")
+	}
+}
+
 func TestAppendLedgerEventsIsAtomicAndTyped(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	if _, err := app.memory.appendLedgerEvents([]meetingMemoryEntry{{
@@ -525,4 +746,208 @@ func TestAppendLedgerEventsIsAtomicAndTyped(t *testing.T) {
 	if state := app.memory.ledgerState(); len(state) != 1 || state["ldg-topic-1"].Title != "Test" {
 		t.Fatalf("state = %+v, want the single folded record", state)
 	}
+}
+
+/* ---------- F23: non-roster owner never mints a bogus position ---------- */
+
+// A proposed decision only mints a position when its holder grounds to a real
+// participant. The card-069 governance default (madeBy="Scout") must NOT mint a
+// position under the ungroundable system name.
+func TestLedgerPositionSkipsNonRosterOwner(t *testing.T) {
+	if fact, ok := ledgerFactFromDecisionEntry(meetingMemoryEntry{
+		ID:       "dec-gov",
+		Text:     governanceLanesDecisionStatement,
+		Metadata: map[string]string{"status": decisionStatusProposed, "madeBy": scoutParticipantName},
+	}); ok {
+		t.Fatalf("non-roster owner %q minted a position: %+v", scoutParticipantName, fact)
+	}
+	// a roster holder still mints their keyed position.
+	fact, ok := ledgerFactFromDecisionEntry(meetingMemoryEntry{
+		ID:       "dec-tim",
+		Text:     "Tim favors holding the current pricing.",
+		Metadata: map[string]string{"status": decisionStatusProposed, "madeBy": "Tim"},
+	})
+	if !ok || fact.Entity != ledgerEntityPosition || fact.Owner != "Tim" {
+		t.Fatalf("roster holder should mint a Tim position; got %+v ok=%v", fact, ok)
+	}
+}
+
+// End-to-end: a Scout-owned proposed default swept by the ledger produces ZERO
+// position records (only the active roster decision folds).
+func TestLedgerConsumesScoutDefaultWithoutPosition(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	if _, appended, err := app.memory.appendDecision("dec-active", "Ship the pilot with vendor Zebra", map[string]string{
+		"status": decisionStatusActive, "madeBy": "AJ", "meetingId": "meeting-a",
+	}); err != nil || !appended {
+		t.Fatalf("append active: appended=%v err=%v", appended, err)
+	}
+	if _, appended, err := app.memory.appendDecision("dec-gov", governanceLanesDecisionStatement, map[string]string{
+		"status": decisionStatusProposed, "madeBy": scoutParticipantName, "meetingId": "meeting-a",
+	}); err != nil || !appended {
+		t.Fatalf("append gov default: appended=%v err=%v", appended, err)
+	}
+	upsertLedgerTestDigest(t, app, "meeting-a", meetingDigestPayload{})
+	runLedgerPass(t, app, forbiddenLedgerResponder(t))
+
+	if positions := ledgerRecordsOfEntity(app.memory.ledgerState(), ledgerEntityPosition); len(positions) != 0 {
+		t.Fatalf("positions = %+v, want none (Scout is not roster-groundable)", positions)
+	}
+}
+
+/* ---------- F24: at-cap alias rotation lands (content compare, not length) ---------- */
+
+func TestMergeLedgerFactAliasRotationAtCap(t *testing.T) {
+	aliases := make([]string, 0, ledgerAliasCap)
+	for index := 0; index < ledgerAliasCap; index++ {
+		aliases = append(aliases, fmt.Sprintf("alias-%02d", index))
+	}
+	record := ledgerRecord{Entity: ledgerEntityTopic, Title: "Recurring topic", Status: ledgerStatusActive, Aliases: aliases}
+	fact := ledgerFact{Entity: ledgerEntityTopic, Title: "Recurring topic", Aliases: []string{"brand new phrasing"}}
+
+	merged, changed := mergeLedgerFact(record, fact, "2026-07-06T10:00:00Z")
+	if !changed {
+		t.Fatal("at-cap alias rotation must register as a change — length was equal, only content differs (F24)")
+	}
+	if len(merged.Aliases) != ledgerAliasCap {
+		t.Fatalf("alias count = %d, want the cap %d", len(merged.Aliases), ledgerAliasCap)
+	}
+	if !ledgerSliceContains(merged.Aliases, "brand new phrasing") {
+		t.Fatalf("new alias missing after rotation: %+v", merged.Aliases)
+	}
+	if ledgerSliceContains(merged.Aliases, "alias-00") {
+		t.Fatalf("oldest alias should have been evicted: %+v", merged.Aliases)
+	}
+}
+
+/* ---------- F17: digest aliases gate per-fact, never onto siblings ---------- */
+
+func ledgerFactByTitle(facts []ledgerFact, title string) (ledgerFact, bool) {
+	for _, fact := range facts {
+		if fact.Title == title {
+			return fact, true
+		}
+	}
+	return ledgerFact{}, false
+}
+
+func TestDigestAliasesGatePerFact(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	// two topics + one unrelated decision; the storyline alias plainly renames the
+	// Samsung topic but shares nothing with the lease topic or the hiring decision.
+	entry := upsertLedgerTestDigest(t, app, "meeting-a", meetingDigestPayload{
+		Decisions: []meetingDigestDecision{{D: "Approve the Q3 hiring budget", Anchor: "tx-d", Importance: 4}},
+		Topics: []meetingDigestTopic{
+			{T: "Samsung TV Plus partnership", Anchor: "tx-t1", Importance: 4},
+			{T: "Office lease renewal", Anchor: "tx-t2", Importance: 2},
+		},
+		Aliases: []string{"the Samsung deal", "Samsung CTV"},
+	})
+	facts := ledgerFactsFromDigest(entry)
+
+	samsung, ok := ledgerFactByTitle(facts, "Samsung TV Plus partnership")
+	if !ok || len(samsung.Aliases) == 0 {
+		t.Fatalf("the storyline topic should carry the aliases: %+v", samsung)
+	}
+	lease, ok := ledgerFactByTitle(facts, "Office lease renewal")
+	if !ok || len(lease.Aliases) != 0 {
+		t.Fatalf("an unrelated sibling topic must NOT inherit the storyline aliases: %+v", lease)
+	}
+	decision, ok := ledgerFactByTitle(facts, "Approve the Q3 hiring budget")
+	if !ok || len(decision.Aliases) != 0 {
+		t.Fatalf("an unrelated sibling decision must NOT inherit the storyline aliases: %+v", decision)
+	}
+}
+
+// A digest with exactly ONE topic force-attaches its aliases even without a token
+// overlap: the lone topic unambiguously IS the storyline (the rename-bridge seed).
+func TestDigestAliasesForceAttachToSoleTopic(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	entry := upsertLedgerTestDigest(t, app, "meeting-a", meetingDigestPayload{
+		Topics:  []meetingDigestTopic{{T: "Weekly logistics sync", Anchor: "tx-t", Importance: 3}},
+		Aliases: []string{"the Korean TV deal"},
+	})
+	facts := ledgerFactsFromDigest(entry)
+	topic, ok := ledgerFactByTitle(facts, "Weekly logistics sync")
+	if !ok || len(topic.Aliases) == 0 {
+		t.Fatalf("the sole topic should force-attach the storyline aliases: %+v", topic)
+	}
+}
+
+/* ---------- F20: a ratified reversal re-enters the ledger via the decision lane ---------- */
+
+func TestMarkDecisionRatifiedRefeedsReversalIntoLedger(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	// an active decision that folds into a canonical ledger record.
+	if _, appended, err := app.memory.appendDecision("decision-old", "Vendor Zebra wins the packaging pilot", map[string]string{
+		"status": decisionStatusActive, "madeBy": "AJ", "meetingId": "meeting-a",
+		"dedupeKey": decisionDedupeKey("Vendor Zebra wins the packaging pilot"),
+	}); err != nil || !appended {
+		t.Fatalf("seed old: appended=%v err=%v", appended, err)
+	}
+	// a pending reversal — held out of the decision lane, so the ledger sweep
+	// advances past it with no record of its own (token-distinct from the old
+	// statement so the fold is deterministic; the supersedes LINK is metadata).
+	if _, appended, err := app.memory.appendDecision("decision-new", "Weekly all-hands moves to Thursday mornings", map[string]string{
+		"status": decisionStatusProposedSupersession, "supersedes": "decision-old",
+		"madeBy": "AJ", "meetingId": "meeting-a",
+		"dedupeKey": decisionDedupeKey("Weekly all-hands moves to Thursday mornings"),
+	}); err != nil || !appended {
+		t.Fatalf("seed new: appended=%v err=%v", appended, err)
+	}
+
+	// first pass: the old decision folds to a current record; the reversal is skipped.
+	upsertLedgerTestDigest(t, app, "meeting-a", meetingDigestPayload{})
+	runLedgerPass(t, app, forbiddenLedgerResponder(t))
+	if got := len(ledgerCurrentDecisionTitles(app)); got != 1 {
+		t.Fatalf("current decisions after first pass = %d, want just the old one", got)
+	}
+
+	// ratify the reversal: the row flips active and flags itself (and the retired
+	// decision) for ledger re-feed.
+	if _, changed, err := app.markDecisionRatified("decision-new", "AJ"); err != nil || !changed {
+		t.Fatalf("ratify: changed=%v err=%v", changed, err)
+	}
+
+	// next pass re-feeds both: the new canon becomes a current decision record and
+	// the retired one closes.
+	upsertLedgerTestDigest(t, app, "meeting-a", meetingDigestPayload{})
+	runLedgerPass(t, app, forbiddenLedgerResponder(t))
+
+	titles := ledgerCurrentDecisionTitles(app)
+	if len(titles) != 1 || titles[0] != "Weekly all-hands moves to Thursday mornings" {
+		t.Fatalf("current decisions after ratify+pass = %+v, want just the ratified reversal", titles)
+	}
+	// the old statement's record is now closed (present in history, not current).
+	oldClosed := false
+	for _, record := range app.memory.ledgerState() {
+		if record.Entity == ledgerEntityDecision && record.Title == "Vendor Zebra wins the packaging pilot" {
+			if record.current() {
+				t.Fatalf("the retired decision record is still current: %+v", record)
+			}
+			oldClosed = true
+		}
+	}
+	if !oldClosed {
+		t.Fatal("the retired decision never reached the ledger to be closed")
+	}
+
+	// the re-feed markers are cleared, so a subsequent pass folds nothing new.
+	for _, id := range []string{"decision-old", "decision-new"} {
+		entry, _ := app.memory.entryByKindAndID(meetingMemoryKindDecision, id)
+		if entry.Metadata[entityLedgerRefeedMetadataKey] == "1" {
+			t.Fatalf("re-feed marker on %s was never cleared", id)
+		}
+	}
+}
+
+// ledgerCurrentDecisionTitles is the current (validity window open) decision
+// record titles — the read the F20 test asserts against.
+func ledgerCurrentDecisionTitles(app *kanbanBoardApp) []string {
+	titles := []string{}
+	for _, record := range app.memory.ledgerState() {
+		if record.Entity == ledgerEntityDecision && record.current() {
+			titles = append(titles, record.Title)
+		}
+	}
+	return titles
 }

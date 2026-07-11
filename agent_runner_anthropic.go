@@ -850,6 +850,17 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 						// dismisses — never as instant board cards.
 						args["draft"] = true
 					}
+					if block.Name == "note_for_the_record" {
+						// The deliberate-write path is author-certain: the thread's
+						// requester is the author, and the thread + tool-use id scope
+						// the idempotency id so a retried turn files the note once.
+						// The shared applyToolCallArgs has no requester, so this
+						// intercept — not that dispatch — serves the orchestrator.
+						result, _, toolErr := r.app.noteForTheRecordTool(args, job.RequestedBy, "agent-thread:"+job.ThreadID+":"+block.ID)
+						content, isError := anthropicToolResultContent(result, toolErr)
+						toolResults = append(toolResults, anthropicToolResultBlock(block.ID, content, isError))
+						continue
+					}
 					result, changed, toolErr := r.app.applyToolCallArgs(block.Name, args)
 					if changed {
 						boardChanged = true
@@ -1014,6 +1025,11 @@ var orchestratorToolAllowlist = map[string]bool{
 	"create_artifact":        true,
 	"update_artifact":        true,
 	"answer_memory_question": true,
+	// Deliberate-write path (memory study 2.1): a chat/agent thread can file an
+	// author-certain "for the record" note. Intercepted in the turn loop so the
+	// author (job.RequestedBy) and thread scope ride through, not the shared
+	// dispatch — hence not routed via applyToolCallArgs.
+	"note_for_the_record": true,
 	// Cross-meeting recall (Track-2 Wave 6): read-only, bounded output.
 	"cross_meeting_briefing": true,
 	"get_meeting_detail":     true,

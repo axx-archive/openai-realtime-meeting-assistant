@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -690,5 +691,604 @@ func TestAmbientBookkeepingNeverSteersBootResume(t *testing.T) {
 	}
 	if got := reloaded.currentMeetingID(officeRoomID); got != meetingID {
 		t.Fatalf("resume after pass artifact = %q, want %q", got, meetingID)
+	}
+}
+
+/* ---------- verification trio (item 1.1) ---------- */
+
+func TestVerifyMeetingDigestPayloadTrio(t *testing.T) {
+	transcriptIDs := map[string]struct{}{"tx-1": {}, "tx-2": {}}
+	spanStart := time.Date(2026, 7, 6, 17, 0, 0, 0, time.UTC)
+	spanEnd := time.Date(2026, 7, 6, 18, 0, 0, 0, time.UTC)
+
+	payload := meetingDigestPayload{
+		Topics: []meetingDigestTopic{
+			{T: "kept", Anchor: "tx-1", At: "2026-07-06T17:30:00Z"},    // both valid
+			{T: "ghost", Anchor: "tx-999", At: "2026-07-06T10:00:00Z"}, // fabricated anchor + out-of-span at
+			{T: "grace", Anchor: "tx-2", At: "2026-07-06T16:57:00Z"},   // 3m before start, inside the grace
+		},
+		Decisions: []meetingDigestDecision{
+			{D: "roster hedge", By: "attributed to AJ", Anchor: "tx-2", At: "2026-07-06T17:45:00Z"},
+			{D: "ghost maker", By: "attributed to Mallory", Anchor: "tx-1"}, // non-roster → blanked
+			{D: "guest", By: "Guest Sam", Anchor: "tx-1"},                   // guest preserved
+		},
+		ActionItems: []meetingDigestAction{
+			{A: "do the thing", Owner: "Tyler", Anchor: "tx-1"}, // roster owner kept
+		},
+	}
+	verifyMeetingDigestPayload(&payload, spanStart, spanEnd, transcriptIDs)
+
+	if payload.Topics[0].Anchor != "tx-1" || payload.Topics[0].At == "" {
+		t.Fatalf("valid topic disturbed: %+v", payload.Topics[0])
+	}
+	if payload.Topics[1].Anchor != "" {
+		t.Fatalf("fabricated anchor not blanked: %+v", payload.Topics[1])
+	}
+	if payload.Topics[1].At != "" {
+		t.Fatalf("out-of-span at not blanked: %+v", payload.Topics[1])
+	}
+	if payload.Topics[2].At == "" {
+		t.Fatalf("an at inside the grace window was wrongly blanked: %+v", payload.Topics[2])
+	}
+	if payload.Decisions[0].By != "attributed to AJ" {
+		t.Fatalf("hedged roster attribution not preserved: %q", payload.Decisions[0].By)
+	}
+	if payload.Decisions[1].By != "" {
+		t.Fatalf("non-roster attribution not blanked: %q", payload.Decisions[1].By)
+	}
+	if payload.Decisions[2].By != "Guest Sam" {
+		t.Fatalf("guest attribution not preserved: %q", payload.Decisions[2].By)
+	}
+	if payload.ActionItems[0].Owner != "Tyler" {
+		t.Fatalf("roster owner not preserved: %q", payload.ActionItems[0].Owner)
+	}
+}
+
+func TestVerifyMeetingDigestPayloadNilSetSkipsAnchorAndSpan(t *testing.T) {
+	// transcriptIDs==nil (legacy / no stored raw lines) and a zero span must
+	// leave anchors and at values intact rather than destroying them.
+	payload := meetingDigestPayload{
+		Topics: []meetingDigestTopic{{T: "x", Anchor: "tx-anything", At: "2026-07-06T10:00:00Z"}},
+	}
+	verifyMeetingDigestPayload(&payload, time.Time{}, time.Time{}, nil)
+	if payload.Topics[0].Anchor != "tx-anything" {
+		t.Fatalf("nil set must leave anchors intact: %q", payload.Topics[0].Anchor)
+	}
+	if payload.Topics[0].At != "2026-07-06T10:00:00Z" {
+		t.Fatalf("zero span must leave at intact: %q", payload.Topics[0].At)
+	}
+}
+
+func TestGroundDigestAttribution(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"bare roster name", "AJ", "AJ"},
+		{"hedged roster name keeps hedge", "attributed to AJ", "attributed to AJ"},
+		{"hedged casing preserved", "Attributed to Tyler", "Attributed to Tyler"},
+		{"non-roster blanked", "Mallory", ""},
+		{"hedged non-roster blanked whole", "attributed to Mallory", ""},
+		{"guest preserved", "Guest Sam", "Guest Sam"},
+		{"empty stays empty", "", ""},
+		{"joined roster names", "attributed to AJ + Tyler", "attributed to AJ + Tyler"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := groundDigestAttribution(tc.in); got != tc.want {
+				t.Fatalf("groundDigestAttribution(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+/* ---------- carry-forward guard (item 0.2) ---------- */
+
+func TestCarryForwardMeetingDigestFacts(t *testing.T) {
+	prior := meetingDigestPayload{
+		Topics:        []meetingDigestTopic{{T: "Vendor selection", Importance: 4}},
+		Decisions:     []meetingDigestDecision{{D: "Ship the packaging pilot", Status: "decided", Importance: 5}, {D: "Retire the Acme contract", Status: "closed", Importance: 4}},
+		ActionItems:   []meetingDigestAction{{A: "Draft the pricing sheet", Owner: "Tyler", Status: "open", Importance: 3}, {A: "Send the recap email", Owner: "AJ", Status: "done", Importance: 2}},
+		OpenQuestions: []meetingDigestQuestion{{Q: "Which SKU ships first?", Importance: 3}},
+	}
+	// the rebuild silently drops every prior fact, keeping only one fresh decision.
+	payload := meetingDigestPayload{
+		Decisions: []meetingDigestDecision{{D: "Freeze pricing until Q3", Status: "decided", Importance: 5}},
+	}
+	dropped := carryForwardMeetingDigestFacts(&payload, prior)
+	if dropped != 0 {
+		t.Fatalf("droppedFacts = %d, want 0 (headroom available)", dropped)
+	}
+
+	// model-fresh decision stays first and untouched; the live prior decision is
+	// re-appended and flagged; the CLOSED prior decision is NOT resurrected.
+	if len(payload.Decisions) != 2 {
+		t.Fatalf("decisions = %+v, want the fresh one + the carried live one", payload.Decisions)
+	}
+	if payload.Decisions[0].D != "Freeze pricing until Q3" || payload.Decisions[0].CarriedForward {
+		t.Fatalf("model-fresh decision disturbed: %+v", payload.Decisions[0])
+	}
+	if payload.Decisions[1].D != "Ship the packaging pilot" || !payload.Decisions[1].CarriedForward {
+		t.Fatalf("live prior decision not carried with flag: %+v", payload.Decisions[1])
+	}
+	for _, decision := range payload.Decisions {
+		if strings.HasPrefix(decision.D, "Retire") {
+			t.Fatalf("terminal (closed) decision was resurrected: %+v", decision)
+		}
+	}
+	// action: the open one carries, the done (terminal) one does not.
+	if len(payload.ActionItems) != 1 || payload.ActionItems[0].A != "Draft the pricing sheet" || !payload.ActionItems[0].CarriedForward {
+		t.Fatalf("action carry-forward wrong: %+v", payload.ActionItems)
+	}
+	// statusless sections (topics, questions) always carry when dropped.
+	if len(payload.Topics) != 1 || !payload.Topics[0].CarriedForward {
+		t.Fatalf("topic not carried: %+v", payload.Topics)
+	}
+	if len(payload.OpenQuestions) != 1 || !payload.OpenQuestions[0].CarriedForward {
+		t.Fatalf("question not carried: %+v", payload.OpenQuestions)
+	}
+}
+
+func TestCarryForwardNotAppliedWhenModelKeepsFact(t *testing.T) {
+	// the rebuild keeps a reworded-but-same-key fact: no duplicate carried.
+	prior := meetingDigestPayload{Decisions: []meetingDigestDecision{{D: "Freeze pricing until Q3", Status: "decided", Importance: 5}}}
+	payload := meetingDigestPayload{Decisions: []meetingDigestDecision{{D: "freeze pricing until q3", Status: "decided", Importance: 5}}}
+	if dropped := carryForwardMeetingDigestFacts(&payload, prior); dropped != 0 {
+		t.Fatalf("dropped = %d, want 0", dropped)
+	}
+	if len(payload.Decisions) != 1 {
+		t.Fatalf("decisions = %+v, want 1 (same fact key, no carry)", payload.Decisions)
+	}
+	if payload.Decisions[0].CarriedForward {
+		t.Fatalf("a present fact was wrongly flagged carried: %+v", payload.Decisions[0])
+	}
+}
+
+// digestTestWords are distinct >=3-char content tokens so each synthetic fact
+// gets a distinct fact key — a trailing digit would be stripped by the <3-char
+// token filter and collapse every fake fact onto one key.
+var digestTestWords = []string{
+	"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel",
+	"india", "juliet", "kilo", "lima", "mike", "november", "oscar", "papa",
+}
+
+func TestCarryForwardRespectsCapHeadroom(t *testing.T) {
+	cases := []struct {
+		name        string
+		freshCount  int
+		priorLive   int
+		wantTotal   int
+		wantCarried int
+		wantDropped int
+	}{
+		{"no headroom drops all live priors", meetingDigestDecisionCap, 2, meetingDigestDecisionCap, 0, 2},
+		{"partial headroom keeps most important", meetingDigestDecisionCap - 1, 3, meetingDigestDecisionCap, 1, 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fresh := make([]meetingDigestDecision, tc.freshCount)
+			for i := range fresh {
+				fresh[i] = meetingDigestDecision{D: "fresh " + digestTestWords[i], Status: "decided", Importance: 3}
+			}
+			// prior live decisions use a DISJOINT word range and DESCENDING
+			// importance, so the "keep most important" case is deterministic.
+			priorBase := len(digestTestWords) - tc.priorLive
+			prior := meetingDigestPayload{Decisions: make([]meetingDigestDecision, tc.priorLive)}
+			for i := range prior.Decisions {
+				prior.Decisions[i] = meetingDigestDecision{D: "prior " + digestTestWords[priorBase+i], Status: "decided", Importance: 5 - i}
+			}
+			topPrior := "prior " + digestTestWords[priorBase] // importance 5
+			payload := meetingDigestPayload{Decisions: fresh}
+
+			dropped := carryForwardMeetingDigestFacts(&payload, prior)
+			if dropped != tc.wantDropped {
+				t.Fatalf("droppedFacts = %d, want %d", dropped, tc.wantDropped)
+			}
+			if len(payload.Decisions) != tc.wantTotal {
+				t.Fatalf("decisions = %d, want %d (never past cap)", len(payload.Decisions), tc.wantTotal)
+			}
+			carried := 0
+			for _, decision := range payload.Decisions {
+				if decision.CarriedForward {
+					carried++
+				}
+			}
+			if carried != tc.wantCarried {
+				t.Fatalf("carried = %d, want %d", carried, tc.wantCarried)
+			}
+			if tc.wantCarried == 1 && payload.Decisions[len(payload.Decisions)-1].D != topPrior {
+				t.Fatalf("headroom did not keep the most important live prior: %+v", payload.Decisions[len(payload.Decisions)-1])
+			}
+		})
+	}
+}
+
+/* ---------- alias enrichment (item 1.3a) ---------- */
+
+func TestClampDigestAliases(t *testing.T) {
+	got := clampDigestAliases([]string{
+		"  the Korean TV deal  ",
+		"THE KOREAN TV DEAL",                               // case-insensitive dupe of the first
+		"",                                                 // dropped
+		strings.Repeat("x", 100),                           // truncated to the storage cap
+		"CTV partnership", "TKO", "extra one", "extra two", // push past the cap of 5
+	})
+	if len(got) > meetingDigestAliasCap {
+		t.Fatalf("aliases = %d, want <= %d", len(got), meetingDigestAliasCap)
+	}
+	if got[0] != "the Korean TV deal" {
+		t.Fatalf("first alias not trimmed: %q", got[0])
+	}
+	for _, alias := range got {
+		if len([]rune(alias)) > meetingDigestAliasLen+3 { // +3 absorbs the "..." ellipsis
+			t.Fatalf("alias exceeds length cap: %q (%d runes)", alias, len([]rune(alias)))
+		}
+	}
+	deals := 0
+	for _, alias := range got {
+		if strings.EqualFold(alias, "the Korean TV deal") {
+			deals++
+		}
+	}
+	if deals != 1 {
+		t.Fatalf("case-insensitive dedupe failed: %+v", got)
+	}
+	if clampDigestAliases(nil) != nil {
+		t.Fatal("nil in, nil out")
+	}
+	if got := digestAliasesMetadata([]string{"a", "b"}); got != "a, b" {
+		t.Fatalf("aliases metadata = %q, want %q", got, "a, b")
+	}
+}
+
+/* ---------- instruction pins (items 1.3a + 2.5) ---------- */
+
+func TestMeetingDigestInstructionsPins(t *testing.T) {
+	instructions := meetingDigestInstructions()
+	for _, want := range []string{
+		`"aliases":[string]`,                      // schema carries the alias field
+		"aliases = 3-5 short alternate phrasings", // 1.3a producer instruction
+		"Resolve every spoken relative date",      // 2.5 absolute-date resolution
+		"aliases<=5",                              // cap note
+		"importance scores each fact 1-5",         // unchanged A4 contract
+		"hedge who-said-what",                     // unchanged hedged attribution
+	} {
+		if !strings.Contains(instructions, want) {
+			t.Fatalf("meeting digest instructions missing %q", want)
+		}
+	}
+}
+
+/* ---------- producer wiring (items 0.2 + 1.1a end-to-end) ---------- */
+
+// digestJSONWithDecisions builds a digest whose decisions use DISTINCT content
+// words (from a start offset), so each gets a distinct fact key.
+func digestJSONWithDecisions(startWord int, count int) string {
+	decisions := make([]string, count)
+	for i := range decisions {
+		decisions[i] = fmt.Sprintf(`{"d":"decision %s","status":"decided","importance":3}`, digestTestWords[startWord+i])
+	}
+	return `{"meetingId":"x","title":"Cap","decisions":[` + strings.Join(decisions, ",") + `]}`
+}
+
+func TestMeetingDigestProducerCarryForwardStampsDroppedFacts(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	app := newIsolatedKanbanBoardApp(t)
+
+	appendDigestTestBrain(t, app, "brain-1", "m1", "## Overview\nFirst window.", nil)
+	calls := 0
+	responder := func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
+		calls++
+		if calls == 1 {
+			return digestJSONWithDecisions(0, meetingDigestDecisionCap), nil // fills the section to cap (words 0..11)
+		}
+		return digestJSONWithDecisions(meetingDigestDecisionCap, 3), nil // 3 fresh (words 12..14) -> headroom 9 for 12 live priors
+	}
+
+	agent := meetingDigestAgent()
+	if _, err := app.runAmbientAgentOnce(agent, context.Background(), "test-key", responder, 1); err != nil {
+		t.Fatalf("pass1: %v", err)
+	}
+
+	appendDigestTestBrain(t, app, "brain-2", "m1", "## Overview\nSecond window.", nil)
+	second, err := app.runAmbientAgentOnce(agent, context.Background(), "test-key", responder, 1)
+	if err != nil {
+		t.Fatalf("pass2: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("model calls = %d, want 2", calls)
+	}
+
+	if got := second.Metadata[digestDroppedFactsMetadataKey]; got != "3" {
+		t.Fatalf("droppedFacts stamp = %q, want %q (headroom 9, 12 live priors)", got, "3")
+	}
+	var payload meetingDigestPayload
+	if err := json.Unmarshal([]byte(second.Text), &payload); err != nil {
+		t.Fatalf("digest not JSON: %v", err)
+	}
+	if len(payload.Decisions) != meetingDigestDecisionCap {
+		t.Fatalf("decisions = %d, want the cap %d (carried facts fill headroom, never overflow)", len(payload.Decisions), meetingDigestDecisionCap)
+	}
+	carried := 0
+	for _, decision := range payload.Decisions {
+		if decision.CarriedForward {
+			carried++
+		}
+	}
+	if carried != meetingDigestDecisionCap-3 {
+		t.Fatalf("carried = %d, want %d (cap minus the 3 model-fresh)", carried, meetingDigestDecisionCap-3)
+	}
+}
+
+func TestMeetingDigestProducerCarryForwardPreservesCoverage(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	app := newIsolatedKanbanBoardApp(t)
+
+	appendTestTranscript(t, app, "tx-1", "We choose vendor Zebra.")
+	meetingID := app.memory.currentMeetingID(officeRoomID)
+	sittingStart := time.Date(2026, 7, 6, 16, 54, 30, 0, time.UTC) // within tolerance -> full
+	if _, ok := app.meetings.startMeeting(officeRoomID, meetingID, sittingStart, []string{"AJ"}); !ok {
+		t.Fatal("startMeeting did not create a directory record")
+	}
+	appendDigestTestBrain(t, app, "brain-1", meetingID,
+		"## Overview\nZebra chosen.\n## Transcript reference\ntx-1",
+		map[string]string{"fromTranscriptCreatedAt": "2026-07-06T16:55:00Z", "throughTranscriptCreatedAt": "2026-07-06T17:10:00Z"})
+
+	calls := 0
+	responder := func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
+		calls++
+		if calls == 1 {
+			return `{"meetingId":"x","decisions":[{"d":"Ship the packaging pilot","by":"attributed to AJ","status":"decided","anchor":"tx-1","at":"2026-07-06T17:05:00Z","importance":5}]}`, nil
+		}
+		return `{"meetingId":"x","topics":[{"t":"Post-pilot review","importance":3}]}`, nil // silently drops the decision
+	}
+	agent := meetingDigestAgent()
+	first, err := app.runAmbientAgentOnce(agent, context.Background(), "test-key", responder, 1)
+	if err != nil {
+		t.Fatalf("pass1: %v", err)
+	}
+	firstCoverage := first.Metadata[digestCoverageMetadataKey]
+	if firstCoverage != coverageLabelFull {
+		t.Fatalf("pass1 coverage = %q, want %q", firstCoverage, coverageLabelFull)
+	}
+
+	appendDigestTestBrain(t, app, "brain-2", meetingID, "## Overview\nReview.",
+		map[string]string{"fromTranscriptCreatedAt": "2026-07-06T17:20:00Z", "throughTranscriptCreatedAt": "2026-07-06T17:30:00Z"})
+	second, err := app.runAmbientAgentOnce(agent, context.Background(), "test-key", responder, 1)
+	if err != nil {
+		t.Fatalf("pass2: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("model calls = %d, want 2", calls)
+	}
+
+	var payload meetingDigestPayload
+	if err := json.Unmarshal([]byte(second.Text), &payload); err != nil {
+		t.Fatalf("digest not JSON: %v", err)
+	}
+	if len(payload.Decisions) != 1 || !payload.Decisions[0].CarriedForward || payload.Decisions[0].D != "Ship the packaging pilot" {
+		t.Fatalf("dropped live decision not carried forward: %+v", payload.Decisions)
+	}
+	if len(payload.Topics) != 1 || payload.Topics[0].CarriedForward {
+		t.Fatalf("model-fresh topic disturbed: %+v", payload.Topics)
+	}
+	if second.Metadata[digestCoverageMetadataKey] != firstCoverage {
+		t.Fatalf("coverage changed under carry-forward: %q -> %q", firstCoverage, second.Metadata[digestCoverageMetadataKey])
+	}
+	if second.Metadata[digestSittingStartedAtMetadataKey] == "" {
+		t.Fatalf("sitting-start stamp lost under carry-forward")
+	}
+	if _, ok := second.Metadata[digestDroppedFactsMetadataKey]; ok {
+		t.Fatalf("droppedFacts stamped despite available headroom")
+	}
+}
+
+func TestMeetingDigestProducerBlanksFabricatedAnchor(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	app := newIsolatedKanbanBoardApp(t)
+
+	appendTestTranscript(t, app, "tx-1", "Real captured line.")
+	meetingID := app.memory.currentMeetingID(officeRoomID)
+	appendDigestTestBrain(t, app, "brain-1", meetingID,
+		"## Overview\nnotes.\n## Transcript reference\ntx-1",
+		map[string]string{"fromTranscriptCreatedAt": "2026-07-06T16:55:00Z", "throughTranscriptCreatedAt": "2026-07-06T17:10:00Z"})
+
+	responder := func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
+		return `{"meetingId":"x","topics":[{"t":"real","anchor":"tx-1","importance":3},{"t":"ghost","anchor":"tx-does-not-exist","importance":3}]}`, nil
+	}
+	entry, err := app.runAmbientAgentOnce(meetingDigestAgent(), context.Background(), "test-key", responder, 1)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	var payload meetingDigestPayload
+	if err := json.Unmarshal([]byte(entry.Text), &payload); err != nil {
+		t.Fatalf("digest not JSON: %v", err)
+	}
+	byTopic := map[string]meetingDigestTopic{}
+	for _, topic := range payload.Topics {
+		byTopic[topic.T] = topic
+	}
+	if byTopic["real"].Anchor != "tx-1" {
+		t.Fatalf("valid anchor blanked: %+v", byTopic["real"])
+	}
+	if byTopic["ghost"].Anchor != "" {
+		t.Fatalf("fabricated anchor not blanked (transcript-id set unenforced): %+v", byTopic["ghost"])
+	}
+}
+
+// TestMeetingDigestProducerVerifiesCarriedForwardFacts pins the item-1.1 fix:
+// the verification trio runs AFTER the carry-forward guard, so a legacy prior
+// fact re-appended on rebuild — one with a fabricated anchor and a non-roster
+// attribution that never passed verification — is grounded like fresh output
+// (anchor blanked, by blanked) instead of re-entering the digest lane forever.
+func TestMeetingDigestProducerVerifiesCarriedForwardFacts(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	app := newIsolatedKanbanBoardApp(t)
+
+	appendTestTranscript(t, app, "tx-real", "Real captured line.")
+	meetingID := app.memory.currentMeetingID(officeRoomID)
+
+	// Seed a LEGACY prior digest DIRECTLY (it never went through the trio): a live
+	// decision anchored to a transcript id absent from this meeting, attributed to
+	// a non-roster name.
+	priorJSON := `{"meetingId":"` + meetingID + `","decisions":[{"d":"Legacy ungrounded decision","by":"Mallory","status":"decided","anchor":"tx-ghost","importance":5}]}`
+	if _, err := app.memory.upsertDigest(meetingMemoryKindMeetingDigest, meetingID, priorJSON, map[string]string{
+		"meetingId":                meetingID,
+		digestSpanStartMetadataKey: "2026-07-06T16:55:00Z",
+		digestSpanEndMetadataKey:   "2026-07-06T17:10:00Z",
+	}); err != nil {
+		t.Fatalf("seed prior digest: %v", err)
+	}
+
+	// A new brain lands; the model rebuild SILENTLY DROPS the legacy decision, so
+	// the carry-forward guard re-appends it.
+	appendDigestTestBrain(t, app, "brain-2", meetingID, "## Overview\nMore discussion.",
+		map[string]string{"fromTranscriptCreatedAt": "2026-07-06T17:15:00Z", "throughTranscriptCreatedAt": "2026-07-06T17:20:00Z"})
+	responder := func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
+		return `{"meetingId":"x","topics":[{"t":"Follow-up","importance":3}]}`, nil
+	}
+	entry, err := app.runAmbientAgentOnce(meetingDigestAgent(), context.Background(), "test-key", responder, 1)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	var payload meetingDigestPayload
+	if err := json.Unmarshal([]byte(entry.Text), &payload); err != nil {
+		t.Fatalf("digest not JSON: %v", err)
+	}
+	if len(payload.Decisions) != 1 {
+		t.Fatalf("legacy decision not carried forward: %+v", payload.Decisions)
+	}
+	carried := payload.Decisions[0]
+	if !carried.CarriedForward {
+		t.Fatalf("carried decision not flagged: %+v", carried)
+	}
+	if carried.Anchor != "" {
+		t.Fatalf("fabricated anchor on a CARRIED fact was not blanked (verify must run after carry): %+v", carried)
+	}
+	if carried.By != "" {
+		t.Fatalf("non-roster attribution on a CARRIED fact was not blanked: %+v", carried)
+	}
+}
+
+// TestMeetingDigestProducerUnionsPriorAliases pins the item-1.3a
+// silence-preservation fix: a rebuild that omits aliases must not delete the
+// recall paths an earlier pass earned — the producer unions the predecessor's
+// aliases, mirroring narrative_maintainer.
+func TestMeetingDigestProducerUnionsPriorAliases(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	app := newIsolatedKanbanBoardApp(t)
+
+	appendDigestTestBrain(t, app, "brain-1", "m1", "## Overview\nSamsung deal.", nil)
+	calls := 0
+	responder := func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
+		calls++
+		if calls == 1 {
+			return `{"meetingId":"m1","topics":[{"t":"Samsung TV Plus","importance":4}],"aliases":["the Korean TV deal","CTV partnership"]}`, nil
+		}
+		return `{"meetingId":"m1","topics":[{"t":"Samsung TV Plus follow-up","importance":4}]}`, nil // no aliases at all
+	}
+	agent := meetingDigestAgent()
+	first, err := app.runAmbientAgentOnce(agent, context.Background(), "test-key", responder, 1)
+	if err != nil {
+		t.Fatalf("pass1: %v", err)
+	}
+	if first.Metadata[digestAliasesMetadataKey] == "" {
+		t.Fatalf("pass1 alias metadata missing")
+	}
+
+	appendDigestTestBrain(t, app, "brain-2", "m1", "## Overview\nMore.", nil)
+	second, err := app.runAmbientAgentOnce(agent, context.Background(), "test-key", responder, 1)
+	if err != nil {
+		t.Fatalf("pass2: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("model calls = %d, want 2", calls)
+	}
+	var payload meetingDigestPayload
+	if err := json.Unmarshal([]byte(second.Text), &payload); err != nil {
+		t.Fatalf("digest not JSON: %v", err)
+	}
+	if len(payload.Aliases) != 2 {
+		t.Fatalf("prior aliases not preserved on a pass that omitted them: %+v", payload.Aliases)
+	}
+	joined := strings.ToLower(strings.Join(payload.Aliases, "|"))
+	if !strings.Contains(joined, "korean tv deal") || !strings.Contains(joined, "ctv partnership") {
+		t.Fatalf("expected both prior aliases unioned, got %+v", payload.Aliases)
+	}
+	if second.Metadata[digestAliasesMetadataKey] == "" {
+		t.Fatalf("pass2 alias metadata dropped despite the union")
+	}
+}
+
+// TestMeetingDigestProducerStripsForgedCarriedForward pins the item-1.1 forgery
+// fix: a model echoing carriedForwardByServer=true (the flag is in the prior
+// digest JSON fed back into the prompt) on a model-kept row gets it stripped by
+// the clamp, while a genuinely server-carried row stays flagged.
+func TestMeetingDigestProducerStripsForgedCarriedForward(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	app := newIsolatedKanbanBoardApp(t)
+
+	appendDigestTestBrain(t, app, "brain-1", "m1", "## Overview\nPricing + vendor.", nil)
+	calls := 0
+	responder := func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
+		calls++
+		if calls == 1 {
+			return `{"meetingId":"m1","decisions":[{"d":"Keep pricing steady","status":"decided","importance":5},{"d":"Retire the Acme contract","status":"decided","importance":4}]}`, nil
+		}
+		// Pass 2 keeps the pricing decision but FORGES the server-carried flag on
+		// it, and silently drops the Acme decision (which the server then carries).
+		return `{"meetingId":"m1","decisions":[{"d":"Keep pricing steady","status":"decided","importance":5,"carriedForwardByServer":true}]}`, nil
+	}
+	agent := meetingDigestAgent()
+	if _, err := app.runAmbientAgentOnce(agent, context.Background(), "test-key", responder, 1); err != nil {
+		t.Fatalf("pass1: %v", err)
+	}
+	appendDigestTestBrain(t, app, "brain-2", "m1", "## Overview\nMore.", nil)
+	second, err := app.runAmbientAgentOnce(agent, context.Background(), "test-key", responder, 1)
+	if err != nil {
+		t.Fatalf("pass2: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("model calls = %d, want 2", calls)
+	}
+	var payload meetingDigestPayload
+	if err := json.Unmarshal([]byte(second.Text), &payload); err != nil {
+		t.Fatalf("digest not JSON: %v", err)
+	}
+	byDecision := map[string]meetingDigestDecision{}
+	for _, decision := range payload.Decisions {
+		byDecision[decision.D] = decision
+	}
+	kept, ok := byDecision["Keep pricing steady"]
+	if !ok {
+		t.Fatalf("model-kept decision missing: %+v", payload.Decisions)
+	}
+	if kept.CarriedForward {
+		t.Fatalf("forged carriedForwardByServer not stripped from a model-fresh row: %+v", kept)
+	}
+	carried, ok := byDecision["Retire the Acme contract"]
+	if !ok {
+		t.Fatalf("dropped prior decision not carried: %+v", payload.Decisions)
+	}
+	if !carried.CarriedForward {
+		t.Fatalf("genuinely server-carried row lost its flag: %+v", carried)
+	}
+}
+
+// TestClampMeetingDigestStripsModelEchoedCarriedForward is the unit-level guard
+// for the forgery fix: clamp zeroes CarriedForward on every section so only the
+// server-side carry-forward guard can ever set it.
+func TestClampMeetingDigestStripsModelEchoedCarriedForward(t *testing.T) {
+	payload := meetingDigestPayload{
+		Topics:        []meetingDigestTopic{{T: "t", CarriedForward: true}},
+		Decisions:     []meetingDigestDecision{{D: "d", CarriedForward: true}},
+		ActionItems:   []meetingDigestAction{{A: "a", CarriedForward: true}},
+		OpenQuestions: []meetingDigestQuestion{{Q: "q", CarriedForward: true}},
+	}
+	clampMeetingDigestPayload(&payload, "m1", "2026-07-06", time.Time{}, time.Time{})
+	if payload.Topics[0].CarriedForward || payload.Decisions[0].CarriedForward ||
+		payload.ActionItems[0].CarriedForward || payload.OpenQuestions[0].CarriedForward {
+		t.Fatalf("clamp did not strip model-echoed CarriedForward: %+v", payload)
 	}
 }

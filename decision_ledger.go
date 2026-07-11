@@ -38,6 +38,25 @@ const (
 	decisionStatusActive     = "active"
 	decisionStatusSuperseded = "superseded"
 	decisionStatusProposed   = "proposed"
+	// decisionStatusProposedSupersession (item 2.2b) marks a NEW firm decision
+	// that adjudication judged to reverse an existing active decision. It is held
+	// OUT of every active lane — like proposed — so the store never co-pins two
+	// contradictory decisions; a human ratifies it to flip it active AND supersede
+	// the one it contradicts (markDecisionRatified). NEVER auto-supersede: a
+	// missed supersession is recoverable, a false one is not.
+	decisionStatusProposedSupersession = "proposed-supersession"
+	// decisionReversalLowerJaccard/decisionReversalUpperJaccard bound the
+	// reversal-suspect band. Below the lower bound two decisions are unrelated;
+	// at/above decisionDedupeJaccard a new statement is a restatement and never
+	// reaches this check (dedupe drops it first). The middle band — "about the
+	// same thing, differently" — is exactly where a reversal hides, so only it is
+	// spent on the adjudication call.
+	decisionReversalLowerJaccard = 0.4
+	decisionReversalUpperJaccard = decisionDedupeJaccard
+	// decisionReversalCandidateCap bounds the adjudication batch: newest active
+	// decisions compared against one new statement, overflow ignored (a missed
+	// reversal is recoverable by the manual supersede door).
+	decisionReversalCandidateCap = 50
 	// decisionDedupeJaccard: a new statement whose normalized token set
 	// overlaps an existing active decision at or above this ratio is a
 	// restatement, not a new decision.
@@ -118,9 +137,12 @@ func decisionLedgerInstructions() string {
 		"Return STRICT JSON only:",
 		`{"decisions":[{"statement":string(<=200 chars, self-contained, present tense),"madeBy":string(a listed participant, or empty when unclear),"context":string(<=160 chars why/when),"directional":boolean}]}.`,
 		"A FIRM decision (directional:false or omitted) is settled and acted-on. Keep the strict bar: never record an open question, a proposal still under debate, or a lean as firm.",
-		"A DIRECTIONAL alignment (directional:true) is a strategic lean the team is genuinely converging on but has NOT firmly committed — a working preference or a proposed split.",
-		`Example directional: {"statement":"The team is leaning toward Ball Dogs as the lead IP over the alternatives.","madeBy":"","context":"consensus forming, not finalized","directional":true}.`,
-		"Be CONSERVATIVE with directional: only real convergence, never routine brainstorming or a single offhand remark. When unsure whether something is even directional, omit it.",
+		"A DIRECTIONAL alignment (directional:true) is a strategic lean the team is genuinely converging on but has NOT firmly committed — a working preference, a proposed split, or ONE named person's stated position on a topic.",
+		"When a directional lean is a SPECIFIC person's stated position (\"Tim wants to hold pricing\", \"AJ leans toward Zebra\"), set madeBy to that person so their stance is on record; leave madeBy empty only for a genuinely group-wide lean with no single holder.",
+		`Example directional (group lean): {"statement":"The team is leaning toward Ball Dogs as the lead IP over the alternatives.","madeBy":"","context":"consensus forming, not finalized","directional":true}.`,
+		`Example directional (personal position): {"statement":"Tim favors holding the current pricing rather than discounting.","madeBy":"Tim","context":"stated in the pricing debate","directional":true}.`,
+		"Be CONSERVATIVE with directional: only real convergence or a clearly stated position, never routine brainstorming or a single offhand remark. When unsure whether something is even directional, omit it.",
+		"Resolve every spoken relative date ('yesterday', 'next Friday', 'end of the month') to an absolute YYYY-MM-DD using the generation date above; never leave a relative date unresolved in a statement or context.",
 		"Never invent decisions, people, numbers, or dates.",
 		"Exclude anything already in the ALREADY RECORDED list.",
 		`Empty window → {"decisions":[]}.`,
@@ -140,7 +162,14 @@ func (app *kanbanBoardApp) buildDecisionLedgerInput(inputs []meetingMemoryEntry,
 	builder.WriteString(strings.Join(meetingParticipantNames, ", "))
 	builder.WriteByte('\n')
 
-	if recorded := app.activeDecisionEntries(25); len(recorded) > 0 {
+	// Already-recorded exclusion (prompt-layer dedupe): active decisions AND
+	// pending reversals (proposed-supersession). A pending reversal is a firm
+	// decision held out of the active lane awaiting ratification; without it here
+	// the model re-emits the same reversal every window and it re-files as a
+	// duplicate pending row (F16).
+	recorded := app.activeDecisionEntries(25)
+	recorded = append(recorded, app.proposedSupersessionEntries(25)...)
+	if len(recorded) > 0 {
 		builder.WriteString("\n# Already recorded decisions (do not re-emit)\n")
 		for _, decision := range recorded {
 			builder.WriteString("- ")
@@ -215,6 +244,27 @@ func (app *kanbanBoardApp) proposedDecisionEntries(limit int) []meetingMemoryEnt
 	newest := make([]meetingMemoryEntry, 0, limit)
 	for index := len(entries) - 1; index >= 0 && len(newest) < limit; index-- {
 		if entries[index].Metadata["status"] != decisionStatusProposed {
+			continue
+		}
+		newest = append(newest, entries[index])
+	}
+
+	return newest
+}
+
+// proposedSupersessionEntries returns up to limit kind=decision entries with
+// status proposed-supersession, newest first — pending reversals awaiting
+// ratification. They are firm decisions held OUT of the active lane, so unless
+// they are surfaced to the dedupe key sets AND the already-recorded list, the
+// same reversal re-extracts as a fresh pending row every window (F16).
+func (app *kanbanBoardApp) proposedSupersessionEntries(limit int) []meetingMemoryEntry {
+	if app == nil || app.memory == nil || limit <= 0 {
+		return nil
+	}
+	entries := app.memory.entriesOfKind(meetingMemoryKindDecision, 0)
+	newest := make([]meetingMemoryEntry, 0, limit)
+	for index := len(entries) - 1; index >= 0 && len(newest) < limit; index-- {
+		if entries[index].Metadata["status"] != decisionStatusProposedSupersession {
 			continue
 		}
 		newest = append(newest, entries[index])
@@ -377,6 +427,13 @@ func (app *kanbanBoardApp) seedProposedGovernanceDecision() {
 // member on record. Idempotent: an already-active decision stays exactly as
 // first stamped (changed=false); a superseded decision is history and can
 // never be ratified back into the active lanes.
+//
+// A proposed-supersession (item 2.2b) ratifies the reversal in one click: the
+// new decision flips active AND the decision it contradicts is superseded, so
+// the reversal only happens on explicit human confirmation — never automatically
+// at extraction time. The new active row carries a supersedesSummary of the
+// retired decision so the recall lane can render the "current / previously"
+// chain inline (item 2.3a).
 func (app *kanbanBoardApp) markDecisionRatified(decisionID string, ratifiedBy string) (meetingMemoryEntry, bool, error) {
 	if app == nil || app.memory == nil {
 		return meetingMemoryEntry{}, false, fmt.Errorf("meeting memory is unavailable")
@@ -389,19 +446,52 @@ func (app *kanbanBoardApp) markDecisionRatified(decisionID string, ratifiedBy st
 	if !found {
 		return meetingMemoryEntry{}, false, fmt.Errorf("decision %s not found", decisionID)
 	}
-	switch firstNonEmptyString(entry.Metadata["status"], decisionStatusActive) {
+	priorStatus := firstNonEmptyString(entry.Metadata["status"], decisionStatusActive)
+	switch priorStatus {
 	case decisionStatusActive:
 		return entry, false, nil
 	case decisionStatusSuperseded:
 		return meetingMemoryEntry{}, false, fmt.Errorf("decision %s is superseded and cannot be ratified", decisionID)
 	}
-	updated, changed, err := app.memory.updateEntryWithMetadata(meetingMemoryKindDecision, decisionID, entry.Text, map[string]string{
+
+	now := time.Now()
+	metadataUpdate := map[string]string{
 		"status":     decisionStatusActive,
 		"ratifiedBy": strings.TrimSpace(ratifiedBy),
-		"ratifiedAt": time.Now().UTC().Format(time.RFC3339Nano),
-	})
+		"ratifiedAt": now.UTC().Format(time.RFC3339Nano),
+	}
+	supersedesID := strings.TrimSpace(entry.Metadata["supersedes"])
+	retireSuperseded := false
+	if priorStatus == decisionStatusProposedSupersession && supersedesID != "" {
+		if prior, ok := app.memory.entryByKindAndID(meetingMemoryKindDecision, supersedesID); ok {
+			metadataUpdate["supersedesSummary"] = decisionChainSummary(prior, now)
+			retireSuperseded = true
+			// F20: this row was swept past the entity-ledger decision cursor while
+			// held as proposed-supersession (skipped, no fact). Now that it flips
+			// active it must reach the ledger as the new canon; flag it for re-feed
+			// so the next consolidation pass re-folds it even though it sits behind
+			// the cursor. The pass clears the marker once it has consumed the row.
+			metadataUpdate[entityLedgerRefeedMetadataKey] = "1"
+		}
+	}
+
+	updated, changed, err := app.memory.updateEntryWithMetadata(meetingMemoryKindDecision, decisionID, entry.Text, metadataUpdate)
 	if err != nil {
 		return meetingMemoryEntry{}, false, err
+	}
+	// Retire the contradicted decision only AFTER the new one is active, so the
+	// supersession chain (old.supersededBy → new) always resolves to a live row.
+	if retireSuperseded {
+		if _, _, supersedeErr := app.markDecisionSuperseded(supersedesID, decisionID); supersedeErr != nil {
+			log.Errorf("ratified supersession %s could not retire %s: %v", decisionID, supersedesID, supersedeErr)
+		} else if retired, ok := app.memory.entryByKindAndID(meetingMemoryKindDecision, supersedesID); ok {
+			// F20: re-feed the retired decision too, so its now-terminal (superseded)
+			// status closes its ledger record through the decision lane. Its own text
+			// is preserved — only the re-feed marker is stamped.
+			if _, _, stampErr := app.memory.updateEntryWithMetadata(meetingMemoryKindDecision, supersedesID, retired.Text, map[string]string{entityLedgerRefeedMetadataKey: "1"}); stampErr != nil {
+				log.Errorf("ratified supersession %s could not flag retired %s for ledger re-feed: %v", decisionID, supersedesID, stampErr)
+			}
+		}
 	}
 	if changed {
 		// Same wire event the extraction pass broadcasts, so the mission ledger
@@ -409,6 +499,17 @@ func (app *kanbanBoardApp) markDecisionRatified(decisionID string, ratifiedBy st
 		broadcastOfficeKanbanEvent("decision", decisionPayload(updated))
 	}
 	return updated, changed, nil
+}
+
+// decisionChainSummary renders a retired decision as the compact "previously"
+// clause the recall lane appends to its successor (item 2.3a): the statement
+// bounded to one line plus the date it stopped being current.
+func decisionChainSummary(prior meetingMemoryEntry, until time.Time) string {
+	statement := compactAssistantLine(prior.Text)
+	if runes := []rune(statement); len(runes) > 160 {
+		statement = strings.TrimSpace(string(runes[:159])) + "…"
+	}
+	return statement + " (until " + until.In(meetingTimeLocation()).Format("2006-01-02") + ")"
 }
 
 // assistantDecisionRatifyHandler is card 069's ratify door: POST {decisionId}
@@ -502,6 +603,14 @@ func decisionPayload(entry meetingMemoryEntry) map[string]any {
 	if supersededBy := strings.TrimSpace(entry.Metadata["supersededBy"]); supersededBy != "" {
 		payload["supersededBy"] = supersededBy
 	}
+	// supersedes/supersedesSummary (item 2.2b/2.3a): a ratified reversal points
+	// FORWARD at the decision it retired, with a compact chain summary for recall.
+	if supersedes := strings.TrimSpace(entry.Metadata["supersedes"]); supersedes != "" {
+		payload["supersedes"] = supersedes
+	}
+	if supersedesSummary := strings.TrimSpace(entry.Metadata["supersedesSummary"]); supersedesSummary != "" {
+		payload["supersedesSummary"] = supersedesSummary
+	}
 	if supersededAt := strings.TrimSpace(entry.Metadata["supersededAt"]); supersededAt != "" {
 		payload["supersededAt"] = supersededAt
 	}
@@ -519,6 +628,134 @@ func decisionPayload(entry meetingMemoryEntry) map[string]any {
 	}
 
 	return payload
+}
+
+/* ---------- item 2.2b: reversal adjudication (propose-first) ---------- */
+
+// decisionReversalPair is one adjudication candidate: a NEW firm statement and
+// the existing active decision it might reverse.
+type decisionReversalPair struct {
+	decisionIndex int    // index into the extraction, so a verdict routes back
+	statement     string // the new statement
+	candidateID   string // the existing active decision it might reverse
+	candidateText string
+}
+
+func decisionReversalInstructions() string {
+	return strings.Join([]string{
+		"You are Bonfire's decision-reversal adjudicator.",
+		"For each numbered pair, decide whether the NEW decision REVERSES or REPLACES the EXISTING decision on record — i.e. the two conflict and cannot both stand.",
+		"Verdicts: \"supersedes\" = the new decision explicitly reverses, replaces, or overrides the existing one; \"different\" = both can hold at once (a refinement, a follow-on, a decision about a different facet, or an unrelated matter).",
+		"Be STRICT: answer \"supersedes\" only on a genuine head-on conflict on the SAME question, never on merely-related work.",
+		"Return STRICT JSON only, no markdown fence:",
+		`{"verdicts":[{"i":0,"verdict":"different"}]} with exactly one verdict per pair.`,
+	}, " ")
+}
+
+func buildDecisionReversalInput(pairs []decisionReversalPair, generatedAt time.Time) string {
+	var builder strings.Builder
+	builder.WriteString("# Generated at\n")
+	builder.WriteString(generatedAt.Format(time.RFC3339))
+	builder.WriteString("\n\n# Pairs\n")
+	for index, pair := range pairs {
+		builder.WriteString(fmt.Sprintf("- i=%d\n", index))
+		builder.WriteString("  new: ")
+		builder.WriteString(pair.statement)
+		builder.WriteString("\n  existing: ")
+		builder.WriteString(pair.candidateText)
+		builder.WriteByte('\n')
+	}
+
+	return builder.String()
+}
+
+// detectDecisionReversals finds, for each new FIRM non-duplicate decision, the
+// best existing active decision in the reversal-suspect band, then spends ONE
+// batched adjudication call to decide which are true reversals. Returns
+// decisionIndex → superseded-candidate id for the confirmed reversals only.
+// Directional leans are excluded (they become positions, not reversals), and a
+// restatement (>= dedupe Jaccard) never reaches here — dedupe drops it first.
+func (app *kanbanBoardApp) detectDecisionReversals(ctx context.Context, apiKey string, responder openAITextResponder, decisions []extractedDecision, activeEntries []meetingMemoryEntry, activeKeys []string, pendingReversalKeys []string) map[int]string {
+	if app == nil || len(decisions) == 0 || len(activeEntries) == 0 {
+		return nil
+	}
+	pairs := make([]decisionReversalPair, 0, len(decisions))
+	for decisionIndex, decision := range decisions {
+		if decision.Directional {
+			continue
+		}
+		statement := normalizeMemoryText(decision.Statement)
+		if statement == "" {
+			continue
+		}
+		key := decisionDedupeKey(statement)
+		// A statement already active OR already pending as a reversal is not a new
+		// reversal candidate: re-proposing it would mint a duplicate pending row
+		// every window (F16).
+		if key == "" || decisionKeyDuplicate(key, activeKeys) || decisionKeyDuplicate(key, pendingReversalKeys) {
+			continue
+		}
+		keyFields := strings.Fields(key)
+		best := ""
+		bestText := ""
+		bestScore := 0.0
+		for _, entry := range activeEntries {
+			candidateKey := firstNonEmptyString(entry.Metadata["dedupeKey"], decisionDedupeKey(entry.Text))
+			jaccard := tokenSetJaccard(keyFields, strings.Fields(candidateKey))
+			if jaccard >= decisionReversalLowerJaccard && jaccard < decisionReversalUpperJaccard && jaccard > bestScore {
+				bestScore = jaccard
+				best = entry.ID
+				bestText = entry.Text
+			}
+		}
+		if best == "" {
+			continue
+		}
+		pairs = append(pairs, decisionReversalPair{
+			decisionIndex: decisionIndex,
+			statement:     statement,
+			candidateID:   best,
+			candidateText: bestText,
+		})
+	}
+	if len(pairs) == 0 {
+		return nil
+	}
+	if len(pairs) > decisionReversalCandidateCap {
+		pairs = pairs[:decisionReversalCandidateCap]
+	}
+
+	text, err := responder(ctx, apiKey, openAITextRequest{
+		Model:           meetingBrainModel(),
+		Instructions:    decisionReversalInstructions(),
+		Input:           buildDecisionReversalInput(pairs, time.Now().UTC()),
+		ReasoningEffort: "low",
+		Verbosity:       "low",
+		MaxOutputTokens: 400,
+	})
+	if err != nil {
+		// Degrade to no supersession: the new decisions go active as normal. A
+		// missed reversal is recoverable by the manual supersede door.
+		log.Errorf("%s reversal adjudication failed (%d pair(s), no supersession proposed): %v", decisionLedgerAgentName, len(pairs), err)
+		return nil
+	}
+	output, ok := parseLedgerAdjudication(text)
+	if !ok {
+		log.Errorf("%s reversal adjudication returned non-JSON; no supersession proposed", decisionLedgerAgentName)
+		return nil
+	}
+
+	targets := map[int]string{}
+	for _, verdict := range output.Verdicts {
+		if verdict.Verdict != ledgerVerdictSupersedes {
+			continue
+		}
+		if verdict.I >= 0 && verdict.I < len(pairs) {
+			targets[pairs[verdict.I].decisionIndex] = pairs[verdict.I].candidateID
+		}
+	}
+
+	return targets
 }
 
 func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
@@ -555,12 +792,24 @@ func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey
 	// DIRECTIONAL lean dedupes against active AND proposed, so it is neither
 	// re-proposed every pass nor proposed for something already firm. Exact key
 	// match or token-set Jaccard >= 0.8 both mean "restatement, skip".
-	activeKeys := dedupeKeysFor(app.activeDecisionEntries(decisionDedupeWindow))
+	activeEntries := app.activeDecisionEntries(decisionDedupeWindow)
+	activeKeys := dedupeKeysFor(activeEntries)
 	proposedKeys := dedupeKeysFor(app.proposedDecisionEntries(decisionDedupeWindow))
+	// F16: pending reversals (proposed-supersession) are firm decisions held out
+	// of the active lane. Their keys gate BOTH the extraction append below and the
+	// reversal adjudication so a restated reversal is filed exactly ONCE.
+	pendingReversalKeys := dedupeKeysFor(app.proposedSupersessionEntries(decisionDedupeWindow))
+
+	// item 2.2b: before appending, adjudicate which new FIRM decisions REVERSE an
+	// existing active decision (the reversal-suspect band, one batched call). A
+	// reversal is held as proposed-supersession for one-click human ratification —
+	// NEVER auto-superseded — so the store never co-pins two contradictory
+	// decisions and a false positive stays fully recoverable.
+	reversalTargets := app.detectDecisionReversals(ctx, apiKey, responder, extraction.Decisions, activeEntries, activeKeys, pendingReversalKeys)
 
 	appendedCount := 0
 	directionalCount := 0
-	for _, decision := range extraction.Decisions {
+	for decisionIndex, decision := range extraction.Decisions {
 		statement := normalizeMemoryText(decision.Statement)
 		if statement == "" {
 			continue
@@ -575,10 +824,24 @@ func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey
 		if decision.Directional && decisionKeyDuplicate(key, proposedKeys) {
 			continue
 		}
+		// A FIRM restatement of an already-pending reversal is skipped: the pending
+		// proposed-supersession row already awaits ratification, so re-filing it —
+		// as another pending row OR (on adjudication failure) as an active decision
+		// — would duplicate it (F16).
+		if !decision.Directional && decisionKeyDuplicate(key, pendingReversalKeys) {
+			continue
+		}
 
 		status := decisionStatusActive
+		supersedesID := ""
 		if decision.Directional {
 			status = decisionStatusProposed
+		} else if target := reversalTargets[decisionIndex]; target != "" {
+			// adjudged to reverse an existing active decision: held for ratification,
+			// NEVER auto-superseded (a missed supersession is recoverable, a false
+			// one is not).
+			status = decisionStatusProposedSupersession
+			supersedesID = target
 		}
 		// Unknown names are blanked, never invented into the roster.
 		madeBy := normalizeTranscriptSpeaker(decision.MadeBy)
@@ -589,6 +852,9 @@ func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey
 			"dedupeKey":     key,
 			"status":        status,
 			"roomId":        ambientWindowRoomID(inputs),
+		}
+		if supersedesID != "" {
+			metadata["supersedes"] = supersedesID
 		}
 		// card 081: stamp the decision with the meeting its source brain write-up
 		// covered rather than whatever meeting is current when this pass fires up
@@ -611,11 +877,15 @@ func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey
 		// dedupes correctly: a firm row lands in the active lane (blocks a repeat
 		// firm AND a redundant directional), a directional row lands only in the
 		// proposed lane (blocks a repeat directional but still lets it upgrade to
-		// firm later).
-		if decision.Directional {
+		// firm later), and a pending reversal lands in the pending-reversal lane
+		// (blocks a repeat reversal in the same window without pinning it active).
+		switch {
+		case decision.Directional:
 			proposedKeys = append(proposedKeys, key)
 			directionalCount++
-		} else {
+		case status == decisionStatusProposedSupersession:
+			pendingReversalKeys = append(pendingReversalKeys, key)
+		default:
 			activeKeys = append(activeKeys, key)
 		}
 		appendedCount++

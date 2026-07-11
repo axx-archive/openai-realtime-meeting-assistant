@@ -173,6 +173,103 @@ docker compose down
 
 This demo has a lightweight room gate enforced by the server-side participant/password check. Treat it as a meeting-room passcode, not as full identity or account authentication.
 
+### Data backups (memory-architecture study §6 Phase 0.1)
+
+The entire company brain — meeting memory, board, decisions, users, sessions, rooms, archives — lives in the `data/` volume on this one Droplet. `data/` survives `docker compose up -d --build`, but a disk failure or an accidental wipe is otherwise **total, permanent loss**. To close that, the server runs a nightly in-process snapshot worker (started at boot alongside the other background workers; no cron needed). Configure it with the `BACKUP_*` keys documented in `.env.example`.
+
+**What it does.** Once every `BACKUP_INTERVAL_HOURS` (default 24; first run ~3 min after boot so a fresh deploy proves the path) it tar.gz's the data dir — `meeting-memory.jsonl`, `kanban-board.json`, `meetings.json`, `notifications.json`, `users.json`, `sessions.json`, `rooms.json`, `file-folders.json`, `archives/`, `archive-secret`, `vapid-keys.json`, and any other sibling state files that exist — **plus the `blobs/` upload store (every uploaded file body) by default**, so a restore is complete; the `backups/` dir itself is never included. Set `BACKUP_INCLUDE_BLOBS` to a falsy value (`0`/`off`/`false`/`no`) to exclude `blobs/` and shrink the snapshot — but a restore then comes back with no uploaded file bodies. Each snapshot logs its size (blobs make it larger); watch that line if disk or offsite bandwidth is tight. Each file is read whole so a concurrent append can never corrupt the archive; no app lock is held. Because the store is append-mostly, the worst case a restore can lose is the current day's tail — versus today's exposure of losing everything.
+
+**Where snapshots land.**
+- **Local ring** (always): `/app/data/backups/bonfire-data-<UTC-timestamp>.tgz` (or `.tgz.enc` when encrypted). The newest `BACKUP_RING_KEEP` (default 7) are kept; older ones are deleted. This ring lives inside the same volume it protects, so it survives rebuilds but is **NOT offsite** — a disk loss takes it too.
+- **Offsite** (when the `BACKUP_S3_*` block is set): the encrypted snapshot is PUT to your S3/Spaces bucket via stdlib SigV4. This is the real disaster-recovery copy. **Offsite requires `BACKUP_ENCRYPTION_KEY`** — with S3 configured but no key, the worker takes the local snapshot and refuses to upload (fail-closed; it will not ship the brain off the box in the clear, and logs a warning).
+
+Check the boot log to confirm posture: it prints one line stating whether offsite is armed, dormant, or skipped-for-no-key, and each snapshot logs its size, duration, ring count, and offsite result.
+
+**Restore.** Pick the newest good snapshot (from `/app/data/backups/`, or downloaded from the bucket).
+
+1. Stop the app so nothing writes mid-restore:
+   ```bash
+   cd /opt/meetingassist/deploy/digitalocean && docker compose down
+   ```
+2. If the snapshot is **encrypted** (`.tgz.enc`), decrypt it to a plain `.tgz` first. `openssl enc` cannot handle AES-GCM from the CLI, so use this self-contained Go decryptor (the file format is `magic(8) | nonce(12) | ciphertext+tag`, GCM-authenticated with `BACKUP_ENCRYPTION_KEY`). Save it as `decrypt-backup.go`:
+   ```go
+   package main
+
+   import (
+       "bytes"
+       "crypto/aes"
+       "crypto/cipher"
+       "crypto/sha256"
+       "encoding/base64"
+       "encoding/hex"
+       "os"
+       "strings"
+   )
+
+   // deriveKey mirrors the server's deriveBackupKey EXACTLY: a value that
+   // hex-, standard-base64-, or RAW (unpadded) base64-decodes to 32 bytes is used
+   // as the raw key; anything else is a passphrase SHA-256'd to 32 bytes. The
+   // raw-base64 branch matters — a 32-byte key pasted without '=' padding is
+   // valid to the server and must decrypt here too.
+   func deriveKey(raw string) []byte {
+       raw = strings.TrimSpace(raw)
+       if b, err := hex.DecodeString(raw); err == nil && len(b) == 32 {
+           return b
+       }
+       if b, err := base64.StdEncoding.DecodeString(raw); err == nil && len(b) == 32 {
+           return b
+       }
+       if b, err := base64.RawStdEncoding.DecodeString(raw); err == nil && len(b) == 32 {
+           return b
+       }
+       s := sha256.Sum256([]byte(raw))
+       return s[:]
+   }
+
+   // usage: BACKUP_ENCRYPTION_KEY=... go run decrypt-backup.go in.tgz.enc out.tgz
+   func main() {
+       blob, err := os.ReadFile(os.Args[1])
+       if err != nil {
+           panic(err)
+       }
+       magic := []byte("BFBKUP01")
+       block, err := aes.NewCipher(deriveKey(os.Getenv("BACKUP_ENCRYPTION_KEY")))
+       if err != nil {
+           panic(err)
+       }
+       gcm, err := cipher.NewGCM(block)
+       if err != nil {
+           panic(err)
+       }
+       ns := gcm.NonceSize()
+       // Guard the layout before slicing so a truncated/foreign download fails with
+       // a clear message instead of an index-out-of-range panic.
+       if len(blob) < len(magic)+ns || !bytes.Equal(blob[:len(magic)], magic) {
+           panic("not a BFBKUP01 snapshot (too short or wrong magic): " + os.Args[1])
+       }
+       plain, err := gcm.Open(nil, blob[len(magic):len(magic)+ns], blob[len(magic)+ns:], magic)
+       if err != nil {
+           panic("decrypt failed (wrong key or tampered file): " + err.Error())
+       }
+       if err := os.WriteFile(os.Args[2], plain, 0o600); err != nil {
+           panic(err)
+       }
+   }
+   ```
+   Run it where Go is available (your laptop, or `docker run --rm -v "$PWD":/w -w /w -e BACKUP_ENCRYPTION_KEY golang:1.25 go run decrypt-backup.go snap.tgz.enc snap.tgz`). A plain `.tgz` from an unencrypted ring skips this step entirely.
+3. Untar into the volume, replacing the current data dir contents:
+   ```bash
+   tar xzf snap.tgz -C /var/lib/docker/volumes/<meetingassist-data-volume>/_data
+   # or, if you bind-mount, into /opt/meetingassist/data
+   ```
+4. Bring the app back up and verify:
+   ```bash
+   docker compose up -d --build
+   curl -s https://$MEETING_HOST/readyz | jq .checks.memoryFile
+   ```
+
+To pull an offsite snapshot first, use any S3 client against the bucket (DO Spaces works with `aws s3 cp --endpoint-url https://<region>.digitaloceanspaces.com s3://<bucket>/<prefix>/<file> .`, `s3cmd`, `rclone`, or the DO control panel), then run the same steps.
+
 ### Web Push / installable PWA (card 089)
 
 Bonfire installs to a phone home screen and can send Web Push notifications for durable alerts (chat mentions, task proposals, agent milestones). This needs no configuration: on first boot the server mints a VAPID keypair and writes it to `/app/data/vapid-keys.json`, and device subscriptions live in `/app/data/push-subscriptions.json`. Both sit under `data/`, which is already preserved across `docker compose up -d --build`, so pushes survive redeploys. To pin your own keypair (e.g. so subscriptions survive a `data/` wipe) set `WEB_PUSH_VAPID_PUBLIC_KEY` + `WEB_PUSH_VAPID_PRIVATE_KEY`. The container must be able to reach the push services over HTTPS (`fcm.googleapis.com`, `web.push.apple.com`, `push.mozilla.org`); a standard Droplet already has `ca-certificates` and open outbound 443. iOS caveat: push there works only from a home-screen install launched standalone (iOS 16.4+) — a Safari tab has no Notification API, and there is no install prompt, so users add Bonfire via Share → Add to Home Screen.

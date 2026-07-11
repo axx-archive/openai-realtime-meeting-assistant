@@ -47704,6 +47704,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const id = String(decision?.id || '')
         const open = id !== '' && id === expandedIntelDecisionId
         const proposed = String(decision?.status || '') === 'proposed'
+        // A proposed-supersession is a proposed REVERSAL: it carries the same
+        // ratify affordance (markDecisionRatified resolves both server-side), but
+        // labels itself as a reversal so the member knows ratifying supersedes the
+        // decision it contradicts.
+        const proposedReversal = String(decision?.status || '') === 'proposed-supersession'
+        const awaitingRatification = proposed || proposedReversal
 
         const wrap = document.createElement('div')
         wrap.className = 'intel-decision'
@@ -47730,6 +47736,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // the name stays sans (a person), the timestamp rides mono (DL-2)
         const metaBits = []
         if (proposed) metaBits.push({ text: 'proposed · awaiting ratification' })
+        else if (proposedReversal) metaBits.push({ text: 'proposed reversal · awaiting ratification' })
         if (madeBy) metaBits.push({ text: madeBy })
         metaBits.push({ text: intelRelativeTime(decision?.createdAt), mono: true })
         if (context) metaBits.push({ text: context })
@@ -47757,16 +47764,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         })
         wrap.append(item)
 
-        if (proposed && id) {
-          // card 069 ratify door: any signed-in member flips a recorded
-          // DEFAULT to an active decision; the office "decision" broadcast
-          // re-renders the row, the local flip is just the honest echo. It
-          // rides as a sibling of the row button (a button can never nest a
-          // button) rather than inside the body.
+        if (awaitingRatification && id) {
+          // card 069 ratify door: any signed-in member flips a recorded proposal
+          // to an active decision; a proposed-supersession additionally supersedes
+          // the decision it reverses (markDecisionRatified resolves BOTH via the
+          // SAME endpoint). The office "decision" broadcast re-renders the row, the
+          // local flip is just the honest echo. It rides as a sibling of the row
+          // button (a button can never nest a button) rather than inside the body.
           const ratify = document.createElement('button')
           ratify.type = 'button'
           ratify.className = 'intel-item__ratify pressable'
-          ratify.textContent = 'ratify'
+          ratify.textContent = proposedReversal ? 'ratify reversal' : 'ratify'
           ratify.addEventListener('click', async () => {
             ratify.disabled = true
             const { ok } = await postAuthJSON('/assistant/decisions/ratify', { decisionId: decision.id })
@@ -47809,8 +47817,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             addRow('status', later?.statement ? `superseded by: ${String(later.statement)}` : 'superseded')
           } else if (status === 'proposed') {
             addRow('status', 'proposed default — awaiting team ratification')
-          } else {
+          } else if (status === 'proposed-supersession') {
+            const summary = String(decision?.supersedesSummary || '').trim()
+            addRow('status', summary
+              ? `proposed reversal — ratify to supersede: ${summary}`
+              : 'proposed reversal — ratify to supersede the current decision')
+          } else if (status === 'active' || status === '') {
             addRow('status', 'active decision on record')
+          } else {
+            // Unknown status: show it literally rather than mislabeling it as an
+            // active decision on record (F21).
+            addRow('status', status)
           }
           const meetingId = String(decision?.meetingId || '').trim()
           if (meetingId) {

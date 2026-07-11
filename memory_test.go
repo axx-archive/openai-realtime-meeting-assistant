@@ -185,6 +185,100 @@ func TestMeetingMemoryLoadsLargeEntries(t *testing.T) {
 	}
 }
 
+// Item 1.6: search matches STEMMED query tokens against the entry's stemmed
+// token set on word boundaries — "launch" finds "launched", but "art" no
+// longer scores against "startup". Item 1.3a: query tokens also match an
+// entry's digestAliases metadata at synonym weight, so a "Samsung TV Plus"
+// digest carrying the alias "the Korean TV deal" is found by "korean tv".
+func TestSearchWordBoundaryStemmingAndAliases(t *testing.T) {
+	store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "memory.jsonl"))
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+	if _, _, err := store.appendTranscript("e1", "i1", "AJ: We launched the packaging pilot."); err != nil {
+		t.Fatalf("append launch: %v", err)
+	}
+	if _, _, err := store.appendTranscript("e2", "i2", "Tom: The startup runway looks tight."); err != nil {
+		t.Fatalf("append startup: %v", err)
+	}
+
+	matches := store.search("launch", 5)
+	if len(matches) != 1 || matches[0].Entry.ID != "e1" {
+		t.Fatalf("search(launch) = %v, want only the launched-pilot entry", memorySearchIDs(matches))
+	}
+	if matches := store.search("art", 5); len(matches) != 0 {
+		t.Fatalf("search(art) = %v, want nothing — 'art' must not match 'startup'", memorySearchIDs(matches))
+	}
+
+	store.mu.Lock()
+	store.entries = append(store.entries, meetingMemoryEntry{
+		ID:        "digest-samsung",
+		Kind:      meetingMemoryKindMeetingDigest,
+		Text:      "Samsung TV Plus partnership terms discussed.",
+		CreatedAt: time.Now().UTC(),
+		Metadata: map[string]string{
+			"meetingId":              "m-samsung",
+			digestAliasesMetadataKey: "the Korean TV deal, CTV partnership",
+		},
+	})
+	store.mu.Unlock()
+
+	found := false
+	for _, match := range store.search("korean tv", 5) {
+		if match.Entry.ID == "digest-samsung" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("alias search: 'korean tv' did not reach the Samsung digest via digestAliases")
+	}
+}
+
+func memorySearchIDs(matches []meetingMemoryMatch) []string {
+	ids := make([]string, len(matches))
+	for i, match := range matches {
+		ids[i] = match.Entry.ID
+	}
+	return ids
+}
+
+// Item 1.5a: an STT redelivery that arrives with no provider/item id gets a
+// content-addressed fallback id (sha256 of meetingId|speaker|text|hourBucket,
+// F9), so an identical near-immediate redelivery no-ops through the seen-map,
+// while a different speaker saying the same words stays a distinct entry
+// (speaker attribution is the raw-tier payload). The hour bucket is exercised
+// directly in TestFallbackTranscriptIDHourBucket.
+func TestFallbackTranscriptIDIsContentAddressed(t *testing.T) {
+	store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "memory.jsonl"))
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+
+	first, appended, err := store.appendAttributedTranscript("", "", "tom", "", "Boot Barn rollout is on track.")
+	if err != nil || !appended {
+		t.Fatalf("first append appended=%v err=%v", appended, err)
+	}
+	if !strings.HasPrefix(first.ID, "transcript-") || len(first.ID) != len("transcript-")+16 {
+		t.Fatalf("fallback id %q is not the content-addressed form", first.ID)
+	}
+	if _, appended, err := store.appendAttributedTranscript("", "", "tom", "", "Boot Barn rollout is on track."); err != nil {
+		t.Fatalf("second append: %v", err)
+	} else if appended {
+		t.Fatal("identical id-less redelivery must dedupe, got appended=true")
+	}
+
+	other, appended, err := store.appendAttributedTranscript("", "", "aj", "", "Boot Barn rollout is on track.")
+	if err != nil || !appended {
+		t.Fatalf("other-speaker append appended=%v err=%v", appended, err)
+	}
+	if other.ID == first.ID {
+		t.Fatalf("two speakers saying the same words collided on id %q", first.ID)
+	}
+	if entries := store.snapshot(10); len(entries) != 2 {
+		t.Fatalf("entries=%d, want 2 (one per speaker)", len(entries))
+	}
+}
+
 func TestMeetingMemoryPersistsOSArtifactsWithStructure(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "memory.jsonl")
 	store, err := newMeetingMemoryStore(path)
@@ -1246,5 +1340,73 @@ func TestUpsertDigestConcurrentSingleWinner(t *testing.T) {
 	}
 	if visible != 1 {
 		t.Fatalf("recall-visible day digests = %d, want 1", visible)
+	}
+}
+
+// F6+F25: the stemmer must fold inflected and base forms onto ONE stem — the
+// old stripper left "changes"/"changed" on "chang" while "change" stayed
+// "change", silently regressing recall. Doubled-consonant gemination
+// (plan/planning, ship/shipped) and silent-e bases (change, decide) now
+// converge, while short tokens and acronyms stay exact and unrelated words do
+// not collide.
+func TestStemMemoryTokenConverges(t *testing.T) {
+	groups := [][]string{
+		{"change", "changes", "changed", "changing"},
+		{"plan", "plans", "planning", "planned"},
+		{"ship", "ships", "shipped", "shipping"},
+		{"decide", "decides", "decided", "deciding"},
+		{"launch", "launches", "launched", "launching"},
+		{"press", "presses", "pressed", "pressing"},
+	}
+	for _, group := range groups {
+		want := stemMemoryToken(group[0])
+		for _, form := range group[1:] {
+			if got := stemMemoryToken(form); got != want {
+				t.Fatalf("stemMemoryToken(%q)=%q, want %q (fold of %q)", form, got, want, group[0])
+			}
+		}
+	}
+
+	// Acronyms and short tokens stay exact.
+	for _, exact := range []string{"AJ", "TKO", "art", "code", "aj", "tko"} {
+		if got := stemMemoryToken(exact); got != exact {
+			t.Fatalf("stemMemoryToken(%q)=%q, want it unchanged (acronym/short exactness)", exact, got)
+		}
+	}
+
+	// Unrelated words must NOT collide after stemming.
+	if stemMemoryToken("art") == stemMemoryToken("startup") {
+		t.Fatal("art and startup must not share a stem")
+	}
+	if stemMemoryToken("change") == stemMemoryToken("charge") {
+		t.Fatal("change and charge must not share a stem")
+	}
+}
+
+// F9: the id-less-transcript fallback id includes a coarse UTC-hour bucket, so a
+// near-immediate redelivery still dedupes (same hour → same id) while the SAME
+// speaker genuinely repeating the SAME words a later hour files as a distinct
+// entry instead of being silently swallowed. Speaker and meeting still separate.
+func TestFallbackTranscriptIDHourBucket(t *testing.T) {
+	const line = "Boot Barn rollout is on track."
+	h10 := time.Date(2026, 7, 11, 10, 30, 0, 0, time.UTC)
+	h10late := time.Date(2026, 7, 11, 10, 59, 59, 0, time.UTC)
+	h11 := time.Date(2026, 7, 11, 11, 0, 1, 0, time.UTC)
+
+	base := fallbackTranscriptID("m1", "tom", line, h10)
+	if got := fallbackTranscriptID("m1", "tom", line, h10late); got != base {
+		t.Fatalf("same-hour redelivery id=%q, want %q (must dedupe)", got, base)
+	}
+	if got := fallbackTranscriptID("m1", "tom", line, h11); got == base {
+		t.Fatal("a genuine repeat in a later hour must file as a distinct id, not dedupe")
+	}
+	if fallbackTranscriptID("m1", "aj", line, h10) == base {
+		t.Fatal("a different speaker must not collide")
+	}
+	if fallbackTranscriptID("m2", "tom", line, h10) == base {
+		t.Fatal("a different meeting must not collide")
+	}
+	if !strings.HasPrefix(base, "transcript-") || len(base) != len("transcript-")+16 {
+		t.Fatalf("id %q is not the content-addressed form", base)
 	}
 }

@@ -139,6 +139,9 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 		// Explicit-save gate (card-110): save a finished deliverable onto the
 		// Files surface; attribution carries the requester.
 		"save_to_files": true,
+		// Deliberate-write path (memory study 2.1): file an author-certain note
+		// into company memory; the private user owns filing their own notes.
+		"note_for_the_record": true,
 	}
 	for _, tool := range tools {
 		name, _ := tool["name"].(string)
