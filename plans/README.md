@@ -1,6 +1,6 @@
 # Animation improvement plans — 2026-07-11 audit
 
-Produced by the `improve-animations` audit (commit `bd289db`). Full audit: 4 parallel category agents over the 8-category playbook; every finding re-verified at its file:line by the orchestrator before planning. The client's motion foundation is strong (single token system, no `ease-in`, no `scale(0)`, only one weak `ease`, comprehensive reduced-motion block with 3 gaps) — these plans are targeted corrections, not a redesign.
+Produced by the `improve-animations` audit (commit `bd289db`); wave 2 reconciled and planned at `d8846df`. Full audit: 4 parallel category agents over the 8-category playbook; every finding re-verified at its file:line by the orchestrator before planning. The client's motion foundation is strong (single token system, no `ease-in`, no `scale(0)`, only one weak `ease`, comprehensive reduced-motion block with 3 gaps) — these plans are targeted corrections, not a redesign.
 
 ## Plans
 
@@ -11,31 +11,36 @@ Produced by the `improve-animations` audit (commit `bd289db`). Full audit: 4 par
 | 003 | Board video tiles: composite-only speaker/hover emphasis | HIGH | DONE |
 | 004 | Gate hover motion behind (hover:hover); finish reduced-motion coverage | MEDIUM | DONE |
 | 005 | Motion token hygiene: fold stray durations/easings into tokens | MEDIUM | DONE |
+| 006 | Meter and progress fills: animate transform, not width | HIGH | DONE |
+| 007 | Anchored popovers scale in from their trigger | MEDIUM | DONE |
+| 008 | Correct three --dur-slow drift regressions; un-fight the tile drag | MEDIUM | DONE |
 
-Gate evidence (2026-07-11): full `go test -count=1 .` → ok (95.8s); keyless browser smoke on :3171 → 9/9 PASS (tab-in 0.22s, palette animation-none + error-free filtering, tile transition width-free + scale(1.23) speaker, reduced-motion research dots gated, body 0.36s, zero JS errors).
+Wave-1 gate evidence (2026-07-11): full `go test -count=1 .` → ok (95.8s); keyless browser smoke on :3171 → 9/9 PASS (tab-in 0.22s, palette animation-none + error-free filtering, tile transition width-free + scale(1.23) speaker, reduced-motion research dots gated, body 0.36s, zero JS errors).
+
+Wave-2 reconcile (2026-07-11, HEAD `d8846df`): all five wave-1 plans verified intact at HEAD by a dedicated agent (evidence per plan on file). Drift scan over `bd289db..HEAD` found three duration regressions from 005's own tokenization (rounded 0.3s UP to `--dur-slow`) → plan 008.
+
+Wave-2 gate evidence (2026-07-11): per-plan `TestIndex` green after each of 006/007/008; full `go test -count=1 .` → ok (99.7s); keyless browser smoke on :3171 → 12/12 PASS (login, account-menu origin+transition, intel fill transform-only with honest-zero `translateX(-100%)`, research fill resting state, files-menu transition, tab pane token-timed, reduced-motion token zeroing 0ms×3, dragging tile transition excludes transform, zero console errors). Adversarial diff review: 1 critical caught (research-bar template sites still wrote attribute-form `width` — fixed, addendum in plan 006) + 1 stale comment (fixed); re-gate green.
 
 ## Execution order & dependencies
 
-Run **strictly sequentially, 001 → 005** — all five edit the same file (`index.html`); parallel execution will conflict.
-
-- 001, 002, 003: independent of each other, but run in order anyway (single file).
-- 004 depends on 003: it wraps the `.board-video-tile:hover` rule **as rewritten by 003** (read it fresh; split `:focus-visible` out of the media query).
-- 005 runs last: it touches many scattered lines and would otherwise churn context under the other plans. It must pin-check every edit against `*_test.go` first.
+Run **strictly sequentially, 006 → 007 → 008** — all plans edit the same file (`index.html`); parallel execution will conflict. The three are otherwise independent.
 
 Gate for every plan: `go test -count=1 -run 'TestIndex' .` green before moving on.
 
-## Deferred findings (audited, vetted, not in this wave)
+## Deferred findings (audited, vetted, not yet planned)
 
 | Finding | Category | Why deferred |
 |---|---|---|
-| Meter/progress `width` transitions → `scaleX()` (voice meter ≈4517 `width 80ms linear`, `--agent-progress` driver ≈54040, research bars ≈29647, audio meter ≈25349) | Performance | 8 sites + JS drivers + a pinned string in `frontend_noise_suppression_test.go:172`; needs its own careful pass |
-| Toast enter/leave as transitions + FLIP stack shift (≈3737, 3759) | Interruptibility | Medium complexity; toasts are occasional-frequency |
-| Video-tile drag drop: FLIP + spring settle (≈31893) | Interruptibility | Touches live-room drag code; too risky to batch |
+| Video-tile drag drop: FLIP + spring settle (≈31893) | Interruptibility | Touches live-room drag code; too risky to batch (008 fixes the drag-lag part only) |
 | PiP release: velocity corner-snap with `--ease-spring` (≈31462) | Interruptibility | Feature work, not a fix |
 | Room exit choreography (mirror of `rise-in`) | Missed opportunity | Requires JS wiring in the leave path — must never delay teardown |
-| Anchored popovers scale-in from trigger (invite-pop ≈15142, account/board/files menus) | Physicality | `@starting-style` support decision needed |
-| Goalcard node tooltip: fade → scale-from-anchor (≈19849) | Physicality | Low leverage, niche surface |
-| Kanban card mount stagger (≈15811) | Missed opportunity | Polish; board rides panel entrance today |
+| Goalcard node tooltip: fade → scale-from-anchor (≈19849 at bd289db) | Physicality | Low leverage, niche surface |
+
+## Retired findings (wave-2 reconcile, 2026-07-11 — re-vetted at HEAD and withdrawn)
+
+- **Toast transitions + FLIP stack shift** — stale: toasts follow a one-pill-at-a-time design canon (`while (toastRegion.children.length > 1) … remove()`, comment-documented ≈52262); there is no stack to FLIP. Enter/leave keyframes run on fresh elements (no retrigger-restart risk) and the reduced-motion block handles both states, including the `animation-duration: 1ms` trick so `animationend` removal still fires. By-design; do not re-report.
+- **Kanban card mount stagger** — withdrawn: the board rail rebuilds every card on each websocket board update (`replaceChildren`-style render ≈51156), so a mount stagger would replay on every update — the same replay bug class plan 002 removed from the palette. The `is-fresh` / `is-moved` treatments already carry change feedback.
+- **Meter width → transform** and **anchored popovers** — promoted to plans 006 and 007 (translateX pattern chosen over scaleX to preserve rounded fill caps; `@starting-style` chosen with instant-appear degradation on older engines).
 
 ## Explicitly rejected (by-design, do not re-report)
 

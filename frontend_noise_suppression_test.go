@@ -169,7 +169,7 @@ func TestIndexNoiseStatusRespectsMonolithDiscipline(t *testing.T) {
 		t.Errorf("index.html introduced a banned `transition: all;`")
 	}
 	// The new bar animates a named property.
-	if !strings.Contains(html, "transition: width var(--dur-med) var(--ease)") {
+	if !strings.Contains(html, "transition: transform var(--dur-med) var(--ease)") {
 		t.Errorf("index.html suppression bar must transition a named property")
 	}
 	// The new loading-dot pulse is registered in the reduced-motion block.

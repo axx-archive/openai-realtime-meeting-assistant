@@ -1187,6 +1187,12 @@
         -webkit-backdrop-filter: var(--glass-blur);
         box-shadow: var(--glass-highlight), var(--glass-shadow);
         color: var(--text-1);
+        transform-origin: bottom left;
+        transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+
+      @starting-style {
+        .account-menu:not([hidden]) { opacity: 0; transform: scale(0.96); }
       }
 
       .account-menu[hidden] {
@@ -1353,7 +1359,7 @@
         aspect-ratio: 16 / 10;
         cursor: grab;
         user-select: none;
-        transition: box-shadow var(--dur-slow) var(--ease), transform var(--dur-slow) var(--ease), opacity var(--dur-med) var(--ease);
+        transition: box-shadow var(--dur-slow) var(--ease), transform var(--dur-med) var(--ease), opacity var(--dur-med) var(--ease);
       }
 
       /* tile hairline stays a white literal — the stage is theme-invariant */
@@ -1390,6 +1396,7 @@
         opacity: 0.94;
         box-shadow: var(--glow-accent), var(--shadow-2);
         cursor: grabbing;
+        transition: box-shadow var(--dur-med) var(--ease), opacity var(--dur-med) var(--ease);
       }
 
       .video-drag-slot {
@@ -4037,7 +4044,6 @@
       /* Bonfire OS canon motion + waveform primitives (additive; used by redesigned surfaces) */
       @keyframes bf-ringpulse { 0%, 100% { transform: scale(1); opacity: 0.55; } 50% { transform: scale(1.25); opacity: 0.1; } }
       @keyframes bf-flamebreathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.93); opacity: 0.74; } }
-      @keyframes bf-toastin { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
       @keyframes bf-sheetin { from { transform: translateY(26px) scale(0.98); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
       @keyframes bf-islandin { from { transform: translateY(20px) scale(0.96); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
       @keyframes bf-fadein { from { transform: translateY(8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
@@ -4400,11 +4406,12 @@
 
       .av-suppression__bar {
         display: block;
-        width: 0%;
+        width: 100%;
         height: 100%;
         border-radius: inherit;
         background: var(--live);
-        transition: width var(--dur-med) var(--ease);
+        transform: translateX(-100%);
+        transition: transform var(--dur-med) var(--ease);
       }
 
       .av-saved {
@@ -4522,11 +4529,12 @@
       /* the meter is a live signal — the one green in this dialog */
       .voice-meter__bar {
         display: block;
-        width: 0%;
+        width: 100%;
         height: 100%;
         border-radius: inherit;
         background: var(--live);
-        transition: width 80ms linear;
+        transform: translateX(-100%);
+        transition: transform 80ms linear;
       }
 
       .voice-profile__actions,
@@ -5271,11 +5279,6 @@
         color: var(--text-1);
       }
 
-      @keyframes toast-in {
-        0%   { opacity: 0; transform: translate3d(0, 8px, 0) scale(0.98); }
-        100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
-      }
-
       /* Modals arrive on the kit spring — a short rise, nothing showy. */
       .card-detail-region.visible .card-detail,
       .settings-region.visible .settings-panel {
@@ -5552,7 +5555,7 @@
         display: grid;
       }
 
-      /* tab panes enter with the canon rise (bf-tabin .4s) — display flips
+      /* tab panes enter with the canon rise (bf-tabin, token speed) — display flips
          from none on tool switch, so the animation replays per entry. The
          live room keeps its own rise-in choreography; the expanded board
          keeps its animation kill-switch. `both`, never bare: the room pane
@@ -5758,7 +5761,7 @@
         border-radius: 99px;
         transform-origin: bottom;
         opacity: 0.5;
-        transition: opacity var(--dur-slow) var(--ease);
+        transition: opacity var(--dur-med) var(--ease);
       }
 
       .office-launch__line {
@@ -6188,11 +6191,12 @@
 
       .office-agent-card__bar {
         display: block;
-        width: var(--agent-progress, 0%);
+        width: 100%;
         height: 100%;
         border-radius: inherit;
         background: var(--accent);
-        transition: width var(--dur-med) var(--ease);
+        transform: translateX(calc(var(--agent-progress, 0%) - 100%));
+        transition: transform var(--dur-med) var(--ease);
       }
 
       .office-insights {
@@ -6823,10 +6827,11 @@
       .grillstage__pressure-fill {
         display: block;
         height: 100%;
-        width: 0%;
+        width: 100%;
         border-radius: var(--r-full);
         background: linear-gradient(90deg, color-mix(in srgb, var(--agent) 55%, transparent), var(--agent));
-        transition: width var(--dur-slow) var(--ease);
+        transform: translateX(-100%);
+        transition: transform var(--dur-slow) var(--ease);
       }
 
       .grillstage__questions {
@@ -6917,10 +6922,11 @@
       .grillstage__meter-fill {
         display: block;
         height: 100%;
-        width: 0%;
+        width: 100%;
         border-radius: var(--r-full);
         background: var(--agent);
-        transition: width var(--dur-slow) var(--ease);
+        transform: translateX(-100%);
+        transition: transform var(--dur-slow) var(--ease);
       }
 
       .grillstage__row.is-weak .grillstage__meter-fill { background: var(--warn); }
@@ -9477,10 +9483,13 @@
       }
 
       .scout-chat-research__fill {
+        display: block;
+        width: 100%;
         height: 100%;
         background: var(--accent);
         border-radius: 999px;
-        transition: width 0.2s linear;
+        transform: translateX(-100%);
+        transition: transform 0.2s linear;
       }
 
       .scout-chat-research__pct {
@@ -11050,6 +11059,8 @@
         border: 1px solid var(--line-1);
         border-radius: var(--r-md);
         box-shadow: var(--shadow-2);
+        transform-origin: top left;
+        transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
       }
 
       .files-row .files-folder-menu,
@@ -11058,6 +11069,11 @@
         left: auto;
         right: 10px;
         margin-top: 4px;
+        transform-origin: top right;
+      }
+
+      @starting-style {
+        .files-folder-menu { opacity: 0; transform: scale(0.96); }
       }
 
       .files-folder-menu__label {
@@ -11594,11 +11610,13 @@
 
       .intel-contrib__fill {
         display: block;
+        width: 100%;
         height: 100%;
         border-radius: inherit;
         background: var(--accent);
         opacity: 0.8;
-        transition: width var(--dur-slow) var(--ease);
+        transform: translateX(-100%);
+        transition: transform var(--dur-slow) var(--ease);
       }
 
       /* delta cell rides BEFORE the line-count cell (design §9.3) */
@@ -13565,10 +13583,13 @@
 
       /* earned ember: live run progress is real work happening */
       .research-bar__fill {
+        display: block;
+        width: 100%;
         height: 100%;
         border-radius: inherit;
         background: var(--ember);
-        transition: width var(--dur-med) var(--ease);
+        transform: translateX(-100%);
+        transition: transform var(--dur-med) var(--ease);
       }
 
       .research-agents {
@@ -15174,7 +15195,14 @@
         backdrop-filter: var(--glass-blur);
         -webkit-backdrop-filter: var(--glass-blur);
         box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
+        transform-origin: bottom center;
+        transition: opacity var(--dur-med) var(--ease), transform var(--dur-med) var(--ease);
       }
+
+      @starting-style {
+        .invite-pop { opacity: 0; transform: translateX(-50%) scale(0.96); }
+      }
+
       .invite-pop__row {
         display: flex;
         align-items: center;
@@ -16562,6 +16590,12 @@
         box-shadow: var(--glass-highlight), var(--shadow-2);
         backdrop-filter: var(--glass-blur);
         -webkit-backdrop-filter: var(--glass-blur);
+        transform-origin: bottom right;
+        transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+
+      @starting-style {
+        .board-menu:not([hidden]) { opacity: 0; transform: scale(0.96); }
       }
 
       .board-menu[hidden] {
@@ -18971,7 +19005,7 @@
           padding: 30px 0 26px;
           gap: 18px;
           border-radius: 24px;
-          transition: background var(--dur-slow) var(--ease);
+          transition: background var(--dur-fast) var(--ease);
         }
 
         .office-launch__island:active {
@@ -25383,7 +25417,7 @@
         if (audioSuppressionSection) audioSuppressionSection.hidden = !hasReading
         if (!hasReading) return
         const db = Math.max(0, Math.min(30, snapshot.suppressionDb))
-        if (audioSuppressionBar) audioSuppressionBar.style.width = `${Math.round((db / 30) * 100)}%`
+        if (audioSuppressionBar) audioSuppressionBar.style.transform = `translateX(${Math.round((db / 30) * 100) - 100}%)`
         if (audioSuppressionValue) audioSuppressionValue.textContent = `${db.toFixed(0)} dB quieter`
       }
 
@@ -29530,8 +29564,8 @@
           // The launch path stamps running immediately; treat a freshly-created run
           // (no completedAt, scout_thread source) the same — it is still the work.
           // Same run already on stage → refresh the live bits in place so the
-          // ember fill ANIMATES its width transition instead of rebuilding at
-          // the new width, and nothing under the reader's eye is thrashed.
+          // ember fill ANIMATES its transform transition instead of rebuilding
+          // at the new position, and nothing under the reader's eye is thrashed.
           const current = stage.querySelector('.research-run')
           if (current && current.dataset.artifactId === String(entry.id || '') && current.dataset.runStatus === status) {
             updateResearchRunningStage(current, entry)
@@ -29650,7 +29684,7 @@
             ${stageLabel ? `<span class="research-overall__stage">${escapeHtml(stageLabel)}</span>` : ''}
             <span class="research-overall__pct">${Math.round(pct)}%</span>
           </div>
-          <div class="research-bar"><span class="research-bar__fill" style="width:${pct}%"></span></div>`
+          <div class="research-bar"><span class="research-bar__fill" style="transform:translateX(${pct - 100}%)"></span></div>`
         // the per-turn note rides under the bar — model-derived text lands via
         // textContent only, never markup
         const note = String(entry?.metadata?.progressNote || '').trim()
@@ -29677,11 +29711,11 @@
 
       // in-place refresh of the running card's live bits (bar width, percent,
       // stage word, per-turn note, source count) — the card is NOT rebuilt,
-      // so the ember fill animates its width transition and nothing flickers
+      // so the ember fill animates its transform transition and nothing flickers
       // between orchestrator turns. Model-derived text lands via textContent.
       function updateResearchRunningStage(wrap, entry) {
         const pct = artifactProgressPercent(entry, 35)
-        wrap.querySelectorAll('.research-bar__fill').forEach(fill => { fill.style.width = `${pct}%` })
+        wrap.querySelectorAll('.research-bar__fill').forEach(fill => { fill.style.transform = `translateX(${pct - 100}%)` })
         wrap.querySelectorAll('.research-overall__pct, .research-agent__pct').forEach(el => { el.textContent = `${Math.round(pct)}%` })
         const label = wrap.querySelector('.research-overall__label')
         if (label) {
@@ -29727,7 +29761,7 @@
             </span>
           </div>
           <p class="research-agent__task">${escapeHtml(agent.task)}</p>
-          <div class="research-bar"><span class="research-bar__fill" style="width:${agent.pct}%"></span></div>
+          <div class="research-bar"><span class="research-bar__fill" style="transform:translateX(${agent.pct - 100}%)"></span></div>
           <div class="research-agent__meta"><span>progress</span><span class="research-agent__pct">${Math.round(agent.pct)}%</span></div>`
         return card
       }
@@ -30521,10 +30555,10 @@
             row.append(labelEl, meter, count)
             grillStageRows.appendChild(row)
             if (reduceMotion) {
-              fill.style.width = `${value * 10}%`
+              fill.style.transform = `translateX(${value * 10 - 100}%)`
             } else {
               window.setTimeout(() => {
-                fill.style.width = `${value * 10}%`
+                fill.style.transform = `translateX(${value * 10 - 100}%)`
                 countUpGrillScore(count, value)
               }, index * 100 + 120)
             }
@@ -44450,7 +44484,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           agents.textContent = queued ? 'waiting for Codex' : running ? 'worker running' : approvalRequired ? 'approval gate' : rejected ? 'gate rejected' : error ? 'gate blocked' : 'artifact ready'
         }
         if (fill) {
-          fill.style.width = `${Math.max(0, Math.min(100, pct))}%`
+          fill.style.transform = `translateX(${Math.max(0, Math.min(100, pct)) - 100}%)`
         }
         if (pctEl) {
           pctEl.textContent = `${Math.round(Math.max(0, Math.min(100, pct)))}%`
@@ -47548,9 +47582,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           fill.className = 'intel-contrib__fill'
           // guard the percentage-of-nothing case: no conversation lines → an
           // empty track, so a full bar never contradicts "0 lines" (CL-5)
-          fill.style.width = lineCount === 0
-            ? '0%'
-            : `${Math.round(Math.min(1, (Number(person.fuel) || 0) / fuelMax) * 100)}%`
+          fill.style.transform = lineCount === 0
+            ? 'translateX(-100%)'
+            : `translateX(${Math.round(Math.min(1, (Number(person.fuel) || 0) / fuelMax) * 100) - 100}%)`
           track.appendChild(fill)
           const delta = document.createElement('span')
           delta.className = 'intel-contrib__delta'
@@ -48095,7 +48129,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           track.className = 'intel-contrib__track'
           const fill = document.createElement('span')
           fill.className = 'intel-contrib__fill'
-          fill.style.width = `${packageStagePercent(record)}%`
+          fill.style.transform = `translateX(${packageStagePercent(record) - 100}%)`
           track.append(fill)
           const labels = document.createElement('div')
           labels.className = 'package-rail__labels'
