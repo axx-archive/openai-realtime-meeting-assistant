@@ -1,36 +1,35 @@
 # Extractable Components
 
-## Topbar
-- Source: `index.html`
-- Category: layout
-- Description: Bonfire brand mark, room title, and live connection status.
-- Extractable props: statusLabel, statusKind
-- Hardcoded: Brand SVG, Bonfire product name, agentic meeting room subtitle.
+## ToolRail
 
-## HearthStage
 - Source: `index.html`
 - Category: layout
-- Description: Active speaker stage, screen-share stage, participant seats.
-- Extractable props: activeSpeakerName, isScreenSharing
-- Hardcoded: Ember motion, video geometry, tile labels.
+- Description: desktop 60px global rail and mobile safe-area bottom glass navigation island.
+- Props: `activeTool`, `isInRoom`, `roomUnreadCount`.
+- Hardcoded: current BonfireOS tool destinations and inline SVG icons.
 
-## BoardRail
-- Source: `index.html`
-- Category: layout
-- Description: Compact standup board preview with expanded board entry.
-- Extractable props: cardCount, isBoardReady
-- Hardcoded: Kanban columns and Bonfire board copy.
+## MobileRoomStage
 
-## ScoutPanel
 - Source: `index.html`
 - Category: layout
-- Description: Assistant query panel and memory count surface.
-- Extractable props: memoryCount, assistantState
-- Hardcoded: Scout naming and message styles.
+- Description: canonical active-speaker hero, participant filmstrip, pin/speaking states, and screen-share state.
+- Props: `activeSpeakerName`, `pinnedSpeakerName`, `participantCount`, `isScreenSharing`.
+- Hardcoded: Glass & Ink video treatment, signal-green audible ring, media-state overlays.
 
 ## MeetingBar
+
 - Source: `index.html`
 - Category: layout
-- Description: Sticky bottom media controls, share, notes, invite link, and room clock.
-- Extractable props: isMuted, isCameraOff, isSharing, elapsedTime
-- Hardcoded: Control order and icon SVGs.
+- Description: contextual mic, camera, recording, room chat, invite, notes, and leave controls.
+- Props: `isMuted`, `isCameraOff`, `isRecording`, `unreadCount`.
+- Hardcoded: current control icons, order, ARIA labels, and destructive leave treatment.
+
+## TopbarLivePill
+
+- Source: `index.html`
+- Category: navigation
+- Description: mobile continuity control that returns to the live room from another tool without ending media.
+- Props: `isInRoom`, `elapsedTime`.
+- Hardcoded: live signal dot and room return behavior.
+
+Skip generic primitives such as buttons, pills, inputs, and cards; keep them inline in drafts.

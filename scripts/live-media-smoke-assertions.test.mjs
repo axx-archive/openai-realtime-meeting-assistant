@@ -2,12 +2,17 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  validateMobileActiveSpeakerSnapshots,
+  validateMobileMoreMenuSnapshots,
+  validateMobilePinInteractions,
+  validateMobileRoomChromeSnapshot,
+  validateMobileRoomLayoutSnapshot,
   validatePinnedViewSnapshot,
   validateScreenShareSnapshot,
   validateSoakProgressSnapshots
 } from './live-media-smoke-assertions.mjs'
 
-const visibleRect = { clientRects: 1, rect: { width: 320, height: 180 } }
+const visibleRect = { clientRects: 1, rect: { top: 0, right: 320, bottom: 180, left: 0, width: 320, height: 180 } }
 const hiddenRect = { clientRects: 0, rect: { width: 0, height: 0 } }
 const renderedVideo = {
   hidden: false,
@@ -49,15 +54,18 @@ test('screen-share validator accepts the sharer placeholder and requires remote 
 })
 
 test('mobile pinned mode keeps canonical hero and strip while desktop stays single-stage', () => {
+  const heroRect = { clientRects: 1, rect: { top: 0, right: 366, bottom: 484, left: 0, width: 366, height: 484 } }
+  const stripRect = { clientRects: 1, rect: { top: 492, right: 104, bottom: 596, left: 0, width: 104, height: 104 } }
   const snapshot = {
     name: 'Tom',
     roomLayout: 'pinned',
     stageParticipant: 'Caitlyn',
-    viewport: { innerWidth: 390, coarsePointer: true, maxTouchPoints: 5, hoverNone: true },
+    viewport: { innerWidth: 390, innerHeight: 844, coarsePointer: true, maxTouchPoints: 5, hoverNone: true },
     tiles: [
-      { participant: 'Tom', classes: 'video-tile', rect: visibleRect, renderedVideos: 1, decodedFrames: 12 },
-      { participant: 'Caitlyn', classes: 'video-tile is-mobile-hero is-on-stage', rect: visibleRect, renderedVideos: 1, decodedFrames: 12 }
-    ]
+      { participant: 'Tom', classes: 'video-tile', rect: stripRect, renderedVideos: 1, decodedFrames: 12 },
+      { participant: 'Caitlyn', classes: 'video-tile is-mobile-hero is-on-stage', rect: heroRect, renderedVideos: 1, decodedFrames: 12 }
+    ],
+    videoStackGeometry: { clientWidth: 366, scrollWidth: 366 }
   }
   assert.deepEqual(validatePinnedViewSnapshot(snapshot, ['Tom', 'Caitlyn']), [])
 
@@ -66,6 +74,141 @@ test('mobile pinned mode keeps canonical hero and strip while desktop stays sing
     viewport: { innerWidth: 1280, coarsePointer: false, maxTouchPoints: 0, hoverNone: false }
   }, ['Tom', 'Caitlyn'])
   assert.match(desktopFailures.join('\n'), /pinned view has 2 visible participant tiles/)
+})
+
+test('mobile crowded-room validator requires a dominant active-speaker hero and reachable filmstrip', () => {
+  const names = ['Tom', 'Caitlyn', 'Tyler', 'Tim', 'Erick']
+  const snapshot = {
+    name: 'Tom',
+    roomLayout: 'grid',
+    activeSpeaker: 'Caitlyn',
+    serverActiveSpeakerFresh: true,
+    viewport: { innerWidth: 390, innerHeight: 844, coarsePointer: true, maxTouchPoints: 5, hoverNone: true },
+    videoStackGeometry: { clientWidth: 366, scrollWidth: 440 },
+    tiles: names.map((name, index) => ({
+      participant: name,
+      classes: name === 'Caitlyn' ? 'video-tile is-mobile-hero is-active-speaker' : 'video-tile',
+      rect: name === 'Caitlyn'
+        ? { clientRects: 1, rect: { top: 0, right: 366, bottom: 484, left: 0, width: 366, height: 484 } }
+        : { clientRects: 1, rect: { top: 492, right: 104 + index * 112, bottom: 596, left: index * 112, width: 104, height: 104 } }
+    }))
+  }
+  assert.deepEqual(validateMobileRoomLayoutSnapshot(snapshot, names), [])
+
+  const failures = validateMobileRoomLayoutSnapshot({
+    ...snapshot,
+    videoStackGeometry: { clientWidth: 366, scrollWidth: 366 },
+    tiles: snapshot.tiles.map(tile => tile.participant === 'Caitlyn'
+      ? { ...tile, rect: { clientRects: 1, rect: { width: 85, height: 104 } } }
+      : tile)
+  }, names)
+  assert.match(failures.join('\n'), /hero width|does not dominate|not scroll reachable/)
+})
+
+test('mobile landscape keeps a dominant hero beside a vertically reachable filmstrip', () => {
+  const names = ['Tom', 'Caitlyn', 'Tyler', 'Tim', 'Erick']
+  const snapshot = {
+    name: 'Tom',
+    roomLayout: 'grid',
+    activeSpeaker: 'Tyler',
+    serverActiveSpeakerFresh: true,
+    viewport: { innerWidth: 844, innerHeight: 390, coarsePointer: true, maxTouchPoints: 5, hoverNone: true },
+    videoStackGeometry: { clientHeight: 286, scrollHeight: 344 },
+    tiles: names.map((name, index) => ({
+      participant: name,
+      classes: name === 'Tyler' ? 'video-tile is-mobile-hero is-active-speaker' : 'video-tile',
+      rect: name === 'Tyler'
+        ? { clientRects: 1, rect: { top: 0, right: 704, bottom: 286, left: 0, width: 704, height: 286 } }
+        : { clientRects: 1, rect: { top: index * 88, right: 820, bottom: index * 88 + 80, left: 716, width: 104, height: 80 } }
+    }))
+  }
+  assert.deepEqual(validateMobileRoomLayoutSnapshot(snapshot, names), [])
+})
+
+test('mobile room chrome keeps one call dock, a minimize control, and 44px actions', () => {
+  const control = id => ({
+    id,
+    visible: true,
+    ariaLabel: id,
+    rect: { clientRects: 1, rect: { width: 44, height: 44 } }
+  })
+  const snapshot = {
+    name: 'Tom',
+    viewport: { innerWidth: 390, innerHeight: 844, coarsePointer: true, maxTouchPoints: 5, hoverNone: true },
+    phoneLayoutMatches: true,
+    pipMeeting: { hidden: true, visible: false },
+    toolRail: { visible: false },
+    meetingBar: { visible: true, rect: { clientRects: 1, rect: { top: 768, bottom: 828, width: 371, height: 60 } } },
+    topbarBack: { visible: true, rect: { clientRects: 1, rect: { width: 44, height: 44 } } },
+    videoStackGeometry: { rect: { clientRects: 1, rect: { top: 100, bottom: 760, width: 366, height: 660 } } },
+    tiles: [{ participant: 'Caitlyn', classes: 'video-tile is-mobile-hero', rect: { clientRects: 1, rect: { top: 100, bottom: 760, width: 366, height: 660 } } }],
+    callControls: [
+      ...['muteMic', 'toggleCamera', 'roomChatToggle', 'roomMoreToggle', 'leave'].map(control),
+      ...['recordMeeting', 'inviteToggle', 'archiveMeeting'].map(id => ({ ...control(id), visible: false }))
+    ]
+  }
+  assert.deepEqual(validateMobileRoomChromeSnapshot(snapshot), [])
+
+  const failures = validateMobileRoomChromeSnapshot({
+    ...snapshot,
+    phoneLayoutMatches: false,
+    pipMeeting: { hidden: false, visible: true },
+    toolRail: { visible: true },
+    topbarBack: { visible: true, rect: { clientRects: 1, rect: { width: 28, height: 28 } } },
+    tiles: [{ participant: 'Caitlyn', classes: 'video-tile is-mobile-hero', rect: { clientRects: 1, rect: { top: 100, bottom: 780, width: 366, height: 680 } } }],
+    callControls: [{ ...control('muteMic'), rect: { clientRects: 1, rect: { width: 40, height: 40 } } }]
+  })
+  assert.match(failures.join('\n'), /CSS and JS disagree|desktop PiP|global tool rail|minimize hit area|40\.0x40\.0|overlaps the active-speaker hero/)
+})
+
+test('mobile authoritative speaker promotion moves the canonical hero without attachment churn', () => {
+  const snapshot = (expectedActiveSpeaker, revision = 7) => ({
+    name: 'Tom',
+    expectedActiveSpeaker,
+    activeSpeaker: expectedActiveSpeaker,
+    serverActiveSpeakerFresh: true,
+    videoAttachmentRevision: revision,
+    viewport: { innerWidth: 390, innerHeight: 844, coarsePointer: true, maxTouchPoints: 5, hoverNone: true },
+    tiles: ['Tom', 'Caitlyn', 'Tyler'].map(name => ({
+      participant: name,
+      classes: name === expectedActiveSpeaker ? 'video-tile is-mobile-hero is-active-speaker' : 'video-tile'
+    }))
+  })
+  assert.deepEqual(validateMobileActiveSpeakerSnapshots([
+    snapshot('Caitlyn'),
+    snapshot('Tyler')
+  ]), [])
+
+  const failures = validateMobileActiveSpeakerSnapshots([
+    snapshot('Caitlyn'),
+    snapshot('Tyler', 8)
+  ])
+  assert.match(failures.join('\n'), /attachment revision 7->8/)
+})
+
+test('mobile filmstrip gate requires a real scroll and pin-control click for crowded rooms', () => {
+  assert.deepEqual(validateMobilePinInteractions([
+    { name: 'Tom', target: 'Erick', mobile: true, wasOffscreen: true, scrolled: true, clicked: true }
+  ], 5), [])
+  const failures = validateMobilePinInteractions([
+    { name: 'Tom', target: 'Erick', mobile: true, wasOffscreen: false, scrolled: false, clicked: false }
+  ], 5)
+  assert.match(failures.join('\n'), /actual pin control|offscreen tile|scroll position/)
+})
+
+test('mobile secondary call actions stay reachable in a labelled 44px menu', () => {
+  const actions = ['roomMoreRecord', 'roomMoreInvite', 'roomMoreArchive'].map(id => ({
+    id,
+    hidden: false,
+    label: id,
+    rect: { width: 180, height: 44 }
+  }))
+  assert.deepEqual(validateMobileMoreMenuSnapshots([{ name: 'Tom', menuVisible: true, actions }]), [])
+  assert.match(validateMobileMoreMenuSnapshots([{
+    name: 'Tom',
+    menuVisible: true,
+    actions: actions.map(action => action.id === 'roomMoreInvite' ? { ...action, rect: { width: 180, height: 40 } } : action)
+  }]).join('\n'), /roomMoreInvite hit area is too small/)
 })
 
 function soakSnapshot(iteration, options = {}) {

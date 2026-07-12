@@ -1,26 +1,26 @@
 # Pages
 
-## `/` Bonfire Room
+## `/` BonfireOS
 
-Entry: `index.html`
+Entry and complete client source: `index.html`.
 
-Dependencies:
+The authenticated shell switches first-class tools without a client router:
 
-- `index.html`
-  - Inline CSS tokens and components.
-  - Inline SVG brand marks and control icons.
-  - Inline browser/WebRTC client logic.
-- `main.go`
-  - Serves `index.html`, WebSocket signaling, participant snapshots, archives.
-- `kanban.go`
-  - Board model, Realtime assistant, memory and archive broadcasts.
-- `participants.go`
-  - Participant names, password, room capacity, email mapping.
-- `meeting_notes.go`
-  - Archive and email notes content.
-- `memory.go`
-  - Meeting memory store and recall search.
-- `design-system/README.md`
-  - Brand, copy, layout, motion, and visual rules.
+- `office` — Scout waveform home and operational context.
+- `room` — WebRTC lobby, green room, active meeting, screen share, and room chat.
+- `chat` — private Scout threads and channels.
+- `artifacts` / `research` / `design` / `grill` — work products and agent workflows.
+- `board` — meeting Kanban view.
+- `memory` — recalled meeting context.
+- `files` — file surface.
 
-There are no nested client imports because the app is intentionally framework-free.
+## Complete UI dependency tree
+
+- `index.html` — current tokens, CSS, inline SVG icons, DOM, responsive branches, and client/WebRTC logic.
+- `main.go` — template serving, auth/session routes, WebSocket signaling, and HTTP handlers.
+- `kanban.go` — room/board state, Scout tools, recording, memory, and archive events.
+- `participants.go` — seeded participant identities and room constraints.
+- `frontend_latency_test.go` — source-level frontend behavior contracts.
+- `scripts/live-media-smoke.mjs` — end-to-end media and geometry verification.
+
+For design work on the room, always read the actual `index.html` mobile branch and do not infer the current layout from older Hearth/Bonfire naming.

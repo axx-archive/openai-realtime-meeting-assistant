@@ -1,12 +1,13 @@
 # Routes
 
-This app does not use file-based routing or a client router.
+BonfireOS uses one rendered client page and stateful tool switching rather than file-based client routes.
 
-| URL | Handler | UI |
+| URL | Source | UI role |
 | --- | --- | --- |
-| `/` | `main.go` root handler | Renders `index.html` through `text/template` with the WebSocket URL. |
-| `/websocket` | `websocketHandler` in `main.go` | Signaling, room state, board edits, assistant events. |
-| `/participants` | `participantsHandler` in `main.go` | JSON room snapshot for waiting room preview. |
-| `/archives/{id}.json` | `meetingArchiveHandler` in `main.go` | Meeting archive download. |
+| `/` | `main.go` + `index.html` | Full authenticated BonfireOS shell, lobby, and room. |
+| `/websocket` | `main.go` | Signaling, participant/media state, room events, board and Scout broadcasts. |
+| `/participants` | `main.go` | Authenticated room snapshot used by lobby and smoke verification. |
+| `/healthz` / `/readyz` | `main.go` | Liveness and production readiness. |
+| `/archives/{id}.json` | meeting/archive handlers | Meeting archive download. |
 
-Key page: `/` is the Bonfire room.
+Within `/`, `data-tool` selects Office, Room, Chat, Artifacts, Board, Memory, Files, Research, Design, and Grill surfaces. Designs must preserve these tool keys even if labels change.

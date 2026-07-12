@@ -14,10 +14,227 @@ export function videoProbeRendered(probe) {
 export function usesMobileMediaLayout(snapshot) {
   const viewport = snapshot?.viewport || {}
   const visualWidth = Number(viewport.visualViewport?.width) || 0
+  const visualHeight = Number(viewport.visualViewport?.height) || 0
   const innerWidth = Number(viewport.innerWidth) || 0
+  const innerHeight = Number(viewport.innerHeight) || 0
   const documentWidth = Number(viewport.documentSize?.clientWidth) || 0
+  const documentHeight = Number(viewport.documentSize?.clientHeight) || 0
   const width = visualWidth || innerWidth || documentWidth
-  return Boolean(width > 0 && width <= 700 && (viewport.coarsePointer || viewport.maxTouchPoints > 0 || viewport.hoverNone))
+  const height = visualHeight || innerHeight || documentHeight
+  const phoneViewport = (width > 0 && width <= 700) || (height > 0 && height <= 500)
+  return Boolean(phoneViewport && (viewport.coarsePointer || viewport.maxTouchPoints > 0 || viewport.hoverNone))
+}
+
+function classNames(value) {
+  return String(value || '').split(/\s+/).filter(Boolean)
+}
+
+export function validateMobileRoomLayoutSnapshot(snapshot, expectedNames = []) {
+  if (!usesMobileMediaLayout(snapshot)) {
+    return []
+  }
+  const failures = []
+  const prefix = `${snapshot.name} mobile room`
+  const expected = expectedNames.filter(Boolean)
+  const tiles = Array.isArray(snapshot.tiles) ? snapshot.tiles : []
+  const canonicalTiles = expected.map(name => tiles.find(tile => tile.participant === name)).filter(Boolean)
+  if (canonicalTiles.length !== expected.length) {
+    failures.push(`${prefix} has ${canonicalTiles.length} canonical participant tiles, expected ${expected.length}`)
+  }
+
+  const laidOutTiles = canonicalTiles.filter(tile => rectProbeVisible(tile.rect))
+  if (laidOutTiles.length !== expected.length) {
+    failures.push(`${prefix} has ${laidOutTiles.length} laid-out participant tiles, expected ${expected.length}`)
+  }
+  const heroTiles = laidOutTiles.filter(tile => classNames(tile.classes).includes('is-mobile-hero'))
+  if (heroTiles.length !== 1) {
+    failures.push(`${prefix} has ${heroTiles.length} mobile heroes`)
+    return failures
+  }
+
+  const hero = heroTiles[0]
+  if (snapshot.roomLayout === 'pinned' && snapshot.stageParticipant && hero.participant !== snapshot.stageParticipant) {
+    failures.push(`${prefix} pinned hero is ${hero.participant}, expected ${snapshot.stageParticipant}`)
+  }
+  if (snapshot.roomLayout === 'grid' && snapshot.serverActiveSpeakerFresh && snapshot.activeSpeaker && hero.participant !== snapshot.activeSpeaker) {
+    failures.push(`${prefix} active-speaker hero is ${hero.participant}, expected ${snapshot.activeSpeaker}`)
+  }
+
+  const heroRect = hero.rect?.rect || {}
+  const stripTiles = laidOutTiles.filter(tile => tile !== hero)
+  const stripWidths = stripTiles.map(tile => Number(tile.rect?.rect?.width) || 0)
+  const stripHeights = stripTiles.map(tile => Number(tile.rect?.rect?.height) || 0)
+  if (stripWidths.some(width => width < 96)) {
+    failures.push(`${prefix} strip tile width fell below 96px (${stripWidths.map(width => width.toFixed(1)).join(',')})`)
+  }
+  const maxStripHeight = Math.max(0, ...stripHeights)
+  if (maxStripHeight > 0 && (Number(heroRect.height) || 0) < maxStripHeight * 2) {
+    failures.push(`${prefix} hero height ${(Number(heroRect.height) || 0).toFixed(1)}px does not dominate ${maxStripHeight.toFixed(1)}px strip`)
+  }
+
+  const viewportWidth = Number(snapshot.viewport?.visualViewport?.width)
+    || Number(snapshot.viewport?.innerWidth)
+    || Number(snapshot.viewport?.documentSize?.clientWidth)
+    || 0
+  const viewportHeight = Number(snapshot.viewport?.visualViewport?.height)
+    || Number(snapshot.viewport?.innerHeight)
+    || Number(snapshot.viewport?.documentSize?.clientHeight)
+    || 0
+  const landscape = viewportWidth > viewportHeight
+  const minimumHeroWidth = landscape ? viewportWidth * 0.6 : viewportWidth - 48
+  if (viewportWidth > 0 && (Number(heroRect.width) || 0) < minimumHeroWidth) {
+    failures.push(`${prefix} hero width ${(Number(heroRect.width) || 0).toFixed(1)}px is too narrow for ${viewportWidth}px viewport`)
+  }
+
+  const stack = snapshot.videoStackGeometry || {}
+  const filmstripScrollable = landscape
+    ? Number(stack.scrollHeight) > Number(stack.clientHeight)
+    : Number(stack.scrollWidth) > Number(stack.clientWidth)
+  if (expected.length >= 5 && !filmstripScrollable) {
+    failures.push(`${prefix} crowded filmstrip is not scroll reachable`)
+  }
+  return failures
+}
+
+export function validateMobileRoomChromeSnapshot(snapshot) {
+  if (!usesMobileMediaLayout(snapshot)) {
+    return []
+  }
+  const failures = []
+  const prefix = `${snapshot.name} mobile room chrome`
+  if (snapshot.phoneLayoutMatches !== true) {
+    failures.push(`${prefix} CSS and JS disagree about the phone layout`)
+  }
+  if (!snapshot.pipMeeting?.hidden || snapshot.pipMeeting?.visible) {
+    failures.push(`${prefix} desktop PiP is active on the phone layout`)
+  }
+  if (snapshot.toolRail?.visible) {
+    failures.push(`${prefix} still shows the global tool rail over the live room`)
+  }
+  if (!snapshot.meetingBar?.visible || !rectProbeVisible(snapshot.meetingBar.rect)) {
+    failures.push(`${prefix} call dock is not visible`)
+  }
+  if (!snapshot.topbarBack?.visible || !rectProbeVisible(snapshot.topbarBack.rect)) {
+    failures.push(`${prefix} minimize control is not visible`)
+  } else {
+    const width = Number(snapshot.topbarBack.rect?.rect?.width) || 0
+    const height = Number(snapshot.topbarBack.rect?.rect?.height) || 0
+    if (width < 44 || height < 44) {
+      failures.push(`${prefix} minimize hit area is ${width.toFixed(1)}x${height.toFixed(1)}`)
+    }
+  }
+  const visibleControlIds = (snapshot.callControls || []).filter(control => control.visible).map(control => control.id)
+  for (const id of ['muteMic', 'toggleCamera', 'roomChatToggle', 'roomMoreToggle', 'leave']) {
+    if (!visibleControlIds.includes(id)) {
+      failures.push(`${prefix} is missing primary call action ${id}`)
+    }
+  }
+  for (const id of ['recordMeeting', 'inviteToggle', 'archiveMeeting']) {
+    if (visibleControlIds.includes(id)) {
+      failures.push(`${prefix} still exposes secondary action ${id} in the primary dock`)
+    }
+  }
+  for (const control of snapshot.callControls || []) {
+    if (!control.visible) {
+      continue
+    }
+    const width = Number(control.rect?.rect?.width) || 0
+    const height = Number(control.rect?.rect?.height) || 0
+    if (width < 44 || height < 44) {
+      failures.push(`${prefix} ${control.id} hit area is ${width.toFixed(1)}x${height.toFixed(1)}`)
+    }
+    if (!String(control.ariaLabel || '').trim()) {
+      failures.push(`${prefix} ${control.id} has no accessible label`)
+    }
+  }
+  const barRect = snapshot.meetingBar?.rect?.rect || {}
+  const stackRect = snapshot.videoStackGeometry?.rect?.rect || {}
+  if ((Number(stackRect.bottom) || 0) > (Number(barRect.top) || 0)) {
+    failures.push(`${prefix} call dock overlaps the participant stage`)
+  }
+  const hero = (snapshot.tiles || []).find(tile => classNames(tile.classes).includes('is-mobile-hero'))
+  const heroRect = hero?.rect?.rect || {}
+  if ((Number(heroRect.bottom) || 0) > (Number(barRect.top) || 0)) {
+    failures.push(`${prefix} call dock overlaps the active-speaker hero`)
+  }
+  return failures
+}
+
+export function validateMobileActiveSpeakerSnapshots(snapshots) {
+  const failures = []
+  const attachmentBaseline = new Map()
+  for (const snapshot of snapshots) {
+    if (!usesMobileMediaLayout(snapshot)) {
+      continue
+    }
+    const expected = String(snapshot.expectedActiveSpeaker || '')
+    const prefix = `${snapshot.name} mobile speaker ${expected || 'missing'}`
+    const heroTiles = (snapshot.tiles || []).filter(tile => classNames(tile.classes).includes('is-mobile-hero'))
+    if (!expected || snapshot.activeSpeaker !== expected || !snapshot.serverActiveSpeakerFresh) {
+      failures.push(`${prefix} did not retain a fresh authoritative active speaker`)
+    }
+    if (heroTiles.length !== 1 || heroTiles[0]?.participant !== expected) {
+      failures.push(`${prefix} hero is ${heroTiles.map(tile => tile.participant).join(',') || 'missing'}`)
+    }
+    const speakerTile = (snapshot.tiles || []).find(tile => tile.participant === expected)
+    if (!speakerTile || !classNames(speakerTile.classes).includes('is-active-speaker')) {
+      failures.push(`${prefix} has no audible active-speaker ring`)
+    }
+    const revision = Number(snapshot.videoAttachmentRevision) || 0
+    const baseline = attachmentBaseline.get(snapshot.name)
+    if (baseline == null) {
+      attachmentBaseline.set(snapshot.name, revision)
+    } else if (revision !== baseline) {
+      failures.push(`${prefix} changed video attachment revision ${baseline}->${revision}`)
+    }
+  }
+  return failures
+}
+
+export function validateMobilePinInteractions(interactions, participantCount = 0) {
+  const failures = []
+  for (const interaction of interactions || []) {
+    if (!interaction?.mobile) {
+      continue
+    }
+    const prefix = `${interaction.name} mobile filmstrip target ${interaction.target || 'missing'}`
+    if (!interaction.clicked) {
+      failures.push(`${prefix} was not promoted through its actual pin control`)
+    }
+    if (participantCount >= 5 && !interaction.wasOffscreen) {
+      failures.push(`${prefix} did not exercise an offscreen tile`)
+    }
+    if (participantCount >= 5 && !interaction.scrolled) {
+      failures.push(`${prefix} did not move the filmstrip scroll position`)
+    }
+  }
+  return failures
+}
+
+export function validateMobileMoreMenuSnapshots(snapshots) {
+  const failures = []
+  for (const snapshot of snapshots || []) {
+    const prefix = `${snapshot.name} mobile more menu`
+    if (!snapshot.menuVisible) {
+      failures.push(`${prefix} did not open`)
+      continue
+    }
+    const visibleActions = (snapshot.actions || []).filter(action => !action.hidden)
+    for (const id of ['roomMoreRecord', 'roomMoreInvite', 'roomMoreArchive']) {
+      const action = visibleActions.find(candidate => candidate.id === id)
+      if (!action) {
+        failures.push(`${prefix} is missing ${id}`)
+        continue
+      }
+      if (!String(action.label || '').trim()) {
+        failures.push(`${prefix} ${id} has no label`)
+      }
+      if ((Number(action.rect?.width) || 0) < 44 || (Number(action.rect?.height) || 0) < 44) {
+        failures.push(`${prefix} ${id} hit area is too small`)
+      }
+    }
+  }
+  return failures
 }
 
 export function validatePinnedViewSnapshot(snapshot, expectedNames = []) {
@@ -60,6 +277,7 @@ export function validatePinnedViewSnapshot(snapshot, expectedNames = []) {
   if (heroTiles.length !== 1 || heroTiles[0]?.participant !== snapshot.stageParticipant) {
     failures.push(`${prefix} mobile pinned hero is ${heroTiles.map(tile => tile.participant).join(',') || 'missing'}, expected ${snapshot.stageParticipant}`)
   }
+  failures.push(...validateMobileRoomLayoutSnapshot(snapshot, expectedNames))
   return failures
 }
 

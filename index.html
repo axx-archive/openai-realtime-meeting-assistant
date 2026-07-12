@@ -3294,6 +3294,10 @@
         flex: none;
       }
 
+      .room-more {
+        display: none;
+      }
+
       /* dock text verbs ride the pill geometry */
       .controls #screenShare,
       .controls #recordMeeting,
@@ -4605,7 +4609,7 @@
         padding: 0 var(--sp-6) var(--sp-6);
       }
 
-      @media (max-width: 640px) {
+      @media (max-width: 640px), (max-height: 500px) and (hover: none) and (pointer: coarse) {
         /* bottom sheet: full width, chip-row section nav */
         .settings-region {
           padding: var(--sp-3);
@@ -6991,7 +6995,7 @@
 
       .grillstage__btn--primary:hover { background: var(--agent); filter: brightness(1.05); }
 
-      @media (max-width: 640px) {
+      @media (max-width: 640px), (max-height: 500px) and (hover: none) and (pointer: coarse) {
         .grillstage {
           align-items: flex-end;
           padding: 0;
@@ -7153,7 +7157,7 @@
         }
       }
 
-      @media (max-width: 640px) {
+      @media (max-width: 640px), (max-height: 500px) and (hover: none) and (pointer: coarse) {
         #appShell.is-authed:not(.is-in-room) .workspace {
           padding: var(--sp-3);
         }
@@ -13844,7 +13848,7 @@
         }
       }
 
-      @media (max-width: 640px) {
+      @media (max-width: 640px), (max-height: 500px) and (hover: none) and (pointer: coarse) {
         .agent-tool__head {
           align-items: stretch;
           flex-direction: column;
@@ -15233,7 +15237,7 @@
         white-space: nowrap;
       }
       .invite-pop__action:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
-      @media (max-width: 640px) {
+      @media (max-width: 640px), (max-height: 500px) and (hover: none) and (pointer: coarse) {
         /* phone: the popover widens into a bottom sheet riding the dock */
         .invite-pop { width: calc(100vw - 24px); border-radius: 20px; }
       }
@@ -16920,7 +16924,7 @@
         }
       }
 
-      @media (max-width: 640px) {
+      @media (max-width: 640px), (max-height: 500px) and (hover: none) and (pointer: coarse) {
         .hearth-stage {
           padding: var(--sp-4);
         }
@@ -17317,7 +17321,7 @@
       .portfolio__gap { font: var(--type-label); letter-spacing: var(--track-label); text-transform: lowercase; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line-1); color: var(--text-3); }
 
       /* phone: sheets become full-height, option/action rows go full-width */
-      @media (max-width: 640px) {
+      @media (max-width: 640px), (max-height: 500px) and (hover: none) and (pointer: coarse) {
         .bsheet { padding: 0; align-items: flex-end; }
         .bsheet__panel { width: 100%; max-height: 92vh; border-radius: 20px 20px 0 0; }
         .approval__actions { width: 100%; }
@@ -17883,7 +17887,7 @@
          the desktop clearance :has() rules never match; the old top-docked
          phone PiP block and its 256px caption clearance are gone */
 
-      @media (max-width: 640px) {
+      @media (max-width: 640px), (max-height: 500px) and (hover: none) and (pointer: coarse) {
         /* the phone shell: single top header + floating bottom glass tab bar
            (design mobile §0–§3). The header height feeds every full-height
            pane through --shell-topbar-height. */
@@ -17928,7 +17932,11 @@
           height: var(--shell-topbar-height);
           min-height: 0;
           gap: 9px;
-          padding: calc(env(safe-area-inset-top, 0px) + 10px) 18px 10px;
+          padding:
+            calc(env(safe-area-inset-top, 0px) + 10px)
+            max(18px, env(safe-area-inset-right, 0px))
+            10px
+            max(18px, env(safe-area-inset-left, 0px));
           background: var(--bg-app);
         }
 
@@ -17961,8 +17969,16 @@
         #appShell[data-tool="artifacts"] .topbar__back,
         #appShell[data-tool="research"] .topbar__back,
         #appShell[data-tool="design"] .topbar__back,
-        #appShell[data-tool="grill"] .topbar__back {
+        #appShell[data-tool="grill"] .topbar__back,
+        #appShell.is-in-room[data-tool="room"] .topbar__back {
           display: flex;
+        }
+
+        #appShell.is-in-room[data-tool="room"] .topbar__back {
+          width: 44px;
+          height: 44px;
+          margin-left: -12px;
+          border-radius: 14px;
         }
 
         .topbar__bell,
@@ -18113,6 +18129,14 @@
           bottom: max(16px, env(safe-area-inset-bottom));
         }
 
+        /* A live room is an immersive surface, not another tab above the OS
+           dock. Keep one calm call island and expose the existing top-left
+           back control as "minimize to BonfireOS"; media keeps running and
+           the live pill returns to the room from every other tool. */
+        #appShell.is-in-room[data-tool="room"]:not(.is-board-expanded) .tool-rail {
+          display: none;
+        }
+
         .tool-rail__slot {
           width: auto;
         }
@@ -18204,7 +18228,11 @@
           height: calc(100dvh - var(--shell-topbar-height, 0px));
           min-height: 0;
           margin: 0;
-          padding: 52px 12px calc(env(safe-area-inset-bottom) + 148px);
+          padding:
+            52px
+            max(12px, env(safe-area-inset-right, 0px))
+            calc(env(safe-area-inset-bottom) + 84px)
+            max(12px, env(safe-area-inset-left, 0px));
           border: none;
           border-radius: 0;
           background: var(--bg-stage);
@@ -18236,8 +18264,12 @@
         #appShell.is-in-room[data-tool="room"] .stage-chrome__meeting {
           display: flex;
           top: 62px;
-          right: 24px;
-          left: auto;
+          right: auto;
+          left: 24px;
+          max-width: calc(100% - 96px);
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
           font: var(--type-label);
           letter-spacing: var(--track-label);
           color: rgba(255, 255, 255, 0.5);
@@ -18283,49 +18315,142 @@
           overscroll-behavior: contain;
         }
 
-        /* hero + strip (design mobile §5a): the current speaker holds the
-           stage; everyone else rides a fingertip strip beneath. The hero is
-           picked honestly in JS (is-mobile-hero — active speaker, then the
-           pinned participant, sticky through pauses). */
+        /* Hero + filmstrip (mobile room): the current speaker holds the
+           stage; everyone else keeps a useful 104px canonical tile in a
+           horizontally reachable strip. CSS grid gives pinned and unpinned
+           layouts the same geometry without cloning or reparenting video. */
         .hearth-stage[data-room-layout="grid"] .hearth-seats,
         .hearth-stage[data-room-layout="pinned"] .hearth-seats {
-          display: flex;
-          flex-wrap: wrap;
+          display: grid;
+          grid-template-columns: repeat(var(--mobile-strip-count, 1), minmax(104px, 1fr));
+          grid-template-rows: minmax(0, 1fr) 104px;
+          grid-auto-flow: column;
           gap: 8px;
-          align-content: flex-start;
+          align-content: stretch;
           align-items: stretch;
-          justify-content: center;
+          justify-content: stretch;
           width: 100%;
           height: 100%;
           min-height: 0;
           padding: 0;
-          overflow: hidden;
+          overflow-x: auto;
+          overflow-y: hidden;
+          overscroll-behavior-x: contain;
+          scroll-snap-type: x proximity;
+          scroll-padding-inline: 0;
+          -webkit-overflow-scrolling: touch;
         }
 
         .hearth-stage[data-room-layout="grid"] .hearth-seat,
         .hearth-stage[data-room-layout="pinned"] .hearth-seat,
         .hearth-stage[data-room-layout="pinned"] .hearth-seat.is-on-stage {
           display: grid;
-          width: auto;
-          min-width: 0;
+          grid-row: 2;
+          width: 100%;
+          min-width: 104px;
           height: 104px;
           min-height: 0;
           max-width: none;
-          flex: 1 1 0;
-          order: 1;
+          scroll-snap-align: start;
           aspect-ratio: auto;
           border-radius: 14px;
         }
 
-        .hearth-stage .hearth-seat.is-mobile-hero {
-          flex: 1 1 100%;
-          order: 0;
-          height: calc(100% - 112px);
+        .hearth-stage[data-room-layout="grid"] .hearth-seat.is-mobile-hero,
+        .hearth-stage[data-room-layout="pinned"] .hearth-seat.is-mobile-hero,
+        .hearth-stage[data-room-layout="pinned"] .hearth-seat.is-on-stage.is-mobile-hero {
+          position: sticky;
+          left: 0;
+          z-index: 2;
+          grid-row: 1;
+          grid-column: 1 / -1;
+          justify-self: start;
+          width: min(100%, calc(100vw - 24px));
+          min-width: 0;
+          height: 100%;
           border-radius: 20px;
         }
 
+        .hearth-stage[data-grid-size="single"] .hearth-seats {
+          grid-template-columns: minmax(0, 1fr);
+          grid-template-rows: minmax(0, 1fr);
+          overflow: hidden;
+        }
+
         .hearth-stage[data-grid-size="single"] .hearth-seat.is-mobile-hero {
+          grid-row: 1;
           height: 100%;
+        }
+
+        /* Screen share keeps the content dominant without erasing the people
+           in the room. The same canonical tiles become a reachable receiver
+           rail; no duplicate video elements or hidden decode path. */
+        #appShell.is-in-room[data-tool="room"] .presentation-tile.is-screen-sharing {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr);
+          grid-template-rows: minmax(0, 1fr) 92px;
+          gap: 8px;
+        }
+
+        #appShell.is-in-room[data-tool="room"] .presentation-tile.is-screen-sharing .screen-stage {
+          grid-column: 1;
+          grid-row: 1;
+          min-height: 0;
+        }
+
+        #appShell.is-in-room[data-tool="room"] .presentation-tile.is-screen-sharing .screen-stage video#screenStageVideo {
+          height: 100%;
+          min-height: 0;
+        }
+
+        #appShell.is-in-room[data-tool="room"] .presentation-tile.is-screen-sharing .hearth-stage {
+          display: block;
+          grid-column: 1;
+          grid-row: 2;
+          width: 100%;
+          height: 92px;
+          min-height: 0;
+          padding: 0;
+          overflow: hidden;
+          pointer-events: auto;
+        }
+
+        #appShell.is-in-room[data-tool="room"] .presentation-tile.is-screen-sharing .hearth-center {
+          display: block;
+          height: 100%;
+        }
+
+        #appShell.is-in-room[data-tool="room"] .presentation-tile.is-screen-sharing .hearth-speaker {
+          display: none;
+        }
+
+        #appShell.is-in-room[data-tool="room"] .presentation-tile.is-screen-sharing .hearth-seats {
+          display: flex;
+          flex-direction: row;
+          gap: 8px;
+          width: 100%;
+          height: 100%;
+          padding: 0;
+          overflow-x: auto;
+          overflow-y: hidden;
+          overscroll-behavior-x: contain;
+          scroll-snap-type: x proximity;
+          -webkit-overflow-scrolling: touch;
+        }
+
+        #appShell.is-in-room[data-tool="room"] .presentation-tile.is-screen-sharing .hearth-seat {
+          display: grid;
+          flex: 0 0 104px;
+          width: 104px;
+          min-width: 104px;
+          height: 92px;
+          min-height: 92px;
+          aspect-ratio: auto;
+          scroll-snap-align: start;
+        }
+
+        #appShell.is-in-room[data-tool="room"] .presentation-tile.is-screen-sharing .hearth-seat.is-sharing-screen {
+          display: none;
         }
 
         /* strip tiles: bare centered mini names, no pin/drag chrome */
@@ -18346,9 +18471,33 @@
           height: 30px;
         }
 
-        .hearth-seat:not(.is-mobile-hero) .pin-speaker,
         .hearth-seat .video-reorder-handle {
           display: none;
+        }
+
+        /* The strip stays visually quiet, but its existing pin button covers
+           the full tile so a tap promotes that participant. Keyboard focus
+           receives an honest white inset ring without adding permanent chrome. */
+        .hearth-seat:not(.is-mobile-hero) .pin-speaker {
+          inset: 0;
+          display: block;
+          width: 100%;
+          min-width: 44px;
+          height: 100%;
+          min-height: 44px;
+          border-radius: inherit;
+          background: transparent;
+          opacity: 0;
+        }
+
+        .hearth-seat:not(.is-mobile-hero) .pin-speaker svg {
+          display: none;
+        }
+
+        .hearth-seat:not(.is-mobile-hero) .pin-speaker:focus-visible {
+          opacity: 1;
+          outline: none;
+          box-shadow: inset 0 0 0 2px #fff;
         }
 
         .hearth-center {
@@ -18504,18 +18653,16 @@
         /* legacy clearance contract — the tool rail and account menu still
            read this variable */
         #appShell.is-in-room:not(.is-board-expanded) {
-          --dock-h: 152px;
+          --dock-h: 88px;
         }
 
-        /* the room dock — one dark glass pill floating 70px above the tab
-           bar: mic · cam · record · chat · Send notes | leave (design §5a;
-           record/chat/notes kept per D1/D6). Share screen and the mixer fold
-           on phones — devices live in the settings sheet. */
+        /* The room dock is the phone's only bottom island while Room is
+           foregrounded. Global navigation returns after minimizing the call. */
         #appShell.is-in-room[data-tool="room"]:not(.is-board-expanded) .meeting-bar {
           position: fixed;
           top: auto;
           right: auto;
-          bottom: calc(env(safe-area-inset-bottom) + 78px);
+          bottom: max(16px, env(safe-area-inset-bottom));
           left: 50%;
           transform: translateX(-50%);
           /* the mount rise-in animation fills transform:none and would undo
@@ -18526,9 +18673,11 @@
           display: flex;
           align-items: center;
           width: max-content;
+          max-width: calc(100vw - 16px);
+          max-width: calc(100dvw - 16px);
           min-height: 0;
-          padding: 8px;
-          gap: 8px;
+          padding: 6px;
+          gap: 6px;
           border: 1px solid rgba(255, 255, 255, 0.12);
           border-radius: var(--r-full);
           background: rgba(24, 24, 27, 0.6);
@@ -18560,7 +18709,7 @@
         #appShell.is-in-room .meeting-bar .controls {
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 6px;
           width: auto;
         }
 
@@ -18568,7 +18717,7 @@
           display: block;
           width: 1px;
           height: 22px;
-          margin: 0 2px;
+          margin: 0;
           background: rgba(255, 255, 255, 0.14);
         }
 
@@ -18578,10 +18727,10 @@
         #appShell.is-in-room #roomChatToggle,
         #appShell.is-in-room #inviteToggle,
         #appShell.is-in-room #archiveMeeting {
-          width: 40px;
-          min-width: 0;
-          height: 40px;
-          min-height: 40px;
+          width: 44px;
+          min-width: 44px;
+          height: 44px;
+          min-height: 44px;
           padding: 0;
           border: none;
           border-radius: var(--r-full);
@@ -18594,6 +18743,89 @@
             color var(--dur-fast) var(--ease),
             box-shadow var(--dur-fast) var(--ease),
             transform var(--dur-fast) var(--ease);
+        }
+
+        /* Keep the live dock calm on every phone. Secondary actions stay one
+           tap away in a compact menu; mic, camera, chat, and leave never
+           shrink or disappear. */
+        #appShell.is-in-room[data-tool="room"] .meeting-bar .controls > #recordMeeting,
+        #appShell.is-in-room[data-tool="room"] .meeting-bar .controls > #inviteToggle,
+        #appShell.is-in-room[data-tool="room"] .meeting-bar .controls > #archiveMeeting {
+          display: none;
+        }
+
+        #appShell.is-in-room[data-tool="room"] .room-more {
+          position: relative;
+          display: block;
+          flex: none;
+        }
+
+        #appShell.is-in-room #roomMoreToggle {
+          display: grid;
+          place-items: center;
+          width: 44px;
+          min-width: 44px;
+          height: 44px;
+          min-height: 44px;
+          padding: 0;
+          border: none;
+          border-radius: var(--r-full);
+          background: rgba(255, 255, 255, 0.12);
+          color: #fff;
+        }
+
+        #appShell.is-in-room #roomMoreToggle[aria-expanded="true"] {
+          background: rgba(255, 255, 255, 0.2);
+        }
+
+        .room-more__menu {
+          position: absolute;
+          right: 0;
+          bottom: calc(100% + 10px);
+          z-index: 2;
+          display: grid;
+          width: 196px;
+          padding: 6px;
+          border: 1px solid rgba(255, 255, 255, 0.14);
+          border-radius: 18px;
+          background: rgba(24, 24, 27, 0.94);
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 16px 42px rgba(0, 0, 0, 0.45);
+          backdrop-filter: blur(20px) saturate(1.35);
+          -webkit-backdrop-filter: blur(20px) saturate(1.35);
+        }
+
+        .room-more__menu[hidden] {
+          display: none;
+        }
+
+        .room-more__action {
+          display: flex;
+          align-items: center;
+          width: 100%;
+          min-height: 44px;
+          padding: 0 12px;
+          border: none;
+          border-radius: 12px;
+          background: transparent;
+          color: rgba(255, 255, 255, 0.88);
+          font: 500 13px var(--font-sans);
+          text-align: left;
+        }
+
+        .room-more__action:active {
+          background: rgba(255, 255, 255, 0.1);
+        }
+
+        .room-more__action[disabled] {
+          opacity: 0.45;
+        }
+
+        .room-more__action[hidden] {
+          display: none;
+        }
+
+        #appShell.is-guest.is-in-room .room-more {
+          display: none;
         }
 
         #appShell.is-in-room #muteMic:active,
@@ -18633,9 +18865,9 @@
 
         #appShell.is-in-room #leave {
           width: 52px;
-          min-width: 0;
-          height: 40px;
-          min-height: 40px;
+          min-width: 52px;
+          height: 44px;
+          min-height: 44px;
           padding: 0;
           border: none;
           border-radius: var(--r-full);
@@ -19330,9 +19562,118 @@
         }
       }
 
+      /* Phone landscape keeps the same immersive call contract, but turns
+         the filmstrip vertical so the active speaker retains useful size.
+         The canonical tiles still own their media; only grid placement moves. */
+      @media (max-height: 500px) and (orientation: landscape) and (hover: none) and (pointer: coarse) {
+        #appShell[data-tool="room"] .hearth-presentation {
+          padding:
+            8px
+            max(12px, env(safe-area-inset-right, 0px))
+            calc(env(safe-area-inset-bottom) + 72px)
+            max(12px, env(safe-area-inset-left, 0px));
+        }
+
+        #appShell.is-in-room[data-tool="room"] .stage-chrome__meeting {
+          top: 16px;
+        }
+
+        .hearth-stage[data-room-layout="grid"] .hearth-seats,
+        .hearth-stage[data-room-layout="pinned"] .hearth-seats {
+          grid-template-columns: minmax(0, 1fr) 104px;
+          grid-template-rows: repeat(var(--mobile-strip-count, 1), minmax(80px, 1fr));
+          grid-auto-flow: row;
+          overflow-x: hidden;
+          overflow-y: auto;
+          scroll-snap-type: y proximity;
+        }
+
+        .hearth-stage[data-room-layout="grid"] .hearth-seat,
+        .hearth-stage[data-room-layout="pinned"] .hearth-seat,
+        .hearth-stage[data-room-layout="pinned"] .hearth-seat.is-on-stage {
+          grid-row: auto;
+          grid-column: 2;
+          width: 104px;
+          min-width: 104px;
+          height: 100%;
+          min-height: 80px;
+        }
+
+        .hearth-stage[data-room-layout="grid"] .hearth-seat.is-mobile-hero,
+        .hearth-stage[data-room-layout="pinned"] .hearth-seat.is-mobile-hero,
+        .hearth-stage[data-room-layout="pinned"] .hearth-seat.is-on-stage.is-mobile-hero {
+          top: 0;
+          left: auto;
+          grid-row: 1 / -1;
+          grid-column: 1;
+          align-self: start;
+          width: 100%;
+          height: var(--mobile-stage-viewport-height, 100%);
+          max-height: var(--mobile-stage-viewport-height, 100%);
+        }
+
+        .hearth-stage[data-grid-size="single"] .hearth-seats {
+          grid-template-columns: minmax(0, 1fr);
+          grid-template-rows: minmax(0, 1fr);
+        }
+
+        .hearth-stage[data-grid-size="single"] .hearth-seat.is-mobile-hero {
+          grid-column: 1;
+          grid-row: 1;
+          height: 100%;
+        }
+
+        #appShell.is-in-room[data-tool="room"] .presentation-tile.is-screen-sharing {
+          grid-template-columns: minmax(0, 1fr) 96px;
+          grid-template-rows: minmax(0, 1fr);
+        }
+
+        #appShell.is-in-room[data-tool="room"] .presentation-tile.is-screen-sharing .screen-stage {
+          grid-column: 1;
+          grid-row: 1;
+        }
+
+        #appShell.is-in-room[data-tool="room"] .presentation-tile.is-screen-sharing .hearth-stage {
+          grid-column: 2;
+          grid-row: 1;
+          width: 96px;
+          height: 100%;
+        }
+
+        #appShell.is-in-room[data-tool="room"] .presentation-tile.is-screen-sharing .hearth-seats {
+          flex-direction: column;
+          overflow-x: hidden;
+          overflow-y: auto;
+          overscroll-behavior-x: auto;
+          overscroll-behavior-y: contain;
+          scroll-snap-type: y proximity;
+        }
+
+        #appShell.is-in-room[data-tool="room"] .presentation-tile.is-screen-sharing .hearth-seat {
+          flex-basis: 64px;
+          width: 96px;
+          min-width: 96px;
+          height: 64px;
+          min-height: 64px;
+        }
+      }
+
+      @media (max-height: 380px) and (orientation: landscape) and (hover: none) and (pointer: coarse) {
+        .hearth-stage[data-room-layout="grid"] .hearth-seats,
+        .hearth-stage[data-room-layout="pinned"] .hearth-seats {
+          grid-template-rows: repeat(var(--mobile-strip-count, 1), minmax(64px, 1fr));
+        }
+
+        .hearth-stage[data-room-layout="grid"] .hearth-seat,
+        .hearth-stage[data-room-layout="pinned"] .hearth-seat,
+        .hearth-stage[data-room-layout="pinned"] .hearth-seat.is-on-stage {
+          min-height: 64px;
+        }
+      }
+
       @media (max-width: 400px) {
         /* the squeezed "Send notes" label collided with the leave button —
-           the verb goes icon-only and keeps a full 48px landing */
+           the verb goes icon-only and keeps the canonical 44px landing */
         #appShell.is-in-room #archiveMeeting .archive-label {
           display: none;
         }
@@ -19342,7 +19683,7 @@
         }
 
         #appShell.is-in-room #archiveMeeting {
-          width: 40px;
+          width: 44px;
           padding: 0;
           justify-self: center;
         }
@@ -19725,7 +20066,7 @@
       .palette__handle { display: none; }
 
       /* --- Mobile: palette becomes a thumb-reachable bottom sheet (ux §1.8) --- */
-      @media (max-width: 640px) {
+      @media (max-width: 640px), (max-height: 500px) and (hover: none) and (pointer: coarse) {
         .palette { align-items: flex-end; padding: 0; }
         .palette__sheet {
           width: 100%;
@@ -20285,7 +20626,7 @@
       .goalcard__work-line--detail { padding-left: 14px; color: var(--text-3); }
       /* compressed 5-node rail on narrow screens (ux §1.8) */
       .goalcard__rail-count { display: none; font: var(--type-numeric); font-variant-numeric: tabular-nums; color: var(--text-2); margin-left: 8px; }
-      @media (max-width: 640px) {
+      @media (max-width: 640px), (max-height: 500px) and (hover: none) and (pointer: coarse) {
         .goalcard:not(.is-rail-expanded) .goalcard__node[data-compressed="hide"],
         .goalcard:not(.is-rail-expanded) .goalcard__conn[data-compressed="hide"] { display: none; }
         .goalcard:not(.is-rail-expanded) .goalcard__rail-count { display: inline; }
@@ -21051,7 +21392,7 @@
         text-overflow: ellipsis;
       }
       /* the display hero holds its own inside narrow panes */
-      @media (max-width: 640px) {
+      @media (max-width: 640px), (max-height: 500px) and (hover: none) and (pointer: coarse) {
         .artifact-report__title { font: var(--type-title-1); letter-spacing: var(--track-title-1); }
       }
 
@@ -21212,7 +21553,7 @@
       /* phone: the row's .btn actions are 40px base — 4px under --hit-min; bump
          them to the full touch target and let them fill the row (the approval/
          tray pattern at max-width:640px). */
-      @media (max-width: 640px) {
+      @media (max-width: 640px), (max-height: 500px) and (hover: none) and (pointer: coarse) {
         .deal-room-row__actions .btn { flex: 1; min-height: var(--hit-min); }
       }
 
@@ -22691,6 +23032,20 @@
             </svg>
             <span class="archive-label">Send notes</span>
           </button>
+          <div class="room-more">
+            <button id="roomMoreToggle" type="button" aria-label="More call actions" aria-haspopup="menu" aria-expanded="false" title="More call actions">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <circle cx="5" cy="12" r="1.7"></circle>
+                <circle cx="12" cy="12" r="1.7"></circle>
+                <circle cx="19" cy="12" r="1.7"></circle>
+              </svg>
+            </button>
+            <div id="roomMoreMenu" class="room-more__menu" role="menu" aria-label="More call actions" hidden>
+              <button id="roomMoreRecord" class="room-more__action" type="button" role="menuitem">Recording</button>
+              <button id="roomMoreInvite" class="room-more__action" type="button" role="menuitem">Invite people</button>
+              <button id="roomMoreArchive" class="room-more__action" type="button" role="menuitem">Send notes</button>
+            </div>
+          </div>
           <span class="controls__divider" aria-hidden="true"></span>
           <button id="leave" class="btn btn--danger" type="button" aria-label="Leave the room" title="Leave the room" disabled>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -23404,6 +23759,11 @@
       const recordMeetingButton = document.getElementById('recordMeeting')
       const recordMeetingLabel = recordMeetingButton.querySelector('.record-label')
       const archiveMeetingButton = document.getElementById('archiveMeeting')
+      const roomMoreToggleButton = document.getElementById('roomMoreToggle')
+      const roomMoreMenu = document.getElementById('roomMoreMenu')
+      const roomMoreRecordButton = document.getElementById('roomMoreRecord')
+      const roomMoreInviteButton = document.getElementById('roomMoreInvite')
+      const roomMoreArchiveButton = document.getElementById('roomMoreArchive')
       const roomClock = document.getElementById('roomClock')
       const accessPanel = document.getElementById('accessPanel')
       const accessState = document.getElementById('accessState')
@@ -23667,7 +24027,7 @@
       const officeIntelCard = document.getElementById('officeIntelCard')
       // mobile shell chrome (design mobile §1) — header back/bell/avatar,
       // the settings sheet head, and the chat stacked navigator
-      const phoneLayoutQuery = window.matchMedia('(max-width: 640px)')
+      const phoneLayoutQuery = window.matchMedia('(max-width: 640px), (max-height: 500px) and (hover: none) and (pointer: coarse)')
       // P2-3: re-entrancy guard so a popstate-driven view change (OS back /
       // edge-swipe) never re-pushes the entry it is currently unwinding.
       let chatHistoryPopping = false
@@ -24463,6 +24823,19 @@
       screenShareButton.addEventListener('click', toggleScreenShare)
       applyScreenShareSupportState()
       inviteToggleButton.addEventListener('click', toggleInvitePopover)
+      roomMoreToggleButton?.addEventListener('click', () => setRoomMoreOpen(roomMoreMenu?.hidden !== false))
+      roomMoreRecordButton?.addEventListener('click', () => {
+        setRoomMoreOpen(false)
+        if (!guestMode && !recordMeetingButton.disabled) recordMeetingButton.click()
+      })
+      roomMoreInviteButton?.addEventListener('click', () => {
+        setRoomMoreOpen(false)
+        if (!guestMode) inviteToggleButton.click()
+      })
+      roomMoreArchiveButton?.addEventListener('click', () => {
+        setRoomMoreOpen(false)
+        if (!guestMode && !archiveMeetingButton.disabled) archiveMeetingButton.click()
+      })
       document.getElementById('lobbyNewRoom')?.addEventListener('click', () => {
         const form = document.getElementById('lobbyCreateForm')
         if (!form) {
@@ -24504,6 +24877,9 @@
         if (invitePopoverEl && !invitePopoverEl.contains(event.target) && !event.target.closest?.('#inviteToggle')) {
           closeInvitePopover()
         }
+        if (roomMoreMenu && !roomMoreMenu.hidden && !event.target.closest?.('.room-more')) {
+          setRoomMoreOpen(false)
+        }
         // the green-room filters popover closes on outside click too (the
         // filters button toggles it, so exclude the button itself)
         if (greenRoomFiltersEl && !greenRoomFiltersEl.hidden
@@ -24525,6 +24901,9 @@
         }
         if (invitePopoverEl) {
           closeInvitePopover()
+        }
+        if (roomMoreMenu && !roomMoreMenu.hidden) {
+          setRoomMoreOpen(false)
         }
         if (greenRoomFiltersEl && !greenRoomFiltersEl.hidden) {
           closeGreenRoomFilters()
@@ -24897,10 +25276,12 @@
       })
       window.addEventListener('beforeunload', leaveRoom)
       window.addEventListener('resize', () => {
+        window.requestAnimationFrame(updateMobileRoomStageMetrics)
         scheduleAuxiliaryVideoPlaybackRepair('viewport resize', 160)
         schedulePrimaryVideoPlaybackRepair('viewport resize', 180)
       })
       window.addEventListener('orientationchange', () => {
+        window.requestAnimationFrame(updateMobileRoomStageMetrics)
         scheduleAuxiliaryVideoPlaybackRepair('orientation change', 260)
         schedulePrimaryVideoPlaybackRepair('orientation change', 320)
       })
@@ -27421,6 +27802,7 @@
         // the next surface
         closeLobbyPopover()
         closeInvitePopover()
+        setRoomMoreOpen(false)
         if (tool !== 'room') {
           // never keep a hot preview camera on a surface the user left
           stopGreenRoomPreview()
@@ -31713,6 +32095,7 @@
       function updateRoomGridMetrics() {
         const count = Array.from(videoStack.querySelectorAll(':scope > .video-tile:not(.video-drag-slot)')).length
         hearthStage.dataset.participantCount = String(count)
+        hearthStage.style.setProperty('--mobile-strip-count', String(Math.max(1, count - 1)))
         hearthStage.dataset.gridSize = count <= 1
           ? 'single'
           : count === 2
@@ -31720,6 +32103,14 @@
           : count <= 4
           ? 'quad'
           : 'crowded'
+        window.requestAnimationFrame(updateMobileRoomStageMetrics)
+      }
+
+      function updateMobileRoomStageMetrics() {
+        const height = Math.max(0, Math.round(videoStack.clientHeight || 0))
+        if (height > 0) {
+          videoStack.style.setProperty('--mobile-stage-viewport-height', `${height}px`)
+        }
       }
 
       function defaultStageParticipantName() {
@@ -45297,6 +45688,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           : label.toLowerCase()
         boardDockRecord.classList.toggle(stateClass, true)
         boardDockRecord.classList.toggle(staleClass, false)
+        syncRoomMoreActions()
       }
 
       function roomListeningLabel() {
@@ -45350,6 +45742,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         archiveMeetingButton.setAttribute('aria-label', text)
         archiveMeetingButton.title = text
+        syncRoomMoreActions()
       }
 
       function archiveMeeting() {
@@ -54397,6 +54790,40 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function inviteRoomRecord() {
         const id = activeJoin.roomId || 'office'
         return activeJoinRoomRecord() || { id, name: id === 'office' ? 'the office' : id }
+      }
+
+      function syncRoomMoreActions() {
+        if (!roomMoreMenu) {
+          return
+        }
+        if (roomMoreRecordButton) {
+          roomMoreRecordButton.hidden = Boolean(guestMode)
+          roomMoreRecordButton.disabled = recordMeetingButton.disabled
+          roomMoreRecordButton.textContent = roomRecordingEnabled ? 'Pause recording' : 'Resume recording'
+        }
+        if (roomMoreInviteButton) {
+          roomMoreInviteButton.hidden = Boolean(guestMode)
+          roomMoreInviteButton.disabled = !appShell.classList.contains('is-in-room')
+        }
+        if (roomMoreArchiveButton) {
+          roomMoreArchiveButton.hidden = Boolean(guestMode)
+          roomMoreArchiveButton.disabled = archiveMeetingButton.disabled
+          roomMoreArchiveButton.textContent = archiveMeetingButton.getAttribute('aria-label') || 'Send notes'
+        }
+      }
+
+      function setRoomMoreOpen(open) {
+        if (!roomMoreMenu || !roomMoreToggleButton) {
+          return
+        }
+        const next = Boolean(open && appShell.classList.contains('is-in-room'))
+        syncRoomMoreActions()
+        roomMoreMenu.hidden = !next
+        roomMoreToggleButton.setAttribute('aria-expanded', String(next))
+        if (next) {
+          const first = Array.from(roomMoreMenu.querySelectorAll('button:not([hidden]):not([disabled])'))[0]
+          window.setTimeout(() => first?.focus(), 0)
+        }
       }
 
       function closeInvitePopover() {

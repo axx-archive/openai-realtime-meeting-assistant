@@ -6,6 +6,11 @@ import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import {
   rectProbeVisible,
+  validateMobileActiveSpeakerSnapshots,
+  validateMobileMoreMenuSnapshots,
+  validateMobilePinInteractions,
+  validateMobileRoomChromeSnapshot,
+  validateMobileRoomLayoutSnapshot,
   validatePinnedViewSnapshot,
   validateScreenShareSnapshot,
   validateSoakProgressSnapshots,
@@ -20,6 +25,7 @@ const defaults = {
   rejoin: '',
   separateBrowsers: true,
   durationMs: 0,
+  desktopSharer: '',
   emitReport: '',
   interactive: false,
   lateJoin: '',
@@ -76,6 +82,14 @@ try {
 
   const lateJoinSnapshots = lateJoinPlan.name ? await performLateJoin(lateJoinPlan) : []
   const expectedNames = expectedParticipantNames({ includeLate: true })
+  await sleep(2000)
+  const initialSnapshots = await collectSnapshots('initial-room')
+  const mobileMoreMenuSnapshots = config.mobileViewport
+    ? await exerciseMobileMoreMenu()
+    : []
+  const activeSpeakerSnapshots = config.mobileViewport
+    ? await exerciseMobileActiveSpeakerPromotion(expectedNames)
+    : []
 
   const recordingSnapshots = await exerciseRecordingToggle(pages[0])
 
@@ -84,12 +98,14 @@ try {
     await waitForExpectedRoomMedia(expectedNames)
   }
 
-  const screenShareSnapshots = await exerciseScreenShare(pages[0])
+  const screenShareController = pages.find(page => page.name === config.desktopSharer) || pages[0]
+  const screenShareSnapshots = await exerciseScreenShare(screenShareController)
 
   await sleep(6000)
+  const pinInteractions = []
   for (const page of pages) {
-    const pinTarget = expectedNames.find(name => name !== page.name) || page.name
-    await showPinnedView(page, pinTarget)
+    const pinTarget = expectedNames.slice().reverse().find(name => name !== page.name) || page.name
+    pinInteractions.push(await showPinnedView(page, pinTarget))
   }
   await sleep(5000)
   const pinSnapshots = await collectSnapshots('pin')
@@ -111,16 +127,20 @@ try {
     ...validateRecordingSnapshots(recordingSnapshots.off, 'off'),
     ...validateRecordingSnapshots(recordingSnapshots.on, 'on'),
     ...validateLateJoinSnapshots(lateJoinSnapshots, expectedNames),
-    ...validateScreenShareSnapshots(screenShareSnapshots.started, pages[0].name, expectedNames),
-    ...validateScreenShareStoppedSnapshots(screenShareSnapshots.stopped, pages[0].name),
+    ...validateMobileRoomSnapshots(initialSnapshots, expectedNames),
+    ...validateMobileMoreMenuSnapshots(mobileMoreMenuSnapshots),
+    ...validateMobileActiveSpeakerSnapshots(activeSpeakerSnapshots),
+    ...validateScreenShareSnapshots(screenShareSnapshots.started, screenShareController.name, expectedNames),
+    ...validateScreenShareStoppedSnapshots(screenShareSnapshots.stopped, screenShareController.name),
+    ...validateMobilePinInteractions(pinInteractions, expectedNames.length),
     ...validateSnapshots(pinSnapshots, expectedNames.length, { view: 'pin', requirePinnedView: true, expectedNames }),
-    ...validateMobileToolRailSnapshots(mobileToolRailSnapshots),
+    ...validateMobileRoomSnapshots(mobileToolRailSnapshots, expectedNames),
     ...validateSnapshots(boardSnapshots, expectedNames.length, { view: 'board', requireBoardDock: true, expectedNames }),
     ...validateSnapshots(soakSnapshots, expectedNames.length, { view: 'soak', requireBoardDock: true, expectedNames }),
     ...validateSoakProgressSnapshots(soakSnapshots, expectedNames),
     ...validatePostLeaveParticipants(postLeaveParticipants)
   ]
-  const result = { ok: failures.length === 0, failures, snapshots: boardSnapshots, pinSnapshots, mobileToolRailSnapshots, screenShareSnapshots, recordingSnapshots, lateJoinSnapshots, soakSnapshots, postLeaveParticipants }
+  const result = { ok: failures.length === 0, failures, snapshots: boardSnapshots, initialSnapshots, mobileMoreMenuSnapshots, activeSpeakerSnapshots, pinInteractions, pinSnapshots, mobileToolRailSnapshots, screenShareSnapshots, recordingSnapshots, lateJoinSnapshots, soakSnapshots, postLeaveParticipants }
   await emitReport(result)
   console.log(JSON.stringify(result, null, 2))
   await finish(failures.length === 0 ? 0 : 1)
@@ -208,6 +228,9 @@ function parseArgs(args) {
       } else {
         parsed.mobileViewport = parseMobileViewport('')
       }
+    } else if (arg === '--desktop-sharer' && next) {
+      parsed.desktopSharer = next.trim()
+      index++
     } else if (arg === '--timeout-ms' && next) {
       parsed.timeoutMs = Number(next) || defaults.timeoutMs
       index++
@@ -369,7 +392,7 @@ async function openPage(name, browser) {
 }
 
 async function applyPageEmulation(page) {
-  if (!config.mobileViewport) {
+  if (!config.mobileViewport || page.name === config.desktopSharer) {
     return
   }
   const viewport = config.mobileViewport
@@ -567,7 +590,7 @@ async function exerciseScreenShare(sharer) {
   if (!sharer) {
     return { started: [], stopped: [] }
   }
-  if (config.mobileViewport) {
+  if (config.mobileViewport && sharer.name !== config.desktopSharer) {
     log('screen-share-skip', 'mobile viewport smoke does not initiate fake display capture')
     return { started: [], stopped: [], skipped: true }
   }
@@ -632,6 +655,30 @@ async function exerciseScreenShare(sharer) {
   return { started, stopped }
 }
 
+async function exerciseMobileActiveSpeakerPromotion(expectedNames) {
+  const targets = expectedNames.filter(Boolean).slice(1, 3)
+  if (targets.length < 2) {
+    return []
+  }
+  const snapshots = []
+  for (const target of targets) {
+    for (const page of pages) {
+      await evaluate(page, `
+        (() => {
+          handleAuthoritativeActiveSpeaker({ name: ${JSON.stringify(target)} })
+          return true
+        })()
+      `)
+    }
+    await sleep(120)
+    const batch = await collectSnapshots(`active-speaker-${target}`)
+    for (const snapshot of batch) {
+      snapshots.push({ ...snapshot, expectedActiveSpeaker: target })
+    }
+  }
+  return snapshots
+}
+
 async function collectRecordingSnapshots() {
   const snapshots = []
   for (const page of pages) {
@@ -687,8 +734,8 @@ async function installFakeDisplayMedia(page) {
 }
 
 async function showPinnedView(page, targetName = '') {
-  await evaluate(page, `
-    (() => {
+  return evaluate(page, `
+    (async () => {
       if (typeof setActiveTool === 'function') {
         setActiveTool('room')
       }
@@ -696,6 +743,50 @@ async function showPinnedView(page, targetName = '') {
         setBoardExpanded(false)
       }
       const target = ${JSON.stringify(targetName)}
+      const mobile = typeof phoneLayoutQuery !== 'undefined' && phoneLayoutQuery.matches
+      if (target && mobile) {
+        const stack = document.getElementById('videoStack')
+        const landscape = window.innerWidth > window.innerHeight
+        const stackRect = stack?.getBoundingClientRect()
+        const candidates = Array.from(stack?.querySelectorAll(':scope > .video-tile') || [])
+          .filter(candidate => candidate.querySelector('.pin-speaker'))
+        const offscreen = candidates.filter(candidate => {
+          const rect = candidate.getBoundingClientRect()
+          return Boolean(stackRect && (landscape
+            ? rect.top < stackRect.top || rect.bottom > stackRect.bottom
+            : rect.left < stackRect.left || rect.right > stackRect.right))
+        })
+        const tile = offscreen.sort((a, b) => {
+          const aRect = a.getBoundingClientRect()
+          const bRect = b.getBoundingClientRect()
+          return landscape ? aRect.bottom - bRect.bottom : aRect.right - bRect.right
+        }).at(-1) || candidates.find(candidate => candidate.dataset.participant === target)
+        const actualTarget = tile?.dataset.participant || target
+        const button = tile?.querySelector('.pin-speaker')
+        const targetRect = tile?.getBoundingClientRect()
+        const before = { left: stack?.scrollLeft || 0, top: stack?.scrollTop || 0 }
+        const wasOffscreen = Boolean(stackRect && targetRect && (landscape
+          ? targetRect.top < stackRect.top || targetRect.bottom > stackRect.bottom
+          : targetRect.left < stackRect.left || targetRect.right > stackRect.right))
+        tile?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+        const after = { left: stack?.scrollLeft || 0, top: stack?.scrollTop || 0 }
+        button?.click()
+        if (typeof repairAuxiliaryVideoPlayback === 'function') {
+          repairAuxiliaryVideoPlayback('live media smoke pinned view')
+        }
+        return {
+          name: ${JSON.stringify(page.name)},
+          target: actualTarget,
+          mobile: true,
+          landscape,
+          wasOffscreen,
+          clicked: Boolean(button),
+          before,
+          after,
+          scrolled: landscape ? after.top !== before.top : after.left !== before.left
+        }
+      }
       if (target && typeof togglePinnedSpeaker === 'function') {
         const current = typeof stageParticipantDisplayName === 'function' ? stageParticipantDisplayName() : ''
         if (current !== target) {
@@ -705,9 +796,46 @@ async function showPinnedView(page, targetName = '') {
       if (typeof repairAuxiliaryVideoPlayback === 'function') {
         repairAuxiliaryVideoPlayback('live media smoke pinned view')
       }
-      return true
+      return { name: ${JSON.stringify(page.name)}, target, mobile: false, clicked: false, scrolled: false }
     })()
   `)
+}
+
+async function exerciseMobileMoreMenu() {
+  const snapshots = []
+  for (const page of pages) {
+    const snapshot = await evaluate(page, `
+      (async () => {
+        if (typeof phoneLayoutQuery === 'undefined' || !phoneLayoutQuery.matches || typeof guestMode !== 'undefined' && guestMode) {
+          return null
+        }
+        const toggle = document.getElementById('roomMoreToggle')
+        const menu = document.getElementById('roomMoreMenu')
+        toggle?.click()
+        await new Promise(resolve => requestAnimationFrame(resolve))
+        const rect = element => {
+          const value = element?.getBoundingClientRect?.()
+          return value ? { width: value.width, height: value.height, top: value.top, right: value.right, bottom: value.bottom, left: value.left } : {}
+        }
+        const result = {
+          name: ${JSON.stringify(page.name)},
+          menuVisible: Boolean(menu && !menu.hidden && menu.getClientRects().length),
+          menuRect: rect(menu),
+          actions: Array.from(menu?.querySelectorAll('button') || []).map(button => ({
+            id: button.id,
+            hidden: button.hidden,
+            disabled: button.disabled,
+            label: button.textContent.trim(),
+            rect: rect(button)
+          }))
+        }
+        toggle?.click()
+        return result
+      })()
+    `)
+    if (snapshot) snapshots.push(snapshot)
+  }
+  return snapshots
 }
 
 async function showExpandedBoardView(page) {
@@ -1176,10 +1304,43 @@ async function snapshotPage(page) {
         stageMirrorCanvas: canvasProbe(document.getElementById('activeSpeakerMirrorCanvas')),
         speakerVideo: videoProbe(document.getElementById('activeSpeakerVideo')),
         screenSharing: Boolean(document.getElementById('presentationTile')?.classList.contains('is-screen-sharing')),
+        phoneLayoutMatches: typeof phoneLayoutQuery !== 'undefined' ? phoneLayoutQuery.matches : null,
+        pipMeeting: {
+          hidden: Boolean(document.getElementById('pipMeeting')?.hidden),
+          visible: Boolean(document.getElementById('pipMeeting')?.getClientRects?.().length),
+          rect: rectProbe(document.getElementById('pipMeeting'))
+        },
         toolRail: {
           rect: rectProbe(document.getElementById('toolRail')),
           visible: Boolean(document.getElementById('toolRail')?.getClientRects?.().length)
         },
+        meetingBar: {
+          rect: rectProbe(document.querySelector('.meeting-bar')),
+          visible: Boolean(document.querySelector('.meeting-bar')?.getClientRects?.().length)
+        },
+        topbarBack: {
+          rect: rectProbe(document.getElementById('topbarBack')),
+          visible: Boolean(document.getElementById('topbarBack')?.getClientRects?.().length)
+        },
+        videoStackGeometry: {
+          rect: rectProbe(document.getElementById('videoStack')),
+          clientWidth: document.getElementById('videoStack')?.clientWidth || 0,
+          clientHeight: document.getElementById('videoStack')?.clientHeight || 0,
+          scrollWidth: document.getElementById('videoStack')?.scrollWidth || 0,
+          scrollHeight: document.getElementById('videoStack')?.scrollHeight || 0,
+          scrollLeft: document.getElementById('videoStack')?.scrollLeft || 0,
+          scrollTop: document.getElementById('videoStack')?.scrollTop || 0
+        },
+        callControls: ['muteMic', 'toggleCamera', 'roomChatToggle', 'recordMeeting', 'inviteToggle', 'archiveMeeting', 'roomMoreToggle', 'leave'].map(id => {
+          const element = document.getElementById(id)
+          return {
+            id,
+            visible: Boolean(element?.getClientRects?.().length),
+            ariaLabel: element?.getAttribute?.('aria-label') || '',
+            ariaPressed: element?.getAttribute?.('aria-pressed') || '',
+            rect: rectProbe(element)
+          }
+        }),
         activeScreenShareParticipant: typeof activeScreenShareParticipant !== 'undefined' ? activeScreenShareParticipant : '',
         screenStageLocalShare: Boolean(document.getElementById('screenStage')?.classList.contains('is-local-share')),
         screenStagePlaceholder: rectProbe(document.querySelector('#screenStage .screen-stage__placeholder')),
@@ -1457,24 +1618,11 @@ function validateScreenShareStoppedSnapshots(snapshots, sharerName) {
   return failures
 }
 
-function validateMobileToolRailSnapshots(snapshots) {
+function validateMobileRoomSnapshots(snapshots, expectedNames) {
   const failures = []
   for (const snapshot of snapshots) {
-    const prefix = `${snapshot.name} mobile tool rail`
-    const rail = snapshot.toolRail
-    if (!rail?.visible) {
-      failures.push(`${prefix} is not visible`)
-      continue
-    }
-    const box = rail.rect?.rect
-    if (!box || box.width <= 0 || box.height <= 0) {
-      failures.push(`${prefix} has invalid geometry`)
-      continue
-    }
-    const viewportWidth = snapshot.viewport?.innerWidth || snapshot.viewport?.documentSize?.clientWidth || 0
-    if (viewportWidth > 0 && (box.left < 0 || box.right > viewportWidth)) {
-      failures.push(`${prefix} overflows the viewport`)
-    }
+    failures.push(...validateMobileRoomLayoutSnapshot(snapshot, expectedNames))
+    failures.push(...validateMobileRoomChromeSnapshot(snapshot))
   }
   return failures
 }
@@ -1564,7 +1712,7 @@ function reportOutputPath(value) {
 }
 
 async function closePages(pages) {
-  await Promise.all(pages.map(page => evaluate(page, 'leaveRoom?.(); true').catch(() => {})))
+  await Promise.all(pages.map(page => evaluate(page, '(async () => { await leaveRoom?.(); return true })()').catch(() => {})))
   for (const page of pages) {
     page.client.close()
   }

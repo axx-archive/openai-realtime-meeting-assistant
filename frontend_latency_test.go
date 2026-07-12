@@ -1307,6 +1307,66 @@ func TestIndexLocksControlsAndUsesGreenSpeakerAccent(t *testing.T) {
 	}
 }
 
+func TestIndexUsesSingleDockAndReachableSpeakerFirstMobileRoom(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	html := string(rawHTML)
+	for _, want := range []string{
+		`#appShell.is-in-room[data-tool="room"] .topbar__back`,
+		`#appShell.is-in-room[data-tool="room"]:not(.is-board-expanded) .tool-rail`,
+		`grid-template-columns: repeat(var(--mobile-strip-count, 1), minmax(104px, 1fr));`,
+		`grid-template-rows: minmax(0, 1fr) 104px;`,
+		`scroll-snap-type: x proximity;`,
+		`@media (max-height: 500px) and (orientation: landscape) and (hover: none) and (pointer: coarse)`,
+		`const phoneLayoutQuery = window.matchMedia('(max-width: 640px), (max-height: 500px) and (hover: none) and (pointer: coarse)')`,
+		`max(18px, env(safe-area-inset-left, 0px))`,
+		`max(12px, env(safe-area-inset-right, 0px))`,
+		`id="roomMoreToggle"`,
+		`id="roomMoreMenu"`,
+		`#appShell.is-guest.is-in-room .room-more`,
+		`grid-template-rows: repeat(var(--mobile-strip-count, 1), minmax(64px, 1fr));`,
+		`.presentation-tile.is-screen-sharing .hearth-seats`,
+		`grid-template-rows: minmax(0, 1fr) 92px;`,
+		`grid-template-columns: minmax(0, 1fr) 104px;`,
+		`height: var(--mobile-stage-viewport-height, 100%);`,
+		`.hearth-stage[data-room-layout="pinned"] .hearth-seat.is-on-stage.is-mobile-hero`,
+		`hearthStage.style.setProperty('--mobile-strip-count', String(Math.max(1, count - 1)))`,
+		`videoStack.style.setProperty('--mobile-stage-viewport-height',`,
+		`#appShell.is-in-room #archiveMeeting {`,
+		`height: 44px;`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing mobile room quality marker %q", want)
+		}
+	}
+
+	heroBody := functionBody(html, "function syncMobileRoomHero(speakerName)")
+	for _, want := range []string{
+		"const spoken = String(speakerName || '')",
+		"mobileRoomHeroName = spoken",
+		"tile.classList.toggle('is-mobile-hero', hero)",
+	} {
+		if !strings.Contains(heroBody, want) {
+			t.Fatalf("syncMobileRoomHero missing canonical promotion marker %q", want)
+		}
+	}
+	for _, forbidden := range []string{"appendChild", "insertBefore", "replaceChildren", "setVideoElementStream"} {
+		if strings.Contains(heroBody, forbidden) {
+			t.Fatalf("syncMobileRoomHero must not churn canonical video ownership via %q", forbidden)
+		}
+	}
+
+	layoutBody := functionBody(html, "function currentRoomLayout()")
+	screenShare := strings.Index(layoutBody, "return 'screen-share'")
+	pinned := strings.Index(layoutBody, "return 'pinned'")
+	grid := strings.Index(layoutBody, "return 'grid'")
+	if screenShare < 0 || pinned < 0 || grid < 0 || !(screenShare < pinned && pinned < grid) {
+		t.Fatalf("currentRoomLayout precedence must stay screen-share -> pinned -> grid: %q", layoutBody)
+	}
+}
+
 func TestIndexUsesRemoteTrackAliasesForRelabelingAndDedupe(t *testing.T) {
 	rawHTML, err := os.ReadFile("index.html")
 	if err != nil {
@@ -2023,8 +2083,8 @@ func TestIndexAuditFixWiring(t *testing.T) {
 		"async function createScoutChatThreadOnServer(title, visibility)",
 		// notifications: header action group + nav/Escape dismissal
 		`class="notification-panel__actions"`,
-		// mobile meeting bar: derived dock clearance + icon-only Send notes
-		"--dock-h: 152px;",
+		// mobile meeting bar: one call dock, not a call dock stacked above the OS rail
+		"--dock-h: 88px;",
 		"@media (max-width: 400px) {",
 		`class="archive-label"`,
 		`class="archive-icon"`,

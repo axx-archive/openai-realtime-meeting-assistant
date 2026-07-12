@@ -1,30 +1,23 @@
 # Components
 
-This app is a single-file HTML client (`index.html`) backed by a Go WebRTC server. There is no component directory, framework, or shared UI primitive library. Reusable UI primitives are CSS classes and DOM factory functions inside `index.html`.
+BonfireOS is framework-free. Reusable components are CSS classes and DOM factory functions inside `index.html`.
 
-## CSS Primitives
+## Current shell primitives
 
-- `btn`, `btn--primary`, `btn--ghost`, `btn--danger`, `btn--text` — button system.
+- `tool-rail`, `tool-rail__tool`, `tool-rail__live`, `topbar-live` — global navigation and live-room continuity.
+- `btn`, `btn--primary`, `btn--ghost`, `btn--danger`, `pressable` — action system with explicit states and press feedback.
+- `pill`, `status-pill`, `toast`, `glass-menu`, `settings-sheet` — neutral Glass & Ink feedback and overlays.
 - `field`, `device-control`, `device-select`, `assistant-input` — form controls.
-- `pill`, `status-pill`, `card-id-pill` — status and metadata pills.
-- `card`, `column`, `tags`, `owner-avatar`, `monogram` — board and avatar primitives.
-- `assistant-message`, `memory-item`, `toast`, `comment-preview`, `card-detail` — live room feedback surfaces.
-- `video-tile`, `hearth-seat`, `tile-avatar`, `media-flags` — participant media surfaces.
+- `run-card`, `artifact-card`, `chat-thread-item`, `memory-item`, `column` — OS content primitives.
 
-## DOM Factory Functions
+## Room primitives
 
-```js
-function renderCard(card, moved = false, completed = false)
-function renderOwnerAvatar(card, options = {})
-function renderIdenticon(seed)
-function renderAvatarStack(container, names, options = {})
-function renderMediaFlags()
-function renderAssistantMessage(entry, entering = false)
-function renderMemoryEntry(entry)
-function renderTagList(card)
-function renderPreviewDetail(labelText, value)
-function renderFormField(labelText, type, value)
-function renderSelectField(labelText, options, value)
-```
+- `presentation-tile`, `hearth-stage`, `hearth-center`, `hearth-seats` — video-stage layout.
+- `video-tile hearth-seat`, `is-mobile-hero`, `is-active-speaker`, `is-on-stage` — canonical participant tile and state classes.
+- `tile-avatar`, `video-label`, `media-flags`, `pin-speaker` — participant overlays.
+- `screen-stage`, `screen-stage__pip` — screen-share layout.
+- `meeting-bar`, `controls`, `room-chat-toggle`, `btn--recording` — contextual call controls.
 
-The implementation source of record is `index.html`.
+## DOM factories
+
+Key factories include `renderOwnerAvatar`, `renderIdenticon`, `renderAvatarStack`, `renderMediaFlags`, `renderAssistantMessage`, `renderMemoryEntry`, and the board/card render helpers. The implementation source of truth is `index.html`.
