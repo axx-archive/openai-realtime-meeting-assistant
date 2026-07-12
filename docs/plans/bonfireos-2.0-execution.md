@@ -45,6 +45,8 @@ Current phase: W0 implementation integrated; independent revision gate and exact
 - Read-only production compatibility gate confirmed Docker 29.4.3, Compose v5.1.3, empty rooms, healthy app/runner, fresh runner heartbeat, no nonterminal jobs, and successful parsing of both current and proposed Compose against the live environment.
 - Independent adversarial re-gate passed after provider holds were centralized across every ambient producer and authenticated principals were propagated through chat-launched process goals.
 - Exact-Compose VPS preflight built both images and started Codex CLI 0.144.1 under dropped capabilities, read-only root, no-new-privileges, isolated writable mounts, and read-only sandbox. Queue heartbeat and usage writes passed. The first job exposed and drove a HOME/TMPDIR isolation fix; the rerun reached OpenAI and stopped only on the current quota error.
+- Live W0 cutover completed from commit `7dbac83` with backup `/opt/meetingassist-backups/20260712T220050Z-w0-control-plane`. Historical usage books were prefix-verified in `digitalocean_usage_ledger`; all 13 completed jobs were checksum-verified in `digitalocean_codex_queue`; app and runner were recreated together and both have zero restarts.
+- Live `/livez`, `/readyz`, `/capabilities`, and `/participants` passed their contracts. Traffic is ready while AI capabilities truthfully report degraded; the runner heartbeat reports the new queue paths and a Git workspace; the sidecar has no company-brain mount. Digest remains disabled and the live call count remains exactly 573.
 
 ## Pending Dependencies
 
@@ -70,4 +72,4 @@ Current phase: W0 implementation integrated; independent revision gate and exact
 
 ## Resume Here
 
-Commit/push the passing W0 scope, then cut over app+runner together while digest stays disabled. Before first recreation, copy and verify historical usage books into `usage_ledger` and all 13 completed jobs into `codex_queue`. Verify live health/heartbeat/confinement. A successful read-only job and one-meeting digest recovery canary remain gated only by restoring OpenAI quota; normal digest concurrency stays disabled until both pass.
+Commit/push the external-volume protection follow-up, then run a successful read-only job and one-meeting digest recovery canary after OpenAI quota is restored. Normal digest concurrency stays disabled until both pass. Continue W1 implementation in parallel because W0 traffic, authority, history migration, and containment are live.

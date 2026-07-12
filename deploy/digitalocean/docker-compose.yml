@@ -157,7 +157,13 @@ networks:
 volumes:
   caddy_data:
   caddy_config:
+  # Explicit external names protect migrated operational history from an
+  # accidental `docker compose down -v` and make the cutover invariant clear.
   codex_queue:
+    external: true
+    name: digitalocean_codex_queue
   codex_runner_data:
   meeting_data:
   usage_ledger:
+    external: true
+    name: digitalocean_usage_ledger
