@@ -2,7 +2,7 @@
 
 Goal and source pointers: active `$goal-loop`; `docs/model-routing-master-plan-2026-07-11.md`; `docs/plans/multi-room-2026-07-08.md`; architecture audit in the current Codex task.
 
-Current phase: W0 implementation integrated; independent revision gate and exact-Compose runtime preflight are in progress before live cutover.
+Current phase: W0 is live and verified. W1 canonical event/ACL implementation is in progress; its first slice hardens legacy file durability before shadow capture can be trusted.
 
 ## Invariants
 
@@ -17,8 +17,8 @@ Current phase: W0 implementation integrated; independent revision gate and exact
 
 | Wave | Outcome | Dependencies | Gate / rollback | Status |
 |---|---|---|---|---|
-| W0 | Stop runaway spend; make output, authority, health, backup, and usage truth enforceable | None | Accepted digest advances cursor; code-level authority tests; offsite restore evidence; old env/code backup | Integration gate |
-| W1 | Canonical event/ACL substrate, object authorization, outbox/jobs, retention, consent, revision-bound approval | W0 | Dual-write replay/checksum and ACL-negative parity; JSONL reader rollback | Pending |
+| W0 | Stop runaway spend; make output, authority, health, backup, and usage truth enforceable | None | Accepted digest advances cursor; code-level authority tests; offsite restore evidence; old env/code backup | Complete; model-output recovery canaries held for W4 quota gate |
+| W1 | Canonical event/ACL substrate, object authorization, outbox/jobs, retention, consent, revision-bound approval | W0 | Dual-write replay/checksum and ACL-negative parity; JSONL reader rollback | In progress: W1A durability/contracts |
 | W2A | Per-room Scout, exact recap, guest policy, media backend pilot | W1 contracts | Two-room zero-leak live gate; Pion and feature-flag rollback | Pending |
 | W2B | Restart-safe brain, complete historical recall, claim/evidence lineage | W1 contracts | Recall corpus and restart/replay gates; shadow-reader rollback | Pending |
 | W2C | `insights_opportunities_v1`, structured feedback, verdict critic, pilots | W1 + W0 route/authority | Ten reviewed pilots; process disable and route rollback | Pending |
@@ -46,11 +46,12 @@ Current phase: W0 implementation integrated; independent revision gate and exact
 - Independent adversarial re-gate passed after provider holds were centralized across every ambient producer and authenticated principals were propagated through chat-launched process goals.
 - Exact-Compose VPS preflight built both images and started Codex CLI 0.144.1 under dropped capabilities, read-only root, no-new-privileges, isolated writable mounts, and read-only sandbox. Queue heartbeat and usage writes passed. The first job exposed and drove a HOME/TMPDIR isolation fix; the rerun reached OpenAI and stopped only on the current quota error.
 - Live W0 cutover completed from commit `7dbac83` with backup `/opt/meetingassist-backups/20260712T220050Z-w0-control-plane`. Historical usage books were prefix-verified in `digitalocean_usage_ledger`; all 13 completed jobs were checksum-verified in `digitalocean_codex_queue`; app and runner were recreated together and both have zero restarts.
+- External-volume deletion protection shipped in follow-up commit `cc780f1`; the live queue and usage volumes are explicit external resources.
 - Live `/livez`, `/readyz`, `/capabilities`, and `/participants` passed their contracts. Traffic is ready while AI capabilities truthfully report degraded; the runner heartbeat reports the new queue paths and a Git workspace; the sidecar has no company-brain mount. Digest remains disabled and the live call count remains exactly 573.
 
 ## Pending Dependencies
 
-- Managed Postgres, Redis, object storage/offsite backup, and LiveKit credentials/region/DPA are not present in the current deployment.
+- Dedicated managed PostgreSQL HA and private object storage are not present. The recommended W1 minimum is approximately $53/month ($48 PostgreSQL plus $5 Spaces) and remains blocked on explicit recurring-cost approval. Managed Valkey is intentionally deferred; PostgreSQL leases/outbox are the W1 design.
 - OpenAI quota is again exhausted after the digest storm; Realtime/transcription cannot be called operational until billing is restored and the repaired lanes are canaried.
 - Guest consent/retention language needs an authorized business/legal owner.
 - Native Apple GA requires signing team, privacy manifest decisions, and physical-device evidence; otherwise 2.0 must explicitly ship web-first with native labeled beta.
@@ -72,4 +73,4 @@ Current phase: W0 implementation integrated; independent revision gate and exact
 
 ## Resume Here
 
-Commit/push the external-volume protection follow-up, then run a successful read-only job and one-meeting digest recovery canary after OpenAI quota is restored. Normal digest concurrency stays disabled until both pass. Continue W1 implementation in parallel because W0 traffic, authority, history migration, and containment are live.
+Implement W1A in this order: harden legacy file/append durability; land canonical contracts, deterministic normalization/replay, and recoverable framed shadow capture; then prove migration-fence failpoints and PostgreSQL integration against disposable infrastructure. Commit and push scoped slices without staging user-owned Superdesign or mobile-room work. Provision managed PostgreSQL/Spaces only after explicit cost approval. Run a successful read-only job and one-meeting digest recovery canary after OpenAI quota is restored; normal digest concurrency stays disabled until both pass.
