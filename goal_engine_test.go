@@ -1597,8 +1597,14 @@ func TestGoalLawSweepMissingHeadingSkipsReviewerModel(t *testing.T) {
 	// The child only ever produces loose prose with no contract structure.
 	launches := 0
 	var mu sync.Mutex
+	var wg sync.WaitGroup
+	// Every revision is launched before its predecessor fold returns, so the
+	// count cannot reach zero between generations. Drain the final fold (which
+	// persists the terminal notification after the blocked stage is visible)
+	// before TempDir cleanup removes the app's backing directory.
 	originalChild := startAgentThreadAsync
 	t.Cleanup(func() { startAgentThreadAsync = originalChild })
+	t.Cleanup(wg.Wait)
 	startAgentThreadAsync = func(app *kanbanBoardApp, thread scoutAgentThread) {
 		meta := thread.Artifact.Metadata
 		parent, sub := meta["goalParentId"], meta["goalSubtaskId"]
@@ -1608,7 +1614,9 @@ func TestGoalLawSweepMissingHeadingSkipsReviewerModel(t *testing.T) {
 		mu.Lock()
 		launches++
 		mu.Unlock()
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			child, _, err := app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", "A page of loose prose with no contract headings at all.", "tester", map[string]string{
 				"threadStatus": "complete",
 				"status":       "complete",

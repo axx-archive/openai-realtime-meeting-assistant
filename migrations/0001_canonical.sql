@@ -128,6 +128,7 @@ CREATE TABLE object_grants (
     tenant_id text NOT NULL,
     object_type text NOT NULL,
     object_id text NOT NULL,
+    acl_version bigint NOT NULL CHECK (acl_version > 0),
     revision bigint,
     subject_type text NOT NULL,
     subject_id text NOT NULL,
@@ -140,7 +141,7 @@ CREATE TABLE object_grants (
     expires_at timestamptz,
     revoked_at timestamptz,
     conditions jsonb NOT NULL DEFAULT '{}'::jsonb,
-    UNIQUE (tenant_id, object_type, object_id, revision, subject_type, subject_id, action)
+    UNIQUE (tenant_id, object_type, object_id, acl_version, revision, subject_type, subject_id, action)
 );
 
 CREATE INDEX object_grants_lookup
