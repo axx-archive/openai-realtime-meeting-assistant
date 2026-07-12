@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -159,7 +160,7 @@ const (
 	// slop-quarantine expiry-stub discipline. UI-state AND relevance=expired: the
 	// stub is bookkeeping, never recall material or a client-timeline row.
 	meetingMemoryKindChatDelete = "chat_delete"
-	defaultMeetingMemoryPath   = "data/meeting-memory.jsonl"
+	defaultMeetingMemoryPath    = "data/meeting-memory.jsonl"
 	// transcriptSourceRoomChat marks transcript entries injected from the
 	// in-meeting text chat rather than the audio transcription lanes.
 	transcriptSourceRoomChat = "room_chat"
@@ -1193,18 +1194,16 @@ func (store *meetingMemoryStore) appendEntryForMeeting(roomID string, kind strin
 	}
 	entry.Metadata = stamped
 
-	file, err := os.OpenFile(store.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return meetingMemoryEntry{}, false, fmt.Errorf("open memory file: %w", err)
-	}
-	defer file.Close()
-
 	raw, err := json.Marshal(entry)
 	if err != nil {
 		return meetingMemoryEntry{}, false, fmt.Errorf("encode memory entry: %w", err)
 	}
-	if _, err := file.Write(append(raw, '\n')); err != nil {
-		return meetingMemoryEntry{}, false, fmt.Errorf("write memory entry: %w", err)
+	persist := appendFileBestEffort
+	if canonicalLegacyDurabilityRequired() {
+		persist = appendFileDurably
+	}
+	if err := persist(store.path, append(raw, '\n'), 0o600); err != nil {
+		return meetingMemoryEntry{}, false, fmt.Errorf("persist memory entry: %w", err)
 	}
 
 	store.entries = append(store.entries, entry)
@@ -1214,54 +1213,20 @@ func (store *meetingMemoryStore) appendEntryForMeeting(roomID string, kind strin
 }
 
 func (store *meetingMemoryStore) rewriteLocked(syncToDisk bool) error {
-	dir := filepath.Dir(store.path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("create memory directory: %w", err)
-	}
-
-	file, err := os.CreateTemp(dir, ".meeting-memory-*.jsonl")
-	if err != nil {
-		return fmt.Errorf("create memory temp file: %w", err)
-	}
-	tempPath := file.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tempPath)
-		}
-	}()
-
-	encoder := json.NewEncoder(file)
+	var encoded bytes.Buffer
+	encoder := json.NewEncoder(&encoded)
 	for _, entry := range store.entries {
 		if err := encoder.Encode(entry); err != nil {
-			_ = file.Close()
 			return fmt.Errorf("encode memory entry: %w", err)
 		}
 	}
-	if err := file.Chmod(0o600); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("chmod memory temp file: %w", err)
+	persist := writeFileAtomicallyBestEffort
+	if syncToDisk || canonicalLegacyDurabilityRequired() {
+		persist = writeFileAtomicallyDurable
 	}
-	// Flush to disk before the rename when asked: digest upserts make
-	// full-file rewrites routine (~every few minutes), and a crash after
-	// rename with unflushed data could truncate the entire memory file.
-	// Per-message rewrites skip the fsync — it multiplies suite latency
-	// (the -race pass times out) and async reporters outrun assertions;
-	// their crash window is unchanged from the pre-digest design.
-	if syncToDisk {
-		if err := file.Sync(); err != nil {
-			_ = file.Close()
-			return fmt.Errorf("sync memory temp file: %w", err)
-		}
-	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("close memory temp file: %w", err)
-	}
-	if err := os.Rename(tempPath, store.path); err != nil {
+	if err := persist(store.path, encoded.Bytes(), 0o600); err != nil {
 		return fmt.Errorf("replace memory file: %w", err)
 	}
-	cleanup = false
-
 	return nil
 }
 
@@ -1941,18 +1906,16 @@ func (store *meetingMemoryStore) upsertDigest(kind string, key string, text stri
 // Caller holds store.mu and owns the entries/seen bookkeeping (including
 // rollback on error).
 func (store *meetingMemoryStore) appendEntryLineLocked(entry meetingMemoryEntry) error {
-	file, err := os.OpenFile(store.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return fmt.Errorf("open memory file: %w", err)
-	}
-	defer file.Close()
-
 	raw, err := json.Marshal(entry)
 	if err != nil {
 		return fmt.Errorf("encode memory entry: %w", err)
 	}
-	if _, err := file.Write(append(raw, '\n')); err != nil {
-		return fmt.Errorf("write memory entry: %w", err)
+	persist := appendFileBestEffort
+	if canonicalLegacyDurabilityRequired() {
+		persist = appendFileDurably
+	}
+	if err := persist(store.path, append(raw, '\n'), 0o600); err != nil {
+		return fmt.Errorf("persist memory entry: %w", err)
 	}
 
 	return nil

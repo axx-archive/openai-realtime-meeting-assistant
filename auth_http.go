@@ -75,16 +75,7 @@ func (s *sessionStore) persistLocked() {
 		log.Errorf("Failed to encode session store: %v", err)
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-		log.Errorf("Failed to create session store directory: %v", err)
-		return
-	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		log.Errorf("Failed to persist session store: %v", err)
-		return
-	}
-	if err := os.Rename(tmp, s.path); err != nil {
+	if err := writeFileAtomicallyDurable(s.path, raw, 0o600); err != nil {
 		log.Errorf("Failed to persist session store: %v", err)
 	}
 	// Guest-link expiry rides the session-persist seam (multi-room §5.1):

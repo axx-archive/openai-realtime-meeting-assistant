@@ -193,17 +193,10 @@ func (s *userAccountStore) persistLocked() error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-		return err
-	}
-
-	// Write-then-rename so a crash mid-write cannot truncate the only copy of
-	// everyone's password hashes and passkeys.
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.path)
+	// Password hashes and passkeys need the same file-and-directory durability
+	// guarantee as the company-brain stores even though they never become
+	// canonical events.
+	return writeFileAtomicallyDurable(s.path, raw, 0o600)
 }
 
 func (s *userAccountStore) accountEmails() []string {

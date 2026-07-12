@@ -48,6 +48,7 @@ Current phase: W0 is live and verified. W1 canonical event/ACL implementation is
 - Live W0 cutover completed from commit `7dbac83` with backup `/opt/meetingassist-backups/20260712T220050Z-w0-control-plane`. Historical usage books were prefix-verified in `digitalocean_usage_ledger`; all 13 completed jobs were checksum-verified in `digitalocean_codex_queue`; app and runner were recreated together and both have zero restarts.
 - External-volume deletion protection shipped in follow-up commit `cc780f1`; the live queue and usage volumes are explicit external resources.
 - Live `/livez`, `/readyz`, `/capabilities`, and `/participants` passed their contracts. Traffic is ready while AI capabilities truthfully report degraded; the runner heartbeat reports the new queue paths and a Git workspace; the sidecar has no company-brain mount. Digest remains disabled and the live call count remains exactly 573.
+- W1A durability/contracts slice passed an independent code gate after adversarial revisions: mode-gated fsync/rename/directory durability, RFC 8785 deterministic tenant-scoped imports, closed immutable payload schemas, deterministic replay, default-deny ACLs, revision/action-bound approval and ambiguous-effect handling, and a PostgreSQL 17 schema applied successfully to a disposable local database. Focused race tests passed. The repository-wide suite still has one reproducible-only-under-full-load async TempDir cleanup flake to resolve before this slice can deploy.
 
 ## Pending Dependencies
 

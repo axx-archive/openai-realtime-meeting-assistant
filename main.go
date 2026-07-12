@@ -765,6 +765,10 @@ func setSubscriberLayerTier(sessionID string, tier layerTier) bool {
 func main() {
 	// Parse the flags passed to program
 	flag.Parse()
+	if err := validateCanonicalModeConfig(); err != nil {
+		fmt.Fprintf(os.Stderr, "Canonical persistence configuration is invalid: %v\n", err)
+		os.Exit(2)
+	}
 
 	if *codexRunnerWorker {
 		if err := runCodexRunnerLoop(context.Background()); err != nil {

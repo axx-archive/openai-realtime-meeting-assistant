@@ -430,16 +430,8 @@ func (idx *embeddingIndex) persist() error {
 		builder.Write(line)
 		builder.WriteByte('\n')
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create embeddings dir: %w", err)
-	}
-	tmp := filepath.Join(filepath.Dir(path), ".tmp-embeddings-"+strconv.FormatInt(time.Now().UnixNano(), 10))
-	if err := os.WriteFile(tmp, []byte(builder.String()), 0o600); err != nil {
-		return fmt.Errorf("write embeddings sidecar: %w", err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return fmt.Errorf("rename embeddings sidecar: %w", err)
+	if err := writeFileAtomicallyForCanonicalMode(path, []byte(builder.String()), 0o600); err != nil {
+		return fmt.Errorf("persist embeddings sidecar: %w", err)
 	}
 	return nil
 }

@@ -1,6 +1,6 @@
 # Canonical Event and ACL v1
 
-Status: implementation candidate under independent critic review for the active bonfireOS 2.0 goal. This becomes the W1 source of truth only after the gate passes; the execution ledger remains `docs/plans/bonfireos-2.0-execution.md`.
+Status: accepted W1 implementation source of truth under the active bonfireOS 2.0 goal. The initial durability/contracts slice passed its independent code gate; the execution ledger remains `docs/plans/bonfireos-2.0-execution.md`.
 
 ## Outcome and evidence
 
@@ -74,7 +74,7 @@ type CanonicalEvent struct {
 }
 ```
 
-Live events use UUIDv7. Imports use a deterministic UUIDv5 over `{source system, source object id, event type, source revision}`. `PayloadSHA256` is computed from canonical JSON encoding. Blank legacy `roomId` always normalizes to `office`.
+Live events use UUIDv7. Imports use a deterministic UUIDv5 over `{normalization registry, tenant, source family, source object id, event type, state digest}`. `PayloadSHA256` is computed from RFC 8785 JCS; unsafe integral inputs outside the interoperable range fail closed. Blank legacy `roomId` always normalizes to `office`.
 
 Initial event families:
 
@@ -94,7 +94,7 @@ Imports are specified by a versioned normalization registry, not by ad hoc decod
 
 Identity and revision never depend on unrelated record order. A stable legacy object key comes from the family's intrinsic ID fields; its normalized state digest identifies a state. A checksummed, fsynced per-object version map persists `{family, object_key, state_digest -> aggregate_version}` and allocates the next version under the same family mutation lock. Initial import assigns version 1 to the current state unless an embedded revision journal provides its ordered history; later unseen state digests receive the next version, while known digests reuse the recorded version and event ID. The UUIDv5 input is `{normalization_registry_version, family, object_key, lifecycle_event, state_digest}`. Exact duplicate records with the same key and digest collapse according to existing global-memory-ID behavior. Same-key conflicting duplicates without a family-defined lifecycle order fail the import instead of using array position as identity. A golden test inserts, removes, and reorders an unrelated earlier-sorting record and proves unchanged event IDs and aggregate versions remain byte-identical.
 
-Canonical event payloads use a closed schema registry keyed by `{event_type, schema_version}`. Unknown fields or an unregistered schema fail closed. Event payloads may contain only identifiers, enums, booleans, timestamps, numeric counters, digests, classifications, revision numbers, and content references. Transcript text, chat/file/artifact bodies, filenames, prompts, email/recipient data, provider tokens, credentials, capability tokens, raw provider responses, and user-supplied excerpts are prohibited. Tests walk serialized events and reject fields outside the allowlist.
+Canonical event payloads use a closed schema registry keyed by `{event_type, schema_version}`. Unknown fields or an unregistered schema fail closed. A centrally reviewed positive vocabulary binds every allowed field name to one exact semantic kind; registered schemas are deep-copied and immutable. Event payloads may contain only identifiers, enums, booleans, timestamps, numeric counters, digests, classifications, revision numbers, and content references. Transcript text, chat/file/artifact bodies, titles, summaries, descriptions, messages, notes, filenames, prompts, email/recipient data, API keys, provider tokens, credentials, capability tokens, raw provider responses, and user-supplied excerpts are prohibited. Tests walk serialized events and reject fields outside the allowlist.
 
 ### PostgreSQL schema
 
@@ -206,6 +206,7 @@ BONFIRE_BLOB_BACKEND=local|s3
 ```
 
 `shadow` is the only W1 production mode. `required` and PostgreSQL reads are rejected unless a persisted parity gate for that object family is current.
+Blank mode normalizes to `off`; any other unknown or misspelled value fails process startup rather than silently weakening durability.
 
 1. **Bootstrap capture fence:** under the existing bounded per-store mutation locks, create and fsync a common migration epoch plus a generation/high-water record for every authority, enable spool capture, and only then release writers. Spool records are length-delimited, checksummed frames with sequence numbers; startup truncates only an incomplete final frame and rejects any interior corruption.
 2. **Import:** snapshot each fenced generation after capture is active; import deterministic events through its recorded high-water; record normalized counts and checksums. Spool facts after each source high-water are replayed in sequence, so writes and deletes on either side of the boundary have one ordering.

@@ -491,23 +491,14 @@ func writeKanbanBoardState(path string, state kanbanBoardState) error {
 }
 
 func writeJSONFileAtomically(path string, description string, value any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create %s directory: %w", description, err)
-	}
-
 	rawJSON, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", description, err)
 	}
 	rawJSON = append(rawJSON, '\n')
 
-	tmpPath := fmt.Sprintf("%s.tmp-%d", path, time.Now().UnixNano())
-	if err := os.WriteFile(tmpPath, rawJSON, 0o600); err != nil {
-		return fmt.Errorf("write %s: %w", description, err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("replace %s: %w", description, err)
+	if err := writeFileAtomicallyForCanonicalMode(path, rawJSON, 0o600); err != nil {
+		return fmt.Errorf("persist %s: %w", description, err)
 	}
 
 	return nil

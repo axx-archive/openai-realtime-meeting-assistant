@@ -89,16 +89,7 @@ func (s *fileFolderStore) persistLocked() {
 		log.Errorf("Failed to encode file-folder store: %v", err)
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-		log.Errorf("Failed to create file-folder store directory: %v", err)
-		return
-	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		log.Errorf("Failed to persist file-folder store: %v", err)
-		return
-	}
-	if err := os.Rename(tmp, s.path); err != nil {
+	if err := writeFileAtomicallyForCanonicalMode(s.path, raw, 0o600); err != nil {
 		log.Errorf("Failed to persist file-folder store: %v", err)
 	}
 }
