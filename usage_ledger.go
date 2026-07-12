@@ -122,13 +122,16 @@ const (
 // Callers fill what they know; recordLLMUsage defaults the rest. Token counts
 // are per-call absolutes, never deltas.
 type llmUsageEntry struct {
-	TS       time.Time `json:"ts"`
-	Provider string    `json:"provider"`
-	Model    string    `json:"model"`
-	Seat     string    `json:"seat"`
-	RoomID   string    `json:"room_id,omitempty"`
-	ThreadID string    `json:"thread_id,omitempty"`
-	GoalID   string    `json:"goal_id,omitempty"`
+	TS                   time.Time `json:"ts"`
+	Provider             string    `json:"provider"`
+	Model                string    `json:"model"`
+	Seat                 string    `json:"seat"`
+	RoomID               string    `json:"room_id,omitempty"`
+	ThreadID             string    `json:"thread_id,omitempty"`
+	GoalID               string    `json:"goal_id,omitempty"`
+	Workflow             string    `json:"workflow,omitempty"`
+	RequestedServiceTier string    `json:"requested_service_tier,omitempty"`
+	ServiceTier          string    `json:"service_tier,omitempty"`
 
 	InputTokens         int64 `json:"input_tokens,omitempty"`
 	CachedInputTokens   int64 `json:"cached_input_tokens,omitempty"`   // cache READS (90% off tier)
@@ -142,12 +145,15 @@ type llmUsageEntry struct {
 	AudioOutputTokens      int64   `json:"audio_output_tokens,omitempty"`
 	AudioSeconds           float64 `json:"audio_seconds,omitempty"`
 
-	DurationMS   int64   `json:"duration_ms,omitempty"`
-	EstCostUSD   float64 `json:"est_cost_usd,omitempty"`
-	PriceMissing bool    `json:"price_missing,omitempty"` // model id had no price row — rollup alarms on ANY of these
-	FallbackUsed bool    `json:"fallback_used,omitempty"` // this call was a same-call fallback replay
-	Estimated    bool    `json:"estimated,omitempty"`     // wall-clock estimate, not wire-reported usage
-	Error        string  `json:"error,omitempty"`         // non-empty when the call failed (429/529 storms still cost latency)
+	DurationMS          int64   `json:"duration_ms,omitempty"`
+	EstCostUSD          float64 `json:"est_cost_usd,omitempty"`
+	PriceMissing        bool    `json:"price_missing,omitempty"` // model id had no price row — rollup alarms on ANY of these
+	FallbackUsed        bool    `json:"fallback_used,omitempty"` // this call was a same-call fallback replay
+	Estimated           bool    `json:"estimated,omitempty"`     // wall-clock estimate, not wire-reported usage
+	Error               string  `json:"error,omitempty"`         // non-empty when the call failed (429/529 storms still cost latency)
+	WireSuccess         bool    `json:"wire_success,omitempty"`
+	AcceptedOutput      bool    `json:"accepted_output,omitempty"`
+	OutputFailureReason string  `json:"output_failure_reason,omitempty"`
 }
 
 // recordLLMUsage appends one entry to today's usage file. It never fails the
@@ -205,6 +211,7 @@ const (
 	evalKindTranscriptSegment = "transcript_segment" // fields: status (completed|failed), room_id, audio_seconds
 	evalKindCorrectionHit     = "correction_hit"     // fields: term, room_id — canonicalizeDomainTerms regex hit
 	evalKindNoVocabWarning    = "no_vocab_warning"   // authoritative STT lane running without vocabulary biasing
+	evalKindDigestOutput      = "digest_output"      // fields: outcome, reason, attempt_hash — accepted/rejected/circuit_open
 )
 
 // Reserved eval lane for the W2 STT harness scores (transcript_wer,

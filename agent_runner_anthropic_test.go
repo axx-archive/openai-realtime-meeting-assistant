@@ -9,7 +9,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -66,7 +68,7 @@ func TestAnthropicFableRunnerToolLoopRoundTrip(t *testing.T) {
 	runner.maxTurns = 6
 
 	cardsBefore := len(app.cards)
-	job := app.newAgentJob(scoutAgentThread{ID: "agent-thread-workflow-1", Mode: "workflow", Query: "package the Aurora IP"})
+	job := app.newAgentJob(scoutAgentThread{ID: "agent-thread-workflow-1", Mode: "workflow", Query: "package the Aurora IP", Artifact: meetingMemoryEntry{Metadata: map[string]string{"authority": codexJobAuthorityWorkspaceWrite, "createdBy": "tester@example.com"}}})
 	out, err := runner.RunJob(context.Background(), job)
 	if err != nil {
 		t.Fatalf("RunJob: %v", err)
@@ -116,6 +118,38 @@ func TestAnthropicFableRunnerToolLoopRoundTrip(t *testing.T) {
 	}
 	if !strings.Contains(terminal.Text, "Aurora plan") || !strings.Contains(terminal.Text, "Orchestrator evidence") {
 		t.Fatalf("terminal text missing body/evidence: %q", terminal.Text)
+	}
+}
+
+func TestReadOnlyOrchestratorCannotMutateDurableState(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	runner := newAnthropicFableRunner(app)
+	tools := toolNames(runner.toolsForAuthority("workflow", codexJobAuthorityReadOnly))
+	for _, forbidden := range []string{"create_ticket", "update_ticket", "create_artifact", "note_for_the_record", "send_notification"} {
+		if slices.Contains(tools, forbidden) {
+			t.Fatalf("read_only tool exposure contains mutator %q: %v", forbidden, tools)
+		}
+	}
+	if !slices.Contains(tools, "answer_memory_question") || !slices.Contains(tools, "do_nothing") {
+		t.Fatalf("read_only exposure lost safe tools: %v", tools)
+	}
+
+	beforeBoard, _ := os.ReadFile(kanbanBoardPath())
+	beforeMemory, _ := os.ReadFile(meetingMemoryPath())
+	job := AgentJob{Authority: codexJobAuthorityReadOnly, RequestedBy: "tester@example.com"}
+	if err := authorizeOrchestratorTool(job, "create_ticket"); err == nil {
+		t.Fatal("read_only create_ticket authorization unexpectedly succeeded")
+	}
+	if err := authorizeOrchestratorTool(AgentJob{Authority: codexJobAuthorityWorkspaceWrite}, "create_ticket"); err == nil {
+		t.Fatal("principal-less workspace mutation unexpectedly succeeded")
+	}
+	if err := authorizeOrchestratorTool(AgentJob{Authority: codexJobAuthorityWorkspaceWrite, RequestedBy: "AJ"}, "create_ticket"); err == nil {
+		t.Fatal("display-name-only principal unexpectedly authorized a mutation")
+	}
+	afterBoard, _ := os.ReadFile(kanbanBoardPath())
+	afterMemory, _ := os.ReadFile(meetingMemoryPath())
+	if !bytes.Equal(beforeBoard, afterBoard) || !bytes.Equal(beforeMemory, afterMemory) {
+		t.Fatal("rejected mutation changed durable board or memory bytes")
 	}
 }
 
@@ -1579,7 +1613,7 @@ func TestAnthropicFableRunnerBroadcastsBoardOnlyOnMutatingTurn(t *testing.T) {
 		}
 		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock("# Done")}}, nil
 	}
-	out, err := newRunner(mutating).RunJob(context.Background(), app.newAgentJob(scoutAgentThread{ID: "rw1-mut", Mode: "workflow", Query: "add a card"}))
+	out, err := newRunner(mutating).RunJob(context.Background(), app.newAgentJob(scoutAgentThread{ID: "rw1-mut", Mode: "workflow", Query: "add a card", Artifact: meetingMemoryEntry{Metadata: map[string]string{"authority": codexJobAuthorityWorkspaceWrite, "createdBy": "tester@example.com"}}}))
 	if err != nil {
 		t.Fatalf("RunJob mutating: %v", err)
 	}

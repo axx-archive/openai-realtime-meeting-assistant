@@ -292,12 +292,13 @@ func runBackupLoop() {
 // backupOutcome is the recorded result of one pass (also feeds the readiness
 // snapshot and tests).
 type backupOutcome struct {
-	path      string
-	sizeBytes int64
-	encrypted bool
-	ringKept  int
-	offsite   string // "ok" | "skip_no_key" | "dormant" | "error"
-	duration  time.Duration
+	path       string
+	sizeBytes  int64
+	encrypted  bool
+	ringKept   int
+	offsite    string // "ok" | "skip_no_key" | "dormant" | "error"
+	offsiteErr string
+	duration   time.Duration
 }
 
 // runBackupOnce performs a full snapshot pass and records/logs the outcome. It
@@ -386,9 +387,11 @@ func createBackupSnapshot(cfg backupConfig, now time.Time) (backupOutcome, error
 			body, readErr := os.ReadFile(finalPath)
 			if readErr != nil {
 				out.offsite = "error"
+				out.offsiteErr = readErr.Error()
 				log.Errorf("backup: offsite read %s failed: %v", finalName, readErr)
 			} else if upErr := uploadBackupToS3(cfg.s3, finalName, body, now); upErr != nil {
 				out.offsite = "error"
+				out.offsiteErr = upErr.Error()
 				log.Errorf("backup: offsite upload of %s failed: %v", finalName, upErr)
 			} else {
 				out.offsite = "ok"
@@ -784,7 +787,10 @@ var (
 	backupLastSize    int64
 	backupLastErr     string
 	backupLastOffsite string
+	backupOffsiteErr  string
 	backupRingCount   int
+	backupRestoreAt   time.Time
+	backupRestoreErr  string
 )
 
 func recordBackupOutcome(now time.Time, out backupOutcome, err error) {
@@ -792,13 +798,28 @@ func recordBackupOutcome(now time.Time, out backupOutcome, err error) {
 	defer backupStatMu.Unlock()
 	backupLastRunAt = now
 	backupLastOK = err == nil
+	backupLastSize = out.sizeBytes
+	backupLastOffsite = out.offsite
+	backupOffsiteErr = out.offsiteErr
+	backupRingCount = out.ringKept
 	if err != nil {
 		backupLastErr = err.Error()
 	} else {
 		backupLastErr = ""
-		backupLastSize = out.sizeBytes
-		backupLastOffsite = out.offsite
-		backupRingCount = out.ringKept
+	}
+}
+
+// recordBackupRestoreVerification is the producer seam for a real restore
+// drill. Snapshot creation never calls it: copying bytes is not proof that the
+// archive can be restored.
+func recordBackupRestoreVerification(at time.Time, err error) {
+	backupStatMu.Lock()
+	defer backupStatMu.Unlock()
+	backupRestoreAt = at
+	if err != nil {
+		backupRestoreErr = err.Error()
+	} else {
+		backupRestoreErr = ""
 	}
 }
 
@@ -824,6 +845,73 @@ func readinessBackupSnapshot() map[string]any {
 		if backupLastErr != "" {
 			snap["lastError"] = backupLastErr
 		}
+	}
+	return snap
+}
+
+// backupCapabilitySnapshot distinguishes a successful local ring write from
+// actual disaster recovery. Local-only, dormant offsite, failed offsite, and an
+// unproven restore are never reported as healthy recovery.
+func backupCapabilitySnapshot(now time.Time) map[string]any {
+	cfg := loadBackupConfig()
+	backupStatMu.Lock()
+	lastRunAt := backupLastRunAt
+	lastOK := backupLastOK
+	lastSize := backupLastSize
+	lastErr := backupLastErr
+	lastOffsite := backupLastOffsite
+	offsiteErr := backupOffsiteErr
+	ringCount := backupRingCount
+	restoreAt := backupRestoreAt
+	restoreErr := backupRestoreErr
+	backupStatMu.Unlock()
+
+	snap := map[string]any{
+		"enabled":           !backupDisabled(),
+		"interval":          fmt.Sprintf("%dh", cfg.intervalHours),
+		"localConfigured":   true,
+		"offsiteConfigured": cfg.s3 != nil,
+		"encrypted":         cfg.keyConfigured,
+		"offsite":           "dormant",
+		"restoreVerified":   !restoreAt.IsZero() && restoreErr == "",
+		"status":            "degraded",
+	}
+	if backupDisabled() {
+		snap["status"] = "disabled"
+		return snap
+	}
+	if !lastRunAt.IsZero() {
+		age := now.Sub(lastRunAt)
+		if age < 0 {
+			age = 0
+		}
+		snap["lastBackupAt"] = lastRunAt.UTC().Format(time.RFC3339Nano)
+		snap["lagSeconds"] = int64(age.Seconds())
+		snap["stale"] = age > time.Duration(max(1, cfg.intervalHours))*2*time.Hour
+		snap["localLastOK"] = lastOK
+		snap["lastSizeBytes"] = lastSize
+		snap["ringCount"] = ringCount
+		if lastOffsite != "" {
+			snap["offsite"] = lastOffsite
+		}
+		if offsiteErr != "" {
+			snap["offsiteError"] = offsiteErr
+		}
+		if lastErr != "" {
+			snap["lastError"] = lastErr
+		}
+	}
+	if !restoreAt.IsZero() {
+		snap["lastRestoreAt"] = restoreAt.UTC().Format(time.RFC3339Nano)
+		if restoreErr != "" {
+			snap["restoreError"] = restoreErr
+		}
+	}
+	// Healthy DR requires all independent facts: current encrypted offsite
+	// configuration, a fresh local snapshot, successful replication, and a
+	// restore drill recorded through recordBackupRestoreVerification.
+	if snap["offsiteConfigured"] == true && snap["encrypted"] == true && snap["localLastOK"] == true && snap["stale"] == false && snap["offsite"] == "ok" && snap["restoreVerified"] == true {
+		snap["status"] = "healthy"
 	}
 	return snap
 }

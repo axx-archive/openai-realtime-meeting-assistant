@@ -33,10 +33,13 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -45,7 +48,15 @@ const (
 	defaultMeetingDigestInterval           = 6 * time.Minute
 	meetingDigestRequestTimeout            = 90 * time.Second
 	defaultMeetingDigestMaxMeetingsPerTick = 3
-	meetingDigestMaxOutputTokens           = 1500
+	// max_output_tokens includes hidden reasoning as well as visible JSON. The
+	// old 1500 ceiling repeatedly cut gpt-5.5 off at the wire before it could
+	// close the digest object. A higher ceiling does not pre-spend tokens; it
+	// gives the strict schema enough headroom while the storage clamps still
+	// bound accepted output.
+	meetingDigestMaxOutputTokens         = 4000
+	meetingDigestPoisonFailureThreshold  = 2
+	meetingDigestPoisonSuppressionPasses = 3
+	meetingDigestPoisonCircuitCapacity   = 256
 	// meetingDigestCursorMetadataKey rides every upserted meeting_digest; the
 	// runner reads it off the NEWEST digest to resume after the consumed
 	// window (agent_runner.go unconsumedEntriesAfter).
@@ -68,6 +79,16 @@ const (
 	reflectionMaxSupportIDs   = 12
 	reflectionMaxOutputTokens = 700
 )
+
+type meetingDigestPoisonState struct {
+	failures              int
+	suppressionsRemaining int
+}
+
+var meetingDigestPoisonCircuit = struct {
+	sync.Mutex
+	entries map[string]meetingDigestPoisonState
+}{entries: map[string]meetingDigestPoisonState{}}
 
 // T2 section caps (meeting_digest); every string field is trimForStorage-bound
 // so a whole digest stays ~4KB and rides recall context safely.
@@ -805,6 +826,122 @@ func meetingDigestInstructions() string {
 	}, " ")
 }
 
+// meetingDigestJSONSchema is the Responses API strict-output contract. Strict
+// schemas require every property to be listed in required; empty arrays and
+// strings represent unknown/absent values and the server still clamps them.
+func meetingDigestJSONSchema() *openAIJSONSchema {
+	stringField := func() map[string]any { return map[string]any{"type": "string"} }
+	integerField := func() map[string]any { return map[string]any{"type": "integer", "minimum": 1, "maximum": 5} }
+	objectArray := func(properties map[string]any, required ...string) map[string]any {
+		return map[string]any{
+			"type": "array",
+			"items": map[string]any{
+				"type":                 "object",
+				"properties":           properties,
+				"required":             required,
+				"additionalProperties": false,
+			},
+		}
+	}
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"meetingId": stringField(), "title": stringField(), "day": stringField(),
+			"started": stringField(), "ended": stringField(),
+			"attendees": map[string]any{"type": "array", "items": stringField()},
+			"topics": objectArray(map[string]any{
+				"t": stringField(), "anchor": stringField(), "at": stringField(), "importance": integerField(),
+			}, "t", "anchor", "at", "importance"),
+			"decisions": objectArray(map[string]any{
+				"d": stringField(), "by": stringField(), "status": stringField(), "anchor": stringField(), "at": stringField(), "importance": integerField(),
+			}, "d", "by", "status", "anchor", "at", "importance"),
+			"actionItems": objectArray(map[string]any{
+				"a": stringField(), "owner": stringField(), "status": stringField(), "anchor": stringField(), "at": stringField(), "importance": integerField(),
+			}, "a", "owner", "status", "anchor", "at", "importance"),
+			"openQuestions": objectArray(map[string]any{
+				"q": stringField(), "anchor": stringField(), "at": stringField(), "importance": integerField(),
+			}, "q", "anchor", "at", "importance"),
+			"themes":  map[string]any{"type": "array", "items": stringField()},
+			"aliases": map[string]any{"type": "array", "items": stringField()},
+		},
+		"required":             []string{"meetingId", "title", "day", "started", "ended", "attendees", "topics", "decisions", "actionItems", "openQuestions", "themes", "aliases"},
+		"additionalProperties": false,
+	}
+	return &openAIJSONSchema{Name: "meeting_digest", Description: "One cumulative meeting digest", Schema: schema}
+}
+
+func meetingDigestAttemptHash(model, instructions, input string) string {
+	digest := sha256.Sum256([]byte(model + "\x00" + instructions + "\x00" + input))
+	return hex.EncodeToString(digest[:16])
+}
+
+func meetingDigestCircuitSuppress(attemptHash string) bool {
+	meetingDigestPoisonCircuit.Lock()
+	defer meetingDigestPoisonCircuit.Unlock()
+	state, ok := meetingDigestPoisonCircuit.entries[attemptHash]
+	if !ok || state.suppressionsRemaining <= 0 {
+		return false
+	}
+	state.suppressionsRemaining--
+	meetingDigestPoisonCircuit.entries[attemptHash] = state
+	return true
+}
+
+func meetingDigestCircuitReject(attemptHash string) {
+	meetingDigestPoisonCircuit.Lock()
+	defer meetingDigestPoisonCircuit.Unlock()
+	state := meetingDigestPoisonCircuit.entries[attemptHash]
+	state.failures++
+	if state.failures >= meetingDigestPoisonFailureThreshold {
+		state.suppressionsRemaining = meetingDigestPoisonSuppressionPasses
+	}
+	// The map is deliberately bounded. Removing an arbitrary old key is safe:
+	// it only permits an earlier probe and never advances a data cursor.
+	if len(meetingDigestPoisonCircuit.entries) >= meetingDigestPoisonCircuitCapacity {
+		for key := range meetingDigestPoisonCircuit.entries {
+			delete(meetingDigestPoisonCircuit.entries, key)
+			break
+		}
+	}
+	meetingDigestPoisonCircuit.entries[attemptHash] = state
+}
+
+func meetingDigestCircuitAccept(attemptHash string) bool {
+	meetingDigestPoisonCircuit.Lock()
+	defer meetingDigestPoisonCircuit.Unlock()
+	_, recovering := meetingDigestPoisonCircuit.entries[attemptHash]
+	delete(meetingDigestPoisonCircuit.entries, attemptHash)
+	return recovering
+}
+
+func recordMeetingDigestOutput(outcome, reason, attemptHash, meetingID string, recovery bool) {
+	fields := map[string]any{
+		"outcome":      outcome,
+		"reason":       reason,
+		"attempt_hash": attemptHash,
+		"meeting_id":   meetingID,
+	}
+	if recovery {
+		fields["recovery"] = true
+	}
+	recordEvalEvent(seatMeetingDigest, evalKindDigestOutput, fields)
+	now := time.Now().UTC()
+	switch outcome {
+	case "accepted":
+		recordCapabilityQueue(capabilityRecap, 0, 0, "closed")
+		recordCapabilitySuccess(capabilityRecap, now)
+	case "rejected":
+		recordCapabilityFailure(capabilityRecap, now, &openAIOutputRejection{reason: firstNonEmptyString(reason, "digest_output_rejected")})
+	case "circuit_open":
+		state := capabilityState(capabilityRecap)
+		backlog := 1
+		if state.Backlog != nil && *state.Backlog > 0 {
+			backlog = *state.Backlog
+		}
+		recordCapabilityQueue(capabilityRecap, backlog, 0, "open")
+	}
+}
+
 // buildMeetingDigestInput assembles one meeting's digest prompt: prior digest
 // continuity plus the new brain write-ups. Brain/digest text ONLY — never
 // os_artifact bodies — so the input is blob-free by construction.
@@ -878,16 +1015,39 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 	var newest meetingMemoryEntry
 	for _, group := range groups {
 		prior, hasPrior := current[group.key]
+		instructions := meetingDigestInstructions()
+		generatedAt := group.brains[len(group.brains)-1].CreatedAt.UTC()
+		input := app.buildMeetingDigestInput(group.key, prior, hasPrior, group.brains, generatedAt)
+		attemptHash := meetingDigestAttemptHash(model, instructions, input)
+		if meetingDigestCircuitSuppress(attemptHash) {
+			recordMeetingDigestOutput("circuit_open", "identical_poison_input", attemptHash, group.key, false)
+			log.Errorf("%s circuit suppressed identical rejected input for %s; cursor remains put", meetingDigestAgentName, group.key)
+			return newest, nil
+		}
 		text, err := responder(ctx, apiKey, openAITextRequest{
 			Model:           model,
 			Seat:            seatMeetingDigest,
-			Instructions:    meetingDigestInstructions(),
-			Input:           app.buildMeetingDigestInput(group.key, prior, hasPrior, group.brains, time.Now().UTC()),
+			Workflow:        "meeting_digest",
+			Instructions:    instructions,
+			Input:           input,
 			ReasoningEffort: "low",
 			Verbosity:       "low",
 			MaxOutputTokens: meetingDigestMaxOutputTokens,
+			JSONSchema:      meetingDigestJSONSchema(),
+			ValidateOutput: func(text string) error {
+				var payload meetingDigestPayload
+				return json.Unmarshal([]byte(strings.TrimSpace(text)), &payload)
+			},
 		})
 		if err != nil {
+			if isOpenAIProviderFailure(err) {
+				recordCapabilityFailure(capabilityRecap, time.Now().UTC(), err)
+				return newest, &ambientAgentHoldError{err: err}
+			}
+			if reason, rejected := openAIOutputRejectionReason(err); rejected {
+				meetingDigestCircuitReject(attemptHash)
+				recordMeetingDigestOutput("rejected", reason, attemptHash, group.key, false)
+			}
 			return newest, err
 		}
 		payload, ok := parseMeetingDigest(text)
@@ -896,6 +1056,8 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 			// prior digest stays current, the cursor stays put, and the same
 			// window (plus anything newer) retries next pass.
 			recordEvalEvent(seatMeetingDigest, evalKindParseFailure, map[string]any{"seat": seatMeetingDigest, "model": model})
+			meetingDigestCircuitReject(attemptHash)
+			recordMeetingDigestOutput("rejected", "non_json", attemptHash, group.key, false)
 			log.Errorf("%s returned non-JSON output for %s; keeping the prior digest", meetingDigestAgentName, group.key)
 			return newest, nil
 		}
@@ -988,6 +1150,7 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 		if err != nil {
 			return newest, err
 		}
+		recordMeetingDigestOutput("accepted", "", attemptHash, group.key, meetingDigestCircuitAccept(attemptHash))
 		newest = entry
 	}
 

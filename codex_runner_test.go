@@ -13,6 +13,60 @@ import (
 	"time"
 )
 
+func signedCodexCallbackPayload(token string, payload codexRunnerCallbackPayload) codexRunnerCallbackPayload {
+	payload.Capability = codexRunnerCallbackCapability(token, payload.JobID, payload.ArtifactID, payload.ThreadID)
+	return payload
+}
+
+func TestCodexCallbackBindingAndMonotonicStatusRejectWithoutMutation(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	defer func() { kanbanApp = previousApp }()
+	t.Setenv("BONFIRE_RUNNER_TOKEN", "runner-secret")
+	artifact, _, err := app.createOSArtifactWithMetadata("workflow", "Bound", "queued", "tester", map[string]string{
+		"threadId": "thread-bound", "runnerJobId": "job-bound", "threadStatus": codexJobStatusQueued,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	post := func(payload codexRunnerCallbackPayload) int {
+		body, _ := json.Marshal(payload)
+		req := httptest.NewRequest(http.MethodPost, "/internal/codex/jobs/result", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer runner-secret")
+		recorder := httptest.NewRecorder()
+		internalCodexRunnerResultHandler(recorder, req)
+		return recorder.Code
+	}
+	before, _ := os.ReadFile(meetingMemoryPath())
+	missingJob := signedCodexCallbackPayload("runner-secret", codexRunnerCallbackPayload{ArtifactID: artifact.ID, ThreadID: "thread-bound", Status: codexJobStatusComplete})
+	if got := post(missingJob); got != http.StatusBadRequest {
+		t.Fatalf("missing job id status=%d", got)
+	}
+	wrongCapability := codexRunnerCallbackPayload{JobID: "job-bound", ArtifactID: artifact.ID, ThreadID: "thread-bound", Status: codexJobStatusComplete, Capability: "v1.wrong"}
+	if got := post(wrongCapability); got != http.StatusUnauthorized {
+		t.Fatalf("wrong capability status=%d", got)
+	}
+	after, _ := os.ReadFile(meetingMemoryPath())
+	if !bytes.Equal(before, after) {
+		t.Fatal("rejected callbacks changed durable artifact bytes")
+	}
+
+	complete := signedCodexCallbackPayload("runner-secret", codexRunnerCallbackPayload{JobID: "job-bound", ArtifactID: artifact.ID, ThreadID: "thread-bound", Status: codexJobStatusComplete, Text: "done"})
+	if got := post(complete); got != http.StatusOK {
+		t.Fatalf("complete status=%d", got)
+	}
+	terminalBytes, _ := os.ReadFile(meetingMemoryPath())
+	regression := signedCodexCallbackPayload("runner-secret", codexRunnerCallbackPayload{JobID: "job-bound", ArtifactID: artifact.ID, ThreadID: "thread-bound", Status: codexJobStatusRunning, Text: "overwrite"})
+	if got := post(regression); got != http.StatusConflict {
+		t.Fatalf("terminal regression status=%d", got)
+	}
+	regressedBytes, _ := os.ReadFile(meetingMemoryPath())
+	if !bytes.Equal(terminalBytes, regressedBytes) {
+		t.Fatal("rejected terminal regression changed durable artifact bytes")
+	}
+}
+
 func TestAgentThreadUsesCodexExecWorkerWhenConfigured(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	t.Setenv("BONFIRE_AGENT_THREAD_WORKER", "codex_exec")
@@ -184,14 +238,17 @@ func TestInternalCodexRunnerCallbackUpdatesArtifact(t *testing.T) {
 
 	artifact, _, err := app.createOSArtifactWithMetadata("workflow", "Build it", "queued", "tester", map[string]string{
 		"title":        "Build it",
+		"threadId":     "agent-thread-test",
+		"runnerJobId":  "codex-job-test",
 		"threadStatus": codexJobStatusQueued,
 	})
 	if err != nil {
 		t.Fatalf("createOSArtifactWithMetadata: %v", err)
 	}
-	body, err := json.Marshal(codexRunnerCallbackPayload{
+	body, err := json.Marshal(signedCodexCallbackPayload("runner-secret", codexRunnerCallbackPayload{
 		JobID:      "codex-job-test",
 		ArtifactID: artifact.ID,
+		ThreadID:   "agent-thread-test",
 		Status:     codexJobStatusComplete,
 		Text:       "Vision: finished\n\n## Codex worker evidence\n- Worker: codex exec",
 		Metadata: map[string]string{
@@ -199,7 +256,7 @@ func TestInternalCodexRunnerCallbackUpdatesArtifact(t *testing.T) {
 			"progressPercent": "100",
 			"reviewGate":      "passed",
 		},
-	})
+	}))
 	if err != nil {
 		t.Fatalf("marshal callback: %v", err)
 	}
@@ -237,6 +294,7 @@ func TestInternalCodexRunnerCallbackAppendsRunLog(t *testing.T) {
 
 	postCallback := func(payload codexRunnerCallbackPayload) {
 		t.Helper()
+		payload.Capability = codexRunnerCallbackCapability("runner-secret", payload.JobID, payload.ArtifactID, payload.ThreadID)
 		body, err := json.Marshal(payload)
 		if err != nil {
 			t.Fatalf("marshal callback: %v", err)
@@ -265,6 +323,7 @@ func TestInternalCodexRunnerCallbackAppendsRunLog(t *testing.T) {
 		"threadQuery":  "build the thing",
 		"mode":         "workflow",
 		"threadStatus": codexJobStatusQueued,
+		"runnerJobId":  "codex-job-runlog",
 	})
 	if err != nil {
 		t.Fatalf("createOSArtifactWithMetadata: %v", err)
@@ -272,6 +331,7 @@ func TestInternalCodexRunnerCallbackAppendsRunLog(t *testing.T) {
 	completePayload := codexRunnerCallbackPayload{
 		JobID:      "codex-job-runlog",
 		ArtifactID: artifact.ID,
+		ThreadID:   "agent-thread-runlog-test",
 		Status:     codexJobStatusComplete,
 		Text:       "Vision: finished\n\n## Codex worker evidence\n- Worker: codex exec",
 	}
@@ -296,6 +356,7 @@ func TestInternalCodexRunnerCallbackAppendsRunLog(t *testing.T) {
 		"threadQuery":  "break the thing",
 		"mode":         "workflow",
 		"threadStatus": codexJobStatusQueued,
+		"runnerJobId":  "codex-job-runlog-failed",
 	})
 	if err != nil {
 		t.Fatalf("createOSArtifactWithMetadata: %v", err)
@@ -303,6 +364,7 @@ func TestInternalCodexRunnerCallbackAppendsRunLog(t *testing.T) {
 	postCallback(codexRunnerCallbackPayload{
 		JobID:      "codex-job-runlog-failed",
 		ArtifactID: failedArtifact.ID,
+		ThreadID:   "agent-thread-runlog-failed",
 		Status:     codexJobStatusFailed,
 		Error:      "workspace exploded",
 	})
@@ -329,16 +391,18 @@ func TestInternalCodexRunnerCallbackRejectsStaleJobID(t *testing.T) {
 		"title":        "Build it",
 		"threadStatus": codexJobStatusQueued,
 		"runnerJobId":  "codex-job-current",
+		"threadId":     "agent-thread-stale",
 	})
 	if err != nil {
 		t.Fatalf("createOSArtifactWithMetadata: %v", err)
 	}
-	body, err := json.Marshal(codexRunnerCallbackPayload{
+	body, err := json.Marshal(signedCodexCallbackPayload("runner-secret", codexRunnerCallbackPayload{
 		JobID:      "codex-job-stale",
 		ArtifactID: artifact.ID,
+		ThreadID:   "agent-thread-stale",
 		Status:     codexJobStatusComplete,
 		Text:       "stale result",
-	})
+	}))
 	if err != nil {
 		t.Fatalf("marshal callback: %v", err)
 	}
@@ -453,10 +517,12 @@ func TestRunCodexExecCommandContextBuildsNoninteractiveCommand(t *testing.T) {
 	dir := t.TempDir()
 	recordArgs := filepath.Join(dir, "args.txt")
 	recordPrompt := filepath.Join(dir, "prompt.txt")
+	recordEnv := filepath.Join(dir, "env.txt")
 	fakeCodex := filepath.Join(dir, "codex")
 	script := `#!/bin/sh
-printf '%s\n' "$@" > "$RECORD_ARGS"
-cat > "$RECORD_PROMPT"
+printf '%s\n' "$@" > "__RECORD_ARGS__"
+printf 'HOME=%s\nTMPDIR=%s\n' "$HOME" "$TMPDIR" > "__RECORD_ENV__"
+cat > "__RECORD_PROMPT__"
 previous=""
 for arg in "$@"; do
   if [ "$previous" = "--output-last-message" ]; then
@@ -465,12 +531,13 @@ for arg in "$@"; do
   previous="$arg"
 done
 `
+	script = strings.ReplaceAll(script, "__RECORD_ARGS__", recordArgs)
+	script = strings.ReplaceAll(script, "__RECORD_ENV__", recordEnv)
+	script = strings.ReplaceAll(script, "__RECORD_PROMPT__", recordPrompt)
 	if err := os.WriteFile(fakeCodex, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake codex: %v", err)
 	}
 
-	t.Setenv("RECORD_ARGS", recordArgs)
-	t.Setenv("RECORD_PROMPT", recordPrompt)
 	result, err := runCodexExecCommandContext(context.Background(), codexExecConfig{
 		Command:        fakeCodex,
 		CWD:            dir,
@@ -508,6 +575,19 @@ done
 	}
 	if strings.TrimSpace(string(rawPrompt)) != "hello codex worker" {
 		t.Fatalf("prompt=%q", string(rawPrompt))
+	}
+	rawEnv, err := os.ReadFile(recordEnv)
+	if err != nil {
+		t.Fatalf("read env: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(rawEnv)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("Codex HOME/TMPDIR record malformed: %q", string(rawEnv))
+	}
+	home := strings.TrimPrefix(lines[0], "HOME=")
+	tmp := strings.TrimPrefix(lines[1], "TMPDIR=")
+	if home == tmp || !strings.HasSuffix(home, "/home") || !strings.HasSuffix(tmp, "/tmp") {
+		t.Fatalf("Codex HOME/TMPDIR are not isolated siblings: %q", string(rawEnv))
 	}
 }
 

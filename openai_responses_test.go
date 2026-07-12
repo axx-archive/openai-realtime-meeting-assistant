@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -20,6 +22,75 @@ func openAIResponsesLedgerDir(t *testing.T) string {
 	usageLedgerNow = func() time.Time { return fixed }
 	t.Cleanup(func() { usageLedgerNow = prevNow })
 	return dir
+}
+
+func TestCreateOpenAITextResponseSendsStrictSchemaAndRejectsTruncation(t *testing.T) {
+	dir := openAIResponsesLedgerDir(t)
+	var payload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Write([]byte(`{"status":"incomplete","service_tier":"priority","incomplete_details":{"reason":"max_output_tokens"},"output":[{"type":"message","content":[{"type":"output_text","text":"{\"meetingId\":\"cut"}]}],"usage":{"input_tokens":10,"output_tokens":5}}`))
+	}))
+	defer server.Close()
+	t.Setenv("OPENAI_RESPONSES_BASE_URL", server.URL)
+
+	_, err := createOpenAITextResponseHTTP(context.Background(), "test-key", openAITextRequest{
+		Model:       "gpt-5.5",
+		Seat:        seatMeetingDigest,
+		Workflow:    "meeting_digest",
+		ServiceTier: "priority",
+		Input:       "digest",
+		JSONSchema:  meetingDigestJSONSchema(),
+	})
+	if reason, ok := openAIOutputRejectionReason(err); !ok || reason != "max_output_truncation" {
+		t.Fatalf("error=%v reason=%q ok=%v, want max-output rejection", err, reason, ok)
+	}
+	text, _ := payload["text"].(map[string]any)
+	format, _ := text["format"].(map[string]any)
+	if format["type"] != "json_schema" || format["strict"] != true || format["name"] != "meeting_digest" {
+		t.Fatalf("strict format missing: %#v", format)
+	}
+	if payload["service_tier"] != "priority" {
+		t.Fatalf("requested service tier=%v, want priority", payload["service_tier"])
+	}
+
+	rows := readLedgerLines(t, filepath.Join(dir, "usage-2026-07-11.jsonl"))
+	if len(rows) != 1 || rows[0]["wire_success"] != true || rows[0]["output_failure_reason"] != "max_output_truncation" {
+		t.Fatalf("truncation ledger row=%v", rows)
+	}
+	if _, accepted := rows[0]["accepted_output"]; accepted {
+		t.Fatalf("truncated output was marked accepted: %v", rows[0])
+	}
+	if rows[0]["service_tier"] != "priority" || rows[0]["requested_service_tier"] != "priority" {
+		t.Fatalf("service-tier provenance missing: %v", rows[0])
+	}
+}
+
+func TestCreateOpenAITextResponseBooksWireSuccessBeforeOutputValidation(t *testing.T) {
+	dir := openAIResponsesLedgerDir(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"not json"}]}],"usage":{"input_tokens":7,"output_tokens":2}}`))
+	}))
+	defer server.Close()
+	t.Setenv("OPENAI_RESPONSES_BASE_URL", server.URL)
+
+	_, err := createOpenAITextResponseHTTP(context.Background(), "test-key", openAITextRequest{
+		Model: "gpt-5.5", Seat: seatMeetingDigest, Input: "digest",
+		ValidateOutput: func(text string) error {
+			var value map[string]any
+			return json.Unmarshal([]byte(text), &value)
+		},
+	})
+	if _, ok := openAIOutputRejectionReason(err); !ok {
+		t.Fatalf("error=%v, want accepted-wire output rejection", err)
+	}
+	rows := readLedgerLines(t, filepath.Join(dir, "usage-2026-07-11.jsonl"))
+	if len(rows) != 1 || rows[0]["wire_success"] != true || rows[0]["output_failure_reason"] != "output_validation_error" {
+		t.Fatalf("validation ledger row=%v", rows)
+	}
 }
 
 func TestOpenAIResponsesURLDefaultAndOverride(t *testing.T) {

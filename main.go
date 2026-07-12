@@ -862,7 +862,9 @@ func main() {
 
 	// websocket handler
 	http.HandleFunc("/healthz", healthHandler)
+	http.HandleFunc("/livez", liveHandler)
 	http.HandleFunc("/readyz", readinessHandler)
+	http.HandleFunc("/capabilities", capabilitiesHandler)
 	http.HandleFunc("/websocket", websocketHandler)
 	http.HandleFunc("/auth/", authHandler)
 	http.HandleFunc("/assistant/query", assistantQueryHandler)
@@ -1065,10 +1067,11 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	appAvailable := kanbanApp != nil
-	memoryAvailable := appAvailable && kanbanApp.memory != nil
-	memoryCheck := readinessStateFileCheck(meetingMemoryPath())
-	boardCheck := readinessStateFileCheck(kanbanBoardPath())
+	traffic := trafficReadiness()
+	appAvailable := traffic.appAvailable
+	memoryAvailable := traffic.memoryAvailable
+	memoryCheck := traffic.memoryCheck
+	boardCheck := traffic.boardCheck
 	realtime := map[string]any{"connected": false, "voiceControl": false}
 	if appAvailable {
 		kanbanApp.mu.Lock()
@@ -1077,28 +1080,31 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 		kanbanApp.mu.Unlock()
 	}
 
-	ready := appAvailable && memoryAvailable && readinessCheckOK(memoryCheck) && readinessCheckOK(boardCheck)
+	ready := traffic.ready
 	status := http.StatusOK
 	if !ready {
 		status = http.StatusServiceUnavailable
 	}
 
-	degraded := []string{}
+	capabilities, capabilityDegraded := capabilitySnapshot(time.Now())
+	degraded := append([]string{}, capabilityDegraded...)
 	if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) == "" {
-		degraded = append(degraded, "openai_api_key_missing")
+		degraded = append([]string{"openai_api_key_missing"}, degraded...)
 	}
 
 	writeSystemStatusJSON(w, r, status, map[string]any{
-		"ok":       ready,
-		"service":  "meetingassist",
-		"time":     time.Now().UTC().Format(time.RFC3339Nano),
-		"degraded": degraded,
+		"ok":           ready,
+		"service":      "meetingassist",
+		"time":         time.Now().UTC().Format(time.RFC3339Nano),
+		"degraded":     degraded,
+		"capabilities": capabilities,
 		"checks": map[string]any{
 			"app":         appAvailable,
 			"memoryStore": memoryAvailable,
 			"memoryFile":  memoryCheck,
 			"boardFile":   boardCheck,
 			"realtime":    realtime,
+			"backup":      readinessBackupSnapshot(),
 			"agents": map[string]any{
 				"brain":          readinessAgentSnapshot(meetingBrainAgent()),
 				"board":          readinessAgentSnapshot(meetingBoardAgent()),
@@ -1765,7 +1771,8 @@ func assistantThreadsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	thread, err := kanbanApp.launchAgentThreadWithOrigin(payload.Mode, payload.Query, user.Name, map[string]string{
-		"originKind": agentThreadOriginTool,
+		"originKind":  agentThreadOriginTool,
+		"requestedBy": normalizeAccountEmail(user.Email),
 	})
 	if err != nil {
 		writeAuthError(w, http.StatusBadRequest, err.Error())

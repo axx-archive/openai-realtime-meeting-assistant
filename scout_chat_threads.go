@@ -661,8 +661,9 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 			originKind = agentThreadOriginChannel
 		}
 		agentThread, err := app.launchAgentThreadWithOrigin(mode, text, user.Name, map[string]string{
-			"originKind": originKind,
-			"originId":   threadID,
+			"originKind":  originKind,
+			"originId":    threadID,
+			"requestedBy": normalizeAccountEmail(user.Email),
 		})
 		if err != nil {
 			return nil, err

@@ -499,11 +499,13 @@ func (idx *embeddingIndex) queryEmbedding(query string) []float32 {
 	if err != nil || len(vectors) == 0 || len(vectors[0]) != idx.dims {
 		if err != nil {
 			idx.queryFailUntil.Store(time.Now().Add(embeddingQueryFailureCooldown).UnixNano())
+			recordCapabilityFailure(capabilityEmbedding, time.Now().UTC(), err)
 			log.Warnf("embedding maintainer: query embed failed (semantic lane skipped ~%s): %v", embeddingQueryFailureCooldown, err)
 		}
 		return nil
 	}
 	idx.queryFailUntil.Store(0) // success closes any open breaker
+	recordCapabilitySuccess(capabilityEmbedding, time.Now().UTC())
 	vec := vectors[0]
 	idx.queryMu.Lock()
 	idx.queryCache[query] = vec
@@ -1009,7 +1011,12 @@ func (app *kanbanBoardApp) runEmbeddingMaintainerOnce(idx *embeddingIndex) error
 	if embedded > 0 || dropped > 0 {
 		log.Infof("embedding maintainer: embedded %d, dropped %d; index now %d", embedded, dropped, idx.size())
 	}
-	return err
+	if err != nil {
+		recordCapabilityFailure(capabilityEmbedding, time.Now().UTC(), err)
+		return err
+	}
+	recordCapabilitySuccess(capabilityEmbedding, time.Now().UTC())
+	return nil
 }
 
 // ---------------------------------------------------------------------------

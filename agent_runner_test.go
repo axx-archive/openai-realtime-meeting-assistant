@@ -275,6 +275,32 @@ func TestAmbientAgentFailureBackoffHalvingAndDeadLetter(t *testing.T) {
 	}
 }
 
+func TestAmbientAgentProviderFailureHoldsEveryProducerCursor(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	appendTestTranscript(t, app, "provider-held-transcript", "This raw transcript must survive a provider outage.")
+	var produced [][]string
+	agent := newTestAmbientAgent(&produced)
+	agent.defaultMinBatch = 1
+	agent.produce = func(*kanbanBoardApp, context.Context, string, []meetingMemoryEntry, openAITextResponder) (meetingMemoryEntry, error) {
+		return meetingMemoryEntry{}, &openAIProviderFailure{err: fmt.Errorf("provider unavailable")}
+	}
+	key := ambientAgentKey(agent.name, officeRoomID)
+	for attempt := 0; attempt < ambientAgentMaxWindowAttempts+2; attempt++ {
+		app.fireAmbientAgentPass(agent, "test-key", 1, officeRoomID)
+		app.mu.Lock()
+		if failure := app.agentFailures[key]; failure != nil {
+			failure.backoffUntil = time.Now().Add(-time.Second)
+		}
+		app.mu.Unlock()
+	}
+	if baseline := app.ambientAgentBaselineID(key); baseline == "provider-held-transcript" {
+		t.Fatalf("provider outage advanced shared ambient baseline: %q", baseline)
+	}
+	if deadLetters := app.memory.entriesOfKind(meetingMemoryKindDeadLetter, 0); len(deadLetters) != 0 {
+		t.Fatalf("provider outage dead-lettered non-digest input: %+v", deadLetters)
+	}
+}
+
 func TestAmbientAgentRunnerBaselineSkipsHistory(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	var produced [][]string

@@ -187,6 +187,8 @@ func TestCodexCallbackAdvancesLinkedCardAndRetriesAreNoops(t *testing.T) {
 		"title":        "Coyote channel audit",
 		"threadStatus": codexJobStatusQueued,
 		"boardCardId":  card.ID,
+		"threadId":     "agent-thread-linkage",
+		"runnerJobId":  "codex-job-linkage",
 	})
 	if err != nil {
 		t.Fatalf("createOSArtifactWithMetadata: %v", err)
@@ -194,12 +196,13 @@ func TestCodexCallbackAdvancesLinkedCardAndRetriesAreNoops(t *testing.T) {
 
 	post := func() *httptest.ResponseRecorder {
 		t.Helper()
-		body, err := json.Marshal(codexRunnerCallbackPayload{
+		body, err := json.Marshal(signedCodexCallbackPayload("runner-secret", codexRunnerCallbackPayload{
 			JobID:      "codex-job-linkage",
 			ArtifactID: artifact.ID,
+			ThreadID:   "agent-thread-linkage",
 			Status:     codexJobStatusComplete,
 			Text:       "Vision: audit finished\n\n## Codex worker evidence\n- Worker: codex exec",
-		})
+		}))
 		if err != nil {
 			t.Fatalf("marshal callback: %v", err)
 		}
@@ -244,18 +247,23 @@ func TestCodexCallbackFailureBlocksAndMissingCardIsNoop(t *testing.T) {
 		"title":        "Nimbus deck rework",
 		"threadStatus": codexJobStatusQueued,
 		"boardCardId":  card.ID,
+		"threadId":     "agent-thread-failed",
+		"runnerJobId":  "codex-job-failed",
 	})
 	if err != nil {
 		t.Fatalf("createOSArtifactWithMetadata: %v", err)
 	}
 	postResult := func(artifactID string, status string) *httptest.ResponseRecorder {
 		t.Helper()
-		body, err := json.Marshal(codexRunnerCallbackPayload{
+		artifact, _ := app.osArtifactByID(artifactID)
+		payload := signedCodexCallbackPayload("runner-secret", codexRunnerCallbackPayload{
 			JobID:      "codex-job-" + status,
 			ArtifactID: artifactID,
+			ThreadID:   artifact.Metadata["threadId"],
 			Status:     status,
 			Text:       "worker report",
 		})
+		body, err := json.Marshal(payload)
 		if err != nil {
 			t.Fatalf("marshal callback: %v", err)
 		}
@@ -278,6 +286,8 @@ func TestCodexCallbackFailureBlocksAndMissingCardIsNoop(t *testing.T) {
 		"title":        "Orphaned deliverable",
 		"threadStatus": codexJobStatusQueued,
 		"boardCardId":  "card-deleted-long-ago",
+		"threadId":     "agent-thread-complete",
+		"runnerJobId":  "codex-job-complete",
 	})
 	if err != nil {
 		t.Fatalf("create orphan artifact: %v", err)

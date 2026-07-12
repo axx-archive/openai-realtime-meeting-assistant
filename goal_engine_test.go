@@ -313,6 +313,29 @@ func TestGoalLaunchEnforcesPerUserInFlightCap(t *testing.T) {
 	}
 }
 
+func TestGoalLaunchPreservesDisplayNameAndCanonicalPrincipal(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	installFakeResponder(t, goalResponderRoutes{})
+	thread, err := app.launchGoalThread(goalLaunchSpec{
+		Objective: "Prepare the company brief",
+		CreatedBy: "AJ",
+		Origin:    map[string]string{"requestedBy": "AJ@Shareability.com"},
+	})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	plan := mustGoalPlan(t, app, thread.Artifact.ID)
+	if plan.CreatedBy != "AJ" || plan.RequestedBy != "aj@shareability.com" {
+		t.Fatalf("goal identity display=%q principal=%q", plan.CreatedBy, plan.RequestedBy)
+	}
+	if got := thread.Artifact.Metadata["requestedBy"]; got != "aj@shareability.com" {
+		t.Fatalf("artifact canonical principal=%q", got)
+	}
+	if got := goalPlanRequestedBy(plan); got != "aj@shareability.com" {
+		t.Fatalf("child principal=%q", got)
+	}
+}
+
 // The cap is check-then-append over the persisted store, so it must hold under
 // concurrency: cap+2 simultaneous launches from one account (differently-cased
 // emails — same bucket) must admit at most cap goals. Without the per-email
@@ -775,13 +798,20 @@ func waitForArtifactMeta(t *testing.T, app *kanbanBoardApp, id string, key strin
 
 func postCodexCallback(t *testing.T, artifactID string, jobID string, status string) {
 	t.Helper()
-	body, err := json.Marshal(codexRunnerCallbackPayload{
+	artifact, ok := kanbanApp.osArtifactByID(artifactID)
+	if !ok {
+		t.Fatalf("artifact %s not found", artifactID)
+	}
+	threadID := artifact.Metadata["threadId"]
+	payload := signedCodexCallbackPayload("runner-secret", codexRunnerCallbackPayload{
 		JobID:      jobID,
 		ArtifactID: artifactID,
+		ThreadID:   threadID,
 		Status:     status,
 		Text:       "Vision: shipped\n\n## Codex worker evidence\n- Worker: codex exec",
 		Metadata:   map[string]string{"runnerId": "test-runner"},
 	})
+	body, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("marshal callback: %v", err)
 	}

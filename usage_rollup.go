@@ -100,6 +100,9 @@ type usageRollupCell struct {
 	Errors              int64   `json:"errors,omitempty"`
 	Fallbacks           int64   `json:"fallbacks,omitempty"`
 	PriceMissing        int64   `json:"price_missing,omitempty"`
+	WireSuccesses       int64   `json:"wire_successes,omitempty"`
+	AcceptedOutputs     int64   `json:"accepted_outputs,omitempty"`
+	RejectedOutputs     int64   `json:"rejected_outputs,omitempty"`
 }
 
 // usageRollupEvalCounters folds the eval/proposal/workflow event funnel for
@@ -119,6 +122,10 @@ type usageRollupEvalCounters struct {
 	ProposalsResolved  int64 `json:"proposals_resolved"`
 	ProposalsLaunched  int64 `json:"proposals_launched"`
 	WorkflowLaunches   int64 `json:"workflow_launches"`
+	DigestAccepted     int64 `json:"digest_accepted"`
+	DigestRejected     int64 `json:"digest_rejected"`
+	DigestSuppressed   int64 `json:"digest_suppressed"`
+	DigestRecovered    int64 `json:"digest_recovered"`
 }
 
 // usageRollupDay is one UTC day of books: totals plus seat×model splits plus
@@ -211,6 +218,14 @@ func foldUsageFileInto(day *usageRollupDay, path string) {
 			if entry.PriceMissing {
 				cell.PriceMissing++
 			}
+			if entry.WireSuccess {
+				cell.WireSuccesses++
+				if entry.AcceptedOutput {
+					cell.AcceptedOutputs++
+				} else {
+					cell.RejectedOutputs++
+				}
+			}
 		}
 	})
 }
@@ -251,6 +266,18 @@ func foldEvalFileInto(day *usageRollupDay, path string) {
 				}
 			case evalKindCorrectionHit:
 				eval.CorrectionHits++
+			case evalKindDigestOutput:
+				switch outcome, _ := event.Fields["outcome"].(string); outcome {
+				case "accepted":
+					eval.DigestAccepted++
+					if recovery, _ := event.Fields["recovery"].(bool); recovery {
+						eval.DigestRecovered++
+					}
+				case "rejected":
+					eval.DigestRejected++
+				case "circuit_open":
+					eval.DigestSuppressed++
+				}
 			}
 		case telemetryTypeProposal:
 			switch event.Kind {

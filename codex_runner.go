@@ -37,6 +37,7 @@ type codexExecConfig struct {
 	Search         bool
 	Ephemeral      bool
 	SkipGitCheck   bool
+	ScratchDir     string
 }
 
 type codexExecResult struct {
@@ -326,7 +327,26 @@ func appendCodexWorkerEvidence(output string, cfg codexExecConfig) string {
 }
 
 func runCodexExecCommandContext(ctx context.Context, cfg codexExecConfig, prompt string) (result codexExecResult, err error) {
-	outputFile, err := os.CreateTemp("", "bonfire-codex-thread-*.md")
+	scratchDir := strings.TrimSpace(cfg.ScratchDir)
+	if scratchDir == "" {
+		var err error
+		scratchDir, err = os.MkdirTemp("", "bonfire-codex-job-*")
+		if err != nil {
+			return codexExecResult{}, fmt.Errorf("create Codex scratch directory: %w", err)
+		}
+		defer os.RemoveAll(scratchDir)
+	} else if err := os.MkdirAll(scratchDir, 0o700); err != nil {
+		return codexExecResult{}, fmt.Errorf("create Codex scratch directory: %w", err)
+	}
+	homeDir := filepath.Join(scratchDir, "home")
+	tmpDir := filepath.Join(scratchDir, "tmp")
+	if err := os.MkdirAll(homeDir, 0o700); err != nil {
+		return codexExecResult{}, fmt.Errorf("create Codex home directory: %w", err)
+	}
+	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
+		return codexExecResult{}, fmt.Errorf("create Codex temp directory: %w", err)
+	}
+	outputFile, err := os.CreateTemp(scratchDir, "last-message-*.md")
 	if err != nil {
 		return codexExecResult{}, fmt.Errorf("create Codex output file: %w", err)
 	}
@@ -367,6 +387,8 @@ func runCodexExecCommandContext(ctx context.Context, cfg codexExecConfig, prompt
 	command.Dir = cfg.CWD
 	command.Stdin = strings.NewReader(prompt)
 	command.Env = codexExecEnvironment(os.Environ())
+	command.Env = setEnvValue(command.Env, "HOME", homeDir)
+	command.Env = setEnvValue(command.Env, "TMPDIR", tmpDir)
 
 	var stdout cappedBuffer
 	var stderr cappedBuffer
@@ -422,14 +444,29 @@ func runCodexExecCommandContext(ctx context.Context, cfg codexExecConfig, prompt
 }
 
 func codexExecEnvironment(base []string) []string {
-	if envValue(base, "CODEX_API_KEY") != "" {
-		return base
+	allowed := []string{"PATH", "HOME", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"}
+	result := make([]string, 0, len(allowed)+1)
+	for _, name := range allowed {
+		if value := envValue(base, name); value != "" {
+			result = append(result, name+"="+value)
+		}
 	}
-	openAIKey := envValue(base, "OPENAI_API_KEY")
-	if strings.TrimSpace(openAIKey) == "" {
-		return base
+	key := firstNonEmptyString(envValue(base, "CODEX_API_KEY"), envValue(base, "OPENAI_API_KEY"))
+	if key != "" {
+		result = append(result, "CODEX_API_KEY="+key)
 	}
-	return append(base, "CODEX_API_KEY="+openAIKey)
+	return result
+}
+
+func setEnvValue(env []string, name, value string) []string {
+	prefix := name + "="
+	filtered := env[:0]
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, prefix) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return append(filtered, prefix+value)
 }
 
 func envValue(env []string, name string) string {

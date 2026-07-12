@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
@@ -25,6 +27,7 @@ const (
 	codexJobStatusComplete         = "complete"
 	codexJobStatusFailed           = "failed"
 	codexJobStatusApprovalRequired = "approval_required"
+	codexJobStatusCancelled        = "cancelled"
 
 	defaultCodexRunnerPollInterval = 2 * time.Second
 	defaultCodexRunnerStaleAfter   = 2 * time.Minute
@@ -62,6 +65,7 @@ type codexRunnerCallbackPayload struct {
 	Error          string            `json:"error,omitempty"`
 	RunnerEvidence string            `json:"runner_evidence,omitempty"`
 	Metadata       map[string]string `json:"metadata,omitempty"`
+	Capability     string            `json:"capability"`
 }
 
 func codexRunnerQueuePath() string {
@@ -95,6 +99,12 @@ func (store *codexRunnerJobStore) enqueue(job codexRunnerJob) (codexRunnerJob, e
 	}
 	if strings.TrimSpace(job.Status) == "" {
 		job.Status = codexJobStatusQueued
+	}
+	if !validCodexJobStatus(job.Status) || job.Status != codexJobStatusQueued {
+		return codexRunnerJob{}, fmt.Errorf("new Codex runner job must have queued status")
+	}
+	if strings.TrimSpace(job.ArtifactID) == "" || strings.TrimSpace(job.ThreadID) == "" {
+		return codexRunnerJob{}, fmt.Errorf("Codex runner artifact_id and thread_id are required")
 	}
 	if job.CreatedAt.IsZero() {
 		job.CreatedAt = time.Now().UTC()
@@ -162,7 +172,51 @@ func (store *codexRunnerJobStore) update(job codexRunnerJob) error {
 	if strings.TrimSpace(job.ID) == "" {
 		return fmt.Errorf("Codex runner job id is required")
 	}
+	if !validCodexJobStatus(job.Status) {
+		return fmt.Errorf("invalid Codex runner job status %q", job.Status)
+	}
+	if current, err := store.read(filepath.Base(store.jobPath(job.ID))); err == nil {
+		if !codexJobStatusTransitionAllowed(current.Status, job.Status) {
+			return fmt.Errorf("Codex runner job status cannot transition from %s to %s", current.Status, job.Status)
+		}
+	}
 	return writeJSONFileAtomically(store.jobPath(job.ID), "Codex runner job", job)
+}
+
+func validCodexJobStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case codexJobStatusQueued, codexJobStatusRunning, codexJobStatusComplete, codexJobStatusFailed, codexJobStatusApprovalRequired, codexJobStatusCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+func codexJobStatusTerminal(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case codexJobStatusComplete, codexJobStatusFailed, codexJobStatusApprovalRequired, codexJobStatusCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+func codexJobStatusTransitionAllowed(from, to string) bool {
+	from, to = strings.ToLower(strings.TrimSpace(from)), strings.ToLower(strings.TrimSpace(to))
+	if from == to {
+		return true
+	}
+	if codexJobStatusTerminal(from) {
+		return false
+	}
+	switch from {
+	case codexJobStatusQueued:
+		return to == codexJobStatusRunning || codexJobStatusTerminal(to)
+	case codexJobStatusRunning:
+		return codexJobStatusTerminal(to)
+	default:
+		return false
+	}
 }
 
 func (store *codexRunnerJobStore) read(filename string) (*codexRunnerJob, error) {
@@ -305,6 +359,7 @@ func (app *kanbanBoardApp) enqueueCodexAgentThreadJob(thread scoutAgentThread, a
 	}
 
 	metadata["runnerJobId"] = job.ID
+	metadata["threadId"] = job.ThreadID
 	metadata["runnerQueuePath"] = store.dir
 	metadata["createdAt"] = job.CreatedAt.Format(time.RFC3339Nano)
 
@@ -424,6 +479,8 @@ func runCodexRunnerLoop(ctx context.Context) error {
 func processCodexRunnerJob(ctx context.Context, store *codexRunnerJobStore, job codexRunnerJob) {
 	authority := normalizeCodexJobAuthority(job.Authority)
 	cfg := codexExecConfigForAuthority(codexExecConfigFromEnv(), authority, job.Mode)
+	cfg.ScratchDir = filepath.Join(getenvDefault("BONFIRE_CODEX_SCRATCH_ROOT", "/runner-data/jobs"), filepath.Base(job.ID))
+	defer os.RemoveAll(cfg.ScratchDir)
 	now := time.Now().UTC()
 	runningMetadata := map[string]string{
 		"status":              codexJobStatusRunning,
@@ -457,6 +514,19 @@ func processCodexRunnerJob(ctx context.Context, store *codexRunnerJobStore, job 
 	job.Metadata = mergeStringMaps(job.Metadata, runningMetadata)
 	if err := store.update(job); err != nil {
 		log.Errorf("Codex runner could not persist running job %s: %v", job.ID, err)
+	}
+	if authority == codexJobAuthorityExternalWrite && !boolEnv("BONFIRE_CODEX_EXTERNAL_WRITE_ENABLED") {
+		err := fmt.Errorf("external runner execution is disabled; set BONFIRE_CODEX_EXTERNAL_WRITE_ENABLED only for an approved shipping window")
+		job.Status = codexJobStatusApprovalRequired
+		job.CompletedAt = time.Now().UTC()
+		job.Error = err.Error()
+		job.Metadata = mergeStringMaps(job.Metadata, map[string]string{
+			"status": codexJobStatusApprovalRequired, "threadStatus": codexJobStatusApprovalRequired,
+			"goalStatus": "approval_required", "reviewGate": "approval_required", "error": err.Error(),
+		})
+		_ = store.update(job)
+		_ = sendCodexRunnerCallback(ctx, codexRunnerCallbackPayload{JobID: job.ID, ArtifactID: job.ArtifactID, ThreadID: job.ThreadID, Status: job.Status, Error: job.Error, Metadata: job.Metadata})
+		return
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
@@ -674,6 +744,8 @@ func codexWorkspaceHasGit(cwd string) bool {
 }
 
 func sendCodexRunnerCallback(ctx context.Context, payload codexRunnerCallbackPayload) error {
+	callbackCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	callbackURL := strings.TrimSpace(os.Getenv("BONFIRE_RUNNER_CALLBACK_URL"))
 	if callbackURL == "" {
 		callbackURL = "http://meetingassist:3000/internal/codex/jobs/result"
@@ -682,11 +754,12 @@ func sendCodexRunnerCallback(ctx context.Context, payload codexRunnerCallbackPay
 	if token == "" {
 		return fmt.Errorf("BONFIRE_RUNNER_TOKEN is required for Codex runner callbacks")
 	}
+	payload.Capability = codexRunnerCallbackCapability(token, payload.JobID, payload.ArtifactID, payload.ThreadID)
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("encode Codex runner callback: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, callbackURL, bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(callbackCtx, http.MethodPost, callbackURL, bytes.NewReader(raw))
 	if err != nil {
 		return fmt.Errorf("create Codex runner callback request: %w", err)
 	}
@@ -701,6 +774,16 @@ func sendCodexRunnerCallback(ctx context.Context, payload codexRunnerCallbackPay
 		return fmt.Errorf("Codex runner callback returned %s", resp.Status)
 	}
 	return nil
+}
+
+func codexRunnerCallbackCapability(token, jobID, artifactID, threadID string) string {
+	mac := hmac.New(sha256.New, []byte(strings.TrimSpace(token)))
+	for _, value := range []string{jobID, artifactID, threadID} {
+		value = strings.TrimSpace(value)
+		_, _ = fmt.Fprintf(mac, "%d:", len(value))
+		_, _ = mac.Write([]byte(value))
+	}
+	return fmt.Sprintf("v1.%x", mac.Sum(nil))
 }
 
 func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
@@ -739,6 +822,22 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	callbackJobID := strings.TrimSpace(payload.JobID)
+	callbackThreadID := strings.TrimSpace(payload.ThreadID)
+	status := strings.ToLower(strings.TrimSpace(payload.Status))
+	if callbackJobID == "" || callbackThreadID == "" {
+		writeSystemStatusJSON(w, r, http.StatusBadRequest, map[string]any{"ok": false, "error": "job_id and thread_id are required"})
+		return
+	}
+	if !validCodexJobStatus(status) || status == codexJobStatusQueued {
+		writeSystemStatusJSON(w, r, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid runner status"})
+		return
+	}
+	expectedCapability := codexRunnerCallbackCapability(strings.TrimSpace(os.Getenv("BONFIRE_RUNNER_TOKEN")), callbackJobID, artifactID, callbackThreadID)
+	if subtle.ConstantTimeCompare([]byte(strings.TrimSpace(payload.Capability)), []byte(expectedCapability)) != 1 {
+		writeSystemStatusJSON(w, r, http.StatusUnauthorized, map[string]any{"ok": false, "error": "runner capability does not match job binding"})
+		return
+	}
 	existing, exists := kanbanApp.osArtifactByID(artifactID)
 	if !exists {
 		writeSystemStatusJSON(w, r, http.StatusNotFound, map[string]any{
@@ -748,12 +847,20 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	expectedJobID := strings.TrimSpace(existing.Metadata["runnerJobId"])
-	callbackJobID := strings.TrimSpace(payload.JobID)
-	if expectedJobID != "" && callbackJobID != "" && callbackJobID != expectedJobID {
+	expectedThreadID := strings.TrimSpace(existing.Metadata["threadId"])
+	if expectedJobID == "" || expectedThreadID == "" || callbackJobID != expectedJobID || callbackThreadID != expectedThreadID {
 		writeSystemStatusJSON(w, r, http.StatusConflict, map[string]any{
 			"ok":    false,
 			"error": "runner job does not match artifact",
 		})
+		return
+	}
+	currentStatus := strings.ToLower(strings.TrimSpace(existing.Metadata["threadStatus"]))
+	if currentStatus == "error" {
+		currentStatus = codexJobStatusFailed
+	}
+	if currentStatus != "" && !codexJobStatusTransitionAllowed(currentStatus, status) {
+		writeSystemStatusJSON(w, r, http.StatusConflict, map[string]any{"ok": false, "error": "runner status transition is not monotonic"})
 		return
 	}
 
@@ -761,10 +868,8 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 		"runnerJobId": payload.JobID,
 		"codexRunner": "callback",
 	}
-	if payload.Status != "" {
-		metadata["status"] = payload.Status
-		metadata["threadStatus"] = payload.Status
-	}
+	metadata["status"] = status
+	metadata["threadStatus"] = status
 	if payload.Error != "" {
 		metadata["error"] = payload.Error
 	}
@@ -773,6 +878,12 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 			metadata[key] = value
 		}
 	}
+	// Callback-supplied metadata is descriptive only. It cannot rewrite the
+	// capability-bound identity or the validated state machine fields.
+	metadata["runnerJobId"] = callbackJobID
+	metadata["threadId"] = callbackThreadID
+	metadata["status"] = status
+	metadata["threadStatus"] = status
 	text := strings.TrimSpace(payload.Text)
 	if text == "" {
 		text = existing.Text
@@ -1083,6 +1194,7 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 		// is still safe for THIS user (GATE-FINDINGS G2); everything else drops
 		// to originKind tool, which keeps the creator-notification behavior.
 		origin := kanbanApp.rerunOriginForUser(artifact, user.Email)
+		origin["requestedBy"] = normalizeAccountEmail(user.Email)
 		thread, err := kanbanApp.launchAgentThreadWithOrigin(mode, query, user.Name, origin)
 		if err != nil {
 			writeAuthError(w, http.StatusBadRequest, err.Error())

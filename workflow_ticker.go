@@ -87,6 +87,7 @@ func recordWorkflowTickerPass(now time.Time, launched int) {
 	workflowTickerLastPass = now
 	workflowTickerLastCount = launched
 	workflowTickerStatMu.Unlock()
+	recordCapabilitySuccess(capabilityWorkflows, now.UTC())
 }
 
 // readinessWorkflowTickerSnapshot exposes the ticker's config + last-pass state

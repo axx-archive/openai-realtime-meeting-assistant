@@ -2012,6 +2012,28 @@ func (app *kanbanBoardApp) boardContextJSON() string {
 	return string(raw)
 }
 
+type orchestratorToolPolicy struct {
+	RequiredAuthority string
+	SideEffect        string
+}
+
+// orchestratorToolPolicies is the code-level capability registry adjacent to
+// the master Kanban tool definitions. Tools absent here are never exposed to
+// the orchestrator; every present tool declares both authority and effects.
+var orchestratorToolPolicies = map[string]orchestratorToolPolicy{
+	"create_ticket": {codexJobAuthorityWorkspaceWrite, "board_write"}, "move_ticket": {codexJobAuthorityWorkspaceWrite, "board_write"},
+	"add_tags": {codexJobAuthorityWorkspaceWrite, "board_write"}, "add_key_date": {codexJobAuthorityWorkspaceWrite, "board_write"},
+	"remove_key_dates": {codexJobAuthorityWorkspaceWrite, "board_write"}, "update_ticket": {codexJobAuthorityWorkspaceWrite, "board_write"},
+	"create_artifact": {codexJobAuthorityWorkspaceWrite, "artifact_write"}, "update_artifact": {codexJobAuthorityWorkspaceWrite, "artifact_write"},
+	"answer_memory_question": {codexJobAuthorityReadOnly, "read"}, "note_for_the_record": {codexJobAuthorityWorkspaceWrite, "memory_write"},
+	"cross_meeting_briefing": {codexJobAuthorityReadOnly, "read"}, "get_meeting_detail": {codexJobAuthorityReadOnly, "read"},
+	"create_package": {codexJobAuthorityWorkspaceWrite, "package_write"}, "attach_to_package": {codexJobAuthorityWorkspaceWrite, "package_write"},
+	"advance_package_stage": {codexJobAuthorityWorkspaceWrite, "package_write"}, "send_notification": {codexJobAuthorityWorkspaceWrite, "notification_write"},
+	"do_nothing": {codexJobAuthorityReadOnly, "none"}, "company_financial_snapshot": {codexJobAuthorityReadOnly, "external_read"},
+	"financial_comps": {codexJobAuthorityReadOnly, "external_read"}, "fiscal_api_docs": {codexJobAuthorityReadOnly, "external_read"},
+	"fiscal_data_query": {codexJobAuthorityReadOnly, "external_read"},
+}
+
 func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 	statusProperty := map[string]any{
 		"type":        "string",
@@ -2786,9 +2808,11 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 
 	switch event.Type {
 	case "session.created", "session.updated":
+		recordCapabilitySuccess(capabilityScout, time.Now().UTC())
 		broadcastAssistantEvent("status", "OpenAI Realtime session configured", map[string]any{"eventType": event.Type})
 	case "error":
 		if event.Error != nil {
+			recordCapabilityFailure(capabilityScout, time.Now().UTC(), fmt.Errorf("%s", firstNonEmptyString(event.Error.Code, "realtime_error")))
 			log.Errorf("OpenAI Realtime error code=%s message=%s", event.Error.Code, event.Error.Message)
 			if event.Error.Code == "session_expired" {
 				broadcastAssistantEvent("status", "OpenAI Realtime session expired; reconnecting", nil)
@@ -2877,6 +2901,11 @@ func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
 		hadFunctionCall := false
 		if event.Response != nil {
 			interrupted := isInterruptedRealtimeResponseStatus(event.Response.Status)
+			if interrupted && !strings.EqualFold(strings.TrimSpace(event.Response.Status), "cancelled") {
+				recordCapabilityFailure(capabilityScout, time.Now().UTC(), fmt.Errorf("realtime response %s", strings.TrimSpace(event.Response.Status)))
+			} else {
+				recordCapabilitySuccess(capabilityScout, time.Now().UTC())
+			}
 			for _, outputItem := range event.Response.Output {
 				if outputItem.Type == "function_call" {
 					hadFunctionCall = true

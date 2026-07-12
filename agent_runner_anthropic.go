@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/mail"
 	"os"
 	"strconv"
 	"strings"
@@ -850,7 +851,7 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 		}
 
 		system := r.systemPrompt(job)
-		tools := r.tools(job.Mode)
+		tools := r.toolsForJob(job)
 		messages := []anthropicMessage{{
 			Role:    "user",
 			Content: []json.RawMessage{anthropicTextBlock(r.userPrompt(job))},
@@ -964,6 +965,10 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 						args["draft"] = true
 					}
 					if block.Name == "note_for_the_record" {
+						if err := authorizeOrchestratorTool(job, block.Name); err != nil {
+							toolResults = append(toolResults, anthropicToolResultBlock(block.ID, err.Error(), true))
+							continue
+						}
 						// The deliberate-write path is author-certain: the thread's
 						// requester is the author, and the thread + tool-use id scope
 						// the idempotency id so a retried turn files the note once.
@@ -972,6 +977,10 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 						result, _, toolErr := r.app.noteForTheRecordTool(args, job.RequestedBy, "agent-thread:"+job.ThreadID+":"+block.ID)
 						content, isError := anthropicToolResultContent(result, toolErr)
 						toolResults = append(toolResults, anthropicToolResultBlock(block.ID, content, isError))
+						continue
+					}
+					if err := authorizeOrchestratorTool(job, block.Name); err != nil {
+						toolResults = append(toolResults, anthropicToolResultBlock(block.ID, err.Error(), true))
 						continue
 					}
 					result, changed, toolErr := r.app.applyToolCallArgs(block.Name, args)
@@ -1125,46 +1134,30 @@ func (r *anthropicFableRunner) userPrompt(job AgentJob) string {
 	return builder.String()
 }
 
-// orchestratorToolAllowlist is the curated subset of kanbanTools() the
-// orchestrator may call in-process. It excludes UI/voice-only tools
-// (control_app, set_voice_control, grill sessions) and recursive thread launches.
-var orchestratorToolAllowlist = map[string]bool{
-	"create_ticket":          true,
-	"move_ticket":            true,
-	"add_tags":               true,
-	"add_key_date":           true,
-	"remove_key_dates":       true,
-	"update_ticket":          true,
-	"create_artifact":        true,
-	"update_artifact":        true,
-	"answer_memory_question": true,
-	// Deliberate-write path (memory study 2.1): a chat/agent thread can file an
-	// author-certain "for the record" note. Intercepted in the turn loop so the
-	// author (job.RequestedBy) and thread scope ride through, not the shared
-	// dispatch — hence not routed via applyToolCallArgs.
-	"note_for_the_record": true,
-	// Cross-meeting recall (Track-2 Wave 6): read-only, bounded output.
-	"cross_meeting_briefing": true,
-	"get_meeting_detail":     true,
-	"create_package":         true,
-	"attach_to_package":      true,
-	"advance_package_stage":  true,
-	"send_notification":      true,
-	"do_nothing":             true,
-	// fiscal.ai financial grounding (read-only; keyless degrades to a clear
-	// not-configured payload). The orchestrator gets all four, including the
-	// docs + raw-query pair the voice surfaces exclude.
-	"company_financial_snapshot": true,
-	"financial_comps":            true,
-	"fiscal_api_docs":            true,
-	"fiscal_data_query":          true,
-}
+// Retained as a derived compatibility view for callers/tests that only need
+// membership. Authorization must use orchestratorToolPolicies.
+var orchestratorToolAllowlist = func() map[string]bool {
+	allowlist := make(map[string]bool, len(orchestratorToolPolicies))
+	for name := range orchestratorToolPolicies {
+		allowlist[name] = true
+	}
+	return allowlist
+}()
 
 func (r *anthropicFableRunner) tools(mode string) []anthropicTool {
+	return r.toolsForAuthority(mode, codexJobAuthorityWorkspaceWrite)
+}
+
+func (r *anthropicFableRunner) toolsForJob(job AgentJob) []anthropicTool {
+	return r.toolsForAuthority(job.Mode, job.Authority)
+}
+
+func (r *anthropicFableRunner) toolsForAuthority(mode, authority string) []anthropicTool {
 	var tools []anthropicTool
 	for _, tool := range r.app.kanbanTools() {
 		name := asString(tool["name"])
-		if !orchestratorToolAllowlist[name] {
+		policy, ok := orchestratorToolPolicies[name]
+		if !ok || !codexAuthorityAllows(authority, policy.RequiredAuthority) {
 			continue
 		}
 		schema, _ := tool["parameters"].(map[string]any)
@@ -1187,6 +1180,47 @@ func (r *anthropicFableRunner) tools(mode string) []anthropicTool {
 		tools = append(tools, webSearchServerTool(), webFetchServerTool())
 	}
 	return append(tools, reportGoalStateTool())
+}
+
+func codexAuthorityAllows(granted, required string) bool {
+	rank := func(value string) (int, bool) {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "read-only", "readonly", codexJobAuthorityReadOnly:
+			return 0, true
+		case codexJobAuthorityWorkspaceWrite:
+			return 1, true
+		case "external", "external-write", codexJobAuthorityExternalWrite:
+			return 2, true
+		default:
+			return -1, false
+		}
+	}
+	grantedRank, grantedOK := rank(granted)
+	requiredRank, requiredOK := rank(required)
+	return grantedOK && requiredOK && grantedRank >= requiredRank
+}
+
+func authorizeOrchestratorTool(job AgentJob, name string) error {
+	policy, ok := orchestratorToolPolicies[strings.TrimSpace(name)]
+	if !ok {
+		return fmt.Errorf("tool %q is not registered for orchestrator dispatch", name)
+	}
+	if !codexAuthorityAllows(job.Authority, policy.RequiredAuthority) {
+		return fmt.Errorf("tool %q requires %s authority (job has %s)", name, policy.RequiredAuthority, normalizeCodexJobAuthority(job.Authority))
+	}
+	if policy.RequiredAuthority != codexJobAuthorityReadOnly && !canonicalAuthenticatedPrincipal(job.RequestedBy) {
+		return fmt.Errorf("tool %q requires an authenticated requester principal", name)
+	}
+	return nil
+}
+
+func canonicalAuthenticatedPrincipal(value string) bool {
+	normalized := normalizeAccountEmail(value)
+	if normalized == "" {
+		return false
+	}
+	address, err := mail.ParseAddress(normalized)
+	return err == nil && normalizeAccountEmail(address.Address) == normalized
 }
 
 // webSearchServerTool is Anthropic's server-side web_search (no beta header on

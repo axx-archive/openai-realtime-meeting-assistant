@@ -565,9 +565,11 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEventForRoom(roomID string, ra
 
 	switch event.Type {
 	case "session.created", "session.updated":
+		recordCapabilitySuccess(capabilitySTT, time.Now().UTC())
 		broadcastAssistantEvent("status", "OpenAI transcription session configured", map[string]any{"eventType": event.Type})
 	case "error":
 		if event.Error != nil {
+			recordCapabilityFailure(capabilitySTT, time.Now().UTC(), fmt.Errorf("%s", firstNonEmptyString(event.Error.Code, "transcription_error")))
 			if event.Error.Code == "session_expired" {
 				log.Warnf("OpenAI transcription session expired: %s", event.Error.Message)
 				broadcastAssistantEvent("status", "Transcript lane session expired; reconnecting", map[string]any{"code": event.Error.Code, "lane": "transcript"})
@@ -579,6 +581,7 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEventForRoom(roomID string, ra
 			broadcastAssistantEvent("status", "transcript lane hit a server error", map[string]any{"code": event.Error.Code, "message": event.Error.Message, "lane": "transcript"})
 		}
 	case "conversation.item.input_audio_transcription.completed":
+		recordCapabilitySuccess(capabilitySTT, time.Now().UTC())
 		recordEvalEvent(seatTranscriptionLane, evalKindTranscriptSegment, map[string]any{
 			"status":        "completed",
 			"room_id":       roomID,
@@ -586,6 +589,7 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEventForRoom(roomID string, ra
 		})
 		app.rememberTranscript(roomID, event, "transcript_lane", model)
 	case "conversation.item.input_audio_transcription.failed":
+		recordCapabilityFailure(capabilitySTT, time.Now().UTC(), fmt.Errorf("transcription segment failed"))
 		// W0-5: a failed segment is speech the brain never heard — this event
 		// series is the raw feed for the >2% drop-off alarm.
 		recordEvalEvent(seatTranscriptionLane, evalKindTranscriptSegment, map[string]any{

@@ -343,6 +343,103 @@ func TestMeetingDigestWorkerBadJSONKeepsPriorDigest(t *testing.T) {
 	}
 }
 
+func TestMeetingDigestWorkerIdenticalPoisonCircuitSuppressesThenRecovers(t *testing.T) {
+	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
+	meetingDigestPoisonCircuit.Lock()
+	oldCircuit := meetingDigestPoisonCircuit.entries
+	meetingDigestPoisonCircuit.entries = map[string]meetingDigestPoisonState{}
+	meetingDigestPoisonCircuit.Unlock()
+	t.Cleanup(func() {
+		meetingDigestPoisonCircuit.Lock()
+		meetingDigestPoisonCircuit.entries = oldCircuit
+		meetingDigestPoisonCircuit.Unlock()
+	})
+
+	app := newIsolatedKanbanBoardApp(t)
+	appendDigestTestBrain(t, app, "brain-poison-circuit", "meeting-poison-circuit", "## Overview\nA fact that must not be skipped.", nil)
+	calls := 0
+	var firstInput string
+	responder := func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		calls++
+		if request.JSONSchema == nil || request.JSONSchema.Name != "meeting_digest" || request.ValidateOutput == nil {
+			t.Fatalf("digest request missing strict output contract: %+v", request)
+		}
+		if request.MaxOutputTokens != meetingDigestMaxOutputTokens || request.MaxOutputTokens <= 1500 {
+			t.Fatalf("digest max output tokens=%d, want repaired headroom %d", request.MaxOutputTokens, meetingDigestMaxOutputTokens)
+		}
+		if firstInput == "" {
+			firstInput = request.Input
+		} else if request.Input != firstInput {
+			t.Fatalf("retry changed raw poison input; cursor window must be preserved\nfirst=%s\nnext=%s", firstInput, request.Input)
+		}
+		if calls <= meetingDigestPoisonFailureThreshold {
+			return "not json", nil
+		}
+		return `{"meetingId":"x","title":"Recovered","day":"","started":"","ended":"","attendees":[],"topics":[{"t":"preserved fact","anchor":"","at":"","importance":3}],"decisions":[],"actionItems":[],"openQuestions":[],"themes":[],"aliases":[]}`, nil
+	}
+
+	agent := meetingDigestAgent()
+	// Two poison outputs open the circuit. Three scheduled passes are then
+	// suppressed without wire calls, and the following pass is a recovery probe.
+	passes := meetingDigestPoisonFailureThreshold + meetingDigestPoisonSuppressionPasses + 1
+	for pass := 0; pass < passes; pass++ {
+		if _, err := app.runAmbientAgentOnce(agent, context.Background(), "test-key", responder, 1); err != nil {
+			t.Fatalf("pass %d: %v", pass+1, err)
+		}
+	}
+	if calls != meetingDigestPoisonFailureThreshold+1 {
+		t.Fatalf("wire calls=%d, want two failures plus one recovery probe", calls)
+	}
+	digest := app.memory.latestDigestPerMeeting()["meeting-poison-circuit"]
+	if digest.ID == "" || digest.Metadata[meetingDigestCursorMetadataKey] != "brain-poison-circuit" {
+		t.Fatalf("recovery did not advance the preserved cursor exactly once: %+v", digest)
+	}
+	if generations := app.memory.entriesOfKind(meetingMemoryKindMeetingDigest, 0); len(generations) != 1 {
+		t.Fatalf("digest generations=%d, want one accepted generation", len(generations))
+	}
+	if _, err := app.runAmbientAgentOnce(agent, context.Background(), "test-key", responder, 1); err != nil {
+		t.Fatalf("post-recovery cursor pass: %v", err)
+	}
+	if calls != meetingDigestPoisonFailureThreshold+1 {
+		t.Fatalf("accepted cursor did not silence later passes; calls=%d", calls)
+	}
+}
+
+func TestMeetingDigestProviderOutageNeverDeadLettersOrAdvances(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	agent := meetingDigestAgent()
+	appendDigestTestBrain(t, app, "brain-provider-outage", "meeting-provider-outage", "## Overview\nThis input must survive quota recovery.", nil)
+
+	previousResponder := createOpenAITextResponse
+	calls := 0
+	createOpenAITextResponse = func(context.Context, string, openAITextRequest) (string, error) {
+		calls++
+		return "", &openAIProviderFailure{err: fmt.Errorf("OpenAI response failed: 429 quota exhausted")}
+	}
+	t.Cleanup(func() { createOpenAITextResponse = previousResponder })
+
+	for attempt := 0; attempt < ambientAgentMaxWindowAttempts+2; attempt++ {
+		app.fireAmbientAgentPass(agent, "test-key", 1, officeRoomID)
+		app.mu.Lock()
+		if failure := app.agentFailures[ambientAgentKey(agent.name, officeRoomID)]; failure != nil {
+			failure.backoffUntil = time.Now().Add(-time.Second)
+		}
+		app.mu.Unlock()
+	}
+	if calls != ambientAgentMaxWindowAttempts+2 {
+		t.Fatalf("provider calls=%d, want repeated capped probes", calls)
+	}
+	if baseline := app.ambientAgentBaselineID(ambientAgentKey(agent.name, officeRoomID)); baseline == "brain-provider-outage" {
+		t.Fatalf("provider outage advanced baseline to failed input %q", baseline)
+	}
+	if deadLetters := app.memory.entriesOfKind(meetingMemoryKindDeadLetter, 0); len(deadLetters) != 0 {
+		t.Fatalf("provider outage created dead letters: %+v", deadLetters)
+	}
+	if digests := app.memory.entriesOfKind(meetingMemoryKindMeetingDigest, 0); len(digests) != 0 {
+		t.Fatalf("provider outage wrote a digest: %+v", digests)
+	}
+}
+
 /* ---------- day digest fold ---------- */
 
 func TestDayDigestBucketsMarathonMeetingByCalendarDay(t *testing.T) {

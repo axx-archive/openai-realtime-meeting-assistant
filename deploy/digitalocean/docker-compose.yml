@@ -9,8 +9,16 @@ services:
     # into an `environment:` block here — .env is the single source of truth.
     env_file:
       - .env
+    environment:
+      BONFIRE_CODEX_QUEUE_PATH: /app/codex-queue/jobs
+      BONFIRE_CODEX_HEARTBEAT_PATH: /app/codex-queue/heartbeat.json
     volumes:
       - meeting_data:/app/data
+      # Cost/eval books are isolated into their own volume so the Codex
+      # sidecar can append usage without receiving the company-brain volume.
+      # The mount stays nested under /app/data so normal backups include it.
+      - usage_ledger:/app/data/usage
+      - codex_queue:/app/codex-queue
     ports:
       - "40000-40100:40000-40100/udp"
     healthcheck:
@@ -32,29 +40,38 @@ services:
       context: ../..
       dockerfile: Dockerfile
       target: codex-runner
-    # The sidecar also reads .env, so BONFIRE_CODEX_MODEL (pinned to gpt-5.5
-    # for OPS-3) reaches `codex exec` here. Keys listed under `environment:`
-    # below OVERRIDE the .env values for this service — keep BONFIRE_CODEX_MODEL
-    # and the Anthropic set out of that block.
-    env_file:
-      - .env
+    image: meetingassist-codex-runner:codex-0.144.1
+    # Explicit allowlist: this execution sidecar does not inherit app mail,
+    # calendar, Anthropic, fiscal, or other production-service credentials.
     environment:
+      CODEX_API_KEY: ${CODEX_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      BONFIRE_RUNNER_TOKEN: ${BONFIRE_RUNNER_TOKEN:?BONFIRE_RUNNER_TOKEN is required}
+      BONFIRE_CODEX_MODEL: ${BONFIRE_CODEX_MODEL:?BONFIRE_CODEX_MODEL must be pinned}
       BONFIRE_CODEX_CWD: /workspace/meetingassist
-      BONFIRE_CODEX_QUEUE_PATH: /app/data/codex-runner-jobs
+      BONFIRE_CODEX_QUEUE_PATH: /app/codex-queue/jobs
+      BONFIRE_CODEX_HEARTBEAT_PATH: /app/codex-queue/heartbeat.json
       BONFIRE_RUNNER_CALLBACK_URL: http://meetingassist:3000/internal/codex/jobs/result
       BONFIRE_CODEX_SANDBOX: workspace-write
       BONFIRE_CODEX_APPROVAL_POLICY: never
       BONFIRE_CODEX_REASONING_EFFORT: high
+      BONFIRE_CODEX_EXTERNAL_WRITE_ENABLED: ${BONFIRE_CODEX_EXTERNAL_WRITE_ENABLED:-false}
+      BONFIRE_CODEX_EPHEMERAL: "true"
+      USAGE_LEDGER_PATH: /app/usage-ledger
     volumes:
-      - meeting_data:/app/data
+      - codex_queue:/app/codex-queue
+      - usage_ledger:/app/usage-ledger
       - ${BONFIRE_CODEX_WORKSPACE_HOST_PATH:-../..}:/workspace/meetingassist
-      - codex_home:/root/.codex
+      - ${BONFIRE_CODEX_WORKSPACE_HOST_PATH:-../..}/.git:/workspace/meetingassist/.git:ro
       - codex_runner_data:/runner-data
-    cap_add:
-      - SYS_ADMIN
+    cap_drop:
+      - ALL
     security_opt:
-      - seccomp=unconfined
-      - apparmor=unconfined
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    pids_limit: 256
     depends_on:
       meetingassist:
         condition: service_healthy
@@ -140,6 +157,7 @@ networks:
 volumes:
   caddy_data:
   caddy_config:
-  codex_home:
+  codex_queue:
   codex_runner_data:
   meeting_data:
+  usage_ledger:

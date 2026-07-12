@@ -70,6 +70,7 @@ func TestFoldUsageRollupAggregatesFixture(t *testing.T) {
 	recordLLMUsage(llmUsageEntry{
 		TS: rollupTestNow, Provider: providerOpenAI, Model: "gpt-5.6-luna",
 		Seat: seatBrain, InputTokens: 2000, CachedInputTokens: 1000, OutputTokens: 1000,
+		WireSuccess: true, AcceptedOutput: true,
 	}) // $0.002 + $0.0001 + $0.006 = $0.0081
 	recordLLMUsage(llmUsageEntry{
 		TS: rollupTestNow, Provider: providerAnthropic, Model: "claude-opus-4-8",
@@ -77,7 +78,7 @@ func TestFoldUsageRollupAggregatesFixture(t *testing.T) {
 	})
 	recordLLMUsage(llmUsageEntry{
 		TS: rollupTestNow, Provider: providerOpenAI, Model: "junk-model-rollup-test",
-		Seat: seatCodex, InputTokens: 10,
+		Seat: seatCodex, InputTokens: 10, WireSuccess: true, OutputFailureReason: "max_output_truncation",
 	}) // no price row → PriceMissing stamped by the ledger
 	recordLLMUsage(llmUsageEntry{
 		TS: yesterday, Provider: providerAnthropic, Model: "claude-sonnet-5",
@@ -100,6 +101,9 @@ func TestFoldUsageRollupAggregatesFixture(t *testing.T) {
 	recordEvalEvent(seatTranscriptionLane, evalKindTranscriptSegment, map[string]any{"status": "failed"})
 	recordEvalEvent(seatTranscriptionSession, evalKindNoVocabWarning, nil)
 	recordEvalEvent(evalLaneTranscript, evalKindCorrectionHit, map[string]any{"term": "StationTenn"})
+	recordEvalEvent(seatMeetingDigest, evalKindDigestOutput, map[string]any{"outcome": "accepted", "recovery": true})
+	recordEvalEvent(seatMeetingDigest, evalKindDigestOutput, map[string]any{"outcome": "rejected"})
+	recordEvalEvent(seatMeetingDigest, evalKindDigestOutput, map[string]any{"outcome": "circuit_open"})
 	recordProposalEvent(proposalEventMinted, "prop-1", map[string]any{"source": proposalSourceBoardWorker})
 	recordProposalEvent(proposalEventResolved, "prop-1", map[string]any{"resolution": "approved"})
 	recordProposalEvent(proposalEventLaunched, "prop-1", map[string]any{"path": "codex"})
@@ -122,6 +126,9 @@ func TestFoldUsageRollupAggregatesFixture(t *testing.T) {
 	}
 	if today.Total.Errors != 1 || today.Total.Fallbacks != 1 || today.Total.PriceMissing != 1 {
 		t.Fatalf("today counters errors=%d fallbacks=%d priceMissing=%d, want 1/1/1", today.Total.Errors, today.Total.Fallbacks, today.Total.PriceMissing)
+	}
+	if today.Total.WireSuccesses != 2 || today.Total.AcceptedOutputs != 1 || today.Total.RejectedOutputs != 1 {
+		t.Fatalf("output truth counters=%+v, want wire/accepted/rejected 2/1/1", today.Total)
 	}
 
 	router := today.Seats[seatRouter]
@@ -149,6 +156,9 @@ func TestFoldUsageRollupAggregatesFixture(t *testing.T) {
 	}
 	if eval.TranscriptSegments != 2 || eval.TranscriptFailed != 1 {
 		t.Fatalf("transcript segments=%d failed=%d, want 2/1", eval.TranscriptSegments, eval.TranscriptFailed)
+	}
+	if eval.DigestAccepted != 1 || eval.DigestRejected != 1 || eval.DigestSuppressed != 1 || eval.DigestRecovered != 1 {
+		t.Fatalf("digest output funnel=%+v, want accepted/rejected/suppressed/recovered 1/1/1/1", eval)
 	}
 	if eval.ProposalsMinted != 1 || eval.ProposalsResolved != 1 || eval.ProposalsLaunched != 1 || eval.WorkflowLaunches != 1 {
 		t.Fatalf("proposal funnel=%+v, want 1/1/1/1", eval)

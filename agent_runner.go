@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -73,6 +74,19 @@ type ambientAgentFailure struct {
 	windowID     string
 	attempts     int
 	backoffUntil time.Time
+}
+
+// ambientAgentHoldError is a recoverable infrastructure/configuration outage.
+// It participates in bounded backoff but is categorically forbidden from
+// dead-lettering input or advancing a baseline.
+type ambientAgentHoldError struct{ err error }
+
+func (failure *ambientAgentHoldError) Error() string { return failure.err.Error() }
+func (failure *ambientAgentHoldError) Unwrap() error { return failure.err }
+
+func isAmbientAgentHoldError(err error) bool {
+	var failure *ambientAgentHoldError
+	return errors.As(err, &failure)
 }
 
 type ambientAgentConfig struct {
@@ -393,10 +407,43 @@ func (app *kanbanBoardApp) fireAmbientAgentPass(agent ambientAgentConfig, apiKey
 	cancelRequest()
 	if err != nil {
 		log.Errorf("%s worker failed: %v", agent.name, err)
+		if isAmbientAgentHoldError(err) || isOpenAIProviderFailure(err) {
+			app.recordAmbientAgentHoldFailure(agent, headID, roomID)
+			return
+		}
 		app.recordAmbientAgentFailure(agent, headID, roomID)
 		return
 	}
 	app.clearAmbientAgentFailure(key)
+}
+
+// recordAmbientAgentHoldFailure arms the same capped retry backoff as a poison
+// failure but never dead-letters and never changes the durable baseline.
+func (app *kanbanBoardApp) recordAmbientAgentHoldFailure(agent ambientAgentConfig, headID string, roomID string) {
+	key := ambientAgentKey(agent.name, roomID)
+	app.mu.Lock()
+	if app.agentFailures == nil {
+		app.agentFailures = map[string]*ambientAgentFailure{}
+	}
+	fail := app.agentFailures[key]
+	if fail == nil || fail.windowID != headID {
+		fail = &ambientAgentFailure{windowID: headID}
+		app.agentFailures[key] = fail
+	}
+	if fail.attempts < 32 {
+		fail.attempts++
+	}
+	attempt := fail.attempts
+	backoff := ambientAgentBackoffBase
+	for i := 1; i < attempt && backoff < ambientAgentBackoffCap; i++ {
+		backoff *= 2
+		if backoff > ambientAgentBackoffCap {
+			backoff = ambientAgentBackoffCap
+		}
+	}
+	fail.backoffUntil = time.Now().Add(backoff)
+	app.mu.Unlock()
+	log.Warnf("%s worker is holding input %s after recoverable provider failure; cursor remains put for %s", key, headID, backoff)
 }
 
 func (app *kanbanBoardApp) runAmbientAgentOnce(agent ambientAgentConfig, ctx context.Context, apiKey string, responder openAITextResponder, minBatch int) (meetingMemoryEntry, error) {

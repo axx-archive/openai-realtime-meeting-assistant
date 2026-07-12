@@ -89,11 +89,13 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 	// in main.go must have a row; every row must still be registered.
 	probes := map[string]guestRouteProbe{
 		// ---- public statics + health (§5.3 "already-public statics")
-		"/":        {handler: nil}, // inline SPA closure: static shell bytes, no data; guests boot from it
-		"/healthz": {handler: healthHandler, method: http.MethodGet, path: "/healthz", allowed: []int{http.StatusOK}},
-		"/readyz":  {handler: readinessHandler, method: http.MethodGet, path: "/readyz", allowed: []int{http.StatusOK, http.StatusServiceUnavailable}},
-		"/sw.js":   {handler: serviceWorkerHandler, method: http.MethodGet, path: "/sw.js", allowed: []int{http.StatusOK}},
-		"/public/": {handler: publicAssetHandler, method: http.MethodGet, path: "/public/route-walk-not-a-file.js", allowed: []int{http.StatusNotFound}},
+		"/":             {handler: nil}, // inline SPA closure: static shell bytes, no data; guests boot from it
+		"/healthz":      {handler: healthHandler, method: http.MethodGet, path: "/healthz", allowed: []int{http.StatusOK}},
+		"/livez":        {handler: liveHandler, method: http.MethodGet, path: "/livez", allowed: []int{http.StatusOK}},
+		"/readyz":       {handler: readinessHandler, method: http.MethodGet, path: "/readyz", allowed: []int{http.StatusOK, http.StatusServiceUnavailable}},
+		"/capabilities": {handler: capabilitiesHandler, method: http.MethodGet, path: "/capabilities", allowed: []int{http.StatusOK}},
+		"/sw.js":        {handler: serviceWorkerHandler, method: http.MethodGet, path: "/sw.js", allowed: []int{http.StatusOK}},
+		"/public/":      {handler: publicAssetHandler, method: http.MethodGet, path: "/public/route-walk-not-a-file.js", allowed: []int{http.StatusNotFound}},
 
 		// ---- the guest surface (§5.3 allowlist)
 		"/g": {handler: guestPageHandler, method: http.MethodGet, path: "/g", allowed: []int{http.StatusOK},

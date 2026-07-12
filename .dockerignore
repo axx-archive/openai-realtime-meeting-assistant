@@ -4,3 +4,6 @@ openai-realtime-meeting-assistant
 *.test
 deploy/digitalocean/.env
 data/
+apple/.build/
+artifacts/
+design-system/

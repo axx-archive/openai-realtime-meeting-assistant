@@ -81,6 +81,7 @@ type goalPlan struct {
 	GoalID       string `json:"goalId"`
 	Objective    string `json:"objective"`
 	CreatedBy    string `json:"createdBy"`
+	RequestedBy  string `json:"requestedBy,omitempty"`
 	Authority    string `json:"authority"`
 	PackageID    string `json:"packageId,omitempty"`
 	ToolTemplate string `json:"toolTemplate,omitempty"`
@@ -114,6 +115,16 @@ type goalPlan struct {
 	// this record mirrored into metadata["checkpoint"], and resumes through
 	// the resumeApprovedGoal seam carrying the human's {choice}.
 	Checkpoint *goalProcessCheckpoint `json:"checkpoint,omitempty"`
+}
+
+func goalPlanRequestedBy(plan goalPlan) string {
+	if canonicalAuthenticatedPrincipal(plan.RequestedBy) {
+		return normalizeAccountEmail(plan.RequestedBy)
+	}
+	if canonicalAuthenticatedPrincipal(plan.CreatedBy) {
+		return normalizeAccountEmail(plan.CreatedBy)
+	}
+	return ""
 }
 
 // goalProcessCheckpoint is the persisted human_checkpoint record. An empty
@@ -656,6 +667,13 @@ func (app *kanbanBoardApp) launchGoalThread(spec goalLaunchSpec) (scoutAgentThre
 	}
 
 	createdBy := strings.TrimSpace(spec.CreatedBy)
+	requestedBy := normalizeAccountEmail(spec.Origin["requestedBy"])
+	if !canonicalAuthenticatedPrincipal(requestedBy) && canonicalAuthenticatedPrincipal(createdBy) {
+		requestedBy = normalizeAccountEmail(createdBy)
+	}
+	if !canonicalAuthenticatedPrincipal(requestedBy) {
+		requestedBy = ""
+	}
 	// Per-user in-flight cap (Wave 1 item 6). Every production door (HTTP
 	// /assistant/goal, voice initiate_goal) stamps the requester, so the check
 	// lives here — one seam guards both. An unattributed launch (tests, internal
@@ -664,12 +682,12 @@ func (app *kanbanBoardApp) launchGoalThread(spec goalLaunchSpec) (scoutAgentThre
 	// be serialized per user — otherwise N concurrent launches all observe the
 	// pre-launch count and all pass. The per-email lock is held through the
 	// artifact append (goalUserCapLocks, the goalEngineLocks pattern).
-	if normalizedRequester := normalizeAccountEmail(createdBy); normalizedRequester != "" {
+	if normalizedRequester := firstNonEmptyString(requestedBy, normalizeAccountEmail(createdBy)); normalizedRequester != "" {
 		lock := goalUserCapLock(normalizedRequester)
 		lock.Lock()
 		defer lock.Unlock()
 		capLimit := goalUserInFlightCap()
-		if inFlight := app.inFlightGoalsForUser(createdBy); len(inFlight) >= capLimit {
+		if inFlight := app.inFlightGoalsForUser(normalizedRequester); len(inFlight) >= capLimit {
 			return scoutAgentThread{}, &errGoalUserCapExceeded{Cap: capLimit, Goals: inFlight}
 		}
 	}
@@ -695,6 +713,7 @@ func (app *kanbanBoardApp) launchGoalThread(spec goalLaunchSpec) (scoutAgentThre
 		GoalID:       goalID,
 		Objective:    objective,
 		CreatedBy:    createdBy,
+		RequestedBy:  requestedBy,
 		Authority:    authority,
 		PackageID:    strings.TrimSpace(spec.PackageID),
 		ToolTemplate: toolTemplate,
@@ -735,8 +754,8 @@ func (app *kanbanBoardApp) launchGoalThread(spec goalLaunchSpec) (scoutAgentThre
 	// stamp is CURRENT-state: the external-write ship gate re-stamps heavy if
 	// the run parks there later.
 	metadata["approvalLane"] = approvalLaneFor("goal", toolTemplate, authority, false)
-	if createdBy != "" {
-		metadata["requestedBy"] = createdBy
+	if requestedBy != "" {
+		metadata["requestedBy"] = requestedBy
 	}
 	if plan.PackageID != "" {
 		metadata["packageId"] = plan.PackageID
@@ -1152,7 +1171,7 @@ func (e *goalEngine) launchSubtask(plan *goalPlan, st *goalSubtask, parentID str
 	}
 	spec := agentThreadGoalSpec{
 		Objective:      query,
-		RequestedBy:    plan.CreatedBy,
+		RequestedBy:    goalPlanRequestedBy(*plan),
 		Authority:      goalChildAuthority(st.Authority, plan.Authority),
 		ParentGoalID:   parentID,
 		SubtaskID:      st.ID,

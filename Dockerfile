@@ -30,9 +30,11 @@ ENTRYPOINT ["/app/meetingassist", "-addr", ":3000"]
 
 FROM debian:bookworm-slim AS codex-runner
 
+ARG CODEX_CLI_VERSION=0.144.1
+
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends bubblewrap ca-certificates curl git libopus0 nodejs npm \
-	&& npm install -g @openai/codex \
+	&& npm install -g "@openai/codex@${CODEX_CLI_VERSION}" \
 	&& rm -rf /var/lib/apt/lists/* /root/.npm
 
 WORKDIR /workspace/meetingassist

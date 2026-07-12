@@ -194,6 +194,9 @@ func (app *kanbanBoardApp) launchAgentThreadWithSpec(mode string, query string, 
 			metadata[key] = value
 		}
 	}
+	if requestedBy := normalizeAccountEmail(origin["requestedBy"]); requestedBy != "" {
+		metadata["requestedBy"] = requestedBy
+	}
 	// Additive goal-spec metadata: absent fields stamp nothing, so callers that
 	// pass an empty spec keep today's behavior.
 	for key, value := range spec.metadata() {

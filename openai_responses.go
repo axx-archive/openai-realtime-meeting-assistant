@@ -44,6 +44,22 @@ type openAITextRequest struct {
 	// signature — swapped as a test seam across the whole suite — is untouched.
 	// An empty Seat records as seatUntagged: visible gaps beat invisible ones.
 	Seat string
+	// Workflow and ServiceTier make routing provenance explicit in the usage
+	// book. JSONSchema enables Responses strict structured output without
+	// changing the responder signature used by existing text callers.
+	Workflow    string
+	ServiceTier string
+	JSONSchema  *openAIJSONSchema
+	// ValidateOutput runs before a wire response is accepted. It is deliberately
+	// request-local so strict lanes can book wire success separately from a
+	// parse/schema rejection while ordinary text callers remain unchanged.
+	ValidateOutput func(string) error
+}
+
+type openAIJSONSchema struct {
+	Name        string
+	Description string
+	Schema      map[string]any
 }
 
 type openAIResponsesPayload struct {
@@ -54,9 +70,15 @@ type openAIResponsesPayload struct {
 	Text            map[string]any `json:"text,omitempty"`
 	MaxOutputTokens int            `json:"max_output_tokens,omitempty"`
 	Store           *bool          `json:"store,omitempty"`
+	ServiceTier     string         `json:"service_tier,omitempty"`
 }
 
 type openAIResponsesBody struct {
+	Status            string `json:"status,omitempty"`
+	ServiceTier       string `json:"service_tier,omitempty"`
+	IncompleteDetails *struct {
+		Reason string `json:"reason,omitempty"`
+	} `json:"incomplete_details,omitempty"`
 	Output []struct {
 		Type    string `json:"type,omitempty"`
 		Content []struct {
@@ -88,6 +110,42 @@ type openAIResponsesUsage struct {
 
 type openAITextResponder func(context.Context, string, openAITextRequest) (string, error)
 
+// openAIOutputRejection is a successful HTTP exchange whose model output is
+// unusable. Callers use this distinction to avoid treating truncation/invalid
+// structured output like a transport outage.
+type openAIOutputRejection struct {
+	reason string
+}
+
+func (failure *openAIOutputRejection) Error() string {
+	return "OpenAI output rejected: " + failure.reason
+}
+
+func openAIOutputRejectionReason(err error) (string, bool) {
+	var failure *openAIOutputRejection
+	if !errors.As(err, &failure) {
+		return "", false
+	}
+	return failure.reason, true
+}
+
+// openAIProviderFailure marks failures outside the model output itself: HTTP
+// errors, transport timeouts, unreadable bodies, or malformed provider
+// envelopes. Digest callers must hold their cursor on these failures; quota or
+// network outages are not poison input and must never consume a dead-letter
+// budget.
+type openAIProviderFailure struct {
+	err error
+}
+
+func (failure *openAIProviderFailure) Error() string { return failure.err.Error() }
+func (failure *openAIProviderFailure) Unwrap() error { return failure.err }
+
+func isOpenAIProviderFailure(err error) bool {
+	var failure *openAIProviderFailure
+	return errors.As(err, &failure)
+}
+
 var createOpenAITextResponse openAITextResponder = createOpenAITextResponseHTTP
 
 func meetingBrainModel() string {
@@ -114,9 +172,19 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 		Instructions: strings.TrimSpace(request.Instructions),
 		Input:        strings.TrimSpace(request.Input),
 		Store:        &store,
+		ServiceTier:  strings.TrimSpace(request.ServiceTier),
 		Text: map[string]any{
 			"format": map[string]any{"type": "text"},
 		},
+	}
+	if request.JSONSchema != nil {
+		payload.Text["format"] = map[string]any{
+			"type":        "json_schema",
+			"name":        request.JSONSchema.Name,
+			"description": request.JSONSchema.Description,
+			"strict":      true,
+			"schema":      request.JSONSchema.Schema,
+		}
 	}
 	if effort := strings.ToLower(strings.TrimSpace(request.ReasoningEffort)); effort != "" {
 		payload.Reasoning = map[string]any{"effort": effort}
@@ -145,12 +213,18 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 	// keyless-Anthropic twins) is metered without touching its own code path.
 	// Test-swapped responders never reach this seam, so tests stay silent.
 	started := time.Now()
-	recordWire := func(usage *openAIResponsesUsage, callErr error) {
+	recordWire := func(usage *openAIResponsesUsage, wireSuccess bool, accepted bool, reason string, serviceTier string, callErr error) {
 		entry := llmUsageEntry{
-			Provider:   providerOpenAI,
-			Model:      model,
-			Seat:       strings.TrimSpace(request.Seat),
-			DurationMS: time.Since(started).Milliseconds(),
+			Provider:             providerOpenAI,
+			Model:                model,
+			Seat:                 strings.TrimSpace(request.Seat),
+			DurationMS:           time.Since(started).Milliseconds(),
+			Workflow:             strings.TrimSpace(request.Workflow),
+			RequestedServiceTier: strings.TrimSpace(request.ServiceTier),
+			ServiceTier:          strings.TrimSpace(serviceTier),
+			WireSuccess:          wireSuccess,
+			AcceptedOutput:       accepted,
+			OutputFailureReason:  strings.TrimSpace(reason),
 		}
 		if usage != nil {
 			cached := usage.InputTokensDetails.CachedTokens
@@ -172,44 +246,63 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 
 	response, err := (&http.Client{Timeout: 45 * time.Second}).Do(httpRequest)
 	if err != nil {
-		wireErr := fmt.Errorf("create OpenAI response: %w", err)
-		recordWire(nil, wireErr)
+		wireErr := &openAIProviderFailure{err: fmt.Errorf("create OpenAI response: %w", err)}
+		recordWire(nil, false, false, "transport_error", "", wireErr)
 		return "", wireErr
 	}
 	defer response.Body.Close()
 
 	rawBody, err := io.ReadAll(io.LimitReader(response.Body, 2*1024*1024))
 	if err != nil {
-		readErr := fmt.Errorf("read OpenAI response: %w", err)
-		recordWire(nil, readErr)
+		readErr := &openAIProviderFailure{err: fmt.Errorf("read OpenAI response: %w", err)}
+		recordWire(nil, false, false, "body_read_error", "", readErr)
 		return "", readErr
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		failure := apiRequestFailedError("OpenAI response failed", response.Status, rawBody)
-		recordWire(nil, failure)
+		failure := &openAIProviderFailure{err: apiRequestFailedError("OpenAI response failed", response.Status, rawBody)}
+		recordWire(nil, false, false, "http_error", "", failure)
 		return "", failure
 	}
 
 	var body openAIResponsesBody
 	if err := json.Unmarshal(rawBody, &body); err != nil {
-		decodeErr := fmt.Errorf("decode OpenAI response: %w", err)
-		recordWire(nil, decodeErr)
+		decodeErr := &openAIProviderFailure{err: fmt.Errorf("decode OpenAI response: %w", err)}
+		recordWire(nil, true, false, "response_decode_error", "", decodeErr)
 		return "", decodeErr
 	}
 	if body.Error != nil && strings.TrimSpace(body.Error.Message) != "" {
-		bodyErr := fmt.Errorf("OpenAI response error: %s", strings.TrimSpace(body.Error.Message))
-		recordWire(body.Usage, bodyErr)
+		bodyErr := &openAIProviderFailure{err: fmt.Errorf("OpenAI response error: %s", strings.TrimSpace(body.Error.Message))}
+		recordWire(body.Usage, true, false, "response_error", body.ServiceTier, bodyErr)
 		return "", bodyErr
+	}
+	if status := strings.ToLower(strings.TrimSpace(body.Status)); status == "incomplete" || status == "failed" || status == "cancelled" {
+		reason := "response_" + status
+		if body.IncompleteDetails != nil && strings.TrimSpace(body.IncompleteDetails.Reason) != "" {
+			reason = strings.TrimSpace(body.IncompleteDetails.Reason)
+		}
+		if reason == "max_output_tokens" || reason == "max_tokens" {
+			reason = "max_output_truncation"
+		}
+		incompleteErr := &openAIOutputRejection{reason: reason}
+		recordWire(body.Usage, true, false, reason, body.ServiceTier, incompleteErr)
+		return "", incompleteErr
 	}
 
 	text := extractOpenAIResponseText(body)
 	if text == "" {
-		emptyErr := fmt.Errorf("OpenAI response did not include output text")
-		recordWire(body.Usage, emptyErr)
+		emptyErr := &openAIOutputRejection{reason: "empty_output"}
+		recordWire(body.Usage, true, false, "empty_output", body.ServiceTier, emptyErr)
 		return "", emptyErr
 	}
+	if request.ValidateOutput != nil {
+		if err := request.ValidateOutput(text); err != nil {
+			validationErr := &openAIOutputRejection{reason: "output_validation_error: " + err.Error()}
+			recordWire(body.Usage, true, false, "output_validation_error", body.ServiceTier, validationErr)
+			return "", validationErr
+		}
+	}
 
-	recordWire(body.Usage, nil)
+	recordWire(body.Usage, true, true, "", body.ServiceTier, nil)
 	return text, nil
 }
 
