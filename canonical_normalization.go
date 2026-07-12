@@ -296,7 +296,22 @@ func canonicalJSON(value any) ([]byte, error) {
 	if err := validateJCSSafeNumbers(decoded); err != nil {
 		return nil, err
 	}
-	return jsoncanonicalizer.Transform(data)
+	// The upstream transformer accepts an object root. Wrapping one value in a
+	// fixed-key object also canonicalizes scalar/null roots without changing the
+	// bytes of object or array values; strip the deterministic envelope after.
+	wrapper := make([]byte, 0, len(data)+6)
+	wrapper = append(wrapper, []byte(`{"v":`)...)
+	wrapper = append(wrapper, data...)
+	wrapper = append(wrapper, '}')
+	canonical, err := jsoncanonicalizer.Transform(wrapper)
+	if err != nil {
+		return nil, err
+	}
+	const prefix = `{"v":`
+	if len(canonical) < len(prefix)+1 || string(canonical[:len(prefix)]) != prefix || canonical[len(canonical)-1] != '}' {
+		return nil, errors.New("RFC 8785 transformer returned an invalid wrapper")
+	}
+	return append([]byte(nil), canonical[len(prefix):len(canonical)-1]...), nil
 }
 
 func validateJCSSafeNumbers(value any) error {
