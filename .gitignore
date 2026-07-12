@@ -8,6 +8,10 @@
 /data/
 /artifacts/native-apple/
 .playwright-mcp/
+/node_modules/
+/playwright-report/
+/test-results/
+/live-media-smoke-report-*.json
 apple/.build/
 apple/.swiftpm/
 apple/DerivedData/

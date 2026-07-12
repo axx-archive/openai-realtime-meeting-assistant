@@ -5510,13 +5510,30 @@ func (app *kanbanBoardApp) admitParticipantSessionEndpointInRoom(roomID string, 
 		endpoints = map[string]string{}
 		state.participantEndpoints[name] = endpoints
 	}
-	_, endpointExisted := endpoints[endpointID]
+	previousSessionID, endpointExisted := endpoints[endpointID]
 	if !endpointExisted && len(endpoints) >= maxEndpointsPerUser() {
 		return "", false, fmt.Errorf("you're already connected from %d devices. leave one to join here", maxEndpointsPerUser())
 	}
 	endpoints[endpointID] = sessionID
 
 	now := time.Now().UTC()
+	if state.participantSessionLiveness == nil {
+		state.participantSessionLiveness = map[string]map[string]time.Time{}
+	}
+	sessionLiveness := state.participantSessionLiveness[name]
+	if sessionLiveness == nil {
+		sessionLiveness = map[string]time.Time{}
+		state.participantSessionLiveness[name] = sessionLiveness
+	}
+	// Refreshing one endpoint replaces its prior session. Retire the old stamp
+	// before installing the new one so a later stale-session cleanup can never
+	// match or remove the refreshed endpoint.
+	if previousSessionID != "" && previousSessionID != sessionID {
+		delete(sessionLiveness, previousSessionID)
+	}
+	if sessionID != "" {
+		sessionLiveness[sessionID] = now
+	}
 	state.participants[name] = now
 	state.participantCounts[name] = len(endpoints)
 	// Reset the shared media state on a fresh account or when an endpoint's own
@@ -5580,6 +5597,12 @@ func (app *kanbanBoardApp) forgetParticipantSessionResultInRoom(roomID string, n
 			return false, state.participantCounts[name] > 0
 		}
 		delete(endpoints, matchedEndpoint)
+		if sessionLiveness := state.participantSessionLiveness[name]; sessionLiveness != nil {
+			delete(sessionLiveness, sessionID)
+			if len(sessionLiveness) == 0 {
+				delete(state.participantSessionLiveness, name)
+			}
+		}
 		if len(endpoints) > 0 {
 			state.participantCounts[name] = len(endpoints)
 			state.participants[name] = time.Now().UTC()
@@ -5590,6 +5613,7 @@ func (app *kanbanBoardApp) forgetParticipantSessionResultInRoom(roomID string, n
 	delete(state.participantCounts, name)
 	delete(state.participants, name)
 	delete(state.participantEndpoints, name)
+	delete(state.participantSessionLiveness, name)
 	delete(state.participantMedia, name)
 
 	return true, false
@@ -5629,16 +5653,23 @@ func (app *kanbanBoardApp) participantSessionCurrentInRoom(roomID string, name s
 	return false
 }
 
-// touchParticipantLiveness stamps that a present account's room socket is still
-// alive (a pong on the heartbeat, or an inbound room frame). The liveness sweep
-// reaps only accounts whose stamp goes stale, so every proof of life must land
-// here; a stamp for an absent account is ignored so a late frame can never
-// resurrect a departed participant.
+// touchParticipantLiveness is the legacy account-level wrapper. Callers that
+// know the socket session must use touchParticipantSessionLivenessInRoom so one
+// healthy endpoint cannot keep another endpoint's zombie transport alive.
 func (app *kanbanBoardApp) touchParticipantLiveness(name string) {
 	app.touchParticipantLivenessInRoom(officeRoomID, name)
 }
 
 func (app *kanbanBoardApp) touchParticipantLivenessInRoom(roomID string, name string) {
+	app.touchParticipantSessionLivenessInRoom(roomID, name, "")
+}
+
+// touchParticipantSessionLivenessInRoom stamps one admitted socket's
+// endpoint-scoped proof of life (an inbound app-level room frame). A late frame
+// from a replaced/removed session is ignored, so it cannot resurrect presence
+// or keep the replacement's endpoint alive. The account-level stamp remains an
+// aggregate and a compatibility fallback for legacy in-memory state.
+func (app *kanbanBoardApp) touchParticipantSessionLivenessInRoom(roomID string, name string, sessionID string) {
 	name = canonicalRoomParticipantName(name)
 	if name == "" {
 		return
@@ -5651,34 +5682,122 @@ func (app *kanbanBoardApp) touchParticipantLivenessInRoom(roomID string, name st
 	if state.participantCounts[name] <= 0 {
 		return
 	}
-	state.participants[name] = time.Now().UTC()
+	now := time.Now().UTC()
+	if sessionID == "" {
+		// A legacy caller has no session identity. Preserve its historical
+		// account-level semantics by refreshing every current endpoint; the main
+		// room read loop uses the session-aware method above.
+		state.participants[name] = now
+		if state.participantSessionLiveness == nil {
+			state.participantSessionLiveness = map[string]map[string]time.Time{}
+		}
+		sessionLiveness := state.participantSessionLiveness[name]
+		if sessionLiveness == nil {
+			sessionLiveness = map[string]time.Time{}
+			state.participantSessionLiveness[name] = sessionLiveness
+		}
+		for _, currentSessionID := range state.participantEndpoints[name] {
+			if currentSessionID != "" {
+				sessionLiveness[currentSessionID] = now
+			}
+		}
+		return
+	}
+
+	current := false
+	for _, currentSessionID := range state.participantEndpoints[name] {
+		if currentSessionID == sessionID {
+			current = true
+			break
+		}
+	}
+	if !current {
+		return
+	}
+	if state.participantSessionLiveness == nil {
+		state.participantSessionLiveness = map[string]map[string]time.Time{}
+	}
+	sessionLiveness := state.participantSessionLiveness[name]
+	if sessionLiveness == nil {
+		sessionLiveness = map[string]time.Time{}
+		state.participantSessionLiveness[name] = sessionLiveness
+	}
+	sessionLiveness[sessionID] = now
+	state.participants[name] = now
 }
 
-// participantLivenessReap describes one account the liveness sweep dropped: its
-// canonical name and the session ids its endpoints were holding, so the caller
-// can tear down each half-open socket's peer connection and forwarded tracks
-// (the same cleanup the read loop's onclose defer would have done).
+// participantLivenessReap describes the stale endpoints removed from one
+// account. stillPresent distinguishes a partial endpoint reap from the last
+// endpoint leaving, so the caller tears down every stale session but only
+// announces participant_left when the account actually leaves the roster.
 type participantLivenessReap struct {
-	name       string
-	sessionIDs []string
+	name            string
+	sessionIDs      []string
+	reapedEndpoints int
+	stillPresent    bool
 }
 
-// reapStaleParticipantSessionsLocked drops every present account whose last
-// liveness stamp is older than timeout and returns what it removed, per room.
-// Callers hold app.mu. Deleting from the ranged map mid-iteration is safe in Go.
+// reapStaleParticipantSessionsLocked drops each stale endpoint independently.
+// A healthy laptop therefore no longer keeps the same account's frozen phone
+// session, PeerConnection, and forwarded tracks alive. Account presence/media
+// survives while any endpoint remains; the legacy account-level stamp is used
+// when endpoint stamps do not exist. Callers hold app.mu. Deleting from ranged
+// maps during iteration is safe in Go.
 func (app *kanbanBoardApp) reapStaleParticipantSessionsLocked(now time.Time, timeout time.Duration) map[string][]participantLivenessReap {
 	reapedByRoom := map[string][]participantLivenessReap{}
 	for roomID, state := range app.roomLive {
-		for name, lastSeen := range state.participants {
+		for name, accountLastSeen := range state.participants {
 			if state.participantCounts[name] <= 0 {
 				continue
 			}
-			if now.Sub(lastSeen) <= timeout {
+
+			endpoints := state.participantEndpoints[name]
+			sessionLiveness := state.participantSessionLiveness[name]
+			accountStale := now.Sub(accountLastSeen) > timeout
+			type staleEndpoint struct {
+				endpointID string
+				sessionID  string
+			}
+			stale := make([]staleEndpoint, 0, len(endpoints))
+			if len(endpoints) == 0 {
+				// Compatibility for legacy/runtime state that predates endpoint
+				// bookkeeping and carries only the account liveness stamp.
+				if accountStale {
+					stale = append(stale, staleEndpoint{})
+				}
+			} else {
+				for endpointID, sessionID := range endpoints {
+					lastSeen, stamped := sessionLiveness[sessionID]
+					// An explicit session stamp is authoritative even if a legacy/
+					// inconsistent aggregate is stale; otherwise a fresh laptop could
+					// still be evicted with a zombie phone. Only endpoints without a
+					// session stamp fall back to the aggregate timestamp.
+					isStale := accountStale
+					if stamped {
+						isStale = now.Sub(lastSeen) > timeout
+					}
+					if !isStale {
+						continue
+					}
+					stale = append(stale, staleEndpoint{endpointID: endpointID, sessionID: sessionID})
+				}
+			}
+			if len(stale) == 0 {
 				continue
 			}
-			sessionIDs := make([]string, 0, len(state.participantEndpoints[name]))
-			for _, sessionID := range state.participantEndpoints[name] {
-				sessionIDs = append(sessionIDs, sessionID)
+
+			sessionIDs := make([]string, 0, len(stale))
+			seenSessions := map[string]bool{}
+			for _, endpoint := range stale {
+				sessionID := endpoint.sessionID
+				if endpoint.endpointID != "" || len(endpoints) > 0 {
+					delete(endpoints, endpoint.endpointID)
+				}
+				if sessionID != "" && !seenSessions[sessionID] {
+					seenSessions[sessionID] = true
+					sessionIDs = append(sessionIDs, sessionID)
+				}
+				delete(sessionLiveness, sessionID)
 				// memberRepairBuckets / memberIceRestartBuckets key on the
 				// per-socket participant session id (not the guest seat key), so
 				// release each reaped session here — the read-loop defer's
@@ -5688,9 +5807,45 @@ func (app *kanbanBoardApp) reapStaleParticipantSessionsLocked(now time.Time, tim
 				delete(state.memberRepairBuckets, sessionID)
 				delete(state.memberIceRestartBuckets, sessionID)
 			}
+			if len(sessionLiveness) == 0 {
+				delete(state.participantSessionLiveness, name)
+			}
+			if len(endpoints) > 0 {
+				state.participantCounts[name] = len(endpoints)
+				// Keep the aggregate/legacy stamp honest after a partial reap: it
+				// is the newest proof of life among surviving stamped sessions. A
+				// surviving legacy endpoint has no individual stamp, so preserve a
+				// newer aggregate for it rather than manufacturing an older value.
+				newestRemaining := time.Time{}
+				legacyEndpointRemains := false
+				for _, sessionID := range endpoints {
+					lastSeen, stamped := sessionLiveness[sessionID]
+					if !stamped {
+						legacyEndpointRemains = true
+						continue
+					}
+					if newestRemaining.IsZero() || lastSeen.After(newestRemaining) {
+						newestRemaining = lastSeen
+					}
+				}
+				if legacyEndpointRemains && accountLastSeen.After(newestRemaining) {
+					newestRemaining = accountLastSeen
+				}
+				if !newestRemaining.IsZero() {
+					state.participants[name] = newestRemaining
+				}
+				reapedByRoom[roomID] = append(reapedByRoom[roomID], participantLivenessReap{
+					name:            name,
+					sessionIDs:      sessionIDs,
+					reapedEndpoints: len(stale),
+					stillPresent:    true,
+				})
+				continue
+			}
 			delete(state.participantCounts, name)
 			delete(state.participants, name)
 			delete(state.participantEndpoints, name)
+			delete(state.participantSessionLiveness, name)
 			delete(state.participantMedia, name)
 			if isGuestDisplayName(name) {
 				for sessionKey, display := range state.guestSeats {
@@ -5703,7 +5858,11 @@ func (app *kanbanBoardApp) reapStaleParticipantSessionsLocked(now time.Time, tim
 					}
 				}
 			}
-			reapedByRoom[roomID] = append(reapedByRoom[roomID], participantLivenessReap{name: name, sessionIDs: sessionIDs})
+			reapedByRoom[roomID] = append(reapedByRoom[roomID], participantLivenessReap{
+				name:            name,
+				sessionIDs:      sessionIDs,
+				reapedEndpoints: len(stale),
+			})
 		}
 	}
 	return reapedByRoom
@@ -5742,7 +5901,11 @@ func (app *kanbanBoardApp) sweepStaleParticipantSessions() {
 				closeSessionMedia(sessionID)
 				unregisterParticipantSession(entry.name, sessionID)
 			}
-			log.Infof("participant_liveness_reap participant=%s room=%s sessions=%d pcpool=%d; room socket silent past %s", entry.name, roomID, len(entry.sessionIDs), peerConnectionPoolSize(), participantLivenessTimeout)
+			if entry.stillPresent {
+				log.Infof("participant_endpoint_liveness_reap participant=%s room=%s endpoints=%d sessions=%d remaining=true pcpool=%d; endpoint socket silent past %s", entry.name, roomID, entry.reapedEndpoints, len(entry.sessionIDs), peerConnectionPoolSize(), participantLivenessTimeout)
+				continue
+			}
+			log.Infof("participant_liveness_reap participant=%s room=%s endpoints=%d sessions=%d pcpool=%d; last endpoint silent past %s", entry.name, roomID, entry.reapedEndpoints, len(entry.sessionIDs), peerConnectionPoolSize(), participantLivenessTimeout)
 			broadcastRoomKanbanEvent(roomID, "participant_left", map[string]any{"name": entry.name, "roomId": roomID})
 		}
 		broadcastRoomKanbanEvent(roomID, "participants", app.roomSnapshotForRoom(roomID))

@@ -46,7 +46,10 @@ func TestLivenessSweepClosesReapedPeerConnection(t *testing.T) {
 
 	// AJ's room socket goes silent past the timeout.
 	app.mu.Lock()
-	app.roomLiveLocked(roomID).participants["AJ"] = time.Now().UTC().Add(-participantLivenessTimeout - time.Minute)
+	staleAt := time.Now().UTC().Add(-participantLivenessTimeout - time.Minute)
+	state := app.roomLiveLocked(roomID)
+	state.participants["AJ"] = staleAt
+	state.participantSessionLiveness["AJ"]["aj-1"] = staleAt
 	app.mu.Unlock()
 
 	app.sweepStaleParticipantSessions()
@@ -87,7 +90,9 @@ func TestLivenessReapReleasesMemberRepairBucket(t *testing.T) {
 	app.mu.Lock()
 	state := app.roomLiveLocked(roomID)
 	state.memberRepairBuckets["aj-1"] = &guestChatBucket{tokens: 1, last: time.Now().UTC()}
-	state.participants["AJ"] = time.Now().UTC().Add(-participantLivenessTimeout - time.Minute)
+	staleAt := time.Now().UTC().Add(-participantLivenessTimeout - time.Minute)
+	state.participants["AJ"] = staleAt
+	state.participantSessionLiveness["AJ"]["aj-1"] = staleAt
 	app.mu.Unlock()
 
 	app.sweepStaleParticipantSessions()
@@ -124,7 +129,9 @@ func TestLivenessReapReleasesGuestMediaBuckets(t *testing.T) {
 	state.chatBuckets[seatKey] = &guestChatBucket{}
 	state.mediaStateBuckets[seatKey] = &guestChatBucket{}
 	state.telemetryBuckets[seatKey] = &guestChatBucket{}
-	state.participants[guestName] = time.Now().UTC().Add(-participantLivenessTimeout - time.Minute)
+	staleAt := time.Now().UTC().Add(-participantLivenessTimeout - time.Minute)
+	state.participants[guestName] = staleAt
+	state.participantSessionLiveness[guestName]["ada-1"] = staleAt
 	app.mu.Unlock()
 
 	app.sweepStaleParticipantSessions()

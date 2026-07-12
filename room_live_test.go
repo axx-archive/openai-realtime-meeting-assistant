@@ -930,9 +930,12 @@ func TestLivenessReapIsRoomScoped(t *testing.T) {
 		t.Fatalf("admit Tim room B: %v", err)
 	}
 
-	// AJ's room A stamp goes stale; Tim stays fresh in room B.
+	// AJ's room A endpoint stamp goes stale; Tim stays fresh in room B.
 	app.mu.Lock()
-	app.roomLiveLocked("room-a").participants["AJ"] = time.Now().UTC().Add(-participantLivenessTimeout - time.Minute)
+	staleAt := time.Now().UTC().Add(-participantLivenessTimeout - time.Minute)
+	roomA := app.roomLiveLocked("room-a")
+	roomA.participants["AJ"] = staleAt
+	roomA.participantSessionLiveness["AJ"]["aj-1"] = staleAt
 	app.mu.Unlock()
 
 	app.sweepStaleParticipantSessions()

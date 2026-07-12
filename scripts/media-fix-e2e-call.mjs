@@ -11,21 +11,21 @@
 //   [3] a shared screen reaches BOTH a Safari-engine peer and an iPhone peer on
 //       the presentation stage.
 //
-// Run (needs Playwright + browsers; NOT in `go test`):
+// Run (uses the repo-pinned Playwright; NOT in `go test`):
 //   # 1) start an isolated local instance (separate data dir):
 //   go build -o /tmp/ma . && rm -rf /tmp/ma-e2e && mkdir -p /tmp/ma-e2e/data
 //   MEETING_ROOM_PASSWORD="smoke-pass-1234" \
 //     MEETING_MEMORY_PATH=/tmp/ma-e2e/data/meeting-memory.jsonl /tmp/ma -addr :3191 &
-//   # 2) install playwright + browsers, then run:
-//   mkdir -p /tmp/e2e && cd /tmp/e2e && npm init -y && npm i playwright
-//   npx playwright install webkit chromium
-//   PLAYWRIGHT_BROWSERS_PATH="$HOME/Library/Caches/ms-playwright" \
-//     node /Users/ajhart/meetingassist/scripts/media-fix-e2e-call.mjs
+//   # 2) from the repository root:
+//   npm install
+//   npm run media:browsers
+//   npm run media:e2e
+// Override MEDIA_FIX_E2E_BASE / MEDIA_FIX_E2E_PASSWORD for another local host.
 // Seeded accounts (accounts.go) all share MEETING_ROOM_PASSWORD locally.
 import { webkit, chromium, devices } from 'playwright'
 
-const BASE = 'http://localhost:3191'
-const PW = 'smoke-pass-1234'
+const BASE = process.env.MEDIA_FIX_E2E_BASE || 'http://localhost:3191'
+const PW = process.env.MEDIA_FIX_E2E_PASSWORD || 'smoke-pass-1234'
 let pass = 0, fail = 0
 const ok = (n,c)=>{ if(c){pass++;console.log('  PASS',n)}else{fail++;console.log('  FAIL',n)} }
 const sleep = ms => new Promise(r=>setTimeout(r,ms))
@@ -35,6 +35,7 @@ const sleep = ms => new Promise(r=>setTimeout(r,ms))
 function initScript(label, portrait) {
   return `(${(label, portrait) => {
     const W = portrait ? 480 : 640, H = portrait ? 640 : 480
+    window.__LABEL = label
     function makeStream(text) {
       const c = document.createElement('canvas'); c.width = W; c.height = H
       const x = c.getContext('2d'); let f = 0
@@ -42,23 +43,30 @@ function initScript(label, portrait) {
         x.fillStyle='#fff'; x.font='32px sans-serif'; x.fillText(text + ' ' + f, 16, H/2) }, 33)
       return c.captureStream(30)
     }
-    const camStream = makeStream(window.__LABEL)
+    const camStream = makeStream(label)
     function audioTrack() {
       const ac = new (window.AudioContext||window.webkitAudioContext)(); ac.resume && ac.resume()
       const d = ac.createMediaStreamDestination(); const o = ac.createOscillator(); o.frequency.value = 110
       const g = ac.createGain(); g.gain.value = 0.001; o.connect(g); g.connect(d); o.start()
       return d.stream.getAudioTracks()[0]
     }
-    window.__gumCalls = []
-    window.__applyConstraintsCalls = 0
+    const gumCalls = []
+    let applyConstraintsCalls = 0
+    Object.defineProperties(window, {
+      __gumCalls: { configurable: false, get: () => gumCalls },
+      __applyConstraintsCalls: { configurable: false, get: () => applyConstraintsCalls }
+    })
     const wrapTrack = t => {
       if (!t) return t
       const orig = t.applyConstraints && t.applyConstraints.bind(t)
-      if (orig) t.applyConstraints = (...a) => { window.__applyConstraintsCalls++; return orig(...a) }
+      if (orig) t.applyConstraints = (...a) => { applyConstraintsCalls++; return orig(...a) }
       return t
     }
+    // WebKit exposes these methods through its MediaDevices prototype. Direct
+    // assignment creates the reliable page-owned overrides; defineProperty on
+    // the host object can throw and silently leave the native permission path.
     navigator.mediaDevices.getUserMedia = async (constraints) => {
-      window.__gumCalls.push(JSON.parse(JSON.stringify(constraints||{})))
+      gumCalls.push(JSON.parse(JSON.stringify(constraints||{})))
       const tracks = []
       if (constraints && constraints.video) tracks.push(wrapTrack(camStream.getVideoTracks()[0]))
       if (constraints && constraints.audio) tracks.push(audioTrack())
@@ -70,7 +78,7 @@ function initScript(label, portrait) {
     ])
     navigator.mediaDevices.getDisplayMedia = async () => {
       window.__sharedScreen = true
-      return makeStream('SCREEN ' + window.__LABEL)
+      return makeStream('SCREEN ' + label)
     }
   }})(${JSON.stringify(label)}, ${JSON.stringify(portrait)})`
 }
@@ -78,13 +86,15 @@ function initScript(label, portrait) {
 async function join(browserType, ctxOpts, label, portrait) {
   const browser = await browserType.launch()
   const context = await browser.newContext({ ...ctxOpts, permissions: ['camera','microphone'].filter(()=>browserType===chromium) })
+  // Install one context-owned script before any page exists. This avoids the
+  // undefined ordering/lifecycle edge of multiple page-level init scripts and
+  // makes an empty request recorder an explicit harness failure.
+  await context.addInitScript(initScript(label, portrait))
   // login -> cookie in context jar
   const resp = await context.request.post(BASE + '/auth/login', { data: { name: label, password: PW } })
   if (!resp.ok()) throw new Error(label+' login failed: '+resp.status())
   const page = await context.newPage()
   page.on('console', m => { const t = m.text(); if (/error|fail/i.test(t) && !/auth\/me|401/.test(t)) console.log(`   [${label} console] ${t.slice(0,120)}`) })
-  await page.addInitScript(`window.__LABEL = ${JSON.stringify(label)};`)
-  await page.addInitScript(initScript(label, portrait))
   await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await page.waitForLoadState('domcontentloaded')
   await page.waitForFunction(() => typeof joinRoom === 'function' && typeof setActiveTool === 'function', null, { timeout: 30000 })
@@ -94,6 +104,20 @@ async function join(browserType, ctxOpts, label, portrait) {
     setActiveTool('room')
     await joinRoom()
   })
+  // joinRoom can return after opening signaling but before the access-granted
+  // render has settled. Keep every later assertion tied to a participant that
+  // is actually seated and publishing a live local camera, not merely a page
+  // whose join call resolved.
+  await page.waitForFunction(() => {
+    const stream = typeof localStream !== 'undefined' ? localStream : null
+    const localVideo = document.getElementById('localVideo')
+    return document.getElementById('appShell')?.classList.contains('is-in-room')
+      && stream?.getVideoTracks?.().some(track => track.readyState === 'live')
+      && Array.isArray(window.__gumCalls)
+      && window.__gumCalls.some(call => call?.video)
+      && localVideo?.videoWidth > 0
+      && localVideo?.videoHeight > 0
+  }, null, { timeout: 35000 })
   return { browser, context, page, label }
 }
 
@@ -159,15 +183,25 @@ try {
   const C = await join(webkit, { ...devices['iPhone 13'] }, 'Erick', true)
   sessions.push(C)
   await sleep(8000) // let C negotiate + roster propagate + any retune fire
-  const cInfo = await C.page.evaluate(() => ({ gum: window.__gumCalls, applied: window.__applyConstraintsCalls,
-    mobile: /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) }))
+  const cInfo = await C.page.evaluate(() => {
+    const track = typeof localStream !== 'undefined' ? localStream?.getVideoTracks?.()[0] : null
+    return {
+      gum: window.__gumCalls,
+      applied: window.__applyConstraintsCalls,
+      mobile: /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent),
+      localVideoLive: Boolean(track && track.readyState === 'live')
+    }
+  })
   const afterA = await orient(A), afterB = await orient(B)
   console.log('   C(iPhone) gum constraints:', JSON.stringify(cInfo.gum))
   console.log('   C applyConstraints calls:', cInfo.applied, '| A orient', beforeA,'->',afterA, '| B orient', beforeB,'->',afterB)
-  const cVideoConstraint = (cInfo.gum.find(g=>g.video) || {}).video
+  const cVideoConstraint = ((cInfo.gum || []).find(g=>g.video) || {}).video
   const land = a => a.filter(o=>o==='landscape').length
   ok('C detected as mobile (real iPhone UA)', cInfo.mobile === true)
-  ok('C capture requested WITHOUT a landscape aspectRatio pin', cVideoConstraint && typeof cVideoConstraint==='object' && !('aspectRatio' in cVideoConstraint))
+  ok('C publishes a live local camera track', cInfo.localVideoLive === true)
+  ok('C capture requested WITHOUT a landscape aspectRatio pin', cVideoConstraint
+    && typeof cVideoConstraint === 'object'
+    && !('aspectRatio' in cVideoConstraint))
   ok('C never restarted its camera via applyConstraints (no reorientation trigger)', cInfo.applied === 0)
   // The bug = existing landscape feeds FLIP to portrait when a mobile joins. So
   // the landscape count must not DROP (C's own feed is legitimately portrait).

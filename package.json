@@ -1,0 +1,17 @@
+{
+  "name": "meetingassist-media-harness",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "media:browsers": "playwright install chromium webkit",
+    "media:engine": "node scripts/media-fix-engine-verification.mjs",
+    "media:e2e": "node scripts/media-fix-e2e-call.mjs",
+    "test:media-harness": "node --test scripts/live-media-smoke-assertions.test.mjs scripts/media-frontend-hardening.test.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.61.1"
+  }
+}

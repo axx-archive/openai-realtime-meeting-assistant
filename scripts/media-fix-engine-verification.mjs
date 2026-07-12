@@ -2,12 +2,11 @@
 // shipped helpers from index.html inside actual WebKit (Safari's engine) and
 // Chromium. Complements scripts/media-fix-verification.mjs (logic-only, in CI).
 //
-// This one needs Playwright + its browsers, so it is NOT wired into `go test`
-// (would make Playwright a test dependency). Run it manually:
-//   mkdir -p /tmp/wkv && cd /tmp/wkv && npm init -y && npm i playwright
-//   npx playwright install webkit chromium
-//   PLAYWRIGHT_BROWSERS_PATH="$HOME/Library/Caches/ms-playwright" \
-//     node /Users/ajhart/meetingassist/scripts/media-fix-engine-verification.mjs
+// This one needs the repo-pinned Playwright + browser engines, so it is not
+// wired into `go test`. From the repository root:
+//   npm install
+//   npm run media:browsers
+//   npm run media:engine
 //
 // Verifies on the real Safari engine: (A) videoElementNeedsRefresh never forces a
 // srcObject reattach (the flicker) during healthy live-MediaStream playback, that
@@ -16,9 +15,12 @@
 // no landscape aspect-ratio pin. (Multi-party WebRTC screen share still needs a
 // human smoke test — getDisplayMedia can't be automated.)
 import { readFileSync } from 'fs'
+import { dirname, join } from 'path'
+import { fileURLToPath } from 'url'
 import { webkit, chromium, devices } from 'playwright'
 
-const html = readFileSync('/Users/ajhart/meetingassist/index.html', 'utf8')
+const here = dirname(fileURLToPath(import.meta.url))
+const html = readFileSync(join(here, '..', 'index.html'), 'utf8')
 function extractFn(name) {
   let s = html.indexOf(`function ${name}(`)
   if (s < 0) throw new Error(`missing ${name}`)

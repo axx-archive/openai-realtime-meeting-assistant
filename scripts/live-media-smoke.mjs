@@ -4,6 +4,13 @@ import { spawn } from 'node:child_process'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
+import {
+  rectProbeVisible,
+  validatePinnedViewSnapshot,
+  validateScreenShareSnapshot,
+  validateSoakProgressSnapshots,
+  videoProbeRendered
+} from './live-media-smoke-assertions.mjs'
 
 const defaults = {
   chromePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -110,6 +117,7 @@ try {
     ...validateMobileToolRailSnapshots(mobileToolRailSnapshots),
     ...validateSnapshots(boardSnapshots, expectedNames.length, { view: 'board', requireBoardDock: true, expectedNames }),
     ...validateSnapshots(soakSnapshots, expectedNames.length, { view: 'soak', requireBoardDock: true, expectedNames }),
+    ...validateSoakProgressSnapshots(soakSnapshots, expectedNames),
     ...validatePostLeaveParticipants(postLeaveParticipants)
   ]
   const result = { ok: failures.length === 0, failures, snapshots: boardSnapshots, pinSnapshots, mobileToolRailSnapshots, screenShareSnapshots, recordingSnapshots, lateJoinSnapshots, soakSnapshots, postLeaveParticipants }
@@ -575,17 +583,32 @@ async function exerciseScreenShare(sharer) {
       && activeScreenShareParticipant === currentParticipantName
       && document.getElementById('presentationTile')?.classList.contains('is-screen-sharing')))()
   `)
+  const expectedStripTiles = Math.max(0, expectedParticipantNames({ includeLate: true }).length - 1)
   for (const page of pages) {
     await waitFor(page, `${page.name} screen share visible`, `
       (() => {
         const stage = document.getElementById('presentationTile')
+        const screenStage = document.getElementById('screenStage')
         const video = document.getElementById('screenStageVideo')
+        const placeholder = screenStage?.querySelector('.screen-stage__placeholder')
         const stripTiles = Array.from(document.querySelectorAll('#presentationTile.is-screen-sharing #videoStack > .video-tile:not(.is-sharing-screen)'))
+        const localShare = typeof currentParticipantName !== 'undefined'
+          && currentParticipantName === ${JSON.stringify(sharer.name)}
+        const localPlaceholderReady = localShare
+          && screenStage?.classList.contains('is-local-share')
+          && !video?.srcObject
+          && placeholder?.getClientRects?.().length > 0
+        const remoteVideoReady = !localShare
+          && !screenStage?.classList.contains('is-local-share')
+          && video?.srcObject?.getVideoTracks?.().some(track => track.readyState !== 'ended')
+          && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+          && video.videoWidth > 0
+          && video.videoHeight > 0
         return typeof activeScreenShareParticipant !== 'undefined'
           && activeScreenShareParticipant === ${JSON.stringify(sharer.name)}
           && stage?.classList.contains('is-screen-sharing')
-          && video?.srcObject?.getVideoTracks?.().some(track => track.readyState !== 'ended')
-          && stripTiles.length >= ${Math.max(0, pages.length - 1)}
+          && (localPlaceholderReady || remoteVideoReady)
+          && stripTiles.length >= ${expectedStripTiles}
       })()
     `)
   }
@@ -817,6 +840,11 @@ async function snapshotPage(page) {
           videoWidth: video.videoWidth,
           videoHeight: video.videoHeight,
           frames,
+          attachmentRevision: Number(video.dataset.videoAttachmentRevision || 0),
+          sourceSignature: video.dataset.sourceStreamSignature || '',
+          attachedAt: Number(video.dataset.videoStreamAttachedAt || 0),
+          lastFrameAt: Number(video.dataset.lastVideoFrameAt || 0),
+          progressAt: Number(video.dataset.videoProgressAt || 0),
           srcObjectTracks: video.srcObject?.getTracks?.().map(trackProbe) || [],
           hasLiveVideo: Boolean(video.srcObject?.getVideoTracks?.().some(track => track.readyState !== 'ended'))
         }
@@ -834,6 +862,9 @@ async function snapshotPage(page) {
           visible: Boolean(canvas.getClientRects().length),
           width: canvas.width || 0,
           height: canvas.height || 0,
+          mirrorFrameReady: canvas.dataset.mirrorFrameReady === 'true',
+          mirrorCommitCount: Number(canvas.dataset.mirrorCommitCount || 0),
+          mirrorDrawFailures: Number(canvas.dataset.mirrorDrawFailures || 0),
           rect: rectProbe(canvas)
         }
       }
@@ -855,11 +886,23 @@ async function snapshotPage(page) {
         }
         return null
       }
-      const stats = typeof pc !== 'undefined' && pc
-        ? Array.from((await pc.getStats()).values()).map(stat => ({
+      const sessionPeer = typeof pc !== 'undefined' ? pc : null
+      const rawStats = sessionPeer?.getStats
+        ? Array.from((await sessionPeer.getStats()).values())
+        : []
+      const rawStatsById = new Map(rawStats.map(stat => [stat.id, stat]))
+      const receiverTrackIdByMid = new Map((sessionPeer?.getTransceivers?.() || [])
+        .filter(transceiver => transceiver?.mid != null && transceiver.receiver?.track)
+        .map(transceiver => [String(transceiver.mid), transceiver.receiver.track.id || '']))
+      const stats = rawStats.map(stat => {
+        const trackStat = rawStatsById.get(stat.trackId)
+        return {
             id: stat.id || '',
             type: stat.type,
             kind: stat.kind || '',
+            mid: stat.mid == null ? '' : String(stat.mid),
+            ssrc: stat.ssrc == null ? '' : String(stat.ssrc),
+            trackIdentifier: stat.trackIdentifier || trackStat?.trackIdentifier || receiverTrackIdByMid.get(String(stat.mid ?? '')) || '',
             state: stat.state || '',
             nominated: Boolean(stat.nominated),
             selectedCandidatePairId: stat.selectedCandidatePairId || '',
@@ -869,6 +912,7 @@ async function snapshotPage(page) {
             jitter: Number(stat.jitter) || 0,
             packetsLost: Number(stat.packetsLost) || 0,
             packetsReceived: Number(stat.packetsReceived) || 0,
+            packetsSent: Number(stat.packetsSent) || 0,
             framesDecoded: Number(stat.framesDecoded) || 0,
             framesDropped: Number(stat.framesDropped) || 0,
             keyFramesDecoded: Number(stat.keyFramesDecoded) || 0,
@@ -886,15 +930,102 @@ async function snapshotPage(page) {
             candidateType: stat.candidateType || '',
             protocol: stat.protocol || '',
             networkType: stat.networkType || ''
-          }))
-        : []
+          }
+      })
+      const sdpMediaRTCPFeedbackSummary = sdp => {
+        const sections = []
+        const chunks = String(sdp || '').split(/\\r?\\nm=/)
+        for (let index = 1; index < chunks.length; index++) {
+          const lines = ('m=' + chunks[index]).split(/\\r?\\n/).filter(Boolean)
+          const mediaParts = String(lines[0] || '').slice(2).trim().split(/\\s+/)
+          const kind = mediaParts[0] || ''
+          if (!kind) {
+            continue
+          }
+          const codecsByPayload = new Map(lines
+            .filter(line => line.startsWith('a=rtpmap:'))
+            .map(line => {
+              const match = /^a=rtpmap:(\\d+)\\s+([^/\\s]+)/i.exec(line)
+              return match ? [match[1], match[2].toLowerCase()] : ['', '']
+            })
+            .filter(([payload]) => payload))
+          const direction = ['sendrecv', 'sendonly', 'recvonly', 'inactive']
+            .find(candidate => lines.includes('a=' + candidate)) || 'sendrecv'
+          sections.push({
+            kind,
+            mid: lines.find(line => line.startsWith('a=mid:'))?.slice(6) || '',
+            direction,
+            codecs: mediaParts.slice(3).map(payload => codecsByPayload.has(payload) ? payload + ':' + codecsByPayload.get(payload) : payload),
+            rtcpFeedback: Array.from(new Set(lines
+              .filter(line => line.startsWith('a=rtcp-fb:'))
+              .map(line => line.slice('a=rtcp-fb:'.length).trim())))
+          })
+        }
+        return sections
+      }
+      const mediaProgress = {
+        outboundAudioBytes: stats.filter(stat => stat.type === 'outbound-rtp' && stat.kind === 'audio').reduce((total, stat) => total + stat.bytesSent, 0),
+        outboundAudioPackets: stats.filter(stat => stat.type === 'outbound-rtp' && stat.kind === 'audio').reduce((total, stat) => total + stat.packetsSent, 0),
+        outboundVideoBytes: stats.filter(stat => stat.type === 'outbound-rtp' && stat.kind === 'video').reduce((total, stat) => total + stat.bytesSent, 0),
+        outboundVideoFrames: stats.filter(stat => stat.type === 'outbound-rtp' && stat.kind === 'video').reduce((total, stat) => total + Math.max(stat.framesSent, stat.framesEncoded), 0)
+      }
+      const participantVideoElements = participantName => {
+        const target = String(participantName || '').trim().toLowerCase()
+        const videos = []
+        for (const container of document.querySelectorAll('[data-participant]')) {
+          if (String(container.dataset.participant || '').trim().toLowerCase() !== target) {
+            continue
+          }
+          for (const video of container.querySelectorAll('video')) {
+            if (!videos.includes(video)) {
+              videos.push(video)
+            }
+          }
+        }
+        return videos
+      }
+      const remoteVideoProgress = (typeof participantsInRoom !== 'undefined' ? participantsInRoom : [])
+        .filter(participantName => participantName && participantName !== ${JSON.stringify(page.name)})
+        .map(participantName => {
+          const videos = participantVideoElements(participantName)
+          const probes = videos.map(videoProbe).filter(Boolean)
+          const trackIds = Array.from(new Set(probes.flatMap(probe => probe.srcObjectTracks.filter(track => track.kind === 'video').map(track => track.id))))
+          const inbound = stats.filter(stat => stat.type === 'inbound-rtp'
+            && stat.kind === 'video'
+            && trackIds.includes(stat.trackIdentifier))
+          const visibleProbes = probes.filter(probe => probe.visible && !probe.hidden && probe.rect?.clientRects > 0)
+          return {
+            participant: participantName,
+            cameraOff: typeof participantMediaState === 'function' ? Boolean(participantMediaState(participantName).cameraOff) : false,
+            trackIds,
+            inboundStatCount: inbound.length,
+            inboundBytesReceived: inbound.reduce((total, stat) => total + stat.bytesReceived, 0),
+            inboundFramesDecoded: inbound.reduce((total, stat) => total + stat.framesDecoded, 0),
+            visibleVideoCount: visibleProbes.length,
+            renderedFrames: visibleProbes.reduce((total, probe) => total + probe.frames, 0),
+            renderCurrentTime: visibleProbes.reduce((latest, probe) => Math.max(latest, probe.currentTime), 0),
+            attachmentRevisions: probes.map(probe => probe.attachmentRevision).filter(Boolean)
+          }
+        })
       const remoteMonitorList = typeof remoteAudioMonitors === 'function'
         ? remoteAudioMonitors()
         : (typeof audioMonitors !== 'undefined'
           ? Array.from(audioMonitors.values()).filter(monitor => typeof isCurrentParticipantName !== 'function' || !isCurrentParticipantName(monitor.name))
           : [])
+      const iosStageOwner = document.getElementById('screenStageVideo')?.dataset.participantVideoOwner || ''
+      const iosStagePrimaryVideo = iosStageOwner && typeof primaryVideoElementForParticipant === 'function'
+        ? primaryVideoElementForParticipant(iosStageOwner)
+        : null
       return {
         name: ${JSON.stringify(page.name)},
+        browserFlags: {
+          safari: typeof safariBrowser !== 'undefined' ? Boolean(safariBrowser) : false,
+          mobileDevice: typeof isMobileDevice !== 'undefined' ? Boolean(isMobileDevice) : false,
+          iosDevice: typeof isIOSDevice !== 'undefined' ? Boolean(isIOSDevice) : false,
+          androidDevice: typeof isAndroidDevice !== 'undefined' ? Boolean(isAndroidDevice) : false,
+          harnessMobileViewport: ${Boolean(config.mobileViewport)},
+          userAgent: String(navigator.userAgent || '')
+        },
         viewport: {
           innerWidth: window.innerWidth,
           innerHeight: window.innerHeight,
@@ -939,6 +1070,68 @@ async function snapshotPage(page) {
         localTracks: typeof localStream !== 'undefined' && localStream
           ? localStream.getTracks().map(trackProbe)
           : [],
+        localCameraRecovery: {
+          requested: typeof localCameraRequested !== 'undefined' ? Boolean(localCameraRequested) : null,
+          cameraOff: typeof isCameraOff !== 'undefined' ? Boolean(isCameraOff) : null,
+          attempts: typeof localVideoRecoveryAttempts !== 'undefined' ? Number(localVideoRecoveryAttempts) || 0 : null,
+          maxAttempts: typeof maxLocalVideoRecoveryAttempts !== 'undefined' ? Number(maxLocalVideoRecoveryAttempts) || 0 : null,
+          inFlight: typeof localVideoRecoveryPromise !== 'undefined' ? Boolean(localVideoRecoveryPromise) : null,
+          replacingTrack: typeof isReplacingLocalVideo !== 'undefined' ? Boolean(isReplacingLocalVideo) : null
+        },
+        outboundVideoOwnership: {
+          cameraTrackId: typeof localVideoTrack === 'function' ? localVideoTrack()?.id || '' : '',
+          screenTrackId: typeof activeScreenShareTrack === 'function' ? activeScreenShareTrack()?.id || '' : '',
+          selectedTrackId: typeof outboundVideoTrack === 'function' ? outboundVideoTrack()?.id || '' : '',
+          senderTrackId: sessionPeer?.getSenders?.().find(sender => sender.track?.kind === 'video')?.track?.id || ''
+        },
+        localVideo: videoProbe(document.getElementById('localVideo')),
+        localVideoMirrorCanvas: canvasProbe(document.getElementById('localVideoMirrorCanvas')),
+        localMirror: {
+          enabledForBrowser: typeof useLocalMirrorCanvas !== 'undefined' ? Boolean(useLocalMirrorCanvas) : null,
+          sourceReady: typeof localMirrorPreviewSourceReady === 'function' ? Boolean(localMirrorPreviewSourceReady()) : null,
+          active: typeof hasActiveLocalMirrorCanvas === 'function' ? Boolean(hasActiveLocalMirrorCanvas()) : null,
+          animationFramePending: typeof localMirrorFrame !== 'undefined' ? Boolean(localMirrorFrame) : null,
+          canonicalVideoYielded: Boolean(document.getElementById('localVideo')?.classList.contains('local-mirror-source')),
+          canvasReady: Boolean(document.getElementById('localVideoMirrorCanvas')
+            && document.getElementById('localVideoMirrorCanvas').dataset.mirrorFrameReady === 'true'
+            && !document.getElementById('localVideoMirrorCanvas').hidden
+            && document.getElementById('localVideoMirrorCanvas').width > 0
+            && document.getElementById('localVideoMirrorCanvas').height > 0),
+          commitCount: Number(document.getElementById('localVideoMirrorCanvas')?.dataset.mirrorCommitCount || 0),
+          drawFailures: Number(document.getElementById('localVideoMirrorCanvas')?.dataset.mirrorDrawFailures || 0)
+        },
+        videoLookReliability: {
+          reliableBrowser: typeof reliableVideoLookBrowser !== 'undefined' ? Boolean(reliableVideoLookBrowser) : null,
+          disabled: typeof videoLooksDisabledForReliability !== 'undefined' ? Boolean(videoLooksDisabledForReliability) : null,
+          chipStates: Array.from(document.querySelectorAll('.video-look-chip[data-look]')).map(chip => ({
+            look: chip.dataset.look || '',
+            disabled: Boolean(chip.disabled),
+            selected: chip.getAttribute('aria-pressed') === 'true'
+          }))
+        },
+        remoteParticipantMaps: {
+          streamNames: typeof remoteStreamsByParticipant !== 'undefined'
+            ? Array.from(remoteStreamsByParticipant.keys())
+            : [],
+          videoTrackNames: typeof remoteVideoTracksByParticipant !== 'undefined'
+            ? Array.from(remoteVideoTracksByParticipant.keys())
+            : [],
+          videoTracks: typeof remoteVideoTracksByParticipant !== 'undefined'
+            ? Array.from(remoteVideoTracksByParticipant.entries()).map(([name, track]) => ({
+                name,
+                id: track?.id || '',
+                readyState: track?.readyState || '',
+                muted: Boolean(track?.muted)
+              }))
+            : []
+        },
+        videoAttachmentRevision: typeof videoAttachmentRevision !== 'undefined' ? Number(videoAttachmentRevision) || 0 : 0,
+        mediaProgress,
+        remoteVideoProgress,
+        sdpMedia: {
+          local: sdpMediaRTCPFeedbackSummary(sessionPeer?.localDescription?.sdp),
+          remote: sdpMediaRTCPFeedbackSummary(sessionPeer?.remoteDescription?.sdp)
+        },
         remoteElements: typeof remoteElements !== 'undefined' ? remoteElements.size : -1,
         remoteElementAttachments: typeof remoteElements !== 'undefined'
           ? Array.from(remoteElements.entries()).map(([name, value]) => ({
@@ -988,7 +1181,17 @@ async function snapshotPage(page) {
           visible: Boolean(document.getElementById('toolRail')?.getClientRects?.().length)
         },
         activeScreenShareParticipant: typeof activeScreenShareParticipant !== 'undefined' ? activeScreenShareParticipant : '',
+        screenStageLocalShare: Boolean(document.getElementById('screenStage')?.classList.contains('is-local-share')),
+        screenStagePlaceholder: rectProbe(document.querySelector('#screenStage .screen-stage__placeholder')),
         screenStageVideo: videoProbe(document.getElementById('screenStageVideo')),
+        iosScreenStageOwnership: {
+          owner: iosStageOwner,
+          active: Boolean(iosStageOwner && typeof iosScreenStageOwnsParticipant === 'function' && iosScreenStageOwnsParticipant(iosStageOwner)),
+          stageTrackIds: document.getElementById('screenStageVideo')?.srcObject?.getVideoTracks?.().map(track => track.id) || [],
+          canonicalDetached: Boolean(iosStageOwner && iosStagePrimaryVideo && !iosStagePrimaryVideo.srcObject),
+          canonicalTileMarked: Boolean(iosStagePrimaryVideo?.closest?.('.video-tile')?.classList.contains('is-stage-video-owned')),
+          canonicalTrackIds: iosStagePrimaryVideo?.srcObject?.getVideoTracks?.().map(track => track.id) || []
+        },
         screenShareStripTiles: Array.from(document.querySelectorAll('#presentationTile.is-screen-sharing #videoStack > .video-tile')).map(tile => ({
           participant: tile.dataset.participant || '',
           classes: tile.className,
@@ -1005,6 +1208,7 @@ async function snapshotPage(page) {
           text: tile.textContent.trim().replace(/\\s+/g, ' ').slice(0, 120)
         })),
         boardExpanded: Boolean(document.getElementById('appShell')?.classList.contains('is-board-expanded')),
+        boardVideoStrip: rectProbe(document.getElementById('boardVideoStrip')),
         boardDockVideos: Array.from(document.querySelectorAll('.board-video-tile')).map(tile => ({
           participant: tile.dataset.participant || '',
           text: tile.textContent.trim().replace(/\\s+/g, ' ').slice(0, 80),
@@ -1132,30 +1336,21 @@ function validateSnapshots(snapshots, expectedClientCount, options = {}) {
       failures.push(`${prefix} standard cleanup is not using browser processing`)
     }
     if (options.requirePinnedView) {
-      if (snapshot.roomLayout !== 'pinned') {
-        failures.push(`${prefix} room layout is ${snapshot.roomLayout}`)
-      }
-      if (!snapshot.stageParticipant) {
-        failures.push(`${prefix} has no pinned participant`)
-      }
-      const pinnedTile = snapshot.tiles.find(tile => tile.participant === snapshot.stageParticipant)
-      if (!pinnedTile) {
-        failures.push(`${prefix} is missing pinned tile for ${snapshot.stageParticipant}`)
-      } else if (pinnedTile.renderedVideos <= 0 && pinnedTile.decodedFrames <= 0) {
-        failures.push(`${prefix} pinned tile did not render for ${snapshot.stageParticipant}`)
-      }
-      const visibleTiles = snapshot.tiles.filter(tile => rectProbeVisible(tile.rect))
-      if (visibleTiles.length !== 1 || visibleTiles[0]?.participant !== snapshot.stageParticipant) {
-        failures.push(`${prefix} pinned view has ${visibleTiles.length} visible participant tiles`)
-      }
+      failures.push(...validatePinnedViewSnapshot(snapshot, expectedNames))
     }
-    if (options.requireBoardDock && !snapshot.usesCrowdedVideoLimits && !usesMobileBoardDockBreakpoint(snapshot)) {
+    if (options.requireBoardDock && !snapshot.usesCrowdedVideoLimits) {
       if (!snapshot.boardExpanded) {
         failures.push(`${prefix} board is not expanded`)
       }
-      const renderedDockVideos = snapshot.boardDockVideos.filter(tile => videoProbeRendered(tile.video))
-      if (renderedDockVideos.length < expectedClientCount) {
-        failures.push(`${prefix} board dock rendered ${renderedDockVideos.length} videos, expected ${expectedClientCount}`)
+      // The board strip is intentionally hidden when the live meeting follows
+      // the user in PiP (and at the phone breakpoint). Only demand duplicate
+      // dock rendering when the strip itself is visible; canonical/transport
+      // health remains validated either way.
+      if (rectProbeVisible(snapshot.boardVideoStrip)) {
+        const renderedDockVideos = snapshot.boardDockVideos.filter(tile => videoProbeRendered(tile.video))
+        if (renderedDockVideos.length < expectedClientCount) {
+          failures.push(`${prefix} board dock rendered ${renderedDockVideos.length} videos, expected ${expectedClientCount}`)
+        }
       }
     }
     for (const name of expectedNames) {
@@ -1197,15 +1392,6 @@ function validateSnapshots(snapshots, expectedClientCount, options = {}) {
   return failures
 }
 
-function usesMobileBoardDockBreakpoint(snapshot) {
-  const viewport = snapshot?.viewport || {}
-  const visualWidth = Number(viewport.visualViewport?.width) || 0
-  const innerWidth = Number(viewport.innerWidth) || 0
-  const documentWidth = Number(viewport.documentSize?.clientWidth) || 0
-  const width = visualWidth || innerWidth || documentWidth
-  return Boolean(width > 0 && width <= 700 && (viewport.coarsePointer || viewport.maxTouchPoints > 0 || viewport.hoverNone))
-}
-
 function validateLateJoinSnapshots(snapshots, expectedNames) {
   if (snapshots.length === 0) {
     return []
@@ -1216,23 +1402,10 @@ function validateLateJoinSnapshots(snapshots, expectedNames) {
   })
 }
 
-function validateScreenShareSnapshots(snapshots, sharerName, expectedNames = config.participants) {
+function validateScreenShareSnapshots(snapshots, sharerName, expectedNames) {
   const failures = []
   for (const snapshot of snapshots) {
-    const prefix = `${snapshot.name} screen share`
-    if (!snapshot.screenSharing || snapshot.activeScreenShareParticipant !== sharerName) {
-      failures.push(`${prefix} is not showing ${sharerName}'s share`)
-    }
-    if (snapshot.roomLayout !== 'screen-share') {
-      failures.push(`${prefix} room layout is ${snapshot.roomLayout}`)
-    }
-    if (!videoProbeRendered(snapshot.screenStageVideo)) {
-      failures.push(`${prefix} stage video did not render`)
-    }
-    const visibleStripTiles = snapshot.screenShareStripTiles.filter(tile => rectProbeVisible(tile.rect))
-    if (visibleStripTiles.length > 0) {
-      failures.push(`${prefix} participant strip should be collapsed, found ${visibleStripTiles.length} visible tiles`)
-    }
+    failures.push(...validateScreenShareSnapshot(snapshot, sharerName, expectedNames))
   }
   return failures
 }
@@ -1318,19 +1491,6 @@ function validatePostLeaveParticipants(postLeave) {
     failures.push(`post-leave participants still present: ${postLeave.names.join(',')}`)
   }
   return failures
-}
-
-function videoProbeRendered(probe) {
-  return Boolean(probe
-    && !probe.hidden
-    && probe.visible
-    && probe.hasLiveVideo
-    && ((probe.readyState >= 2 && probe.videoWidth > 0 && probe.videoHeight > 0) || probe.frames > 0))
-}
-
-function rectProbeVisible(probe) {
-  const rect = probe?.rect || {}
-  return (Number(rect.width) || 0) > 0 && (Number(rect.height) || 0) > 0
 }
 
 function canvasProbeRendered(probe) {

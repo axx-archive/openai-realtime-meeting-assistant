@@ -32,6 +32,7 @@ import (
 	"github.com/pion/logging"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
+	"github.com/pion/sdp/v3"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -143,6 +144,13 @@ func negotiationWatchdogAction(firstNonStable time.Time, offerResent bool, now t
 // Wi-Fi to cellular) persists past it and gets recovered.
 const iceDisconnectGrace = 2500 * time.Millisecond
 
+// iceRestartRequestCooldown coalesces restart requests that are not attached to
+// an ICE-disconnected episode (for example the stale-tile repair ladder). An
+// actual disconnected episode is stricter: it gets one restart window until
+// ICE reports connected/completed again, at which point a later outage starts a
+// new generation and may restart immediately.
+const iceRestartRequestCooldown = 5 * time.Second
+
 // iceStateNeedsRecovery reports whether an ICE connection state indicates a
 // recoverable connectivity loss that a server-side ICE restart should address.
 // Only "disconnected" qualifies: it is the transient, network-change signal an
@@ -151,6 +159,197 @@ const iceDisconnectGrace = 2500 * time.Millisecond
 // participant instead of trying to revive it.
 func iceStateNeedsRecovery(state webrtc.ICEConnectionState) bool {
 	return state == webrtc.ICEConnectionStateDisconnected
+}
+
+// maxPendingRemoteICECandidates bounds browser trickle candidates waiting for
+// the matching answer generation. A normal browser emits only a handful per
+// generation; retaining the newest 128 leaves ample headroom while preventing
+// an authenticated socket from growing this queue without limit.
+const maxPendingRemoteICECandidates = 128
+
+type pendingRemoteICECandidateQueue struct {
+	candidates []webrtc.ICECandidateInit
+}
+
+// enqueue deduplicates a candidate and retains the newest bounded window.
+// queued is false for a duplicate; evicted reports that the oldest candidate
+// was dropped to preserve the bound.
+func (q *pendingRemoteICECandidateQueue) enqueue(candidate webrtc.ICECandidateInit) (queued bool, evicted bool) {
+	key := remoteICECandidateKey(candidate)
+	for _, existing := range q.candidates {
+		if remoteICECandidateKey(existing) == key {
+			return false, false
+		}
+	}
+	if len(q.candidates) >= maxPendingRemoteICECandidates {
+		copy(q.candidates, q.candidates[1:])
+		q.candidates = q.candidates[:len(q.candidates)-1]
+		evicted = true
+	}
+	q.candidates = append(q.candidates, candidate)
+
+	return true, evicted
+}
+
+// takeMatching drains the queue after an answer is accepted. Only candidates
+// whose explicit username fragment belongs to that new remote description
+// survive; an older explicit generation is discarded instead of being handed
+// to pion against the wrong ICE agent. Legacy/Safari candidates may omit the
+// fragment, so they get one post-answer AddICECandidate attempt for backwards
+// compatibility (pion remains the final validator).
+func (q *pendingRemoteICECandidateQueue) takeMatching(description *webrtc.SessionDescription) (matching []webrtc.ICECandidateInit, discarded int) {
+	activeUfrags := remoteDescriptionICEUfrags(description)
+	for _, candidate := range q.candidates {
+		ufrag := remoteICECandidateUsernameFragment(candidate)
+		_, explicitMatch := activeUfrags[ufrag]
+		if ufrag == "" || explicitMatch {
+			matching = append(matching, candidate)
+			continue
+		}
+		discarded++
+	}
+	q.candidates = nil
+
+	return matching, discarded
+}
+
+// remoteICECandidateShouldQueue protects the restart race where the browser
+// starts trickling candidates for its new answer while pion still exposes the
+// previous RemoteDescription. Matching/legacy candidates can be applied now;
+// a future generation (or no description yet) waits for the answer.
+func remoteICECandidateShouldQueue(candidate webrtc.ICECandidateInit, description *webrtc.SessionDescription) bool {
+	if description == nil {
+		return true
+	}
+	ufrag := remoteICECandidateUsernameFragment(candidate)
+	if ufrag == "" {
+		return false // legacy clients omit usernameFragment; preserve existing behavior
+	}
+	_, matchesCurrentDescription := remoteDescriptionICEUfrags(description)[ufrag]
+
+	return !matchesCurrentDescription
+}
+
+func remoteDescriptionICEUfrags(description *webrtc.SessionDescription) map[string]struct{} {
+	ufrags := map[string]struct{}{}
+	if description == nil {
+		return ufrags
+	}
+	for _, line := range strings.Split(strings.ReplaceAll(description.SDP, "\r\n", "\n"), "\n") {
+		const prefix = "a=ice-ufrag:"
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		if ufrag := strings.TrimSpace(strings.TrimPrefix(line, prefix)); ufrag != "" {
+			ufrags[ufrag] = struct{}{}
+		}
+	}
+
+	return ufrags
+}
+
+func remoteICECandidateUsernameFragment(candidate webrtc.ICECandidateInit) string {
+	if candidate.UsernameFragment != nil {
+		if ufrag := strings.TrimSpace(*candidate.UsernameFragment); ufrag != "" {
+			return ufrag
+		}
+	}
+	// Pion and legacy clients may omit ICECandidateInit.UsernameFragment while
+	// still serializing RFC 5245 extension attributes in the candidate line.
+	// Recover the generation from "... ufrag <value>" before treating it as
+	// unscoped.
+	fields := strings.Fields(candidate.Candidate)
+	for i := 0; i+1 < len(fields); i++ {
+		if strings.EqualFold(fields[i], "ufrag") {
+			return strings.TrimSpace(fields[i+1])
+		}
+	}
+
+	return ""
+}
+
+func remoteICECandidateKey(candidate webrtc.ICECandidateInit) string {
+	mid := ""
+	if candidate.SDPMid != nil {
+		mid = *candidate.SDPMid
+	}
+	mLineIndex := ""
+	if candidate.SDPMLineIndex != nil {
+		mLineIndex = strconv.FormatUint(uint64(*candidate.SDPMLineIndex), 10)
+	}
+
+	return strings.Join([]string{candidate.Candidate, mid, mLineIndex, remoteICECandidateUsernameFragment(candidate)}, "\x00")
+}
+
+// peerICERestartState is the server-side restart coalescer for one participant
+// PeerConnection. Callers mutate it only while holding listLock.
+//
+// Browser and server recovery can observe the same outage independently. The
+// outage generation makes those two triggers spend one restart, while a later
+// disconnected transition after a healthy state gets a fresh generation. A
+// connected manual repair is bounded by a short cooldown instead.
+type peerICERestartState struct {
+	outageActive     bool
+	outageGeneration uint64
+	restartedOutage  uint64
+	queued           bool
+	inFlight         bool
+	lastStarted      time.Time
+}
+
+func (s *peerICERestartState) observeConnectionState(state webrtc.ICEConnectionState) {
+	switch state {
+	case webrtc.ICEConnectionStateDisconnected:
+		if !s.outageActive {
+			s.outageActive = true
+			s.outageGeneration++
+		}
+	case webrtc.ICEConnectionStateConnected, webrtc.ICEConnectionStateCompleted:
+		s.outageActive = false
+		s.queued = false
+	}
+}
+
+// queue requests one restart and reports whether this call created new work.
+// A distinct outage that arrives while an earlier restart is still in flight is
+// retained as one queued follow-up; duplicate triggers for the same outage are
+// dropped.
+func (s *peerICERestartState) queue(state webrtc.ICEConnectionState, now time.Time) bool {
+	s.observeConnectionState(state)
+	if s.queued {
+		return false
+	}
+	if s.inFlight {
+		if s.outageActive && s.restartedOutage != s.outageGeneration {
+			s.queued = true
+			return true
+		}
+		return false
+	}
+	if s.outageActive {
+		if s.restartedOutage == s.outageGeneration {
+			return false
+		}
+	} else if !s.lastStarted.IsZero() && now.Sub(s.lastStarted) < iceRestartRequestCooldown {
+		return false
+	}
+	s.queued = true
+
+	return true
+}
+
+func (s *peerICERestartState) start(now time.Time) {
+	s.queued = false
+	s.inFlight = true
+	s.lastStarted = now
+	if s.outageActive {
+		s.restartedOutage = s.outageGeneration
+	}
+}
+
+func (s *peerICERestartState) complete() {
+	s.inFlight = false
 }
 
 type websocketMessage struct {
@@ -202,6 +401,7 @@ type peerConnectionState struct {
 	signalingRevision    uint64
 	pendingOfferID       string
 	pendingOfferRevision uint64
+	iceRestart           peerICERestartState
 }
 
 // officeConnectionState is the registry entry for an authenticated websocket
@@ -430,10 +630,12 @@ func rtcpFeedbackSummary(feedback []webrtc.RTCPFeedback) string {
 	return strings.Join(parts, ",")
 }
 
-// Identity/transport-scoped SDES header extension URIs (RFC 8843 §9, RFC
-// 8852). Their ids AND values are meaningful only on the transport they were
-// negotiated on: the MID/RID bytes name the PUBLISHER's m-lines, and the ids
-// may map to entirely different URIs on a subscriber's transport.
+// Identity-scoped SDES header extension URIs (RFC 8843 §9, RFC 8852). Their
+// ids AND values are meaningful only on the transport they were negotiated
+// on: the MID/RID bytes name the PUBLISHER's m-lines, and the ids may map to
+// entirely different URIs on a subscriber's transport. Transport-wide CC is
+// likewise hop-by-hop: its sequence belongs to the publisher->SFU transport
+// and must not coexist with the fresh sequence generated for SFU->subscriber.
 const (
 	sdesMidExtensionURI                 = "urn:ietf:params:rtp-hdrext:sdes:mid"
 	sdesRTPStreamIDExtensionURI         = "urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id"
@@ -441,8 +643,8 @@ const (
 )
 
 // transportScopedRTPExtensionIDs resolves which extension ids the PUBLISHER's
-// transport negotiated for the identity/transport-scoped SDES URIs — the ids
-// the forward path must strip before fan-out.
+// transport negotiated for identity-scoped SDES or hop-by-hop transport-wide
+// CC — the ids the forward path must strip before fan-out.
 func transportScopedRTPExtensionIDs(receiver *webrtc.RTPReceiver) []uint8 {
 	if receiver == nil {
 		return nil
@@ -454,7 +656,7 @@ func transportScopedRTPExtensionIDsFromParameters(parameters webrtc.RTPParameter
 	var ids []uint8
 	for _, extension := range parameters.HeaderExtensions {
 		switch extension.URI {
-		case sdesMidExtensionURI, sdesRTPStreamIDExtensionURI, sdesRepairedRTPStreamIDExtensionURI:
+		case sdesMidExtensionURI, sdesRTPStreamIDExtensionURI, sdesRepairedRTPStreamIDExtensionURI, sdp.TransportCCURI:
 			ids = append(ids, uint8(extension.ID))
 		}
 	}
@@ -467,11 +669,11 @@ func transportScopedRTPExtensionIDsFromParameters(parameters webrtc.RTPParameter
 // publisher's raw MID/RID bytes to subscribers — whose demux resolves the same
 // id against THEIR OWN negotiation — is spec-incorrect and can confuse
 // subscriber-side demux after m-line churn (the permanent per-subscriber
-// freeze class in the 2026-07-10 incident). Everything else is preserved:
-// commit 0a46b50 deliberately keeps media-scoped extensions (video
-// orientation/rotation, congestion metadata like abs-send-time/TWCC,
-// audio-level) because a strip-everything forward made phone video look
-// unstable to subscribers.
+// freeze class in the 2026-07-10 incident). Publisher transport-wide CC is
+// also removed because its sequence space terminates at the SFU. Everything
+// else is preserved: commit 0a46b50 deliberately keeps media-scoped extensions
+// (video orientation/rotation, abs-send-time, audio-level) because a
+// strip-everything forward made phone video look unstable to subscribers.
 func stripTransportScopedRTPExtensions(packet *rtp.Packet, ids []uint8) {
 	if packet == nil || !packet.Header.Extension || len(ids) == 0 {
 		return
@@ -489,8 +691,8 @@ func stripTransportScopedRTPExtensions(packet *rtp.Packet, ids []uint8) {
 }
 
 // forwardPublisherRTP is the single write seam from a publisher's inbound RTP
-// to the room's fan-out track: strip the transport-scoped extensions, keep the
-// media-scoped ones, write.
+// to the room's fan-out track: strip publisher-transport identity/TWCC
+// extensions, keep the media-scoped ones, write.
 func forwardPublisherRTP(trackLocal *webrtc.TrackLocalStaticRTP, packet *rtp.Packet, stripExtensionIDs []uint8) error {
 	stripTransportScopedRTPExtensions(packet, stripExtensionIDs)
 	return trackLocal.WriteRTP(packet)
@@ -762,11 +964,13 @@ func main() {
 		}
 	})
 
-	// request a keyframe every 3 seconds, and on the same tick sweep publisher
-	// tracks for silently-stalled uplinks (2026-07-10 silent-uplink incident).
+	// Sweep publisher tracks for silently-stalled uplinks every 3 seconds
+	// (2026-07-10 silent-uplink incident). Keyframes are requested only for a
+	// concrete subscriber decoder event, video-liveness stall, or screen-share
+	// transition; a perpetual room-wide PLI walk makes every encoder spike in
+	// lockstep and causes visible flicker on constrained Safari/mobile devices.
 	go func() {
 		for range time.NewTicker(time.Second * 3).C {
-			dispatchKeyFrame()
 			sweepPublisherSilence()
 		}
 	}()
@@ -3379,33 +3583,77 @@ func requestPeerConnectionSignal() {
 		signalRequestLock.Lock()
 		signalRequestTimer = nil
 		signalRequestLock.Unlock()
-		signalPeerConnectionsWithRestart(nil)
+		signalPeerConnectionsWithRestart()
 	})
 }
 
-func signalPeerConnectionICE(peerConnection *webrtc.PeerConnection) {
+func signalPeerConnectionICE(peerConnection *webrtc.PeerConnection) bool {
+	if peerConnection == nil {
+		return false
+	}
+
+	now := time.Now()
+	state := peerConnection.ICEConnectionState()
+	queued := false
+	listLock.Lock()
+	for i := range peerConnections {
+		if peerConnections[i].peerConnection != peerConnection {
+			continue
+		}
+		queued = peerConnections[i].iceRestart.queue(state, now)
+		break
+	}
+	listLock.Unlock()
+	if !queued {
+		return false
+	}
+
+	signalPeerConnectionsWithRestart()
+	return true
+}
+
+func notePeerConnectionICEState(peerConnection *webrtc.PeerConnection, state webrtc.ICEConnectionState) {
 	if peerConnection == nil {
 		return
 	}
-
-	signalPeerConnectionsWithRestart(peerConnection)
+	listLock.Lock()
+	defer listLock.Unlock()
+	for i := range peerConnections {
+		if peerConnections[i].peerConnection == peerConnection {
+			peerConnections[i].iceRestart.observeConnectionState(state)
+			return
+		}
+	}
 }
 
-func schedulePeerConnectionSignal(restartPeer *webrtc.PeerConnection) {
+func completePeerConnectionICERestart(peerConnection *webrtc.PeerConnection) {
+	if peerConnection == nil {
+		return
+	}
+	listLock.Lock()
+	defer listLock.Unlock()
+	for i := range peerConnections {
+		if peerConnections[i].peerConnection == peerConnection {
+			peerConnections[i].iceRestart.complete()
+			return
+		}
+	}
+}
+
+func schedulePeerConnectionSignal() {
 	go func() {
 		time.Sleep(750 * time.Millisecond)
-		signalPeerConnectionsWithRestart(restartPeer)
+		signalPeerConnectionsWithRestart()
 	}()
 }
 
-func signalPeerConnectionsWithRestart(restartPeer *webrtc.PeerConnection) { // nolint
+func signalPeerConnectionsWithRestart() { // nolint
 	listLock.Lock()
 	retryLater := false
 	defer func() {
 		listLock.Unlock()
-		dispatchKeyFrame()
 		if retryLater {
-			schedulePeerConnectionSignal(restartPeer)
+			schedulePeerConnectionSignal()
 		}
 	}()
 
@@ -3418,7 +3666,7 @@ func signalPeerConnectionsWithRestart(restartPeer *webrtc.PeerConnection) { // n
 			}
 
 			peer := &peerConnections[i]
-			forceSignal := restartPeer != nil && peer.peerConnection == restartPeer
+			forceSignal := peer.iceRestart.queued
 
 			if peer.peerConnection.SignalingState() != webrtc.SignalingStateStable {
 				retryLater = true
@@ -3473,11 +3721,12 @@ func signalPeerConnectionsWithRestart(restartPeer *webrtc.PeerConnection) { // n
 			existingSenders := map[string]bool{}
 
 			for _, sender := range peer.peerConnection.GetSenders() {
-				if sender.Track() == nil {
+				currentTrack := sender.Track()
+				if currentTrack == nil {
 					continue
 				}
 
-				trackID := sender.Track().ID()
+				trackID := currentTrack.ID()
 				existingSenders[trackID] = true
 
 				// If we have an RTPSender that does not map to an existing track, remove and signal.
@@ -3487,6 +3736,33 @@ func signalPeerConnectionsWithRestart(restartPeer *webrtc.PeerConnection) { // n
 						log.Errorf("Failed to remove stale sender track=%s: %v", trackID, err)
 						return true
 					}
+					delete(existingSenders, trackID)
+					needsOffer = true
+					continue
+				}
+
+				// A publisher may stop and republish with the same forwarded track
+				// ID. The map then points at a new TrackLocalStaticRTP even though
+				// the subscriber's sender is still bound to the old object. Comparing
+				// IDs alone leaves the replacement unbound and the remote tile frozen.
+				// Rebind compatible replacements in place so media resumes without a
+				// renegotiation; if pion cannot safely do that, remove/add below and
+				// let the normal offer path renegotiate the sender.
+				if currentTrack != trackLocal {
+					if senderTrackReplacementCompatible(currentTrack, trackLocal) {
+						if err := sender.ReplaceTrack(trackLocal); err == nil {
+							log.Infof("room_sender_track_rebound track_id=%s participant=%s session=%s", trackID, peer.participantName, peer.sessionID)
+							continue
+						} else {
+							log.Errorf("Failed to replace republished sender track=%s in place; renegotiating: %v", trackID, err)
+						}
+					}
+
+					if err := peer.peerConnection.RemoveTrack(sender); err != nil {
+						log.Errorf("Failed to remove replaced sender track=%s: %v", trackID, err)
+						return true
+					}
+					delete(existingSenders, trackID)
 					needsOffer = true
 				}
 			}
@@ -3553,6 +3829,9 @@ func signalPeerConnectionsWithRestart(restartPeer *webrtc.PeerConnection) { // n
 				retryLater = true
 				return true
 			}
+			if forceSignal {
+				peer.iceRestart.start(time.Now())
+			}
 			offerMetadata := startPendingOfferMetadata(peer)
 
 			if peer.websocket != nil {
@@ -3598,9 +3877,6 @@ func signalPeerConnectionsWithRestart(restartPeer *webrtc.PeerConnection) { // n
 			// restart (if any) was delivered, so follow-ups must not force again.
 			peer.nonStableSince = time.Now()
 			peer.offerResent = false
-			if forceSignal {
-				restartPeer = nil
-			}
 			retryLater = true
 		}
 
@@ -3658,6 +3934,28 @@ func resendPendingOffer(peer *peerConnectionState) {
 	}
 }
 
+// senderTrackReplacementCompatible reports whether pion can bind desired onto
+// an already-negotiated sender without changing the sender's media envelope.
+// Pointer identity is deliberately handled by the caller: this helper is only
+// for the same-ID, different-TrackLocal republish case.
+func senderTrackReplacementCompatible(current webrtc.TrackLocal, desired *webrtc.TrackLocalStaticRTP) bool {
+	if current == nil || desired == nil {
+		return false
+	}
+	currentStatic, ok := current.(*webrtc.TrackLocalStaticRTP)
+	if !ok || currentStatic.Kind() != desired.Kind() || currentStatic.ID() != desired.ID() || currentStatic.StreamID() != desired.StreamID() {
+		return false
+	}
+
+	currentCodec := currentStatic.Codec()
+	desiredCodec := desired.Codec()
+
+	return strings.EqualFold(strings.TrimSpace(currentCodec.MimeType), strings.TrimSpace(desiredCodec.MimeType)) &&
+		currentCodec.ClockRate == desiredCodec.ClockRate &&
+		currentCodec.Channels == desiredCodec.Channels &&
+		strings.EqualFold(strings.TrimSpace(currentCodec.SDPFmtpLine), strings.TrimSpace(desiredCodec.SDPFmtpLine))
+}
+
 // preferSourceTrackCodec restricts a subscriber-facing sender to the codec the
 // forwarded source is actually publishing and — for video — also advertises that
 // codec's RTX repair codec, so the offered m-line carries the rtx codec and an
@@ -3675,16 +3973,40 @@ func preferSourceTrackCodec(transceiver *webrtc.RTPTransceiver, trackLocal *webr
 		return nil
 	}
 
-	preferences := []webrtc.RTPCodecParameters{{RTPCodecCapability: codec}}
+	preferences := []webrtc.RTPCodecParameters{roomCodecPreferenceWithTransportCC(webrtc.RTPCodecParameters{RTPCodecCapability: codec})}
 	if primary, rtx, ok := roomVideoCodecPairFor(codec.MimeType); ok {
 		// Use the engine's registered parameters (payload types included) so
 		// SetCodecPreferences matches exactly and, critically, keeps the RTX
 		// codec attached to its primary (its apt payload type must be present
-		// in the same list or the RTX entry is dropped).
-		preferences = []webrtc.RTPCodecParameters{primary, rtx}
+		// in the same list or the RTX entry is dropped). ConfigureTWCCSender
+		// adds transport-cc feedback to the MediaEngine after these canonical
+		// structs are registered, so mirror it into every explicit preference;
+		// otherwise pion intersects it away on source-specific m-sections and
+		// Chrome disables congestion control for the entire PeerConnection.
+		preferences = []webrtc.RTPCodecParameters{
+			roomCodecPreferenceWithTransportCC(primary),
+			roomCodecPreferenceWithTransportCC(rtx),
+		}
 	}
 
 	return transceiver.SetCodecPreferences(preferences)
+}
+
+// roomCodecPreferenceWithTransportCC clones a codec preference and includes
+// the feedback ConfigureTWCCSender registered on the MediaEngine. Keeping this
+// at the explicit-preference seam avoids mutating the canonical codec globals
+// (which would make ConfigureTWCCSender register a duplicate feedback entry).
+func roomCodecPreferenceWithTransportCC(codec webrtc.RTPCodecParameters) webrtc.RTPCodecParameters {
+	feedback := append([]webrtc.RTCPFeedback(nil), codec.RTCPFeedback...)
+	for _, entry := range feedback {
+		if strings.EqualFold(strings.TrimSpace(entry.Type), webrtc.TypeRTCPFBTransportCC) {
+			codec.RTCPFeedback = feedback
+			return codec
+		}
+	}
+	codec.RTCPFeedback = append(feedback, webrtc.RTCPFeedback{Type: webrtc.TypeRTCPFBTransportCC})
+
+	return codec
 }
 
 // roomVideoCodecPairFor returns the registered primary and RTX repair codec
@@ -3700,59 +4022,6 @@ func roomVideoCodecPairFor(mimeType string) (primary, rtx webrtc.RTPCodecParamet
 	default:
 		return webrtc.RTPCodecParameters{}, webrtc.RTPCodecParameters{}, false
 	}
-}
-
-// dispatchKeyFrame asks every publisher for a keyframe — run after signal
-// walks (so a new subscriber's first frame arrives promptly) and by the
-// periodic 3s ticker.
-//
-// 2026-07-10 keyframe-spiral incident: this used to PLI EVERY publisher
-// unconditionally, BYPASSING subscriberKeyframeThrottle. 193 client repair
-// messages in ~4 minutes each ran a signal walk whose deferred dispatch PLI'd
-// all five publishers, so they pumped keyframe-heavy bursts (~3.2MB/interval)
-// until the droplet's egress saturated and everyone lost media. Each PLI now
-// spends the SAME per-source budget as forwarded subscriber PLIs (the key is
-// forwardedRemoteTrackID, identical to the requestSourceKeyframe key): a
-// source the throttle has never seen — a just-published track — still gets
-// its keyframe immediately, while a storm of walks costs each publisher at
-// most one keyframe per subscriberKeyframeInterval.
-func dispatchKeyFrame() {
-	now := time.Now()
-	listLock.RLock()
-	defer listLock.RUnlock()
-
-	for i := range peerConnections {
-		if peerConnections[i].peerConnection == nil {
-			continue
-		}
-		for _, receiver := range peerConnections[i].peerConnection.GetReceivers() {
-			track := receiver.Track()
-			if track == nil {
-				continue
-			}
-			if !allowSignalWalkKeyframe(forwardedRemoteTrackID(track), now) {
-				continue
-			}
-
-			_ = peerConnections[i].peerConnection.WriteRTCP([]rtcp.Packet{
-				&rtcp.PictureLossIndication{
-					MediaSSRC: uint32(track.SSRC()),
-				},
-			})
-		}
-	}
-}
-
-// allowSignalWalkKeyframe gates one signal-walk PLI through the shared
-// per-source keyframe throttle. Suppressions feed the room_keyframe_throttled
-// accounting so a walk storm stays visible in the logs it starves.
-func allowSignalWalkKeyframe(sourceKey string, now time.Time) bool {
-	if subscriberKeyframeThrottle.allow(sourceKey, now) {
-		return true
-	}
-	noteThrottledKeyframeRequestDrop(sourceKey, "signal_walk", "server")
-
-	return false
 }
 
 // keyframeRequestThrottle coalesces subscriber keyframe requests per forwarded
@@ -3792,13 +4061,10 @@ func (t *keyframeRequestThrottle) forget(sourceKey string) {
 }
 
 // subscriberKeyframeInterval caps keyframe requests toward a publisher at
-// roughly one per source per 2.5s — the shared budget for forwarded
-// subscriber PLIs AND the signal-walk dispatch. A first request for a source
-// always passes (empty throttle entry), so a first-seen frozen source
-// recovers immediately; a source served within the last 2.5s has its PLI
-// dropped and is retried on the next 3s signal-walk tick, so recovery for an
-// already-throttled source is bounded at <=3s, not immediate. The floor only
-// caps SUSTAINED re-requests. It was 1s
+// roughly one per source per 2.5s — the shared budget for concrete subscriber,
+// screen-share-transition, and video-liveness requests. A first request for a
+// source always passes (empty throttle entry); the floor only caps sustained
+// re-requests. It was 1s
 // until the 2026-07-10 spiral, where a lossy mobile subscriber sustained ~1
 // forwarded keyframe per source per 1-2s and the resulting keyframe-heavy
 // fanout saturated egress — 2.5s keeps recovery snappy while a storm costs
@@ -4015,7 +4281,7 @@ func (r *publisherSilenceRegistry) size() int {
 
 var publisherSilence = newPublisherSilenceRegistry()
 
-// sweepPublisherSilence runs on the 3s keyframe ticker. For each watched track
+// sweepPublisherSilence runs on the 3s liveness ticker. For each watched track
 // whose PeerConnection is Connected (a stall while the transport itself is down
 // is explained by the transport, not a silent uplink), it advances the silence
 // state and logs/nudges accordingly.
@@ -4111,6 +4377,35 @@ func requestSourceKeyframe(forwardedTrackID string, subscriberName string, subsc
 		forwardedTrackID, sourceSSRC, subscriberName, subscriberSession)
 }
 
+// requestParticipantVideoKeyframes scopes a server-originated keyframe nudge
+// to one publisher session and its current video sources. It is used for
+// screen-share transitions, where a fresh frame is useful, without making an
+// unrelated participant's camera produce a synchronized keyframe burst.
+func requestParticipantVideoKeyframes(participantName string, participantSession string, reason string) {
+	for _, trackID := range participantVideoTrackIDs(participantName, participantSession) {
+		requestSourceKeyframe(trackID, reason, participantSession)
+	}
+}
+
+func participantVideoTrackIDs(participantName string, participantSession string) []string {
+	listLock.RLock()
+	defer listLock.RUnlock()
+
+	trackIDs := make([]string, 0)
+	for trackID, trackLocal := range trackLocals {
+		if trackLocal == nil || trackLocal.Kind() != webrtc.RTPCodecTypeVideo {
+			continue
+		}
+		if !sameParticipantName(trackParticipants[trackID], participantName) || trackParticipantSessions[trackID] != participantSession {
+			continue
+		}
+		trackIDs = append(trackIDs, trackID)
+	}
+	sort.Strings(trackIDs)
+
+	return trackIDs
+}
+
 // publisherKeyframeTarget maps a forwarded track ID back to its source: the
 // publisher's PeerConnection (via the trackParticipantSessions bookkeeping)
 // and the publisher-side SSRC embedded in the forwarded ID by
@@ -4124,6 +4419,10 @@ func publisherKeyframeTarget(forwardedTrackID string) (*webrtc.PeerConnection, u
 
 	listLock.RLock()
 	defer listLock.RUnlock()
+	trackLocal := trackLocals[forwardedTrackID]
+	if trackLocal == nil || trackLocal.Kind() != webrtc.RTPCodecTypeVideo {
+		return nil, 0, false
+	}
 	sessionID := trackParticipantSessions[forwardedTrackID]
 	if sessionID == "" {
 		return nil, 0, false
@@ -4358,7 +4657,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	var participantAcceptedState atomic.Bool
 	var mediaJoinedState atomic.Bool
 	var cleanupOnce sync.Once
-	pendingRemoteCandidates := make([]webrtc.ICECandidateInit, 0)
+	pendingRemoteCandidates := pendingRemoteICECandidateQueue{}
 	participantMu := sync.Mutex{}
 	currentParticipantName := func() string {
 		participantMu.Lock()
@@ -4619,7 +4918,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				// media-scoped (mobile browsers carry video orientation/rotation and
 				// congestion metadata there; stripping them makes phone video look
 				// unstable to subscribers — 0a46b50) while dropping the
-				// TRANSPORT-scoped SDES ids, which are only meaningful on the
+				// Transport-scoped SDES/TWCC ids, which are only meaningful on the
 				// publisher's own transport (see stripTransportScopedRTPExtensions).
 				if err = forwardPublisherRTP(trackLocal, packet, stripExtensionIDs); err != nil {
 					log.Errorf("room_ontrack_write_failed participant=%s session=%s kind=%s track_id=%s source_track_id=%s sequence=%d payload_type=%d extension_profile=0x%x extension_ids=%s packets=%d error=%v",
@@ -4672,6 +4971,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 
 		pc.OnICEConnectionStateChange(func(is webrtc.ICEConnectionState) {
 			log.Infof("ICE connection state changed: %s", is)
+			notePeerConnectionICEState(pc, is)
 			switch {
 			case iceStateNeedsRecovery(is):
 				scheduleICERecovery()
@@ -4712,7 +5012,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 
 		// An inbound room frame is proof of life for the liveness sweep, alongside
 		// the heartbeat pong (no-op until this socket is admitted).
-		kanbanApp.touchParticipantLivenessInRoom(connRoomID, currentParticipantName())
+		kanbanApp.touchParticipantSessionLivenessInRoom(connRoomID, currentParticipantName(), participantSessionID)
 
 		if err := json.Unmarshal(raw, &message); err != nil {
 			log.Errorf("Failed to unmarshal json to message: %v", err)
@@ -5084,9 +5384,16 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 
 			log.Infof("Got candidate: %v", candidate)
 
-			if peerConnection.RemoteDescription() == nil {
-				pendingRemoteCandidates = append(pendingRemoteCandidates, candidate)
-				log.Infof("Queued ICE candidate until remote description is set")
+			if remoteICECandidateShouldQueue(candidate, peerConnection.RemoteDescription()) {
+				queued, evicted := pendingRemoteCandidates.enqueue(candidate)
+				switch {
+				case !queued:
+					log.Infof("Coalesced duplicate ICE candidate while waiting for matching remote description")
+				case evicted:
+					log.Infof("Queued ICE candidate for a future remote description; evicted oldest candidate at bound=%d", maxPendingRemoteICECandidates)
+				default:
+					log.Infof("Queued ICE candidate until its matching remote description is set")
+				}
 				continue
 			}
 
@@ -5130,25 +5437,28 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 
 				continue
 			}
+			completePeerConnectionICERestart(peerConnection)
 			clearPendingOfferMetadata(peerConnection)
-			for _, candidate := range pendingRemoteCandidates {
+			matchingCandidates, discardedCandidates := pendingRemoteCandidates.takeMatching(peerConnection.RemoteDescription())
+			if discardedCandidates > 0 {
+				log.Infof("Discarded %d queued ICE candidates from stale explicit generations", discardedCandidates)
+			}
+			for _, candidate := range matchingCandidates {
 				if err := peerConnection.AddICECandidate(candidate); err != nil {
 					log.Errorf("Failed to add queued ICE candidate: %v", err)
 				}
 			}
-			pendingRemoteCandidates = pendingRemoteCandidates[:0]
 			signalPeerConnections()
 		case "restart_ice":
 			if !participantAccepted || !mediaJoined || peerConnection == nil {
 				continue
 			}
-			// card-003 W4: restart_ice forces a full ICERestart renegotiation
-			// plus a dispatchKeyFrame walk and was the last media-inbound event
-			// left unbucketed after the keyframe-spiral damping wave. Token-bucket
-			// per principal (burst 2, refill 1 per 15s) — the client's ladder is
-			// at most 1 per 3.5s / 2 per 60s, so this never throttles legitimate
-			// recovery but caps a socket-line-rate storm. On deny, drop silently
-			// toward the client with a rate-limited drop log.
+			// card-003 W4: restart_ice is token-bucketed at the socket boundary;
+			// peerICERestartState then coalesces browser and server observations of
+			// the same outage into one ICE-restart offer. The bucket preserves the
+			// client's legitimate retry ladder while capping a socket-line-rate
+			// flood. On deny, drop silently toward the client with a rate-limited
+			// drop log.
 			iceRestartNow := time.Now()
 			iceRestartAllowed := true
 			if guest != nil {
@@ -5167,8 +5477,11 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				continue
 			}
 			totalTracks, audioTracks, videoTracks := snapshotForwardedTrackCounts()
-			log.Infof("Client requested ICE restart for participant=%s session=%s total_tracks=%d audio_tracks=%d video_tracks=%d", currentParticipantName(), participantSessionID, totalTracks, audioTracks, videoTracks)
-			signalPeerConnectionICE(peerConnection)
+			if signalPeerConnectionICE(peerConnection) {
+				log.Infof("Client requested ICE restart for participant=%s session=%s total_tracks=%d audio_tracks=%d video_tracks=%d", currentParticipantName(), participantSessionID, totalTracks, audioTracks, videoTracks)
+			} else {
+				log.Infof("Client ICE restart coalesced for participant=%s session=%s", currentParticipantName(), participantSessionID)
+			}
 		case "select_layer":
 			if !participantAccepted || !mediaJoined {
 				continue
@@ -5474,7 +5787,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				"name":   currentParticipantName(),
 				"roomId": connRoomID,
 			})
-			go dispatchKeyFrame()
+			go requestParticipantVideoKeyframes(currentParticipantName(), participantSessionID, "screen_share_started")
 			broadcastAssistantEvent("status", currentParticipantName()+" started sharing their screen", nil)
 		case "screen_share_stopped":
 			if !participantAccepted {
@@ -5485,7 +5798,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				"name":   currentParticipantName(),
 				"roomId": connRoomID,
 			})
-			go dispatchKeyFrame()
+			go requestParticipantVideoKeyframes(currentParticipantName(), participantSessionID, "screen_share_stopped")
 			broadcastAssistantEvent("status", currentParticipantName()+" stopped sharing their screen", nil)
 		default:
 			log.Errorf("unknown message: %+v", message)

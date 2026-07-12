@@ -217,8 +217,8 @@ func TestIndexStaleTileEscalationDeafSubscription(t *testing.T) {
 		t.Error("the deaf escalation branch must gate before the muted early-return")
 	}
 
-	// the deaf gate: rendered gallery tile + roster camera-on; no roster entry
-	// or an explicit camera-off keeps the old behavior
+	// the deaf gate: rendered gallery tile + roster frame-capable media; no roster
+	// entry or camera-off without an active screen share keeps the old behavior
 	helper := functionBody(html, "function deafSubscriptionRemoteTile(track, framesDecoded)")
 	if helper == "" {
 		t.Fatal("could not extract deafSubscriptionRemoteTile body")
@@ -226,8 +226,9 @@ func TestIndexStaleTileEscalationDeafSubscription(t *testing.T) {
 	for _, want := range []string{
 		"if (framesDecoded <= 0) {", // a never-rendered fresh track is not deaf
 		"remoteTileShowingTrack(track)",
-		"!participantMediaStates.has(name)",   // no roster state → not deaf
-		"participantMediaState(name).cameraOff", // camera off → not deaf
+		"!participantMediaStates.has(name)",                        // no roster state → not deaf
+		"const mediaState = participantMediaState(name)",           // current roster media truth
+		"if (mediaState.cameraOff && !mediaState.screenSharing) {", // camera off without a share → not deaf
 	} {
 		if !strings.Contains(helper, want) {
 			t.Errorf("deafSubscriptionRemoteTile is missing %q", want)

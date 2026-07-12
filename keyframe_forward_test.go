@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/pion/rtcp"
+	"github.com/pion/webrtc/v4"
 )
 
 // TestKeyframeRequestThrottleCoalescesPerSource proves the core guarantee of
@@ -117,9 +118,18 @@ func TestPublisherKeyframeTargetMapsForwardedTrackToSource(t *testing.T) {
 		t.Fatalf("create other pc: %v", err)
 	}
 	defer otherPC.Close() //nolint:errcheck
+	videoTrack, err := webrtc.NewTrackLocalStaticRTP(
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8, ClockRate: 90000},
+		"stream:cam:12345",
+		"publisher-stream",
+	)
+	if err != nil {
+		t.Fatalf("create forwarded video track: %v", err)
+	}
 
 	snapshotPeerState(t)
 	listLock.Lock()
+	trackLocals = map[string]*webrtc.TrackLocalStaticRTP{videoTrack.ID(): videoTrack}
 	trackParticipantSessions = map[string]string{"stream:cam:12345": "aj-1"}
 	peerConnections = []peerConnectionState{
 		{peerConnection: otherPC, participantName: "Tim", sessionID: "tim-1"},
@@ -148,13 +158,23 @@ func TestPublisherKeyframeTargetMissingMappings(t *testing.T) {
 		t.Fatalf("create pc: %v", err)
 	}
 	defer livePC.Close() //nolint:errcheck
+	audioTrack, err := webrtc.NewTrackLocalStaticRTP(
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus, ClockRate: 48000, Channels: 2},
+		"stream:mic:3",
+		"publisher-stream",
+	)
+	if err != nil {
+		t.Fatalf("create forwarded audio track: %v", err)
+	}
 
 	snapshotPeerState(t)
 	listLock.Lock()
+	trackLocals = map[string]*webrtc.TrackLocalStaticRTP{audioTrack.ID(): audioTrack}
 	trackParticipantSessions = map[string]string{
 		"stream:cam:1": "gone-1", // session no longer pooled
 		"stream:cam:2": "nil-1",  // pooled entry with nil pc
 		"stream:cam:x": "live-1", // unparseable ssrc
+		"stream:mic:3": "live-1", // live publisher, but audio must never receive PLI
 	}
 	peerConnections = []peerConnectionState{
 		{peerConnection: nil, participantName: "Nil", sessionID: "nil-1"},
@@ -173,6 +193,9 @@ func TestPublisherKeyframeTargetMissingMappings(t *testing.T) {
 	}
 	if _, _, ok := publisherKeyframeTarget("stream:cam:x"); ok {
 		t.Fatal("an unparseable forwarded ID must have no keyframe target")
+	}
+	if _, _, ok := publisherKeyframeTarget("stream:mic:3"); ok {
+		t.Fatal("an audio source must never become a PLI target")
 	}
 }
 

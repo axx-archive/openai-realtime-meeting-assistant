@@ -1424,12 +1424,11 @@
         -webkit-backface-visibility: hidden;
       }
 
-      .is-mobile-device #localVideo,
-      .is-mobile-device .hearth-speaker video.is-local,
-      .is-mobile-device .screen-stage__pip video.is-local,
-      .is-mobile-device .pip-tile video.is-local,
-      .is-mobile-device .board-video-tile video.is-local,
-      .is-mobile-device .board-huddle__media video.is-local {
+      .uses-local-mirror-canvas .hearth-speaker video.is-local,
+      .uses-local-mirror-canvas .screen-stage__pip video.is-local,
+      .uses-local-mirror-canvas .pip-tile video.is-local,
+      .uses-local-mirror-canvas .board-video-tile video.is-local,
+      .uses-local-mirror-canvas .board-huddle__media video.is-local {
         transform: none;
         -webkit-transform: none;
       }
@@ -1446,7 +1445,7 @@
         display: none;
       }
 
-      .is-mobile-device .local-video-mirror-canvas {
+      .uses-local-mirror-canvas .local-video-mirror-canvas {
         position: absolute;
         inset: 0;
         z-index: 2;
@@ -1458,7 +1457,11 @@
         pointer-events: none;
       }
 
-      .is-mobile-device #localVideo.local-mirror-source {
+      .uses-local-mirror-canvas .local-video-mirror-canvas[hidden] {
+        display: none;
+      }
+
+      .uses-local-mirror-canvas #localVideo.local-mirror-source {
         opacity: 0;
       }
 
@@ -1570,12 +1573,14 @@
       }
 
       .video-tile.is-camera-off .tile-avatar,
-      .video-tile.is-video-stalled .tile-avatar {
+      .video-tile.is-video-stalled .tile-avatar,
+      .video-tile.is-stage-video-owned .tile-avatar {
         display: grid;
       }
 
       .video-tile.is-camera-off video,
-      .video-tile.is-video-stalled video {
+      .video-tile.is-video-stalled video,
+      .video-tile.is-stage-video-owned video {
         opacity: 0;
       }
 
@@ -23771,8 +23776,13 @@
       let roomEntryStartedAt = 0
       let screenShareStream
       let isReplacingLocalAudio = false
+      let isReplacingLocalVideo = false
       let isMicMuted = false
       let isCameraOff = false
+      // Separate the person's intent from a temporary device failure. Recovery
+      // may show camera-off UI while it reacquires, but it must never restart a
+      // camera the person deliberately turned off.
+      let localCameraRequested = false
       let currentParticipantName = ''
       // Active scout rail tab; in-memory only by design (resets on reload).
       let scoutChatTab = 'room'
@@ -23883,6 +23893,8 @@
       let lastNonBoardTool = 'office'
       let railHidden = false
       const pipVideoTilesByParticipant = new Map()
+      let pipMoreIndicator = null
+      let pipEmptyIndicator = null
       let pipRenderTimer = 0
       const scoutChatMaxNodes = 200
       const roomChatMaxNodes = 200
@@ -23983,6 +23995,7 @@
       const unlabeledRemoteVideoSightings = new Map()
       const participantPlaceholders = new Map()
       const boardVideoTilesByParticipant = new Map()
+      let boardVideoEmptyIndicator = null
       const participantMediaStates = new Map()
       const audioMonitors = new Map()
       const pendingRemotePlaybackElements = new Set()
@@ -24126,8 +24139,10 @@
       let previousMediaQualityStats = null
       let lastMediaQualityReportAt = 0
       let auxiliaryVideoRepairTimer = 0
+      let primaryVideoRepairTimer = 0
       let videoAttachmentRevision = 0
       let localMirrorFrame = 0
+      const localMirrorCanvasStates = new WeakMap()
       const mediaQualityReportIntervalMs = 12000
       const audioSettingsStorageKey = 'bonfire.audio.settings.v1'
       // Stable per-device id so one account can be in the room on a laptop and a
@@ -24193,8 +24208,10 @@
       // platform NS as the default to protect battery; RNNoise is an explicit,
       // clearly-labelled opt-in there. Chrome/Edge/Firefox desktop run RNNoise as
       // a true denoiser with the browser's own NS disabled so nothing double-suppresses.
-      const isIOSDevice = /iPad|iPhone|iPod/i.test(navigator.userAgent)
-        || (safariBrowser && typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent))
+      const isIPadOSDevice = /Macintosh/.test(navigator.userAgent)
+        && typeof navigator.maxTouchPoints === 'number'
+        && navigator.maxTouchPoints > 1
+      const isIOSDevice = /iPad|iPhone|iPod/i.test(navigator.userAgent) || isIPadOSDevice
       const isAndroidDevice = /Android/i.test(navigator.userAgent)
       // WebKit prefers the platform path; our WASM worklet is not stacked there.
       const prefersPlatformVoiceIsolation = safariBrowser || isIOSDevice
@@ -24206,8 +24223,22 @@
       // stay in the device's native orientation. (iPadOS reports as "Macintosh"
       // but exposes touch points, so fold that in.)
       const isMobileDevice = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
-        || (/Macintosh/.test(navigator.userAgent) && typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 1)
+        || isIPadOSDevice
+      // Video looks are deliberately Chrome-desktop-only. The output remains a
+      // normal WebRTC video track for every remote browser, but Safari/mobile do
+      // not pay for (or depend on) the extra WebGL/canvas capture pipeline.
+      const reliableVideoLookBrowser = !safariBrowser
+        && !isMobileDevice
+        && /(?:Chrome|Chromium)\//i.test(navigator.userAgent)
+        && !/(?:Edg|OPR)\//i.test(navigator.userAgent)
+      const videoLooksDisabledForReliability = !reliableVideoLookBrowser
+      // The canvas mirror is an iOS/WebKit workaround, not a generic mobile
+      // rendering path. Android/other mobile engines keep the single canonical
+      // video element and its cheap CSS mirror; iOS gets the canvas only after a
+      // successful atomic draw (see syncLocalMirrorPreview).
+      const useLocalMirrorCanvas = isIOSDevice
       document.documentElement.classList.toggle('is-mobile-device', isMobileDevice)
+      document.documentElement.classList.toggle('uses-local-mirror-canvas', useLocalMirrorCanvas)
       const audioModeLabels = {
         'voice-focus': 'voice focus',
         'standard-cleanup': 'standard cleanup',
@@ -24865,15 +24896,33 @@
         })
       })
       window.addEventListener('beforeunload', leaveRoom)
-      window.addEventListener('resize', () => scheduleAuxiliaryVideoPlaybackRepair('viewport resize', 160))
-      window.addEventListener('orientationchange', () => scheduleAuxiliaryVideoPlaybackRepair('orientation change', 260))
+      window.addEventListener('resize', () => {
+        scheduleAuxiliaryVideoPlaybackRepair('viewport resize', 160)
+        schedulePrimaryVideoPlaybackRepair('viewport resize', 180)
+      })
+      window.addEventListener('orientationchange', () => {
+        scheduleAuxiliaryVideoPlaybackRepair('orientation change', 260)
+        schedulePrimaryVideoPlaybackRepair('orientation change', 320)
+      })
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
+          syncLocalMirrorPreview()
           scheduleAuxiliaryVideoPlaybackRepair('visibility restored', 120)
+          schedulePrimaryVideoPlaybackRepair('visibility restored', 140)
           restoreAudioAfterVisibility().catch(error => {
             console.warn('Could not restore audio after visibility change', error)
           })
+          restoreVideoAfterVisibility().catch(error => {
+            console.warn('Could not restore video after visibility change', error)
+          })
+        } else {
+          pauseLocalMirrorPreviewForVisibility()
         }
+      })
+      window.addEventListener('pageshow', () => {
+        syncLocalMirrorPreview()
+        scheduleAuxiliaryVideoPlaybackRepair('page restored', 120)
+        schedulePrimaryVideoPlaybackRepair('page restored', 140)
       })
       // card-003 W4 gap 5: a network handoff (Wi-Fi <-> cellular, VPN flip)
       // silently invalidates the room's ICE candidates; the browser fires
@@ -25083,7 +25132,11 @@
         return {
           look,
           lookIntensity: clampNumber(source.lookIntensity, 0, 1, defaultVideoSettings.lookIntensity),
-          preferredCamera: normalizePreferredAudioInput(source.preferredCamera)
+          preferredCamera: normalizePreferredAudioInput(source.preferredCamera),
+          // Older v8 records stored the implicit desktop `studio` default with
+          // no provenance. Keep that implicit so Safari/mobile can safely run
+          // raw video until the person intentionally picks a look.
+          lookExplicitlyChosen: source.lookExplicitlyChosen === true
         }
       }
 
@@ -27411,6 +27464,7 @@
           stopPrivateRealtimeVoiceForRoom()
           // room-tool activation renders the lobby (hero + rooms rail)
           renderLobby()
+          schedulePrimaryVideoPlaybackRepair('room tool activated', 80)
         } else {
           syncVoiceIslandVisibility()
         }
@@ -31386,6 +31440,32 @@
         return roomMediaActive() && (tool === 'office' || tool === 'chat' || tool === 'artifacts' || tool === 'board' || agentToolIds.includes(tool) || tool === 'memory' || tool === 'files')
       }
 
+      // Live <video> elements should not be detached and reinserted on a timer.
+      // WebKit can briefly reset its rendering surface even when srcObject is
+      // unchanged. Reconcile only the positions that genuinely changed.
+      function reconcileStableChildren(container, desiredChildren) {
+        if (!container) {
+          return false
+        }
+        const desired = desiredChildren.filter(Boolean)
+        const current = Array.from(container.children)
+        if (current.length === desired.length && current.every((child, index) => child === desired[index])) {
+          return false
+        }
+        const desiredSet = new Set(desired)
+        for (const child of current) {
+          if (!desiredSet.has(child)) {
+            child.remove()
+          }
+        }
+        desired.forEach((child, index) => {
+          if (container.children[index] !== child) {
+            container.insertBefore(child, container.children[index] || null)
+          }
+        })
+        return true
+      }
+
       function renderPipMeeting() {
         if (!pipMeeting) {
           return
@@ -31427,18 +31507,22 @@
         pipTiles.classList.toggle('is-pair', shown.length > 1)
         const rest = names.length - shown.length
         if (rest > 0) {
-          const more = document.createElement('span')
-          more.className = 'pip-meeting__more'
-          more.textContent = `+${rest}`
-          children.push(more)
+          if (!pipMoreIndicator) {
+            pipMoreIndicator = document.createElement('span')
+            pipMoreIndicator.className = 'pip-meeting__more'
+          }
+          pipMoreIndicator.textContent = `+${rest}`
+          children.push(pipMoreIndicator)
         }
         if (children.length === 0) {
-          const empty = document.createElement('span')
-          empty.className = 'pip-meeting__empty'
-          empty.textContent = 'waiting for video'
-          children.push(empty)
+          if (!pipEmptyIndicator) {
+            pipEmptyIndicator = document.createElement('span')
+            pipEmptyIndicator.className = 'pip-meeting__empty'
+            pipEmptyIndicator.textContent = 'waiting for video'
+          }
+          children.push(pipEmptyIndicator)
         }
-        pipTiles.replaceChildren(...children)
+        reconcileStableChildren(pipTiles, children)
 
         const project = (topbarProjectEl.textContent || 'room').trim().toLowerCase()
         const elapsed = topbarElapsedEl.dataset.started === 'true' ? topbarElapsedEl.textContent : ''
@@ -31501,9 +31585,11 @@
 
         const stream = participantStream(name)
         const state = participantMediaState(name)
-        if (stream && !state.cameraOff) {
+        let video = tile.querySelector('video')
+        const mayAttachVideo = stream && !state.cameraOff
+          && shouldAttachParticipantVideo(video || tile, name, stream)
+        if (mayAttachVideo) {
           tile.querySelector('.owner-avatar')?.remove()
-          let video = tile.querySelector('video')
           if (!video) {
             video = document.createElement('video')
             video.autoplay = true
@@ -31514,7 +31600,6 @@
           }
           setVideoElementStream(video, stream, { local: name === currentParticipantName })
         } else {
-          const video = tile.querySelector('video')
           if (video) {
             clearVideoElementStream(video)
             video.remove()
@@ -31671,6 +31756,7 @@
         updateStageControls()
         updateHearthParticipants()
         scheduleAuxiliaryVideoPlaybackRepair(`room layout ${currentRoomLayout()}`, 120)
+        schedulePrimaryVideoPlaybackRepair(`room layout ${currentRoomLayout()}`, 140)
       }
 
       function togglePinnedSpeaker(name) {
@@ -31682,6 +31768,7 @@
         reconcileStageLayoutState()
         updateStageControls()
         updateHearthParticipants()
+        schedulePrimaryVideoPlaybackRepair(`speaker ${pinnedSpeakerName ? 'pinned' : 'unpinned'}`, 140)
       }
 
       function updateStageControls() {
@@ -31774,7 +31861,11 @@
           }
         }).sort((a, b) => (a.orderIndex - b.orderIndex) || (a.index - b.index))
 
-        ordered.forEach(({ tile }) => videoStack.appendChild(tile))
+        const desiredTiles = ordered.map(({ tile }) => tile)
+        if (tiles.every((tile, index) => tile === desiredTiles[index])) {
+          return
+        }
+        reconcileStableChildren(videoStack, desiredTiles)
       }
 
       function ensureVideoTileReorderControl(tile, name) {
@@ -32390,14 +32481,25 @@
           }
           signalChain = signalChain
             .catch(() => {})
-            .then(() => handleSignal(message))
+            .then(() => {
+              // Resetting signalChain cannot cancel callbacks already queued on
+              // the old promise. Re-check ownership at execution time so an
+              // old socket can never negotiate the replacement room peer.
+              if (ws !== socket) {
+                return
+              }
+              return handleSignal(message, { socket, sessionPeer: pc })
+            })
             .catch(error => {
               console.warn('Signal handling failed', error)
-              setLog(error.message || String(error))
+              if (ws === socket) {
+                setLog(error.message || String(error))
+              }
             })
         }
         socket.onclose = event => {
           try { window.clearInterval(socket.__roomHeartbeat) } catch { /* none */ }
+          socket.__roomHeartbeat = undefined
           if (ws === socket) {
             ws = undefined
           }
@@ -32696,12 +32798,15 @@
         return limits.maxFramerate
       }
 
-      async function configureOutboundSenders() {
-        if (!pc) {
+      async function configureOutboundSenders(sessionPeer = pc, isCurrent = () => pc === sessionPeer) {
+        if (!sessionPeer || !isCurrent()) {
           return
         }
         await retuneLocalCameraCapture()
-        await Promise.all(pc.getSenders()
+        if (!isCurrent()) {
+          return
+        }
+        await Promise.all(sessionPeer.getSenders()
           .filter(sender => sender.track)
           .map(sender => configureOutboundSender(sender, sender.track)))
       }
@@ -32897,6 +33002,7 @@
           || localStream.getAudioTracks().every(track => !track.enabled)
         isCameraOff = voiceOnly || localStream.getVideoTracks().length === 0
           || localStream.getVideoTracks().every(track => !track.enabled)
+        localCameraRequested = !isCameraOff
         setVideoElementStream(localVideo, localStream, { local: true, force: true })
         wireLocalAudioTrack(localStream.getAudioTracks()[0])
         wireLocalVideoTrack(localStream.getVideoTracks()[0])
@@ -33872,7 +33978,10 @@
 
       function videoLookSettingsValue() {
         const video = normalizeVideoSettings(audioSettings.video)
-        return { look: video.look, intensity: video.lookIntensity }
+        const look = videoLooksDisabledForReliability
+          ? 'none'
+          : video.look
+        return { look, intensity: video.lookIntensity, explicitlyChosen: video.lookExplicitlyChosen }
       }
 
       function loadVideoLookModule() {
@@ -34108,6 +34217,12 @@
       }
 
       function setVideoLook(look) {
+        if (videoLooksDisabledForReliability && look !== 'none') {
+          setLog('video filters are available on Chrome desktop only')
+          renderVideoLookSettings()
+          renderGreenRoom()
+          return
+        }
         // Picking a chip is picking a recipe: clear any slider fine-tuning so the
         // look starts from its preset, then the sliders re-expose that preset.
         videoLookAdjust = {}
@@ -34116,7 +34231,7 @@
         if (look !== 'blur') {
           greenRoomLastFilterLook = look
         }
-        const next = normalizeVideoSettings({ ...audioSettings.video, look })
+        const next = normalizeVideoSettings({ ...audioSettings.video, look, lookExplicitlyChosen: true })
         audioSettings = { ...audioSettings, video: next }
         saveAudioSettings()
         applyLiveVideoLookChange()
@@ -34313,22 +34428,26 @@
           const selected = chip.dataset.look === look
           chip.classList.toggle('is-selected', selected)
           chip.setAttribute('aria-pressed', String(selected))
+          chip.disabled = videoLooksDisabledForReliability
         })
         // the green-room filters popover's blur switch is not a chip — keep it
         // honest with the persisted look on every look change
         if (greenRoomBlurEl) {
           greenRoomBlurEl.checked = look === 'blur'
+          greenRoomBlurEl.disabled = videoLooksDisabledForReliability
         }
         const preset = videoLookPresetUniforms(look)
         if (videoLookBrightness) {
           videoLookBrightness.value = String(Math.round((0.5 + (preset.uBrightness || 0) * 2.5) * 100))
+          videoLookBrightness.disabled = videoLooksDisabledForReliability || look === 'none'
         }
         if (videoLookWarmth) {
           videoLookWarmth.value = String(Math.round((0.5 + (preset.uTemperature || 0) * 0.5) * 100))
+          videoLookWarmth.disabled = videoLooksDisabledForReliability || look === 'none'
         }
         if (videoLookIntensityInput) {
           videoLookIntensityInput.value = String(Math.round(intensity * 100))
-          videoLookIntensityInput.disabled = look === 'none'
+          videoLookIntensityInput.disabled = videoLooksDisabledForReliability || look === 'none'
         }
         renderVideoLookStatus(look)
         if (videoLookSavedHint) {
@@ -34358,7 +34477,9 @@
         }
         let state = 'off'
         let text = 'Off'
-        if (look !== 'none') {
+        if (videoLooksDisabledForReliability) {
+          text = 'Off here — Chrome desktop only'
+        } else if (look !== 'none') {
           if (videoLookStatus.state === 'paused-battery' || videoLookStatus.governorStage >= 1) {
             state = 'paused'
             text = 'Paused — battery'
@@ -35065,12 +35186,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         setTrackContentHint(track, cameraContentHint)
         track.enabled = !isCameraOff
-        track.addEventListener('ended', () => {
-          isCameraOff = true
-          updateCameraButton()
-          publishParticipantMediaState()
-          setLog('camera stopped')
-        }, { once: true })
+        track.addEventListener('ended', () => handleLocalVideoEnded(track), { once: true })
       }
 
       function toggleLocalMute() {
@@ -35191,43 +35307,69 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function setLocalCameraOff(cameraOff, options = {}) {
-        isCameraOff = Boolean(cameraOff)
+        const requestedOff = Boolean(cameraOff)
+        isCameraOff = requestedOff
+        localCameraRequested = !isCameraOff
         const track = localVideoTrack()
-        if (track) {
+        if (liveTrack(track)) {
           track.enabled = !isCameraOff
+        }
+        if (isCameraOff) {
+          resetLocalVideoRecovery()
+        } else if (!liveTrack(track)) {
+          // A voice-only fallback or an interrupted device still lets the
+          // person press Start video; that explicit gesture starts a bounded
+          // reacquire instead of leaving a permanently disabled button.
+          isCameraOff = true
+          if (!localVideoRecoveryPromise) {
+            resetLocalVideoRecovery()
+          }
+          requestLocalVideoRecovery('camera requested').catch(error => {
+            console.warn('Could not start camera', error)
+          })
         }
         updateCameraButton()
         publishParticipantMediaState()
         if (options.announce) {
-          setLog(isCameraOff ? 'camera off' : 'camera live')
+          setLog(requestedOff ? 'camera off' : (liveTrack(localVideoTrack()) ? 'camera live' : 'reconnecting camera…'))
         }
         updateBoardDockControls()
       }
 
-      async function replaceLocalVideoTrack(nextTrack) {
+      async function replaceLocalVideoTrack(nextTrack, options = {}) {
         if (!localStream || !nextTrack) {
           return false
         }
+        const nextCameraOff = options.cameraOff === undefined
+          ? Boolean(isCameraOff)
+          : Boolean(options.cameraOff)
         const previousTrack = localVideoTrack()
         const sender = pc?.getSenders().find(candidate => candidate.track?.kind === 'video' || candidate.track === null)
         setTrackContentHint(nextTrack, cameraContentHint)
-        nextTrack.enabled = !isCameraOff
-        if (sender) {
-          await sender.replaceTrack(nextTrack)
-          await configureOutboundSender(sender, nextTrack)
+        nextTrack.enabled = !nextCameraOff
+        isReplacingLocalVideo = true
+        try {
+          // While screen sharing the video sender belongs to the display track;
+          // refresh the parked camera in localStream without stealing that leg.
+          if (sender && !activeScreenShareTrack()) {
+            await sender.replaceTrack(nextTrack)
+            await configureOutboundSender(sender, nextTrack)
+          }
+          if (previousTrack && previousTrack !== nextTrack) {
+            localStream.removeTrack(previousTrack)
+          }
+          if (!localStream.getVideoTracks().includes(nextTrack)) {
+            localStream.addTrack(nextTrack)
+          }
+          setVideoElementStream(localVideo, localStream, { local: true, force: true })
+          wireLocalVideoTrack(nextTrack)
+          if (previousTrack && previousTrack !== nextTrack) {
+            previousTrack.stop()
+          }
+        } finally {
+          isReplacingLocalVideo = false
         }
-        if (previousTrack && previousTrack !== nextTrack) {
-          localStream.removeTrack(previousTrack)
-        }
-        if (!localStream.getVideoTracks().includes(nextTrack)) {
-          localStream.addTrack(nextTrack)
-        }
-        setVideoElementStream(localVideo, localStream, { local: true, force: true })
-        wireLocalVideoTrack(nextTrack)
-        if (previousTrack && previousTrack !== nextTrack) {
-          previousTrack.stop()
-        }
-        isCameraOff = false
+        isCameraOff = nextCameraOff
         updateCameraButton()
         publishParticipantMediaState()
         updateHearthParticipants()
@@ -35240,7 +35382,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         const label = toggleCameraButton.querySelector('.camera-label')
         const cameraOff = Boolean(isCameraOff)
-        toggleCameraButton.disabled = !localStream || !localVideoTrack()
+        toggleCameraButton.disabled = !localStream || !navigator.mediaDevices?.getUserMedia
         toggleCameraButton.classList.toggle('is-off', cameraOff)
         toggleCameraButton.setAttribute('aria-pressed', cameraOff ? 'true' : 'false')
         toggleCameraButton.setAttribute('aria-label', cameraOff ? 'Turn camera on' : 'Turn camera off')
@@ -35249,6 +35391,152 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           label.textContent = cameraOff ? 'Start video' : 'Camera'
         }
         updateBoardDockControls()
+      }
+
+      const maxLocalVideoRecoveryAttempts = 3
+      const localVideoRecoveryStableMs = 5000
+      let localVideoRecoveryAttempts = 0
+      let localVideoRecoveryStableTimer = null
+      let localVideoRecoveryPromise = null
+
+      function resetLocalVideoRecovery() {
+        localVideoRecoveryAttempts = 0
+        if (localVideoRecoveryStableTimer) {
+          window.clearTimeout(localVideoRecoveryStableTimer)
+          localVideoRecoveryStableTimer = null
+        }
+      }
+
+      function handleLocalVideoEnded(track) {
+        if (isReplacingLocalVideo || !localStream || localVideoTrack() !== track) {
+          return
+        }
+        const shouldRecover = localCameraRequested
+        isCameraOff = true
+        updateCameraButton()
+        publishParticipantMediaState()
+        if (!shouldRecover || !ws || ws.readyState !== WebSocket.OPEN) {
+          setLog('camera stopped')
+          return
+        }
+        setLog('reconnecting camera…')
+        requestLocalVideoRecovery('camera interrupted').catch(error => {
+          console.warn('Could not recover camera', error)
+        })
+      }
+
+      async function requestLocalVideoRecovery(reason = 'camera interrupted') {
+        if (localVideoRecoveryPromise) {
+          return localVideoRecoveryPromise
+        }
+        if (!localCameraRequested || isReplacingLocalVideo || !localStream
+            || !ws || ws.readyState !== WebSocket.OPEN || liveTrack(localVideoTrack())) {
+          return false
+        }
+        if (localVideoRecoveryAttempts >= maxLocalVideoRecoveryAttempts) {
+          return false
+        }
+
+        const sessionStream = localStream
+        localVideoRecoveryPromise = (async () => {
+          let lastError = null
+          const captureAttempts = [
+            { label: 'camera recovery', constraints: mediaConstraints.video },
+            { label: 'relaxed camera recovery', constraints: relaxedVideoConstraints },
+            { label: 'browser default camera recovery', constraints: true }
+          ]
+          while (localVideoRecoveryAttempts < maxLocalVideoRecoveryAttempts) {
+            localVideoRecoveryAttempts += 1
+            const captureAttempt = captureAttempts[Math.min(captureAttempts.length - 1, localVideoRecoveryAttempts - 1)]
+            const backoffMs = Math.min(2000, 250 * Math.pow(2, localVideoRecoveryAttempts - 1))
+            await new Promise(resolve => window.setTimeout(resolve, backoffMs))
+            if (!localCameraRequested || localStream !== sessionStream
+                || !ws || ws.readyState !== WebSocket.OPEN || liveTrack(localVideoTrack())) {
+              return false
+            }
+
+            let recoveredStream = null
+            let replacementTrack = null
+            let replaced = false
+            try {
+              recoveredStream = await navigator.mediaDevices.getUserMedia({
+                video: captureAttempt.constraints,
+                audio: false
+              })
+              const rawTrack = recoveredStream.getVideoTracks()[0]
+              if (!rawTrack) {
+                throw new Error('camera recovery did not provide video')
+              }
+              const lookedTracks = await applyVideoLookToTracks([rawTrack])
+              replacementTrack = lookedTracks[0] || rawTrack
+              if (!localCameraRequested || localStream !== sessionStream
+                  || !ws || ws.readyState !== WebSocket.OPEN) {
+                if (localVideoLookRawTrack === rawTrack) {
+                  teardownVideoLookPipeline()
+                }
+                for (const candidate of new Set([...recoveredStream.getTracks(), ...lookedTracks])) {
+                  candidate.stop?.()
+                }
+                return false
+              }
+              await replaceLocalVideoTrack(replacementTrack, { cameraOff: false })
+              replaced = true
+              localCameraRequested = true
+              setLog('camera reconnected')
+              if (localVideoRecoveryStableTimer) {
+                window.clearTimeout(localVideoRecoveryStableTimer)
+              }
+              const stableTrack = replacementTrack
+              localVideoRecoveryStableTimer = window.setTimeout(() => {
+                localVideoRecoveryStableTimer = null
+                if (localVideoTrack() === stableTrack && liveTrack(stableTrack)) {
+                  localVideoRecoveryAttempts = 0
+                }
+              }, localVideoRecoveryStableMs)
+              return true
+            } catch (error) {
+              lastError = error
+              console.warn(`Media capture failed with ${captureAttempt.label}`, error)
+              if (!replaced) {
+                const recoveredRawTrack = recoveredStream?.getVideoTracks?.()[0] || null
+                if (recoveredRawTrack && localVideoLookRawTrack === recoveredRawTrack) {
+                  teardownVideoLookPipeline()
+                }
+                if (replacementTrack && replacementTrack !== recoveredRawTrack) {
+                  replacementTrack.stop?.()
+                }
+                recoveredStream?.getTracks?.().forEach(candidate => candidate.stop?.())
+              }
+              const errorName = String(error?.name || '')
+              if (errorName === 'NotAllowedError' || errorName === 'SecurityError') {
+                localVideoRecoveryAttempts = maxLocalVideoRecoveryAttempts
+                break
+              }
+            }
+          }
+
+          if (localCameraRequested && localStream === sessionStream) {
+            isCameraOff = true
+            updateCameraButton()
+            publishParticipantMediaState()
+            setLog('camera unavailable — tap Start video to retry')
+            showToast({ text: 'camera unavailable — tap Start video to retry', kind: 'note' })
+          }
+          if (lastError) {
+            reportClientMediaError('camera_recovery', lastError, { reason })
+          }
+          return false
+        })().finally(() => {
+          localVideoRecoveryPromise = null
+        })
+        return localVideoRecoveryPromise
+      }
+
+      async function restoreVideoAfterVisibility() {
+        if (!localCameraRequested || liveTrack(localVideoTrack())) {
+          return false
+        }
+        return requestLocalVideoRecovery('visibility restored')
       }
 
       async function refreshAudioInputDevices(selectedDeviceId = localAudioDeviceId()) {
@@ -35587,23 +35875,40 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return /(built.?in|internal|macbook|imac|studio display|display audio|computer)/i.test(device?.label || '')
       }
 
-      async function handleSignal(message) {
+      async function handleSignal(message, context = {}) {
+        const socket = context.socket || ws
+        const sessionPeer = context.sessionPeer || pc
+        const contextIsCurrent = () => ws === socket && pc === sessionPeer
         switch (message.event) {
           case 'offer': {
-            if (!pc) {
+            if (!sessionPeer || !contextIsCurrent()) {
               addAssistantMessage({ kind: 'error', text: 'media is not ready for the room offer yet.' })
               return
             }
             const offer = JSON.parse(message.data)
-            await waitForStableSignaling()
-            await pc.setRemoteDescription(offer)
+            if (!await waitForStableSignaling(sessionPeer, contextIsCurrent)) {
+              return
+            }
+            await sessionPeer.setRemoteDescription(offer)
+            if (!contextIsCurrent()) {
+              return
+            }
             try {
-              await flushQueuedRemoteCandidates()
-              await attachLocalTracksToOffer(offer)
-              const answer = await pc.createAnswer()
-              await pc.setLocalDescription(answer)
-              if (ws?.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
+              await flushQueuedRemoteCandidates(sessionPeer, contextIsCurrent)
+              if (!contextIsCurrent()) {
+                return
+              }
+              await attachLocalTracksToOffer(offer, sessionPeer, contextIsCurrent)
+              if (!contextIsCurrent()) {
+                return
+              }
+              const answer = await sessionPeer.createAnswer()
+              if (!contextIsCurrent()) {
+                return
+              }
+              await sessionPeer.setLocalDescription(answer)
+              if (contextIsCurrent() && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
                   event: 'answer',
                   data: JSON.stringify(answer),
                   offerId: message.offerId || '',
@@ -35613,22 +35918,25 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             } catch (error) {
               // Return to stable so the server's re-offer can apply instead of
               // wedging this peer in have-remote-offer forever.
-              await rollbackRemoteOffer()
+              await rollbackRemoteOffer(sessionPeer)
               throw error
             }
+            if (!contextIsCurrent()) {
+              return
+            }
             try {
-              await configureOutboundSenders()
+              await configureOutboundSenders(sessionPeer, contextIsCurrent)
             } catch (error) {
               console.warn('Outbound sender tuning failed after answer', error)
             }
             break
           }
           case 'candidate': {
-            if (!pc) {
+            if (!sessionPeer || !contextIsCurrent()) {
               return
             }
             const candidate = JSON.parse(message.data)
-            await addRemoteIceCandidate(candidate)
+            await addRemoteIceCandidate(candidate, sessionPeer, contextIsCurrent)
             break
           }
           case 'kanban':
@@ -35637,31 +35945,38 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
-      async function waitForStableSignaling(timeoutMs = 2500) {
-        if (!pc || pc.signalingState === 'stable') {
-          return
+      async function waitForStableSignaling(sessionPeer = pc, isCurrent = () => pc === sessionPeer, timeoutMs = 2500) {
+        if (!sessionPeer || !isCurrent()) {
+          return false
+        }
+        if (sessionPeer.signalingState === 'stable') {
+          return true
         }
 
         const startedAt = performance.now()
-        while (pc && pc.signalingState !== 'stable' && performance.now() - startedAt < timeoutMs) {
+        while (isCurrent() && sessionPeer.signalingState !== 'stable' && performance.now() - startedAt < timeoutMs) {
           await new Promise(resolve => window.setTimeout(resolve, 50))
         }
-        if (pc && pc.signalingState !== 'stable') {
+        if (!isCurrent()) {
+          return false
+        }
+        if (sessionPeer.signalingState !== 'stable') {
           // The newer offer supersedes one stuck mid-negotiation; roll the
           // stale one back rather than dropping the fresh offer.
-          if (await rollbackRemoteOffer()) {
-            return
+          if (await rollbackRemoteOffer(sessionPeer)) {
+            return isCurrent()
           }
           throw new Error('media signaling is still busy; retrying')
         }
+        return true
       }
 
-      async function rollbackRemoteOffer() {
-        if (!pc || pc.signalingState !== 'have-remote-offer') {
+      async function rollbackRemoteOffer(sessionPeer = pc) {
+        if (!sessionPeer || sessionPeer.signalingState !== 'have-remote-offer') {
           return false
         }
         try {
-          await pc.setLocalDescription({ type: 'rollback' })
+          await sessionPeer.setLocalDescription({ type: 'rollback' })
           return true
         } catch (error) {
           console.warn('Could not roll back remote offer', error)
@@ -35669,36 +35984,112 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
-      async function addRemoteIceCandidate(candidate) {
-        if (!pc || !candidate) {
+      async function addRemoteIceCandidate(candidate, sessionPeer = pc, isCurrent = () => pc === sessionPeer) {
+        if (!sessionPeer || !candidate || !isCurrent()) {
           return
         }
-        if (!pc.remoteDescription) {
-          queuedRemoteCandidates.push(candidate)
+        if (!sessionPeer.remoteDescription || !remoteIceCandidateMatchesDescription(candidate, sessionPeer.remoteDescription)) {
+          queueRemoteIceCandidate(candidate)
           return
         }
-        await pc.addIceCandidate(candidate)
+        try {
+          await sessionPeer.addIceCandidate(candidate)
+        } catch (error) {
+          // During an ICE restart, trickled candidates can precede the offer
+          // that carries their ufrag while the previous remoteDescription is
+          // still installed. Defer instead of dropping that future generation.
+          if (isCurrent()) {
+            queueRemoteIceCandidate(candidate)
+            console.info('Deferred remote ICE candidate until its offer arrives', error)
+          }
+        }
       }
 
-      async function flushQueuedRemoteCandidates() {
-        const candidates = queuedRemoteCandidates
+      function remoteDescriptionICEUfrags(description) {
+        const ufrags = new Set()
+        const sdp = String(description?.sdp || '')
+        for (const match of sdp.matchAll(/^a=ice-ufrag:([^\r\n]+)$/gm)) {
+          const value = String(match[1] || '').trim()
+          if (value) {
+            ufrags.add(value)
+          }
+        }
+        return ufrags
+      }
+
+      function remoteIceCandidateUsernameFragment(candidate) {
+        const explicit = String(candidate?.usernameFragment || candidate?.ufrag || '').trim()
+        if (explicit) {
+          return explicit
+        }
+        // Pion v4.1.6 ToJSON omits UsernameFragment but preserves it as the
+        // `ufrag <value>` candidate extension. Parse that form so server
+        // restart candidates are still generation-scoped in every browser.
+        const embedded = /(?:^|\s)ufrag\s+(\S+)/i.exec(String(candidate?.candidate || ''))
+        return String(embedded?.[1] || '').trim()
+      }
+
+      function remoteIceCandidateMatchesDescription(candidate, description) {
+        const candidateUfrag = remoteIceCandidateUsernameFragment(candidate)
+        if (!candidateUfrag) {
+          return true
+        }
+        const descriptionUfrags = remoteDescriptionICEUfrags(description)
+        return descriptionUfrags.size === 0 || descriptionUfrags.has(candidateUfrag)
+      }
+
+      function queueRemoteIceCandidate(candidate) {
+        const identity = [
+          String(candidate?.candidate || ''),
+          String(candidate?.sdpMid || ''),
+          String(candidate?.sdpMLineIndex ?? ''),
+          remoteIceCandidateUsernameFragment(candidate)
+        ].join('|')
+        if (queuedRemoteCandidates.some(entry => entry.identity === identity)) {
+          return false
+        }
+        queuedRemoteCandidates.push({ candidate, identity, queuedAt: performance.now() })
+        // One PeerConnection has only a small handful of candidates per ICE
+        // generation. Bound the queue so a broken/malicious signal cannot grow
+        // it for the lifetime of the room.
+        if (queuedRemoteCandidates.length > 64) {
+          queuedRemoteCandidates.splice(0, queuedRemoteCandidates.length - 64)
+        }
+        return true
+      }
+
+      async function flushQueuedRemoteCandidates(sessionPeer = pc, isCurrent = () => pc === sessionPeer) {
+        const entries = queuedRemoteCandidates
         queuedRemoteCandidates = []
-        for (const candidate of candidates) {
+        for (const entry of entries) {
+          if (!sessionPeer || !isCurrent()) {
+            return
+          }
+          const candidate = entry?.candidate || entry
+          if (!remoteIceCandidateMatchesDescription(candidate, sessionPeer.remoteDescription)) {
+            // Once an offer is installed, a queued candidate for another ufrag
+            // is stale. Future-generation candidates arrive after this signal
+            // task and will be queued for the next offer.
+            continue
+          }
           try {
-            await addRemoteIceCandidate(candidate)
+            await sessionPeer.addIceCandidate(candidate)
           } catch (error) {
             console.warn('Skipped a bad queued remote ICE candidate', error)
           }
         }
       }
 
-      async function attachLocalTracksToOffer(offer) {
-        if (!localStream || !pc) {
+      async function attachLocalTracksToOffer(offer, sessionPeer = pc, isCurrent = () => pc === sessionPeer) {
+        if (!localStream || !sessionPeer || !isCurrent()) {
           return
         }
 
         const sections = remoteMediaSections(offer.sdp || '')
-        for (const transceiver of pc.getTransceivers()) {
+        for (const transceiver of sessionPeer.getTransceivers()) {
+          if (!isCurrent()) {
+            return
+          }
           const section = sections.get(transceiver.mid)
           if (!section) {
             continue
@@ -35719,6 +36110,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           // post-answer via configureOutboundSenders.
           try {
             await transceiver.sender.replaceTrack(track)
+            if (!isCurrent()) {
+              return
+            }
             transceiver.direction = 'sendonly'
           } catch (error) {
             console.warn('Could not attach local track for the answer', error)
@@ -37332,6 +37726,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function remoteTileHasLiveVideo(tile) {
+        const tileName = remoteTileName(tile)
+        if (tile?.classList?.contains('is-stage-video-owned') && iosScreenStageOwnsParticipant(tileName)) {
+          return videoElementHasLiveVideoTrack(screenStageVideo)
+        }
         const video = tile?.querySelector?.('video')
         const stream = video?.srcObject
         return Boolean(stream?.getVideoTracks?.().some(track => liveTrack(track)))
@@ -37354,6 +37752,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function remoteTileHasRenderedVideo(tile) {
+        const tileName = remoteTileName(tile)
+        if (tile?.classList?.contains('is-stage-video-owned') && iosScreenStageOwnsParticipant(tileName)) {
+          const stageTracks = screenStageVideo.srcObject?.getVideoTracks?.() || []
+          return Boolean(screenStageVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+            && screenStageVideo.videoWidth > 0 && screenStageVideo.videoHeight > 0
+            && !stageTracks.some(track => frozenRemoteVideoTrackIds.has(track.id)))
+        }
         const video = tile?.querySelector?.('video')
         if (!(video && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0 && video.videoHeight > 0)) {
           return false
@@ -37534,6 +37939,31 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return String(monitor?.name || '').trim()
       }
 
+      function syncRemoteParticipantVideoMappings(tile, fallbackName = '', fallbackTrack = null) {
+        const name = String(tile?.dataset?.participant || fallbackName || '').trim()
+        if (!tile || !name || name === 'participant') {
+          return false
+        }
+        const video = iosScreenStageOwnsParticipant(name)
+          ? screenStageVideo
+          : tile.querySelector?.('video')
+        const stream = video?.srcObject || null
+        const attachedTrack = stream?.getVideoTracks?.().find(liveTrack) || null
+        const track = attachedTrack || (liveTrack(fallbackTrack) && fallbackTrack.kind === 'video' ? fallbackTrack : null)
+        if (!track) {
+          return false
+        }
+        for (const existingName of Array.from(remoteStreamsByParticipant.keys())) {
+          if (existingName !== name && existingName.toLowerCase() === name.toLowerCase()) {
+            remoteStreamsByParticipant.delete(existingName)
+            remoteVideoTracksByParticipant.delete(existingName)
+          }
+        }
+        remoteVideoTracksByParticipant.set(name, track)
+        remoteStreamsByParticipant.set(name, stream || new MediaStream([track]))
+        return true
+      }
+
       function remoteTilePreferenceScore(tile) {
         const createdAt = Number(tile?.dataset?.createdAt || 0)
         return (remoteTileHasRenderedVideo(tile) ? 100 : 0)
@@ -37677,6 +38107,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             continue
           }
           if (remoteTileHasRenderedVideo(tile)) {
+            continue
+          }
+          if (tile.classList.contains('is-stage-video-owned') && iosScreenStageOwnsParticipant(participantName)) {
+            // The stage is the canonical iOS decoder owner. Ask the sender for
+            // recovery without rebuilding the parked gallery tile underneath
+            // it; that rebuild would only churn ownership and risk a blink.
+            requestParticipantTrackRefresh(reason || 'stalled remote video')
             continue
           }
           const video = tile.querySelector('video')
@@ -37867,14 +38304,61 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return targets
       }
 
+      function primaryVideoPlaybackTargets() {
+        const videos = []
+        if (localVideo) {
+          videos.push(localVideo)
+        }
+        for (const tile of remoteTiles()) {
+          const video = tile?.querySelector?.('video')
+          if (video && !videos.includes(video)) {
+            videos.push(video)
+          }
+        }
+        return videos
+      }
+
+      function repairPrimaryVideoPlayback(reason = '') {
+        if (!appShell.classList.contains('is-in-room')) {
+          return false
+        }
+        let attempted = false
+        for (const video of primaryVideoPlaybackTargets()) {
+          if (!video?.isConnected || !videoElementHasLiveVideoTrack(video)) {
+            continue
+          }
+          // Safari may pause a MediaStream-backed element after backgrounding or
+          // after its ancestor was display:none. Re-issue play() on the existing
+          // srcObject only; never load(), detach, or force a rebind here.
+          video.dataset.primaryPlaybackRepairAt = String(performance.now())
+          video.dataset.primaryPlaybackRepairReason = reason
+          ensureVideoElementPlayback(video)
+          attempted = true
+        }
+        syncLocalMirrorPreview()
+        return attempted
+      }
+
+      function schedulePrimaryVideoPlaybackRepair(reason = '', delayMs = 80) {
+        if (primaryVideoRepairTimer) {
+          window.clearTimeout(primaryVideoRepairTimer)
+        }
+        primaryVideoRepairTimer = window.setTimeout(() => {
+          primaryVideoRepairTimer = 0
+          repairPrimaryVideoPlayback(reason)
+        }, Math.max(0, Number(delayMs) || 0))
+      }
+
       function repairAuxiliaryVideoPlayback(reason = '') {
         let repaired = false
         for (const target of auxiliaryVideoPlaybackTargets()) {
           const video = target.video
           const stream = target.stream
-          if (!video || !stream || !shouldAttachParticipantVideo(video, target.name, stream) || (!target.ignoreCameraOff && participantMediaState(target.name).cameraOff)) {
-            if (video && target.local && video !== localVideo) {
-              setVideoElementStream(video, null, { local: true, hidden: true })
+          const cameraOff = !target.ignoreCameraOff && participantMediaState(target.name).cameraOff
+          const attachmentAllowed = Boolean(video && stream && shouldAttachParticipantVideo(video, target.name, stream) && !cameraOff)
+          if (!attachmentAllowed) {
+            if (video && video !== localVideo) {
+              setVideoElementStream(video, null, { local: target.local, hidden: true })
             }
             continue
           }
@@ -38150,11 +38634,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         const exceptKeys = new Set((options.exceptKeys || []).filter(Boolean))
         let removed = false
+        let survivor = null
 
         for (const tile of remoteTiles()) {
           const tileKeys = remoteKeysForTile(tile)
           const tileName = String(tile.dataset.participant || '').trim()
-          if (tileKeys.some(key => exceptKeys.has(key)) || !tileName || tileName === 'participant' || tileName.toLowerCase() !== participantName.toLowerCase()) {
+          if (!tileName || tileName === 'participant' || tileName.toLowerCase() !== participantName.toLowerCase()) {
+            continue
+          }
+          if (tileKeys.some(key => exceptKeys.has(key))) {
+            survivor = tile
             continue
           }
           disposeRemoteTile(tile)
@@ -38162,11 +38651,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           removed = true
         }
 
-        for (const streamName of Array.from(remoteStreamsByParticipant.keys())) {
-          if (streamName.toLowerCase() === participantName.toLowerCase()) {
-            remoteStreamsByParticipant.delete(streamName)
-            remoteVideoTracksByParticipant.delete(streamName)
-            removed = true
+        if (survivor) {
+          syncRemoteParticipantVideoMappings(survivor, participantName)
+        } else {
+          for (const streamName of Array.from(remoteStreamsByParticipant.keys())) {
+            if (streamName.toLowerCase() === participantName.toLowerCase()) {
+              remoteStreamsByParticipant.delete(streamName)
+              remoteVideoTracksByParticipant.delete(streamName)
+              removed = true
+            }
           }
         }
 
@@ -38209,6 +38702,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         removed = removeRemoteParticipantAudioTracksByName(participantName) || removed
 
         if (removed) {
+          if (String(activeScreenShareParticipant || '').toLowerCase() === participantName.toLowerCase()) {
+            activeScreenShareParticipant = ''
+            renderScreenStage()
+          }
           updateHearthParticipants()
         }
         return removed
@@ -38538,7 +39035,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             return new MediaStream([track])
           }
         }
-        return direct || null
+        // An ended/empty direct stream is not a usable placeholder: callers
+        // would stop their bounded retry while setVideoElementStream filters it
+        // down to null. A genuinely live stage is preserved separately by
+        // renderScreenStage's current-owner fallback.
+        return null
       }
 
       function handleScreenShareStopped(event) {
@@ -45024,6 +45525,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (sender) {
           await sender.replaceTrack(null)
         }
+        // Respect an explicit camera-off choice. Ending a screen share must not
+        // reacquire the camera simply because its parked track disappeared.
+        if (!localCameraRequested) {
+          return true
+        }
         if (!navigator.mediaDevices?.getUserMedia) {
           return false
         }
@@ -45048,7 +45554,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (!recoveredTrack) {
             throw new Error('camera did not provide video after screen sharing')
           }
-          await replaceLocalVideoTrack(recoveredTrack)
+          await replaceLocalVideoTrack(recoveredTrack, { cameraOff: false })
           replaced = true
           return true
         } finally {
@@ -45058,11 +45564,75 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
+      function iosScreenStageVideoOwner() {
+        return String(screenStageVideo?.dataset?.participantVideoOwner || '').trim()
+      }
+
+      function iosScreenStageOwnsParticipant(name) {
+        const owner = iosScreenStageVideoOwner()
+        return Boolean(isIOSDevice && owner && String(name || '').trim().toLowerCase() === owner.toLowerCase())
+      }
+
+      // iOS/WebKit can black-frame when the same MediaStreamTrack is decoded by
+      // two video elements. Screen share is carried on the participant's video
+      // track, so transfer that one decoder from the canonical tile to the stage
+      // (and back) in a strict detach-before-attach order. Audio is demoted to its
+      // dedicated playback element during the transfer and promoted on restore.
+      function releaseIOSScreenStageVideoOwner(options = {}) {
+        const owner = iosScreenStageVideoOwner()
+        if (!owner) {
+          return false
+        }
+        delete screenStageVideo.dataset.participantVideoOwner
+        setVideoElementStream(screenStageVideo, null)
+
+        const primaryVideo = primaryVideoElementForParticipant(owner)
+        const primaryTile = primaryVideo?.closest?.('.video-tile')
+        primaryTile?.classList.remove('is-stage-video-owned')
+        if (options.restore !== false && primaryVideo) {
+          const stream = participantStream(owner)
+          const cameraOff = participantMediaState(owner).cameraOff
+          if (stream && !cameraOff) {
+            setVideoElementStream(primaryVideo, stream, { force: true })
+            playRemoteMedia(primaryVideo)
+            syncRemoteParticipantVideoMappings(primaryTile, owner, stream.getVideoTracks?.().find(liveTrack))
+            promoteParticipantAudioToVideo(owner)
+          }
+        }
+        return true
+      }
+
+      function claimIOSScreenStageVideoOwner(name, stream, options = {}) {
+        const owner = String(name || '').trim()
+        if (!isIOSDevice || !owner || owner === currentParticipantName || !stream) {
+          return false
+        }
+        const previousOwner = iosScreenStageVideoOwner()
+        if (previousOwner && previousOwner.toLowerCase() !== owner.toLowerCase()) {
+          releaseIOSScreenStageVideoOwner()
+        }
+        const primaryVideo = primaryVideoElementForParticipant(owner)
+        const primaryTile = primaryVideo?.closest?.('.video-tile')
+        if (primaryVideo && videoElementHasLiveVideoTrack(primaryVideo)) {
+          demoteRemotePlaybackElementFromVideo(primaryVideo, owner)
+          setVideoElementStream(primaryVideo, null, { hidden: true })
+        }
+        if (primaryVideo) {
+          primaryTile?.classList.add('is-stage-video-owned')
+        }
+        if (!iosScreenStageOwnsParticipant(owner)) {
+          screenStageVideo.dataset.participantVideoOwner = owner
+        }
+        setVideoElementStream(screenStageVideo, stream, { force: options.force === true })
+        return true
+      }
+
       function renderScreenStage() {
         const screenStageEl = screenStageVideo.closest('.screen-stage')
         if (!activeScreenShareParticipant) {
           presentationTile.classList.remove('is-screen-sharing')
           screenStageEl?.classList.remove('is-local-share')
+          releaseIOSScreenStageVideoOwner()
           setVideoElementStream(screenStageVideo, null)
           screenStageLabel.textContent = 'screen share'
           setVideoElementStream(screenSpeakerVideo, null)
@@ -45070,29 +45640,45 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           updateStageControls()
           updateBoardDockControls()
           scheduleAuxiliaryVideoPlaybackRepair('screen stage cleared', 120)
+          schedulePrimaryVideoPlaybackRepair('screen stage cleared', 140)
           return
         }
 
         const localShare = activeScreenShareParticipant === currentParticipantName
-        const stream = localShare
+        let stream = localShare
           ? screenShareStream
           : remoteScreenShareStream(activeScreenShareParticipant)
+        if (!stream && iosScreenStageOwnsParticipant(activeScreenShareParticipant)
+            && videoElementHasLiveVideoTrack(screenStageVideo)) {
+          // Track-label replay can briefly lose the participant map. Preserve a
+          // stage that is already receiving the right live track instead of
+          // blinking it out while metadata catches up.
+          stream = screenStageVideo.srcObject
+        }
         if (!stream) {
           presentationTile.classList.remove('is-screen-sharing')
           screenStageEl?.classList.remove('is-local-share')
+          releaseIOSScreenStageVideoOwner()
           setVideoElementStream(screenStageVideo, null)
           screenStageLabel.textContent = `screen share · ${activeScreenShareParticipant}`
           updateSpeakerPictureInPicture()
           updateStageControls()
           updateBoardDockControls()
           scheduleAuxiliaryVideoPlaybackRepair('screen stage waiting', 120)
+          schedulePrimaryVideoPlaybackRepair('screen stage waiting', 140)
           return
         }
         presentationTile.classList.add('is-screen-sharing')
         // design §6.3: your own share shows the quiet "sharing your screen"
         // placeholder instead of mirroring itself; remote shares show video
         screenStageEl?.classList.toggle('is-local-share', localShare)
-        setVideoElementStream(screenStageVideo, localShare ? null : stream)
+        if (localShare) {
+          releaseIOSScreenStageVideoOwner()
+          setVideoElementStream(screenStageVideo, null)
+        } else if (!claimIOSScreenStageVideoOwner(activeScreenShareParticipant, stream)) {
+          releaseIOSScreenStageVideoOwner()
+          setVideoElementStream(screenStageVideo, stream)
+        }
         screenStageLabel.textContent = `screen share · ${activeScreenShareParticipant}`
         updateSpeakerPictureInPicture()
         updateStageControls()
@@ -45239,7 +45825,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             return new MediaStream([track])
           }
         }
-        return direct || null
+        return null
       }
 
       function shouldAttachParticipantVideo(video, name, stream) {
@@ -45250,7 +45836,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // decoded by multiple video elements. Keep each participant's camera on
         // the canonical tile and let auxiliary/stage/dock views fall back to
         // avatars on phones instead of competing for the same decoder.
-        if (safariBrowser && isMobileDevice) {
+        if (isIOSDevice) {
+          if (iosScreenStageOwnsParticipant(name) && video !== screenStageVideo) {
+            return false
+          }
           const primaryVideo = primaryVideoElementForParticipant(name)
           if (primaryVideo && primaryVideo !== video && videoElementHasLiveVideoTrack(primaryVideo)) {
             return false
@@ -45285,6 +45874,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         const nextStream = videoPlaybackStreamForElement(video, stream || null)
         if (force || video.srcObject !== nextStream) {
+          if (video === localVideo) {
+            resetLocalMirrorPreviewFrames()
+          }
           pendingRemotePlaybackElements.delete(video)
           if (!nextStream) {
             video.pause?.()
@@ -45311,11 +45903,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function localMirrorPreviewSourceReady() {
-        return Boolean(isMobileDevice
+        return Boolean(useLocalMirrorCanvas
           && localVideo
           && localVideo.srcObject
           && !localVideo.hidden
           && !isCameraOff
+          && mediaElementIsVisible(localVideo)
           && videoElementHasLiveVideoTrack(localVideo))
       }
 
@@ -45331,20 +45924,64 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return localMirrorCanvases().some(target => target.enabled)
       }
 
+      function localMirrorCanvasState(canvas) {
+        let state = localMirrorCanvasStates.get(canvas)
+        if (!state) {
+          state = {
+            backCanvas: document.createElement('canvas'),
+            hasFrame: false,
+            commits: 0,
+            failures: 0
+          }
+          localMirrorCanvasStates.set(canvas, state)
+        }
+        return state
+      }
+
+      function setLocalMirrorCanvasReady(canvas, ready) {
+        if (!canvas) {
+          return
+        }
+        const state = localMirrorCanvasState(canvas)
+        state.hasFrame = Boolean(ready)
+        canvas.dataset.mirrorFrameReady = ready ? 'true' : 'false'
+        canvas.hidden = !ready
+      }
+
+      function resetLocalMirrorPreviewFrames() {
+        if (localMirrorFrame) {
+          window.cancelAnimationFrame(localMirrorFrame)
+          localMirrorFrame = 0
+        }
+        localVideo?.classList.remove('local-mirror-source')
+        for (const canvas of [localVideoMirrorCanvas, activeSpeakerMirrorCanvas]) {
+          if (!canvas) {
+            continue
+          }
+          setLocalMirrorCanvasReady(canvas, false)
+        }
+      }
+
       function syncLocalMirrorPreview() {
         const targets = localMirrorCanvases()
-        let enabled = false
+        let shouldDraw = false
+        let hasReadyCanvas = false
         for (const target of targets) {
-          target.canvas.hidden = !target.enabled
-          enabled = enabled || target.enabled
+          const state = localMirrorCanvasState(target.canvas)
+          shouldDraw = shouldDraw || target.enabled
+          const ready = target.enabled && state.hasFrame
+          target.canvas.hidden = !ready
+          target.canvas.dataset.mirrorFrameReady = ready ? 'true' : 'false'
+          hasReadyCanvas = hasReadyCanvas || ready
         }
-        if (enabled && !localMirrorFrame) {
-          localVideo?.classList.add('local-mirror-source')
+        // The canonical video remains visible until a canvas frame has been
+        // committed successfully. A Safari draw failure can therefore never
+        // replace a healthy local preview with a blank surface.
+        localVideo?.classList.toggle('local-mirror-source', hasReadyCanvas)
+        if (shouldDraw && document.visibilityState === 'visible' && !localMirrorFrame) {
           localMirrorFrame = window.requestAnimationFrame(drawLocalMirrorPreviewFrame)
-        } else if (!enabled) {
+        } else if (!shouldDraw) {
           stopLocalMirrorPreview()
-        } else {
-          localVideo?.classList.add('local-mirror-source')
         }
       }
 
@@ -45360,26 +45997,40 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
           const context = target.getContext?.('2d')
           context?.clearRect(0, 0, target.width || 0, target.height || 0)
-          target.hidden = true
+          setLocalMirrorCanvasReady(target, false)
         }
+      }
+
+      function pauseLocalMirrorPreviewForVisibility() {
+        // requestAnimationFrame pauses in a background tab. Reveal the canonical
+        // video on return until one new foreground frame commits; do not clear
+        // the last-good pixels because they remain useful if drawing resumes.
+        resetLocalMirrorPreviewFrames()
       }
 
       function drawLocalMirrorPreviewFrame() {
         localMirrorFrame = 0
+        if (document.visibilityState !== 'visible') {
+          pauseLocalMirrorPreviewForVisibility()
+          return
+        }
         if (!hasActiveLocalMirrorCanvas()) {
           stopLocalMirrorPreview()
           return
         }
-        localMirrorFrame = window.requestAnimationFrame(drawLocalMirrorPreviewFrame)
         for (const target of localMirrorCanvases()) {
           if (target.enabled) {
             drawLocalMirrorPreviewToCanvas(target.canvas)
           }
         }
+        syncLocalMirrorPreview()
       }
 
       function drawLocalMirrorPreviewToCanvas(canvas) {
-        const rect = canvas.getBoundingClientRect()
+        // The canvas remains display:none until its first successful commit,
+        // so measuring the canvas itself would stay 0x0 forever. Its positioned
+        // parent is the stable visual surface before and after handoff.
+        const rect = canvas.parentElement?.getBoundingClientRect?.() || localVideo.getBoundingClientRect()
         const sourceWidth = localVideo.videoWidth || 0
         const sourceHeight = localVideo.videoHeight || 0
         if (!rect.width || !rect.height || !sourceWidth || !sourceHeight) {
@@ -45388,12 +46039,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const dpr = Math.min(window.devicePixelRatio || 1, 2)
         const width = Math.max(1, Math.round(rect.width * dpr))
         const height = Math.max(1, Math.round(rect.height * dpr))
-        if (canvas.width !== width || canvas.height !== height) {
-          canvas.width = width
-          canvas.height = height
+        const state = localMirrorCanvasState(canvas)
+        const backCanvas = state.backCanvas
+        if (backCanvas.width !== width || backCanvas.height !== height) {
+          backCanvas.width = width
+          backCanvas.height = height
         }
-        const context = canvas.getContext?.('2d', { alpha: false })
-        if (!context) {
+        const backContext = backCanvas.getContext?.('2d', { alpha: false })
+        if (!backContext) {
           return
         }
         const scale = Math.max(width / sourceWidth, height / sourceHeight)
@@ -45401,17 +46054,54 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const drawHeight = sourceHeight * scale
         const dx = (width - drawWidth) / 2
         const dy = (height - drawHeight) / 2
+        let backContextSaved = false
+        let visibleResized = false
         try {
-          context.save()
-          context.clearRect(0, 0, width, height)
-          context.translate(width, 0)
-          context.scale(-1, 1)
-          context.drawImage(localVideo, dx, dy, drawWidth, drawHeight)
+          // Draw into an invisible back buffer first. Only a complete frame is
+          // allowed to resize/replace the visible canvas, so orientation changes
+          // and transient WebKit draw errors preserve the last-good image.
+          backContext.save()
+          backContextSaved = true
+          backContext.setTransform(1, 0, 0, 1, 0, 0)
+          backContext.clearRect(0, 0, width, height)
+          backContext.translate(width, 0)
+          backContext.scale(-1, 1)
+          backContext.drawImage(localVideo, dx, dy, drawWidth, drawHeight)
+          backContext.restore()
+          backContextSaved = false
+
+          // Acquire the visible context before a resize; a lost WebKit context
+          // must not clear a previously-good canvas just to discover it cannot
+          // receive the replacement frame.
+          const context = canvas.getContext?.('2d', { alpha: false })
+          if (!context) {
+            setLocalMirrorCanvasReady(canvas, false)
+            return
+          }
+          if (canvas.width !== width || canvas.height !== height) {
+            canvas.width = width
+            canvas.height = height
+            visibleResized = true
+          }
+          context.setTransform(1, 0, 0, 1, 0, 0)
+          context.globalCompositeOperation = 'copy'
+          context.drawImage(backCanvas, 0, 0)
+          context.globalCompositeOperation = 'source-over'
+          state.commits += 1
+          canvas.dataset.mirrorCommitCount = String(state.commits)
+          setLocalMirrorCanvasReady(canvas, true)
         } catch (error) {
-          // Safari can throw while the camera surface is warming. The next frame
-          // usually succeeds once metadata is available.
-        } finally {
-          context.restore()
+          if (backContextSaved) {
+            try { backContext.restore() } catch (_) {}
+          }
+          // Safari can throw while the camera surface is warming. Preserve the
+          // last-good visible canvas (or the canonical video before first draw)
+          // and try again on the next animation frame.
+          state.failures += 1
+          canvas.dataset.mirrorDrawFailures = String(state.failures)
+          if (!state.hasFrame || visibleResized) {
+            setLocalMirrorCanvasReady(canvas, false)
+          }
         }
       }
 
@@ -45904,12 +46594,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const stageParticipant = stageParticipantDisplayName()
         const tiles = names.map(name => renderBoardVideoTile(name, name === speaker && speakerAudible, name === stageParticipant))
         if (tiles.length === 0) {
-          const empty = document.createElement('span')
-          empty.className = 'board-dock-now'
-          empty.textContent = 'waiting for video'
-          boardVideoStrip.replaceChildren(empty)
+          if (!boardVideoEmptyIndicator) {
+            boardVideoEmptyIndicator = document.createElement('span')
+            boardVideoEmptyIndicator.className = 'board-dock-now'
+            boardVideoEmptyIndicator.textContent = 'waiting for video'
+          }
+          reconcileStableChildren(boardVideoStrip, [boardVideoEmptyIndicator])
         } else {
-          boardVideoStrip.replaceChildren(...tiles)
+          reconcileStableChildren(boardVideoStrip, tiles)
         }
         scheduleAuxiliaryVideoPlaybackRepair('board dock render', 0)
         if (boardDockNow) {
@@ -46554,7 +47246,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const removeRemoteTileForTrack = deadTrack => {
           // After a rebind the tile may show a newer track; only the track
           // currently on screen may take the tile down.
-          const shownTracks = tile.querySelector('video')?.srcObject?.getVideoTracks?.() || []
+          const shownName = String(tile.dataset.participant || participantName || '').trim()
+          const shownTracks = tile.classList.contains('is-stage-video-owned')
+              && iosScreenStageOwnsParticipant(shownName)
+            ? (screenStageVideo.srcObject?.getVideoTracks?.() || [])
+            : (tile.querySelector('video')?.srcObject?.getVideoTracks?.() || [])
           if (deadTrack && shownTracks.length && !shownTracks.includes(deadTrack)) {
             return
           }
@@ -46603,8 +47299,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           // A repeat ontrack for a known tile carries the current server-side
           // track; rebind so the tile does not stay frozen on a dead track.
           const existingTile = remoteTileForKeys(identityKeys.length ? identityKeys : keys)
-          if (rebindRemoteVideoTileTrack(existingTile, event.track, participantName)) {
-            rememberRemoteTileKeys(existingTile, [...remoteKeysForTile(existingTile), ...keys])
+          rebindRemoteVideoTileTrack(existingTile, event.track, participantName)
+          rememberRemoteTileKeys(existingTile, [...remoteKeysForTile(existingTile), ...keys])
+          // Cleanup above may preserve the known tile while removing its old
+          // participant maps. Always rebuild those maps from the canonical
+          // playback element, including the healthy same-track early return.
+          if (syncRemoteParticipantVideoMappings(existingTile, participantName, event.track)) {
+            scheduleAuxiliaryVideoPlaybackRepair('remote track mapping restored', 80)
           }
           return
         }
@@ -46616,6 +47317,31 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const video = tile?.querySelector?.('video')
         if (!video || !track || track.kind !== 'video' || !liveTrack(track)) {
           return false
+        }
+        const name = String(tile.dataset.participant || participantName || '').trim()
+        if (name && iosScreenStageOwnsParticipant(name)) {
+          const currentStageTracks = screenStageVideo.srcObject?.getVideoTracks?.() || []
+          if (currentStageTracks.includes(track)) {
+            return false
+          }
+          if (currentStageTracks.some(current => current.id === track.id && liveTrack(current) && !current.muted)
+              && screenStageVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+              && screenStageVideo.videoWidth > 0) {
+            return false
+          }
+          const stream = new MediaStream([track])
+          tile.classList.add('is-stage-video-owned')
+          claimIOSScreenStageVideoOwner(name, stream, { force: true })
+          remoteVideoTracksByParticipant.set(name, track)
+          remoteStreamsByParticipant.set(name, stream)
+          track.addEventListener?.('ended', () => {
+            remoteTileRemovers.get(tile)?.(track)
+            if (iosScreenStageOwnsParticipant(name)) {
+              renderScreenStage()
+            }
+          }, { once: true })
+          scheduleAuxiliaryVideoPlaybackRepair('stage video rebind', 80)
+          return true
         }
         const currentTracks = video.srcObject?.getVideoTracks?.() || []
         if (currentTracks.includes(track)) {
@@ -46634,7 +47360,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         playRemoteMedia(video)
         tile.classList.remove('is-video-stalled')
         watchRemoteVideoTrackStall(tile, track)
-        const name = String(tile.dataset.participant || participantName || '').trim()
         if (name && name !== 'participant') {
           remoteVideoTracksByParticipant.set(name, track)
           remoteStreamsByParticipant.set(name, video.srcObject || stream)
@@ -46739,8 +47464,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       // Room-sickness census over the freeze watch's own per-track state.
       // Only FRAME-CAPABLE tiles vote (2026-07-10 gate finding 2): a tile that
       // shows a freeze-watch-tracked video track AND whose participant is not
-      // roster-declared camera-off. Audio-only participants and camera-off
-      // tiles are excluded from BOTH the sick numerator and the tracked
+      // roster-declared camera-off (an active screen share is still frame-
+      // capable even when the camera itself is off). Audio-only participants
+      // and non-sharing camera-off tiles are excluded from BOTH the sick numerator and the tracked
       // denominator, so a 1:1 or camera-off room can still surface its single
       // dead binding (the ladder's 1:1 exception keys off trackedTiles === 1).
       // A voting tile is SICK when its track is marked frozen/deaf, ADVANCING
@@ -46750,14 +47476,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         let advancingTiles = 0
         let trackedTiles = 0
         for (const tile of remoteTiles()) {
-          const shownTracks = tile.querySelector('video')?.srcObject?.getVideoTracks?.() || []
+          const shownTracks = tile.classList.contains('is-stage-video-owned')
+              && iosScreenStageOwnsParticipant(remoteTileName(tile))
+            ? (screenStageVideo.srcObject?.getVideoTracks?.() || [])
+            : (tile.querySelector('video')?.srcObject?.getVideoTracks?.() || [])
           const tracked = shownTracks.find(track => remoteVideoFreezeStates.has(track.id))
           if (!tracked) {
             continue
           }
           const name = remoteTileName(tile)
           if (name && name !== 'participant' && participantMediaStates.has(name)
-              && participantMediaState(name).cameraOff) {
+              && participantMediaState(name).cameraOff
+              && !participantMediaState(name).screenSharing) {
             continue
           }
           trackedTiles++
@@ -47025,8 +47755,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       // A deaf subscription: inbound bytes stopped (the track is muted, or the
-      // byte counter stalled) yet the participant is still ON camera per the
-      // roster, and a real rendered gallery tile is stranded on its last frame.
+      // byte counter stalled) yet the participant is still ON camera or sharing
+      // a screen per the roster, and a real rendered tile is stranded on its last frame.
       // Returns that tile, or null when this is instead a legitimate quiet stop
       // (camera off, peer gone, mid-renegotiation) or the roster is unknown —
       // in which case the caller keeps the old early-return so we never flap a
@@ -47045,7 +47775,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!name || name === 'participant' || !participantMediaStates.has(name)) {
           return null
         }
-        if (participantMediaState(name).cameraOff) {
+        const mediaState = participantMediaState(name)
+        if (mediaState.cameraOff && !mediaState.screenSharing) {
           return null
         }
         return tile
@@ -47155,6 +47886,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function remoteTileShowingTrack(track) {
         if (!track) {
           return null
+        }
+        const stageTracks = screenStageVideo?.srcObject?.getVideoTracks?.() || []
+        if (stageTracks.includes(track)) {
+          const owner = iosScreenStageVideoOwner()
+          if (owner) {
+            const ownerKey = owner.toLowerCase()
+            const ownerTile = remoteTiles().find(tile => remoteTileName(tile).toLowerCase() === ownerKey)
+            if (ownerTile) {
+              return ownerTile
+            }
+          }
         }
         for (const tile of remoteTiles()) {
           const shownTracks = tile.querySelector('video')?.srcObject?.getVideoTracks?.() || []
@@ -52438,6 +53180,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const socket = ws
         ws = undefined
         if (socket) {
+          // Intentional leave suppresses onclose, so release this socket-owned
+          // interval here instead of retaining an inert timer until page unload.
+          try { window.clearInterval(socket.__roomHeartbeat) } catch { /* none */ }
+          socket.__roomHeartbeat = undefined
           socket.onclose = null
         }
         if (socket && socket.readyState !== WebSocket.CLOSED) {
@@ -52465,8 +53211,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         localAudioSourceTrack = undefined
         localStream = undefined
         isReplacingLocalAudio = false
+        isReplacingLocalVideo = false
         isMicMuted = false
         isCameraOff = false
+        localCameraRequested = false
+        resetLocalVideoRecovery()
         updateMuteButton()
         updateCameraButton()
         renderAudioSettings()
@@ -52885,6 +53634,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // keep the filters popover honest with the persisted look without
         // waiting for a settings render: sync the swatch selection + blur switch
         const currentLook = videoLookSettingsValue().look
+        if (greenRoomFiltersBtnEl) {
+          const wrap = greenRoomFiltersBtnEl.closest('.greenroom__filterswrap')
+          if (wrap) {
+            wrap.hidden = videoLooksDisabledForReliability
+          } else {
+            greenRoomFiltersBtnEl.hidden = videoLooksDisabledForReliability
+          }
+        }
+        if (videoLooksDisabledForReliability) {
+          closeGreenRoomFilters()
+        }
         if (greenRoomTileEl) {
           // canon states 5/6: the look previews on the pre-tap avatar layer
           greenRoomTileEl.dataset.look = currentLook

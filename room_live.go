@@ -111,7 +111,13 @@ type roomLiveState struct {
 	participants         map[string]time.Time
 	participantCounts    map[string]int
 	participantEndpoints map[string]map[string]string
-	participantMedia     map[string]participantMediaState
+	// participantSessionLiveness is the endpoint-scoped proof-of-life plane:
+	// participant name -> current session id -> last app-level frame. The
+	// account-level participants stamp remains the aggregate/legacy fallback,
+	// but the sweeper uses these stamps to reap a frozen phone without evicting
+	// the same account's healthy laptop.
+	participantSessionLiveness map[string]map[string]time.Time
+	participantMedia           map[string]participantMediaState
 	// guestSeats maps a guest session key to the room-unique display name the
 	// server minted for it ("Guest Sam", "Guest Sam 2"). Seats are per guest
 	// SESSION: a second socket under the same session shares the seat.
@@ -173,20 +179,21 @@ type guestChatBucket struct {
 
 func newRoomLiveState(roomID string, now time.Time) *roomLiveState {
 	return &roomLiveState{
-		id:                      normalizeRoomID(roomID),
-		participants:            map[string]time.Time{},
-		participantCounts:       map[string]int{},
-		participantEndpoints:    map[string]map[string]string{},
-		participantMedia:        map[string]participantMediaState{},
-		guestSeats:              map[string]string{},
-		recordingEnabled:        true,
-		recordingUpdatedAt:      now,
-		chatBuckets:             map[string]*guestChatBucket{},
-		mediaStateBuckets:       map[string]*guestChatBucket{},
-		telemetryBuckets:        map[string]*guestChatBucket{},
-		memberRepairBuckets:     map[string]*guestChatBucket{},
-		memberIceRestartBuckets: map[string]*guestChatBucket{},
-		guestIceRestartBuckets:  map[string]*guestChatBucket{},
+		id:                         normalizeRoomID(roomID),
+		participants:               map[string]time.Time{},
+		participantCounts:          map[string]int{},
+		participantEndpoints:       map[string]map[string]string{},
+		participantSessionLiveness: map[string]map[string]time.Time{},
+		participantMedia:           map[string]participantMediaState{},
+		guestSeats:                 map[string]string{},
+		recordingEnabled:           true,
+		recordingUpdatedAt:         now,
+		chatBuckets:                map[string]*guestChatBucket{},
+		mediaStateBuckets:          map[string]*guestChatBucket{},
+		telemetryBuckets:           map[string]*guestChatBucket{},
+		memberRepairBuckets:        map[string]*guestChatBucket{},
+		memberIceRestartBuckets:    map[string]*guestChatBucket{},
+		guestIceRestartBuckets:     map[string]*guestChatBucket{},
 	}
 }
 
@@ -865,6 +872,7 @@ func (app *kanbanBoardApp) evictAccountFromOtherRooms(name string, joinedRoomID 
 		delete(state.participants, name)
 		delete(state.participantCounts, name)
 		delete(state.participantEndpoints, name)
+		delete(state.participantSessionLiveness, name)
 		delete(state.participantMedia, name)
 		evictions = append(evictions, evictedRoom{roomID: roomID, sessionIDs: sessionIDs})
 	}
@@ -1039,6 +1047,7 @@ func (app *kanbanBoardApp) closeRoomForArchive(roomID string) {
 		delete(state.participants, name)
 		delete(state.participantCounts, name)
 		delete(state.participantEndpoints, name)
+		delete(state.participantSessionLiveness, name)
 		delete(state.participantMedia, name)
 		if isGuestDisplayName(name) {
 			for sessionKey, display := range state.guestSeats {

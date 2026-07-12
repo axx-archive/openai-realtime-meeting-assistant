@@ -2,16 +2,15 @@ package main
 
 // 2026-07-10 keyframe-spiral incident (room StationTenn): one lossy mobile
 // subscriber PLI'd continuously; every client repair message ran a global
-// signal walk whose deferred dispatchKeyFrame PLI'd EVERY publisher while
-// BYPASSING subscriberKeyframeThrottle, and the MEMBER
+// signal walk whose deferred keyframe dispatch PLI'd EVERY publisher while
+// bypassing source intent, and the MEMBER
 // request_participant_tracks path had no rate limit at all (193 messages in
 // ~4 min, entirely unlogged). Publishers pumped keyframe-heavy bursts until
 // the droplet's egress saturated and all five participants lost media.
 //
 // These tests pin the damping:
-//   S1(a) the signal-walk keyframe dispatch respects the per-source throttle
-//         (storm of walks => at most floor-rate PLIs per source; a fresh
-//         source still recovers immediately),
+//   S1(a) periodic/signal-walk global PLI dispatch stays removed; keyframe
+//         nudges are source-targeted and video-only,
 //   S1(b) member request_participant_tracks is token-bucketed per session
 //         (burst covers a just-joined member's first snapshot request;
 //         sustained spam drops silently with a rate-limited log; the guest
@@ -27,7 +26,7 @@ import (
 	"time"
 )
 
-/* ---------- S1(a): signal-walk keyframe throttle ---------- */
+/* ---------- S1(a): targeted, video-only keyframes ---------- */
 
 // The per-source floor must cap storm cadence around one keyframe per
 // 2.5-3s (the incident's forwarded cadence was 1 per 1-2s per source, which
@@ -42,58 +41,22 @@ func TestSubscriberKeyframeIntervalCapsStormCadence(t *testing.T) {
 	}
 }
 
-// A storm of signal walks (the incident ran one every ~1.2s; this simulates
-// one every 250ms for 10s) must yield at most floor-rate PLIs per source, and
-// a source the throttle has never seen must pass immediately so a
-// just-published track still gets its first keyframe without delay.
-func TestSignalWalkKeyframeStormThrottledPerSource(t *testing.T) {
-	const stormSource = "storm-test-stream:storm-test-track:1111"
-	const freshSource = "fresh-test-stream:fresh-test-track:2222"
-	t.Cleanup(func() {
-		subscriberKeyframeThrottle.forget(stormSource)
-		subscriberKeyframeThrottle.forget(freshSource)
-	})
-
-	base := time.Now()
-	allowed := 0
-	for i := 0; i < 40; i++ { // 40 walks x 250ms = a 10s storm
-		if allowSignalWalkKeyframe(stormSource, base.Add(time.Duration(i)*250*time.Millisecond)) {
-			allowed++
-		}
-	}
-	// 10s at >= 2.5s per source = at most 4 intervals + the initial hit.
-	maxAllowed := int(10*time.Second/subscriberKeyframeInterval) + 1
-	if allowed > maxAllowed {
-		t.Fatalf("storm of 40 walks forwarded %d keyframe requests for one source, want <= %d", allowed, maxAllowed)
-	}
-	if allowed < 1 {
-		t.Fatal("throttle never let a keyframe through — recovery would be impossible")
-	}
-
-	// Mid-storm, an unseen source (new publisher) must not be starved.
-	if !allowSignalWalkKeyframe(freshSource, base.Add(5*time.Second)) {
-		t.Fatal("a source the throttle has never seen must pass immediately (just-joined publisher recovery)")
-	}
-}
-
-// The dispatch walk itself must gate every receiver PLI through the shared
-// per-source throttle (keyed exactly like the forwarded-subscriber-PLI path,
-// so both spend one budget) and keep the room_keyframe_throttled accounting.
-func TestDispatchKeyFrameGatesThroughSubscriberThrottle(t *testing.T) {
+func TestGlobalKeyframeDispatchRemovedFromTimerAndSignalWalk(t *testing.T) {
 	source, err := os.ReadFile("main.go")
 	if err != nil {
 		t.Fatalf("read main.go: %v", err)
 	}
 	main := string(source)
+	if strings.Contains(main, "dispatchKeyFrame") {
+		t.Fatal("main.go restored a room-wide keyframe dispatch; PLIs must remain event/liveness-targeted")
+	}
 	for _, want := range []string{
-		// dispatchKeyFrame consults the throttle per receiver source...
-		`allowSignalWalkKeyframe(forwardedRemoteTrackID(`,
-		// ...and suppressions feed the existing drop accounting.
-		"func allowSignalWalkKeyframe(",
-		"noteThrottledKeyframeRequestDrop(sourceKey",
+		`requestParticipantVideoKeyframes(currentParticipantName(), participantSessionID, "screen_share_started")`,
+		`requestParticipantVideoKeyframes(currentParticipantName(), participantSessionID, "screen_share_stopped")`,
+		"sweepPublisherSilence()",
 	} {
 		if !strings.Contains(main, want) {
-			t.Errorf("main.go is missing the signal-walk keyframe throttle wiring: %q", want)
+			t.Errorf("main.go is missing targeted keyframe/liveness wiring: %q", want)
 		}
 	}
 }

@@ -136,6 +136,9 @@ func TestVideoLookPickerPersistsThroughV8Record(t *testing.T) {
 	if !strings.Contains(html, "['none', 'bonfire-warm', 'studio', 'mono', 'lowlight', 'blur'].includes(source.look)") {
 		t.Errorf("normalizeVideoSettings must accept the grading looks + blur + none")
 	}
+	if !strings.Contains(html, "lookExplicitlyChosen: source.lookExplicitlyChosen === true") {
+		t.Errorf("normalizeVideoSettings must preserve explicit look provenance")
+	}
 
 	// Selecting a chip writes through the v8 video record and saves it.
 	set := functionBody(html, "function setVideoLook(look)")
@@ -143,7 +146,7 @@ func TestVideoLookPickerPersistsThroughV8Record(t *testing.T) {
 		t.Fatalf("could not extract setVideoLook body")
 	}
 	for _, want := range []string{
-		"normalizeVideoSettings({ ...audioSettings.video, look })",
+		"normalizeVideoSettings({ ...audioSettings.video, look, lookExplicitlyChosen: true })",
 		"saveAudioSettings()",
 		"applyLiveVideoLookChange()",
 	} {
