@@ -5606,8 +5606,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				continue
 			}
 			payload["roomId"] = connRoomID
-			broadcastSignedInKanbanEvent("room_chat", payload)
-			broadcastRoomGuestsKanbanEvent(connRoomID, "room_chat", payload)
+			broadcastRoomAudienceKanbanEvent(connRoomID, "room_chat", payload)
 		case "room_chat_delete":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "enter the room before deleting room chat")
@@ -5626,7 +5625,8 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if !ok {
 				continue
 			}
-			broadcastSignedInKanbanEvent("room_chat_delete", payload)
+			payload["roomId"] = connRoomID
+			broadcastRoomAudienceKanbanEvent(connRoomID, "room_chat_delete", payload)
 		case "manual_create_ticket":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before editing the board.")

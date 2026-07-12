@@ -798,10 +798,7 @@ func (app *kanbanBoardApp) reconcileMeetingRecordsAtBootForRoom(roomID string) {
 
 func (app *kanbanBoardApp) broadcastMeetingRecord(record meetingRecord) {
 	payload := meetingRecordPayload(record, time.Now().UTC())
-	broadcastSignedInKanbanEvent("meeting", payload)
-	// Guests never appear in the signed-in pools, but their own room's meeting
-	// record is allowlisted state — deliver it on the guest sidecar (§5.4).
-	broadcastRoomGuestsKanbanEvent(record.RoomID, "meeting", payload)
+	broadcastRoomAudienceKanbanEvent(record.RoomID, "meeting", payload)
 }
 
 // meetingSnapshot returns the room's active record payload for direct sends /

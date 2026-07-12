@@ -7186,6 +7186,20 @@ func broadcastRoomKanbanEvent(roomID string, event string, data any) {
 	deliverKanbanEvent(event, websockets, raw)
 }
 
+// broadcastRoomAudienceKanbanEvent preserves the legacy office room as an
+// organization-wide member surface while making every named room private to
+// its admitted sockets. Named-room chat/meeting records must never use the
+// signed-in union fan-out, which crosses room boundaries by design.
+func broadcastRoomAudienceKanbanEvent(roomID string, event string, data any) {
+	roomID = normalizeRoomID(roomID)
+	if roomID == officeRoomID {
+		broadcastSignedInKanbanEvent(event, data)
+		broadcastRoomGuestsKanbanEvent(roomID, event, data)
+		return
+	}
+	broadcastRoomKanbanEvent(roomID, event, data)
+}
+
 // broadcastRoomGuestsKanbanEvent reaches only the GUEST sockets of one room —
 // the sidecar for signed-in broadcasts whose payload guests are entitled to
 // (their room's meeting record, room chat), since guests never appear in the
