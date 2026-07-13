@@ -1199,6 +1199,9 @@ func TestArtifactsHandlerPublishesSavedArtifactForSignedInUser(t *testing.T) {
 	if payload.Artifact.Metadata["published"] != "true" || payload.Artifact.Metadata["status"] != "published" || payload.Artifact.Metadata["publishedAt"] == "" {
 		t.Fatalf("artifact metadata=%v, want published status", payload.Artifact.Metadata)
 	}
+	if artifactShareEligible(payload.Artifact) || payload.Artifact.Metadata[artifactHumanApprovedAtKey] != "" {
+		t.Fatalf("body+publish retained stale approval eligibility: %v", payload.Artifact.Metadata)
+	}
 	published := kanbanApp.publishedOSArtifactsSnapshot(5)
 	if len(published) != 1 || published[0].ID != artifact.ID {
 		t.Fatalf("published=%#v, want published artifact %q", published, artifact.ID)

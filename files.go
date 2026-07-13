@@ -24,6 +24,7 @@ package main
 // on the GET payload).
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,6 +44,8 @@ var (
 	errFileSaveNotFound       = errors.New("artifact not found")
 	errFileSaveNotDeliverable = errors.New("only a finished deliverable can be saved to Files")
 )
+
+var fileSaveAfterArtifactStampProbe func()
 
 const (
 	// meetingMemoryKindFile is one uploaded file per entry. Like kind
@@ -301,8 +304,16 @@ func fileDeliverableRecord(entry meetingMemoryEntry) (assistantFileRecord, bool)
 // scoutChatThreadsSnapshot already enforces — plus the finished agent
 // deliverables. Newest first, capped after the merge.
 func (app *kanbanBoardApp) assistantFilesForUser(viewerEmail string) []assistantFileRecord {
+	return app.assistantFilesForPrincipal(context.Background(), &userAccount{Email: normalizeAccountEmail(viewerEmail)})
+}
+
+func (app *kanbanBoardApp) assistantFilesForPrincipal(ctx context.Context, viewer *userAccount) []assistantFileRecord {
 	if app == nil || app.memory == nil {
 		return nil
+	}
+	viewerEmail := ""
+	if viewer != nil {
+		viewerEmail = viewer.Email
 	}
 	rows := make([]assistantFileRecord, 0, 32)
 	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindFile, 0) {
@@ -311,7 +322,7 @@ func (app *kanbanBoardApp) assistantFilesForUser(viewerEmail string) []assistant
 	for _, thread := range app.scoutChatThreadsSnapshot(viewerEmail, true, 0) {
 		rows = append(rows, fileRecordsFromThread(thread)...)
 	}
-	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0) {
+	for _, entry := range app.authorizedFileDeliverableCandidates(ctx, viewer, ACLReadContent) {
 		if row, ok := fileDeliverableRecord(entry); ok {
 			rows = append(rows, row)
 		}
@@ -323,6 +334,32 @@ func (app *kanbanBoardApp) assistantFilesForUser(viewerEmail string) []assistant
 		rows = rows[:assistantFilesListLimit]
 	}
 	return rows
+}
+
+// authorizedFileDeliverableCandidates collects IDs only, then obtains each
+// exact artifact snapshot through the body-free authorization seam. No title,
+// metadata, or Text is copied before the viewer is authorized.
+func (app *kanbanBoardApp) authorizedFileDeliverableCandidates(ctx context.Context, viewer *userAccount, actions ...ACLAction) []meetingMemoryEntry {
+	if app == nil || app.memory == nil || viewer == nil {
+		return nil
+	}
+	app.memory.mu.Lock()
+	ids := make([]string, 0)
+	for _, stored := range app.memory.entries {
+		if stored.Kind != meetingMemoryKindOSArtifact {
+			continue
+		}
+		ids = append(ids, stored.ID)
+	}
+	app.memory.mu.Unlock()
+	allowed := make([]meetingMemoryEntry, 0, len(ids))
+	for _, id := range ids {
+		candidate, ok := authorizedArtifactForActions(ctx, viewer, id, actions...)
+		if ok {
+			allowed = append(allowed, candidate)
+		}
+	}
+	return allowed
 }
 
 func fileRecordTime(row assistantFileRecord) time.Time {
@@ -434,7 +471,7 @@ func assistantFilesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows := kanbanApp.assistantFilesForUser(user.Email)
+	rows := kanbanApp.assistantFilesForPrincipal(r.Context(), user)
 	folders := decorateAssistantFileFolders(rows)
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
@@ -595,30 +632,67 @@ func (app *kanbanBoardApp) saveDeliverableToFiles(artifactID string, folderID st
 	if !ok {
 		return assistantFileRecord{}, errFileSaveNotFound
 	}
+	return app.saveDeliverableSnapshotToFiles(entry, folderID, actor)
+}
+
+func (app *kanbanBoardApp) saveDeliverableSnapshotToFiles(entry meetingMemoryEntry, folderID string, actor string) (assistantFileRecord, error) {
+	artifactID := strings.TrimSpace(entry.ID)
+	if artifactID == "" {
+		return assistantFileRecord{}, errFileSaveArtifactID
+	}
 	if !deliverableRecordQualifies(entry) {
 		return assistantFileRecord{}, errFileSaveNotDeliverable
 	}
-	// File under the folder first so a bad folderId aborts before the stamp —
-	// no half-saved state.
 	folderID = strings.TrimSpace(folderID)
-	if folderID != "" {
-		if err := moveFileToFolder(artifactID, folderID); err != nil {
-			return assistantFileRecord{}, err
-		}
+	if folderID != "" && !fileFolderExists(folderID) {
+		return assistantFileRecord{}, errFileFolderNotFound
 	}
-	updated, _, err := app.memory.updateOSArtifactMetadata(artifactID, map[string]string{
+	expectedHeader := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(entry))
+	updated, matched, err := app.memory.updateOSArtifactMetadataIfHeaderMatches(expectedHeader, artifactID, map[string]string{
 		"savedToFiles":   "true",
 		"savedToFilesBy": strings.TrimSpace(actor),
 		"savedToFilesAt": time.Now().UTC().Format(time.RFC3339Nano),
 	})
 	if err != nil {
+		if !matched {
+			return assistantFileRecord{}, errFileSaveNotFound
+		}
 		return assistantFileRecord{}, err
+	}
+	if !matched {
+		return assistantFileRecord{}, errFileSaveNotFound
+	}
+	if fileSaveAfterArtifactStampProbe != nil {
+		fileSaveAfterArtifactStampProbe()
+	}
+	if folderID != "" {
+		if err := moveFileToFolder(artifactID, folderID); err != nil {
+			// A folder can disappear between validation and assignment. Restore
+			// the exact prior artifact metadata conditionally before returning.
+			updatedHeader := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(updated))
+			_, _, _ = app.memory.restoreOSArtifactMetadataIfHeaderMatches(updatedHeader, artifactID, entry.Metadata,
+				[]string{"savedToFiles", "savedToFilesBy", "savedToFilesAt"})
+			return assistantFileRecord{}, err
+		}
 	}
 	row, _ := fileDeliverableRecord(updated)
 	if folderID != "" {
 		row.FolderID = folderID
 	}
 	return row, nil
+}
+
+func fileFolderExists(folderID string) bool {
+	folderID = strings.TrimSpace(folderID)
+	if folderID == "" {
+		return true
+	}
+	for _, folder := range listFileFolders() {
+		if folder.ID == folderID {
+			return true
+		}
+	}
+	return false
 }
 
 // fileSaveErrorStatus maps saveDeliverableToFiles errors onto honest statuses.
@@ -665,8 +739,18 @@ func assistantFileSaveHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, "could not read save request")
 		return
 	}
+	payload.ArtifactID = strings.TrimSpace(payload.ArtifactID)
+	if payload.ArtifactID == "" {
+		writeAuthError(w, http.StatusBadRequest, errFileSaveArtifactID.Error())
+		return
+	}
+	artifact, ok := authorizedArtifactForActions(r.Context(), user, payload.ArtifactID, ACLReadContent, ACLWrite)
+	if !ok {
+		writeAuthError(w, http.StatusNotFound, "artifact not found")
+		return
+	}
 	actor := firstNonEmptyString(strings.TrimSpace(user.Name), normalizeAccountEmail(user.Email))
-	row, err := kanbanApp.saveDeliverableToFiles(payload.ArtifactID, payload.FolderID, actor)
+	row, err := kanbanApp.saveDeliverableSnapshotToFiles(artifact, payload.FolderID, actor)
 	if err != nil {
 		writeAuthError(w, fileSaveErrorStatus(err), err.Error())
 		return

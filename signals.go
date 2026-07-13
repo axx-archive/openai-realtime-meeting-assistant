@@ -308,7 +308,7 @@ func artifactOpenHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, "could not read artifact open request")
 		return
 	}
-	artifact, found := kanbanApp.osArtifactByID(strings.TrimSpace(payload.ID))
+	artifact, found := authorizedArtifactByID(r.Context(), user, ACLReadContent, strings.TrimSpace(payload.ID))
 	if !found {
 		writeAuthError(w, http.StatusNotFound, "artifact not found")
 		return
@@ -473,7 +473,7 @@ func signalSurveyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	artifact, found := kanbanApp.osArtifactByID(strings.TrimSpace(payload.ArtifactID))
+	artifact, found := authorizedArtifactForActions(r.Context(), user, strings.TrimSpace(payload.ArtifactID), ACLReadContent, ACLWrite)
 	if !found {
 		writeAuthError(w, http.StatusNotFound, "artifact not found")
 		return

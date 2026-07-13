@@ -461,7 +461,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 	// counts as summoning Scout, so this branch runs regardless of channel
 	// visibility and never needs @scout.
 	if followUpArtifactID = strings.TrimSpace(followUpArtifactID); followUpArtifactID != "" {
-		artifact, ok := app.osArtifactByID(followUpArtifactID)
+		artifact, ok := authorizedArtifactForActions(ctx, user, followUpArtifactID, ACLReadContent, ACLExecute, ACLWrite)
 		if !ok {
 			return nil, fmt.Errorf("that report is unavailable")
 		}
@@ -488,7 +488,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 		// Unattached channel messages posted after the last run become worker
 		// context alongside the explicit reply.
 		teamReplies := scoutChatRepliesSince(thread, completedAt)
-		agentThread, err := app.dispatchArtifactFollowUpWithAttachments(followUpArtifactID, text, user.Name, teamReplies, attachmentBlocks)
+		agentThread, err := app.dispatchAuthorizedArtifactFollowUpWithAttachments(ctx, user, artifact, text, user.Name, teamReplies, attachmentBlocks)
 		if err != nil {
 			// The reply is a real team answer even when the run cannot launch
 			// (e.g. a second teammate answering while a follow-up is already in

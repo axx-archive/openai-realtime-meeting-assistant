@@ -1048,7 +1048,8 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, "artifact id and action are required")
 		return
 	}
-	artifact, exists := kanbanApp.osArtifactByID(artifactID)
+	requiredActions := artifactRunnerRequiredACLActions(action)
+	artifact, exists := authorizedArtifactForActions(r.Context(), user, artifactID, requiredActions...)
 	if !exists {
 		writeAuthError(w, http.StatusNotFound, "artifact not found")
 		return
@@ -1208,6 +1209,19 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	default:
 		writeAuthError(w, http.StatusBadRequest, "unknown artifact action")
+	}
+}
+
+func artifactRunnerRequiredACLActions(action string) []ACLAction {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "approve", "reject":
+		return []ACLAction{ACLReadMetadata, ACLApprove, ACLWrite}
+	case "resume":
+		return []ACLAction{ACLReadContent, ACLExecute, ACLWrite}
+	case "rerun":
+		return []ACLAction{ACLReadContent, ACLExecute}
+	default:
+		return []ACLAction{ACLWrite}
 	}
 }
 

@@ -347,6 +347,16 @@ func TestArtifactBlobRouteAuthAndHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("putBlob html: %v", err)
 	}
+	artifact, _, err := kanbanApp.createOSArtifactWithMetadata("design", "blob route fixture", "Authorized assets", "AJ", map[string]string{"visibility": "organization"})
+	if err != nil {
+		t.Fatalf("createOSArtifactWithMetadata: %v", err)
+	}
+	if _, err := kanbanApp.appendArtifactAsset(artifact.ID, artifactAsset{Ref: pdfRef, Mime: "application/pdf", Kind: "pdf"}); err != nil {
+		t.Fatalf("append pdf asset: %v", err)
+	}
+	if _, err := kanbanApp.appendArtifactAsset(artifact.ID, artifactAsset{Ref: htmlRef, Mime: "text/html", Kind: "export"}); err != nil {
+		t.Fatalf("append html asset: %v", err)
+	}
 
 	// Method gate.
 	recorder := httptest.NewRecorder()

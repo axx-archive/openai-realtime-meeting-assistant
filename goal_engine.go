@@ -395,7 +395,16 @@ type goalEngine struct {
 	concurrency int
 	timeout     time.Duration
 	now         func() time.Time
+	// expectedPersistHeader is armed only for the first synchronous persist of
+	// an authorized feedback resume. It closes the gap between the goal lock
+	// and unrelated artifact writers that do not take that lock.
+	expectedPersistHeader    *ArtifactAuthorizationHeader
+	expectedPersistBody      string
+	conditionalPersistFailed bool
+	lastPersistedArtifact    meetingMemoryEntry
 }
+
+var goalFeedbackAfterPersistProbe func()
 
 func newGoalEngine(app *kanbanBoardApp) *goalEngine {
 	return &goalEngine{
@@ -2198,6 +2207,9 @@ func (e *goalEngine) proceedProcessCheckpoint(plan *goalPlan, parentID string, s
 	checkpoint.ResolvedAt = e.now().UTC().Format(time.RFC3339Nano)
 	plan.State = goalStateExecute
 	e.persist(plan, parentID, "")
+	if e.conditionalPersistFailed {
+		return fmt.Errorf("goal artifact not found")
+	}
 	e.unparkCheckpointSurface(parentID)
 	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
 	defer cancel()
@@ -2261,6 +2273,9 @@ func (e *goalEngine) applyProcessCheckpointSendBack(plan *goalPlan, parentID str
 	checkpoint.ResolvedAt = e.now().UTC().Format(time.RFC3339Nano)
 	plan.State = goalStateExecute
 	e.persist(plan, parentID, "")
+	if e.conditionalPersistFailed {
+		return
+	}
 	e.unparkCheckpointSurface(parentID)
 }
 
@@ -3138,6 +3153,7 @@ func (app *kanbanBoardApp) resumeBlockedGoal(parentID string, resumedBy string) 
 // real model calls for inline stages — runs here, off the request goroutine.
 // Tests swap it to capture the closure and drive deterministically.
 var startGoalFeedbackResumeAsync = func(run func()) { go run() }
+var goalFeedbackAfterSnapshotProbe func()
 
 // resumeGoalWithFeedback is the Wave 6 feedback door (deliverables drawer /
 // goal-card send-notes / manifest feedback pills): a deliverable dropped into
@@ -3149,6 +3165,18 @@ var startGoalFeedbackResumeAsync = func(run func()) { go run() }
 // and the redo re-parks for a fresh human sign-off. The stage model itself is
 // untouched — this extends resume dispatch only.
 func (app *kanbanBoardApp) resumeGoalWithFeedback(parentID string, resumedBy string, note string, deliverableArtifactID string) (scoutAgentThread, error) {
+	parent, ok := app.osArtifactByID(strings.TrimSpace(parentID))
+	if !ok {
+		return scoutAgentThread{}, fmt.Errorf("goal artifact not found")
+	}
+	return app.resumeGoalWithFeedbackAuthorized(parent, resumedBy, note, deliverableArtifactID)
+}
+
+// resumeGoalWithFeedbackAuthorized carries an already-authorized parent
+// snapshot into the goal lock. It revalidates the snapshot before decoding its
+// plan, and the engine's first persist conditionally consumes the same header.
+func (app *kanbanBoardApp) resumeGoalWithFeedbackAuthorized(parentSnapshot meetingMemoryEntry, resumedBy string, note string, deliverableArtifactID string) (scoutAgentThread, error) {
+	parentID := strings.TrimSpace(parentSnapshot.ID)
 	parentID = strings.TrimSpace(parentID)
 	if parentID == "" {
 		return scoutAgentThread{}, fmt.Errorf("goal id is required")
@@ -3170,9 +3198,13 @@ func (app *kanbanBoardApp) resumeGoalWithFeedback(parentID string, resumedBy str
 	}
 	defer lock.Unlock()
 
-	parent, ok := app.osArtifactByID(parentID)
+	expectedHeader := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(parentSnapshot))
+	parent, ok := app.memory.artifactSnapshotIfHeaderMatches(parentID, expectedHeader)
 	if !ok {
 		return scoutAgentThread{}, fmt.Errorf("goal artifact not found")
+	}
+	if goalFeedbackAfterSnapshotProbe != nil {
+		goalFeedbackAfterSnapshotProbe()
 	}
 	plan, ok := decodeGoalPlan(parent.Metadata["goalPlan"])
 	if !ok {
@@ -3183,6 +3215,8 @@ func (app *kanbanBoardApp) resumeGoalWithFeedback(parentID string, resumedBy str
 	}
 
 	engine := newGoalEngine(app)
+	engine.expectedPersistHeader = &expectedHeader
+	engine.expectedPersistBody = parent.Text
 	engine.applyProcessBudgets(&plan)
 	resumedByName := firstNonEmptyString(strings.TrimSpace(resumedBy), "admin")
 	// Every branch MUTATES AND PERSISTS synchronously under this lock hold —
@@ -3264,10 +3298,15 @@ func (app *kanbanBoardApp) resumeGoalWithFeedback(parentID string, resumedBy str
 	default:
 		return scoutAgentThread{}, fmt.Errorf("the goal is still running — wait for it to park or finish, then send feedback")
 	}
-
-	updated, ok := app.osArtifactByID(parentID)
-	if !ok {
-		updated = parent
+	if engine.conditionalPersistFailed {
+		return scoutAgentThread{}, fmt.Errorf("goal artifact not found")
+	}
+	updated := engine.lastPersistedArtifact
+	if strings.TrimSpace(updated.ID) == "" {
+		return scoutAgentThread{}, fmt.Errorf("goal artifact not found")
+	}
+	if goalFeedbackAfterPersistProbe != nil {
+		goalFeedbackAfterPersistProbe()
 	}
 	query := compactAssistantLine(firstNonEmptyString(plan.Objective, updated.Metadata["title"]))
 	thread := scoutAgentThread{
@@ -3313,6 +3352,9 @@ func (e *goalEngine) reopenGoalForFeedback(plan *goalPlan, parentID string, resu
 	plan.Gate = goalGate{}
 	plan.State = goalStateExecute
 	e.persist(plan, parentID, "")
+	if e.conditionalPersistFailed {
+		return fmt.Errorf("goal artifact not found")
+	}
 	// The card is in flight again (the same flip a checkpoint resume does).
 	e.unparkCheckpointSurface(parentID)
 	return nil
@@ -3519,7 +3561,9 @@ func (e *goalEngine) persist(plan *goalPlan, parentID string, body string) meeti
 		return meetingMemoryEntry{}
 	}
 	if strings.TrimSpace(body) == "" {
-		if current, ok := e.app.osArtifactByID(parentID); ok {
+		if e.expectedPersistHeader != nil {
+			body = e.expectedPersistBody
+		} else if current, ok := e.app.osArtifactByID(parentID); ok {
 			body = current.Text
 		}
 	}
@@ -3572,11 +3616,23 @@ func (e *goalEngine) persist(plan *goalPlan, parentID string, body string) meeti
 		metadata["cancelledBy"] = plan.CancelledBy
 		metadata["cancelledAt"] = plan.CancelledAt
 	}
-	artifact, _, err := e.app.updateOSArtifactWithMetadata(parentID, "", body, scoutParticipantName, metadata)
+	var artifact meetingMemoryEntry
+	if e.expectedPersistHeader != nil {
+		expected := *e.expectedPersistHeader
+		artifact, _, err = e.app.memory.updateOSArtifactWithMetadataIfHeaderMatches(expected, parentID, "", body, scoutParticipantName, metadata)
+		if err != nil {
+			e.conditionalPersistFailed = true
+		} else {
+			e.expectedPersistHeader = nil
+		}
+	} else {
+		artifact, _, err = e.app.updateOSArtifactWithMetadata(parentID, "", body, scoutParticipantName, metadata)
+	}
 	if err != nil {
 		log.Errorf("goal %s persist failed: %v", parentID, err)
 		return meetingMemoryEntry{}
 	}
+	e.lastPersistedArtifact = artifact
 	broadcastSignedInKanbanEvent("memory", e.app.memorySnapshotForClients(20))
 	return artifact
 }

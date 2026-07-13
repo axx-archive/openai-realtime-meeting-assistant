@@ -6,11 +6,14 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -74,6 +77,39 @@ var (
 	archiveSecretCache = map[string][]byte{}
 )
 
+type archiveCapabilityRecord struct {
+	ArchiveID, TenantID, ContentDigest, Action, ExpiresAt, TokenHash string
+	Revoked                                                          bool
+}
+
+var archiveCapabilityMu sync.Mutex
+
+func archiveCapabilitiesPath() string {
+	return filepath.Join(filepath.Dir(meetingMemoryPath()), "archive-capabilities.json")
+}
+
+func loadArchiveCapabilities() (map[string]archiveCapabilityRecord, error) {
+	raw, err := os.ReadFile(archiveCapabilitiesPath())
+	if os.IsNotExist(err) {
+		return map[string]archiveCapabilityRecord{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var records map[string]archiveCapabilityRecord
+	if err := json.Unmarshal(raw, &records); err != nil {
+		return nil, err
+	}
+	if records == nil {
+		records = map[string]archiveCapabilityRecord{}
+	}
+	return records, nil
+}
+
+func saveArchiveCapabilities(records map[string]archiveCapabilityRecord) error {
+	return writeJSONFileAtomically(archiveCapabilitiesPath(), "archive capabilities", records)
+}
+
 // archiveTokenSecret returns the random 32-byte server secret that keys
 // archive access tokens, created lazily next to the meeting memory file and
 // loaded thereafter. Tokens are deliberately not derived from the room
@@ -115,19 +151,137 @@ func archiveTokenSecret() []byte {
 // to that one archive only.
 func archiveAccessToken(archiveID string) string {
 	archiveID = strings.TrimSpace(strings.TrimSuffix(archiveID, ".json"))
+	path, err := meetingArchivePath(archiveID)
+	if err != nil {
+		return ""
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	digestBytes := sha256.Sum256(raw)
+	digest := hex.EncodeToString(digestBytes[:])
+	archiveCapabilityMu.Lock()
+	defer archiveCapabilityMu.Unlock()
+	records, err := loadArchiveCapabilities()
+	if err != nil {
+		return ""
+	}
+	now := time.Now().UTC()
+	record := records[archiveID]
+	if record.ArchiveID == archiveID && record.Revoked {
+		return ""
+	}
+	if record.ArchiveID == archiveID && record.TenantID == canonicalArtifactTenantID() && record.ContentDigest == digest && record.Action == "read_archive" && !record.Revoked {
+		if expires, parseErr := time.Parse(time.RFC3339Nano, record.ExpiresAt); parseErr == nil && now.Before(expires) {
+			return archiveCapabilityRaw(record)
+		}
+	}
+	record = archiveCapabilityRecord{ArchiveID: archiveID, TenantID: canonicalArtifactTenantID(), ContentDigest: digest, Action: "read_archive", ExpiresAt: now.AddDate(0, 0, 7).Format(time.RFC3339Nano)}
+	token := archiveCapabilityRaw(record)
+	tokenHash := sha256.Sum256([]byte(token))
+	record.TokenHash = hex.EncodeToString(tokenHash[:])
+	records[archiveID] = record
+	if err := saveArchiveCapabilities(records); err != nil {
+		return ""
+	}
+	return token
+}
+
+func archiveCapabilityRaw(record archiveCapabilityRecord) string {
 	mac := hmac.New(sha256.New, archiveTokenSecret())
-	mac.Write([]byte("bonfire-archive:" + archiveID))
-	return hex.EncodeToString(mac.Sum(nil))
+	mac.Write([]byte(strings.Join([]string{"bonfire-archive", record.TenantID, record.ArchiveID, record.ContentDigest, record.Action, record.ExpiresAt}, ":")))
+	expires, _ := time.Parse(time.RFC3339Nano, record.ExpiresAt)
+	return strings.Join([]string{strconv.FormatInt(expires.Unix(), 10), record.ContentDigest, record.Action, hex.EncodeToString(mac.Sum(nil))}, ".")
 }
 
 // validArchiveKey accepts only the archive's derived token, compared in
 // constant time. The room password is deliberately rejected: accepting it
 // here made /archives/ an unauthenticated password-guessing oracle.
 func validArchiveKey(archiveID, key string) bool {
-	keyHash := sha256.Sum256([]byte(strings.TrimSpace(key)))
-	tokenHash := sha256.Sum256([]byte(archiveAccessToken(archiveID)))
+	_, err := authorizeArchiveRead(archiveID, key)
+	return err == nil
+}
 
-	return subtle.ConstantTimeCompare(keyHash[:], tokenHash[:]) == 1
+func authorizeArchiveRead(archiveID, key string) ([]byte, error) {
+	archiveID = strings.TrimSpace(strings.TrimSuffix(archiveID, ".json"))
+	archiveCapabilityMu.Lock()
+	defer archiveCapabilityMu.Unlock()
+	records, err := loadArchiveCapabilities()
+	if err != nil {
+		return nil, err
+	}
+	record, ok := records[archiveID]
+	if !ok || record.Revoked || record.TenantID != canonicalArtifactTenantID() || record.Action != "read_archive" || !isHexDigest(record.ContentDigest) || !isHexDigest(record.TokenHash) {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	expires, err := time.Parse(time.RFC3339Nano, record.ExpiresAt)
+	if err != nil || !time.Now().UTC().Before(expires) {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	provided := sha256.Sum256([]byte(strings.TrimSpace(key)))
+	expected, err := hex.DecodeString(record.TokenHash)
+	if err != nil || subtle.ConstantTimeCompare(provided[:], expected) != 1 {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	// Authenticate before touching archive bytes; only an authorized request
+	// pays the body read needed to reject a replaced file.
+	path, err := meetingArchivePath(archiveID)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	digest := sha256.Sum256(raw)
+	if hex.EncodeToString(digest[:]) != record.ContentDigest {
+		return nil, fmt.Errorf("archive content changed")
+	}
+	return raw, nil
+}
+
+func revokeArchiveCapability(archiveID string) error {
+	archiveCapabilityMu.Lock()
+	defer archiveCapabilityMu.Unlock()
+	records, err := loadArchiveCapabilities()
+	if err != nil {
+		return err
+	}
+	id := strings.TrimSpace(strings.TrimSuffix(archiveID, ".json"))
+	record, ok := records[id]
+	if !ok {
+		return fmt.Errorf("archive capability not found")
+	}
+	record.Revoked, record.TokenHash = true, ""
+	records[id] = record
+	return saveArchiveCapabilities(records)
+}
+
+func reissueArchiveCapability(archiveID string) (string, error) {
+	archiveCapabilityMu.Lock()
+	records, err := loadArchiveCapabilities()
+	if err != nil {
+		archiveCapabilityMu.Unlock()
+		return "", err
+	}
+	id := strings.TrimSpace(strings.TrimSuffix(archiveID, ".json"))
+	record, ok := records[id]
+	if !ok || !record.Revoked {
+		archiveCapabilityMu.Unlock()
+		return "", fmt.Errorf("revoked archive capability not found")
+	}
+	delete(records, id)
+	if err := saveArchiveCapabilities(records); err != nil {
+		archiveCapabilityMu.Unlock()
+		return "", err
+	}
+	archiveCapabilityMu.Unlock()
+	token := archiveAccessToken(id)
+	if token == "" {
+		return "", fmt.Errorf("could not reissue archive capability")
+	}
+	return token, nil
 }
 
 func configuredMeetingRoomPassword() string {

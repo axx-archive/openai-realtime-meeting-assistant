@@ -75,36 +75,61 @@ func artifactIsHTMLDocument(artifact meetingMemoryEntry) bool {
 // invalidates the token. Reuses the archive token secret with a distinct
 // domain prefix (participants.go precedent): one lazily-created server
 // secret, no cross-protocol token replay.
-func artifactRenderTokenMAC(artifactID string, expiresUnix string) string {
+func artifactRenderTokenMAC(artifactID string, revision string, digest string, action string, expiresUnix string) string {
 	mac := hmac.New(sha256.New, archiveTokenSecret())
-	mac.Write([]byte(artifactRenderTokenPrefix + strings.TrimSpace(artifactID) + ":" + expiresUnix))
+	mac.Write([]byte(strings.Join([]string{artifactRenderTokenPrefix + canonicalArtifactTenantID(), strings.TrimSpace(artifactID), revision, digest, action, expiresUnix}, ":")))
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
 // mintArtifactRenderToken issues a render token valid until expires, encoded
 // as "<unix-expiry>.<hex-mac>" so validation needs no server-side state.
 func mintArtifactRenderToken(artifactID string, expires time.Time) string {
+	if kanbanApp != nil {
+		if artifact, ok := kanbanApp.osArtifactByID(artifactID); ok {
+			return mintArtifactRenderTokenForArtifact(artifact, expires)
+		}
+	}
+	return mintArtifactRenderTokenForArtifact(meetingMemoryEntry{ID: artifactID}, expires)
+}
+
+func mintArtifactRenderTokenForArtifact(artifact meetingMemoryEntry, expires time.Time) string {
 	expiresUnix := strconv.FormatInt(expires.Unix(), 10)
-	return expiresUnix + "." + artifactRenderTokenMAC(artifactID, expiresUnix)
+	revision := strconv.Itoa(artifactVersion(artifact))
+	digest := artifactCapabilityDigest(artifact)
+	action := string(ACLReadContent)
+	return strings.Join([]string{expiresUnix, revision, digest, action, artifactRenderTokenMAC(artifact.ID, revision, digest, action, expiresUnix)}, ".")
 }
 
 // validArtifactRenderToken accepts only an unexpired token whose MAC matches
 // this artifact, compared in constant time (hash-then-compare, the
 // validArchiveKey pattern, so attacker-controlled lengths leak nothing).
 func validArtifactRenderToken(artifactID string, token string, now time.Time) bool {
-	expiresUnix, macHex, ok := strings.Cut(strings.TrimSpace(token), ".")
-	if !ok {
+	parts := strings.Split(strings.TrimSpace(token), ".")
+	if len(parts) != 5 {
 		return false
 	}
+	expiresUnix, revision, digest, action, macHex := parts[0], parts[1], parts[2], parts[3], parts[4]
 	expires, err := strconv.ParseInt(expiresUnix, 10, 64)
-	if err != nil || now.Unix() > expires {
+	if err != nil || now.Unix() > expires || action != string(ACLReadContent) || !isHexDigest(digest) {
+		return false
+	}
+	if parsed, err := strconv.Atoi(revision); err != nil || parsed < 0 {
 		return false
 	}
 
 	providedHash := sha256.Sum256([]byte(macHex))
-	expectedHash := sha256.Sum256([]byte(artifactRenderTokenMAC(artifactID, expiresUnix)))
+	expectedHash := sha256.Sum256([]byte(artifactRenderTokenMAC(artifactID, revision, digest, action, expiresUnix)))
 
 	return subtle.ConstantTimeCompare(providedHash[:], expectedHash[:]) == 1
+}
+
+func artifactRenderTokenMatchesArtifact(token string, artifact meetingMemoryEntry) bool {
+	parts := strings.Split(strings.TrimSpace(token), ".")
+	if len(parts) != 5 {
+		return false
+	}
+	revision, err := strconv.Atoi(parts[1])
+	return err == nil && revision == artifactVersion(artifact) && parts[2] == artifactCapabilityDigest(artifact) && parts[3] == string(ACLReadContent)
 }
 
 // artifactRenderTokenHandler serves GET /artifacts/render-token?id=... —
@@ -132,7 +157,7 @@ func artifactRenderTokenHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	artifact, found := kanbanApp.osArtifactByID(strings.TrimSpace(r.URL.Query().Get("id")))
+	artifact, found := authorizedArtifactForActions(r.Context(), user, strings.TrimSpace(r.URL.Query().Get("id")), ACLReadContent, ACLExport)
 	if !found {
 		writeAuthError(w, http.StatusNotFound, "artifact not found")
 		return
@@ -143,7 +168,7 @@ func artifactRenderTokenHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	expires := time.Now().Add(artifactRenderTokenTTL)
-	token := mintArtifactRenderToken(artifact.ID, expires)
+	token := mintArtifactRenderTokenForArtifact(artifact, expires)
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok":        true,
 		"token":     token,
@@ -182,7 +207,7 @@ func artifactRenderHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	artifact, found := kanbanApp.osArtifactByID(artifactID)
-	if !found || !artifactIsHTMLDocument(artifact) {
+	if !found || !artifactIsHTMLDocument(artifact) || !artifactRenderTokenMatchesArtifact(token, artifact) {
 		http.NotFound(w, r)
 		return
 	}

@@ -134,9 +134,43 @@ func (app *kanbanBoardApp) dispatchArtifactFollowUpWithAttachments(artifactID st
 		return scoutAgentThread{}, err
 	}
 	if artifact.Metadata["source"] == "scout_thread" {
-		return app.launchAgentThreadFollowUpWithAttachments(artifactID, replyText, requestedBy, teamReplies, attachments)
+		return app.launchAgentThreadFollowUpWithAuthorizedSnapshot(artifact, replyText, requestedBy, teamReplies, attachments)
 	}
-	return app.resumeGoalWithFeedback(artifactGoalParentID(artifact), requestedBy, replyText, artifactID)
+	return app.resumeGoalWithFeedback(artifactGoalParentID(artifact), requestedBy, replyText, artifact.ID)
+}
+
+func (app *kanbanBoardApp) dispatchAuthorizedArtifactFollowUpWithAttachments(ctx context.Context, user *userAccount, artifact meetingMemoryEntry, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord, attachments []json.RawMessage) (scoutAgentThread, error) {
+	artifact, ok := app.revalidateArtifactSnapshot(artifact)
+	if !ok {
+		return scoutAgentThread{}, fmt.Errorf("that report is unavailable")
+	}
+	if artifact.Metadata["source"] == "scout_thread" {
+		if err := app.artifactFollowUpRouteError(artifact); err != nil {
+			return scoutAgentThread{}, err
+		}
+		return app.launchAgentThreadFollowUpWithAuthorizedSnapshot(artifact, replyText, requestedBy, teamReplies, attachments)
+	}
+	parentID := artifactGoalParentID(artifact)
+	if parentID == "" {
+		return scoutAgentThread{}, fmt.Errorf("that deliverable is not linked to a workstream that can take feedback yet")
+	}
+	parent, ok := authorizedArtifactForActions(ctx, user, parentID, ACLReadContent, ACLExecute, ACLWrite)
+	if !ok {
+		return scoutAgentThread{}, fmt.Errorf("that deliverable's workstream is no longer available")
+	}
+	plan, ok := decodeGoalPlan(parent.Metadata["goalPlan"])
+	if !ok || plan.Cancelled {
+		return scoutAgentThread{}, fmt.Errorf("that deliverable's workstream is no longer available")
+	}
+	return app.resumeGoalWithFeedbackAuthorized(parent, requestedBy, replyText, artifact.ID)
+}
+
+func (app *kanbanBoardApp) revalidateArtifactSnapshot(expected meetingMemoryEntry) (meetingMemoryEntry, bool) {
+	if app == nil || app.memory == nil || strings.TrimSpace(expected.ID) == "" {
+		return meetingMemoryEntry{}, false
+	}
+	header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(expected))
+	return app.memory.artifactSnapshotIfHeaderMatches(expected.ID, header)
 }
 
 // artifactFollowUpRouteError decides whether a follow-up on this artifact can
@@ -180,10 +214,18 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUp(artifactID string, replyTex
 // the triggering reply's binary attachment blocks (card 085) for the worker
 // request. Existing entrypoints delegate with nil.
 func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAttachments(artifactID string, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord, attachments []json.RawMessage) (scoutAgentThread, error) {
+	artifact, ok := app.osArtifactByID(strings.TrimSpace(artifactID))
+	if !ok {
+		return scoutAgentThread{}, fmt.Errorf("that report is unavailable")
+	}
+	return app.launchAgentThreadFollowUpWithAuthorizedSnapshot(artifact, replyText, requestedBy, teamReplies, attachments)
+}
+
+func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAuthorizedSnapshot(expected meetingMemoryEntry, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord, attachments []json.RawMessage) (scoutAgentThread, error) {
 	if app == nil || app.memory == nil {
 		return scoutAgentThread{}, fmt.Errorf("assistant is unavailable")
 	}
-	artifactID = strings.TrimSpace(artifactID)
+	artifactID := strings.TrimSpace(expected.ID)
 	if artifactID == "" {
 		return scoutAgentThread{}, fmt.Errorf("artifact id is required")
 	}
@@ -192,7 +234,7 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAttachments(artifactID s
 	lock.Lock()
 	defer lock.Unlock()
 
-	artifact, ok := app.osArtifactByID(artifactID)
+	artifact, ok := app.revalidateArtifactSnapshot(expected)
 	if !ok {
 		return scoutAgentThread{}, fmt.Errorf("that report is unavailable")
 	}
@@ -233,7 +275,8 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAttachments(artifactID s
 	requestedByName := firstNonEmptyString(canonicalRoomActorName(requestedBy), strings.TrimSpace(requestedBy))
 	// Mark running WITHOUT touching text or title: a failed follow-up must be
 	// able to restore the prior good state untouched.
-	updated, _, err := app.updateOSArtifactWithMetadata(artifact.ID, "", artifact.Text, scoutParticipantName, map[string]string{
+	expectedHeader := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact))
+	updated, matched, err := app.memory.updateOSArtifactWithMetadataIfHeaderMatches(expectedHeader, artifact.ID, "", artifact.Text, scoutParticipantName, map[string]string{
 		"status":            "running",
 		"threadStatus":      "running",
 		"goalStatus":        "running",
@@ -247,7 +290,13 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAttachments(artifactID s
 		"followUpError":     "",
 	})
 	if err != nil {
+		if !matched {
+			return scoutAgentThread{}, fmt.Errorf("that report is unavailable")
+		}
 		return scoutAgentThread{}, err
+	}
+	if !matched {
+		return scoutAgentThread{}, fmt.Errorf("that report is unavailable")
 	}
 
 	query := firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["title"])

@@ -233,10 +233,11 @@ const (
 // content-addressed blob store when the blob seam is wired (blobs.go, same
 // wave); lineage stays intact without it — the ref is simply absent.
 type artifactVersionRecord struct {
-	V           int    `json:"v"`
-	EditedBy    string `json:"editedBy,omitempty"`
-	At          string `json:"at,omitempty"`
-	BodyBlobRef string `json:"bodyBlobRef,omitempty"`
+	V             int    `json:"v"`
+	EditedBy      string `json:"editedBy,omitempty"`
+	At            string `json:"at,omitempty"`
+	BodyBlobRef   string `json:"bodyBlobRef,omitempty"`
+	ContentDigest string `json:"contentDigest,omitempty"`
 }
 
 // artifactVersionBlobStore is the seam blobs.go assigns (at init) to persist a
@@ -293,21 +294,39 @@ func appendArtifactVersionRecord(existing string, record artifactVersionRecord) 
 	return string(raw)
 }
 
+func artifactCapabilityMetadataKey(key string) bool {
+	switch strings.TrimSpace(key) {
+	case "title", "threadQuery", "type", "kind", artifactAssetsMetadataKey, "gateOutcome", "goalPlan", "rubricScores":
+		return true
+	default:
+		return false
+	}
+}
+
+func invalidateArtifactApprovalForRevision(entry *meetingMemoryEntry, explicitStatus string, explicitApprovedAt string) {
+	delete(entry.Metadata, artifactHumanApprovedAtKey)
+	delete(entry.Metadata, artifactHumanApprovedByKey)
+	if artifactStatus(*entry) == artifactStatusApproved && (explicitStatus != artifactStatusApproved || strings.TrimSpace(explicitApprovedAt) == "") {
+		entry.Metadata["status"] = artifactStatusComplete
+	}
+}
+
 // bumpArtifactVersionLocked mints version+1 on entry — called under store.mu
 // just before a body edit lands, while entry still carries the superseded
 // body's editor/timestamp metadata. It journals the superseded version (with a
 // body blob ref when the seam is wired) and repoints parentVersionId at it.
 // Every writer funnels through updateOSArtifactWithMetadata, so gate revisions
 // and human PATCH edits inherit the same lineage for free.
-func bumpArtifactVersionLocked(entry *meetingMemoryEntry, previousBody string) {
+func bumpArtifactVersionLocked(entry *meetingMemoryEntry, previous meetingMemoryEntry) {
 	prior := artifactVersion(*entry)
 	record := artifactVersionRecord{
-		V:        prior,
-		EditedBy: firstNonEmptyString(entry.Metadata["updatedBy"], entry.Metadata["createdBy"]),
-		At:       firstNonEmptyString(entry.Metadata["updatedAt"], entry.CreatedAt.UTC().Format(time.RFC3339Nano)),
+		V:             prior,
+		EditedBy:      firstNonEmptyString(entry.Metadata["updatedBy"], entry.Metadata["createdBy"]),
+		At:            firstNonEmptyString(entry.Metadata["updatedAt"], entry.CreatedAt.UTC().Format(time.RFC3339Nano)),
+		ContentDigest: artifactCapabilityDigest(previous),
 	}
 	if artifactVersionBlobStore != nil {
-		if ref, err := artifactVersionBlobStore(entry.ID, prior, previousBody); err == nil {
+		if ref, err := artifactVersionBlobStore(entry.ID, prior, previous.Text); err == nil {
 			record.BodyBlobRef = strings.TrimSpace(ref)
 		} else {
 			log.Warnf("artifact %s v%d body snapshot failed (lineage kept without ref): %v", entry.ID, prior, err)
@@ -431,6 +450,7 @@ func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 			return nil, fmt.Errorf("read memory file: %w", readErr)
 		}
 	}
+	store.backfillArtifactAuthorizationProjections()
 
 	// resume the in-flight meetings after a restart, PER ROOM (multi-room W2):
 	// for each room (absent metadata.roomId == office), if that room's newest
@@ -751,6 +771,37 @@ func (store *meetingMemoryStore) appendArchive(id string, text string, metadata 
 }
 
 func (store *meetingMemoryStore) appendOSArtifact(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
+	storedMetadata := make(map[string]string, len(metadata)+5)
+	for key, value := range metadata {
+		storedMetadata[key] = value
+	}
+	metadata = storedMetadata
+	if strings.TrimSpace(metadata["tenantId"]) == "" {
+		metadata["tenantId"] = canonicalArtifactTenantID()
+	}
+	if strings.TrimSpace(metadata["objectId"]) == "" {
+		metadata["objectId"] = strings.TrimSpace(id)
+	}
+	if strings.TrimSpace(metadata["aclVersion"]) == "" {
+		metadata["aclVersion"] = "1"
+	}
+	if visibility, owner, chatOrigin := store.artifactOriginSecurityProjection(metadata["originSurface"]); chatOrigin {
+		metadata["visibility"] = visibility
+		metadata["ownerEmail"] = owner
+	}
+	if strings.TrimSpace(metadata["visibility"]) == "" {
+		metadata["visibility"] = "organization"
+	}
+	if strings.TrimSpace(metadata["ownerEmail"]) == "" {
+		for _, candidate := range []string{metadata["requestedBy"], metadata["createdBy"]} {
+			owner := normalizeAccountEmail(candidate)
+			if strings.Contains(owner, "@") {
+				metadata["ownerEmail"] = owner
+				break
+			}
+		}
+	}
+	metadata[artifactContentDigestMetadataKey] = artifactCapabilityDigest(meetingMemoryEntry{ID: id, Kind: meetingMemoryKindOSArtifact, Text: text, Metadata: metadata})
 	return store.appendEntry(meetingMemoryKindOSArtifact, id, text, metadata)
 }
 
@@ -824,6 +875,17 @@ func (store *meetingMemoryStore) updateOSArtifact(id string, title string, text 
 }
 
 func (store *meetingMemoryStore) updateOSArtifactWithMetadata(id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.updateOSArtifactWithMetadataExpected(nil, id, title, text, updatedBy, metadataUpdates)
+}
+
+// updateOSArtifactWithMetadataIfHeaderMatches is the authorized-write seam:
+// the security projection comparison and mutation happen under the same store
+// lock, so a caller can never authorize revision N and overwrite revision N+1.
+func (store *meetingMemoryStore) updateOSArtifactWithMetadataIfHeaderMatches(expected ArtifactAuthorizationHeader, id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.updateOSArtifactWithMetadataExpected(&expected, id, title, text, updatedBy, metadataUpdates)
+}
+
+func (store *meetingMemoryStore) updateOSArtifactWithMetadataExpected(expected *ArtifactAuthorizationHeader, id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
 	if store == nil {
 		return meetingMemoryEntry{}, false, fmt.Errorf("memory store is unavailable")
 	}
@@ -849,6 +911,13 @@ func (store *meetingMemoryStore) updateOSArtifactWithMetadata(id string, title s
 	if index < 0 {
 		return meetingMemoryEntry{}, false, fmt.Errorf("artifact not found")
 	}
+	if expected != nil {
+		stored := store.entries[index]
+		current := store.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(meetingMemoryEntry{ID: stored.ID, Kind: stored.Kind, Metadata: stored.Metadata}))
+		if !artifactAuthorizationHeaderEqual(*expected, current) {
+			return meetingMemoryEntry{}, false, fmt.Errorf("artifact not found")
+		}
+	}
 
 	previousEntry := store.entries[index]
 	entry := cloneMemoryEntry(previousEntry)
@@ -860,7 +929,8 @@ func (store *meetingMemoryStore) updateOSArtifactWithMetadata(id string, title s
 		nextTitle = entry.Metadata["title"]
 	}
 	nextUpdatedBy := strings.TrimSpace(updatedBy)
-	changed := entry.Text != text || entry.Metadata["title"] != nextTitle
+	contentChanged := entry.Text != text || entry.Metadata["title"] != nextTitle
+	changed := contentChanged
 	normalizedMetadataUpdates := make(map[string]string, len(metadataUpdates))
 	for key, value := range metadataUpdates {
 		key = strings.TrimSpace(key)
@@ -871,6 +941,9 @@ func (store *meetingMemoryStore) updateOSArtifactWithMetadata(id string, title s
 		normalizedMetadataUpdates[key] = value
 		if entry.Metadata[key] != value {
 			changed = true
+			if artifactCapabilityMetadataKey(key) {
+				contentChanged = true
+			}
 		}
 	}
 	if !changed {
@@ -886,14 +959,26 @@ func (store *meetingMemoryStore) updateOSArtifactWithMetadata(id string, title s
 	// store-owned lineage keys always win, and before the updatedBy/updatedAt
 	// stamps so the journal credits the superseded version's actual editor.
 	// Title- or metadata-only rewrites never mint versions.
-	if entry.Text != text {
-		bumpArtifactVersionLocked(&entry, entry.Text)
+	if contentChanged {
+		bumpArtifactVersionLocked(&entry, previousEntry)
+		// Human approval is revision-bound. Clear the prior revision's evidence,
+		// but preserve an explicit lifecycle transition supplied by this same
+		// operation (notably body+publish). Published without a fresh approval
+		// stamp remains ineligible for a public capability.
+		requestedStatus, statusWasExplicit := normalizedMetadataUpdates["status"]
+		if !statusWasExplicit {
+			requestedStatus = ""
+		}
+		invalidateArtifactApprovalForRevision(&entry, requestedStatus, normalizedMetadataUpdates[artifactHumanApprovedAtKey])
 	}
 	if nextUpdatedBy != "" {
 		entry.Metadata["updatedBy"] = nextUpdatedBy
 	}
 	entry.Metadata["updatedAt"] = time.Now().UTC().Format(time.RFC3339Nano)
 	entry.Text = text
+	if contentChanged {
+		entry.Metadata[artifactContentDigestMetadataKey] = artifactCapabilityDigest(entry)
+	}
 
 	store.entries[index] = entry
 	if err := store.rewriteLocked(false); err != nil {
@@ -912,6 +997,69 @@ func (store *meetingMemoryStore) updateOSArtifactWithMetadata(id string, title s
 // whatever is passed). Text, title, updatedBy, and updatedAt are untouched —
 // this is a bookkeeping stamp, not an edit.
 func (store *meetingMemoryStore) updateOSArtifactMetadata(id string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.updateOSArtifactMetadataExpected(nil, id, metadataUpdates)
+}
+
+func (store *meetingMemoryStore) updateOSArtifactMetadataIfHeaderMatches(expected ArtifactAuthorizationHeader, id string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
+	return store.updateOSArtifactMetadataExpected(&expected, id, metadataUpdates)
+}
+
+// restoreOSArtifactMetadataIfHeaderMatches is a compensation-only seam. It
+// restores the exact prior presence/value of selected non-security metadata
+// keys, but only while the artifact still has the post-update header the
+// caller observed. A newer revision therefore cannot be rolled back.
+func (store *meetingMemoryStore) restoreOSArtifactMetadataIfHeaderMatches(expected ArtifactAuthorizationHeader, id string, priorMetadata map[string]string, keys []string) (meetingMemoryEntry, bool, error) {
+	if store == nil {
+		return meetingMemoryEntry{}, false, fmt.Errorf("memory store is unavailable")
+	}
+	id = strings.TrimSpace(id)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for index := range store.entries {
+		stored := store.entries[index]
+		if stored.Kind != meetingMemoryKindOSArtifact || stored.ID != id {
+			continue
+		}
+		current := store.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(meetingMemoryEntry{ID: stored.ID, Kind: stored.Kind, Metadata: stored.Metadata}))
+		if !artifactAuthorizationHeaderEqual(expected, current) {
+			return meetingMemoryEntry{}, false, fmt.Errorf("artifact not found")
+		}
+		entry := cloneMemoryEntry(stored)
+		if entry.Metadata == nil {
+			entry.Metadata = map[string]string{}
+		}
+		changed := false
+		for _, rawKey := range keys {
+			key := strings.TrimSpace(rawKey)
+			if key == "" || artifactCapabilityMetadataKey(key) || key == "tenantId" || key == "objectId" || key == "aclVersion" || key == "visibility" || key == "ownerEmail" || key == artifactContentDigestMetadataKey || key == artifactVersionMetadataKey || key == artifactVersionsMetadataKey || key == artifactParentVersionIDMetadataKey {
+				continue
+			}
+			prior, existed := priorMetadata[key]
+			currentValue, currentlyExists := entry.Metadata[key]
+			if existed {
+				if !currentlyExists || currentValue != prior {
+					entry.Metadata[key] = prior
+					changed = true
+				}
+			} else if currentlyExists {
+				delete(entry.Metadata, key)
+				changed = true
+			}
+		}
+		if !changed {
+			return cloneMemoryEntry(entry), false, nil
+		}
+		store.entries[index] = entry
+		if err := store.rewriteLocked(false); err != nil {
+			store.entries[index] = stored
+			return meetingMemoryEntry{}, false, err
+		}
+		return cloneMemoryEntry(entry), true, nil
+	}
+	return meetingMemoryEntry{}, false, fmt.Errorf("artifact not found")
+}
+
+func (store *meetingMemoryStore) updateOSArtifactMetadataExpected(expected *ArtifactAuthorizationHeader, id string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
 	if store == nil {
 		return meetingMemoryEntry{}, false, fmt.Errorf("memory store is unavailable")
 	}
@@ -933,6 +1081,13 @@ func (store *meetingMemoryStore) updateOSArtifactMetadata(id string, metadataUpd
 	if index < 0 {
 		return meetingMemoryEntry{}, false, fmt.Errorf("artifact not found")
 	}
+	if expected != nil {
+		stored := store.entries[index]
+		current := store.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(meetingMemoryEntry{ID: stored.ID, Kind: stored.Kind, Metadata: stored.Metadata}))
+		if !artifactAuthorizationHeaderEqual(*expected, current) {
+			return meetingMemoryEntry{}, false, fmt.Errorf("artifact not found")
+		}
+	}
 
 	previousEntry := store.entries[index]
 	entry := cloneMemoryEntry(previousEntry)
@@ -940,6 +1095,7 @@ func (store *meetingMemoryStore) updateOSArtifactMetadata(id string, metadataUpd
 		entry.Metadata = map[string]string{}
 	}
 	changed := false
+	contentChanged := false
 	for key, value := range metadataUpdates {
 		key = strings.TrimSpace(key)
 		if key == "" {
@@ -949,10 +1105,18 @@ func (store *meetingMemoryStore) updateOSArtifactMetadata(id string, metadataUpd
 		if entry.Metadata[key] != value {
 			entry.Metadata[key] = value
 			changed = true
+			if artifactCapabilityMetadataKey(key) {
+				contentChanged = true
+			}
 		}
 	}
 	if !changed {
 		return cloneMemoryEntry(entry), false, nil
+	}
+	if contentChanged {
+		bumpArtifactVersionLocked(&entry, previousEntry)
+		invalidateArtifactApprovalForRevision(&entry, metadataUpdates["status"], metadataUpdates[artifactHumanApprovedAtKey])
+		entry.Metadata[artifactContentDigestMetadataKey] = artifactCapabilityDigest(entry)
 	}
 
 	store.entries[index] = entry

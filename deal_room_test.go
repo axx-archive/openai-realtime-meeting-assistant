@@ -1,15 +1,24 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"html"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
 )
+
+type denyArtifactActionAuthorizer struct{ denied ACLAction }
+
+func (authorizer denyArtifactActionAuthorizer) AuthorizeArtifactHeader(_ context.Context, _ *userAccount, action ACLAction, _ ArtifactAuthorizationHeader) bool {
+	return action != authorizer.denied
+}
 
 // dealRoomTestEnv wires the auth env + an isolated app installed as the global
 // kanbanApp (the handlers read the global), and returns admin + member cookies.
@@ -21,6 +30,132 @@ func dealRoomTestEnv(t *testing.T) (adminCookies, memberCookies []*http.Cookie) 
 	kanbanApp = newIsolatedKanbanBoardApp(t)
 	t.Cleanup(func() { kanbanApp = previousApp })
 	return loginAs(t, "aj@shareability.com", "B0NFIRE!"), loginAs(t, "tim@shareability.com", "B0NFIRE!")
+}
+
+func TestDealRoomCapabilityStoresOnlyHashAndRejectsEditedBoundGalleryArtifact(t *testing.T) {
+	admin, member := dealRoomTestEnv(t)
+	packageID, _ := seedPackageWithBinder(t, "# Bound cover\n\nImmutable at approval")
+	deck := attachGalleryArtifact(t, packageID, "Bound gallery deck", "<!doctype html><html><body>approved gallery v1</body></html>", map[string]string{"type": "html_deck", "status": "approved"})
+	url := approveDealRoomForTest(t, admin, member, packageID)
+	rawToken := strings.TrimPrefix(url, "/deal-room/")
+	stored, err := os.ReadFile(meetingMemoryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(stored, []byte(rawToken)) || !bytes.Contains(stored, []byte(`tokenHash`)) {
+		t.Fatalf("deal room persisted plaintext token or omitted hash")
+	}
+	page := dealRoomRequest(t, http.MethodGet, url, "", nil)
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Bound gallery deck") {
+		t.Fatalf("pre-edit page status=%d", page.Code)
+	}
+	renderHref := html.UnescapeString(regexp.MustCompile(`/artifacts/render\?id=[^"]+`).FindString(page.Body.String()))
+	if _, _, err := kanbanApp.memory.updateOSArtifact(deck.ID, "", "<!doctype html><html><body>unapproved gallery v2</body></html>", "AJ"); err != nil {
+		t.Fatal(err)
+	}
+	after := dealRoomRequest(t, http.MethodGet, url, "", nil)
+	if after.Code != http.StatusOK || strings.Contains(after.Body.String(), "Bound gallery deck") || strings.Contains(after.Body.String(), "unapproved gallery v2") {
+		t.Fatalf("edited gallery leaked under old capability: status=%d", after.Code)
+	}
+	render := httptest.NewRecorder()
+	artifactRenderHandler(render, httptest.NewRequest(http.MethodGet, renderHref, nil))
+	if render.Code != http.StatusNotFound || strings.Contains(render.Body.String(), "unapproved gallery v2") {
+		t.Fatalf("old render capability served edit: status=%d body=%s", render.Code, render.Body.String())
+	}
+}
+
+func TestLegacyPlaintextDealRoomCapabilityFailsClosed(t *testing.T) {
+	dealRoomTestEnv(t)
+	record := dealRoomRecord{ID: "legacy-room", PackageID: "package", ArtifactID: "artifact", Status: dealRoomStatusActive, Token: "legacy-room-secret"}
+	if _, err := kanbanApp.persistDealRoom(record, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := kanbanApp.dealRoomByToken("legacy-room-secret"); ok {
+		t.Fatal("legacy plaintext Deal Room token was accepted")
+	}
+}
+
+func TestDealRoomPersistFailureDoesNotMutateGlobalArtifactApproval(t *testing.T) {
+	admin, member := dealRoomTestEnv(t)
+	packageID, artifactID := seedPackageWithBinder(t, "# Binder")
+	request := dealRoomRequest(t, http.MethodPost, "/assistant/deal-room/request", fmt.Sprintf(`{"packageId":%q}`, packageID), member)
+	id := fmt.Sprint(decodeJSON(t, request)["id"])
+	kanbanApp.memory.path = t.TempDir() // rename target is a directory: deterministic persist failure
+	resolve := dealRoomRequest(t, http.MethodPost, "/assistant/deal-room/resolve", fmt.Sprintf(`{"id":%q,"action":"approve"}`, id), admin)
+	if resolve.Code == http.StatusOK {
+		t.Fatalf("resolve unexpectedly succeeded: %s", resolve.Body.String())
+	}
+	artifact, _ := kanbanApp.osArtifactByID(artifactID)
+	if artifactStatus(artifact) == artifactStatusApproved || artifact.Metadata[artifactHumanApprovedAtKey] != "" {
+		t.Fatalf("failed Deal Room persist mutated approval: %+v", artifact.Metadata)
+	}
+}
+
+func TestDealRoomApprovalReauthorizesApproveAction(t *testing.T) {
+	admin, member := dealRoomTestEnv(t)
+	packageID, _ := seedPackageWithBinder(t, "# Binder")
+	request := dealRoomRequest(t, http.MethodPost, "/assistant/deal-room/request", fmt.Sprintf(`{"packageId":%q}`, packageID), member)
+	id := fmt.Sprint(decodeJSON(t, request)["id"])
+	prior := artifactObjectAuthorizer
+	artifactObjectAuthorizer = denyArtifactActionAuthorizer{denied: ACLApprove}
+	t.Cleanup(func() { artifactObjectAuthorizer = prior })
+	resolve := dealRoomRequest(t, http.MethodPost, "/assistant/deal-room/resolve", fmt.Sprintf(`{"id":%q,"action":"approve"}`, id), admin)
+	if resolve.Code == http.StatusOK {
+		t.Fatalf("approve denial was ignored: %s", resolve.Body.String())
+	}
+	record, _ := kanbanApp.dealRoomByID(id)
+	if record.Status != dealRoomStatusPending || record.TokenHash != "" {
+		t.Fatalf("denied approval minted capability: %+v", record)
+	}
+}
+
+func TestDealRoomGalleryAuthorizesBeforeBodyOrEligibilityRead(t *testing.T) {
+	admin, member := dealRoomTestEnv(t)
+	packageID, _ := seedPackageWithBinder(t, "# Binder")
+	gallery := attachGalleryArtifact(t, packageID, "Private gallery", "secret gallery body", map[string]string{"status": artifactStatusApproved})
+	request := dealRoomRequest(t, http.MethodPost, "/assistant/deal-room/request", fmt.Sprintf(`{"packageId":%q}`, packageID), member)
+	id := fmt.Sprint(decodeJSON(t, request)["id"])
+	priorAuthorizer, priorProbe := artifactObjectAuthorizer, artifactBodyReadProbe
+	recorder := &shareRecordingAuthorizer{denyObject: gallery.ID, denyAction: ACLShare}
+	readIDs := []string{}
+	artifactObjectAuthorizer = recorder
+	artifactBodyReadProbe = func(id string) { readIDs = append(readIDs, id) }
+	t.Cleanup(func() { artifactObjectAuthorizer, artifactBodyReadProbe = priorAuthorizer, priorProbe })
+	resolve := dealRoomRequest(t, http.MethodPost, "/assistant/deal-room/resolve", fmt.Sprintf(`{"id":%q,"action":"approve"}`, id), admin)
+	if resolve.Code == http.StatusOK {
+		t.Fatalf("gallery share denial ignored: %s", resolve.Body.String())
+	}
+	for _, readID := range readIDs {
+		if readID == gallery.ID {
+			t.Fatal("denied gallery body was read before authorization")
+		}
+	}
+	record, _ := kanbanApp.dealRoomByID(id)
+	if record.Status != dealRoomStatusPending || record.TokenHash != "" {
+		t.Fatalf("denied gallery minted capability: %+v", record)
+	}
+}
+
+func TestDealRoomPDFCapabilityNeverServesReplacementAsset(t *testing.T) {
+	admin, member := dealRoomTestEnv(t)
+	packageID, _ := seedPackageWithBinder(t, "# Cover")
+	pdf := attachGalleryArtifact(t, packageID, "Bound PDF", "pdf", map[string]string{"type": "pdf", "status": artifactStatusDraft})
+	refA, _ := putBlob([]byte("%PDF-A approved"), "application/pdf")
+	if _, err := kanbanApp.appendArtifactAsset(pdf.ID, artifactAsset{Ref: refA, Mime: "application/pdf", Name: "a.pdf", Kind: "pdf"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := kanbanApp.memory.updateOSArtifactMetadata(pdf.ID, map[string]string{"status": artifactStatusApproved}); err != nil {
+		t.Fatal(err)
+	}
+	url := approveDealRoomForTest(t, admin, member, packageID)
+	refB, _ := putBlob([]byte("%PDF-B replacement secret"), "application/pdf")
+	if _, err := kanbanApp.replaceArtifactAssetsOfKind(pdf.ID, "pdf", []artifactAsset{{Ref: refB, Mime: "application/pdf", Name: "b.pdf", Kind: "pdf"}}); err != nil {
+		t.Fatal(err)
+	}
+	response := dealRoomRequest(t, http.MethodGet, url+"?artifact="+pdf.ID, "", nil)
+	if response.Code != http.StatusNotFound || bytes.Contains(response.Body.Bytes(), []byte("replacement secret")) {
+		t.Fatalf("old deal room served replacement PDF: status=%d body=%q", response.Code, response.Body.Bytes())
+	}
 }
 
 func dealRoomRequest(t *testing.T, method, path, body string, cookies []*http.Cookie) *httptest.ResponseRecorder {
@@ -187,6 +322,9 @@ func TestDealRoomApproveMintsTokenAndServesEscapedBinder(t *testing.T) {
 	if room["status"] != dealRoomStatusActive {
 		t.Fatalf("status=%v, want active", room["status"])
 	}
+	if room["tokenHash"] != nil || room["snapshot"] != nil || room["boundArtifacts"] != nil {
+		t.Fatalf("deal room payload exposed capability internals: %+v", room)
+	}
 	url, _ := room["url"].(string)
 	if !strings.HasPrefix(url, "/deal-room/") || len(strings.TrimPrefix(url, "/deal-room/")) < 24 {
 		t.Fatalf("url=%q, want a minted /deal-room/<token>", url)
@@ -342,12 +480,19 @@ func attachGalleryArtifact(t *testing.T, packageID, title, body string, extra ma
 // pdf asset (the render-callback shape).
 func seedGalleryPDF(t *testing.T, artifactID string, pdfBytes []byte) {
 	t.Helper()
+	before, _ := kanbanApp.osArtifactByID(artifactID)
+	wasApproved := artifactShareEligible(before)
 	ref, err := putBlob(pdfBytes, "application/pdf")
 	if err != nil {
 		t.Fatalf("putBlob: %v", err)
 	}
 	if _, err := kanbanApp.appendArtifactAsset(artifactID, artifactAsset{Ref: ref, Mime: "application/pdf", Name: "aurora.pdf", Kind: "pdf"}); err != nil {
 		t.Fatalf("append pdf asset: %v", err)
+	}
+	if wasApproved {
+		if _, _, err := kanbanApp.memory.updateOSArtifactMetadata(artifactID, map[string]string{"status": artifactStatusApproved}); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

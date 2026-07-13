@@ -3343,6 +3343,56 @@ func TestResumeGoalWithFeedbackReopensVerifiedGoal(t *testing.T) {
 	}
 }
 
+func TestResumeGoalWithFeedbackAuthorizedRejectsMutationBeforeConditionalPersist(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	plan := goalPlan{
+		GoalID: "goal-conditional-resume", Objective: "resume safely", State: goalStateBlocked,
+		Subtasks: []goalSubtask{{ID: "w1", Status: subtaskBlocked}},
+	}
+	rawPlan, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, _, err := kanbanApp.createOSArtifactWithMetadata("workflow", "resume safely", "original parent body", "AJ", map[string]string{
+		"mode": "goal", "goalPlan": string(rawPlan), "goalStatus": "needs_attention",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousProbe := goalFeedbackAfterSnapshotProbe
+	previousAsync := startGoalFeedbackResumeAsync
+	asyncStarted := false
+	mutated := false
+	goalFeedbackAfterSnapshotProbe = func() {
+		if mutated {
+			return
+		}
+		mutated = true
+		if _, _, updateErr := kanbanApp.updateOSArtifact(parent.ID, "", "concurrent parent revision", "AJ"); updateErr != nil {
+			t.Fatalf("concurrent update: %v", updateErr)
+		}
+	}
+	startGoalFeedbackResumeAsync = func(func()) { asyncStarted = true }
+	t.Cleanup(func() {
+		goalFeedbackAfterSnapshotProbe = previousProbe
+		startGoalFeedbackResumeAsync = previousAsync
+	})
+
+	if _, err := kanbanApp.resumeGoalWithFeedbackAuthorized(parent, "AJ", "retry with evidence", ""); err == nil {
+		t.Fatal("stale authorized parent resumed")
+	}
+	stored, _ := kanbanApp.osArtifactByID(parent.ID)
+	if stored.Text != "concurrent parent revision" || stored.Metadata["goalPlan"] != string(rawPlan) {
+		t.Fatalf("stale resume mutated parent: body=%q plan=%q", stored.Text, stored.Metadata["goalPlan"])
+	}
+	if asyncStarted {
+		t.Fatal("stale resume scheduled async drive")
+	}
+}
+
 // Wave 6 deep 1:1 linkage: feedback on a packaging ship deliverable re-runs
 // the stage whose output that deliverable compiles FROM — The Wall is write's
 // copy, The Talk is voice's script, the rigor companion is the red team's

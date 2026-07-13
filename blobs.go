@@ -494,7 +494,8 @@ func artifactBlobHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
 		return
 	}
-	if userFromRequest(r) == nil {
+	user := userFromRequest(r)
+	if user == nil {
 		writeAuthError(w, http.StatusUnauthorized, "not signed in")
 		return
 	}
@@ -502,6 +503,12 @@ func artifactBlobHandler(w http.ResponseWriter, r *http.Request) {
 	ref := strings.TrimSpace(r.URL.Query().Get("ref"))
 	if !validBlobRef(ref) {
 		writeAuthError(w, http.StatusBadRequest, "invalid blob ref")
+		return
+	}
+	// Resolve the hash through an authorized owning artifact/revision BEFORE
+	// ETag handling or disk I/O. A learned content hash is never authority.
+	if !blobAuthorized(r.Context(), user, ref) {
+		writeAuthError(w, http.StatusNotFound, "blob not found")
 		return
 	}
 

@@ -1218,7 +1218,8 @@ func artifactExportPDFHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
 		return
 	}
-	if userFromRequest(r) == nil {
+	user := userFromRequest(r)
+	if user == nil {
 		writeAuthError(w, http.StatusUnauthorized, "not signed in")
 		return
 	}
@@ -1236,7 +1237,7 @@ func artifactExportPDFHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	artifact, found := kanbanApp.osArtifactByID(strings.TrimSpace(payload.ArtifactID))
+	artifact, found := authorizedArtifactByID(r.Context(), user, ACLExport, strings.TrimSpace(payload.ArtifactID))
 	if !found {
 		writeAuthError(w, http.StatusNotFound, "artifact not found")
 		return
@@ -1562,7 +1563,8 @@ func meetingArchiveHandler(w http.ResponseWriter, r *http.Request) {
 	// assembled client-side). clients get a tokenized URL in the
 	// meeting_archived payload.
 	archiveID := strings.TrimPrefix(r.URL.Path, "/archives/")
-	if !validArchiveKey(archiveID, r.URL.Query().Get("key")) {
+	archiveBytes, authErr := authorizeArchiveRead(archiveID, r.URL.Query().Get("key"))
+	if authErr != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -1574,15 +1576,12 @@ func meetingArchiveHandler(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if _, err := os.Stat(archivePath); err != nil {
-		http.NotFound(w, r)
-		return
-	}
-
 	filename := filepath.Base(archivePath)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
-	http.ServeFile(w, r, archivePath)
+	w.Header().Set("Content-Length", strconv.Itoa(len(archiveBytes)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(archiveBytes)
 }
 
 func participantsHandler(w http.ResponseWriter, r *http.Request) {
@@ -1988,8 +1987,13 @@ func assistantThreadFollowUpHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, "could not read follow-up request")
 		return
 	}
+	artifact, ok := authorizedArtifactForActions(r.Context(), user, strings.TrimSpace(payload.ArtifactID), ACLReadContent, ACLExecute, ACLWrite)
+	if !ok {
+		writeAuthError(w, http.StatusNotFound, "artifact not found")
+		return
+	}
 
-	thread, err := kanbanApp.dispatchArtifactFollowUp(payload.ArtifactID, payload.Text, user.Name, nil)
+	thread, err := kanbanApp.dispatchAuthorizedArtifactFollowUpWithAttachments(r.Context(), user, artifact, payload.Text, user.Name, nil, nil)
 	if err != nil {
 		writeAuthError(w, http.StatusBadRequest, err.Error())
 		return
@@ -2315,6 +2319,11 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, http.StatusBadRequest, "could not read artifact update")
 			return
 		}
+		prior, hadPrior := authorizedArtifactByID(r.Context(), user, ACLWrite, strings.TrimSpace(payload.ID))
+		if !hadPrior {
+			writeAuthError(w, http.StatusNotFound, "artifact not found")
+			return
+		}
 		metadata := map[string]string{}
 		if payload.Published != nil {
 			if *payload.Published {
@@ -2331,7 +2340,6 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		// Signal capture (signals.go): snapshot the prior body BEFORE the update
 		// so a real human edit can store its section-level diff summary.
-		prior, hadPrior := kanbanApp.osArtifactByID(payload.ID)
 		artifact, updated, err := kanbanApp.updateOSArtifactWithMetadata(payload.ID, payload.Title, payload.Text, user.Name, metadata)
 		if err != nil {
 			status := http.StatusBadRequest
@@ -2361,7 +2369,7 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 	// own stage children; the mounted goalcard fetches it here so a parked
 	// checkpoint still renders its choices.
 	if wantID := strings.TrimSpace(r.URL.Query().Get("id")); wantID != "" {
-		artifact, found := kanbanApp.osArtifactByID(wantID)
+		artifact, found := authorizedArtifactByID(r.Context(), user, ACLReadContent, wantID)
 		if !found {
 			writeAuthError(w, http.StatusNotFound, "artifact not found")
 			return
@@ -2381,10 +2389,18 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 	beforeID := strings.TrimSpace(r.URL.Query().Get("before"))
 	limitParam := strings.TrimSpace(r.URL.Query().Get("limit"))
 	if beforeID == "" && limitParam == "" {
+		artifacts := authorizedArtifactsSnapshot(r.Context(), user, ACLReadContent, false)
+		if len(artifacts) > 100 {
+			artifacts = artifacts[len(artifacts)-100:]
+		}
+		published := authorizedArtifactsSnapshot(r.Context(), user, ACLReadContent, true)
+		if len(published) > 10 {
+			published = published[len(published)-10:]
+		}
 		writeAuthJSON(w, http.StatusOK, map[string]any{
 			"ok":                 true,
-			"artifacts":          artifactListView(kanbanApp.osArtifactsSnapshot(100)),
-			"publishedArtifacts": artifactListView(kanbanApp.publishedOSArtifactsSnapshot(10)),
+			"artifacts":          artifactListView(artifacts),
+			"publishedArtifacts": artifactListView(published),
 		})
 		return
 	}
@@ -2402,7 +2418,7 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 		limit = parsed
 	}
 
-	artifacts := kanbanApp.osArtifactsSnapshot(0)
+	artifacts := authorizedArtifactsSnapshot(r.Context(), user, ACLReadContent, false)
 	end := len(artifacts)
 	if beforeID != "" {
 		end = -1
@@ -2422,11 +2438,15 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 		start = 0
 	}
 	window := artifacts[start:end]
+	published := authorizedArtifactsSnapshot(r.Context(), user, ACLReadContent, true)
+	if len(published) > 10 {
+		published = published[len(published)-10:]
+	}
 
 	payload := map[string]any{
 		"ok":                 true,
 		"artifacts":          artifactListView(window),
-		"publishedArtifacts": artifactListView(kanbanApp.publishedOSArtifactsSnapshot(10)),
+		"publishedArtifacts": artifactListView(published),
 		"hasMore":            start > 0,
 	}
 	if start > 0 && len(window) > 0 {

@@ -7,6 +7,8 @@ package main
 // the render callback's auth + asset append.
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -18,6 +20,17 @@ import (
 	"testing"
 	"time"
 )
+
+type shareRecordingAuthorizer struct {
+	denyObject string
+	denyAction ACLAction
+	actions    []ACLAction
+}
+
+func (authorizer *shareRecordingAuthorizer) AuthorizeArtifactHeader(_ context.Context, _ *userAccount, action ACLAction, header ArtifactAuthorizationHeader) bool {
+	authorizer.actions = append(authorizer.actions, action)
+	return !(header.ObjectID == authorizer.denyObject && action == authorizer.denyAction)
+}
 
 // shareLinkTestEnv mirrors dealRoomTestEnv: auth env + an isolated app as the
 // global kanbanApp, returning admin + member cookies.
@@ -76,6 +89,99 @@ func mintShareLinkForTest(t *testing.T, artifactID string, cookies []*http.Cooki
 		t.Fatalf("mint returned no link url: %s", recorder.Body.String())
 	}
 	return link
+}
+
+func TestShareCapabilityStoresOnlyHashAndBodyEditInvalidatesRevision(t *testing.T) {
+	_, member := shareLinkTestEnv(t)
+	artifact := seedShareArtifact(t, artifactStatusApproved, "approved immutable body", nil)
+	link := mintShareLinkForTest(t, artifact.ID, member)
+	if link["tokenHash"] != nil || link["snapshot"] != nil {
+		t.Fatalf("management payload exposed capability internals: %+v", link)
+	}
+	url := fmt.Sprint(link["url"])
+	rawToken := strings.TrimPrefix(url, "/a/")
+	stored, err := os.ReadFile(shareLinksPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(stored, []byte(rawToken)) || !bytes.Contains(stored, []byte(`"tokenHash"`)) {
+		t.Fatalf("persisted capability leaked plaintext or omitted hash: %s", stored)
+	}
+	if before := shareLinkRequest(t, http.MethodGet, url, "", nil); before.Code != http.StatusOK || !strings.Contains(before.Body.String(), "approved immutable body") {
+		t.Fatalf("pre-edit serve status=%d body=%s", before.Code, before.Body.String())
+	}
+	if _, _, err := kanbanApp.memory.updateOSArtifact(artifact.ID, "", "edited unapproved body", "AJ"); err != nil {
+		t.Fatal(err)
+	}
+	fresh, _ := kanbanApp.osArtifactByID(artifact.ID)
+	if artifactShareEligible(fresh) || fresh.Metadata[artifactHumanApprovedAtKey] != "" || artifactVersion(fresh) != 2 {
+		t.Fatalf("edit retained approval eligibility: %+v", fresh.Metadata)
+	}
+	after := shareLinkRequest(t, http.MethodGet, url, "", nil)
+	if after.Code != http.StatusNotFound || strings.Contains(after.Body.String(), "edited unapproved body") {
+		t.Fatalf("old URL served edited bytes: status=%d body=%s", after.Code, after.Body.String())
+	}
+}
+
+func TestLegacyPlaintextShareCapabilityFailsClosed(t *testing.T) {
+	shareLinkTestEnv(t)
+	now := time.Now().UTC()
+	record := shareLinkRecord{ID: "legacy", ArtifactID: "artifact", Token: "legacy-secret", Status: shareLinkStatusActive, ExpiresAt: now.Add(time.Hour).Format(time.RFC3339Nano)}
+	if err := saveShareLinks([]shareLinkRecord{record}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := shareLinkByToken("legacy-secret"); ok {
+		t.Fatal("legacy plaintext capability was accepted")
+	}
+}
+
+func TestShareManagementAuthorizesHeadersBeforeBodySnapshot(t *testing.T) {
+	_, member := shareLinkTestEnv(t)
+	artifact := seedShareArtifact(t, artifactStatusApproved, "must stay unread", nil)
+	liveLink := mintShareLinkForTest(t, artifact.ID, member)
+	previousAuthorizer, previousProbe := artifactObjectAuthorizer, artifactBodyReadProbe
+	recorder := &shareRecordingAuthorizer{denyObject: artifact.ID, denyAction: ACLShare}
+	bodyReads := 0
+	artifactObjectAuthorizer = recorder
+	artifactBodyReadProbe = func(string) { bodyReads++ }
+	t.Cleanup(func() { artifactObjectAuthorizer, artifactBodyReadProbe = previousAuthorizer, previousProbe })
+	for _, request := range []struct{ method, path, body string }{
+		{http.MethodPost, "/artifacts/share", fmt.Sprintf(`{"artifactId":%q}`, artifact.ID)},
+		{http.MethodGet, "/artifacts/share?artifactId=" + artifact.ID, ""},
+		{http.MethodDelete, "/artifacts/share", fmt.Sprintf(`{"id":%q}`, liveLink["id"])},
+	} {
+		response := shareLinkRequest(t, request.method, request.path, request.body, member)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("%s status=%d", request.method, response.Code)
+		}
+	}
+	if bodyReads != 0 {
+		t.Fatalf("denied management authorization read %d bodies", bodyReads)
+	}
+	if len(recorder.actions) < 6 || recorder.actions[0] != ACLReadMetadata || recorder.actions[1] != ACLShare {
+		t.Fatalf("actions=%v", recorder.actions)
+	}
+}
+
+func TestSharedPDFCapabilityNeverServesReplacementAsset(t *testing.T) {
+	_, member := shareLinkTestEnv(t)
+	artifact := seedShareArtifact(t, artifactStatusDraft, "pdf artifact", map[string]string{"type": "pdf"})
+	refA, _ := putBlob([]byte("%PDF-A approved"), "application/pdf")
+	artifact, err := kanbanApp.appendArtifactAsset(artifact.ID, artifactAsset{Ref: refA, Mime: "application/pdf", Name: "a.pdf", Kind: "pdf"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, _, _ = kanbanApp.memory.updateOSArtifactMetadata(artifact.ID, map[string]string{"status": artifactStatusApproved})
+	link := mintShareLinkForTest(t, artifact.ID, member)
+	url := fmt.Sprint(link["url"])
+	refB, _ := putBlob([]byte("%PDF-B replacement secret"), "application/pdf")
+	if _, err := kanbanApp.replaceArtifactAssetsOfKind(artifact.ID, "pdf", []artifactAsset{{Ref: refB, Mime: "application/pdf", Name: "b.pdf", Kind: "pdf"}}); err != nil {
+		t.Fatal(err)
+	}
+	response := shareLinkRequest(t, http.MethodGet, url, "", nil)
+	if response.Code != http.StatusNotFound || bytes.Contains(response.Body.Bytes(), []byte("replacement secret")) {
+		t.Fatalf("old share served replacement PDF: status=%d body=%q", response.Code, response.Body.Bytes())
+	}
 }
 
 func shareOpenedSignalCount(t *testing.T, artifactID string) int {
@@ -204,6 +310,9 @@ func TestShareLinkPublicServesEachTypeAndLogsOpen(t *testing.T) {
 	pdfArtifact := seedShareArtifact(t, "approved", "flattened deck export", map[string]string{"type": "pdf"})
 	if _, err := kanbanApp.appendArtifactAsset(pdfArtifact.ID, artifactAsset{Ref: ref, Mime: "application/pdf", Name: "aurora.pdf", Kind: "pdf"}); err != nil {
 		t.Fatalf("append pdf asset: %v", err)
+	}
+	if _, _, err := kanbanApp.memory.updateOSArtifactMetadata(pdfArtifact.ID, map[string]string{"status": artifactStatusApproved}); err != nil {
+		t.Fatal(err)
 	}
 	pdfLink := mintShareLinkForTest(t, pdfArtifact.ID, member)
 	recorder = shareLinkRequest(t, http.MethodGet, fmt.Sprint(pdfLink["url"]), "", nil)

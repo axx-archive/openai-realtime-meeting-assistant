@@ -747,7 +747,7 @@ func TestSnapshotLanesNoOversizeBodiesEscape(t *testing.T) {
 		t.Fatalf("appendOSArtifact appended=%v err=%v", appended, err)
 	}
 
-	assertCapped := func(lane string, entries []meetingMemoryEntry) {
+	assertCapped := func(lane string, entries []meetingMemoryEntry, expectArtifact bool) {
 		t.Helper()
 		if len(entries) == 0 {
 			t.Fatalf("%s returned no entries", lane)
@@ -766,21 +766,24 @@ func TestSnapshotLanesNoOversizeBodiesEscape(t *testing.T) {
 				}
 			}
 		}
-		if !sawArtifact {
+		if expectArtifact && !sawArtifact {
 			t.Fatalf("%s dropped the artifact entry instead of stubbing it", lane)
+		}
+		if !expectArtifact && sawArtifact {
+			t.Fatalf("%s exposed an artifact entry that must be fetched through the scoped artifact route", lane)
 		}
 		if total > 64*1024 {
 			t.Fatalf("%s summed body bytes=%d, want a sane prompt bound", lane, total)
 		}
 	}
 
-	assertCapped("store.snapshot", store.snapshot(250))
-	assertCapped("store.snapshotForMeeting", store.snapshotForMeeting(meetingID, 0))
+	assertCapped("store.snapshot", store.snapshot(250), true)
+	assertCapped("store.snapshotForMeeting", store.snapshotForMeeting(meetingID, 0), true)
 	app := &kanbanBoardApp{memory: store}
-	assertCapped("memorySnapshotForClients", app.memorySnapshotForClients(20))
+	assertCapped("memorySnapshotForClients", app.memorySnapshotForClients(20), false)
 	// the archive embed lane (archiveMeeting/autoArchiveIdleMeeting both build
 	// from memorySnapshotForMeeting(id, 2000)).
-	assertCapped("memorySnapshotForMeeting(archive embed)", app.memorySnapshotForMeeting(meetingID, 2000))
+	assertCapped("memorySnapshotForMeeting(archive embed)", app.memorySnapshotForMeeting(meetingID, 2000), true)
 
 	// the store itself is never rewritten — full body stays durable for the
 	// artifact-open path and keyword search.

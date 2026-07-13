@@ -25,7 +25,10 @@ package main
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -58,20 +61,47 @@ const (
 // requester email (the list-scoping identity); Token is minted only on approve
 // and is the public read capability.
 type dealRoomRecord struct {
-	ID          string `json:"id"`
-	PackageID   string `json:"packageId"`
-	ArtifactID  string `json:"artifactId"`
-	Status      string `json:"status"`
-	Token       string `json:"token,omitempty"`
-	RequestedBy string `json:"requestedBy"`
-	RequestedAt string `json:"requestedAt"`
-	ResolvedBy  string `json:"resolvedBy,omitempty"`
-	ResolvedAt  string `json:"resolvedAt,omitempty"`
-	Reason      string `json:"reason,omitempty"`
+	ID                   string                             `json:"id"`
+	PackageID            string                             `json:"packageId"`
+	ArtifactID           string                             `json:"artifactId"`
+	Status               string                             `json:"status"`
+	Token                string                             `json:"token,omitempty"` // legacy plaintext: never accepted
+	TokenHash            string                             `json:"tokenHash,omitempty"`
+	RawToken             string                             `json:"-"`
+	TenantID             string                             `json:"tenantId,omitempty"`
+	Revision             int                                `json:"revision,omitempty"`
+	ContentDigest        string                             `json:"contentDigest,omitempty"`
+	Action               string                             `json:"action,omitempty"`
+	ExpiresAt            string                             `json:"expiresAt,omitempty"`
+	BoundArtifacts       map[string]dealRoomArtifactBinding `json:"boundArtifacts,omitempty"`
+	PackageNameSnapshot  string                             `json:"packageNameSnapshot,omitempty"`
+	PackageStageSnapshot string                             `json:"packageStageSnapshot,omitempty"`
+	RequestedBy          string                             `json:"requestedBy"`
+	RequestedAt          string                             `json:"requestedAt"`
+	ResolvedBy           string                             `json:"resolvedBy,omitempty"`
+	ResolvedAt           string                             `json:"resolvedAt,omitempty"`
+	Reason               string                             `json:"reason,omitempty"`
 	// ArtifactOpens maps artifactId -> lastOpenedAt (RFC3339Nano): the
 	// per-artifact debounce stamp for the public gallery's open signal
 	// (recordDealRoomArtifactOpen — the shareLinkRecord.LastOpenedAt twin).
 	ArtifactOpens map[string]string `json:"artifactOpens,omitempty"`
+}
+
+type dealRoomArtifactBinding struct {
+	Revision      int    `json:"revision"`
+	ContentDigest string `json:"contentDigest"`
+}
+
+func sameStringSequence(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func encodeDealRoom(record dealRoomRecord) (string, error) {
@@ -140,11 +170,23 @@ func (app *kanbanBoardApp) dealRoomByToken(token string) (dealRoomRecord, bool) 
 		return dealRoomRecord{}, false
 	}
 	for _, record := range app.dealRoomsSnapshot() {
-		if record.Token != "" && record.Token == token {
+		if !dealRoomCapabilityLive(record, time.Now().UTC()) {
+			continue
+		}
+		provided := sha256.Sum256([]byte(token))
+		stored, err := hex.DecodeString(record.TokenHash)
+		if err == nil && subtle.ConstantTimeCompare(provided[:], stored) == 1 {
+			record.RawToken = token
 			return record, true
 		}
 	}
 	return dealRoomRecord{}, false
+}
+
+func dealRoomCapabilityLive(record dealRoomRecord, now time.Time) bool {
+	expires, err := time.Parse(time.RFC3339Nano, record.ExpiresAt)
+	return err == nil && now.Before(expires) && record.Status == dealRoomStatusActive && record.Token == "" && isHexDigest(record.TokenHash) &&
+		record.TenantID == canonicalArtifactTenantID() && record.Action == "read_deal_room" && record.Revision >= 1 && isHexDigest(record.ContentDigest)
 }
 
 // persistDealRoom writes the record (create or whole-record update), keeping a
@@ -256,8 +298,9 @@ func (app *kanbanBoardApp) dealRoomGalleryEntries(record dealRoomRecord, pkg ven
 		if artifactID == "" || artifactID == record.ArtifactID {
 			continue
 		}
+		binding, bound := record.BoundArtifacts[artifactID]
 		artifact, ok := app.osArtifactByID(artifactID)
-		if !ok || !artifactShareEligible(artifact) {
+		if !bound || !ok || !artifactShareEligible(artifact) || artifactVersion(artifact) != binding.Revision || artifactCapabilityDigest(artifact) != binding.ContentDigest {
 			continue
 		}
 		entry := dealRoomGalleryEntry{
@@ -272,7 +315,7 @@ func (app *kanbanBoardApp) dealRoomGalleryEntries(record dealRoomRecord, pkg ven
 		case artifactTypePDF:
 			entry.TypeBadge = artifactTypePDF
 			if _, hasPDF := firstArtifactAssetOfKind(artifact, "pdf"); hasPDF {
-				entry.Href = "/deal-room/" + record.Token + "?artifact=" + url.QueryEscape(artifact.ID)
+				entry.Href = "/deal-room/" + record.RawToken + "?artifact=" + url.QueryEscape(artifact.ID)
 			}
 		default:
 			entry.TypeBadge = kind
@@ -331,8 +374,8 @@ func (app *kanbanBoardApp) dealRoomPayload(record dealRoomRecord) map[string]any
 		"resolvedAt":  record.ResolvedAt,
 		"reason":      record.Reason,
 	}
-	if record.Status == dealRoomStatusActive && record.Token != "" {
-		payload["url"] = "/deal-room/" + record.Token
+	if dealRoomCapabilityLive(record, time.Now().UTC()) && record.RawToken != "" {
+		payload["url"] = "/deal-room/" + record.RawToken
 	}
 	return payload
 }
@@ -392,6 +435,21 @@ func assistantDealRoomRequestHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusNotFound, "package not found")
 		return
 	}
+	// Sharing the binder delegates durable content to a public capability.
+	// Authorize every artifact the package can expose (binder and gallery)
+	// before resolving or using any of their bodies. One denied/missing item
+	// collapses to the same opaque response as a missing package.
+	packageArtifacts := append([]string(nil), pkg.ArtifactIDs...)
+	for _, referencedID := range packageArtifacts {
+		header, found := kanbanApp.memory.artifactAuthorizationHeaderByID(strings.TrimSpace(referencedID))
+		if found {
+			header = resolveArtifactHeaderOwner(header)
+		}
+		if !found || !artifactHeaderAuthorized(r.Context(), user, ACLReadContent, header) || !artifactHeaderAuthorized(r.Context(), user, ACLShare, header) {
+			writeAuthError(w, http.StatusNotFound, "package not found")
+			return
+		}
+	}
 
 	artifactID := strings.TrimSpace(payload.ArtifactID)
 	if artifactID != "" {
@@ -403,10 +461,6 @@ func assistantDealRoomRequestHandler(w http.ResponseWriter, r *http.Request) {
 		// makes the explicit path match it.
 		if !packageOwnsArtifact(pkg, artifactID) {
 			writeAuthError(w, http.StatusBadRequest, "artifact is not part of this package")
-			return
-		}
-		if _, found := kanbanApp.osArtifactByID(artifactID); !found {
-			writeAuthError(w, http.StatusBadRequest, "artifact not found")
 			return
 		}
 	} else {
@@ -517,7 +571,46 @@ func assistantDealRoomResolveHandler(w http.ResponseWriter, r *http.Request) {
 				return dealRoomRecord{}, tokenErr
 			}
 			record.Status = dealRoomStatusActive
-			record.Token = token
+			artifact, found := authorizedArtifactForActions(r.Context(), user, record.ArtifactID, ACLReadContent, ACLShare, ACLApprove)
+			if !found {
+				return dealRoomRecord{}, fmt.Errorf("artifact not found")
+			}
+			record.TokenHash = fmt.Sprintf("%x", sha256.Sum256([]byte(token)))
+			record.RawToken = token
+			record.TenantID = canonicalArtifactTenantID()
+			record.Revision = artifactVersion(artifact)
+			record.ContentDigest = artifactCapabilityDigest(artifact)
+			record.Action = "read_deal_room"
+			record.ExpiresAt = time.Now().UTC().AddDate(0, 0, 30).Format(time.RFC3339Nano)
+			record.BoundArtifacts = map[string]dealRoomArtifactBinding{}
+			pkg, ok := kanbanApp.venturePackageByID(record.PackageID)
+			if !ok || !packageOwnsArtifact(pkg, record.ArtifactID) {
+				return dealRoomRecord{}, fmt.Errorf("package not found")
+			}
+			record.PackageNameSnapshot = pkg.Name
+			record.PackageStageSnapshot = pkg.Stage
+			for _, artifactID := range pkg.ArtifactIDs {
+				candidate, found := authorizedArtifactForActions(r.Context(), user, artifactID, ACLReadContent, ACLShare)
+				if !found {
+					return dealRoomRecord{}, fmt.Errorf("artifact not found")
+				}
+				if !artifactShareEligible(candidate) && candidate.ID != record.ArtifactID {
+					continue
+				}
+				record.BoundArtifacts[candidate.ID] = dealRoomArtifactBinding{Revision: artifactVersion(candidate), ContentDigest: artifactCapabilityDigest(candidate)}
+			}
+			// Optimistic atomic fence: package membership and every exact bound
+			// snapshot must still match immediately before persistence.
+			freshPkg, ok := kanbanApp.venturePackageByID(record.PackageID)
+			if !ok || !sameStringSequence(pkg.ArtifactIDs, freshPkg.ArtifactIDs) {
+				return dealRoomRecord{}, fmt.Errorf("package changed during approval")
+			}
+			for id, binding := range record.BoundArtifacts {
+				fresh, ok := kanbanApp.osArtifactByID(id)
+				if !ok || artifactVersion(fresh) != binding.Revision || artifactCapabilityDigest(fresh) != binding.ContentDigest {
+					return dealRoomRecord{}, fmt.Errorf("artifact changed during approval")
+				}
+			}
 			record.Reason = ""
 		} else {
 			record.Status = dealRoomStatusRejected
@@ -533,6 +626,18 @@ func assistantDealRoomResolveHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, status, err.Error())
 		return
 	}
+	if record.Status == dealRoomStatusActive {
+		if _, _, approvalErr := kanbanApp.memory.updateOSArtifactMetadata(record.ArtifactID, map[string]string{
+			"status": artifactStatusApproved, artifactHumanApprovedAtKey: time.Now().UTC().Format(time.RFC3339Nano), artifactHumanApprovedByKey: normalizeAccountEmail(user.Email),
+		}); approvalErr != nil {
+			kanbanApp.dealRoomMu.Lock()
+			record.Status, record.TokenHash = dealRoomStatusRevoked, ""
+			_, _ = kanbanApp.persistDealRoom(record, false)
+			kanbanApp.dealRoomMu.Unlock()
+			writeAuthError(w, http.StatusInternalServerError, "could not finalize Deal Room approval")
+			return
+		}
+	}
 
 	// Notify the requester of the outcome (durable bell + targeted OS event).
 	packageName := ""
@@ -540,8 +645,9 @@ func assistantDealRoomResolveHandler(w http.ResponseWriter, r *http.Request) {
 		packageName = pkg.Name
 	}
 	if record.Status == dealRoomStatusActive {
-		url := "/deal-room/" + record.Token
-		text := fmt.Sprintf("Your Deal Room for %q is live: %s", packageName, url)
+		// The raw capability is returned once in this resolve response. Never
+		// persist it inside notification text; only TokenHash belongs at rest.
+		text := fmt.Sprintf("Your Deal Room for %q is approved. Copy the one-time link from the approval response.", packageName)
 		if _, notifyErr := kanbanApp.createNotification(record.RequestedBy, notificationKindInfo, text, osEventDealRoom, "", "", false); notifyErr != nil {
 			log.Errorf("Failed to notify requester of live deal room %s: %v", record.ID, notifyErr)
 		}
@@ -609,6 +715,7 @@ func assistantDealRoomRevokeHandler(w http.ResponseWriter, r *http.Request) {
 		record.Status = dealRoomStatusRevoked
 		// Retire the token so a leaked link can never be re-served.
 		record.Token = ""
+		record.TokenHash = ""
 		return kanbanApp.persistDealRoom(record, false)
 	}()
 	if err != nil {
@@ -679,30 +786,27 @@ func dealRoomPublicHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	artifact, found := kanbanApp.osArtifactByID(record.ArtifactID)
-	if !found {
+	if !found || !artifactShareEligible(artifact) || artifactVersion(artifact) != record.Revision || artifactCapabilityDigest(artifact) != record.ContentDigest {
 		writeDealRoomNotFound(w)
 		return
 	}
-	packageName := "Venture package"
-	stage := ""
+	packageName := firstNonEmptyString(record.PackageNameSnapshot, "Venture package")
+	stage := record.PackageStageSnapshot
 	gallery := []dealRoomGalleryEntry{}
 	if pkg, ok := kanbanApp.venturePackageByID(record.PackageID); ok {
-		if strings.TrimSpace(pkg.Name) != "" {
-			packageName = pkg.Name
-		}
-		stage = pkg.Stage
 		gallery = kanbanApp.dealRoomGalleryEntries(record, pkg)
 	}
 
 	// §5 capture: the gallery page open is the share_opened analog, recorded
 	// against the cover binder and debounced like share links.
-	kanbanApp.recordDealRoomArtifactOpen(record, artifact)
+	boundArtifact := cloneMemoryEntry(artifact)
+	kanbanApp.recordDealRoomArtifactOpen(record, boundArtifact)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(renderDealRoomPage(packageName, stage, artifact.Text, gallery)))
+	_, _ = w.Write([]byte(renderDealRoomPage(packageName, stage, boundArtifact.Text, gallery)))
 }
 
 // serveDealRoomGalleryPDF streams one gallery pdf under the Deal Room token's
@@ -715,13 +819,13 @@ func dealRoomPublicHandler(w http.ResponseWriter, r *http.Request) {
 // beyond the package the token grants. Every miss is the same 404 page (no
 // enumeration).
 func serveDealRoomGalleryPDF(w http.ResponseWriter, record dealRoomRecord, artifactID string) {
-	pkg, ok := kanbanApp.venturePackageByID(record.PackageID)
-	if !ok || !packageOwnsArtifact(pkg, artifactID) {
+	binding, bound := record.BoundArtifacts[artifactID]
+	if !bound {
 		writeDealRoomNotFound(w)
 		return
 	}
 	artifact, found := kanbanApp.osArtifactByID(artifactID)
-	if !found || !artifactShareEligible(artifact) || artifactType(artifact) != artifactTypePDF {
+	if !found || !artifactShareEligible(artifact) || artifactVersion(artifact) != binding.Revision || artifactCapabilityDigest(artifact) != binding.ContentDigest {
 		writeDealRoomNotFound(w)
 		return
 	}

@@ -55,6 +55,10 @@ func TestMeetingArchiveHandlerRequiresRoomKey(t *testing.T) {
 func TestArchiveTokenKeyedOnServerSecretNotPassword(t *testing.T) {
 	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
 	t.Setenv("MEETING_ROOM_PASSWORD", "first-password")
+	archivePath, _ := meetingArchivePath("meeting-test")
+	if err := writeMeetingArchive(archivePath, meetingArchive{ID: "meeting-test"}); err != nil {
+		t.Fatal(err)
+	}
 
 	token := archiveAccessToken("meeting-test")
 	secretPath := filepath.Join(filepath.Dir(meetingMemoryPath()), "archive-secret")
@@ -80,9 +84,58 @@ func TestArchiveTokenKeyedOnServerSecretNotPassword(t *testing.T) {
 	}
 }
 
+func TestArchiveCapabilityPersistsOnlyHashAndRevokesWithoutArchiveRead(t *testing.T) {
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
+	archivePath, _ := meetingArchivePath("meeting-test")
+	if err := writeMeetingArchive(archivePath, meetingArchive{ID: "meeting-test"}); err != nil {
+		t.Fatal(err)
+	}
+	token := archiveAccessToken("meeting-test")
+	stored, err := os.ReadFile(archiveCapabilitiesPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(stored), token) || !strings.Contains(string(stored), "TokenHash") {
+		t.Fatalf("unsafe capability state: %s", stored)
+	}
+	if !validArchiveKey("meeting-test", token) {
+		t.Fatal("fresh capability invalid")
+	}
+	verifiedBytes, err := authorizeArchiveRead("meeting-test", token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeMeetingArchive(archivePath, meetingArchive{ID: "meeting-test", ArchivedBy: "replacement"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(verifiedBytes), "replacement") {
+		t.Fatal("authorized snapshot changed after file replacement")
+	}
+	if validArchiveKey("meeting-test", token) {
+		t.Fatal("old capability authorized replaced archive bytes")
+	}
+	if err := revokeArchiveCapability("meeting-test"); err != nil {
+		t.Fatal(err)
+	}
+	if validArchiveKey("meeting-test", token) {
+		t.Fatal("revoked archive capability remained valid")
+	}
+	if reminted := archiveAccessToken("meeting-test"); reminted != "" {
+		t.Fatal("snapshot generation silently reminted a revoked capability")
+	}
+	reissued, err := reissueArchiveCapability("meeting-test")
+	if err != nil || reissued == "" || !validArchiveKey("meeting-test", reissued) {
+		t.Fatalf("explicit reissue token=%q err=%v", reissued, err)
+	}
+}
+
 func TestMemorySnapshotForClientsAddsKeyedArchiveURL(t *testing.T) {
 	t.Setenv("MEETING_ROOM_PASSWORD", "test-secret")
 	app := newIsolatedKanbanBoardApp(t)
+	archivePath, _ := meetingArchivePath("meeting-test")
+	if err := writeMeetingArchive(archivePath, meetingArchive{ID: "meeting-test"}); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, _, err := app.memory.appendArchive("meeting-test", "archived the meeting", map[string]string{
 		"archiveId":   "meeting-test",

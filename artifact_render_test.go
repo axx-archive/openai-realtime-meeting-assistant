@@ -209,3 +209,27 @@ func TestArtifactRenderTokenMintIsSessionGated(t *testing.T) {
 		t.Fatalf("render body=%q, want the stored deck body", got)
 	}
 }
+
+func TestArtifactRenderMintRequiresReadContentAndExport(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp, previousAuthorizer := kanbanApp, artifactObjectAuthorizer
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp, artifactObjectAuthorizer = previousApp, previousAuthorizer })
+	deck, _, err := kanbanApp.createOSArtifactWithMetadata("research", "deck", "<!doctype html><html></html>", "AJ", map[string]string{"type": "html_deck"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	for _, denied := range []ACLAction{ACLReadContent, ACLExport} {
+		artifactObjectAuthorizer = denyArtifactActionAuthorizer{denied: denied}
+		req := httptest.NewRequest(http.MethodGet, "/artifacts/render-token?id="+deck.ID, nil)
+		for _, cookie := range cookies {
+			req.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		artifactRenderTokenHandler(recorder, req)
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("denied %s status=%d", denied, recorder.Code)
+		}
+	}
+}

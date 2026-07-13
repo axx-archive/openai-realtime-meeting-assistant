@@ -4428,17 +4428,24 @@ func visibleMeetingMemoryEntries(entries []meetingMemoryEntry, limit int) []meet
 // gate without persisting the room password into the store.
 func (app *kanbanBoardApp) memorySnapshotForClients(limit int) []meetingMemoryEntry {
 	entries := app.memorySnapshot(limit)
+	projected := make([]meetingMemoryEntry, 0, len(entries))
 	for index := range entries {
+		// Artifact identity, metadata, and bodies are principal-scoped objects.
+		// Shared HTTP/websocket memory bootstraps omit them entirely; clients load
+		// authorized artifact windows through /artifacts.
+		if entries[index].Kind == meetingMemoryKindOSArtifact {
+			continue
+		}
 		// bodies are already prompt-capped at the snapshot boundary
 		// (stripOversizeBody in visibleEntriesLocked); re-apply as
 		// belt-and-suspenders because this payload is broadcast to every
 		// client on each memory event AND rides buildOSAssistantModeAnswer
 		// prompts. The artifact stage never reads bodies from this lane —
 		// it loads full bodies via /artifacts (osArtifactsSnapshot).
-		entries[index] = decorateArchiveDownloadURLForClient(stripOversizeBody(entries[index]))
+		projected = append(projected, decorateArchiveDownloadURLForClient(stripOversizeBody(entries[index])))
 	}
 
-	return entries
+	return projected
 }
 
 func decorateArchiveDownloadURLForClient(entry meetingMemoryEntry) meetingMemoryEntry {
@@ -4809,7 +4816,8 @@ func (app *kanbanBoardApp) saveToFilesTool(args map[string]any, requesterEmail s
 		}
 	}
 
-	deliverables := app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0)
+	requester := &userAccount{Email: normalizeAccountEmail(requesterEmail), Name: participantNameForEmail(requesterEmail)}
+	deliverables := app.authorizedFileDeliverableCandidates(context.Background(), requester, ACLReadContent, ACLWrite)
 	saved := make([]string, 0, len(fragments))
 	unmatched := make([]string, 0)
 	done := map[string]struct{}{}
@@ -4834,7 +4842,7 @@ func (app *kanbanBoardApp) saveToFilesTool(args map[string]any, requesterEmail s
 			if _, dup := done[entry.ID]; dup {
 				continue
 			}
-			row, err := app.saveDeliverableToFiles(entry.ID, folderID, actor)
+			row, err := app.saveDeliverableSnapshotToFiles(entry, folderID, actor)
 			if err != nil {
 				log.Errorf("save_to_files failed to save %s: %v", entry.ID, err)
 				continue
