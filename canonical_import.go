@@ -151,11 +151,16 @@ func (importer *CanonicalImporter) Build(ctx context.Context) (CanonicalImportPl
 	})
 	orgPrincipals := canonicalLegacyOrgPrincipals(importer.OrgPrincipals)
 	plan := CanonicalImportPlan{TenantID: importer.TenantID, TestedPrincipals: append(append([]string(nil), orgPrincipals...), canonicalLegacyNegativeCorpus...)}
-	for _, object := range objects {
-		version, _, err := importer.Versions.ResolveVersionDurably(ctx, object.Family, object.ObjectKey, object.StateDigest)
-		if err != nil {
-			return CanonicalImportPlan{}, err
-		}
+	versionRequests := make([]canonicalVersionRequest, len(objects))
+	for index, object := range objects {
+		versionRequests[index] = canonicalVersionRequest{Family: object.Family, ObjectKey: object.ObjectKey, StateDigest: object.StateDigest}
+	}
+	versionResults, err := importer.Versions.ResolveVersionsDurably(ctx, versionRequests)
+	if err != nil {
+		return CanonicalImportPlan{}, err
+	}
+	for index, object := range objects {
+		version := versionResults[index].Version
 		object.AggregateVersion = version
 		object.EventID, err = CanonicalImportEventID(importer.TenantID, object.Family, object.ObjectKey, canonicalLegacyImportEventType, object.StateDigest)
 		if err != nil {

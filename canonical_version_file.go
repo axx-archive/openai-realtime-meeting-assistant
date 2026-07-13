@@ -29,6 +29,17 @@ type canonicalVersionFile struct {
 
 var ErrCanonicalStaleVersionSnapshot = errors.New("canonical version snapshot does not extend durable state")
 
+type canonicalVersionRequest struct {
+	Family      string
+	ObjectKey   string
+	StateDigest string
+}
+
+type canonicalVersionResult struct {
+	Version  int64
+	Existing bool
+}
+
 func OpenFileCanonicalObjectVersionMap(path string) (*FileCanonicalObjectVersionMap, error) {
 	if path == "" {
 		return nil, errors.New("version map path required")
@@ -135,6 +146,60 @@ func (versionMap *FileCanonicalObjectVersionMap) ResolveVersionDurably(ctx conte
 		return 0, false, err
 	}
 	return version, existing, nil
+}
+
+// ResolveVersionsDurably resolves a deterministic import batch under one
+// process/file lock and publishes at most one fsynced snapshot. First boot can
+// contain thousands of legacy objects; rewriting the growing JSON map once per
+// object is quadratic and keeps the HTTP listener offline for many minutes.
+func (versionMap *FileCanonicalObjectVersionMap) ResolveVersionsDurably(ctx context.Context, requests []canonicalVersionRequest) ([]canonicalVersionResult, error) {
+	versionMap.mu.Lock()
+	defer versionMap.mu.Unlock()
+	lock, err := versionMap.acquireFileLock()
+	if err != nil {
+		return nil, err
+	}
+	defer releaseCanonicalFileLock(lock)
+
+	latest, err := loadCanonicalVersionMemory(versionMap.path)
+	if err != nil {
+		return nil, err
+	}
+	versionMap.memory = latest
+	before, err := snapshotCanonicalVersionMemory(versionMap.memory)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]canonicalVersionResult, len(requests))
+	changed := false
+	for index, request := range requests {
+		select {
+		case <-ctx.Done():
+			versionMap.memory = memoryCanonicalVersionMapFromSnapshot(before)
+			return nil, ctx.Err()
+		default:
+		}
+		version, existing, resolveErr := versionMap.memory.ResolveVersion(request.Family, request.ObjectKey, request.StateDigest)
+		if resolveErr != nil {
+			versionMap.memory = memoryCanonicalVersionMapFromSnapshot(before)
+			return nil, resolveErr
+		}
+		results[index] = canonicalVersionResult{Version: version, Existing: existing}
+		changed = changed || !existing
+	}
+	if !changed {
+		return results, nil
+	}
+	after, err := snapshotCanonicalVersionMemory(versionMap.memory)
+	if err != nil {
+		versionMap.memory = memoryCanonicalVersionMapFromSnapshot(before)
+		return nil, err
+	}
+	if err := versionMap.persistLocked(ctx, after); err != nil {
+		versionMap.memory = memoryCanonicalVersionMapFromSnapshot(before)
+		return nil, err
+	}
+	return results, nil
 }
 
 func (versionMap *FileCanonicalObjectVersionMap) Snapshot() (CanonicalObjectVersionSnapshot, error) {

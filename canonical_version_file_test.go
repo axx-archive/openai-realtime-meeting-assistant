@@ -1,13 +1,97 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 )
+
+func TestFileCanonicalObjectVersionMapResolvesImportBatchDurably(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "versions.json")
+	versionMap, err := OpenFileCanonicalObjectVersionMap(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requests := []canonicalVersionRequest{
+		{Family: "memory", ObjectKey: "one", StateDigest: captureDigest("a")},
+		{Family: "memory", ObjectKey: "two", StateDigest: captureDigest("b")},
+		{Family: "memory", ObjectKey: "one", StateDigest: captureDigest("c")},
+	}
+	results, err := versionMap.ResolveVersionsDurably(context.Background(), requests)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 3 || results[0].Version != 1 || results[0].Existing || results[1].Version != 1 || results[1].Existing || results[2].Version != 2 || results[2].Existing {
+		t.Fatalf("batch results=%+v", results)
+	}
+	firstBytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, err := OpenFileCanonicalObjectVersionMap(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retry, err := reloaded.ResolveVersionsDurably(context.Background(), requests)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, result := range retry {
+		if !result.Existing || result.Version != results[index].Version {
+			t.Fatalf("retry[%d]=%+v want existing version %d", index, result, results[index].Version)
+		}
+	}
+	secondBytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(firstBytes, secondBytes) {
+		t.Fatal("all-existing batch rewrote durable version map")
+	}
+}
+
+func TestFileCanonicalObjectVersionMapResolvesLargeImportBatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "versions.json")
+	versionMap, err := OpenFileCanonicalObjectVersionMap(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const count = 5000
+	requests := make([]canonicalVersionRequest, count)
+	for index := range requests {
+		key := fmt.Sprintf("legacy-object-%05d", index)
+		requests[index] = canonicalVersionRequest{Family: "memory", ObjectKey: key, StateDigest: captureDigest(key)}
+	}
+	results, err := versionMap.ResolveVersionsDurably(context.Background(), requests)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != count {
+		t.Fatalf("results=%d want=%d", len(results), count)
+	}
+	for index, result := range results {
+		if result.Version != 1 || result.Existing {
+			t.Fatalf("result[%d]=%+v", index, result)
+		}
+	}
+	reloaded, err := OpenFileCanonicalObjectVersionMap(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := reloaded.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Entries) != count {
+		t.Fatalf("durable entries=%d want=%d", len(snapshot.Entries), count)
+	}
+}
 
 func TestFileCanonicalObjectVersionMapPersistsAndLoads(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "versions.json")
