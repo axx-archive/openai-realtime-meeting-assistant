@@ -2,7 +2,7 @@
 
 Goal and source pointers: active `$goal-loop`; `docs/model-routing-master-plan-2026-07-11.md`; `docs/plans/multi-room-2026-07-08.md`; architecture audit in the current Codex task.
 
-Current phase: W0 is live and verified. W1 implementation and independent code gates are complete; commit/push and the PostgreSQL shadow VPS cutover are the only remaining W1 actions. Per user steering, execution pauses after W1 is live and does not begin W2 without an explicit signal.
+Current phase: W0 and W1 are live and verified. Per user steering, execution is paused before W2 and does not resume without an explicit signal.
 
 ## Invariants
 
@@ -18,7 +18,7 @@ Current phase: W0 is live and verified. W1 implementation and independent code g
 | Wave | Outcome | Dependencies | Gate / rollback | Status |
 |---|---|---|---|---|
 | W0 | Stop runaway spend; make output, authority, health, backup, and usage truth enforceable | None | Accepted digest advances cursor; code-level authority tests; offsite restore evidence; old env/code backup | Complete; model-output recovery canaries held for W4 quota gate |
-| W1 | Canonical event/ACL substrate, object authorization, outbox/jobs, retention, consent, revision-bound approval | W0 | Dual-write replay/checksum and ACL-negative parity; JSONL reader rollback | Code complete and independently gated; live shadow cutover pending |
+| W1 | Canonical event/ACL substrate, object authorization, outbox/jobs, retention, consent, revision-bound approval | W0 | Dual-write replay/checksum and ACL-negative parity; JSONL reader rollback | Complete; live in PostgreSQL shadow mode with JSON/JSONL authoritative |
 | W2A | Per-room Scout, exact recap, guest policy, media backend pilot | W1 contracts | Two-room zero-leak live gate; Pion and feature-flag rollback | Pending |
 | W2B | Restart-safe brain, complete historical recall, claim/evidence lineage | W1 contracts | Recall corpus and restart/replay gates; shadow-reader rollback | Pending |
 | W2C | `insights_opportunities_v1`, structured feedback, verdict critic, pilots | W1 + W0 route/authority | Ten reviewed pilots; process disable and route rollback | Pending |
@@ -34,8 +34,8 @@ Current phase: W0 is live and verified. W1 implementation and independent code g
 - Digest count remained exactly 573 through `2026-07-12T21:30Z`; persisted digest count remained 5 across 2 meetings. No post-containment spend occurred.
 - Combined W0 implementation now includes strict Responses JSON Schema, 4,000-token reasoning/output headroom, accepted-vs-wire usage truth, poison-output circuit, provider-outage cursor hold, positive-evidence capability health, principal-aware tool policy, exact callback binding, monotonic queue status, and hardened runner isolation.
 - Codex production queue has 13 completed jobs and zero nonterminal jobs. Cutover must preserve those records, migrate usage books, and recreate the app plus profiled runner together.
-- W1 live target is a private PostgreSQL 17 shadow service on the existing VPS with an externally protected Docker volume. JSON/JSONL remains authoritative; `required` is not enabled in W1.
-- User authorized resizing `meetingassist-demo` from 2 vCPU / 2 GB / 60 GB to `s-4vcpu-8gb` (4 vCPU / 8 GB / 160 GB, $48/month) during the W1 maintenance window.
+- W1 runs a private PostgreSQL 17 shadow service on the VPS with the protected external volume `digitalocean_canonical_postgres`. JSON/JSONL remains authoritative; `required` is not enabled in W1.
+- `meetingassist-demo` was permanently resized from 2 vCPU / 2 GB / 60 GB to `s-4vcpu-8gb` (4 vCPU / 8 GB / 160 GB, $48/month).
 
 ## Completed Evidence
 
@@ -56,12 +56,17 @@ Current phase: W0 is live and verified. W1 implementation and independent code g
 - W1 artifact/capability enforcement passed its independent critic after bounded adversarial revisions: body-free tenant-bound authorization headers; exact atomic header/body snapshots; owner-only private legacy migration; principal-filtered artifact, Files, follow-up, chat-drop, and client snapshot paths; revision/asset-bound share, Deal Room, render, and archive capabilities; approval-time reauthorization; hash-only token state; archive revocation and same-buffer serving; parent-goal authorization; and conditional/compensated Files mutations. Integrated focused normal/race gates passed, and the final post-fix repository suite passed in 128.435s.
 - W1 management, recall, worker, and runtime integration passed independent adversarial gates after bounded revisions: metadata-first package/folder/file authorization; organization-visible historical recall with owner/private and explicit room-only isolation; zero guest durable recall; per-principal HTTP/websocket/meeting/Brief projections; delegated service/agent context; scope-preserving ambient derivation; revision-bound imported PostgreSQL grants with member/owner/guest/service ACL parity; recoverable prepare/write/commit capture; lifecycle deletion advancement; autonomous retry; drained verified outbox; source-bound restart checkpoints; and blob two-file crash recovery.
 - Final integrated `go test -count=1 ./...` passed in 182.922s. The consolidated high-risk race gate for runtime, capture/import/reconcile, ACL, management, recall, ambient workers, and packages passed in 40.194s. Final focused registry/decision/package verification passed after the last registry correction. `gofmt` and `git diff --check` are clean.
+- W1 shipped through commits `8883ffb`, `f148096`, and `7c68c04` on `axx/main`. The 6,220-object initial import was made restart-practical with one batch version-map publication, and reconciliation was independently re-gated after moving its expensive scan/apply work outside the user-facing runtime lock while retaining single-flight ordering.
+- The repository-wide post-availability suite passed in 178.349s; focused normal and all `CanonicalRuntime` race tests passed; the independent availability critic returned PASS.
+- The W1 cutover used cold snapshot `/opt/meetingassist-backups/20260713T023028Z-w1-canonical-shadow` plus the scoped follow-up backup `/opt/meetingassist-backups/20260713-031023-w1-reconcile-availability`. Production was empty before recreation and remained empty afterward.
+- Live restart/checkpoint verification passed with canonical shadow healthy at equal dirty/reconciled/checkpoint high-water 10, zero pending capture, zero outbox backlog/failures, and no frozen families. PostgreSQL held 6,226 canonical events, 6,224 current objects, and 11,791 grants; imported guest/service/capability durable grants were exactly zero.
+- Production memory remained 5,455 lines; board, user, and room hashes exactly matched the pre-cutover baseline. All 13 queue jobs remained present, usage evidence advanced from 5 to 6 files, and app/PostgreSQL/Codex/render services were running with zero restarts and fresh worker heartbeats.
 
 ## Pending Dependencies
 
 - Dedicated managed PostgreSQL HA and private object storage are not present. W1 uses a local private PostgreSQL shadow on the resized VPS without a separate managed-resource charge; managed HA/object storage and their recurring-cost decision remain W4 work. Managed Valkey remains intentionally deferred.
 - The PostgreSQL purge ledger survives process restarts, but a full database rollback could restore both content and its purge authority to the same older point. W4 restore design must keep a separately retained append-only purge manifest/authority and invoke the restore gate before readiness; process-restart evidence alone is not a database-rollback proof.
-- The user reports the OpenAI API balance was topped up. Live W1 verification must still prove one bounded read-only canary; normal digest production remains disabled until the later W4 recovery canary gate.
+- The user reports the OpenAI API balance was topped up, but the bounded live embedding canary still returned HTTP 429 `insufficient_quota` at `2026-07-13T03:13:08Z`. Normal digest production remains disabled; this external provider gate must be rechecked before later AI recovery claims.
 - Guest consent/retention language needs an authorized business/legal owner.
 - Native Apple GA requires signing team, privacy manifest decisions, and physical-device evidence; otherwise 2.0 must explicitly ship web-first with native labeled beta.
 
@@ -83,4 +88,4 @@ Current phase: W0 is live and verified. W1 implementation and independent code g
 
 ## Resume Here
 
-Stage only the verified W1 diff, inspect it, commit and push to `axx/main`; then verify an empty-room window, back up changed VPS files and a cold copy of `digitalocean_meeting_data`, resize the droplet, create the protected PostgreSQL volume, install the shadow env/Compose configuration, and recreate app plus Codex runner together. Gate live completion on healthy services, preserved volume/queue/usage counts, zero canonical pending/frozen/outbox work at equal dirty/reconciled high-water, per-principal ACL-negative parity, and one bounded read-only API canary. Then pause before W2 and wait for the user's signal.
+PAUSED before W2 by user direction. On explicit resume, begin W2 planning from the live W1 canonical contracts and split execution into W2A per-room Scout/media/guest safety, W2B restart-safe brain/recall/evidence lineage, and W2C the single `insights_opportunities_v1` workflow with structured feedback and critic pilots. Do not start W2 without the user's signal. The OpenAI quota canary is an external recovery dependency, not authorization to weaken the containment controls.
