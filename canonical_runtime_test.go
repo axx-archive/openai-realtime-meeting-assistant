@@ -253,6 +253,24 @@ func (store *blockingCanonicalEventStore) Events(ctx context.Context) ([]Canonic
 	return nil, ctx.Err()
 }
 
+type blockingEventsCanonicalEventStore struct {
+	inner   CanonicalEventStore
+	entered chan struct{}
+}
+
+func (store *blockingEventsCanonicalEventStore) Append(ctx context.Context, event CanonicalEvent) (CanonicalAppendResult, error) {
+	return store.inner.Append(ctx, event)
+}
+
+func (store *blockingEventsCanonicalEventStore) Events(ctx context.Context) ([]CanonicalEvent, error) {
+	select {
+	case store.entered <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
 type countingCanonicalEventStore struct {
 	inner   CanonicalEventStore
 	mu      sync.Mutex
@@ -384,6 +402,64 @@ func TestCanonicalRuntimeShutdownCancelsStalledReconcile(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("shutdown did not cancel stalled reconcile")
+	}
+}
+
+func TestCanonicalRuntimeStalledReconcileDoesNotBlockSnapshotsOrWrites(t *testing.T) {
+	dir := canonicalRuntimeTestEnv(t, "shadow")
+	runtime, err := initializeCanonicalRuntime(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked := &blockingEventsCanonicalEventStore{
+		inner:   NewMemoryCanonicalEventStore(runtime.registry),
+		entered: make(chan struct{}, 1),
+	}
+	runtime.events = blocked
+	first := []byte(`{"id":"first","kind":"note","text":"first","createdAt":"2026-01-01T00:00:00Z"}` + "\n")
+	if err := writeFileAtomicallyForCanonicalMode(meetingMemoryPath(), first, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runtime.Reconcile(ctx) }()
+	select {
+	case <-blocked.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("reconcile did not enter stalled event scan")
+	}
+
+	snapshotDone := make(chan CanonicalRuntimeSnapshot, 1)
+	go func() { snapshotDone <- canonicalRuntimeSnapshot() }()
+	select {
+	case snapshot := <-snapshotDone:
+		if snapshot.DirtyHighWater != 2 {
+			t.Fatalf("unexpected snapshot while reconcile stalled: %+v", snapshot)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("runtime snapshot blocked behind stalled reconcile")
+	}
+
+	second := []byte(`{"id":"second","kind":"note","text":"second","createdAt":"2026-01-01T00:00:01Z"}` + "\n")
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- appendFileDurably(filepath.Join(dir, "meeting-memory.jsonl"), second, 0o600)
+	}()
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("covered legacy write blocked behind stalled reconcile")
+	}
+	if snapshot := canonicalRuntimeSnapshot(); snapshot.DirtyHighWater != 4 || runtime.spoolHighWater() != 4 {
+		t.Fatalf("covered write did not advance canonical capture: snapshot=%+v spool=%d", snapshot, runtime.spoolHighWater())
+	}
+
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("reconcile error=%v, want context canceled", err)
 	}
 }
 

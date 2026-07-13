@@ -28,6 +28,7 @@ import (
 // while making the failure visible in readiness.
 type CanonicalRuntime struct {
 	mu                  sync.Mutex
+	reconcileMu         sync.Mutex
 	mode                CanonicalMode
 	dataDir             string
 	root                string
@@ -728,9 +729,14 @@ func (runtime *CanonicalRuntime) Reconcile(ctx context.Context) error {
 	if runtime == nil || runtime.events == nil {
 		return ErrCanonicalStoreUnhealthy
 	}
+	// Only one full import may publish checkpoint and health state at a time.
+	// This is intentionally separate from mu so snapshots and covered writes
+	// remain available throughout the potentially expensive scan and apply.
+	runtime.reconcileMu.Lock()
+	defer runtime.reconcileMu.Unlock()
 	runtime.mu.Lock()
-	defer runtime.mu.Unlock()
 	target := runtime.dirtyHighWater
+	runtime.mu.Unlock()
 	// Reading the committed set validates the complete local chain through the
 	// target high-water before reconstructing logical object identities.
 	for _, fact := range runtime.spool.CommittedFacts() {
@@ -753,13 +759,15 @@ func (runtime *CanonicalRuntime) Reconcile(ctx context.Context) error {
 		}
 	}
 	if err != nil {
-		runtime.healthErr = fmt.Errorf("canonical reconcile failed at high-water %d: %w", target, err)
-		return runtime.healthErr
+		failure := fmt.Errorf("canonical reconcile failed at high-water %d: %w", target, err)
+		runtime.markFailure(failure)
+		return failure
 	}
 	if runtime.postgres != nil {
 		if err := runtime.drainCanonicalImportOutbox(ctx); err != nil {
-			runtime.healthErr = fmt.Errorf("canonical outbox drain failed at high-water %d: %w", target, err)
-			return runtime.healthErr
+			failure := fmt.Errorf("canonical outbox drain failed at high-water %d: %w", target, err)
+			runtime.markFailure(failure)
+			return failure
 		}
 	}
 	spoolDigest, digestErr := runtime.spoolDigestThrough(target)
@@ -774,6 +782,16 @@ func (runtime *CanonicalRuntime) Reconcile(ctx context.Context) error {
 	encoded, encodeErr := json.Marshal(checkpoint)
 	if encodeErr != nil {
 		return encodeErr
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if runtime.dirtyHighWater != target {
+		// The import may have safely observed newer state, but its checkpoint
+		// cannot claim a spool high-water that changed underneath it. A queued
+		// signal will reconcile the newer stable boundary without ever blocking
+		// covered legacy writes for the duration of this full scan.
+		runtime.markSuccessLocked()
+		return nil
 	}
 	if err := writeFileAtomicallyDurable(runtime.checkpointPath(), encoded, 0o600); err != nil {
 		runtime.healthErr = fmt.Errorf("persist canonical reconcile checkpoint: %w", err)
@@ -853,20 +871,26 @@ func (runtime *CanonicalRuntime) drainCanonicalImportOutbox(ctx context.Context)
 			break
 		}
 	}
+	var pending, failed int64
 	var oldest float64
 	err := runtime.postgres.pool.QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE last_error_code IS NOT NULL),
 		COALESCE(EXTRACT(EPOCH FROM (now()-min(available_at))),0)
-		FROM outbox WHERE topic=$1 AND delivered_at IS NULL`, canonicalLegacyImportEventType).Scan(&runtime.outboxPending, &runtime.outboxFailed, &oldest)
+		FROM outbox WHERE topic=$1 AND delivered_at IS NULL`, canonicalLegacyImportEventType).Scan(&pending, &failed, &oldest)
 	if err != nil {
 		return err
 	}
-	runtime.outboxOldestSeconds = 0
+	outboxOldestSeconds := int64(0)
 	if oldest > 0 {
-		runtime.outboxOldestSeconds = int64(oldest)
+		outboxOldestSeconds = int64(oldest)
 	}
+	runtime.mu.Lock()
+	runtime.outboxPending = pending
+	runtime.outboxFailed = failed
+	runtime.outboxOldestSeconds = outboxOldestSeconds
 	runtime.outboxKnown = true
-	if runtime.outboxPending > 0 {
-		return fmt.Errorf("canonical import outbox still has %d pending rows (%d failed)", runtime.outboxPending, runtime.outboxFailed)
+	runtime.mu.Unlock()
+	if pending > 0 {
+		return fmt.Errorf("canonical import outbox still has %d pending rows (%d failed)", pending, failed)
 	}
 	return nil
 }
