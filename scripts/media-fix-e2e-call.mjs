@@ -20,15 +20,68 @@
 //   npm install
 //   npm run media:browsers
 //   npm run media:e2e
-// Override MEDIA_FIX_E2E_BASE / MEDIA_FIX_E2E_PASSWORD for another local host.
+// Override MEDIA_FIX_E2E_BASE / MEDIA_FIX_E2E_PASSWORD for another host.
+// MEDIA_FIX_E2E_ROOM_NAME creates and automatically archives a dedicated room,
+// keeping the default Office untouched. MEDIA_FIX_E2E_CHROME_PATH avoids a
+// shared Playwright-browser cache when a system Chrome is available.
 // Seeded accounts (accounts.go) all share MEETING_ROOM_PASSWORD locally.
-import { webkit, chromium, devices } from 'playwright'
+import { webkit, chromium, devices, request } from 'playwright'
 
 const BASE = process.env.MEDIA_FIX_E2E_BASE || 'http://localhost:3191'
 const PW = process.env.MEDIA_FIX_E2E_PASSWORD || 'smoke-pass-1234'
+const ROOM_NAME = String(process.env.MEDIA_FIX_E2E_ROOM_NAME || '').trim()
+const CHROME_PATH = String(process.env.MEDIA_FIX_E2E_CHROME_PATH || '').trim()
+const JOIN_TIMEOUT_MS = Math.max(35000, Number(process.env.MEDIA_FIX_E2E_JOIN_TIMEOUT_MS) || 35000)
 let pass = 0, fail = 0
 const ok = (n,c)=>{ if(c){pass++;console.log('  PASS',n)}else{fail++;console.log('  FAIL',n)} }
 const sleep = ms => new Promise(r=>setTimeout(r,ms))
+let roomControl = null
+
+async function withTimeout(promise, timeoutMs, message) {
+  let timer
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs)
+  })
+  try {
+    return await Promise.race([promise, timeout])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function createIsolatedRoom() {
+  if (!ROOM_NAME) return null
+  const context = await request.newContext({
+    baseURL: BASE,
+    extraHTTPHeaders: { Origin: new URL(BASE).origin },
+    timeout: 15000
+  })
+  try {
+    const login = await context.post('/auth/login', { data: { name: 'AJ', password: PW } })
+    if (!login.ok()) throw new Error(`test-room login failed: ${login.status()}`)
+    const response = await context.post('/rooms', {
+      data: { name: ROOM_NAME, passcode: '', guestAccess: false }
+    })
+    if (!response.ok()) throw new Error(`test-room create failed: ${response.status()}`)
+    const payload = await response.json()
+    const id = String(payload?.room?.id || '').trim()
+    if (!id) throw new Error('test-room create returned no room id')
+    return { context, id }
+  } catch (error) {
+    await context.dispose().catch(()=>{})
+    throw error
+  }
+}
+
+async function archiveIsolatedRoom(control) {
+  if (!control) return
+  try {
+    const response = await control.context.post(`/rooms/${encodeURIComponent(control.id)}/archive`, { timeout: 15000 })
+    if (!response.ok()) throw new Error(`test-room archive failed: ${response.status()}`)
+  } finally {
+    await control.context.dispose().catch(()=>{})
+  }
+}
 
 // init script: override getUserMedia/getDisplayMedia with live canvas streams,
 // record constraints, and count applyConstraints calls on the video track.
@@ -43,7 +96,11 @@ function initScript(label, portrait) {
         x.fillStyle='#fff'; x.font='32px sans-serif'; x.fillText(text + ' ' + f, 16, H/2) }, 33)
       return c.captureStream(30)
     }
-    const camStream = makeStream(label)
+    let camStream = null
+    const cameraStream = () => {
+      camStream ||= makeStream(label)
+      return camStream
+    }
     function audioTrack() {
       const ac = new (window.AudioContext||window.webkitAudioContext)(); ac.resume && ac.resume()
       const d = ac.createMediaStreamDestination(); const o = ac.createOscillator(); o.frequency.value = 110
@@ -62,29 +119,53 @@ function initScript(label, portrait) {
       if (orig) t.applyConstraints = (...a) => { applyConstraintsCalls++; return orig(...a) }
       return t
     }
-    // WebKit exposes these methods through its MediaDevices prototype. Direct
-    // assignment creates the reliable page-owned overrides; defineProperty on
-    // the host object can throw and silently leave the native permission path.
-    navigator.mediaDevices.getUserMedia = async (constraints) => {
+    const getUserMedia = async (constraints) => {
       gumCalls.push(JSON.parse(JSON.stringify(constraints||{})))
       const tracks = []
-      if (constraints && constraints.video) tracks.push(wrapTrack(camStream.getVideoTracks()[0]))
+      if (constraints && constraints.video) tracks.push(wrapTrack(cameraStream().getVideoTracks()[0]))
       if (constraints && constraints.audio) tracks.push(audioTrack())
       return new MediaStream(tracks)
     }
-    navigator.mediaDevices.enumerateDevices = async () => ([
+    const enumerateDevices = async () => ([
       { deviceId:'cam', kind:'videoinput', label:'fake cam', groupId:'g' },
       { deviceId:'mic', kind:'audioinput', label:'fake mic', groupId:'g' },
     ])
-    navigator.mediaDevices.getDisplayMedia = async () => {
+    const getDisplayMedia = async () => {
       window.__sharedScreen = true
       return makeStream('SCREEN ' + label)
     }
+    // The init script can run before WebKit exposes MediaDevices for the final
+    // secure document. Keep an idempotent installer and call it again after
+    // DOMContentLoaded; verify identity so a native permission prompt can never
+    // masquerade as the synthetic-media harness.
+    const installMediaOverrides = () => {
+      const mediaDevices = navigator.mediaDevices
+      if (!mediaDevices) return false
+      const install = (name, value) => {
+        try { mediaDevices[name] = value } catch (_) {}
+        if (mediaDevices[name] !== value) {
+          try { Object.defineProperty(mediaDevices, name, { configurable: true, value }) } catch (_) {}
+        }
+        return mediaDevices[name] === value
+      }
+      return install('getUserMedia', getUserMedia)
+        && install('enumerateDevices', enumerateDevices)
+        && install('getDisplayMedia', getDisplayMedia)
+    }
+    Object.defineProperty(window, '__installHarnessMediaOverrides', {
+      configurable: false,
+      value: installMediaOverrides
+    })
+    window.__harnessMediaOverridesInstalled = installMediaOverrides()
   }})(${JSON.stringify(label)}, ${JSON.stringify(portrait)})`
 }
 
 async function join(browserType, ctxOpts, label, portrait) {
-  const browser = await browserType.launch()
+  const browser = await browserType.launch(
+    browserType === chromium && CHROME_PATH ? { executablePath: CHROME_PATH } : undefined
+  )
+  let ready = false
+  try {
   const context = await browser.newContext({ ...ctxOpts, permissions: ['camera','microphone'].filter(()=>browserType===chromium) })
   // Install one context-owned script before any page exists. This avoids the
   // undefined ordering/lifecycle edge of multiple page-level init scripts and
@@ -97,51 +178,87 @@ async function join(browserType, ctxOpts, label, portrait) {
   page.on('console', m => { const t = m.text(); if (/error|fail/i.test(t) && !/auth\/me|401/.test(t)) console.log(`   [${label} console] ${t.slice(0,120)}`) })
   await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await page.waitForLoadState('domcontentloaded')
+  const mediaOverridesInstalled = await page.evaluate(() => {
+    const installed = window.__installHarnessMediaOverrides?.() === true
+    window.__harnessMediaOverridesInstalled = installed
+    return installed
+  })
+  if (!mediaOverridesInstalled) {
+    throw new Error(`${label} synthetic media overrides were not installed on the final document`)
+  }
   await page.waitForFunction(() => typeof joinRoom === 'function' && typeof setActiveTool === 'function', null, { timeout: 30000 })
+  if (roomControl?.id) {
+    await page.waitForFunction(roomId => (
+      Array.isArray(roomsList)
+      && roomsList.some(room => room?.id === roomId && !room.archived)
+    ), roomControl.id, { timeout: 30000 })
+  }
   await page.selectOption('#loginAccountSelect', label).catch(()=>{})
   await page.fill('#roomPassword', PW).catch(()=>{})
-  await page.evaluate(async () => {
+  await page.evaluate(async (roomId) => {
+    if (roomId) selectLobbyRoom(roomId)
     setActiveTool('room')
     await joinRoom()
-  })
+  }, roomControl?.id || '')
   // joinRoom can return after opening signaling but before the access-granted
   // render has settled. Keep every later assertion tied to a participant that
   // is actually seated and publishing a live local camera, not merely a page
-  // whose join call resolved.
-  await page.waitForFunction(() => {
-    const stream = typeof localStream !== 'undefined' ? localStream : null
-    const localVideo = document.getElementById('localVideo')
-    return document.getElementById('appShell')?.classList.contains('is-in-room')
-      && stream?.getVideoTracks?.().some(track => track.readyState === 'live')
-      && Array.isArray(window.__gumCalls)
-      && window.__gumCalls.some(call => call?.video)
-      && localVideo?.videoWidth > 0
-      && localVideo?.videoHeight > 0
-  }, null, { timeout: 35000 })
+  // whose join call resolved. Do not require the hidden/local self-preview to
+  // decode in headless WebKit; the call gate below requires a rendered REMOTE
+  // participant before the flicker watch begins.
+  try {
+    await page.waitForFunction(() => {
+      const stream = typeof localStream !== 'undefined' ? localStream : null
+      return document.getElementById('appShell')?.classList.contains('is-in-room')
+        && stream?.getVideoTracks?.().some(track => track.readyState === 'live')
+        && Array.isArray(window.__gumCalls)
+        && window.__gumCalls.some(call => call?.video)
+    }, null, { timeout: JOIN_TIMEOUT_MS })
+  } catch (error) {
+    throw new Error(`${label} did not reach seated and publishing readiness within ${JOIN_TIMEOUT_MS}ms: ${error.message}`)
+  }
+  ready = true
   return { browser, context, page, label }
+  } finally {
+    if (!ready) {
+      await withTimeout(browser.close(), 10000, `${label} failed-join browser cleanup timed out`).catch(()=>{})
+    }
+  }
 }
 
 const sessions = []
 try {
+  roomControl = await createIsolatedRoom()
+  if (roomControl) console.log(`[setup] isolated room: ${ROOM_NAME}`)
   console.log('[setup] A=Chromium(AJ), B=WebKit/Safari(Tim) join the same room')
   const A = await join(chromium, {}, 'AJ', false)
+  sessions.push(A)
   const B = await join(webkit, {}, 'Tim', false)
-  sessions.push(A, B)
+  sessions.push(B)
 
-  // wait until B (Safari engine) is in a real call: a remote participant tile
-  // exists AND at least one rendering video element (live track + frames). Tag a
-  // monitor element (prefer the consolidated active-speaker stage).
-  const conn = await B.page.waitForFunction(() => {
-    const tiles = [...document.querySelectorAll('#videoStack .video-tile')].map(t=>t.dataset.participant).filter(Boolean)
-    const hasRemoteTile = tiles.some(n => n && n.toLowerCase() !== 'tim')
-    const vids = [...document.querySelectorAll('video')].filter(v => v.srcObject &&
-      v.srcObject.getVideoTracks().some(t=>t.readyState==='live') && v.videoWidth>0)
-    if (!hasRemoteTile || vids.length === 0) return null
-    const asv = document.getElementById('activeSpeakerVideo')
-    const mon = (asv && asv.videoWidth>0 && asv.srcObject) ? asv : vids[0]
-    if (mon && !mon.id) mon.id = 'pwMon'
-    return { monId: mon ? (mon.id||'activeSpeakerVideo') : null, rendering: vids.length, tiles }
-  }, null, { timeout: 35000 }).then(h=>h.jsonValue()).catch(()=>null)
+  // wait until B (Safari engine) is in a real call: a REMOTE participant tile
+  // exists with a rendering remote video element (live track + dimensions).
+  // Monitoring self-video could pass while the actual receiver path is black.
+  const conn = await B.page.waitForFunction(selfName => {
+    const own = String(selfName || '').trim().toLowerCase()
+    const tiles = [...document.querySelectorAll('#videoStack .video-tile')]
+      .filter(tile => String(tile.dataset.participant || '').trim())
+    const remoteTiles = tiles.filter(tile => String(tile.dataset.participant || '').trim().toLowerCase() !== own)
+    const remoteVideos = remoteTiles.flatMap(tile => [...tile.querySelectorAll('video')])
+      .filter(video => video.srcObject
+        && video.srcObject.getVideoTracks().some(track => track.readyState === 'live')
+        && video.videoWidth > 0
+        && video.videoHeight > 0)
+    if (remoteTiles.length === 0 || remoteVideos.length === 0) return null
+    const mon = remoteVideos[0]
+    if (!mon.id) mon.id = 'pwRemoteMon'
+    return {
+      monId: mon.id,
+      rendering: remoteVideos.length,
+      tiles: tiles.map(tile => tile.dataset.participant),
+      monitoredParticipant: mon.closest('[data-participant]')?.dataset.participant || ''
+    }
+  }, B.label, { timeout: JOIN_TIMEOUT_MS }).then(h=>h.jsonValue()).catch(()=>null)
 
   console.log('\n[1] Flicker — WebKit (Safari engine) in a REAL WebRTC call')
   console.log('   conn:', JSON.stringify(conn))
@@ -241,7 +358,20 @@ try {
   console.log('\nHARNESS ERROR:', e.message)
   fail++
 } finally {
-  for (const s of sessions) { await s.browser.close().catch(()=>{}) }
+  for (const s of sessions) {
+    try {
+      await withTimeout(s.browser.close(), 10000, `${s.label} browser cleanup timed out`)
+    } catch (error) {
+      console.log('\nHARNESS CLEANUP ERROR:', error.message)
+      fail++
+    }
+  }
+  try {
+    await archiveIsolatedRoom(roomControl)
+  } catch (error) {
+    console.log('\nHARNESS CLEANUP ERROR:', error.message)
+    fail++
+  }
 }
 
 console.log(`\n==== ${pass} passed, ${fail} failed ====`)
