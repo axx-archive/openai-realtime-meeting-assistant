@@ -90,8 +90,15 @@ type osAssistantAction struct {
 	Label      string `json:"label,omitempty"`
 }
 
+var recallModelContextProbe func([]meetingMemoryEntry)
+
 func (app *kanbanBoardApp) answerAssistantQuery(query string) (map[string]any, bool, error) {
-	result, err := app.resolveAssistantQuery(query, nil)
+	sittingID := ""
+	if app != nil && app.memory != nil {
+		sittingID = app.memory.currentMeetingID(officeRoomID)
+	}
+	principal := sharedRoomRecallPrincipal(officeRoomID, sittingID)
+	result, err := app.resolveAssistantQueryContextForPrincipalWithAttachments(context.Background(), principal, "", query, nil, nil)
 	if err != nil {
 		return nil, false, err
 	}
@@ -161,6 +168,10 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForUser(ctx context.Conte
 // requester attribution plus the current turn's image/document blocks. Every
 // narrower entrypoint delegates here with nil/empty extras.
 func (app *kanbanBoardApp) resolveAssistantQueryContextForUserWithAttachments(ctx context.Context, requester string, query string, history []scoutChatTurn, attachments []json.RawMessage) (assistantQueryResult, error) {
+	return app.resolveAssistantQueryContextForPrincipalWithAttachments(ctx, recallPrincipalForEmail(requester), requester, query, history, attachments)
+}
+
+func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachments(ctx context.Context, principal RecallPrincipal, requester string, query string, history []scoutChatTurn, attachments []json.RawMessage) (assistantQueryResult, error) {
 	query = canonicalizeBoardText(query)
 	if query == "" {
 		return assistantQueryResult{}, fmt.Errorf("query is required")
@@ -179,7 +190,10 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForUserWithAttachments(ct
 	// short-circuit and let the model answer from memory context. An
 	// attachment-bearing turn skips it too — "what does this deck say?" must
 	// reach the model that can actually see the deck, never a board template.
-	if len(attachments) == 0 && !app.queryPrefersArtifactContext(query) {
+	recallApp := app.scopedRecallApp(ctx, principal)
+	// Guests are admitted to a live room, not the company board. Their ask bar
+	// can use only the already room/sitting-filtered memory store.
+	if principal.Audience != "guest" && len(attachments) == 0 && !recallApp.queryPrefersArtifactContext(query) {
 		if answer, matchedCards, ok := app.answerCurrentBoardQuestion(query); ok {
 			return assistantQueryResult{
 				query:        query,
@@ -190,9 +204,12 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForUserWithAttachments(ct
 		}
 	}
 
-	matches, contextEntries := app.memoryMatchesAndContext(query)
+	matches, contextEntries := recallApp.memoryMatchesAndContext(query)
+	if recallModelContextProbe != nil {
+		recallModelContextProbe(contextEntries)
+	}
 	board := app.snapshotState()
-	answer, modelErr := app.answerAssistantQueryWithModelAttachments(ctx, requester, query, board.Cards, contextEntries, history, attachments)
+	answer, modelErr := recallApp.answerAssistantQueryWithModelAttachments(ctx, requester, query, board.Cards, contextEntries, history, attachments)
 	if modelErr != nil {
 		log.Errorf("Failed to answer assistant query with model: %v", modelErr)
 	}
@@ -201,9 +218,9 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForUserWithAttachments(ct
 		// digest/ledger briefing (then on-demand map-reduce over raw memory);
 		// A5 keeps current-state questions on the deterministic ledger fold.
 		// Only queries neither lane serves keep the 8-keyword-hit last resort.
-		if briefingAnswer, ok := app.rangedBriefingAnswer(query); ok {
+		if briefingAnswer, ok := recallApp.rangedBriefingAnswer(query); ok {
 			answer = briefingAnswer
-		} else if ledgerAnswer, ok := app.ledgerStatusAnswer(query); ok {
+		} else if ledgerAnswer, ok := recallApp.ledgerStatusAnswer(query); ok {
 			answer = ledgerAnswer
 		} else {
 			answer = buildMemoryAnswer(query, matches)
@@ -2891,7 +2908,15 @@ func (store *meetingMemoryStore) contextEntriesForQuery(query string, limit int,
 	// lexical-only search lane. The fused band is capped at limit, mirroring the
 	// slot share store.search took, so the other lanes below are not starved.
 	lexicalMatches := store.search(query, limit)
-	semanticHits := semanticLaneCandidates(query, embeddingLaneTopK())
+	// The semantic authorization set must cover the full already-filtered
+	// store. Using the 250-row context snapshot here made authorized older
+	// history unreachable (and coupled authorization to a presentation cap).
+	semanticEntries := store.snapshot(0)
+	allowedSemanticIDs := make(map[string]struct{}, len(semanticEntries))
+	for _, entry := range semanticEntries {
+		allowedSemanticIDs[entry.ID] = struct{}{}
+	}
+	semanticHits := semanticLaneCandidatesAllowed(query, embeddingLaneTopK(), allowedSemanticIDs)
 	for _, entry := range fuseRawCandidates(lexicalMatches, semanticHits, store, limit) {
 		if entryAllowedByTime(entry) {
 			add(entry)

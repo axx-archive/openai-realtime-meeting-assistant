@@ -303,11 +303,12 @@ func (app *kanbanBoardApp) runCompanyDigestPass(ctx context.Context, apiKey stri
 	if responder == nil {
 		responder = createOpenAITextResponse
 	}
+	contextApp := app.scopedRecallApp(ctx, ambientServicePrincipalForInputs(inputs))
 
-	state := companyDigestStateFromView(app.ledgerCurrentStateView(companyDigestSectionCap))
+	state := companyDigestStateFromView(contextApp.ledgerCurrentStateView(companyDigestSectionCap))
 
 	priorNarrative := ""
-	if prior, ok := app.memory.latestCompanyDigest(); ok {
+	if prior, ok := contextApp.memory.latestCompanyDigest(); ok {
 		if payload, parsed := parseCompanyDigest(prior.Text); parsed {
 			priorNarrative = payload.Narrative
 		}
@@ -369,6 +370,7 @@ func (app *kanbanBoardApp) runCompanyDigestPass(ctx context.Context, apiKey stri
 		"eventCount":                   strconv.Itoa(len(inputs)),
 		"generatedAt":                  now.UTC().Format(time.RFC3339),
 	}
+	metadata = applyAmbientDerivedScope(metadata, inputs)
 
 	return app.memory.upsertDigest(meetingMemoryKindCompanyDigest, companyDigestKey, string(canonical), metadata)
 }

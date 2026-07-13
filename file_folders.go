@@ -14,12 +14,14 @@ package main
 // sessionStore.persistLocked law.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -62,6 +64,7 @@ type fileFolderStore struct {
 	path        string
 	folders     []fileFolderRecord
 	assignments map[string]string
+	loadErr     error
 }
 
 func newFileFolderStore(path string) *fileFolderStore {
@@ -69,29 +72,56 @@ func newFileFolderStore(path string) *fileFolderStore {
 	if raw, err := os.ReadFile(path); err == nil {
 		var state fileFolderStoreState
 		if err := json.Unmarshal(raw, &state); err != nil {
-			log.Errorf("Ignoring malformed file-folder store at %s: %v", path, err)
+			store.loadErr = fmt.Errorf("file-folder store is malformed")
 		} else {
 			store.folders = state.Folders
 			if state.Assignments != nil {
 				store.assignments = state.Assignments
 			}
 		}
+	} else if !os.IsNotExist(err) {
+		store.loadErr = fmt.Errorf("file-folder store is unavailable")
 	}
 	return store
 }
 
-func (s *fileFolderStore) persistLocked() {
+func (s *fileFolderStore) reloadVisibleStateLocked() error {
+	raw, err := os.ReadFile(s.path)
+	if err != nil {
+		s.loadErr = fmt.Errorf("file-folder store is unavailable")
+		return s.loadErr
+	}
+	var state fileFolderStoreState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		s.loadErr = fmt.Errorf("file-folder store is malformed")
+		return s.loadErr
+	}
+	s.folders = append([]fileFolderRecord(nil), state.Folders...)
+	s.assignments = cloneFileFolderAssignments(state.Assignments)
+	s.loadErr = nil
+	return nil
+}
+
+func (s *fileFolderStore) persistLocked() error {
 	raw, err := json.MarshalIndent(fileFolderStoreState{
 		Folders:     s.folders,
 		Assignments: s.assignments,
 	}, "", "  ")
 	if err != nil {
-		log.Errorf("Failed to encode file-folder store: %v", err)
-		return
+		return fmt.Errorf("encode file-folder store: %w", err)
 	}
 	if err := writeFileAtomicallyForCanonicalMode(s.path, raw, 0o600); err != nil {
-		log.Errorf("Failed to persist file-folder store: %v", err)
+		return fmt.Errorf("persist file-folder store: %w", err)
 	}
+	return nil
+}
+
+func cloneFileFolderAssignments(source map[string]string) map[string]string {
+	clone := make(map[string]string, len(source))
+	for fileID, folderID := range source {
+		clone[fileID] = folderID
+	}
+	return clone
 }
 
 // normalizeFileFolderName collapses whitespace runs and enforces the 1-60
@@ -129,6 +159,9 @@ func (s *fileFolderStore) create(name string, createdBy string) (fileFolderRecor
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.loadErr != nil {
+		return fileFolderRecord{}, s.loadErr
+	}
 	if len(s.folders) >= fileFolderMaxCount {
 		return fileFolderRecord{}, errFileFolderLimit
 	}
@@ -142,7 +175,14 @@ func (s *fileFolderStore) create(name string, createdBy string) (fileFolderRecor
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	s.folders = append(s.folders, folder)
-	s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		if errors.Is(err, ErrDurableReplaceAmbiguous) {
+			_ = s.reloadVisibleStateLocked()
+			return fileFolderRecord{}, err
+		}
+		s.folders = s.folders[:len(s.folders)-1]
+		return fileFolderRecord{}, err
+	}
 	return folder, nil
 }
 
@@ -153,6 +193,9 @@ func (s *fileFolderStore) rename(id string, name string) (fileFolderRecord, erro
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.loadErr != nil {
+		return fileFolderRecord{}, s.loadErr
+	}
 	index := s.folderIndexLocked(strings.TrimSpace(id))
 	if index < 0 {
 		return fileFolderRecord{}, errFileFolderNotFound
@@ -160,8 +203,16 @@ func (s *fileFolderStore) rename(id string, name string) (fileFolderRecord, erro
 	if s.nameTakenLocked(normalized, s.folders[index].ID) {
 		return fileFolderRecord{}, errFileFolderDuplicate
 	}
+	prior := s.folders[index].Name
 	s.folders[index].Name = normalized
-	s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		if errors.Is(err, ErrDurableReplaceAmbiguous) {
+			_ = s.reloadVisibleStateLocked()
+			return fileFolderRecord{}, err
+		}
+		s.folders[index].Name = prior
+		return fileFolderRecord{}, err
+	}
 	return s.folders[index], nil
 }
 
@@ -170,10 +221,15 @@ func (s *fileFolderStore) rename(id string, name string) (fileFolderRecord, erro
 func (s *fileFolderStore) remove(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.loadErr != nil {
+		return s.loadErr
+	}
 	index := s.folderIndexLocked(strings.TrimSpace(id))
 	if index < 0 {
 		return errFileFolderNotFound
 	}
+	priorFolders := append([]fileFolderRecord(nil), s.folders...)
+	priorAssignments := cloneFileFolderAssignments(s.assignments)
 	folderID := s.folders[index].ID
 	s.folders = append(s.folders[:index], s.folders[index+1:]...)
 	for fileID, assigned := range s.assignments {
@@ -181,7 +237,15 @@ func (s *fileFolderStore) remove(id string) error {
 			delete(s.assignments, fileID)
 		}
 	}
-	s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		if errors.Is(err, ErrDurableReplaceAmbiguous) {
+			_ = s.reloadVisibleStateLocked()
+			return err
+		}
+		s.folders = priorFolders
+		s.assignments = priorAssignments
+		return err
+	}
 	return nil
 }
 
@@ -196,12 +260,23 @@ func (s *fileFolderStore) assign(fileID string, folderID string) error {
 	folderID = strings.TrimSpace(folderID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.loadErr != nil {
+		return s.loadErr
+	}
 	if folderID == "" {
-		if _, ok := s.assignments[fileID]; !ok {
+		prior, ok := s.assignments[fileID]
+		if !ok {
 			return nil
 		}
 		delete(s.assignments, fileID)
-		s.persistLocked()
+		if err := s.persistLocked(); err != nil {
+			if errors.Is(err, ErrDurableReplaceAmbiguous) {
+				_ = s.reloadVisibleStateLocked()
+				return err
+			}
+			s.assignments[fileID] = prior
+			return err
+		}
 		return nil
 	}
 	if s.folderIndexLocked(folderID) < 0 {
@@ -210,8 +285,20 @@ func (s *fileFolderStore) assign(fileID string, folderID string) error {
 	if s.assignments == nil {
 		s.assignments = map[string]string{}
 	}
+	prior, hadPrior := s.assignments[fileID]
 	s.assignments[fileID] = folderID
-	s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		if errors.Is(err, ErrDurableReplaceAmbiguous) {
+			_ = s.reloadVisibleStateLocked()
+			return err
+		}
+		if hadPrior {
+			s.assignments[fileID] = prior
+		} else {
+			delete(s.assignments, fileID)
+		}
+		return err
+	}
 	return nil
 }
 
@@ -314,9 +401,20 @@ func fileFolderErrorStatus(err error) int {
 		return http.StatusNotFound
 	case errors.Is(err, errFileFolderDuplicate):
 		return http.StatusConflict
-	default:
+	case errors.Is(err, errFileFolderName), errors.Is(err, errFileFolderLimit), errors.Is(err, errFileFolderFileID):
 		return http.StatusBadRequest
+	default:
+		return http.StatusServiceUnavailable
 	}
+}
+
+func fileFolderPublicError(err error) (int, string) {
+	status := fileFolderErrorStatus(err)
+	if status == http.StatusServiceUnavailable || status == http.StatusInternalServerError {
+		log.Errorf("File-folder mutation failed: %v", err)
+		return status, "file folders are unavailable"
+	}
+	return status, err.Error()
 }
 
 // assistantFileFoldersHandler serves /assistant/files/folders — POST creates,
@@ -350,10 +448,11 @@ func assistantFileFoldersHandler(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, http.StatusBadRequest, "could not read folder request")
 			return
 		}
-		createdBy := firstNonEmptyString(strings.TrimSpace(user.Name), normalizeAccountEmail(user.Email))
+		createdBy := normalizeAccountEmail(user.Email)
 		folder, err := store.create(payload.Name, createdBy)
 		if err != nil {
-			writeAuthError(w, fileFolderErrorStatus(err), err.Error())
+			status, message := fileFolderPublicError(err)
+			writeAuthError(w, status, message)
 			return
 		}
 		broadcastSignedInKanbanEvent("file", map[string]any{"kind": "folders"})
@@ -367,16 +466,26 @@ func assistantFileFoldersHandler(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, http.StatusBadRequest, "could not read folder request")
 			return
 		}
+		if !fileFolderManagedByUser(payload.ID, user) {
+			writeAuthError(w, http.StatusNotFound, "folder not found")
+			return
+		}
 		folder, err := store.rename(payload.ID, payload.Name)
 		if err != nil {
-			writeAuthError(w, fileFolderErrorStatus(err), err.Error())
+			status, message := fileFolderPublicError(err)
+			writeAuthError(w, status, message)
 			return
 		}
 		broadcastSignedInKanbanEvent("file", map[string]any{"kind": "folders"})
 		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "folder": folder})
 	case http.MethodDelete:
+		if !fileFolderManagedByUser(r.URL.Query().Get("id"), user) {
+			writeAuthError(w, http.StatusNotFound, "folder not found")
+			return
+		}
 		if err := store.remove(r.URL.Query().Get("id")); err != nil {
-			writeAuthError(w, fileFolderErrorStatus(err), err.Error())
+			status, message := fileFolderPublicError(err)
+			writeAuthError(w, status, message)
 			return
 		}
 		broadcastSignedInKanbanEvent("file", map[string]any{"kind": "folders"})
@@ -410,10 +519,178 @@ func assistantFileMoveHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, "could not read move request")
 		return
 	}
+	payload.FileID = strings.TrimSpace(payload.FileID)
+	payload.FolderID = strings.TrimSpace(payload.FolderID)
+	if payload.FileID == "" {
+		writeAuthError(w, http.StatusBadRequest, errFileFolderFileID.Error())
+		return
+	}
+	row, rowWritable := authorizedFileRowForMove(r.Context(), user, payload.FileID)
+	if row.ID == "" {
+		writeAuthError(w, http.StatusNotFound, "file not found")
+		return
+	}
+	if payload.FolderID != "" {
+		if !rowWritable || !fileFolderManagedByUser(payload.FolderID, user) {
+			writeAuthError(w, http.StatusNotFound, "file not found")
+			return
+		}
+	} else if !rowWritable {
+		if row.ArtifactID != "" {
+			writeAuthError(w, http.StatusNotFound, "file not found")
+			return
+		}
+		_, assignments := sharedFileFolderStore().snapshot()
+		currentFolderID := assignments[payload.FileID]
+		if currentFolderID == "" || !fileFolderManagedByUser(currentFolderID, user) {
+			writeAuthError(w, http.StatusNotFound, "file not found")
+			return
+		}
+	}
 	if err := sharedFileFolderStore().assign(payload.FileID, payload.FolderID); err != nil {
-		writeAuthError(w, fileFolderErrorStatus(err), err.Error())
+		status, message := fileFolderPublicError(err)
+		writeAuthError(w, status, message)
 		return
 	}
 	broadcastSignedInKanbanEvent("file", map[string]any{"kind": "folders"})
 	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func fileFolderManagedByUser(folderID string, user *userAccount) bool {
+	if user == nil {
+		return false
+	}
+	if isArtifactApprovalAdmin(user) {
+		return true
+	}
+	for _, folder := range listFileFolders() {
+		if folder.ID == strings.TrimSpace(folderID) {
+			creator := strings.TrimSpace(folder.CreatedBy)
+			if canonicalAuthenticatedPrincipal(creator) {
+				return normalizeAccountEmail(creator) == normalizeAccountEmail(user.Email)
+			}
+			creatorEmail, ok := canonicalEmailForUniqueRosterName(creator)
+			return ok && creatorEmail == normalizeAccountEmail(user.Email)
+		}
+	}
+	return false
+}
+
+// authorizedFileRowForMove resolves through the exact Files visibility seam.
+// Direct uploads are legacy team-readable but uploader-write; chat files are
+// uploader-write after their thread visibility gate; deliverables additionally
+// require exact canonical artifact read+write authorization.
+var fileMoveChatThreadBodyProbe func(string)
+
+func authorizedFileRowForMove(ctx context.Context, user *userAccount, fileID string) (assistantFileRecord, bool) {
+	if user == nil || kanbanApp == nil || strings.TrimSpace(fileID) == "" {
+		return assistantFileRecord{}, false
+	}
+	fileID = strings.TrimSpace(fileID)
+
+	// Artifacts have their own exact header/revision authorizer. The body is
+	// only projected into a Files row after both read and write are allowed.
+	if kanbanApp.memory != nil {
+		if _, found := kanbanApp.memory.artifactAuthorizationHeaderByID(fileID); found {
+			artifact, ok := authorizedArtifactForActions(ctx, user, fileID, ACLReadContent, ACLWrite)
+			if !ok {
+				return assistantFileRecord{}, false
+			}
+			row, visible := fileDeliverableRecord(artifact)
+			return row, visible
+		}
+	}
+
+	// Direct files are classified from metadata only. Their company-readable,
+	// uploader-write legacy policy never needs Entry.Text.
+	if kanbanApp.memory != nil {
+		kanbanApp.memory.mu.Lock()
+		for index := len(kanbanApp.memory.entries) - 1; index >= 0; index-- {
+			entry := &kanbanApp.memory.entries[index]
+			if entry.Kind != meetingMemoryKindFile || entry.ID != fileID {
+				continue
+			}
+			metadata := make(map[string]string, len(entry.Metadata))
+			for key, value := range entry.Metadata {
+				metadata[key] = value
+			}
+			header := meetingMemoryEntry{ID: entry.ID, Kind: entry.Kind, CreatedAt: entry.CreatedAt, Metadata: metadata}
+			kanbanApp.memory.mu.Unlock()
+			row := fileRecordFromEntry(header)
+			writable := isArtifactApprovalAdmin(user) || normalizeAccountEmail(row.UploaderEmail) != "" && normalizeAccountEmail(row.UploaderEmail) == normalizeAccountEmail(user.Email)
+			return row, writable
+		}
+		kanbanApp.memory.mu.Unlock()
+	}
+
+	// Attachment ids are <thread>:<message>:<index>. Parse the exact source,
+	// authorize its owner/visibility metadata header, and only then decode that
+	// one thread body.
+	threadID, messageID, fileIndex, parsed := parseChatAttachmentFileID(fileID)
+	if !parsed || kanbanApp.memory == nil {
+		return assistantFileRecord{}, false
+	}
+	var threadEntry meetingMemoryEntry
+	kanbanApp.memory.mu.Lock()
+	for index := len(kanbanApp.memory.entries) - 1; index >= 0; index-- {
+		entry := &kanbanApp.memory.entries[index]
+		if entry.Kind != meetingMemoryKindScoutChat || entry.ID != threadID {
+			continue
+		}
+		ownerEmail := normalizeAccountEmail(entry.Metadata["ownerEmail"])
+		visibility := normalizeScoutChatVisibility(entry.Metadata["visibility"])
+		if ownerEmail == "" || ownerEmail != normalizeAccountEmail(user.Email) && visibility != scoutChatVisibilityPublic {
+			kanbanApp.memory.mu.Unlock()
+			return assistantFileRecord{}, false
+		}
+		threadEntry = cloneMemoryEntry(*entry)
+		break
+	}
+	kanbanApp.memory.mu.Unlock()
+	if threadEntry.ID == "" {
+		return assistantFileRecord{}, false
+	}
+	if fileMoveChatThreadBodyProbe != nil {
+		fileMoveChatThreadBodyProbe(threadEntry.ID)
+	}
+	thread, decoded := decodeScoutChatThreadEntry(threadEntry)
+	if !decoded {
+		return assistantFileRecord{}, false
+	}
+	sourceFound := false
+	for _, message := range thread.Messages {
+		if message.ID == messageID && fileIndex < len(message.Files) {
+			file := message.Files[fileIndex]
+			sourceFound = strings.TrimSpace(file.Ref) != "" || strings.TrimSpace(file.Text) != ""
+			break
+		}
+	}
+	if !sourceFound {
+		return assistantFileRecord{}, false
+	}
+	for _, row := range fileRecordsFromThread(thread) {
+		if row.ID != fileID {
+			continue
+		}
+		writable := isArtifactApprovalAdmin(user) || normalizeAccountEmail(row.UploaderEmail) == normalizeAccountEmail(user.Email) || normalizeAccountEmail(thread.OwnerEmail) == normalizeAccountEmail(user.Email)
+		return row, writable
+	}
+	return assistantFileRecord{}, false
+}
+
+func parseChatAttachmentFileID(fileID string) (string, string, int, bool) {
+	last := strings.LastIndex(fileID, ":")
+	if last <= 0 || last == len(fileID)-1 {
+		return "", "", 0, false
+	}
+	fileIndex, err := strconv.Atoi(fileID[last+1:])
+	if err != nil || fileIndex < 0 {
+		return "", "", 0, false
+	}
+	prefix := fileID[:last]
+	middle := strings.LastIndex(prefix, ":")
+	if middle <= 0 || middle == len(prefix)-1 {
+		return "", "", 0, false
+	}
+	return prefix[:middle], prefix[middle+1:], fileIndex, true
 }

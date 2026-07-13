@@ -101,7 +101,7 @@ func (app *kanbanBoardApp) runScoutChatImageGeneration(threadID string, ownerEma
 
 	// Refresh every signed-in library so the new design artifact appears (the
 	// launchAgentThreadWithSpec precedent).
-	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", nil)
 
 	message := scoutChatMessageRecord{
 		ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),

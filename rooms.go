@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -87,18 +88,22 @@ type guestLinkRecord struct {
 // roomStore persists the room registry with the sessions.json idiom: one
 // mutex, write-tmp-then-rename, office seeded when the file is missing.
 type roomStore struct {
-	mu    sync.Mutex
-	path  string
-	rooms []roomRecord
+	mu      sync.Mutex
+	path    string
+	rooms   []roomRecord
+	loadErr error
 }
 
 func newRoomStore(path string) *roomStore {
 	store := &roomStore{path: path}
 	if raw, err := os.ReadFile(path); err == nil {
 		if err := json.Unmarshal(raw, &store.rooms); err != nil {
-			log.Errorf("Ignoring malformed room store at %s: %v", path, err)
-			store.rooms = nil
+			store.loadErr = fmt.Errorf("room store is malformed: %w", err)
+			log.Errorf("Refusing malformed room store at %s: %v", path, err)
 		}
+	}
+	if store.loadErr != nil {
+		return store
 	}
 	if _, ok := store.roomByIDLocked(officeRoomID); !ok {
 		// §9.1: the existing office becomes the default room. No passcode,
@@ -108,15 +113,39 @@ func newRoomStore(path string) *roomStore {
 			Name:      officeRoomName,
 			CreatedAt: time.Now().UTC(),
 		}}, store.rooms...)
-		store.persistLocked()
+		if err := store.persistLocked(); err != nil {
+			log.Errorf("Failed to seed room store: %v", err)
+		}
 	}
 	return store
 }
 
-func (s *roomStore) persistLocked() {
-	if err := writeJSONFileAtomically(s.path, "room store", s.rooms); err != nil {
-		log.Errorf("Failed to persist room store: %v", err)
+func (s *roomStore) persistLocked() error {
+	if s.loadErr != nil {
+		return s.loadErr
 	}
+	return writeJSONFileAtomically(s.path, "room store", s.rooms)
+}
+
+func (s *roomStore) reloadVisibleStateLocked() error {
+	raw, err := os.ReadFile(s.path)
+	if err != nil {
+		return err
+	}
+	var rooms []roomRecord
+	if err := json.Unmarshal(raw, &rooms); err != nil {
+		return err
+	}
+	s.rooms = rooms
+	s.loadErr = nil
+	return nil
+}
+
+func (s *roomStore) resolvePersistFailureLocked(err error, rollback func()) {
+	if errors.Is(err, ErrDurableReplaceAmbiguous) && s.reloadVisibleStateLocked() == nil {
+		return
+	}
+	rollback()
 }
 
 func (s *roomStore) roomByIDLocked(id string) (int, bool) {
@@ -195,7 +224,10 @@ func (s *roomStore) create(name, passcode, createdBy string, guestEnabled bool) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.rooms = append(s.rooms, record)
-	s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		s.resolvePersistFailureLocked(err, func() { s.rooms = s.rooms[:len(s.rooms)-1] })
+		return roomRecord{}, err
+	}
 	return cloneRoomRecord(record), nil
 }
 
@@ -222,8 +254,12 @@ func (s *roomStore) setPasscode(id, passcode string) error {
 	if !ok {
 		return errRoomNotFound
 	}
+	prior := s.rooms[index].PasscodeHash
 	s.rooms[index].PasscodeHash = passcodeHash
-	s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		s.resolvePersistFailureLocked(err, func() { s.rooms[index].PasscodeHash = prior })
+		return err
+	}
 	return nil
 }
 
@@ -246,8 +282,12 @@ func (s *roomStore) archive(id string) error {
 	if !ok {
 		return errRoomNotFound
 	}
+	prior := s.rooms[index].Archived
 	s.rooms[index].Archived = true
-	s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		s.resolvePersistFailureLocked(err, func() { s.rooms[index].Archived = prior })
+		return err
+	}
 	return nil
 }
 
@@ -266,8 +306,12 @@ func (s *roomStore) restore(id string) error {
 	if !ok {
 		return errRoomNotFound
 	}
+	prior := s.rooms[index].Archived
 	s.rooms[index].Archived = false
-	s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		s.resolvePersistFailureLocked(err, func() { s.rooms[index].Archived = prior })
+		return err
+	}
 	return nil
 }
 
@@ -309,11 +353,15 @@ func (s *roomStore) mintGuestLink(roomID, label, createdBy string, ttl time.Dura
 	if s.rooms[index].Archived {
 		return "", guestLinkRecord{}, errors.New("archived rooms cannot mint guest links")
 	}
+	prior := cloneRoomRecord(s.rooms[index])
 	s.rooms[index].GuestLinks = append(s.rooms[index].GuestLinks, record)
 	// Minting the first link flips the room guest-enabled (§3.1); the
 	// per-sitting listen-only latch reads this in W4.
 	s.rooms[index].GuestEnabled = true
-	s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		s.resolvePersistFailureLocked(err, func() { s.rooms[index] = prior })
+		return "", guestLinkRecord{}, err
+	}
 	return token, record, nil
 }
 
@@ -336,8 +384,12 @@ func (s *roomStore) revokeGuestLink(roomID, linkID string) error {
 	}
 	for linkIndex, link := range s.rooms[roomIndex].GuestLinks {
 		if link.ID == linkID {
+			prior := s.rooms[roomIndex].GuestLinks[linkIndex].Revoked
 			s.rooms[roomIndex].GuestLinks[linkIndex].Revoked = true
-			s.persistLocked()
+			if err := s.persistLocked(); err != nil {
+				s.resolvePersistFailureLocked(err, func() { s.rooms[roomIndex].GuestLinks[linkIndex].Revoked = prior })
+				return err
+			}
 			return nil
 		}
 	}
@@ -380,6 +432,10 @@ func (s *roomStore) sweepExpiredGuestLinks() {
 	defer s.mu.Unlock()
 	now := time.Now()
 	changed := false
+	prior := make([]roomRecord, len(s.rooms))
+	for index := range s.rooms {
+		prior[index] = cloneRoomRecord(s.rooms[index])
+	}
 	for index, room := range s.rooms {
 		kept := room.GuestLinks[:0]
 		for _, link := range room.GuestLinks {
@@ -395,7 +451,10 @@ func (s *roomStore) sweepExpiredGuestLinks() {
 		s.rooms[index].GuestLinks = kept
 	}
 	if changed {
-		s.persistLocked()
+		if err := s.persistLocked(); err != nil {
+			s.resolvePersistFailureLocked(err, func() { s.rooms = prior })
+			log.Errorf("Failed to persist expired guest-link sweep: %v", err)
+		}
 	}
 }
 
@@ -559,6 +618,10 @@ func roomActionHandler(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if !roomManagedByUser(roomID, user) {
+		writeAuthError(w, http.StatusNotFound, "room not found")
+		return
+	}
 
 	switch {
 	case action == "passcode" && r.Method == http.MethodPost:
@@ -644,6 +707,21 @@ func roomActionHandler(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func roomManagedByUser(roomID string, user *userAccount) bool {
+	if user == nil {
+		return false
+	}
+	if isArtifactApprovalAdmin(user) {
+		return true
+	}
+	for _, room := range appRoomStore().list() {
+		if room.ID == strings.TrimSpace(roomID) {
+			return normalizeAccountEmail(room.CreatedBy) != "" && normalizeAccountEmail(room.CreatedBy) == normalizeAccountEmail(user.Email)
+		}
+	}
+	return false
 }
 
 func writeRoomActionError(w http.ResponseWriter, err error) {

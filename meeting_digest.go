@@ -1010,7 +1010,8 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 	}
 
 	model := meetingBrainModel()
-	current := app.memory.latestDigestPerMeeting()
+	contextApp := app.scopedRecallApp(ctx, ambientServicePrincipalForInputs(inputs))
+	current := contextApp.memory.latestDigestPerMeeting()
 	processed := map[string]bool{}
 	var newest meetingMemoryEntry
 	for _, group := range groups {
@@ -1088,7 +1089,8 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 		// verified before, or anchors whose transcript was later quarantined) are
 		// grounded on the same footing as fresh model output; grounding is
 		// idempotent, so re-checking an already-verified model fact is a no-op.
-		verifyMeetingDigestPayload(&payload, spanStart, spanEnd, app.digestTranscriptIDSet(group.key))
+		groupContextApp := app.scopedRecallApp(ctx, ambientServicePrincipalForInputs(group.brains))
+		verifyMeetingDigestPayload(&payload, spanStart, spanEnd, groupContextApp.digestTranscriptIDSet(group.key))
 		canonical, err := json.Marshal(payload)
 		if err != nil {
 			return newest, err
@@ -1109,6 +1111,7 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 			"brainCount":                   strconv.Itoa(len(group.brains)),
 			"generatedAt":                  time.Now().UTC().Format(time.RFC3339),
 		}
+		metadata = applyAmbientDerivedScope(metadata, group.brains)
 		// item 1.3a: mirror the clamped aliases into searchable metadata text.
 		if aliases := digestAliasesMetadata(payload.Aliases); aliases != "" {
 			metadata[digestAliasesMetadataKey] = aliases
@@ -1405,7 +1408,8 @@ func (app *kanbanBoardApp) runDayDigestPass(ctx context.Context, apiKey string, 
 	}
 	sort.Strings(days)
 
-	current := app.memory.latestDigestPerMeeting()
+	contextApp := app.scopedRecallApp(ctx, ambientServicePrincipalForInputs(inputs))
+	current := contextApp.memory.latestDigestPerMeeting()
 	rebuilt := make([]string, 0, len(days))
 	for _, day := range days {
 		payload, ok := foldDayDigest(day, current)
@@ -1426,6 +1430,7 @@ func (app *kanbanBoardApp) runDayDigestPass(ctx context.Context, apiKey string, 
 			"meetingIds":         strings.Join(meetingIDs, ","),
 			"generatedAt":        now.UTC().Format(time.RFC3339),
 		}
+		metadata = applyAmbientDerivedScope(metadata, inputs)
 		if _, err := app.memory.upsertDigest(meetingMemoryKindDayDigest, day, string(canonical), metadata); err != nil {
 			// the cursor artifact has not landed yet: the whole window
 			// re-feeds next tick and the fold self-heals.
@@ -1438,11 +1443,12 @@ func (app *kanbanBoardApp) runDayDigestPass(ctx context.Context, apiKey string, 
 	if len(rebuilt) > 0 {
 		passText = "day digest pass: rebuilt " + strings.Join(rebuilt, ", ")
 	}
-	passEntry, _, err := app.memory.appendAmbientEntry(meetingMemoryKindDayDigestPass, durableTimestampID("day-digest-pass", now), passText, map[string]string{
+	passMetadata := applyAmbientDerivedScope(map[string]string{
 		dayDigestCursorMetadataKey: inputs[len(inputs)-1].ID,
 		"daysRebuilt":              strconv.Itoa(len(rebuilt)),
 		"generatedAt":              now.UTC().Format(time.RFC3339),
-	})
+	}, inputs)
+	passEntry, _, err := app.memory.appendAmbientEntry(meetingMemoryKindDayDigestPass, durableTimestampID("day-digest-pass", now), passText, passMetadata)
 	if err != nil {
 		return meetingMemoryEntry{}, err
 	}

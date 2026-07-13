@@ -567,7 +567,10 @@ func TestMeetingRecapForNamedRoomNeverReachesSignedInUnion(t *testing.T) {
 
 	// Ordered-marker probe: anything the recap leaked onto the signed-in
 	// union would arrive on the office socket BEFORE this marker.
-	broadcastSignedInKanbanEvent("memory", []map[string]any{{"id": "recap-marker"}})
+	if _, _, err := kanbanApp.memory.appendAmbientEntry(meetingMemoryKindBrain, "recap-marker", "ordered recap marker", nil); err != nil {
+		t.Fatalf("append recap marker: %v", err)
+	}
+	broadcastSignedInKanbanEvent("memory", nil)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		if err := conn.SetReadDeadline(deadline); err != nil {

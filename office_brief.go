@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"sort"
 	"strconv"
@@ -78,13 +79,18 @@ func approvalAdminDisplayName() string {
 // ("queued for AJ's sign-off") — their request is visible and owned, never
 // swallowed into someone else's queue.
 func (app *kanbanBoardApp) pendingApprovalEntries(viewerEmail string, isAdmin bool) []map[string]any {
+	principal, _ := authenticatedRecallPrincipal(viewerEmail)
+	return app.pendingApprovalEntriesForPrincipal(context.Background(), principal, viewerEmail, isAdmin)
+}
+
+func (app *kanbanBoardApp) pendingApprovalEntriesForPrincipal(ctx context.Context, principal RecallPrincipal, viewerEmail string, isAdmin bool) []map[string]any {
 	entries := []map[string]any{}
 	if app == nil || app.memory == nil {
 		return entries
 	}
 	viewerEmail = normalizeAccountEmail(viewerEmail)
 	adminName := approvalAdminDisplayName()
-	artifacts := app.osArtifactsSnapshot(0)
+	artifacts := app.recallStoreForPrincipal(ctx, principal).entriesOfKind(meetingMemoryKindOSArtifact, 0)
 	// newest-first: the freshest request sits at the top of the queue.
 	for i := len(artifacts) - 1; i >= 0; i-- {
 		artifact := artifacts[i]
@@ -128,11 +134,15 @@ func (app *kanbanBoardApp) pendingApprovalEntries(viewerEmail string, isAdmin bo
 // artifacts (completed/published/verified goals + drafts), newest first,
 // excluding anything still parked at a gate. Titles only.
 func (app *kanbanBoardApp) recentCompletedArtifacts(limit int) []map[string]any {
+	return app.recentCompletedArtifactsForPrincipal(context.Background(), sharedRoomRecallPrincipal(officeRoomID, ""), limit)
+}
+
+func (app *kanbanBoardApp) recentCompletedArtifactsForPrincipal(ctx context.Context, principal RecallPrincipal, limit int) []map[string]any {
 	items := []map[string]any{}
 	if app == nil || app.memory == nil {
 		return items
 	}
-	artifacts := app.osArtifactsSnapshot(0)
+	artifacts := app.recallStoreForPrincipal(ctx, principal).entriesOfKind(meetingMemoryKindOSArtifact, 0)
 	for i := len(artifacts) - 1; i >= 0; i-- {
 		artifact := artifacts[i]
 		if artifactAwaitingApproval(artifact.Metadata) {
@@ -165,12 +175,16 @@ func (app *kanbanBoardApp) recentCompletedArtifacts(limit int) []map[string]any 
 // digests (the board worker's "what changed" summaries) newest first, plus the
 // count of Scout-drafted cards still awaiting a human accept/dismiss.
 func (app *kanbanBoardApp) recentBoardDeltas(limit int) map[string]any {
+	return app.recentBoardDeltasForPrincipal(context.Background(), sharedRoomRecallPrincipal(officeRoomID, ""), limit)
+}
+
+func (app *kanbanBoardApp) recentBoardDeltasForPrincipal(ctx context.Context, principal RecallPrincipal, limit int) map[string]any {
 	deltas := []map[string]any{}
 	draftCount := 0
 	if app == nil || app.memory == nil {
 		return map[string]any{"items": deltas, "draftCount": draftCount}
 	}
-	updates := app.memory.entriesOfKind(meetingMemoryKindBoardUpdate, limit)
+	updates := app.recallStoreForPrincipal(ctx, principal).entriesOfKind(meetingMemoryKindBoardUpdate, limit)
 	for i := len(updates) - 1; i >= 0; i-- {
 		entry := updates[i]
 		summary := compactAssistantLine(entry.Text)
@@ -224,6 +238,10 @@ func (app *kanbanBoardApp) unreadChannelActivity(viewerEmail string, limit int) 
 // morningBriefPayload composes the whole Brief for one viewer. Admin-ness gates
 // the approval affordances and the quarantine tray's delete button.
 func (app *kanbanBoardApp) morningBriefPayload(viewer *userAccount) map[string]any {
+	return app.morningBriefPayloadContext(context.Background(), viewer)
+}
+
+func (app *kanbanBoardApp) morningBriefPayloadContext(ctx context.Context, viewer *userAccount) map[string]any {
 	isAdmin := isArtifactApprovalAdmin(viewer)
 	viewerEmail := ""
 	greeting := "there"
@@ -233,11 +251,12 @@ func (app *kanbanBoardApp) morningBriefPayload(viewer *userAccount) map[string]a
 			greeting = name[0]
 		}
 	}
-	approvals := app.pendingApprovalEntries(viewerEmail, isAdmin)
-	completed := app.recentCompletedArtifacts(briefCompletedLimit)
-	board := app.recentBoardDeltas(briefBoardDeltaLimit)
+	principal := recallPrincipalForUser(viewer)
+	approvals := app.pendingApprovalEntriesForPrincipal(ctx, principal, viewerEmail, isAdmin)
+	completed := app.recentCompletedArtifactsForPrincipal(ctx, principal, briefCompletedLimit)
+	board := app.recentBoardDeltasForPrincipal(ctx, principal, briefBoardDeltaLimit)
 	unread := app.unreadChannelActivity(viewerEmail, briefUnreadLimit)
-	quarantine := app.quarantineListPayloads()
+	quarantine := app.quarantineListPayloadsForPrincipal(principal)
 
 	return map[string]any{
 		"greeting": greeting,
@@ -557,7 +576,7 @@ func assistantBriefHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok":    true,
-		"brief": kanbanApp.morningBriefPayload(user),
+		"brief": kanbanApp.morningBriefPayloadContext(r.Context(), user),
 	})
 }
 

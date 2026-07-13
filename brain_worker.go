@@ -109,6 +109,7 @@ func (app *kanbanBoardApp) produceMeetingBrainWriteUp(ctx context.Context, apiKe
 		"throughTranscriptCreatedAt": lastTranscript.CreatedAt.Format(time.RFC3339Nano),
 		"transcriptCount":            strconv.Itoa(len(transcripts)),
 	}
+	metadata = applyAmbientDerivedScope(metadata, transcripts)
 	// §6.4 provenance (inclusion RATIFIED 2026-07-09): a write-up over a
 	// listen-only sitting's transcripts carries the origin stamp — the rollups
 	// consume it like any other material; the stamp keeps the external-guest
@@ -122,12 +123,14 @@ func (app *kanbanBoardApp) produceMeetingBrainWriteUp(ctx context.Context, apiKe
 		return entry, err
 	}
 
-	broadcastKanbanEvent("memory_brain", entry)
+	broadcastScopedMemoryEntry("memory_brain", entry, entry)
 	// Office memory rails stay live via the snapshot path: the entry-shaped
 	// memory_brain event stays room-only because the client's addMemoryEntry
 	// does not dedupe by id.
-	broadcastOfficeKanbanEvent("memory", app.memorySnapshotForClients(20))
-	broadcastAssistantEvent("action", "Scout updated the room brain.", map[string]any{"kind": meetingMemoryKindBrain})
+	broadcastOfficeKanbanEvent("memory", nil)
+	broadcastScopedMemoryEntry("assistant_event", entry, map[string]any{
+		"kind": "action", "text": "Scout updated the room brain.", "memoryKind": meetingMemoryKindBrain, "createdAt": time.Now().UTC().Format(time.RFC3339Nano),
+	})
 
 	// A3 cascade: a fresh write-up just landed — wake every worker that consumes
 	// brains so the board / ledger / mission / narrative reflect it promptly

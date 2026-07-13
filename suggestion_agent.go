@@ -130,8 +130,13 @@ func (app *kanbanBoardApp) produceResearchSuggestions(ctx context.Context, apiKe
 		app.setAmbientAgentBaselineID(baselineKey, windowLast.ID)
 		return meetingMemoryEntry{}, nil
 	}
+	if ambientDerivedScopeMetadata(summaries)["visibility"] != "organization" {
+		app.setAmbientAgentBaselineID(baselineKey, windowLast.ID)
+		return meetingMemoryEntry{}, nil
+	}
 
-	known := app.existingResearchTopicStrings(researchSuggestionKnownTopicScan)
+	contextApp := app.scopedRecallApp(ctx, ambientServicePrincipalForInputs(summaries))
+	known := contextApp.existingResearchTopicStrings(researchSuggestionKnownTopicScan)
 	model := researchSuggestionModel()
 	text, err := responder(ctx, apiKey, openAITextRequest{
 		Model:        model,

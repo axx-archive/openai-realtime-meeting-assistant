@@ -25,7 +25,9 @@ package main
 // never touch websockets; callers broadcast after every lock is released.
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -170,14 +172,27 @@ func loadMeetingStoreState(path string) ([]meetingRecord, error) {
 	return records, nil
 }
 
-func (store *meetingStore) persistLocked() {
+func (store *meetingStore) persistLocked() error {
 	state := meetingStoreState{
 		Meetings:  append([]meetingRecord(nil), store.records...),
 		UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	if err := writeJSONFileAtomically(store.path, "meetings", state); err != nil {
-		log.Errorf("Failed to persist meetings: %v", err)
+	err := writeJSONFileAtomically(store.path, "meetings", state)
+	if err == nil {
+		return nil
 	}
+	log.Errorf("Failed to persist meetings: %v", err)
+	return err
+}
+
+func (store *meetingStore) resolvePersistFailureLocked(err error, rollback func()) {
+	if errors.Is(err, ErrDurableReplaceAmbiguous) {
+		if persisted, loadErr := loadMeetingStoreState(store.path); loadErr == nil {
+			store.records = persisted
+			return
+		}
+	}
+	rollback()
 }
 
 // unionMeetingParticipants unions canonical participant names into
@@ -281,12 +296,19 @@ func (store *meetingStore) startMeeting(roomID string, id string, startedAt time
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
+	priorRecords := make([]meetingRecord, len(store.records))
+	for index := range store.records {
+		priorRecords[index] = cloneMeetingRecord(store.records[index])
+	}
 	if index := store.openRecordIndexLocked(roomID); index >= 0 {
 		if store.records[index].ID == id {
 			union, changed := unionMeetingParticipants(store.records[index].Participants, participants)
 			if changed {
 				store.records[index].Participants = union
-				store.persistLocked()
+				if err := store.persistLocked(); err != nil {
+					store.resolvePersistFailureLocked(err, func() { store.records = priorRecords })
+					return cloneMeetingRecord(store.records[index]), false
+				}
 			}
 			return cloneMeetingRecord(store.records[index]), changed
 		}
@@ -305,7 +327,10 @@ func (store *meetingStore) startMeeting(roomID string, id string, startedAt time
 	if len(store.records) > meetingStoreCap {
 		store.records = store.records[len(store.records)-meetingStoreCap:]
 	}
-	store.persistLocked()
+	if err := store.persistLocked(); err != nil {
+		store.resolvePersistFailureLocked(err, func() { store.records = priorRecords })
+		return meetingRecord{}, false
+	}
 	return cloneMeetingRecord(record), true
 }
 
@@ -345,7 +370,10 @@ func (store *meetingStore) latchListenOnly(id string) (meetingRecord, bool) {
 			return cloneMeetingRecord(store.records[index]), false
 		}
 		store.records[index].ListenOnly = true
-		store.persistLocked()
+		if err := store.persistLocked(); err != nil {
+			store.resolvePersistFailureLocked(err, func() { store.records[index].ListenOnly = false })
+			return cloneMeetingRecord(store.records[index]), false
+		}
 		return cloneMeetingRecord(store.records[index]), true
 	}
 	return meetingRecord{}, false
@@ -373,8 +401,12 @@ func (store *meetingStore) addParticipant(id string, name string) (meetingRecord
 	}
 	union, changed := unionMeetingParticipants(store.records[index].Participants, []string{name})
 	if changed {
+		prior := append([]string(nil), store.records[index].Participants...)
 		store.records[index].Participants = union
-		store.persistLocked()
+		if err := store.persistLocked(); err != nil {
+			store.resolvePersistFailureLocked(err, func() { store.records[index].Participants = prior })
+			return cloneMeetingRecord(store.records[index]), false
+		}
 	}
 	return cloneMeetingRecord(store.records[index]), changed
 }
@@ -417,10 +449,14 @@ func (store *meetingStore) endMeetingLocked(id string, endedAt time.Time, reason
 		if store.records[index].EndedAt != "" {
 			return cloneMeetingRecord(store.records[index]), false
 		}
+		prior := cloneMeetingRecord(store.records[index])
 		store.records[index].EndedAt = endedAt.UTC().Format(time.RFC3339Nano)
 		store.records[index].EndedReason = reason
 		store.records[index].ArchiveID = strings.TrimSpace(archiveID)
-		store.persistLocked()
+		if err := store.persistLocked(); err != nil {
+			store.resolvePersistFailureLocked(err, func() { store.records[index] = prior })
+			return cloneMeetingRecord(prior), false
+		}
 		return cloneMeetingRecord(store.records[index]), true
 	}
 	return meetingRecord{}, false
@@ -447,8 +483,12 @@ func (store *meetingStore) stampArchiveID(id string, archiveID string) (meetingR
 		if store.records[index].EndedAt == "" || store.records[index].ArchiveID != "" {
 			return cloneMeetingRecord(store.records[index]), false
 		}
+		prior := store.records[index].ArchiveID
 		store.records[index].ArchiveID = archiveID
-		store.persistLocked()
+		if err := store.persistLocked(); err != nil {
+			store.resolvePersistFailureLocked(err, func() { store.records[index].ArchiveID = prior })
+			return cloneMeetingRecord(store.records[index]), false
+		}
 		return cloneMeetingRecord(store.records[index]), true
 	}
 	return meetingRecord{}, false
@@ -475,9 +515,13 @@ func (store *meetingStore) setAutoTitle(id string, title string) (meetingRecord,
 		if store.records[index].Title == title {
 			return cloneMeetingRecord(store.records[index]), false
 		}
+		prior := cloneMeetingRecord(store.records[index])
 		store.records[index].Title = title
 		store.records[index].TitleSource = meetingTitleSourceAuto
-		store.persistLocked()
+		if err := store.persistLocked(); err != nil {
+			store.resolvePersistFailureLocked(err, func() { store.records[index] = prior })
+			return cloneMeetingRecord(prior), false
+		}
 		return cloneMeetingRecord(store.records[index]), true
 	}
 	return meetingRecord{}, false
@@ -885,11 +929,22 @@ func meetingDetailLogLine(text string) string {
 // meetingMemoryDetails walks the memory store once and groups the Memory
 // tool's expanded-card data by meeting id (only ids present in wanted).
 func (app *kanbanBoardApp) meetingMemoryDetails(wanted map[string]struct{}) map[string]*meetingMemoryDetail {
+	return meetingMemoryDetailsFromStore(app.memory, wanted)
+}
+
+func (app *kanbanBoardApp) meetingMemoryDetailsForPrincipal(ctx context.Context, principal RecallPrincipal, wanted map[string]struct{}) map[string]*meetingMemoryDetail {
+	if app == nil {
+		return map[string]*meetingMemoryDetail{}
+	}
+	return meetingMemoryDetailsFromStore(app.recallStoreForPrincipal(ctx, principal), wanted)
+}
+
+func meetingMemoryDetailsFromStore(store *meetingMemoryStore, wanted map[string]struct{}) map[string]*meetingMemoryDetail {
 	details := map[string]*meetingMemoryDetail{}
-	if app == nil || app.memory == nil || len(wanted) == 0 {
+	if store == nil || len(wanted) == 0 {
 		return details
 	}
-	for _, entry := range app.memory.snapshot(0) {
+	for _, entry := range store.snapshot(0) {
 		meetingID := strings.TrimSpace(entry.Metadata["meetingId"])
 		if meetingID == "" {
 			continue
@@ -1053,7 +1108,7 @@ func assistantMeetingsHandler(w http.ResponseWriter, r *http.Request) {
 	for _, record := range records {
 		wanted[record.ID] = struct{}{}
 	}
-	details := kanbanApp.meetingMemoryDetails(wanted)
+	details := kanbanApp.meetingMemoryDetailsForPrincipal(r.Context(), recallPrincipalForUser(user), wanted)
 	cardTitles := map[string]string{}
 	for _, card := range kanbanApp.snapshotState().Cards {
 		cardTitles[card.ID] = card.Title

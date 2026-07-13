@@ -279,7 +279,8 @@ func (app *kanbanBoardApp) buildNarrativeMaintainerInput(inputs []meetingMemoryE
 }
 
 func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
-	input := app.buildNarrativeMaintainerInput(inputs, time.Now().UTC())
+	contextApp := app.scopedRecallApp(ctx, ambientServicePrincipalForInputs(inputs))
+	input := contextApp.buildNarrativeMaintainerInput(inputs, time.Now().UTC())
 	model := meetingBrainModel()
 	effort := narrativeMaintainerEffort()
 	var text string
@@ -339,12 +340,12 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 			continue
 		}
 		aliases := clampDigestAliases(update.Aliases)
-		predecessor, hasPredecessor := app.activeNarrativeBySlug(slug)
+		predecessor, hasPredecessor := contextApp.activeNarrativeBySlug(slug)
 		// item 1.3b: a fresh slug that is really a synonym of an existing dossier
 		// ("samsung-tv-plus" for an existing "samsung-tv") resolves to that
 		// dossier via alias/title overlap BEFORE it forks a second storyline.
 		if !hasPredecessor {
-			if resolved, resolvedEntry, ok := app.resolveNarrativeByAlias(slug, update.Title, aliases); ok {
+			if resolved, resolvedEntry, ok := contextApp.resolveNarrativeByAlias(slug, update.Title, aliases); ok {
 				slug = resolved
 				predecessor = resolvedEntry
 				hasPredecessor = true
@@ -362,6 +363,7 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 			"brainCount":       strconv.Itoa(len(inputs)),
 			"generatedAt":      now.Format(time.RFC3339),
 		}
+		metadata = applyAmbientDerivedScope(metadata, inputs)
 		if strings.TrimSpace(meetingID) != "" {
 			metadata["meetingId"] = meetingID
 		}
@@ -430,13 +432,17 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 				log.Errorf("%s failed to expire predecessor %s of %s: %v", narrativeMaintainerAgentName, predecessor.ID, slug, expireErr)
 			}
 		}
-		broadcastOfficeKanbanEvent("narrative", narrativeSnapshotRow(entry))
+		broadcastScopedMemoryEntry("narrative", entry, narrativeSnapshotRow(entry))
 	}
 
 	// Recompute the dominant room title from the freshly-updated segment
 	// salience — no extra model call. This is the ~10-minute re-derive trigger
 	// that keeps the title off the 15-minute mission tick's lag.
-	app.refreshDominantTitle(roomID, now)
+	if ambientDerivedScopeMetadata(inputs)["visibility"] == "organization" {
+		// Title reduction must share the model's filtered memory view; using app
+		// here would let an unrelated private dossier win the org-visible title.
+		contextApp.refreshDominantTitle(roomID, now)
+	}
 
 	if strings.TrimSpace(latest.ID) == "" {
 		// A legitimate "nothing storyline-worthy" pass appends no artifact, so

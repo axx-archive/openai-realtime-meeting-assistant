@@ -487,7 +487,9 @@ func (app *kanbanBoardApp) runAmbientAgentOnceLimited(agent ambientAgentConfig, 
 	runLock.Lock()
 	defer runLock.Unlock()
 
-	inputs := app.memory.unconsumedEntriesAfterForRoom(agent.inputKind, agent.artifactKind, agent.cursorMetadataKey, maxBatch, app.ambientAgentWindowBaseline(agent, roomID), agent.windowRoomID(roomID))
+	servicePrincipal := sharedRoomRecallPrincipal(roomID, app.memory.currentMeetingID(roomID))
+	inputs := app.memory.unconsumedEntriesAfterForRoomForPrincipal(agent.inputKind, agent.artifactKind, agent.cursorMetadataKey, maxBatch, app.ambientAgentWindowBaseline(agent, roomID), agent.windowRoomID(roomID), servicePrincipal)
+	inputs = compatibleAmbientScopePrefix(inputs)
 	if len(inputs) < minBatch {
 		return meetingMemoryEntry{}, nil
 	}
@@ -658,7 +660,8 @@ func (app *kanbanBoardApp) peekUnconsumedWindow(agent ambientAgentConfig, roomID
 		limit = 1
 	}
 	roomID = normalizeRoomID(roomID)
-	inputs := app.memory.unconsumedEntriesAfterForRoom(agent.inputKind, agent.artifactKind, agent.cursorMetadataKey, limit, app.ambientAgentWindowBaseline(agent, roomID), agent.windowRoomID(roomID))
+	principal := sharedRoomRecallPrincipal(roomID, app.memory.currentMeetingID(roomID))
+	inputs := app.memory.unconsumedEntriesAfterForRoomForPrincipal(agent.inputKind, agent.artifactKind, agent.cursorMetadataKey, limit, app.ambientAgentWindowBaseline(agent, roomID), agent.windowRoomID(roomID), principal)
 	if len(inputs) == 0 {
 		return "", 0, 0, false
 	}
@@ -946,6 +949,10 @@ func (store *meetingMemoryStore) unconsumedEntriesAfter(inputKind string, artifa
 // advance another room's window. roomID == "" keeps the company-global
 // single-cursor scan unchanged.
 func (store *meetingMemoryStore) unconsumedEntriesAfterForRoom(inputKind string, artifactKind string, cursorKey string, limit int, baselineID string, roomID string) []meetingMemoryEntry {
+	return store.unconsumedEntriesAfterForRoomForPrincipal(inputKind, artifactKind, cursorKey, limit, baselineID, roomID, RecallPrincipal{})
+}
+
+func (store *meetingMemoryStore) unconsumedEntriesAfterForRoomForPrincipal(inputKind string, artifactKind string, cursorKey string, limit int, baselineID string, roomID string, principal RecallPrincipal) []meetingMemoryEntry {
 	if store == nil || limit <= 0 {
 		return nil
 	}
@@ -955,8 +962,8 @@ func (store *meetingMemoryStore) unconsumedEntriesAfterForRoom(inputKind string,
 	}
 
 	store.mu.Lock()
-	entries := cloneMemoryEntries(store.entries)
-	store.mu.Unlock()
+	defer store.mu.Unlock()
+	entries := store.entries
 
 	startIndex := 0
 	baselineID = strings.TrimSpace(baselineID)
@@ -970,7 +977,7 @@ func (store *meetingMemoryStore) unconsumedEntriesAfterForRoom(inputKind string,
 	}
 	for index := len(entries) - 1; index >= 0; index-- {
 		entry := entries[index]
-		if entry.Kind != artifactKind || !matchesRoom(entry) {
+		if entry.Kind != artifactKind || !matchesRoom(entry) || (principal.Audience != "" && !recallEntryScopeAllowed(entry.Metadata, principal)) {
 			continue
 		}
 		cursorID := strings.TrimSpace(entry.Metadata[cursorKey])
@@ -994,13 +1001,68 @@ func (store *meetingMemoryStore) unconsumedEntriesAfterForRoom(inputKind string,
 		if entry.Kind != inputKind || !matchesRoom(entry) {
 			continue
 		}
-		inputs = append(inputs, entry)
+		if principal.Audience != "" && !recallEntryScopeAllowed(entry.Metadata, principal) {
+			continue
+		}
+		inputs = append(inputs, cloneMemoryEntry(entry))
 		if len(inputs) >= limit {
 			break
 		}
 	}
 
 	return inputs
+}
+
+func compatibleAmbientScopePrefix(inputs []meetingMemoryEntry) []meetingMemoryEntry {
+	roomID, sittingID := "", ""
+	for index, entry := range inputs {
+		visibility := strings.ToLower(strings.TrimSpace(entry.Metadata["visibility"]))
+		if visibility != "room" && visibility != "room_only" {
+			continue
+		}
+		entryRoom := normalizeRoomID(entry.Metadata["roomId"])
+		entrySitting := firstNonEmptyString(strings.TrimSpace(entry.Metadata["sittingId"]), strings.TrimSpace(entry.Metadata["meetingId"]))
+		if roomID == "" {
+			roomID, sittingID = entryRoom, entrySitting
+			continue
+		}
+		if entryRoom != roomID || entrySitting != sittingID {
+			return inputs[:index]
+		}
+	}
+	return inputs
+}
+
+func ambientDerivedScopeMetadata(inputs []meetingMemoryEntry) map[string]string {
+	metadata := map[string]string{"tenantId": canonicalArtifactTenantID(), "visibility": "organization"}
+	for _, entry := range inputs {
+		visibility := strings.ToLower(strings.TrimSpace(entry.Metadata["visibility"]))
+		if visibility == "room" || visibility == "room_only" {
+			metadata["visibility"] = "room_only"
+			metadata["roomId"] = normalizeRoomID(entry.Metadata["roomId"])
+			metadata["sittingId"] = firstNonEmptyString(strings.TrimSpace(entry.Metadata["sittingId"]), strings.TrimSpace(entry.Metadata["meetingId"]))
+		}
+	}
+	return metadata
+}
+
+func applyAmbientDerivedScope(metadata map[string]string, inputs []meetingMemoryEntry) map[string]string {
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	for key, value := range ambientDerivedScopeMetadata(inputs) {
+		metadata[key] = value
+	}
+	return metadata
+}
+
+func ambientServicePrincipalForInputs(inputs []meetingMemoryEntry) RecallPrincipal {
+	roomID := ambientWindowRoomID(inputs)
+	sittingID := ""
+	if len(inputs) > 0 {
+		sittingID = firstNonEmptyString(strings.TrimSpace(inputs[0].Metadata["sittingId"]), strings.TrimSpace(inputs[0].Metadata["meetingId"]))
+	}
+	return sharedRoomRecallPrincipal(roomID, sittingID)
 }
 
 func (store *meetingMemoryStore) latestEntryIDOfKind(kind string) string {

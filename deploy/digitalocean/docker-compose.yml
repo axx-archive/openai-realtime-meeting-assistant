@@ -32,6 +32,42 @@ services:
     networks:
       - default
       - render_internal
+    depends_on:
+      canonical-postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # W1 canonical shadow target. It is deliberately private to the Compose
+  # network and resource-capped for the W1 droplet. W4 may replace
+  # this with managed HA PostgreSQL after its separate cost/DR gate.
+  canonical-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: bonfire
+      POSTGRES_USER: bonfire
+      POSTGRES_PASSWORD: ${BONFIRE_CANONICAL_POSTGRES_PASSWORD:?BONFIRE_CANONICAL_POSTGRES_PASSWORD is required}
+    command:
+      - postgres
+      - -c
+      - max_connections=30
+      - -c
+      - shared_buffers=64MB
+      - -c
+      - effective_cache_size=128MB
+      - -c
+      - work_mem=2MB
+      - -c
+      - maintenance_work_mem=32MB
+    volumes:
+      - canonical_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bonfire -d bonfire"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+    mem_limit: 256m
+    shm_size: 64m
     restart: unless-stopped
 
   codex-runner:
@@ -167,3 +203,6 @@ volumes:
   usage_ledger:
     external: true
     name: digitalocean_usage_ledger
+  canonical_postgres:
+    external: true
+    name: digitalocean_canonical_postgres

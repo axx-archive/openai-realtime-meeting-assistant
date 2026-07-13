@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -88,6 +90,54 @@ func TestPutBlobGetBlobRoundTripDedupeAndMimePinning(t *testing.T) {
 	}
 	if otherRef == ref {
 		t.Fatalf("distinct bytes produced the same ref %q", ref)
+	}
+}
+
+func TestPutBlobRepairsEveryIncompletePublicationCrashPoint(t *testing.T) {
+	dir := setupIsolatedBlobStore(t)
+	data := []byte("recoverable blob payload")
+	digest := sha256.Sum256(data)
+	ref := hex.EncodeToString(digest[:])
+	dataPath := filepath.Join(dir, "blobs", ref[:2], ref)
+	if err := os.MkdirAll(filepath.Dir(dataPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Crash after data publication but before sidecar: bytes are not served,
+	// and retry repairs the publication marker.
+	if err := os.WriteFile(dataPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := getBlob(ref); err == nil {
+		t.Fatal("data-only blob was retrievable")
+	}
+	if got, err := putBlob(data, "application/pdf"); err != nil || got != ref {
+		t.Fatalf("repair data-only put ref=%q err=%v", got, err)
+	}
+
+	// A malformed sidecar is likewise unpublished and deterministically
+	// repaired without changing the content address.
+	if err := os.WriteFile(dataPath+blobMetaSuffix, []byte("{broken"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := getBlob(ref); err == nil {
+		t.Fatal("malformed-sidecar blob was retrievable")
+	}
+	if got, err := putBlob(data, "application/pdf"); err != nil || got != ref {
+		t.Fatalf("repair malformed meta ref=%q err=%v", got, err)
+	}
+
+	// Corrupt bytes occupying the correct hash path are repaired from the
+	// caller-supplied bytes before the sidecar is accepted.
+	if err := os.WriteFile(dataPath, []byte("corrupt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := putBlob(data, "application/pdf"); err != nil || got != ref {
+		t.Fatalf("repair corrupt data ref=%q err=%v", got, err)
+	}
+	got, _, err := getBlob(ref)
+	if err != nil || !bytes.Equal(got, data) {
+		t.Fatalf("repaired blob bytes=%q err=%v", got, err)
 	}
 }
 

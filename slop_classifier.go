@@ -750,6 +750,48 @@ func (app *kanbanBoardApp) quarantineListPayloads() []map[string]any {
 	return payloads
 }
 
+func (app *kanbanBoardApp) quarantineListPayloadsForPrincipal(principal RecallPrincipal) []map[string]any {
+	if app == nil || app.memory == nil {
+		return []map[string]any{}
+	}
+	type candidate struct {
+		entry  meetingMemoryEntry
+		header ArtifactAuthorizationHeader
+	}
+	var candidates []candidate
+	app.memory.mu.Lock()
+	for _, stored := range app.memory.entries {
+		if memoryEntryRelevance(stored) != relevanceQuarantined || !recallEntryScopeAllowed(stored.Metadata, principal) {
+			continue
+		}
+		item := candidate{}
+		if stored.Kind == meetingMemoryKindOSArtifact {
+			item.header = app.memory.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(meetingMemoryEntry{ID: stored.ID, Kind: stored.Kind, Metadata: stored.Metadata}))
+			item.entry = meetingMemoryEntry{ID: stored.ID, Kind: stored.Kind}
+		} else {
+			item.entry = cloneMemoryEntry(stored)
+		}
+		candidates = append(candidates, item)
+	}
+	app.memory.mu.Unlock()
+	payloads := make([]map[string]any, 0, len(candidates))
+	for _, candidate := range candidates {
+		entry := candidate.entry
+		if entry.Kind == meetingMemoryKindOSArtifact {
+			if !artifactHeaderAuthorized(context.Background(), principal.User, ACLReadContent, candidate.header) {
+				continue
+			}
+			var found bool
+			entry, found = app.memory.artifactSnapshotIfHeaderMatches(entry.ID, candidate.header)
+			if !found {
+				continue
+			}
+		}
+		payloads = append(payloads, quarantineEntryPayload(entry))
+	}
+	return payloads
+}
+
 func quarantineEntryPayload(entry meetingMemoryEntry) map[string]any {
 	title := slopEntryEventTitle(entry)
 	if entry.Kind == meetingMemoryKindTranscript {

@@ -7,10 +7,11 @@ package main
 // is the full record JSON), NOT a packages.json sidecar: the JSONL store
 // already provides durable append + in-place rewrite, id dedupe, boot
 // loading, and automatic meetingId provenance. Trust boundary = the
-// signed-in team: anyone signed in can create/edit; payloads carry artifact
-// TITLES only, never artifact text.
+// signed-in team: anyone signed in can create; only the creator or an admin
+// can mutate. Payloads carry artifact TITLES only, never artifact text.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -53,7 +54,15 @@ type venturePackageRecord struct {
 	CreatedAt    string   `json:"createdAt"`
 	UpdatedBy    string   `json:"updatedBy"`
 	UpdatedAt    string   `json:"updatedAt"`
+	OwnerEmail   string   `json:"-"`
 }
+
+type venturePackageAuthorizationHeader struct {
+	ID         string
+	OwnerEmail string
+}
+
+var venturePackageDecodeProbe func(string)
 
 func normalizePackageStage(stage string) string {
 	stage = strings.ToLower(strings.TrimSpace(stage))
@@ -97,6 +106,9 @@ func decodeVenturePackageEntry(entry meetingMemoryEntry) (venturePackageRecord, 
 	if entry.Kind != meetingMemoryKindPackage {
 		return venturePackageRecord{}, false
 	}
+	if venturePackageDecodeProbe != nil {
+		venturePackageDecodeProbe(entry.ID)
+	}
 	var record venturePackageRecord
 	if err := json.Unmarshal([]byte(entry.Text), &record); err != nil {
 		return venturePackageRecord{}, false
@@ -116,7 +128,117 @@ func decodeVenturePackageEntry(entry meetingMemoryEntry) (venturePackageRecord, 
 	if strings.TrimSpace(record.UpdatedAt) == "" {
 		record.UpdatedAt = firstNonEmptyString(entry.Metadata["updatedAt"], record.CreatedAt)
 	}
+	record.OwnerEmail = normalizeAccountEmail(entry.Metadata["ownerEmail"])
 	return record, true
+}
+
+func packageOwnerEmailForCreatedBy(createdBy string) (string, bool) {
+	createdBy = strings.TrimSpace(createdBy)
+	if canonicalAuthenticatedPrincipal(createdBy) {
+		email := normalizeAccountEmail(createdBy)
+		return email, accountStore().findUser(email) != nil
+	}
+	return canonicalEmailForUniqueRosterName(createdBy)
+}
+
+// projectLegacyPackageOwnerMetadataAtBoot is the deterministic compatibility
+// bridge for packages written before ownerEmail was a header field. Boot may
+// decode legacy package JSON once; request authorization never does. Unknown,
+// renamed, ambiguous, or malformed owners are stamped unresolved and every
+// request fails closed without touching Entry.Text.
+func (app *kanbanBoardApp) projectLegacyPackageOwnerMetadataAtBoot() {
+	if app == nil || app.memory == nil {
+		return
+	}
+	app.memory.mu.Lock()
+	defer app.memory.mu.Unlock()
+	prior := cloneMemoryEntries(app.memory.entries)
+	changed := false
+	for index := range app.memory.entries {
+		entry := &app.memory.entries[index]
+		if entry.Kind != meetingMemoryKindPackage {
+			continue
+		}
+		if projected, ok := packageOwnerEmailForCreatedBy(entry.Metadata["ownerEmail"]); ok && projected == normalizeAccountEmail(entry.Metadata["ownerEmail"]) {
+			continue
+		}
+		var record venturePackageRecord
+		decoded := json.Unmarshal([]byte(entry.Text), &record) == nil
+		createdBy := strings.TrimSpace(firstNonEmptyString(entry.Metadata["createdBy"], record.CreatedBy))
+		ownerEmail, resolved := packageOwnerEmailForCreatedBy(createdBy)
+		if entry.Metadata == nil {
+			entry.Metadata = map[string]string{}
+		}
+		entry.Metadata["createdBy"] = createdBy
+		if resolved {
+			entry.Metadata["ownerEmail"] = ownerEmail
+			entry.Metadata["ownerResolution"] = "resolved"
+		} else {
+			delete(entry.Metadata, "ownerEmail")
+			entry.Metadata["ownerResolution"] = "unresolved"
+		}
+		if !decoded {
+			delete(entry.Metadata, "ownerEmail")
+			entry.Metadata["ownerResolution"] = "unresolved"
+		}
+		changed = true
+	}
+	if changed {
+		if err := app.memory.rewriteLocked(false); err != nil {
+			app.memory.entries = prior
+			log.Errorf("Legacy package owner projection failed: %v", err)
+		}
+	}
+}
+
+func (app *kanbanBoardApp) packageAuthorizationHeaderByID(id string) (venturePackageAuthorizationHeader, bool) {
+	if app == nil || app.memory == nil {
+		return venturePackageAuthorizationHeader{}, false
+	}
+	id = strings.TrimSpace(id)
+	app.memory.mu.Lock()
+	defer app.memory.mu.Unlock()
+	for index := len(app.memory.entries) - 1; index >= 0; index-- {
+		entry := &app.memory.entries[index]
+		if entry.Kind == meetingMemoryKindPackage && entry.ID == id {
+			header := venturePackageAuthorizationHeader{ID: entry.ID, OwnerEmail: normalizeAccountEmail(entry.Metadata["ownerEmail"])}
+			projected, resolved := packageOwnerEmailForCreatedBy(header.OwnerEmail)
+			return header, resolved && projected == header.OwnerEmail
+		}
+	}
+	return venturePackageAuthorizationHeader{}, false
+}
+
+func packageHeaderManagedByUser(header venturePackageAuthorizationHeader, user *userAccount) bool {
+	return user != nil && (isArtifactApprovalAdmin(user) || header.OwnerEmail == normalizeAccountEmail(user.Email))
+}
+
+// packageHeaderAuthorizedForService is the explicit worker grant for the
+// decision ledger's organization-only auto-link. It reads only projected
+// package ownership metadata; unresolved legacy packages fail closed.
+func (app *kanbanBoardApp) packageHeaderAuthorizedForService(id string, principal RecallPrincipal) bool {
+	if strings.TrimSpace(principal.ServiceID) != "scout-recall" || principal.Audience != "shared_room" || strings.TrimSpace(principal.TenantID) != canonicalArtifactTenantID() {
+		return false
+	}
+	header, found := app.packageAuthorizationHeaderByID(id)
+	return found && strings.TrimSpace(header.OwnerEmail) != ""
+}
+
+func (app *kanbanBoardApp) authorizedVenturePackageByID(id string, user *userAccount) (venturePackageRecord, bool) {
+	header, found := app.packageAuthorizationHeaderByID(id)
+	if !found || !packageHeaderManagedByUser(header, user) {
+		return venturePackageRecord{}, false
+	}
+	app.memory.mu.Lock()
+	defer app.memory.mu.Unlock()
+	for index := len(app.memory.entries) - 1; index >= 0; index-- {
+		entry := app.memory.entries[index]
+		if entry.Kind != meetingMemoryKindPackage || entry.ID != header.ID || normalizeAccountEmail(entry.Metadata["ownerEmail"]) != header.OwnerEmail {
+			continue
+		}
+		return decodeVenturePackageEntry(cloneMemoryEntry(entry))
+	}
+	return venturePackageRecord{}, false
 }
 
 // venturePackagesSnapshot returns every decodable package, newest-updated
@@ -204,6 +326,54 @@ func (app *kanbanBoardApp) findPackageByNameOrID(ref string) (venturePackageReco
 	return best, true
 }
 
+// authorizedPackageByNameOrID resolves only metadata headers owned by the
+// requester (or managed by the approval admin), then decodes the single winner.
+func (app *kanbanBoardApp) authorizedPackageByNameOrID(ref string, user *userAccount) (venturePackageRecord, bool) {
+	ref = strings.TrimSpace(ref)
+	if app == nil || app.memory == nil || user == nil || ref == "" {
+		return venturePackageRecord{}, false
+	}
+	type header struct{ id, name, owner string }
+	app.memory.mu.Lock()
+	var headers []header
+	for index := len(app.memory.entries) - 1; index >= 0; index-- {
+		entry := app.memory.entries[index]
+		if entry.Kind != meetingMemoryKindPackage {
+			continue
+		}
+		h := header{entry.ID, strings.TrimSpace(entry.Metadata["name"]), normalizeAccountEmail(entry.Metadata["ownerEmail"])}
+		if packageHeaderManagedByUser(venturePackageAuthorizationHeader{ID: h.id, OwnerEmail: h.owner}, user) {
+			headers = append(headers, h)
+		}
+	}
+	app.memory.mu.Unlock()
+	selected := ""
+	for _, h := range headers {
+		if h.id == ref || strings.EqualFold(h.name, ref) {
+			selected = h.id
+			break
+		}
+	}
+	if selected == "" {
+		refTokens, best, winners := linkageMatchTokens(ref), 0.0, 0
+		for _, h := range headers {
+			score := tokenSetJaccard(refTokens, linkageMatchTokens(h.name))
+			if score < packageFuzzyNameThreshold {
+				continue
+			}
+			if score > best {
+				selected, best, winners = h.id, score, 1
+			} else if score == best {
+				winners++
+			}
+		}
+		if winners != 1 {
+			return venturePackageRecord{}, false
+		}
+	}
+	return app.authorizedVenturePackageByID(selected, user)
+}
+
 // persistVenturePackage writes the record (create or whole-record update),
 // keeping the cheap {"name","stage"} metadata mirror in sync. Callers hold
 // packageMu — which is exactly why it must NOT broadcast: websocket writes
@@ -212,14 +382,21 @@ func (app *kanbanBoardApp) findPackageByNameOrID(ref string) (venturePackageReco
 // only after every lock is released). Mutators call broadcastVenturePackage
 // after packageMu is unlocked.
 func (app *kanbanBoardApp) persistVenturePackage(record venturePackageRecord, create bool) (venturePackageRecord, error) {
+	if ownerEmail, ok := packageOwnerEmailForCreatedBy(firstNonEmptyString(record.OwnerEmail, record.CreatedBy)); ok {
+		record.OwnerEmail = ownerEmail
+	} else {
+		record.OwnerEmail = ""
+	}
 	encoded, err := encodeVenturePackage(record)
 	if err != nil {
 		return venturePackageRecord{}, err
 	}
 	metadata := map[string]string{
-		"name":      record.Name,
-		"stage":     record.Stage,
-		"updatedAt": record.UpdatedAt,
+		"name":       record.Name,
+		"stage":      record.Stage,
+		"updatedAt":  record.UpdatedAt,
+		"createdBy":  record.CreatedBy,
+		"ownerEmail": normalizeAccountEmail(record.OwnerEmail),
 	}
 	if create {
 		_, appended, appendErr := app.memory.appendVenturePackage(record.ID, encoded, metadata)
@@ -265,6 +442,7 @@ func (app *kanbanBoardApp) createVenturePackage(name string, thesis string, crea
 		}
 
 		now := time.Now().UTC().Format(time.RFC3339Nano)
+		ownerEmail, _ := packageOwnerEmailForCreatedBy(createdBy)
 		record := venturePackageRecord{
 			ID:           durableTimestampID("package", time.Now()),
 			Name:         name,
@@ -277,6 +455,7 @@ func (app *kanbanBoardApp) createVenturePackage(name string, thesis string, crea
 			CreatedAt:    now,
 			UpdatedBy:    strings.TrimSpace(createdBy),
 			UpdatedAt:    now,
+			OwnerEmail:   ownerEmail,
 		}
 		return app.persistVenturePackage(record, true)
 	}()
@@ -1301,6 +1480,29 @@ func (app *kanbanBoardApp) attachToPackageTool(args map[string]any, actor string
 	}, true, nil
 }
 
+func (app *kanbanBoardApp) attachToPackageToolForUser(ctx context.Context, args map[string]any, user *userAccount) (map[string]any, bool, error) {
+	record, ok := app.authorizedPackageByNameOrID(asString(args["package"]), user)
+	if !ok {
+		return nil, false, fmt.Errorf("package not found")
+	}
+	refType := normalizePackageRefType(asString(args["ref_type"]))
+	if refType == "" {
+		return nil, false, fmt.Errorf("ref_type must be artifact, card, channel, or decision")
+	}
+	refID := strings.TrimSpace(asString(args["ref_id"]))
+	if refID == "" {
+		refID = app.resolvePackageRefTitleForUser(ctx, user, refType, asString(args["ref_title"]))
+	}
+	if refID == "" || !packageReferenceAuthorized(ctx, user, refType, refID) {
+		return nil, false, fmt.Errorf("referenced object not found")
+	}
+	updated, err := app.attachToPackage(record.ID, refType, refID, packageToolActor(user.Email))
+	if err != nil {
+		return nil, false, err
+	}
+	return map[string]any{"ok": true, "package": app.packagePayload(updated)}, true, nil
+}
+
 func (app *kanbanBoardApp) advancePackageStageTool(args map[string]any, actor string) (map[string]any, bool, error) {
 	record, ok := app.findPackageByNameOrID(asString(args["package"]))
 	if !ok {
@@ -1314,6 +1516,36 @@ func (app *kanbanBoardApp) advancePackageStageTool(args map[string]any, actor st
 		"ok":      true,
 		"package": app.packagePayload(updated),
 	}, updated.Stage != record.Stage || strings.TrimSpace(asString(args["stage"])) == "", nil
+}
+
+func (app *kanbanBoardApp) advancePackageStageToolForUser(args map[string]any, user *userAccount) (map[string]any, bool, error) {
+	record, ok := app.authorizedPackageByNameOrID(asString(args["package"]), user)
+	if !ok {
+		return nil, false, fmt.Errorf("package not found")
+	}
+	updated, err := app.advancePackageStage(record.ID, asString(args["stage"]), packageToolActor(user.Email))
+	if err != nil {
+		return nil, false, err
+	}
+	return map[string]any{"ok": true, "package": app.packagePayload(updated)}, updated.Stage != record.Stage || strings.TrimSpace(asString(args["stage"])) == "", nil
+}
+
+func (app *kanbanBoardApp) resolvePackageRefTitleForUser(ctx context.Context, user *userAccount, refType string, title string) string {
+	if user == nil {
+		return ""
+	}
+	principal := recallPrincipalForUser(user)
+	scoped := app.recallStoreForPrincipal(ctx, principal)
+	// The existing resolver is safe for board cards (organization membership).
+	if normalizePackageRefType(refType) == packageRefTypeCard {
+		return app.resolvePackageRefTitle(refType, title)
+	}
+	contextApp := &kanbanBoardApp{memory: scoped}
+	refID := contextApp.resolvePackageRefTitle(refType, title)
+	if refID == "" || !packageReferenceAuthorized(ctx, user, refType, refID) {
+		return ""
+	}
+	return refID
 }
 
 // resolvePackageRefTitle fuzzy-resolves a spoken/typed title to a concrete
@@ -1448,9 +1680,10 @@ func assistantPackagesHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, "could not read package")
 		return
 	}
-	record, err := kanbanApp.createVenturePackage(payload.Name, payload.Thesis, user.Name)
+	record, err := kanbanApp.createVenturePackage(payload.Name, payload.Thesis, user.Email)
 	if err != nil {
-		writeAuthError(w, http.StatusBadRequest, err.Error())
+		status, message := packagePublicError(err)
+		writeAuthError(w, status, message)
 		return
 	}
 	writeAuthJSON(w, http.StatusOK, map[string]any{
@@ -1487,6 +1720,11 @@ func assistantPackageActionHandler(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	id := parts[0]
+	if _, found := kanbanApp.authorizedVenturePackageByID(id, user); !found {
+		writeAuthError(w, http.StatusNotFound, "package not found")
+		return
+	}
 
 	payload := struct {
 		Action  string  `json:"action"`
@@ -1501,7 +1739,12 @@ func assistantPackageActionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := parts[0]
+	if strings.EqualFold(strings.TrimSpace(payload.Action), "attach") || strings.EqualFold(strings.TrimSpace(payload.Action), "detach") {
+		if !packageReferenceAuthorized(r.Context(), user, payload.RefType, payload.RefID) {
+			writeAuthError(w, http.StatusNotFound, "reference not found")
+			return
+		}
+	}
 	var record venturePackageRecord
 	var err error
 	switch strings.ToLower(strings.TrimSpace(payload.Action)) {
@@ -1527,15 +1770,136 @@ func assistantPackageActionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		status := http.StatusBadRequest
-		if strings.Contains(err.Error(), "not found") {
-			status = http.StatusNotFound
-		}
-		writeAuthError(w, status, err.Error())
+		status, message := packagePublicError(err)
+		writeAuthError(w, status, message)
 		return
 	}
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
 		"package": kanbanApp.packagePayload(record),
 	})
+}
+
+func packagePublicError(err error) (int, string) {
+	message := strings.TrimSpace(err.Error())
+	if strings.Contains(message, "not found") {
+		return http.StatusNotFound, "package reference not found"
+	}
+	for _, expected := range []string{
+		"package name is required",
+		"a package named ",
+		"stage must be one of ",
+		"ref_type must be ",
+		"ref_id is required",
+	} {
+		if strings.HasPrefix(message, expected) {
+			return http.StatusBadRequest, message
+		}
+	}
+	log.Errorf("Package mutation failed: %v", err)
+	return http.StatusServiceUnavailable, "packages are unavailable"
+}
+
+func packageManagedByUser(pkg venturePackageRecord, user *userAccount) bool {
+	if user == nil {
+		return false
+	}
+	if isArtifactApprovalAdmin(user) {
+		return true
+	}
+	creator := strings.TrimSpace(pkg.CreatedBy)
+	if canonicalAuthenticatedPrincipal(creator) {
+		return normalizeAccountEmail(creator) == normalizeAccountEmail(user.Email)
+	}
+	creatorEmail, ok := canonicalEmailForUniqueRosterName(creator)
+	return ok && creatorEmail == normalizeAccountEmail(user.Email)
+}
+
+// canonicalEmailForUniqueRosterName resolves pre-principal ownership stamps
+// through the CURRENT roster. It intentionally fails closed when a display
+// name disappeared after a rename or is shared by multiple accounts.
+func canonicalEmailForUniqueRosterName(name string) (string, bool) {
+	name = normalizeRosterLoginName(name)
+	if name == "" {
+		return "", false
+	}
+	store := accountStore()
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	match := ""
+	for _, account := range store.users {
+		if account == nil || normalizeRosterLoginName(account.Name) != name {
+			continue
+		}
+		email := normalizeAccountEmail(account.Email)
+		if email == "" || match != "" {
+			return "", false
+		}
+		match = email
+	}
+	return match, match != ""
+}
+
+// packageReferenceAuthorized independently authorizes a referenced object
+// before attach/detach can inspect or mutate it. Artifacts use the canonical
+// exact-revision authorizer. Board cards and decisions are still legacy
+// company-shared resources, so their current ACLWrite policy is membership;
+// these header-only probes deliberately compare only kind/id and never copy a
+// card's notes or a decision's text into the authorization path.
+func packageReferenceAuthorized(ctx context.Context, user *userAccount, refType string, refID string) bool {
+	if user == nil || kanbanApp == nil {
+		return false
+	}
+	refType = normalizePackageRefType(refType)
+	refID = strings.TrimSpace(refID)
+	if refID == "" {
+		return false
+	}
+	switch refType {
+	case packageRefTypeArtifact:
+		_, ok := authorizedArtifactForActions(ctx, user, refID, ACLReadContent, ACLWrite)
+		return ok
+	case packageRefTypeCard:
+		kanbanApp.mu.Lock()
+		defer kanbanApp.mu.Unlock()
+		for index := range kanbanApp.cards {
+			if kanbanApp.cards[index].ID == refID {
+				return true
+			}
+		}
+		return false
+	case packageRefTypeDecision:
+		if kanbanApp.memory == nil {
+			return false
+		}
+		principal := recallPrincipalForUser(user)
+		kanbanApp.memory.mu.Lock()
+		defer kanbanApp.memory.mu.Unlock()
+		for index := len(kanbanApp.memory.entries) - 1; index >= 0; index-- {
+			entry := &kanbanApp.memory.entries[index]
+			if entry.Kind == meetingMemoryKindDecision && entry.ID == refID {
+				// Metadata-only authorization: never decode/copy the decision body
+				// until its visibility/tenant/owner header grants the caller.
+				return recallEntryScopeAllowed(entry.Metadata, principal)
+			}
+		}
+		return false
+	case packageRefTypeChannel:
+		if kanbanApp.memory == nil {
+			return false
+		}
+		// Channel visibility and ownership are authorization-header metadata.
+		// Pre-metadata legacy threads fail closed rather than decoding Entry.Text.
+		kanbanApp.memory.mu.Lock()
+		defer kanbanApp.memory.mu.Unlock()
+		for index := len(kanbanApp.memory.entries) - 1; index >= 0; index-- {
+			entry := &kanbanApp.memory.entries[index]
+			if entry.Kind == meetingMemoryKindScoutChat && entry.ID == refID {
+				return normalizeScoutChatVisibility(entry.Metadata["visibility"]) == scoutChatVisibilityPublic
+			}
+		}
+		return false
+	default:
+		return false
+	}
 }

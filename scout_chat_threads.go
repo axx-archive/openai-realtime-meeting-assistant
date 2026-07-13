@@ -756,7 +756,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 		}
 	}
 
-	result, err := app.resolveAssistantQueryContextWithAttachments(ctx, modelQuery, history, attachmentBlocks)
+	result, err := app.resolveAssistantQueryContextForUserWithAttachments(ctx, user.Email, modelQuery, history, attachmentBlocks)
 	if err != nil {
 		errorMessage := scoutChatMessageRecord{
 			ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
@@ -1010,7 +1010,7 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 	if err != nil {
 		return nil, err
 	}
-	result, err := app.resolveAssistantQueryContext(ctx, query, scoutChatHistoryFromThread(thread))
+	result, err := app.resolveAssistantQueryContextForUser(ctx, user.Email, query, scoutChatHistoryFromThread(thread))
 	if err != nil {
 		return nil, err
 	}
@@ -1119,7 +1119,7 @@ func (app *kanbanBoardApp) resolveScoutChatChoice(ctx context.Context, user *use
 	if err != nil {
 		return nil, err
 	}
-	result, err := app.resolveAssistantQueryContext(ctx, reply, scoutChatHistoryFromThread(thread))
+	result, err := app.resolveAssistantQueryContextForUser(ctx, user.Email, reply, scoutChatHistoryFromThread(thread))
 	if err != nil {
 		// The tap already resolved the card; keep the reply on the record so
 		// the conversation survives, then surface the answer failure.

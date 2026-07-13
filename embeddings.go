@@ -440,6 +440,12 @@ func (idx *embeddingIndex) persist() error {
 // normalized here; stored vectors are already unit-normalized, so similarity is
 // a dot product. Brute force over the whole matrix — milliseconds at our scale.
 func (idx *embeddingIndex) topK(query []float32, k int) []embeddingHit {
+	return idx.topKAllowed(query, k, nil)
+}
+
+// topKAllowed applies the authorization allowlist before the dot product, so
+// denied vectors do not participate in scoring, ranking, or candidate counts.
+func (idx *embeddingIndex) topKAllowed(query []float32, k int, allowed map[string]struct{}) []embeddingHit {
 	if idx == nil || k <= 0 {
 		return nil
 	}
@@ -448,6 +454,11 @@ func (idx *embeddingIndex) topK(query []float32, k int) []embeddingHit {
 	idx.mu.RLock()
 	hits := make([]embeddingHit, 0, len(idx.rows))
 	for i := range idx.rows {
+		if allowed != nil {
+			if _, ok := allowed[idx.rows[i].id]; !ok {
+				continue
+			}
+		}
 		hits = append(hits, embeddingHit{
 			id:    idx.rows[i].id,
 			kind:  idx.rows[i].kind,
@@ -965,6 +976,10 @@ func (app *kanbanBoardApp) runEmbeddingMaintainerLoop(idx *embeddingIndex, inter
 // desired set (and thus the drop computation) is byte-for-byte what a full clone
 // would have produced.
 func (store *meetingMemoryStore) eligibleEmbeddingEntriesSnapshot() []meetingMemoryEntry {
+	return store.eligibleEmbeddingEntriesSnapshotForPrincipal(RecallPrincipal{})
+}
+
+func (store *meetingMemoryStore) eligibleEmbeddingEntriesSnapshotForPrincipal(principal RecallPrincipal) []meetingMemoryEntry {
 	if store == nil {
 		return nil
 	}
@@ -972,7 +987,7 @@ func (store *meetingMemoryStore) eligibleEmbeddingEntriesSnapshot() []meetingMem
 	defer store.mu.Unlock()
 	out := make([]meetingMemoryEntry, 0, 256)
 	for _, entry := range store.entries {
-		if embeddingEligible(entry) {
+		if embeddingEligible(entry) && (principal.Audience == "" || recallEntryScopeAllowed(entry.Metadata, principal)) {
 			out = append(out, cloneMemoryEntry(entry))
 		}
 	}
@@ -995,7 +1010,7 @@ func (app *kanbanBoardApp) runEmbeddingMaintainerOnce(idx *embeddingIndex) error
 	// never eligible, so a whole-store deep clone every pass was pure waste.
 	// Deletions of eligible rows are still detected downstream: a vanished (or
 	// superseded) entry is simply absent here, so reconcile drops it.
-	entries := app.memory.eligibleEmbeddingEntriesSnapshot()
+	entries := app.memory.eligibleEmbeddingEntriesSnapshotForPrincipal(sharedRoomRecallPrincipal(officeRoomID, ""))
 
 	ctx, cancel := context.WithTimeout(context.Background(), embeddingRequestTimeout+15*time.Second)
 	defer cancel()
@@ -1033,6 +1048,10 @@ func loadedEmbeddingIndex() *embeddingIndex {
 // nil when the lane is absent (keyless — no published index) or the query embed
 // fails. Never errors: the retrieval lane degrades to lexical-only.
 func semanticLaneCandidates(query string, topK int) []embeddingHit {
+	return semanticLaneCandidatesAllowed(query, topK, nil)
+}
+
+func semanticLaneCandidatesAllowed(query string, topK int, allowed map[string]struct{}) []embeddingHit {
 	idx := loadedEmbeddingIndex()
 	if idx == nil {
 		return nil
@@ -1045,7 +1064,7 @@ func semanticLaneCandidates(query string, topK int) []embeddingHit {
 	if vec == nil {
 		return nil
 	}
-	return idx.topK(vec, topK)
+	return idx.topKAllowed(vec, topK, allowed)
 }
 
 // fuseRawCandidates weighted-RRF-fuses the lexical search matches with the

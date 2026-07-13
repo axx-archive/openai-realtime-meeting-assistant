@@ -423,6 +423,7 @@ func newKanbanBoardApp() *kanbanBoardApp {
 			officeRoomID: newRoomLiveState(officeRoomID, updatedAt),
 		},
 	}
+	app.projectLegacyPackageOwnerMetadataAtBoot()
 	if notifications, err := loadNotificationStoreState(notificationsPath()); err != nil {
 		log.Errorf("Notification persistence disabled: %v", err)
 	} else {
@@ -3363,7 +3364,7 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 	case "publish_artifact":
 		return app.publishRealtimeArtifact(args)
 	case "answer_memory_question":
-		return app.answerMemoryQuestion(args)
+		return app.answerMemoryQuestionForPrincipal(args, sharedRoomRecallPrincipal(officeRoomID, app.memory.currentMeetingID(officeRoomID)), true)
 	case "organize_files":
 		// Shared dispatch (room voice + workers) has no single requester: an
 		// empty viewer scopes the file list to team-visible rows only (direct
@@ -3429,13 +3430,9 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 	case "catch_me_up":
 		return app.catchMeUp(args, "", officeRoomID)
 	case "cross_meeting_briefing":
-		// Read-only cross-meeting recall; no requester needed, so the shared
-		// dispatch serves the room, private voice, and orchestrator paths.
-		// (Personalization hook per the amendments non-goals: a per-person
-		// variant would thread requesterEmail through here — not built.)
-		return app.crossMeetingBriefingTool(args)
+		return app.crossMeetingBriefingToolForPrincipal(args, sharedRoomRecallPrincipal(officeRoomID, app.memory.currentMeetingID(officeRoomID)))
 	case "get_meeting_detail":
-		return app.getMeetingDetail(args)
+		return app.getMeetingDetailForPrincipal(args, sharedRoomRecallPrincipal(officeRoomID, app.memory.currentMeetingID(officeRoomID)))
 	case "start_grill_session":
 		return app.startGrillSession(args)
 	case "end_grill_session":
@@ -3451,6 +3448,45 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 		}, false, nil
 	default:
 		return nil, false, fmt.Errorf("unsupported function %q", toolName)
+	}
+}
+
+// applyToolCallArgsForPrincipal is the context-carrying dispatch seam for
+// recall-shaped tools. Call sites that know a room/user must use this instead
+// of smuggling room ids through model-controlled arguments. Non-recall tools
+// retain the legacy dispatcher.
+func (app *kanbanBoardApp) applyToolCallArgsForPrincipal(toolName string, args map[string]any, principal RecallPrincipal) (map[string]any, bool, error) {
+	switch strings.TrimSpace(toolName) {
+	case "answer_memory_question":
+		return app.answerMemoryQuestionForPrincipal(args, principal, false)
+	case "meeting_recap", "catch_me_up":
+		if principal.Audience == "guest" || principal.User == nil {
+			return nil, false, fmt.Errorf("meeting recap is unavailable for this principal")
+		}
+		roomID := normalizeRoomID(principal.RoomID)
+		if roomID != officeRoomID && (strings.TrimSpace(principal.SittingID) == "" || app.memory.currentMeetingID(roomID) != strings.TrimSpace(principal.SittingID)) {
+			return nil, false, fmt.Errorf("meeting recap room binding is stale")
+		}
+		requester := ""
+		if principal.Audience == "private" {
+			requester = normalizeAccountEmail(principal.User.Email)
+			privateArgs := make(map[string]any, len(args)+1)
+			for key, value := range args {
+				privateArgs[key] = value
+			}
+			privateArgs["audience"] = notificationAudienceMe
+			args = privateArgs
+		}
+		if toolName == "catch_me_up" {
+			return app.catchMeUp(args, requester, roomID)
+		}
+		return app.meetingRecap(args, requester, roomID)
+	case "cross_meeting_briefing":
+		return app.crossMeetingBriefingToolForPrincipal(args, principal)
+	case "get_meeting_detail":
+		return app.getMeetingDetailForPrincipal(args, principal)
+	default:
+		return app.applyToolCallArgs(toolName, args)
 	}
 }
 
@@ -3627,6 +3663,14 @@ func (app *kanbanBoardApp) applyPrivateRealtimeVoiceTool(requesterEmail string, 
 	if args == nil {
 		args = map[string]any{}
 	}
+	roomID := app.memberCurrentRoom(requesterEmail)
+	principal := app.recallPrincipalForMemberRoom(requesterEmail, roomID)
+	if toolName == "answer_memory_question" || toolName == "meeting_recap" || toolName == "catch_me_up" || toolName == "cross_meeting_briefing" || toolName == "get_meeting_detail" {
+		return app.applyToolCallArgsForPrincipal(toolName, args, principal)
+	}
+	if toolName == "create_artifact" {
+		return app.createRealtimeArtifactForPrincipal(args, recallPrincipalForEmail(requesterEmail))
+	}
 	// send_notification and propose_codex_task depend on who is asking: the
 	// private dashboard voice belongs to a single signed-in user, so audience
 	// "me" can target that account and proposals carry real provenance.
@@ -3649,14 +3693,6 @@ func (app *kanbanBoardApp) applyPrivateRealtimeVoiceTool(requesterEmail string, 
 	}
 	if toolName == "create_channel" {
 		return app.createChannelByVoice(args, requesterEmail)
-	}
-	if toolName == "meeting_recap" {
-		// W4: the recap binds to the caller's CURRENT room — a member in room A
-		// can never pull (or post) another room's recap through private voice.
-		return app.meetingRecap(args, requesterEmail, app.memberCurrentRoom(requesterEmail))
-	}
-	if toolName == "catch_me_up" {
-		return app.catchMeUp(args, requesterEmail, app.memberCurrentRoom(requesterEmail))
 	}
 	// Package mutations carry the signed-in requester's identity from the
 	// private dashboard voice; the shared dispatch falls back to Scout.
@@ -3889,7 +3925,7 @@ func (app *kanbanBoardApp) archiveRealtimeMeeting(_ map[string]any) (map[string]
 	}
 
 	broadcastSignedInKanbanEvent("meeting_archived", result)
-	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", nil)
 	var actions []osAssistantAction
 	if result.Artifact != nil {
 		actions = app.osAssistantActions(result.Summary, "artifacts", *result.Artifact)
@@ -3932,7 +3968,7 @@ func (app *kanbanBoardApp) updateRealtimeArtifact(args map[string]any) (map[stri
 	if err != nil {
 		return nil, false, err
 	}
-	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", nil)
 	actions := app.osAssistantActions(title, "artifacts", artifact)
 	broadcastAssistantEvent("action", "Artifact updated", map[string]any{
 		"tool":       "update_artifact",
@@ -3948,6 +3984,36 @@ func (app *kanbanBoardApp) updateRealtimeArtifact(args map[string]any) (map[stri
 		"updated":  updated,
 		"actions":  actions,
 	}, false, nil
+}
+
+func (app *kanbanBoardApp) updateRealtimeArtifactForUser(ctx context.Context, user *userAccount, args map[string]any) (map[string]any, bool, error) {
+	artifactID := firstNonEmptyString(asString(args["artifact_id"]), asString(args["artifactId"]))
+	if artifactID == "" {
+		return nil, false, fmt.Errorf("artifact_id is required")
+	}
+	header, found := app.memory.artifactAuthorizationHeaderByID(artifactID)
+	if !found || !artifactHeaderAuthorized(ctx, user, ACLWrite, header) {
+		return nil, false, fmt.Errorf("artifact not found")
+	}
+	existing, found := app.memory.artifactSnapshotIfHeaderMatches(artifactID, header)
+	if !found {
+		return nil, false, fmt.Errorf("artifact not found")
+	}
+	title := canonicalizeBoardText(asString(args["title"]))
+	content := strings.TrimSpace(firstNonEmptyString(asString(args["content"]), asString(args["text"])))
+	if title == "" && content == "" {
+		return nil, false, fmt.Errorf("title or content is required")
+	}
+	if content == "" {
+		content = existing.Text
+	}
+	artifact, updated, err := app.memory.updateOSArtifactWithMetadataIfHeaderMatches(header, artifactID, title, content, user.Name, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("artifact not found")
+	}
+	broadcastSignedInKanbanEvent("memory", nil)
+	actions := app.osAssistantActions(title, "artifacts", artifact)
+	return map[string]any{"ok": true, "artifact": artifact, "updated": updated, "actions": actions}, false, nil
 }
 
 func (app *kanbanBoardApp) publishRealtimeArtifact(args map[string]any) (map[string]any, bool, error) {
@@ -3968,7 +4034,7 @@ func (app *kanbanBoardApp) publishRealtimeArtifact(args map[string]any) (map[str
 	if err != nil {
 		return nil, false, err
 	}
-	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", nil)
 	actions := app.osAssistantActions(artifact.Metadata["title"], "artifacts", artifact)
 	message := "Artifact unpublished"
 	if publishedValue {
@@ -4047,6 +4113,10 @@ func osAssistantActionsForTool(tool string, artifactID string) []osAssistantActi
 }
 
 func (app *kanbanBoardApp) createRealtimeArtifact(args map[string]any) (map[string]any, bool, error) {
+	return app.createRealtimeArtifactForPrincipal(args, sharedRoomRecallPrincipal(officeRoomID, app.memory.currentMeetingID(officeRoomID)))
+}
+
+func (app *kanbanBoardApp) createRealtimeArtifactForPrincipal(args map[string]any, principal RecallPrincipal) (map[string]any, bool, error) {
 	mode := normalizeRealtimeArtifactMode(asString(args["mode"]))
 	if mode == "" {
 		return nil, false, fmt.Errorf("mode is required")
@@ -4059,11 +4129,15 @@ func (app *kanbanBoardApp) createRealtimeArtifact(args map[string]any) (map[stri
 	if content == "" {
 		ctx, cancel := context.WithTimeout(context.Background(), assistantQueryRequestTimeout)
 		defer cancel()
-		result, err := app.resolveAssistantQueryContext(ctx, query, nil)
+		requester := ""
+		if principal.User != nil {
+			requester = principal.User.Email
+		}
+		result, err := app.resolveAssistantQueryContextForPrincipalWithAttachments(ctx, principal, requester, query, nil, nil)
 		if err != nil {
 			return nil, false, err
 		}
-		result = buildOSAssistantModeAnswer(mode, result, app.snapshotState(), app.memorySnapshotForClients(12))
+		result = buildOSAssistantModeAnswer(mode, result, app.snapshotState(), app.scopedRecallApp(ctx, principal).memorySnapshotForClients(12))
 		content = strings.TrimSpace(result.answer)
 	}
 	if content == "" {
@@ -4078,7 +4152,7 @@ func (app *kanbanBoardApp) createRealtimeArtifact(args map[string]any) (map[stri
 		return nil, false, fmt.Errorf("artifact was not saved")
 	}
 
-	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", nil)
 	actions := app.osAssistantActions(query, mode, artifact)
 	broadcastAssistantEvent("action", assistantToolLabel(mode)+" artifact saved", map[string]any{
 		"tool":       "create_artifact",
@@ -4466,6 +4540,12 @@ func decorateArchiveDownloadURLForClient(entry meetingMemoryEntry) meetingMemory
 }
 
 func (app *kanbanBoardApp) answerMemoryQuestion(args map[string]any) (map[string]any, bool, error) {
+	return app.answerMemoryQuestionForPrincipal(args, sharedRoomRecallPrincipal(officeRoomID, app.memory.currentMeetingID(officeRoomID)), true)
+}
+
+var recallBroadcastProbe func(RecallPrincipal, string)
+
+func (app *kanbanBoardApp) answerMemoryQuestionForPrincipal(args map[string]any, principal RecallPrincipal, emit bool) (map[string]any, bool, error) {
 	query := canonicalizeBoardText(asString(args["query"]))
 	if query == "" {
 		return nil, false, fmt.Errorf("query is required")
@@ -4474,8 +4554,12 @@ func (app *kanbanBoardApp) answerMemoryQuestion(args map[string]any) (map[string
 		return nil, false, fmt.Errorf("meeting memory is unavailable")
 	}
 
-	matches, contextEntries := app.memoryMatchesAndContext(query)
-	answer, modelErr := app.answerMemoryQuestionWithModel(query, contextEntries)
+	recallApp := app.scopedRecallApp(context.Background(), principal)
+	matches, contextEntries := recallApp.memoryMatchesAndContext(query)
+	if recallModelContextProbe != nil {
+		recallModelContextProbe(contextEntries)
+	}
+	answer, modelErr := recallApp.answerMemoryQuestionWithModel(query, contextEntries)
 	if modelErr != nil {
 		log.Errorf("Failed to answer memory question with model: %v", modelErr)
 	}
@@ -4484,9 +4568,9 @@ func (app *kanbanBoardApp) answerMemoryQuestion(args map[string]any) (map[string
 		// digest/ledger briefing (then on-demand map-reduce over raw memory);
 		// A5 keeps current-state questions on the deterministic ledger fold.
 		// Only queries neither lane serves keep the 8-keyword-hit last resort.
-		if briefingAnswer, ok := app.rangedBriefingAnswer(query); ok {
+		if briefingAnswer, ok := recallApp.rangedBriefingAnswer(query); ok {
 			answer = briefingAnswer
-		} else if ledgerAnswer, ok := app.ledgerStatusAnswer(query); ok {
+		} else if ledgerAnswer, ok := recallApp.ledgerStatusAnswer(query); ok {
 			answer = ledgerAnswer
 		} else {
 			answer = buildMemoryAnswer(query, matches)
@@ -4497,8 +4581,16 @@ func (app *kanbanBoardApp) answerMemoryQuestion(args map[string]any) (map[string
 		"answer": answer,
 	}
 
-	broadcastKanbanEvent("memory_answer", response)
-	broadcastAssistantEvent("answer", answer, map[string]any{"query": query})
+	if emit {
+		if recallBroadcastProbe != nil {
+			recallBroadcastProbe(principal, answer)
+		}
+		roomID := normalizeRoomID(principal.RoomID)
+		broadcastRoomKanbanEvent(roomID, "memory_answer", response)
+		broadcastRoomKanbanEvent(roomID, "assistant_event", map[string]any{
+			"kind": "answer", "text": answer, "query": query, "createdAt": time.Now().UTC().Format(time.RFC3339Nano),
+		})
+	}
 
 	return map[string]any{
 		"ok":      true,
@@ -4617,7 +4709,7 @@ func (app *kanbanBoardApp) noteForTheRecordTool(args map[string]any, certainAuth
 		}
 		if appended {
 			broadcastOfficeKanbanEvent("decision", decisionPayload(entry))
-			broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
+			broadcastSignedInKanbanEvent("memory", nil)
 			broadcastAssistantEvent("action", "Scout recorded a decision for the record.", map[string]any{"kind": "decision"})
 		}
 		result := map[string]any{
@@ -4654,7 +4746,7 @@ func (app *kanbanBoardApp) noteForTheRecordTool(args map[string]any, certainAuth
 		return nil, false, err
 	}
 	if appended {
-		broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
+		broadcastSignedInKanbanEvent("memory", nil)
 		broadcastAssistantEvent("action", "Scout filed a note for the record.", map[string]any{"kind": "note"})
 	}
 	return map[string]any{
@@ -6472,7 +6564,7 @@ func (app *kanbanBoardApp) autoArchiveIdleMeeting(closed meetingRecord) {
 	}
 	// silent by design: refresh memory-fed surfaces, no meeting_archived
 	// toast and no assistant announcement.
-	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", nil)
 }
 
 func meetingArchiveArtifactTitle(archive meetingArchive) string {
@@ -6662,7 +6754,19 @@ func (app *kanbanBoardApp) persistBoardLocked() error {
 		state.UpdatedAt = app.updatedAt.UTC().Format(time.RFC3339Nano)
 	}
 
-	return writeKanbanBoardState(kanbanBoardPath(), state)
+	err := writeKanbanBoardState(kanbanBoardPath(), state)
+	if err == nil {
+		return nil
+	}
+	// A failed/ambiguous durable replace must not leave RAM describing a
+	// generation different from the visible legacy source of truth.
+	if visible, found, loadErr := loadKanbanBoardState(kanbanBoardPath()); loadErr == nil && found {
+		app.cards = cloneKanbanCards(visible.Cards)
+		if parsed, parseErr := time.Parse(time.RFC3339Nano, visible.UpdatedAt); parseErr == nil {
+			app.updatedAt = parsed.UTC()
+		}
+	}
+	return err
 }
 
 func cloneKanbanCards(cards []kanbanCard) []kanbanCard {
@@ -7238,6 +7342,28 @@ func broadcastRoomGuestsKanbanEvent(roomID string, event string, data any) {
 // exactly-once channel for signed-in-safe events (chat_thread,
 // codex_proposal, mission_insight).
 func broadcastOfficeKanbanEvent(event string, data any) {
+	if event == "memory" && kanbanApp != nil {
+		listLock.RLock()
+		type recipient struct {
+			websocket *threadSafeWriter
+			email     string
+		}
+		recipients := make([]recipient, 0, len(officeConnections))
+		for _, state := range officeConnections {
+			if state.websocket != nil {
+				recipients = append(recipients, recipient{state.websocket, state.sessionEmail})
+			}
+		}
+		listLock.RUnlock()
+		for _, recipient := range recipients {
+			principal, ok := authenticatedRecallPrincipal(recipient.email)
+			if !ok {
+				continue
+			}
+			_ = sendKanbanEvent(recipient.websocket, "memory", kanbanApp.memorySnapshotForPrincipal(context.Background(), principal, 20))
+		}
+		return
+	}
 	raw, err := encodeKanbanEvent(event, data)
 	if err != nil {
 		log.Errorf("Failed to encode office Kanban event: %v", err)
@@ -7264,6 +7390,37 @@ func broadcastOfficeKanbanEvent(event string, data any) {
 // and id-deduped entries (notification, room_chat) where a double delivery is
 // a harmless re-render.
 func broadcastSignedInKanbanEvent(event string, data any) {
+	if event == "memory" && kanbanApp != nil {
+		type recipient struct {
+			websocket *threadSafeWriter
+			email     string
+			roomID    string
+		}
+		listLock.RLock()
+		seen := make(map[*threadSafeWriter]bool, len(officeConnections)+len(peerConnections))
+		recipients := make([]recipient, 0, len(officeConnections)+len(peerConnections))
+		for _, state := range officeConnections {
+			if state.websocket != nil && !seen[state.websocket] {
+				seen[state.websocket] = true
+				recipients = append(recipients, recipient{state.websocket, state.sessionEmail, officeRoomID})
+			}
+		}
+		for _, state := range peerConnections {
+			if state.websocket != nil && !state.websocket.guest && !seen[state.websocket] {
+				seen[state.websocket] = true
+				recipients = append(recipients, recipient{state.websocket, state.sessionEmail, state.roomID})
+			}
+		}
+		listLock.RUnlock()
+		for _, recipient := range recipients {
+			if _, ok := authenticatedRecallPrincipal(recipient.email); !ok {
+				continue
+			}
+			principal := kanbanApp.recallPrincipalForMemberRoom(recipient.email, recipient.roomID)
+			_ = sendKanbanEvent(recipient.websocket, "memory", kanbanApp.memorySnapshotForPrincipal(context.Background(), principal, 20))
+		}
+		return
+	}
 	raw, err := encodeKanbanEvent(event, data)
 	if err != nil {
 		log.Errorf("Failed to encode signed-in Kanban event: %v", err)

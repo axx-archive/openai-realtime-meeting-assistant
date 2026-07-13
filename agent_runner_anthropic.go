@@ -983,7 +983,7 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 						toolResults = append(toolResults, anthropicToolResultBlock(block.ID, err.Error(), true))
 						continue
 					}
-					result, changed, toolErr := r.app.applyToolCallArgs(block.Name, args)
+					result, changed, toolErr := r.applyToolCallArgsForJob(job, block.Name, args)
 					if changed {
 						boardChanged = true
 					}
@@ -1208,8 +1208,8 @@ func authorizeOrchestratorTool(job AgentJob, name string) error {
 	if !codexAuthorityAllows(job.Authority, policy.RequiredAuthority) {
 		return fmt.Errorf("tool %q requires %s authority (job has %s)", name, policy.RequiredAuthority, normalizeCodexJobAuthority(job.Authority))
 	}
-	if policy.RequiredAuthority != codexJobAuthorityReadOnly && !canonicalAuthenticatedPrincipal(job.RequestedBy) {
-		return fmt.Errorf("tool %q requires an authenticated requester principal", name)
+	if !canonicalAuthenticatedPrincipal(job.RequestedBy) {
+		return fmt.Errorf("tool %q requires an active organization-member requester", name)
 	}
 	return nil
 }
@@ -1220,7 +1220,33 @@ func canonicalAuthenticatedPrincipal(value string) bool {
 		return false
 	}
 	address, err := mail.ParseAddress(normalized)
-	return err == nil && normalizeAccountEmail(address.Address) == normalized
+	return err == nil && normalizeAccountEmail(address.Address) == normalized && accountStore().findUser(normalized) != nil
+}
+
+func (r *anthropicFableRunner) applyToolCallArgsForJob(job AgentJob, name string, args map[string]any) (map[string]any, bool, error) {
+	user, ok := authenticatedRequester(job.RequestedBy)
+	if !ok {
+		return nil, false, fmt.Errorf("tool %q requires an active organization-member requester", name)
+	}
+	principal := recallPrincipalForUser(user)
+	switch strings.TrimSpace(name) {
+	case "answer_memory_question", "cross_meeting_briefing", "get_meeting_detail":
+		return r.app.applyToolCallArgsForPrincipal(name, args, principal)
+	case "create_artifact":
+		return r.app.createRealtimeArtifactForPrincipal(args, principal)
+	case "update_artifact":
+		return r.app.updateRealtimeArtifactForUser(context.Background(), user, args)
+	case "create_package":
+		return r.app.createPackageTool(args, packageToolActor(user.Email))
+	case "attach_to_package":
+		return r.app.attachToPackageToolForUser(context.Background(), args, user)
+	case "advance_package_stage":
+		return r.app.advancePackageStageToolForUser(args, user)
+	case "send_notification":
+		return r.app.sendRealtimeNotification(args, user.Email)
+	default:
+		return r.app.applyToolCallArgs(name, args)
+	}
 }
 
 // webSearchServerTool is Anthropic's server-side web_search (no beta header on

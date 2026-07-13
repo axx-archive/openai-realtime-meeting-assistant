@@ -227,7 +227,7 @@ func appendCodexWorkerEvidenceForContract(output string, cfg codexExecConfig, co
 
 func (app *kanbanBoardApp) buildCodexAgentThreadPrompt(thread scoutAgentThread, now time.Time, authority string) string {
 	board := app.snapshotState()
-	memory := app.memorySnapshotForClients(20)
+	memory := app.delegatedMemorySnapshot(context.Background(), firstNonEmptyString(thread.Artifact.Metadata["requestedBy"], thread.Artifact.Metadata["createdBy"]), thread.Artifact.Metadata["originRoomId"], 20)
 	contextLine := boardAndMemoryContextLine(board, memory)
 	authority = normalizeCodexJobAuthority(authority)
 

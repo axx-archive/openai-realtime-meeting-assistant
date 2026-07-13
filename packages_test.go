@@ -778,8 +778,8 @@ func TestAssistantPackagesHandlersAuthAndActions(t *testing.T) {
 		t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
 	}
 	record := payload["package"].(map[string]any)
-	if record["createdBy"] != "Tim" {
-		t.Fatalf("createdBy=%v, want the signed-in user", record["createdBy"])
+	if record["createdBy"] != "tim@shareability.com" {
+		t.Fatalf("createdBy=%v, want the signed-in principal", record["createdBy"])
 	}
 	packageID := asString(record["id"])
 

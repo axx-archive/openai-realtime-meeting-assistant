@@ -46,7 +46,7 @@ func authSurface(id string, kind AuthorizationSurfaceKind, source string, famili
 
 var authorizationHTTPSurfaces = []AuthorizationSurface{
 	authSurface("http.websocket_upgrade", AuthorizationHTTP, "/websocket", []string{"room", "membership", "guest_capability"}, []ACLAction{ACLReadMetadata, ACLCreateChild}, []string{"user", "guest"}, false, true, AuthorizationLegacyGuarded),
-	authSurface("http.assistant.query", AuthorizationHTTP, "/assistant/query", []string{"memory", "artifact", "board"}, []ACLAction{ACLReadContent}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
+	authSurface("http.assistant.query", AuthorizationHTTP, "/assistant/query", []string{"memory", "artifact", "board"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.assistant.chat_threads", AuthorizationHTTP, "/assistant/chat-threads", []string{"chat_thread"}, []ACLAction{ACLReadContent, ACLCreateChild}, []string{"user"}, true, true, AuthorizationLegacyGuarded),
 	authSurface("http.assistant.chat_thread", AuthorizationHTTP, "/assistant/chat-threads/", []string{"chat_thread", "artifact", "file"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"user"}, true, true, AuthorizationLegacyGuarded),
 	authSurface("http.assistant.attachments", AuthorizationHTTP, "/assistant/attachments", []string{"file", "blob", "chat_thread"}, []ACLAction{ACLCreateChild, ACLWrite}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
@@ -62,28 +62,29 @@ var authorizationHTTPSurfaces = []AuthorizationSurface{
 	authSurface("http.assistant.notifications_clear", AuthorizationHTTP, "/assistant/notifications/clear", []string{"notification"}, []ACLAction{ACLDelete}, []string{"user"}, false, true, AuthorizationLegacyGuarded),
 	authSurface("http.assistant.board", AuthorizationHTTP, "/assistant/board", []string{"board_card"}, []ACLAction{ACLReadContent}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.board_drafts", AuthorizationHTTP, "/assistant/board/drafts/", []string{"board_card"}, []ACLAction{ACLWrite, ACLApprove}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
-	authSurface("http.assistant.memory", AuthorizationHTTP, "/assistant/memory", []string{"memory", "meeting", "artifact"}, []ACLAction{ACLReadContent}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
+	authSurface("http.assistant.memory", AuthorizationHTTP, "/assistant/memory", []string{"memory", "meeting", "artifact"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.assistant.files", AuthorizationHTTP, "/assistant/files", []string{"file", "blob", "artifact", "folder"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.assistant.files_upload", AuthorizationHTTP, "/assistant/files/upload", []string{"file", "blob"}, []ACLAction{ACLCreateChild, ACLWrite}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
-	authSurface("http.assistant.file_folders", AuthorizationHTTP, "/assistant/files/folders", []string{"folder"}, []ACLAction{ACLCreateChild, ACLWrite, ACLDelete}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
-	authSurface("http.assistant.file_move", AuthorizationHTTP, "/assistant/files/move", []string{"file", "folder"}, []ACLAction{ACLWrite}, []string{"user"}, false, false, AuthorizationCanonicalNeeded),
+	authSurface("http.assistant.file_folders", AuthorizationHTTP, "/assistant/files/folders", []string{"folder"}, []ACLAction{ACLCreateChild, ACLWrite, ACLDelete}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("http.assistant.file_move", AuthorizationHTTP, "/assistant/files/move", []string{"file", "folder", "artifact", "chat_thread"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.assistant.file_save", AuthorizationHTTP, "/assistant/files/save", []string{"artifact", "file", "folder"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
-	authSurface("http.assistant.meetings", AuthorizationHTTP, "/assistant/meetings", []string{"meeting", "memory", "board_card"}, []ACLAction{ACLReadContent}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
+	authSurface("http.assistant.meetings", AuthorizationHTTP, "/assistant/meetings", []string{"meeting", "memory", "board_card"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.assistant.mission", AuthorizationHTTP, "/assistant/mission", []string{"package", "artifact", "decision"}, []ACLAction{ACLReadContent}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.mission_refresh", AuthorizationHTTP, "/assistant/mission/refresh", []string{"package", "artifact", "decision"}, []ACLAction{ACLExecute}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.proposals", AuthorizationHTTP, "/assistant/proposals/", []string{"proposal", "workflow"}, []ACLAction{ACLApprove, ACLExecute}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.quarantine", AuthorizationHTTP, "/assistant/quarantine", []string{"memory"}, []ACLAction{ACLReadContent}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.quarantine_action", AuthorizationHTTP, "/assistant/quarantine/", []string{"memory"}, []ACLAction{ACLWrite, ACLDelete}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
-	authSurface("http.assistant.packages", AuthorizationHTTP, "/assistant/packages", []string{"package", "artifact", "decision", "board_card"}, []ACLAction{ACLReadContent, ACLCreateChild}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
-	authSurface("http.assistant.package_action", AuthorizationHTTP, "/assistant/packages/", []string{"package", "artifact", "decision", "board_card"}, []ACLAction{ACLWrite}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
+	authSurface("http.assistant.packages", AuthorizationHTTP, "/assistant/packages", []string{"package", "artifact", "decision", "board_card", "chat_thread", "channel"}, []ACLAction{ACLReadContent, ACLCreateChild}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
+	authSurface("http.assistant.package_action", AuthorizationHTTP, "/assistant/packages/", []string{"package", "artifact", "decision", "board_card", "chat_thread", "channel"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.assistant.deal_room_request", AuthorizationHTTP, "/assistant/deal-room/request", []string{"deal_room", "package", "artifact"}, []ACLAction{ACLReadContent, ACLShare}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.assistant.deal_room_resolve", AuthorizationHTTP, "/assistant/deal-room/resolve", []string{"deal_room", "artifact"}, []ACLAction{ACLReadContent, ACLShare, ACLApprove}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.assistant.deal_room_revoke", AuthorizationHTTP, "/assistant/deal-room/revoke", []string{"deal_room"}, []ACLAction{ACLShare}, []string{"user"}, false, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.deal_room_list", AuthorizationHTTP, "/assistant/deal-room/list", []string{"deal_room"}, []ACLAction{ACLReadMetadata}, []string{"user"}, false, false, AuthorizationCanonicalNeeded),
-	authSurface("http.assistant.brief", AuthorizationHTTP, "/assistant/brief", []string{"memory", "meeting", "package"}, []ACLAction{ACLReadContent}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
+	authSurface("http.assistant.brief", AuthorizationHTTP, "/assistant/brief", []string{"memory", "meeting", "package"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.assistant.portfolio", AuthorizationHTTP, "/assistant/portfolio", []string{"package", "artifact", "decision"}, []ACLAction{ACLReadContent}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.realtime_offer", AuthorizationHTTP, "/assistant/realtime-offer", []string{"room", "meeting"}, []ACLAction{ACLReadMetadata, ACLExecute}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.realtime_tool", AuthorizationHTTP, "/assistant/realtime-tool", []string{"memory", "board_card", "artifact", "workflow", "room"}, []ACLAction{ACLReadContent, ACLWrite, ACLExecute}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
+	authSurface("http.assistant.realtime_tool.recall", AuthorizationHTTP, "/assistant/realtime-tool recall tools", []string{"memory", "meeting", "artifact"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.artifacts", AuthorizationHTTP, "/artifacts", []string{"artifact", "revision"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.artifacts.action", AuthorizationHTTP, "/artifacts/action", []string{"artifact", "workflow", "approval"}, []ACLAction{ACLReadMetadata, ACLReadContent, ACLApprove, ACLExecute, ACLWrite}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.artifacts.open", AuthorizationHTTP, "/artifacts/open", []string{"artifact"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
@@ -95,7 +96,7 @@ var authorizationHTTPSurfaces = []AuthorizationSurface{
 	authSurface("http.archives", AuthorizationHTTP, "/archives/", []string{"archive", "meeting", "blob"}, []ACLAction{ACLReadContent, ACLExport}, []string{"public_capability"}, true, true, AuthorizationLegacyGuarded),
 	authSurface("http.participants", AuthorizationHTTP, "/participants", []string{"room", "membership"}, []ACLAction{ACLReadMetadata}, []string{"anonymous", "user"}, false, true, AuthorizationLegacyGuarded),
 	authSurface("http.rooms", AuthorizationHTTP, "/rooms", []string{"room", "membership"}, []ACLAction{ACLReadMetadata, ACLCreateChild}, []string{"user"}, false, false, AuthorizationCanonicalNeeded),
-	authSurface("http.room_action", AuthorizationHTTP, "/rooms/", []string{"room", "membership", "guest_capability"}, []ACLAction{ACLManage}, []string{"user"}, false, false, AuthorizationCanonicalNeeded),
+	authSurface("http.room_action", AuthorizationHTTP, "/rooms/", []string{"room", "membership", "guest_capability"}, []ACLAction{ACLManage}, []string{"user"}, false, true, AuthorizationCanonicalEnforced),
 	authSurface("http.internal_codex_result", AuthorizationHTTP, "/internal/codex/jobs/result", []string{"job", "artifact", "workflow"}, []ACLAction{ACLExecute, ACLWrite}, []string{"service"}, true, true, AuthorizationLegacyGuarded),
 	authSurface("http.internal_render_result", AuthorizationHTTP, "/internal/render/jobs/result", []string{"job", "artifact", "blob"}, []ACLAction{ACLExecute, ACLWrite}, []string{"service"}, true, true, AuthorizationLegacyGuarded),
 }
@@ -119,10 +120,19 @@ func websocketInboundAuthorizationSurfaces() []AuthorizationSurface {
 		action := ACLExecute
 		families := []string{"room", "meeting"}
 		readsBody := false
+		authorizeBeforeBodyRead := false
 		status := AuthorizationLegacyGuarded
 		switch event {
 		case "assistant_query", "scout_chat_reset", "scout_chat":
 			action, families, readsBody, status = ACLReadContent, []string{"memory", "chat_thread", "artifact"}, true, AuthorizationCanonicalNeeded
+			if event == "assistant_query" {
+				authorizeBeforeBodyRead = true
+				status = AuthorizationCanonicalEnforced
+			}
+			if event == "scout_chat" {
+				authorizeBeforeBodyRead = true
+				status = AuthorizationCanonicalEnforced
+			}
 		case "room_chat", "room_chat_delete":
 			action, families, readsBody, status = ACLWrite, []string{"room", "meeting", "chat_thread"}, true, AuthorizationCanonicalNeeded
 		case "manual_create_ticket", "manual_update_ticket", "manual_delete_ticket", "undo_delete_ticket":
@@ -132,7 +142,7 @@ func websocketInboundAuthorizationSurfaces() []AuthorizationSurface {
 		case "set_recording", "voice_control":
 			action, families, status = ACLManage, []string{"room", "meeting"}, AuthorizationCanonicalNeeded
 		}
-		result = append(result, authSurface("ws.in."+event, AuthorizationWebSocketIn, event, families, []ACLAction{action}, []string{"user", "guest"}, readsBody, false, status))
+		result = append(result, authSurface("ws.in."+event, AuthorizationWebSocketIn, event, families, []ACLAction{action}, []string{"user", "guest"}, readsBody, authorizeBeforeBodyRead, status))
 	}
 	return result
 }
@@ -140,8 +150,10 @@ func websocketInboundAuthorizationSurfaces() []AuthorizationSurface {
 var authorizationFanoutSurfaces = []AuthorizationSurface{
 	authSurface("ws.bootstrap.member_room", AuthorizationWSBootstrap, "member room bootstrap", []string{"room", "meeting", "board_card", "memory", "notification", "proposal"}, []ACLAction{ACLReadMetadata, ACLReadContent}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("ws.bootstrap.member_office", AuthorizationWSBootstrap, "member office bootstrap", []string{"room", "meeting", "board_card", "memory", "notification", "proposal"}, []ACLAction{ACLReadMetadata, ACLReadContent}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
+	authSurface("ws.bootstrap.member_room.memory", AuthorizationWSBootstrap, "member room memory bootstrap", []string{"memory", "meeting", "artifact"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("ws.bootstrap.member_office.memory", AuthorizationWSBootstrap, "member office memory bootstrap", []string{"memory", "meeting", "artifact"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("ws.bootstrap.guest_room", AuthorizationWSBootstrap, "guest room bootstrap", []string{"room", "meeting", "room_chat"}, []ACLAction{ACLReadMetadata, ACLReadContent}, []string{"guest"}, true, true, AuthorizationLegacyGuarded),
-	authSurface("ws.out.memory", AuthorizationWebSocketOut, "memory", []string{"memory", "meeting", "artifact"}, []ACLAction{ACLReadContent}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
+	authSurface("ws.out.memory", AuthorizationWebSocketOut, "memory", []string{"memory", "meeting", "artifact"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("ws.out.artifact", AuthorizationWebSocketOut, "artifact", []string{"artifact", "revision"}, []ACLAction{ACLReadMetadata, ACLReadContent}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("ws.out.room_chat", AuthorizationWebSocketOut, "room_chat", []string{"room", "meeting", "room_chat"}, []ACLAction{ACLReadContent}, []string{"user", "guest"}, true, true, AuthorizationLegacyGuarded),
 	authSurface("ws.out.meeting", AuthorizationWebSocketOut, "meeting", []string{"room", "meeting"}, []ACLAction{ACLReadMetadata, ACLReadContent}, []string{"user", "guest"}, true, true, AuthorizationLegacyGuarded),
@@ -150,16 +162,16 @@ var authorizationFanoutSurfaces = []AuthorizationSurface{
 }
 
 var authorizationWorkerSurfaces = []AuthorizationSurface{
-	authSurface("worker.meeting_brain", AuthorizationWorker, "runMeetingBrainOnce", []string{"meeting", "memory"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"service"}, true, false, AuthorizationCanonicalNeeded),
-	authSurface("worker.meeting_board", AuthorizationWorker, "runMeetingBoardOnce", []string{"meeting", "memory", "board_card"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"service"}, true, false, AuthorizationCanonicalNeeded),
-	authSurface("worker.research_suggestion", AuthorizationWorker, "runResearchSuggestionOnce", []string{"meeting", "memory", "proposal"}, []ACLAction{ACLReadContent, ACLCreateChild}, []string{"service"}, true, false, AuthorizationCanonicalNeeded),
-	authSurface("worker.mission_intelligence", AuthorizationWorker, "mission intelligence", []string{"memory", "package", "artifact", "decision"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"service"}, true, false, AuthorizationCanonicalNeeded),
-	authSurface("worker.decision_ledger", AuthorizationWorker, "decision ledger", []string{"memory", "decision"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"service"}, true, false, AuthorizationCanonicalNeeded),
-	authSurface("worker.narrative", AuthorizationWorker, "narrative maintainer", []string{"memory", "artifact"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"service"}, true, false, AuthorizationCanonicalNeeded),
-	authSurface("worker.meeting_digest", AuthorizationWorker, "meeting digest", []string{"meeting", "memory", "digest"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"service"}, true, false, AuthorizationCanonicalNeeded),
-	authSurface("worker.day_company_digest", AuthorizationWorker, "day/company digest", []string{"memory", "digest"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"service"}, true, false, AuthorizationCanonicalNeeded),
-	authSurface("worker.embedding_maintainer", AuthorizationWorker, "runEmbeddingMaintainerOnce", []string{"memory", "artifact", "embedding"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"service"}, true, false, AuthorizationCanonicalNeeded),
-	authSurface("worker.agent_thread", AuthorizationWorker, "runAgentThread", []string{"workflow", "artifact", "memory", "board_card"}, []ACLAction{ACLReadContent, ACLWrite, ACLExecute}, []string{"service"}, true, false, AuthorizationCanonicalNeeded),
+	authSurface("worker.meeting_brain", AuthorizationWorker, "runMeetingBrainOnce", []string{"meeting", "memory"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"service"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("worker.meeting_board", AuthorizationWorker, "runMeetingBoardOnce", []string{"meeting", "memory", "board_card"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"service"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("worker.research_suggestion", AuthorizationWorker, "runResearchSuggestionOnce", []string{"meeting", "memory", "proposal"}, []ACLAction{ACLReadContent, ACLCreateChild}, []string{"service"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("worker.mission_intelligence", AuthorizationWorker, "mission intelligence", []string{"memory", "package", "artifact", "decision", "meeting"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"service"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("worker.decision_ledger", AuthorizationWorker, "decision ledger", []string{"memory", "decision", "package"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"service"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("worker.narrative", AuthorizationWorker, "narrative maintainer", []string{"memory", "artifact", "meeting"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"service"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("worker.meeting_digest", AuthorizationWorker, "meeting digest", []string{"meeting", "memory", "digest"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"service"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("worker.day_company_digest", AuthorizationWorker, "day/company digest", []string{"memory", "digest"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"service"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("worker.embedding_maintainer", AuthorizationWorker, "runEmbeddingMaintainerOnce", []string{"memory", "artifact", "embedding"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"service"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("worker.agent_thread", AuthorizationWorker, "runAgentThread", []string{"workflow", "artifact", "memory", "board_card"}, []ACLAction{ACLReadContent, ACLWrite, ACLExecute}, []string{"service"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("worker.codex_runner", AuthorizationWorker, "codex runner", []string{"job", "workflow", "artifact"}, []ACLAction{ACLExecute, ACLWrite}, []string{"service"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("worker.render_runner", AuthorizationWorker, "render runner", []string{"job", "artifact", "revision", "blob"}, []ACLAction{ACLReadContent, ACLExport, ACLWrite}, []string{"service"}, true, false, AuthorizationCanonicalNeeded),
 }

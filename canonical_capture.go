@@ -249,7 +249,10 @@ func (spool *CanonicalCaptureSpool) Recover(current CanonicalRecoveryState) (Can
 		if err != nil {
 			return result, err
 		}
-		afterMatches := exists && state == record.AfterStateDigest
+		// sha256(empty) is the runtime tombstone digest for a removed legacy
+		// object. This lets the same prepared/committed protocol recover deletes
+		// without storing user content in the spool.
+		afterMatches := (exists && state == record.AfterStateDigest) || (!exists && record.AfterStateDigest == sha256Hex(nil))
 		beforeMatches := (!exists && record.BeforeStateDigest == "") || (exists && state == record.BeforeStateDigest)
 		provedByLaterChain := spool.laterPrepareProvesCommit(record)
 		switch {

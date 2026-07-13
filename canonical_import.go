@@ -44,27 +44,52 @@ type CanonicalImportPaths struct {
 }
 
 type CanonicalImportedObject struct {
-	Family           string
-	ObjectID         string
-	ObjectKey        string
-	StateDigest      string
-	AggregateVersion int64
-	EventID          uuid.UUID
-	RoomID           string
-	MeetingID        string
-	ContentRevision  int64
-	ContentDigest    string
-	ContentRef       string
-	Status           string
-	OccurredAt       time.Time
-	Deleted          bool
-	Principals       []string
+	Family               string
+	ObjectID             string
+	ObjectKey            string
+	StateDigest          string
+	AggregateVersion     int64
+	EventID              uuid.UUID
+	RoomID               string
+	MeetingID            string
+	ContentRevision      int64
+	ContentDigest        string
+	ContentRef           string
+	Status               string
+	OccurredAt           time.Time
+	Deleted              bool
+	Principals           []string
+	OwnerPrincipal       string
+	Visibility           string
+	ImportGrants         []CanonicalImportGrant
+	LifecycleFamily      string
+	LifecycleObjectID    string
+	LifecycleStateDigest string
 }
 
 type CanonicalImportPlan struct {
-	TenantID string
-	Objects  []CanonicalImportedObject
-	Events   []CanonicalEvent
+	TenantID         string
+	Objects          []CanonicalImportedObject
+	Events           []CanonicalEvent
+	TestedPrincipals []string
+}
+
+// CanonicalImportGrant is the explicit migration ACL attached to one imported
+// object. Revision is zero for metadata-only access and the exact immutable
+// content revision for content access.
+type CanonicalImportGrant struct {
+	SubjectKind          ACLSubjectKind
+	SubjectID            string
+	SubjectPrincipalKind ACLPrincipalKind
+	Action               ACLAction
+	Revision             int64
+}
+
+const canonicalLegacyOrgTeamID = "legacy-organization"
+
+var canonicalLegacyNegativeCorpus = []string{
+	"guest:__legacy_guest__",
+	"service:__legacy_service__",
 }
 
 type CanonicalImporter struct {
@@ -73,6 +98,9 @@ type CanonicalImporter struct {
 	Versions   *FileCanonicalObjectVersionMap
 	Registry   *CanonicalPayloadRegistry
 	Principals func(CanonicalImportedObject) []string
+	// OrgPrincipals is the concrete signed-in user corpus used to prove
+	// per-principal source/target parity. Team grants remain one durable row.
+	OrgPrincipals []string
 }
 
 func NewCanonicalImportPayloadRegistry() (*CanonicalPayloadRegistry, error) {
@@ -111,13 +139,18 @@ func (importer *CanonicalImporter) Build(ctx context.Context) (CanonicalImportPl
 	if err != nil {
 		return CanonicalImportPlan{}, err
 	}
+	objects, err = addCanonicalLifecycleDeletionTargets(objects, importer.Versions)
+	if err != nil {
+		return CanonicalImportPlan{}, err
+	}
 	sort.Slice(objects, func(i, j int) bool {
 		if objects[i].Family != objects[j].Family {
 			return objects[i].Family < objects[j].Family
 		}
 		return objects[i].ObjectID < objects[j].ObjectID
 	})
-	plan := CanonicalImportPlan{TenantID: importer.TenantID}
+	orgPrincipals := canonicalLegacyOrgPrincipals(importer.OrgPrincipals)
+	plan := CanonicalImportPlan{TenantID: importer.TenantID, TestedPrincipals: append(append([]string(nil), orgPrincipals...), canonicalLegacyNegativeCorpus...)}
 	for _, object := range objects {
 		version, _, err := importer.Versions.ResolveVersionDurably(ctx, object.Family, object.ObjectKey, object.StateDigest)
 		if err != nil {
@@ -128,9 +161,13 @@ func (importer *CanonicalImporter) Build(ctx context.Context) (CanonicalImportPl
 		if err != nil {
 			return CanonicalImportPlan{}, err
 		}
+		applyCanonicalLegacyAccess(&object, orgPrincipals)
 		if importer.Principals != nil {
+			// Compatibility seam for deterministic importer/reconciler fixtures.
+			// Production derives this set from explicit grants above.
 			object.Principals = uniqueSortedStrings(importer.Principals(object))
 		}
+		plan.TestedPrincipals = append(plan.TestedPrincipals, object.Principals...)
 		payloadValue := map[string]any{
 			"object_id": object.ObjectID, "source_kind": object.Family, "source_revision": version,
 			"room_id": NormalizeCanonicalRoomID(object.RoomID), "status": canonicalImportStatus(object.Status), "deleted": object.Deleted,
@@ -165,7 +202,78 @@ func (importer *CanonicalImporter) Build(ctx context.Context) (CanonicalImportPl
 		plan.Objects = append(plan.Objects, object)
 		plan.Events = append(plan.Events, event)
 	}
+	plan.TestedPrincipals = uniqueSortedStrings(plan.TestedPrincipals)
 	return plan, nil
+}
+
+func canonicalLegacyOrgPrincipals(configured []string) []string {
+	principals := []string{"user:__legacy_org_member__", "user:__legacy_org_nonowner__"}
+	for _, value := range configured {
+		kind, id, ok := splitCanonicalImportPrincipal(value)
+		if ok && kind == ACLPrincipalUser {
+			principals = append(principals, "user:"+id)
+		}
+	}
+	return uniqueSortedStrings(principals)
+}
+
+func splitCanonicalImportPrincipal(value string) (ACLPrincipalKind, string, bool) {
+	parts := strings.SplitN(strings.TrimSpace(value), ":", 2)
+	if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
+		return "", "", false
+	}
+	kind := ACLPrincipalKind(parts[0])
+	if !validACLPrincipalKind(kind) {
+		return "", "", false
+	}
+	return kind, strings.TrimSpace(parts[1]), true
+}
+
+func canonicalImportOwnerPrincipal(value string) string {
+	email := normalizeAccountEmail(value)
+	if !strings.Contains(email, "@") || strings.HasPrefix(email, "@") || strings.HasSuffix(email, "@") {
+		return ""
+	}
+	return "user:" + email
+}
+
+func applyCanonicalLegacyAccess(object *CanonicalImportedObject, orgPrincipals []string) {
+	if object == nil {
+		return
+	}
+	visibility := strings.ToLower(strings.TrimSpace(object.Visibility))
+	if visibility == "" {
+		switch object.Family {
+		case "memory", "board_card", "room", "meeting", "notification", "file_folder", "file_assignment", "archive":
+			visibility = "team"
+		default:
+			visibility = "none"
+		}
+	}
+	metadataGrant := func(kind ACLSubjectKind, subjectID string, principalKind ACLPrincipalKind) {
+		object.ImportGrants = append(object.ImportGrants, CanonicalImportGrant{SubjectKind: kind, SubjectID: subjectID, SubjectPrincipalKind: principalKind, Action: ACLReadMetadata})
+		if object.ContentRevision > 0 && isHexDigest(object.ContentDigest) {
+			object.ImportGrants = append(object.ImportGrants, CanonicalImportGrant{SubjectKind: kind, SubjectID: subjectID, SubjectPrincipalKind: principalKind, Action: ACLReadContent, Revision: object.ContentRevision})
+		}
+	}
+	ownerKind, ownerID, ownerOK := splitCanonicalImportPrincipal(object.OwnerPrincipal)
+	switch visibility {
+	case "team", "organization", "public":
+		metadataGrant(ACLSubjectTeam, canonicalLegacyOrgTeamID, "")
+		object.Principals = append(object.Principals, orgPrincipals...)
+		// Room/folder creators retain an explicit identity grant in addition to
+		// organization visibility, making creator migration independently auditable.
+		if ownerOK && ownerKind == ACLPrincipalUser && (object.Family == "room" || object.Family == "file_folder") {
+			metadataGrant(ACLSubjectPrincipal, ownerID, ownerKind)
+			object.Principals = append(object.Principals, "user:"+ownerID)
+		}
+	case "private":
+		if ownerOK && ownerKind == ACLPrincipalUser {
+			metadataGrant(ACLSubjectPrincipal, ownerID, ownerKind)
+			object.Principals = append(object.Principals, "user:"+ownerID)
+		}
+	}
+	object.Principals = uniqueSortedStrings(object.Principals)
 }
 
 func (plan CanonicalImportPlan) Apply(ctx context.Context, store CanonicalEventStore) error {
@@ -242,6 +350,60 @@ func importedObject(family, id string, safeState any, occurred time.Time) (Canon
 	return CanonicalImportedObject{Family: family, ObjectID: id, ObjectKey: key, StateDigest: digest, OccurredAt: occurred, Status: "active"}, nil
 }
 
+func addCanonicalLifecycleDeletionTargets(objects []CanonicalImportedObject, versions *FileCanonicalObjectVersionMap) ([]CanonicalImportedObject, error) {
+	if versions == nil {
+		return nil, errors.New("durable version map is required for lifecycle targets")
+	}
+	snapshot, err := versions.Snapshot()
+	if err != nil {
+		return nil, err
+	}
+	known := map[string]bool{}
+	for _, entry := range snapshot.Entries {
+		known[entry.Family+"\x00"+entry.ObjectKey] = true
+	}
+	current := map[string]int{}
+	for index, object := range objects {
+		if object.LifecycleFamily == "" {
+			current[object.Family+"\x00"+object.ObjectID] = index
+		}
+	}
+	result := append([]CanonicalImportedObject(nil), objects...)
+	for _, journal := range objects {
+		if journal.LifecycleFamily == "" || journal.LifecycleObjectID == "" || !isHexDigest(journal.LifecycleStateDigest) {
+			continue
+		}
+		objectKey, err := CanonicalLegacyObjectKey(journal.LifecycleFamily, journal.LifecycleObjectID)
+		if err != nil {
+			return nil, err
+		}
+		key := journal.LifecycleFamily + "\x00" + journal.LifecycleObjectID
+		if liveIndex, exists := current[key]; exists {
+			live := result[liveIndex]
+			if !live.OccurredAt.IsZero() && live.OccurredAt.After(journal.OccurredAt) {
+				continue // a later recreation supersedes the older journal
+			}
+			return nil, fmt.Errorf("lifecycle journal conflicts with live object %s/%s", journal.LifecycleFamily, journal.LifecycleObjectID)
+		}
+		if !known[journal.LifecycleFamily+"\x00"+objectKey] {
+			// No canonical predecessor can exist. The audit object is sufficient on
+			// a first import into an empty target and avoids inventing version 1 as a
+			// deletion of an object that canonical storage never observed.
+			continue
+		}
+		deleted, err := importedObject(journal.LifecycleFamily, journal.LifecycleObjectID, map[string]any{
+			"id": journal.LifecycleObjectID, "deleted": true, "prior_state_sha256": journal.LifecycleStateDigest,
+		}, journal.OccurredAt)
+		if err != nil {
+			return nil, err
+		}
+		deleted.Deleted, deleted.Status, deleted.Visibility = true, "closed", "none"
+		result = append(result, deleted)
+		current[key] = len(result) - 1
+	}
+	return result, nil
+}
+
 func importMemoryObjects(path string) ([]CanonicalImportedObject, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, nil
@@ -293,6 +455,14 @@ func importMemoryObjects(path string) ([]CanonicalImportedObject, error) {
 				object.ContentDigest = hex.EncodeToString(contentDigest[:])
 				object.ContentRef = "legacy:memory:" + entry.ID
 				object.Status = firstNonEmptyString(entry.Metadata["status"], "active")
+				owner := firstNonEmptyString(entry.Metadata["ownerEmail"], entry.Metadata["createdByEmail"], entry.Metadata["createdBy"])
+				object.OwnerPrincipal = canonicalImportOwnerPrincipal(owner)
+				visibility := strings.ToLower(strings.TrimSpace(entry.Metadata["visibility"]))
+				if visibility == "private" || strings.EqualFold(entry.Metadata["private"], "true") || entry.Kind == meetingMemoryKindScoutChat && visibility != scoutChatVisibilityPublic {
+					object.Visibility = "private"
+				} else {
+					object.Visibility = "team"
+				}
 				objects = append(objects, object)
 				if entry.Kind == meetingMemoryKindOSArtifact {
 					for _, revision := range artifactVersionHistory(entry) {
@@ -303,6 +473,8 @@ func importMemoryObjects(path string) ([]CanonicalImportedObject, error) {
 							return nil, err
 						}
 						revisionObject.ContentRevision = int64(revision.V)
+						revisionObject.OwnerPrincipal = object.OwnerPrincipal
+						revisionObject.Visibility = object.Visibility
 						if validBlobRef(revision.BodyBlobRef) {
 							revisionObject.ContentDigest = revision.BodyBlobRef
 							revisionObject.ContentRef = "blob:" + revision.BodyBlobRef
@@ -338,6 +510,9 @@ func importBoardObjects(path string) ([]CanonicalImportedObject, error) {
 			return nil, err
 		}
 		object.Status = string(card.Status)
+		object.ContentRevision = 1
+		object.ContentDigest = object.StateDigest
+		object.ContentRef = "legacy:board-card:" + card.ID
 		objects = append(objects, object)
 	}
 	return objects, nil
@@ -356,6 +531,8 @@ func importRoomObjects(path string) ([]CanonicalImportedObject, error) {
 			return nil, err
 		}
 		object.RoomID = NormalizeCanonicalRoomID(room.ID)
+		object.OwnerPrincipal = canonicalImportOwnerPrincipal(room.CreatedBy)
+		object.Visibility = "team"
 		if room.Archived {
 			object.Status = "archived"
 		}
@@ -366,6 +543,9 @@ func importRoomObjects(path string) ([]CanonicalImportedObject, error) {
 				return nil, err
 			}
 			linkObject.RoomID = object.RoomID
+			// Guest-link metadata is not durable guest authority. Possession of a
+			// separately verified live capability is handled outside import ACLs.
+			linkObject.Visibility = "none"
 			if link.Revoked {
 				linkObject.Status = "revoked"
 			}
@@ -424,6 +604,14 @@ func importNotificationObjects(path string) ([]CanonicalImportedObject, error) {
 		if record.ResolvedAt != "" {
 			object.Status = "closed"
 		}
+		object.ContentRevision = 1
+		object.ContentDigest = digestText(record.Text)
+		object.ContentRef = "legacy:notification:" + record.ID
+		if owner := canonicalImportOwnerPrincipal(record.UserEmail); owner != "" {
+			object.OwnerPrincipal, object.Visibility = owner, "private"
+		} else {
+			object.Visibility = "team"
+		}
 		objects = append(objects, object)
 	}
 	return objects, nil
@@ -443,6 +631,8 @@ func importShareLinkObjects(path string) ([]CanonicalImportedObject, error) {
 			return nil, err
 		}
 		object.Status = record.Status
+		// A stored share-link row is not itself proof of token possession.
+		object.Visibility = "none"
 		objects = append(objects, object)
 	}
 	return objects, nil
@@ -459,6 +649,8 @@ func importFileFolderObjects(path string) ([]CanonicalImportedObject, error) {
 		if err != nil {
 			return nil, err
 		}
+		object.OwnerPrincipal = canonicalImportOwnerPrincipal(folder.CreatedBy)
+		object.Visibility = "team"
 		objects = append(objects, object)
 	}
 	for fileID, folderID := range state.Assignments {
@@ -467,6 +659,7 @@ func importFileFolderObjects(path string) ([]CanonicalImportedObject, error) {
 		if err != nil {
 			return nil, err
 		}
+		object.Visibility = "team"
 		objects = append(objects, object)
 	}
 	return objects, nil
@@ -627,6 +820,10 @@ func importLifecycleJournal(path, family string) ([]CanonicalImportedObject, err
 			return nil, err
 		}
 		object.Deleted, object.Status = true, "closed"
+		object.Visibility = "none"
+		object.LifecycleFamily = record.Family
+		object.LifecycleObjectID = record.ObjectID
+		object.LifecycleStateDigest = record.StateDigest
 		objects = append(objects, object)
 	}
 	return objects, scanner.Err()

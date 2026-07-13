@@ -43,6 +43,10 @@ MEETING_ROOM_PASSWORD=<room-passcode>
 MEETING_ROOM_MAX_PARTICIPANTS=10
 MEETING_ALLOWED_ORIGINS=https://<droplet-public-ip>.nip.io
 MEETING_MEMORY_PATH=/app/data/meeting-memory.jsonl
+BONFIRE_CANONICAL_POSTGRES_PASSWORD=<openssl-rand-hex-32>
+BONFIRE_CANONICAL_DATABASE_URL=postgres://bonfire:<same-password>@canonical-postgres:5432/bonfire?sslmode=disable
+BONFIRE_CANONICAL_TENANT_ID=bonfire
+BONFIRE_CANONICAL_MODE=shadow
 MEETING_BRAIN_INTERVAL=5m
 OPENAI_BRAIN_MODEL=gpt-5.5
 MEETING_BRAIN_BACKFILL=false
@@ -143,8 +147,18 @@ From the repo root on the Droplet:
 
 ```bash
 cd deploy/digitalocean
-docker compose up -d --build
+# The W1 PostgreSQL volume is external so `docker compose down -v` cannot
+# erase canonical history. This command is idempotent.
+docker volume create digitalocean_canonical_postgres
+docker compose --profile codex up -d --build
 ```
+
+W1 runs PostgreSQL as a private, resource-capped shadow target on the existing
+Droplet. JSON/JSONL remains the serving authority. Do not set
+`BONFIRE_CANONICAL_MODE=required` until `/readyz` reports equal canonical dirty
+and reconciled high-water marks with no pending/frozen families and the
+principal-aware parity gate has passed. Managed HA PostgreSQL is a separate W4
+cutover decision.
 
 The room will be available at:
 

@@ -770,6 +770,14 @@ func main() {
 		os.Exit(2)
 	}
 
+	canonicalRuntime, runtimeErr := initializeCanonicalRuntime(context.Background())
+	if runtimeErr != nil {
+		fmt.Fprintf(os.Stderr, "Canonical runtime startup failed: %v\n", runtimeErr)
+		os.Exit(2)
+	}
+	_ = canonicalRuntime
+	defer closeCanonicalRuntime()
+
 	if *codexRunnerWorker {
 		if err := runCodexRunnerLoop(context.Background()); err != nil {
 			log.Errorf("Codex runner stopped: %v", err)
@@ -783,7 +791,6 @@ func main() {
 		}
 		return
 	}
-
 	// Init other state
 	trackLocals = map[string]*webrtc.TrackLocalStaticRTP{}
 	trackParticipants = map[string]string{}
@@ -1085,6 +1092,10 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ready := traffic.ready
+	canonical := canonicalRuntimeSnapshot()
+	if canonical.Required && !canonical.Healthy {
+		ready = false
+	}
 	status := http.StatusOK
 	if !ready {
 		status = http.StatusServiceUnavailable
@@ -1095,6 +1106,9 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) == "" {
 		degraded = append([]string{"openai_api_key_missing"}, degraded...)
 	}
+	if canonical.Mode != "off" && !canonical.Healthy {
+		degraded = append(degraded, "canonical_runtime_degraded")
+	}
 
 	writeSystemStatusJSON(w, r, status, map[string]any{
 		"ok":           ready,
@@ -1103,6 +1117,7 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 		"degraded":     degraded,
 		"capabilities": capabilities,
 		"checks": map[string]any{
+			"canonical":   canonical,
 			"app":         appAvailable,
 			"memoryStore": memoryAvailable,
 			"memoryFile":  memoryCheck,
@@ -1544,7 +1559,7 @@ func internalRenderRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	// Let open viewers see the new asset without a reload (the codex
 	// callback's memory fan-out).
-	broadcastSignedInKanbanEvent("memory", kanbanApp.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", nil)
 
 	writeSystemStatusJSON(w, r, http.StatusOK, map[string]any{
 		"ok":  true,
@@ -1706,13 +1721,14 @@ func assistantQueryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mode := normalizeOSAssistantMode(payload.Mode)
-	result, err := kanbanApp.resolveAssistantQueryContext(r.Context(), query, scoutChatHistoryFromPayload(payload.History))
+	principal := kanbanApp.recallPrincipalForMemberRoom(user.Email, kanbanApp.memberCurrentRoom(user.Email))
+	result, err := kanbanApp.resolveAssistantQueryContextForPrincipalWithAttachments(r.Context(), principal, user.Email, query, scoutChatHistoryFromPayload(payload.History), nil)
 	if err != nil {
 		log.Errorf("Failed to answer OS assistant query for %s: %v", user.Email, err)
 		writeAuthError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	result = buildOSAssistantModeAnswer(mode, result, kanbanApp.snapshotState(), kanbanApp.memorySnapshotForClients(12))
+	result = buildOSAssistantModeAnswer(mode, result, kanbanApp.snapshotState(), kanbanApp.scopedRecallApp(r.Context(), principal).memorySnapshotForClients(12))
 
 	response := map[string]any{
 		"ok":           true,
@@ -2079,7 +2095,7 @@ func assistantMemoryHandler(w http.ResponseWriter, r *http.Request) {
 
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok":     true,
-		"memory": kanbanApp.memorySnapshotForClients(20),
+		"memory": kanbanApp.memorySnapshotForPrincipal(r.Context(), recallPrincipalForUser(user), 20),
 	})
 }
 
@@ -4663,6 +4679,10 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	if sessionUser != nil {
 		sessionEmail = sessionUser.Email
 	}
+	scoutChat.requesterEmail = sessionEmail
+	if sessionUser != nil {
+		scoutChat.principal = kanbanApp.recallPrincipalForMemberRoom(sessionEmail, connRoomID)
+	}
 	participantName := "participant"
 	participantSessionID := nextParticipantSessionID()
 	// endpointID is the stable per-device id from the participant hello. It is
@@ -5202,7 +5222,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if err := sendKanbanEvent(c, "undo_available", kanbanApp.canUndoDelete()); err != nil {
 				log.Errorf("Failed to send undo state: %v", err)
 			}
-			if err := sendKanbanEvent(c, "memory", kanbanApp.memorySnapshotForClients(20)); err != nil {
+			if err := sendKanbanEvent(c, "memory", kanbanApp.memorySnapshotForPrincipal(context.Background(), kanbanApp.recallPrincipalForMemberRoom(sessionEmail, connRoomID), 20)); err != nil {
 				log.Errorf("Failed to send meeting memory: %v", err)
 			}
 			// Direct send: this socket is not in peerConnections until
@@ -5286,7 +5306,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if err := sendKanbanEvent(c, "undo_available", kanbanApp.canUndoDelete()); err != nil {
 				log.Errorf("Failed to send undo state: %v", err)
 			}
-			if err := sendKanbanEvent(c, "memory", kanbanApp.memorySnapshotForClients(20)); err != nil {
+			if err := sendKanbanEvent(c, "memory", kanbanApp.memorySnapshotForPrincipal(context.Background(), recallPrincipalForUser(sessionUser), 20)); err != nil {
 				log.Errorf("Failed to send meeting memory: %v", err)
 			}
 			// Meeting record snapshot (null clears client state) keeps the
@@ -5552,9 +5572,20 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				continue
 			}
 			assistantQuery := query.Query
-			broadcastAssistantEvent("query", assistantQuery, nil)
-			broadcastAssistantEvent("status", "Scout is checking the board and memory.", nil)
-			go answerAssistantQueryForClient(c, assistantQuery)
+			principal := RecallPrincipal{}
+			requester := sessionEmail
+			if guest != nil {
+				principal = recallPrincipalForGuest(guest.SessionKey, connRoomID, kanbanApp.memory.currentMeetingID(connRoomID))
+			} else {
+				principal = kanbanApp.recallPrincipalForMemberRoom(sessionEmail, connRoomID)
+			}
+			_ = sendKanbanEvent(c, "assistant_event", map[string]any{
+				"kind": "query", "text": assistantQuery, "createdAt": time.Now().UTC().Format(time.RFC3339Nano),
+			})
+			_ = sendKanbanEvent(c, "assistant_event", map[string]any{
+				"kind": "status", "text": "Scout is checking the board and memory.", "createdAt": time.Now().UTC().Format(time.RFC3339Nano),
+			})
+			go answerAssistantQueryForClient(c, assistantQuery, principal, requester)
 		case "scout_chat_reset":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "enter the room before starting a Scout thread")
@@ -5562,6 +5593,8 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			scoutChat.close()
 			scoutChat = newScoutChatSession(c)
+			scoutChat.requesterEmail = sessionEmail
+			scoutChat.principal = kanbanApp.recallPrincipalForMemberRoom(sessionEmail, connRoomID)
 			_ = sendKanbanEvent(c, "scout_chat", map[string]any{
 				"kind": "reset",
 				"text": "new Scout thread started",
@@ -5723,7 +5756,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				continue
 			}
 			broadcastSignedInKanbanEvent("meeting_archived", result)
-			broadcastSignedInKanbanEvent("memory", kanbanApp.memorySnapshotForClients(20))
+			broadcastSignedInKanbanEvent("memory", nil)
 		case "set_recording":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before changing recording.")
@@ -5864,8 +5897,9 @@ func sendManualBoardError(c *threadSafeWriter, err error) {
 	}
 }
 
-func answerAssistantQueryForClient(c *threadSafeWriter, query string) {
-	if _, _, err := kanbanApp.answerAssistantQuery(query); err != nil {
+func answerAssistantQueryForClient(c *threadSafeWriter, query string, principal RecallPrincipal, requester string) {
+	result, err := kanbanApp.resolveAssistantQueryContextForPrincipalWithAttachments(context.Background(), principal, requester, query, nil, nil)
+	if err != nil {
 		log.Errorf("Failed to answer assistant query: %v", err)
 		if writeErr := sendKanbanEvent(c, "assistant_event", map[string]any{
 			"kind":      "error",
@@ -5874,6 +5908,20 @@ func answerAssistantQueryForClient(c *threadSafeWriter, query string) {
 		}); writeErr != nil {
 			log.Errorf("Failed to send assistant query error: %v", writeErr)
 		}
+		return
+	}
+	payload := map[string]any{
+		"kind":      "answer",
+		"text":      result.answer,
+		"query":     result.query,
+		"source":    result.source,
+		"createdAt": time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if result.matchedCards > 0 {
+		payload["matchedCards"] = result.matchedCards
+	}
+	if writeErr := sendKanbanEvent(c, "assistant_event", payload); writeErr != nil {
+		log.Errorf("Failed to send assistant query answer: %v", writeErr)
 	}
 }
 

@@ -192,12 +192,13 @@ func (app *kanbanBoardApp) buildMissionIntelInput(inputs []meetingMemoryEntry, g
 
 func (app *kanbanBoardApp) produceMissionInsight(ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
 	roomID := ambientWindowRoomID(inputs)
+	contextApp := app.scopedRecallApp(ctx, ambientServicePrincipalForInputs(inputs))
 	model := meetingBrainModel()
 	text, err := responder(ctx, apiKey, openAITextRequest{
 		Model:           model,
 		Seat:            seatMissionIntel,
 		Instructions:    missionIntelInstructions(),
-		Input:           app.buildMissionIntelInput(inputs, time.Now().UTC()),
+		Input:           contextApp.buildMissionIntelInput(inputs, time.Now().UTC()),
 		ReasoningEffort: "low",
 		Verbosity:       "low",
 		MaxOutputTokens: 900,
@@ -225,13 +226,14 @@ func (app *kanbanBoardApp) produceMissionInsight(ctx context.Context, apiKey str
 		"brainCount":     strconv.Itoa(len(inputs)),
 		"generatedAt":    time.Now().UTC().Format(time.RFC3339),
 	}
+	metadata = applyAmbientDerivedScope(metadata, inputs)
 	id := durableTimestampID("mission-insight", time.Now())
 	entry, appended, err := app.memory.appendMissionInsight(id, cleanText, metadata)
 	if err != nil || !appended {
 		return entry, err
 	}
 
-	broadcastOfficeKanbanEvent("mission_insight", missionInsightEventPayload(entry, insight))
+	broadcastScopedMemoryEntry("mission_insight", entry, missionInsightEventPayload(entry, insight))
 
 	// server-side auto-title: recency-weighted salience over the CURRENT sitting
 	// (narrative segments when the maintainer has produced them, decayed mission
@@ -239,7 +241,12 @@ func (app *kanbanBoardApp) produceMissionInsight(ctx context.Context, apiKey str
 	// never steal the title from a topic that owned the airtime.
 	// refreshDominantTitle no-ops when no meeting is live. W4: it titles THE
 	// WINDOW'S ROOM's active record, never the office's by default.
-	app.refreshDominantTitle(roomID, time.Now().UTC())
+	if ambientDerivedScopeMetadata(inputs)["visibility"] == "organization" {
+		// Reduce titles over the same authorized service snapshot that fed the
+		// model. The meeting registry is shared, but private/room-only themes are
+		// absent from contextApp.memory and cannot become an org-visible title.
+		contextApp.refreshDominantTitle(roomID, time.Now().UTC())
+	}
 
 	return entry, nil
 }

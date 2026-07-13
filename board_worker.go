@@ -88,6 +88,26 @@ func (app *kanbanBoardApp) produceMeetingBoardUpdate(ctx context.Context, apiKey
 	// skip-while-advancing idiom; deterministic on restart) and stay silent:
 	// no model call, no artifact, no board ops, no proposals.
 	summaries, droppedListenOnly := app.filterListenOnly(summaries)
+	servicePrincipal := sharedRoomRecallPrincipal(roomID, app.memory.currentMeetingID(roomID))
+	authorizedSummaries := summaries[:0]
+	for _, summary := range summaries {
+		if recallEntryScopeAllowed(summary.Metadata, servicePrincipal) {
+			authorizedSummaries = append(authorizedSummaries, summary)
+		}
+	}
+	summaries = authorizedSummaries
+	if ambientDerivedScopeMetadata(summaries)["visibility"] != "organization" {
+		if len(summaries) == 0 {
+			return meetingMemoryEntry{}, nil
+		}
+		metadata := applyAmbientDerivedScope(map[string]string{
+			"source": "scope_guard", "model": "none", "roomId": roomID,
+			"fromBrainId": summaries[0].ID, "throughBrainId": summaries[len(summaries)-1].ID,
+			"brainCount": strconv.Itoa(len(summaries)), "operationCount": "0", "changedOperationCount": "0", "errorOperationCount": "0",
+		}, summaries)
+		entry, _, err := app.memory.appendBoardUpdate(durableTimestampID("board-update", time.Now()), "Room-only brain window reviewed; global board mutation suppressed.", metadata)
+		return entry, err
+	}
 	if len(summaries) == 0 {
 		if droppedListenOnly > 0 {
 			app.setAmbientAgentBaselineID(ambientAgentKey(meetingBoardAgentName, roomID), windowLast.ID)
@@ -167,6 +187,7 @@ func (app *kanbanBoardApp) produceMeetingBoardUpdate(ctx context.Context, apiKey
 		"changedOperationCount": strconv.Itoa(runResult.ChangedCount),
 		"errorOperationCount":   strconv.Itoa(runResult.ErrorCount),
 	}
+	metadata = applyAmbientDerivedScope(metadata, summaries)
 	if fromTranscriptID := strings.TrimSpace(firstSummary.Metadata["fromTranscriptId"]); fromTranscriptID != "" {
 		metadata["fromTranscriptId"] = fromTranscriptID
 	}
@@ -203,7 +224,7 @@ func (app *kanbanBoardApp) produceMeetingBoardUpdate(ctx context.Context, apiKey
 	// Office memory rails stay live via the snapshot path: the entry-shaped
 	// memory_board_update event stays room-only because the client's
 	// addMemoryEntry does not dedupe by id.
-	broadcastOfficeKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastOfficeKanbanEvent("memory", nil)
 	if runResult.ChangedCount > 0 {
 		broadcastSignedInKanbanEvent("board", app.snapshotState())
 		broadcastSignedInKanbanEvent("undo_available", app.canUndoDelete())

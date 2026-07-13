@@ -762,12 +762,13 @@ func (app *kanbanBoardApp) detectDecisionReversals(ctx context.Context, apiKey s
 }
 
 func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
+	contextApp := app.scopedRecallApp(ctx, ambientServicePrincipalForInputs(inputs))
 	model := meetingBrainModel()
 	text, err := responder(ctx, apiKey, openAITextRequest{
 		Model:        model,
 		Seat:         seatDecisionLedger,
 		Instructions: decisionLedgerInstructions(),
-		Input:        app.buildDecisionLedgerInput(inputs, time.Now().UTC()),
+		Input:        contextApp.buildDecisionLedgerInput(inputs, time.Now().UTC()),
 		// Effort raise to the doctrine floor (medium): the ledger judges firm vs
 		// directional commitment and emits exact-shape JSON — the discrimination
 		// low reasoning effort punishes most. Mirrors the board worker's raise.
@@ -797,13 +798,13 @@ func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey
 	// DIRECTIONAL lean dedupes against active AND proposed, so it is neither
 	// re-proposed every pass nor proposed for something already firm. Exact key
 	// match or token-set Jaccard >= 0.8 both mean "restatement, skip".
-	activeEntries := app.activeDecisionEntries(decisionDedupeWindow)
+	activeEntries := contextApp.activeDecisionEntries(decisionDedupeWindow)
 	activeKeys := dedupeKeysFor(activeEntries)
-	proposedKeys := dedupeKeysFor(app.proposedDecisionEntries(decisionDedupeWindow))
+	proposedKeys := dedupeKeysFor(contextApp.proposedDecisionEntries(decisionDedupeWindow))
 	// F16: pending reversals (proposed-supersession) are firm decisions held out
 	// of the active lane. Their keys gate BOTH the extraction append below and the
 	// reversal adjudication so a restated reversal is filed exactly ONCE.
-	pendingReversalKeys := dedupeKeysFor(app.proposedSupersessionEntries(decisionDedupeWindow))
+	pendingReversalKeys := dedupeKeysFor(contextApp.proposedSupersessionEntries(decisionDedupeWindow))
 
 	// item 2.2b: before appending, adjudicate which new FIRM decisions REVERSE an
 	// existing active decision (the reversal-suspect band, one batched call). A
@@ -858,6 +859,7 @@ func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey
 			"status":        status,
 			"roomId":        ambientWindowRoomID(inputs),
 		}
+		metadata = applyAmbientDerivedScope(metadata, inputs)
 		if supersedesID != "" {
 			metadata["supersedes"] = supersedesID
 		}
@@ -894,20 +896,26 @@ func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey
 			activeKeys = append(activeKeys, key)
 		}
 		appendedCount++
-		// Binder linkage: an exact package-name match files the decision into
-		// its venture package (attachToPackage stamps packageId back onto the
-		// decision entry, so re-read before broadcasting the payload).
-		if record, found := app.venturePackageByExactName(decision.Package); found {
-			if _, attachErr := app.attachToPackage(record.ID, packageRefTypeDecision, entry.ID, scoutParticipantName); attachErr != nil {
-				log.Errorf("Failed to attach decision %s to package %s: %v", entry.ID, record.ID, attachErr)
-			} else if stamped, ok := app.memory.entryByKindAndID(meetingMemoryKindDecision, entry.ID); ok {
-				entry = stamped
+		// Binder linkage is organization-scope only and requires an explicit
+		// metadata-only service grant for the target package. Unresolved legacy
+		// package ownership fails closed before attach reads or mutates bodies.
+		if ambientDerivedScopeMetadata(inputs)["visibility"] == "organization" {
+			principal := ambientServicePrincipalForInputs(inputs)
+			if record, found := contextApp.venturePackageByExactName(decision.Package); found && app.packageHeaderAuthorizedForService(record.ID, principal) && recallEntryScopeAllowed(entry.Metadata, principal) {
+				if _, attachErr := app.attachToPackage(record.ID, packageRefTypeDecision, entry.ID, scoutParticipantName); attachErr != nil {
+					log.Errorf("Failed to attach decision %s to package %s: %v", entry.ID, record.ID, attachErr)
+				} else if stamped, ok := app.memory.entryByKindAndID(meetingMemoryKindDecision, entry.ID); ok {
+					entry = stamped
+				}
 			}
 		}
-		broadcastOfficeKanbanEvent("decision", decisionPayload(entry))
+		broadcastScopedMemoryEntry("decision", entry, decisionPayload(entry))
 	}
 	if appendedCount > 0 {
-		broadcastAssistantEvent("action", "Scout logged "+strconv.Itoa(appendedCount)+" decision(s) to the ledger.", map[string]any{"kind": "decision"})
+		scopeEntry := meetingMemoryEntry{ID: lastBrain.ID, Metadata: applyAmbientDerivedScope(map[string]string{}, inputs)}
+		broadcastScopedMemoryEntry("assistant_event", scopeEntry, map[string]any{
+			"kind": "action", "text": "Scout logged " + strconv.Itoa(appendedCount) + " decision(s) to the ledger.", "memoryKind": "decision", "createdAt": time.Now().UTC().Format(time.RFC3339Nano),
+		})
 	}
 
 	// The pass entry ALWAYS lands — including zero-decision windows —
@@ -926,6 +934,7 @@ func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey
 		"decisionCount":    strconv.Itoa(appendedCount),
 		"directionalCount": strconv.Itoa(directionalCount),
 	}
+	passMetadata = applyAmbientDerivedScope(passMetadata, inputs)
 	passEntry, _, err := app.memory.appendDecisionPass(durableTimestampID("decision-pass", time.Now()), passText, passMetadata)
 	if err != nil {
 		return meetingMemoryEntry{}, err

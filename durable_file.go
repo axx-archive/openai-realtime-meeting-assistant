@@ -1,12 +1,19 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// ErrDurableReplaceAmbiguous means rename published the replacement, but the
+// parent-directory fsync failed. Callers must not roll in-memory state back as
+// if the old file were still authoritative; reload the visible file or poison
+// the store until recovery establishes which generation is live.
+var ErrDurableReplaceAmbiguous = errors.New("durable replacement outcome is ambiguous")
 
 // writeFileAtomicallyDurable replaces path without exposing a partially
 // written file. Success means both the new contents and directory entry were
@@ -27,6 +34,12 @@ func writeFileAtomicallyForCanonicalMode(path string, data []byte, perm fs.FileM
 }
 
 func writeFileAtomically(path string, data []byte, perm fs.FileMode, durable bool) error {
+	return canonicalFenceFileMutation(path, data, func() error {
+		return writeFileAtomicallyUnfenced(path, data, perm, durable)
+	})
+}
+
+func writeFileAtomicallyUnfenced(path string, data []byte, perm fs.FileMode, durable bool) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create parent directory: %w", err)
@@ -66,8 +79,8 @@ func writeFileAtomically(path string, data []byte, perm fs.FileMode, durable boo
 	}
 	cleanup = false
 	if durable {
-		if err := syncDirectory(dir); err != nil {
-			return fmt.Errorf("sync parent directory: %w", err)
+		if err := syncDirectoryForAtomicWrite(dir); err != nil {
+			return fmt.Errorf("%w: sync parent directory: %v", ErrDurableReplaceAmbiguous, err)
 		}
 	}
 	return nil
@@ -83,6 +96,12 @@ func appendFileBestEffort(path string, data []byte, perm fs.FileMode) error {
 }
 
 func appendFile(path string, data []byte, perm fs.FileMode, durable bool) error {
+	return canonicalFenceAppendMutation(path, data, func() error {
+		return appendFileUnfenced(path, data, perm, durable)
+	})
+}
+
+func appendFileUnfenced(path string, data []byte, perm fs.FileMode, durable bool) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create parent directory: %w", err)
@@ -107,7 +126,7 @@ func appendFile(path string, data []byte, perm fs.FileMode, durable bool) error 
 		return fmt.Errorf("close append file: %w", err)
 	}
 	if created && durable {
-		if err := syncDirectory(dir); err != nil {
+		if err := syncDirectoryForAtomicWrite(dir); err != nil {
 			return fmt.Errorf("sync parent directory: %w", err)
 		}
 	}
@@ -172,3 +191,5 @@ func syncDirectory(path string) error {
 	}
 	return dir.Close()
 }
+
+var syncDirectoryForAtomicWrite = syncDirectory

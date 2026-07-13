@@ -752,7 +752,13 @@ func assistantFileSaveHandler(w http.ResponseWriter, r *http.Request) {
 	actor := firstNonEmptyString(strings.TrimSpace(user.Name), normalizeAccountEmail(user.Email))
 	row, err := kanbanApp.saveDeliverableSnapshotToFiles(artifact, payload.FolderID, actor)
 	if err != nil {
-		writeAuthError(w, fileSaveErrorStatus(err), err.Error())
+		status := fileSaveErrorStatus(err)
+		message := err.Error()
+		if status == http.StatusServiceUnavailable || status == http.StatusInternalServerError {
+			log.Errorf("Save deliverable to Files failed: %v", err)
+			message = "files are unavailable"
+		}
+		writeAuthError(w, status, message)
 		return
 	}
 	broadcastSignedInKanbanEvent("file", row)

@@ -33,7 +33,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -251,12 +250,7 @@ func (store *meetingMemoryStore) appendLedgerEvents(entries []meetingMemoryEntry
 		return 0, nil
 	}
 
-	file, err := os.OpenFile(store.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return 0, fmt.Errorf("open memory file: %w", err)
-	}
-	defer file.Close()
-	if _, err := file.Write(buffer); err != nil {
+	if err := appendFileDurably(store.path, buffer, 0o600); err != nil {
 		return 0, fmt.Errorf("write ledger events: %w", err)
 	}
 
@@ -1068,7 +1062,8 @@ func (app *kanbanBoardApp) runLedgerConsolidationPass(ctx context.Context, apiKe
 		return meetingMemoryEntry{}, nil
 	}
 
-	current := app.memory.latestDigestPerMeeting()
+	contextApp := app.scopedRecallApp(ctx, ambientServicePrincipalForInputs(inputs))
+	current := contextApp.memory.latestDigestPerMeeting()
 	seenKeys := map[string]bool{}
 	facts := make([]ledgerFact, 0, 32)
 	for _, input := range inputs {
@@ -1087,7 +1082,7 @@ func (app *kanbanBoardApp) runLedgerConsolidationPass(ctx context.Context, apiKe
 		facts = append(facts, ledgerFactsFromDigest(digest)...)
 	}
 
-	decisions, throughDecisionID := app.unconsumedDecisionEntriesForLedger(entityLedgerDecisionSweepCap)
+	decisions, throughDecisionID := contextApp.unconsumedDecisionEntriesForLedger(entityLedgerDecisionSweepCap)
 	for _, decision := range decisions {
 		if fact, ok := ledgerFactFromDecisionEntry(decision); ok {
 			facts = append(facts, fact)
@@ -1096,7 +1091,7 @@ func (app *kanbanBoardApp) runLedgerConsolidationPass(ctx context.Context, apiKe
 
 	appended := 0
 	if len(facts) > 0 {
-		count, err := app.consolidateLedgerFacts(ctx, apiKey, facts, responder, now)
+		count, err := app.consolidateLedgerFacts(ctx, apiKey, facts, responder, now, inputs)
 		if err != nil {
 			// nothing persisted (consolidate appends all-or-nothing) and no
 			// cursor landed: the whole window re-feeds and retries next tick. The
@@ -1126,6 +1121,7 @@ func (app *kanbanBoardApp) runLedgerConsolidationPass(ctx context.Context, apiKe
 		"eventCount":                  strconv.Itoa(appended),
 		"generatedAt":                 now.UTC().Format(time.RFC3339),
 	}
+	metadata = applyAmbientDerivedScope(metadata, inputs)
 	if throughDecisionID != "" {
 		metadata[entityLedgerDecisionCursorMetadataKey] = throughDecisionID
 	}
@@ -1143,10 +1139,22 @@ func (app *kanbanBoardApp) runLedgerConsolidationPass(ctx context.Context, apiKe
 // restatements inside one pass dedupe against each other. Adjudication
 // failure degrades to ADD (a duplicate is recoverable by a later supersede; a
 // false merge silently loses a record) — the pass never fails on the model.
-func (app *kanbanBoardApp) consolidateLedgerFacts(ctx context.Context, apiKey string, facts []ledgerFact, responder openAITextResponder, now time.Time) (int, error) {
+func (app *kanbanBoardApp) consolidateLedgerFacts(ctx context.Context, apiKey string, facts []ledgerFact, responder openAITextResponder, now time.Time, scopeInputs ...[]meetingMemoryEntry) (int, error) {
 	nowStamp := now.UTC().Format(time.RFC3339)
 
-	state := app.memory.ledgerState()
+	// Consolidation is a read-before-write reducer. Fold and score only the
+	// principal-scoped ledger; otherwise a restricted digest can be compared to
+	// (and leak facts from) organization/private records that never entered its
+	// authorized model window. The final events still land in the real store.
+	scope := []meetingMemoryEntry(nil)
+	if len(scopeInputs) > 0 {
+		scope = scopeInputs[0]
+	}
+	stateStore := app.memory
+	if len(scope) > 0 {
+		stateStore = app.recallStoreForPrincipal(ctx, ambientServicePrincipalForInputs(scope))
+	}
+	state := stateStore.ledgerState()
 	working := make(map[string]ledgerRecord, len(state))
 	order := make([]string, 0, len(state))
 	for id, record := range state {
@@ -1283,16 +1291,23 @@ func (app *kanbanBoardApp) consolidateLedgerFacts(ctx context.Context, apiKey st
 		if err != nil {
 			return 0, fmt.Errorf("encode ledger event: %w", err)
 		}
+		metadata := map[string]string{
+			"op":       event.Op,
+			"recordId": event.Record.ID,
+			"entity":   event.Record.Entity,
+		}
+		if len(scope) > 0 {
+			metadata = applyAmbientDerivedScope(metadata, scope)
+		} else {
+			metadata["tenantId"] = canonicalArtifactTenantID()
+			metadata["visibility"] = "organization"
+		}
 		entries = append(entries, meetingMemoryEntry{
 			ID:        fmt.Sprintf("ledger-event-%d-%03d", now.UnixNano(), index),
 			Kind:      meetingMemoryKindLedgerEvent,
 			Text:      string(raw),
 			CreatedAt: now.UTC(),
-			Metadata: map[string]string{
-				"op":       event.Op,
-				"recordId": event.Record.ID,
-				"entity":   event.Record.Entity,
-			},
+			Metadata:  metadata,
 		})
 	}
 

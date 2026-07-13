@@ -74,13 +74,15 @@ func scoutChatHistoryFromPayload(turns []scoutChatTurnPayload) []scoutChatTurn {
 }
 
 type scoutChatSession struct {
-	mu         sync.Mutex
-	send       func(event string, data any) error
-	turns      []scoutChatTurn
-	queue      chan string
-	ctx        context.Context
-	cancel     context.CancelFunc
-	workerOnce sync.Once
+	mu             sync.Mutex
+	send           func(event string, data any) error
+	turns          []scoutChatTurn
+	queue          chan string
+	ctx            context.Context
+	cancel         context.CancelFunc
+	workerOnce     sync.Once
+	requesterEmail string
+	principal      RecallPrincipal
 }
 
 func newScoutChatSession(conn *threadSafeWriter) *scoutChatSession {
@@ -161,7 +163,11 @@ func (session *scoutChatSession) answer(app *kanbanBoardApp, text string) {
 	copy(history, session.turns)
 	session.mu.Unlock()
 
-	result, err := app.resolveAssistantQueryContext(session.ctx, text, history)
+	principal := session.principal
+	if principal.User == nil && principal.Audience == "" {
+		principal = recallPrincipalForEmail(session.requesterEmail)
+	}
+	result, err := app.resolveAssistantQueryContextForPrincipalWithAttachments(session.ctx, principal, session.requesterEmail, text, history, nil)
 	if session.ctx != nil && session.ctx.Err() != nil {
 		return // cancelled mid-call; nobody is listening for this answer
 	}

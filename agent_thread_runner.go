@@ -165,7 +165,8 @@ func (app *kanbanBoardApp) launchAgentThreadWithSpec(mode string, query string, 
 
 	threadID := fmt.Sprintf("agent-thread-%s-%d", mode, time.Now().UnixNano())
 	worker := configuredAgentThreadWorkerName()
-	content := buildAgentThreadScaffold(mode, query, app.snapshotState(), app.memorySnapshotForClients(12))
+	requester := firstNonEmptyString(strings.TrimSpace(origin["requestedBy"]), createdBy)
+	content := buildAgentThreadScaffold(mode, query, app.snapshotState(), app.delegatedMemorySnapshot(context.Background(), requester, origin["originRoomId"], 12))
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	metadata := map[string]string{
 		"source":          "scout_thread",
@@ -235,7 +236,7 @@ func (app *kanbanBoardApp) launchAgentThreadWithSpec(mode string, query string, 
 		Actions:  actions,
 	}
 
-	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", nil)
 	// A channel-origin launch drops navigation actions BOTH at the top level and
 	// inside the nested thread, so no client — present or future — can read a
 	// navigation action off this room-wide broadcast and yank the tab.
@@ -480,7 +481,7 @@ func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
 
 	actions := app.osAssistantActions(thread.Query, thread.Mode, artifact)
 	broadcastActions := broadcastNavigationActions(artifact.Metadata["originKind"], actions)
-	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", nil)
 	broadcastAssistantEvent("action", message, map[string]any{
 		"tool":       "launch_agent_thread",
 		"thread":     scoutAgentThread{ID: thread.ID, Mode: thread.Mode, Query: thread.Query, Status: status, Artifact: artifact, Actions: broadcastActions},
@@ -866,7 +867,7 @@ func (app *kanbanBoardApp) updateQueuedAgentThread(thread scoutAgentThread, work
 
 	actions := app.osAssistantActions(thread.Query, thread.Mode, artifact)
 	broadcastActions := broadcastNavigationActions(artifact.Metadata["originKind"], actions)
-	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", nil)
 	broadcastAssistantEvent("action", message, map[string]any{
 		"tool":       "launch_agent_thread",
 		"thread":     scoutAgentThread{ID: thread.ID, Mode: thread.Mode, Query: thread.Query, Status: status, Artifact: artifact, Actions: broadcastActions},
@@ -948,7 +949,7 @@ func (app *kanbanBoardApp) persistAgentThreadProgress(thread scoutAgentThread, u
 	// fans out the artifact_progress os_event when the progress signature
 	// changes; the per-turn rising progressPercent makes that fire each turn.
 	// Bounded by the orchestrator's 24-turn cap — no broadcast storm.
-	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", nil)
 }
 
 func (app *kanbanBoardApp) produceAgentThreadArtifact(ctx context.Context, thread scoutAgentThread, responder openAITextResponder) (string, error) {
@@ -963,11 +964,12 @@ func (app *kanbanBoardApp) produceAgentThreadArtifact(ctx context.Context, threa
 		return "", fmt.Errorf("OPENAI_API_KEY is not configured")
 	}
 
+	requester := firstNonEmptyString(strings.TrimSpace(thread.Artifact.Metadata["requestedBy"]), strings.TrimSpace(thread.Artifact.Metadata["createdBy"]))
 	output, err := responder(ctx, apiKey, openAITextRequest{
 		Model:           meetingBrainModel(),
 		Seat:            seatAgentThreadText,
 		Instructions:    app.agentThreadInstructionsForThread(thread),
-		Input:           buildAgentThreadInput(thread, app.snapshotState(), app.memorySnapshotForClients(20), time.Now()),
+		Input:           buildAgentThreadInput(thread, app.snapshotState(), app.delegatedMemorySnapshot(ctx, requester, thread.Artifact.Metadata["originRoomId"], 20), time.Now()),
 		ReasoningEffort: "low",
 		Verbosity:       "medium",
 		MaxOutputTokens: 2600,

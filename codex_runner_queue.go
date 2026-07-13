@@ -995,7 +995,7 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	actions := kanbanApp.osAssistantActions(firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["title"]), artifact.Metadata["mode"], artifact)
-	broadcastSignedInKanbanEvent("memory", kanbanApp.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", nil)
 	broadcastAssistantEvent("action", statusMessage, map[string]any{
 		"tool":       "codex_runner",
 		"artifact":   artifact,
@@ -1362,7 +1362,7 @@ func (app *kanbanBoardApp) rejectCodexArtifactGate(artifact meetingMemoryEntry, 
 		return meetingMemoryEntry{}, nil, err
 	}
 	actions := app.osAssistantActions(updated.Metadata["title"], updated.Kind, updated)
-	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", nil)
 	broadcastAssistantEvent("action", assistantToolLabel(updated.Kind)+" thread rejected", map[string]any{
 		"tool":       "codex_runner",
 		"artifact":   updated,

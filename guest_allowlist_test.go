@@ -345,7 +345,10 @@ func TestGuestFanOutLeakSweepAcrossBroadcastSeams(t *testing.T) {
 	droppedBefore := guestEventsDropped.Load()
 
 	// ---- the real seams, each with a marker that must never reach the guest.
-	broadcastSignedInKanbanEvent("memory", map[string]any{"marker": "LEAK-artifact-os-event"})
+	if _, _, err := kanbanApp.memory.appendAmbientEntry(meetingMemoryKindNote, "guest-leak-sweep-memory", "LEAK-artifact-os-event", map[string]string{"visibility": "organization"}); err != nil {
+		t.Fatalf("append memory marker: %v", err)
+	}
+	broadcastSignedInKanbanEvent("memory", nil)
 	if _, err := kanbanApp.createNotification("", notificationKindInfo, "LEAK-notification", "room", "", "", false); err != nil {
 		t.Fatalf("create notification: %v", err)
 	}

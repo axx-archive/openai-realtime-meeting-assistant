@@ -573,6 +573,10 @@ func (e *goalEngine) toolPromptContextForPlan(plan *goalPlan, tool packagingTool
 // durable memory. Each is bounded and compacted; an empty slot returns "" so the
 // wrapper falls back to its own default.
 func (app *kanbanBoardApp) goalGroundingSlots(packageID string) (artifacts string, decisions string, recent string, memory string) {
+	return app.scopedRecallApp(context.Background(), sharedRoomRecallPrincipal(officeRoomID, "")).goalGroundingSlotsFromCurrentStore(packageID)
+}
+
+func (app *kanbanBoardApp) goalGroundingSlotsFromCurrentStore(packageID string) (artifacts string, decisions string, recent string, memory string) {
 	if app == nil || app.memory == nil {
 		return "", "", "", ""
 	}
@@ -622,7 +626,14 @@ func (app *kanbanBoardApp) goalGroundingSlots(packageID string) (artifacts strin
 // slot-filling can never be trusted to find it. Requester-less callers (and
 // users without a profile yet) get goalGroundingSlots' output unchanged.
 func (app *kanbanBoardApp) goalGroundingSlotsForRequester(packageID string, requestedBy string) (artifacts string, decisions string, recent string, memory string) {
-	artifacts, decisions, recent, memory = app.goalGroundingSlots(packageID)
+	if app == nil {
+		return "", "", "", ""
+	}
+	user, ok := authenticatedRequester(requestedBy)
+	if !ok {
+		return "", "", "", ""
+	}
+	artifacts, decisions, recent, memory = app.scopedRecallApp(context.Background(), recallPrincipalForUser(user)).goalGroundingSlotsFromCurrentStore(packageID)
 	if app == nil {
 		return artifacts, decisions, recent, memory
 	}
@@ -816,7 +827,7 @@ func (app *kanbanBoardApp) launchGoalThread(spec goalLaunchSpec) (scoutAgentThre
 	}
 
 	thread := scoutAgentThread{ID: goalID, Mode: "goal", Query: objective, Status: "running", Artifact: artifact}
-	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", nil)
 	broadcastAssistantEvent("action", "Goal thread launched", map[string]any{
 		"tool":       "launch_goal_thread",
 		"thread":     thread,
@@ -3633,7 +3644,7 @@ func (e *goalEngine) persist(plan *goalPlan, parentID string, body string) meeti
 		return meetingMemoryEntry{}
 	}
 	e.lastPersistedArtifact = artifact
-	broadcastSignedInKanbanEvent("memory", e.app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", nil)
 	return artifact
 }
 

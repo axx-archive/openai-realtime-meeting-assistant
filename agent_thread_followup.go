@@ -309,7 +309,7 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAuthorizedSnapshot(expec
 		Artifact: updated,
 		Actions:  actions,
 	}
-	input := buildAgentThreadFollowUpInput(thread, artifact, nextVersion, replyText, teamReplies, app.snapshotState(), app.memorySnapshotForClients(12), time.Now())
+	input := buildAgentThreadFollowUpInput(thread, artifact, nextVersion, replyText, teamReplies, app.snapshotState(), app.delegatedMemorySnapshot(context.Background(), firstNonEmptyString(updated.Metadata["requestedBy"], requestedByName), updated.Metadata["originRoomId"], 12), time.Now())
 
 	// Signal capture (signals.go): asking for a re-run means v(N) missed — a
 	// negative signal whose payload carries WHAT was asked for. Log-and-continue.
@@ -317,7 +317,7 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAuthorizedSnapshot(expec
 		"instruction": truncateAgentThreadText(replyText, 500),
 	})
 
-	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", nil)
 	broadcastAssistantEvent("action", assistantToolLabel(mode)+" follow-up running", map[string]any{
 		"tool":       "launch_agent_thread",
 		"thread":     thread,
@@ -426,7 +426,7 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponder(run agentThreadFo
 		message := assistantToolLabel(run.thread.Mode) + " follow-up needs attention"
 		actions := app.osAssistantActions(run.thread.Query, run.thread.Mode, artifact)
 		prevRefStatus := firstNonEmptyString(run.prevStatus["threadStatus"], run.prevStatus["status"], "complete")
-		broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
+		broadcastSignedInKanbanEvent("memory", nil)
 		broadcastAssistantEvent("action", message, map[string]any{
 			"tool":       "launch_agent_thread",
 			"thread":     scoutAgentThread{ID: run.thread.ID, Mode: run.thread.Mode, Query: run.thread.Query, Status: prevRefStatus, Artifact: artifact, Actions: actions},
@@ -470,7 +470,7 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponder(run agentThreadFo
 
 	message := assistantToolLabel(run.thread.Mode) + " follow-up complete"
 	actions := app.osAssistantActions(run.thread.Query, run.thread.Mode, artifact)
-	broadcastSignedInKanbanEvent("memory", app.memorySnapshotForClients(20))
+	broadcastSignedInKanbanEvent("memory", nil)
 	broadcastAssistantEvent("action", message, map[string]any{
 		"tool":       "launch_agent_thread",
 		"thread":     scoutAgentThread{ID: run.thread.ID, Mode: run.thread.Mode, Query: run.thread.Query, Status: "complete", Artifact: artifact, Actions: actions},

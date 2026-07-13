@@ -8,11 +8,16 @@ package main
 // implicitly).
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -111,6 +116,97 @@ func TestFileFolderStoreCap(t *testing.T) {
 	}
 	if _, err := store.create("One Too Many", "AJ"); err != errFileFolderLimit {
 		t.Fatalf("cap err=%v, want %v", err, errFileFolderLimit)
+	}
+}
+
+func TestFileFolderStoreRollsBackWhenPersistenceFails(t *testing.T) {
+	root := t.TempDir()
+	validPath := filepath.Join(root, "file-folders.json")
+	store := newFileFolderStore(validPath)
+	folder, err := store.create("Diligence", "AJ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.assign("file-1", folder.ID); err != nil {
+		t.Fatal(err)
+	}
+	beforeFolders, beforeAssignments := store.snapshot()
+
+	blockedParent := filepath.Join(root, "not-a-directory")
+	if err := os.WriteFile(blockedParent, []byte("block"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store.path = filepath.Join(blockedParent, "file-folders.json")
+
+	if _, err := store.create("Should Roll Back", "AJ"); err == nil {
+		t.Fatal("create reported success when persistence failed")
+	}
+	if _, err := store.rename(folder.ID, "Renamed"); err == nil {
+		t.Fatal("rename reported success when persistence failed")
+	}
+	if err := store.assign("file-2", folder.ID); err == nil {
+		t.Fatal("assignment reported success when persistence failed")
+	}
+	if err := store.assign("file-1", ""); err == nil {
+		t.Fatal("move-to-root reported success when persistence failed")
+	}
+	if err := store.remove(folder.ID); err == nil {
+		t.Fatal("remove reported success when persistence failed")
+	}
+
+	afterFolders, afterAssignments := store.snapshot()
+	if !reflect.DeepEqual(afterFolders, beforeFolders) || !reflect.DeepEqual(afterAssignments, beforeAssignments) {
+		t.Fatalf("failed persistence mutated state: folders=%+v assignments=%v", afterFolders, afterAssignments)
+	}
+	reloaded := newFileFolderStore(validPath)
+	reloadedFolders, reloadedAssignments := reloaded.snapshot()
+	if !reflect.DeepEqual(reloadedFolders, beforeFolders) || !reflect.DeepEqual(reloadedAssignments, beforeAssignments) {
+		t.Fatalf("failed persistence changed durable state: folders=%+v assignments=%v", reloadedFolders, reloadedAssignments)
+	}
+}
+
+func TestFileFolderStoreReloadsPublishedGenerationAfterAmbiguousSync(t *testing.T) {
+	t.Setenv("BONFIRE_CANONICAL_MODE", "shadow")
+	path := filepath.Join(t.TempDir(), "file-folders.json")
+	store := newFileFolderStore(path)
+	previous := syncDirectoryForAtomicWrite
+	syncDirectoryForAtomicWrite = func(string) error { return io.ErrClosedPipe }
+	t.Cleanup(func() { syncDirectoryForAtomicWrite = previous })
+
+	if _, err := store.create("Published But Unsynced", "aj@example.com"); !errors.Is(err, ErrDurableReplaceAmbiguous) {
+		t.Fatalf("create err=%v, want ambiguous published generation", err)
+	}
+	syncDirectoryForAtomicWrite = previous
+	folders, _ := store.snapshot()
+	if len(folders) != 1 || folders[0].Name != "Published But Unsynced" {
+		t.Fatalf("in-memory state did not reload visible generation: %+v", folders)
+	}
+	reloaded := newFileFolderStore(path)
+	reloadedFolders, _ := reloaded.snapshot()
+	if !reflect.DeepEqual(reloadedFolders, folders) {
+		t.Fatalf("disk and memory diverged: memory=%+v disk=%+v", folders, reloadedFolders)
+	}
+	if _, err := store.create("Published But Unsynced", "aj@example.com"); !errors.Is(err, errFileFolderDuplicate) {
+		t.Fatalf("retry duplicated ambiguous create: %v", err)
+	}
+}
+
+func TestFileFolderStoreMalformedStateFailsClosed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "file-folders.json")
+	malformed := []byte(`{"folders":[`)
+	if err := os.WriteFile(path, malformed, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := newFileFolderStore(path)
+	if _, err := store.create("Must Not Overwrite", "aj@example.com"); err == nil {
+		t.Fatal("malformed store allowed create")
+	}
+	if err := store.assign("file-1", ""); err == nil {
+		t.Fatal("malformed store allowed assignment")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(raw, malformed) {
+		t.Fatalf("malformed source was overwritten: raw=%q err=%v", raw, err)
 	}
 }
 
@@ -242,6 +338,11 @@ func TestAssistantFileFolderHandlersCRUD(t *testing.T) {
 	}
 
 	// Move: file a row, unknown folder is a 404, empty fileId a 400.
+	if _, _, err := kanbanApp.memory.appendEntry(meetingMemoryKindFile, "file-1", "File owned by AJ", map[string]string{
+		"name": "file-1.txt", "uploaderEmail": "aj@shareability.com", "origin": "files", "brainStatus": fileBrainStatusIngested,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if recorder := postFolderJSON(t, http.MethodPost, "/assistant/files/move", fmt.Sprintf(`{"fileId":"file-1","folderId":%q}`, folder.ID), cookies); recorder.Code != http.StatusOK {
 		t.Fatalf("move status=%d body=%s, want 200", recorder.Code, recorder.Body.String())
 	}

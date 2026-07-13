@@ -153,16 +153,34 @@ func putBlob(data []byte, mime string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err := os.Stat(dataPath); err == nil {
-		return ref, nil
+	if existing, readErr := os.ReadFile(dataPath); readErr == nil {
+		existingDigest := sha256.Sum256(existing)
+		if hex.EncodeToString(existingDigest[:]) != ref || len(existing) != len(data) {
+			// The caller supplied the bytes that hash to ref, so repairing a
+			// corrupted content-addressed slot is deterministic.
+			if err := writeFileAtomicallyForCanonicalMode(dataPath, data, 0o644); err != nil {
+				return "", fmt.Errorf("repair corrupt blob: %w", err)
+			}
+		}
+		if rawMeta, metaErr := os.ReadFile(metaPath); metaErr == nil {
+			var pinned blobMeta
+			if json.Unmarshal(rawMeta, &pinned) == nil && strings.TrimSpace(pinned.Mime) != "" && pinned.Size == int64(len(data)) {
+				return ref, nil
+			}
+		}
+		// Missing/malformed/inconsistent sidecars are repaired below. Until that
+		// durable write lands, getBlob refuses to serve the untracked data.
+	} else if !os.IsNotExist(readErr) {
+		return "", fmt.Errorf("inspect existing blob: %w", readErr)
 	}
 	if err := os.MkdirAll(filepath.Dir(dataPath), 0o755); err != nil {
 		return "", fmt.Errorf("create blob shard directory: %w", err)
 	}
 
-	// Sidecar first, data rename last: an addressable blob always has its
-	// meta; a crash in between leaves only an orphan sidecar that the next
-	// put of the same bytes overwrites.
+	// Data first, sidecar last: importers enumerate sidecars, so a crash between
+	// the two leaves only an unreferenced content-addressed data file (ignored by
+	// canonical import and removable by the sweep), never a phantom canonical
+	// blob whose bytes do not exist. Reads already tolerate a missing sidecar.
 	metaJSON, err := json.Marshal(blobMeta{
 		Mime:      mime,
 		Size:      int64(len(data)),
@@ -171,27 +189,11 @@ func putBlob(data []byte, mime string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("encode blob meta: %w", err)
 	}
-	if err := os.WriteFile(metaPath, metaJSON, 0o644); err != nil {
-		return "", fmt.Errorf("write blob meta: %w", err)
-	}
-
-	tempFile, err := os.CreateTemp(filepath.Dir(dataPath), "."+ref[:8]+".put-*")
-	if err != nil {
-		return "", fmt.Errorf("create blob temp file: %w", err)
-	}
-	tempPath := tempFile.Name()
-	if _, err := tempFile.Write(data); err != nil {
-		tempFile.Close()
-		os.Remove(tempPath)
-		return "", fmt.Errorf("write blob: %w", err)
-	}
-	if err := tempFile.Close(); err != nil {
-		os.Remove(tempPath)
-		return "", fmt.Errorf("close blob temp file: %w", err)
-	}
-	if err := os.Rename(tempPath, dataPath); err != nil {
-		os.Remove(tempPath)
+	if err := writeFileAtomicallyForCanonicalMode(dataPath, data, 0o644); err != nil {
 		return "", fmt.Errorf("finalize blob: %w", err)
+	}
+	if err := writeFileAtomicallyForCanonicalMode(metaPath, metaJSON, 0o644); err != nil {
+		return "", fmt.Errorf("write blob meta: %w", err)
 	}
 
 	return ref, nil
@@ -199,9 +201,9 @@ func putBlob(data []byte, mime string) (string, error) {
 
 // getBlob returns the bytes and sidecar meta for a ref. The digest is
 // re-verified on every read — the content-addressed contract means a
-// corrupted file is an error, never silently-wrong bytes. A missing or
-// unreadable sidecar degrades to the octet-stream default instead of failing
-// the read.
+// corrupted file is an error, never silently-wrong bytes. The sidecar is the
+// publication marker: missing or malformed metadata means the data is an
+// incomplete/untracked put and is not retrievable until putBlob repairs it.
 func getBlob(ref string) ([]byte, blobMeta, error) {
 	ref = strings.TrimSpace(ref)
 	dataPath, metaPath, err := blobPaths(ref)
@@ -221,14 +223,14 @@ func getBlob(ref string) ([]byte, blobMeta, error) {
 		return nil, blobMeta{}, fmt.Errorf("blob %s failed content verification", ref)
 	}
 
-	meta := blobMeta{Mime: blobDefaultMime}
-	if rawMeta, err := os.ReadFile(metaPath); err == nil {
-		var parsed blobMeta
-		if err := json.Unmarshal(rawMeta, &parsed); err == nil && strings.TrimSpace(parsed.Mime) != "" {
-			meta = parsed
-		}
+	rawMeta, err := os.ReadFile(metaPath)
+	if err != nil {
+		return nil, blobMeta{}, fmt.Errorf("blob is not published: %w", err)
 	}
-	meta.Size = int64(len(data))
+	var meta blobMeta
+	if err := json.Unmarshal(rawMeta, &meta); err != nil || strings.TrimSpace(meta.Mime) == "" || meta.Size != int64(len(data)) {
+		return nil, blobMeta{}, fmt.Errorf("blob publication metadata is invalid")
+	}
 
 	return data, meta, nil
 }
@@ -436,11 +438,21 @@ func sweepUnreferencedBlobs(app *kanbanBoardApp) ([]string, error) {
 			if _, ok := referenced[ref]; ok {
 				continue
 			}
-			if err := os.Remove(filepath.Join(shardDir, ref)); err != nil {
+			journalRecord := CanonicalLifecycleJournalRecord{
+				Family: "blob", ObjectID: ref, StateDigest: ref, At: time.Now().UTC(), Reason: "unreferenced_blob_sweep",
+			}
+			journalPath := filepath.Join(filepath.Dir(meetingMemoryPath()), "evicted-objects.jsonl")
+			if err := ensureCanonicalLifecycleJournal(journalPath, journalRecord); err != nil {
+				return deleted, fmt.Errorf("journal blob eviction %s: %w", ref, err)
+			}
+			metaPath := filepath.Join(shardDir, ref+blobMetaSuffix)
+			if err := canonicalFenceRemoveMutation(metaPath, func() error { return os.Remove(metaPath) }); err != nil && !os.IsNotExist(err) {
+				return deleted, fmt.Errorf("delete blob metadata %s: %w", ref, err)
+			}
+			dataPath := filepath.Join(shardDir, ref)
+			if err := canonicalFenceRemoveMutation(dataPath, func() error { return os.Remove(dataPath) }); err != nil {
 				return deleted, fmt.Errorf("delete blob %s: %w", ref, err)
 			}
-			// Best-effort sidecar cleanup: an orphan .meta blocks nothing.
-			_ = os.Remove(filepath.Join(shardDir, ref+blobMetaSuffix))
 			deleted = append(deleted, ref)
 		}
 	}

@@ -68,7 +68,7 @@ func TestAnthropicFableRunnerToolLoopRoundTrip(t *testing.T) {
 	runner.maxTurns = 6
 
 	cardsBefore := len(app.cards)
-	job := app.newAgentJob(scoutAgentThread{ID: "agent-thread-workflow-1", Mode: "workflow", Query: "package the Aurora IP", Artifact: meetingMemoryEntry{Metadata: map[string]string{"authority": codexJobAuthorityWorkspaceWrite, "createdBy": "tester@example.com"}}})
+	job := app.newAgentJob(scoutAgentThread{ID: "agent-thread-workflow-1", Mode: "workflow", Query: "package the Aurora IP", Artifact: meetingMemoryEntry{Metadata: map[string]string{"authority": codexJobAuthorityWorkspaceWrite, "createdBy": "aj@shareability.com"}}})
 	out, err := runner.RunJob(context.Background(), job)
 	if err != nil {
 		t.Fatalf("RunJob: %v", err)
@@ -1613,7 +1613,7 @@ func TestAnthropicFableRunnerBroadcastsBoardOnlyOnMutatingTurn(t *testing.T) {
 		}
 		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{mockAnthropicTextBlock("# Done")}}, nil
 	}
-	out, err := newRunner(mutating).RunJob(context.Background(), app.newAgentJob(scoutAgentThread{ID: "rw1-mut", Mode: "workflow", Query: "add a card", Artifact: meetingMemoryEntry{Metadata: map[string]string{"authority": codexJobAuthorityWorkspaceWrite, "createdBy": "tester@example.com"}}}))
+	out, err := newRunner(mutating).RunJob(context.Background(), app.newAgentJob(scoutAgentThread{ID: "rw1-mut", Mode: "workflow", Query: "add a card", Artifact: meetingMemoryEntry{Metadata: map[string]string{"authority": codexJobAuthorityWorkspaceWrite, "createdBy": "aj@shareability.com"}}}))
 	if err != nil {
 		t.Fatalf("RunJob mutating: %v", err)
 	}
@@ -1645,7 +1645,10 @@ func TestAnthropicFableRunnerBroadcastsBoardOnlyOnMutatingTurn(t *testing.T) {
 	}
 	collectProgress(out)
 
-	broadcastSignedInKanbanEvent("memory", []map[string]any{{"id": "rw1-readonly-marker", "kind": "brain"}})
+	if _, _, err := kanbanApp.memory.appendAmbientEntry(meetingMemoryKindBrain, "rw1-readonly-marker", "ordered read-only marker", nil); err != nil {
+		t.Fatalf("append read-only marker: %v", err)
+	}
+	broadcastSignedInKanbanEvent("memory", nil)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		if err := conn.SetReadDeadline(deadline); err != nil {

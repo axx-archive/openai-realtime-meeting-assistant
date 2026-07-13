@@ -255,6 +255,15 @@ func projectCanonicalEvent(ctx context.Context, tx pgx.Tx, event CanonicalEvent,
 		return err
 	}
 	deleted := canonicalDeletionEvent(event.EventType)
+	if event.EventType == canonicalLegacyImportEventType {
+		var imported struct {
+			Deleted bool `json:"deleted"`
+		}
+		if err := json.Unmarshal(event.Payload, &imported); err != nil {
+			return fmt.Errorf("decode imported lifecycle state: %w", err)
+		}
+		deleted = imported.Deleted
+	}
 	var deletedAt any
 	if deleted {
 		deletedAt = event.OccurredAt
@@ -479,6 +488,133 @@ func (store *PostgresCanonicalStore) Events(ctx context.Context) ([]CanonicalEve
 	return events, nil
 }
 
+// SyncImportGrants replaces only grants owned by the canonical importer. It
+// never touches human/admin grants, and runs as one transaction so parity
+// cannot observe a half-migrated principal set.
+func (store *PostgresCanonicalStore) SyncImportGrants(ctx context.Context, plan CanonicalImportPlan) error {
+	if store == nil || store.pool == nil {
+		return ErrCanonicalStoreUnhealthy
+	}
+	expectedACLVersions := make(map[string]int64, len(plan.Events))
+	for _, event := range plan.Events {
+		expectedACLVersions[event.AggregateType+"\x00"+event.AggregateID] = event.ACLVersion
+	}
+	tx, err := store.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	for _, object := range plan.Objects {
+		var currentACLVersion, currentContentRevision int64
+		if err := tx.QueryRow(ctx, `SELECT acl_version,content_revision FROM objects
+			WHERE tenant_id=$1 AND object_type=$2 AND object_id=$3 FOR UPDATE`, plan.TenantID, object.Family, object.ObjectID).
+			Scan(&currentACLVersion, &currentContentRevision); err != nil {
+			return fmt.Errorf("resolve imported ACL object %s/%s: %w", object.Family, object.ObjectID, err)
+		}
+		expectedACLVersion, found := expectedACLVersions[object.Family+"\x00"+object.ObjectID]
+		if !found || expectedACLVersion < 1 || currentACLVersion != expectedACLVersion {
+			return fmt.Errorf("imported ACL version mismatch for %s/%s: projection=%d plan=%d", object.Family, object.ObjectID, currentACLVersion, expectedACLVersion)
+		}
+		expectedIDs := make([]uuid.UUID, 0, len(object.ImportGrants))
+		for _, grant := range object.ImportGrants {
+			if !validACLAction(grant.Action) || strings.TrimSpace(grant.SubjectID) == "" {
+				return fmt.Errorf("invalid imported grant for %s/%s", object.Family, object.ObjectID)
+			}
+			subjectType := string(grant.SubjectKind)
+			switch grant.SubjectKind {
+			case ACLSubjectTeam:
+				if grant.SubjectPrincipalKind != "" {
+					return fmt.Errorf("team import grant cannot carry a principal kind")
+				}
+			case ACLSubjectPrincipal:
+				if !validACLPrincipalKind(grant.SubjectPrincipalKind) || grant.SubjectPrincipalKind == ACLPrincipalGuest || grant.SubjectPrincipalKind == ACLPrincipalService || grant.SubjectPrincipalKind == ACLPrincipalCapability {
+					return fmt.Errorf("legacy durable grant cannot authorize %q", grant.SubjectPrincipalKind)
+				}
+				subjectType = string(grant.SubjectPrincipalKind)
+			default:
+				return fmt.Errorf("invalid imported grant subject kind %q", grant.SubjectKind)
+			}
+			var revision any
+			if grant.Action == ACLReadContent {
+				if grant.Revision < 1 || grant.Revision != currentContentRevision {
+					return fmt.Errorf("imported content grant revision mismatch for %s/%s", object.Family, object.ObjectID)
+				}
+				revision = currentContentRevision
+			} else if grant.Revision != 0 {
+				return fmt.Errorf("metadata import grant must not bind a content revision")
+			}
+			grantID := uuid.NewSHA1(canonicalImportNamespace, []byte(strings.Join([]string{
+				"legacy-import-grant-v1", plan.TenantID, object.Family, object.ObjectID,
+				fmt.Sprint(currentACLVersion), fmt.Sprint(revision), subjectType, grant.SubjectID, string(grant.Action),
+			}, "\x1f")))
+			expectedIDs = append(expectedIDs, grantID)
+			if _, err := tx.Exec(ctx, `INSERT INTO object_grants (
+				grant_id,tenant_id,object_type,object_id,acl_version,revision,subject_type,subject_id,action,
+				room_id,sitting_id,granted_by_type,granted_by_id,conditions
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NULLIF($10,''),NULL,'service','canonical-import','{}'::jsonb)
+			ON CONFLICT (grant_id) DO UPDATE SET acl_version=EXCLUDED.acl_version,revision=EXCLUDED.revision,
+				subject_type=EXCLUDED.subject_type,subject_id=EXCLUDED.subject_id,action=EXCLUDED.action,
+				room_id=EXCLUDED.room_id,sitting_id=NULL,revoked_at=NULL,conditions=EXCLUDED.conditions`,
+				grantID, plan.TenantID, object.Family, object.ObjectID, currentACLVersion, revision, subjectType, grant.SubjectID, string(grant.Action), object.RoomID); err != nil {
+				return err
+			}
+		}
+		if len(expectedIDs) == 0 {
+			if _, err := tx.Exec(ctx, `DELETE FROM object_grants WHERE tenant_id=$1 AND object_type=$2 AND object_id=$3
+				AND granted_by_type='service' AND granted_by_id='canonical-import'`, plan.TenantID, object.Family, object.ObjectID); err != nil {
+				return err
+			}
+		} else if _, err := tx.Exec(ctx, `DELETE FROM object_grants WHERE tenant_id=$1 AND object_type=$2 AND object_id=$3
+			AND granted_by_type='service' AND granted_by_id='canonical-import' AND NOT (grant_id = ANY($4::uuid[]))`,
+			plan.TenantID, object.Family, object.ObjectID, expectedIDs); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// PostgresCanonicalParityACL resolves the exact current projection and runs
+// the production authorization kernel. User principals carry the migrated
+// organization team; guests, services, and capabilities never do.
+type PostgresCanonicalParityACL struct {
+	store    *PostgresCanonicalStore
+	tenantID string
+}
+
+func NewPostgresCanonicalParityACL(store *PostgresCanonicalStore, tenantID string) PostgresCanonicalParityACL {
+	return PostgresCanonicalParityACL{store: store, tenantID: strings.TrimSpace(tenantID)}
+}
+
+func (resolver PostgresCanonicalParityACL) CanReadCanonicalObject(ctx context.Context, principal string, event CanonicalEvent) (bool, error) {
+	kind, id, ok := splitCanonicalImportPrincipal(principal)
+	if !ok || resolver.store == nil || resolver.tenantID == "" {
+		return false, nil
+	}
+	aclPrincipal := ACLPrincipal{TenantID: resolver.tenantID, Kind: kind, ID: id}
+	if kind == ACLPrincipalUser {
+		aclPrincipal.TeamIDs = []string{canonicalLegacyOrgTeamID}
+	}
+	ref := ACLObjectRef{TenantID: resolver.tenantID, Type: event.AggregateType, ID: event.AggregateID, ACLVersion: event.ACLVersion}
+	object, err := resolver.store.ResolveACLObject(ctx, ref)
+	if err != nil {
+		if errors.Is(err, ErrACLObjectNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	action := ACLReadMetadata
+	revision := ACLRevisionRef{}
+	if object.CurrentContentRevision > 0 && isHexDigest(object.CurrentContentDigest) {
+		action = ACLReadContent
+		revision = ACLRevisionRef{ContentRevision: object.CurrentContentRevision, ContentDigest: object.CurrentContentDigest}
+	}
+	decision := (AuthorizationKernel{Store: resolver.store}).Authorize(ctx, aclPrincipal, action, ref, revision)
+	if decision.DenialCode == ACLDenialUnavailable {
+		return false, errors.New(decision.PolicyReason)
+	}
+	return decision.Allowed, nil
+}
+
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
@@ -514,9 +650,11 @@ func (store *PostgresCanonicalStore) ResolveACLObject(ctx context.Context, ref A
 }
 
 func (store *PostgresCanonicalStore) ListACLGrants(ctx context.Context, ref ACLObjectRef) ([]ACLGrant, error) {
-	rows, err := store.pool.Query(ctx, `SELECT grant_id::text,tenant_id,object_type,object_id,acl_version,
-		subject_type,subject_id,action,COALESCE(room_id,''),COALESCE(sitting_id,''),expires_at,revoked_at,conditions
-		FROM object_grants WHERE tenant_id=$1 AND object_type=$2 AND object_id=$3`, ref.TenantID, ref.Type, ref.ID)
+	rows, err := store.pool.Query(ctx, `SELECT grant_id::text,g.tenant_id,g.object_type,g.object_id,g.acl_version,
+		g.subject_type,g.subject_id,g.action,COALESCE(g.room_id,''),COALESCE(g.sitting_id,''),g.expires_at,g.revoked_at,g.conditions
+		FROM object_grants g JOIN objects o ON o.tenant_id=g.tenant_id AND o.object_type=g.object_type AND o.object_id=g.object_id
+		WHERE g.tenant_id=$1 AND g.object_type=$2 AND g.object_id=$3 AND g.acl_version=o.acl_version
+		AND (g.revision IS NULL OR g.revision=o.content_revision)`, ref.TenantID, ref.Type, ref.ID)
 	if err != nil {
 		return nil, err
 	}

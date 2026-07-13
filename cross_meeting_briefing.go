@@ -621,6 +621,16 @@ func (app *kanbanBoardApp) crossMeetingBriefingTool(args map[string]any) (map[st
 	}, false, nil
 }
 
+// crossMeetingBriefingToolForPrincipal filters every digest, ledger row, and
+// raw map-reduce anchor before composition or model use. The returned payload
+// is caller-owned; this helper never broadcasts.
+func (app *kanbanBoardApp) crossMeetingBriefingToolForPrincipal(args map[string]any, principal RecallPrincipal) (map[string]any, bool, error) {
+	if app == nil || app.memory == nil {
+		return nil, false, fmt.Errorf("meeting memory is unavailable")
+	}
+	return app.scopedRecallApp(context.Background(), principal).crossMeetingBriefingTool(args)
+}
+
 // getMeetingDetail is the get_meeting_detail dispatch body: the drill-down
 // walk digest → brains → verbatim transcript (anchors resolve through
 // transcriptWindowAround, which excludes hidden lines and rides the prompt
@@ -711,6 +721,42 @@ func (app *kanbanBoardApp) getMeetingDetail(args map[string]any) (map[string]any
 		return nil, false, fmt.Errorf("no meeting memory found for %s", firstNonEmptyString(meetingID, anchor))
 	}
 	return result, false, nil
+}
+
+// getMeetingDetailForPrincipal performs the scope reduction before resolving
+// an anchor, digest, brain body, coverage, or meeting-directory metadata.
+func (app *kanbanBoardApp) getMeetingDetailForPrincipal(args map[string]any, principal RecallPrincipal) (map[string]any, bool, error) {
+	if app == nil || app.memory == nil {
+		return nil, false, fmt.Errorf("meeting memory is unavailable")
+	}
+	scoped := app.scopedRecallApp(context.Background(), principal)
+	meetingID := strings.TrimSpace(asString(args["meeting_id"]))
+	if meetingID != "" && !scoped.meetingVisibleToRecallPrincipal(meetingID, principal) {
+		return nil, false, fmt.Errorf("no meeting memory found for %s", meetingID)
+	}
+	return scoped.getMeetingDetail(args)
+}
+
+// meetingVisibleToRecallPrincipal is metadata-only. Named-room/sitting callers
+// must match the durable meeting directory when present, and legacy records
+// without a directory row are visible only when an already-filtered memory
+// header proves the meeting belongs to the principal's scope.
+func (app *kanbanBoardApp) meetingVisibleToRecallPrincipal(meetingID string, principal RecallPrincipal) bool {
+	meetingID = strings.TrimSpace(meetingID)
+	if app == nil || app.memory == nil || meetingID == "" {
+		return false
+	}
+	// Directory rows are legacy organization-readable headers. Content access
+	// is proved below by the already principal-filtered store; room membership
+	// is not required for organization-granted historical recall.
+	app.memory.mu.Lock()
+	defer app.memory.mu.Unlock()
+	for _, entry := range app.memory.entries {
+		if strings.TrimSpace(entry.Metadata["meetingId"]) == meetingID && !memoryEntryHiddenFromRecall(entry) {
+			return true
+		}
+	}
+	return false
 }
 
 // meetingCoverageDetail resolves how completely the stored digest window covers

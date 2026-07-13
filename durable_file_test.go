@@ -69,6 +69,25 @@ func TestWriteFileAtomicallyDurableParentFailureLeavesNoArtifact(t *testing.T) {
 	}
 }
 
+func TestWriteFileAtomicallyDurableReportsPostRenameAmbiguity(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	previous := syncDirectoryForAtomicWrite
+	syncDirectoryForAtomicWrite = func(string) error { return io.ErrClosedPipe }
+	t.Cleanup(func() { syncDirectoryForAtomicWrite = previous })
+	err := writeFileAtomicallyDurable(path, []byte("new"), 0o600)
+	if !errors.Is(err, ErrDurableReplaceAmbiguous) {
+		t.Fatalf("error=%v, want ambiguous durable replacement", err)
+	}
+	raw, readErr := os.ReadFile(path)
+	if readErr != nil || string(raw) != "new" {
+		t.Fatalf("visible replacement=%q err=%v, want published new generation", raw, readErr)
+	}
+}
+
 func TestAppendFileDurablyPersistsOrderedRecords(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	if err := appendFileDurably(path, []byte("one\n"), 0o600); err != nil {
