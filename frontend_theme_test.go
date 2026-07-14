@@ -11,8 +11,8 @@ import (
 // "system" choice), the choice persists to localStorage on every apply, and a
 // signed-in user's choice syncs to their account via POST /auth/theme and is
 // re-applied from /auth/me at session bootstrap. Also pins the lobby ink-
-// channel tokens that keep the pre-join Rooms lobby theme-aware while the
-// in-call stage stays true black.
+// channel tokens and the room-canvas token so both pre-join and in-call room
+// grounds follow the selected theme while video media stays true black.
 
 func readIndexForTheme(t *testing.T) string {
 	t.Helper()
@@ -73,7 +73,7 @@ func TestIndexThemePersistsToAccount(t *testing.T) {
 	}
 }
 
-func TestIndexLobbyThemeTokens(t *testing.T) {
+func TestIndexRoomThemeTokens(t *testing.T) {
 	html := readIndexForTheme(t)
 
 	// the lobby ink channel: ink on paper by default, white on black in dark
@@ -83,12 +83,26 @@ func TestIndexLobbyThemeTokens(t *testing.T) {
 	if !strings.Contains(html, "[data-theme=\"dark\"] .room-empty {") || !strings.Contains(html, "--lob-fg: 255, 255, 255;") {
 		t.Error("lobby dark ink-channel override missing")
 	}
-	// the pre-join ground follows the theme; the in-call stage keeps --bg-stage
+	// The pre-join ground follows the theme.
 	roomEmptyIdx := strings.Index(html, "background: var(--bg-app);\n        border-radius: 0;")
 	if roomEmptyIdx == -1 {
 		t.Error(".room-empty must ground on var(--bg-app) so the lobby follows the theme")
 	}
-	if !strings.Contains(html, "background: var(--bg-stage);\n        /* tiles sit directly on the light canvas") {
-		t.Error(".hearth-stage must keep the true-black --bg-stage ground for in-call video")
+	// The in-call canvas is paper in light mode and true black in dark mode.
+	for _, want := range []string{
+		"--bg-room-canvas: var(--paper-100);",
+		"--bg-room-canvas: #000000;",
+		"background: var(--bg-room-canvas);",
+		"--bg-stage: #000000;",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("room theme contract missing %q", want)
+		}
+	}
+	if strings.Contains(html, "#appShell.is-in-room .hearth-presentation,\n        #appShell.is-authed[data-tool=\"room\"]:not(.is-in-room) .hearth-presentation {\n          background: var(--bg-stage);") {
+		t.Error("in-call .hearth-presentation must not force the true-black media token in light mode")
+	}
+	if !strings.Contains(html, "color: var(--text-3);") {
+		t.Error("room canvas metadata must use theme-aware text color")
 	}
 }

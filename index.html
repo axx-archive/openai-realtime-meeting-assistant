@@ -114,7 +114,8 @@
 
         /* ---------- colors.css · semantic aliases · LIGHT (default) ---------- */
         --bg-app: var(--paper-50);
-        --bg-stage: #000000;            /* video always sits on true black */
+        --bg-room-canvas: var(--paper-100); /* room ground follows the app theme */
+        --bg-stage: #000000;            /* video and letterboxing stay true black */
         --surface-1: var(--paper-0);    /* panels, rails */
         --surface-2: var(--paper-0);    /* cards on panels */
         --surface-3: var(--paper-100);  /* inputs, wells, hover fills */
@@ -269,6 +270,7 @@
 
         /* ---------- colors.css · semantic aliases · DARK (true black) ---------- */
         --bg-app: #000000;              /* true black */
+        --bg-room-canvas: #000000;
         --bg-stage: #000000;
         --surface-1: #101012;
         --surface-2: #161619;
@@ -1439,6 +1441,19 @@
         backface-visibility: hidden;
         -webkit-backface-visibility: hidden;
         contain: paint;
+      }
+
+      /* A phone publishes its native portrait frame. Wide desktop tiles must
+         preserve that complete frame instead of cropping the top and bottom
+         with cover; the tile's true-black media ground supplies pillarboxes. */
+      @media (min-width: 641px) {
+        html:not(.is-mobile-device) .video-tile video.has-portrait-frame,
+        html:not(.is-mobile-device) .hearth-speaker video.has-portrait-frame,
+        html:not(.is-mobile-device) .screen-stage__pip video.has-portrait-frame,
+        html:not(.is-mobile-device) .pip-tile video.has-portrait-frame,
+        html:not(.is-mobile-device) .board-video-tile video.has-portrait-frame {
+          object-fit: contain;
+        }
       }
 
       .local-video-mirror-canvas {
@@ -14239,13 +14254,12 @@
         overflow: hidden;
         border: 0;
         border-radius: 0;
-        background: transparent;
+        background: var(--bg-room-canvas);
         box-shadow: none;
       }
 
-      /* the stage — true black in both themes; video is the imagery. The
-         black is painted here (not just on .room-empty) so the pre-join /
-         keyless stage is never bare white paper behind the tiles (R-1). */
+      /* The room ground follows the selected theme. Camera tiles retain their
+         own true-black media ground so video and letterboxing stay stable. */
       .hearth-stage {
         position: relative;
         min-height: min(74vh, 820px);
@@ -14254,7 +14268,7 @@
         grid-template-rows: minmax(0, 1fr);
         place-items: stretch;
         overflow: hidden;
-        background: var(--bg-stage);
+        background: var(--bg-room-canvas);
         /* tiles sit directly on the light canvas — the workspace padding is
            the only inset, per the reference grid */
         padding: 0;
@@ -14273,14 +14287,14 @@
         min-height: 0;
       }
 
-      /* design Room · quiet — dark stage, three quiet lines. Hidden unless
+      /* design Room · quiet — themed stage, three quiet lines. Hidden unless
          the stage is mounted but no live connection is up; reuses the live
          join flow. Visibility is debounced (see the show rule below) so
          connect/reconnect churn can never flash the join pill on/off. */
       /* lobby theming (founder call 2026-07-10, supersedes the always-black
-         lobby canon from the fidelity pass): the PRE-JOIN lobby follows the
-         app theme; the IN-CALL stage and the preview tile stay true black in
-         both themes (video is the imagery). One ink-channel token pair drives
+         lobby canon from the fidelity pass): the lobby and in-call room ground
+         follow the app theme; preview/video tiles stay true black. One
+         ink-channel token pair drives
          the whole white-alpha idiom — white on black in dark, ink on paper in
          light — so every rule below stays single-sourced. */
       .room-empty {
@@ -14312,8 +14326,7 @@
         gap: 18px;
         padding: 24px;
         text-align: center;
-        /* --bg-app: paper in light, true black in dark — the lobby ground
-           follows the theme while the in-call stage keeps --bg-stage black */
+        /* --bg-app: paper in light, true black in dark */
         background: var(--bg-app);
         border-radius: 0;
         visibility: hidden;
@@ -16643,9 +16656,8 @@
         outline-offset: 2px;
       }
 
-      /* ---------- Room surface (design canon) — flush black stage, chrome
-         overlays, caption pill, in-room board panel. Stage literals are
-         theme-invariant white/black values by ruling D3: do NOT tokenize. */
+      /* ---------- Room surface (design canon) — themed room ground, dark
+         media tiles, chrome overlays, caption pill, in-room board panel. */
 
       @keyframes bf-slidein {
         from { opacity: 0; transform: translateX(28px); }
@@ -16664,7 +16676,7 @@
         font: var(--type-numeric);
         letter-spacing: var(--track-numeric);
         font-variant-numeric: tabular-nums;
-        color: rgba(255, 255, 255, 0.55);
+        color: var(--text-3);
       }
 
       .stage-chrome__occupancy {
@@ -16675,7 +16687,7 @@
         display: none;
         font: var(--type-label-lg);
         letter-spacing: var(--track-label-lg);
-        color: rgba(255, 255, 255, 0.55);
+        color: var(--text-3);
       }
 
       /* in-room board panel — dark glass sheet sliding from the right */
@@ -16786,7 +16798,7 @@
       }
 
       /* the desktop room pane sits flush under the header — the stage owns
-         the full content region on true black; tiles inset 60/20/100 for the
+         the full themed content region; tiles inset 60/20/100 for the
          chrome above and the dock below (design §6) */
       @media (min-width: 641px) {
         #appShell.is-in-room:not(.is-board-expanded):not(.is-room-chat-open) .workspace,
@@ -16801,7 +16813,7 @@
 
         #appShell.is-in-room .hearth-presentation,
         #appShell.is-authed[data-tool="room"]:not(.is-in-room) .hearth-presentation {
-          background: var(--bg-stage);
+          background: var(--bg-room-canvas);
         }
 
         #appShell.is-in-room[data-tool="room"] .hearth-presentation {
@@ -18213,8 +18225,8 @@
           min-height: 0;
         }
 
-        /* the Room runs full-bleed black under the floating tab bar (design
-           mobile §2/§5) — no PiP, no board panel, no share verb on phones */
+        /* The Room runs full-bleed beneath the floating tab bar (design mobile
+           §2/§5) — no PiP, no board panel, no share verb on phones. */
         #appShell.is-authed[data-tool="room"] .workspace {
           padding: 0;
           gap: 0;
@@ -18235,7 +18247,7 @@
             max(12px, env(safe-area-inset-left, 0px));
           border: none;
           border-radius: 0;
-          background: var(--bg-stage);
+          background: var(--bg-room-canvas);
           box-shadow: none;
           overflow: hidden;
         }
@@ -18245,7 +18257,7 @@
           min-height: 0;
         }
 
-        /* the pre-join quiet state centers on the same black stage */
+        /* the pre-join quiet state centers on the same themed stage */
         #appShell[data-tool="room"]:not(.is-in-room) .hearth-presentation {
           padding: 0 0 calc(env(safe-area-inset-bottom) + 96px);
         }
@@ -18272,7 +18284,7 @@
           white-space: nowrap;
           font: var(--type-label);
           letter-spacing: var(--track-label);
-          color: rgba(255, 255, 255, 0.5);
+          color: var(--text-3);
         }
 
         /* guest hero (recon-25): with the topbar gone the hero climbs to the
@@ -33951,6 +33963,8 @@
           trackIds: tracks.map(track => track.id),
           trackStates: tracks.map(track => track.readyState || ''),
           sourceSignature: video.dataset.sourceStreamSignature || '',
+          frameOrientation: video.dataset.frameOrientation || 'unknown',
+          objectFit: getComputedStyle(video).objectFit,
           attachmentRevision: Number(video.dataset.videoAttachmentRevision || 0),
           attachedAgeMs: age(video.dataset.videoStreamAttachedAt),
           lastFrameAgeMs: age(video.dataset.lastVideoFrameAt),
@@ -46252,6 +46266,33 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return remoteVideoElementForParticipant(participantName)
       }
 
+      function syncVideoFrameOrientation(video) {
+        if (video?.tagName?.toLowerCase?.() !== 'video') {
+          return 'unknown'
+        }
+        const width = video.srcObject ? Number(video.videoWidth || 0) : 0
+        const height = video.srcObject ? Number(video.videoHeight || 0) : 0
+        const orientation = width > 0 && height > 0
+          ? (height > width ? 'portrait' : 'landscape')
+          : 'unknown'
+        video.dataset.frameOrientation = orientation
+        video.classList.toggle('has-portrait-frame', orientation === 'portrait')
+        return orientation
+      }
+
+      function observeVideoFrameOrientation(video) {
+        if (video?.tagName?.toLowerCase?.() !== 'video') {
+          return
+        }
+        if (video.dataset.frameOrientationObserved !== 'true') {
+          video.dataset.frameOrientationObserved = 'true'
+          video.addEventListener('loadedmetadata', () => syncVideoFrameOrientation(video))
+          video.addEventListener('resize', () => syncVideoFrameOrientation(video))
+          video.addEventListener('emptied', () => syncVideoFrameOrientation(video))
+        }
+        syncVideoFrameOrientation(video)
+      }
+
       function setVideoElementStream(video, stream, { hidden = false, local = false, force = false } = {}) {
         const wasHidden = video.hidden
         if (video?.tagName?.toLowerCase?.() === 'video') {
@@ -46261,6 +46302,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           video.playsInline = true
           video.setAttribute('playsinline', '')
           video.setAttribute('webkit-playsinline', '')
+          observeVideoFrameOrientation(video)
         }
         if (force) {
           delete video.dataset.sourceStreamSignature
@@ -46275,6 +46317,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             video.pause?.()
           }
           video.srcObject = nextStream
+          syncVideoFrameOrientation(video)
           videoAttachmentRevision += 1
           video.dataset.videoAttachmentRevision = String(videoAttachmentRevision)
           markVideoElementStreamAttached(video, nextStream)
@@ -46290,6 +46333,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (nextStream && !video.hidden) {
           ensureVideoElementPlayback(video)
         }
+        syncVideoFrameOrientation(video)
         if (video === localVideo) {
           syncLocalMirrorPreview()
         }

@@ -236,6 +236,36 @@ try {
   const B = await join(webkit, {}, 'Tim', false)
   sessions.push(B)
 
+  console.log('\n[0] Room canvas — light follows paper; dark remains true black')
+  const roomCanvasTheme = await A.page.evaluate(() => {
+    const root = document.documentElement
+    const initialTheme = root.dataset.theme || 'light'
+    const snapshot = theme => {
+      root.dataset.theme = theme
+      const presentation = document.querySelector('.hearth-presentation')
+      const stage = document.getElementById('hearthStage')
+      const video = document.querySelector('#videoStack video')
+      return {
+        presentation: presentation ? getComputedStyle(presentation).backgroundColor : '',
+        stage: stage ? getComputedStyle(stage).backgroundColor : '',
+        video: video ? getComputedStyle(video).backgroundColor : ''
+      }
+    }
+    const light = snapshot('light')
+    const dark = snapshot('dark')
+    root.dataset.theme = initialTheme
+    return { light, dark }
+  })
+  console.log('   canvas colors:', JSON.stringify(roomCanvasTheme))
+  ok('Light room canvas uses the cool paper ground while video stays black',
+    roomCanvasTheme.light.presentation === 'rgb(237, 237, 240)'
+      && roomCanvasTheme.light.stage === 'rgb(237, 237, 240)'
+      && roomCanvasTheme.light.video === 'rgb(0, 0, 0)')
+  ok('Dark room canvas and video remain true black',
+    roomCanvasTheme.dark.presentation === 'rgb(0, 0, 0)'
+      && roomCanvasTheme.dark.stage === 'rgb(0, 0, 0)'
+      && roomCanvasTheme.dark.video === 'rgb(0, 0, 0)')
+
   // wait until B (Safari engine) is in a real call: a REMOTE participant tile
   // exists with a rendering remote video element (live track + dimensions).
   // Monitoring self-video could pass while the actual receiver path is black.
@@ -310,8 +340,27 @@ try {
     }
   })
   const afterA = await orient(A), afterB = await orient(B)
+  const remotePortraitFrame = async (session, participantName) => session.page.waitForFunction(name => {
+    const target = String(name || '').trim().toLowerCase()
+    const tile = [...document.querySelectorAll('#videoStack .video-tile')]
+      .find(candidate => String(candidate.dataset.participant || '').trim().toLowerCase() === target)
+    const video = tile?.querySelector('video')
+    if (!video || !video.srcObject || video.videoWidth <= 0 || video.videoHeight <= 0) return null
+    const rect = video.getBoundingClientRect()
+    return {
+      videoWidth: video.videoWidth,
+      videoHeight: video.videoHeight,
+      visualWidth: Math.round(rect.width),
+      visualHeight: Math.round(rect.height),
+      frameOrientation: video.dataset.frameOrientation || 'unknown',
+      objectFit: getComputedStyle(video).objectFit
+    }
+  }, participantName, { timeout: 25000 }).then(handle => handle.jsonValue()).catch(() => null)
+  const cOnA = await remotePortraitFrame(A, C.label)
+  const cOnB = await remotePortraitFrame(B, C.label)
   console.log('   C(iPhone) gum constraints:', JSON.stringify(cInfo.gum))
   console.log('   C applyConstraints calls:', cInfo.applied, '| A orient', beforeA,'->',afterA, '| B orient', beforeB,'->',afterB)
+  console.log('   C frame on A(Chromium):', JSON.stringify(cOnA), '| B(WebKit):', JSON.stringify(cOnB))
   const cVideoConstraint = ((cInfo.gum || []).find(g=>g.video) || {}).video
   const land = a => a.filter(o=>o==='landscape').length
   ok('C detected as mobile (real iPhone UA)', cInfo.mobile === true)
@@ -324,6 +373,12 @@ try {
   // the landscape count must not DROP (C's own feed is legitimately portrait).
   ok('A: existing landscape feeds did NOT flip to portrait when C joined', land(afterA) >= land(beforeA) && land(afterA) >= 1)
   ok('B: existing landscape feeds did NOT flip to portrait when C joined', land(afterB) >= land(beforeB) && land(afterB) >= 1)
+  ok('A: portrait iPhone feed preserves its complete frame with contain', cOnA?.videoHeight > cOnA?.videoWidth
+    && cOnA?.frameOrientation === 'portrait'
+    && cOnA?.objectFit === 'contain')
+  ok('B (Safari engine): portrait iPhone feed preserves its complete frame with contain', cOnB?.videoHeight > cOnB?.videoWidth
+    && cOnB?.frameOrientation === 'portrait'
+    && cOnB?.objectFit === 'contain')
 
   console.log('\n[3] Screen share — A shares; B and C must see it on the presentation stage')
   await A.page.click('#screenShare').catch(async()=>{ await A.page.evaluate(()=>document.getElementById('screenShare')?.click()) })

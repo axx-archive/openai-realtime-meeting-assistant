@@ -251,6 +251,40 @@ func TestIndexKeepsWidescreenCaptureAndCalmRemoteTiles(t *testing.T) {
 	}
 }
 
+func TestIndexPreservesPortraitMobileFramingOnDesktop(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+	for _, want := range []string{
+		"function syncVideoFrameOrientation(video)",
+		"function observeVideoFrameOrientation(video)",
+		"video.addEventListener('loadedmetadata', () => syncVideoFrameOrientation(video))",
+		"video.addEventListener('resize', () => syncVideoFrameOrientation(video))",
+		"video.classList.toggle('has-portrait-frame', orientation === 'portrait')",
+		"html:not(.is-mobile-device) .video-tile video.has-portrait-frame",
+		"object-fit: contain;",
+		"frameOrientation: video.dataset.frameOrientation || 'unknown'",
+		"objectFit: getComputedStyle(video).objectFit",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing portrait-frame preservation %q", want)
+		}
+	}
+
+	attachStart := strings.Index(html, "function setVideoElementStream(video, stream,")
+	attachEnd := strings.Index(html, "function localMirrorPreviewSourceReady()")
+	if attachStart == -1 || attachEnd == -1 || attachEnd <= attachStart {
+		t.Fatal("missing setVideoElementStream helper")
+	}
+	attach := html[attachStart:attachEnd]
+	if !strings.Contains(attach, "observeVideoFrameOrientation(video)") || strings.Count(attach, "syncVideoFrameOrientation(video)") < 2 {
+		t.Fatal("every video attachment must observe metadata changes and immediately resync frame orientation")
+	}
+}
+
 func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T) {
 	rawHTML, err := os.ReadFile("index.html")
 	if err != nil {
