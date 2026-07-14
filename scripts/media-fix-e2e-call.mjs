@@ -347,13 +347,17 @@ try {
     const video = tile?.querySelector('video')
     if (!video || !video.srcObject || video.videoWidth <= 0 || video.videoHeight <= 0) return null
     const rect = video.getBoundingClientRect()
+    const tileRect = tile.getBoundingClientRect()
     return {
       videoWidth: video.videoWidth,
       videoHeight: video.videoHeight,
       visualWidth: Math.round(rect.width),
       visualHeight: Math.round(rect.height),
+      tileWidth: Math.round(tileRect.width),
+      tileHeight: Math.round(tileRect.height),
       frameOrientation: video.dataset.frameOrientation || 'unknown',
-      objectFit: getComputedStyle(video).objectFit
+      objectFit: getComputedStyle(video).objectFit,
+      position: getComputedStyle(video).position
     }
   }, participantName, { timeout: 25000 }).then(handle => handle.jsonValue()).catch(() => null)
   const cOnA = await remotePortraitFrame(A, C.label)
@@ -375,10 +379,16 @@ try {
   ok('B: existing landscape feeds did NOT flip to portrait when C joined', land(afterB) >= land(beforeB) && land(afterB) >= 1)
   ok('A: portrait iPhone feed preserves its complete frame with contain', cOnA?.videoHeight > cOnA?.videoWidth
     && cOnA?.frameOrientation === 'portrait'
-    && cOnA?.objectFit === 'contain')
+    && cOnA?.objectFit === 'contain'
+    && cOnA?.position === 'absolute'
+    && Math.abs(cOnA?.visualWidth - cOnA?.tileWidth) <= 1
+    && Math.abs(cOnA?.visualHeight - cOnA?.tileHeight) <= 1)
   ok('B (Safari engine): portrait iPhone feed preserves its complete frame with contain', cOnB?.videoHeight > cOnB?.videoWidth
     && cOnB?.frameOrientation === 'portrait'
-    && cOnB?.objectFit === 'contain')
+    && cOnB?.objectFit === 'contain'
+    && cOnB?.position === 'absolute'
+    && Math.abs(cOnB?.visualWidth - cOnB?.tileWidth) <= 1
+    && Math.abs(cOnB?.visualHeight - cOnB?.tileHeight) <= 1)
 
   console.log('\n[3] Screen share — A shares; B and C must see it on the presentation stage')
   await A.page.click('#screenShare').catch(async()=>{ await A.page.evaluate(()=>document.getElementById('screenShare')?.click()) })

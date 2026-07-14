@@ -14,6 +14,7 @@ import {
   validatePinnedViewSnapshot,
   validateScreenShareSnapshot,
   validateSoakProgressSnapshots,
+  validateVideoTileMediaBounds,
   videoProbeRendered
 } from './live-media-smoke-assertions.mjs'
 
@@ -771,6 +772,11 @@ async function showPinnedView(page, targetName = '') {
         tile?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
         const after = { left: stack?.scrollLeft || 0, top: stack?.scrollTop || 0 }
+        const buttonRect = button?.getBoundingClientRect()
+        const hitElement = buttonRect
+          ? document.elementFromPoint(buttonRect.left + buttonRect.width / 2, buttonRect.top + buttonRect.height / 2)
+          : null
+        const hitTargetedButton = Boolean(button && hitElement?.closest?.('.pin-speaker') === button)
         button?.click()
         if (typeof repairAuxiliaryVideoPlayback === 'function') {
           repairAuxiliaryVideoPlayback('live media smoke pinned view')
@@ -782,6 +788,7 @@ async function showPinnedView(page, targetName = '') {
           landscape,
           wasOffscreen,
           clicked: Boolean(button),
+          hitTargetedButton,
           before,
           after,
           scrolled: landscape ? after.top !== before.top : after.left !== before.left
@@ -1499,6 +1506,7 @@ function validateSnapshots(snapshots, expectedClientCount, options = {}) {
     if (options.requirePinnedView) {
       failures.push(...validatePinnedViewSnapshot(snapshot, expectedNames))
     }
+    failures.push(...validateVideoTileMediaBounds(snapshot))
     if (options.requireBoardDock && !snapshot.usesCrowdedVideoLimits) {
       if (!snapshot.boardExpanded) {
         failures.push(`${prefix} board is not expanded`)

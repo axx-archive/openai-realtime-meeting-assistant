@@ -265,6 +265,8 @@ func TestIndexPreservesPortraitMobileFramingOnDesktop(t *testing.T) {
 		"video.addEventListener('resize', () => syncVideoFrameOrientation(video))",
 		"video.classList.toggle('has-portrait-frame', orientation === 'portrait')",
 		"html:not(.is-mobile-device) .video-tile video.has-portrait-frame",
+		".video-tile > video {",
+		"position: absolute;\n        inset: 0;\n        min-width: 0;\n        min-height: 0;",
 		"object-fit: contain;",
 		"frameOrientation: video.dataset.frameOrientation || 'unknown'",
 		"objectFit: getComputedStyle(video).objectFit",
@@ -272,6 +274,9 @@ func TestIndexPreservesPortraitMobileFramingOnDesktop(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing portrait-frame preservation %q", want)
 		}
+	}
+	if strings.Index(html, ".video-tile > video {") > strings.Index(html, "html:not(.is-mobile-device) .video-tile video.has-portrait-frame") {
+		t.Fatal("gallery videos must receive definite tile bounds before portrait object-fit overrides are applied")
 	}
 
 	attachStart := strings.Index(html, "function setVideoElementStream(video, stream,")

@@ -1420,6 +1420,18 @@
         background: var(--bg-stage);
       }
 
+      /* Gallery tiles are CSS-grid containers with an aspect-ratio-derived
+         block size. A portrait video's intrinsic ratio can otherwise expand
+         the implicit grid track beyond the tile even though height is 100%,
+         leaving overflow:hidden to show only a zoomed slice. Give the media
+         a definite containing block so object-fit owns framing as intended. */
+      .video-tile > video {
+        position: absolute;
+        inset: 0;
+        min-width: 0;
+        min-height: 0;
+      }
+
       #localVideo {
         transform: scaleX(-1);
         backface-visibility: hidden;

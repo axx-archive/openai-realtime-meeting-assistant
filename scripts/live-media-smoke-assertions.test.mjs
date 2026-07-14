@@ -9,7 +9,8 @@ import {
   validateMobileRoomLayoutSnapshot,
   validatePinnedViewSnapshot,
   validateScreenShareSnapshot,
-  validateSoakProgressSnapshots
+  validateSoakProgressSnapshots,
+  validateVideoTileMediaBounds
 } from './live-media-smoke-assertions.mjs'
 
 const visibleRect = { clientRects: 1, rect: { top: 0, right: 320, bottom: 180, left: 0, width: 320, height: 180 } }
@@ -23,6 +24,35 @@ const renderedVideo = {
   videoHeight: 720,
   frames: 12
 }
+
+test('gallery media boxes stay pinned to their tile instead of expanding to portrait intrinsic height', () => {
+  const snapshot = {
+    name: 'AJ',
+    tiles: [{
+      participant: 'Erick',
+      rect: { clientRects: 1, rect: { width: 965, height: 603.125 } },
+      videoDetails: [{
+        ...renderedVideo,
+        videoWidth: 720,
+        videoHeight: 1280,
+        rect: { clientRects: 1, rect: { width: 965, height: 603.125 } }
+      }]
+    }]
+  }
+  assert.deepEqual(validateVideoTileMediaBounds(snapshot), [])
+
+  const failures = validateVideoTileMediaBounds({
+    ...snapshot,
+    tiles: snapshot.tiles.map(tile => ({
+      ...tile,
+      videoDetails: tile.videoDetails.map(video => ({
+        ...video,
+        rect: { clientRects: 1, rect: { width: 965, height: 1715.55 } }
+      }))
+    }))
+  })
+  assert.match(failures.join('\n'), /965\.0x1715\.5 media box inside a 965\.0x603\.1 tile/)
+})
 
 test('screen-share validator accepts the sharer placeholder and requires remote rendering', () => {
   const local = {
@@ -188,12 +218,12 @@ test('mobile authoritative speaker promotion moves the canonical hero without at
 
 test('mobile filmstrip gate requires a real scroll and pin-control click for crowded rooms', () => {
   assert.deepEqual(validateMobilePinInteractions([
-    { name: 'Tom', target: 'Erick', mobile: true, wasOffscreen: true, scrolled: true, clicked: true }
+    { name: 'Tom', target: 'Erick', mobile: true, wasOffscreen: true, scrolled: true, clicked: true, hitTargetedButton: true }
   ], 5), [])
   const failures = validateMobilePinInteractions([
-    { name: 'Tom', target: 'Erick', mobile: true, wasOffscreen: false, scrolled: false, clicked: false }
+    { name: 'Tom', target: 'Erick', mobile: true, wasOffscreen: false, scrolled: false, clicked: false, hitTargetedButton: false }
   ], 5)
-  assert.match(failures.join('\n'), /actual pin control|offscreen tile|scroll position/)
+  assert.match(failures.join('\n'), /actual pin control|center-point hit testing|offscreen tile|scroll position/)
 })
 
 test('mobile secondary call actions stay reachable in a labelled 44px menu', () => {

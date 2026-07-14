@@ -11,6 +11,34 @@ export function videoProbeRendered(probe) {
     && ((probe.readyState >= 2 && probe.videoWidth > 0 && probe.videoHeight > 0) || probe.frames > 0))
 }
 
+export function validateVideoTileMediaBounds(snapshot, tolerancePx = 2) {
+  const failures = []
+  const tolerance = Math.max(0, Number(tolerancePx) || 0)
+  for (const tile of snapshot?.tiles || []) {
+    if (!rectProbeVisible(tile.rect)) {
+      continue
+    }
+    const tileRect = tile.rect?.rect || {}
+    const tileWidth = Number(tileRect.width) || 0
+    const tileHeight = Number(tileRect.height) || 0
+    if (tileWidth <= 0 || tileHeight <= 0) {
+      continue
+    }
+    for (const video of tile.videoDetails || []) {
+      if (!videoProbeRendered(video) || !rectProbeVisible(video.rect)) {
+        continue
+      }
+      const videoRect = video.rect?.rect || {}
+      const videoWidth = Number(videoRect.width) || 0
+      const videoHeight = Number(videoRect.height) || 0
+      if (Math.abs(videoWidth - tileWidth) > tolerance || Math.abs(videoHeight - tileHeight) > tolerance) {
+        failures.push(`${snapshot.name} video tile ${tile.participant || 'unknown'} has a ${videoWidth.toFixed(1)}x${videoHeight.toFixed(1)} media box inside a ${tileWidth.toFixed(1)}x${tileHeight.toFixed(1)} tile`)
+      }
+    }
+  }
+  return failures
+}
+
 export function usesMobileMediaLayout(snapshot) {
   const viewport = snapshot?.viewport || {}
   const visualWidth = Number(viewport.visualViewport?.width) || 0
@@ -200,6 +228,9 @@ export function validateMobilePinInteractions(interactions, participantCount = 0
     const prefix = `${interaction.name} mobile filmstrip target ${interaction.target || 'missing'}`
     if (!interaction.clicked) {
       failures.push(`${prefix} was not promoted through its actual pin control`)
+    }
+    if (!interaction.hitTargetedButton) {
+      failures.push(`${prefix} pin control does not own center-point hit testing`)
     }
     if (participantCount >= 5 && !interaction.wasOffscreen) {
       failures.push(`${prefix} did not exercise an offscreen tile`)
