@@ -395,8 +395,25 @@ try {
   const stageVisible = async (s) => s.page.waitForFunction(() => {
     const tile = document.getElementById('presentationTile')
     const v = document.getElementById('screenStageVideo')
-    return tile && tile.classList.contains('is-screen-sharing') && v && v.srcObject &&
-      v.srcObject.getVideoTracks().some(t=>t.readyState==='live') && v.videoWidth > 0
+    if (!(tile && tile.classList.contains('is-screen-sharing') && v && v.srcObject &&
+      v.srcObject.getVideoTracks().some(t=>t.readyState==='live') && v.videoWidth > 0 && v.videoHeight > 0)) return false
+    try {
+      const canvas = document.createElement('canvas')
+      canvas.width = 64
+      canvas.height = 36
+      const context = canvas.getContext('2d', { willReadFrequently: true })
+      context.drawImage(v, 0, 0, canvas.width, canvas.height)
+      const data = context.getImageData(0, 0, canvas.width, canvas.height).data
+      let nonBlackPixels = 0
+      let maxLuma = 0
+      for (let offset = 0; offset < data.length; offset += 4) {
+        if (Math.max(data[offset], data[offset + 1], data[offset + 2]) >= 12) nonBlackPixels += 1
+        maxLuma = Math.max(maxLuma, ((0.2126 * data[offset]) + (0.7152 * data[offset + 1]) + (0.0722 * data[offset + 2])) / 255)
+      }
+      return nonBlackPixels / Math.max(1, data.length / 4) >= 0.05 && maxLuma >= 0.08
+    } catch {
+      return false
+    }
   }, null, { timeout: 25000 }).then(()=>true).catch(()=>false)
   const bSees = await stageVisible(B)
   const cSees = await stageVisible(C)

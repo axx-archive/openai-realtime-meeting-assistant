@@ -984,6 +984,44 @@ async function snapshotPage(page) {
           hasLiveVideo: Boolean(video.srcObject?.getVideoTracks?.().some(track => track.readyState !== 'ended'))
         }
       }
+      const videoFramePixelProbe = video => {
+        if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || video.videoWidth <= 0 || video.videoHeight <= 0) {
+          return { sampled: false, sampleCount: 0, nonBlackPixels: 0, nonBlackRatio: 0, meanLuma: 0, maxLuma: 0 }
+        }
+        try {
+          const canvas = document.createElement('canvas')
+          canvas.width = 64
+          canvas.height = 36
+          const context = canvas.getContext('2d', { willReadFrequently: true })
+          context.drawImage(video, 0, 0, canvas.width, canvas.height)
+          const data = context.getImageData(0, 0, canvas.width, canvas.height).data
+          const sampleCount = Math.floor(data.length / 4)
+          let nonBlackPixels = 0
+          let lumaTotal = 0
+          let maxLuma = 0
+          for (let offset = 0; offset < data.length; offset += 4) {
+            const red = data[offset]
+            const green = data[offset + 1]
+            const blue = data[offset + 2]
+            if (Math.max(red, green, blue) >= 12) {
+              nonBlackPixels += 1
+            }
+            const luma = ((0.2126 * red) + (0.7152 * green) + (0.0722 * blue)) / 255
+            lumaTotal += luma
+            maxLuma = Math.max(maxLuma, luma)
+          }
+          return {
+            sampled: sampleCount > 0,
+            sampleCount,
+            nonBlackPixels,
+            nonBlackRatio: sampleCount ? nonBlackPixels / sampleCount : 0,
+            meanLuma: sampleCount ? lumaTotal / sampleCount : 0,
+            maxLuma
+          }
+        } catch (error) {
+          return { sampled: false, sampleCount: 0, nonBlackPixels: 0, nonBlackRatio: 0, meanLuma: 0, maxLuma: 0, error: error?.message || String(error) }
+        }
+      }
       const canvasProbe = canvas => {
         if (!canvas) {
           return null
@@ -1352,6 +1390,7 @@ async function snapshotPage(page) {
         screenStageLocalShare: Boolean(document.getElementById('screenStage')?.classList.contains('is-local-share')),
         screenStagePlaceholder: rectProbe(document.querySelector('#screenStage .screen-stage__placeholder')),
         screenStageVideo: videoProbe(document.getElementById('screenStageVideo')),
+        screenStageFramePixels: videoFramePixelProbe(document.getElementById('screenStageVideo')),
         iosScreenStageOwnership: {
           owner: iosStageOwner,
           active: Boolean(iosStageOwner && typeof iosScreenStageOwnsParticipant === 'function' && iosScreenStageOwnsParticipant(iosStageOwner)),

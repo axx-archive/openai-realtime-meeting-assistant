@@ -8,6 +8,7 @@ import {
   validateMobileRoomChromeSnapshot,
   validateMobileRoomLayoutSnapshot,
   validatePinnedViewSnapshot,
+  screenShareFrameHasSignal,
   validateScreenShareSnapshot,
   validateSoakProgressSnapshots,
   validateVideoTileMediaBounds
@@ -23,6 +24,22 @@ const renderedVideo = {
   videoWidth: 1280,
   videoHeight: 720,
   frames: 12
+}
+const colorfulScreenSharePixels = {
+  sampled: true,
+  sampleCount: 2304,
+  nonBlackPixels: 2100,
+  nonBlackRatio: 2100 / 2304,
+  meanLuma: 0.34,
+  maxLuma: 1
+}
+const blackScreenSharePixels = {
+  sampled: true,
+  sampleCount: 2304,
+  nonBlackPixels: 0,
+  nonBlackRatio: 0,
+  meanLuma: 0,
+  maxLuma: 0
 }
 
 test('gallery media boxes stay pinned to their tile instead of expanding to portrait intrinsic height', () => {
@@ -75,12 +92,18 @@ test('screen-share validator accepts the sharer placeholder and requires remote 
     name: 'Caitlyn',
     screenStageLocalShare: false,
     screenStagePlaceholder: hiddenRect,
-    screenStageVideo: renderedVideo
+    screenStageVideo: renderedVideo,
+    screenStageFramePixels: colorfulScreenSharePixels
   }
   assert.deepEqual(validateScreenShareSnapshot(remote, 'Tom', ['Tom', 'Caitlyn']), [])
+  assert.equal(screenShareFrameHasSignal(colorfulScreenSharePixels), true)
 
   const failures = validateScreenShareSnapshot({ ...remote, screenStageVideo: null }, 'Tom', ['Tom', 'Caitlyn'])
   assert.match(failures.join('\n'), /remote stage video did not render/)
+
+  const blackFailures = validateScreenShareSnapshot({ ...remote, screenStageFramePixels: blackScreenSharePixels }, 'Tom', ['Tom', 'Caitlyn'])
+  assert.equal(screenShareFrameHasSignal(blackScreenSharePixels), false)
+  assert.match(blackFailures.join('\n'), /remote stage decoded only black pixels/)
 })
 
 test('mobile pinned mode keeps canonical hero and strip while desktop stays single-stage', () => {

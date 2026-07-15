@@ -11,6 +11,14 @@ export function videoProbeRendered(probe) {
     && ((probe.readyState >= 2 && probe.videoWidth > 0 && probe.videoHeight > 0) || probe.frames > 0))
 }
 
+export function screenShareFrameHasSignal(probe) {
+  return Boolean(probe
+    && probe.sampled
+    && Number(probe.sampleCount) > 0
+    && Number(probe.nonBlackRatio) >= 0.05
+    && Number(probe.maxLuma) >= 0.08)
+}
+
 export function validateVideoTileMediaBounds(snapshot, tolerancePx = 2) {
   const failures = []
   const tolerance = Math.max(0, Number(tolerancePx) || 0)
@@ -338,6 +346,8 @@ export function validateScreenShareSnapshot(snapshot, sharerName, expectedNames 
     }
     if (!videoProbeRendered(snapshot.screenStageVideo)) {
       failures.push(`${prefix} remote stage video did not render`)
+    } else if (!screenShareFrameHasSignal(snapshot.screenStageFramePixels)) {
+      failures.push(`${prefix} remote stage decoded only black pixels`)
     }
   }
 

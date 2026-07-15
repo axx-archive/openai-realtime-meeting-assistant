@@ -24159,6 +24159,7 @@
       let roomEntryInProgress = false
       let roomEntryStartedAt = 0
       let screenShareStream
+      let screenShareStartInFlight = false
       let isReplacingLocalAudio = false
       let isReplacingLocalVideo = false
       let isMicMuted = false
@@ -24695,12 +24696,17 @@
           constrainedMaxWidth: 480,
           constrainedMaxHeight: 270,
           screenShareMaxBitrate: 2500000,
-          screenShareMaxFramerate: 15
+          screenShareMaxFramerate: 15,
+          screenShareMaxWidth: 1280,
+          screenShareMaxHeight: 720
         }
       }
       const cameraContentHint = 'motion'
       const screenShareContentHint = 'detail'
       const screenShareSupported = Boolean(navigator.mediaDevices?.getDisplayMedia)
+      const screenShareCaptureProbeTimeoutMs = 2400
+      const screenShareCaptureProbeIntervalMs = 120
+      const screenShareOutboundProbeTimeoutMs = 2200
       const connectionRecoveryDelayMs = 20000
       const iceRestartThrottleMs = 3500
       const maxIceRestartAttempts = 5
@@ -34034,7 +34040,8 @@
             name: error?.name || '',
             message: error?.message || String(error || ''),
             constraint: error?.constraint || '',
-            attempts: Array.isArray(error?.mediaAttempts) ? error.mediaAttempts.slice(-8) : []
+            attempts: Array.isArray(error?.mediaAttempts) ? error.mediaAttempts.slice(-8) : [],
+            screenShare: error?.screenShareDiagnostics || null
           }
         }
         try {
@@ -34080,7 +34087,13 @@
           },
           video: {
             constrained: mediaQualityConstrained,
-            settings: trackSettingsSnapshot(localVideoTrack(), ['width', 'height', 'frameRate', 'facingMode'])
+            settings: trackSettingsSnapshot(localVideoTrack(), ['width', 'height', 'frameRate', 'facingMode']),
+            screenShare: screenShareStream ? {
+              active: true,
+              settings: trackSettingsSnapshot(activeScreenShareTrack(), ['width', 'height', 'frameRate', 'displaySurface', 'logicalSurface', 'cursor']),
+              muted: Boolean(activeScreenShareTrack()?.muted),
+              readyState: activeScreenShareTrack()?.readyState || ''
+            } : { active: false }
           },
           remote: remoteHealth,
           render: renderMediaDiagnosticsSnapshot(remoteHealth),
@@ -45799,7 +45812,184 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         await startScreenShare()
       }
 
+      function screenSharePixelSnapshot(imageData) {
+        const data = imageData?.data || []
+        const pixelCount = Math.floor(data.length / 4)
+        if (!pixelCount) {
+          return { sampled: false, blank: false, mean: 0, variance: 0, max: 0, brightFraction: 0 }
+        }
+
+        let sum = 0
+        let sumSquares = 0
+        let max = 0
+        let brightPixels = 0
+        for (let offset = 0; offset < data.length; offset += 4) {
+          const luminance = (0.2126 * data[offset]) + (0.7152 * data[offset + 1]) + (0.0722 * data[offset + 2])
+          sum += luminance
+          sumSquares += luminance * luminance
+          max = Math.max(max, luminance)
+          if (luminance >= 18) {
+            brightPixels += 1
+          }
+        }
+
+        const mean = sum / pixelCount
+        const variance = Math.max(0, (sumSquares / pixelCount) - (mean * mean))
+        const brightFraction = brightPixels / pixelCount
+        return {
+          sampled: true,
+          // macOS can hand Chrome a live display track whose pixels are all
+          // black when capture permission or the capture backend is wedged.
+          // Require near-perfect black across the whole downsampled frame so a
+          // legitimately dark slide, terminal, or app chrome still passes.
+          blank: mean < 2.5 && max < 10 && variance < 3 && brightFraction < 0.001,
+          mean,
+          variance,
+          max,
+          brightFraction
+        }
+      }
+
+      function screenShareStartError(name, message, diagnostics = {}) {
+        const error = new Error(message)
+        error.name = name
+        error.screenShareDiagnostics = diagnostics
+        return error
+      }
+
+      async function validateScreenShareCapture(stream, options = {}) {
+        const track = stream?.getVideoTracks?.()[0]
+        if (!liveTrack(track)) {
+          throw screenShareStartError('ScreenShareNoFramesError', 'screen capture did not provide a live video track')
+        }
+
+        const video = document.createElement('video')
+        const canvas = document.createElement('canvas')
+        canvas.width = 96
+        canvas.height = 54
+        video.autoplay = true
+        video.muted = true
+        video.playsInline = true
+        video.srcObject = stream
+        const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : screenShareCaptureProbeTimeoutMs
+        const intervalMs = Number.isFinite(options.intervalMs) ? options.intervalMs : screenShareCaptureProbeIntervalMs
+        const deadline = Date.now() + Math.max(400, timeoutMs)
+        let samples = 0
+        let blankSamples = 0
+        let lastSnapshot = null
+
+        try {
+          try {
+            await Promise.race([
+              Promise.resolve(video.play()).catch(() => {}),
+              new Promise(resolve => window.setTimeout(resolve, Math.min(800, timeoutMs)))
+            ])
+          } catch {
+            // Autoplay rejection is not decisive; readyState may still advance
+            // on a muted display-capture element, so keep probing until timeout.
+          }
+          while (Date.now() < deadline && liveTrack(track)) {
+            if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0 && video.videoHeight > 0) {
+              try {
+                const context = canvas.getContext('2d', { willReadFrequently: true })
+                context.drawImage(video, 0, 0, canvas.width, canvas.height)
+                lastSnapshot = screenSharePixelSnapshot(context.getImageData(0, 0, canvas.width, canvas.height))
+                samples += 1
+                if (!lastSnapshot.blank) {
+                  return { ok: true, samples, snapshot: lastSnapshot, settings: track.getSettings?.() || {} }
+                }
+                blankSamples += 1
+                if (blankSamples >= 5) {
+                  break
+                }
+              } catch (error) {
+                console.warn('Could not inspect screen capture pixels', error)
+                return { ok: true, samples, snapshot: null, settings: track.getSettings?.() || {}, unverified: true }
+              }
+            }
+            await new Promise(resolve => window.setTimeout(resolve, intervalMs))
+          }
+        } finally {
+          video.pause?.()
+          video.srcObject = null
+        }
+
+        const diagnostics = {
+          samples,
+          blankSamples,
+          snapshot: lastSnapshot,
+          settings: track.getSettings?.() || {},
+          readyState: track.readyState,
+          muted: Boolean(track.muted)
+        }
+        if (samples && blankSamples === samples) {
+          throw screenShareStartError('ScreenShareBlankFramesError', 'screen capture returned only blank frames', diagnostics)
+        }
+        throw screenShareStartError('ScreenShareNoFramesError', 'screen capture did not produce a readable video frame', diagnostics)
+      }
+
+      async function screenShareOutboundSnapshot(sender) {
+        if (!sender?.getStats) {
+          return null
+        }
+        try {
+          const reports = await sender.getStats()
+          let found = false
+          let frames = 0
+          let bytes = 0
+          reports.forEach(report => {
+            if (report.type !== 'outbound-rtp' || report.isRemote || (report.kind && report.kind !== 'video') || (report.mediaType && report.mediaType !== 'video')) {
+              return
+            }
+            found = true
+            frames += Number(report.framesSent) || 0
+            bytes += Number(report.bytesSent) || 0
+          })
+          return found ? { frames, bytes } : null
+        } catch (error) {
+          console.warn('Could not inspect screen-share sender stats', error)
+          return null
+        }
+      }
+
+      async function waitForScreenShareOutboundFrames(sender, timeoutMs = screenShareOutboundProbeTimeoutMs) {
+        const baseline = await screenShareOutboundSnapshot(sender)
+        if (!baseline) {
+          return true
+        }
+        const deadline = Date.now() + Math.max(500, timeoutMs)
+        while (Date.now() < deadline) {
+          await new Promise(resolve => window.setTimeout(resolve, 160))
+          const current = await screenShareOutboundSnapshot(sender)
+          if (!current) {
+            return true
+          }
+          if (current.frames > baseline.frames || current.bytes > baseline.bytes) {
+            return true
+          }
+        }
+        return false
+      }
+
+      async function ensureScreenShareOutboundFrames(sender, screenTrack) {
+        if (await waitForScreenShareOutboundFrames(sender)) {
+          return true
+        }
+
+        // A small number of Chrome/macOS sessions keep the camera encoder
+        // parked after replaceTrack(). Rebinding once forces a fresh encoder
+        // and keyframe without renegotiating the room.
+        await sender.replaceTrack(null)
+        await new Promise(resolve => window.setTimeout(resolve, 80))
+        await sender.replaceTrack(screenTrack)
+        await configureOutboundSender(sender, screenTrack)
+        return waitForScreenShareOutboundFrames(sender)
+      }
+
       async function startScreenShare() {
+        if (screenShareStartInFlight) {
+          return
+        }
         if (!pc || !ws || ws.readyState !== WebSocket.OPEN) {
           const message = 'join the room before sharing your screen.'
           addAssistantMessage({ kind: 'error', text: message })
@@ -45813,22 +46003,40 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
 
+        let captureStream
+        let sender
+        let senderUsesScreenTrack = false
+        screenShareStartInFlight = true
         try {
-          screenShareStream = await navigator.mediaDevices.getDisplayMedia({
+          // Keep the unverified capture local. A concurrent SFU re-offer uses
+          // outboundVideoTrack(), so publishing it through screenShareStream
+          // before this probe would bypass the blank-frame gate.
+          captureStream = await navigator.mediaDevices.getDisplayMedia({
             video: {
+              width: { ideal: outboundMediaLimits.video.screenShareMaxWidth, max: outboundMediaLimits.video.screenShareMaxWidth },
+              height: { ideal: outboundMediaLimits.video.screenShareMaxHeight, max: outboundMediaLimits.video.screenShareMaxHeight },
               frameRate: { ideal: outboundMediaLimits.video.screenShareMaxFramerate, max: outboundMediaLimits.video.screenShareMaxFramerate }
             },
             audio: false
           })
-          const screenTrack = screenShareStream.getVideoTracks()[0]
-          const sender = pc.getSenders().find(candidate => candidate.track?.kind === 'video')
+          const screenTrack = captureStream.getVideoTracks()[0]
+          sender = pc.getSenders().find(candidate => candidate.track?.kind === 'video')
           if (!screenTrack || !sender) {
             throw new Error('screen sharing is unavailable in this browser')
           }
 
           setTrackContentHint(screenTrack, screenShareContentHint)
+          await validateScreenShareCapture(captureStream)
+          screenShareStream = captureStream
           await sender.replaceTrack(screenTrack)
+          senderUsesScreenTrack = true
           await configureOutboundSender(sender, screenTrack)
+          if (!await ensureScreenShareOutboundFrames(sender, screenTrack)) {
+            throw screenShareStartError('ScreenShareOutboundStalledError', 'screen capture started but no frames left this computer', {
+              settings: screenTrack.getSettings?.() || {},
+              sender: await screenShareOutboundSnapshot(sender)
+            })
+          }
           activeScreenShareParticipant = currentParticipantName
           setScreenShareButtonState(true)
           renderScreenStage()
@@ -45839,9 +46047,21 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             stopScreenShare()
           }, { once: true })
         } catch (error) {
-          screenShareStream?.getTracks().forEach(track => track.stop())
-          screenShareStream = undefined
+          if (senderUsesScreenTrack) {
+            try {
+              await restoreCameraAfterScreenShare(sender)
+            } catch (restoreError) {
+              reportClientMediaError('screen_share_start_restore_camera', restoreError)
+            }
+          }
+          captureStream?.getTracks().forEach(track => track.stop())
+          if (screenShareStream === captureStream) {
+            screenShareStream = undefined
+          }
           setLog(error.message || String(error))
+          if (error?.name?.startsWith?.('ScreenShare')) {
+            reportClientMediaError('screen_share_start', error)
+          }
           // getDisplayMedia rejects with NotAllowedError (and sometimes
           // AbortError) when the user dismisses the picker — not reliably
           // distinguishable from a real permission block, and someone who hit
@@ -45850,9 +46070,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           // do; keep the detail in setLog and keep cancel silent.
           const name = error?.name || ''
           if (name !== 'NotAllowedError' && name !== 'AbortError') {
-            const message = 'could not start screen sharing. please try again.'
+            const message = name === 'ScreenShareBlankFramesError'
+              ? 'Chrome captured a blank screen. On Mac, allow Chrome in System Settings → Privacy & Security → Screen & System Audio Recording, fully quit and reopen Chrome, then try again.'
+              : name === 'ScreenShareNoFramesError'
+                ? 'Chrome did not provide screen frames. Choose a different window or screen and try again.'
+                : name === 'ScreenShareOutboundStalledError'
+                  ? 'Your screen capture started, but no frames left this computer. Reload the room and try sharing again.'
+                  : 'could not start screen sharing. please try again.'
             addAssistantMessage({ kind: 'error', text: message })
           }
+        } finally {
+          screenShareStartInFlight = false
         }
       }
 

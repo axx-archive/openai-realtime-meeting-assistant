@@ -186,6 +186,32 @@ test('video looks are selectable only on Chrome desktop', () => {
   assert.match(functionSource('renderGreenRoom'), /wrap\.hidden = videoLooksDisabledForReliability/)
 })
 
+test('screen-share source probe rejects sustained zero pixels without rejecting dark content', () => {
+  const { screenSharePixelSnapshot } = compileFunctions(['screenSharePixelSnapshot'])
+  const solid = (red, green, blue, count = 16) => {
+    const data = new Uint8ClampedArray(count * 4)
+    for (let offset = 0; offset < data.length; offset += 4) {
+      data[offset] = red
+      data[offset + 1] = green
+      data[offset + 2] = blue
+      data[offset + 3] = 255
+    }
+    return { data }
+  }
+
+  assert.equal(screenSharePixelSnapshot(solid(0, 0, 0)).blank, true)
+  assert.equal(screenSharePixelSnapshot(solid(2, 2, 2)).blank, true)
+  assert.equal(screenSharePixelSnapshot(solid(10, 10, 10)).blank, false)
+
+  const darkWithText = solid(0, 0, 0, 1000)
+  darkWithText.data[0] = 255
+  darkWithText.data[1] = 255
+  darkWithText.data[2] = 255
+  const snapshot = screenSharePixelSnapshot(darkWithText)
+  assert.equal(snapshot.blank, false)
+  assert.ok(snapshot.brightFraction >= 0.001)
+})
+
 test('local mirror reveals the canvas only after a commit and preserves last-good pixels', () => {
   const state = {
     backCanvas: { width: 0, height: 0, getContext: () => backContext },
