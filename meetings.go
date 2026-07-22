@@ -680,17 +680,14 @@ func meetingRecordPayload(record meetingRecord, now time.Time) map[string]any {
 
 /* ---------- app lifecycle hooks ---------- */
 
-// noteMeetingAdmission opens/extends the room's meeting record for an
-// admitted participant. Called from the websocket accept path AFTER
-// admitParticipantSession succeeds. Cancels the room's pending idle end FIRST
-// so a rejoin inside the grace window keeps the meeting open. Broadcasts
-// `meeting` on change.
-func (app *kanbanBoardApp) noteMeetingAdmission(roomID string, name string) {
+// prepareMeetingSittingID mints or resolves the sitting identity without
+// opening a meeting record or broadcasting participant state. The websocket
+// path uses this identity to persist its admission anchor first.
+func (app *kanbanBoardApp) prepareMeetingSittingID(roomID string) string {
 	if app == nil || app.meetings == nil || app.memory == nil {
-		return
+		return ""
 	}
 	roomID = normalizeRoomID(roomID)
-	app.meetings.cancelIdleEnd(roomID)
 	id := app.memory.ensureMeetingID(roomID)
 	if app.meetings.hasEndedRecord(id) {
 		// The idle-end fire (or an archive) closed this id after the memory
@@ -701,6 +698,28 @@ func (app *kanbanBoardApp) noteMeetingAdmission(roomID string, name string) {
 		app.memory.rotateMeetingID(roomID)
 		id = app.memory.ensureMeetingID(roomID)
 	}
+	return id
+}
+
+// noteMeetingAdmission opens/extends the room's meeting record for an
+// admitted participant. Legacy/internal callers prepare and commit together;
+// the websocket path calls noteMeetingAdmissionForSitting only after its
+// durable admission anchor succeeds.
+func (app *kanbanBoardApp) noteMeetingAdmission(roomID string, name string) string {
+	return app.noteMeetingAdmissionForSitting(roomID, name, app.prepareMeetingSittingID(roomID))
+}
+
+func (app *kanbanBoardApp) noteMeetingAdmissionForSitting(roomID string, name string, id string) string {
+	if app == nil || app.meetings == nil || app.memory == nil || strings.TrimSpace(id) == "" {
+		return ""
+	}
+	roomID = normalizeRoomID(roomID)
+	// A close/rotation racing between preparation and durable anchor write must
+	// not attach the participant to a different sitting than the anchor.
+	if app.memory.currentMeetingID(roomID) != id || app.meetings.hasEndedRecord(id) {
+		return ""
+	}
+	app.meetings.cancelIdleEnd(roomID)
 	record, changed := app.meetings.startMeeting(roomID, id, time.Now().UTC(), []string{name})
 	// §7.1 listen-only latch: guest-enabled at the sitting's start OR a guest
 	// admitted mid-sitting (guest admissions land here too) latches the record.
@@ -715,6 +734,7 @@ func (app *kanbanBoardApp) noteMeetingAdmission(roomID string, name string) {
 	if changed {
 		app.broadcastMeetingRecord(record)
 	}
+	return record.ID
 }
 
 // noteMeetingOccupancy arms the room's idle-end timer when that room empties.

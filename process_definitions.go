@@ -385,6 +385,12 @@ var (
 // definitions are refused — a pipeline that cannot instantiate must never be
 // proposable.
 func registerProcessDefinition(def ProcessDefinition) error {
+	// W2C's contract is deliberately not a generic process. Until its dedicated
+	// executor supplies snapshot reauthorization and per-action approval, even
+	// internal callers must not smuggle the inert definition into this registry.
+	if strings.TrimSpace(strings.ToLower(def.ID)) == insightsOpportunitiesProcessID {
+		return fmt.Errorf("process id %q requires the dedicated W2C executor", def.ID)
+	}
 	if err := validateProcessDefinition(def); err != nil {
 		return err
 	}

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -48,11 +49,12 @@ func TestReadinessHandlerReportsStorageAndAgentState(t *testing.T) {
 		Service  string   `json:"service"`
 		Degraded []string `json:"degraded"`
 		Checks   struct {
-			App        bool           `json:"app"`
-			Memory     bool           `json:"memoryStore"`
-			MemoryFile map[string]any `json:"memoryFile"`
-			BoardFile  map[string]any `json:"boardFile"`
-			Agents     struct {
+			App              bool           `json:"app"`
+			Memory           bool           `json:"memoryStore"`
+			MemoryFile       map[string]any `json:"memoryFile"`
+			BoardFile        map[string]any `json:"boardFile"`
+			AdmissionAnchors map[string]any `json:"admissionAnchors"`
+			Agents           struct {
 				Brain map[string]any `json:"brain"`
 				Board map[string]any `json:"board"`
 			} `json:"agents"`
@@ -70,11 +72,32 @@ func TestReadinessHandlerReportsStorageAndAgentState(t *testing.T) {
 	if payload.Checks.MemoryFile["ok"] != true || payload.Checks.BoardFile["ok"] != true {
 		t.Fatalf("storage checks memory=%v board=%v, want ok", payload.Checks.MemoryFile, payload.Checks.BoardFile)
 	}
+	if payload.Checks.AdmissionAnchors["healthy"] != true {
+		t.Fatalf("admission anchor readiness=%v, want healthy", payload.Checks.AdmissionAnchors)
+	}
 	if payload.Checks.Agents.Brain["enabled"] != true || payload.Checks.Agents.Board["enabled"] != true {
 		t.Fatalf("agent checks=%+v, want enabled defaults", payload.Checks.Agents)
 	}
 	if len(payload.Degraded) == 0 || payload.Degraded[0] != "openai_api_key_missing" {
 		t.Fatalf("degraded=%v, want missing OpenAI key noted without failing readiness", payload.Degraded)
+	}
+}
+
+func TestReadinessHandlerFailsClosedWhenAdmissionAnchorStoreIsUnavailable(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.admissionAnchors = nil
+	app.admissionAnchorErr = ErrAdmissionAnchorStore
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	recorder := httptest.NewRecorder()
+	readinessHandler(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("readiness status=%d body=%s, want 503", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "admission_anchor_store_degraded") || strings.Contains(recorder.Body.String(), ErrAdmissionAnchorStore.Error()) {
+		t.Fatalf("readiness did not expose sanitized admission-anchor degradation: %s", recorder.Body.String())
 	}
 }
 

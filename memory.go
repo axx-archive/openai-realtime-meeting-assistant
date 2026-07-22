@@ -1356,6 +1356,16 @@ func (store *meetingMemoryStore) appendEntryForMeeting(roomID string, kind strin
 	if strings.TrimSpace(stamped["roomId"]) == "" {
 		stamped["roomId"] = roomID
 	}
+	if kind == meetingMemoryKindTranscript {
+		sequence, sequenceErr := nextDurableCaptureSequence(store.path, maxPersistedCaptureSequence(store.entries))
+		if sequenceErr != nil {
+			return meetingMemoryEntry{}, false, fmt.Errorf("persist transcript capture sequence: %w", sequenceErr)
+		}
+		// Caller metadata is never allowed to choose ordering. The server's
+		// separately durable monotonic sequence is the exact admission fence.
+		stamped["captureSequence"] = strconv.FormatUint(sequence, 10)
+		stamped["capturedAt"] = entry.CreatedAt.Format(time.RFC3339Nano)
+	}
 	entry.Metadata = stamped
 
 	raw, err := json.Marshal(entry)

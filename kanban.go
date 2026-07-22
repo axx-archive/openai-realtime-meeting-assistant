@@ -315,6 +315,9 @@ type kanbanBoardApp struct {
 	agentThreadRunLocks map[string]*sync.Mutex
 	notifications       []notificationRecord
 	meetings            *meetingStore
+	admissionAnchorMu   sync.RWMutex
+	admissionAnchors    *AdmissionAnchorStore
+	admissionAnchorErr  error
 	// Grill session state ("Scout, grill us") — all under mu. While
 	// grillActive, sessionInstructions() swaps to the persona instruction set
 	// and realtimeToolChoice() returns "auto" so the persona can speak.
@@ -433,6 +436,9 @@ func newKanbanBoardApp() *kanbanBoardApp {
 		log.Errorf("Meeting record persistence disabled: %v", err)
 	} else {
 		app.meetings = meetings
+	}
+	if err := app.initializeAdmissionAnchorStore(admissionAnchorsPath()); err != nil {
+		log.Errorf("Admission anchor persistence disabled: %v", err)
 	}
 	// boot reconciliation: close a stale open record (its meeting id no longer
 	// matches the memory store's resumed id), or re-arm the idle timer when
@@ -5618,12 +5624,31 @@ func (app *kanbanBoardApp) admitParticipantSessionEndpointInRoom(roomID string, 
 	app.mu.Lock()
 	defer app.mu.Unlock()
 	state := app.roomLiveLocked(roomID)
+	return app.admitParticipantSessionEndpointInRoomLocked(state, name, sessionID, endpointID)
+}
 
+func (app *kanbanBoardApp) validateParticipantAdmissionLocked(state *roomLiveState, name, endpointID string) error {
 	capacity := configuredMeetingRoomCapacity()
 	alreadyPresent := state.participantCounts[name] > 0
 	if !alreadyPresent && app.activeParticipantCountInRoomLocked(state) >= capacity {
-		return "", false, fmt.Errorf("the room is full. this room supports %d people with video on", capacity)
+		return fmt.Errorf("the room is full. this room supports %d people with video on", capacity)
 	}
+	if endpoints := state.participantEndpoints[name]; endpoints != nil {
+		if _, exists := endpoints[endpointID]; !exists && len(endpoints) >= maxEndpointsPerUser() {
+			return fmt.Errorf("you're already connected from %d devices. leave one to join here", maxEndpointsPerUser())
+		}
+	}
+	return nil
+}
+
+// admitParticipantSessionEndpointInRoomLocked commits presence after all
+// fail-closed admission authorities have succeeded. Callers hold app.mu.
+func (app *kanbanBoardApp) admitParticipantSessionEndpointInRoomLocked(state *roomLiveState, name, sessionID, endpointID string) (admitted string, firstEndpoint bool, err error) {
+	if err := app.validateParticipantAdmissionLocked(state, name, endpointID); err != nil {
+		return "", false, err
+	}
+
+	alreadyPresent := state.participantCounts[name] > 0
 
 	endpoints := state.participantEndpoints[name]
 	if endpoints == nil {
@@ -5631,9 +5656,6 @@ func (app *kanbanBoardApp) admitParticipantSessionEndpointInRoom(roomID string, 
 		state.participantEndpoints[name] = endpoints
 	}
 	previousSessionID, endpointExisted := endpoints[endpointID]
-	if !endpointExisted && len(endpoints) >= maxEndpointsPerUser() {
-		return "", false, fmt.Errorf("you're already connected from %d devices. leave one to join here", maxEndpointsPerUser())
-	}
 	endpoints[endpointID] = sessionID
 
 	now := time.Now().UTC()

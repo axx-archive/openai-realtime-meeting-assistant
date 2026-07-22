@@ -1084,16 +1084,26 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 	memoryCheck := traffic.memoryCheck
 	boardCheck := traffic.boardCheck
 	realtime := map[string]any{"connected": false, "voiceControl": false}
+	admissionAnchors := map[string]any{"healthy": false}
+	var admissionAnchorErr error
 	if appAvailable {
 		kanbanApp.mu.Lock()
 		realtime["connected"] = kanbanApp.connected
 		realtime["voiceControl"] = kanbanApp.voiceControlActive
 		kanbanApp.mu.Unlock()
+		admissionAnchorErr = kanbanApp.admissionAnchorHealthError()
+		admissionAnchors["healthy"] = admissionAnchorErr == nil
+		if admissionAnchorErr != nil {
+			admissionAnchors["reason"] = "store_unavailable"
+		}
 	}
 
 	ready := traffic.ready
 	canonical := canonicalRuntimeSnapshot()
 	if canonical.Required && !canonical.Healthy {
+		ready = false
+	}
+	if admissionAnchorErr != nil {
 		ready = false
 	}
 	status := http.StatusOK
@@ -1109,6 +1119,9 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 	if canonical.Mode != "off" && !canonical.Healthy {
 		degraded = append(degraded, "canonical_runtime_degraded")
 	}
+	if admissionAnchorErr != nil {
+		degraded = append(degraded, "admission_anchor_store_degraded")
+	}
 
 	writeSystemStatusJSON(w, r, status, map[string]any{
 		"ok":           ready,
@@ -1117,13 +1130,14 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 		"degraded":     degraded,
 		"capabilities": capabilities,
 		"checks": map[string]any{
-			"canonical":   canonical,
-			"app":         appAvailable,
-			"memoryStore": memoryAvailable,
-			"memoryFile":  memoryCheck,
-			"boardFile":   boardCheck,
-			"realtime":    realtime,
-			"backup":      readinessBackupSnapshot(),
+			"canonical":        canonical,
+			"admissionAnchors": admissionAnchors,
+			"app":              appAvailable,
+			"memoryStore":      memoryAvailable,
+			"memoryFile":       memoryCheck,
+			"boardFile":        boardCheck,
+			"realtime":         realtime,
+			"backup":           readinessBackupSnapshot(),
 			"agents": map[string]any{
 				"brain":          readinessAgentSnapshot(meetingBrainAgent()),
 				"board":          readinessAgentSnapshot(meetingBoardAgent()),
@@ -5100,8 +5114,14 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				// payload; the display name is server-prefixed and deduped, and
 				// the seat keys on the guest session (two guests named Sam
 				// coexist; a second socket of one session shares its seat).
-				admittedName, firstEndpoint, err := kanbanApp.admitGuestParticipant(connRoomID, guest.SessionKey, guest.Name, participantSessionID)
+				sittingID := kanbanApp.prepareMeetingSittingID(connRoomID)
+				admittedName, firstEndpoint, err := kanbanApp.admitGuestWithAnchor(context.Background(), connRoomID, guest.SessionKey, guest.Name, participantSessionID, sittingID)
 				if err != nil {
+					if errors.Is(err, ErrAdmissionAnchorStore) {
+						log.Errorf("Failed to persist guest admission anchor: %v", err)
+						_ = sendKanbanEvent(c, "access_denied", "could not establish a durable room admission.")
+						return
+					}
 					_ = sendKanbanEvent(c, "access_denied", err.Error()+".")
 					continue
 				}
@@ -5112,7 +5132,12 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				if admitGuestCaps != nil {
 					admitGuestCaps()
 				}
-				// The PeerConnection exists only NOW (§6.1 deferred alloc).
+				if kanbanApp.noteMeetingAdmissionForSitting(connRoomID, admittedName, sittingID) == "" {
+					_ = sendKanbanEvent(c, "access_denied", "the room sitting changed while you joined; please reconnect.")
+					return
+				}
+				// The PeerConnection exists only after the durable admission anchor
+				// (§6.1 deferred alloc plus W2A's before-access_granted boundary).
 				if peerConnection == nil {
 					if err := setupPeerConnection(); err != nil {
 						log.Errorf("Failed to create guest PeerConnection: %v", err)
@@ -5121,7 +5146,6 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 					}
 				}
 				replaceExistingParticipantSessionEndpointInRoom(connRoomID, admittedName, participantSessionID, endpointID, peerConnection, c, "")
-				kanbanApp.noteMeetingAdmission(connRoomID, admittedName)
 				kanbanApp.ensureRoomMedia(connRoomID)
 				// §5.4(d): the guest replay branch withholds board/memory/
 				// notifications/proposals — only room-scoped, allowlisted state.
@@ -5190,14 +5214,24 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				}
 				clearAuthAttempts("roompass:"+connRoomID, "roompass-ip:"+clientIP)
 			}
-			admittedName, firstEndpoint, err := kanbanApp.admitParticipantSessionEndpointInRoom(connRoomID, name, participantSessionID, endpointID)
+			sittingID := kanbanApp.prepareMeetingSittingID(connRoomID)
+			admittedName, firstEndpoint, err := kanbanApp.admitParticipantWithAnchor(context.Background(), connRoomID, name, participantSessionID, endpointID, sittingID, memberAdmissionPrincipal(sessionEmail))
 			if err != nil {
+				if errors.Is(err, ErrAdmissionAnchorStore) {
+					log.Errorf("Failed to persist member admission anchor: %v", err)
+					_ = sendKanbanEvent(c, "access_denied", "could not establish a durable room admission.")
+					return
+				}
 				_ = sendKanbanEvent(c, "access_denied", err.Error()+".")
 				continue
 			}
 			setParticipantName(admittedName)
 			participantAccepted = true
 			participantAcceptedState.Store(true)
+			if kanbanApp.noteMeetingAdmissionForSitting(connRoomID, admittedName, sittingID) == "" {
+				_ = sendKanbanEvent(c, "access_denied", "the room sitting changed while you joined; please reconnect.")
+				return
+			}
 			replaceExistingParticipantSessionEndpointInRoom(connRoomID, admittedName, participantSessionID, endpointID, peerConnection, c, sessionEmail)
 			// One account, one live room (§2): joining here evicts the
 			// account's seat in any other room via session_replaced.
@@ -5205,7 +5239,6 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			// admission opens (or extends) the first-class meeting record and
 			// cancels any pending idle-end from a briefly empty room; named
 			// rooms lazily start their mixer + transcription lane here.
-			kanbanApp.noteMeetingAdmission(connRoomID, admittedName)
 			kanbanApp.ensureRoomMedia(connRoomID)
 			if err := sendKanbanEvent(c, "access_granted", map[string]any{
 				"name":   admittedName,

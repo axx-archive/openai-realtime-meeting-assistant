@@ -11,8 +11,8 @@ func TestLoadCanonicalMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load migrations: %v", err)
 	}
-	if len(migrations) != 3 {
-		t.Fatalf("migration count = %d, want 3", len(migrations))
+	if len(migrations) != 4 {
+		t.Fatalf("migration count = %d, want 4", len(migrations))
 	}
 	migration := migrations[0]
 	if migration.Version != 1 || migration.Name != "0001_canonical.sql" {
@@ -26,6 +26,9 @@ func TestLoadCanonicalMigrations(t *testing.T) {
 	}
 	if migrations[2].Version != 3 || migrations[2].Name != "0003_purge_ledger.sql" || migrations[2].SHA256 != sha256.Sum256([]byte(migrations[2].SQL)) || !strings.Contains(migrations[2].SQL, "CREATE TABLE purge_ledger") {
 		t.Fatalf("unexpected purge ledger migration: %+v", migrations[2])
+	}
+	if migrations[3].Version != 4 || migrations[3].Name != "0004_brain_projection_checkpoints.sql" || migrations[3].SHA256 != sha256.Sum256([]byte(migrations[3].SQL)) || !strings.Contains(migrations[3].SQL, "CREATE TABLE brain_projection_checkpoints") {
+		t.Fatalf("unexpected brain projection checkpoint migration: %+v", migrations[3])
 	}
 	for _, marker := range []string{
 		"CREATE TABLE canonical_events",
