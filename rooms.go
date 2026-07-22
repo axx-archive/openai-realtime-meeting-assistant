@@ -88,14 +88,15 @@ type guestLinkRecord struct {
 // roomStore persists the room registry with the sessions.json idiom: one
 // mutex, write-tmp-then-rename, office seeded when the file is missing.
 type roomStore struct {
-	mu      sync.Mutex
-	path    string
-	rooms   []roomRecord
-	loadErr error
+	mu                   sync.Mutex
+	path                 string
+	lifecycleJournalPath string
+	rooms                []roomRecord
+	loadErr              error
 }
 
 func newRoomStore(path string) *roomStore {
-	store := &roomStore{path: path}
+	store := &roomStore{path: path, lifecycleJournalPath: filepath.Join(filepath.Dir(path), "evicted-objects.jsonl")}
 	if raw, err := os.ReadFile(path); err == nil {
 		if err := json.Unmarshal(raw, &store.rooms); err != nil {
 			store.loadErr = fmt.Errorf("room store is malformed: %w", err)
@@ -425,13 +426,132 @@ func (s *roomStore) redeemGuestToken(token string) (roomRecord, bool) {
 	return roomRecord{}, false
 }
 
+// guestLinkCanonicalImportedObject builds the exact safe-state projection used
+// by importRoomObjects. Expiry removal journals this identity + digest before
+// deleting the legacy row so canonical reconciliation can advance the already-
+// observed guest_link aggregate to a deleted state instead of reporting an
+// unexplained target-only object.
+func guestLinkCanonicalImportedObject(roomID string, link guestLinkRecord) (CanonicalImportedObject, error) {
+	return importedObject("guest_link", roomID+":"+link.ID, map[string]any{
+		"id": link.ID, "token_hash_digest": digestText(link.Hash), "expires": link.Expires, "revoked": link.Revoked,
+	}, link.CreatedAt)
+}
+
+// recoverJournaledExpiredGuestLinks closes the journal-before-rooms-rewrite
+// crash window before canonical import constructs its plan. It removes only a
+// guest-link row whose durable expiry journal matches the row's exact importer
+// projection and whose journal timestamp proves the row had expired. A newer
+// recreation wins; every other live/journal mismatch remains a hard conflict
+// for addCanonicalLifecycleDeletionTargets rather than being silently erased.
+func recoverJournaledExpiredGuestLinks(roomsPath, journalPath string) error {
+	var rooms []roomRecord
+	ok, err := readJSONIfExists(roomsPath, &rooms)
+	if err != nil || !ok {
+		return err
+	}
+	records, err := readCanonicalLifecycleJournal(journalPath)
+	if err != nil {
+		return err
+	}
+	intents := make(map[string]CanonicalLifecycleJournalRecord)
+	for _, record := range records {
+		if record.Family != "guest_link" || record.Reason != "guest_link_expired" {
+			continue
+		}
+		if prior, exists := intents[record.ObjectID]; exists && prior.StateDigest != record.StateDigest {
+			return fmt.Errorf("conflicting guest-link expiry journals for %s", record.ObjectID)
+		}
+		intents[record.ObjectID] = record
+	}
+	if len(intents) == 0 {
+		return nil
+	}
+
+	changed := false
+	for roomIndex, room := range rooms {
+		kept := room.GuestLinks[:0]
+		for _, link := range room.GuestLinks {
+			object, projectErr := guestLinkCanonicalImportedObject(room.ID, link)
+			if projectErr != nil {
+				return fmt.Errorf("project journaled guest link %s/%s: %w", room.ID, link.ID, projectErr)
+			}
+			record, journaled := intents[object.ObjectID]
+			if !journaled {
+				kept = append(kept, link)
+				continue
+			}
+			if link.CreatedAt.After(record.At) {
+				// A later recreation supersedes this older journal, matching the
+				// general lifecycle conflict rule in canonical import.
+				kept = append(kept, link)
+				continue
+			}
+			if object.StateDigest != record.StateDigest {
+				return fmt.Errorf("guest-link expiry journal state mismatch for %s", object.ObjectID)
+			}
+			if record.At.IsZero() || !record.At.After(link.Expires) {
+				return fmt.Errorf("guest-link expiry journal predates expiry for %s", object.ObjectID)
+			}
+			changed = true
+		}
+		if len(kept) == 0 {
+			kept = nil
+		}
+		rooms[roomIndex].GuestLinks = kept
+	}
+	if !changed {
+		return nil
+	}
+	if err := writeJSONFileAtomically(roomsPath, "room store guest-link expiry recovery", rooms); err != nil {
+		return fmt.Errorf("persist journaled guest-link expiry recovery: %w", err)
+	}
+	return nil
+}
+
 // sweepExpiredGuestLinks drops expired link rows (revoked-but-unexpired rows
-// stay listed as history). Rewrites only when something actually expired.
-func (s *roomStore) sweepExpiredGuestLinks() {
+// stay listed as history). Every expired guest_link is journaled durably before
+// the room store is rewritten. The journal write is idempotent, so a crash or
+// persist failure after journaling leaves a retryable intent. Any journal
+// failure aborts the whole batch: no expired row is removed, while redemption
+// remains fail-closed because it independently re-checks expiry on every use.
+func (s *roomStore) sweepExpiredGuestLinks() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
-	changed := false
+	type expiredGuestLink struct {
+		roomID string
+		link   guestLinkRecord
+	}
+	var expired []expiredGuestLink
+	for _, room := range s.rooms {
+		for _, link := range room.GuestLinks {
+			if now.After(link.Expires) {
+				expired = append(expired, expiredGuestLink{roomID: room.ID, link: link})
+			}
+		}
+	}
+	if len(expired) == 0 {
+		return nil
+	}
+
+	journalPath := s.lifecycleJournalPath
+	if strings.TrimSpace(journalPath) == "" {
+		journalPath = filepath.Join(filepath.Dir(s.path), "evicted-objects.jsonl")
+	}
+	for _, candidate := range expired {
+		object, err := guestLinkCanonicalImportedObject(candidate.roomID, candidate.link)
+		if err != nil {
+			return fmt.Errorf("project expired guest link %s/%s: %w", candidate.roomID, candidate.link.ID, err)
+		}
+		record := CanonicalLifecycleJournalRecord{
+			Family: object.Family, ObjectID: object.ObjectID, StateDigest: object.StateDigest,
+			At: now.UTC(), Reason: "guest_link_expired",
+		}
+		if err := ensureCanonicalLifecycleJournal(journalPath, record); err != nil {
+			return fmt.Errorf("journal expired guest link %s: %w", object.ObjectID, err)
+		}
+	}
+
 	prior := make([]roomRecord, len(s.rooms))
 	for index := range s.rooms {
 		prior[index] = cloneRoomRecord(s.rooms[index])
@@ -440,7 +560,6 @@ func (s *roomStore) sweepExpiredGuestLinks() {
 		kept := room.GuestLinks[:0]
 		for _, link := range room.GuestLinks {
 			if now.After(link.Expires) {
-				changed = true
 				continue
 			}
 			kept = append(kept, link)
@@ -450,12 +569,11 @@ func (s *roomStore) sweepExpiredGuestLinks() {
 		}
 		s.rooms[index].GuestLinks = kept
 	}
-	if changed {
-		if err := s.persistLocked(); err != nil {
-			s.resolvePersistFailureLocked(err, func() { s.rooms = prior })
-			log.Errorf("Failed to persist expired guest-link sweep: %v", err)
-		}
+	if err := s.persistLocked(); err != nil {
+		s.resolvePersistFailureLocked(err, func() { s.rooms = prior })
+		return fmt.Errorf("persist expired guest-link sweep: %w", err)
 	}
+	return nil
 }
 
 /* ---------- store accessor ---------- */
@@ -492,7 +610,9 @@ func sweepExpiredGuestLinksIfOpen() {
 	store := roomStoreCache[roomsFilePath()]
 	roomStoreMu.Unlock()
 	if store != nil {
-		store.sweepExpiredGuestLinks()
+		if err := store.sweepExpiredGuestLinks(); err != nil {
+			log.Errorf("Failed to sweep expired guest links: %v", err)
+		}
 	}
 }
 

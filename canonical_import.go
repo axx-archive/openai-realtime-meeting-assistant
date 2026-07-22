@@ -543,7 +543,7 @@ func importRoomObjects(path string) ([]CanonicalImportedObject, error) {
 		}
 		objects = append(objects, object)
 		for _, link := range room.GuestLinks {
-			linkObject, err := importedObject("guest_link", room.ID+":"+link.ID, map[string]any{"id": link.ID, "token_hash_digest": digestText(link.Hash), "expires": link.Expires, "revoked": link.Revoked}, link.CreatedAt)
+			linkObject, err := guestLinkCanonicalImportedObject(room.ID, link)
 			if err != nil {
 				return nil, err
 			}

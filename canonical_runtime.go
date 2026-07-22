@@ -86,27 +86,43 @@ var canonicalRuntimeState struct {
 
 var canonicalLifecycleJournalMu sync.Mutex
 
-func ensureCanonicalLifecycleJournal(path string, record CanonicalLifecycleJournalRecord) error {
-	canonicalLifecycleJournalMu.Lock()
-	defer canonicalLifecycleJournalMu.Unlock()
+func readCanonicalLifecycleJournal(path string) ([]CanonicalLifecycleJournalRecord, error) {
 	raw, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
 	}
+	if err != nil {
+		return nil, err
+	}
+	var records []CanonicalLifecycleJournalRecord
 	for _, line := range bytes.Split(raw, []byte{'\n'}) {
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
 		var existing CanonicalLifecycleJournalRecord
 		if err := json.Unmarshal(line, &existing); err != nil {
-			return err
+			return nil, err
 		}
-		if existing.Family == record.Family && existing.ObjectID == record.ObjectID {
-			if existing.StateDigest != record.StateDigest {
-				return fmt.Errorf("conflicting lifecycle journal for %s/%s", record.Family, record.ObjectID)
-			}
-			return nil
+		records = append(records, existing)
+	}
+	return records, nil
+}
+
+func ensureCanonicalLifecycleJournal(path string, record CanonicalLifecycleJournalRecord) error {
+	canonicalLifecycleJournalMu.Lock()
+	defer canonicalLifecycleJournalMu.Unlock()
+	records, err := readCanonicalLifecycleJournal(path)
+	if err != nil {
+		return err
+	}
+	for _, existing := range records {
+		if existing.Family != record.Family || existing.ObjectID != record.ObjectID {
+			continue
 		}
+		if existing.StateDigest != record.StateDigest {
+			return fmt.Errorf("conflicting lifecycle journal for %s/%s", record.Family, record.ObjectID)
+		}
+		return nil
 	}
 	encoded, err := json.Marshal(record)
 	if err != nil {
@@ -170,6 +186,12 @@ func initializeCanonicalRuntime(ctx context.Context) (*CanonicalRuntime, error) 
 			return nil, fmt.Errorf("canonical blob-delete recovery: %w", err)
 		}
 		runtime.markFailure(fmt.Errorf("canonical blob-delete recovery degraded: %w", err))
+	}
+	if err := recoverJournaledExpiredGuestLinks(roomsFilePath(), filepath.Join(runtime.dataDir, "evicted-objects.jsonl")); err != nil {
+		if mode == CanonicalModeRequired {
+			return nil, fmt.Errorf("canonical guest-link expiry recovery: %w", err)
+		}
+		runtime.markFailure(fmt.Errorf("canonical guest-link expiry recovery degraded: %w", err))
 	}
 	// A missing/corrupt/mismatched checkpoint is not trusted. Boot continues
 	// into the full importer/PG parity reconciliation below and rewrites it.
