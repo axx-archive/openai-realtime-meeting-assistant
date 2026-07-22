@@ -2,7 +2,7 @@
 
 Goal and source pointers: active `$goal-loop`; `docs/model-routing-master-plan-2026-07-11.md`; `docs/plans/multi-room-2026-07-08.md`; architecture audit in the current Codex task.
 
-Current phase: execution resumed by explicit user signal on 2026-07-22. W0 is live; W1 is held at a bounded canonical guest-link parity repair before any W2 implementation. The decision-complete W2 design is approved at `docs/plans/bonfireos-w2-design.md`.
+Current phase: execution resumed by explicit user signal on 2026-07-22. W0 and W1 are live and verified; W2 begins from the approved decision-complete design at `docs/plans/bonfireos-w2-design.md`.
 
 ## Invariants
 
@@ -18,7 +18,7 @@ Current phase: execution resumed by explicit user signal on 2026-07-22. W0 is li
 | Wave | Outcome | Dependencies | Gate / rollback | Status |
 |---|---|---|---|---|
 | W0 | Stop runaway spend; make output, authority, health, backup, and usage truth enforceable | None | Accepted digest advances cursor; code-level authority tests; offsite restore evidence; old env/code backup | Complete; model-output recovery canaries held for W4 quota gate |
-| W1 | Canonical event/ACL substrate, object authorization, outbox/jobs, retention, consent, revision-bound approval | W0 | Dual-write replay/checksum and ACL-negative parity; JSONL reader rollback | Repair gate: future expiry fix pushed; historical four-object parity repair awaiting empty-room maintenance window |
+| W1 | Canonical event/ACL substrate, object authorization, outbox/jobs, retention, consent, revision-bound approval | W0 | Dual-write replay/checksum and ACL-negative parity; JSONL reader rollback | Complete; live in PostgreSQL shadow mode with JSON/JSONL authoritative; expiry repair restart-proven |
 | W2A | Per-room Scout, exact recap, guest policy, media backend pilot | W1 contracts | Two-room zero-leak live gate; Pion and feature-flag rollback | Pending |
 | W2B | Restart-safe brain, complete historical recall, claim/evidence lineage | W1 contracts | Recall corpus and restart/replay gates; shadow-reader rollback | Pending |
 | W2C | `insights_opportunities_v1`, structured feedback, verdict critic, pilots | W1 + W0 route/authority | Ten reviewed pilots; process disable and route rollback | Pending |
@@ -32,7 +32,9 @@ Current phase: execution resumed by explicit user signal on 2026-07-22. W0 is li
 - W2 resumed on 2026-07-22. Independent audits found the existing W2A/W2B foundations, the absent W2C product, and the exact remaining gaps. Strategic design plus two critic rounds produced the approved W2 contract in `docs/plans/bonfireos-w2-design.md`, including W2D's complete pre-W3 evaluation wave.
 - Resume inspection found W1 canonical shadow at four target-only `guest_link` objects. Cold W1 backup evidence proved the exact four rows expired on 2026-07-16/17; the current expiry sweep had removed them without a lifecycle journal. No target history gap, pending capture, outbox failure, or principal-parity defect was present.
 - Commit `a0ae9c9` is pushed to `axx/main`. It journals future expiry before source removal, shares the importer digest projection, and recovers the journal-before-source-rewrite crash window before canonical boot. Focused normal/race tests, the full suite, and an independent adversarial re-gate passed.
-- The historical backfill is roll-forward-only after first append and is bounded to the four cold-backup/canonical-candidate fingerprints. Production currently reports occupied seats, so the matched data-volume/PostgreSQL snapshot, journal repair, deploy, restart, and second-reconcile proof are waiting for a genuinely empty-room maintenance window.
+- The historical backfill was executed under a full mutation fence after explicit interruption authority. Matched data-volume/PostgreSQL snapshot: `/opt/meetingassist-backups/20260722T153417Z-guest-link-parity-repair/matched-snapshot`. The operator repair refused expansion beyond the exact four cold-backup/canonical-candidate fingerprints, appended four `guest_link_expired` lifecycle records, and reconciled with zero divergence.
+- Commit `a0ae9c9` was deployed with the Codex and render profiles. First live parity reached equal dirty/reconciled/checkpoint high-water 5,796; the independent PostgreSQL plus application restart proof reached equal high-water 5,804. Both had zero pending capture, outbox backlog/failures, or frozen families. App, PostgreSQL, Codex, render, Caddy, and coturn are running; both worker heartbeats are fresh.
+- The live `rooms.json` SHA-256 remained byte-identical to the pre-repair matched snapshot, PostgreSQL contains exactly four deleted `guest_link` events, all 13 historical queue jobs remain, the room is empty, and the public host returns HTTP 200. The one-time repair test and image were removed.
 - Live containment applied at `2026-07-12T19:11Z`: `MEETING_DIGEST_DISABLED=true`; env backup at `/opt/meetingassist-backups/20260712T191102Z-digest-containment/env.before`.
 - Digest usage baseline after containment: 573 calls, last call `2026-07-12T19:07:49Z`, app-estimated cost `$61.80095` for 2026-07-12.
 - Digest count remained exactly 573 through `2026-07-12T21:30Z`; persisted digest count remained 5 across 2 meetings. No post-containment spend occurred.
@@ -92,4 +94,4 @@ Current phase: execution resumed by explicit user signal on 2026-07-22. W0 is li
 
 ## Execution Frontier
 
-Wait for `occupiedSeats=0`, then enter the full maintenance fence and take one matched data-volume/PostgreSQL snapshot. Revalidate the exact four-candidate manifest, append lifecycle records from the cold W1 backup, reconcile roll-forward to zero diff, deploy `a0ae9c9` with the Codex and render profiles, restart, and prove a second zero-diff reconciliation. Only then begin W2 shared evidence/temporal contracts and the dependency order in `docs/plans/bonfireos-w2-design.md`. The OpenAI quota canary remains an external recovery dependency, not authorization to weaken containment controls.
+Begin W2 with the shared evidence, coverage, temporal-query, authorization-snapshot, and projection-checkpoint contracts in `docs/plans/bonfireos-w2-design.md`. W2A first-admission anchors, W2B restart-safe projections/retrieval, and W2C closed schemas may proceed on disjoint paths, but W2C pilots wait for W2B evidence resolution and no media cutover precedes actorized Pion. The OpenAI quota canary remains an external recovery dependency, not authorization to weaken containment controls.
