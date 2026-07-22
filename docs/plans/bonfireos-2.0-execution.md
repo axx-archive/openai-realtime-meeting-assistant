@@ -2,7 +2,7 @@
 
 Goal and source pointers: active `$goal-loop`; `docs/model-routing-master-plan-2026-07-11.md`; `docs/plans/multi-room-2026-07-08.md`; architecture audit in the current Codex task.
 
-Current phase: W0 and W1 are live and verified. Per user steering, execution is paused before W2 and does not resume without an explicit signal.
+Current phase: execution resumed by explicit user signal on 2026-07-22. W0 is live; W1 is held at a bounded canonical guest-link parity repair before any W2 implementation. The decision-complete W2 design is approved at `docs/plans/bonfireos-w2-design.md`.
 
 ## Invariants
 
@@ -18,7 +18,7 @@ Current phase: W0 and W1 are live and verified. Per user steering, execution is 
 | Wave | Outcome | Dependencies | Gate / rollback | Status |
 |---|---|---|---|---|
 | W0 | Stop runaway spend; make output, authority, health, backup, and usage truth enforceable | None | Accepted digest advances cursor; code-level authority tests; offsite restore evidence; old env/code backup | Complete; model-output recovery canaries held for W4 quota gate |
-| W1 | Canonical event/ACL substrate, object authorization, outbox/jobs, retention, consent, revision-bound approval | W0 | Dual-write replay/checksum and ACL-negative parity; JSONL reader rollback | Complete; live in PostgreSQL shadow mode with JSON/JSONL authoritative |
+| W1 | Canonical event/ACL substrate, object authorization, outbox/jobs, retention, consent, revision-bound approval | W0 | Dual-write replay/checksum and ACL-negative parity; JSONL reader rollback | Repair gate: future expiry fix pushed; historical four-object parity repair awaiting empty-room maintenance window |
 | W2A | Per-room Scout, exact recap, guest policy, media backend pilot | W1 contracts | Two-room zero-leak live gate; Pion and feature-flag rollback | Pending |
 | W2B | Restart-safe brain, complete historical recall, claim/evidence lineage | W1 contracts | Recall corpus and restart/replay gates; shadow-reader rollback | Pending |
 | W2C | `insights_opportunities_v1`, structured feedback, verdict critic, pilots | W1 + W0 route/authority | Ten reviewed pilots; process disable and route rollback | Pending |
@@ -29,6 +29,10 @@ Current phase: W0 and W1 are live and verified. Per user steering, execution is 
 
 - Lead owns integration, Git, VPS configuration, restarts, migration cutovers, and release evidence.
 - Subagents own disjoint code paths only; they do not stage, commit, push, deploy, or mutate production.
+- W2 resumed on 2026-07-22. Independent audits found the existing W2A/W2B foundations, the absent W2C product, and the exact remaining gaps. Strategic design plus two critic rounds produced the approved W2 contract in `docs/plans/bonfireos-w2-design.md`, including W2D's complete pre-W3 evaluation wave.
+- Resume inspection found W1 canonical shadow at four target-only `guest_link` objects. Cold W1 backup evidence proved the exact four rows expired on 2026-07-16/17; the current expiry sweep had removed them without a lifecycle journal. No target history gap, pending capture, outbox failure, or principal-parity defect was present.
+- Commit `a0ae9c9` is pushed to `axx/main`. It journals future expiry before source removal, shares the importer digest projection, and recovers the journal-before-source-rewrite crash window before canonical boot. Focused normal/race tests, the full suite, and an independent adversarial re-gate passed.
+- The historical backfill is roll-forward-only after first append and is bounded to the four cold-backup/canonical-candidate fingerprints. Production currently reports occupied seats, so the matched data-volume/PostgreSQL snapshot, journal repair, deploy, restart, and second-reconcile proof are waiting for a genuinely empty-room maintenance window.
 - Live containment applied at `2026-07-12T19:11Z`: `MEETING_DIGEST_DISABLED=true`; env backup at `/opt/meetingassist-backups/20260712T191102Z-digest-containment/env.before`.
 - Digest usage baseline after containment: 573 calls, last call `2026-07-12T19:07:49Z`, app-estimated cost `$61.80095` for 2026-07-12.
 - Digest count remained exactly 573 through `2026-07-12T21:30Z`; persisted digest count remained 5 across 2 meetings. No post-containment spend occurred.
@@ -86,6 +90,6 @@ Current phase: W0 and W1 are live and verified. Per user steering, execution is 
 - Use a modular Go control plane with durable shared state; do not split into a microservice fleet or add Kafka.
 - Implement only `insights_opportunities_v1`; no scheduler, provider marketplace, dynamic model chooser, or additional workflow before its pilot gate.
 
-## Resume Here
+## Execution Frontier
 
-PAUSED before W2 by user direction. On explicit resume, begin W2 planning from the live W1 canonical contracts and split execution into W2A per-room Scout/media/guest safety, W2B restart-safe brain/recall/evidence lineage, and W2C the single `insights_opportunities_v1` workflow with structured feedback and critic pilots. Do not start W2 without the user's signal. The OpenAI quota canary is an external recovery dependency, not authorization to weaken the containment controls.
+Wait for `occupiedSeats=0`, then enter the full maintenance fence and take one matched data-volume/PostgreSQL snapshot. Revalidate the exact four-candidate manifest, append lifecycle records from the cold W1 backup, reconcile roll-forward to zero diff, deploy `a0ae9c9` with the Codex and render profiles, restart, and prove a second zero-diff reconciliation. Only then begin W2 shared evidence/temporal contracts and the dependency order in `docs/plans/bonfireos-w2-design.md`. The OpenAI quota canary remains an external recovery dependency, not authorization to weaken containment controls.
