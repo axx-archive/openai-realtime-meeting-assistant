@@ -1170,6 +1170,8 @@ func TestEndMeetingForIdleFlushesRollupChainBeforeRotation(t *testing.T) {
 	}
 
 	app.noteMeetingAdmission(officeRoomID, "AJ")
+	authority := newAmbientConsentAuthorityForTest(t)
+	grantAmbientConsentForTest(t, app, authority, officeRoomID, "tom@shareability.com")
 	appendTestTranscript(t, app, "tx-idle-1", "We choose vendor Zebra for the packaging pilot.")
 	closedID := app.memory.currentMeetingID(officeRoomID)
 	if closedID == "" {

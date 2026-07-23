@@ -406,20 +406,26 @@ func (app *kanbanBoardApp) applySlopVerdict(entry meetingMemoryEntry, verdict sl
 // records the deleted id + reason so the FACT of deletion survives. forwardCursor
 // keeps the audit stub carrying the transcript cursor so it never strands the
 // classification window.
-func (app *kanbanBoardApp) sweepExpiredQuarantine(forwardCursor string) {
+func (app *kanbanBoardApp) sweepExpiredQuarantine(forwardCursor string) map[string][]scopedRoomDeliveryAcknowledgement {
 	now := time.Now().UTC()
+	artifactAcknowledgements := map[string][]scopedRoomDeliveryAcknowledgement{}
 	for _, entry := range app.memory.entriesByRelevance(relevanceQuarantined) {
 		expiresAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(entry.Metadata["expiresAt"]))
 		if err != nil || !now.After(expiresAt) {
 			continue
 		}
-		removed, deleted, delErr := app.memory.deleteEntryByID(entry.ID)
+		removed, acknowledgements, deleted, delErr := app.deleteEntryByIDAcknowledged(entry.ID)
 		if delErr != nil {
 			log.Errorf("%s expiry failed to delete %s: %v", slopClassifierAgentName, entry.ID, delErr)
-			continue
+			if !deleted {
+				continue
+			}
 		}
 		if !deleted {
 			continue
+		}
+		if removed.Kind == meetingMemoryKindOSArtifact {
+			artifactAcknowledgements[removed.ID] = acknowledgements
 		}
 		reason := firstNonEmptyString(strings.TrimSpace(removed.Metadata["classifierReason"]), "quarantine expired after 30 days")
 		auditMetadata := map[string]string{
@@ -440,6 +446,7 @@ func (app *kanbanBoardApp) sweepExpiredQuarantine(forwardCursor string) {
 			Actor:         reviewedByClassifier,
 		})
 	}
+	return artifactAcknowledgements
 }
 
 // signalDistilledCompactionAge is the reprieve between a signal's distillation
@@ -562,6 +569,9 @@ func (store *meetingMemoryStore) deleteEntriesByID(ids []string) (int, error) {
 	removed := make([]string, 0, len(want))
 	for _, entry := range previous {
 		if _, matched := want[entry.ID]; matched {
+			if entry.Kind == meetingMemoryKindOSArtifact {
+				return 0, fmt.Errorf("OS artifacts require the projection-backed delete seam")
+			}
 			removed = append(removed, entry.ID)
 			continue
 		}
@@ -872,22 +882,29 @@ func (app *kanbanBoardApp) restoreQuarantinedEntry(id string, reviewerEmail stri
 // leaving a slop_pass audit stub — the same terminal step the expiry sweep runs,
 // on demand.
 func (app *kanbanBoardApp) deleteQuarantinedEntry(id string, adminEmail string) error {
+	_, err := app.deleteQuarantinedEntryAcknowledged(id, adminEmail)
+	return err
+}
+
+func (app *kanbanBoardApp) deleteQuarantinedEntryAcknowledged(id string, adminEmail string) ([]scopedRoomDeliveryAcknowledgement, error) {
 	if app == nil || app.memory == nil {
-		return errQuarantineUnavailable
+		return nil, errQuarantineUnavailable
 	}
 	entry, found := app.memory.entryByID(id)
 	if !found {
-		return errQuarantineNotFound
+		return nil, errQuarantineNotFound
 	}
 	if memoryEntryRelevance(entry) != relevanceQuarantined {
-		return errQuarantineNotQuarantined
+		return nil, errQuarantineNotQuarantined
 	}
-	removed, deleted, err := app.memory.deleteEntryByID(entry.ID)
+	removed, acknowledgements, deleted, err := app.deleteEntryByIDAcknowledged(entry.ID)
 	if err != nil {
-		return err
+		if !deleted {
+			return nil, err
+		}
 	}
 	if !deleted {
-		return errQuarantineNotFound
+		return nil, errQuarantineNotFound
 	}
 	now := time.Now().UTC()
 	reason := firstNonEmptyString(strings.TrimSpace(removed.Metadata["classifierReason"]), "deleted by admin")
@@ -909,7 +926,7 @@ func (app *kanbanBoardApp) deleteQuarantinedEntry(id string, adminEmail string) 
 		OriginSurface: "quarantine",
 		Actor:         strings.TrimSpace(adminEmail),
 	})
-	return nil
+	return acknowledgements, err
 }
 
 var (

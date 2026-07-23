@@ -327,6 +327,8 @@ func TestAmbientAgentRunnerBaselineSkipsHistory(t *testing.T) {
 
 func TestArchiveMeetingFlushesAgentsBeforeSnapshot(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
+	authority := newAmbientConsentAuthorityForTest(t)
+	grantAmbientConsentForTest(t, app, authority, officeRoomID, "tom@shareability.com")
 	t.Setenv("MEETING_BRAIN_MIN_TRANSCRIPTS", "4")
 	app.mu.Lock()
 	app.apiKey = "test-key"
@@ -501,6 +503,8 @@ func TestArchiveFlushDoesNotConsumePreBootHistory(t *testing.T) {
 	}
 
 	app := newKanbanBoardApp()
+	authority := newAmbientConsentAuthorityForTest(t)
+	grantAmbientConsentForTest(t, app, authority, officeRoomID, "tom@shareability.com")
 	app.mu.Lock()
 	app.apiKey = "test-key"
 	app.mu.Unlock()

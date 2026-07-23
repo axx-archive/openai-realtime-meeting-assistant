@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"sync"
@@ -31,6 +32,8 @@ type insightsTestAuthorizationVerifier struct {
 	receipts         map[string]InsightsOpportunitiesApprovalConsumption
 	runTargets       map[string]InsightsOpportunitiesAuthorizationTarget
 	expectedApproval *InsightsOpportunitiesAuthorizationTarget
+	authorizeHook    func(ACLAction, InsightsOpportunitiesAuthorizationTarget)
+	requirementHook  func(string, InsightsOpportunitiesAuthorizationTarget)
 }
 
 func (v *insightsTestAuthorizationVerifier) AuthorizeInsightsOpportunities(_ context.Context, _ ACLPrincipal, action ACLAction, target InsightsOpportunitiesAuthorizationTarget) ACLDecision {
@@ -38,6 +41,9 @@ func (v *insightsTestAuthorizationVerifier) AuthorizeInsightsOpportunities(_ con
 	defer v.mu.Unlock()
 	v.actions = append(v.actions, action)
 	v.targets = append(v.targets, target)
+	if v.authorizeHook != nil {
+		v.authorizeHook(action, target)
+	}
 	if v.deny {
 		return ACLDecision{DenialCode: ACLDenialNotFound}
 	}
@@ -49,6 +55,9 @@ func (v *insightsTestAuthorizationVerifier) VerifyInsightsOpportunitiesRequireme
 	defer v.mu.Unlock()
 	v.requirements = append(v.requirements, requirement)
 	v.targets = append(v.targets, target)
+	if v.requirementHook != nil {
+		v.requirementHook(requirement, target)
+	}
 	if v.deny || v.denyRequirements[requirement] {
 		return ACLDecision{DenialCode: ACLDenialNotFound}
 	}
@@ -105,11 +114,41 @@ func (v *insightsTestAuthorizationVerifier) AdvanceInsightsOpportunitiesRun(_ co
 	if found && prior == target {
 		return InsightsOpportunitiesRunTransition{Resumed: true, CheckpointID: "run-checkpoint-" + target.RunID, Decision: decision}
 	}
-	if (!found && target.ReportRevision != 1) || (found && (prior.Terminal || target.ReportRevision != prior.ReportRevision+1 || target.ParentReportDigest != prior.ReportDigest)) {
+	if (!found && target.ReportRevision != 1) || (found && (target.ReportRevision != prior.ReportRevision+1 || target.ParentReportDigest != prior.ReportDigest)) {
 		return InsightsOpportunitiesRunTransition{}
 	}
 	v.runTargets[target.RunID] = target
 	return InsightsOpportunitiesRunTransition{Advanced: true, CheckpointID: "run-checkpoint-" + target.RunID, Decision: decision}
+}
+
+func (v *insightsTestAuthorizationVerifier) AuthorizeInsightsOpportunitiesPublication(_ context.Context, _ ACLPrincipal, target InsightsOpportunitiesAuthorizationTarget, key string) (InsightsOpportunitiesWorkspaceWriteAuthority, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.requirements = append(v.requirements, insightsRequirementActiveOrganizationMember)
+	v.actions = append(v.actions, ACLWrite)
+	v.targets = append(v.targets, target)
+	if v.deny || v.denyRequirements[insightsRequirementActiveOrganizationMember] {
+		return InsightsOpportunitiesWorkspaceWriteAuthority{}, errors.New("publication authority denied")
+	}
+	digest, err := CanonicalStateDigest(target)
+	if err != nil {
+		return InsightsOpportunitiesWorkspaceWriteAuthority{}, err
+	}
+	return InsightsOpportunitiesWorkspaceWriteAuthority{
+		AuthorityID:    "publication-authority-" + key,
+		TargetDigest:   digest,
+		IdempotencyKey: key,
+		Decision:       ACLDecision{Allowed: true, MatchedGrantID: "publication-grant", ACLVersion: 1, Obligations: []string{"audit"}},
+	}, nil
+}
+
+func (v *insightsTestAuthorizationVerifier) VerifyInsightsOpportunitiesPublication(_ context.Context, _ ACLPrincipal, target InsightsOpportunitiesAuthorizationTarget, key string, authority InsightsOpportunitiesWorkspaceWriteAuthority) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.deny || v.denyRequirements[insightsRequirementActiveOrganizationMember] {
+		return errors.New("publication authority denied")
+	}
+	return authority.validate(target, key)
 }
 
 func validInsightsRequest(t *testing.T) InsightsOpportunitiesRequest {

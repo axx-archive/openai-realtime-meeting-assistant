@@ -191,6 +191,7 @@ func (store *PostgresCanonicalStore) Append(ctx context.Context, event Canonical
 	if existing, found, err := store.findRetry(ctx, event); err != nil {
 		return CanonicalAppendResult{}, err
 	} else if found {
+		notifyProductionBrainProjectionCanonicalEvent(store, event)
 		return existing, nil
 	}
 
@@ -199,6 +200,12 @@ func (store *PostgresCanonicalStore) Append(ctx context.Context, event Canonical
 		return CanonicalAppendResult{}, fmt.Errorf("begin canonical append: %w", err)
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
+	projectionKey := brainProjectionKeyForCanonicalEvent(event)
+	if projectionKey.Validate() == nil {
+		if err := lockBrainProjectionSource(ctx, tx, projectionKey); err != nil {
+			return CanonicalAppendResult{}, fmt.Errorf("lock canonical projection source: %w", err)
+		}
+	}
 	sequence, err := insertCanonicalEvent(ctx, tx, event)
 	if err != nil {
 		_ = tx.Rollback(ctx)
@@ -227,9 +234,13 @@ func (store *PostgresCanonicalStore) Append(ctx context.Context, event Canonical
 	if _, err := tx.Exec(ctx, `INSERT INTO outbox(event_id, topic, payload) VALUES ($1,$2,$3::jsonb)`, event.EventID, event.EventType, outboxPayload); err != nil {
 		return CanonicalAppendResult{}, fmt.Errorf("insert canonical outbox: %w", err)
 	}
+	if err := registerBrainProjectionScopeDurably(ctx, tx, store.pool, projectionKey); err != nil {
+		return CanonicalAppendResult{}, fmt.Errorf("register brain projection scope: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return CanonicalAppendResult{}, fmt.Errorf("commit canonical append: %w", err)
 	}
+	notifyProductionBrainProjectionCanonicalEvent(store, event)
 	return CanonicalAppendResult{Event: cloneCanonicalEvent(event)}, nil
 }
 
@@ -308,6 +319,8 @@ func projectCanonicalEvent(ctx context.Context, tx pgx.Tx, event CanonicalEvent,
 // retry have byte-identical fingerprints instead of differing only because the
 // database discarded sub-microsecond precision.
 func normalizeCanonicalPostgresEvent(event CanonicalEvent) CanonicalEvent {
+	event.RoomID = NormalizeCanonicalRoomID(event.RoomID)
+	event.MeetingID = strings.TrimSpace(event.MeetingID)
 	event.OccurredAt = canonicalPostgresTime(event.OccurredAt)
 	event.RecordedAt = canonicalPostgresTime(event.RecordedAt)
 	if event.RetainUntil != nil {

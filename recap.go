@@ -40,6 +40,9 @@ func (app *kanbanBoardApp) meetingRecap(args map[string]any, requesterEmail stri
 		// no single requester.
 		audience = "room"
 	}
+	if audience == notificationAudienceMe {
+		return app.exactCatchUpTool(args, requesterEmail, roomID)
+	}
 
 	app.mu.Lock()
 	apiKey := app.apiKey
@@ -87,16 +90,12 @@ func (app *kanbanBoardApp) meetingRecap(args map[string]any, requesterEmail stri
 	} else {
 		// Room delivery: the recap re-enters the transcript stream (typed-chat
 		// path), consistent with Scout's spoken output being transcribed too.
-		// The OFFICE keeps its signed-in union (office ∪ room, like every other
-		// office room_chat writer — the unread pip stays live and roomChatSeenIds
-		// dedupe makes dual-socket delivery harmless); a NAMED room's recap
-		// fans out room-scoped ONLY (W4 §7.4 — never the signed-in union, which
-		// leaked one room's recap office-wide).
-		if payload, ok := app.recordRoomChatMessage(roomID, scoutParticipantName, "Meeting recap:\n"+recapText); ok {
-			if roomID == officeRoomID {
-				broadcastSignedInKanbanEvent("room_chat", payload)
-			} else {
-				broadcastRoomKanbanEvent(roomID, "room_chat", payload)
+		// Publications are fenced to the exact live room+sitting+generation.
+		// Stale sockets from a prior sitting or media generation receive neither
+		// the recap nor its transcript companion.
+		if payload, ok := app.publishMeetingRecapToRoom(roomID, meetingID, recapText, nil); ok {
+			if scope, current := app.roomPublicationScope(roomID, meetingID); current {
+				broadcastScopedRoomKanbanEvent(scope, "room_chat", payload)
 			}
 		}
 	}
@@ -109,17 +108,63 @@ func (app *kanbanBoardApp) meetingRecap(args map[string]any, requesterEmail stri
 	}, false, nil
 }
 
+// publishMeetingRecapToRoom is the single recap publication seam used by the
+// live tool and by the bounded media-soak isolation probe. expectedMeetingID
+// lets the probe fail closed on a sitting rollover; metadata is server-owned.
+func (app *kanbanBoardApp) publishMeetingRecapToRoom(roomID, expectedMeetingID, recapText string, metadata map[string]string) (map[string]any, bool) {
+	return app.recordRoomChatMessageForMeeting(roomID, scoutParticipantName, "Meeting recap:\n"+strings.TrimSpace(recapText), metadata, expectedMeetingID)
+}
+
 // catchMeUp is the catch_me_up tool: meeting_recap with audience forced to
 // "me" (which still falls back to a room post when there is no requester).
 func (app *kanbanBoardApp) catchMeUp(args map[string]any, requesterEmail string, roomID string) (map[string]any, bool, error) {
-	forced := map[string]any{"audience": notificationAudienceMe}
-	for key, value := range args {
-		if key == "audience" {
-			continue
-		}
-		forced[key] = value
+	return app.exactCatchUpTool(args, requesterEmail, roomID)
+}
+
+func (app *kanbanBoardApp) exactCatchUpTool(args map[string]any, requesterEmail string, roomID string) (map[string]any, bool, error) {
+	return app.exactCatchUpToolWithComposer(args, requesterEmail, roomID, app.configuredCatchUpComposer())
+}
+
+func (app *kanbanBoardApp) exactCatchUpToolWithComposer(args map[string]any, requesterEmail string, roomID string, composer catchUpComposerProvider) (map[string]any, bool, error) {
+	requesterEmail = normalizeAccountEmail(requesterEmail)
+	if requesterEmail == "" {
+		return nil, false, ErrCatchUpUnauthorized
 	}
-	return app.meetingRecap(forced, requesterEmail, roomID)
+	ctx, cancel := context.WithTimeout(context.Background(), meetingRecapRequestTimeout)
+	defer cancel()
+	response, err := app.exactCatchUpRecapWithComposer(ctx, requesterEmail, roomID, asString(args["focus"]), composer)
+	if err != nil {
+		return nil, false, err
+	}
+	publicationPrincipal := ACLPrincipal{
+		TenantID: canonicalTenantID(), ID: requesterEmail, Kind: ACLPrincipalUser,
+		TeamIDs: []string{"organization"}, RoomID: response.RoomID, SittingID: response.SittingID,
+	}
+	notificationText := response.Headline + "\n\n" + response.Recap
+	if len([]rune(notificationText)) > 6000 {
+		notificationText = trimForStorage(notificationText, 5900) + "\n\n(Notification display truncated; the live Scout response carried the complete evidence set.)"
+	}
+	var result map[string]any
+	if publisher, ok := app.catchUpRecapResolver.(catchUpTransactionalPublisher); ok {
+		committedResult, commitErr := publisher.CommitAndDeliverCatchUpPublication(ctx, app, publicationPrincipal, response.Snapshot, notificationText, response.toolResult())
+		if commitErr != nil {
+			return nil, false, fmt.Errorf("%w: transactional publication", ErrCatchUpUnavailable)
+		}
+		return committedResult, false, nil
+	}
+	if err := app.catchUpRecapResolver.CommitCatchUpPublication(ctx, publicationPrincipal, response.Snapshot, func() error {
+		if _, err := app.createNotification(requesterEmail, notificationKindInfo, notificationText, "catch_up_recap", "", "", false); err != nil {
+			return err
+		}
+		// Materialize the result while the same authority fence that guarded the
+		// notification is still held. Returning the already-committed value after
+		// the callback releases those locks cannot race a later revocation.
+		result = response.toolResult()
+		return nil
+	}); err != nil {
+		return nil, false, fmt.Errorf("%w: notification publication", ErrCatchUpUnavailable)
+	}
+	return result, false, nil
 }
 
 // meetingCapturePrefix returns a short honesty note to lead a recap when the

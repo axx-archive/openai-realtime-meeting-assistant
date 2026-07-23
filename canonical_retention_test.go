@@ -11,7 +11,7 @@ import (
 )
 
 func retentionFixture(kind string) (RetentionHeader, RetentionBody) {
-	key := RetentionKey{TenantID: "tenant-1", ObjectID: "artifact-1", RevisionID: "revision-1"}
+	key := RetentionKey{TenantID: "tenant-1", ObjectType: "artifact", ObjectID: "artifact-1", RevisionID: "revision-1"}
 	created := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
 	header := RetentionHeader{
 		Key: key, EventType: "artifact.revised", OccurredAt: created, RecordedAt: created.Add(time.Second),

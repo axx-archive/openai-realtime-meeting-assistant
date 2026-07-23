@@ -418,17 +418,22 @@ func (app *kanbanBoardApp) createOSArtifact(mode string, query string, answer st
 }
 
 func (app *kanbanBoardApp) createOSArtifactWithMetadata(mode string, query string, answer string, createdBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
+	entry, appended, _, err := app.createOSArtifactWithMetadataAcknowledged(mode, query, answer, createdBy, metadataUpdates)
+	return entry, appended, err
+}
+
+func (app *kanbanBoardApp) createOSArtifactWithMetadataAcknowledged(mode string, query string, answer string, createdBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, []scopedRoomDeliveryAcknowledgement, error) {
 	if app == nil || app.memory == nil {
-		return meetingMemoryEntry{}, false, fmt.Errorf("artifact memory is unavailable")
+		return meetingMemoryEntry{}, false, nil, fmt.Errorf("artifact memory is unavailable")
 	}
 
 	mode = normalizeOSAssistantMode(mode)
 	if mode == "chat" {
-		return meetingMemoryEntry{}, false, nil
+		return meetingMemoryEntry{}, false, nil, nil
 	}
 	answer = strings.TrimSpace(answer)
 	if answer == "" {
-		return meetingMemoryEntry{}, false, nil
+		return meetingMemoryEntry{}, false, nil, nil
 	}
 
 	artifactID := fmt.Sprintf("os-artifact-%s-%d", mode, time.Now().UnixNano())
@@ -469,12 +474,13 @@ func (app *kanbanBoardApp) createOSArtifactWithMetadata(mode string, query strin
 	}
 
 	entry, appended, err := app.memory.appendOSArtifact(artifactID, answer, metadata)
+	var acknowledgements []scopedRoomDeliveryAcknowledgement
 	if appended && err == nil {
 		// Unified push channel: a new artifact (worker scaffold or a directly
-		// saved piece) fans out title-only to every signed-in session.
-		emitOSArtifactEvent(entry)
+		// saved piece) routes from its persisted authorization scope.
+		acknowledgements, err = emitOSArtifactEventForApp(app, entry)
 	}
-	return entry, appended, err
+	return entry, appended, acknowledgements, err
 }
 
 func (app *kanbanBoardApp) updateOSArtifact(id string, title string, text string, updatedBy string) (meetingMemoryEntry, bool, error) {
@@ -504,7 +510,7 @@ func (app *kanbanBoardApp) updateOSArtifactWithMetadata(id string, title string,
 		// publish) fans out title-only. Bookkeeping re-writes that leave the
 		// user-visible state unchanged are deduped inside emitOSArtifactEvent,
 		// so deliverArtifactToOrigin's deliveredAt stamp stays silent.
-		emitOSArtifactEvent(entry)
+		_, _ = emitOSArtifactEventForApp(app, entry)
 	}
 	return entry, changed, err
 }

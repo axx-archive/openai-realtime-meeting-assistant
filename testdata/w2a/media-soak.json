@@ -1,0 +1,74 @@
+{
+  "schema": "bonfire.w2a.media-soak.gate.v1",
+  "id": "w2a-two-room-live-media-soak",
+  "description": "Release-qualified two-room actorized-Pion media soak with exact room, sitting, and media-generation isolation canaries plus provider-failure independence.",
+  "command": "go run ./cmd/media-soak --collect --manifest testdata/w2a/media-soak.json --public-key-file ${BONFIRE_MEDIA_SOAK_PUBLIC_KEY_FILE} --collector-public-key-file ${BONFIRE_MEDIA_SOAK_COLLECTOR_PUBLIC_KEY_FILE} --release-private-key-file ${BONFIRE_MEDIA_SOAK_RELEASE_PRIVATE_KEY_FILE} --release-commit ${BONFIRE_RELEASE_COMMIT}",
+  "timeoutSeconds": 7800,
+  "releaseCommit": "${BONFIRE_RELEASE_COMMIT}",
+  "backend": "pion-room-actor",
+  "featureFlag": "BONFIRE_MEDIA_BACKEND",
+  "featureFlagValue": "pion",
+  "requiredEvidenceMode": "live_soak",
+  "allowedSignerKeyIds": ["bonfire-release-operator"],
+  "trustedSignerKeys": [
+    {
+      "role": "release_operator",
+      "keyId": "bonfire-release-operator",
+      "publicKeySha256": "35efb49217bdda0cc65d565000c7f3e18dd929249b2cc717215ad365d4fffdd6"
+    },
+    {
+      "role": "independent_collector",
+      "keyId": "bonfire-media-collector",
+      "publicKeySha256": "3462a80dc080d66b853e75e2f527deea43f56356e489b24b5f3f104a592b0ea7"
+    }
+  ],
+  "collector": {
+    "command": ["node", "testdata/w2a/live-media-soak-probe.mjs", "--release-commit", "{releaseCommit}", "--output", "{signedEvidencePath}"],
+    "signedEvidencePath": "artifacts/w2-gates/probe/{releaseCommit}/signed-raw-evidence.json",
+    "minimumRawSamples": 120,
+    "maximumSampleGapSeconds": 90
+  },
+  "freshness": {
+    "maximumAgeSeconds": 900,
+    "maximumFutureSeconds": 30,
+    "nonceLedgerPath": "artifacts/w2-gates/nonces/{releaseCommit}"
+  },
+  "thresholds": {
+    "minimumDurationSeconds": 7200,
+    "minimumConcurrentRoomSeconds": 7200,
+    "minimumRoomCount": 2,
+    "minimumPublishersPerRoom": 3,
+    "minimumSubscribersPerRoom": 3,
+    "minimumParticipantMinutes": 720,
+    "minimumBlockedOfferSeconds": 10,
+    "minimumAdmissionSamples": 3,
+    "maximumAdmissionP95Seconds": 2,
+    "minimumRenegotiationSamples": 3,
+    "maximumRenegotiationP95Seconds": 3,
+    "maximumRoomBAdmissionFailures": 0,
+    "maximumRoomBRenegotiationFailures": 0,
+    "maximumPacketLossPercent": 2,
+    "maximumUnexpectedDisconnectParticipantMinutePercent": 1,
+    "maximumSustainedCpuPercent": 80,
+    "maximumRssContainerLimitPercent": 75,
+    "minimumNetworkSampleCount": 120,
+    "minimumNetworkSampleCoverageSeconds": 7200,
+    "minimumResourceSampleCount": 120,
+    "minimumResourceSampleCoverageSeconds": 7200,
+    "minimumCanaryChecksPerBoundary": 8,
+    "minimumSourceCanaryObservationRate": 1,
+    "maximumLeakCountPerSurface": 0,
+    "minimumAiProviderFailureInjections": 1,
+    "maximumMediaInterruptionsDuringAiFault": 0,
+    "maximumAdmissionFailuresDuringAiFault": 0
+  },
+  "receipt": {
+    "liveOutputPath": "artifacts/w2-gates/{releaseCommit}/w2a-two-room-live-media-soak.json",
+    "fixtureOutputPath": "artifacts/w2-gates/non-qualifying/{releaseCommit}/w2a-two-room-live-media-soak.json",
+    "schema": "bonfire.w2a.media-soak.receipt.v1",
+    "signatureAlgorithm": "ed25519",
+    "publicKeyFileFlag": "--public-key-file"
+  },
+  "stopCondition": "Stop W2 release and every media-backend canary unless a same-commit signed live soak proves two concurrent two-hour rooms, three publishers/subscribers per room, zero scope leaks, room-B latency and reliability under the blocked-offer fault, resource and loss limits, and uninterrupted media/admission during AI-provider failure.",
+  "rollbackCommand": "export BONFIRE_MEDIA_BACKEND=pion"
+}

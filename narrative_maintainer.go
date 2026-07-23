@@ -77,6 +77,13 @@ func narrativeMaintainerAgent() ambientAgentConfig {
 
 func (app *kanbanBoardApp) startNarrativeMaintainerWorker(apiKey string) {
 	app.startAmbientAgent(narrativeMaintainerAgent(), apiKey)
+	// Backfill mode deliberately starts the generic chassis at the beginning of
+	// history. Restore the narrative-specific durable cursor after registration
+	// so a cold-start empty pass does not get replayed after process restart.
+	// Normal (non-backfill) boot keeps the chassis's newest-input baseline.
+	if boolEnv(narrativeMaintainerAgent().backfillEnv) {
+		app.restoreNarrativeMaintainerCursorBaselines()
+	}
 }
 
 // narrativeMaintainerEffort is the maintainer's thinking depth on both model
@@ -476,25 +483,68 @@ func (app *kanbanBoardApp) stampNarrativeCursor(roomID string, throughBrainID st
 	latestID := app.memory.latestEntryIDOfKindForRoom(meetingMemoryKindNarrative, roomID)
 	if latestID == "" {
 		now := time.Now()
-		if _, _, err := app.memory.appendNarrative(durableTimestampID("narrative-cursor", now), "Narrative maintainer cursor stamp — no storylines yet.", map[string]string{
+		entry, appended, err := app.memory.appendNarrative(durableTimestampID("narrative-cursor", now), "Narrative maintainer cursor stamp — no storylines yet.", map[string]string{
 			narrativeCursorKey:   throughBrainID,
 			"source":             "narrative_maintainer",
 			"roomId":             roomID,
 			relevanceMetadataKey: relevanceExpired,
 			"generatedAt":        now.UTC().Format(time.RFC3339),
-		}); err != nil {
+		})
+		if err != nil {
 			log.Errorf("%s failed to persist cold-start cursor: %v", narrativeMaintainerAgentName, err)
+			return
 		}
+		if !app.narrativeCursorPersisted(entry, appended, throughBrainID) {
+			return
+		}
+		app.setAmbientAgentBaselineID(ambientAgentKey(narrativeMaintainerAgentName, roomID), throughBrainID)
 		return
 	}
 	entry, ok := app.memory.entryByKindAndID(meetingMemoryKindNarrative, latestID)
 	if !ok {
 		return
 	}
-	if _, _, err := app.memory.updateEntryWithMetadata(meetingMemoryKindNarrative, entry.ID, entry.Text, map[string]string{
+	stamped, _, err := app.memory.updateEntryWithMetadata(meetingMemoryKindNarrative, entry.ID, entry.Text, map[string]string{
 		narrativeCursorKey: throughBrainID,
-	}); err != nil {
+	})
+	if err != nil {
 		log.Errorf("%s failed to advance cursor on %s: %v", narrativeMaintainerAgentName, entry.ID, err)
+		return
+	}
+	if strings.TrimSpace(stamped.Metadata[narrativeCursorKey]) != strings.TrimSpace(throughBrainID) {
+		return
+	}
+	app.setAmbientAgentBaselineID(ambientAgentKey(narrativeMaintainerAgentName, roomID), throughBrainID)
+}
+
+// narrativeCursorPersisted verifies the append result before the in-memory
+// baseline advances. A disk failure must leave both cursors put so the model
+// retries the window; a vanishingly rare idempotent ID collision is accepted
+// only when the already-durable row carries this exact cursor.
+func (app *kanbanBoardApp) narrativeCursorPersisted(entry meetingMemoryEntry, appended bool, throughBrainID string) bool {
+	if appended && strings.TrimSpace(entry.Metadata[narrativeCursorKey]) == strings.TrimSpace(throughBrainID) {
+		return true
+	}
+	stored, ok := app.memory.entryByKindAndID(meetingMemoryKindNarrative, entry.ID)
+	return ok && strings.TrimSpace(stored.Metadata[narrativeCursorKey]) == strings.TrimSpace(throughBrainID)
+}
+
+// restoreNarrativeMaintainerCursorBaselines rehydrates the hidden carrier (or
+// a real dossier's later cursor) for explicit backfill boots. entriesOfKind is
+// intentionally the raw maintenance reader: expired carriers stay absent from
+// recall while still serving as durable cursor truth.
+func (app *kanbanBoardApp) restoreNarrativeMaintainerCursorBaselines() {
+	if app == nil || app.memory == nil {
+		return
+	}
+	latestByRoom := map[string]string{}
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindNarrative, 0) {
+		if cursor := strings.TrimSpace(entry.Metadata[narrativeCursorKey]); cursor != "" {
+			latestByRoom[normalizeRoomID(entry.Metadata["roomId"])] = cursor
+		}
+	}
+	for roomID, cursor := range latestByRoom {
+		app.setAmbientAgentBaselineID(ambientAgentKey(narrativeMaintainerAgentName, roomID), cursor)
 	}
 }
 

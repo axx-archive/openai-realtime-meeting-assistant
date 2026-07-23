@@ -201,6 +201,8 @@ func TestMeetingRecapRoomPostReachesOfficeSocket(t *testing.T) {
 		return "## Overview\nThe Boot Barn pilot is on track for Friday.", nil
 	}
 	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
+	authority := newAmbientConsentAuthorityForTest(t)
+	grantAmbientConsentForTest(t, kanbanApp, authority, officeRoomID, "tom@shareability.com")
 	appendTestTranscript(t, kanbanApp, "recap-office-1", "Boot Barn pilot is on track.")
 
 	if _, _, err := kanbanApp.meetingRecap(map[string]any{"audience": "room"}, "", officeRoomID); err != nil {

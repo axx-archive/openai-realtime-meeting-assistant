@@ -11,6 +11,13 @@ export function videoProbeRendered(probe) {
     && ((probe.readyState >= 2 && probe.videoWidth > 0 && probe.videoHeight > 0) || probe.frames > 0))
 }
 
+export function mediaSoakProbeURL(rawURL, enabled) {
+  const url = new URL(rawURL)
+  if (enabled === true) url.searchParams.set('media-soak-probe', '1')
+  else url.searchParams.delete('media-soak-probe')
+  return url.toString()
+}
+
 export function screenShareFrameHasSignal(probe) {
   return Boolean(probe
     && probe.sampled

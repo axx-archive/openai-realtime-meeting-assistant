@@ -1,0 +1,25 @@
+{
+  "schema": "bonfire.w2.price-catalog.v1",
+  "catalog": "bonfire-w2-operational-prices",
+  "version": "2026-07-22.1",
+  "currency": "USD",
+  "effectiveAt": "2026-07-22T00:00:00Z",
+  "rates": [
+    {"provider":"anthropic","model":"claude-opus-4-8","inputUsdPerMillion":15,"cachedInputUsdPerMillion":1.5,"outputUsdPerMillion":75,"audioUsdPerMinute":0},
+    {"provider":"anthropic","model":"claude-sonnet-5","inputUsdPerMillion":3,"cachedInputUsdPerMillion":0.3,"outputUsdPerMillion":15,"audioUsdPerMinute":0},
+    {"provider":"bonfire","model":"lexical-retrieval","inputUsdPerMillion":0.05,"cachedInputUsdPerMillion":0.005,"outputUsdPerMillion":0.1,"audioUsdPerMinute":0},
+    {"provider":"openai","model":"gpt-4o-mini-transcribe","inputUsdPerMillion":0.15,"cachedInputUsdPerMillion":0.075,"outputUsdPerMillion":0.6,"audioUsdPerMinute":0.003},
+    {"provider":"openai","model":"gpt-4o-transcribe","inputUsdPerMillion":2.5,"cachedInputUsdPerMillion":1.25,"outputUsdPerMillion":10,"audioUsdPerMinute":0.006},
+    {"provider":"openai","model":"gpt-5.5","inputUsdPerMillion":2,"cachedInputUsdPerMillion":0.2,"outputUsdPerMillion":12,"audioUsdPerMinute":0},
+    {"provider":"openai","model":"gpt-5.6-luna","inputUsdPerMillion":5,"cachedInputUsdPerMillion":0.5,"outputUsdPerMillion":25,"audioUsdPerMinute":0},
+    {"provider":"openai","model":"gpt-5.6-terra","inputUsdPerMillion":1,"cachedInputUsdPerMillion":0.1,"outputUsdPerMillion":6,"audioUsdPerMinute":0},
+    {"provider":"openai","model":"gpt-realtime-2","inputUsdPerMillion":4,"cachedInputUsdPerMillion":0.4,"outputUsdPerMillion":16,"audioUsdPerMinute":0.06},
+    {"provider":"openai","model":"gpt-realtime-whisper","inputUsdPerMillion":0.15,"cachedInputUsdPerMillion":0.075,"outputUsdPerMillion":0.6,"audioUsdPerMinute":0.006},
+    {"provider":"openai","model":"text-embedding-3-small","inputUsdPerMillion":0.02,"cachedInputUsdPerMillion":0.002,"outputUsdPerMillion":0,"audioUsdPerMinute":0}
+  ],
+  "signature": {
+    "algorithm": "ed25519",
+    "keyId": "bonfire-w2-price-authority-2026-07",
+    "value": "gTj2c8t9l97XoylN7v4F9GR/avNUH1RUh83yyEIG8I1ey1IVA1w5MplxXK7Hx8Yq21ANx7mFSligOYhhAWWRCQ=="
+  }
+}

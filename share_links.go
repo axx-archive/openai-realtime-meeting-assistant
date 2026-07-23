@@ -207,17 +207,22 @@ func artifactCapabilityDigest(entry meetingMemoryEntry) string {
 		return assets[i].Name < assets[j].Name
 	})
 	canonical, _ := json.Marshal(struct {
-		Title        string          `json:"title"`
-		Body         string          `json:"body"`
-		Type         string          `json:"type"`
-		Kind         string          `json:"kind"`
-		Assets       []artifactAsset `json:"assets"`
-		GateOutcome  string          `json:"gateOutcome"`
-		GoalPlan     string          `json:"goalPlan"`
-		RubricScores string          `json:"rubricScores"`
+		Title           string          `json:"title"`
+		Body            string          `json:"body"`
+		Type            string          `json:"type"`
+		Kind            string          `json:"kind"`
+		Assets          []artifactAsset `json:"assets"`
+		GateOutcome     string          `json:"gateOutcome"`
+		GoalPlan        string          `json:"goalPlan"`
+		RubricScores    string          `json:"rubricScores"`
+		RoomID          string          `json:"roomId"`
+		SittingID       string          `json:"sittingId"`
+		MediaGeneration uint64          `json:"mediaGeneration"`
 	}{Title: firstNonEmptyString(entry.Metadata["title"], entry.Metadata["threadQuery"]), Body: entry.Text,
 		Type: artifactType(entry), Kind: firstNonEmptyString(entry.Metadata["kind"], entry.Kind), Assets: assets,
-		GateOutcome: entry.Metadata["gateOutcome"], GoalPlan: entry.Metadata["goalPlan"], RubricScores: entry.Metadata["rubricScores"]})
+		GateOutcome: entry.Metadata["gateOutcome"], GoalPlan: entry.Metadata["goalPlan"], RubricScores: entry.Metadata["rubricScores"],
+		RoomID: normalizeRoomID(entry.Metadata["roomId"]), SittingID: firstNonEmptyString(strings.TrimSpace(entry.Metadata["sittingId"]), strings.TrimSpace(entry.Metadata["meetingId"])),
+		MediaGeneration: artifactAuthorizationHeaderFromEntry(entry).MediaGeneration})
 	digest := sha256.Sum256(canonical)
 	return fmt.Sprintf("%x", digest[:])
 }

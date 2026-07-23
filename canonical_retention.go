@@ -53,6 +53,7 @@ var (
 
 type RetentionKey struct {
 	TenantID   string
+	ObjectType string
 	ObjectID   string
 	RevisionID string
 }
@@ -484,7 +485,8 @@ func validateRetentionPair(header RetentionHeader, body RetentionBody) error {
 }
 
 func validRetentionKey(key RetentionKey) bool {
-	return safeMachineToken(key.TenantID, 128) && safeMachineToken(key.ObjectID, 128) && safeMachineToken(key.RevisionID, 128)
+	return safeMachineToken(key.TenantID, 128) && safeMachineToken(key.ObjectType, 128) &&
+		safeMachineToken(key.ObjectID, 128) && safeMachineToken(key.RevisionID, 128)
 }
 
 func mandatoryPurgeClass(class RetentionResourceClass) bool {

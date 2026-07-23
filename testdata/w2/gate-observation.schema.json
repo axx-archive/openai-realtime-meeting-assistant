@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thebonfire.xyz/schemas/w2/gate-observation.schema.json",
+  "title": "bonfireOS W2D authenticated body-free gate observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "gateId", "releaseCommit", "corpusDigest", "evidenceMode", "issuedAt", "expiresAt", "run", "corpusCustody", "baseline", "candidate", "keyId", "hmacSha256"],
+  "properties": {
+    "schema": {"const": "bonfire.w2.gate.observation.v2"},
+    "gateId": {"type": "string", "minLength": 3},
+    "releaseCommit": {"type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"},
+    "corpusDigest": {"$ref": "#/$defs/digest"},
+    "evidenceMode": {"enum": ["live_provider", "deterministic_fixture"]},
+    "issuedAt": {"type": "string", "format": "date-time"},
+    "expiresAt": {"type": "string", "format": "date-time"},
+    "run": {"$ref": "#/$defs/run"},
+    "corpusCustody": {
+      "type": "object", "additionalProperties": false,
+      "required": ["manifestDigest", "authority", "exportId", "itemMerkleRoot"],
+      "properties": {
+        "manifestDigest": {"$ref": "#/$defs/digest"}, "authority": {"type": "string", "minLength": 1},
+        "exportId": {"type": "string", "minLength": 3}, "itemMerkleRoot": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "baseline": {"$ref": "#/$defs/snapshot"},
+    "candidate": {"$ref": "#/$defs/snapshot"},
+    "recordOnly": {"type": "array", "items": {"$ref": "#/$defs/snapshot"}},
+    "keyId": {"type": "string", "minLength": 3},
+    "hmacSha256": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "run": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "driverId", "driverArgvDigest", "startedAt", "completedAt"],
+      "properties": {
+        "id": {"type": "string", "minLength": 3}, "driverId": {"type": "string", "minLength": 3},
+        "driverArgvDigest": {"$ref": "#/$defs/digest"}, "startedAt": {"type": "string", "format": "date-time"},
+        "completedAt": {"type": "string", "format": "date-time"}
+      }
+    },
+    "identity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "lane", "provider", "model", "effort"],
+      "properties": {
+        "id": {"type": "string", "minLength": 3}, "lane": {"type": "string", "minLength": 3},
+        "provider": {"type": "string", "minLength": 1}, "model": {"type": "string", "minLength": 1}, "effort": {"type": "string", "minLength": 1}
+      }
+    },
+    "price": {
+      "type": "object", "additionalProperties": false,
+      "required": ["catalog", "version", "retrievedAt", "digest"],
+      "properties": {
+        "catalog": {"type": "string", "minLength": 3}, "version": {"type": "string", "minLength": 1},
+        "retrievedAt": {"type": "string", "format": "date-time"}, "digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "cost": {
+      "type": "object", "additionalProperties": false,
+      "required": ["currency", "estimatedUsd", "inputTokens", "cachedInputTokens", "outputTokens", "audioSeconds", "price"],
+      "properties": {
+        "currency": {"const": "USD"}, "estimatedUsd": {"type": "number", "minimum": 0},
+        "inputTokens": {"type": "integer", "minimum": 0}, "cachedInputTokens": {"type": "integer", "minimum": 0},
+        "outputTokens": {"type": "integer", "minimum": 0}, "audioSeconds": {"type": "number", "minimum": 0},
+        "price": {"$ref": "#/$defs/price"}
+      }
+    },
+    "snapshot": {
+      "type": "object", "additionalProperties": false,
+      "required": ["identity", "metrics", "cost", "evidenceDigest"],
+      "properties": {
+        "identity": {"$ref": "#/$defs/identity"},
+        "metrics": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "number", "minimum": 0}},
+        "cost": {"$ref": "#/$defs/cost"}, "evidenceDigest": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

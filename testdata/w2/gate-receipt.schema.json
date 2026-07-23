@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thebonfire.xyz/schemas/w2/gate-receipt.schema.json",
+  "title": "bonfireOS W2D authenticated body-free gate receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "gateId", "generatedAt", "releaseCommit", "manifestDigest", "corpusDigest", "observationPath", "observationDigest", "run", "evidenceMode", "baseline", "candidate", "thresholds", "verdict", "w2dAccepted", "candidateCanaryAllowed", "stopTriggered", "featureFlag", "stopCondition", "rollbackCommand", "keyId", "hmacSha256"],
+  "properties": {
+    "schema": {"const": "bonfire.w2.gate.receipt.v2"}, "gateId": {"type": "string", "minLength": 3},
+    "generatedAt": {"type": "string", "format": "date-time"}, "releaseCommit": {"type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"},
+    "manifestDigest": {"$ref": "#/$defs/digest"}, "corpusDigest": {"$ref": "#/$defs/digest"},
+    "observationPath": {"type": "string", "minLength": 1}, "observationDigest": {"$ref": "#/$defs/digest"},
+    "run": {"$ref": "gate-observation.schema.json#/$defs/run"}, "evidenceMode": {"enum": ["live_provider", "deterministic_fixture"]},
+    "baseline": {"$ref": "gate-observation.schema.json#/$defs/snapshot"}, "candidate": {"$ref": "gate-observation.schema.json#/$defs/snapshot"},
+    "recordOnly": {"type": "array", "items": {"$ref": "gate-observation.schema.json#/$defs/snapshot"}},
+    "thresholds": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/thresholdResult"}},
+    "verdict": {"enum": ["pass", "fail"]}, "w2dAccepted": {"const": true}, "candidateCanaryAllowed": {"type": "boolean"},
+    "stopTriggered": {"type": "boolean"}, "featureFlag": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"},
+    "stopCondition": {"type": "string", "minLength": 1}, "rollbackCommand": {"type": "string", "minLength": 1},
+    "keyId": {"type": "string", "minLength": 3}, "hmacSha256": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "thresholdResult": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "snapshot", "metric", "operator", "actual", "expected", "passed"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1}, "snapshot": {"type": "string", "minLength": 1},
+        "metric": {"type": "string", "minLength": 1}, "operator": {"enum": ["gt", "gte", "lt", "lte", "eq"]},
+        "actual": {"type": "number", "minimum": 0}, "expected": {"type": "number", "minimum": 0}, "passed": {"type": "boolean"}
+      }
+    }
+  }
+}

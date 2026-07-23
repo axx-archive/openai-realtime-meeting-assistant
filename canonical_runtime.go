@@ -58,25 +58,27 @@ type CanonicalRuntime struct {
 }
 
 type CanonicalRuntimeSnapshot struct {
-	Mode                string   `json:"mode"`
-	Healthy             bool     `json:"healthy"`
-	Required            bool     `json:"required"`
-	Database            bool     `json:"database"`
-	HighWater           uint64   `json:"highWater"`
-	DirtyHighWater      uint64   `json:"dirtyHighWater"`
-	ReconciledHighWater uint64   `json:"reconciledHighWater"`
-	Pending             int      `json:"pending"`
-	FrozenFamilies      []string `json:"frozenFamilies,omitempty"`
-	CoveredFamilies     []string `json:"coveredFamilies,omitempty"`
-	UncoveredFamilies   []string `json:"uncoveredFamilies,omitempty"`
-	LastSuccess         string   `json:"lastSuccess,omitempty"`
-	Error               string   `json:"error,omitempty"`
-	OutboxPending       int64    `json:"outboxPending"`
-	OutboxFailed        int64    `json:"outboxFailed"`
-	OutboxOldestSeconds int64    `json:"outboxOldestSeconds"`
-	OutboxKnown         bool     `json:"outboxKnown"`
-	CheckpointValid     bool     `json:"checkpointValid"`
-	CheckpointHighWater uint64   `json:"checkpointHighWater"`
+	Mode                string                          `json:"mode"`
+	Healthy             bool                            `json:"healthy"`
+	Required            bool                            `json:"required"`
+	Database            bool                            `json:"database"`
+	HighWater           uint64                          `json:"highWater"`
+	DirtyHighWater      uint64                          `json:"dirtyHighWater"`
+	ReconciledHighWater uint64                          `json:"reconciledHighWater"`
+	Pending             int                             `json:"pending"`
+	FrozenFamilies      []string                        `json:"frozenFamilies,omitempty"`
+	CoveredFamilies     []string                        `json:"coveredFamilies,omitempty"`
+	UncoveredFamilies   []string                        `json:"uncoveredFamilies,omitempty"`
+	LastSuccess         string                          `json:"lastSuccess,omitempty"`
+	Error               string                          `json:"error,omitempty"`
+	OutboxPending       int64                           `json:"outboxPending"`
+	OutboxFailed        int64                           `json:"outboxFailed"`
+	OutboxOldestSeconds int64                           `json:"outboxOldestSeconds"`
+	OutboxKnown         bool                            `json:"outboxKnown"`
+	CheckpointValid     bool                            `json:"checkpointValid"`
+	CheckpointHighWater uint64                          `json:"checkpointHighWater"`
+	BrainProjection     BrainProjectionRuntimeStatus    `json:"brainProjection"`
+	CatchUpPublication  CatchUpPublicationRuntimeStatus `json:"catchUpPublication"`
 }
 
 var canonicalRuntimeState struct {
@@ -140,6 +142,7 @@ func initializeCanonicalRuntime(ctx context.Context) (*CanonicalRuntime, error) 
 	dataDir := filepath.Dir(meetingMemoryPath())
 	runtime := &CanonicalRuntime{mode: mode, dataDir: dataDir, tenantID: canonicalTenantID(), lastOK: time.Now().UTC()}
 	if mode == CanonicalModeOff {
+		configureProductionBrainProjectionRuntime(runtime)
 		setCanonicalRuntime(runtime)
 		return runtime, nil
 	}
@@ -221,7 +224,6 @@ func initializeCanonicalRuntime(ctx context.Context) (*CanonicalRuntime, error) 
 	} else {
 		runtime.markFailure(errors.New("canonical PostgreSQL is not configured"))
 	}
-
 	// A boot scan validates every registered legacy family even when shadow PG
 	// is absent. A source+spool-bound checkpoint may take the read-only resume
 	// path; otherwise boot performs the full import/grant/reconcile sequence.
@@ -265,6 +267,10 @@ func initializeCanonicalRuntime(ctx context.Context) (*CanonicalRuntime, error) 
 		}
 		runtime.startReconcileLoop()
 	}
+	// Projection shadowing begins only after import/parity recovery. Existing
+	// canonical history is never scanned or silently baselined; post-boot
+	// canonical commits explicitly enqueue their exact scope.
+	configureProductionBrainProjectionRuntime(runtime)
 	return runtime, nil
 }
 
@@ -359,6 +365,8 @@ func currentCanonicalRuntime() *CanonicalRuntime {
 }
 
 func closeCanonicalRuntime() {
+	stopProductionBrainProjectionRuntime()
+	stopCatchUpPublicationRecovery()
 	canonicalRuntimeState.Lock()
 	runtime := canonicalRuntimeState.runtime
 	canonicalRuntimeState.runtime = nil
@@ -1066,7 +1074,7 @@ func canonicalRuntimeSnapshot() CanonicalRuntimeSnapshot {
 	}
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
-	snapshot := CanonicalRuntimeSnapshot{Mode: string(runtime.mode), Required: runtime.mode == CanonicalModeRequired, Database: runtime.postgres != nil}
+	snapshot := CanonicalRuntimeSnapshot{Mode: string(runtime.mode), Required: runtime.mode == CanonicalModeRequired, Database: runtime.postgres != nil, BrainProjection: brainProjectionRuntimeStatus(), CatchUpPublication: catchUpPublicationRuntimeStatus()}
 	if runtime.mode == CanonicalModeOff {
 		snapshot.Healthy = true
 		return snapshot

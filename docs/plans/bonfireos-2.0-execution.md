@@ -2,12 +2,12 @@
 
 Goal and source pointers: active `$goal-loop`; `docs/model-routing-master-plan-2026-07-11.md`; `docs/plans/multi-room-2026-07-08.md`; architecture audit in the current Codex task.
 
-Current phase: execution resumed by explicit user signal on 2026-07-22. W0 and W1 are live and verified; W2 begins from the approved decision-complete design at `docs/plans/bonfireos-w2-design.md`.
+Current phase: pre-W5 release closure. W0 and W1 are live and verified; the W2 product/runtime slices and W4 secure-restore repository foundation have passed their independent code gates. The exact release is being pushed and installed default-off/shadow before quota-dependent commissioning begins.
 
 ## Invariants
 
 - Production truth lives in Docker volume `digitalocean_meeting_data`; repository and `/opt/meetingassist/data/` content are never treated as live data.
-- Preserve the user-owned untracked `design-system/` directory.
+- Preserve user-owned `README.md`, `stride-site/`, `design-system/`, and ignored native-Apple artifacts; none are part of this release.
 - Private Scout threads remain owner-scoped; guest or retrieved content never authorizes tools.
 - Video remains available when AI providers degrade; stale or partial AI output is always labeled.
 - No force-accept critic path, no unattended external publish, and no silent authority escalation.
@@ -17,13 +17,15 @@ Current phase: execution resumed by explicit user signal on 2026-07-22. W0 and W
 
 | Wave | Outcome | Dependencies | Gate / rollback | Status |
 |---|---|---|---|---|
-| W0 | Stop runaway spend; make output, authority, health, backup, and usage truth enforceable | None | Accepted digest advances cursor; code-level authority tests; offsite restore evidence; old env/code backup | Complete; model-output recovery canaries held for W4 quota gate |
+| W0 | Stop runaway spend; make output, authority, health, backup, and usage truth enforceable | None | Accepted digest advances cursor; code-level authority tests; offsite restore evidence; old env/code backup | Complete; model-output recovery canaries held for W5 |
 | W1 | Canonical event/ACL substrate, object authorization, outbox/jobs, retention, consent, revision-bound approval | W0 | Dual-write replay/checksum and ACL-negative parity; JSONL reader rollback | Complete; live in PostgreSQL shadow mode with JSON/JSONL authoritative; expiry repair restart-proven |
-| W2A | Per-room Scout, exact recap, guest policy, media backend pilot | W1 contracts | Two-room zero-leak live gate; Pion and feature-flag rollback | In progress; admission anchor contract complete |
-| W2B | Restart-safe brain, complete historical recall, claim/evidence lineage | W1 contracts | Recall corpus and restart/replay gates; shadow-reader rollback | In progress; evidence, coverage, retrieval, and checkpoint contracts complete |
-| W2C | `insights_opportunities_v1`, structured feedback, verdict critic, pilots | W1 + W0 route/authority | Ten reviewed pilots; process disable and route rollback | In progress; closed contract complete, executor remains unregistered |
-| W3 | Static versioned model-route registry and measured canaries | W2 eval corpora | One seat at a time; prior route pointer rollback | Pending |
-| W4 | HA/DR cutover and full operational release | W2 + W3 | Chaos, restore, live media/recall/workflow evidence; cutover rollback | Pending |
+| W2A | Per-room Scout, exact recap, guest policy, media backend pilot | W1 contracts | Two-room zero-leak live gate; Pion and feature-flag rollback | Repository-complete; actorized/scoped implementation independently passed; two-hour live soak held for W5 |
+| W2B | Restart-safe brain, complete historical recall, claim/evidence lineage | W1 contracts | Recall corpus and restart/replay gates; shadow-reader rollback | Repository-complete; projection/backfill/retrieval gates passed; live 90-day replay held for W5 |
+| W2C | `insights_opportunities_v1`, structured feedback, verdict critic, pilots | W1 + W0 route/authority | Ten reviewed pilots; process disable and route rollback | Repository-complete and default-off; durable executor/feedback/capability gates passed; human pilots held for W5 |
+| W2D | Same-release evaluation, collector custody, cost derivation, and signed verdict receipts | W2A-W2C | Clean-commit and receipt-custody gate; no route mutation | Harness complete; live-provider corpora held for W5 |
+| W3 | Static versioned model-route registry and measured canaries | W2 eval corpora | One seat at a time; prior route pointer rollback | Canary/rollback plan ready; route changes remain blocked on W5 receipts |
+| W4 | HA/DR cutover and full operational release | W2 + W3 | Chaos, restore, live media/recall/workflow evidence; cutover rollback | Secure DR capture/manifest/restore gate repository-complete; managed HA, offsite immutable custody, and live restore drill remain external gates |
+| W5 | Final AI commissioning after API quota is restored | Pre-W5 code installed; W4 infrastructure/custody and human reviewers available | Bounded provider canaries, same-commit live receipts, then one-seat-at-a-time enablement; all AI routes remain degraded/disabled on failure | Pending top-up and remaining external prerequisites |
 
 ## Current Wave
 
@@ -38,8 +40,11 @@ Current phase: execution resumed by explicit user signal on 2026-07-22. W0 and W
 - W2 shared foundation now has canonical evidence/revision/ACL/purge/trust references, half-open temporal and admission-relative queries, honest recall coverage, exhaustive terminal/count/manifest-proven inventory, local source-byte verification, boundary-safe byte-addressed clipping, and deterministic full-range prompt folding. Denied inventory cannot affect published counts or late-arrival state; guest/capability recall remains denied and service recall requires an explicit kind-bound ACL.
 - W2 projection checkpoints bind tenant, projection, partition, version, generation, authoritative source range/manifest, derived high-water/digest, and an opaque fence token. Publication verifies the derived sink inside the same advisory-locked transaction; rebuild, race, crash/restart, tamper, and ambiguous-commit tests pass.
 - W2A admission anchors now use a checksummed durable first-admission store and a separately durable monotonic capture sequence. Startup proves the exact atomic write path, runtime failure latches readiness, plaintext guest identifiers are refused, and live participant state is published only after the anchor persists under one visibility lock. Independent admission re-gate returned PASS.
-- W2C's closed default-off contract binds a logical RunID, request/snapshot/coverage/process/prompt/destination/action digests, a direct-once approval, and a durable restart receipt. Reports form an immutable maximum-two revision chain; critic transitions are server-checkpointed, terminal rejection cannot be rewritten, and exact transition replay is resumable. Evidence usability, fresh reviewer authority, typed feedback, and pilot-review role checks are fail closed. The generic process registry still refuses launch until a dedicated durable executor exists.
-- Independent critic re-gates returned PASS for admission, retrieval, and W2C lifecycle. Focused normal tests passed in 7.770s; the corresponding high-risk race gate passed in 11.612s; `go vet ./...` passed; the repository-wide `go test -count=1 ./...` passed in 211.652s. The unrelated user-owned `README.md` and `stride-site/` work remained outside this checkpoint.
+- W2A now actorizes Pion and Scout by room, sitting, and generation; exact-scope fencing reaches transcription completion, attribution, durable commit, recap, chat, artifact fanout, and teardown/restart. The independent final critic returned PASS after focused normal/race, vet, and diff gates.
+- W2B's production adapter, transactional projection queue, bounded admin backfill, exact as-of rebuild, catch-up publication, purge/ACL reauthorization, and restart readiness passed independent adversarial gates.
+- W2C's default-off durable executor now implements the immutable two-revision Insights chain, one-use capability enforcement, typed feedback, crash recovery, provider boundaries, and fail-closed reviewer eligibility. Independent adversarial re-gate returned PASS; only the ten human-reviewed pilots remain.
+- W2D's typed collector, local metric/cost replay, independent Ed25519/HMAC custody, clean-release binding, transitive input verification, and 48-hour receipt sets passed its repository gate. Synthetic or missing provider observations cannot qualify.
+- W4's signed four-root capture, repeatable-read logical PostgreSQL digest, purge-authority continuity, isolated restore-only boot gate, and one-use release/environment/image-bound receipt passed independent normal/race/vet/diff gates. Managed HA, immutable offsite storage/KMS custody, and a real restore-host drill are not created by this VPS code deploy.
 - Live containment applied at `2026-07-12T19:11Z`: `MEETING_DIGEST_DISABLED=true`; env backup at `/opt/meetingassist-backups/20260712T191102Z-digest-containment/env.before`.
 - Digest usage baseline after containment: 573 calls, last call `2026-07-12T19:07:49Z`, app-estimated cost `$61.80095` for 2026-07-12.
 - Digest count remained exactly 573 through `2026-07-12T21:30Z`; persisted digest count remained 5 across 2 meetings. No post-containment spend occurred.
@@ -75,11 +80,22 @@ Current phase: execution resumed by explicit user signal on 2026-07-22. W0 and W
 
 ## Pending Dependencies
 
-- Dedicated managed PostgreSQL HA and private object storage are not present. W1 uses a local private PostgreSQL shadow on the resized VPS without a separate managed-resource charge; managed HA/object storage and their recurring-cost decision remain W4 work. Managed Valkey remains intentionally deferred.
-- The PostgreSQL purge ledger survives process restarts, but a full database rollback could restore both content and its purge authority to the same older point. W4 restore design must keep a separately retained append-only purge manifest/authority and invoke the restore gate before readiness; process-restart evidence alone is not a database-rollback proof.
-- The user reports the OpenAI API balance was topped up, but the bounded live embedding canary still returned HTTP 429 `insufficient_quota` at `2026-07-13T03:13:08Z`. Normal digest production remains disabled; this external provider gate must be rechecked before later AI recovery claims.
+- Dedicated managed PostgreSQL HA, immutable private object storage, independent signing/KMS custody, a separate restore host, and redundant app/TURN/routing are not present. The W4 repository gate fails closed without them; provisioning and the real restore drill remain operational work outside this single-VPS deploy. Managed Valkey remains intentionally deferred.
+- The OpenAI production project currently requires a user-reported balance top-up. Do not poll or run provider/model canaries until the user confirms it is ready; normal digest production remains disabled meanwhile.
 - Guest consent/retention language needs an authorized business/legal owner.
 - Native Apple GA requires signing team, privacy manifest decisions, and physical-device evidence; otherwise 2.0 must explicitly ship web-first with native labeled beta.
+
+## W5 Final AI Commissioning Queue
+
+Run this wave only after the OpenAI project used by the production key has usable API quota and the listed W4 infrastructure/custody prerequisites have owners. A balance change is not acceptance evidence; each check below must produce a fresh, same-release receipt. Keep media admission, video, deterministic workflows, and read-only company-brain access available while AI remains degraded.
+
+1. Run one bounded provider canary for embeddings, Responses, Realtime voice, and transcription. Confirm successful usage attribution to the intended project/organization, model access, latency, and ledgered token/audio usage. Stop on `insufficient_quota`, permission, unknown-price, or model-access errors.
+2. Re-run the frozen W2D live-provider corpora from the release-candidate commit. Verify collector custody, raw evidence, price derivation, baseline pass, and candidate verdict receipts; missing or synthetic samples remain non-qualifying.
+3. Run the two-room 3x3 media soak from the same commit, including room-isolation canaries, head-of-line injection, Realtime/AI failure continuity, transcript/Scout fencing, resource limits, and recovery. Preserve the signed sanitized evidence packet.
+4. Run the production-shaped 90-day recall replay and catch-up checks. Verify semantic retrieval, source/ACL/purge lineage, honest partial-coverage labels, exact-window late-join recap, and zero cross-room or guest leakage.
+5. Execute the ten fixed-release `insights_opportunities_v1` pilots with at least two eligible human reviewers. Verify immutable evidence snapshots, bounded critic revisions, typed feedback, approval/capability enforcement, and no external write without current authority.
+6. Only after the receipts above pass, exercise the static W3 route canaries one seat at a time. Compare quality, latency, failure, retry, and cost against the frozen baseline; retain the prior route pointer and automatically roll back any negative verdict.
+7. Recheck `/readyz`, `/capabilities`, usage/price ledgers, provider console agreement, worker cursors, queue depth, and 24-hour/ten-sitting stability. Final commissioning fails closed if any AI lane is stale, unmetered, unattributed, or unable to reproduce its receipt.
 
 ## Operations And Authority Queue
 
@@ -99,4 +115,4 @@ Current phase: execution resumed by explicit user signal on 2026-07-22. W0 and W
 
 ## Execution Frontier
 
-Continue W2A with explicit consent-lane state, independent per-room Scout runtimes, exact catch-up delivery, two-room isolation/soak coverage, and actorized Pion before any media cutover. In parallel, connect W2B's proven contracts to production source/projection adapters and build the required 40-meeting/90-day corpus. W2C next needs its dedicated durable executor and feedback store before ten fixed-release pilots; it remains unreachable through the generic registry until those gates pass. The OpenAI quota canary remains an external recovery dependency, not authorization to weaken containment controls.
+Freeze and ship the intended W2-W4 repository changes to `axx/main`, install that exact commit on the VPS with all new AI/workflow/media-observer/restore paths default-off or shadow, and verify live readiness without touching `digitalocean_meeting_data`. Then stop. Resume at W5 item 1 only after the user confirms the production OpenAI project is topped up; do not infer provider recovery from a balance change alone.

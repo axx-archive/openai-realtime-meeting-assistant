@@ -8,9 +8,13 @@ import (
 )
 
 func TestPostgresPurgeLedgerSurvivesRepositoryRestartAndGatesRestore(t *testing.T) {
-	ctx, canonical, _ := migratedPostgresCanonicalStore(t)
+	ctx, canonical, registry := migratedPostgresCanonicalStore(t)
 	ledger := NewPostgresPurgeLedger(canonical.pool)
 	header, body := retentionFixture("artifact_body")
+	appendProjectionCanonicalEvent(t, ctx, canonical, registry, BrainProjectionCheckpointKey{
+		TenantID: header.Key.TenantID, ProjectorVersion: brainProjectionProjectorVersion, RoomID: officeRoomID,
+		SittingID: "retention-sitting", SourceFamily: header.Key.ObjectType,
+	}, header.Key.ObjectID, 1, "retention fixture")
 	retention := NewMemoryRetentionStore(ledger)
 	if _, err := retention.Register(ctx, header, body); err != nil {
 		t.Fatal(err)
@@ -56,9 +60,13 @@ func TestPostgresPurgeLedgerSurvivesRepositoryRestartAndGatesRestore(t *testing.
 }
 
 func TestPostgresPurgeLedgerRetryIsIdempotentAndConflictFailsClosed(t *testing.T) {
-	ctx, canonical, _ := migratedPostgresCanonicalStore(t)
+	ctx, canonical, registry := migratedPostgresCanonicalStore(t)
 	ledger := NewPostgresPurgeLedger(canonical.pool)
 	header, _ := retentionFixture("artifact_body")
+	appendProjectionCanonicalEvent(t, ctx, canonical, registry, BrainProjectionCheckpointKey{
+		TenantID: header.Key.TenantID, ProjectorVersion: brainProjectionProjectorVersion, RoomID: officeRoomID,
+		SittingID: "retention-sitting", SourceFamily: header.Key.ObjectType,
+	}, header.Key.ObjectID, 1, "retention fixture")
 	evidence := make(map[RetentionResourceClass]string, len(mandatoryPurgeClasses))
 	for _, class := range mandatoryPurgeClasses {
 		evidence[class] = "deleted"

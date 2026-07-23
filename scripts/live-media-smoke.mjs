@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, open, readFile, rm, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import {
@@ -15,6 +15,7 @@ import {
   validateScreenShareSnapshot,
   validateSoakProgressSnapshots,
   validateVideoTileMediaBounds,
+  mediaSoakProbeURL,
   videoProbeRendered
 } from './live-media-smoke-assertions.mjs'
 
@@ -28,6 +29,8 @@ const defaults = {
   durationMs: 0,
   desktopSharer: '',
   emitReport: '',
+	mediaSoakProbe: false,
+	faultControlDir: '',
   interactive: false,
   lateJoin: '',
   mobileViewport: null,
@@ -50,6 +53,8 @@ const reportStartedAt = new Date().toISOString()
 const pages = []
 const browsers = []
 let sharedBrowser = null
+const faultProofs = []
+let stopFaultProofMonitor = false
 
 let shuttingDown = false
 process.on('SIGINT', () => finish(130))
@@ -80,6 +85,7 @@ try {
   }
 
   await waitForExpectedRoomMedia(expectedParticipantNames({ includeLate: false }))
+	const faultProofMonitor = startFaultProofMonitor()
 
   const lateJoinSnapshots = lateJoinPlan.name ? await performLateJoin(lateJoinPlan) : []
   const expectedNames = expectedParticipantNames({ includeLate: true })
@@ -141,7 +147,9 @@ try {
     ...validateSoakProgressSnapshots(soakSnapshots, expectedNames),
     ...validatePostLeaveParticipants(postLeaveParticipants)
   ]
-  const result = { ok: failures.length === 0, failures, snapshots: boardSnapshots, initialSnapshots, mobileMoreMenuSnapshots, activeSpeakerSnapshots, pinInteractions, pinSnapshots, mobileToolRailSnapshots, screenShareSnapshots, recordingSnapshots, lateJoinSnapshots, soakSnapshots, postLeaveParticipants }
+	stopFaultProofMonitor = true
+	await faultProofMonitor
+  const result = { ok: failures.length === 0, failures, snapshots: boardSnapshots, initialSnapshots, mobileMoreMenuSnapshots, activeSpeakerSnapshots, pinInteractions, pinSnapshots, mobileToolRailSnapshots, screenShareSnapshots, recordingSnapshots, lateJoinSnapshots, soakSnapshots, postLeaveParticipants, faultProofs }
   await emitReport(result)
   console.log(JSON.stringify(result, null, 2))
   await finish(failures.length === 0 ? 0 : 1)
@@ -212,6 +220,11 @@ function parseArgs(args) {
       parsed.separateBrowsers = true
     } else if (arg === '--interactive') {
       parsed.interactive = true
+	} else if (arg === '--media-soak-probe') {
+	  parsed.mediaSoakProbe = true
+	} else if (arg === '--fault-control-dir' && next) {
+	  parsed.faultControlDir = resolve(next)
+	  index++
     } else if (arg === '--duration-ms' && next) {
       parsed.durationMs = Math.max(0, Number(next) || 0)
       index++
@@ -305,6 +318,133 @@ function uniqueNames(names) {
   return Array.from(new Set(names.map(name => String(name || '').trim()).filter(Boolean)))
 }
 
+async function startFaultProofMonitor() {
+	if (!config.mediaSoakProbe || !config.faultControlDir) return
+	await mkdir(config.faultControlDir, { recursive: true, mode: 0o700 })
+	let pool = await prepareTransientBrowserPool('initial')
+	while (!stopFaultProofMonitor) {
+	  const commandPath = join(config.faultControlDir, 'command.json')
+	  let command
+	  try {
+	    command = JSON.parse(await readFile(commandPath, 'utf8'))
+	    await unlink(commandPath)
+	  } catch (error) {
+	    if (error?.code !== 'ENOENT') log('fault-proof-command-error', error.message)
+	    await sleep(100)
+	    continue
+	  }
+	  let response
+	  try {
+	    response = await executeFaultProof(command, pool)
+	    faultProofs.push(response)
+	    pool = await prepareTransientBrowserPool(String(command.kind || 'next'))
+	  } catch (error) {
+	    response = {
+	      schema: 'bonfire.w2a.browser-fault-proof.v1',
+	      requestId: String(command?.requestId || ''), kind: String(command?.kind || ''), ok: false,
+	      error: String(error?.message || error).slice(0, 500), attempts: []
+	    }
+	  }
+	  await writeExclusiveJSON(join(config.faultControlDir, `response-${response.requestId}.json`), response)
+	}
+}
+
+async function prepareTransientBrowserPool(label) {
+	return Promise.all(config.participants.map(async (name, index) => {
+	  const browser = await createBrowser(`transient-${label}-${index + 1}`)
+	  const page = await openPage(name, browser)
+	  return page
+	}))
+}
+
+async function executeFaultProof(command, pool) {
+	const requestId = String(command?.requestId || '')
+	const kind = String(command?.kind || '')
+	const now = Date.now()
+	const deadline = new Date(command?.deadline || '').getTime()
+	if (!/^[0-9a-f]{64}$/.test(requestId) || !['head-of-line', 'ai-failure'].includes(kind)
+	    || !Number.isFinite(deadline) || deadline <= now || deadline - now > 30_000
+	    || !Array.isArray(pool) || pool.length !== 3) {
+	  throw new Error('invalid or expired fixed fault-proof command')
+	}
+	const attempts = await Promise.all(pool.map(async transientPage => {
+	  const pageIndex = pages.findIndex(page => page.name === transientPage.name)
+	  if (pageIndex < 0) throw new Error(`missing incumbent browser for ${transientPage.name}`)
+	  const incumbent = pages[pageIndex]
+	  await joinRoom(transientPage)
+	  await waitFor(transientPage, `${transientPage.name} correlated media proof`, `
+	    (async () => {
+	      if (!window.__bonfireMediaSoakProbe || !pc || pc.connectionState !== 'connected') return false
+	      const proof = window.__bonfireMediaSoakProbe.snapshot()
+	      const kinds = new Set(proof.events.map(event => event.kind))
+	      if (![...'join offer answer ontrack'.split(' ')].every(kind => kinds.has(kind))) return false
+	      const stats = await pc.getStats()
+	      let packets = 0
+	      stats.forEach(stat => {
+	        if (stat.type === 'inbound-rtp') packets += Number(stat.packetsReceived) || 0
+	        if (stat.type === 'outbound-rtp') packets += Number(stat.packetsSent) || 0
+	      })
+	      return packets > 0
+	    })()
+	  `)
+	  const before = await mediaSoakBrowserProofState(transientPage)
+	  let after = before
+	  const progressStarted = Date.now()
+	  while (Date.now() - progressStarted < 1500 && after.rtpPackets <= before.rtpPackets) {
+	    await sleep(100)
+	    after = await mediaSoakBrowserProofState(transientPage)
+	  }
+	  const offer = after.events.find(event => event.kind === 'offer')
+	  const answer = after.events.find(event => event.kind === 'answer' && event.offerId === offer?.offerId && event.revision === offer?.revision)
+	  const join = after.events.find(event => event.kind === 'join')
+	  const ontrack = after.events.find(event => event.kind === 'ontrack')
+	  if (!join || !offer || !answer || !ontrack || after.rtpPackets <= before.rtpPackets) {
+	    throw new Error(`browser ${transientPage.name} omitted correlated signaling or monotonic RTP`)
+	  }
+	  if (new Date(join.at).getTime() > new Date(offer.at).getTime()
+	      || new Date(offer.at).getTime() > new Date(answer.at).getTime()
+	      || new Date(join.at).getTime() > new Date(ontrack.at).getTime()) {
+	    throw new Error(`browser ${transientPage.name} signaling order is invalid`)
+	  }
+	  pages[pageIndex] = transientPage
+	  await closeBrowser(incumbent.browser)
+	  return {
+	    startedAt: join.at, completedAt: after.capturedAt, onTrackAt: ontrack.at, succeeded: true,
+	    clientId: after.clientId, offerCorrelation: `${offer.offerId}:${offer.revision}`,
+	    answerCorrelation: `${answer.offerId}:${answer.revision}`,
+	    rtpPacketsBefore: before.rtpPackets, rtpPacketsAfter: after.rtpPackets
+	  }
+	}))
+	if (new Set(attempts.map(attempt => attempt.clientId)).size !== 3) throw new Error('transient browser ids are not distinct')
+	return { schema: 'bonfire.w2a.browser-fault-proof.v1', requestId, kind, ok: true, attempts }
+}
+
+async function mediaSoakBrowserProofState(page) {
+	return evaluate(page, `
+	  (async () => {
+	    const proof = window.__bonfireMediaSoakProbe?.snapshot?.()
+	    if (!proof || !pc) return null
+	    const stats = await pc.getStats()
+	    let rtpPackets = 0
+	    stats.forEach(stat => {
+	      if (stat.type === 'inbound-rtp') rtpPackets += Number(stat.packetsReceived) || 0
+	      if (stat.type === 'outbound-rtp') rtpPackets += Number(stat.packetsSent) || 0
+	    })
+	    return { ...proof, rtpPackets, capturedAt: new Date().toISOString() }
+	  })()
+	`)
+}
+
+async function writeExclusiveJSON(path, value) {
+	const file = await open(path, 'wx', 0o600)
+	try {
+	  await file.writeFile(`${JSON.stringify(value)}\n`)
+	  await file.sync()
+	} finally {
+	  await file.close()
+	}
+}
+
 async function findDebugPort() {
   for (let attempt = 0; attempt < 20; attempt++) {
     const port = 9600 + Math.floor(Math.random() * 700)
@@ -387,7 +527,7 @@ async function openPage(name, browser) {
       text: event.exceptionDetails?.exception?.description || event.exceptionDetails?.text || ''
     })
   })
-  await client.send('Page.navigate', { url: config.url })
+  await client.send('Page.navigate', { url: mediaSoakProbeURL(config.url, config.mediaSoakProbe) })
   log('page', name, target.id)
   return page
 }

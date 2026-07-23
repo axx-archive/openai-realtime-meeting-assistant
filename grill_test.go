@@ -808,12 +808,19 @@ func TestRememberTranscriptBroadcastsWakeOnlyForMatchingText(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	meeting, ok := kanbanApp.meetings.activeRecord(officeRoomID)
+	if !ok {
+		t.Fatal("member admission did not open an office sitting")
+	}
+	enableFullTranscriptConsentForTest(t, kanbanApp, memberAdmissionPrincipal("aj@shareability.com"), officeRoomID, meeting.ID)
 
+	attributeNextTranscriptForTest(kanbanApp, officeRoomID, "AJ")
 	kanbanApp.rememberTranscript(officeRoomID, kanbanRealtimeEvent{
 		EventID:    "wake-event-1",
 		ItemID:     "wake-item-1",
 		Transcript: "We are scouting locations at a discount.",
 	}, "transcript_lane", "test-model")
+	attributeNextTranscriptForTest(kanbanApp, officeRoomID, "AJ")
 	kanbanApp.rememberTranscript(officeRoomID, kanbanRealtimeEvent{
 		EventID:    "wake-event-2",
 		ItemID:     "wake-item-2",

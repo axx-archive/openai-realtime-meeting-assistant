@@ -142,7 +142,7 @@ func TestConsentOutOfOrderOldGrantCannotReverseNewWithdrawal(t *testing.T) {
 
 func TestCanonicalConsentCheckerAdaptsExactObjectSitting(t *testing.T) {
 	store := NewMemoryConsentStore()
-	if _, err := store.Append(context.Background(), consentFixture("grant", ConsentGranted, ConsentTranscription)); err != nil {
+	if _, err := store.Append(context.Background(), consentFixture("grant", ConsentGranted, ConsentAudioCapture, ConsentTranscription)); err != nil {
 		t.Fatal(err)
 	}
 	checker := CanonicalConsentChecker{Store: store, PolicyVersion: "policy-v1"}

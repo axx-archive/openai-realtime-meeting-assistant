@@ -779,6 +779,9 @@ func (app *kanbanBoardApp) endMeetingForIdle(roomID string, generation uint64) {
 	if !changed {
 		return
 	}
+	if roomID == officeRoomID {
+		app.cancelOfficeScoutWorkForSitting(closed.ID)
+	}
 	// The meeting is over: deliver anything queued with deliver
 	// "after_meeting" before the id rotates (idempotent — archiveMeeting may
 	// flush the same queue).

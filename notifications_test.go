@@ -421,6 +421,44 @@ func TestWebsocketTargetedNotificationScopedToRecipientSession(t *testing.T) {
 	}
 }
 
+func TestTenantBoundCatchUpExcludedFromSameEmailWebsocketAndBacklog(t *testing.T) {
+	t.Setenv("BONFIRE_CANONICAL_TENANT_ID", "tenant-a")
+	server := newIsolatedWebsocketServer(t)
+	email := "tom@shareability.com"
+	private := notificationRecord{ID: "catch-up-notification-tenant-b", TenantID: "tenant-b", UserEmail: email,
+		Kind: notificationKindInfo, Text: "TENANT-B-PRIVATE-CANARY", Tool: "catch_up_recap",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), ExpiresAt: time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano)}
+	if _, err := kanbanApp.persistCommittedCatchUpNotification(private); err != nil {
+		t.Fatal(err)
+	}
+
+	conn := dialIsolatedWebsocket(t, server, email)
+	writeNativeWebsocketEvent(t, conn, "participant", map[string]any{})
+	raw := waitForKanbanEvent(t, conn, "notification_backlog", 5*time.Second)
+	var backlog []map[string]any
+	if err := json.Unmarshal(raw, &backlog); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range backlog {
+		if item["id"] == private.ID || strings.Contains(asString(item["text"]), "TENANT-B-PRIVATE-CANARY") {
+			t.Fatalf("tenant-B backlog leaked to tenant-A same-email socket: %+v", backlog)
+		}
+	}
+	pushNotificationRecordLocal(private)
+	marker, err := kanbanApp.createNotification(email, notificationKindInfo, "tenant-A generic marker", "", "", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = waitForKanbanEvent(t, conn, "notification", 5*time.Second)
+	var received map[string]any
+	if err := json.Unmarshal(raw, &received); err != nil {
+		t.Fatal(err)
+	}
+	if received["id"] != marker.ID || strings.Contains(asString(received["text"]), "TENANT-B-PRIVATE-CANARY") {
+		t.Fatalf("tenant-bound websocket fan-out leaked: %+v", received)
+	}
+}
+
 // The system emitter: a finished agent thread notifies its creator durably,
 // carrying the artifact id so the client can route straight to the result.
 func TestAgentThreadCompletionNotifiesCreator(t *testing.T) {

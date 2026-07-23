@@ -160,6 +160,7 @@ func TestSyntheticSilenceBypassesTranscriptLane(t *testing.T) {
 
 func TestPausedRecordingBypassesTranscriptLaneAndMemory(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
+	admitMemberWithTranscriptConsentForTest(t, app, officeRoomID, "aj@shareability.com")
 	lane := &meetingTranscriptionLane{input: make(chan []int16, 1)}
 	app.mu.Lock()
 	app.transcriptLane = lane
@@ -223,6 +224,7 @@ func TestPausedRecordingBypassesTranscriptLaneAndMemory(t *testing.T) {
 	}
 
 	app.setTranscriptRecording(true, "AJ")
+	attributeNextTranscriptForTest(app, officeRoomID, "AJ")
 	app.rememberTranscript(officeRoomID, kanbanRealtimeEvent{
 		EventID:    "event-resumed-transcript",
 		ItemID:     "item-resumed-transcript",
@@ -242,6 +244,8 @@ func TestTranscriptionLaneCompletedTranscriptWritesSourceMetadata(t *testing.T) 
 	t.Setenv("OPENAI_TRANSCRIPT_MODEL", "gpt-realtime-whisper")
 
 	app := newKanbanBoardApp()
+	admitMemberWithTranscriptConsentForTest(t, app, officeRoomID, "tom@shareability.com")
+	attributeNextTranscriptForTest(app, officeRoomID, "Tom")
 	app.handleTranscriptionLaneEvent([]byte(`{
 		"type":"conversation.item.input_audio_transcription.completed",
 		"event_id":"event-transcript-1",

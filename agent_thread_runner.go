@@ -578,7 +578,9 @@ func (app *kanbanBoardApp) deliverArtifactToOrigin(artifact meetingMemoryEntry, 
 		if !ok {
 			return
 		}
-		broadcastSignedInKanbanEvent("room_chat", payload)
+		if scope, current := app.roomPublicationScope(officeRoomID, originMeetingID); current {
+			broadcastScopedRoomKanbanEvent(scope, "room_chat", payload)
+		}
 	case agentThreadOriginChannel:
 		channelID := strings.TrimSpace(artifact.Metadata["originId"])
 		if channelID == "" {

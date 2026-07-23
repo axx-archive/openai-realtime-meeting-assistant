@@ -8,12 +8,15 @@ package main
 // per-room liveness reap, and guest attribution.
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -694,14 +697,20 @@ func TestGuestTranscriptAttributionStoredAsGuestName(t *testing.T) {
 	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
 	app := newKanbanBoardApp()
 	roomID := "room-attrib"
+	guestSessionKey := strings.Repeat("a", 64)
+	sittingID := app.prepareMeetingSittingID(roomID)
 
-	admitted, _, err := app.admitGuestParticipant(roomID, "session-a", "Sam", "sock-a")
+	admitted, _, err := app.admitGuestWithAnchor(context.Background(), roomID, guestSessionKey, "Sam", "sock-a", sittingID)
 	if err != nil {
 		t.Fatalf("admit guest: %v", err)
 	}
 	if admitted != "Guest Sam" {
 		t.Fatalf("admitted=%q", admitted)
 	}
+	if got := app.noteMeetingAdmissionForSitting(roomID, admitted, sittingID); got != sittingID {
+		t.Fatalf("opened sitting=%q want=%q", got, sittingID)
+	}
+	enableFullTranscriptConsentForTest(t, app, guestAdmissionPrincipal(guestSessionKey), roomID, sittingID)
 
 	// Feed the room's attribution state exactly as its mixer listener would.
 	now := time.Now().UTC()
@@ -801,6 +810,424 @@ func TestCrossRoomAccountEvictionWithoutCrossRoomTrackTeardown(t *testing.T) {
 }
 
 /* ---------- lazy media lifecycle + mediaGen (§4.4) ---------- */
+
+func TestOfficeMediaFirstStartIsPositiveAndConcurrentIdempotent(t *testing.T) {
+	resetRoomMediaActorsForTest(t)
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
+	t.Setenv("MEETING_TRANSCRIPT_LANE_ENABLED", "0")
+	app := newKanbanBoardApp()
+
+	const admissions = 32
+	start := make(chan struct{})
+	generations := make(chan uint64, admissions)
+	var wait sync.WaitGroup
+	for range admissions {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			generations <- app.ensureRoomMedia(officeRoomID)
+		}()
+	}
+	close(start)
+	wait.Wait()
+	close(generations)
+	for generation := range generations {
+		if generation != 1 {
+			t.Fatalf("concurrent office admission captured generation=%d, want 1", generation)
+		}
+	}
+	app.mu.Lock()
+	state := app.roomLiveLocked(officeRoomID)
+	generation, actor := state.mediaGen, state.mediaActor
+	app.mu.Unlock()
+	if generation != 1 || actor == nil || actor.generation != generation {
+		t.Fatalf("office media owner mismatch generation=%d actor=%+v", generation, actor)
+	}
+}
+
+func TestOfficeStaleStartupCannotPublishOrWedgeSuccessor(t *testing.T) {
+	resetRoomMediaActorsForTest(t)
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
+	app := newKanbanBoardApp()
+	firstGeneration := app.ensureRoomMedia(officeRoomID)
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	officeRealtimeBeforePublishProbe = func() { close(entered); <-release }
+	t.Cleanup(func() { officeRealtimeBeforePublishProbe = nil })
+	app.mu.Lock()
+	app.realtimeStarting = true
+	app.realtimeStartToken++
+	token := app.realtimeStartToken
+	app.mu.Unlock()
+	result := make(chan error, 1)
+	go func() { result <- app.startRealtimePeer("test-key", "test-model", firstGeneration, token) }()
+	<-entered
+	app.teardownOfficeMediaAfterIdle()
+	successorGeneration := app.ensureRoomMedia(officeRoomID)
+	close(release)
+	if err := <-result; !errors.Is(err, ErrRoomScoutFence) {
+		t.Fatalf("stale peer startup err=%v, want generation fence", err)
+	}
+	app.mu.Lock()
+	peer, starting := app.pc, app.realtimeStarting
+	state := app.roomLiveLocked(officeRoomID)
+	app.mu.Unlock()
+	if peer != nil || starting || successorGeneration <= firstGeneration || state.mediaActor == nil || state.mediaGen != successorGeneration {
+		t.Fatalf("stale startup wedged successor peer=%v starting=%v first=%d successor=%d stateGen=%d", peer, starting, firstGeneration, successorGeneration, state.mediaGen)
+	}
+
+	transcriptEntered := make(chan struct{})
+	transcriptRelease := make(chan struct{})
+	officeTranscriptionBeforePublishProbe = func() { close(transcriptEntered); <-transcriptRelease }
+	t.Cleanup(func() { officeTranscriptionBeforePublishProbe = nil })
+	app.mu.Lock()
+	app.transcriptionStarting = true
+	app.transcriptionStartToken++
+	laneToken := app.transcriptionStartToken
+	app.mu.Unlock()
+	laneDone := make(chan struct{})
+	go func() {
+		app.startTranscriptionLane("test-key", successorGeneration, laneToken)
+		close(laneDone)
+	}()
+	<-transcriptEntered
+	app.teardownOfficeMediaAfterIdle()
+	finalGeneration := app.ensureRoomMedia(officeRoomID)
+	close(transcriptRelease)
+	<-laneDone
+	app.mu.Lock()
+	lane, laneStarting := app.transcriptLane, app.transcriptionStarting
+	app.mu.Unlock()
+	if lane != nil || laneStarting || finalGeneration <= successorGeneration {
+		t.Fatalf("stale lane startup wedged successor lane=%v starting=%v generation=%d", lane, laneStarting, finalGeneration)
+	}
+}
+
+func TestStaleTranscriptionEventCannotConsumeSuccessorWindow(t *testing.T) {
+	resetRoomMediaActorsForTest(t)
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
+	app := newKanbanBoardApp()
+	app.memory.ensureMeetingID(officeRoomID)
+	generation := app.ensureRoomMedia(officeRoomID)
+	app.mu.Lock()
+	scope := RoomScoutScope{RoomID: officeRoomID, SittingID: app.roomLiveLocked(officeRoomID).mediaSittingID, MediaGeneration: generation}
+	app.mu.Unlock()
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	transcriptionEventAfterScopeProbe = func() { close(entered); <-release }
+	t.Cleanup(func() { transcriptionEventAfterScopeProbe = nil })
+	done := make(chan struct{})
+	go func() {
+		app.handleTranscriptionLaneEventForScope(scope, []byte(`{"type":"conversation.item.input_audio_transcription.failed"}`), "test-model")
+		close(done)
+	}()
+	<-entered
+	app.teardownOfficeMediaAfterIdle()
+	successorGeneration := app.ensureRoomMedia(officeRoomID)
+	app.mu.Lock()
+	successorState := app.roomLiveLocked(officeRoomID)
+	successorScope := RoomScoutScope{RoomID: officeRoomID, SittingID: successorState.mediaSittingID, MediaGeneration: successorGeneration}
+	successorState.pendingAttributionWindows = []attributionWindow{{startedAt: time.Now().UTC(), stoppedAt: time.Now().UTC()}}
+	app.mu.Unlock()
+	app.pushTranscriptionSegmentSecondsForLaneScope(successorScope, 7)
+	app.pushTranscriptionSegmentSecondsForLaneScope(scope, 99)
+	app.resetTranscriptionSegmentSecondsForLaneScope(scope)
+	app.noteRealtimeSpeechStartedForScope(successorScope)
+	app.discardRealtimeSpeechForScope(scope)
+	close(release)
+	<-done
+	app.mu.Lock()
+	finalState := app.roomLiveLocked(officeRoomID)
+	remaining := len(finalState.pendingAttributionWindows)
+	successorSpeechRetained := !finalState.currentSpeechStartedAt.IsZero()
+	app.mu.Unlock()
+	if remaining != 1 {
+		t.Fatalf("stale transcription event consumed successor window: remaining=%d", remaining)
+	}
+	if !successorSpeechRetained {
+		t.Fatal("stale transcription scope cleared successor speech markers")
+	}
+	if seconds := app.popTranscriptionSegmentSecondsForLaneScope(successorScope); seconds != 7 {
+		t.Fatalf("stale transcription scope mutated successor meter FIFO: seconds=%v", seconds)
+	}
+}
+
+func TestTranscriptPersistenceScopeRolloverCannotConsumeSuccessorWindow(t *testing.T) {
+	resetRoomMediaActorsForTest(t)
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
+	t.Setenv("MEETING_TRANSCRIPT_LANE_ENABLED", "0")
+	app := newKanbanBoardApp()
+	app.memory.ensureMeetingID(officeRoomID)
+	generation := app.ensureRoomMedia(officeRoomID)
+	app.mu.Lock()
+	scope := RoomScoutScope{
+		RoomID:          officeRoomID,
+		SittingID:       app.roomLiveLocked(officeRoomID).mediaSittingID,
+		MediaGeneration: generation,
+	}
+	app.roomLiveLocked(officeRoomID).pendingAttributionWindows = []attributionWindow{{startedAt: time.Now().UTC(), stoppedAt: time.Now().UTC()}}
+	app.mu.Unlock()
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	transcriptPersistenceAfterScopeProbe = func() { close(entered); <-release }
+	t.Cleanup(func() { transcriptPersistenceAfterScopeProbe = nil })
+	done := make(chan struct{})
+	go func() {
+		app.rememberTranscriptForMediaScope(scope, kanbanRealtimeEvent{
+			EventID:    "stale-persistence-event",
+			ItemID:     "stale-persistence-item",
+			Transcript: "This stale transcript must not enter the successor sitting.",
+		}, "transcript_lane", "test-model")
+		close(done)
+	}()
+	<-entered
+
+	app.teardownOfficeMediaAfterIdle()
+	successorGeneration := app.ensureRoomMedia(officeRoomID)
+	app.mu.Lock()
+	successorState := app.roomLiveLocked(officeRoomID)
+	successorState.pendingAttributionWindows = []attributionWindow{{startedAt: time.Now().UTC(), stoppedAt: time.Now().UTC()}}
+	successorSittingID := successorState.mediaSittingID
+	app.mu.Unlock()
+	close(release)
+	<-done
+
+	app.mu.Lock()
+	remaining := len(app.roomLiveLocked(officeRoomID).pendingAttributionWindows)
+	app.mu.Unlock()
+	if remaining != 1 {
+		t.Fatalf("stale persistence consumed successor attribution window: remaining=%d", remaining)
+	}
+	if successorGeneration <= generation || successorSittingID == "" {
+		t.Fatalf("successor scope not installed: old=%d successor=%d sitting=%q", generation, successorGeneration, successorSittingID)
+	}
+	for _, entry := range app.memory.snapshot(0) {
+		if entry.ID == "stale-persistence-event" || entry.Metadata["eventId"] == "stale-persistence-event" || strings.Contains(entry.Text, "stale transcript") {
+			t.Fatalf("stale scoped transcript persisted into memory: %+v", entry)
+		}
+	}
+}
+
+func TestRestartRealtimePeerRolloverRetriggersSuccessorOwner(t *testing.T) {
+	resetRoomMediaActorsForTest(t)
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
+	t.Setenv("MEETING_TRANSCRIPT_LANE_ENABLED", "0")
+	app := newKanbanBoardApp()
+	app.memory.ensureMeetingID(officeRoomID)
+	firstGeneration := app.ensureRoomMedia(officeRoomID)
+	oldPeer, err := newPeerConnection()
+	if err != nil {
+		t.Fatalf("create old realtime peer: %v", err)
+	}
+	app.mu.Lock()
+	app.apiKey = "test-key"
+	app.pc = oldPeer
+	app.realtimeMediaGen = firstGeneration
+	app.mu.Unlock()
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	connectHold := make(chan struct{})
+	var releaseOnce sync.Once
+	var connectOnce sync.Once
+	var publishCalls atomic.Int32
+	previousPublishProbe := officeRealtimeBeforePublishProbe
+	previousConnectProbe := officeRealtimeBeforeConnectProbe
+	officeRealtimeBeforePublishProbe = func() {
+		if publishCalls.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+	}
+	officeRealtimeBeforeConnectProbe = func() bool {
+		<-connectHold
+		return true
+	}
+	t.Cleanup(func() {
+		officeRealtimeBeforePublishProbe = previousPublishProbe
+		officeRealtimeBeforeConnectProbe = previousConnectProbe
+		releaseOnce.Do(func() { close(release) })
+		_ = app.Close()
+		connectOnce.Do(func() { close(connectHold) })
+	})
+
+	restartDone := make(chan struct{})
+	go func() {
+		app.restartRealtimePeer("scope-rollover-test")
+		close(restartDone)
+	}()
+	<-entered
+	app.mu.Lock()
+	oldRestartToken := app.realtimeRestartToken
+	oldStartToken := app.realtimeStartToken
+	app.apiKey = ""
+	app.mu.Unlock()
+	if oldRestartToken == 0 || oldStartToken == 0 {
+		t.Fatalf("restart did not install tokens: restart=%d start=%d", oldRestartToken, oldStartToken)
+	}
+
+	app.teardownOfficeMediaAfterIdle()
+	successorGeneration := app.ensureRoomMedia(officeRoomID)
+	app.mu.Lock()
+	if app.pc != nil {
+		app.mu.Unlock()
+		t.Fatal("successor unexpectedly started before stale restart released")
+	}
+	app.apiKey = "test-key"
+	app.mu.Unlock()
+	releaseOnce.Do(func() { close(release) })
+	<-restartDone
+
+	deadline := time.Now().Add(3 * time.Second)
+	var successorPeer *webrtc.PeerConnection
+	for time.Now().Before(deadline) {
+		app.mu.Lock()
+		successorPeer = app.pc
+		currentGeneration := app.realtimeMediaGen
+		starting := app.realtimeStarting
+		app.mu.Unlock()
+		if successorPeer != nil && currentGeneration == successorGeneration && !starting {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	app.mu.Lock()
+	currentPeer := app.pc
+	currentGeneration := app.realtimeMediaGen
+	currentRestartToken := app.realtimeRestartToken
+	currentStartToken := app.realtimeStartToken
+	state := app.roomLiveLocked(officeRoomID)
+	app.mu.Unlock()
+	if currentPeer == nil || currentPeer != successorPeer || currentPeer == oldPeer || currentGeneration != successorGeneration || state.mediaActor == nil || state.mediaGen != successorGeneration {
+		t.Fatalf("automatic restart did not publish successor owner: peer=%p successor=%p old=%p realtimeGen=%d stateGen=%d successorGen=%d", currentPeer, successorPeer, oldPeer, currentGeneration, state.mediaGen, successorGeneration)
+	}
+	if currentRestartToken == oldRestartToken || currentStartToken == oldStartToken {
+		t.Fatalf("stale restart tokens remained authoritative: restart=%d start=%d", currentRestartToken, currentStartToken)
+	}
+	if oldPeer.ConnectionState() != webrtc.PeerConnectionStateClosed {
+		t.Fatalf("old peer state=%s, want closed", oldPeer.ConnectionState())
+	}
+
+	app.restartRealtimePeerIfStill(oldPeer, webrtc.PeerConnectionStateClosed, 0, "stale-old-peer")
+	app.mu.Lock()
+	afterStaleCallback := app.pc
+	app.mu.Unlock()
+	if afterStaleCallback != successorPeer {
+		t.Fatalf("old peer callback displaced successor: got=%p want=%p", afterStaleCallback, successorPeer)
+	}
+}
+
+func TestOfficeMediaTeardownRejoinAdvancesGenerationAndDeniesStaleOwner(t *testing.T) {
+	resetRoomMediaActorsForTest(t)
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
+	t.Setenv("MEETING_TRANSCRIPT_LANE_ENABLED", "0")
+	app := newKanbanBoardApp()
+	firstGeneration := app.ensureRoomMedia(officeRoomID)
+	if firstGeneration == 0 {
+		t.Fatal("first office media generation remained zero")
+	}
+	oldActor := roomMediaActorForGeneration(officeRoomID, firstGeneration)
+	if oldActor == nil {
+		t.Fatal("first office generation had no actor")
+	}
+	app.mu.Lock()
+	seedState := app.roomLiveLocked(officeRoomID)
+	seedState.audioActivity = []participantAudioFrame{{At: time.Now().UTC(), EnergyByParticipant: map[string]float64{"Old": 1}}}
+	seedState.currentSpeechStartedAt = time.Now().UTC()
+	seedState.currentSpeechStoppedAt = time.Now().UTC()
+	seedState.pendingAttributionWindows = []attributionWindow{{startedAt: time.Now().UTC(), stoppedAt: time.Now().UTC()}}
+	app.mu.Unlock()
+
+	app.teardownOfficeMediaAfterIdle()
+	teardownGeneration := app.roomMediaGeneration(officeRoomID)
+	if teardownGeneration <= firstGeneration {
+		t.Fatalf("teardown generation=%d, want > %d", teardownGeneration, firstGeneration)
+	}
+	app.mu.Lock()
+	clearedState := app.roomLiveLocked(officeRoomID)
+	retainedAttribution := len(clearedState.audioActivity) != 0 || !clearedState.currentSpeechStartedAt.IsZero() || !clearedState.currentSpeechStoppedAt.IsZero() || len(clearedState.pendingAttributionWindows) != 0
+	app.mu.Unlock()
+	if retainedAttribution {
+		t.Fatal("office teardown retained prior-sitting attribution state")
+	}
+	if roomMediaActorForGeneration(officeRoomID, firstGeneration) != nil || requestRoomMediaCommandForGeneration(officeRoomID, firstGeneration, roomMediaCommandAdmit) {
+		t.Fatal("old office generation remained authorized after teardown")
+	}
+
+	rejoinGeneration := app.ensureRoomMedia(officeRoomID)
+	if rejoinGeneration <= teardownGeneration {
+		t.Fatalf("rejoin generation=%d, want > teardown generation %d", rejoinGeneration, teardownGeneration)
+	}
+	if actor := roomMediaActorForGeneration(officeRoomID, rejoinGeneration); actor == nil || actor == oldActor {
+		t.Fatalf("rejoin did not install a fresh generation owner: actor=%+v", actor)
+	}
+	if !app.roomMediaGenerationCurrent(officeRoomID, rejoinGeneration) || app.roomMediaGenerationCurrent(officeRoomID, firstGeneration) {
+		t.Fatal("office generation-current fence accepted the stale sitting")
+	}
+
+	lane := newMeetingTranscriptionLaneForRoomGeneration(app, "test-key", "test-model", officeRoomID, rejoinGeneration)
+	if lane.mediaGeneration != rejoinGeneration {
+		t.Fatalf("transcript lane generation=%d, want %d", lane.mediaGeneration, rejoinGeneration)
+	}
+	app.mu.Lock()
+	app.realtimeMediaGen = rejoinGeneration
+	app.mu.Unlock()
+	if got := app.currentRealtimeMediaGeneration(); got != rejoinGeneration {
+		t.Fatalf("Scout generation=%d, want %d", got, rejoinGeneration)
+	}
+	staleSpeechStarted := []byte(`{"type":"input_audio_buffer.speech_started"}`)
+	app.handleRealtimeEventForGeneration(firstGeneration, staleSpeechStarted)
+	app.handleTranscriptionLaneEventForRoomGeneration(officeRoomID, firstGeneration, staleSpeechStarted, "test-model")
+	app.mu.Lock()
+	staleAttribution := app.roomLiveLocked(officeRoomID).currentSpeechStartedAt
+	app.mu.Unlock()
+	if !staleAttribution.IsZero() {
+		t.Fatal("stale Scout/transcript generation changed successor attribution")
+	}
+	app.handleTranscriptionLaneEventForRoomGeneration(officeRoomID, rejoinGeneration, staleSpeechStarted, "test-model")
+	app.mu.Lock()
+	currentAttribution := app.roomLiveLocked(officeRoomID).currentSpeechStartedAt
+	app.roomLiveLocked(officeRoomID).currentSpeechStartedAt = time.Time{}
+	app.mu.Unlock()
+	if currentAttribution.IsZero() {
+		t.Fatal("current transcript generation did not reach attribution")
+	}
+
+	currentWriter := mediaSoakTestWriter(t)
+	staleWriter := mediaSoakTestWriter(t)
+	listLock.Lock()
+	previousPeers := peerConnections
+	peerConnections = []peerConnectionState{
+		{sessionID: "office-current-generation", roomID: officeRoomID, sittingID: "office-sitting", mediaGeneration: rejoinGeneration, websocket: currentWriter},
+		{sessionID: "office-stale-generation", roomID: officeRoomID, sittingID: "office-sitting", mediaGeneration: firstGeneration, websocket: staleWriter},
+	}
+	listLock.Unlock()
+	t.Cleanup(func() {
+		listLock.Lock()
+		peerConnections = previousPeers
+		listLock.Unlock()
+	})
+	acknowledgements, err := broadcastScopedRoomKanbanEventAcknowledged(RoomScoutScope{
+		RoomID: officeRoomID, SittingID: "office-sitting", MediaGeneration: rejoinGeneration,
+	}, "room_chat", map[string]any{"id": "office-generation-proof"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := map[string]scopedRoomDeliveryAcknowledgement{}
+	for _, acknowledgement := range acknowledgements {
+		results[acknowledgement.SessionID] = acknowledgement
+	}
+	if !results["office-current-generation"].Authorized || !results["office-current-generation"].Delivered {
+		t.Fatalf("current office generation was denied: %+v", results)
+	}
+	if results["office-stale-generation"].Authorized || results["office-stale-generation"].Delivered {
+		t.Fatalf("stale office generation received publication: %+v", results)
+	}
+}
 
 func TestNamedRoomMediaLazyLifecycle(t *testing.T) {
 	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))

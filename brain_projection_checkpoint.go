@@ -70,6 +70,21 @@ func (key BrainProjectionCheckpointKey) advisoryLockID() int64 {
 	return int64(binary.BigEndian.Uint64(hash.Sum(nil)[:8]))
 }
 
+// sourceAdvisoryLockID excludes projector version: canonical mutations and
+// every projector publication for the same tenant/family/room/sitting must
+// share one PostgreSQL transaction boundary.
+func (key BrainProjectionCheckpointKey) sourceAdvisoryLockID() int64 {
+	hash := sha256.New()
+	_, _ = hash.Write([]byte("bonfire-brain-projection-source-v1"))
+	for _, value := range []string{key.TenantID, key.SourceFamily, key.RoomID, key.SittingID} {
+		var size [8]byte
+		binary.BigEndian.PutUint64(size[:], uint64(len(value)))
+		_, _ = hash.Write(size[:])
+		_, _ = hash.Write([]byte(value))
+	}
+	return int64(binary.BigEndian.Uint64(hash.Sum(nil)[:8]))
+}
+
 type BrainProjectionSourceState struct {
 	HighWater      int64
 	ManifestSHA256 [sha256.Size]byte
@@ -332,10 +347,19 @@ func (store *PostgresBrainProjectionCheckpointStore) Status(ctx context.Context,
 	return status, nil
 }
 
-func (store *PostgresBrainProjectionCheckpointStore) BeginRebuild(ctx context.Context, request BrainProjectionRebuildRequest) (BrainProjectionRebuildFence, error) {
+type brainProjectionRebuildTransactionHook func(context.Context, pgx.Tx, BrainProjectionRebuildFence) error
+
+// beginRebuild requires the caller to durably bind its authority in the same
+// transaction as the checkpoint fence. There is deliberately no exported or
+// hook-free rebuild API: an active fence without its authorization audit must
+// never become recoverable projection work.
+func (store *PostgresBrainProjectionCheckpointStore) beginRebuild(ctx context.Context, request BrainProjectionRebuildRequest, hook brainProjectionRebuildTransactionHook) (BrainProjectionRebuildFence, error) {
 	fence := BrainProjectionRebuildFence{Key: request.Key, StartSourceHighWater: request.StartSourceHighWater, EndSourceHighWater: request.EndSourceHighWater}
 	if err := request.Validate(); err != nil {
 		return fence, err
+	}
+	if hook == nil {
+		return fence, ErrBrainProjectionBackfillUnauthorized
 	}
 	if store == nil || store.pool == nil || store.sources == nil {
 		return fence, unavailableBrainProjectionCheckpoint("begin rebuild", nil)
@@ -347,6 +371,9 @@ func (store *PostgresBrainProjectionCheckpointStore) BeginRebuild(ctx context.Co
 	defer func() { _ = tx.Rollback(context.Background()) }()
 	if err := lockBrainProjectionCheckpoint(ctx, tx, request.Key); err != nil {
 		return fence, unavailableBrainProjectionCheckpoint("lock rebuild fence", err)
+	}
+	if err := lockBrainProjectionSource(ctx, tx, request.Key); err != nil {
+		return fence, unavailableBrainProjectionCheckpoint("lock rebuild source", err)
 	}
 	source, err := store.sources.ResolveBrainProjectionSourceState(ctx, tx, request.Key)
 	if err != nil {
@@ -367,6 +394,9 @@ func (store *PostgresBrainProjectionCheckpointStore) BeginRebuild(ctx context.Co
 		if current.RebuildGeneration == request.ExpectedGeneration+1 && current.RebuildStartHighWater == request.StartSourceHighWater &&
 			current.RebuildEndHighWater == request.EndSourceHighWater && current.RebuildSourceManifestSHA256 == source.ManifestSHA256 {
 			fence.Generation, fence.Token, fence.StartedAt, fence.Existing = current.RebuildGeneration, current.RebuildFenceToken, current.RebuildStartedAt, true
+			if err := hook(ctx, tx, fence); err != nil {
+				return fence, err
+			}
 			if err := tx.Commit(ctx); err != nil {
 				return fence, unavailableBrainProjectionCheckpoint("commit idempotent rebuild fence", err)
 			}
@@ -400,6 +430,9 @@ func (store *PostgresBrainProjectionCheckpointStore) BeginRebuild(ctx context.Co
 	}
 	if err != nil {
 		return fence, unavailableBrainProjectionCheckpoint("persist rebuild fence", err)
+	}
+	if err := hook(ctx, tx, fence); err != nil {
+		return fence, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fence, unavailableBrainProjectionCheckpoint("commit rebuild fence", err)
@@ -440,12 +473,12 @@ func (store *PostgresBrainProjectionCheckpointStore) publishVerified(ctx context
 	if err := lockBrainProjectionCheckpoint(ctx, tx, publication.output.Key); err != nil {
 		return result, unavailableBrainProjectionCheckpoint("lock checkpoint publication", err)
 	}
+	if err := lockBrainProjectionSource(ctx, tx, publication.output.Key); err != nil {
+		return result, unavailableBrainProjectionCheckpoint("lock publication source", err)
+	}
 	source, err := store.sources.ResolveBrainProjectionSourceState(ctx, tx, publication.output.Key)
 	if err != nil {
 		return result, unavailableBrainProjectionCheckpoint("resolve publication source", err)
-	}
-	if !source.valid() || source.HighWater != publication.output.SourceHighWater || source.ManifestSHA256 != publication.output.SourceManifestSHA256 {
-		return result, ErrBrainProjectionSourceMoved
 	}
 	current, found, err := loadBrainProjectionCheckpoint(ctx, tx, publication.output.Key, true)
 	if err != nil {
@@ -453,6 +486,9 @@ func (store *PostgresBrainProjectionCheckpointStore) publishVerified(ctx context
 	}
 	output := publication.output
 	if !found {
+		if !source.valid() || source.HighWater != output.SourceHighWater || source.ManifestSHA256 != output.SourceManifestSHA256 {
+			return result, ErrBrainProjectionSourceMoved
+		}
 		if output.RebuildGeneration != 0 || !output.RebuildFenceToken.isZero() {
 			return result, ErrBrainProjectionFenceLost
 		}
@@ -467,7 +503,17 @@ func (store *PostgresBrainProjectionCheckpointStore) publishVerified(ctx context
 			if output.SourceHighWater != current.RebuildEndHighWater || output.SourceManifestSHA256 != current.RebuildSourceManifestSHA256 {
 				return result, ErrBrainProjectionRebuildIncomplete
 			}
+			// The rebuild publishes the exact source snapshot durably captured at
+			// authorization time. Canonical appends or purges that landed after
+			// that fence remain queued and make this checkpoint immediately stale;
+			// they must not prevent the bounded generation from completing.
+			if !source.valid() || source.HighWater < current.RebuildEndHighWater {
+				return result, ErrBrainProjectionSourceMoved
+			}
 		} else if current.HasPublication {
+			if !source.valid() || source.HighWater != output.SourceHighWater || source.ManifestSHA256 != output.SourceManifestSHA256 {
+				return result, ErrBrainProjectionSourceMoved
+			}
 			if output.RebuildFenceToken != current.PublishedRebuildFenceToken {
 				return result, ErrBrainProjectionFenceLost
 			}
@@ -666,5 +712,10 @@ func loadBrainProjectionCheckpoint(ctx context.Context, query brainProjectionChe
 
 func lockBrainProjectionCheckpoint(ctx context.Context, tx pgx.Tx, key BrainProjectionCheckpointKey) error {
 	_, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", key.advisoryLockID())
+	return err
+}
+
+func lockBrainProjectionSource(ctx context.Context, tx pgx.Tx, key BrainProjectionCheckpointKey) error {
+	_, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", key.sourceAdvisoryLockID())
 	return err
 }

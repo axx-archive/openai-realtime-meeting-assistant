@@ -1,10 +1,9 @@
 package main
 
-// insights_opportunities.go defines the closed W2C contract only. It does not
-// register or execute a process, expose an HTTP surface, persist feedback, or
-// contact an external system. A dedicated executor must supply authenticated
-// principals, the canonical authorization kernel, and a server-owned action
-// verifier before any of these records can become authoritative.
+// insights_opportunities.go defines the closed W2C records and authority
+// seams. The dedicated, default-off journaled executor lives in
+// insights_opportunities_executor.go; this process remains permanently absent
+// from the generic registry.
 
 import (
 	"bytes"
@@ -716,14 +715,23 @@ func (v InsightsOpportunitiesCriticVerdict) Validate(report InsightsOpportunitie
 // reviewer can still read every exact source revision under the current purge
 // generation and receives fresh server-owned membership/approval decisions.
 func (v InsightsOpportunitiesCriticVerdict) ValidateAuthorized(ctx context.Context, principal ACLPrincipal, kernel AuthorizationKernel, purgeResolver BrainPurgeGenerationResolver, verifier InsightsOpportunitiesAuthorizationVerifier, report InsightsOpportunitiesReport, request InsightsOpportunitiesRequest) error {
+	_, err := v.CheckpointAuthorized(ctx, principal, kernel, purgeResolver, verifier, report, request)
+	return err
+}
+
+// CheckpointAuthorized is the executor-facing form of ValidateAuthorized. It
+// returns the durable transition receipt so the dedicated W2C journal can bind
+// its local checkpoint to the server-owned transition across restart. The
+// public validation behavior remains identical through ValidateAuthorized.
+func (v InsightsOpportunitiesCriticVerdict) CheckpointAuthorized(ctx context.Context, principal ACLPrincipal, kernel AuthorizationKernel, purgeResolver BrainPurgeGenerationResolver, verifier InsightsOpportunitiesAuthorizationVerifier, report InsightsOpportunitiesReport, request InsightsOpportunitiesRequest) (InsightsOpportunitiesRunTransition, error) {
 	if err := v.Validate(report, request); err != nil {
-		return err
+		return InsightsOpportunitiesRunTransition{}, err
 	}
 	if err := validateInsightsAuthorizedActor(principal, request.TenantID, v.ReviewerID); err != nil {
-		return err
+		return InsightsOpportunitiesRunTransition{}, err
 	}
 	if err := reauthorizeInsightsSources(ctx, kernel, purgeResolver, principal, request.EvidenceSnapshot); err != nil {
-		return fmt.Errorf("critic evidence reauthorization failed: %w", err)
+		return InsightsOpportunitiesRunTransition{}, fmt.Errorf("critic evidence reauthorization failed: %w", err)
 	}
 	target := InsightsOpportunitiesAuthorizationTarget{
 		Purpose: "critic_verdict_acceptance", TenantID: request.TenantID, ResourceType: "insights_report",
@@ -734,16 +742,16 @@ func (v InsightsOpportunitiesCriticVerdict) ValidateAuthorized(ctx context.Conte
 		RecallCoverageDigest: request.RecallCoverage.Digest, ProcessVersion: report.ProcessVersion, PromptVersion: report.PromptVersion,
 	}
 	if err := requireInsightsRequirement(ctx, verifier, principal, insightsRequirementActiveOrganizationMember, target); err != nil {
-		return err
+		return InsightsOpportunitiesRunTransition{}, err
 	}
 	if err := requireInsightsAuthorization(ctx, verifier, principal, ACLApprove, target); err != nil {
-		return err
+		return InsightsOpportunitiesRunTransition{}, err
 	}
 	transition := verifier.AdvanceInsightsOpportunitiesRun(ctx, principal, target)
 	if (transition.Advanced == transition.Resumed) || strings.TrimSpace(transition.CheckpointID) == "" || !validInsightsAuthorizationDecision(transition.Decision) {
-		return fmt.Errorf("critic run transition was not durably checkpointed")
+		return InsightsOpportunitiesRunTransition{}, fmt.Errorf("critic run transition was not durably checkpointed")
 	}
-	return nil
+	return transition, nil
 }
 
 // InsightsOpportunitiesFeedback contains no serialized role or authorization
@@ -927,8 +935,9 @@ func (p InsightsOpportunitiesPilotReview) ValidateAuthorized(ctx context.Context
 	return requireInsightsAuthorization(ctx, verifier, principal, ACLWrite, target)
 }
 
-// The flag records operator intent only. W2C stays absent from the process
-// registry until a dedicated executor calls every authorization seam above.
+// The flag records operator intent only. W2C always stays absent from the
+// generic process registry; its dedicated executor additionally requires all
+// provider, authority, persistence, and workspace-writer dependencies.
 func insightsOpportunitiesRequested() bool { return boolEnv(insightsOpportunitiesEnabledEnv) }
 
 // insightsOpportunitiesProcessDefinition is inert specification metadata. It

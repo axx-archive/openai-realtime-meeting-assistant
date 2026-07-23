@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +33,7 @@ import (
 const (
 	osEventArtifactCompleted = "artifact_completed"
 	osEventArtifactProgress  = "artifact_progress"
+	osEventArtifactDeleted   = "artifact_deleted"
 	osEventProposal          = "proposal"
 	osEventNotification      = "notification"
 	osEventChannelPost       = "channel_post"
@@ -195,17 +197,28 @@ func osArtifactEventKind(metadata map[string]string) string {
 // the memory_query.go app seams (createOSArtifactWithMetadata,
 // updateOSArtifactWithMetadata); publishOSArtifact rides through the update
 // seam, so it needs no separate call. Title only — entry.Text never leaves.
-func emitOSArtifactEvent(entry meetingMemoryEntry) {
+func emitOSArtifactEvent(entry meetingMemoryEntry) ([]scopedRoomDeliveryAcknowledgement, error) {
+	return emitOSArtifactEventForApp(kanbanApp, entry)
+}
+
+func emitOSArtifactEventForApp(app *kanbanBoardApp, entry meetingMemoryEntry) ([]scopedRoomDeliveryAcknowledgement, error) {
 	if strings.TrimSpace(entry.ID) == "" || entry.Kind != meetingMemoryKindOSArtifact {
-		return
+		return nil, fmt.Errorf("artifact event requires a stored artifact id")
 	}
-	kind := osArtifactEventKind(entry.Metadata)
-	signature := osArtifactEventSignature(kind, entry.Metadata)
+	if app == nil || app.memory == nil {
+		return nil, fmt.Errorf("artifact event store is unavailable")
+	}
+	stored, _, current := app.memory.artifactEventSnapshot(entry)
+	if !current {
+		return nil, fmt.Errorf("artifact event authorization is stale or missing")
+	}
+	kind := osArtifactEventKind(stored.Metadata)
+	signature := osArtifactEventSignature(kind, stored.Metadata)
 
 	osArtifactEventMu.Lock()
 	if osArtifactEventState[entry.ID] == signature {
 		osArtifactEventMu.Unlock()
-		return
+		return nil, nil
 	}
 	osArtifactEventState[entry.ID] = signature
 	// Bound the guard so a long-lived process never accumulates one entry per
@@ -216,18 +229,165 @@ func emitOSArtifactEvent(entry meetingMemoryEntry) {
 	}
 	osArtifactEventMu.Unlock()
 
-	mode := firstNonEmptyString(entry.Metadata["mode"], entry.Kind)
-	broadcastOSEvent(osEvent{
+	mode := firstNonEmptyString(stored.Metadata["mode"], stored.Kind)
+	event := osEvent{
 		Kind:          kind,
-		Ref:           entry.ID,
-		Title:         firstNonEmptyString(strings.TrimSpace(entry.Metadata["title"]), assistantToolLabel(mode)+" artifact"),
-		OriginSurface: firstNonEmptyString(strings.TrimSpace(entry.Metadata["originSurface"]), strings.TrimSpace(entry.Metadata["originKind"]), "artifacts"),
-		Actor:         firstNonEmptyString(entry.Metadata["updatedBy"], entry.Metadata["createdBy"], scoutParticipantName),
-	})
+		Ref:           stored.ID,
+		Title:         firstNonEmptyString(strings.TrimSpace(stored.Metadata["title"]), assistantToolLabel(mode)+" artifact"),
+		OriginSurface: firstNonEmptyString(strings.TrimSpace(stored.Metadata["originSurface"]), strings.TrimSpace(stored.Metadata["originKind"]), "artifacts"),
+		Actor:         firstNonEmptyString(stored.Metadata["updatedBy"], stored.Metadata["createdBy"], scoutParticipantName),
+	}
+	acks, deliveryErr := deliverOSArtifactEvent(app, stored, event)
+	if deliveryErr != nil {
+		osArtifactEventMu.Lock()
+		if osArtifactEventState[entry.ID] == signature {
+			delete(osArtifactEventState, entry.ID)
+		}
+		osArtifactEventMu.Unlock()
+		return nil, deliveryErr
+	}
 
 	// Wave 8: the same transition seam is where the admin learns an artifact has
 	// parked at the external-write gate (fires once per gate entry, admin-only).
-	if kanbanApp != nil {
-		kanbanApp.maybeNotifyApprovalGate(entry)
+	if app != nil {
+		app.maybeNotifyApprovalGate(stored)
+	}
+	return acks, nil
+}
+
+type artifactDeletionProjectionSeal struct{ marker byte }
+
+// artifactDeletionProjection is minted only by the locked delete seam. Its
+// token has no caller-controlled authorization fields; the corresponding
+// server-owned record is consumed exactly once by the deletion emitter.
+type artifactDeletionProjection struct {
+	token *artifactDeletionProjectionSeal
+}
+
+type artifactDeletionAuthorization struct {
+	header ArtifactAuthorizationHeader
+	event  osEvent
+}
+
+var artifactDeletionProjections = struct {
+	sync.Mutex
+	records map[*artifactDeletionProjectionSeal]artifactDeletionAuthorization
+}{records: map[*artifactDeletionProjectionSeal]artifactDeletionAuthorization{}}
+
+func mintArtifactDeletionProjection(header ArtifactAuthorizationHeader, event osEvent) artifactDeletionProjection {
+	token := &artifactDeletionProjectionSeal{}
+	artifactDeletionProjections.Lock()
+	artifactDeletionProjections.records[token] = artifactDeletionAuthorization{header: header, event: event}
+	artifactDeletionProjections.Unlock()
+	return artifactDeletionProjection{token: token}
+}
+
+func revokeArtifactDeletionProjection(projection artifactDeletionProjection) {
+	artifactDeletionProjections.Lock()
+	delete(artifactDeletionProjections.records, projection.token)
+	artifactDeletionProjections.Unlock()
+}
+
+func consumeArtifactDeletionProjection(projection artifactDeletionProjection) (artifactDeletionAuthorization, bool) {
+	artifactDeletionProjections.Lock()
+	defer artifactDeletionProjections.Unlock()
+	authorization, found := artifactDeletionProjections.records[projection.token]
+	if found {
+		delete(artifactDeletionProjections.records, projection.token)
+	}
+	return authorization, found
+}
+
+func emitOSArtifactDeletionEvent(app *kanbanBoardApp, projection artifactDeletionProjection) ([]scopedRoomDeliveryAcknowledgement, error) {
+	return deliverOSArtifactEvent(app, meetingMemoryEntry{}, osEvent{}, projection)
+}
+
+func (app *kanbanBoardApp) deleteOSArtifactAndEmit(id string) (meetingMemoryEntry, []scopedRoomDeliveryAcknowledgement, bool, error) {
+	if app == nil || app.memory == nil {
+		return meetingMemoryEntry{}, nil, false, fmt.Errorf("artifact event store is unavailable")
+	}
+	removed, projection, deleted, err := app.memory.deleteOSArtifactWithProjection(id)
+	if err != nil || !deleted {
+		return removed, nil, deleted, err
+	}
+	acknowledgements, err := emitOSArtifactDeletionEvent(app, projection)
+	return removed, acknowledgements, true, err
+}
+
+// deleteEntryByIDAcknowledged is the sole production single-entry delete
+// router. Artifacts take the sealed projection path; every other kind retains
+// the generic store delete behavior.
+func (app *kanbanBoardApp) deleteEntryByIDAcknowledged(id string) (meetingMemoryEntry, []scopedRoomDeliveryAcknowledgement, bool, error) {
+	if app == nil || app.memory == nil {
+		return meetingMemoryEntry{}, nil, false, fmt.Errorf("memory store is unavailable")
+	}
+	entry, found := app.memory.entryByID(id)
+	if !found {
+		return meetingMemoryEntry{}, nil, false, nil
+	}
+	if entry.Kind == meetingMemoryKindOSArtifact {
+		return app.deleteOSArtifactAndEmit(id)
+	}
+	removed, deleted, err := app.memory.deleteEntryByID(id)
+	return removed, nil, deleted, err
+}
+
+func (app *kanbanBoardApp) deleteEntryByID(id string) (meetingMemoryEntry, bool, error) {
+	removed, _, deleted, err := app.deleteEntryByIDAcknowledged(id)
+	return removed, deleted, err
+}
+
+// deliverOSArtifactEvent accepts a live artifact only when its complete caller
+// header still matches storage. Once the ID is absent, the sole alternative is
+// the sealed projection minted by deleteOSArtifactWithProjection; arbitrary
+// pre-delete entry metadata can never authorize the missing-row path.
+func deliverOSArtifactEvent(app *kanbanBoardApp, entry meetingMemoryEntry, event osEvent, deletion ...artifactDeletionProjection) ([]scopedRoomDeliveryAcknowledgement, error) {
+	if app == nil || app.memory == nil {
+		return nil, fmt.Errorf("artifact event store is unavailable")
+	}
+	if _, header, current := app.memory.artifactEventSnapshot(entry); current {
+		return deliverAuthorizedOSArtifactEvent(app, header, event)
+	}
+	if len(deletion) != 1 {
+		return nil, fmt.Errorf("artifact event authorization is stale or missing")
+	}
+	authorization, valid := consumeArtifactDeletionProjection(deletion[0])
+	if !valid || strings.TrimSpace(authorization.header.ObjectID) == "" {
+		return nil, fmt.Errorf("artifact deletion authorization is invalid")
+	}
+	if _, found := app.memory.artifactAuthorizationHeaderByIDForEvent(authorization.header.ObjectID); found {
+		return nil, fmt.Errorf("artifact deletion event precedes durable removal")
+	}
+	return deliverAuthorizedOSArtifactEvent(app, authorization.header, authorization.event)
+}
+
+func deliverAuthorizedOSArtifactEvent(app *kanbanBoardApp, header ArtifactAuthorizationHeader, event osEvent) ([]scopedRoomDeliveryAcknowledgement, error) {
+	if app == nil || app.memory == nil {
+		return nil, fmt.Errorf("artifact event store is unavailable")
+	}
+	visibility := strings.ToLower(strings.TrimSpace(header.Visibility))
+	event = normalizeOSEvent(event)
+	switch visibility {
+	case "", "organization", "org", "team", "public", "shared":
+		broadcastOSEvent(event)
+		return nil, nil
+	case "private", "owner":
+		if strings.TrimSpace(header.OwnerEmail) == "" {
+			return nil, fmt.Errorf("private artifact event has no authorized owner")
+		}
+		sendOSEventToUser(header.OwnerEmail, event)
+		return nil, nil
+	case "room", "room_only":
+		scope := RoomScoutScope{
+			RoomID:          header.RoomID,
+			SittingID:       header.SittingID,
+			MediaGeneration: header.MediaGeneration,
+		}
+		if !roomPublicationScopeValid(scope) {
+			return nil, fmt.Errorf("room artifact event has invalid immutable scope")
+		}
+		return broadcastScopedRoomKanbanEventAcknowledged(scope, osEventName, event)
+	default:
+		return nil, fmt.Errorf("artifact event visibility %q is not authorized", visibility)
 	}
 }

@@ -200,11 +200,15 @@ func TestGoalHTTPEndpointLaunchesAsRequesterNoExternalWrite(t *testing.T) {
 	kanbanApp = newIsolatedKanbanBoardApp(t)
 	t.Cleanup(func() { kanbanApp = previousApp })
 	installFakeResponder(t, goalResponderRoutes{})
+	thread, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Goal HTTP origin", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create private origin thread: %v", err)
+	}
 
 	body, _ := json.Marshal(map[string]any{
 		"objective":     "audit the deploy pipeline and push a fix to production",
 		"authorityHint": "external_write",
-		"originSurface": "chat:thread-123",
+		"originSurface": "chat:" + thread.ID,
 	})
 	req := httptest.NewRequest(http.MethodPost, "/assistant/goal", strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")

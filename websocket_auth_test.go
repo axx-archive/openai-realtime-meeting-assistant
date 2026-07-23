@@ -523,7 +523,12 @@ func newIsolatedNativeWebsocket(t *testing.T, email string) *websocket.Conn {
 func newIsolatedWebsocketServer(t *testing.T) *httptest.Server {
 	t.Helper()
 
-	// Registered first so it runs LAST — after the conn.Close and server.Close
+	// Registered before the handler-drain cleanup so it runs after every
+	// hijacked websocket has returned and no stale room actor can touch the
+	// next test's isolated peer registry.
+	resetRoomMediaActorsForTest(t)
+	// Registered before connection/server cleanups so it runs after their close
+	// callbacks (but before the actor reset registered above) — guaranteeing
 	// cleanups — guaranteeing the hijacked handler goroutine has fully returned
 	// before this test's isolated globals go out of scope and the next test
 	// (which may swap kanbanApp) begins.
@@ -553,21 +558,6 @@ func newIsolatedWebsocketServer(t *testing.T) *httptest.Server {
 	trackLayerGroups = map[string]string{}
 	subscriberLayerTiers = map[string]string{}
 	listLock.Unlock()
-
-	signalRequestLock.Lock()
-	if signalRequestTimer != nil {
-		signalRequestTimer.Stop()
-	}
-	signalRequestTimer = nil
-	signalRequestLock.Unlock()
-	t.Cleanup(func() {
-		signalRequestLock.Lock()
-		if signalRequestTimer != nil {
-			signalRequestTimer.Stop()
-		}
-		signalRequestTimer = nil
-		signalRequestLock.Unlock()
-	})
 
 	server := httptest.NewServer(http.HandlerFunc(websocketHandler))
 	t.Cleanup(server.Close)

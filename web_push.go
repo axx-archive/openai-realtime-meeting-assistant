@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -29,6 +30,7 @@ const webPushTTLSeconds = 300
 // re-subscribing rebinds rather than duplicates.
 type pushSubscriptionRecord struct {
 	UserEmail string `json:"userEmail"`
+	TenantID  string `json:"tenantId,omitempty"`
 	Endpoint  string `json:"endpoint"`
 	Keys      struct {
 		P256dh string `json:"p256dh"`
@@ -104,6 +106,10 @@ func loadPushStoreFile() pushStoreData {
 	if state.Prefs == nil {
 		state.Prefs = map[string]pushPrefs{}
 	}
+	for index := range state.Subscriptions {
+		state.Subscriptions[index].TenantID = strings.TrimSpace(state.Subscriptions[index].TenantID)
+		state.Subscriptions[index].UserEmail = normalizeAccountEmail(state.Subscriptions[index].UserEmail)
+	}
 	return state
 }
 
@@ -142,13 +148,15 @@ func upsertPushSubscription(sub pushSubscriptionRecord) error {
 
 // removePushSubscription drops one endpoint, scoped to the owning account so a
 // caller can only unsubscribe its own device.
-func removePushSubscription(userEmail, endpoint string) error {
+func removePushSubscription(tenantID, userEmail, endpoint string) error {
+	tenantID = strings.TrimSpace(tenantID)
 	userEmail = normalizeAccountEmail(userEmail)
 	endpoint = strings.TrimSpace(endpoint)
 	return mutatePushStore(func(state *pushStoreData) {
 		kept := make([]pushSubscriptionRecord, 0, len(state.Subscriptions))
 		for _, sub := range state.Subscriptions {
-			if sub.Endpoint == endpoint && (userEmail == "" || sub.UserEmail == userEmail) {
+			if sub.Endpoint == endpoint && (userEmail == "" || sub.UserEmail == userEmail) &&
+				(tenantID == "" || sub.TenantID == tenantID) {
 				continue
 			}
 			kept = append(kept, sub)
@@ -242,10 +250,15 @@ func prefsFromRequest(kinds map[string]bool, onlyWhenAway bool) pushPrefs {
 	return prefs
 }
 
-func pushRecipientMatches(record notificationRecord, userEmail string) bool {
+func pushRecipientMatches(record notificationRecord, subscription pushSubscriptionRecord) bool {
 	// Broadcast (UserEmail == "") reaches every subscriber; a targeted record
-	// reaches only its recipient.
-	return record.UserEmail == "" || record.UserEmail == normalizeAccountEmail(userEmail)
+	// reaches only its recipient. Tenant-bound canonical publications additionally
+	// require an exact subscription tenant; legacy tenant-less subscriptions are
+	// deliberately ineligible for private catch-up bodies.
+	if !notificationTenantMatches(record, subscription.TenantID) {
+		return false
+	}
+	return record.UserEmail == "" || record.UserEmail == normalizeAccountEmail(subscription.UserEmail)
 }
 
 // --- VAPID keys -------------------------------------------------------------
@@ -328,17 +341,43 @@ var sendWebPush = func(payload []byte, sub *webpush.Subscription, opts *webpush.
 	return webpush.SendNotification(payload, sub, opts)
 }
 
+// sendWebPushWithContext is reserved for private catch-up delivery, whose
+// canonical outbox expiry must be able to cancel an in-flight network request.
+// Generic notifications retain the established sendWebPush seam and behavior.
+var sendWebPushWithContext = func(ctx context.Context, payload []byte, sub *webpush.Subscription, opts *webpush.Options) (*http.Response, error) {
+	return webpush.SendNotificationWithContext(ctx, payload, sub, opts)
+}
+
 // deliverWebPushForRecord fans one durable notification out to subscribed
 // phones. Runs in its own goroutine off pushNotificationRecord so the websocket
 // fan-out never blocks on a network call. Short-circuits before touching VAPID
 // keys when nothing is subscribed (the common case for every non-push test).
 func deliverWebPushForRecord(record notificationRecord) {
+	_ = deliverWebPushForRecordWithSender(context.Background(), record,
+		func(_ context.Context, payload []byte, sub *webpush.Subscription, opts *webpush.Options) (*http.Response, error) {
+			return sendWebPush(payload, sub, opts)
+		})
+}
+
+func deliverWebPushForRecordContext(ctx context.Context, record notificationRecord) error {
+	return deliverWebPushForRecordWithSender(ctx, record, sendWebPushWithContext)
+}
+
+func deliverWebPushForRecordWithSender(ctx context.Context, record notificationRecord,
+	send func(context.Context, []byte, *webpush.Subscription, *webpush.Options) (*http.Response, error),
+) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if strings.TrimSpace(record.Text) == "" {
-		return
+		return nil
 	}
 	state := snapshotPushStore()
 	if len(state.Subscriptions) == 0 {
-		return
+		return nil
 	}
 
 	type target struct {
@@ -346,7 +385,7 @@ func deliverWebPushForRecord(record notificationRecord) {
 	}
 	targets := make([]target, 0, len(state.Subscriptions))
 	for _, sub := range state.Subscriptions {
-		if !pushRecipientMatches(record, sub.UserEmail) {
+		if !pushRecipientMatches(record, sub) {
 			continue
 		}
 		prefs := resolvePushPrefs(state, sub.UserEmail)
@@ -359,13 +398,13 @@ func deliverWebPushForRecord(record notificationRecord) {
 		targets = append(targets, target{sub: sub})
 	}
 	if len(targets) == 0 {
-		return
+		return nil
 	}
 
 	keys, err := vapidKeys()
 	if err != nil {
 		log.Errorf("Web push send skipped, no VAPID keys: %v", err)
-		return
+		return err
 	}
 
 	payload, err := json.Marshal(map[string]any{
@@ -376,13 +415,17 @@ func deliverWebPushForRecord(record notificationRecord) {
 	})
 	if err != nil {
 		log.Errorf("Failed to encode web push payload: %v", err)
-		return
+		return err
 	}
 
 	subscriber := webPushSubscriber()
 	var stale []string
+	var firstErr error
 	for _, t := range targets {
-		response, err := sendWebPush(payload, t.sub.toWebpush(), &webpush.Options{
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		response, err := send(ctx, payload, t.sub.toWebpush(), &webpush.Options{
 			Subscriber:      subscriber,
 			VAPIDPublicKey:  keys.Public,
 			VAPIDPrivateKey: keys.Private,
@@ -390,6 +433,9 @@ func deliverWebPushForRecord(record notificationRecord) {
 		})
 		if err != nil {
 			log.Errorf("Web push send failed for %s: %v", t.sub.UserEmail, err)
+			if firstErr == nil {
+				firstErr = err
+			}
 			continue
 		}
 		if response != nil {
@@ -403,6 +449,7 @@ func deliverWebPushForRecord(record notificationRecord) {
 		}
 	}
 	prunePushSubscriptions(stale)
+	return firstErr
 }
 
 // --- HTTP handlers ----------------------------------------------------------
@@ -438,7 +485,7 @@ func assistantPushConfigHandler(w http.ResponseWriter, r *http.Request) {
 	prefs := resolvePushPrefs(state, user.Email)
 	subscribed := false
 	for _, sub := range state.Subscriptions {
-		if sub.UserEmail == normalizeAccountEmail(user.Email) {
+		if sub.UserEmail == normalizeAccountEmail(user.Email) && sub.TenantID == canonicalTenantID() {
 			subscribed = true
 			break
 		}
@@ -492,6 +539,7 @@ func assistantPushSubscribeHandler(w http.ResponseWriter, r *http.Request) {
 
 	record := pushSubscriptionRecord{
 		UserEmail: normalizeAccountEmail(user.Email),
+		TenantID:  canonicalTenantID(),
 		Endpoint:  endpoint,
 		UserAgent: trimForStorage(r.Header.Get("User-Agent"), 200),
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
@@ -535,7 +583,7 @@ func assistantPushUnsubscribeHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, "endpoint is required")
 		return
 	}
-	if err := removePushSubscription(user.Email, body.Endpoint); err != nil {
+	if err := removePushSubscription(canonicalTenantID(), user.Email, body.Endpoint); err != nil {
 		writeAuthError(w, http.StatusInternalServerError, "could not remove subscription")
 		return
 	}

@@ -60,8 +60,9 @@ type BrainSourceInventoryPage struct {
 }
 
 type BrainSourceInventoryRequest struct {
-	TenantID string        `json:"tenantId"`
-	Temporal TemporalQuery `json:"temporal"`
+	TenantID  string        `json:"tenantId"`
+	Principal ACLPrincipal  `json:"-"`
+	Temporal  TemporalQuery `json:"temporal"`
 }
 
 type BrainSourceMetadataInventory interface {
@@ -194,7 +195,7 @@ func (planner BrainRetrievalPlanner) Resolve(ctx context.Context, request BrainR
 	if err != nil || purgeGeneration < 0 {
 		return result, fmt.Errorf("%w: purge generation", ErrBrainRetrievalUnavailable)
 	}
-	pages, err := planner.inventoryAll(ctx, BrainSourceInventoryRequest{TenantID: request.Principal.TenantID, Temporal: request.Temporal})
+	pages, err := planner.inventoryAll(ctx, BrainSourceInventoryRequest{TenantID: request.Principal.TenantID, Principal: request.Principal, Temporal: request.Temporal})
 	if err != nil {
 		return result, err
 	}

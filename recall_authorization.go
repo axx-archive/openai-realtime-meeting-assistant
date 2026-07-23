@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strconv"
 	"strings"
 )
 
@@ -15,7 +16,10 @@ type RecallPrincipal struct {
 	TenantID  string
 	RoomID    string
 	SittingID string
-	Audience  string
+	// MediaGeneration is populated only by server-owned, exact-scope readers.
+	// It is never accepted from a browser or tool payload.
+	MediaGeneration uint64
+	Audience        string
 }
 
 func recallPrincipalForUser(user *userAccount) RecallPrincipal {
@@ -107,7 +111,60 @@ func recallEntryScopeAllowed(metadata map[string]string, principal RecallPrincip
 	if entryTenant != "" && entryTenant != strings.TrimSpace(principal.TenantID) {
 		return false
 	}
+	if rawGeneration := strings.TrimSpace(metadata["mediaGeneration"]); rawGeneration != "" {
+		generation, err := strconv.ParseUint(rawGeneration, 10, 64)
+		if err != nil || generation == 0 || principal.MediaGeneration != generation {
+			return false
+		}
+	}
 	return true
+}
+
+// mediaSoakCanaryEntryForPrincipal is the sole authenticated read path allowed
+// to see a server-owned release canary. It runs the same room/sitting/tenant
+// policy and artifact object authorization as production recall, then performs
+// a locked header recompare before returning the body. Normal readers remain
+// governed by memoryEntryHiddenFromRecall and can never see these entries.
+func (app *kanbanBoardApp) mediaSoakCanaryEntryForPrincipal(ctx context.Context, principal RecallPrincipal, id string) (meetingMemoryEntry, bool) {
+	if app == nil || app.memory == nil || strings.TrimSpace(id) == "" || principal.MediaGeneration == 0 {
+		return meetingMemoryEntry{}, false
+	}
+	var candidate meetingMemoryEntry
+	var header ArtifactAuthorizationHeader
+	app.memory.mu.Lock()
+	for _, stored := range app.memory.entries {
+		if stored.ID != strings.TrimSpace(id) || !strings.EqualFold(strings.TrimSpace(stored.Metadata["mediaSoakCanary"]), "true") || !recallEntryScopeAllowed(stored.Metadata, principal) {
+			continue
+		}
+		candidate = cloneMemoryEntry(stored)
+		if stored.Kind == meetingMemoryKindOSArtifact {
+			header = app.memory.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(meetingMemoryEntry{ID: stored.ID, Kind: stored.Kind, Metadata: stored.Metadata}))
+		}
+		break
+	}
+	app.memory.mu.Unlock()
+	if candidate.ID == "" {
+		return meetingMemoryEntry{}, false
+	}
+	if candidate.Kind != meetingMemoryKindOSArtifact {
+		return candidate, true
+	}
+	if !artifactHeaderAuthorized(ctx, principal.User, ACLReadContent, header) {
+		return meetingMemoryEntry{}, false
+	}
+	app.memory.mu.Lock()
+	defer app.memory.mu.Unlock()
+	for _, stored := range app.memory.entries {
+		if stored.ID != candidate.ID || !strings.EqualFold(strings.TrimSpace(stored.Metadata["mediaSoakCanary"]), "true") {
+			continue
+		}
+		current := app.memory.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(meetingMemoryEntry{ID: stored.ID, Kind: stored.Kind, Metadata: stored.Metadata}))
+		if !artifactAuthorizationHeaderEqual(header, current) || !recallEntryScopeAllowed(stored.Metadata, principal) {
+			return meetingMemoryEntry{}, false
+		}
+		return cloneMemoryEntry(stored), true
+	}
+	return meetingMemoryEntry{}, false
 }
 
 // recallStoreForPrincipal constructs a request-local store containing only

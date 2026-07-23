@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -21,6 +22,9 @@ type ArtifactAuthorizationHeader struct {
 	Visibility      string
 	OwnerEmail      string
 	OriginSurface   string
+	RoomID          string
+	SittingID       string
+	MediaGeneration uint64
 	AssetRefs       map[string]struct{}
 	Revisions       map[string]ACLRevisionRef // body blob ref -> exact revision
 }
@@ -248,9 +252,12 @@ func artifactAuthorizationHeaderFromEntry(entry meetingMemoryEntry) ArtifactAuth
 		Visibility:      firstNonEmptyString(strings.TrimSpace(entry.Metadata["visibility"]), "organization"),
 		OwnerEmail:      artifactAuthorizationOwner(entry.Metadata),
 		OriginSurface:   strings.TrimSpace(entry.Metadata["originSurface"]),
+		RoomID:          normalizeRoomID(entry.Metadata["roomId"]),
+		SittingID:       firstNonEmptyString(strings.TrimSpace(entry.Metadata["sittingId"]), strings.TrimSpace(entry.Metadata["meetingId"])),
 		AssetRefs:       map[string]struct{}{},
 		Revisions:       map[string]ACLRevisionRef{},
 	}
+	header.MediaGeneration, _ = strconv.ParseUint(strings.TrimSpace(entry.Metadata["mediaGeneration"]), 10, 64)
 	var assets []artifactAsset
 	_ = json.Unmarshal([]byte(entry.Metadata[artifactAssetsMetadataKey]), &assets)
 	for _, asset := range assets {
@@ -269,13 +276,24 @@ func artifactAuthorizationHeaderFromEntry(entry meetingMemoryEntry) ArtifactAuth
 // artifactAuthorizationHeaderByID projects metadata while holding the store
 // lock and deliberately never copies or reads entry.Text.
 func (store *meetingMemoryStore) artifactAuthorizationHeaderByID(id string) (ArtifactAuthorizationHeader, bool) {
+	return store.artifactAuthorizationHeaderByIDInternal(id, false)
+}
+
+// artifactAuthorizationHeaderByIDForEvent is the event-publication projection.
+// It admits server-owned soak canaries, which are intentionally hidden from
+// every recall/authorization reader, but otherwise has the same locked lookup.
+func (store *meetingMemoryStore) artifactAuthorizationHeaderByIDForEvent(id string) (ArtifactAuthorizationHeader, bool) {
+	return store.artifactAuthorizationHeaderByIDInternal(id, true)
+}
+
+func (store *meetingMemoryStore) artifactAuthorizationHeaderByIDInternal(id string, includeHidden bool) (ArtifactAuthorizationHeader, bool) {
 	if store == nil {
 		return ArtifactAuthorizationHeader{}, false
 	}
 	id = strings.TrimSpace(id)
 	store.mu.Lock()
 	for _, entry := range store.entries {
-		if entry.Kind != meetingMemoryKindOSArtifact || entry.ID != id || memoryEntryHiddenFromRecall(entry) {
+		if entry.Kind != meetingMemoryKindOSArtifact || entry.ID != id || (!includeHidden && memoryEntryHiddenFromRecall(entry)) {
 			continue
 		}
 		header := store.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(meetingMemoryEntry{ID: entry.ID, Kind: entry.Kind, Metadata: entry.Metadata}))
@@ -292,7 +310,8 @@ var artifactAuthorizationAfterCheckProbe func()
 func artifactAuthorizationHeaderEqual(left, right ArtifactAuthorizationHeader) bool {
 	if left.TenantID != right.TenantID || left.ObjectID != right.ObjectID || left.ACLVersion != right.ACLVersion ||
 		left.ContentRevision != right.ContentRevision || left.ContentDigest != right.ContentDigest || left.Visibility != right.Visibility ||
-		left.OwnerEmail != right.OwnerEmail || left.OriginSurface != right.OriginSurface || len(left.AssetRefs) != len(right.AssetRefs) || len(left.Revisions) != len(right.Revisions) {
+		left.OwnerEmail != right.OwnerEmail || left.OriginSurface != right.OriginSurface || left.RoomID != right.RoomID || left.SittingID != right.SittingID ||
+		left.MediaGeneration != right.MediaGeneration || len(left.AssetRefs) != len(right.AssetRefs) || len(left.Revisions) != len(right.Revisions) {
 		return false
 	}
 	for ref := range left.AssetRefs {
@@ -308,14 +327,58 @@ func artifactAuthorizationHeaderEqual(left, right ArtifactAuthorizationHeader) b
 	return true
 }
 
+func artifactScopeMetadataKey(key string) bool {
+	switch strings.TrimSpace(key) {
+	case "roomId", "sittingId", "meetingId", "mediaGeneration":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizedArtifactScopeMetadataValue(key, value string) string {
+	value = strings.TrimSpace(value)
+	switch strings.TrimSpace(key) {
+	case "roomId":
+		return normalizeRoomID(value)
+	case "mediaGeneration":
+		generation, err := strconv.ParseUint(value, 10, 64)
+		if err == nil {
+			return strconv.FormatUint(generation, 10)
+		}
+	}
+	return value
+}
+
+func validateArtifactScopeMetadataUpdates(existing, updates map[string]string) error {
+	for rawKey, updatedValue := range updates {
+		key := strings.TrimSpace(rawKey)
+		if !artifactScopeMetadataKey(key) {
+			continue
+		}
+		if normalizedArtifactScopeMetadataValue(key, existing[key]) != normalizedArtifactScopeMetadataValue(key, updatedValue) {
+			return fmt.Errorf("artifact authorization scope %s is immutable", key)
+		}
+	}
+	return nil
+}
+
 func (store *meetingMemoryStore) artifactSnapshotIfHeaderMatches(id string, authorized ArtifactAuthorizationHeader) (meetingMemoryEntry, bool) {
+	return store.artifactSnapshotIfHeaderMatchesInternal(id, authorized, false)
+}
+
+func (store *meetingMemoryStore) artifactSnapshotIfHeaderMatchesForEvent(id string, authorized ArtifactAuthorizationHeader) (meetingMemoryEntry, bool) {
+	return store.artifactSnapshotIfHeaderMatchesInternal(id, authorized, true)
+}
+
+func (store *meetingMemoryStore) artifactSnapshotIfHeaderMatchesInternal(id string, authorized ArtifactAuthorizationHeader, includeHidden bool) (meetingMemoryEntry, bool) {
 	if store == nil {
 		return meetingMemoryEntry{}, false
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	for _, entry := range store.entries {
-		if entry.Kind != meetingMemoryKindOSArtifact || entry.ID != strings.TrimSpace(id) || memoryEntryHiddenFromRecall(entry) {
+		if entry.Kind != meetingMemoryKindOSArtifact || entry.ID != strings.TrimSpace(id) || (!includeHidden && memoryEntryHiddenFromRecall(entry)) {
 			continue
 		}
 		current := store.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(meetingMemoryEntry{ID: entry.ID, Kind: entry.Kind, Metadata: entry.Metadata}))
@@ -325,6 +388,29 @@ func (store *meetingMemoryStore) artifactSnapshotIfHeaderMatches(id string, auth
 		return cloneMemoryEntry(entry), true
 	}
 	return meetingMemoryEntry{}, false
+}
+
+// artifactEventSnapshot requires the caller's complete authorization header to
+// match the currently stored row while the store lock is held. The returned
+// body is used only to construct the title-only event after that comparison.
+func (store *meetingMemoryStore) artifactEventSnapshot(candidate meetingMemoryEntry) (meetingMemoryEntry, ArtifactAuthorizationHeader, bool) {
+	if store == nil || strings.TrimSpace(candidate.ID) == "" || candidate.Kind != meetingMemoryKindOSArtifact {
+		return meetingMemoryEntry{}, ArtifactAuthorizationHeader{}, false
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for _, entry := range store.entries {
+		if entry.Kind != meetingMemoryKindOSArtifact || entry.ID != strings.TrimSpace(candidate.ID) {
+			continue
+		}
+		current := store.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(meetingMemoryEntry{ID: entry.ID, Kind: entry.Kind, Metadata: entry.Metadata}))
+		provided := store.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(meetingMemoryEntry{ID: candidate.ID, Kind: candidate.Kind, Metadata: candidate.Metadata}))
+		if !artifactAuthorizationHeaderEqual(provided, current) {
+			return meetingMemoryEntry{}, ArtifactAuthorizationHeader{}, false
+		}
+		return cloneMemoryEntry(entry), current, true
+	}
+	return meetingMemoryEntry{}, ArtifactAuthorizationHeader{}, false
 }
 
 func authorizedArtifactByID(ctx context.Context, user *userAccount, action ACLAction, id string) (meetingMemoryEntry, bool) {

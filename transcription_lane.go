@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -9,6 +10,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -48,27 +51,52 @@ type meetingTranscriptionLane struct {
 	// freezes/pops, segmentation lookups — to ONE room (multi-room W3). The
 	// boot-started office lane carries officeRoomID; named rooms get a lane
 	// per sitting from ensureRoomMedia.
-	roomID string
+	roomID          string
+	sittingID       string
+	mediaGeneration uint64
 
-	input     chan []int16
-	stop      chan struct{}
-	done      chan struct{}
-	closeOnce sync.Once
+	input        chan []int16
+	consentInput chan consentAudioFrame
+	withdrawals  chan ConsentWithdrawalNotice
+	stop         chan struct{}
+	done         chan struct{}
+	closeOnce    sync.Once
 
-	mu                   sync.Mutex
-	connected            bool
-	forwardedAudioNotice bool
-	droppedAudioNotice   bool
+	mu                    sync.Mutex
+	connected             bool
+	forwardedAudioNotice  bool
+	droppedAudioNotice    bool
+	unsubscribeWithdrawal func()
 }
 
-func (app *kanbanBoardApp) startTranscriptionLane(apiKey string) {
+func (lane *meetingTranscriptionLane) scope() RoomScoutScope {
+	if lane == nil {
+		return RoomScoutScope{}
+	}
+	return RoomScoutScope{RoomID: lane.roomID, SittingID: lane.sittingID, MediaGeneration: lane.mediaGeneration}
+}
+
+type consentAudioFrame struct {
+	pcm    []int16
+	fences []ConsentFence
+}
+
+func (app *kanbanBoardApp) startTranscriptionLane(apiKey string, mediaGeneration uint64, startToken uint64) {
 	if app == nil || strings.TrimSpace(apiKey) == "" || !transcriptionLaneEnabled() {
 		return
 	}
 
-	lane := newMeetingTranscriptionLane(app, apiKey, transcriptionLaneModel())
+	lane := newMeetingTranscriptionLaneForRoomGeneration(app, apiKey, transcriptionLaneModel(), officeRoomID, mediaGeneration)
+	if officeTranscriptionBeforePublishProbe != nil {
+		officeTranscriptionBeforePublishProbe()
+	}
 
 	app.mu.Lock()
+	state := app.roomLiveLocked(officeRoomID)
+	if state.mediaGen != mediaGeneration || state.mediaActor == nil || !app.transcriptionStarting || app.transcriptionStartToken != startToken {
+		app.mu.Unlock()
+		return
+	}
 	oldLane := app.transcriptLane
 	app.transcriptLane = lane
 	app.mu.Unlock()
@@ -81,23 +109,38 @@ func (app *kanbanBoardApp) startTranscriptionLane(apiKey string) {
 	lane.start()
 }
 
+var officeTranscriptionBeforePublishProbe func()
+
 func newMeetingTranscriptionLane(app *kanbanBoardApp, apiKey string, transcriptionModel string) *meetingTranscriptionLane {
 	return newMeetingTranscriptionLaneForRoom(app, apiKey, transcriptionModel, officeRoomID)
 }
 
 func newMeetingTranscriptionLaneForRoom(app *kanbanBoardApp, apiKey string, transcriptionModel string, roomID string) *meetingTranscriptionLane {
+	return newMeetingTranscriptionLaneForRoomGeneration(app, apiKey, transcriptionModel, roomID, 0)
+}
+
+func newMeetingTranscriptionLaneForRoomGeneration(app *kanbanBoardApp, apiKey string, transcriptionModel string, roomID string, mediaGeneration uint64) *meetingTranscriptionLane {
+	sittingID := ""
+	if app != nil && app.memory != nil {
+		sittingID = app.memory.currentMeetingID(roomID)
+	}
 	return &meetingTranscriptionLane{
 		app:                app,
 		apiKey:             strings.TrimSpace(apiKey),
 		transcriptionModel: strings.TrimSpace(transcriptionModel),
 		roomID:             normalizeRoomID(roomID),
+		sittingID:          sittingID,
+		mediaGeneration:    mediaGeneration,
 		input:              make(chan []int16, transcriptionLaneQueueSize),
+		consentInput:       make(chan consentAudioFrame, transcriptionLaneQueueSize),
+		withdrawals:        make(chan ConsentWithdrawalNotice, 8),
 		stop:               make(chan struct{}),
 		done:               make(chan struct{}),
 	}
 }
 
 func (lane *meetingTranscriptionLane) start() {
+	lane.unsubscribeWithdrawal = subscribeConsentWithdrawals(lane.noteWithdrawal)
 	go lane.run()
 }
 
@@ -109,7 +152,39 @@ func (lane *meetingTranscriptionLane) close() {
 	lane.closeOnce.Do(func() {
 		close(lane.stop)
 		<-lane.done
+		if lane.unsubscribeWithdrawal != nil {
+			lane.unsubscribeWithdrawal()
+		}
 	})
+}
+
+func (lane *meetingTranscriptionLane) enqueueWithConsent(roomPCM []int16, fences []ConsentFence) bool {
+	if lane == nil || len(roomPCM) == 0 || len(fences) == 0 {
+		return false
+	}
+	frame := consentAudioFrame{pcm: append([]int16(nil), roomPCM...), fences: append([]ConsentFence(nil), fences...)}
+	select {
+	case lane.consentInput <- frame:
+		lane.noteForwardedAudio()
+		return true
+	default:
+		lane.noteDroppedAudio()
+		return false
+	}
+}
+
+func (lane *meetingTranscriptionLane) noteWithdrawal(notice ConsentWithdrawalNotice) {
+	if lane == nil || normalizeRoomID(notice.Binding.RoomID) != normalizeRoomID(lane.roomID) {
+		return
+	}
+	if notice.Scope != ConsentAudioCapture && notice.Scope != ConsentTranscription {
+		return
+	}
+	select {
+	case <-lane.stop:
+		return
+	case lane.withdrawals <- notice:
+	}
 }
 
 func (lane *meetingTranscriptionLane) enqueue(roomPCM []int16) bool {
@@ -242,11 +317,11 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 	// A6: clear any window orphaned by the previous connection (a commit whose
 	// .completed never arrived before the socket dropped) so it cannot drift this
 	// connection's attribution FIFO.
-	lane.app.resetPendingAttributionWindowsForRoom(lane.roomID)
+	lane.app.resetPendingAttributionWindowsForScope(lane.scope())
 	// W0-5: same discipline for the metering FIFO — a committed duration whose
 	// terminal event never arrived must not stamp itself onto this session's
 	// first segment.
-	resetTranscriptionSegmentSecondsForRoom(lane.roomID)
+	lane.app.resetTranscriptionSegmentSecondsForLaneScope(lane.scope())
 	lane.setConnected(true)
 
 	readErr := make(chan error, 1)
@@ -257,7 +332,7 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 				readErr <- err
 				return
 			}
-			if lane.app.handleTranscriptionLaneEventForRoom(lane.roomID, raw, lane.transcriptionModel) {
+			if lane.app.handleTranscriptionLaneEventForScope(lane.scope(), raw, lane.transcriptionModel) {
 				readErr <- errTranscriptionLaneSessionExpired
 				return
 			}
@@ -271,18 +346,122 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 	defer refreshTimer.Stop()
 	pendingAudio := false
 	pendingAudioSamples := 0
+	pendingFences := map[string]ConsentFence{}
+	var segmentCapture *transcriptCaptureStamp
 	// A6: the stable active speaker at the moment this segment opened. A change
 	// mid-segment commits the pending audio early so an interjection lands as its
 	// own attributed turn instead of folding under the opening speaker.
 	segmentSpeaker := ""
 
+	clearPending := func(clearProvider bool) {
+		if clearProvider {
+			_ = lane.writeJSON(conn, map[string]any{"type": "input_audio_buffer.clear"})
+		}
+		pendingAudio = false
+		pendingAudioSamples = 0
+		pendingFences = map[string]ConsentFence{}
+		segmentCapture = nil
+		segmentSpeaker = ""
+		stopTranscriptionTimer(commitTimer)
+		lane.app.discardRealtimeSpeechForScope(lane.scope())
+	}
+	commitPending := func() error {
+		if !pendingAudio {
+			return nil
+		}
+		for _, fence := range pendingFences {
+			if err := currentConsentLaneAuthority().ValidateFence(context.Background(), fence); err != nil {
+				clearPending(true)
+				return nil
+			}
+		}
+		samples := pendingAudioSamples
+		capture := segmentCapture
+		contributorFences := make([]ConsentFence, 0, len(pendingFences))
+		for _, fence := range pendingFences {
+			contributorFences = append(contributorFences, fence)
+		}
+		sort.Slice(contributorFences, func(i, j int) bool {
+			return consentBindingKey(contributorFences[i].binding) < consentBindingKey(contributorFences[j].binding)
+		})
+		if capture == nil {
+			clearPending(true)
+			return nil
+		}
+		capture.OccurredEnd = time.Now().UTC()
+		pendingAudio = false
+		pendingAudioSamples = 0
+		pendingFences = map[string]ConsentFence{}
+		segmentCapture = nil
+		scope := RoomScoutScope{RoomID: lane.roomID, SittingID: lane.sittingID, MediaGeneration: lane.mediaGeneration}
+		lane.app.noteRealtimeSpeechStoppedForScope(scope)
+		lane.app.freezeAttributionWindowAtCommitForScopeWithCaptureAndConsent(scope, capture, contributorFences)
+		return lane.commitPendingTranscriptionAudio(conn, samples)
+	}
+	acceptFrame := func(frame consentAudioFrame) error {
+		if len(frame.fences) == 0 {
+			return nil
+		}
+		authority := currentConsentLaneAuthority()
+		for _, fence := range frame.fences {
+			if fence.lane != ConsentLaneTranscription || authority.ValidateIngressFence(fence) != nil {
+				return nil
+			}
+		}
+		// A refreshed fence for the same contributor may reflect a remote
+		// withdrawal/re-grant that did not originate in this process. Never let
+		// the newer record digest overwrite and thereby launder audio already
+		// buffered under the older authority; clear the old segment first.
+		if pendingAudio {
+			for _, fence := range frame.fences {
+				if prior, ok := pendingFences[consentBindingKey(fence.binding)]; ok &&
+					(prior.generation != fence.generation || prior.recordDigest != fence.recordDigest || prior.policy != fence.policy) {
+					clearPending(true)
+					break
+				}
+			}
+		}
+		audio := roomPCMForTranscription(frame.pcm)
+		if len(audio) == 0 {
+			return nil
+		}
+		if pendingAudio && pendingAudioSamples >= transcriptionLaneMinCommitSamples {
+			if speaker := lane.app.activeSpeakerNameForSegmentationForRoom(lane.roomID); speaker != "" && segmentSpeaker != "" && speaker != segmentSpeaker {
+				stopTranscriptionTimer(commitTimer)
+				if err := commitPending(); err != nil {
+					return err
+				}
+			}
+		}
+		if !pendingAudio {
+			if lane.app == nil || lane.app.memory == nil {
+				return nil
+			}
+			capture, err := lane.app.memory.reserveTranscriptCapture(time.Now().UTC())
+			if err != nil {
+				return nil
+			}
+			pendingAudio = true
+			segmentCapture = capture
+			segmentSpeaker = lane.app.activeSpeakerNameForSegmentationForRoom(lane.roomID)
+			lane.app.noteRealtimeSpeechStartedForScope(RoomScoutScope{RoomID: lane.roomID, SittingID: lane.sittingID, MediaGeneration: lane.mediaGeneration})
+		}
+		for _, fence := range frame.fences {
+			pendingFences[consentBindingKey(fence.binding)] = fence
+		}
+		if err := lane.writeJSON(conn, map[string]any{"type": "input_audio_buffer.append", "audio": base64.StdEncoding.EncodeToString(audio)}); err != nil {
+			return fmt.Errorf("write transcription audio: %w", err)
+		}
+		pendingAudioSamples += transcriptionLaneAudioSamples(audio)
+		resetTranscriptionTimer(commitTimer)
+		return nil
+	}
+
 	for {
 		select {
 		case <-lane.stop:
 			if pendingAudio {
-				lane.app.noteRealtimeSpeechStoppedForRoom(lane.roomID)
-				lane.app.freezeAttributionWindowAtCommitForRoom(lane.roomID)
-				_ = lane.commitPendingTranscriptionAudio(conn, pendingAudioSamples)
+				_ = commitPending()
 			}
 			_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""), time.Now().Add(time.Second))
 			return nil
@@ -297,51 +476,36 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 				continue
 			}
 			return errTranscriptionLaneSessionRefresh
-		case roomPCM := <-lane.input:
-			audio := roomPCMForTranscription(roomPCM)
-			if len(audio) == 0 {
-				continue
+		case <-lane.input:
+			// Legacy/plain PCM is intentionally not authority. The channel remains
+			// for compatibility probes, but production provider ingress requires
+			// enqueueWithConsent.
+		case frame := <-lane.consentInput:
+			if err := acceptFrame(frame); err != nil {
+				return err
 			}
-			// A6: split on speaker change before appending the new speaker's audio,
-			// but only once the pending segment holds enough to commit on its own
-			// (guards against fragmenting a single word on a flicker).
-			if pendingAudio && pendingAudioSamples >= transcriptionLaneMinCommitSamples {
-				if speaker := lane.app.activeSpeakerNameForSegmentationForRoom(lane.roomID); speaker != "" && segmentSpeaker != "" && speaker != segmentSpeaker {
-					stopTranscriptionTimer(commitTimer)
-					samples := pendingAudioSamples
-					pendingAudio = false
-					pendingAudioSamples = 0
-					lane.app.noteRealtimeSpeechStoppedForRoom(lane.roomID)
-					lane.app.freezeAttributionWindowAtCommitForRoom(lane.roomID)
-					if err := lane.commitPendingTranscriptionAudio(conn, samples); err != nil {
-						return err
-					}
+		case notice := <-lane.withdrawals:
+			matches := false
+			for _, fence := range pendingFences {
+				if consentBindingKey(fence.binding) == consentBindingKey(notice.Binding) {
+					matches = true
+					break
 				}
 			}
-			if !pendingAudio {
-				pendingAudio = true
-				pendingAudioSamples = 0
-				segmentSpeaker = lane.app.activeSpeakerNameForSegmentationForRoom(lane.roomID)
-				lane.app.noteRealtimeSpeechStartedForRoom(lane.roomID)
+			if matches {
+				clearPending(true)
 			}
-			if err := lane.writeJSON(conn, map[string]any{
-				"type":  "input_audio_buffer.append",
-				"audio": base64.StdEncoding.EncodeToString(audio),
-			}); err != nil {
-				return fmt.Errorf("write transcription audio: %w", err)
+			// Every queued frame is uncommitted room work. Dropping the bounded
+			// queue is conservative and prevents a withdrawn contributor's mixed
+			// samples from surviving behind other participants' audio.
+			for len(lane.consentInput) > 0 {
+				<-lane.consentInput
 			}
-			pendingAudioSamples += transcriptionLaneAudioSamples(audio)
-			resetTranscriptionTimer(commitTimer)
 		case <-commitTimer.C:
 			if !pendingAudio {
 				continue
 			}
-			pendingAudio = false
-			samples := pendingAudioSamples
-			pendingAudioSamples = 0
-			lane.app.noteRealtimeSpeechStoppedForRoom(lane.roomID)
-			lane.app.freezeAttributionWindowAtCommitForRoom(lane.roomID)
-			if err := lane.commitPendingTranscriptionAudio(conn, samples); err != nil {
+			if err := commitPending(); err != nil {
 				return err
 			}
 		}
@@ -440,6 +604,21 @@ func pushTranscriptionSegmentSeconds(roomID string, seconds float64) {
 	transcriptionSegmentSeconds[roomID] = queue
 }
 
+func transcriptionScopeMeterKey(scope RoomScoutScope) string {
+	return normalizeRoomID(scope.RoomID) + "\x00" + strings.TrimSpace(scope.SittingID) + "\x00" + strconv.FormatUint(scope.MediaGeneration, 10)
+}
+
+func pushTranscriptionSegmentSecondsForScope(scope RoomScoutScope, seconds float64) {
+	transcriptionSegmentSecondsMu.Lock()
+	defer transcriptionSegmentSecondsMu.Unlock()
+	key := transcriptionScopeMeterKey(scope)
+	queue := append(transcriptionSegmentSeconds[key], seconds)
+	if len(queue) > transcriptionSegmentSecondsCap {
+		queue = queue[len(queue)-transcriptionSegmentSecondsCap:]
+	}
+	transcriptionSegmentSeconds[key] = queue
+}
+
 // popTranscriptionSegmentSeconds returns the oldest committed segment duration
 // for the room, or 0 when nothing is queued (a terminal event for a segment
 // committed before the last reconnect).
@@ -460,11 +639,86 @@ func popTranscriptionSegmentSeconds(roomID string) float64 {
 	return seconds
 }
 
+func popTranscriptionSegmentSecondsForScope(scope RoomScoutScope) float64 {
+	transcriptionSegmentSecondsMu.Lock()
+	defer transcriptionSegmentSecondsMu.Unlock()
+	key := transcriptionScopeMeterKey(scope)
+	queue := transcriptionSegmentSeconds[key]
+	if len(queue) == 0 {
+		return 0
+	}
+	seconds := queue[0]
+	if len(queue) == 1 {
+		delete(transcriptionSegmentSeconds, key)
+	} else {
+		transcriptionSegmentSeconds[key] = queue[1:]
+	}
+	return seconds
+}
+
 func resetTranscriptionSegmentSecondsForRoom(roomID string) {
 	roomID = normalizeRoomID(roomID)
 	transcriptionSegmentSecondsMu.Lock()
 	delete(transcriptionSegmentSeconds, roomID)
 	transcriptionSegmentSecondsMu.Unlock()
+}
+
+func resetTranscriptionSegmentSecondsForScope(scope RoomScoutScope) {
+	transcriptionSegmentSecondsMu.Lock()
+	delete(transcriptionSegmentSeconds, transcriptionScopeMeterKey(scope))
+	transcriptionSegmentSecondsMu.Unlock()
+}
+
+// The scoped meter helpers linearize the current-owner check with the FIFO
+// mutation under app.mu. A teardown therefore cannot advance the sitting
+// between validation and push/pop/reset and let stale lane work touch its
+// successor's accounting queue.
+func (app *kanbanBoardApp) pushTranscriptionSegmentSecondsForLaneScope(scope RoomScoutScope, seconds float64) {
+	if app == nil {
+		return
+	}
+	if scope.MediaGeneration == 0 {
+		pushTranscriptionSegmentSeconds(scope.RoomID, seconds)
+		return
+	}
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	state := app.roomLiveLocked(scope.RoomID)
+	if state.mediaGen == scope.MediaGeneration && state.mediaActor != nil && state.mediaSittingID == strings.TrimSpace(scope.SittingID) {
+		pushTranscriptionSegmentSecondsForScope(scope, seconds)
+	}
+}
+
+func (app *kanbanBoardApp) popTranscriptionSegmentSecondsForLaneScope(scope RoomScoutScope) float64 {
+	if app == nil {
+		return 0
+	}
+	if scope.MediaGeneration == 0 {
+		return popTranscriptionSegmentSeconds(scope.RoomID)
+	}
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	state := app.roomLiveLocked(scope.RoomID)
+	if state.mediaGen != scope.MediaGeneration || state.mediaActor == nil || state.mediaSittingID != strings.TrimSpace(scope.SittingID) {
+		return 0
+	}
+	return popTranscriptionSegmentSecondsForScope(scope)
+}
+
+func (app *kanbanBoardApp) resetTranscriptionSegmentSecondsForLaneScope(scope RoomScoutScope) {
+	if app == nil {
+		return
+	}
+	if scope.MediaGeneration == 0 {
+		resetTranscriptionSegmentSecondsForRoom(scope.RoomID)
+		return
+	}
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	state := app.roomLiveLocked(scope.RoomID)
+	if state.mediaGen == scope.MediaGeneration && state.mediaActor != nil && state.mediaSittingID == strings.TrimSpace(scope.SittingID) {
+		resetTranscriptionSegmentSecondsForScope(scope)
+	}
 }
 
 // noteCommittedSegment writes the ledger row for one committed segment and
@@ -481,7 +735,7 @@ func (lane *meetingTranscriptionLane) noteCommittedSegment(committedSamples int)
 		RoomID:       lane.roomID,
 		AudioSeconds: seconds,
 	})
-	pushTranscriptionSegmentSeconds(lane.roomID, seconds)
+	lane.app.pushTranscriptionSegmentSecondsForLaneScope(lane.scope(), seconds)
 }
 
 func (lane *meetingTranscriptionLane) stopping() bool {
@@ -499,7 +753,9 @@ func (lane *meetingTranscriptionLane) stopping() bool {
 
 func (app *kanbanBoardApp) ensureRoomMixerSink() {
 	if roomMixer != nil {
-		roomMixer.setSink(realtimeMixedAudioSinkKey, app)
+		authority := currentConsentLaneAuthority()
+		roomMixer.setConsentSink(realtimeMixedAudioSinkKey+":transcription:"+officeRoomID, ConsentLaneTranscription, authority, &roomLaneAudioSink{app: app, roomID: officeRoomID, lane: ConsentLaneTranscription})
+		roomMixer.setConsentSink(realtimeMixedAudioSinkKey+":model:"+officeRoomID, ConsentLaneModelAnalysis, authority, &roomLaneAudioSink{app: app, roomID: officeRoomID, lane: ConsentLaneModelAnalysis})
 	}
 }
 
@@ -514,7 +770,8 @@ func (app *kanbanBoardApp) removeRoomMixerSinkIfIdle() {
 	app.mu.Unlock()
 
 	if !hasTranscriptLane && !hasRealtimeInput {
-		roomMixer.removeSink(realtimeMixedAudioSinkKey)
+		roomMixer.removeSink(realtimeMixedAudioSinkKey + ":transcription:" + officeRoomID)
+		roomMixer.removeSink(realtimeMixedAudioSinkKey + ":model:" + officeRoomID)
 	}
 }
 
@@ -551,17 +808,49 @@ func (app *kanbanBoardApp) currentRealtimeModel() string {
 	return app.model
 }
 
+func (app *kanbanBoardApp) currentRealtimeMediaGeneration() uint64 {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	return app.realtimeMediaGen
+}
+
 func (app *kanbanBoardApp) handleTranscriptionLaneEvent(raw []byte) bool {
 	return app.handleTranscriptionLaneEventForRoom(officeRoomID, raw, app.currentTranscriptionLaneModel())
 }
 
 func (app *kanbanBoardApp) handleTranscriptionLaneEventForRoom(roomID string, raw []byte, model string) bool {
+	return app.handleTranscriptionLaneEventForRoomGeneration(roomID, 0, raw, model)
+}
+
+func (app *kanbanBoardApp) handleTranscriptionLaneEventForRoomGeneration(roomID string, mediaGeneration uint64, raw []byte, model string) bool {
+	sittingID := ""
+	app.mu.Lock()
+	if mediaGeneration > 0 {
+		sittingID = app.roomLiveLocked(roomID).mediaSittingID
+	}
+	app.mu.Unlock()
+	return app.handleTranscriptionLaneEventForScope(RoomScoutScope{RoomID: roomID, SittingID: sittingID, MediaGeneration: mediaGeneration}, raw, model)
+}
+
+func (app *kanbanBoardApp) handleTranscriptionLaneEventForScope(scope RoomScoutScope, raw []byte, model string) bool {
 	var event kanbanRealtimeEvent
 	if err := json.Unmarshal(raw, &event); err != nil {
 		log.Errorf("Failed to parse OpenAI transcription event: %v", err)
 		return false
 	}
-	roomID = normalizeRoomID(roomID)
+	roomID, mediaGeneration := normalizeRoomID(scope.RoomID), scope.MediaGeneration
+	if mediaGeneration > 0 {
+		if strings.TrimSpace(scope.SittingID) != "" {
+			if !app.roomMediaScopeCurrent(scope) {
+				return false
+			}
+		} else if !app.roomMediaGenerationCurrent(roomID, mediaGeneration) {
+			return false
+		}
+	}
+	if transcriptionEventAfterScopeProbe != nil {
+		transcriptionEventAfterScopeProbe()
+	}
 
 	switch event.Type {
 	case "session.created", "session.updated":
@@ -585,9 +874,13 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEventForRoom(roomID string, ra
 		recordEvalEvent(seatTranscriptionLane, evalKindTranscriptSegment, map[string]any{
 			"status":        "completed",
 			"room_id":       roomID,
-			"audio_seconds": popTranscriptionSegmentSeconds(roomID),
+			"audio_seconds": app.popTranscriptionSegmentSecondsForLaneScope(scope),
 		})
-		app.rememberTranscript(roomID, event, "transcript_lane", model)
+		if mediaGeneration > 0 {
+			app.rememberTranscriptForMediaScope(scope, event, "transcript_lane", model)
+		} else {
+			app.rememberTranscript(roomID, event, "transcript_lane", model)
+		}
 	case "conversation.item.input_audio_transcription.failed":
 		recordCapabilityFailure(capabilitySTT, time.Now().UTC(), fmt.Errorf("transcription segment failed"))
 		// W0-5: a failed segment is speech the brain never heard — this event
@@ -595,26 +888,40 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEventForRoom(roomID string, ra
 		recordEvalEvent(seatTranscriptionLane, evalKindTranscriptSegment, map[string]any{
 			"status":        "failed",
 			"room_id":       roomID,
-			"audio_seconds": popTranscriptionSegmentSeconds(roomID),
+			"audio_seconds": app.popTranscriptionSegmentSecondsForLaneScope(scope),
 		})
 		// A6: a failed segment yields no transcript to persist, but it still had a
 		// window frozen at its commit. Pop it (discard) so the FIFO stays aligned;
 		// otherwise the next .completed inherits this dead turn's boundaries and every
 		// later transcript is attributed one turn late for the rest of the sitting.
-		app.popPendingAttributionWindowForRoom(roomID)
+		if mediaGeneration > 0 {
+			app.popPendingAttributionWindowForScope(scope)
+		} else {
+			app.popPendingAttributionWindowForRoom(roomID)
+		}
 	case "input_audio_buffer.speech_started":
-		app.noteRealtimeSpeechStartedForRoom(roomID)
+		if mediaGeneration > 0 {
+			app.noteRealtimeSpeechStartedForScope(scope)
+		} else {
+			app.noteRealtimeSpeechStartedForRoom(roomID)
+		}
 		if roomID == officeRoomID {
 			app.clearScoutVoiceArmForNewSpeech()
 		}
 		broadcastAssistantEvent("audio", "transcript lane detected speech", map[string]any{"eventType": event.Type})
 	case "input_audio_buffer.speech_stopped":
-		app.noteRealtimeSpeechStoppedForRoom(roomID)
+		if mediaGeneration > 0 {
+			app.noteRealtimeSpeechStoppedForScope(scope)
+		} else {
+			app.noteRealtimeSpeechStoppedForRoom(roomID)
+		}
 		broadcastAssistantEvent("audio", "transcript lane detected silence", map[string]any{"eventType": event.Type})
 	}
 
 	return false
 }
+
+var transcriptionEventAfterScopeProbe func()
 
 func transcriptionLaneEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("MEETING_TRANSCRIPT_LANE_ENABLED"))) {

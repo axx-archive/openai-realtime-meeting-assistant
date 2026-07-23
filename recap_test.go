@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,8 @@ import (
 // recap + headline for the voice model to speak.
 func TestMeetingRecapForcesBrainPassAndPostsToRoomChat(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
+	authority := newAmbientConsentAuthorityForTest(t)
+	grantAmbientConsentForTest(t, app, authority, officeRoomID, "tom@shareability.com")
 	app.mu.Lock()
 	app.apiKey = "test-key"
 	app.mu.Unlock()
@@ -111,10 +114,13 @@ func TestMeetingRecapErrorsWhenNothingCaptured(t *testing.T) {
 	}
 }
 
-// Audience "me" (catch-me-up) writes a targeted notification and skips the
-// room chat post; without a requester it falls back to the room.
+// Audience "me" is the exact W2 catch-up path. Without the production
+// retrieval/reauthorization adapter it fails closed and never falls back to a
+// whole-meeting digest; a requester-less shared-room call still means room.
 func TestMeetingRecapAudienceMeTargetsRequesterBell(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
+	authority := newAmbientConsentAuthorityForTest(t)
+	grantAmbientConsentForTest(t, app, authority, officeRoomID, "tim@shareability.com", "tom@shareability.com")
 	app.mu.Lock()
 	app.apiKey = "test-key"
 	app.mu.Unlock()
@@ -128,16 +134,13 @@ func TestMeetingRecapAudienceMeTargetsRequesterBell(t *testing.T) {
 	appendTestTranscript(t, app, "recap-me-1", "Tim will take the vendor call.")
 
 	result, _, err := app.applyPrivateRealtimeVoiceTool("tim@shareability.com", "catch_me_up", map[string]any{})
-	if err != nil {
-		t.Fatalf("catch_me_up: %v", err)
-	}
-	if result["audience"] != "me" {
-		t.Fatalf("audience=%v, want me", result["audience"])
+	if !errors.Is(err, ErrCatchUpUnavailable) || result != nil {
+		t.Fatalf("catch_me_up result=%v err=%v, want fail-closed adapter error", result, err)
 	}
 
 	unread := app.unreadNotificationsFor("tim@shareability.com", notificationListLimit)
-	if len(unread) != 1 || !strings.Contains(asString(unread[0]["text"]), "Tim owns the vendor call") {
-		t.Fatalf("tim unread=%#v, want the recap headline notification", unread)
+	if len(unread) != 0 {
+		t.Fatalf("tim unread=%#v, fail-closed catch-up must not publish", unread)
 	}
 	if other := app.unreadNotificationsFor("aj@shareability.com", notificationListLimit); len(other) != 0 {
 		t.Fatalf("aj unread=%#v, want the catch-up targeted only", other)
@@ -225,6 +228,8 @@ func jsonMarshalForTest(value any) (string, error) {
 // full coverage — while still delivering the fresh brain body.
 func TestMeetingRecapPrefixesCaptureNoteOnLateStart(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
+	authority := newAmbientConsentAuthorityForTest(t)
+	grantAmbientConsentForTest(t, app, authority, officeRoomID, "tom@shareability.com")
 	app.mu.Lock()
 	app.apiKey = "test-key"
 	app.mu.Unlock()

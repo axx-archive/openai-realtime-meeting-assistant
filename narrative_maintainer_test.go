@@ -248,6 +248,17 @@ func TestNarrativeMaintainerColdStartEmptyPassAdvancesCursor(t *testing.T) {
 		t.Fatalf("model passes after cursor stamp=%d, want still one (the window must not be re-fed)", passes)
 	}
 
+	// The hidden carrier is durable too: an explicit-backfill restart restores
+	// it into the chassis baseline without making the expired row recallable.
+	reloaded := newKanbanBoardApp()
+	reloaded.restoreNarrativeMaintainerCursorBaselines()
+	if entry := runNarrativeMaintainerOnceForTest(t, reloaded, empty); strings.TrimSpace(entry.ID) != "" {
+		t.Fatalf("reloaded empty pass appended %q, want nothing", entry.ID)
+	}
+	if passes != 1 {
+		t.Fatalf("model passes after durable cursor restore=%d, want still one", passes)
+	}
+
 	// The carrier never surfaces: not an active dossier, never recall material.
 	if actives := app.activeNarrativeEntries(narrativeStorylineContextLimit); len(actives) != 0 {
 		t.Fatalf("cursor carrier leaked into active dossiers: %v", actives)
@@ -276,6 +287,34 @@ func TestNarrativeMaintainerColdStartEmptyPassAdvancesCursor(t *testing.T) {
 	}
 	if actives := app.activeNarrativeEntries(narrativeStorylineContextLimit); len(actives) != 1 || actives[0].ID != entry.ID {
 		t.Fatalf("active dossiers=%v, want exactly the samsung dossier", actives)
+	}
+}
+
+func TestNarrativeMaintainerColdStartCursorPersistenceFailureRetries(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	app := newIsolatedKanbanBoardApp(t)
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-1", "## Overview\nNothing storyline-worthy.", nil); err != nil || !appended {
+		t.Fatalf("append brain-1: appended=%v err=%v", appended, err)
+	}
+
+	// A directory cannot be opened as the JSONL append target. The valid empty
+	// model response therefore cannot durably stamp its cursor.
+	app.memory.path = t.TempDir()
+	passes := 0
+	empty := func(context.Context, string, openAITextRequest) (string, error) {
+		passes++
+		return `{"narratives":[]}`, nil
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		if entry := runNarrativeMaintainerOnceForTest(t, app, empty); strings.TrimSpace(entry.ID) != "" {
+			t.Fatalf("failed cursor pass appended %q, want nothing", entry.ID)
+		}
+	}
+	if passes != 2 {
+		t.Fatalf("model passes=%d, want retry after each failed cursor persistence", passes)
+	}
+	if got := app.ambientAgentBaselineID(narrativeMaintainerAgentName); got != "" {
+		t.Fatalf("baseline advanced to %q despite cursor persistence failure", got)
 	}
 }
 

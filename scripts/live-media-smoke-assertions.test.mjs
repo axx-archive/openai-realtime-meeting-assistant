@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  mediaSoakProbeURL,
   validateMobileActiveSpeakerSnapshots,
   validateMobileMoreMenuSnapshots,
   validateMobilePinInteractions,
@@ -13,6 +14,11 @@ import {
   validateSoakProgressSnapshots,
   validateVideoTileMediaBounds
 } from './live-media-smoke-assertions.mjs'
+
+test('media-soak probe query is present only in explicit collector mode', () => {
+  assert.equal(mediaSoakProbeURL('https://example.test/rooms/alpha?x=1', true), 'https://example.test/rooms/alpha?x=1&media-soak-probe=1')
+  assert.equal(mediaSoakProbeURL('https://example.test/rooms/alpha?x=1&media-soak-probe=1', false), 'https://example.test/rooms/alpha?x=1')
+})
 
 const visibleRect = { clientRects: 1, rect: { top: 0, right: 320, bottom: 180, left: 0, width: 320, height: 180 } }
 const hiddenRect = { clientRects: 0, rect: { width: 0, height: 0 } }

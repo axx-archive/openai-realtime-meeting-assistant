@@ -969,7 +969,7 @@ func (store *meetingMemoryStore) unconsumedEntriesAfterForRoomForPrincipal(input
 	baselineID = strings.TrimSpace(baselineID)
 	if baselineID != "" {
 		for index := len(entries) - 1; index >= 0; index-- {
-			if entries[index].ID == baselineID {
+			if entries[index].ID == baselineID && !memoryEntryHiddenFromRecall(entries[index]) {
 				startIndex = index + 1
 				break
 			}
@@ -977,7 +977,7 @@ func (store *meetingMemoryStore) unconsumedEntriesAfterForRoomForPrincipal(input
 	}
 	for index := len(entries) - 1; index >= 0; index-- {
 		entry := entries[index]
-		if entry.Kind != artifactKind || !matchesRoom(entry) || (principal.Audience != "" && !recallEntryScopeAllowed(entry.Metadata, principal)) {
+		if entry.Kind != artifactKind || memoryEntryHiddenFromRecall(entry) || !matchesRoom(entry) || (principal.Audience != "" && !recallEntryScopeAllowed(entry.Metadata, principal)) {
 			continue
 		}
 		cursorID := strings.TrimSpace(entry.Metadata[cursorKey])
@@ -998,7 +998,7 @@ func (store *meetingMemoryStore) unconsumedEntriesAfterForRoomForPrincipal(input
 
 	inputs := make([]meetingMemoryEntry, 0, limit)
 	for _, entry := range entries[startIndex:] {
-		if entry.Kind != inputKind || !matchesRoom(entry) {
+		if entry.Kind != inputKind || memoryEntryHiddenFromRecall(entry) || !matchesRoom(entry) {
 			continue
 		}
 		if principal.Audience != "" && !recallEntryScopeAllowed(entry.Metadata, principal) {
@@ -1081,7 +1081,7 @@ func (store *meetingMemoryStore) latestEntryIDOfKindForRoom(kind string, roomID 
 	defer store.mu.Unlock()
 
 	for index := len(store.entries) - 1; index >= 0; index-- {
-		if store.entries[index].Kind != kind {
+		if store.entries[index].Kind != kind || memoryEntryHiddenFromRecall(store.entries[index]) {
 			continue
 		}
 		if roomID != "" && normalizeRoomID(store.entries[index].Metadata["roomId"]) != roomID {

@@ -13,10 +13,14 @@ import (
 // /assistant/goal door as aj and returns the decoded thread/artifact payload.
 func goalHTTPWithPackage(t *testing.T, field, packageID string) (int, meetingMemoryEntry) {
 	t.Helper()
+	thread, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Package goal origin", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create private origin thread: %v", err)
+	}
 	body, _ := json.Marshal(map[string]any{
 		"objective":     "package the IP thesis into a one-pager",
 		field:           packageID,
-		"originSurface": "chat:thread-xyz",
+		"originSurface": "chat:" + thread.ID,
 	})
 	req := httptest.NewRequest(http.MethodPost, "/assistant/goal", strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")

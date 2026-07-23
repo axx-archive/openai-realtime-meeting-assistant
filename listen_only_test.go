@@ -126,6 +126,8 @@ func TestListenOnlySittingBuildsRecordButNeverActsProactively(t *testing.T) {
 	if !record.ListenOnly {
 		t.Fatal("fixture: record must be latched")
 	}
+	authority := newAmbientConsentAuthorityForTest(t)
+	grantAmbientConsentForTest(t, app, authority, roomID, "tom@shareability.com")
 
 	// The record tier still runs: transcripts brain fine, stamped for §6.4.
 	appendRoomTestTranscript(t, app, roomID, "lo-ts-1", "The guests walked through the partnership terms sheet.")
@@ -509,7 +511,7 @@ func TestOfficeIdleTeardownFencesRealtimeRestart(t *testing.T) {
 	app.restartRealtimePeer("stale reconnect after teardown")
 	app.mu.Lock()
 	peer := app.pc
-	restarting := app.restarting
+	restarting := app.realtimeRestartToken != 0
 	app.mu.Unlock()
 	if peer != nil || restarting {
 		t.Fatalf("restart after teardown resurrected the peer (pc=%v restarting=%v)", peer, restarting)
@@ -556,6 +558,8 @@ func TestMeetingRecapForNamedRoomNeverReachesSignedInUnion(t *testing.T) {
 	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
 
 	roomB := "room-recap-bbbb"
+	authority := newAmbientConsentAuthorityForTest(t)
+	grantAmbientConsentForTest(t, kanbanApp, authority, roomB, "tom@shareability.com")
 	appendRoomTestTranscript(t, kanbanApp, roomB, "recap-roomb-1", "Private diligence points were talked through in room B.")
 	result, _, err := kanbanApp.meetingRecap(map[string]any{"audience": "room"}, "", roomB)
 	if err != nil {

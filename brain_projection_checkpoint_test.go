@@ -129,6 +129,13 @@ func testBrainProjectionOutput(t *testing.T, key BrainProjectionCheckpointKey, g
 	return output
 }
 
+// beginTestBrainProjectionRebuild exercises checkpoint fencing in isolation.
+// Production has no hook-free entrypoint; the runtime hook durably binds the
+// operator audit and source snapshot in this transaction.
+func beginTestBrainProjectionRebuild(ctx context.Context, store *PostgresBrainProjectionCheckpointStore, request BrainProjectionRebuildRequest) (BrainProjectionRebuildFence, error) {
+	return store.beginRebuild(ctx, request, func(context.Context, pgx.Tx, BrainProjectionRebuildFence) error { return nil })
+}
+
 func TestBrainProjectionCheckpointMigrationIsAdditiveAndDedicated(t *testing.T) {
 	migrations, err := loadCanonicalMigrations()
 	if err != nil || len(migrations) < 4 || migrations[3].Name != "0004_brain_projection_checkpoints.sql" {
@@ -239,12 +246,12 @@ func TestBrainProjectionAuthoritativeSourceRejectsFutureRegressingAndChangedMani
 		{Key: key, ExpectedGeneration: 0, StartSourceHighWater: 0, EndSourceHighWater: 21},
 		{Key: key, ExpectedGeneration: 0, StartSourceHighWater: 0, EndSourceHighWater: 19},
 	} {
-		if _, err := store.BeginRebuild(ctx, request); !errors.Is(err, ErrBrainProjectionSourceMoved) {
+		if _, err := beginTestBrainProjectionRebuild(ctx, store, request); !errors.Is(err, ErrBrainProjectionSourceMoved) {
 			t.Fatalf("non-authoritative range %+v error=%v", request, err)
 		}
 	}
 	resolver.set(19, "source-19")
-	if _, err := store.BeginRebuild(ctx, BrainProjectionRebuildRequest{Key: key, ExpectedGeneration: 0, StartSourceHighWater: 0, EndSourceHighWater: 19}); !errors.Is(err, ErrBrainProjectionRegression) {
+	if _, err := beginTestBrainProjectionRebuild(ctx, store, BrainProjectionRebuildRequest{Key: key, ExpectedGeneration: 0, StartSourceHighWater: 0, EndSourceHighWater: 19}); !errors.Is(err, ErrBrainProjectionRegression) {
 		t.Fatalf("replacement below published cursor error=%v", err)
 	}
 	changed := resolver.set(21, "source-21")
@@ -271,17 +278,17 @@ func TestBrainProjectionRebuildBindsOpaqueFenceManifestAndDurabilityTime(t *test
 		t.Fatal(err)
 	}
 	request := BrainProjectionRebuildRequest{Key: key, ExpectedGeneration: 0, StartSourceHighWater: 4, EndSourceHighWater: 30}
-	fence, err := store.BeginRebuild(ctx, request)
+	fence, err := beginTestBrainProjectionRebuild(ctx, store, request)
 	if err != nil || fence.Token.isZero() || fence.SourceManifestSHA256 != source.ManifestSHA256 {
 		t.Fatalf("rebuild fence=%+v err=%v", fence, err)
 	}
-	retry, err := store.BeginRebuild(ctx, request)
+	retry, err := beginTestBrainProjectionRebuild(ctx, store, request)
 	if err != nil || !retry.Existing || retry.Token != fence.Token {
 		t.Fatalf("idempotent rebuild=%+v err=%v", retry, err)
 	}
 	conflict := request
 	conflict.StartSourceHighWater = 5
-	if _, err := store.BeginRebuild(ctx, conflict); !errors.Is(err, ErrBrainProjectionFenceLost) {
+	if _, err := beginTestBrainProjectionRebuild(ctx, store, conflict); !errors.Is(err, ErrBrainProjectionFenceLost) {
 		t.Fatalf("conflicting rebuild error=%v", err)
 	}
 	old := testBrainProjectionOutput(t, key, 0, BrainProjectionRebuildFenceToken{}, source, 10, "old worker")
@@ -410,7 +417,7 @@ func TestBrainProjectionCompetingPublishAndPublishVersusRebuildRaces(t *testing.
 	publicationDone := make(chan error, 1)
 	rebuildDone := make(chan error, 1)
 	go func() { _, err := publisher.Publish(ctx, incremental); publicationDone <- err }()
-	go func() { _, err := store.BeginRebuild(ctx, rebuildRequest); rebuildDone <- err }()
+	go func() { _, err := beginTestBrainProjectionRebuild(ctx, store, rebuildRequest); rebuildDone <- err }()
 	publicationErr, rebuildErr := <-publicationDone, <-rebuildDone
 	if rebuildErr != nil || (publicationErr != nil && !errors.Is(publicationErr, ErrBrainProjectionFenceLost)) {
 		t.Fatalf("publish-vs-rebuild publication=%v rebuild=%v", publicationErr, rebuildErr)

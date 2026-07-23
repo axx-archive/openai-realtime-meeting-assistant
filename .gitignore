@@ -7,6 +7,8 @@
 /openai-realtime-meeting-assistant
 /data/
 /artifacts/native-apple/
+/artifacts/w2-gates/*
+!/artifacts/w2-gates/.gitignore
 .playwright-mcp/
 /node_modules/
 /playwright-report/

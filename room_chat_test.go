@@ -174,6 +174,18 @@ func TestWebsocketRoomChatBroadcastsSessionIdentity(t *testing.T) {
 	if chat.Name != "Tom" {
 		t.Fatalf("broadcast name=%q, want session identity Tom", chat.Name)
 	}
+	listLock.RLock()
+	var admittedGeneration uint64
+	for _, peer := range peerConnections {
+		if normalizeRoomID(peer.roomID) == officeRoomID && sameParticipantName(peer.participantName, "Tom") {
+			admittedGeneration = peer.mediaGeneration
+			break
+		}
+	}
+	listLock.RUnlock()
+	if admittedGeneration == 0 || kanbanApp.roomMediaGeneration(officeRoomID) != admittedGeneration {
+		t.Fatalf("first-boot office chat used generation=%d current=%d", admittedGeneration, kanbanApp.roomMediaGeneration(officeRoomID))
+	}
 	if chat.Text != "ship it" {
 		t.Fatalf("broadcast text=%q, want ship it", chat.Text)
 	}

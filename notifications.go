@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +19,14 @@ const (
 	// notificationListLimit is the newest-first page size for GET and for the
 	// unread backlog replayed on websocket admission.
 	notificationListLimit = 100
+	// catchUpNotificationAuditText is the only catch-up body permitted in the
+	// disk-backed bell store. The private recap stays solely in the canonical
+	// publication outbox while transient delivery is pending.
+	catchUpNotificationAuditText = "Catch-up delivery audit record."
+	// Websocket writes have a five-second bound. Refusing to start any catch-up
+	// channel inside this larger margin prevents a non-cancellable local write
+	// from running through the private payload's expiry.
+	catchUpDispatchDeadlineMargin = 10 * time.Second
 )
 
 const (
@@ -46,7 +55,11 @@ const (
 // notification is addressed to everyone; ReadBy tracks which accounts have
 // acknowledged it.
 type notificationRecord struct {
-	ID         string `json:"id"`
+	ID string `json:"id"`
+	// TenantID is populated for security-sensitive canonical publications. The
+	// process is single-tenant today, but carrying the binding prevents a
+	// recovered row from being merged into another tenant's notification log.
+	TenantID   string `json:"tenantId,omitempty"`
 	UserEmail  string `json:"userEmail,omitempty"`
 	Kind       string `json:"kind"`
 	Text       string `json:"text"`
@@ -67,9 +80,14 @@ type notificationRecord struct {
 	// waiting for the meeting to end); flushDeferredNotifications clears it,
 	// restamps CreatedAt, and pushes the record. Queued records are hidden
 	// from every viewer list until then.
-	DeliverAfter string   `json:"deliverAfter,omitempty"`
-	CreatedAt    string   `json:"createdAt"`
-	ReadBy       []string `json:"readBy,omitempty"`
+	DeliverAfter string `json:"deliverAfter,omitempty"`
+	CreatedAt    string `json:"createdAt"`
+	// ExpiresAt is audit metadata for canonical private catch-up publications.
+	// Their persisted Text is always catchUpNotificationAuditText; private text
+	// is never written here. Generic notifications retain their lifecycle.
+	ExpiresAt  string   `json:"expiresAt,omitempty"`
+	RedactedAt string   `json:"redactedAt,omitempty"`
+	ReadBy     []string `json:"readBy,omitempty"`
 	// ClearedBy tracks which accounts have dismissed this notification from
 	// their bell. Cleared records are filtered out of every viewer list (the
 	// GET page and the websocket admission backlog) without being deleted —
@@ -112,6 +130,7 @@ func loadNotificationStoreState(path string) ([]notificationRecord, error) {
 			continue
 		}
 		record.Kind = normalizeNotificationKind(record.Kind)
+		record.TenantID = strings.TrimSpace(record.TenantID)
 		record.UserEmail = normalizeAccountEmail(record.UserEmail)
 		records = append(records, record)
 	}
@@ -156,7 +175,11 @@ func (app *kanbanBoardApp) createLinkedNotification(userEmail string, kind strin
 	if app == nil {
 		return notificationRecord{}, fmt.Errorf("notifications are unavailable")
 	}
-	text = trimForStorage(text, 500)
+	textLimit := 500
+	if strings.TrimSpace(tool) == "catch_up_recap" {
+		textLimit = 6000
+	}
+	text = trimForStorage(text, textLimit)
 	if text == "" {
 		return notificationRecord{}, fmt.Errorf("notification text is required")
 	}
@@ -198,11 +221,28 @@ func (app *kanbanBoardApp) createLinkedNotification(userEmail string, kind strin
 // pushNotificationRecord fans one persisted record out over the websocket:
 // broadcast to everyone, or targeted to the recipient's own sockets only.
 func pushNotificationRecord(record notificationRecord) {
+	pushNotificationRecordLocal(record)
+	// Ordinary notifications keep web push off the websocket fan-out path.
+	go deliverWebPushForRecord(record)
+}
+
+func pushNotificationRecordLocal(record notificationRecord) {
+	if !notificationTenantMatches(record, canonicalTenantID()) {
+		return
+	}
+	pushNotificationRecordWebsocket(record)
+	pushNotificationRecordOS(record)
+}
+
+func pushNotificationRecordWebsocket(record notificationRecord) {
 	if record.UserEmail == "" {
 		broadcastSignedInKanbanEvent("notification", notificationForViewer(record, ""))
 	} else {
 		sendKanbanEventToUser(record.UserEmail, "notification", notificationForViewer(record, record.UserEmail))
 	}
+}
+
+func pushNotificationRecordOS(record notificationRecord) {
 	// Unified push channel: the same record on the typed stream so brief
 	// counters and other light consumers can react by kind. The bell itself
 	// stays driven by the full 'notification' event above; this carries a
@@ -219,13 +259,111 @@ func pushNotificationRecord(record notificationRecord) {
 	} else {
 		sendOSEventToUser(record.UserEmail, osEvt)
 	}
-	// Card 089: the same record buzzes subscribed phones over Web Push. This
-	// is the single fan-out seam every durable notification (live + deferred
-	// flush) already funnels through, so one hook covers every producer. Run
-	// it off the fan-out path — a per-subscription network call must never
-	// block the websocket sends above. settleProposalNotification rewrites its
-	// nudge without calling here on purpose (no re-buzz on settle).
-	go deliverWebPushForRecord(record)
+}
+
+type catchUpDispatchHooks struct {
+	now       func() time.Time
+	failpoint func(string) error
+	websocket func(notificationRecord) error
+	os        func(notificationRecord) error
+	webPush   func(context.Context, notificationRecord) error
+}
+
+func validateCatchUpDispatch(ctx context.Context, tenantID string, record notificationRecord, now func() time.Time) (time.Time, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return time.Time{}, err
+	}
+	tenantID = strings.TrimSpace(tenantID)
+	if tenantID == "" || tenantID != canonicalTenantID() || record.TenantID != tenantID || !canonicalCatchUpNotification(record) ||
+		normalizeAccountEmail(record.UserEmail) == "" || strings.TrimSpace(record.Text) == "" {
+		return time.Time{}, ErrCatchUpUnauthorized
+	}
+	expiresAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(record.ExpiresAt))
+	if err != nil {
+		return time.Time{}, ErrCatchUpUnavailable
+	}
+	clock := time.Now
+	if now != nil {
+		clock = now
+	}
+	deadline := expiresAt.UTC().Add(-catchUpDispatchDeadlineMargin)
+	if !clock().UTC().Before(deadline) {
+		return time.Time{}, context.DeadlineExceeded
+	}
+	return deadline, nil
+}
+
+// dispatchCommittedCatchUpNotification is the bounded transient dispatcher
+// for a canonical private catch-up. Each channel gets a fresh tenant/expiry
+// check before and after its call. The stable notification ID is reused on
+// recovery, so an ambiguous send can be coalesced by websocket clients and by
+// the Web Push tag.
+func dispatchCommittedCatchUpNotification(ctx context.Context, tenantID string, record notificationRecord, hooks catchUpDispatchHooks) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	deadline, err := validateCatchUpDispatch(ctx, tenantID, record, hooks.now)
+	if err != nil {
+		return err
+	}
+	dispatchCtx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+
+	websocket := hooks.websocket
+	if websocket == nil {
+		websocket = func(record notificationRecord) error {
+			pushNotificationRecordWebsocket(record)
+			return nil
+		}
+	}
+	osDispatch := hooks.os
+	if osDispatch == nil {
+		osDispatch = func(record notificationRecord) error {
+			pushNotificationRecordOS(record)
+			return nil
+		}
+	}
+	webPush := hooks.webPush
+	if webPush == nil {
+		webPush = deliverWebPushForRecordContext
+	}
+
+	phases := []struct {
+		name string
+		run  func() error
+	}{
+		{name: "websocket", run: func() error { return websocket(record) }},
+		{name: "os", run: func() error { return osDispatch(record) }},
+		{name: "web_push", run: func() error { return webPush(dispatchCtx, record) }},
+	}
+	for _, phase := range phases {
+		if _, err := validateCatchUpDispatch(dispatchCtx, tenantID, record, hooks.now); err != nil {
+			return err
+		}
+		if hooks.failpoint != nil {
+			if err := hooks.failpoint("before_" + phase.name + "_dispatch"); err != nil {
+				return err
+			}
+		}
+		if _, err := validateCatchUpDispatch(dispatchCtx, tenantID, record, hooks.now); err != nil {
+			return err
+		}
+		if err := phase.run(); err != nil {
+			return err
+		}
+		if hooks.failpoint != nil {
+			if err := hooks.failpoint("after_" + phase.name + "_dispatch"); err != nil {
+				return err
+			}
+		}
+		if _, err := validateCatchUpDispatch(dispatchCtx, tenantID, record, hooks.now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // flushDeferredNotifications delivers every notification queued with
@@ -292,8 +430,21 @@ func (app *kanbanBoardApp) persistNotificationsLocked() error {
 	return writeJSONFileAtomically(notificationsPath(), "notifications", state)
 }
 
+func canonicalCatchUpNotification(record notificationRecord) bool {
+	return strings.TrimSpace(record.TenantID) != "" && record.Tool == "catch_up_recap" && strings.HasPrefix(record.ID, "catch-up-notification-")
+}
+
+func notificationTenantMatches(record notificationRecord, viewerTenantID string) bool {
+	recordTenantID := strings.TrimSpace(record.TenantID)
+	return recordTenantID == "" || (strings.TrimSpace(viewerTenantID) != "" && recordTenantID == strings.TrimSpace(viewerTenantID))
+}
+
+func notificationVisibleToTenant(record notificationRecord, viewerTenantID, viewerEmail string) bool {
+	return notificationTenantMatches(record, viewerTenantID) && (record.UserEmail == "" || record.UserEmail == viewerEmail)
+}
+
 func notificationVisibleTo(record notificationRecord, viewerEmail string) bool {
-	return record.UserEmail == "" || record.UserEmail == viewerEmail
+	return notificationVisibleToTenant(record, canonicalTenantID(), viewerEmail)
 }
 
 func notificationReadBy(record notificationRecord, viewerEmail string) bool {
@@ -355,30 +506,45 @@ func notificationForViewer(record notificationRecord, viewerEmail string) map[st
 	if record.ProposalID != "" {
 		payload["proposalId"] = record.ProposalID
 	}
+	if record.RedactedAt != "" {
+		payload["redactedAt"] = record.RedactedAt
+	}
 	return payload
 }
 
 // notificationsForUser returns the viewer's own plus broadcast notifications,
 // newest first.
 func (app *kanbanBoardApp) notificationsForUser(viewerEmail string, limit int) []map[string]any {
-	return app.notificationsForUserFiltered(viewerEmail, limit, false)
+	return app.notificationsForTenantUser(canonicalTenantID(), viewerEmail, limit)
+}
+
+func (app *kanbanBoardApp) notificationsForTenantUser(viewerTenantID, viewerEmail string, limit int) []map[string]any {
+	return app.notificationsForTenantUserFiltered(viewerTenantID, viewerEmail, limit, false)
 }
 
 // unreadNotificationsFor is the websocket admission backlog: only records the
 // viewer has not read yet, newest first.
 func (app *kanbanBoardApp) unreadNotificationsFor(viewerEmail string, limit int) []map[string]any {
-	return app.notificationsForUserFiltered(viewerEmail, limit, true)
+	return app.unreadNotificationsForTenant(canonicalTenantID(), viewerEmail, limit)
+}
+
+func (app *kanbanBoardApp) unreadNotificationsForTenant(viewerTenantID, viewerEmail string, limit int) []map[string]any {
+	return app.notificationsForTenantUserFiltered(viewerTenantID, viewerEmail, limit, true)
 }
 
 func (app *kanbanBoardApp) notificationsForUserFiltered(viewerEmail string, limit int, unreadOnly bool) []map[string]any {
+	return app.notificationsForTenantUserFiltered(canonicalTenantID(), viewerEmail, limit, unreadOnly)
+}
+
+func (app *kanbanBoardApp) notificationsForTenantUserFiltered(viewerTenantID, viewerEmail string, limit int, unreadOnly bool) []map[string]any {
 	if app == nil {
 		return []map[string]any{}
 	}
+	viewerTenantID = strings.TrimSpace(viewerTenantID)
 	viewerEmail = normalizeAccountEmail(viewerEmail)
-	if viewerEmail == "" {
+	if viewerTenantID == "" || viewerEmail == "" {
 		return []map[string]any{}
 	}
-
 	app.mu.Lock()
 	records := append([]notificationRecord(nil), app.notifications...)
 	app.mu.Unlock()
@@ -390,7 +556,7 @@ func (app *kanbanBoardApp) notificationsForUserFiltered(viewerEmail string, limi
 		if record.DeliverAfter != "" {
 			continue
 		}
-		if !notificationVisibleTo(record, viewerEmail) {
+		if !notificationVisibleToTenant(record, viewerTenantID, viewerEmail) {
 			continue
 		}
 		// A record the viewer cleared is hidden from both the GET page and the
@@ -475,11 +641,16 @@ func (app *kanbanBoardApp) settleProposalNotification(proposalID string, text st
 // view/mark-all-read receipts skip it, and only resolveCodexProposal (via
 // settleProposalNotification) settles it.
 func (app *kanbanBoardApp) markNotificationsRead(viewerEmail string, ids []string) (int, error) {
+	return app.markNotificationsReadForTenant(canonicalTenantID(), viewerEmail, ids)
+}
+
+func (app *kanbanBoardApp) markNotificationsReadForTenant(viewerTenantID, viewerEmail string, ids []string) (int, error) {
 	if app == nil {
 		return 0, fmt.Errorf("notifications are unavailable")
 	}
+	viewerTenantID = strings.TrimSpace(viewerTenantID)
 	viewerEmail = normalizeAccountEmail(viewerEmail)
-	if viewerEmail == "" || len(ids) == 0 {
+	if viewerTenantID == "" || viewerEmail == "" || len(ids) == 0 {
 		return 0, nil
 	}
 	wanted := map[string]struct{}{}
@@ -499,7 +670,7 @@ func (app *kanbanBoardApp) markNotificationsRead(viewerEmail string, ids []strin
 		if _, ok := wanted[record.ID]; !ok {
 			continue
 		}
-		if !notificationVisibleTo(*record, viewerEmail) || notificationReadFor(*record, viewerEmail) {
+		if !notificationVisibleToTenant(*record, viewerTenantID, viewerEmail) || notificationReadFor(*record, viewerEmail) {
 			continue
 		}
 		if record.ProposalID != "" && record.ResolvedAt == "" && app.proposalAwaitingAction(record.ProposalID) {
@@ -529,11 +700,16 @@ func (app *kanbanBoardApp) markNotificationsRead(viewerEmail string, ids []strin
 // sticky pending-proposal nudge — that call to action only leaves the bell when
 // the proposal itself is acted on, never on a generic clear.
 func (app *kanbanBoardApp) clearNotifications(viewerEmail string, ids []string) (int, error) {
+	return app.clearNotificationsForTenant(canonicalTenantID(), viewerEmail, ids)
+}
+
+func (app *kanbanBoardApp) clearNotificationsForTenant(viewerTenantID, viewerEmail string, ids []string) (int, error) {
 	if app == nil {
 		return 0, fmt.Errorf("notifications are unavailable")
 	}
+	viewerTenantID = strings.TrimSpace(viewerTenantID)
 	viewerEmail = normalizeAccountEmail(viewerEmail)
-	if viewerEmail == "" {
+	if viewerTenantID == "" || viewerEmail == "" {
 		return 0, nil
 	}
 	// nil/empty ids means "clear all visible"; a populated set scopes the clear.
@@ -562,7 +738,7 @@ func (app *kanbanBoardApp) clearNotifications(viewerEmail string, ids []string) 
 		// Only records the viewer can actually see are clearable, and a queued
 		// deferred record has not been delivered yet — clearing it before the
 		// flush would swallow it silently.
-		if !notificationVisibleTo(*record, viewerEmail) || record.DeliverAfter != "" {
+		if !notificationVisibleToTenant(*record, viewerTenantID, viewerEmail) || record.DeliverAfter != "" {
 			continue
 		}
 		if notificationClearedBy(*record, viewerEmail) {

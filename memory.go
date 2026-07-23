@@ -202,6 +202,14 @@ func memoryEntryRelevance(entry meetingMemoryEntry) string {
 // exactly one current digest per (kind, digestKey) may ever ground recall,
 // otherwise a stale rollup could contradict its replacement.
 func memoryEntryHiddenFromRecall(entry meetingMemoryEntry) bool {
+	// Release-soak canaries may traverse the real persistence seams only while
+	// the authenticated observer is active. They are never knowledge: one
+	// server-owned marker excludes them from every normal snapshot, search,
+	// artifact, embedding, brain, digest, and model-context lane that shares
+	// this universal recall guard. Dedicated probe reads bypass it explicitly.
+	if memoryEntryIsMediaSoakCanary(entry) {
+		return true
+	}
 	switch memoryEntryRelevance(entry) {
 	case relevanceQuarantined, relevanceExpired:
 		return true
@@ -209,6 +217,10 @@ func memoryEntryHiddenFromRecall(entry meetingMemoryEntry) bool {
 		return isMeetingDigestKind(entry.Kind)
 	}
 	return false
+}
+
+func memoryEntryIsMediaSoakCanary(entry meetingMemoryEntry) bool {
+	return strings.EqualFold(strings.TrimSpace(entry.Metadata["mediaSoakCanary"]), "true")
 }
 
 // --- First-class Artifact model: version lineage (packaging OS §4, Wave 3
@@ -436,11 +448,13 @@ func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 			} else if strings.TrimSpace(entry.ID) != "" && strings.TrimSpace(entry.Text) != "" {
 				store.entries = append(store.entries, entry)
 				store.seen[entry.ID] = struct{}{}
-				store.bootLatestIDs[entry.Kind] = entry.ID
-				if store.bootLatestRoomIDs[entry.Kind] == nil {
-					store.bootLatestRoomIDs[entry.Kind] = map[string]string{}
+				if !memoryEntryHiddenFromRecall(entry) {
+					store.bootLatestIDs[entry.Kind] = entry.ID
+					if store.bootLatestRoomIDs[entry.Kind] == nil {
+						store.bootLatestRoomIDs[entry.Kind] = map[string]string{}
+					}
+					store.bootLatestRoomIDs[entry.Kind][normalizeRoomID(entry.Metadata["roomId"])] = entry.ID
 				}
-				store.bootLatestRoomIDs[entry.Kind][normalizeRoomID(entry.Metadata["roomId"])] = entry.ID
 			}
 		}
 		if readErr != nil {
@@ -465,7 +479,7 @@ func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 	decided := map[string]struct{}{}
 	for index := len(store.entries) - 1; index >= 0; index-- {
 		last := store.entries[index]
-		if isAmbientBookkeepingMemoryKind(last.Kind) {
+		if isAmbientBookkeepingMemoryKind(last.Kind) || memoryEntryHiddenFromRecall(last) {
 			continue
 		}
 		roomID := normalizeRoomID(last.Metadata["roomId"])
@@ -703,6 +717,10 @@ func fallbackTranscriptID(meetingID string, speaker string, transcript string, a
 }
 
 func (store *meetingMemoryStore) appendAttributedTranscriptEntry(roomID string, eventID string, itemID string, speaker string, speakerConfidence string, transcript string, extraMetadata map[string]string, bypassUsefulnessFilter bool, expectedMeetingID string) (meetingMemoryEntry, bool, error) {
+	return store.appendAttributedTranscriptEntryWithCapture(roomID, eventID, itemID, speaker, speakerConfidence, transcript, extraMetadata, bypassUsefulnessFilter, expectedMeetingID, nil)
+}
+
+func (store *meetingMemoryStore) appendAttributedTranscriptEntryWithCapture(roomID string, eventID string, itemID string, speaker string, speakerConfidence string, transcript string, extraMetadata map[string]string, bypassUsefulnessFilter bool, expectedMeetingID string, capture *transcriptCaptureStamp) (meetingMemoryEntry, bool, error) {
 	transcript = normalizeMemoryText(canonicalizeDomainTerms(transcript))
 	if store == nil || transcript == "" {
 		return meetingMemoryEntry{}, false, nil
@@ -755,7 +773,7 @@ func (store *meetingMemoryStore) appendAttributedTranscriptEntry(roomID string, 
 		}
 	}
 
-	return store.appendEntryForMeeting(roomID, meetingMemoryKindTranscript, id, transcript, metadata, expectedMeetingID)
+	return store.appendEntryForMeetingWithCapture(roomID, meetingMemoryKindTranscript, id, transcript, metadata, expectedMeetingID, capture)
 }
 
 func (store *meetingMemoryStore) appendBrainWriteUp(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
@@ -920,6 +938,9 @@ func (store *meetingMemoryStore) updateOSArtifactWithMetadataExpected(expected *
 	}
 
 	previousEntry := store.entries[index]
+	if err := validateArtifactScopeMetadataUpdates(previousEntry.Metadata, metadataUpdates); err != nil {
+		return meetingMemoryEntry{}, false, err
+	}
 	entry := cloneMemoryEntry(previousEntry)
 	if entry.Metadata == nil {
 		entry.Metadata = map[string]string{}
@@ -1031,7 +1052,7 @@ func (store *meetingMemoryStore) restoreOSArtifactMetadataIfHeaderMatches(expect
 		changed := false
 		for _, rawKey := range keys {
 			key := strings.TrimSpace(rawKey)
-			if key == "" || artifactCapabilityMetadataKey(key) || key == "tenantId" || key == "objectId" || key == "aclVersion" || key == "visibility" || key == "ownerEmail" || key == artifactContentDigestMetadataKey || key == artifactVersionMetadataKey || key == artifactVersionsMetadataKey || key == artifactParentVersionIDMetadataKey {
+			if key == "" || artifactScopeMetadataKey(key) || artifactCapabilityMetadataKey(key) || key == "tenantId" || key == "objectId" || key == "aclVersion" || key == "visibility" || key == "ownerEmail" || key == artifactContentDigestMetadataKey || key == artifactVersionMetadataKey || key == artifactVersionsMetadataKey || key == artifactParentVersionIDMetadataKey {
 				continue
 			}
 			prior, existed := priorMetadata[key]
@@ -1090,6 +1111,9 @@ func (store *meetingMemoryStore) updateOSArtifactMetadataExpected(expected *Arti
 	}
 
 	previousEntry := store.entries[index]
+	if err := validateArtifactScopeMetadataUpdates(previousEntry.Metadata, metadataUpdates); err != nil {
+		return meetingMemoryEntry{}, false, err
+	}
 	entry := cloneMemoryEntry(previousEntry)
 	if entry.Metadata == nil {
 		entry.Metadata = map[string]string{}
@@ -1170,6 +1194,9 @@ func (store *meetingMemoryStore) updateOSArtifactsMetadataBatch(ids []string, me
 			continue
 		}
 		previousEntry := store.entries[index]
+		if err := validateArtifactScopeMetadataUpdates(previousEntry.Metadata, metadataUpdates); err != nil {
+			return 0, err
+		}
 		entry := cloneMemoryEntry(previousEntry)
 		if entry.Metadata == nil {
 			entry.Metadata = map[string]string{}
@@ -1233,6 +1260,11 @@ func (store *meetingMemoryStore) updateEntryWithMetadata(kind string, id string,
 	}
 
 	previousEntry := store.entries[index]
+	if kind == meetingMemoryKindOSArtifact {
+		if err := validateArtifactScopeMetadataUpdates(previousEntry.Metadata, metadataUpdates); err != nil {
+			return meetingMemoryEntry{}, false, err
+		}
+	}
 	entry := cloneMemoryEntry(previousEntry)
 	if entry.Metadata == nil {
 		entry.Metadata = map[string]string{}
@@ -1311,6 +1343,34 @@ func (store *meetingMemoryStore) roomIDsOfKind(kind string) []string {
 // metadata.roomId (§3.4) alongside the room's meetingId; readers keep treating
 // absent roomId as office, so the JSONL is never rewritten.
 func (store *meetingMemoryStore) appendEntryForMeeting(roomID string, kind string, id string, text string, metadata map[string]string, expectedMeetingID string) (meetingMemoryEntry, bool, error) {
+	return store.appendEntryForMeetingWithCapture(roomID, kind, id, text, metadata, expectedMeetingID, nil)
+}
+
+type transcriptCaptureStamp struct {
+	CaptureSequence uint64
+	CapturedAt      time.Time
+	OccurredStart   time.Time
+	OccurredEnd     time.Time
+}
+
+func (store *meetingMemoryStore) reserveTranscriptCapture(occurredStart time.Time) (*transcriptCaptureStamp, error) {
+	if store == nil {
+		return nil, fmt.Errorf("meeting memory unavailable")
+	}
+	if occurredStart.IsZero() {
+		occurredStart = time.Now().UTC()
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	sequence, err := nextDurableCaptureSequence(store.path, maxPersistedCaptureSequence(store.entries))
+	if err != nil {
+		return nil, fmt.Errorf("reserve transcript capture sequence: %w", err)
+	}
+	stamp := &transcriptCaptureStamp{CaptureSequence: sequence, CapturedAt: time.Now().UTC(), OccurredStart: occurredStart.UTC()}
+	return stamp, nil
+}
+
+func (store *meetingMemoryStore) appendEntryForMeetingWithCapture(roomID string, kind string, id string, text string, metadata map[string]string, expectedMeetingID string, capture *transcriptCaptureStamp) (meetingMemoryEntry, bool, error) {
 	if strings.TrimSpace(kind) == "" {
 		kind = meetingMemoryKindTranscript
 	}
@@ -1357,14 +1417,31 @@ func (store *meetingMemoryStore) appendEntryForMeeting(roomID string, kind strin
 		stamped["roomId"] = roomID
 	}
 	if kind == meetingMemoryKindTranscript {
-		sequence, sequenceErr := nextDurableCaptureSequence(store.path, maxPersistedCaptureSequence(store.entries))
-		if sequenceErr != nil {
-			return meetingMemoryEntry{}, false, fmt.Errorf("persist transcript capture sequence: %w", sequenceErr)
+		sequence := uint64(0)
+		capturedAt := entry.CreatedAt
+		occurredStart, occurredEnd := time.Time{}, time.Time{}
+		if capture != nil {
+			sequence, capturedAt = capture.CaptureSequence, capture.CapturedAt.UTC()
+			occurredStart, occurredEnd = capture.OccurredStart.UTC(), capture.OccurredEnd.UTC()
+			highWater, sequenceErr := currentDurableCaptureSequence(store.path, maxPersistedCaptureSequence(store.entries))
+			if sequence == 0 || capturedAt.IsZero() || occurredStart.IsZero() || occurredEnd.IsZero() || occurredEnd.Before(occurredStart) || sequenceErr != nil || highWater < sequence {
+				return meetingMemoryEntry{}, false, fmt.Errorf("invalid reserved transcript capture")
+			}
+		} else {
+			var sequenceErr error
+			sequence, sequenceErr = nextDurableCaptureSequence(store.path, maxPersistedCaptureSequence(store.entries))
+			if sequenceErr != nil {
+				return meetingMemoryEntry{}, false, fmt.Errorf("persist transcript capture sequence: %w", sequenceErr)
+			}
 		}
 		// Caller metadata is never allowed to choose ordering. The server's
 		// separately durable monotonic sequence is the exact admission fence.
 		stamped["captureSequence"] = strconv.FormatUint(sequence, 10)
-		stamped["capturedAt"] = entry.CreatedAt.Format(time.RFC3339Nano)
+		stamped["capturedAt"] = capturedAt.Format(time.RFC3339Nano)
+		if !occurredStart.IsZero() {
+			stamped["occurredStart"] = occurredStart.Format(time.RFC3339Nano)
+			stamped["occurredEnd"] = occurredEnd.Format(time.RFC3339Nano)
+		}
 	}
 	entry.Metadata = stamped
 
@@ -1576,7 +1653,7 @@ func (store *meetingMemoryStore) transcriptCoverageForMeeting(meetingID string) 
 
 	times := make([]time.Time, 0, 64)
 	for _, entry := range store.entries {
-		if entry.Kind != meetingMemoryKindTranscript {
+		if entry.Kind != meetingMemoryKindTranscript || memoryEntryIsMediaSoakCanary(entry) {
 			continue
 		}
 		if strings.TrimSpace(entry.Metadata["meetingId"]) != meetingID {
@@ -1610,7 +1687,10 @@ func (store *meetingMemoryStore) entriesOfKind(kind string, limit int) []meeting
 
 	matched := make([]meetingMemoryEntry, 0)
 	for _, entry := range store.entries {
-		if entry.Kind == kind {
+		// entriesOfKind feeds artifact/model/worker lanes as well as maintenance
+		// callers. Release canaries are visible only through the dedicated,
+		// authenticated exact-scope probe reader.
+		if entry.Kind == kind && !memoryEntryIsMediaSoakCanary(entry) {
 			matched = append(matched, entry)
 		}
 	}
@@ -1635,7 +1715,7 @@ func (store *meetingMemoryStore) entryByKindAndID(kind string, id string) (meeti
 
 	for index := len(store.entries) - 1; index >= 0; index-- {
 		entry := store.entries[index]
-		if entry.ID == id && entry.Kind == kind {
+		if entry.ID == id && entry.Kind == kind && !memoryEntryIsMediaSoakCanary(entry) {
 			return cloneMemoryEntry(entry), true
 		}
 	}
@@ -2430,6 +2510,9 @@ func (store *meetingMemoryStore) deleteEntryByID(id string) (meetingMemoryEntry,
 	if index < 0 {
 		return meetingMemoryEntry{}, false, nil
 	}
+	if store.entries[index].Kind == meetingMemoryKindOSArtifact {
+		return meetingMemoryEntry{}, false, fmt.Errorf("OS artifacts require the projection-backed delete seam")
+	}
 
 	removed := cloneMemoryEntry(store.entries[index])
 	store.entries = append(store.entries[:index], store.entries[index+1:]...)
@@ -2441,6 +2524,51 @@ func (store *meetingMemoryStore) deleteEntryByID(id string) (meetingMemoryEntry,
 	delete(store.seen, id)
 
 	return removed, true, nil
+}
+
+// deleteOSArtifactWithProjection captures the body-free authorization and
+// deletion event under the same lock that removes the artifact. The returned
+// entry supports deletion audit records, but only the opaque projection can
+// authorize post-delete publication.
+func (store *meetingMemoryStore) deleteOSArtifactWithProjection(id string) (meetingMemoryEntry, artifactDeletionProjection, bool, error) {
+	if store == nil {
+		return meetingMemoryEntry{}, artifactDeletionProjection{}, false, fmt.Errorf("memory store is unavailable")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return meetingMemoryEntry{}, artifactDeletionProjection{}, false, fmt.Errorf("artifact id is required")
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	index := -1
+	for candidate := len(store.entries) - 1; candidate >= 0; candidate-- {
+		if store.entries[candidate].ID == id && store.entries[candidate].Kind == meetingMemoryKindOSArtifact {
+			index = candidate
+			break
+		}
+	}
+	if index < 0 {
+		return meetingMemoryEntry{}, artifactDeletionProjection{}, false, nil
+	}
+
+	removed := cloneMemoryEntry(store.entries[index])
+	header := store.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(meetingMemoryEntry{ID: removed.ID, Kind: removed.Kind, Metadata: removed.Metadata}))
+	projection := mintArtifactDeletionProjection(header, osEvent{
+		Kind:          osEventArtifactDeleted,
+		Ref:           removed.ID,
+		Title:         firstNonEmptyString(strings.TrimSpace(removed.Metadata["title"]), "Artifact removed"),
+		OriginSurface: firstNonEmptyString(strings.TrimSpace(removed.Metadata["originSurface"]), strings.TrimSpace(removed.Metadata["originKind"]), "artifacts"),
+		Actor:         "system",
+	})
+	store.entries = append(store.entries[:index], store.entries[index+1:]...)
+	if err := store.rewriteLocked(false); err != nil {
+		store.entries = append(store.entries[:index], append([]meetingMemoryEntry{removed}, store.entries[index:]...)...)
+		revokeArtifactDeletionProjection(projection)
+		return meetingMemoryEntry{}, artifactDeletionProjection{}, false, err
+	}
+	delete(store.seen, id)
+	return removed, projection, true, nil
 }
 
 // isUIStateMemoryKind reports the entry kinds that are workspace/UI state

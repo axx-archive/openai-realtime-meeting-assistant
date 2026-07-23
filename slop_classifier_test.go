@@ -145,6 +145,27 @@ func TestSweepExpiredQuarantineDeletesAndLeavesStub(t *testing.T) {
 	}
 }
 
+func TestSlopGenericArtifactUpdateCannotMutateRoomScope(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	entry, appended, err := app.memory.appendOSArtifact("slop-scope-immutable", "artifact body", map[string]string{
+		"title": "Slop scope proof", "visibility": "room_only", "roomId": "room-a",
+		"meetingId": "sitting-a", "sittingId": "sitting-a", "mediaGeneration": "7",
+	})
+	if err != nil || !appended {
+		t.Fatalf("append artifact appended=%v err=%v", appended, err)
+	}
+	if _, changed, err := app.memory.updateEntryWithMetadata(meetingMemoryKindOSArtifact, entry.ID, entry.Text, map[string]string{
+		relevanceMetadataKey: relevanceQuarantined,
+		"roomId":             "room-b",
+	}); err == nil || changed {
+		t.Fatalf("generic slop update mutated room scope changed=%v err=%v", changed, err)
+	}
+	header, found := app.memory.artifactAuthorizationHeaderByID(entry.ID)
+	if !found || header.RoomID != "room-a" || header.SittingID != "sitting-a" || header.MediaGeneration != 7 {
+		t.Fatalf("generic slop update changed authorization scope: found=%v header=%+v", found, header)
+	}
+}
+
 // TestSweepDoesNotDeleteBeforeExpiry guards the 30-day reprieve.
 func TestSweepDoesNotDeleteBeforeExpiry(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)

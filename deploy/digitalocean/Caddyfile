@@ -1,4 +1,12 @@
 {$MEETING_HOST} {
 	encode zstd gzip
-	reverse_proxy meetingassist:3000
+	@media_soak path /internal/media-soak/*
+	handle @media_soak {
+		@media_soak_denied not remote_ip {$BONFIRE_MEDIA_SOAK_COLLECTOR_CIDR:127.0.0.1/32}
+		respond @media_soak_denied 403
+		reverse_proxy meetingassist:3000
+	}
+	handle {
+		reverse_proxy meetingassist:3000
+	}
 }

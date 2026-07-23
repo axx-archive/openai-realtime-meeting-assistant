@@ -1,8 +1,15 @@
 services:
   meetingassist:
+    image: ${BONFIRE_MEETINGASSIST_IMAGE:-meetingassist:local}
     build:
       context: ../..
       dockerfile: Dockerfile
+      args:
+        BONFIRE_RELEASE_COMMIT: ${BONFIRE_RELEASE_COMMIT:-unqualified}
+        BONFIRE_GIT_TREE_DIGEST: ${BONFIRE_GIT_TREE_DIGEST:-unqualified}
+        BONFIRE_BUILD_CONFIG_SHA256: ${BONFIRE_BUILD_CONFIG_SHA256:-unqualified}
+        BONFIRE_BUILD_TRANSITIVE_INPUTS_SHA256: ${BONFIRE_BUILD_TRANSITIVE_INPUTS_SHA256:-unqualified}
+        BONFIRE_SOURCE_ARCHIVE_SHA256: ${BONFIRE_SOURCE_ARCHIVE_SHA256:-unqualified}
     # .env carries every runtime key into the app container, including the
     # OPS-3 Fable activation set (ANTHROPIC_API_KEY, BONFIRE_AGENT_RUNNER,
     # BONFIRE_ORCHESTRATOR_*/BONFIRE_DELIVERABLE_* dials). Do not move those
@@ -27,6 +34,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+    mem_limit: 1024m
     # Rides both networks: the egress-less render_internal leg exists ONLY so
     # the render sidecar can POST its callback here.
     networks:

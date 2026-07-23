@@ -72,13 +72,15 @@ var (
 	// trackRooms maps a forwarded track ID to the room it was published in
 	// (multi-room W3). acceptsTrack rejects cross-room forwards, so room A's
 	// media is never offered to room B's subscribers.
-	trackRooms            map[string]string
-	trackSourceIDs        map[string]string
-	trackLayerRIDs        map[string]string // forwarded track ID -> simulcast RID ("" when not simulcast)
-	trackLayerGroups      map[string]string // forwarded track ID -> source group key (shared by sibling layers)
+	trackRooms       map[string]string
+	trackSourceIDs   map[string]string
+	trackLayerRIDs   map[string]string // forwarded track ID -> simulcast RID ("" when not simulcast)
+	trackLayerGroups map[string]string // forwarded track ID -> source group key (shared by sibling layers)
+	// trackMediaOwners binds a concrete forwarded track object to the exact
+	// sitting generation that published it. Pointer identity preserves legacy
+	// tests/direct fixtures that replace trackLocals without registry metadata.
+	trackMediaOwners      map[string]trackMediaOwner
 	subscriberLayerTiers  map[string]string // subscriber session ID -> requested layer tier
-	signalRequestLock     sync.Mutex
-	signalRequestTimer    *time.Timer
 	participantSessionSeq atomic.Uint64
 	// activeWebsocketHandlers counts in-flight websocketHandler goroutines. A
 	// hijacked websocket outlives httptest.Server.Close, so tests that swap
@@ -307,7 +309,11 @@ func (s *peerICERestartState) observeConnectionState(state webrtc.ICEConnectionS
 		}
 	case webrtc.ICEConnectionStateConnected, webrtc.ICEConnectionStateCompleted:
 		s.outageActive = false
-		s.queued = false
+		// A restart request is owned by the room media actor once queue returns
+		// true. Do not let a healthy-state callback erase that accepted work
+		// during the actor's coalescing window; start() is the linearization point
+		// that consumes it. Recovery still closes the outage generation so a
+		// later disconnect opens a fresh one.
 	}
 }
 
@@ -386,10 +392,17 @@ type peerConnectionState struct {
 	// means office (the migration invariant), so every legacy entry — and
 	// every existing test that constructs states without it — keeps its exact
 	// behavior. Room-scoped fan-out and track acceptance filter on it.
-	roomID       string
-	acceptTrack  func(*webrtc.TrackLocalStaticRTP) bool
-	shouldSignal func(desiredTrackCount int) bool
-	signal       func(gatherComplete <-chan struct{}) error
+	roomID string
+	// sittingID and mediaGeneration form the exact recipient fence used by
+	// scoped room fan-out. Legacy/test states may leave sittingID empty; only
+	// explicitly scoped delivery requires it.
+	sittingID string
+	// mediaGeneration binds callbacks to the room sitting that admitted this
+	// transport. A callback from a closed sitting cannot publish into the next.
+	mediaGeneration uint64
+	acceptTrack     func(*webrtc.TrackLocalStaticRTP) bool
+	shouldSignal    func(desiredTrackCount int) bool
+	signal          func(gatherComplete <-chan struct{}) error
 
 	// Negotiation watchdog bookkeeping, mutated only under listLock by
 	// signalPeerConnectionsWithRestart.
@@ -422,6 +435,12 @@ type participantTrackSnapshot struct {
 	RoomID        string `json:"roomId"`
 }
 
+type trackMediaOwner struct {
+	track      *webrtc.TrackLocalStaticRTP
+	generation uint64
+	sittingID  string
+}
+
 func (p peerConnectionState) acceptsTrack(track *webrtc.TrackLocalStaticRTP) bool {
 	if track != nil && sameParticipantName(trackParticipants[track.ID()], p.participantName) {
 		return false
@@ -431,6 +450,13 @@ func (p peerConnectionState) acceptsTrack(track *webrtc.TrackLocalStaticRTP) boo
 	// both sides (§9 migration invariant).
 	if track != nil && normalizeRoomID(trackRooms[track.ID()]) != normalizeRoomID(p.roomID) {
 		return false
+	}
+	if track != nil {
+		if owner, ok := trackMediaOwners[track.ID()]; ok && owner.track == track {
+			if owner.generation != p.mediaGeneration || (owner.sittingID != "" && owner.sittingID != p.sittingID) {
+				return false
+			}
+		}
 	}
 	if p.acceptTrack != nil {
 		return p.acceptTrack(track)
@@ -765,6 +791,10 @@ func setSubscriberLayerTier(sessionID string, tier layerTier) bool {
 func main() {
 	// Parse the flags passed to program
 	flag.Parse()
+	if err := initializeRestoreGate(time.Now().UTC()); err != nil {
+		fmt.Fprintf(os.Stderr, "Restore gate startup failed: %v\n", err)
+		os.Exit(2)
+	}
 	if err := validateCanonicalModeConfig(); err != nil {
 		fmt.Fprintf(os.Stderr, "Canonical persistence configuration is invalid: %v\n", err)
 		os.Exit(2)
@@ -799,11 +829,18 @@ func main() {
 	trackSourceIDs = map[string]string{}
 	trackLayerRIDs = map[string]string{}
 	trackLayerGroups = map[string]string{}
+	trackMediaOwners = map[string]trackMediaOwner{}
 	subscriberLayerTiers = map[string]string{}
 	activeParticipantConnections = map[string]peerConnectionState{}
 	roomMixer = newAudioMixer()
 	defer roomMixer.close()
 	kanbanApp = newKanbanBoardApp()
+	installLiveMediaSoakObserver(kanbanApp)
+	configureProductionCatchUpResolver(kanbanApp)
+	if err := configureProductionInsightsOpportunitiesExecutor(kanbanApp); err != nil {
+		fmt.Fprintf(os.Stderr, "Insights & Opportunities executor startup failed: %v\n", err)
+		os.Exit(2)
+	}
 	roomMixer.setActivityListener(kanbanApp)
 	defer kanbanApp.Close()
 	if err := kanbanApp.JoinConferenceRoom(); err != nil {
@@ -919,6 +956,9 @@ func main() {
 	http.HandleFunc("/deal-room/", dealRoomPublicHandler)
 	http.HandleFunc("/assistant/brief", assistantBriefHandler)
 	http.HandleFunc("/assistant/portfolio", assistantPortfolioHandler)
+	// W2C is a dedicated, default-off executor surface. It never enters the
+	// generic process registry and remains 404 until the feature flag is enabled.
+	http.HandleFunc("/api/insights-opportunities/v1/", insightsOpportunitiesExecutorHandler)
 	http.HandleFunc("/assistant/realtime-offer", assistantRealtimeOfferHandler)
 	http.HandleFunc("/assistant/realtime-tool", assistantRealtimeToolHandler)
 	// W0 private-voice usage beacon (founder decision 3): the browser owns the
@@ -927,7 +967,12 @@ func main() {
 	http.HandleFunc("/assistant/realtime/usage", assistantRealtimeUsageHandler)
 	// W0-9: signed-in JSON twin of the living Spend & Health artifact.
 	http.HandleFunc("/api/usage/rollup", usageRollupHandler)
+	http.HandleFunc("/api/consent", consentHandler)
+	http.HandleFunc("/api/admin/brain-projection/backfill", brainProjectionHistoricalBackfillHandler)
 	http.HandleFunc("/internal/codex/jobs/result", internalCodexRunnerResultHandler)
+	// W2A release-only observer: the handler is always registered but returns
+	// 404 unless explicit media-soak mode and its purpose-scoped token are set.
+	http.HandleFunc("/internal/media-soak/", mediaSoakObserverHandler)
 	http.HandleFunc("/artifacts", artifactsHandler)
 	http.HandleFunc("/artifacts/action", artifactRunnerActionHandler)
 	http.HandleFunc("/artifacts/open", artifactOpenHandler)
@@ -1018,7 +1063,7 @@ func main() {
 func broadcastServerShutdown(retryAfterMs int) {
 	if kanbanApp != nil {
 		kanbanApp.mu.Lock()
-		kanbanApp.restarting = true
+		kanbanApp.serverRestarting = true
 		kanbanApp.mu.Unlock()
 	}
 	log.Infof("room_server_shutdown retry_after_ms=%d", retryAfterMs)
@@ -1085,7 +1130,9 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 	boardCheck := traffic.boardCheck
 	realtime := map[string]any{"connected": false, "voiceControl": false}
 	admissionAnchors := map[string]any{"healthy": false}
+	consentAuthority := map[string]any{"healthy": false, "policyVersion": consentPolicyVersionFromEnvironment()}
 	var admissionAnchorErr error
+	var consentAuthorityErr error
 	if appAvailable {
 		kanbanApp.mu.Lock()
 		realtime["connected"] = kanbanApp.connected
@@ -1096,11 +1143,24 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 		if admissionAnchorErr != nil {
 			admissionAnchors["reason"] = "store_unavailable"
 		}
+		consentAuthorityErr = currentConsentLaneAuthority().Health(r.Context())
+		consentAuthority["healthy"] = consentAuthorityErr == nil
+		if consentAuthorityErr != nil {
+			consentAuthority["reason"] = "store_unavailable"
+		}
 	}
 
 	ready := traffic.ready
+	if restoreGate.enabled && !restoreGate.ready {
+		ready = false
+	}
 	canonical := canonicalRuntimeSnapshot()
 	if canonical.Required && !canonical.Healthy {
+		ready = false
+	}
+	// A canonical deployment is not ready until the private catch-up
+	// outbox has completed its first durable scan and has no unresolved rows.
+	if canonical.Database && !canonical.CatchUpPublication.Ready {
 		ready = false
 	}
 	if admissionAnchorErr != nil {
@@ -1119,8 +1179,19 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 	if canonical.Mode != "off" && !canonical.Healthy {
 		degraded = append(degraded, "canonical_runtime_degraded")
 	}
+	if canonical.Database && !canonical.CatchUpPublication.Ready {
+		degraded = append(degraded, "catch_up_publication_recovery_degraded")
+	}
+	if canonical.BrainProjection.Enabled && !canonical.BrainProjection.Ready {
+		degraded = append(degraded, "brain_projection_recovery_degraded")
+	}
 	if admissionAnchorErr != nil {
 		degraded = append(degraded, "admission_anchor_store_degraded")
+	}
+	if consentAuthorityErr != nil {
+		// Consent failure narrows capture/transcription/model/org-memory lanes;
+		// room admission, direct WebRTC transport, chat, and video remain ready.
+		degraded = append(degraded, "consent_authority_degraded")
 	}
 
 	writeSystemStatusJSON(w, r, status, map[string]any{
@@ -1130,8 +1201,10 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 		"degraded":     degraded,
 		"capabilities": capabilities,
 		"checks": map[string]any{
+			"restoreGate":      restoreGateSnapshot(),
 			"canonical":        canonical,
 			"admissionAnchors": admissionAnchors,
+			"consentAuthority": consentAuthority,
 			"app":              appAvailable,
 			"memoryStore":      memoryAvailable,
 			"memoryFile":       memoryCheck,
@@ -2810,6 +2883,10 @@ func websocketOriginAllowed(r *http.Request) bool {
 
 // Add to list of tracks. Callers publish track metadata before renegotiating.
 func addTrack(roomID string, t *webrtc.TrackRemote, participantName string, sessionID string) (*webrtc.TrackLocalStaticRTP, error) { // nolint
+	return addTrackForGeneration(roomID, 0, t, participantName, sessionID)
+}
+
+func addTrackForGeneration(roomID string, mediaGeneration uint64, t *webrtc.TrackRemote, participantName string, sessionID string) (*webrtc.TrackLocalStaticRTP, error) { // nolint
 	// Create a new TrackLocal with the same codec as our incoming
 	trackLocal, err := webrtc.NewTrackLocalStaticRTP(t.Codec().RTPCodecCapability, forwardedRemoteTrackID(t), t.StreamID())
 	if err != nil {
@@ -2838,6 +2915,9 @@ func addTrack(roomID string, t *webrtc.TrackRemote, participantName string, sess
 	if trackLayerGroups == nil {
 		trackLayerGroups = map[string]string{}
 	}
+	if trackMediaOwners == nil {
+		trackMediaOwners = map[string]trackMediaOwner{}
+	}
 	groupKey := layerGroupKey(t.StreamID(), t.ID())
 	reapStaleLayerTwinsLocked(groupKey, t.RID(), trackLocal.ID())
 	trackLocals[trackLocal.ID()] = trackLocal
@@ -2847,6 +2927,11 @@ func addTrack(roomID string, t *webrtc.TrackRemote, participantName string, sess
 	trackSourceIDs[trackLocal.ID()] = t.ID()
 	trackLayerRIDs[trackLocal.ID()] = t.RID()
 	trackLayerGroups[trackLocal.ID()] = groupKey
+	sittingID := ""
+	if kanbanApp != nil && kanbanApp.memory != nil {
+		sittingID = kanbanApp.memory.currentMeetingID(roomID)
+	}
+	trackMediaOwners[trackLocal.ID()] = trackMediaOwner{track: trackLocal, generation: mediaGeneration, sittingID: sittingID}
 	totalTracks, audioTracks, videoTracks := forwardedTrackCountsLocked()
 	listLock.Unlock()
 
@@ -2875,6 +2960,7 @@ func reapStaleLayerTwinsLocked(groupKey string, rid string, keepTrackID string) 
 		delete(trackSourceIDs, staleID)
 		delete(trackLayerRIDs, staleID)
 		delete(trackLayerGroups, staleID)
+		delete(trackMediaOwners, staleID)
 		subscriberKeyframeThrottle.forget(staleID)
 	}
 }
@@ -2928,17 +3014,29 @@ func removeTrack(t *webrtc.TrackLocalStaticRTP) {
 
 	var participantName string
 	var sessionID string
+	var roomID string
+	var mediaGeneration uint64
+	var generationBound bool
 	var totalTracks, audioTracks, videoTracks int
 	listLock.Lock()
 	defer func() {
 		listLock.Unlock()
 		log.Infof("room_track_removed participant=%s session=%s kind=%s track_id=%s total_tracks=%d audio_tracks=%d video_tracks=%d",
 			participantName, sessionID, t.Kind(), t.ID(), totalTracks, audioTracks, videoTracks)
-		signalPeerConnections()
+		if generationBound {
+			requestRoomMediaCommandForGeneration(roomID, mediaGeneration, roomMediaCommandTrack)
+		} else {
+			requestRoomMediaCommand(roomID, roomMediaCommandTrack)
+		}
 	}()
 
 	participantName = trackParticipants[t.ID()]
 	sessionID = trackParticipantSessions[t.ID()]
+	roomID = normalizeRoomID(trackRooms[t.ID()])
+	if owner, ok := trackMediaOwners[t.ID()]; ok && owner.track == t {
+		mediaGeneration = owner.generation
+		generationBound = true
+	}
 	if trackLocals[t.ID()] != t {
 		// A same-ID republish already replaced this entry; the stale
 		// track's unpublish must not tear down the fresh one.
@@ -2951,6 +3049,7 @@ func removeTrack(t *webrtc.TrackLocalStaticRTP) {
 	delete(trackSourceIDs, t.ID())
 	delete(trackLayerRIDs, t.ID())
 	delete(trackLayerGroups, t.ID())
+	delete(trackMediaOwners, t.ID())
 	subscriberKeyframeThrottle.forget(t.ID())
 	totalTracks, audioTracks, videoTracks = forwardedTrackCountsLocked()
 }
@@ -2971,6 +3070,7 @@ func removeParticipantTracksLocked(name string, sessionID string) bool {
 		delete(trackSourceIDs, trackID)
 		delete(trackLayerRIDs, trackID)
 		delete(trackLayerGroups, trackID)
+		delete(trackMediaOwners, trackID)
 		subscriberKeyframeThrottle.forget(trackID)
 		removedTracks = true
 	}
@@ -2979,13 +3079,21 @@ func removeParticipantTracksLocked(name string, sessionID string) bool {
 }
 
 func participantTrackSnapshots(roomID string, excludeParticipant string) []participantTrackSnapshot {
+	mediaGeneration := uint64(0)
+	if kanbanApp != nil {
+		mediaGeneration = kanbanApp.roomMediaGeneration(roomID)
+	}
 	listLock.RLock()
 	defer listLock.RUnlock()
 
-	return participantTrackSnapshotsLocked(roomID, excludeParticipant)
+	return participantTrackSnapshotsLockedForGeneration(roomID, excludeParticipant, mediaGeneration, true)
 }
 
 func participantTrackSnapshotsLocked(roomID string, excludeParticipant string) []participantTrackSnapshot {
+	return participantTrackSnapshotsLockedForGeneration(roomID, excludeParticipant, 0, false)
+}
+
+func participantTrackSnapshotsLockedForGeneration(roomID string, excludeParticipant string, mediaGeneration uint64, enforceGeneration bool) []participantTrackSnapshot {
 	// Room isolation must hold server-side (§6.2): the replay mirrors
 	// acceptsTrack — only tracks published in the requester's room, each
 	// stamped with roomId. Absent room ids mean office on both sides (§9).
@@ -2996,6 +3104,9 @@ func participantTrackSnapshotsLocked(roomID string, excludeParticipant string) [
 			continue
 		}
 		if normalizeRoomID(trackRooms[trackID]) != snapshotRoomID {
+			continue
+		}
+		if owner, ok := trackMediaOwners[trackID]; enforceGeneration && ok && owner.track == trackLocal && owner.generation != mediaGeneration {
 			continue
 		}
 		name := canonicalRoomParticipantName(trackParticipants[trackID])
@@ -3082,6 +3193,11 @@ func browserRTCConfigurationFromEnv() map[string]any {
 func nativeRoomClientConfig() map[string]any {
 	return map[string]any{
 		"rtcConfiguration": browserRTCConfigurationFromEnv(),
+		// The browser proof ledger is inert unless both the server-side observer
+		// and the explicit probe URL opt in. It records only bounded signaling
+		// timestamps/correlation ids and RTP counters; no SDP, names, chat, audio,
+		// transcript, or other meeting content is exposed.
+		"mediaSoakProbeEnabled": strings.EqualFold(strings.TrimSpace(os.Getenv("BONFIRE_MEDIA_SOAK_OBSERVER_ENABLED")), "true"),
 		// How long the ICE servers' TURN credentials stay valid (card-003 W4
 		// gap 2). 0 when creds are static or absent; non-zero on the HMAC mint
 		// path so the client refreshes this config before an ICE restart or
@@ -3509,7 +3625,7 @@ func replaceExistingParticipantSessionEndpointInRoom(roomID string, name string,
 	closeParticipantConnections(staleConnections)
 
 	if len(staleConnections) > 0 || removedTracks {
-		signalPeerConnections()
+		requestRoomMediaCommand(roomID, roomMediaCommandAdmit)
 	}
 }
 
@@ -3524,10 +3640,12 @@ func unregisterParticipantSession(name string, sessionID string) {
 
 	removedConnection := false
 	removedTracks := false
+	affectedRooms := map[string]struct{}{}
 
 	listLock.Lock()
 	for key, state := range activeParticipantConnections {
 		if sameParticipantName(state.participantName, name) && state.sessionID == sessionID {
+			affectedRooms[normalizeRoomID(state.roomID)] = struct{}{}
 			delete(activeParticipantConnections, key)
 			removedConnection = true
 		}
@@ -3535,18 +3653,26 @@ func unregisterParticipantSession(name string, sessionID string) {
 	retainedConnections := peerConnections[:0]
 	for _, state := range peerConnections {
 		if sameParticipantName(state.participantName, name) && state.sessionID == sessionID {
+			affectedRooms[normalizeRoomID(state.roomID)] = struct{}{}
 			removedConnection = true
 			continue
 		}
 		retainedConnections = append(retainedConnections, state)
 	}
 	peerConnections = retainedConnections
+	for trackID, participantName := range trackParticipants {
+		if sameParticipantName(participantName, name) && trackParticipantSessions[trackID] == sessionID {
+			affectedRooms[normalizeRoomID(trackRooms[trackID])] = struct{}{}
+		}
+	}
 	removedTracks = removeParticipantTracksLocked(name, sessionID)
 	delete(subscriberLayerTiers, sessionID)
 	listLock.Unlock()
 
 	if removedConnection || removedTracks {
-		signalPeerConnections()
+		for roomID := range affectedRooms {
+			requestRoomMediaCommand(roomID, roomMediaCommandLeave)
+		}
 	}
 }
 
@@ -3594,6 +3720,19 @@ func peerConnectionPoolSize() int {
 	return len(peerConnections)
 }
 
+// peerConnectionStateLocked resolves the current slice entry after code has
+// temporarily released listLock for blocking signaling I/O. Slice entries are
+// values and may move during append/prune, so retaining a pointer across an
+// unlock would be an ownership race even when the PeerConnection itself lives.
+func peerConnectionStateLocked(peerConnection *webrtc.PeerConnection) *peerConnectionState {
+	for i := range peerConnections {
+		if peerConnections[i].peerConnection == peerConnection {
+			return &peerConnections[i]
+		}
+	}
+	return nil
+}
+
 func closeParticipantConnections(states []peerConnectionState) {
 	closedPeerConnections := map[*webrtc.PeerConnection]struct{}{}
 	closedWebsockets := map[*threadSafeWriter]struct{}{}
@@ -3632,20 +3771,9 @@ func signalPeerConnections() { // nolint
 }
 
 func requestPeerConnectionSignal() {
-	signalRequestLock.Lock()
-	defer signalRequestLock.Unlock()
-
-	if signalRequestTimer != nil {
-		signalRequestTimer.Reset(peerSignalDebounce)
-		return
+	for _, roomID := range activeMediaRoomIDs() {
+		requestRoomMediaCommand(roomID, roomMediaCommandSignal)
 	}
-
-	signalRequestTimer = time.AfterFunc(peerSignalDebounce, func() {
-		signalRequestLock.Lock()
-		signalRequestTimer = nil
-		signalRequestLock.Unlock()
-		signalPeerConnectionsWithRestart()
-	})
 }
 
 func signalPeerConnectionICE(peerConnection *webrtc.PeerConnection) bool {
@@ -3656,12 +3784,16 @@ func signalPeerConnectionICE(peerConnection *webrtc.PeerConnection) bool {
 	now := time.Now()
 	state := peerConnection.ICEConnectionState()
 	queued := false
+	roomID := officeRoomID
+	mediaGeneration := uint64(0)
 	listLock.Lock()
 	for i := range peerConnections {
 		if peerConnections[i].peerConnection != peerConnection {
 			continue
 		}
 		queued = peerConnections[i].iceRestart.queue(state, now)
+		roomID = normalizeRoomID(peerConnections[i].roomID)
+		mediaGeneration = peerConnections[i].mediaGeneration
 		break
 	}
 	listLock.Unlock()
@@ -3669,7 +3801,17 @@ func signalPeerConnectionICE(peerConnection *webrtc.PeerConnection) bool {
 		return false
 	}
 
-	signalPeerConnectionsWithRestart()
+	if !requestRoomMediaCommandForGeneration(roomID, mediaGeneration, roomMediaCommandRestart) {
+		listLock.Lock()
+		for i := range peerConnections {
+			if peerConnections[i].peerConnection == peerConnection && peerConnections[i].mediaGeneration == mediaGeneration {
+				peerConnections[i].iceRestart.queued = false
+				break
+			}
+		}
+		listLock.Unlock()
+		return false
+	}
 	return true
 }
 
@@ -3701,25 +3843,60 @@ func completePeerConnectionICERestart(peerConnection *webrtc.PeerConnection) {
 	}
 }
 
-func schedulePeerConnectionSignal() {
+func schedulePeerConnectionSignal(roomID string) {
+	schedulePeerConnectionSignalForGeneration(roomID, 0, false)
+}
+
+func schedulePeerConnectionSignalForGeneration(roomID string, mediaGeneration uint64, enforceGeneration bool) {
 	go func() {
 		time.Sleep(750 * time.Millisecond)
-		signalPeerConnectionsWithRestart()
+		if enforceGeneration {
+			requestRoomMediaCommandForGeneration(roomID, mediaGeneration, roomMediaCommandSignal)
+		} else {
+			requestRoomMediaCommand(roomID, roomMediaCommandSignal)
+		}
 	}()
 }
 
 func signalPeerConnectionsWithRestart() { // nolint
+	for _, roomID := range activeMediaRoomIDs() {
+		signalPeerConnectionsForRoomWithRestart(roomID)
+	}
+}
+
+func signalPeerConnectionsForRoomWithRestart(roomID string) { // nolint
+	signalPeerConnectionsForRoom(roomID, 0, false)
+}
+
+func signalPeerConnectionsForRoomGenerationWithRestart(roomID string, mediaGeneration uint64) { // nolint
+	signalPeerConnectionsForRoom(roomID, mediaGeneration, true)
+}
+
+func signalPeerConnectionsForRoom(roomID string, mediaGeneration uint64, enforceGeneration bool) { // nolint
+	roomID = normalizeRoomID(roomID)
+	if enforceGeneration && roomMediaActorForGeneration(roomID, mediaGeneration) == nil {
+		return
+	}
 	listLock.Lock()
 	retryLater := false
 	defer func() {
 		listLock.Unlock()
-		if retryLater {
-			schedulePeerConnectionSignal()
+		if retryLater && (!enforceGeneration || roomMediaActorForGeneration(roomID, mediaGeneration) != nil) {
+			schedulePeerConnectionSignalForGeneration(roomID, mediaGeneration, enforceGeneration)
 		}
 	}()
 
 	attemptSync := func() (tryAgain bool) {
 		for i := range peerConnections {
+			if enforceGeneration && roomMediaActorForGeneration(roomID, mediaGeneration) == nil {
+				return false
+			}
+			if normalizeRoomID(peerConnections[i].roomID) != roomID {
+				continue
+			}
+			if enforceGeneration && peerConnections[i].mediaGeneration != mediaGeneration {
+				continue
+			}
 			if peerConnections[i].peerConnection == nil || peerConnections[i].peerConnection.ConnectionState() == webrtc.PeerConnectionStateClosed {
 				peerConnections = append(peerConnections[:i], peerConnections[i+1:]...)
 
@@ -3738,7 +3915,22 @@ func signalPeerConnectionsWithRestart() { // nolint
 				switch negotiationWatchdogAction(peer.nonStableSince, peer.offerResent, now) {
 				case negotiationActionResend:
 					peer.offerResent = true
-					resendPendingOffer(peer)
+					peerSnapshot := *peer
+					if pendingOfferMetadata(&peerSnapshot).empty() {
+						startPendingOfferMetadata(peer)
+						peerSnapshot = *peer
+					}
+					// Socket delivery can block behind a slow client. Never hold the
+					// shared registry lock across it: another room's actor must be
+					// able to admit and negotiate independently.
+					currentPeerConnection := peer.peerConnection
+					listLock.Unlock()
+					resendPendingOffer(&peerSnapshot)
+					listLock.Lock()
+					peer = peerConnectionStateLocked(currentPeerConnection)
+					if peer == nil || (enforceGeneration && (peer.mediaGeneration != mediaGeneration || roomMediaActorForGeneration(roomID, mediaGeneration) == nil)) {
+						return true
+					}
 				case negotiationActionClose:
 					log.Errorf("Negotiation stuck >%s for participant=%s session=%s; closing peer connection so the client can reconnect", negotiationCloseAfter, peer.participantName, peer.sessionID)
 					stuckPeerConnection := peer.peerConnection
@@ -3896,8 +4088,21 @@ func signalPeerConnectionsWithRestart() { // nolint
 			offerMetadata := startPendingOfferMetadata(peer)
 
 			if peer.websocket != nil {
-				for _, snapshot := range participantTrackSnapshotsLocked(peer.roomID, peer.participantName) {
-					sendParticipantTrackSnapshot(peer.websocket, snapshot)
+				currentPeerConnection := peer.peerConnection
+				writer := peer.websocket
+				peerGeneration := peer.mediaGeneration
+				snapshots := participantTrackSnapshotsLockedForGeneration(peer.roomID, peer.participantName, peerGeneration, true)
+				listLock.Unlock()
+				for _, snapshot := range snapshots {
+					if roomMediaActorForGeneration(roomID, peerGeneration) == nil {
+						break
+					}
+					sendParticipantTrackSnapshot(writer, snapshot)
+				}
+				listLock.Lock()
+				peer = peerConnectionStateLocked(currentPeerConnection)
+				if peer == nil || peer.mediaGeneration != peerGeneration || (enforceGeneration && roomMediaActorForGeneration(roomID, mediaGeneration) == nil) {
+					return true
 				}
 			}
 
@@ -3906,8 +4111,18 @@ func signalPeerConnectionsWithRestart() { // nolint
 				peer.participantName, peer.sessionID, offerMetadata.OfferID, offerMetadata.Revision, forceSignal, desiredTrackCount, countPeerSenders(peer.peerConnection), countPeerReceivers(peer.peerConnection), totalTracks, audioTracks, videoTracks, peer.peerConnection.SignalingState())
 
 			if peer.signal != nil {
-				if err = peer.signal(gatherComplete); err != nil {
+				signal := peer.signal
+				peerGeneration := peer.mediaGeneration
+				currentPeerConnection := peer.peerConnection
+				listLock.Unlock()
+				err = signal(gatherComplete)
+				listLock.Lock()
+				if err != nil {
 					log.Errorf("Failed to signal peer: %v", err)
+					return true
+				}
+				peer = peerConnectionStateLocked(currentPeerConnection)
+				if peer == nil || peer.mediaGeneration != peerGeneration || (enforceGeneration && roomMediaActorForGeneration(roomID, mediaGeneration) == nil) {
 					return true
 				}
 
@@ -3924,12 +4139,23 @@ func signalPeerConnectionsWithRestart() { // nolint
 			log.Infof("room_signal_offer_payload participant=%s session=%s offer_id=%s revision=%d sdp_bytes=%d",
 				peer.participantName, peer.sessionID, offerMetadata.OfferID, offerMetadata.Revision, len(offer.SDP))
 
-			if err = peer.websocket.WriteJSON(&websocketMessage{
+			writer := peer.websocket
+			currentPeerConnection := peer.peerConnection
+			peerGeneration := peer.mediaGeneration
+			message := &websocketMessage{
 				Event:    "offer",
 				Data:     string(offerString),
 				OfferID:  offerMetadata.OfferID,
 				Revision: offerMetadata.Revision,
-			}); err != nil {
+			}
+			listLock.Unlock()
+			err = writer.WriteJSON(message)
+			listLock.Lock()
+			if err != nil {
+				return true
+			}
+			peer = peerConnectionStateLocked(currentPeerConnection)
+			if peer == nil || peer.mediaGeneration != peerGeneration || (enforceGeneration && roomMediaActorForGeneration(roomID, mediaGeneration) == nil) {
 				return true
 			}
 
@@ -3949,7 +4175,11 @@ func signalPeerConnectionsWithRestart() { // nolint
 			// Release the lock and attempt a sync in 3 seconds. We might be blocking a RemoveTrack or AddTrack
 			go func() {
 				time.Sleep(time.Second * 3)
-				signalPeerConnections()
+				if enforceGeneration {
+					requestRoomMediaCommandForGeneration(roomID, mediaGeneration, roomMediaCommandSignal)
+				} else {
+					requestRoomMediaCommand(roomID, roomMediaCommandSignal)
+				}
 			}()
 
 			return
@@ -4721,6 +4951,8 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	iceRestartDropsSuppressed := 0
 	var participantAcceptedState atomic.Bool
 	var mediaJoinedState atomic.Bool
+	var participantMediaGeneration atomic.Uint64
+	participantSittingID := ""
 	var cleanupOnce sync.Once
 	pendingRemoteCandidates := pendingRemoteICECandidateQueue{}
 	participantMu := sync.Mutex{}
@@ -4871,15 +5103,27 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				if mediaJoinedState.Load() {
 					cleanupParticipantSession("", false)
 				} else {
-					signalPeerConnections()
+					requestRoomMediaCommand(connRoomID, roomMediaCommandLeave)
 				}
 			default:
 			}
 		})
 
+		var mediaConsentPrincipal CanonicalPrincipalRef
+		if guest != nil {
+			mediaConsentPrincipal = guestAdmissionPrincipal(guest.SessionKey)
+		} else {
+			mediaConsentPrincipal = memberAdmissionPrincipal(sessionEmail)
+		}
 		pc.OnTrack(func(t *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 			trackParticipantName := currentParticipantName()
 			trackParticipantSessionID := participantSessionID
+			trackMediaGeneration := participantMediaGeneration.Load()
+			mediaActor := roomMediaActorForGeneration(connRoomID, trackMediaGeneration)
+			if mediaActor == nil {
+				log.Infof("room_ontrack_stale_sitting participant=%s session=%s room=%s gen=%d", trackParticipantName, trackParticipantSessionID, connRoomID, trackMediaGeneration)
+				return
+			}
 			forwardedTrackID := forwardedRemoteTrackID(t)
 			// The ids THIS publisher negotiated for sdes:mid/rid/repaired-rid;
 			// forwardPublisherRTP strips them per packet (transport-scoped,
@@ -4888,7 +5132,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			codec := t.Codec()
 			log.Infof("room_ontrack_start participant=%s session=%s room=%s kind=%s track_id=%s source_track_id=%s stream_id=%s rid=%q ssrc=%d rtx_ssrc=%d payload_type=%d codec=%s clock_rate=%d channels=%d fmtp=%q feedback=%s has_rtx=%t",
 				trackParticipantName, trackParticipantSessionID, connRoomID, t.Kind(), forwardedTrackID, t.ID(), t.StreamID(), t.RID(), t.SSRC(), t.RtxSSRC(), t.PayloadType(), codec.MimeType, codec.ClockRate, codec.Channels, codec.SDPFmtpLine, rtcpFeedbackSummary(codec.RTCPFeedback), t.HasRTX())
-			broadcastAssistantEvent("signal", fmt.Sprintf("received %s track from browser", t.Kind().String()), map[string]any{
+			broadcastRoomAssistantTelemetry(connRoomID, "signal", fmt.Sprintf("received %s track from browser", t.Kind().String()), map[string]any{
 				"participant":   trackParticipantName,
 				"trackId":       forwardedTrackID,
 				"sourceTrackId": t.ID(),
@@ -4898,15 +5142,22 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 
 			// Create a track to fan out our incoming media to all browser peers
 			// of THIS room only (trackRooms + acceptsTrack, multi-room W3).
-			trackLocal, err := addTrack(connRoomID, t, trackParticipantName, trackParticipantSessionID)
+			trackLocal, err := addTrackForGeneration(connRoomID, trackMediaGeneration, t, trackParticipantName, trackParticipantSessionID)
 			if err != nil {
 				log.Errorf("Failed to create local track for remote track=%s: %v", t.ID(), err)
+				return
+			}
+			if !mediaActor.enqueue(roomMediaCommandTrack) {
+				removeTrack(trackLocal)
+				return
+			}
+			if roomMediaActorForGeneration(connRoomID, trackMediaGeneration) != mediaActor {
+				removeTrack(trackLocal)
 				return
 			}
 			trackPayload := participantTrackPayload(trackParticipantName, t)
 			trackPayload["roomId"] = connRoomID
 			broadcastRoomKanbanEvent(connRoomID, "participant_track", trackPayload)
-			signalPeerConnections()
 			defer removeTrack(trackLocal)
 
 			// Silence watchdog: watch this publisher track for a stalled uplink
@@ -4920,10 +5171,13 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				log.Errorf("Failed to create audio decoder for track=%s: %v", t.ID(), err)
 			}
 			audioTrackKey := roomAudioTrackKey(t)
+			var consentGate *consentAudioIngressGate
 			if audioDecoder != nil {
+				consentGate = newConsentAudioIngressGate(kanbanApp, mediaConsentPrincipal, connRoomID)
 				// remove from whatever mixer the room holds at teardown time —
 				// the lazy lifecycle may have replaced it mid-session.
 				defer func() {
+					consentGate.close()
 					kanbanApp.roomMixerFor(connRoomID).removeTrack(audioTrackKey)
 				}()
 			}
@@ -4940,10 +5194,19 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}()
 
 			for {
+				if mediaActor.closing.Load() || mediaActor.closed.Load() {
+					return
+				}
 				packet, _, err := t.ReadRTP()
 				if err != nil {
 					log.Infof("room_ontrack_read_end participant=%s session=%s kind=%s track_id=%s source_track_id=%s packets=%d error=%v",
 						trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), packetsForwarded, err)
+					return
+				}
+				// ReadRTP is blocking. The sitting may have rolled while no packet
+				// was available, so revalidate the exact actor immediately after it
+				// returns and before telemetry, mixer capture, or forwarded RTP.
+				if roomMediaActorForGeneration(connRoomID, trackMediaGeneration) != mediaActor {
 					return
 				}
 				// Hot-path silence stamp: one atomic store of the receive time —
@@ -4959,23 +5222,27 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				if audioDecoder != nil {
 					if !announcedAudioPacket {
 						announcedAudioPacket = true
-						broadcastAssistantEvent("audio", "browser microphone packets are reaching the server", nil)
+						broadcastRoomAssistantTelemetry(connRoomID, "audio", "browser microphone packets are reaching the server", nil)
 					}
 					pcm, decodeErr := decodeOpusToRoomPCM(audioDecoder, audioDecodeBuffer, audioChannels, packet.Payload)
 					if decodeErr != nil {
 						log.Errorf("Failed to decode room audio for track=%s: %v", t.ID(), decodeErr)
 						if !announcedDecodedAudio {
-							broadcastAssistantEvent("error", "server could not decode microphone audio: "+decodeErr.Error(), nil)
+							broadcastRoomAssistantTelemetry(connRoomID, "error", "server could not decode microphone audio: "+decodeErr.Error(), nil)
 							announcedDecodedAudio = true
 						}
 					} else {
 						if !announcedDecodedAudio && len(pcm) > 0 {
 							announcedDecodedAudio = true
-							broadcastAssistantEvent("audio", "browser microphone audio decoded on the server", nil)
+							broadcastRoomAssistantTelemetry(connRoomID, "audio", "browser microphone audio decoded on the server", nil)
 						}
-						// nil-mixer frames (a join racing the lazy teardown) are
-						// dropped by the nil-safe mixer methods.
-						kanbanApp.roomMixerFor(connRoomID).submit(audioTrackKey, trackParticipantName, pcm)
+						// Capture is a separate lane from direct RTP transport. A
+						// missing, denied, withdrawn, or unavailable authority drops
+						// only server-side decoded PCM; the packet is still forwarded
+						// below to the other participants.
+						if fences, allowed := consentGate.admittedFences(); allowed {
+							kanbanApp.roomMixerFor(connRoomID).submitWithConsent(audioTrackKey, trackParticipantName, pcm, fences)
+						}
 					}
 				}
 
@@ -5115,6 +5382,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				// the seat keys on the guest session (two guests named Sam
 				// coexist; a second socket of one session shares its seat).
 				sittingID := kanbanApp.prepareMeetingSittingID(connRoomID)
+				participantSittingID = sittingID
 				admittedName, firstEndpoint, err := kanbanApp.admitGuestWithAnchor(context.Background(), connRoomID, guest.SessionKey, guest.Name, participantSessionID, sittingID)
 				if err != nil {
 					if errors.Is(err, ErrAdmissionAnchorStore) {
@@ -5146,7 +5414,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 					}
 				}
 				replaceExistingParticipantSessionEndpointInRoom(connRoomID, admittedName, participantSessionID, endpointID, peerConnection, c, "")
-				kanbanApp.ensureRoomMedia(connRoomID)
+				participantMediaGeneration.Store(kanbanApp.ensureRoomMedia(connRoomID))
 				// §5.4(d): the guest replay branch withholds board/memory/
 				// notifications/proposals — only room-scoped, allowlisted state.
 				if err := sendKanbanEvent(c, "access_granted", map[string]any{
@@ -5215,6 +5483,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				clearAuthAttempts("roompass:"+connRoomID, "roompass-ip:"+clientIP)
 			}
 			sittingID := kanbanApp.prepareMeetingSittingID(connRoomID)
+			participantSittingID = sittingID
 			admittedName, firstEndpoint, err := kanbanApp.admitParticipantWithAnchor(context.Background(), connRoomID, name, participantSessionID, endpointID, sittingID, memberAdmissionPrincipal(sessionEmail))
 			if err != nil {
 				if errors.Is(err, ErrAdmissionAnchorStore) {
@@ -5239,7 +5508,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			// admission opens (or extends) the first-class meeting record and
 			// cancels any pending idle-end from a briefly empty room; named
 			// rooms lazily start their mixer + transcription lane here.
-			kanbanApp.ensureRoomMedia(connRoomID)
+			participantMediaGeneration.Store(kanbanApp.ensureRoomMedia(connRoomID))
 			if err := sendKanbanEvent(c, "access_granted", map[string]any{
 				"name":   admittedName,
 				"roomId": connRoomID,
@@ -5397,6 +5666,8 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				endpointID:      endpointID,
 				sessionEmail:    normalizeAccountEmail(sessionEmail),
 				roomID:          connRoomID,
+				sittingID:       participantSittingID,
+				mediaGeneration: participantMediaGeneration.Load(),
 			})
 			listLock.Unlock()
 			if guest == nil {
@@ -5409,7 +5680,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			sendParticipantTrackSnapshots(c, connRoomID, currentParticipantName())
 			broadcastRoomKanbanEvent(connRoomID, "participants", kanbanApp.roomSnapshotForRoom(connRoomID))
-			signalPeerConnections()
+			requestRoomMediaCommandForGeneration(connRoomID, participantMediaGeneration.Load(), roomMediaCommandAdmit)
 		case "request_participant_tracks":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before requesting media labels.")
@@ -5454,7 +5725,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				}
 			}
 			sendParticipantTrackSnapshots(c, connRoomID, currentParticipantName())
-			signalPeerConnections()
+			requestRoomMediaCommandForGeneration(connRoomID, participantMediaGeneration.Load(), roomMediaCommandSignal)
 		case "candidate":
 			if peerConnection == nil {
 				continue
@@ -5532,7 +5803,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 					log.Errorf("Failed to add queued ICE candidate: %v", err)
 				}
 			}
-			signalPeerConnections()
+			requestRoomMediaCommandForGeneration(connRoomID, participantMediaGeneration.Load(), roomMediaCommandSignal)
 		case "restart_ice":
 			if !participantAccepted || !mediaJoined || peerConnection == nil {
 				continue
@@ -5583,7 +5854,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			// reconcile which layer this subscriber receives.
 			if setSubscriberLayerTier(participantSessionID, tier) {
 				log.Infof("Participant=%s session=%s selected simulcast layer tier=%s", currentParticipantName(), participantSessionID, tier)
-				signalPeerConnections()
+				requestRoomMediaCommandForGeneration(connRoomID, participantMediaGeneration.Load(), roomMediaCommandSignal)
 			}
 		case "assistant_query":
 			if !participantAccepted {
@@ -5619,6 +5890,31 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				"kind": "status", "text": "Scout is checking the board and memory.", "createdAt": time.Now().UTC().Format(time.RFC3339Nano),
 			})
 			go answerAssistantQueryForClient(c, assistantQuery, principal, requester)
+		case "catch_me_up":
+			if !participantAccepted || guest != nil {
+				_ = sendKanbanEvent(c, "access_denied", "Only an admitted organization member can request durable catch-up.")
+				continue
+			}
+			request := struct {
+				Focus string `json:"focus"`
+			}{}
+			if strings.TrimSpace(message.Data) != "" {
+				if err := json.Unmarshal([]byte(message.Data), &request); err != nil {
+					_ = sendKanbanEvent(c, "catch_up_recap", map[string]any{"ok": false, "error": "could not read catch-up request"})
+					continue
+				}
+			}
+			// Exact recall can wait for the bounded late-arrival settle window and
+			// provider/ACL adapters. It never blocks this socket's media/signaling
+			// read loop, and its response returns only to the authenticated member.
+			go func(email, roomID, focus string, socket *threadSafeWriter) {
+				result, _, err := kanbanApp.exactCatchUpTool(map[string]any{"focus": focus}, email, roomID)
+				if err != nil {
+					_ = sendKanbanEvent(socket, "catch_up_recap", map[string]any{"ok": false, "error": "Scout could not build an authorized catch-up right now."})
+					return
+				}
+				_ = sendKanbanEvent(socket, "catch_up_recap", result)
+			}(sessionEmail, connRoomID, request.Focus, c)
 		case "scout_chat_reset":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "enter the room before starting a Scout thread")
@@ -5687,12 +5983,12 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 					"guest":   "true",
 				}
 			}
-			payload, ok := kanbanApp.recordRoomChatMessageWithMetadata(connRoomID, currentParticipantName(), chat.Text, chatMetadata)
+			payload, ok := kanbanApp.recordRoomChatMessageForMeeting(connRoomID, currentParticipantName(), chat.Text, chatMetadata, participantSittingID)
 			if !ok {
 				continue
 			}
 			payload["roomId"] = connRoomID
-			broadcastRoomAudienceKanbanEvent(connRoomID, "room_chat", payload)
+			broadcastScopedRoomKanbanEvent(RoomScoutScope{RoomID: connRoomID, SittingID: participantSittingID, MediaGeneration: participantMediaGeneration.Load()}, "room_chat", payload)
 		case "room_chat_delete":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "enter the room before deleting room chat")
@@ -5712,7 +6008,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				continue
 			}
 			payload["roomId"] = connRoomID
-			broadcastRoomAudienceKanbanEvent(connRoomID, "room_chat_delete", payload)
+			broadcastScopedRoomKanbanEvent(RoomScoutScope{RoomID: connRoomID, SittingID: participantSittingID, MediaGeneration: participantMediaGeneration.Load()}, "room_chat_delete", payload)
 		case "manual_create_ticket":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before editing the board.")
@@ -5805,7 +6101,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			snapshot := kanbanApp.setTranscriptRecordingInRoom(connRoomID, payload.Enabled, currentParticipantName())
 			recording, _ := snapshot["recording"].(roomRecordingState)
 			broadcastRoomKanbanEvent(connRoomID, "participants", snapshot)
-			broadcastAssistantEvent("answer", roomRecordingAnnouncementText(recording), map[string]any{
+			broadcastRoomAssistantTelemetry(connRoomID, "answer", roomRecordingAnnouncementText(recording), map[string]any{
 				"tool":       "set_recording",
 				"recording":  recording,
 				"voiceState": "talking",
@@ -5885,7 +6181,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				"roomId": connRoomID,
 			})
 			go requestParticipantVideoKeyframes(currentParticipantName(), participantSessionID, "screen_share_started")
-			broadcastAssistantEvent("status", currentParticipantName()+" started sharing their screen", nil)
+			broadcastRoomAssistantTelemetry(connRoomID, "status", currentParticipantName()+" started sharing their screen", nil)
 		case "screen_share_stopped":
 			if !participantAccepted {
 				continue
@@ -5896,7 +6192,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				"roomId": connRoomID,
 			})
 			go requestParticipantVideoKeyframes(currentParticipantName(), participantSessionID, "screen_share_stopped")
-			broadcastAssistantEvent("status", currentParticipantName()+" stopped sharing their screen", nil)
+			broadcastRoomAssistantTelemetry(connRoomID, "status", currentParticipantName()+" stopped sharing their screen", nil)
 		default:
 			log.Errorf("unknown message: %+v", message)
 		}

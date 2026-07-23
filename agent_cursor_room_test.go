@@ -39,6 +39,9 @@ func brainWindowResponder(inputs *[]string) openAITextResponder {
 func TestRoomCursorIsolationAcrossInterleavedTranscripts(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	roomB := "room-bbbb1111"
+	authority := newAmbientConsentAuthorityForTest(t)
+	grantAmbientConsentForTest(t, app, authority, officeRoomID, "tom@shareability.com")
+	grantAmbientConsentForTest(t, app, authority, roomB, "tom@shareability.com")
 
 	// Interleave the two rooms' transcript streams.
 	appendRoomTestTranscript(t, app, officeRoomID, "office-1", "Boot Barn kickoff planning notes for the office.")
@@ -154,6 +157,8 @@ func TestLegacyArtifactsWithoutRoomIDAreOfficeCursors(t *testing.T) {
 func TestRoomScopedAgentBaselinesAtBootNeverBackfillsRoomHistory(t *testing.T) {
 	first := newIsolatedKanbanBoardApp(t)
 	roomB := "room-bbbb3333"
+	authority := newAmbientConsentAuthorityForTest(t)
+	grantAmbientConsentForTest(t, first, authority, roomB, "tom@shareability.com")
 	appendRoomTestTranscript(t, first, roomB, "roomb-old-1", "Deal room history from a previous boot.")
 	appendRoomTestTranscript(t, first, roomB, "roomb-old-2", "More deal room history from a previous boot.")
 
@@ -309,6 +314,9 @@ func TestTwoRoomsCloseFlushConcurrentlyWithoutDeadlock(t *testing.T) {
 
 	roomA := "room-close-aaaa"
 	roomB := "room-close-bbbb"
+	authority := newAmbientConsentAuthorityForTest(t)
+	grantAmbientConsentForTest(t, app, authority, roomA, "tom@shareability.com")
+	grantAmbientConsentForTest(t, app, authority, roomB, "tom@shareability.com")
 	appendRoomTestTranscript(t, app, roomA, "close-a1", "Room A wrapped up the vendor selection discussion.")
 	appendRoomTestTranscript(t, app, roomB, "close-b1", "Room B finalized the launch checklist review.")
 

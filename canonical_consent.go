@@ -37,18 +37,19 @@ var (
 // SittingID are both mandatory: consent in an earlier sitting never follows a
 // participant into a later meeting, and a late join has no implied grant.
 type ConsentRecord struct {
-	ID            string
-	TenantID      string
-	PrincipalKind ACLPrincipalKind
-	PrincipalID   string
-	RoomID        string
-	SittingID     string
-	PolicyVersion string
-	Scopes        []ConsentScope
-	Disposition   ConsentDisposition
-	EvidenceKind  string
-	EvidenceRef   string
-	RecordedAt    time.Time
+	ID                          string
+	TenantID                    string
+	PrincipalKind               ACLPrincipalKind
+	PrincipalID                 string
+	RoomID                      string
+	SittingID                   string
+	PolicyVersion               string
+	Scopes                      []ConsentScope
+	Disposition                 ConsentDisposition
+	EvidenceKind                string
+	EvidenceRef                 string
+	RecordedAt                  time.Time
+	LastAcceptedCaptureSequence *uint64
 }
 
 func (record ConsentRecord) Validate() error {
@@ -61,6 +62,12 @@ func (record ConsentRecord) Validate() error {
 		strings.TrimSpace(record.PolicyVersion) == "" || len(record.Scopes) == 0 ||
 		strings.TrimSpace(record.EvidenceKind) == "" || strings.TrimSpace(record.EvidenceRef) == "" ||
 		record.RecordedAt.IsZero() || !validConsentDisposition(record.Disposition) {
+		return ErrConsentInvalid
+	}
+	if record.PrincipalKind == ACLPrincipalGuest && !isHexDigest(record.PrincipalID) {
+		return ErrConsentInvalid
+	}
+	if record.Disposition != ConsentWithdrawn && record.LastAcceptedCaptureSequence != nil {
 		return ErrConsentInvalid
 	}
 	seen := make(map[ConsentScope]struct{}, len(record.Scopes))
@@ -90,6 +97,7 @@ type ConsentDecision struct {
 	Allowed       bool
 	MissingScopes []ConsentScope
 	RecordIDs     map[ConsentScope]string
+	Dispositions  map[ConsentScope]ConsentDisposition
 }
 
 type ConsentStore interface {
@@ -97,6 +105,9 @@ type ConsentStore interface {
 	Effective(context.Context, ConsentQuery) (ConsentDecision, error)
 }
 
+// MemoryConsentStore is a deterministic test adapter. Production authority is
+// always PostgreSQL-backed through PostgresConsentStore; restart safety must
+// never depend on this process-local slice.
 type MemoryConsentStore struct {
 	mu      sync.Mutex
 	records []ConsentRecord
@@ -153,13 +164,17 @@ func (store *MemoryConsentStore) Effective(_ context.Context, query ConsentQuery
 			}
 		}
 	}
-	decision := ConsentDecision{Allowed: true, RecordIDs: make(map[ConsentScope]string)}
+	decision := ConsentDecision{
+		Allowed: true, RecordIDs: make(map[ConsentScope]string),
+		Dispositions: make(map[ConsentScope]ConsentDisposition),
+	}
 	for _, scope := range requested {
 		record, ok := latest[scope]
 		if ok {
 			// Preserve the exact denial/withdrawal evidence as well as grant
 			// evidence so the caller can explain an immediate track exclusion.
 			decision.RecordIDs[scope] = record.ID
+			decision.Dispositions[scope] = record.Disposition
 		}
 		if !ok || record.Disposition != ConsentGranted {
 			decision.Allowed = false
@@ -226,7 +241,12 @@ func normalizeConsentQuery(query ConsentQuery) ([]ConsentScope, error) {
 		if !validConsentScope(scope) {
 			return nil, ErrConsentInvalid
 		}
-		seen[scope] = struct{}{}
+		// Later lanes can never be granted around an earlier denied or absent
+		// lane. Expanding here keeps every caller, including ACL checks and
+		// direct media seams, on one fail-closed dependency rule.
+		for _, required := range consentScopeDependencies(scope) {
+			seen[required] = struct{}{}
+		}
 	}
 	result := make([]ConsentScope, 0, len(seen))
 	for scope := range seen {
@@ -234,6 +254,21 @@ func normalizeConsentQuery(query ConsentQuery) ([]ConsentScope, error) {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
 	return result, nil
+}
+
+func consentScopeDependencies(scope ConsentScope) []ConsentScope {
+	switch scope {
+	case ConsentAudioCapture:
+		return []ConsentScope{ConsentAudioCapture}
+	case ConsentTranscription:
+		return []ConsentScope{ConsentAudioCapture, ConsentTranscription}
+	case ConsentModelAnalysis:
+		return []ConsentScope{ConsentAudioCapture, ConsentTranscription, ConsentModelAnalysis}
+	case ConsentOrgMemory:
+		return []ConsentScope{ConsentAudioCapture, ConsentTranscription, ConsentModelAnalysis, ConsentOrgMemory}
+	default:
+		return nil
+	}
 }
 
 func validConsentScope(scope ConsentScope) bool {
@@ -251,6 +286,10 @@ func validConsentDisposition(disposition ConsentDisposition) bool {
 
 func cloneConsentRecord(record ConsentRecord) ConsentRecord {
 	record.Scopes = append([]ConsentScope(nil), record.Scopes...)
+	if record.LastAcceptedCaptureSequence != nil {
+		sequence := *record.LastAcceptedCaptureSequence
+		record.LastAcceptedCaptureSequence = &sequence
+	}
 	return record
 }
 
@@ -258,7 +297,7 @@ func equalConsentRecord(left, right ConsentRecord) bool {
 	if left.ID != right.ID || left.TenantID != right.TenantID || left.PrincipalKind != right.PrincipalKind || left.PrincipalID != right.PrincipalID ||
 		left.RoomID != right.RoomID || left.SittingID != right.SittingID || left.PolicyVersion != right.PolicyVersion ||
 		left.Disposition != right.Disposition || left.EvidenceKind != right.EvidenceKind || left.EvidenceRef != right.EvidenceRef || !left.RecordedAt.Equal(right.RecordedAt) ||
-		len(left.Scopes) != len(right.Scopes) {
+		!equalOptionalUint64(left.LastAcceptedCaptureSequence, right.LastAcceptedCaptureSequence) || len(left.Scopes) != len(right.Scopes) {
 		return false
 	}
 	for index := range left.Scopes {
@@ -267,4 +306,11 @@ func equalConsentRecord(left, right ConsentRecord) bool {
 		}
 	}
 	return true
+}
+
+func equalOptionalUint64(left, right *uint64) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }

@@ -3591,6 +3591,58 @@
         display: none;
       }
 
+      .btn.consent-toggle {
+        min-width: 44px;
+        width: 44px;
+        min-height: 44px;
+        height: 44px;
+        padding: 0;
+        border-radius: var(--r-full);
+      }
+
+      #appShell:not(.is-in-room) #consentToggle { display: none; }
+
+      .consent-panel {
+        position: fixed;
+        left: 50%;
+        bottom: 92px;
+        z-index: 90;
+        width: min(520px, calc(100vw - 28px));
+        max-height: min(680px, calc(100vh - 130px));
+        overflow: auto;
+        transform: translateX(-50%);
+        padding: 18px;
+        border: 1px solid var(--border-2);
+        border-radius: 22px;
+        background: color-mix(in srgb, var(--surface-1) 94%, transparent);
+        box-shadow: var(--shadow-3);
+        backdrop-filter: blur(24px) saturate(1.25);
+        -webkit-backdrop-filter: blur(24px) saturate(1.25);
+      }
+
+      .consent-panel[hidden] { display: none; }
+      .consent-panel__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+      .consent-panel__head h2 { margin: 0; font: 650 18px/1.2 var(--font-sans); }
+      .consent-panel__head p,
+      .consent-panel__disclosure,
+      .consent-panel__status { margin: 5px 0 0; color: var(--text-2); font: 12.5px/1.45 var(--font-sans); }
+      .consent-panel__close { border: 0; background: transparent; color: var(--text-2); font-size: 22px; cursor: pointer; }
+      .consent-panel__lanes { display: grid; gap: 8px; margin-top: 14px; }
+      .consent-lane { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border-1); border-radius: 14px; background: var(--surface-2); }
+      .consent-lane strong { display: block; font: 620 13px/1.25 var(--font-sans); }
+      .consent-lane small { display: block; margin-top: 3px; color: var(--text-2); font: 11.5px/1.35 var(--font-sans); }
+      .consent-lane__choices { display: flex; gap: 5px; }
+      .consent-lane__choices button { min-width: 48px; padding: 7px 9px; border: 1px solid var(--border-2); border-radius: 999px; background: var(--surface-1); color: var(--text-2); font: 600 11px/1 var(--font-sans); cursor: pointer; }
+      .consent-lane__choices button[aria-pressed="true"] { border-color: var(--text-1); background: var(--text-1); color: var(--surface-1); }
+      .consent-lane__choices button:disabled { opacity: .48; cursor: wait; }
+      .consent-panel__status[data-kind="error"] { color: var(--danger); }
+
+      @media (max-width: 640px) {
+        .consent-panel { bottom: 82px; padding: 15px; border-radius: 19px; }
+        .consent-lane { grid-template-columns: 1fr; }
+        .consent-lane__choices { justify-content: flex-end; }
+      }
+
       #appShell:not(.is-in-room) #muteMic,
       #appShell:not(.is-in-room) #toggleCamera,
       #appShell:not(.is-in-room) #audioSettingsButton,
@@ -23027,6 +23079,9 @@
             </svg>
             <span class="audio-settings-label">audio</span>
           </button>
+          <button id="consentToggle" class="btn btn--ghost consent-toggle" type="button" aria-label="Microphone data choices" aria-expanded="false" title="Microphone data choices" disabled>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path><path d="M9 12l2 2 4-4"></path></svg>
+          </button>
           <button id="roomChatToggle" class="btn btn--ghost room-chat-toggle" type="button" aria-label="Open room chat" aria-pressed="false" title="Room chat" disabled>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
@@ -23078,6 +23133,15 @@
           </button>
         </div>
       </footer>
+      <section id="consentPanel" class="consent-panel" aria-labelledby="consentTitle" hidden>
+        <header class="consent-panel__head">
+          <div><h2 id="consentTitle">your microphone data.</h2><p id="consentPolicy">choices for this room sitting.</p></div>
+          <button id="consentClose" class="consent-panel__close" type="button" aria-label="Close microphone data choices">×</button>
+        </header>
+        <p class="consent-panel__disclosure">Direct room audio, video, and chat continue when these are off. These choices control the server copy of your microphone and what may be derived from it for this sitting.</p>
+        <div id="consentLanes" class="consent-panel__lanes"></div>
+        <p id="consentStatus" class="consent-panel__status" role="status" aria-live="polite"></p>
+      </section>
     </main>
     <aside id="osAssistant" class="os-assistant" hidden aria-label="Scout">
       <section class="os-assistant__panel" aria-label="Assistant conversation">
@@ -23754,6 +23818,12 @@
       const muteMicButton = document.getElementById('muteMic')
       const toggleCameraButton = document.getElementById('toggleCamera')
       const audioSettingsButton = document.getElementById('audioSettingsButton')
+      const consentToggleButton = document.getElementById('consentToggle')
+      const consentPanel = document.getElementById('consentPanel')
+      const consentCloseButton = document.getElementById('consentClose')
+      const consentPolicy = document.getElementById('consentPolicy')
+      const consentLanes = document.getElementById('consentLanes')
+      const consentStatus = document.getElementById('consentStatus')
       const settingsRegion = document.getElementById('settingsRegion')
       const settingsPanel = settingsRegion.querySelector('.settings-panel')
       const settingsClose = document.getElementById('settingsClose')
@@ -24361,6 +24431,41 @@
       // aborted refetch must fall back to this synchronously rather than poison
       // the memo with a bare {} (which would strip TURN off every later re-dial).
       let lastGoodClientConfig = null
+	      // W2A's browser proof ledger is installed only for the explicit probe URL
+	      // and only when authenticated /client-config says the release-only
+	      // observer is enabled. The retained fields are deliberately content-free.
+	      let mediaSoakProofLedger = null
+	      let mediaSoakJoinStartedAt = ''
+	      function configureMediaSoakProofLedger(config) {
+	        if (mediaSoakProofLedger || config?.mediaSoakProbeEnabled !== true
+	            || new URLSearchParams(location.search).get('media-soak-probe') !== '1') {
+	          return
+	        }
+	        const bytes = new Uint8Array(16)
+	        crypto.getRandomValues(bytes)
+	        const clientId = Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('')
+	        const events = []
+	        mediaSoakProofLedger = {
+	          clientId,
+	          record(kind, detail = {}) {
+	            events.push({
+	              at: detail.at && Number.isFinite(new Date(detail.at).getTime()) ? new Date(detail.at).toISOString() : new Date().toISOString(),
+	              kind: String(kind || '').slice(0, 32),
+	              offerId: String(detail.offerId || '').slice(0, 128),
+	              revision: Number(detail.revision) || 0,
+	              trackKind: detail.trackKind === 'audio' || detail.trackKind === 'video' ? detail.trackKind : ''
+	            })
+	            if (events.length > 256) events.splice(0, events.length - 256)
+	          },
+	          snapshot() { return { clientId, events: events.slice() } }
+	        }
+	        Object.defineProperty(window, '__bonfireMediaSoakProbe', {
+	          configurable: false, enumerable: false, writable: false, value: mediaSoakProofLedger
+	        })
+	      }
+	      function recordMediaSoakProofEvent(kind, detail) {
+	        mediaSoakProofLedger?.record(kind, detail)
+	      }
       // A config refetch fires exactly when the network is lossy (an ICE restart
       // is in flight), so it must never hang past this — the restart proceeds on
       // the previous config the moment the refresh times out.
@@ -24741,6 +24846,11 @@
       muteMicButton.addEventListener('click', toggleLocalMute)
       toggleCameraButton.addEventListener('click', toggleLocalCamera)
       audioSettingsButton.addEventListener('click', () => openSettings({ section: 'devices' }))
+      consentToggleButton?.addEventListener('click', () => {
+        setConsentPanelOpen(consentPanel.hidden)
+        if (!consentPanel.hidden) loadConsentStatus()
+      })
+      consentCloseButton?.addEventListener('click', () => setConsentPanelOpen(false))
       document.getElementById('dockScoutState')?.addEventListener('click', () => {
         // Scout now lives in the chat tool under the Bonfire OS design; jump there.
         setActiveTool('chat')
@@ -32628,6 +32738,9 @@
       }
 
       async function joinRoom(options = {}) {
+	        if (new URLSearchParams(location.search).get('media-soak-probe') === '1') {
+	          mediaSoakJoinStartedAt = new Date().toISOString()
+	        }
         if (options?.preventDefault) {
           options = {}
         }
@@ -33437,9 +33550,11 @@
         // re-dial — refresh TURN credentials when the memoized config has aged
         // past half its TTL so a long-lived session never rebuilds the peer with
         // dead relay candidates (gap 2). Fresh sessions hit the cache untouched.
-        const rtcConfiguration = await freshRTCConfiguration()
-        pc = new RTCPeerConnection(rtcConfiguration)
-        const sessionPeer = pc
+	        const rtcConfiguration = await freshRTCConfiguration()
+	        configureMediaSoakProofLedger(lastGoodClientConfig)
+	        pc = new RTCPeerConnection(rtcConfiguration)
+	        const sessionPeer = pc
+	        recordMediaSoakProofEvent('join', { at: mediaSoakJoinStartedAt })
         pc.ontrack = addRemoteTrack
         pc.onicecandidate = event => {
           if (!event.candidate || ws?.readyState !== WebSocket.OPEN) {
@@ -36310,12 +36425,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const sessionPeer = context.sessionPeer || pc
         const contextIsCurrent = () => ws === socket && pc === sessionPeer
         switch (message.event) {
-          case 'offer': {
+	          case 'offer': {
             if (!sessionPeer || !contextIsCurrent()) {
               addAssistantMessage({ kind: 'error', text: 'media is not ready for the room offer yet.' })
               return
             }
-            const offer = JSON.parse(message.data)
+	            const offer = JSON.parse(message.data)
+	            recordMediaSoakProofEvent('offer', { offerId: message.offerId, revision: message.revision })
             if (!await waitForStableSignaling(sessionPeer, contextIsCurrent)) {
               return
             }
@@ -36337,13 +36453,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
                 return
               }
               await sessionPeer.setLocalDescription(answer)
-              if (contextIsCurrent() && socket.readyState === WebSocket.OPEN) {
+	              if (contextIsCurrent() && socket.readyState === WebSocket.OPEN) {
                 socket.send(JSON.stringify({
                   event: 'answer',
                   data: JSON.stringify(answer),
                   offerId: message.offerId || '',
                   revision: Number(message.revision) || 0
-                }))
+	                }))
+	                recordMediaSoakProofEvent('answer', { offerId: message.offerId, revision: message.revision })
               }
             } catch (error) {
               // Return to stable so the server's re-offer can apply instead of
@@ -39333,6 +39450,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         try {
           await beginMediaSession({ voiceOnly, reuseLocalMedia: reconnectingSignal })
           setRoomView(true)
+          consentToggleButton.disabled = false
+          loadConsentStatus({ openIfMissing: !reconnectingSignal })
           setRoomEntryInProgress(false)
           if (!reconnectingSignal) {
             // room-chat unread accumulated outside the room (via the office
@@ -39371,6 +39490,113 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             setVoiceIslandState('error', message)
           }
           leaveRoom()
+        }
+      }
+
+      const consentScopeInfo = [
+        ['audio_capture', 'Server microphone copy', 'Lets the server accept your microphone audio for this sitting.'],
+        ['transcription', 'Transcript', 'Turns accepted microphone audio into text. Requires server microphone copy.'],
+        ['model_analysis', 'Scout analysis', 'Lets Scout analyze your transcript in near real time. Requires transcript.'],
+        ['org_memory', 'Company memory', 'Lets approved transcript content contribute to durable company memory. Requires Scout analysis.'],
+      ]
+      let consentSnapshot = null
+      let consentChoicePending = ''
+
+      function consentEndpoint() {
+        return `/api/consent${guestMode ? '?as=guest' : ''}`
+      }
+
+      function setConsentPanelOpen(open) {
+        const visible = Boolean(open && appShell.classList.contains('is-in-room'))
+        consentPanel.hidden = !visible
+        consentToggleButton?.setAttribute('aria-expanded', String(visible))
+      }
+
+      function renderConsentStatus() {
+        consentLanes.replaceChildren()
+        const available = Boolean(consentSnapshot?.storeAvailable)
+        consentPolicy.textContent = consentSnapshot?.policyVersion
+          ? `this room sitting · policy ${consentSnapshot.policyVersion}`
+          : 'choices for this room sitting.'
+        for (const [scope, label, detail] of consentScopeInfo) {
+          const disposition = consentSnapshot?.scopes?.[scope] || 'missing'
+          const row = document.createElement('div')
+          row.className = 'consent-lane'
+          const copy = document.createElement('div')
+          const title = document.createElement('strong')
+          title.textContent = label
+          const description = document.createElement('small')
+          description.textContent = detail
+          copy.append(title, description)
+          const choices = document.createElement('div')
+          choices.className = 'consent-lane__choices'
+          choices.setAttribute('role', 'group')
+          choices.setAttribute('aria-label', label)
+          const allow = document.createElement('button')
+          allow.type = 'button'
+          allow.textContent = 'allow'
+          allow.setAttribute('aria-pressed', String(disposition === 'granted'))
+          allow.disabled = !available || Boolean(consentChoicePending)
+          allow.addEventListener('click', () => saveConsentChoice(scope, 'granted'))
+          const off = document.createElement('button')
+          off.type = 'button'
+          off.textContent = 'off'
+          off.setAttribute('aria-pressed', String(disposition === 'denied' || disposition === 'withdrawn'))
+          off.disabled = !available || Boolean(consentChoicePending)
+          off.addEventListener('click', () => saveConsentChoice(scope, disposition === 'granted' ? 'withdrawn' : 'denied'))
+          choices.append(allow, off)
+          row.append(copy, choices)
+          consentLanes.append(row)
+        }
+        if (!available) {
+          consentStatus.dataset.kind = 'error'
+          consentStatus.textContent = 'Choices are unavailable, so server capture and AI use stay off. Your direct room media continues.'
+        } else if (consentChoicePending) {
+          consentStatus.dataset.kind = ''
+          consentStatus.textContent = 'saving your choice…'
+        } else if (consentSnapshot?.guestPolicyListenOnly) {
+          consentStatus.dataset.kind = ''
+          consentStatus.textContent = 'This sitting is listen-only; room policy may keep Scout analysis unavailable.'
+        } else {
+          consentStatus.dataset.kind = ''
+          consentStatus.textContent = 'Each choice is explicit and applies only to this sitting.'
+        }
+      }
+
+      async function loadConsentStatus({ openIfMissing = false } = {}) {
+        try {
+          const response = await fetch(consentEndpoint(), { headers: { Accept: 'application/json' } })
+          if (!response.ok) throw new Error(`consent status ${response.status}`)
+          consentSnapshot = await response.json()
+          renderConsentStatus()
+          const missing = consentScopeInfo.some(([scope]) => !consentSnapshot?.scopes?.[scope])
+          if (openIfMissing && missing) setConsentPanelOpen(true)
+        } catch (error) {
+          consentSnapshot = { storeAvailable: false, scopes: {} }
+          renderConsentStatus()
+          if (openIfMissing) setConsentPanelOpen(true)
+        }
+      }
+
+      async function saveConsentChoice(scope, disposition) {
+        if (consentChoicePending) return
+        consentChoicePending = scope
+        renderConsentStatus()
+        try {
+          const response = await fetch(consentEndpoint(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ scope, disposition }),
+          })
+          if (!response.ok) throw new Error(`consent choice ${response.status}`)
+          const payload = await response.json()
+          consentSnapshot = payload.consent
+        } catch (error) {
+          consentStatus.dataset.kind = 'error'
+          consentStatus.textContent = 'That choice could not be saved. Server capture stays fail-closed; room media continues.'
+        } finally {
+          consentChoicePending = ''
+          renderConsentStatus()
         }
       }
 
@@ -47953,7 +48179,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return true
       }
 
-      function addRemoteTrack(event) {
+	      function addRemoteTrack(event) {
+	        recordMediaSoakProofEvent('ontrack', { trackKind: event.track.kind })
         if (event.track.kind === 'audio') {
           addRemoteAudioTrack(event)
           return
@@ -53834,6 +54061,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         micSelect.replaceChildren(audioInputOption('', 'microphone'))
         screenShareButton.disabled = true
         recordMeetingButton.disabled = true
+        consentToggleButton.disabled = true
+        setConsentPanelOpen(false)
+        consentSnapshot = null
         archiveMeetingButton.disabled = true
         if (roomBoardToggleButton) {
           roomBoardToggleButton.disabled = true

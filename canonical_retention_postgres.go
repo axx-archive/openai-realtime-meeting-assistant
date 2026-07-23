@@ -41,14 +41,51 @@ func (ledger *PostgresPurgeLedger) RecordPurge(ctx context.Context, entry PurgeL
 		return ErrRetentionInvalid
 	}
 	digest, _ := hex.DecodeString(entry.ContentDigest)
-	result, err := ledger.pool.Exec(ctx, `INSERT INTO purge_ledger (
-		tenant_id,object_id,revision_id,content_sha256,policy_id,purged_at,destruction_evidence
-	) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) ON CONFLICT (tenant_id,object_id,revision_id) DO NOTHING`,
-		entry.Key.TenantID, entry.Key.ObjectID, entry.Key.RevisionID, digest, entry.PolicyID, entry.PurgedAt.UTC(), rawEvidence)
+	tx, err := ledger.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return fmt.Errorf("begin purge ledger fence: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	var roomID, sittingID string
+	err = tx.QueryRow(ctx, `SELECT COALESCE(room_id,''),COALESCE(meeting_id,'') FROM objects
+		WHERE tenant_id=$1 AND object_type=$2 AND object_id=$3`,
+		entry.Key.TenantID, entry.Key.ObjectType, entry.Key.ObjectID).Scan(&roomID, &sittingID)
+	if err != nil {
+		return fmt.Errorf("resolve canonical object for purge: %w", err)
+	}
+	projectionKey := BrainProjectionCheckpointKey{
+		TenantID: entry.Key.TenantID, ProjectorVersion: brainProjectionProjectorVersion,
+		RoomID: roomID, SittingID: sittingID, SourceFamily: entry.Key.ObjectType,
+	}
+	if projectionKey.Validate() == nil {
+		if err := lockBrainProjectionSource(ctx, tx, projectionKey); err != nil {
+			return fmt.Errorf("lock purge projection source: %w", err)
+		}
+	}
+	var lockedRoomID, lockedSittingID string
+	err = tx.QueryRow(ctx, `SELECT COALESCE(room_id,''),COALESCE(meeting_id,'') FROM objects
+		WHERE tenant_id=$1 AND object_type=$2 AND object_id=$3 FOR UPDATE`,
+		entry.Key.TenantID, entry.Key.ObjectType, entry.Key.ObjectID).Scan(&lockedRoomID, &lockedSittingID)
+	if err != nil || lockedRoomID != roomID || lockedSittingID != sittingID {
+		return fmt.Errorf("lock canonical object for purge: %w", ErrRetentionInvalid)
+	}
+	result, err := tx.Exec(ctx, `INSERT INTO purge_ledger (
+		tenant_id,object_type,object_id,revision_id,content_sha256,policy_id,purged_at,destruction_evidence
+	) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb) ON CONFLICT (tenant_id,object_type,object_id,revision_id) DO NOTHING`,
+		entry.Key.TenantID, entry.Key.ObjectType, entry.Key.ObjectID, entry.Key.RevisionID, digest, entry.PolicyID, entry.PurgedAt.UTC(), rawEvidence)
 	if err != nil {
 		return fmt.Errorf("insert purge ledger: %w", err)
 	}
 	if result.RowsAffected() == 1 {
+		if err := registerBrainProjectionScopeDurably(ctx, tx, ledger.pool, projectionKey); err != nil {
+			return fmt.Errorf("register purge projection scope: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit purge ledger: %w", err)
+	}
+	if result.RowsAffected() == 1 {
+		notifyProductionBrainProjectionScope(ledger.pool, projectionKey)
 		return nil
 	}
 	prior, found, err := ledger.LookupPurge(ctx, entry.Key)
@@ -73,8 +110,8 @@ func (ledger *PostgresPurgeLedger) LookupPurge(ctx context.Context, key Retentio
 	var purgedAt time.Time
 	var rawEvidence []byte
 	err := ledger.pool.QueryRow(ctx, `SELECT content_sha256,policy_id,purged_at,destruction_evidence
-		FROM purge_ledger WHERE tenant_id=$1 AND object_id=$2 AND revision_id=$3`, key.TenantID, key.ObjectID, key.RevisionID).
-		Scan(&digest, &policyID, &purgedAt, &rawEvidence)
+		FROM purge_ledger WHERE tenant_id=$1 AND object_type=$2 AND object_id=$3 AND revision_id=$4`,
+		key.TenantID, key.ObjectType, key.ObjectID, key.RevisionID).Scan(&digest, &policyID, &purgedAt, &rawEvidence)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PurgeLedgerEntry{}, false, nil
 	}

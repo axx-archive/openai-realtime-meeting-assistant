@@ -61,6 +61,26 @@ func TestPeerICERestartManualRepairUsesCooldown(t *testing.T) {
 	}
 }
 
+func TestPeerICERestartAcceptedWorkSurvivesHealthyCallbackBeforeActorStart(t *testing.T) {
+	base := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+	state := peerICERestartState{}
+
+	if !state.queue(webrtc.ICEConnectionStateChecking, base) {
+		t.Fatal("manual repair was not queued")
+	}
+	// The room actor coalesces commands before it starts the restart. A healthy
+	// ICE callback in that window must not revoke work the enqueue already
+	// reported as accepted to the caller.
+	state.observeConnectionState(webrtc.ICEConnectionStateConnected)
+	if !state.queued {
+		t.Fatal("healthy callback erased restart accepted by the room actor")
+	}
+	state.start(base.Add(time.Millisecond))
+	if state.queued || !state.inFlight {
+		t.Fatalf("start did not consume accepted work: queued=%t inFlight=%t", state.queued, state.inFlight)
+	}
+}
+
 func TestPeerICERestartRetainsOneDistinctOutageWhileOfferInFlight(t *testing.T) {
 	base := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 	state := peerICERestartState{}

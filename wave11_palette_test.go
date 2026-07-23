@@ -307,8 +307,13 @@ func TestGoalLaunchPersistsOriginSurface(t *testing.T) {
 	kanbanApp = newIsolatedKanbanBoardApp(t)
 	t.Cleanup(func() { kanbanApp = previousApp })
 	installFakeResponder(t, goalResponderRoutes{})
+	thread, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Goal launch origin", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create private origin thread: %v", err)
+	}
+	originSurface := "chat:" + thread.ID
 
-	body, _ := json.Marshal(map[string]any{"objective": "map the fintech landscape", "originSurface": "chat:thread-xyz"})
+	body, _ := json.Marshal(map[string]any{"objective": "map the fintech landscape", "originSurface": originSurface})
 	req := httptest.NewRequest(http.MethodPost, "/assistant/goal", strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", "http://localhost")
@@ -327,8 +332,8 @@ func TestGoalLaunchPersistsOriginSurface(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if payload.Artifact.Metadata["originSurface"] != "chat:thread-xyz" {
-		t.Fatalf("goal artifact originSurface=%q, want chat:thread-xyz — the return card cannot route without it", payload.Artifact.Metadata["originSurface"])
+	if payload.Artifact.Metadata["originSurface"] != originSurface {
+		t.Fatalf("goal artifact originSurface=%q, want %s — the return card cannot route without it", payload.Artifact.Metadata["originSurface"], originSurface)
 	}
 }
 
@@ -340,12 +345,17 @@ func TestGoalCompletionEventCarriesOriginSurface(t *testing.T) {
 	conn := dialIsolatedWebsocket(t, server, "aj@shareability.com")
 	sendOfficeHello(t, conn)
 	drainOfficeReplay(t, conn)
+	thread, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Goal completion origin", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create private origin thread: %v", err)
+	}
+	originSurface := "chat:" + thread.ID
 
 	artifact, appended, err := kanbanApp.createOSArtifactWithMetadata(
 		"workflow", "market map", "Done.", "AJ",
 		map[string]string{
 			"mode": "goal", "goalStatus": "complete", "status": "complete",
-			"originKind": "private_thread", "originSurface": "chat:thread-xyz", "title": "Market Map",
+			"originKind": "private_thread", "originSurface": originSurface, "title": "Market Map",
 		},
 	)
 	if err != nil || !appended {
@@ -355,8 +365,8 @@ func TestGoalCompletionEventCarriesOriginSurface(t *testing.T) {
 	if completed.Ref != artifact.ID {
 		t.Fatalf("completed ref=%q, want %q", completed.Ref, artifact.ID)
 	}
-	if completed.OriginSurface != "chat:thread-xyz" {
-		t.Fatalf("event OriginSurface=%q, want chat:thread-xyz — the return card routes on this, not the coarse originKind", completed.OriginSurface)
+	if completed.OriginSurface != originSurface {
+		t.Fatalf("event OriginSurface=%q, want %s — the return card routes on this, not the coarse originKind", completed.OriginSurface, originSurface)
 	}
 }
 

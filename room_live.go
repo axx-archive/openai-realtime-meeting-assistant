@@ -145,8 +145,14 @@ type roomLiveState struct {
 	// transcription cap timer) only acts when its captured gen is still live.
 	mixer    *audioMixer
 	lane     *meetingTranscriptionLane
-	mediaGen uint64
-	capTimer *time.Timer
+	realtime *roomRealtimeBundle
+	// mediaActor is the Pion control-plane owner for exactly this sitting.
+	// Lifecycle code detaches this exact pointer, so an old teardown can never
+	// close a successor sitting's actor in the package registry.
+	mediaActor     *roomMediaActor
+	mediaGen       uint64
+	mediaSittingID string
+	capTimer       *time.Timer
 
 	// §6.5 per-guest-session token buckets. chatBuckets caps room chat;
 	// mediaStateBuckets and telemetryBuckets cap the guest-reachable media
@@ -617,12 +623,14 @@ var guestInboundEvents = map[string]bool{
 // roomAudioActivityListener feeds a named room's mixer activity into that
 // room's attribution state — the office listener stays kanbanApp itself.
 type roomAudioActivityListener struct {
-	app    *kanbanBoardApp
-	roomID string
+	app        *kanbanBoardApp
+	roomID     string
+	sittingID  string
+	generation uint64
 }
 
 func (l *roomAudioActivityListener) NoteAudioActivity(at time.Time, levels []audioActivityLevel) {
-	l.app.noteAudioActivityForRoom(l.roomID, at, levels)
+	l.app.noteAudioActivityForScope(RoomScoutScope{RoomID: l.roomID, SittingID: l.sittingID, MediaGeneration: l.generation}, at, levels)
 }
 
 // roomLaneAudioSink is a named room's mixer sink (key
@@ -632,20 +640,54 @@ func (l *roomAudioActivityListener) NoteAudioActivity(at time.Time, levels []aud
 type roomLaneAudioSink struct {
 	app    *kanbanBoardApp
 	roomID string
+	lane   ConsentLane
 }
 
 func (s *roomLaneAudioSink) WriteMixedPCM(roomPCM []int16) error {
+	// Live room capture requires contributor fences; a plain mixer call is not
+	// authority and therefore fails closed.
+	return nil
+}
+
+func (s *roomLaneAudioSink) WriteMixedPCMWithConsent(roomPCM []int16, fences []ConsentFence) error {
 	if len(roomPCM) == 0 || pcmIsZero(roomPCM) {
 		return nil
+	}
+	authority := currentConsentLaneAuthority()
+	if len(fences) == 0 {
+		return nil
+	}
+	for _, fence := range fences {
+		if fence.lane != s.lane || authority.ValidateIngressFence(fence) != nil {
+			return nil
+		}
 	}
 	if !s.app.transcriptRecordingActiveInRoom(s.roomID) {
 		return nil
 	}
-	s.app.mu.Lock()
-	lane := s.app.roomLiveLocked(s.roomID).lane
-	s.app.mu.Unlock()
-	if lane != nil {
-		lane.enqueue(roomPCM)
+	switch s.lane {
+	case ConsentLaneTranscription:
+		s.app.mu.Lock()
+		var transcriptLane *meetingTranscriptionLane
+		if normalizeRoomID(s.roomID) == officeRoomID {
+			transcriptLane = s.app.transcriptLane
+		} else {
+			transcriptLane = s.app.roomLiveLocked(s.roomID).lane
+		}
+		s.app.mu.Unlock()
+		if transcriptLane != nil {
+			transcriptLane.enqueueWithConsent(roomPCM, fences)
+		}
+	case ConsentLaneModelAnalysis:
+		if normalizeRoomID(s.roomID) == officeRoomID {
+			_ = s.app.writeRealtimeMixedPCM(roomPCM)
+			return nil
+		}
+		s.app.mu.Lock()
+		realtime := s.app.roomLiveLocked(s.roomID).realtime
+		s.app.mu.Unlock()
+		// Scout/provider errors are isolated from direct room media.
+		realtime.writeMixedPCMWithConsent(roomPCM, fences)
 	}
 	return nil
 }
@@ -671,39 +713,45 @@ func (app *kanbanBoardApp) roomMixerFor(roomID string) *audioMixer {
 // Named rooms get their mixer + transcription lane here; the office (W4) gets
 // its lane + Scout Realtime peer via ensureOfficeMedia — lazy for every room,
 // ending the always-on boot spend. Idempotent per sitting.
-func (app *kanbanBoardApp) ensureRoomMedia(roomID string) {
+func (app *kanbanBoardApp) ensureRoomMedia(roomID string) uint64 {
 	roomID = normalizeRoomID(roomID)
 	if app == nil {
-		return
+		return 0
 	}
 	if roomID == officeRoomID {
-		app.ensureOfficeMedia()
-		return
+		return app.ensureOfficeMedia()
+	}
+	sittingID := ""
+	if app.memory != nil {
+		sittingID = app.memory.currentMeetingID(roomID)
 	}
 
 	app.mu.Lock()
 	state := app.roomLiveLocked(roomID)
 	if state.mixer != nil {
+		generation := state.mediaGen
 		app.mu.Unlock()
-		return
+		return generation
 	}
 	state.mediaGen++
 	gen := state.mediaGen
 	mixer := newAudioMixer()
-	mixer.setActivityListener(&roomAudioActivityListener{app: app, roomID: roomID})
+	mixer.setActivityListener(&roomAudioActivityListener{app: app, roomID: roomID, sittingID: sittingID, generation: gen})
 	state.mixer = mixer
 
 	apiKey := app.apiKey
 	var lane *meetingTranscriptionLane
 	if strings.TrimSpace(apiKey) != "" && transcriptionLaneEnabled() {
-		lane = newMeetingTranscriptionLaneForRoom(app, apiKey, transcriptionLaneModel(), roomID)
+		lane = newMeetingTranscriptionLaneForRoomGeneration(app, apiKey, transcriptionLaneModel(), roomID, gen)
 		// Started before it becomes observable through state.lane, so a
 		// racing teardown can never close() a lane whose run loop (the one
 		// that signals done) has not launched yet.
 		lane.start()
 		state.lane = lane
-		mixer.setSink(realtimeMixedAudioSinkKey+":"+roomID, &roomLaneAudioSink{app: app, roomID: roomID})
 	}
+	authority := currentConsentLaneAuthority()
+	mixer.setConsentSink(realtimeMixedAudioSinkKey+":transcription:"+roomID, ConsentLaneTranscription, authority, &roomLaneAudioSink{app: app, roomID: roomID, lane: ConsentLaneTranscription})
+	mixer.setConsentSink(realtimeMixedAudioSinkKey+":model:"+roomID, ConsentLaneModelAnalysis, authority, &roomLaneAudioSink{app: app, roomID: roomID, lane: ConsentLaneModelAnalysis})
 	guestEnabled := false
 	if room, ok := appRoomStore().byID(roomID); ok {
 		guestEnabled = room.GuestEnabled
@@ -711,9 +759,13 @@ func (app *kanbanBoardApp) ensureRoomMedia(roomID string) {
 	if guestEnabled {
 		app.armGuestTranscriptionCapLocked(state, gen)
 	}
+	state.mediaActor = actorForRoomGeneration(roomID, gen)
+	state.mediaSittingID = sittingID
 	app.mu.Unlock()
+	app.ensureRoomScoutRuntime(roomID, sittingID, gen)
 
 	log.Infof("room_media_started room=%s gen=%d lane=%t", roomID, gen, lane != nil)
+	return gen
 }
 
 // teardownRoomMediaAfterIdle runs at the tail of a named room's idle-end
@@ -740,16 +792,25 @@ func (app *kanbanBoardApp) teardownRoomMediaAfterIdle(roomID string) {
 	}
 	mixer := state.mixer
 	lane := state.lane
+	realtime := state.realtime
+	mediaActor := state.mediaActor
 	capTimer := state.capTimer
 	state.mixer = nil
 	state.lane = nil
+	state.realtime = nil
+	state.mediaActor = nil
+	state.mediaSittingID = ""
 	state.capTimer = nil
 	state.mediaGen++
 	gen := state.mediaGen
+	closeRoomMediaActorOwned(roomID, mediaActor)
 	app.mu.Unlock()
 
 	if capTimer != nil {
 		capTimer.Stop()
+	}
+	if realtime != nil {
+		_ = realtime.close()
 	}
 	if lane != nil {
 		lane.close()
@@ -778,8 +839,25 @@ func (app *kanbanBoardApp) teardownOfficeMediaAfterIdle() {
 	}
 	lane := app.transcriptLane
 	app.transcriptLane = nil
+	app.transcriptionStartToken++
+	app.transcriptionStarting = false
+	app.realtimeStartToken++
+	app.realtimeStarting = false
+	app.realtimeRestartToken = 0
+	mediaActor := state.mediaActor
+	state.mediaActor = nil
+	state.mediaSittingID = ""
+	state.audioActivity = nil
+	state.currentSpeechStartedAt = time.Time{}
+	state.currentSpeechStoppedAt = time.Time{}
+	state.pendingAttributionWindows = nil
+	state.activeSpeakerName = ""
+	state.activeSpeakerCandidate = ""
+	state.activeSpeakerCandidateAt = time.Time{}
+	state.activeSpeakerPayload = nil
 	state.mediaGen++
 	gen := state.mediaGen
+	closeRoomMediaActorOwned(officeRoomID, mediaActor)
 	app.mu.Unlock()
 
 	app.teardownRealtimePeerForIdle()
@@ -790,6 +868,35 @@ func (app *kanbanBoardApp) teardownOfficeMediaAfterIdle() {
 	if lane != nil {
 		log.Infof("room_media_torn_down room=%s gen=%d", officeRoomID, gen)
 	}
+}
+
+func (app *kanbanBoardApp) roomMediaGeneration(roomID string) uint64 {
+	if app == nil {
+		return 0
+	}
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	return app.roomLiveLocked(roomID).mediaGen
+}
+
+func (app *kanbanBoardApp) roomMediaGenerationCurrent(roomID string, generation uint64) bool {
+	if app == nil || generation == 0 {
+		return false
+	}
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	state := app.roomLiveLocked(roomID)
+	return state.mediaGen == generation && state.mediaActor != nil
+}
+
+func (app *kanbanBoardApp) roomMediaScopeCurrent(scope RoomScoutScope) bool {
+	if app == nil || !scope.valid() {
+		return false
+	}
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	state := app.roomLiveLocked(scope.RoomID)
+	return state.mediaGen == scope.MediaGeneration && state.mediaActor != nil && state.mediaSittingID == strings.TrimSpace(scope.SittingID)
 }
 
 /* ---------- §6.5 guest transcription cap ---------- */

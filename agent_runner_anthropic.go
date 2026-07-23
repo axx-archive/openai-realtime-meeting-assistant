@@ -281,6 +281,7 @@ type anthropicMessagesRequest struct {
 }
 
 type anthropicMessagesResponse struct {
+	ID         string            `json:"id"`
 	Model      string            `json:"model"`
 	StopReason string            `json:"stop_reason"`
 	Content    []json.RawMessage `json:"content"`
@@ -573,6 +574,7 @@ type anthropicSSEEvent struct {
 	Type    string `json:"type"`
 	Index   int    `json:"index"`
 	Message *struct {
+		ID    string `json:"id"`
 		Model string `json:"model"`
 		Usage struct {
 			InputTokens              int `json:"input_tokens"`
@@ -708,6 +710,7 @@ func decodeAnthropicSSEStream(reader io.Reader) (anthropicMessagesResponse, erro
 		switch event.Type {
 		case "message_start":
 			if event.Message != nil {
+				response.ID = event.Message.ID
 				response.Model = event.Message.Model
 				response.Usage.InputTokens = event.Message.Usage.InputTokens
 				response.Usage.CacheCreationInputTokens = event.Message.Usage.CacheCreationInputTokens

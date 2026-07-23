@@ -1,0 +1,56 @@
+# Isolated W4 restore-only deployment. Do not merge this service into the live
+# stack: it deliberately has no public ports, Caddy, TURN, runners, or restart
+# policy. Start it only on a network-isolated restore host.
+services:
+  meetingassist-restore:
+    image: ${BONFIRE_MEETINGASSIST_IMAGE:?immutable meetingassist image digest is required}
+    env_file:
+      - .env.restore
+    environment:
+      BONFIRE_RESTORE_MODE: isolated
+      BONFIRE_CANONICAL_DATABASE_URL: postgres://bonfire:${BONFIRE_RESTORE_POSTGRES_PASSWORD:?restore postgres password is required}@canonical-postgres-restore:5432/bonfire?sslmode=disable
+    volumes:
+      - ./restore-profile-v1:/run/bonfire-dr/restore-profile-v1:ro
+      - ${BONFIRE_RESTORE_EVIDENCE_DIR:?restore evidence directory is required}:/run/bonfire-dr/evidence:ro
+      - ${BONFIRE_RESTORE_CANONICAL_ARTIFACT:?canonical snapshot path is required}:/restore/canonical:ro
+      - ${BONFIRE_RESTORE_MEETING_DATA:?meeting data path is required}:/app/data
+      - ${BONFIRE_RESTORE_CODEX_QUEUE:?codex queue path is required}:/app/codex-queue
+      - ${BONFIRE_RESTORE_USAGE_LEDGER:?usage ledger path is required}:/app/data/usage
+      - restore_receipt_state:/var/lib/bonfire-restore-gate
+    depends_on:
+      canonical-postgres-restore:
+        condition: service_healthy
+    networks:
+      - restore_internal
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
+  canonical-postgres-restore:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: bonfire
+      POSTGRES_USER: bonfire
+      POSTGRES_PASSWORD: ${BONFIRE_RESTORE_POSTGRES_PASSWORD:?restore postgres password is required}
+    volumes:
+      - ${BONFIRE_RESTORE_POSTGRES_DATA:?restored postgres data path is required}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bonfire -d bonfire"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - restore_internal
+    restart: "no"
+
+networks:
+  restore_internal:
+    internal: true
+
+volumes:
+  restore_receipt_state:

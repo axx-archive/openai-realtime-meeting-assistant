@@ -365,6 +365,38 @@ func TestDeliverWebPushRoutingAndFilters(t *testing.T) {
 	}
 }
 
+func TestCatchUpWebPushRequiresExactSubscriptionTenantForSameEmail(t *testing.T) {
+	setupPushTestEnv(t)
+	t.Setenv("WEB_PUSH_VAPID_PUBLIC_KEY", "test-public-key")
+	t.Setenv("WEB_PUSH_VAPID_PRIVATE_KEY", "test-private-key")
+	email := "aj@shareability.com"
+	tenantA := testPushSubscription(email, "https://push.example/tenant-a")
+	tenantA.TenantID = "tenant-a"
+	tenantB := testPushSubscription(email, "https://push.example/tenant-b")
+	tenantB.TenantID = "tenant-b"
+	legacy := testPushSubscription(email, "https://push.example/legacy-tenantless")
+	for _, subscription := range []pushSubscriptionRecord{tenantA, tenantB, legacy} {
+		if err := upsertPushSubscription(subscription); err != nil {
+			t.Fatal(err)
+		}
+	}
+	captured := stubWebPush(t, nil)
+	deliverWebPushForRecord(notificationRecord{ID: "catch-up-notification-tenant-a", TenantID: "tenant-a", UserEmail: email,
+		Kind: notificationKindInfo, Text: "TENANT-A-PRIVATE", Tool: "catch_up_recap"})
+	sends := captured()
+	if len(sends) != 1 || sends[0].endpoint != tenantA.Endpoint {
+		t.Fatalf("tenant-bound sends=%+v, want tenant A only", sends)
+	}
+
+	// Tenant-less generic notifications retain the existing email-scoped behavior.
+	captured = stubWebPush(t, nil)
+	deliverWebPushForRecord(notificationRecord{ID: "notification-generic", UserEmail: email, Kind: notificationKindInfo, Text: "GENERIC"})
+	sends = captured()
+	if len(sends) != 3 {
+		t.Fatalf("generic sends=%+v, want all same-email subscriptions", sends)
+	}
+}
+
 // The deferred flush is the delivery moment: a queued notification must NOT
 // push when created, and must push when flushed.
 func TestDeferredFlushTriggersPush(t *testing.T) {

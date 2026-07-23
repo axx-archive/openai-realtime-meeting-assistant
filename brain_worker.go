@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"strconv"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 const (
 	meetingBrainAgentName             = "meeting brain"
+	meetingBrainCursorMetadataKey     = "processedThroughTranscriptId"
 	defaultMeetingBrainInterval       = 5 * time.Minute
 	defaultMeetingBrainMinTranscripts = 4
 	// defaultMeetingBrainMaxTranscripts (A7) is lowered from 80 so a single dense
@@ -44,18 +46,22 @@ func brainMaxOutputTokens(transcriptCount int) int {
 
 func meetingBrainAgent() ambientAgentConfig {
 	return ambientAgentConfig{
-		name:              meetingBrainAgentName,
-		defaultInterval:   defaultMeetingBrainInterval,
-		intervalEnv:       "MEETING_BRAIN_INTERVAL",
-		disabledEnv:       "MEETING_BRAIN_DISABLED",
-		backfillEnv:       "MEETING_BRAIN_BACKFILL",
-		minBatchEnv:       "MEETING_BRAIN_MIN_TRANSCRIPTS",
-		defaultMinBatch:   defaultMeetingBrainMinTranscripts,
-		maxBatchEnv:       "MEETING_BRAIN_MAX_TRANSCRIPTS",
-		defaultMaxBatch:   defaultMeetingBrainMaxTranscripts,
-		inputKind:         meetingMemoryKindTranscript,
-		artifactKind:      meetingMemoryKindBrain,
-		cursorMetadataKey: "throughTranscriptId",
+		name:            meetingBrainAgentName,
+		defaultInterval: defaultMeetingBrainInterval,
+		intervalEnv:     "MEETING_BRAIN_INTERVAL",
+		disabledEnv:     "MEETING_BRAIN_DISABLED",
+		backfillEnv:     "MEETING_BRAIN_BACKFILL",
+		minBatchEnv:     "MEETING_BRAIN_MIN_TRANSCRIPTS",
+		defaultMinBatch: defaultMeetingBrainMinTranscripts,
+		maxBatchEnv:     "MEETING_BRAIN_MAX_TRANSCRIPTS",
+		defaultMaxBatch: defaultMeetingBrainMaxTranscripts,
+		inputKind:       meetingMemoryKindTranscript,
+		artifactKind:    meetingMemoryKindBrain,
+		// Provenance and consumption are deliberately separate. The public
+		// from/through fields describe only sources authorized for the model;
+		// this private cursor may advance across denied inputs that were checked
+		// and omitted.
+		cursorMetadataKey: meetingBrainCursorMetadataKey,
 		requestTimeout:    meetingBrainRequestTimeout,
 		// W4 §7.4: per-room cursors — one room's brain pass must never advance
 		// another room's transcript window. §6.5: a guests-only room defers its
@@ -79,8 +85,61 @@ func (app *kanbanBoardApp) produceMeetingBrainWriteUp(ctx context.Context, apiKe
 	// W4: the runner hands each pass ONE room's window; the room rides the
 	// artifact (cursor partitioning) and the downstream nudges.
 	roomID := ambientWindowRoomID(transcripts)
+	rawTranscripts := transcripts
+	verifier := appBrainSourceConsentVerifier{App: app}
+	transcripts = make([]meetingMemoryEntry, 0, len(rawTranscripts))
+	for _, transcript := range rawTranscripts {
+		_, err := verifier.AuthorizeBrainSourceConsent(ctx, transcript)
+		if err == nil {
+			transcripts = append(transcripts, transcript)
+			continue
+		}
+		if errors.Is(err, ErrBrainSourceConsentAbsent) {
+			continue
+		}
+		// Authority outages and other indeterminate states hold the cursor and
+		// never send a partial prompt to a model.
+		return meetingMemoryEntry{}, err
+	}
+	if len(transcripts) == 0 {
+		return meetingMemoryEntry{}, nil
+	}
+	// Subscribe before the final provider-ingress check. A withdrawal that lands
+	// after this point cancels the provider context; one that landed just before
+	// the subscription is caught by the durable reauthorization below.
+	allOrgFences := make([]ConsentFence, 0, len(transcripts))
+	for _, transcript := range transcripts {
+		fences, err := verifier.AuthorizeBrainSourceConsent(ctx, transcript)
+		if err != nil {
+			if errors.Is(err, ErrBrainSourceConsentAbsent) {
+				return meetingMemoryEntry{}, nil
+			}
+			return meetingMemoryEntry{}, err
+		}
+		allOrgFences = append(allOrgFences, fences...)
+	}
+	providerCtx, cancelProvider := context.WithCancel(ctx)
+	defer cancelProvider()
+	boundContributors := make(map[string]struct{}, len(allOrgFences))
+	for _, fence := range allOrgFences {
+		boundContributors[consentBindingKey(fence.binding)] = struct{}{}
+	}
+	unsubscribeWithdrawal := subscribeConsentWithdrawals(func(notice ConsentWithdrawalNotice) {
+		if _, matches := boundContributors[consentBindingKey(notice.Binding)]; matches {
+			cancelProvider()
+		}
+	})
+	defer unsubscribeWithdrawal()
+	for _, fence := range allOrgFences {
+		if err := currentConsentLaneAuthority().ValidateFence(providerCtx, fence); err != nil {
+			if errors.Is(err, ErrConsentFenceStale) {
+				return meetingMemoryEntry{}, nil
+			}
+			return meetingMemoryEntry{}, err
+		}
+	}
 	model := meetingBrainModel()
-	text, err := responder(ctx, apiKey, openAITextRequest{
+	text, err := responder(providerCtx, apiKey, openAITextRequest{
 		Model:           model,
 		Seat:            seatBrain,
 		Instructions:    meetingBrainInstructions(),
@@ -100,14 +159,15 @@ func (app *kanbanBoardApp) produceMeetingBrainWriteUp(ctx context.Context, apiKe
 	firstTranscript := transcripts[0]
 	lastTranscript := transcripts[len(transcripts)-1]
 	metadata := map[string]string{
-		"source":                     "openai_responses",
-		"model":                      model,
-		"roomId":                     roomID,
-		"fromTranscriptId":           firstTranscript.ID,
-		"throughTranscriptId":        lastTranscript.ID,
-		"fromTranscriptCreatedAt":    firstTranscript.CreatedAt.Format(time.RFC3339Nano),
-		"throughTranscriptCreatedAt": lastTranscript.CreatedAt.Format(time.RFC3339Nano),
-		"transcriptCount":            strconv.Itoa(len(transcripts)),
+		"source":                      "openai_responses",
+		"model":                       model,
+		"roomId":                      roomID,
+		"fromTranscriptId":            firstTranscript.ID,
+		"throughTranscriptId":         lastTranscript.ID,
+		"fromTranscriptCreatedAt":     firstTranscript.CreatedAt.Format(time.RFC3339Nano),
+		"throughTranscriptCreatedAt":  lastTranscript.CreatedAt.Format(time.RFC3339Nano),
+		"transcriptCount":             strconv.Itoa(len(transcripts)),
+		meetingBrainCursorMetadataKey: rawTranscripts[len(rawTranscripts)-1].ID,
 	}
 	metadata = applyAmbientDerivedScope(metadata, transcripts)
 	// §6.4 provenance (inclusion RATIFIED 2026-07-09): a write-up over a
@@ -118,7 +178,18 @@ func (app *kanbanBoardApp) produceMeetingBrainWriteUp(ctx context.Context, apiKe
 		metadata[listenOnlyMetadataKey] = "true"
 	}
 	id := durableTimestampID("brain", time.Now())
-	entry, appended, err := app.memory.appendBrainWriteUp(id, text, metadata)
+	var entry meetingMemoryEntry
+	var appended bool
+	commit := func() error {
+		var appendErr error
+		entry, appended, appendErr = app.memory.appendBrainWriteUp(id, text, metadata)
+		return appendErr
+	}
+	if len(allOrgFences) == 0 {
+		err = commit()
+	} else {
+		err = currentConsentLaneAuthority().CommitWithFences(ctx, allOrgFences, commit)
+	}
 	if err != nil || !appended {
 		return entry, err
 	}
@@ -212,7 +283,7 @@ func (store *meetingMemoryStore) unsummarizedTranscripts(limit int) []meetingMem
 }
 
 func (store *meetingMemoryStore) unsummarizedTranscriptsAfter(limit int, baselineTranscriptID string) []meetingMemoryEntry {
-	return store.unconsumedEntriesAfter(meetingMemoryKindTranscript, meetingMemoryKindBrain, "throughTranscriptId", limit, baselineTranscriptID)
+	return store.unconsumedEntriesAfter(meetingMemoryKindTranscript, meetingMemoryKindBrain, meetingBrainCursorMetadataKey, limit, baselineTranscriptID)
 }
 
 func (store *meetingMemoryStore) latestTranscriptID() string {

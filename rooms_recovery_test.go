@@ -20,21 +20,13 @@ func TestRequestParticipantTracksTriggersRenegotiation(t *testing.T) {
 	})
 	waitForKanbanEvent(t, conn, "access_granted", 5*time.Second)
 
-	signalRequestLock.Lock()
-	if signalRequestTimer != nil {
-		signalRequestTimer.Stop()
-		signalRequestTimer = nil
-	}
-	signalRequestLock.Unlock()
+	acceptedBefore := roomMediaActorAcceptedCommands(officeRoomID)
 
 	writeNativeWebsocketEvent(t, conn, "request_participant_tracks", map[string]string{"reason": "missing remote tiles"})
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		signalRequestLock.Lock()
-		scheduled := signalRequestTimer != nil
-		signalRequestLock.Unlock()
-		if scheduled {
+		if roomMediaActorAcceptedCommands(officeRoomID) > acceptedBefore {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
@@ -57,14 +49,6 @@ func TestRemoveTrackSkipsRepublishedTrackWithSameID(t *testing.T) {
 	}
 
 	snapshotPeerState(t)
-	t.Cleanup(func() {
-		signalRequestLock.Lock()
-		if signalRequestTimer != nil {
-			signalRequestTimer.Stop()
-		}
-		signalRequestTimer = nil
-		signalRequestLock.Unlock()
-	})
 	listLock.Lock()
 	peerConnections = nil
 	trackLocals = map[string]*webrtc.TrackLocalStaticRTP{newTrack.ID(): newTrack}

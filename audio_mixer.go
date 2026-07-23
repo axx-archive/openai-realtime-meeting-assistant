@@ -39,6 +39,20 @@ type mixedAudioSink interface {
 	WriteMixedPCM([]int16) error
 }
 
+// consentMixedAudioSink receives only the sources whose server-issued fence
+// authorizes the sink's lane. The fences travel with the exact mixed frame so
+// provider ingress and commit can revalidate every contributor after the
+// mixer has intentionally erased speaker identity from the PCM.
+type consentMixedAudioSink interface {
+	WriteMixedPCMWithConsent([]int16, []ConsentFence) error
+}
+
+type audioMixerSink struct {
+	sink      mixedAudioSink
+	lane      ConsentLane
+	authority *ConsentLaneAuthority
+}
+
 type audioActivityListener interface {
 	NoteAudioActivity(time.Time, []audioActivityLevel)
 }
@@ -51,19 +65,23 @@ type audioActivityLevel struct {
 }
 
 type audioMixer struct {
-	mu               sync.Mutex
-	sinks            map[string]mixedAudioSink
-	activityListener audioActivityListener
-	input            chan audioInput
-	stop             chan struct{}
-	done             chan struct{}
-	closeOnce        sync.Once
+	mu                    sync.Mutex
+	sinks                 map[string]audioMixerSink
+	activityListener      audioActivityListener
+	input                 chan audioInput
+	stop                  chan struct{}
+	done                  chan struct{}
+	closeOnce             sync.Once
+	unsubscribeWithdrawal func()
 }
 
 type audioInput struct {
 	trackKey        string
 	participantName string
 	pcm             []int16
+	fences          map[ConsentLane]ConsentFence
+	consentBound    bool
+	withdrawal      *ConsentWithdrawalNotice
 	remove          bool
 }
 
@@ -73,6 +91,9 @@ type audioSource struct {
 	buffer          []int16
 	noiseFloor      float64
 	gateRelease     int
+	laneBuffers     map[ConsentLane][]int16
+	laneFences      map[ConsentLane]ConsentFence
+	captureFence    ConsentFence
 }
 
 type audioSourceActivity struct {
@@ -82,18 +103,33 @@ type audioSourceActivity struct {
 	rms             float64
 	peak            int16
 	active          bool
+	laneFrames      map[ConsentLane][]int16
+	laneFences      map[ConsentLane]ConsentFence
 }
 
 func newAudioMixer() *audioMixer {
 	mixer := &audioMixer{
-		sinks: map[string]mixedAudioSink{},
+		sinks: map[string]audioMixerSink{},
 		input: make(chan audioInput, 128),
 		stop:  make(chan struct{}),
 		done:  make(chan struct{}),
 	}
+	mixer.unsubscribeWithdrawal = subscribeConsentWithdrawals(mixer.noteWithdrawal)
 
 	go mixer.run()
 	return mixer
+}
+
+func (mixer *audioMixer) noteWithdrawal(notice ConsentWithdrawalNotice) {
+	if mixer == nil {
+		return
+	}
+	copyNotice := notice
+	select {
+	case <-mixer.stop:
+		return
+	case mixer.input <- audioInput{withdrawal: &copyNotice}:
+	}
 }
 
 func (mixer *audioMixer) submit(trackKey string, participantName string, pcm []int16) {
@@ -111,6 +147,31 @@ func (mixer *audioMixer) submit(trackKey string, participantName string, pcm []i
 	case mixer.input <- audioInput{trackKey: trackKey, participantName: participantName, pcm: pcm}:
 	default:
 		log.Warnf("Dropping decoded audio frame for track=%s", trackKey)
+	}
+}
+
+// submitWithConsent is the only live-room capture entry. Direct WebRTC RTP
+// forwarding never passes through this method. Audio is queued for activity
+// only after audio_capture was authorized, while transcription/model lanes
+// receive aligned PCM or silence according to their own independent fences.
+func (mixer *audioMixer) submitWithConsent(trackKey string, participantName string, pcm []int16, fences map[ConsentLane]ConsentFence) {
+	if mixer == nil || trackKey == "" || len(pcm) == 0 {
+		return
+	}
+	select {
+	case <-mixer.stop:
+		return
+	default:
+	}
+	copiedFences := make(map[ConsentLane]ConsentFence, len(fences))
+	for lane, fence := range fences {
+		copiedFences[lane] = fence
+	}
+	copiedPCM := append([]int16(nil), pcm...)
+	select {
+	case mixer.input <- audioInput{trackKey: trackKey, participantName: participantName, pcm: copiedPCM, fences: copiedFences, consentBound: true}:
+	default:
+		log.Warnf("Dropping consent-bound decoded audio frame for track=%s", trackKey)
 	}
 }
 
@@ -144,7 +205,20 @@ func (mixer *audioMixer) setSink(key string, sink mixedAudioSink) {
 		delete(mixer.sinks, key)
 		return
 	}
-	mixer.sinks[key] = sink
+	mixer.sinks[key] = audioMixerSink{sink: sink}
+}
+
+func (mixer *audioMixer) setConsentSink(key string, lane ConsentLane, authority *ConsentLaneAuthority, sink mixedAudioSink) {
+	if mixer == nil || key == "" {
+		return
+	}
+	mixer.mu.Lock()
+	defer mixer.mu.Unlock()
+	if sink == nil {
+		delete(mixer.sinks, key)
+		return
+	}
+	mixer.sinks[key] = audioMixerSink{sink: sink, lane: lane, authority: authority}
 }
 
 func (mixer *audioMixer) setActivityListener(listener audioActivityListener) {
@@ -175,6 +249,9 @@ func (mixer *audioMixer) close() {
 	mixer.closeOnce.Do(func() {
 		close(mixer.stop)
 		<-mixer.done
+		if mixer.unsubscribeWithdrawal != nil {
+			mixer.unsubscribeWithdrawal()
+		}
 	})
 }
 
@@ -191,6 +268,10 @@ func (mixer *audioMixer) run() {
 		case <-mixer.stop:
 			return
 		case input := <-mixer.input:
+			if input.withdrawal != nil {
+				invalidateMixerSourcesForWithdrawal(sources, *input.withdrawal)
+				continue
+			}
 			if input.remove {
 				delete(sources, input.trackKey)
 				continue
@@ -198,19 +279,52 @@ func (mixer *audioMixer) run() {
 
 			source := sources[input.trackKey]
 			if source == nil {
-				source = &audioSource{trackKey: input.trackKey}
+				source = &audioSource{trackKey: input.trackKey, laneBuffers: make(map[ConsentLane][]int16), laneFences: make(map[ConsentLane]ConsentFence)}
 				sources[input.trackKey] = source
 			}
 			if input.participantName != "" {
 				source.participantName = input.participantName
 			}
 
-			source.buffer = append(source.buffer, input.pcm...)
+			if input.consentBound {
+				captureFence, captureOK := input.fences[ConsentLaneAudioCapture]
+				if !captureOK {
+					delete(sources, input.trackKey)
+					continue
+				}
+				if source.captureFence.policy != "" && !sameConsentFenceVersion(source.captureFence, captureFence) {
+					// A regrant must never make buffered pre-withdraw PCM eligible.
+					source.buffer = nil
+					source.laneBuffers = make(map[ConsentLane][]int16)
+					source.laneFences = make(map[ConsentLane]ConsentFence)
+				}
+				source.captureFence = captureFence
+				source.buffer = append(source.buffer, input.pcm...)
+				for _, lane := range []ConsentLane{ConsentLaneTranscription, ConsentLaneModelAnalysis} {
+					if fence, ok := input.fences[lane]; ok {
+						if prior, exists := source.laneFences[lane]; exists && !sameConsentFenceVersion(prior, fence) {
+							source.laneBuffers[lane] = make([]int16, len(source.buffer)-len(input.pcm))
+						}
+						source.laneBuffers[lane] = append(source.laneBuffers[lane], input.pcm...)
+						source.laneFences[lane] = fence
+					} else {
+						source.laneBuffers[lane] = append(source.laneBuffers[lane], make([]int16, len(input.pcm))...)
+						delete(source.laneFences, lane)
+					}
+				}
+			} else {
+				source.buffer = append(source.buffer, input.pcm...)
+			}
 			if overflow := len(source.buffer) - audioSourceLimit; overflow > 0 {
 				source.buffer = source.buffer[overflow:]
+				for lane, buffer := range source.laneBuffers {
+					if len(buffer) > audioSourceLimit {
+						source.laneBuffers[lane] = buffer[len(buffer)-audioSourceLimit:]
+					}
+				}
 			}
 		case <-ticker.C:
-			mixedPCM, activeLevels := mixAudioFrameWithActivity(sources)
+			mixedPCM, activeLevels, activities := mixAudioFrameSetWithActivity(sources)
 			if len(mixedPCM) == 0 {
 				if trailingSilenceFrames <= 0 {
 					continue
@@ -224,8 +338,21 @@ func (mixer *audioMixer) run() {
 			if len(activeLevels) > 0 {
 				mixer.notifyAudioActivity(time.Now().UTC(), activeLevels)
 			}
-			for key, sink := range mixer.snapshotSinks() {
-				if err := sink.WriteMixedPCM(mixedPCM); err != nil {
+			for key, sinkConfig := range mixer.snapshotSinks() {
+				sinkPCM, fences := mixedPCM, []ConsentFence(nil)
+				if sinkConfig.lane != "" {
+					sinkPCM, fences = mixConsentLaneFrame(activities, sinkConfig.lane, sinkConfig.authority)
+					if len(sinkPCM) == 0 {
+						continue
+					}
+				}
+				var err error
+				if consentSink, ok := sinkConfig.sink.(consentMixedAudioSink); ok && sinkConfig.lane != "" {
+					err = consentSink.WriteMixedPCMWithConsent(sinkPCM, fences)
+				} else {
+					err = sinkConfig.sink.WriteMixedPCM(sinkPCM)
+				}
+				if err != nil {
 					log.Errorf("Failed to write mixed audio sink=%s: %v", key, err)
 				}
 			}
@@ -233,11 +360,11 @@ func (mixer *audioMixer) run() {
 	}
 }
 
-func (mixer *audioMixer) snapshotSinks() map[string]mixedAudioSink {
+func (mixer *audioMixer) snapshotSinks() map[string]audioMixerSink {
 	mixer.mu.Lock()
 	defer mixer.mu.Unlock()
 
-	sinks := make(map[string]mixedAudioSink, len(mixer.sinks))
+	sinks := make(map[string]audioMixerSink, len(mixer.sinks))
 	for key, sink := range mixer.sinks {
 		sinks[key] = sink
 	}
@@ -263,6 +390,11 @@ func mixAudioFrame(sources map[string]*audioSource) []int16 {
 }
 
 func mixAudioFrameWithActivity(sources map[string]*audioSource) ([]int16, []audioActivityLevel) {
+	mixed, levels, _ := mixAudioFrameSetWithActivity(sources)
+	return mixed, levels
+}
+
+func mixAudioFrameSetWithActivity(sources map[string]*audioSource) ([]int16, []audioActivityLevel, []audioSourceActivity) {
 	readySources := make([]*audioSource, 0, len(sources))
 	for trackKey, source := range sources {
 		if len(source.buffer) >= roomAudioMixFrameSize {
@@ -273,7 +405,7 @@ func mixAudioFrameWithActivity(sources map[string]*audioSource) ([]int16, []audi
 		}
 	}
 	if len(readySources) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	activeActivities := activeAudioSourceActivities(readySources)
@@ -291,8 +423,13 @@ func mixAudioFrameWithActivity(sources map[string]*audioSource) ([]int16, []audi
 	if len(mixSources) == 0 {
 		for _, source := range readySources {
 			source.buffer = source.buffer[roomAudioMixFrameSize:]
+			for lane, buffer := range source.laneBuffers {
+				if len(buffer) >= roomAudioMixFrameSize {
+					source.laneBuffers[lane] = buffer[roomAudioMixFrameSize:]
+				}
+			}
 		}
-		return nil, nil
+		return nil, nil, activeActivities
 	}
 
 	// Straight summation keeps each speaker at full level during crosstalk;
@@ -309,9 +446,74 @@ func mixAudioFrameWithActivity(sources map[string]*audioSource) ([]int16, []audi
 
 	for _, source := range readySources {
 		source.buffer = source.buffer[roomAudioMixFrameSize:]
+		for lane, buffer := range source.laneBuffers {
+			if len(buffer) >= roomAudioMixFrameSize {
+				source.laneBuffers[lane] = buffer[roomAudioMixFrameSize:]
+			}
+		}
 	}
 
-	return mixedPCM, activeLevels
+	return mixedPCM, activeLevels, activeActivities
+}
+
+func mixConsentLaneFrame(activities []audioSourceActivity, lane ConsentLane, authority *ConsentLaneAuthority) ([]int16, []ConsentFence) {
+	eligible := make([]audioSourceActivity, 0, len(activities))
+	fences := make([]ConsentFence, 0, len(activities))
+	for _, activity := range activities {
+		if len(activity.laneFrames[lane]) < roomAudioMixFrameSize {
+			continue
+		}
+		fence, ok := activity.laneFences[lane]
+		if !ok || authority == nil || authority.ValidateFenceLocal(fence) != nil {
+			continue
+		}
+		eligible = append(eligible, activity)
+		fences = append(fences, fence)
+	}
+	if len(eligible) == 0 {
+		return nil, nil
+	}
+	mixed := make([]int16, roomAudioMixFrameSize)
+	for index := range mixed {
+		var sum int32
+		for _, activity := range eligible {
+			sum += int32(activity.laneFrames[lane][index])
+		}
+		mixed[index] = softClipPCM16(sum)
+	}
+	return mixed, fences
+}
+
+func sameConsentFenceVersion(left, right ConsentFence) bool {
+	return consentBindingKey(left.binding) == consentBindingKey(right.binding) && left.policy == right.policy &&
+		left.generation == right.generation && left.recordDigest == right.recordDigest
+}
+
+func invalidateMixerSourcesForWithdrawal(sources map[string]*audioSource, notice ConsentWithdrawalNotice) {
+	wantBinding := consentBindingKey(notice.Binding)
+	for trackKey, source := range sources {
+		if source == nil {
+			continue
+		}
+		matchesCapture := source.captureFence.policy != "" && consentBindingKey(source.captureFence.binding) == wantBinding
+		if notice.Scope == ConsentAudioCapture && matchesCapture {
+			delete(sources, trackKey)
+			continue
+		}
+		for _, lane := range []ConsentLane{ConsentLaneTranscription, ConsentLaneModelAnalysis} {
+			fence, ok := source.laneFences[lane]
+			if !ok || consentBindingKey(fence.binding) != wantBinding {
+				continue
+			}
+			invalidated := notice.Scope == ConsentTranscription ||
+				(notice.Scope == ConsentModelAnalysis && lane == ConsentLaneModelAnalysis)
+			if !invalidated {
+				continue
+			}
+			source.laneBuffers[lane] = make([]int16, len(source.laneBuffers[lane]))
+			delete(source.laneFences, lane)
+		}
+	}
 }
 
 func activeAudioSources(sources []*audioSource) []*audioSource {
@@ -341,12 +543,20 @@ func sourceAudioActive(source *audioSource) bool {
 }
 
 func sourceAudioActivity(source *audioSource) audioSourceActivity {
-	activity := audioSourceActivity{source: source}
+	activity := audioSourceActivity{source: source, laneFrames: make(map[ConsentLane][]int16), laneFences: make(map[ConsentLane]ConsentFence)}
 	if source == nil || len(source.buffer) < roomAudioMixFrameSize {
 		return activity
 	}
 	activity.trackKey = source.trackKey
 	activity.participantName = source.participantName
+	for lane, buffer := range source.laneBuffers {
+		if len(buffer) >= roomAudioMixFrameSize {
+			activity.laneFrames[lane] = append([]int16(nil), buffer[:roomAudioMixFrameSize]...)
+			if fence, ok := source.laneFences[lane]; ok {
+				activity.laneFences[lane] = fence
+			}
+		}
+	}
 
 	rms, peak := audioFrameLevel(source.buffer[:roomAudioMixFrameSize])
 	activity.rms = rms

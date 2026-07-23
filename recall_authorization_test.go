@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -261,10 +262,10 @@ func TestPrivateMeetingRecapCannotBroadcastToRoom(t *testing.T) {
 	appendTestTranscript(t, app, "private-recap-transcript", "Private recap source line.")
 
 	result, _, err := app.applyPrivateRealtimeVoiceTool("tim@shareability.com", "meeting_recap", map[string]any{"audience": "room"})
-	if err != nil || result["audience"] != notificationAudienceMe {
-		t.Fatalf("private recap=%v err=%v", result, err)
+	if !errors.Is(err, ErrCatchUpUnavailable) || result != nil {
+		t.Fatalf("private recap=%v err=%v, want fail-closed exact adapter error", result, err)
 	}
-	if unread := app.unreadNotificationsFor("tim@shareability.com", notificationListLimit); len(unread) != 1 {
+	if unread := app.unreadNotificationsFor("tim@shareability.com", notificationListLimit); len(unread) != 0 {
 		t.Fatalf("caller notifications=%v", unread)
 	}
 	for _, item := range app.roomChatHistory(roomChatHistoryLimit) {
@@ -351,8 +352,11 @@ func TestAmbientWorkerFiltersBeforeModelAndPreservesDerivedScope(t *testing.T) {
 	t.Setenv("MEETING_BRAIN_BACKFILL", "true")
 	roomID := "strategy"
 	meetingID := app.memory.ensureMeetingID(roomID)
+	authority := newAmbientConsentAuthorityForTest(t)
+	grantAmbientConsentForTest(t, app, authority, roomID, "tom@shareability.com")
 	appendInput := func(id, text string, metadata map[string]string) {
 		metadata["roomId"], metadata["meetingId"], metadata["sittingId"] = roomID, meetingID, meetingID
+		metadata["speaker"] = "Tom"
 		if _, _, err := app.memory.appendAmbientEntry(meetingMemoryKindTranscript, id, text, metadata); err != nil {
 			t.Fatal(err)
 		}
