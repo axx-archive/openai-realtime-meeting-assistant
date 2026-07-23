@@ -1,0 +1,21 @@
+/** Mirrors the web app paper/ember palette for visual continuity. */
+export const colors = {
+  bg: '#F7F6F3',
+  bgElevated: '#FFFFFF',
+  bgMuted: '#EFEDE8',
+  text: '#0E0E10',
+  textSecondary: 'rgba(14, 14, 16, 0.62)',
+  textTertiary: 'rgba(14, 14, 16, 0.38)',
+  border: 'rgba(14, 14, 16, 0.10)',
+  accent: '#0E0E10',
+  onAccent: '#FFFFFF',
+  ember: '#FF6B4A',
+  onEmber: '#FFFFFF',
+  live: '#23A847',
+  liveSoft: 'rgba(35, 168, 71, 0.13)',
+  danger: '#FF453A',
+  dangerSoft: 'rgba(255, 69, 58, 0.10)',
+  warn: '#FF9F0A',
+  tabInactive: 'rgba(14, 14, 16, 0.42)',
+  scrim: 'rgba(14, 14, 16, 0.35)',
+} as const;

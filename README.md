@@ -1,178 +1,216 @@
-# Realtime Meeting Assistant Demo
+# STRIDE
+
+> A company operating system that remembers, understands, and acts with receipts.
 
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 ![Go](https://img.shields.io/badge/Built_with-Go-blue)
-![WebRTC](https://img.shields.io/badge/Uses-WebRTC-blueviolet)
-![OpenAI API](https://img.shields.io/badge/Powered_by-OpenAI_API-orange)
+![WebRTC](https://img.shields.io/badge/Live_media-Pion_WebRTC-blueviolet)
+![Status](https://img.shields.io/badge/2.0-W2_in_progress-f36f45)
 
-This demo showcases how to use the [OpenAI Realtime API](https://platform.openai.com/docs/guides/realtime) to interact through voice with a Kanban board during a standup. Multiple users can join the same WebRTC room and update the shared board with natural voice.
+Built by **That's Cool**, an independent lab for ambitious ways of working.
 
-It is implemented as a Go application using Pion WebRTC, Gorilla WebSocket, Opus audio encoding/decoding, and the [Realtime + WebRTC integration](https://developers.openai.com/api/docs/guides/realtime-webrtc/). The server mixes participant audio, sends it to an OpenAI Realtime peer, and uses [function calling](https://developers.openai.com/api/docs/guides/realtime-conversations/) to trigger board updates.
+**STRIDE** is the product and the emerging open operating platform for human-and-agent work. **BonfireOS** is its first implementation and proving ground.
 
-![screenshot](./public/screenshot.png)
+At STRIDE's core is an idea called **AmbientMind**: a permissioned organizational intelligence layer that can remember what happened, understand what is changing, help the company act, and explain its work with evidence. AmbientMind is part of STRIDE—not a second product or identity.
 
-> [!IMPORTANT]
-> This demo does not include built-in authentication or access control. While the server is running, anyone who can reach the app URL can join and access the meeting room.
+Meetings are an important sensor. They are not the product.
 
-## How to use
+The product spans private Scout conversations, shared threads, live rooms, agent runs, artifacts, decisions, board state, feedback, and model usage. It turns those authorized signals into durable organizational memory—then uses that memory to surface storylines, alignment, gaps, opportunities, ownership, and governed next actions.
 
-### Running the application
+[Explore the STRIDE vision](https://workinstride.xyz) · [Read the active 2.0 execution ledger](docs/plans/bonfireos-2.0-execution.md) · [Read the W2 design](docs/plans/bonfireos-w2-design.md)
 
-1. **Set up the OpenAI API:**
+## The AmbientMind inside STRIDE
 
-   - If you're new to the OpenAI API, [sign up for an account](https://platform.openai.com/signup).
-   - Follow the [Quickstart](https://platform.openai.com/docs/quickstart) to retrieve your API key.
+Most companies have the raw material for collective intelligence but no trustworthy system that can assemble it. Context gets scattered across calls, chats, documents, agent sessions, dashboards, and individual memory. Activity is visible; understanding is not.
 
-2. **Clone the Repository:**
+STRIDE closes that loop:
 
-   ```bash
-   git clone https://github.com/openai/openai-realtime-meeting-assistant.git
-   ```
+```mermaid
+flowchart LR
+    A["Authorized conversations and work"] --> B["Evidence and durable artifacts"]
+    B --> C["Organizational memory"]
+    C --> D["Storylines, alignment, gaps, and opportunities"]
+    D --> E["Governed human and agent action"]
+    E --> F["Outcomes, feedback, usage, and learnings"]
+    F --> C
+```
 
-3. **Set your API key:**
+It should let a teammate or executive ask:
 
-   Export `OPENAI_API_KEY` in the shell where you start the server:
+- What changed this week, and what evidence supports that?
+- Where are teams aligned—and where are they talking past each other?
+- Which storylines are moving, stalled, contradicted, or quietly dying?
+- Who is doing what, what did our agents produce, and did anyone use it?
+- Which decisions are current, and which were superseded?
+- Where are tokens and model spend going, and what value came back?
+- What should we do next—and what requires a human decision?
 
-   ```bash
-   export OPENAI_API_KEY=<your_api_key>
-   ```
+The answer is not an omniscient chatbot. It is a permissioned view assembled from sources the requester is allowed to see, with coverage and provenance attached.
 
-   The server reads environment variables directly. A `.env` file is not loaded automatically.
+## One system, many surfaces
 
-4. **Install dependencies:**
+| Surface | Role in the AmbientMind |
+|---|---|
+| **Scout** | A private, owner-scoped thinking space and voice interface. It can answer, propose work, or launch governed agent workflows. |
+| **Chat** | Shared channels, threads, agent progress, approvals, and durable deliverables. |
+| **Rooms** | Multi-participant WebRTC spaces with video, audio, screen share, transcription, consent controls, and room-aware Scout. |
+| **Intelligence** | Themes, alignments, open questions, decisions, contribution signals, and living company storylines. |
+| **Board** | Visible operating state that conversations and authorized agents can update through the same audited tool path. |
+| **Memory** | Search and recall across authorized transcripts, decisions, artifacts, narratives, and company context. |
+| **Artifacts** | Versioned outputs from people and agents, with provenance, review, feedback, sharing, and approval controls. |
+| **Usage** | Per-model and per-seat token flow, cost, failures, accepted output, and quality telemetry. |
+| **iOS (Expo)** | Native shell under [`mobile/`](mobile/) — same session auth, rooms, Scout, and board APIs as the web; full OS via authenticated WebView. EAS project `@axx_archive/bonfireos`. |
 
-   You need Go 1.24 or newer and the Opus library available through `pkg-config`.
+These are not separate mini-products. They are views into one loop: **conversation → evidence → understanding → governed action → learning**.
 
-   ```bash
-   brew install opus pkg-config
-   ```
+## What gets remembered
 
-5. **Run the app:**
+BonfireOS preserves more than transcripts.
 
-   ```bash
-   go run .
-   ```
+- Private Scout history remains owner-scoped. Private content is not silently promoted into organization-wide recall.
+- Shared conversations and consented room activity can produce source-linked memory, decisions, narratives, and follow-up work.
+- Direct requests and accepted suggestions can launch restartable agent workflows.
+- Agent runs create durable, versioned artifacts rather than disappearing into a chat response.
+- Opens, edits, feedback, approvals, rejections, and outcomes become learning signals for future process improvement.
+- Every metered model seat writes usage and quality telemetry so cost and output health can be inspected together.
 
-   The app will be available at [http://localhost:3000](http://localhost:3000).
+Authorization travels with the source. Retrieved content is data, never tool authority. Guests cannot authorize tools. Consequential external actions remain human-gated.
 
-   To use another port:
+## What is real today
 
-   ```bash
-   go run . -addr :8080
-   ```
+This repository grew from OpenAI's realtime meeting-assistant example, but the current system is substantially broader. The first implementation includes:
 
-### Start a session
+- account authentication, sessions, passkeys, password reset, guest links, and room-scoped access;
+- a custom Pion WebRTC media stack with audio/video, screen share, TURN support, recovery, and participant limits;
+- shared room Scout plus private Scout chat and voice;
+- a dedicated transcription lane, speaker-attributed meeting memory, digests, semantic and lexical recall;
+- durable decision records, themes and alignments, living storyline dossiers, and mission-intelligence views;
+- Kanban tools used by both live Scout and background workers;
+- restartable `/goal` workflows with decomposition, dependencies, agent execution, review, gates, artifacts, reporting, and verification;
+- research, design, image, deck, packaging, and Codex-backed work threads;
+- versioned artifacts with content-addressed assets, provenance, approvals, sharing, export, and feedback signals;
+- an append-only usage ledger and rollup API covering model seat, token flow, cost, latency, errors, and accepted output;
+- canonical event, ACL, consent, retention, approval, outbox, and PostgreSQL shadow contracts from W1.
 
-When the server starts, it creates the OpenAI Realtime peer if `OPENAI_API_KEY` is configured. If the key is missing or the Realtime connection fails, the browser room still loads, but the Kanban assistant will not listen or update cards.
+This is a strong working 1.0, not a claim of finished autonomy. The [2.0 execution ledger](docs/plans/bonfireos-2.0-execution.md) is the source of truth for release status.
 
-1. Open [http://localhost:3000](http://localhost:3000).
-2. Click **Join room**.
-3. Allow camera and microphone access.
-4. Speak naturally about the work on the board. The mixed room audio is sent to the Realtime assistant, and board changes are broadcast to everyone in the room. Scout only speaks back when a turn starts with **"Hey Scout"**.
-5. Open the same URL in another browser tab or on another device to join as another participant.
-6. Click **Send notes** to archive the meeting, generate meeting notes, and email them to the participants when SMTP is configured.
-7. Click **Leave** to disconnect that browser from the room and stop its local media tracks.
+## What 2.0 is proving
 
-## Capacity target
+The active W2 work deliberately narrows the next release to trust and product truth:
 
-The room is budgeted for up to **10 concurrent browser participants with cameras on**. The browser prefers camera video around 854x480, 24fps, and about 900kbps, with mono Opus audio capped around 48kbps. Screen share keeps a higher detail budget at about 1.6Mbps and 15fps. The server forwards RTP video packets between peers and only decodes/mixes audio for the Realtime assistant.
+1. **Room isolation and exact recap** — independent room-owned Scout runtimes, durable first-admission anchors, explicit consent lanes, and evidence-linked catch-up without cross-room leakage.
+2. **A restart-safe company brain** — deterministic projections, complete authorized historical inventory, honest coverage, temporal queries, and claim-to-primary-evidence resolution.
+3. **Insights & Opportunities v1** — one closed, evidence-bound workflow that produces decision-ready reports, survives critic/revision gates, accepts typed human feedback, and earns ten reviewed pilot records.
+4. **Evaluation before routing** — product, recall, transcription, workflow, and model-route corpora must pass before dynamic route canaries or a broader platform claim.
 
-`MEETING_ROOM_MAX_PARTICIPANTS` defaults to `10`; the 11th participant is refused before camera and microphone capture starts. For a 10-person room, plan for roughly 90 Mbps of server video/audio egress before protocol overhead, and use a host/network with comfortable headroom above that.
+Not yet proven: managed HA/object storage, the full JSON/JSONL-to-PostgreSQL cutover, a portable STRIDE conformance suite, or a production-ready ecosystem of third-party implementations.
 
-## Demo flow
+## Trust model
 
-**Use headphones or keep speaker volume low to avoid echo. Background audio can be picked up by the meeting mix and interpreted as board updates.**
+The AmbientMind must earn the right to be ambient.
 
-The demo starts with a few WebRTC-related Kanban cards in the Backlog column. Try saying:
+- **Private means private.** Private Scout threads are owner-scoped; derived outputs cannot widen source visibility.
+- **Consent is a capability.** Audio capture, transcription, model analysis, and organization memory are separate lanes that fail closed.
+- **Evidence outranks fluency.** Asserted claims must resolve to authorized source revisions; missing or stale coverage is visible.
+- **Memory is correctable.** Retention, revocation, purge, supersession, and revision history are part of the data model.
+- **Agents have bounded authority.** Tool access depends on the authenticated principal and current revision—not on words found in retrieved content.
+- **Writes have gates.** Commit, push, deploy, email, sharing, and other consequential actions require revision-bound approval.
+- **Video survives AI failure.** Media and admission continue when model providers degrade; stale or partial AI output is labeled.
+- **Cost is part of truth.** Wire usage, accepted output, failures, latency, and estimated cost are recorded per model seat.
 
-1. "I started the ICE restart handling ticket."
-2. "The DTLS cleanup work is blocked on a transport shutdown issue."
-3. "We shipped the RTP HEVC packetizer."
-4. "Create a ticket to add subscription controls for simulcast forwarding."
-5. "Add the bandwidth tag to the simulcast card."
-6. "Delete the packet retransmission buffer ticket."
+The deeper contracts live in [canonical events and ACLs](docs/plans/canonical-event-acl-v1.md), [multi-room design](docs/plans/multi-room-2026-07-08.md), and the [W2 decision-complete design](docs/plans/bonfireos-w2-design.md).
 
-The board should update in place. Card moves animate, completed work triggers confetti, and note updates can show a short comment preview.
+## Architecture
 
-Scout listens continuously for board updates, but spoken answers are wake-phrase gated. Start a turn with "Hey Scout" when you want Scout to answer aloud, for example: "Hey Scout, what is blocked?"
+BonfireOS is intentionally a modular Go control plane, not a microservice fleet.
 
-Scout also saves speaker-attributed transcripts as meeting memory. By default, a separate `gpt-4o-transcribe` transcription-only lane (with domain-vocabulary biasing) records the mixed room audio while Scout's `gpt-realtime-2` lane stays focused on board tools and spoken answers. A scheduled brain worker reuses `OPENAI_API_KEY` to summarize new transcript windows into durable `brain` entries with transcript references, so later questions can use both the write-ups and the raw transcript. A second board worker analyzes those brain summaries, applies grounded card updates through the same Kanban tool path as live Scout, and writes durable `board_update` artifacts so conversations compound into auditable board state instead of disappearing after the call.
+```text
+Browser shell
+  ├── authenticated chat, intelligence, board, memory, and artifacts
+  └── WebRTC media + WebSocket event stream
+             │
+Go application
+  ├── room/media runtime (Pion)
+  ├── Scout, memory, intelligence, decisions, and narratives
+  ├── workflow engine, artifacts, approval lanes, and signals
+  ├── canonical capture, ACLs, consent, retention, and outbox
+  └── usage/evaluation ledger
+             │
+Durable state
+  ├── JSON/JSONL authoritative readers + content-addressed blobs
+  ├── PostgreSQL canonical shadow and projections
+  └── isolated Codex queue and usage volumes
+             │
+Replaceable model/agent seats
+  ├── realtime voice and transcription
+  ├── extraction, recall, intelligence, and review
+  └── sidecar agent execution with evidence callbacks
+```
 
-### Codex goal workflows
+Current production-style deployment uses Docker Compose on a VPS. Repository `data/` is seed/development data, never production truth.
 
-Scout can scaffold a reusable goal workflow artifact from text or Realtime voice by using workflow mode. The saved artifact follows the loop: identify the goal, decompose work, assign agents, coordinate dependencies, execute in order, review, gate, save learnings, report what matters, and verify completion.
+## Run locally
 
-Realtime 2 and the private Scout chat can also launch research, design, grill, and workflow work threads. A thread creates a running artifact immediately, shows progress in Chat, updates the artifact when the server-side worker completes, and can then be opened, copied, published, or shared from the Artifacts app.
+### Requirements
 
-By default, this slice saves and updates the workflow inside Bonfire OS with the lightweight Responses artifact writer. To let Scout launch real Codex work from Realtime 2 or private Chat, configure the sidecar Codex runner with `BONFIRE_AGENT_THREAD_WORKER=codex_exec`. The web app enqueues jobs, the private `codex-runner` service claims them one at a time, runs `codex exec` with explicit sandbox and approval settings, and calls the app back with status, final output, and evidence. Browser, SSH, code, test, and deploy claims should only appear when the Codex artifact includes that evidence.
+- Go 1.24 or newer
+- Opus and `pkg-config`
+- An OpenAI API key for Realtime, transcription, and OpenAI-backed model seats
+- Optional Anthropic and Codex configuration for alternate agent seats
 
-Realtime 2 can launch `read_only` and `workspace_write` work. Anything that looks like commit, push, deploy, SSH, email, external API writes, or production mutation is blocked behind an artifact approval gate. The Artifacts app exposes approve, reject, rerun, and publish controls for runner artifacts.
+On macOS:
 
-### Configured interactions
+```bash
+brew install opus pkg-config
+export OPENAI_API_KEY=<your_api_key>
+go run .
+```
 
-The assistant is configured as a voice-operated Kanban board operator. It can:
+Open [http://localhost:3000](http://localhost:3000). The server reads environment variables directly; it does not load `.env` automatically.
 
-- Create tickets from explicit requests or concrete standup updates.
-- Move existing tickets between **Backlog**, **In Progress**, **Blocked**, and **Done**.
-- Add tags without replacing existing tags.
-- Update ticket titles or notes when follow-up context arrives.
-- Delete tickets by request.
-- Ignore filler, handoffs, or wrap-up phrases when no board operation is needed.
+Without a working AI provider, the browser and media room still load, but AI-backed voice, transcription, recall, and workflow capabilities report degraded or remain unavailable.
 
-For more details about the instructions and tools used by the model, see `kanban.go`.
+### Core configuration
 
-## Customization
+| Variable | Purpose |
+|---|---|
+| `OPENAI_API_KEY` | Realtime, transcription, embeddings, image, and OpenAI text seats |
+| `OPENAI_REALTIME_MODEL` | Shared-room Realtime model; defaults to the model configured in code |
+| `OPENAI_TRANSCRIPT_MODEL` | Dedicated transcript-lane override |
+| `OPENAI_BRAIN_MODEL` | Ambient extraction and company-memory model |
+| `ANTHROPIC_API_KEY` | Enables Anthropic-backed orchestration and review seats |
+| `BONFIRE_AGENT_THREAD_WORKER` | Selects structured text output or sidecar Codex execution |
+| `BONFIRE_CODEX_RUNNER_MODE` | Sidecar queue or local development execution |
+| `MEETING_ROOM_MAX_PARTICIPANTS` | Room capacity; defaults to 10 |
+| `MEETING_ALLOWED_ORIGINS` | Allowed browser origins for WebSocket access |
+| `MEETING_STUN_URLS` / `MEETING_TURN_URLS` | ICE connectivity for restrictive networks |
+| `MEETING_BRAIN_DISABLED` | Disables the background brain worker |
+| `MEETING_DIGEST_DISABLED` | Disables meeting digest generation |
+| `USAGE_LEDGER_DISABLED` | Disables usage and evaluation recording |
+| `BONFIRE_PUBLIC_URL` | Canonical production URL for secure links |
 
-You can update:
+Additional model-seat and runner controls are documented alongside their implementations in `usage_ledger.go`, `codex_runner.go`, `agent_runner_anthropic.go`, and `kanban.go`. Operational activation guidance lives in [docs/ops3-fable-activation.md](docs/ops3-fable-activation.md).
 
-- The initial cards in `initialKanbanBoardCards` in `kanban.go`.
-- The Realtime instructions in `sessionInstructions` in `kanban.go`.
-- The tools exposed to the model in `kanbanTools` in `kanban.go`.
-- The default Realtime model by setting `OPENAI_REALTIME_MODEL`; otherwise the app uses `gpt-realtime-2`.
-- The input transcription model by setting `OPENAI_REALTIME_TRANSCRIPTION_MODEL`; otherwise the app uses `gpt-4o-transcribe` with domain vocabulary hints.
-- The dedicated transcript lane with `MEETING_TRANSCRIPT_LANE_ENABLED`; it defaults to enabled. The transcript-only model defaults to `gpt-4o-transcribe`, which accepts the domain-vocabulary prompt the lane sends. Set `OPENAI_TRANSCRIPT_MODEL` only to deliberately override it — whisper-family ids (`gpt-realtime-whisper`) silently disable vocabulary biasing (the prompt parameter is unsupported there) and, before the session-config gate, broke the lane outright.
-- The spoken Scout voice by setting `OPENAI_REALTIME_VOICE`; otherwise the app uses `marin`.
-- The Realtime reasoning effort with `OPENAI_REALTIME_REASONING_EFFORT` (`minimal`, `low`, `medium`, `high`, or `xhigh`); the default is `high` for stronger orchestration across company context, meeting memory, app tools, and artifact workflows on `gpt-realtime-2`.
-- The Realtime turn detector with `OPENAI_REALTIME_VAD_TYPE` (`server_vad` or `semantic_vad`) and `OPENAI_REALTIME_VAD_EAGERNESS` (`low`, `medium`, `high`, or `auto` for semantic VAD); the default is `server_vad` with a 300 ms silence window for faster turn endings.
-- The meeting brain model by setting `OPENAI_BRAIN_MODEL`; otherwise the app uses `gpt-5.5`.
-- The agent orchestrator by setting `ANTHROPIC_API_KEY` plus `BONFIRE_AGENT_RUNNER=anthropic_fable`: `/goal`, grill reports, and packaging deliverables then run on the in-process Fable 5 orchestrator (`claude-fable-5` by default; dials via `BONFIRE_ORCHESTRATOR_MODEL`, `BONFIRE_ORCHESTRATOR_EFFORT`, `BONFIRE_ORCHESTRATOR_MAX_TURNS`, `BONFIRE_ORCHESTRATOR_MAX_TOKENS`, `BONFIRE_ORCHESTRATOR_TIMEOUT`, and `BONFIRE_DELIVERABLE_EFFORT`/`BONFIRE_DELIVERABLE_MAX_TOKENS` for the /goal deliverable subtask). Keyless deploys degrade to the workers below unchanged. Live activation steps: `docs/ops3-fable-activation.md`.
-- Financial-data grounding by setting `FISCAL_AI_API_KEY` ([fiscal.ai](https://fiscal.ai)): unlocks the `company_financial_snapshot`, `financial_comps`, `fiscal_api_docs`, and `fiscal_data_query` tools. Scout voice (room and private) speaks the typed pair (`company_financial_snapshot`/`financial_comps`); the Fable agent orchestrator behind `/goal` and the research/packaging tools get all four, so `comps_precedent`, `market_map`, `economics_waterfall`, and `deep_research` pull comps tables, fundamentals, and valuation multiples from filings instead of model recall. Every metric carries an `auditUrl` deep link to the exact filing page and every company a fiscal.ai `terminalUrl`, and peer universes come from fiscal.ai's peer data rather than memory. Without the key everything degrades gracefully: the tools report not-configured and the research prompts instruct agents to label any financial figures as ungrounded memory instead of inventing sources.
-- The long-running Scout work-thread runner by setting `BONFIRE_AGENT_THREAD_WORKER`. The default `openai_text_response` writes structured artifacts only. Set `BONFIRE_AGENT_THREAD_WORKER=codex_exec` (or `BONFIRE_CODEX_AGENT_THREADS=true`) to enqueue sidecar Codex jobs for research/design/grill/workflow threads.
-- The Codex runner mode with `BONFIRE_CODEX_RUNNER_MODE`. The default is `sidecar_queue`; `local_exec` keeps the older in-process `codex exec` path for development.
-- The Codex queue/callback controls with `BONFIRE_CODEX_QUEUE_PATH` (default beside meeting memory), `BONFIRE_RUNNER_TOKEN` (required for sidecar callbacks), and `BONFIRE_RUNNER_CALLBACK_URL` (default `http://meetingassist:3000/internal/codex/jobs/result` inside Compose).
-- The Codex runner command and controls with `BONFIRE_CODEX_COMMAND` (default `codex`), `BONFIRE_CODEX_CWD` (default current repo), `BONFIRE_CODEX_SANDBOX` (`read-only`, `workspace-write`, or `danger-full-access`; default `workspace-write`), `BONFIRE_CODEX_APPROVAL_POLICY` (`never`, `on-request`, or `untrusted`; default `never` for noninteractive runs), `BONFIRE_CODEX_PROFILE`, `BONFIRE_CODEX_MODEL`, `BONFIRE_CODEX_REASONING_EFFORT` (default `high`), `BONFIRE_CODEX_TIMEOUT` (default `20m`), `BONFIRE_CODEX_SEARCH=true` for live web search beyond the automatic research-mode search, `BONFIRE_CODEX_EPHEMERAL=true` for non-persistent Codex sessions, and `BONFIRE_CODEX_SKIP_GIT_REPO_CHECK=true` only for an intentionally prepared non-git runner directory.
-- The brain worker interval with `MEETING_BRAIN_INTERVAL`; the default is `5m`. Set `MEETING_BRAIN_DISABLED=true` to disable it.
-- Historical backfill for the brain worker with `MEETING_BRAIN_BACKFILL=true`; by default it starts from the latest transcript at app startup and summarizes new transcript windows only.
-- The summary-to-board worker model by setting `OPENAI_BOARD_MODEL`; otherwise it uses the meeting brain model.
-- The summary-to-board worker interval with `MEETING_BOARD_INTERVAL`; the default is `2m`. Set `MEETING_BOARD_DISABLED=true` to disable it. It processes new `brain` summaries into card create/update/move/tag/date operations and records a `board_update` memory artifact for every reviewed window.
-- Historical backfill for the summary-to-board worker with `MEETING_BOARD_BACKFILL=true`; by default it starts from the latest brain summary at app startup and updates the board from new summaries only.
-- The meeting memory timezone with `MEETING_TIME_ZONE`; the default is `America/Los_Angeles` for relative questions such as "yesterday".
-- The browser UI in `index.html`.
-- The HTTP bind address with the `-addr` flag in `main.go`.
+## Development and verification
 
-### Meeting access and notes
+```bash
+go test ./...
+go test -race ./...
+```
 
-- Access is account-based. Six fixed accounts exist (`aj@`, `tim@`, `e@`, `joel@`, `tyler@`, `caitlyn@` at `shareability.com`); there is no public signup. Accounts live in `data/users.json` (override with `BONFIRE_USERS_PATH`), sessions in `data/sessions.json` (`BONFIRE_SESSIONS_PATH`).
-- `MEETING_ROOM_PASSWORD` now only seeds the **initial** password for accounts that do not exist yet in `users.json`; after first run, users change passwords (or add passkeys) in the in-app settings dialog.
-- Password reset emails are sent through [Resend](https://resend.com): set `RESEND_API_KEY` and optionally `RESEND_FROM` (default `Bonfire <no-reply@thebonfire.xyz>`). Without a key, the reset link is logged at info level instead. Set `BONFIRE_PUBLIC_URL` (e.g. `https://thebonfire.xyz`) in production — reset links refuse to derive from the request Host header on non-loopback hosts.
-- Passkeys (WebAuthn) bind to the origin that serves the page; they work on `https://` origins and on `localhost` during development.
-- Set `MEETING_ROOM_MAX_PARTICIPANTS` to change the room capacity. The default is `10`.
-- Set `MEETING_ALLOWED_ORIGINS` to a comma-separated list of allowed browser origins for WebSocket access. If unset, same-host origins are allowed.
-- For more reliable media on restrictive networks, configure browser ICE servers with `MEETING_STUN_URLS`, `MEETING_TURN_URLS`, `MEETING_TURN_USERNAME`, and `MEETING_TURN_CREDENTIAL`. You can also provide a full JSON array with `MEETING_ICE_SERVERS_JSON`.
-- Meeting notes are generated when **Send notes** archives the meeting. The notes include detected decisions and the latest status for every active board card.
-- Participant email addresses use the Shareability convention: `name@shareability.com`, except Erick maps to `e@shareability.com`.
-- To email notes automatically, configure SMTP:
+The repository contains focused contract tests for privacy, guest access, cross-room boundaries, artifacts, approvals, canonical capture, recall, usage, agent workflows, and media behavior. Green local tests are necessary evidence, but the 2.0 ledger also requires restart, replay, soak, provider-degradation, and live isolation gates.
 
-  ```bash
-  export MEETING_NOTES_SMTP_HOST=smtp.example.com
-  export MEETING_NOTES_SMTP_PORT=587
-  export MEETING_NOTES_SMTP_USERNAME=...
-  export MEETING_NOTES_SMTP_PASSWORD=...
-  export MEETING_NOTES_SMTP_FROM=meeting-notes@shareability.com
-  ```
+## Project direction
 
-  If SMTP is not configured, the archive still includes generated notes and reports that email delivery was skipped.
+The naming hierarchy is:
+
+- **STRIDE** — the product and eventual open platform.
+- **AmbientMind** — a core STRIDE concept: its permissioned, evidence-bearing organizational intelligence layer.
+- **BonfireOS** — the first implementation and proving ground.
+- **That's Cool** — the independent lab building it.
+
+The repository will earn that abstraction from working contracts and conformance evidence—not from a rename alone. Until then, the code and active 2.0 ledger remain the most honest description of what exists.
 
 ## License
 
-This project is licensed under the MIT License. See the LICENSE file for details.
+This project is licensed under the [MIT License](LICENSE).

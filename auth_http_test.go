@@ -84,6 +84,74 @@ func TestLoginSetsSessionCookieAndMeWorks(t *testing.T) {
 	}
 }
 
+func TestNativeLoginReturnsSessionTokenAndBearerAuthWorks(t *testing.T) {
+	setupAuthTestEnv(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"name":"AJ","password":"B0NFIRE!"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Bonfire-Client", "expo")
+	recorder := httptest.NewRecorder()
+	authHandler(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("native login failed: status %d body %s", recorder.Code, recorder.Body.String())
+	}
+	var loginPayload struct {
+		Email        string `json:"email"`
+		Name         string `json:"name"`
+		SessionToken string `json:"sessionToken"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &loginPayload); err != nil {
+		t.Fatalf("unmarshal native login: %v", err)
+	}
+	if loginPayload.SessionToken == "" {
+		t.Fatal("expected sessionToken in native login response")
+	}
+	if loginPayload.Email != "aj@shareability.com" {
+		t.Fatalf("unexpected email: %s", loginPayload.Email)
+	}
+
+	// Browser-style login must NOT leak the raw session token in JSON.
+	web := postAuthJSON(t, "/auth/login", `{"name":"Tim","password":"B0NFIRE!"}`, nil)
+	if web.Code != http.StatusOK {
+		t.Fatalf("web login failed: %d", web.Code)
+	}
+	var webPayload map[string]any
+	if err := json.Unmarshal(web.Body.Bytes(), &webPayload); err != nil {
+		t.Fatalf("unmarshal web login: %v", err)
+	}
+	if _, ok := webPayload["sessionToken"]; ok {
+		t.Fatal("web login must not include sessionToken")
+	}
+
+	// Bearer auth must resolve the same account as the cookie.
+	meReq := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	meReq.Header.Set("Authorization", "Bearer "+loginPayload.SessionToken)
+	meRec := httptest.NewRecorder()
+	authHandler(meRec, meReq)
+	if meRec.Code != http.StatusOK {
+		t.Fatalf("expected /auth/me with Bearer to return 200, got %d body %s", meRec.Code, meRec.Body.String())
+	}
+	var mePayload struct {
+		Email string `json:"email"`
+		Name  string `json:"name"`
+	}
+	if err := json.Unmarshal(meRec.Body.Bytes(), &mePayload); err != nil {
+		t.Fatalf("unmarshal me: %v", err)
+	}
+	if mePayload.Name != "AJ" {
+		t.Fatalf("unexpected me payload: %+v", mePayload)
+	}
+
+	// X-Bonfire-Session header is an alternate native transport.
+	hdrReq := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	hdrReq.Header.Set("X-Bonfire-Session", loginPayload.SessionToken)
+	hdrRec := httptest.NewRecorder()
+	authHandler(hdrRec, hdrReq)
+	if hdrRec.Code != http.StatusOK {
+		t.Fatalf("expected /auth/me with X-Bonfire-Session to return 200, got %d", hdrRec.Code)
+	}
+}
+
 func TestLoginRejectsBadCredentials(t *testing.T) {
 	setupAuthTestEnv(t)
 

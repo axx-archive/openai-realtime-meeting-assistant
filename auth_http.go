@@ -185,14 +185,58 @@ func userSessionStore() *sessionStore {
 	return store
 }
 
-// userFromRequest resolves the signed-in account from the session cookie, or
-// nil when the request carries no live session.
+// sessionTokenFromRequest returns the member session token from the cookie,
+// Authorization: Bearer, or X-Bonfire-Session header. Native clients (Expo)
+// cannot always observe HttpOnly Set-Cookie, so they re-send the token from
+// the login JSON body on subsequent requests.
+func sessionTokenFromRequest(r *http.Request) string {
+	if cookie, err := r.Cookie(sessionCookieName); err == nil {
+		if token := strings.TrimSpace(cookie.Value); token != "" {
+			return token
+		}
+	}
+	if auth := strings.TrimSpace(r.Header.Get("Authorization")); len(auth) >= 7 && strings.EqualFold(auth[:7], "Bearer ") {
+		if token := strings.TrimSpace(auth[7:]); token != "" {
+			return token
+		}
+	}
+	if token := strings.TrimSpace(r.Header.Get("X-Bonfire-Session")); token != "" {
+		return token
+	}
+	return ""
+}
+
+// wantsNativeSessionToken is true for native mobile clients that need the
+// session token in the JSON body (cookie jars are unreliable across RN fetch
+// and WKWebView). Web browsers keep the HttpOnly cookie only.
+func wantsNativeSessionToken(r *http.Request) bool {
+	client := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Bonfire-Client")))
+	switch client {
+	case "expo", "ios", "android", "native", "mobile":
+		return true
+	default:
+		return false
+	}
+}
+
+// identityPayloadForRequest is identityPayload plus an optional sessionToken
+// field when the caller is a native client that just established a session.
+func identityPayloadForRequest(r *http.Request, user *userAccount, sessionToken string) map[string]any {
+	payload := identityPayload(user)
+	if sessionToken != "" && wantsNativeSessionToken(r) {
+		payload["sessionToken"] = sessionToken
+	}
+	return payload
+}
+
+// userFromRequest resolves the signed-in account from the session cookie or
+// a native bearer/session header, or nil when the request carries no live session.
 func userFromRequest(r *http.Request) *userAccount {
-	cookie, err := r.Cookie(sessionCookieName)
-	if err != nil || cookie.Value == "" {
+	token := sessionTokenFromRequest(r)
+	if token == "" {
 		return nil
 	}
-	record, ok := userSessionStore().lookupRecord(cookie.Value)
+	record, ok := userSessionStore().lookupRecord(token)
 	if !ok {
 		return nil
 	}
@@ -494,7 +538,7 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	clearAuthAttempts("login|"+clientIPForRateLimit(r), "login-name|"+name)
 	setSessionCookie(w, r, token, int(sessionTTL/time.Second))
-	writeAuthJSON(w, http.StatusOK, identityPayload(user))
+	writeAuthJSON(w, http.StatusOK, identityPayloadForRequest(r, user, token))
 }
 
 func handleAuthLogout(w http.ResponseWriter, r *http.Request) {
@@ -511,6 +555,8 @@ func handleAuthMe(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusUnauthorized, "not signed in")
 		return
 	}
+	// Do not re-emit sessionToken on /auth/me — the native client already
+	// holds it. Emitting it again would expand the surface of every me poll.
 	writeAuthJSON(w, http.StatusOK, identityPayload(user))
 }
 
