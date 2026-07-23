@@ -2,9 +2,12 @@
 
 ## Purpose
 
-Ship a native iOS app that is entirely interoperable with the web OS at
-`https://thebonfire.xyz`: same accounts, same session model, same rooms / Scout
-/ board data.
+Ship a native iOS app that is entirely interoperable with the **live** web OS at
+`https://thebonfire.xyz`: same accounts, same session model, same rooms / Chat /
+board data, and the **Glass & Ink** visual system from the deployed `index.html`.
+
+Older work under `apple/` targeted an earlier build and is **not** the design or
+product source of truth for this client.
 
 ## Layout
 
@@ -27,13 +30,16 @@ Ship a native iOS app that is entirely interoperable with the web OS at
 
 ## Surfaces
 
-| Tab | Endpoint(s) |
+| Tab (live label) | Endpoint(s) |
 |---|---|
-| Login | `POST /auth/login`, `GET /auth/me`, `POST /auth/logout` |
+| Login (`bonfireOS` / Enter your office) | `POST /auth/login`, `GET /auth/me`, `POST /auth/logout` |
+| BonfireOS (office) | Home + deep link into full OS |
 | Rooms | `GET /rooms` |
-| Scout | `GET/POST /assistant/chat-threads`, `POST /assistant/query` |
+| Chat | `GET/POST /assistant/chat-threads`, `POST /assistant/query` |
 | Board | `GET /assistant/board` |
-| Full OS | WebView of production SPA with session cookie injected |
+| Full OS | WebView of **production** SPA (live design, no fork) |
+
+Tokens live in `mobile/src/theme/tokens.ts`, mirrored from `:root` in `index.html`.
 
 ## EAS / TestFlight
 

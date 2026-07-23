@@ -9,7 +9,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../theme/colors';
+import { colors, space, type } from '../theme/tokens';
 
 type Props = {
   title?: string;
@@ -25,6 +25,7 @@ type Props = {
   style?: ViewStyle;
 };
 
+/** Phone workspace chrome — topbar title scale from live tool titles. */
 export function Screen({
   title,
   subtitle,
@@ -97,53 +98,51 @@ export function Screen({
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: colors.bg,
+    backgroundColor: colors.bgApp,
   },
   scroll: {
-    padding: 20,
-    paddingBottom: 40,
+    paddingHorizontal: space[5],
+    paddingTop: space[3],
+    paddingBottom: space[10],
     flexGrow: 1,
   },
   fill: {
     flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 12,
+    paddingHorizontal: space[5],
+    paddingTop: space[3],
   },
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
-    marginBottom: 16,
-    gap: 12,
+    marginBottom: space[4],
+    gap: space[3],
   },
   headerText: {
     flex: 1,
   },
   title: {
-    fontSize: 28,
-    fontWeight: '600',
-    letterSpacing: -0.6,
-    color: colors.text,
+    ...type.title1,
+    color: colors.text1,
   },
   subtitle: {
     marginTop: 4,
-    fontSize: 15,
-    color: colors.textSecondary,
+    ...type.caption,
+    color: colors.text2,
   },
   loading: {
-    paddingVertical: 40,
+    paddingVertical: space[10],
     alignItems: 'center',
   },
   errorBox: {
     backgroundColor: colors.dangerSoft,
     borderRadius: 12,
     padding: 14,
-    marginBottom: 16,
+    marginBottom: space[4],
   },
   errorText: {
     color: colors.danger,
-    fontSize: 14,
-    lineHeight: 20,
+    ...type.bodySm,
   },
   retry: {
     marginTop: 8,

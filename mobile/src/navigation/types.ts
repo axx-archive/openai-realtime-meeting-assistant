@@ -1,7 +1,11 @@
+/**
+ * Tab ids map to live phone tool titles where we have a native surface:
+ * BonfireOS (office), Rooms, Chat (scout threads), Board.
+ */
 export type MainTabParamList = {
   Home: undefined;
   Rooms: undefined;
-  Scout: undefined;
+  Chat: undefined;
   Board: undefined;
 };
 

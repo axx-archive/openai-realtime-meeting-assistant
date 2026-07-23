@@ -8,22 +8,22 @@ import {
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../auth/AuthContext';
 import { WEB_APP_URL } from '../config';
 import type { RootStackParamList } from '../navigation/types';
-import { colors } from '../theme/colors';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { colors, product, type } from '../theme/tokens';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'OSWeb'>;
 
 /**
- * Full web OS surface. Injects the native session as the bonfire_session
- * cookie so the SPA is already signed in — same session as API tabs.
+ * Full live web OS. Injects the native session cookie so the SPA is signed in
+ * with the same Glass & Ink UI the production site serves — no forked design.
  */
 export function OSWebScreen({ route, navigation }: Props) {
   const { sessionToken, user } = useAuth();
   const path = route.params?.path ?? '/';
-  const title = route.params?.title ?? 'BonfireOS';
+  const title = route.params?.title ?? product.name;
   const webRef = useRef<WebView>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -36,11 +36,8 @@ export function OSWebScreen({ route, navigation }: Props) {
 
   const injectedBefore = useMemo(() => {
     if (!sessionToken) return undefined;
-    // Set the HttpOnly-equivalent session cookie for this origin before the
-    // SPA boots /auth/me. document.cookie cannot set HttpOnly; the server
-    // still accepts the same value via Cookie header from the WebView store.
     const secure = WEB_APP_URL.startsWith('https') ? '; Secure' : '';
-    const script = `
+    return `
       (function() {
         try {
           document.cookie = "bonfire_session=${sessionToken}; Path=/${secure}; SameSite=Lax; Max-Age=${30 * 24 * 3600}";
@@ -48,19 +45,18 @@ export function OSWebScreen({ route, navigation }: Props) {
         true;
       })();
     `;
-    return script;
   }, [sessionToken]);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <View style={styles.toolbar}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={12}>
+        <Pressable onPress={() => navigation.goBack()} hitSlop={12} style={styles.side}>
           <Text style={styles.back}>Close</Text>
         </Pressable>
         <Text style={styles.title} numberOfLines={1}>
           {title}
         </Text>
-        <Text style={styles.user} numberOfLines={1}>
+        <Text style={[styles.side, styles.user]} numberOfLines={1}>
           {user?.name ?? ''}
         </Text>
       </View>
@@ -68,7 +64,12 @@ export function OSWebScreen({ route, navigation }: Props) {
       {error ? (
         <View style={styles.errorBox}>
           <Text style={styles.errorText}>{error}</Text>
-          <Pressable onPress={() => { setError(null); webRef.current?.reload(); }}>
+          <Pressable
+            onPress={() => {
+              setError(null);
+              webRef.current?.reload();
+            }}
+          >
             <Text style={styles.retry}>Reload</Text>
           </Pressable>
         </View>
@@ -91,7 +92,7 @@ export function OSWebScreen({ route, navigation }: Props) {
           onLoadEnd={() => setLoading(false)}
           onError={() => {
             setLoading(false);
-            setError('Could not load the OS. Check your connection.');
+            setError('Could not load BonfireOS. Check your connection.');
           }}
           onHttpError={(e) => {
             if (e.nativeEvent.statusCode >= 500) {
@@ -110,7 +111,7 @@ export function OSWebScreen({ route, navigation }: Props) {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: colors.bg,
+    backgroundColor: colors.bgApp,
   },
   toolbar: {
     flexDirection: 'row',
@@ -119,41 +120,41 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     gap: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.bgElevated,
+    borderBottomColor: colors.line1,
+    backgroundColor: colors.surface1,
+  },
+  side: {
+    width: 64,
   },
   back: {
-    color: colors.ember,
-    fontWeight: '600',
-    fontSize: 16,
-    width: 56,
+    ...type.headline,
+    color: colors.text2,
+    fontSize: 15,
   },
   title: {
     flex: 1,
     textAlign: 'center',
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text,
+    ...type.headline,
+    color: colors.text1,
   },
   user: {
-    width: 56,
     textAlign: 'right',
-    fontSize: 13,
-    color: colors.textTertiary,
+    ...type.caption,
+    color: colors.text3,
   },
   webWrap: {
     flex: 1,
   },
   web: {
     flex: 1,
-    backgroundColor: colors.bg,
+    backgroundColor: colors.bgApp,
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 2,
-    backgroundColor: 'rgba(247,246,243,0.7)',
+    backgroundColor: 'rgba(245,245,247,0.72)',
   },
   errorBox: {
     padding: 12,
@@ -166,7 +167,7 @@ const styles = StyleSheet.create({
     color: colors.danger,
     flex: 1,
     marginRight: 12,
-    fontSize: 13,
+    ...type.caption,
   },
   retry: {
     color: colors.accent,

@@ -1,14 +1,14 @@
 # BonfireOS iOS (Expo)
 
-Native iOS client for [BonfireOS / STRIDE](https://thebonfire.xyz) that is fully interoperable with the web app:
+Native iOS client for the **live** [BonfireOS](https://thebonfire.xyz) web OS. Design and product language are rooted in the deployed Glass & Ink system (`index.html` + `.superdesign/design-system.md`) — not the older Swift package under `../apple`, which targeted an earlier build.
 
 | Surface | How it works |
 |---|---|
-| **Auth** | Same `/auth/login`, `/auth/me`, `/auth/logout` roster sessions as the browser |
+| **Auth** | Same `/auth/login`, `/auth/me`, `/auth/logout` roster sessions as the browser; login gate matches live wordmark + “Enter your office” |
 | **Rooms** | `GET /rooms` — same room list the web lobby shows |
-| **Scout** | `GET/POST /assistant/chat-threads` + `/assistant/query` |
+| **Chat** | `GET/POST /assistant/chat-threads` + Scout `/assistant/query` |
 | **Board** | `GET /assistant/board` — same kanban cards |
-| **Full OS** | Authenticated WebView of the production SPA for any deeper surface |
+| **Full OS** | Authenticated WebView of the **production SPA** so any deeper tool is the live design, not a fork |
 
 Native clients send `X-Bonfire-Client: expo` so the server returns a `sessionToken` in the login JSON (HttpOnly cookies are not reliably visible to React Native). Subsequent API calls use `Authorization: Bearer <token>` / `X-Bonfire-Session`. That token is the same session id the web stores in `bonfire_session`.
 
@@ -87,6 +87,12 @@ Credentials (certificates, provisioning, App Store Connect API key) are managed 
 - **iOS bundle id:** `xyz.thebonfire.app`  
 - **Default API host:** `https://thebonfire.xyz`
 
+## Design source of truth
+
+1. **Live web:** `https://thebonfire.xyz` / repo `index.html` (tokens, login gate, tool labels).
+2. **Canon notes:** `.superdesign/design-system.md` (Glass & Ink).
+3. **Not authoritative:** `../apple` Swift client — older room-focused work; do not port its chrome or palette forward.
+
 ## Relationship to `apple/`
 
-The Swift package under `../apple` is the protocol-first native room/WebRTC foundation. This Expo app is the product shell for day-to-day OS access and TestFlight distribution. Both speak the same backend contracts.
+The Swift tree is historical room/WebRTC scaffolding. This Expo app is the current product path for TestFlight and day-to-day OS access against the live design.

@@ -38,7 +38,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         foregroundImage: './assets/android-icon-foreground.png',
         backgroundImage: './assets/android-icon-background.png',
         monochromeImage: './assets/android-icon-monochrome.png',
-        backgroundColor: '#F7F6F3',
+        backgroundColor: '#F5F5F7',
       },
       permissions: [
         'CAMERA',
@@ -55,7 +55,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       [
         'expo-splash-screen',
         {
-          backgroundColor: '#F7F6F3',
+          // Live PWA theme_color / paper-50
+          backgroundColor: '#F5F5F7',
           image: './assets/splash-icon.png',
         },
       ],

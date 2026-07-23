@@ -20,15 +20,15 @@ import { useAuth } from '../auth/AuthContext';
 import { Card } from '../components/Card';
 import { Screen } from '../components/Screen';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
-import { colors } from '../theme/colors';
+import { colors, hitMin, radius, space, type } from '../theme/tokens';
 
-type ScoutNav = CompositeNavigationProp<
-  BottomTabNavigationProp<MainTabParamList, 'Scout'>,
+type ChatNav = CompositeNavigationProp<
+  BottomTabNavigationProp<MainTabParamList, 'Chat'>,
   NativeStackNavigationProp<RootStackParamList>
 >;
 
 function threadTitle(thread: ScoutThread): string {
-  return String(thread.title || thread.preview || 'Scout thread');
+  return String(thread.title || thread.preview || 'Thread');
 }
 
 function threadSubtitle(thread: ScoutThread): string | undefined {
@@ -36,9 +36,10 @@ function threadSubtitle(thread: ScoutThread): string | undefined {
   return last ? String(last) : undefined;
 }
 
+/** Chat tab — same `/assistant/chat-threads` + Scout query as the web OS. */
 export function ScoutScreen() {
   const { sessionToken } = useAuth();
-  const navigation = useNavigation<ScoutNav>();
+  const navigation = useNavigation<ChatNav>();
   const [threads, setThreads] = useState<ScoutThread[]>([]);
   const [query, setQuery] = useState('');
   const [answer, setAnswer] = useState<string | null>(null);
@@ -57,7 +58,7 @@ export function ScoutScreen() {
         const res = await api.scoutThreads(sessionToken);
         setThreads(res.threads ?? []);
       } catch (err) {
-        setError(err instanceof BonfireApiError ? err.message : 'Could not load Scout');
+        setError(err instanceof BonfireApiError ? err.message : 'Could not load chat');
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -94,8 +95,8 @@ export function ScoutScreen() {
 
   return (
     <Screen
-      title="Scout"
-      subtitle="Private thinking space — same threads as the web"
+      title="Chat"
+      subtitle="Scout threads — same data as the web"
       loading={loading}
       error={error}
       onRetry={() => void load('initial')}
@@ -106,7 +107,7 @@ export function ScoutScreen() {
         <TextInput
           style={styles.input}
           placeholder="Ask Scout…"
-          placeholderTextColor={colors.textTertiary}
+          placeholderTextColor={colors.text3}
           value={query}
           onChangeText={setQuery}
           multiline
@@ -137,7 +138,7 @@ export function ScoutScreen() {
 
       <Text style={styles.sectionTitle}>Threads</Text>
       {threads.length === 0 && !loading ? (
-        <Text style={styles.empty}>No Scout threads yet. Ask something above.</Text>
+        <Text style={styles.empty}>No threads yet. Ask something above.</Text>
       ) : (
         threads.map((thread) => (
           <Card
@@ -153,7 +154,7 @@ export function ScoutScreen() {
             badge={thread.visibility === 'public' ? 'public' : 'private'}
             onPress={() =>
               navigation.navigate('OSWeb', {
-                path: `/?tool=scout&thread=${encodeURIComponent(String(thread.id))}`,
+                path: `/?tool=chat&thread=${encodeURIComponent(String(thread.id))}`,
                 title: threadTitle(thread),
               })
             }
@@ -166,64 +167,61 @@ export function ScoutScreen() {
 
 const styles = StyleSheet.create({
   composer: {
-    backgroundColor: colors.bgElevated,
-    borderRadius: 16,
+    backgroundColor: colors.surface1,
+    borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    padding: 12,
-    marginBottom: 16,
+    borderColor: colors.line1,
+    padding: space[3],
+    marginBottom: space[4],
   },
   input: {
     minHeight: 72,
-    fontSize: 16,
-    color: colors.text,
+    fontSize: 15,
+    letterSpacing: -0.08,
+    color: colors.text1,
     textAlignVertical: 'top',
   },
   askBtn: {
     alignSelf: 'flex-end',
     backgroundColor: colors.accent,
-    borderRadius: 12,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    marginTop: 8,
+    borderRadius: radius.md,
+    minHeight: hitMin,
+    paddingHorizontal: space[4],
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: space[2],
   },
   askBtnDisabled: {
     opacity: 0.55,
   },
   askBtnText: {
+    ...type.button,
     color: colors.onAccent,
-    fontWeight: '600',
-    fontSize: 15,
   },
   answerBox: {
-    backgroundColor: colors.bgMuted,
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 16,
+    backgroundColor: colors.surface3,
+    borderRadius: radius.md,
+    padding: space[3],
+    marginBottom: space[4],
   },
   answerLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
+    ...type.label,
     color: colors.ember,
     marginBottom: 6,
+    textTransform: 'uppercase',
   },
   answerText: {
-    fontSize: 15,
-    lineHeight: 22,
-    color: colors.text,
+    ...type.bodySm,
+    color: colors.text1,
   },
   sectionTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: 0.6,
+    ...type.label,
+    color: colors.text3,
+    marginBottom: space[2],
     textTransform: 'uppercase',
-    color: colors.textTertiary,
-    marginBottom: 8,
   },
   empty: {
-    color: colors.textSecondary,
-    fontSize: 15,
+    ...type.bodySm,
+    color: colors.text2,
   },
 });

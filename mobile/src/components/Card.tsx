@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
-import { colors } from '../theme/colors';
+import { colors, radius, shadow, space, type } from '../theme/tokens';
 
 type Props = {
   title: string;
@@ -13,6 +13,7 @@ type Props = {
   children?: React.ReactNode;
 };
 
+/** Surface card — live --r-lg, hairline, soft shadow (no warm/parchment). */
 export function Card({
   title,
   subtitle,
@@ -63,32 +64,33 @@ export function Card({
     return (
       <Pressable
         onPress={onPress}
-        style={({ pressed }) => [styles.card, pressed && styles.pressed, style]}
+        style={({ pressed }) => [
+          styles.card,
+          shadow[1],
+          pressed && styles.pressed,
+          style,
+        ]}
       >
         {content}
       </Pressable>
     );
   }
 
-  return <View style={[styles.card, style]}>{content}</View>;
+  return <View style={[styles.card, shadow[1], style]}>{content}</View>;
 }
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.bgElevated,
-    borderRadius: 16,
-    padding: 16,
+    backgroundColor: colors.surface1,
+    borderRadius: radius.lg,
+    padding: space[4],
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    marginBottom: 12,
-    shadowColor: '#0E0E10',
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
+    borderColor: colors.line1,
+    marginBottom: space[3],
   },
   pressed: {
-    opacity: 0.88,
-    transform: [{ scale: 0.995 }],
+    opacity: 0.92,
+    transform: [{ scale: 0.97 }],
   },
   row: {
     flexDirection: 'row',
@@ -97,40 +99,36 @@ const styles = StyleSheet.create({
   },
   title: {
     flex: 1,
-    fontSize: 17,
-    fontWeight: '600',
-    color: colors.text,
-    letterSpacing: -0.2,
+    ...type.headline,
+    color: colors.text1,
   },
   subtitle: {
     marginTop: 6,
-    fontSize: 14,
-    lineHeight: 20,
-    color: colors.textSecondary,
+    ...type.bodySm,
+    color: colors.text2,
   },
   meta: {
     marginTop: 10,
-    fontSize: 12,
-    color: colors.textTertiary,
+    ...type.label,
+    color: colors.text3,
+    textTransform: 'none',
   },
   badge: {
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 999,
-    backgroundColor: colors.bgMuted,
+    borderRadius: radius.full,
+    backgroundColor: colors.surface3,
   },
   badgeLive: {
     backgroundColor: colors.liveSoft,
   },
   badgeWarn: {
-    backgroundColor: 'rgba(255, 159, 10, 0.14)',
+    backgroundColor: colors.warnSoft,
   },
   badgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.textSecondary,
+    ...type.label,
+    color: colors.text2,
     textTransform: 'uppercase',
-    letterSpacing: 0.4,
   },
   badgeTextLive: {
     color: colors.live,

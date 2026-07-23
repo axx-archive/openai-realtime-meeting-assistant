@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Text } from 'react-native';
+import { Text, StyleSheet } from 'react-native';
 import {
   useFocusEffect,
   useNavigation,
@@ -13,6 +13,7 @@ import { useAuth } from '../auth/AuthContext';
 import { Card } from '../components/Card';
 import { Screen } from '../components/Screen';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
+import { colors, type } from '../theme/tokens';
 
 type RoomsNav = CompositeNavigationProp<
   BottomTabNavigationProp<MainTabParamList, 'Rooms'>,
@@ -63,7 +64,7 @@ export function RoomsScreen() {
       onRefresh={() => void load('refresh')}
     >
       {rooms.length === 0 && !loading ? (
-        <Text style={{ color: '#666', fontSize: 15 }}>No active rooms yet.</Text>
+        <Text style={styles.empty}>No active rooms yet.</Text>
       ) : (
         rooms.map((room) => (
           <Card
@@ -91,3 +92,10 @@ export function RoomsScreen() {
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  empty: {
+    ...type.bodySm,
+    color: colors.text2,
+  },
+});

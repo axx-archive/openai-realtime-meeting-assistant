@@ -1,6 +1,6 @@
 import React from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
-import { NavigationContainer, DarkTheme, DefaultTheme } from '@react-navigation/native';
+import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
+import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '../auth/AuthContext';
@@ -10,12 +10,29 @@ import { LoginScreen } from '../screens/LoginScreen';
 import { OSWebScreen } from '../screens/OSWebScreen';
 import { RoomsScreen } from '../screens/RoomsScreen';
 import { ScoutScreen } from '../screens/ScoutScreen';
-import { colors } from '../theme/colors';
+import { colors, product } from '../theme/tokens';
 import type { MainTabParamList, RootStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
+const navTheme = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    background: colors.bgApp,
+    card: colors.surface1,
+    text: colors.text1,
+    border: colors.line1,
+    primary: colors.accent,
+  },
+};
+
+/**
+ * Bottom tabs approximate the live mobile glass tool island labels.
+ * Full OS remains available via WebView for tools not yet natively ported
+ * (Intelligence, Memory, Files, Room media).
+ */
 function MainTabs() {
   return (
     <Tab.Navigator
@@ -24,19 +41,25 @@ function MainTabs() {
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.tabInactive,
         tabBarStyle: {
-          backgroundColor: colors.bgElevated,
-          borderTopColor: colors.border,
+          backgroundColor: Platform.OS === 'ios' ? 'rgba(255,255,255,0.86)' : colors.surface1,
+          borderTopColor: colors.line1,
+          borderTopWidth: StyleSheet.hairlineWidth,
         },
         tabBarLabelStyle: {
           fontSize: 11,
-          fontWeight: '600',
+          fontWeight: '500',
+          letterSpacing: 0.2,
         },
       }}
     >
-      <Tab.Screen name="Home" component={HomeScreen} options={{ title: 'Office' }} />
-      <Tab.Screen name="Rooms" component={RoomsScreen} />
-      <Tab.Screen name="Scout" component={ScoutScreen} />
-      <Tab.Screen name="Board" component={BoardScreen} />
+      <Tab.Screen
+        name="Home"
+        component={HomeScreen}
+        options={{ title: product.name }}
+      />
+      <Tab.Screen name="Rooms" component={RoomsScreen} options={{ title: 'Rooms' }} />
+      <Tab.Screen name="Chat" component={ScoutScreen} options={{ title: 'Chat' }} />
+      <Tab.Screen name="Board" component={BoardScreen} options={{ title: 'Board' }} />
     </Tab.Navigator>
   );
 }
@@ -53,7 +76,7 @@ export function RootNavigator() {
   }
 
   return (
-    <NavigationContainer theme={DefaultTheme}>
+    <NavigationContainer theme={navTheme}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {user ? (
           <>
@@ -72,14 +95,11 @@ export function RootNavigator() {
   );
 }
 
-// Keep DarkTheme import referenced for future themePref wiring without lint noise.
-void DarkTheme;
-
 const styles = StyleSheet.create({
   boot: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.bg,
+    backgroundColor: colors.bgApp,
   },
 });

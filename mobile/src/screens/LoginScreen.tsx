@@ -12,9 +12,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BonfireApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { BrandMark } from '../components/BrandMark';
 import { API_BASE_URL } from '../config';
-import { colors } from '../theme/colors';
+import { colors, hitMin, product, radius, shadow, space, type } from '../theme/tokens';
 
+/**
+ * Login gate — matches live `.login-head` / `.login-card` / `.login-signin`
+ * from index.html (Glass & Ink). Placeholder-only fields; ink primary CTA.
+ */
 export function LoginScreen() {
   const { signIn, lastLoginName } = useAuth();
   const [name, setName] = useState(lastLoginName);
@@ -24,7 +29,7 @@ export function LoginScreen() {
 
   async function onSubmit() {
     if (!name.trim() || !password) {
-      setError('Enter your roster name and password.');
+      setError('choose your name and enter your password');
       return;
     }
     setBusy(true);
@@ -37,7 +42,7 @@ export function LoginScreen() {
           ? err.message
           : err instanceof Error
             ? err.message
-            : 'Sign-in failed';
+            : 'sign-in failed';
       setError(message);
     } finally {
       setBusy(false);
@@ -51,23 +56,19 @@ export function LoginScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={styles.inner}>
-          <View style={styles.brandMark}>
-            <View style={styles.ember} />
+          <View style={styles.head}>
+            <BrandMark size={56} />
+            <Text style={styles.wordmark}>{product.wordmark}</Text>
           </View>
-          <Text style={styles.brand}>BonfireOS</Text>
-          <Text style={styles.tagline}>
-            The company OS on your phone — same accounts, rooms, Scout, and board as
-            the web.
-          </Text>
 
-          <View style={styles.form}>
-            <Text style={styles.label}>Name</Text>
+          <View style={[styles.card, shadow.glass]}>
             <TextInput
+              accessibilityLabel="Name"
               autoCapitalize="words"
               autoCorrect={false}
               autoComplete="username"
-              placeholder="Your roster name"
-              placeholderTextColor={colors.textTertiary}
+              placeholder="choose your name"
+              placeholderTextColor={colors.text3}
               style={styles.input}
               value={name}
               onChangeText={setName}
@@ -75,13 +76,13 @@ export function LoginScreen() {
               returnKeyType="next"
             />
 
-            <Text style={styles.label}>Password</Text>
             <TextInput
+              accessibilityLabel="Password"
               secureTextEntry
               autoCapitalize="none"
               autoComplete="password"
-              placeholder="Password"
-              placeholderTextColor={colors.textTertiary}
+              placeholder="password"
+              placeholderTextColor={colors.text3}
               style={styles.input}
               value={password}
               onChangeText={setPassword}
@@ -96,20 +97,21 @@ export function LoginScreen() {
               onPress={onSubmit}
               disabled={busy}
               style={({ pressed }) => [
-                styles.button,
-                (pressed || busy) && styles.buttonPressed,
+                styles.cta,
+                (pressed || busy) && styles.ctaPressed,
+                busy && styles.ctaDisabled,
               ]}
             >
               {busy ? (
                 <ActivityIndicator color={colors.onAccent} />
               ) : (
-                <Text style={styles.buttonText}>Sign in</Text>
+                <Text style={styles.ctaText}>{product.loginCta}</Text>
               )}
             </Pressable>
           </View>
 
           <Text style={styles.footer}>
-            Signing into {API_BASE_URL.replace(/^https?:\/\//, '')}
+            {API_BASE_URL.replace(/^https?:\/\//, '')}
           </Text>
         </View>
       </KeyboardAvoidingView>
@@ -120,92 +122,76 @@ export function LoginScreen() {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: colors.bg,
+    backgroundColor: colors.bgApp,
   },
   flex: {
     flex: 1,
   },
   inner: {
     flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 48,
+    paddingHorizontal: space[5],
     justifyContent: 'center',
+    maxWidth: 440,
+    width: '100%',
+    alignSelf: 'center',
   },
-  brandMark: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    backgroundColor: colors.accent,
+  head: {
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 18,
+    gap: 14,
+    marginBottom: space[6],
   },
-  ember: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: colors.ember,
+  wordmark: {
+    ...type.wordmark,
+    color: colors.text1,
   },
-  brand: {
-    fontSize: 34,
-    fontWeight: '700',
-    letterSpacing: -1,
-    color: colors.text,
-  },
-  tagline: {
-    marginTop: 10,
-    fontSize: 16,
-    lineHeight: 23,
-    color: colors.textSecondary,
-    maxWidth: 340,
-  },
-  form: {
-    marginTop: 36,
-    gap: 8,
-  },
-  label: {
-    marginTop: 10,
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+  card: {
+    alignSelf: 'stretch',
+    backgroundColor: colors.glassPanel,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassBorder,
+    borderRadius: radius.xxl,
+    padding: space[6],
+    gap: 10,
   },
   input: {
-    backgroundColor: colors.bgElevated,
+    height: hitMin,
+    borderRadius: radius.md,
+    paddingHorizontal: space[4],
+    backgroundColor: colors.surface3,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 17,
-    color: colors.text,
+    borderColor: colors.line1,
+    color: colors.text1,
+    fontSize: 14,
+    letterSpacing: -0.07,
   },
   error: {
-    marginTop: 8,
+    ...type.caption,
     color: colors.danger,
-    fontSize: 14,
-    lineHeight: 20,
   },
-  button: {
-    marginTop: 18,
+  cta: {
+    marginTop: 2,
+    height: hitMin,
+    borderRadius: radius.md,
     backgroundColor: colors.accent,
-    borderRadius: 14,
-    paddingVertical: 16,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  buttonPressed: {
-    opacity: 0.88,
+  ctaPressed: {
+    transform: [{ scale: 0.97 }],
+    opacity: 0.94,
   },
-  buttonText: {
+  ctaDisabled: {
+    opacity: 0.7,
+  },
+  ctaText: {
+    ...type.button,
     color: colors.onAccent,
-    fontSize: 17,
-    fontWeight: '600',
   },
   footer: {
-    marginTop: 28,
-    fontSize: 12,
-    color: colors.textTertiary,
+    ...type.label,
+    color: colors.text3,
     textAlign: 'center',
+    marginTop: space[6],
+    textTransform: 'none',
   },
 });

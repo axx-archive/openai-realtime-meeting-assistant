@@ -6,7 +6,7 @@ import type { BoardCard } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { Card } from '../components/Card';
 import { Screen } from '../components/Screen';
-import { colors } from '../theme/colors';
+import { colors, space, type } from '../theme/tokens';
 
 function cardColumn(card: BoardCard): string {
   return String(card.column || card.status || 'backlog').toLowerCase();
@@ -67,7 +67,7 @@ export function BoardScreen() {
       subtitle={
         updatedAt
           ? `Shared kanban · updated ${new Date(updatedAt).toLocaleString()}`
-          : 'Shared kanban — same cards as the web'
+          : 'Same cards as the web board'
       }
       loading={loading}
       error={error}
@@ -108,19 +108,17 @@ export function BoardScreen() {
 
 const styles = StyleSheet.create({
   empty: {
-    color: colors.textSecondary,
-    fontSize: 15,
+    ...type.bodySm,
+    color: colors.text2,
   },
   section: {
-    marginBottom: 8,
+    marginBottom: space[2],
   },
   sectionTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: 0.6,
+    ...type.label,
+    color: colors.text3,
+    marginBottom: space[2],
+    marginTop: space[2],
     textTransform: 'uppercase',
-    color: colors.textTertiary,
-    marginBottom: 8,
-    marginTop: 8,
   },
 });

@@ -5,40 +5,48 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { CompositeNavigationProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../auth/AuthContext';
+import { BrandMark } from '../components/BrandMark';
 import { Card } from '../components/Card';
 import { Screen } from '../components/Screen';
 import { API_BASE_URL } from '../config';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
-import { colors } from '../theme/colors';
+import { colors, product, radius, space, type } from '../theme/tokens';
 
 type HomeNav = CompositeNavigationProp<
   BottomTabNavigationProp<MainTabParamList, 'Home'>,
   NativeStackNavigationProp<RootStackParamList>
 >;
 
+/**
+ * Office home — live tool title "BonfireOS". Surfaces mirror the web tool set
+ * (Rooms, Chat/Scout, Board) against the same backend.
+ */
 export function HomeScreen() {
   const { user, signOut } = useAuth();
   const navigation = useNavigation<HomeNav>();
 
   return (
     <Screen
-      title="Office"
-      subtitle={user ? `Signed in as ${user.name}` : undefined}
+      title={product.name}
+      subtitle={user ? user.name : undefined}
       right={
-        <Pressable onPress={() => void signOut()} hitSlop={12}>
-          <Text style={styles.signOut}>Sign out</Text>
+        <Pressable onPress={() => void signOut()} hitSlop={12} style={styles.signOutHit}>
+          <Text style={styles.signOut}>sign out</Text>
         </Pressable>
       }
     >
       <View style={styles.hero}>
-        <Text style={styles.heroTitle}>Same OS. Mobile shell.</Text>
-        <Text style={styles.heroBody}>
-          This app talks to the live BonfireOS backend at {API_BASE_URL.replace(/^https?:\/\//, '')}.
-          Rooms, Scout, and board are the same data the web app reads and writes.
-        </Text>
+        <BrandMark size={44} />
+        <View style={styles.heroCopy}>
+          <Text style={styles.heroTitle}>Office</Text>
+          <Text style={styles.heroBody}>
+            Same session, rooms, Scout, and board as the web OS at{' '}
+            {API_BASE_URL.replace(/^https?:\/\//, '')}.
+          </Text>
+        </View>
         <Pressable
           style={({ pressed }) => [styles.primary, pressed && styles.pressed]}
-          onPress={() => navigation.navigate('OSWeb', { path: '/', title: 'BonfireOS' })}
+          onPress={() => navigation.navigate('OSWeb', { path: '/', title: product.name })}
         >
           <Text style={styles.primaryText}>Open full OS</Text>
         </Pressable>
@@ -46,17 +54,17 @@ export function HomeScreen() {
 
       <Card
         title="Rooms"
-        subtitle="Live WebRTC spaces with the same roster and presence as desktop."
+        subtitle="Live spaces — same roster and presence as desktop."
         onPress={() => navigation.navigate('Rooms')}
       />
       <Card
-        title="Scout"
-        subtitle="Private threads and queries against organizational memory."
-        onPress={() => navigation.navigate('Scout')}
+        title="Chat"
+        subtitle="Scout threads and queries against organizational memory."
+        onPress={() => navigation.navigate('Chat')}
       />
       <Card
         title="Board"
-        subtitle="Kanban cards shared with agents and the web board surface."
+        subtitle="Kanban shared with agents and the web board surface."
         onPress={() => navigation.navigate('Board')}
       />
     </Screen>
@@ -64,44 +72,51 @@ export function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  signOutHit: {
+    minHeight: 44,
+    justifyContent: 'center',
+  },
   signOut: {
-    color: colors.ember,
-    fontWeight: '600',
-    fontSize: 15,
-    marginTop: 8,
+    ...type.label,
+    color: colors.text3,
+    textDecorationLine: 'underline',
+    textTransform: 'none',
   },
   hero: {
-    backgroundColor: colors.accent,
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 16,
+    backgroundColor: colors.surface1,
+    borderRadius: radius.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.line1,
+    padding: space[5],
+    marginBottom: space[4],
+    gap: space[3],
+  },
+  heroCopy: {
+    gap: 6,
   },
   heroTitle: {
-    color: colors.onAccent,
-    fontSize: 22,
-    fontWeight: '700',
-    letterSpacing: -0.4,
+    ...type.title2,
+    color: colors.text1,
   },
   heroBody: {
-    color: 'rgba(255,255,255,0.72)',
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 8,
+    ...type.bodySm,
+    color: colors.text2,
   },
   primary: {
-    marginTop: 16,
     alignSelf: 'flex-start',
-    backgroundColor: colors.ember,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    backgroundColor: colors.accent,
+    borderRadius: radius.md,
+    paddingHorizontal: space[4],
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: space[1],
   },
   pressed: {
-    opacity: 0.9,
+    transform: [{ scale: 0.97 }],
   },
   primaryText: {
-    color: colors.onEmber,
-    fontWeight: '700',
-    fontSize: 15,
+    ...type.button,
+    color: colors.onAccent,
   },
 });
