@@ -2,7 +2,7 @@
 
 Goal and source pointers: active `$goal-loop`; `docs/model-routing-master-plan-2026-07-11.md`; `docs/plans/multi-room-2026-07-08.md`; architecture audit in the current Codex task.
 
-Current phase: pre-W5 release closure. W0 and W1 are live and verified; the W2 product/runtime slices and W4 secure-restore repository foundation have passed their independent code gates. The exact release is being pushed and installed default-off/shadow before quota-dependent commissioning begins.
+Current phase: pre-W5 release installed and verified. W0 and W1 remain live; the W2 product/runtime slices and W4 secure-restore repository foundation are installed default-off/shadow from signed release `424f022`. Execution is stopped before quota-dependent commissioning.
 
 ## Invariants
 
@@ -19,10 +19,10 @@ Current phase: pre-W5 release closure. W0 and W1 are live and verified; the W2 p
 |---|---|---|---|---|
 | W0 | Stop runaway spend; make output, authority, health, backup, and usage truth enforceable | None | Accepted digest advances cursor; code-level authority tests; offsite restore evidence; old env/code backup | Complete; model-output recovery canaries held for W5 |
 | W1 | Canonical event/ACL substrate, object authorization, outbox/jobs, retention, consent, revision-bound approval | W0 | Dual-write replay/checksum and ACL-negative parity; JSONL reader rollback | Complete; live in PostgreSQL shadow mode with JSON/JSONL authoritative; expiry repair restart-proven |
-| W2A | Per-room Scout, exact recap, guest policy, media backend pilot | W1 contracts | Two-room zero-leak live gate; Pion and feature-flag rollback | Repository-complete; actorized/scoped implementation independently passed; two-hour live soak held for W5 |
-| W2B | Restart-safe brain, complete historical recall, claim/evidence lineage | W1 contracts | Recall corpus and restart/replay gates; shadow-reader rollback | Repository-complete; projection/backfill/retrieval gates passed; live 90-day replay held for W5 |
-| W2C | `insights_opportunities_v1`, structured feedback, verdict critic, pilots | W1 + W0 route/authority | Ten reviewed pilots; process disable and route rollback | Repository-complete and default-off; durable executor/feedback/capability gates passed; human pilots held for W5 |
-| W2D | Same-release evaluation, collector custody, cost derivation, and signed verdict receipts | W2A-W2C | Clean-commit and receipt-custody gate; no route mutation | Harness complete; live-provider corpora held for W5 |
+| W2A | Per-room Scout, exact recap, guest policy, media backend pilot | W1 contracts | Two-room zero-leak live gate; Pion and feature-flag rollback | Installed default-off; actorized/scoped implementation independently passed; two-hour live soak held for W5 |
+| W2B | Restart-safe brain, complete historical recall, claim/evidence lineage | W1 contracts | Recall corpus and restart/replay gates; shadow-reader rollback | Installed with projection mode off; projection/backfill/retrieval gates passed; live 90-day replay held for W5 |
+| W2C | `insights_opportunities_v1`, structured feedback, verdict critic, pilots | W1 + W0 route/authority | Ten reviewed pilots; process disable and route rollback | Installed disabled; durable executor/feedback/capability gates passed; human pilots held for W5 |
+| W2D | Same-release evaluation, collector custody, cost derivation, and signed verdict receipts | W2A-W2C | Clean-commit and receipt-custody gate; no route mutation | Harness installed; live-provider corpora held for W5 |
 | W3 | Static versioned model-route registry and measured canaries | W2 eval corpora | One seat at a time; prior route pointer rollback | Canary/rollback plan ready; route changes remain blocked on W5 receipts |
 | W4 | HA/DR cutover and full operational release | W2 + W3 | Chaos, restore, live media/recall/workflow evidence; cutover rollback | Secure DR capture/manifest/restore gate repository-complete; managed HA, offsite immutable custody, and live restore drill remain external gates |
 | W5 | Final AI commissioning after API quota is restored | Pre-W5 code installed; W4 infrastructure/custody and human reviewers available | Bounded provider canaries, same-commit live receipts, then one-seat-at-a-time enablement; all AI routes remain degraded/disabled on failure | Pending top-up and remaining external prerequisites |
@@ -77,6 +77,9 @@ Current phase: pre-W5 release closure. W0 and W1 are live and verified; the W2 p
 - The W1 cutover used cold snapshot `/opt/meetingassist-backups/20260713T023028Z-w1-canonical-shadow` plus the scoped follow-up backup `/opt/meetingassist-backups/20260713-031023-w1-reconcile-availability`. Production was empty before recreation and remained empty afterward.
 - Live restart/checkpoint verification passed with canonical shadow healthy at equal dirty/reconciled/checkpoint high-water 10, zero pending capture, zero outbox backlog/failures, and no frozen families. PostgreSQL held 6,226 canonical events, 6,224 current objects, and 11,791 grants; imported guest/service/capability durable grants were exactly zero.
 - Production memory remained 5,455 lines; board, user, and room hashes exactly matched the pre-cutover baseline. All 13 queue jobs remained present, usage evidence advanced from 5 to 6 files, and app/PostgreSQL/Codex/render services were running with zero restarts and fresh worker heartbeats.
+- Pre-W5 release `424f02204a969ac6c7090c6f721a7097064ff57d` is pushed to `axx/main` and installed from immutable image digest `sha256:0d9c63683a340f7e197451cb0bae960c2101bf966a7542f1ed63635a78a17592`. Signed build-manifest verification passed against the running binary, OCI labels, registry manifest, commit, tree, build inputs, and source archive.
+- Cutover backup `/opt/meetingassist-backups/20260723-021325-pre-w5-424f022` contains the app source, logical PostgreSQL dump, and exact meeting-data, Codex-queue, and usage-ledger archives with verified SHA-256 values. An off-host copy is at `~/.backups/meetingassist/20260723-021325-pre-w5-424f022`; a disposable PostgreSQL 17 restore test recovered migrations 1-3 and 9,426 canonical events before cutover.
+- Live migrations advanced exactly to 1-7. The five core production-data hashes remained byte-identical, all 13 Codex queue records remained, app and sidecars have zero restarts, participants remain zero, media-soak ingress returns 403 externally, and canonical shadow converged at equal dirty/reconciled/checkpoint high-water 6,052 with no pending or failed outbox work. Brain projection, Insights v1, media observer, historical backfill, and restore mode remain explicitly off; provider-backed capabilities truthfully remain degraded until W5.
 
 ## Pending Dependencies
 
@@ -115,4 +118,4 @@ Run this wave only after the OpenAI project used by the production key has usabl
 
 ## Execution Frontier
 
-Freeze and ship the intended W2-W4 repository changes to `axx/main`, install that exact commit on the VPS with all new AI/workflow/media-observer/restore paths default-off or shadow, and verify live readiness without touching `digitalocean_meeting_data`. Then stop. Resume at W5 item 1 only after the user confirms the production OpenAI project is topped up; do not infer provider recovery from a balance change alone.
+STOP. Preserve signed runtime release `424f022` and its backup/manifest evidence unchanged. Resume at W5 item 1 only after the user confirms the production OpenAI project is topped up and the W4 infrastructure/custody owners are available; do not infer provider recovery from a balance change alone.
