@@ -813,8 +813,11 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 		"inset: auto auto max(16px, env(safe-area-inset-bottom)) 50%;",
 		"width: max-content;",
 		"max-width: calc(100dvw - 24px);",
-		"transform: translateX(-50%);",
-		"backdrop-filter: blur(22px) saturate(1.45);",
+		// Anchored as a pair: the glass wave tokenised this blur, and the bare
+		// token string now appears on several over-media surfaces, so pinning it
+		// alone would no longer prove the mobile rail specifically kept its glass.
+		`          transform: translateX(-50%);
+          backdrop-filter: var(--glass-blur-chrome);`,
 		"#appShell.is-authed .workspace",
 		"padding-bottom: max(96px, calc(var(--sp-2) + env(safe-area-inset-bottom)));",
 		".tool-rail__theme svg",

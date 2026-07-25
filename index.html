@@ -180,10 +180,31 @@
         /* ---------- glass.css · LIGHT ---------- */
         --glass-chrome: rgba(255, 255, 255, 0.62);
         --glass-panel: rgba(255, 255, 255, 0.44);
+        /* One substance, two thicknesses. saturate() is the material's signature
+           and NEVER varies — the app had grown five recipes at 1.8/1.45/1.35/
+           1.3/1.25, and two panes of the same glass cannot boost colour by
+           different amounts. That is what made adjacent surfaces read as
+           assembled rather than designed. Radius may scale with the surface:
+           under a 28px kernel a small pill averages nearly its whole footprint
+           to one flat colour and stops reading translucent, so floating chrome
+           gets 20px (28 / 1.4 — one clear tier). Panels and sheets keep 28px,
+           and --glass-blur's value is unchanged for all 66 of its consumers. */
         --glass-blur: saturate(1.8) blur(28px);
+        --glass-blur-chrome: saturate(1.8) blur(20px);
+        --glass-scrim: blur(2px);
         --glass-border: rgba(14, 14, 16, 0.10);
         --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.70);
         --glass-shadow: 0 8px 32px rgba(14, 14, 16, 0.10);
+
+        /* Over-media chrome — rides live video, so it stays dark in BOTH themes
+           (deliberately no [data-theme] override). The 0.62 body is a contrast
+           fix, not taste: .stage-tool sets white 500 11px, and against a
+           blown-out white frame the old rgba(0,0,0,0.52) measured 3.81:1. */
+        --glass-media: rgba(16, 16, 19, 0.62);
+        --glass-media-hover: rgba(16, 16, 19, 0.74);
+        --glass-media-border: rgba(255, 255, 255, 0.14);
+        --glass-media-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+        --glass-media-shadow: 0 12px 34px rgba(0, 0, 0, 0.42);
 
         /* ---------- typography.css ---------- */
         --type-display-xl: 600 56px/1.04 var(--font-sans);
@@ -3639,8 +3660,8 @@
         border-radius: 22px;
         background: color-mix(in srgb, var(--surface-1) 94%, transparent);
         box-shadow: var(--shadow-3);
-        backdrop-filter: blur(24px) saturate(1.25);
-        -webkit-backdrop-filter: blur(24px) saturate(1.25);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
       }
 
       .consent-panel[hidden] { display: none; }
@@ -6803,8 +6824,8 @@
         justify-content: center;
         padding: 24px;
         background: var(--scrim);
-        -webkit-backdrop-filter: blur(2px);
-        backdrop-filter: blur(2px);
+        -webkit-backdrop-filter: var(--glass-scrim);
+        backdrop-filter: var(--glass-scrim);
         pointer-events: auto;
       }
 
@@ -14865,8 +14886,13 @@
          filters popover around it ride the lobby ink channel so they read on
          paper and on black alike */
       /* mock canon: the preview reads as a dark stage inset, not a raised chip */
-      .room-empty .greenroom__tile { background: rgba(0, 0, 0, 0.4); border-color: rgba(var(--lob-fg), 0.1); color: rgba(255, 255, 255, 0.55); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); }
-      .room-empty .greenroom__tile:hover { border-color: rgba(var(--lob-fg), 0.35); color: rgba(255, 255, 255, 0.8); }
+      /* The preview is a video surface, and canon (--bg-stage) says video stays
+         true black. At 0.4 alpha this composited to mid-grey over the light
+         panel — a flat dead slab carrying hardcoded white text at 1.96:1
+         ("preview") and 2.36:1 (the avatar initial). Deepening it restores the
+         camera-off look in both themes and takes those to 5.3:1 / 7.8:1. */
+      .room-empty .greenroom__tile { background: rgba(0, 0, 0, 0.82); border-color: rgba(255, 255, 255, 0.14); color: rgba(255, 255, 255, 0.72); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06); }
+      .room-empty .greenroom__tile:hover { border-color: rgba(255, 255, 255, 0.34); color: rgba(255, 255, 255, 0.92); }
       .room-empty .greenroom__ctl { background: rgba(var(--lob-fg), 0.06); border-color: rgba(var(--lob-fg), 0.14); color: rgba(var(--lob-fg), 0.85); }
       .room-empty .greenroom__ctl:hover { border-color: rgba(var(--lob-fg), 0.35); }
       .room-empty .greenroom__ctl[aria-pressed="false"] { color: rgba(var(--lob-fg), 0.62); }
@@ -15434,12 +15460,14 @@
         text-overflow: ellipsis;
         padding: 0 14px;
         border: 0;
-        background: rgba(0, 0, 0, 0.52);
+        /* white 500 11px over live video: at 0.52 this measured 3.81:1 against
+           a blown-out white frame. The shared over-media material clears AA. */
+        background: var(--glass-media);
         color: #fff;
-        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 12px 30px rgba(0, 0, 0, 0.24);
+        box-shadow: var(--glass-media-highlight), var(--glass-media-shadow);
         pointer-events: auto;
-        backdrop-filter: blur(18px) saturate(1.3);
-        -webkit-backdrop-filter: blur(18px) saturate(1.3);
+        backdrop-filter: var(--glass-blur-chrome);
+        -webkit-backdrop-filter: var(--glass-blur-chrome);
       }
 
       .stage-tool[aria-pressed="true"] {
@@ -15475,7 +15503,7 @@
       }
 
       .stage-tool:hover:not([disabled]) {
-        background: rgba(0, 0, 0, 0.68);
+        background: var(--glass-media-hover);
       }
 
       .stage-segmented button:active,
@@ -17274,7 +17302,7 @@
         padding: max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
       }
       .bsheet[hidden] { display: none; }
-      .bsheet__scrim { position: absolute; inset: 0; background: var(--scrim); backdrop-filter: blur(2px); }
+      .bsheet__scrim { position: absolute; inset: 0; background: var(--scrim); -webkit-backdrop-filter: var(--glass-scrim); backdrop-filter: var(--glass-scrim); }
       .bsheet__panel {
         position: relative;
         width: min(640px, 100%);
@@ -18181,8 +18209,8 @@
           visibility: visible;
           pointer-events: auto;
           transform: translateX(-50%);
-          backdrop-filter: blur(22px) saturate(1.45);
-          -webkit-backdrop-filter: blur(22px) saturate(1.45);
+          backdrop-filter: var(--glass-blur-chrome);
+          -webkit-backdrop-filter: var(--glass-blur-chrome);
           transition:
             transform var(--dur-med) var(--ease),
             background var(--dur-med) var(--ease),
@@ -18900,12 +18928,13 @@
           display: grid;
           width: 196px;
           padding: 6px;
-          border: 1px solid rgba(255, 255, 255, 0.14);
+          border: 1px solid var(--glass-media-border);
           border-radius: 18px;
-          background: rgba(24, 24, 27, 0.94);
-          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 16px 42px rgba(0, 0, 0, 0.45);
-          backdrop-filter: blur(20px) saturate(1.35);
-          -webkit-backdrop-filter: blur(20px) saturate(1.35);
+          /* was 0.94 — a solid box paying for a blur pass that was 94% invisible */
+          background: var(--glass-media);
+          box-shadow: var(--glass-media-highlight), var(--glass-media-shadow);
+          backdrop-filter: var(--glass-blur-chrome);
+          -webkit-backdrop-filter: var(--glass-blur-chrome);
         }
 
         .room-more__menu[hidden] {
@@ -19957,7 +19986,8 @@
         position: absolute;
         inset: 0;
         background: var(--scrim);
-        backdrop-filter: blur(2px);
+        -webkit-backdrop-filter: var(--glass-scrim);
+        backdrop-filter: var(--glass-scrim);
       }
       .palette__sheet {
         position: relative;
