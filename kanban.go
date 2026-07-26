@@ -6073,11 +6073,96 @@ func (app *kanbanBoardApp) validateParticipantAdmissionLocked(state *roomLiveSta
 	return nil
 }
 
+// validateParticipantTransferAdmissionLocked applies the room-seat limit but
+// deliberately skips the per-account endpoint cap: a transfer commits the new
+// endpoint and removes every older same-room endpoint in one locked mutation.
+func (app *kanbanBoardApp) validateParticipantTransferAdmissionLocked(state *roomLiveState, name string) error {
+	if state.participantCounts[name] <= 0 && app.activeParticipantCountInRoomLocked(state) >= configuredMeetingRoomCapacity() {
+		return fmt.Errorf("the room is full. this room supports %d people with video on", configuredMeetingRoomCapacity())
+	}
+	return nil
+}
+
+func ensureParticipantAdmissionLeasesLocked(state *roomLiveState) {
+	if state.participantAdmissionLeases == nil {
+		state.participantAdmissionLeases = map[string]*participantAdmissionLease{}
+	}
+}
+
+func participantAdmissionLeaseLocked(state *roomLiveState, roomID, name, sessionID string) *participantAdmissionLease {
+	if sessionID == "" {
+		return nil
+	}
+	ensureParticipantAdmissionLeasesLocked(state)
+	if lease := state.participantAdmissionLeases[sessionID]; lease != nil && lease.isCurrent() {
+		return lease
+	}
+	lease := newParticipantAdmissionLease(roomID, name, sessionID)
+	state.participantAdmissionLeases[sessionID] = lease
+	return lease
+}
+
+// retireParticipantAdmissionLeaseLocked is called only while app.mu is held.
+// It publishes retirement with one atomic store and never waits on lease.gate.
+// The admitting transaction releases app.mu before draining that gate, so a
+// websocket write can never extend an app.mu critical section. The phase/lock
+// order is app.mu (seat + atomic retirement), then lease.gate, then listLock;
+// no lease/list path acquires app.mu in reverse.
+func retireParticipantAdmissionLeaseLocked(state *roomLiveState, sessionID string) *participantAdmissionLease {
+	if sessionID == "" || state.participantAdmissionLeases == nil {
+		return nil
+	}
+	lease := state.participantAdmissionLeases[sessionID]
+	if lease == nil {
+		return nil
+	}
+	lease.retire()
+	delete(state.participantAdmissionLeases, sessionID)
+	return lease
+}
+
+func newParticipantSessionRetirement(roomID, name, sessionID, message string, lease *participantAdmissionLease) participantSessionRetirement {
+	return participantSessionRetirement{
+		roomID:    normalizeRoomID(roomID),
+		name:      canonicalRoomParticipantName(name),
+		sessionID: sessionID,
+		message:   message,
+		lease:     lease,
+	}
+}
+
+func drainParticipantAdmissionLeases(leases []*participantAdmissionLease) {
+	seen := map[*participantAdmissionLease]struct{}{}
+	for _, lease := range leases {
+		if lease == nil {
+			continue
+		}
+		if _, ok := seen[lease]; ok {
+			continue
+		}
+		seen[lease] = struct{}{}
+		lease.drain()
+	}
+}
+
+func drainParticipantAdmissionRetirements(retired []participantSessionRetirement) {
+	leases := make([]*participantAdmissionLease, 0, len(retired))
+	for _, retirement := range retired {
+		leases = append(leases, retirement.lease)
+	}
+	drainParticipantAdmissionLeases(leases)
+}
+
 // admitParticipantSessionEndpointInRoomLocked commits presence after all
 // fail-closed admission authorities have succeeded. Callers hold app.mu.
 func (app *kanbanBoardApp) admitParticipantSessionEndpointInRoomLocked(state *roomLiveState, name, sessionID, endpointID string) (admitted string, firstEndpoint bool, err error) {
+	result, err := app.admitParticipantSessionEndpointInRoomWithLeaseLocked(state, name, sessionID, endpointID)
+	return result.name, result.firstEndpoint, err
+}
+
+func (app *kanbanBoardApp) admitParticipantSessionEndpointInRoomWithLeaseLocked(state *roomLiveState, name, sessionID, endpointID string) (participantAdmissionResult, error) {
 	if err := app.validateParticipantAdmissionLocked(state, name, endpointID); err != nil {
-		return "", false, err
+		return participantAdmissionResult{}, err
 	}
 
 	alreadyPresent := state.participantCounts[name] > 0
@@ -6087,7 +6172,18 @@ func (app *kanbanBoardApp) admitParticipantSessionEndpointInRoomLocked(state *ro
 		endpoints = map[string]string{}
 		state.participantEndpoints[name] = endpoints
 	}
-	previousSessionID, endpointExisted := endpoints[endpointID]
+	previousSessionID := endpoints[endpointID]
+	result := participantAdmissionResult{name: name, firstEndpoint: !alreadyPresent}
+	if previousSessionID != "" && previousSessionID != sessionID {
+		retiredLease := retireParticipantAdmissionLeaseLocked(state, previousSessionID)
+		result.retired = append(result.retired, newParticipantSessionRetirement(
+			state.id,
+			name,
+			previousSessionID,
+			"This browser session was replaced by a newer room join.",
+			retiredLease,
+		))
+	}
 	endpoints[endpointID] = sessionID
 
 	now := time.Now().UTC()
@@ -6110,17 +6206,159 @@ func (app *kanbanBoardApp) admitParticipantSessionEndpointInRoomLocked(state *ro
 	}
 	state.participants[name] = now
 	state.participantCounts[name] = len(endpoints)
-	// Reset the shared media state on a fresh account or when an endpoint's own
-	// session reconnects (a refreshed tab), but NOT when an additional device
-	// joins an already-present account — otherwise the first device's mute/
-	// camera state would be clobbered by the second device's arrival.
-	if !alreadyPresent || endpointExisted {
-		state.participantMedia[name] = participantMediaState{
-			UpdatedAt: now.Format(time.RFC3339Nano),
+	if state.participantEndpointMedia == nil {
+		state.participantEndpointMedia = map[string]map[string]participantMediaState{}
+	}
+	endpointMedia := state.participantEndpointMedia[name]
+	if endpointMedia == nil {
+		endpointMedia = map[string]participantMediaState{}
+		state.participantEndpointMedia[name] = endpointMedia
+	}
+	// Every newly admitted endpoint starts with the legacy zero-value media
+	// contract. Replacing the same endpoint resets only that endpoint; adding a
+	// second device leaves the first device's authoritative row untouched.
+	endpointMedia[endpointID] = participantMediaState{UpdatedAt: now.Format(time.RFC3339Nano)}
+	state.participantMedia[name] = participantMediaProjectionLocked(state, name, now.Format(time.RFC3339Nano))
+	result.lease = participantAdmissionLeaseLocked(state, state.id, name, sessionID)
+
+	return result, nil
+}
+
+// transferParticipantSessionEndpointInRoomLocked atomically retains one new
+// endpoint for an existing seat and retires every other endpoint session for
+// that same account in the room. Callers hold app.mu and have already completed
+// capacity/admission-anchor validation.
+func (app *kanbanBoardApp) transferParticipantSessionEndpointInRoomLocked(state *roomLiveState, name, sessionID, endpointID string) (admitted string, firstEndpoint bool, retiredSessionIDs []string, err error) {
+	result, err := app.transferParticipantSessionEndpointInRoomWithLeaseLocked(state, name, sessionID, endpointID)
+	if err != nil {
+		return "", false, nil, err
+	}
+	retiredSessionIDs = make([]string, 0, len(result.retired))
+	for _, retired := range result.retired {
+		retiredSessionIDs = append(retiredSessionIDs, retired.sessionID)
+	}
+	return result.name, result.firstEndpoint, retiredSessionIDs, nil
+}
+
+func (app *kanbanBoardApp) transferParticipantSessionEndpointInRoomWithLeaseLocked(state *roomLiveState, name, sessionID, endpointID string) (participantAdmissionResult, error) {
+	// Older restored/test room literals can predate endpoint-scoped presence.
+	// Initialize every map this transfer writes before reading the old seat so
+	// the atomic replacement path remains safe for those migrated states too.
+	if state.participantEndpoints == nil {
+		state.participantEndpoints = map[string]map[string]string{}
+	}
+	if state.participantSessionLiveness == nil {
+		state.participantSessionLiveness = map[string]map[string]time.Time{}
+	}
+	if state.participants == nil {
+		state.participants = map[string]time.Time{}
+	}
+	if state.participantCounts == nil {
+		state.participantCounts = map[string]int{}
+	}
+	if state.participantMedia == nil {
+		state.participantMedia = map[string]participantMediaState{}
+	}
+	alreadyPresent := state.participantCounts[name] > 0
+	result := participantAdmissionResult{name: name, firstEndpoint: !alreadyPresent}
+	seenSessions := map[string]bool{}
+	for _, currentSessionID := range state.participantEndpoints[name] {
+		if currentSessionID == "" || currentSessionID == sessionID || seenSessions[currentSessionID] {
+			continue
 		}
+		seenSessions[currentSessionID] = true
+		retiredLease := retireParticipantAdmissionLeaseLocked(state, currentSessionID)
+		result.retired = append(result.retired, newParticipantSessionRetirement(
+			state.id,
+			name,
+			currentSessionID,
+			"This call moved to another device.",
+			retiredLease,
+		))
+		delete(state.memberRepairBuckets, currentSessionID)
+		delete(state.memberIceRestartBuckets, currentSessionID)
+	}
+	sort.Slice(result.retired, func(i, j int) bool {
+		return result.retired[i].sessionID < result.retired[j].sessionID
+	})
+
+	now := time.Now().UTC()
+	state.participantEndpoints[name] = map[string]string{endpointID: sessionID}
+	if sessionID == "" {
+		delete(state.participantSessionLiveness, name)
+	} else {
+		state.participantSessionLiveness[name] = map[string]time.Time{sessionID: now}
+	}
+	state.participants[name] = now
+	state.participantCounts[name] = 1
+	if state.participantEndpointMedia == nil {
+		state.participantEndpointMedia = map[string]map[string]participantMediaState{}
+	}
+	media := participantMediaState{UpdatedAt: now.Format(time.RFC3339Nano)}
+	state.participantEndpointMedia[name] = map[string]participantMediaState{endpointID: media}
+	state.participantMedia[name] = media
+	result.lease = participantAdmissionLeaseLocked(state, state.id, name, sessionID)
+
+	return result, nil
+}
+
+func (app *kanbanBoardApp) retireParticipantSeatInRoomLocked(state *roomLiveState, name, message string) []participantSessionRetirement {
+	if state == nil || state.participantCounts[name] <= 0 {
+		return nil
+	}
+	seenSessions := map[string]bool{}
+	retired := make([]participantSessionRetirement, 0, len(state.participantEndpoints[name]))
+	for _, sessionID := range state.participantEndpoints[name] {
+		if sessionID == "" || seenSessions[sessionID] {
+			continue
+		}
+		seenSessions[sessionID] = true
+		retiredLease := retireParticipantAdmissionLeaseLocked(state, sessionID)
+		delete(state.memberRepairBuckets, sessionID)
+		delete(state.memberIceRestartBuckets, sessionID)
+		retired = append(retired, newParticipantSessionRetirement(state.id, name, sessionID, message, retiredLease))
+	}
+	// Defensive cleanup for a migrated/in-flight state whose endpoint row was
+	// already removed but whose lease still names this account.
+	for sessionID, lease := range state.participantAdmissionLeases {
+		if lease == nil || !sameParticipantName(lease.name, name) || seenSessions[sessionID] {
+			continue
+		}
+		seenSessions[sessionID] = true
+		retiredLease := retireParticipantAdmissionLeaseLocked(state, sessionID)
+		retired = append(retired, newParticipantSessionRetirement(state.id, name, sessionID, message, retiredLease))
 	}
 
-	return name, !alreadyPresent, nil
+	delete(state.participants, name)
+	delete(state.participantCounts, name)
+	delete(state.participantEndpoints, name)
+	delete(state.participantSessionLiveness, name)
+	delete(state.participantMedia, name)
+	delete(state.participantEndpointMedia, name)
+	sort.Slice(retired, func(i, j int) bool {
+		return retired[i].sessionID < retired[j].sessionID
+	})
+	return retired
+}
+
+// retireParticipantSeatsOutsideRoomLocked is part of the same app.mu
+// transaction that installs joinedRoomID. Therefore two concurrent joins for
+// one account serialize to exactly one current room: the later transaction
+// retires the earlier transaction's lease and seat before it returns.
+func (app *kanbanBoardApp) retireParticipantSeatsOutsideRoomLocked(name, joinedRoomID string) []participantSessionRetirement {
+	joinedRoomID = normalizeRoomID(joinedRoomID)
+	var retired []participantSessionRetirement
+	for roomID, state := range app.roomLive {
+		if normalizeRoomID(roomID) == joinedRoomID {
+			continue
+		}
+		retired = append(retired, app.retireParticipantSeatInRoomLocked(
+			state,
+			name,
+			"You joined another room; this seat was released.",
+		)...)
+	}
+	return retired
 }
 
 func (app *kanbanBoardApp) forgetParticipant(name string) {
@@ -6152,8 +6390,8 @@ func (app *kanbanBoardApp) forgetParticipantSessionResultInRoom(roomID string, n
 	}
 
 	app.mu.Lock()
-	defer app.mu.Unlock()
 	state := app.roomLiveLocked(roomID)
+	var retiredLeases []*participantAdmissionLease
 
 	endpoints := state.participantEndpoints[name]
 
@@ -6168,9 +6406,16 @@ func (app *kanbanBoardApp) forgetParticipantSessionResultInRoom(roomID string, n
 			}
 		}
 		if !matched {
-			return false, state.participantCounts[name] > 0
+			stillPresent := state.participantCounts[name] > 0
+			app.mu.Unlock()
+			return false, stillPresent
 		}
+		legacyMediaWasProjected := state.participantMedia[name] == participantMediaProjectionLocked(state, name, state.participantMedia[name].UpdatedAt)
+		retiredLeases = append(retiredLeases, retireParticipantAdmissionLeaseLocked(state, sessionID))
 		delete(endpoints, matchedEndpoint)
+		if endpointMedia := state.participantEndpointMedia[name]; endpointMedia != nil {
+			delete(endpointMedia, matchedEndpoint)
+		}
 		if sessionLiveness := state.participantSessionLiveness[name]; sessionLiveness != nil {
 			delete(sessionLiveness, sessionID)
 			if len(sessionLiveness) == 0 {
@@ -6179,8 +6424,23 @@ func (app *kanbanBoardApp) forgetParticipantSessionResultInRoom(roomID string, n
 		}
 		if len(endpoints) > 0 {
 			state.participantCounts[name] = len(endpoints)
-			state.participants[name] = time.Now().UTC()
+			now := time.Now().UTC()
+			state.participants[name] = now
+			// Preserve a migrated/legacy flat state that was already inconsistent
+			// with endpoint rows; otherwise rebuild the projection after removal.
+			if legacyMediaWasProjected {
+				state.participantMedia[name] = participantMediaProjectionLocked(state, name, now.Format(time.RFC3339Nano))
+			}
+			app.mu.Unlock()
+			drainParticipantAdmissionLeases(retiredLeases)
 			return true, true
+		}
+	}
+	if sessionID == "" {
+		for currentSessionID, lease := range state.participantAdmissionLeases {
+			if lease != nil && sameParticipantName(lease.name, name) {
+				retiredLeases = append(retiredLeases, retireParticipantAdmissionLeaseLocked(state, currentSessionID))
+			}
 		}
 	}
 
@@ -6189,6 +6449,9 @@ func (app *kanbanBoardApp) forgetParticipantSessionResultInRoom(roomID string, n
 	delete(state.participantEndpoints, name)
 	delete(state.participantSessionLiveness, name)
 	delete(state.participantMedia, name)
+	delete(state.participantEndpointMedia, name)
+	app.mu.Unlock()
+	drainParticipantAdmissionLeases(retiredLeases)
 
 	return true, false
 }
@@ -6307,6 +6570,7 @@ func (app *kanbanBoardApp) touchParticipantSessionLivenessInRoom(roomID string, 
 type participantLivenessReap struct {
 	name            string
 	sessionIDs      []string
+	leases          []*participantAdmissionLease
 	reapedEndpoints int
 	stillPresent    bool
 }
@@ -6359,13 +6623,19 @@ func (app *kanbanBoardApp) reapStaleParticipantSessionsLocked(now time.Time, tim
 			if len(stale) == 0 {
 				continue
 			}
+			legacyMediaWasProjected := state.participantMedia[name] == participantMediaProjectionLocked(state, name, state.participantMedia[name].UpdatedAt)
 
 			sessionIDs := make([]string, 0, len(stale))
+			retiredLeases := make([]*participantAdmissionLease, 0, len(stale))
 			seenSessions := map[string]bool{}
 			for _, endpoint := range stale {
 				sessionID := endpoint.sessionID
+				retiredLeases = append(retiredLeases, retireParticipantAdmissionLeaseLocked(state, sessionID))
 				if endpoint.endpointID != "" || len(endpoints) > 0 {
 					delete(endpoints, endpoint.endpointID)
+					if endpointMedia := state.participantEndpointMedia[name]; endpointMedia != nil {
+						delete(endpointMedia, endpoint.endpointID)
+					}
 				}
 				if sessionID != "" && !seenSessions[sessionID] {
 					seenSessions[sessionID] = true
@@ -6408,9 +6678,15 @@ func (app *kanbanBoardApp) reapStaleParticipantSessionsLocked(now time.Time, tim
 				if !newestRemaining.IsZero() {
 					state.participants[name] = newestRemaining
 				}
+				// Old restored states may carry only a meaningful flat media row.
+				// Do not erase that compatibility value during an endpoint reap.
+				if legacyMediaWasProjected {
+					state.participantMedia[name] = participantMediaProjectionLocked(state, name, now.Format(time.RFC3339Nano))
+				}
 				reapedByRoom[roomID] = append(reapedByRoom[roomID], participantLivenessReap{
 					name:            name,
 					sessionIDs:      sessionIDs,
+					leases:          retiredLeases,
 					reapedEndpoints: len(stale),
 					stillPresent:    true,
 				})
@@ -6421,6 +6697,7 @@ func (app *kanbanBoardApp) reapStaleParticipantSessionsLocked(now time.Time, tim
 			delete(state.participantEndpoints, name)
 			delete(state.participantSessionLiveness, name)
 			delete(state.participantMedia, name)
+			delete(state.participantEndpointMedia, name)
 			if isGuestDisplayName(name) {
 				for sessionKey, display := range state.guestSeats {
 					if strings.EqualFold(display, name) {
@@ -6435,6 +6712,7 @@ func (app *kanbanBoardApp) reapStaleParticipantSessionsLocked(now time.Time, tim
 			reapedByRoom[roomID] = append(reapedByRoom[roomID], participantLivenessReap{
 				name:            name,
 				sessionIDs:      sessionIDs,
+				leases:          retiredLeases,
 				reapedEndpoints: len(stale),
 			})
 		}
@@ -6463,6 +6741,7 @@ func (app *kanbanBoardApp) sweepStaleParticipantSessions() {
 	}
 	for roomID, reaped := range reapedByRoom {
 		for _, entry := range reaped {
+			drainParticipantAdmissionLeases(entry.leases)
 			for _, sessionID := range entry.sessionIDs {
 				// Close the peer connections + sockets BEFORE clearing the
 				// bookkeeping: closeSessionMedia looks the PCs up by session id
@@ -6595,6 +6874,32 @@ func (app *kanbanBoardApp) setParticipantMediaState(name string, state participa
 	return app.setParticipantMediaStateInRoom(officeRoomID, name, state)
 }
 
+// participantMediaProjectionLocked preserves the legacy name-level mediaStates
+// contract while endpointMediaStates remains authoritative. A participant is
+// camera-off or muted only when every live endpoint is; screen sharing is true
+// when any endpoint is sharing.
+func participantMediaProjectionLocked(room *roomLiveState, name string, updatedAt string) participantMediaState {
+	endpoints := room.participantEndpoints[name]
+	if len(endpoints) == 0 {
+		return room.participantMedia[name]
+	}
+	projection := participantMediaState{MicMuted: true, CameraOff: true, UpdatedAt: updatedAt}
+	legacy := room.participantMedia[name]
+	for endpointID := range endpoints {
+		state, ok := room.participantEndpointMedia[name][endpointID]
+		if !ok {
+			state = legacy
+		}
+		projection.MicMuted = projection.MicMuted && state.MicMuted
+		projection.CameraOff = projection.CameraOff && state.CameraOff
+		projection.ScreenSharing = projection.ScreenSharing || state.ScreenSharing
+		if projection.UpdatedAt == "" && state.UpdatedAt != "" {
+			projection.UpdatedAt = state.UpdatedAt
+		}
+	}
+	return projection
+}
+
 func (app *kanbanBoardApp) setParticipantMediaStateInRoom(roomID string, name string, state participantMediaState) (map[string]any, error) {
 	name = canonicalRoomParticipantName(name)
 	if name == "" {
@@ -6610,7 +6915,56 @@ func (app *kanbanBoardApp) setParticipantMediaStateInRoom(roomID string, name st
 	}
 
 	state.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	room.participantMedia[name] = state
+	if room.participantEndpointMedia == nil {
+		room.participantEndpointMedia = map[string]map[string]participantMediaState{}
+	}
+	endpointMedia := room.participantEndpointMedia[name]
+	if endpointMedia == nil {
+		endpointMedia = map[string]participantMediaState{}
+		room.participantEndpointMedia[name] = endpointMedia
+	}
+	for endpointID := range room.participantEndpoints[name] {
+		endpointMedia[endpointID] = state
+	}
+	if len(room.participantEndpoints[name]) == 0 {
+		room.participantMedia[name] = state
+	} else {
+		room.participantMedia[name] = participantMediaProjectionLocked(room, name, state.UpdatedAt)
+	}
+
+	return app.roomSnapshotLockedForRoom(room, configuredMeetingRoomCapacity()), nil
+}
+
+// setParticipantEndpointMediaStateInRoom updates only the endpoint owned by the
+// current websocket session. The session check prevents a replaced socket from
+// overwriting its successor's stable endpoint row.
+func (app *kanbanBoardApp) setParticipantEndpointMediaStateInRoom(roomID, name, endpointID, sessionID string, state participantMediaState) (map[string]any, error) {
+	name = canonicalRoomParticipantName(name)
+	if name == "" {
+		return nil, fmt.Errorf("unknown participant")
+	}
+
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	room := app.roomLiveLocked(roomID)
+	if room.participantCounts[name] <= 0 {
+		return nil, fmt.Errorf("%s is not in the room", name)
+	}
+	currentSessionID, ok := room.participantEndpoints[name][endpointID]
+	if !ok || currentSessionID != sessionID {
+		return nil, fmt.Errorf("%s endpoint session is no longer current", name)
+	}
+	if room.participantEndpointMedia == nil {
+		room.participantEndpointMedia = map[string]map[string]participantMediaState{}
+	}
+	endpointMedia := room.participantEndpointMedia[name]
+	if endpointMedia == nil {
+		endpointMedia = map[string]participantMediaState{}
+		room.participantEndpointMedia[name] = endpointMedia
+	}
+	state.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	endpointMedia[endpointID] = state
+	room.participantMedia[name] = participantMediaProjectionLocked(room, name, state.UpdatedAt)
 
 	return app.roomSnapshotLockedForRoom(room, configuredMeetingRoomCapacity()), nil
 }
@@ -6633,12 +6987,62 @@ func (app *kanbanBoardApp) setParticipantScreenSharingInRoom(roomID string, name
 		return app.roomSnapshotLockedForRoom(room, configuredMeetingRoomCapacity())
 	}
 
-	state := room.participantMedia[name]
-	state.ScreenSharing = screenSharing
-	state.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	room.participantMedia[name] = state
+	updatedAt := time.Now().UTC().Format(time.RFC3339Nano)
+	if room.participantEndpointMedia == nil {
+		room.participantEndpointMedia = map[string]map[string]participantMediaState{}
+	}
+	endpointMedia := room.participantEndpointMedia[name]
+	if endpointMedia == nil {
+		endpointMedia = map[string]participantMediaState{}
+		room.participantEndpointMedia[name] = endpointMedia
+	}
+	// This legacy/programmatic setter represents an account-wide command, so
+	// fan it into every live endpoint row before rebuilding the legacy
+	// projection. Websocket events use the endpoint-scoped setter below.
+	for endpointID := range room.participantEndpoints[name] {
+		state := endpointMedia[endpointID]
+		state.ScreenSharing = screenSharing
+		state.UpdatedAt = updatedAt
+		endpointMedia[endpointID] = state
+	}
+	if len(room.participantEndpoints[name]) == 0 {
+		state := room.participantMedia[name]
+		state.ScreenSharing = screenSharing
+		state.UpdatedAt = updatedAt
+		room.participantMedia[name] = state
+	} else {
+		room.participantMedia[name] = participantMediaProjectionLocked(room, name, updatedAt)
+	}
 
 	return app.roomSnapshotLockedForRoom(room, configuredMeetingRoomCapacity())
+}
+
+func (app *kanbanBoardApp) setParticipantEndpointScreenSharingInRoom(roomID, name, endpointID, sessionID string, screenSharing bool) (map[string]any, error) {
+	name = canonicalRoomParticipantName(name)
+	if name == "" {
+		return nil, fmt.Errorf("unknown participant")
+	}
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	room := app.roomLiveLocked(roomID)
+	currentSessionID, ok := room.participantEndpoints[name][endpointID]
+	if room.participantCounts[name] <= 0 || !ok || currentSessionID != sessionID {
+		return nil, fmt.Errorf("%s endpoint session is no longer current", name)
+	}
+	if room.participantEndpointMedia == nil {
+		room.participantEndpointMedia = map[string]map[string]participantMediaState{}
+	}
+	endpointMedia := room.participantEndpointMedia[name]
+	if endpointMedia == nil {
+		endpointMedia = map[string]participantMediaState{}
+		room.participantEndpointMedia[name] = endpointMedia
+	}
+	state := endpointMedia[endpointID]
+	state.ScreenSharing = screenSharing
+	state.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	endpointMedia[endpointID] = state
+	room.participantMedia[name] = participantMediaProjectionLocked(room, name, state.UpdatedAt)
+	return app.roomSnapshotLockedForRoom(room, configuredMeetingRoomCapacity()), nil
 }
 
 func (app *kanbanBoardApp) transcriptRecordingActive() bool {
@@ -6738,19 +7142,31 @@ func (app *kanbanBoardApp) roomSnapshotLockedForRoom(room *roomLiveState, capaci
 		availableSeats = 0
 	}
 	mediaStates := make(map[string]participantMediaState, len(participants))
+	endpointMediaStates := make(map[string]map[string]participantMediaState, len(participants))
 	for _, participant := range participants {
-		mediaStates[participant] = room.participantMedia[participant]
+		legacy := room.participantMedia[participant]
+		mediaStates[participant] = legacy
+		perEndpoint := make(map[string]participantMediaState, len(room.participantEndpoints[participant]))
+		for endpointID := range room.participantEndpoints[participant] {
+			state, ok := room.participantEndpointMedia[participant][endpointID]
+			if !ok {
+				state = legacy
+			}
+			perEndpoint[endpointID] = state
+		}
+		endpointMediaStates[participant] = perEndpoint
 	}
 
 	return map[string]any{
-		"roomId":         room.id,
-		"participants":   participants,
-		"capacity":       capacity,
-		"occupiedSeats":  occupiedSeats,
-		"availableSeats": availableSeats,
-		"mediaStates":    mediaStates,
-		"endpointCounts": app.participantEndpointCountsLocked(room),
-		"recording":      app.roomRecordingStateLocked(room),
+		"roomId":              room.id,
+		"participants":        participants,
+		"capacity":            capacity,
+		"occupiedSeats":       occupiedSeats,
+		"availableSeats":      availableSeats,
+		"mediaStates":         mediaStates,
+		"endpointMediaStates": endpointMediaStates,
+		"endpointCounts":      app.participantEndpointCountsLocked(room),
+		"recording":           app.roomRecordingStateLocked(room),
 	}
 }
 

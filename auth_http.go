@@ -402,6 +402,46 @@ func writeAuthError(w http.ResponseWriter, status int, message string) {
 	writeAuthJSON(w, status, map[string]string{"error": message})
 }
 
+// appleAppSiteAssociationHandler binds the App Store identity to the public
+// Bonfire relying-party domain. iOS verifies this document before allowing a
+// native AuthenticationServices passkey ceremony for thebonfire.xyz.
+func appleAppSiteAssociationHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	appID := strings.TrimSpace(os.Getenv("BONFIRE_APPLE_APP_ID"))
+	if appID == "" {
+		appID = "73PT36P58W.xyz.thebonfire.app"
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	if r.Method == http.MethodHead {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"applinks": map[string]any{
+			"apps": []string{},
+			"details": []any{
+				map[string]any{
+					"appIDs": []string{appID},
+					"components": []any{
+						map[string]any{
+							"/":       "/",
+							"?":       map[string]string{"reset": "*"},
+							"comment": "Open password reset links in BonfireOS.",
+						},
+					},
+				},
+			},
+		},
+		"webcredentials": map[string]any{
+			"apps": []string{appID},
+		},
+	})
+}
+
 func decodeAuthBody(r *http.Request, dest any) error {
 	return decodeAuthBodyWithLimit(r, dest, authBodyLimit)
 }
@@ -430,6 +470,8 @@ func authHandler(w http.ResponseWriter, r *http.Request) {
 		handleAuthLogout(w, r)
 	case r.URL.Path == "/auth/me" && r.Method == http.MethodGet:
 		handleAuthMe(w, r)
+	case r.URL.Path == "/auth/native-web-session" && r.Method == http.MethodGet:
+		handleAuthNativeWebSession(w, r)
 	case r.URL.Path == "/auth/profile" && r.Method == http.MethodPost:
 		handleAuthProfile(w, r)
 	case r.URL.Path == "/auth/theme" && r.Method == http.MethodPost:
@@ -542,8 +584,12 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleAuthLogout(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
-		userSessionStore().destroy(cookie.Value)
+	// Native clients authenticate with the bearer/session header rather than
+	// the browser cookie. Resolve all supported transports so signing out from
+	// iOS actually revokes the server-side session instead of only clearing the
+	// local Keychain copy and leaving a live 30-day token behind.
+	if token := sessionTokenFromRequest(r); token != "" {
+		userSessionStore().destroy(token)
 	}
 	setSessionCookie(w, r, "", -1)
 	writeAuthJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -558,6 +604,28 @@ func handleAuthMe(w http.ResponseWriter, r *http.Request) {
 	// Do not re-emit sessionToken on /auth/me — the native client already
 	// holds it. Emitting it again would expand the surface of every me poll.
 	writeAuthJSON(w, http.StatusOK, identityPayload(user))
+}
+
+// handleAuthNativeWebSession is a narrow bearer-to-HttpOnly-cookie bridge for
+// the few rich web surfaces still embedded by the native app. The bearer is
+// carried only in the initial request header, never exposed to page JavaScript,
+// a URL, a redirect Location, or response JSON.
+func handleAuthNativeWebSession(w http.ResponseWriter, r *http.Request) {
+	token := sessionTokenFromRequest(r)
+	if token == "" || userFromRequest(r) == nil || !wantsNativeSessionToken(r) {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	destination := strings.TrimSpace(r.URL.Query().Get("path"))
+	if destination == "" {
+		destination = "/"
+	}
+	if !strings.HasPrefix(destination, "/") || strings.HasPrefix(destination, "//") || strings.ContainsAny(destination, "\r\n") {
+		writeAuthError(w, http.StatusBadRequest, "invalid destination")
+		return
+	}
+	setSessionCookie(w, r, token, int(sessionTTL/time.Second))
+	http.Redirect(w, r, destination, http.StatusSeeOther)
 }
 
 func handleAuthProfile(w http.ResponseWriter, r *http.Request) {
@@ -737,8 +805,11 @@ func handleAuthChangePassword(w http.ResponseWriter, r *http.Request) {
 	// Rotate sessions: a password change revokes every other signed-in
 	// device, then re-issues a fresh session for this one.
 	userSessionStore().destroyAllForEmail(user.Email)
-	if token, err := userSessionStore().create(user.Email); err == nil {
-		setSessionCookie(w, r, token, int(sessionTTL/time.Second))
+	token, err := userSessionStore().create(user.Email)
+	if err != nil {
+		writeAuthError(w, http.StatusInternalServerError, "could not start a new session")
+		return
 	}
-	writeAuthJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	setSessionCookie(w, r, token, int(sessionTTL/time.Second))
+	writeAuthJSON(w, http.StatusOK, identityPayloadForRequest(r, user, token))
 }

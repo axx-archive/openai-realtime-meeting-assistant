@@ -116,8 +116,12 @@ console.log('[2b] retuneLocalCameraCapture - no camera restart on mobile')
 {
   const src = extractFn('retuneLocalCameraCapture')
   let applied = 0
-  const track = { applyConstraints: async () => { applied++ } }
+  const track = {
+    getSettings: () => ({ width: 640, height: 360, frameRate: 30 }),
+    applyConstraints: async constraints => { applied++; track.constraints = constraints }
+  }
   const run = new Function('isMobileDevice','localVideoTrack','liveTrack','outboundMediaLimits','mediaQualityConstrained','useCrowdedVideoLimits','useGroupVideoLimits','widescreenAspectRatio', `
+    ${extractFn('cameraCaptureNeedsRetune')}
     ${src}
     return retuneLocalCameraCapture
   `)
@@ -127,62 +131,109 @@ console.log('[2b] retuneLocalCameraCapture - no camera restart on mobile')
   applied = 0
   const desktopFn = run(false, ()=>track, ()=>true, {video:{maxFramerate:30}}, false, ()=>false, ()=>false, {ideal:16/9})
   await desktopFn()
-  ok('desktop: applyConstraints still called (behavior preserved)', applied === 1)
+  ok('desktop: a legacy 640x360 strand is restored once', applied === 1)
+  ok('desktop: recovery requests 1280x720 ideals (max-only cannot upscale)', track.constraints?.width?.ideal === 1280 && track.constraints?.height?.ideal === 720)
+
+  track.getSettings = () => ({ width: 1280, height: 720, frameRate: 30 })
+  await desktopFn()
+  ok('desktop: a healthy 1280x720 capture is not restarted on re-offer', applied === 1)
 }
 
-console.log('[2c] constrainCameraForLag - sender-only throttling on mobile')
+console.log('[2c] receive loss stays receive-only')
 {
-  const src = extractFn('constrainCameraForLag')
-  function build(isMobileDevice) {
-    const track = {
-      kind: 'video',
-      applied: 0,
-      applyConstraints: async constraints => {
-        track.applied++
-        track.lastConstraints = constraints
-      }
+  const monitor = extractFn('startMediaQualityMonitor')
+  ok('inbound lag remains telemetry/receiver health and never constrains local camera', !monitor.includes('constrainCameraForLag') && !monitor.includes('mediaQualityConstrained'))
+  ok('outbound low-bandwidth adaptation remains directionally isolated', monitor.includes('snapshot.candidatePair?.availableOutgoingBitrate') && monitor.includes('adaptDesktopCameraForLowBandwidth'))
+
+  let intervalTick = null
+  const peer = { connectionState: 'connected', getStats: async () => ({}) }
+  const make = new Function('window', 'document', 'peer', `
+    let pc = peer
+    let previousMediaQualityStats = null
+    let mediaQualityBandwidthLimited = false
+    let mediaQualityBandwidthLowSamples = 0
+    let mediaQualityBandwidthHealthySamples = 0
+    let adapted = 0
+    let restored = 0
+    let nextSnapshot = null
+    const isMobileDevice = false
+    function stopMediaQualityMonitor() {}
+    function startRemoteVideoFreezeWatch() {}
+    function summarizeMediaQualityStats() { return nextSnapshot }
+    function mediaQualityLooksLaggy(snapshot) { return Boolean(snapshot.inboundLaggy) }
+    async function adaptDesktopCameraForLowBandwidth() { adapted++; mediaQualityBandwidthLimited = true; mediaQualityBandwidthHealthySamples = 0 }
+    async function restoreDesktopCameraAfterBandwidthRecovery() { restored++; mediaQualityBandwidthLimited = false; mediaQualityBandwidthLowSamples = 0; mediaQualityBandwidthHealthySamples = 0 }
+    function repairRemoteMediaHealth() { return {} }
+    function remoteMediaHealthSnapshot() { return {} }
+    function syncRoomAudioPlaybackState() {}
+    function sendMediaQualityReport() {}
+    ${monitor}
+    return {
+      start: () => startMediaQualityMonitor(peer),
+      sample: async snapshot => { nextSnapshot = snapshot; await window.tick() },
+      state: () => ({ adapted, restored, limited: mediaQualityBandwidthLimited })
     }
-    const sender = {
-      track,
-      tuned: 0,
-      getParameters: () => ({ encodings: [{}] }),
-      setParameters: async parameters => {
-        sender.tuned++
-        sender.lastParameters = parameters
-      }
-    }
-    const make = new Function('isMobileDevice', 'sender', 'track', `
-      let mediaQualityConstrained = false
-      const pc = { getSenders: () => [sender] }
-      const outboundMediaLimits = {
-        video: {
-          constrainedMaxBitrate: 250000,
-          constrainedMaxFramerate: 12,
-          constrainedMaxWidth: 480,
-          constrainedMaxHeight: 270
-        }
-      }
-      const widescreenAspectRatio = { ideal: 16 / 9 }
-      function localVideoTrack() { return track }
-      ${src}
-      return {
-        run: constrainCameraForLag,
-        state: () => ({ applied: track.applied, tuned: sender.tuned, mediaQualityConstrained, constraints: track.lastConstraints, parameters: sender.lastParameters })
-      }
-    `)
-    return make(isMobileDevice, sender, track)
+  `)
+  const windowMock = {
+    setInterval: fn => { intervalTick = fn; return 1 },
+    tick: async () => intervalTick(),
   }
+  const harness = make(windowMock, { visibilityState: 'visible' }, peer)
+  harness.start()
+  await harness.sample({ at:0, inboundLaggy:true, outboundVideoBytesSent:1000, candidatePair:{ availableOutgoingBitrate:2590000 } })
+  await harness.sample({ at:4000, inboundLaggy:true, outboundVideoBytesSent:2000, candidatePair:{ availableOutgoingBitrate:2590000 } })
+  ok('20% inbound loss with healthy outgoing bandwidth leaves sender untouched', harness.state().adapted === 0)
+  await harness.sample({ at:8000, inboundLaggy:false, outboundVideoBytesSent:3000, candidatePair:{ availableOutgoingBitrate:200000 } })
+  await harness.sample({ at:12000, inboundLaggy:false, outboundVideoBytesSent:4000, candidatePair:{ availableOutgoingBitrate:200000 } })
+  ok('two sustained low selected-pair bandwidth samples adapt outbound sender', harness.state().adapted === 1 && harness.state().limited)
+  await harness.sample({ at:16000, inboundLaggy:true, outboundVideoBytesSent:5000, candidatePair:{ availableOutgoingBitrate:700000 } })
+  await harness.sample({ at:20000, inboundLaggy:true, outboundVideoBytesSent:6000, candidatePair:{ availableOutgoingBitrate:700000 } })
+  await harness.sample({ at:24000, inboundLaggy:true, outboundVideoBytesSent:7000, candidatePair:{ availableOutgoingBitrate:700000 } })
+  ok('outgoing recovery restores quality despite continued inbound loss', harness.state().restored === 1 && !harness.state().limited)
+}
 
-  const mobile = build(true)
-  await mobile.run('mobile packet loss')
-  const mobileState = mobile.state()
-  ok('mobile lag tunes sender bitrate/framerate', mobileState.tuned === 1 && mobileState.parameters.encodings[0].maxBitrate === 250000)
-  ok('mobile lag does NOT apply capture constraints or aspect ratio', mobileState.applied === 0 && !mobileState.constraints)
+console.log('[2d] selected ICE pair - stale paths do not poison RTT')
+{
+  const make = new Function('performance', 'frozenRemoteVideoTrackIds', `
+    ${extractFn('summarizeCandidatePair')}
+    ${extractFn('summarizeMediaQualityStats')}
+    return summarizeMediaQualityStats
+  `)
+  const summarize = make({ now: () => 1000 }, new Set())
+  const report = new Map([
+    ['stale', { id:'stale', type:'candidate-pair', state:'succeeded', currentRoundTripTime:4.676, availableOutgoingBitrate:85000 }],
+    ['selected', { id:'selected', type:'candidate-pair', state:'succeeded', nominated:true, currentRoundTripTime:0.1, availableOutgoingBitrate:1200000, localCandidateId:'local', remoteCandidateId:'remote' }],
+    ['transport', { type:'transport', selectedCandidatePairId:'selected' }],
+    ['local', { type:'local-candidate', candidateType:'relay', protocol:'udp', networkType:'wifi' }],
+    ['remote', { type:'remote-candidate', candidateType:'host', protocol:'udp' }],
+  ])
+  const snapshot = summarize(report)
+  ok('RTT comes from transport.selectedCandidatePairId, not max stale succeeded pair', snapshot.outboundRtt === 0.1)
+  ok('available outgoing bitrate comes from that same selected pair', snapshot.candidatePair.availableOutgoingBitrate === 1200000)
+}
 
-  const desktop = build(false)
-  await desktop.run('desktop packet loss')
-  const desktopState = desktop.state()
-  ok('desktop lag still applies capture constraints', desktopState.applied === 1 && desktopState.constraints.aspectRatio?.ideal === 16 / 9)
+console.log('[2e] transient disconnect - ICE restart grace')
+{
+  let scheduled = null
+  const peer = { connectionState: 'disconnected' }
+  const make = new Function('window', 'peer', `
+    let pc = peer
+    let iceDisconnectRestartTimer = 0
+    const iceDisconnectRestartGraceMs = 3000
+    let restarts = 0
+    function requestIceRestart() { restarts++ }
+    ${extractFn('scheduleIceRestartAfterDisconnect')}
+    return { schedule: scheduleIceRestartAfterDisconnect, restarts: () => restarts }
+  `)
+  const harness = make({
+    setTimeout: (fn, delay) => { scheduled = { fn, delay }; return 1 },
+  }, peer)
+  harness.schedule(peer)
+  ok('disconnected does not restart ICE synchronously', harness.restarts() === 0)
+  ok('disconnect grace is three seconds', scheduled?.delay === 3000)
+  peer.connectionState = 'connected'
+  scheduled.fn()
+  ok('a self-healed disconnect never restarts ICE', harness.restarts() === 0)
 }
 
 // ---------- ISSUE 3: screen share ----------

@@ -257,9 +257,9 @@ func TestIndexGreenRoomJoinOrderSwapAndWatchdog(t *testing.T) {
 	joinSource := joinRoomSource(t, html)
 
 	acquireAt := strings.Index(joinSource, "await joinMediaWithWatchdog(voiceOnly)")
-	dialAt := strings.Index(joinSource, "openRoomWebSocket()")
+	dialAt := strings.Index(joinSource, "openRoomWebSocket({ transferExisting })")
 	if acquireAt == -1 || dialAt == -1 || acquireAt > dialAt {
-		t.Error("joinRoom must acquire media BEFORE openRoomWebSocket() — the seat is only taken after media resolves")
+		t.Error("joinRoom must acquire media BEFORE openRoomWebSocket({ transferExisting }) — the seat is only taken after media resolves")
 	}
 
 	watchdogBody := functionBody(html, "function joinMediaWithWatchdog(voiceOnly)")

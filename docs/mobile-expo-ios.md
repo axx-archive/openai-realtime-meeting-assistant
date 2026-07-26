@@ -43,19 +43,31 @@ Tokens live in `mobile/src/theme/tokens.ts`, mirrored from `:root` in `index.htm
 
 ## EAS / TestFlight
 
-- Expo account: `axx_archive`
-- Project: https://expo.dev/accounts/axx_archive/projects/bonfireos
-- Project id: `0236310a-4904-4eaf-b1d4-a86e50e49d88`
+- Expo account: `axxonlabs` (paid organization; do not submit from `axx_archive`)
+- Project: https://expo.dev/accounts/axxonlabs/projects/bonfireos
+- Project id: `30cd10a4-275d-45e3-8084-a1d7617b42f8`
 - Bundle id: `xyz.thebonfire.app`
 
 Apple distribution credentials must be set up interactively once:
 
 ```bash
 cd mobile
-npx eas-cli credentials
-npx eas-cli build --platform ios --profile production
-npx eas-cli submit --platform ios --profile production --latest
+npx --yes eas-cli@20.1.0 credentials
+npx --yes eas-cli@20.1.0 build \
+  --platform ios \
+  --profile production \
+  --non-interactive \
+  --wait
+npx --yes eas-cli@20.1.0 submit \
+  --platform ios \
+  --profile production \
+  --id <exact-build-id> \
+  --non-interactive \
+  --wait
 ```
+
+The submit ID must be the build ID returned by the immediately preceding,
+inspected build. Never substitute `--latest` or `--auto-submit`.
 
 ## Local checks
 

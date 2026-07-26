@@ -117,7 +117,17 @@ type roomLiveState struct {
 	// but the sweeper uses these stamps to reap a frozen phone without evicting
 	// the same account's healthy laptop.
 	participantSessionLiveness map[string]map[string]time.Time
+	// participantAdmissionLeases are pointer-stable, per-socket authority
+	// tokens. Presence changes mint/retire them while app.mu is held; media
+	// callbacks retain the pointer and read its atomic current bit without
+	// taking app.mu on every RTP packet.
+	participantAdmissionLeases map[string]*participantAdmissionLease
 	participantMedia           map[string]participantMediaState
+	// participantEndpointMedia is the authoritative per-device media plane:
+	// participant name -> stable endpoint id -> current media state. The
+	// participantMedia map remains the backwards-compatible account projection
+	// consumed by older web clients.
+	participantEndpointMedia map[string]map[string]participantMediaState
 	// guestSeats maps a guest session key to the room-unique display name the
 	// server minted for it ("Guest Sam", "Guest Sam 2"). Seats are per guest
 	// SESSION: a second socket under the same session shares the seat.
@@ -176,6 +186,81 @@ type roomLiveState struct {
 	guestIceRestartBuckets  map[string]*guestChatBucket
 }
 
+// participantAdmissionLease binds every post-admission side effect to the
+// exact socket session that won the app.mu admission transaction. The atomic
+// bit is the media hot-path fence. gate serializes the one-time registry/grant
+// commit against retirement: once the post-app.mu drain returns, a delayed
+// pre-transfer handler cannot install itself or send access_granted.
+type participantAdmissionLease struct {
+	current atomic.Bool
+	gate    sync.Mutex
+
+	roomID    string
+	name      string
+	sessionID string
+}
+
+type participantSessionRetirement struct {
+	roomID    string
+	name      string
+	sessionID string
+	message   string
+	lease     *participantAdmissionLease
+}
+
+type participantAdmissionResult struct {
+	name          string
+	firstEndpoint bool
+	lease         *participantAdmissionLease
+	retired       []participantSessionRetirement
+}
+
+func newParticipantAdmissionLease(roomID, name, sessionID string) *participantAdmissionLease {
+	lease := &participantAdmissionLease{
+		roomID:    normalizeRoomID(roomID),
+		name:      canonicalRoomParticipantName(name),
+		sessionID: sessionID,
+	}
+	lease.current.Store(true)
+	return lease
+}
+
+func (lease *participantAdmissionLease) isCurrent() bool {
+	return lease != nil && lease.current.Load()
+}
+
+func (lease *participantAdmissionLease) retire() {
+	if lease == nil {
+		return
+	}
+	lease.current.Store(false)
+}
+
+func (lease *participantAdmissionLease) drain() {
+	if lease == nil {
+		return
+	}
+	lease.gate.Lock()
+	lease.gate.Unlock()
+}
+
+// whileCurrent runs a bounded, non-app.mu operation while the lease is still
+// authoritative. Admission uses it for registry installation + access_granted;
+// OnTrack uses it once for its initial enqueue/broadcast. RTP forwarding uses
+// isCurrent instead, keeping the packet path lock-free.
+func (lease *participantAdmissionLease) whileCurrent(fn func()) bool {
+	if lease == nil {
+		return false
+	}
+	lease.gate.Lock()
+	defer lease.gate.Unlock()
+	if !lease.current.Load() {
+		return false
+	}
+	fn()
+	return true
+}
+
 // guestChatBucket is a plain token bucket (tokens + last-refill stamp) reused
 // by every §6.5 per-guest-session limit, not just chat.
 type guestChatBucket struct {
@@ -190,7 +275,9 @@ func newRoomLiveState(roomID string, now time.Time) *roomLiveState {
 		participantCounts:          map[string]int{},
 		participantEndpoints:       map[string]map[string]string{},
 		participantSessionLiveness: map[string]map[string]time.Time{},
+		participantAdmissionLeases: map[string]*participantAdmissionLease{},
 		participantMedia:           map[string]participantMediaState{},
+		participantEndpointMedia:   map[string]map[string]participantMediaState{},
 		guestSeats:                 map[string]string{},
 		recordingEnabled:           true,
 		recordingUpdatedAt:         now,
@@ -962,43 +1049,28 @@ func (app *kanbanBoardApp) evictAccountFromOtherRooms(name string, joinedRoomID 
 	}
 	joinedRoomID = normalizeRoomID(joinedRoomID)
 
-	type evictedRoom struct {
-		roomID     string
-		sessionIDs []string
-	}
-	var evictions []evictedRoom
 	app.mu.Lock()
-	for roomID, state := range app.roomLive {
-		if roomID == joinedRoomID || state.participantCounts[name] <= 0 {
-			continue
-		}
-		sessionIDs := make([]string, 0, len(state.participantEndpoints[name]))
-		for _, sessionID := range state.participantEndpoints[name] {
-			sessionIDs = append(sessionIDs, sessionID)
-		}
-		delete(state.participants, name)
-		delete(state.participantCounts, name)
-		delete(state.participantEndpoints, name)
-		delete(state.participantSessionLiveness, name)
-		delete(state.participantMedia, name)
-		evictions = append(evictions, evictedRoom{roomID: roomID, sessionIDs: sessionIDs})
-	}
+	retired := app.retireParticipantSeatsOutsideRoomLocked(name, joinedRoomID)
 	app.mu.Unlock()
+	drainParticipantAdmissionRetirements(retired)
 
-	for _, eviction := range evictions {
-		for _, sessionID := range eviction.sessionIDs {
-			notifySessionReplacedAndClose(sessionID)
-			unregisterParticipantSession(name, sessionID)
-		}
-		log.Infof("room_seat_evicted participant=%s from=%s joined=%s sessions=%d", name, eviction.roomID, joinedRoomID, len(eviction.sessionIDs))
-		broadcastRoomKanbanEvent(eviction.roomID, "participant_left", map[string]any{
-			"name":   name,
-			"roomId": eviction.roomID,
-		})
-		broadcastRoomKanbanEvent(eviction.roomID, "participants", app.roomSnapshotForRoom(eviction.roomID))
-		app.noteMeetingOccupancy(eviction.roomID)
+	byRoom := map[string]int{}
+	for _, retirement := range retired {
+		notifySessionReplacedAndClose(retirement.sessionID)
+		closeSessionMedia(retirement.sessionID)
+		unregisterParticipantSession(retirement.name, retirement.sessionID)
+		byRoom[retirement.roomID]++
 	}
-	if len(evictions) > 0 {
+	for roomID, count := range byRoom {
+		log.Infof("room_seat_evicted participant=%s from=%s joined=%s sessions=%d", name, roomID, joinedRoomID, count)
+		broadcastRoomKanbanEvent(roomID, "participant_left", map[string]any{
+			"name":   name,
+			"roomId": roomID,
+		})
+		broadcastRoomKanbanEvent(roomID, "participants", app.roomSnapshotForRoom(roomID))
+		app.noteMeetingOccupancy(roomID)
+	}
+	if len(retired) > 0 {
 		broadcastRoomsSnapshot()
 	}
 }
@@ -1142,20 +1214,37 @@ func (app *kanbanBoardApp) closeRoomForArchive(roomID string) {
 	type closedSeat struct {
 		name       string
 		sessionIDs []string
+		leases     []*participantAdmissionLease
 	}
 	var seats []closedSeat
 	app.mu.Lock()
 	state := app.roomLiveLocked(roomID)
 	for name := range state.participantCounts {
 		sessionIDs := make([]string, 0, len(state.participantEndpoints[name]))
+		retiredLeases := make([]*participantAdmissionLease, 0, len(state.participantEndpoints[name]))
+		seenSessions := map[string]bool{}
 		for _, sessionID := range state.participantEndpoints[name] {
+			if sessionID == "" || seenSessions[sessionID] {
+				continue
+			}
+			seenSessions[sessionID] = true
 			sessionIDs = append(sessionIDs, sessionID)
+			retiredLeases = append(retiredLeases, retireParticipantAdmissionLeaseLocked(state, sessionID))
+		}
+		for sessionID, lease := range state.participantAdmissionLeases {
+			if lease == nil || !sameParticipantName(lease.name, name) || seenSessions[sessionID] {
+				continue
+			}
+			seenSessions[sessionID] = true
+			sessionIDs = append(sessionIDs, sessionID)
+			retiredLeases = append(retiredLeases, retireParticipantAdmissionLeaseLocked(state, sessionID))
 		}
 		delete(state.participants, name)
 		delete(state.participantCounts, name)
 		delete(state.participantEndpoints, name)
 		delete(state.participantSessionLiveness, name)
 		delete(state.participantMedia, name)
+		delete(state.participantEndpointMedia, name)
 		if isGuestDisplayName(name) {
 			for sessionKey, display := range state.guestSeats {
 				if strings.EqualFold(display, name) {
@@ -1167,13 +1256,14 @@ func (app *kanbanBoardApp) closeRoomForArchive(roomID string) {
 				}
 			}
 		}
-		seats = append(seats, closedSeat{name: name, sessionIDs: sessionIDs})
+		seats = append(seats, closedSeat{name: name, sessionIDs: sessionIDs, leases: retiredLeases})
 	}
 	app.mu.Unlock()
 
 	for _, seat := range seats {
+		drainParticipantAdmissionLeases(seat.leases)
 		for _, sessionID := range seat.sessionIDs {
-			closeSessionSockets(sessionID)
+			closeSessionMedia(sessionID)
 			unregisterParticipantSession(seat.name, sessionID)
 		}
 		log.Infof("room_seat_closed participant=%s room=%s sessions=%d; room archived", seat.name, roomID, len(seat.sessionIDs))

@@ -432,6 +432,7 @@ type participantTrackSnapshot struct {
 	TrackID       string `json:"trackId"`
 	SourceTrackID string `json:"sourceTrackId,omitempty"`
 	StreamID      string `json:"streamId,omitempty"`
+	EndpointID    string `json:"endpointId,omitempty"`
 	RoomID        string `json:"roomId"`
 }
 
@@ -439,6 +440,7 @@ type trackMediaOwner struct {
 	track      *webrtc.TrackLocalStaticRTP
 	generation uint64
 	sittingID  string
+	endpointID string
 }
 
 func (p peerConnectionState) acceptsTrack(track *webrtc.TrackLocalStaticRTP) bool {
@@ -915,6 +917,7 @@ func main() {
 	http.HandleFunc("/capabilities", capabilitiesHandler)
 	http.HandleFunc("/websocket", websocketHandler)
 	http.HandleFunc("/auth/", authHandler)
+	http.HandleFunc("/.well-known/apple-app-site-association", appleAppSiteAssociationHandler)
 	http.HandleFunc("/assistant/query", assistantQueryHandler)
 	http.HandleFunc("/assistant/chat-threads", assistantChatThreadsHandler)
 	http.HandleFunc("/assistant/chat-threads/", assistantChatThreadHandler)
@@ -934,6 +937,8 @@ func main() {
 	http.HandleFunc("/assistant/push/unsubscribe", assistantPushUnsubscribeHandler)
 	http.HandleFunc("/assistant/push/prefs", assistantPushPrefsHandler)
 	http.HandleFunc("/assistant/board", assistantBoardHandler)
+	http.HandleFunc("/assistant/board/cards", assistantBoardCardsHandler)
+	http.HandleFunc("/assistant/board/cards/", assistantBoardCardsHandler)
 	http.HandleFunc("/assistant/board/drafts/", assistantBoardDraftActionHandler)
 	http.HandleFunc("/assistant/memory", assistantMemoryHandler)
 	http.HandleFunc("/assistant/files", assistantFilesHandler)
@@ -2131,8 +2136,8 @@ func shouldServeIndexHTML(r *http.Request) bool {
 
 // assistantBoardHandler serves the kanban board snapshot to any authenticated
 // session. Reads must not require joining the video call: the board state is
-// server-side, and office/chat sessions have no room websocket. Writes and
-// board editing keep their existing room-scoped gates.
+// server-side, and office/chat sessions have no room websocket. Native manual
+// edits use the sibling session-authenticated cards endpoint.
 func assistantBoardHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -2887,6 +2892,10 @@ func addTrack(roomID string, t *webrtc.TrackRemote, participantName string, sess
 }
 
 func addTrackForGeneration(roomID string, mediaGeneration uint64, t *webrtc.TrackRemote, participantName string, sessionID string) (*webrtc.TrackLocalStaticRTP, error) { // nolint
+	return addTrackForEndpointGeneration(roomID, mediaGeneration, t, participantName, sessionID, "")
+}
+
+func addTrackForEndpointGeneration(roomID string, mediaGeneration uint64, t *webrtc.TrackRemote, participantName string, sessionID string, endpointID string) (*webrtc.TrackLocalStaticRTP, error) { // nolint
 	// Create a new TrackLocal with the same codec as our incoming
 	trackLocal, err := webrtc.NewTrackLocalStaticRTP(t.Codec().RTPCodecCapability, forwardedRemoteTrackID(t), t.StreamID())
 	if err != nil {
@@ -2931,7 +2940,7 @@ func addTrackForGeneration(roomID string, mediaGeneration uint64, t *webrtc.Trac
 	if kanbanApp != nil && kanbanApp.memory != nil {
 		sittingID = kanbanApp.memory.currentMeetingID(roomID)
 	}
-	trackMediaOwners[trackLocal.ID()] = trackMediaOwner{track: trackLocal, generation: mediaGeneration, sittingID: sittingID}
+	trackMediaOwners[trackLocal.ID()] = trackMediaOwner{track: trackLocal, generation: mediaGeneration, sittingID: sittingID, endpointID: endpointID}
 	totalTracks, audioTracks, videoTracks := forwardedTrackCountsLocked()
 	listLock.Unlock()
 
@@ -2966,13 +2975,25 @@ func reapStaleLayerTwinsLocked(groupKey string, rid string, keepTrackID string) 
 }
 
 func participantTrackPayload(name string, t *webrtc.TrackRemote) map[string]any {
-	return map[string]any{
+	return participantTrackPayloadForEndpoint(name, t, "")
+}
+
+func participantTrackPayloadForEndpoint(name string, t *webrtc.TrackRemote, endpointID string) map[string]any {
+	return participantTrackPayloadFields(name, t.Kind().String(), forwardedRemoteTrackID(t), t.ID(), t.StreamID(), endpointID)
+}
+
+func participantTrackPayloadFields(name, kind, trackID, sourceTrackID, streamID, endpointID string) map[string]any {
+	payload := map[string]any{
 		"name":          canonicalRoomParticipantName(name),
-		"kind":          t.Kind().String(),
-		"trackId":       forwardedRemoteTrackID(t),
-		"sourceTrackId": t.ID(),
-		"streamId":      t.StreamID(),
+		"kind":          kind,
+		"trackId":       trackID,
+		"sourceTrackId": sourceTrackID,
+		"streamId":      streamID,
 	}
+	if endpointID != "" {
+		payload["endpointId"] = endpointID
+	}
+	return payload
 }
 
 func forwardedRemoteTrackID(t *webrtc.TrackRemote) string {
@@ -3106,8 +3127,13 @@ func participantTrackSnapshotsLockedForGeneration(roomID string, excludeParticip
 		if normalizeRoomID(trackRooms[trackID]) != snapshotRoomID {
 			continue
 		}
-		if owner, ok := trackMediaOwners[trackID]; enforceGeneration && ok && owner.track == trackLocal && owner.generation != mediaGeneration {
+		owner, hasOwner := trackMediaOwners[trackID]
+		if enforceGeneration && hasOwner && owner.track == trackLocal && owner.generation != mediaGeneration {
 			continue
+		}
+		endpointID := ""
+		if hasOwner && owner.track == trackLocal {
+			endpointID = owner.endpointID
 		}
 		name := canonicalRoomParticipantName(trackParticipants[trackID])
 		if sameParticipantName(name, excludeParticipant) {
@@ -3119,6 +3145,7 @@ func participantTrackSnapshotsLockedForGeneration(roomID string, excludeParticip
 			TrackID:       trackID,
 			SourceTrackID: trackSourceIDs[trackID],
 			StreamID:      trackLocal.StreamID(),
+			EndpointID:    endpointID,
 			RoomID:        snapshotRoomID,
 		})
 	}
@@ -3316,6 +3343,7 @@ func logClientMediaQualityReport(rawData string, participantName string, session
 	}
 
 	client := mapFromPayload(payload, "client")
+	cameraFraming := mapFromPayload(payload, "cameraFraming")
 	browser := mapFromPayload(payload, "browser")
 	audio := mapFromPayload(payload, "audio")
 	video := mapFromPayload(payload, "video")
@@ -3331,7 +3359,7 @@ func logClientMediaQualityReport(rawData string, participantName string, session
 	videoSettings := mapFromPayload(video, "settings")
 	remoteAudioPlaybackPaths := mapFromPayload(remote, "remoteAudioPlaybackPaths")
 	fmt.Printf(
-		"Client media quality participant=%q session=%s platform=%s clientVersion=%s safari=%v laggy=%v viewport=%dx%d visual=%dx%d orientation=%s/%d mobile=%v roomLayout=%s stageMode=%s boardExpanded=%v screenShare=%s attachmentRevision=%d auxTargets=%d constrained=%v audioMode=%s audioProfile=%s voiceFocus=%v processor=%s workletHealth=%s rnnoiseReady=%v sampleRate=%d frameSize=%d vfGain=%.3f vfSuppressionDb=%.1f vfBias=%.4f vfSpeech=%.2f localAudio=%s/%v localVideo=%s/%v outAudioKbps=%.0f outVideoKbps=%.0f outAudioPackets=%d outVideoFrames=%d rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f inboundVideoLossPct=%.1f inboundAudioLossPct=%.1f localCandidate=%s remoteCandidate=%s protocol=%s network=%s remoteVideo=%d remoteAudio=%d remoteAudioLevel=%.5f remoteAudible=%d playbackElement=%d playbackWebAudio=%d playbackNone=%d audioCtx=%s missingVideo=%d missingAudio=%d duplicateVideo=%d duplicateAudio=%d placeholderVideo=%d placeholderAudio=%d stalledVideo=%d pendingAudio=%d\n",
+		"Client media quality participant=%q session=%s platform=%s clientVersion=%s safari=%v laggy=%v viewport=%dx%d visual=%dx%d orientation=%s/%d mobile=%v roomLayout=%s stageMode=%s boardExpanded=%v screenShare=%s attachmentRevision=%d auxTargets=%d constrained=%v audioMode=%s audioProfile=%s voiceFocus=%v processor=%s workletHealth=%s rnnoiseReady=%v sampleRate=%d frameSize=%d vfGain=%.3f vfSuppressionDb=%.1f vfBias=%.4f vfSpeech=%.2f localAudio=%s/%v localVideo=%s/%v cameraDeviceType=%s centerStageSupported=%v centerStageEnabled=%v centerStageActive=%v wideUprightSupported=%v wideUprightEnabled=%v framingDynamic=%dx%d framingReason=%s wideUprightReason=%s centerStageReason=%s outAudioKbps=%.0f outVideoKbps=%.0f outAudioPackets=%d outVideoFrames=%d outVideo=%dx%d outVideoFps=%.1f targetVideoKbps=%.0f videoLimit=%s rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f inboundVideoLossPct=%.1f inboundAudioLossPct=%.1f localCandidate=%s remoteCandidate=%s protocol=%s network=%s remoteVideo=%d remoteAudio=%d remoteAudioLevel=%.5f remoteAudible=%d playbackElement=%d playbackWebAudio=%d playbackNone=%d audioCtx=%s missingVideo=%d missingAudio=%d duplicateVideo=%d duplicateAudio=%d placeholderVideo=%d placeholderAudio=%d stalledVideo=%d pendingAudio=%d\n",
 		participantName,
 		sessionID,
 		stringFromPayload(client, "platform"),
@@ -3368,10 +3396,26 @@ func logClientMediaQualityReport(rawData string, participantName string, session
 		boolFromPayload(audioOutput, "enabled"),
 		stringFromPayload(videoSettings, "readyState"),
 		boolFromPayload(videoSettings, "enabled"),
+		stringFromPayload(cameraFraming, "activeDeviceType"),
+		boolFromPayload(cameraFraming, "centerStageSupported"),
+		boolFromPayload(cameraFraming, "centerStageEnabled"),
+		boolFromPayload(cameraFraming, "centerStageActive"),
+		boolFromPayload(cameraFraming, "wideUprightSupported"),
+		boolFromPayload(cameraFraming, "wideUprightEnabled"),
+		int(floatFromPayload(cameraFraming, "dynamicWidth")),
+		int(floatFromPayload(cameraFraming, "dynamicHeight")),
+		stringFromPayload(cameraFraming, "reasonCode"),
+		stringFromPayload(cameraFraming, "wideUprightReasonCode"),
+		stringFromPayload(cameraFraming, "centerStageReasonCode"),
 		kbpsFromDelta(floatFromPayload(deltas, "outboundAudioBytesSent"), floatFromPayload(deltas, "elapsedMs")),
 		kbpsFromDelta(floatFromPayload(deltas, "outboundVideoBytesSent"), floatFromPayload(deltas, "elapsedMs")),
 		int(floatFromPayload(deltas, "outboundAudioPacketsSent")),
 		int(floatFromPayload(deltas, "outboundVideoFramesSent")),
+		int(floatFromPayload(stats, "outboundVideoFrameWidth")),
+		int(floatFromPayload(stats, "outboundVideoFrameHeight")),
+		floatFromPayload(stats, "outboundVideoFramesPerSecond"),
+		floatFromPayload(stats, "outboundVideoTargetBitrate")/1000,
+		stringFromPayload(stats, "outboundVideoQualityLimitationReason"),
 		secondsToMillis(floatFromPayload(stats, "outboundRtt")),
 		secondsToMillis(floatFromPayload(stats, "inboundVideoJitter")),
 		secondsToMillis(floatFromPayload(stats, "inboundAudioJitter")),
@@ -3574,12 +3618,20 @@ func replaceExistingParticipantSessionEndpoint(name string, sessionID string, en
 }
 
 func replaceExistingParticipantSessionEndpointInRoom(roomID string, name string, sessionID string, endpointID string, currentPeerConnection *webrtc.PeerConnection, currentWebsocket *threadSafeWriter, sessionEmail string) {
+	replaceParticipantSessionEndpointInRoom(roomID, name, sessionID, endpointID, currentPeerConnection, currentWebsocket, sessionEmail, false)
+}
+
+// replaceParticipantSessionEndpointInRoom installs the current session and
+// retires either a stale session on the same endpoint or, for an explicit
+// transfer, every other endpoint of this account in the same room.
+func replaceParticipantSessionEndpointInRoom(roomID string, name string, sessionID string, endpointID string, currentPeerConnection *webrtc.PeerConnection, currentWebsocket *threadSafeWriter, sessionEmail string, transferExisting bool) {
 	name = canonicalRoomParticipantName(name)
 	if name == "" {
 		return
 	}
 
 	key := participantConnectionKey(name, endpointID)
+	normalizedRoomID := normalizeRoomID(roomID)
 	var staleConnections []peerConnectionState
 	removedTracks := false
 
@@ -3587,8 +3639,17 @@ func replaceExistingParticipantSessionEndpointInRoom(roomID string, name string,
 	if activeParticipantConnections == nil {
 		activeParticipantConnections = map[string]peerConnectionState{}
 	}
-	if existing, ok := activeParticipantConnections[key]; ok && existing.sessionID != sessionID {
+	for activeKey, existing := range activeParticipantConnections {
+		sameEndpointReplacement := activeKey == key && existing.sessionID != sessionID
+		sameRoomTransfer := transferExisting &&
+			existing.sessionID != sessionID &&
+			sameParticipantName(existing.participantName, name) &&
+			normalizeRoomID(existing.roomID) == normalizedRoomID
+		if !sameEndpointReplacement && !sameRoomTransfer {
+			continue
+		}
 		staleConnections = append(staleConnections, existing)
+		delete(activeParticipantConnections, activeKey)
 	}
 	activeParticipantConnections[key] = peerConnectionState{
 		peerConnection:  currentPeerConnection,
@@ -3597,14 +3658,17 @@ func replaceExistingParticipantSessionEndpointInRoom(roomID string, name string,
 		sessionID:       sessionID,
 		endpointID:      endpointID,
 		sessionEmail:    normalizeAccountEmail(sessionEmail),
-		roomID:          normalizeRoomID(roomID),
+		roomID:          normalizedRoomID,
 	}
 
 	retainedConnections := peerConnections[:0]
 	for _, state := range peerConnections {
 		isCurrentConnection := currentPeerConnection != nil && state.peerConnection == currentPeerConnection
 		sameEndpoint := sameParticipantName(state.participantName, name) && state.endpointID == endpointID
-		if isCurrentConnection || !sameEndpoint || state.sessionID == sessionID {
+		sameRoomTransfer := transferExisting &&
+			sameParticipantName(state.participantName, name) &&
+			normalizeRoomID(state.roomID) == normalizedRoomID
+		if isCurrentConnection || (!sameEndpoint && !sameRoomTransfer) || state.sessionID == sessionID {
 			retainedConnections = append(retainedConnections, state)
 			continue
 		}
@@ -3615,17 +3679,104 @@ func replaceExistingParticipantSessionEndpointInRoom(roomID string, name string,
 	// Remove only the evicted sessions' forwarded tracks, never the account's
 	// other live endpoint. A brand-new session has no tracks yet at admission,
 	// so this only prunes the replaced tab's leftovers.
+	retiredSessions := map[string]bool{}
 	for _, stale := range staleConnections {
+		if stale.sessionID == "" || retiredSessions[stale.sessionID] {
+			continue
+		}
+		retiredSessions[stale.sessionID] = true
 		if removeParticipantTracksLocked(name, stale.sessionID) {
 			removedTracks = true
 		}
 	}
 	listLock.Unlock()
 
-	closeParticipantConnections(staleConnections)
+	if transferExisting {
+		closeParticipantConnectionsWithMessage(staleConnections, "This call moved to another device.")
+	} else {
+		closeParticipantConnections(staleConnections)
+	}
 
 	if len(staleConnections) > 0 || removedTracks {
 		requestRoomMediaCommand(roomID, roomMediaCommandAdmit)
+	}
+}
+
+// finalizeParticipantAdmissionRetirements performs the socket/media half of an
+// app.mu admission transaction. Presence and lease authority are already gone;
+// this function takes listLock only long enough to detach registry rows and
+// forwarded tracks, then writes/closes sockets and PeerConnections after the
+// lock is released. It never takes app.mu while holding listLock.
+func finalizeParticipantAdmissionRetirements(retired []participantSessionRetirement, joinedRoomID string) {
+	if len(retired) == 0 {
+		return
+	}
+	joinedRoomID = normalizeRoomID(joinedRoomID)
+	retiredBySession := map[string]participantSessionRetirement{}
+	for _, retirement := range retired {
+		if retirement.sessionID != "" {
+			retiredBySession[retirement.sessionID] = retirement
+		}
+	}
+	if len(retiredBySession) == 0 {
+		return
+	}
+
+	connectionsByMessage := map[string][]peerConnectionState{}
+	roomsNeedingSignal := map[string]struct{}{}
+	listLock.Lock()
+	for key, state := range activeParticipantConnections {
+		retirement, ok := retiredBySession[state.sessionID]
+		if !ok {
+			continue
+		}
+		connectionsByMessage[retirement.message] = append(connectionsByMessage[retirement.message], state)
+		roomsNeedingSignal[retirement.roomID] = struct{}{}
+		delete(activeParticipantConnections, key)
+	}
+	retainedConnections := peerConnections[:0]
+	for _, state := range peerConnections {
+		retirement, ok := retiredBySession[state.sessionID]
+		if !ok {
+			retainedConnections = append(retainedConnections, state)
+			continue
+		}
+		connectionsByMessage[retirement.message] = append(connectionsByMessage[retirement.message], state)
+		roomsNeedingSignal[retirement.roomID] = struct{}{}
+	}
+	peerConnections = retainedConnections
+	for sessionID, retirement := range retiredBySession {
+		if removeParticipantTracksLocked(retirement.name, sessionID) {
+			roomsNeedingSignal[retirement.roomID] = struct{}{}
+		}
+		delete(subscriberLayerTiers, sessionID)
+	}
+	listLock.Unlock()
+
+	for message, states := range connectionsByMessage {
+		closeParticipantConnectionsWithMessage(states, message)
+	}
+	for roomID := range roomsNeedingSignal {
+		requestRoomMediaCommand(roomID, roomMediaCommandLeave)
+	}
+
+	retiredOtherRooms := map[string]participantSessionRetirement{}
+	for _, retirement := range retiredBySession {
+		if normalizeRoomID(retirement.roomID) != joinedRoomID {
+			retiredOtherRooms[normalizeRoomID(retirement.roomID)] = retirement
+		}
+	}
+	for roomID, retirement := range retiredOtherRooms {
+		log.Infof("room_seat_evicted participant=%s from=%s joined=%s", retirement.name, roomID, joinedRoomID)
+		broadcastRoomKanbanEvent(roomID, "participant_left", map[string]any{
+			"name":   retirement.name,
+			"roomId": roomID,
+		})
+		broadcastRoomKanbanEvent(roomID, "participants", kanbanApp.roomSnapshotForRoom(roomID))
+		kanbanApp.noteMeetingOccupancy(roomID)
+	}
+	if len(retiredOtherRooms) > 0 {
+		broadcastRoomsSnapshot()
 	}
 }
 
@@ -3734,6 +3885,10 @@ func peerConnectionStateLocked(peerConnection *webrtc.PeerConnection) *peerConne
 }
 
 func closeParticipantConnections(states []peerConnectionState) {
+	closeParticipantConnectionsWithMessage(states, "This browser session was replaced by a newer room join.")
+}
+
+func closeParticipantConnectionsWithMessage(states []peerConnectionState, message string) {
 	closedPeerConnections := map[*webrtc.PeerConnection]struct{}{}
 	closedWebsockets := map[*threadSafeWriter]struct{}{}
 	for _, state := range states {
@@ -3754,7 +3909,7 @@ func closeParticipantConnections(states []peerConnectionState) {
 				// reconnect re-dials — evicting THIS admission right back, a
 				// self-sustaining seat duel where both tabs churn forever.
 				// session_replaced makes the losing tab stop cleanly.
-				_ = sendKanbanEvent(state.websocket, "session_replaced", "This browser session was replaced by a newer room join.")
+				_ = sendKanbanEvent(state.websocket, "session_replaced", message)
 				_ = state.websocket.Close()
 			}
 		}
@@ -4929,10 +5084,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	}
 	participantName := "participant"
 	participantSessionID := nextParticipantSessionID()
-	// endpointID is the stable per-device id from the participant hello. It is
-	// set once at admission and only ever read afterwards on this same read-loop
-	// goroutine, so it needs no lock. Empty for legacy/native clients; guests
-	// use their per-socket session id (each socket is an endpoint of the seat).
+	// endpointID is the stable per-device id from the participant hello. Empty
+	// for legacy clients; guests use their per-socket session id. The OnTrack
+	// callback reads it through participantMu after admission.
 	endpointID := ""
 	participantAccepted := false
 	officeAccepted := false
@@ -4952,6 +5106,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	var participantAcceptedState atomic.Bool
 	var mediaJoinedState atomic.Bool
 	var participantMediaGeneration atomic.Uint64
+	var participantAdmission atomic.Pointer[participantAdmissionLease]
 	participantSittingID := ""
 	var cleanupOnce sync.Once
 	pendingRemoteCandidates := pendingRemoteICECandidateQueue{}
@@ -4966,10 +5121,24 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 		participantName = name
 		participantMu.Unlock()
 	}
+	currentParticipantEndpointID := func() string {
+		participantMu.Lock()
+		defer participantMu.Unlock()
+		return endpointID
+	}
+	setParticipantEndpointID := func(value string) {
+		participantMu.Lock()
+		endpointID = value
+		participantMu.Unlock()
+	}
 	cleanupParticipantSession := func(reason string, closeSocket bool) {
 		cleanupOnce.Do(func() {
 			if participantAcceptedState.Load() {
 				name := currentParticipantName()
+				// Revoke + drain the admission lease before the registry scan. A
+				// callback that already entered whileCurrent may finish, but it must
+				// do so before unregister removes the final connection/track rows.
+				removed, stillPresent := kanbanApp.forgetParticipantSessionResultInRoom(connRoomID, name, participantSessionID)
 				unregisterParticipantSession(name, participantSessionID)
 				if guest == nil {
 					// Member repair + ice-restart buckets key on this per-socket
@@ -4978,7 +5147,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 					kanbanApp.dropMemberMediaRepairBucket(connRoomID, participantSessionID)
 					kanbanApp.dropMemberIceRestartBucket(connRoomID, participantSessionID)
 				}
-				if removed, stillPresent := kanbanApp.forgetParticipantSessionResultInRoom(connRoomID, name, participantSessionID); removed {
+				if removed {
 					// participant_left means a PERSON left. When one of an
 					// account's two devices drops but another stays connected,
 					// the person is still here: suppress the "left" (peers would
@@ -5118,7 +5287,13 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 		pc.OnTrack(func(t *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 			trackParticipantName := currentParticipantName()
 			trackParticipantSessionID := participantSessionID
+			trackParticipantEndpointID := currentParticipantEndpointID()
 			trackMediaGeneration := participantMediaGeneration.Load()
+			trackAdmission := participantAdmission.Load()
+			if !trackAdmission.isCurrent() {
+				log.Infof("room_ontrack_stale_session participant=%s session=%s room=%s", trackParticipantName, trackParticipantSessionID, connRoomID)
+				return
+			}
 			mediaActor := roomMediaActorForGeneration(connRoomID, trackMediaGeneration)
 			if mediaActor == nil {
 				log.Infof("room_ontrack_stale_sitting participant=%s session=%s room=%s gen=%d", trackParticipantName, trackParticipantSessionID, connRoomID, trackMediaGeneration)
@@ -5132,32 +5307,39 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			codec := t.Codec()
 			log.Infof("room_ontrack_start participant=%s session=%s room=%s kind=%s track_id=%s source_track_id=%s stream_id=%s rid=%q ssrc=%d rtx_ssrc=%d payload_type=%d codec=%s clock_rate=%d channels=%d fmtp=%q feedback=%s has_rtx=%t",
 				trackParticipantName, trackParticipantSessionID, connRoomID, t.Kind(), forwardedTrackID, t.ID(), t.StreamID(), t.RID(), t.SSRC(), t.RtxSSRC(), t.PayloadType(), codec.MimeType, codec.ClockRate, codec.Channels, codec.SDPFmtpLine, rtcpFeedbackSummary(codec.RTCPFeedback), t.HasRTX())
-			broadcastRoomAssistantTelemetry(connRoomID, "signal", fmt.Sprintf("received %s track from browser", t.Kind().String()), map[string]any{
-				"participant":   trackParticipantName,
-				"trackId":       forwardedTrackID,
-				"sourceTrackId": t.ID(),
-				"streamId":      t.StreamID(),
-				"payloadType":   t.PayloadType(),
-			})
-
 			// Create a track to fan out our incoming media to all browser peers
 			// of THIS room only (trackRooms + acceptsTrack, multi-room W3).
-			trackLocal, err := addTrackForGeneration(connRoomID, trackMediaGeneration, t, trackParticipantName, trackParticipantSessionID)
+			trackLocal, err := addTrackForEndpointGeneration(connRoomID, trackMediaGeneration, t, trackParticipantName, trackParticipantSessionID, trackParticipantEndpointID)
 			if err != nil {
 				log.Errorf("Failed to create local track for remote track=%s: %v", t.ID(), err)
 				return
 			}
-			if !mediaActor.enqueue(roomMediaCommandTrack) {
+			if !trackAdmission.isCurrent() {
+				removeTrack(trackLocal)
+				log.Infof("room_ontrack_retired_after_add participant=%s session=%s room=%s", trackParticipantName, trackParticipantSessionID, connRoomID)
+				return
+			}
+			published := false
+			if !trackAdmission.whileCurrent(func() {
+				if mediaActor.enqueue(roomMediaCommandTrack) && roomMediaActorForGeneration(connRoomID, trackMediaGeneration) == mediaActor {
+					trackPayload := participantTrackPayloadForEndpoint(trackParticipantName, t, trackParticipantEndpointID)
+					trackPayload["roomId"] = connRoomID
+					broadcastRoomKanbanEvent(connRoomID, "participant_track", trackPayload)
+					published = true
+				}
+			}) || !published {
 				removeTrack(trackLocal)
 				return
 			}
-			if roomMediaActorForGeneration(connRoomID, trackMediaGeneration) != mediaActor {
-				removeTrack(trackLocal)
-				return
+			if trackAdmission.isCurrent() {
+				broadcastRoomAssistantTelemetry(connRoomID, "signal", fmt.Sprintf("received %s track from browser", t.Kind().String()), map[string]any{
+					"participant":   trackParticipantName,
+					"trackId":       forwardedTrackID,
+					"sourceTrackId": t.ID(),
+					"streamId":      t.StreamID(),
+					"payloadType":   t.PayloadType(),
+				})
 			}
-			trackPayload := participantTrackPayload(trackParticipantName, t)
-			trackPayload["roomId"] = connRoomID
-			broadcastRoomKanbanEvent(connRoomID, "participant_track", trackPayload)
 			defer removeTrack(trackLocal)
 
 			// Silence watchdog: watch this publisher track for a stalled uplink
@@ -5201,6 +5383,13 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				if err != nil {
 					log.Infof("room_ontrack_read_end participant=%s session=%s kind=%s track_id=%s source_track_id=%s packets=%d error=%v",
 						trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), packetsForwarded, err)
+					return
+				}
+				// The admission lease is pointer-stable and retired atomically by
+				// transfer, room switch, leave, archive, or liveness reap. This is
+				// deliberately the first post-ReadRTP side effect and requires no
+				// app.mu acquisition on the packet hot path.
+				if !trackAdmission.isCurrent() {
 					return
 				}
 				// ReadRTP is blocking. The sitting may have rolled while no packet
@@ -5366,8 +5555,8 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 		}
 
-		if participantAccepted && message.Event != "participant" && !kanbanApp.participantSessionCurrentInRoom(connRoomID, currentParticipantName(), participantSessionID) {
-			_ = sendKanbanEvent(c, "session_replaced", "This browser session was replaced by a newer room join.")
+		if participantAccepted && message.Event != "participant" && !participantAdmission.Load().isCurrent() {
+			_ = sendKanbanEvent(c, "session_replaced", "This call moved to another device, or this browser session was replaced by a newer room join.")
 			return
 		}
 
@@ -5383,7 +5572,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				// coexist; a second socket of one session shares its seat).
 				sittingID := kanbanApp.prepareMeetingSittingID(connRoomID)
 				participantSittingID = sittingID
-				admittedName, firstEndpoint, err := kanbanApp.admitGuestWithAnchor(context.Background(), connRoomID, guest.SessionKey, guest.Name, participantSessionID, sittingID)
+				admission, err := kanbanApp.admitGuestWithAnchorResult(context.Background(), connRoomID, guest.SessionKey, guest.Name, participantSessionID, sittingID)
 				if err != nil {
 					if errors.Is(err, ErrAdmissionAnchorStore) {
 						log.Errorf("Failed to persist guest admission anchor: %v", err)
@@ -5393,10 +5582,14 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 					_ = sendKanbanEvent(c, "access_denied", err.Error()+".")
 					continue
 				}
-				endpointID = participantSessionID
+				admittedName := admission.name
+				firstEndpoint := admission.firstEndpoint
+				setParticipantEndpointID(participantSessionID)
 				setParticipantName(admittedName)
+				participantAdmission.Store(admission.lease)
 				participantAccepted = true
 				participantAcceptedState.Store(true)
+				finalizeParticipantAdmissionRetirements(admission.retired, connRoomID)
 				if admitGuestCaps != nil {
 					admitGuestCaps()
 				}
@@ -5413,16 +5606,23 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 						return
 					}
 				}
-				replaceExistingParticipantSessionEndpointInRoom(connRoomID, admittedName, participantSessionID, endpointID, peerConnection, c, "")
 				participantMediaGeneration.Store(kanbanApp.ensureRoomMedia(connRoomID))
 				// §5.4(d): the guest replay branch withholds board/memory/
 				// notifications/proposals — only room-scoped, allowlisted state.
-				if err := sendKanbanEvent(c, "access_granted", map[string]any{
-					"name":   admittedName,
-					"roomId": connRoomID,
-					"guest":  true,
-				}); err != nil {
-					log.Errorf("Failed to send guest access grant: %v", err)
+				var grantErr error
+				if !admission.lease.whileCurrent(func() {
+					replaceExistingParticipantSessionEndpointInRoom(connRoomID, admittedName, participantSessionID, endpointID, peerConnection, c, "")
+					grantErr = sendKanbanEvent(c, "access_granted", map[string]any{
+						"name":   admittedName,
+						"roomId": connRoomID,
+						"guest":  true,
+					})
+				}) {
+					_ = sendKanbanEvent(c, "session_replaced", "This browser session was replaced by a newer room join.")
+					return
+				}
+				if grantErr != nil {
+					log.Errorf("Failed to send guest access grant: %v", grantErr)
 				}
 				if err := sendKanbanEvent(c, "participants", kanbanApp.roomSnapshotForRoom(connRoomID)); err != nil {
 					log.Errorf("Failed to send participant state: %v", err)
@@ -5454,14 +5654,17 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			// behaviour. The passcode rides the same hello (§4.5) — never the
 			// URL, never logged.
 			helloPasscode := ""
+			transferExisting := false
 			if trimmed := strings.TrimSpace(message.Data); trimmed != "" {
 				var hello struct {
-					EndpointID string `json:"endpointId"`
-					Passcode   string `json:"passcode"`
+					EndpointID       string `json:"endpointId"`
+					Passcode         string `json:"passcode"`
+					TransferExisting bool   `json:"transferExisting"`
 				}
 				if err := json.Unmarshal([]byte(trimmed), &hello); err == nil {
-					endpointID = sanitizeEndpointID(hello.EndpointID)
+					setParticipantEndpointID(sanitizeEndpointID(hello.EndpointID))
 					helloPasscode = hello.Passcode
+					transferExisting = hello.TransferExisting
 				}
 			}
 			room, roomOK := appRoomStore().byID(connRoomID)
@@ -5484,7 +5687,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			sittingID := kanbanApp.prepareMeetingSittingID(connRoomID)
 			participantSittingID = sittingID
-			admittedName, firstEndpoint, err := kanbanApp.admitParticipantWithAnchor(context.Background(), connRoomID, name, participantSessionID, endpointID, sittingID, memberAdmissionPrincipal(sessionEmail))
+			admission, err := kanbanApp.admitParticipantWithAnchorResult(context.Background(), connRoomID, name, participantSessionID, endpointID, sittingID, memberAdmissionPrincipal(sessionEmail), transferExisting)
 			if err != nil {
 				if errors.Is(err, ErrAdmissionAnchorStore) {
 					log.Errorf("Failed to persist member admission anchor: %v", err)
@@ -5494,26 +5697,34 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				_ = sendKanbanEvent(c, "access_denied", err.Error()+".")
 				continue
 			}
+			admittedName := admission.name
+			firstEndpoint := admission.firstEndpoint
 			setParticipantName(admittedName)
+			participantAdmission.Store(admission.lease)
 			participantAccepted = true
 			participantAcceptedState.Store(true)
+			finalizeParticipantAdmissionRetirements(admission.retired, connRoomID)
 			if kanbanApp.noteMeetingAdmissionForSitting(connRoomID, admittedName, sittingID) == "" {
 				_ = sendKanbanEvent(c, "access_denied", "the room sitting changed while you joined; please reconnect.")
 				return
 			}
-			replaceExistingParticipantSessionEndpointInRoom(connRoomID, admittedName, participantSessionID, endpointID, peerConnection, c, sessionEmail)
-			// One account, one live room (§2): joining here evicts the
-			// account's seat in any other room via session_replaced.
-			kanbanApp.evictAccountFromOtherRooms(admittedName, connRoomID)
 			// admission opens (or extends) the first-class meeting record and
 			// cancels any pending idle-end from a briefly empty room; named
 			// rooms lazily start their mixer + transcription lane here.
 			participantMediaGeneration.Store(kanbanApp.ensureRoomMedia(connRoomID))
-			if err := sendKanbanEvent(c, "access_granted", map[string]any{
-				"name":   admittedName,
-				"roomId": connRoomID,
-			}); err != nil {
-				log.Errorf("Failed to send access grant: %v", err)
+			var grantErr error
+			if !admission.lease.whileCurrent(func() {
+				replaceParticipantSessionEndpointInRoom(connRoomID, admittedName, participantSessionID, endpointID, peerConnection, c, sessionEmail, transferExisting)
+				grantErr = sendKanbanEvent(c, "access_granted", map[string]any{
+					"name":   admittedName,
+					"roomId": connRoomID,
+				})
+			}) {
+				_ = sendKanbanEvent(c, "session_replaced", "This call moved to another device, or this browser session was replaced by a newer room join.")
+				return
+			}
+			if grantErr != nil {
+				log.Errorf("Failed to send access grant: %v", grantErr)
 			}
 			if err := sendKanbanEvent(c, "participants", kanbanApp.roomSnapshotForRoom(connRoomID)); err != nil {
 				log.Errorf("Failed to send participant state: %v", err)
@@ -5655,21 +5866,27 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if mediaJoined || peerConnection == nil {
 				continue
 			}
-			mediaJoined = true
-			mediaJoinedState.Store(true)
-			listLock.Lock()
-			peerConnections = append(peerConnections, peerConnectionState{
-				peerConnection:  peerConnection,
-				websocket:       c,
-				participantName: currentParticipantName(),
-				sessionID:       participantSessionID,
-				endpointID:      endpointID,
-				sessionEmail:    normalizeAccountEmail(sessionEmail),
-				roomID:          connRoomID,
-				sittingID:       participantSittingID,
-				mediaGeneration: participantMediaGeneration.Load(),
-			})
-			listLock.Unlock()
+			admission := participantAdmission.Load()
+			if !admission.whileCurrent(func() {
+				mediaJoined = true
+				mediaJoinedState.Store(true)
+				listLock.Lock()
+				peerConnections = append(peerConnections, peerConnectionState{
+					peerConnection:  peerConnection,
+					websocket:       c,
+					participantName: currentParticipantName(),
+					sessionID:       participantSessionID,
+					endpointID:      endpointID,
+					sessionEmail:    normalizeAccountEmail(sessionEmail),
+					roomID:          connRoomID,
+					sittingID:       participantSittingID,
+					mediaGeneration: participantMediaGeneration.Load(),
+				})
+				listLock.Unlock()
+			}) {
+				_ = sendKanbanEvent(c, "session_replaced", "This call moved to another device, or this browser session was replaced by a newer room join.")
+				return
+			}
 			if guest == nil {
 				if err := sendKanbanEvent(c, "board", kanbanApp.snapshotState()); err != nil {
 					log.Errorf("Failed to send Kanban board state after media join: %v", err)
@@ -6127,7 +6344,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				log.Errorf("Failed to unmarshal participant media state: %v", err)
 				continue
 			}
-			snapshot, err := kanbanApp.setParticipantMediaStateInRoom(connRoomID, currentParticipantName(), participantMediaState{
+			snapshot, err := kanbanApp.setParticipantEndpointMediaStateInRoom(connRoomID, currentParticipantName(), endpointID, participantSessionID, participantMediaState{
 				MicMuted:      payload.MicMuted,
 				CameraOff:     payload.CameraOff,
 				ScreenSharing: payload.ScreenSharing,
@@ -6175,7 +6392,12 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before sharing your screen.")
 				continue
 			}
-			broadcastRoomKanbanEvent(connRoomID, "participants", kanbanApp.setParticipantScreenSharingInRoom(connRoomID, currentParticipantName(), true))
+			snapshot, err := kanbanApp.setParticipantEndpointScreenSharingInRoom(connRoomID, currentParticipantName(), endpointID, participantSessionID, true)
+			if err != nil {
+				log.Errorf("Failed to update participant screen sharing: %v", err)
+				continue
+			}
+			broadcastRoomKanbanEvent(connRoomID, "participants", snapshot)
 			broadcastRoomKanbanEvent(connRoomID, "screen_share_started", map[string]any{
 				"name":   currentParticipantName(),
 				"roomId": connRoomID,
@@ -6186,7 +6408,12 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if !participantAccepted {
 				continue
 			}
-			broadcastRoomKanbanEvent(connRoomID, "participants", kanbanApp.setParticipantScreenSharingInRoom(connRoomID, currentParticipantName(), false))
+			snapshot, err := kanbanApp.setParticipantEndpointScreenSharingInRoom(connRoomID, currentParticipantName(), endpointID, participantSessionID, false)
+			if err != nil {
+				log.Errorf("Failed to update participant screen sharing: %v", err)
+				continue
+			}
+			broadcastRoomKanbanEvent(connRoomID, "participants", snapshot)
 			broadcastRoomKanbanEvent(connRoomID, "screen_share_stopped", map[string]any{
 				"name":   currentParticipantName(),
 				"roomId": connRoomID,

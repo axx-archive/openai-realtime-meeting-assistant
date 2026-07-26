@@ -256,8 +256,8 @@ func TestAdmissionAnchorPersistsBeforeBothAccessGrantedBranches(t *testing.T) {
 		source       string
 		anchoredCall string
 	}{
-		{name: "guest", source: participantCase[:memberAt], anchoredCall: "admitGuestWithAnchor(context.Background()"},
-		{name: "member", source: participantCase[memberAt:], anchoredCall: "admitParticipantWithAnchor(context.Background()"},
+		{name: "guest", source: participantCase[:memberAt], anchoredCall: "admitGuestWithAnchorResult(context.Background()"},
+		{name: "member", source: participantCase[memberAt:], anchoredCall: "admitParticipantWithAnchorResult(context.Background()"},
 	}
 	for _, branch := range branches {
 		if count := strings.Count(branch.source, branch.anchoredCall); count != 1 {
@@ -278,10 +278,10 @@ func TestAdmissionAnchorPersistsBeforeBothAccessGrantedBranches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, function := range []string{"admitParticipantWithAnchor", "admitGuestWithAnchor"} {
+	for _, function := range []string{"admitParticipantWithAnchorResult", "admitGuestWithAnchorResult"} {
 		section := sourceSectionForAdmissionTest(t, string(anchorSource), "func (app *kanbanBoardApp) "+function, "\n}\n")
 		persistAt := strings.Index(section, "persistAdmissionAnchor(")
-		commitAt := strings.Index(section, "admitParticipantSessionEndpointInRoomLocked(")
+		commitAt := strings.Index(section, "ParticipantSessionEndpointInRoomWithLeaseLocked(")
 		if persistAt < 0 || commitAt < 0 || persistAt >= commitAt {
 			t.Fatalf("%s does not persist before live-state commit", function)
 		}
@@ -435,5 +435,81 @@ func TestAdmissionAnchorFailurePreservesExistingEndpointSession(t *testing.T) {
 	app.mu.Unlock()
 	if got != "session-old" {
 		t.Fatalf("failed anchored refresh replaced prior endpoint session with %q", got)
+	}
+}
+
+func TestTransferAnchorFailurePreservesExistingEndpointsAndMedia(t *testing.T) {
+	dir := t.TempDir()
+	memory, err := newMeetingMemoryStore(filepath.Join(dir, "meeting-memory.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	meetings, err := loadMeetingStore(filepath.Join(dir, "meetings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := &kanbanBoardApp{memory: memory, meetings: meetings}
+	anchorPath := filepath.Join(dir, "anchors", "admission-anchors.json")
+	if err := app.initializeAdmissionAnchorStore(anchorPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := app.admitParticipantSessionEndpointInRoom("room-a", "AJ", "session-laptop", "endpoint-laptop"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := app.admitParticipantSessionEndpointInRoom("room-a", "AJ", "session-phone", "endpoint-phone"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.setParticipantEndpointMediaStateInRoom("room-a", "AJ", "endpoint-laptop", "session-laptop", participantMediaState{MicMuted: true, CameraOff: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.setParticipantEndpointMediaStateInRoom("room-a", "AJ", "endpoint-phone", "session-phone", participantMediaState{ScreenSharing: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	app.mu.Lock()
+	room := app.roomLiveLocked("room-a")
+	wantLaptopMedia := room.participantEndpointMedia["AJ"]["endpoint-laptop"]
+	wantPhoneMedia := room.participantEndpointMedia["AJ"]["endpoint-phone"]
+	wantLegacyMedia := room.participantMedia["AJ"]
+	app.mu.Unlock()
+
+	sittingID := app.prepareMeetingSittingID("room-a")
+	if err := os.Remove(anchorPath); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(anchorPath + ".lock")
+	anchorDir := filepath.Dir(anchorPath)
+	if err := os.Remove(anchorDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(anchorDir, []byte("block persistence"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, retired, err := app.admitParticipantTransferWithAnchor(context.Background(), "room-a", "AJ", "session-tablet", "endpoint-tablet", sittingID, memberAdmissionPrincipal("member@example.com"))
+	if !errors.Is(err, ErrAdmissionAnchorStore) {
+		t.Fatalf("transfer error=%v, want ErrAdmissionAnchorStore", err)
+	}
+	if len(retired) != 0 {
+		t.Fatalf("failed transfer retired sessions=%v", retired)
+	}
+	if !app.participantSessionCurrentInRoom("room-a", "AJ", "session-laptop") || !app.participantSessionCurrentInRoom("room-a", "AJ", "session-phone") || app.participantSessionCurrentInRoom("room-a", "AJ", "session-tablet") {
+		t.Fatal("failed transfer changed current endpoint sessions")
+	}
+
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	room = app.roomLiveLocked("room-a")
+	if len(room.participantEndpoints["AJ"]) != 2 || room.participantEndpoints["AJ"]["endpoint-laptop"] != "session-laptop" || room.participantEndpoints["AJ"]["endpoint-phone"] != "session-phone" {
+		t.Fatalf("failed transfer changed endpoints=%+v", room.participantEndpoints["AJ"])
+	}
+	if got := room.participantEndpointMedia["AJ"]["endpoint-laptop"]; got != wantLaptopMedia {
+		t.Fatalf("failed transfer changed laptop media=%+v want=%+v", got, wantLaptopMedia)
+	}
+	if got := room.participantEndpointMedia["AJ"]["endpoint-phone"]; got != wantPhoneMedia {
+		t.Fatalf("failed transfer changed phone media=%+v want=%+v", got, wantPhoneMedia)
+	}
+	if got := room.participantMedia["AJ"]; got != wantLegacyMedia {
+		t.Fatalf("failed transfer changed legacy media=%+v want=%+v", got, wantLegacyMedia)
 	}
 }

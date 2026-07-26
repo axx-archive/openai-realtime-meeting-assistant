@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -19,6 +19,7 @@ import type { ScoutThread } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { Card } from '../components/Card';
 import { Screen } from '../components/Screen';
+import { useOfficeEvents } from '../realtime/OfficeEventsContext';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
 import { colors, hitMin, radius, space, type } from '../theme/tokens';
 
@@ -39,10 +40,10 @@ function threadSubtitle(thread: ScoutThread): string | undefined {
 /** Chat tab — same `/assistant/chat-threads` + Scout query as the web OS. */
 export function ScoutScreen() {
   const { sessionToken } = useAuth();
+  const office = useOfficeEvents();
   const navigation = useNavigation<ChatNav>();
   const [threads, setThreads] = useState<ScoutThread[]>([]);
   const [query, setQuery] = useState('');
-  const [answer, setAnswer] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -73,19 +74,24 @@ export function ScoutScreen() {
     }, [load]),
   );
 
+  useEffect(() => {
+    if (office.event === 'chat_thread') void load('refresh');
+  }, [load, office.event, office.version]);
+
   async function askScout() {
     if (!sessionToken || !query.trim()) return;
     setAsking(true);
-    setAnswer(null);
     setError(null);
     try {
-      const res = await api.scoutQuery(sessionToken, query.trim());
-      const text =
-        (typeof res.answer === 'string' && res.answer) ||
-        (typeof res.text === 'string' && res.text) ||
-        JSON.stringify(res, null, 2);
-      setAnswer(text);
+      const text = query.trim();
+      const title = text.length > 54 ? `${text.slice(0, 51).trimEnd()}…` : text;
+      const created = await api.createScoutThread(sessionToken, { title, visibility: 'private' });
+      const threadId = String(created.thread?.id ?? '');
+      if (!threadId) throw new Error('Scout did not return a thread.');
+      setQuery('');
+      await api.sendScoutMessage(sessionToken, threadId, text);
       await load('refresh');
+      navigation.navigate('Thread', { threadId, title });
     } catch (err) {
       setError(err instanceof BonfireApiError ? err.message : 'Scout query failed');
     } finally {
@@ -129,13 +135,6 @@ export function ScoutScreen() {
         </Pressable>
       </View>
 
-      {answer ? (
-        <View style={styles.answerBox}>
-          <Text style={styles.answerLabel}>Scout</Text>
-          <Text style={styles.answerText}>{answer}</Text>
-        </View>
-      ) : null}
-
       <Text style={styles.sectionTitle}>Threads</Text>
       {threads.length === 0 && !loading ? (
         <Text style={styles.empty}>No threads yet. Ask something above.</Text>
@@ -153,8 +152,8 @@ export function ScoutScreen() {
               .join(' · ')}
             badge={thread.visibility === 'public' ? 'public' : 'private'}
             onPress={() =>
-              navigation.navigate('OSWeb', {
-                path: `/?tool=chat&thread=${encodeURIComponent(String(thread.id))}`,
+              navigation.navigate('Thread', {
+                threadId: String(thread.id),
                 title: threadTitle(thread),
               })
             }
@@ -197,22 +196,6 @@ const styles = StyleSheet.create({
   askBtnText: {
     ...type.button,
     color: colors.onAccent,
-  },
-  answerBox: {
-    backgroundColor: colors.surface3,
-    borderRadius: radius.md,
-    padding: space[3],
-    marginBottom: space[4],
-  },
-  answerLabel: {
-    ...type.label,
-    color: colors.ember,
-    marginBottom: 6,
-    textTransform: 'uppercase',
-  },
-  answerText: {
-    ...type.bodySm,
-    color: colors.text1,
   },
   sectionTitle: {
     ...type.label,

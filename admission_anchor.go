@@ -291,52 +291,111 @@ func (app *kanbanBoardApp) persistAdmissionAnchor(ctx context.Context, roomID, s
 // under app.mu. A snapshot reader therefore observes either no new endpoint or
 // a fully anchored endpoint, never the compensating-rollback interval.
 func (app *kanbanBoardApp) admitParticipantWithAnchor(ctx context.Context, roomID, name, sessionID, endpointID, sittingID string, principal CanonicalPrincipalRef) (string, bool, error) {
-	name = canonicalRoomParticipantName(name)
-	if name == "" {
-		return "", false, fmt.Errorf("choose a listed participant and enter the room password")
-	}
-	app.mu.Lock()
-	defer app.mu.Unlock()
-	state := app.roomLiveLocked(roomID)
-	if err := app.validateParticipantAdmissionLocked(state, name, endpointID); err != nil {
-		return "", false, err
-	}
-	if _, err := app.persistAdmissionAnchor(ctx, roomID, sittingID, principal); err != nil {
-		return "", false, fmt.Errorf("%w: %v", ErrAdmissionAnchorStore, err)
-	}
-	return app.admitParticipantSessionEndpointInRoomLocked(state, name, sessionID, endpointID)
+	result, err := app.admitParticipantWithAnchorResult(ctx, roomID, name, sessionID, endpointID, sittingID, principal, false)
+	return result.name, result.firstEndpoint, err
 }
 
-func (app *kanbanBoardApp) admitGuestWithAnchor(ctx context.Context, roomID, sessionKey, requestedName, participantSessionID, sittingID string) (string, bool, error) {
+// admitParticipantWithAnchorResult is the linearization point for every member
+// room join. Anchor persistence, the target-room seat, the new session lease,
+// same-endpoint/transfer retirement, and one-account-one-room eviction all
+// commit under the same app.mu hold. Socket and media closure are intentionally
+// returned to the caller so no websocket I/O happens while app.mu is held.
+func (app *kanbanBoardApp) admitParticipantWithAnchorResult(ctx context.Context, roomID, name, sessionID, endpointID, sittingID string, principal CanonicalPrincipalRef, transferExisting bool) (participantAdmissionResult, error) {
+	name = canonicalRoomParticipantName(name)
+	if name == "" {
+		return participantAdmissionResult{}, fmt.Errorf("choose a listed participant and enter the room password")
+	}
+	app.mu.Lock()
+	state := app.roomLiveLocked(roomID)
+	if transferExisting {
+		if err := app.validateParticipantTransferAdmissionLocked(state, name); err != nil {
+			app.mu.Unlock()
+			return participantAdmissionResult{}, err
+		}
+	} else if err := app.validateParticipantAdmissionLocked(state, name, endpointID); err != nil {
+		app.mu.Unlock()
+		return participantAdmissionResult{}, err
+	}
+	if _, err := app.persistAdmissionAnchor(ctx, roomID, sittingID, principal); err != nil {
+		app.mu.Unlock()
+		return participantAdmissionResult{}, fmt.Errorf("%w: %v", ErrAdmissionAnchorStore, err)
+	}
+	var result participantAdmissionResult
+	var err error
+	if transferExisting {
+		result, err = app.transferParticipantSessionEndpointInRoomWithLeaseLocked(state, name, sessionID, endpointID)
+	} else {
+		result, err = app.admitParticipantSessionEndpointInRoomWithLeaseLocked(state, name, sessionID, endpointID)
+	}
+	if err != nil {
+		app.mu.Unlock()
+		return participantAdmissionResult{}, err
+	}
+	result.retired = append(result.retired, app.retireParticipantSeatsOutsideRoomLocked(name, roomID)...)
+	app.mu.Unlock()
+	// Retirement becomes visible atomically under app.mu, then drains any
+	// already-running lease-gated install/grant after app.mu is released. This
+	// preserves linearization without holding the global room lock across a
+	// websocket write.
+	drainParticipantAdmissionRetirements(result.retired)
+	return result, nil
+}
+
+// admitParticipantTransferWithAnchor preserves the admission-anchor ordering
+// while atomically replacing every older same-account endpoint in this room's
+// live state. The returned session ids are already retired from the seat and
+// can be removed from the media registry/closed after app.mu is released.
+func (app *kanbanBoardApp) admitParticipantTransferWithAnchor(ctx context.Context, roomID, name, sessionID, endpointID, sittingID string, principal CanonicalPrincipalRef) (string, bool, []string, error) {
+	result, err := app.admitParticipantWithAnchorResult(ctx, roomID, name, sessionID, endpointID, sittingID, principal, true)
+	if err != nil {
+		return "", false, nil, err
+	}
+	retiredSessionIDs := make([]string, 0, len(result.retired))
+	for _, retired := range result.retired {
+		retiredSessionIDs = append(retiredSessionIDs, retired.sessionID)
+	}
+	return result.name, result.firstEndpoint, retiredSessionIDs, nil
+}
+
+func (app *kanbanBoardApp) admitGuestWithAnchorResult(ctx context.Context, roomID, sessionKey, requestedName, participantSessionID, sittingID string) (participantAdmissionResult, error) {
 	roomID = normalizeRoomID(roomID)
 	base := strings.TrimSpace(requestedName)
 	if base == "" {
 		base = "Guest"
 	}
 	app.mu.Lock()
-	defer app.mu.Unlock()
 	state := app.roomLiveLocked(roomID)
 	display, seated := state.guestSeats[sessionKey]
 	if !seated {
 		if len(state.guestSeats) >= maxGuestsPerRoom() {
-			return "", false, errGuestRoomFull
+			app.mu.Unlock()
+			return participantAdmissionResult{}, errGuestRoomFull
 		}
 		display = dedupeGuestDisplayNameLocked(state, guestNamePrefix+base)
 	}
 	if err := app.validateParticipantAdmissionLocked(state, display, participantSessionID); err != nil {
-		return "", false, err
+		app.mu.Unlock()
+		return participantAdmissionResult{}, err
 	}
 	if _, err := app.persistAdmissionAnchor(ctx, roomID, sittingID, guestAdmissionPrincipal(sessionKey)); err != nil {
-		return "", false, fmt.Errorf("%w: %v", ErrAdmissionAnchorStore, err)
+		app.mu.Unlock()
+		return participantAdmissionResult{}, fmt.Errorf("%w: %v", ErrAdmissionAnchorStore, err)
 	}
 	if !seated {
 		state.guestSeats[sessionKey] = display
 	}
-	admitted, firstEndpoint, err := app.admitParticipantSessionEndpointInRoomLocked(state, display, participantSessionID, participantSessionID)
+	result, err := app.admitParticipantSessionEndpointInRoomWithLeaseLocked(state, display, participantSessionID, participantSessionID)
 	if err != nil && !seated {
 		delete(state.guestSeats, sessionKey)
 	}
-	return admitted, firstEndpoint, err
+	app.mu.Unlock()
+	drainParticipantAdmissionRetirements(result.retired)
+	return result, err
+}
+
+func (app *kanbanBoardApp) admitGuestWithAnchor(ctx context.Context, roomID, sessionKey, requestedName, participantSessionID, sittingID string) (string, bool, error) {
+	result, err := app.admitGuestWithAnchorResult(ctx, roomID, sessionKey, requestedName, participantSessionID, sittingID)
+	return result.name, result.firstEndpoint, err
 }
 
 func normalizeAdmissionAnchor(anchor AdmissionAnchor) AdmissionAnchor {

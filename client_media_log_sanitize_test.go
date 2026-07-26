@@ -17,11 +17,11 @@ import (
 func TestSanitizeLogFieldStripsLineForgingChars(t *testing.T) {
 	cases := map[string]string{
 		"boom\nroom_ontrack_start forged=true": "boomroom_ontrack_start forged=true",
-		"a\rb":       "ab",
-		"a\tb":       "ab",
-		"a\x00b\x1fc": "abc",
-		"a\x7fb":     "ab",
-		"plain-value": "plain-value",
+		"a\rb":                                 "ab",
+		"a\tb":                                 "ab",
+		"a\x00b\x1fc":                          "abc",
+		"a\x7fb":                               "ab",
+		"plain-value":                          "plain-value",
 	}
 	for in, want := range cases {
 		if got := sanitizeLogField(in); got != want {
@@ -88,6 +88,52 @@ func TestClientMediaQualityReportCannotForgeLogLine(t *testing.T) {
 	if !strings.Contains(out, "Client media quality") {
 		t.Fatalf("the real report line was lost: %s", out)
 	}
+}
+
+func TestClientMediaQualityReportLogsNativeOutboundVideoGeometry(t *testing.T) {
+	out := captureStdout(t, func() {
+		logClientMediaQualityReport(
+			`{"stats":{"outboundVideoFrameWidth":1920,"outboundVideoFrameHeight":1080,"outboundVideoFramesPerSecond":29.7,"outboundVideoTargetBitrate":1200000,"outboundVideoQualityLimitationReason":"none"}}`,
+			"AJ", "sess-1")
+	})
+	for _, field := range []string{
+		"outVideo=1920x1080",
+		"outVideoFps=29.7",
+		"targetVideoKbps=1200",
+		"videoLimit=none",
+	} {
+		if !strings.Contains(out, field) {
+			t.Fatalf("native outbound geometry field %q missing from log: %s", field, out)
+		}
+	}
+}
+
+func TestClientMediaQualityReportLogsSanitizedNativeCameraFraming(t *testing.T) {
+	out := captureStdout(t, func() {
+		logClientMediaQualityReport(
+			`{"cameraFraming":{"activeDeviceType":"builtInUltraWideCamera\nroom_ontrack_start forged=true","activeDeviceId":"private-camera-identifier","centerStageSupported":true,"centerStageEnabled":true,"centerStageActive":false,"wideUprightSupported":true,"wideUprightEnabled":true,"dynamicWidth":1920,"dynamicHeight":1080,"reasonCode":"active_camera_not_front_ultra_wide","wideUprightReasonCode":"active_format_missing_16x9","centerStageReasonCode":"center_stage_unsupported"}}`,
+			"AJ", "sess-1")
+	})
+	for _, field := range []string{
+		"cameraDeviceType=builtInUltraWideCameraroom_ontrack_start forged=true",
+		"centerStageSupported=true",
+		"centerStageEnabled=true",
+		"centerStageActive=false",
+		"wideUprightSupported=true",
+		"wideUprightEnabled=true",
+		"framingDynamic=1920x1080",
+		"framingReason=active_camera_not_front_ultra_wide",
+		"wideUprightReason=active_format_missing_16x9",
+		"centerStageReason=center_stage_unsupported",
+	} {
+		if !strings.Contains(out, field) {
+			t.Fatalf("native camera framing field %q missing from log: %s", field, out)
+		}
+	}
+	if strings.Contains(out, "private-camera-identifier") {
+		t.Fatalf("private camera identifier leaked into log: %s", out)
+	}
+	assertNoForgedLine(t, out)
 }
 
 func assertNoForgedLine(t *testing.T, out string) {

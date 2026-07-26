@@ -1,3 +1,5 @@
+import { DynamicColorIOS, Platform, type ColorValue } from 'react-native';
+
 /**
  * Glass & Ink tokens — mirrored from the live BonfireOS `index.html` :root.
  * Source of truth: deployed web design (see `.superdesign/design-system.md`).
@@ -36,27 +38,30 @@ export const ember = {
   600: '#F0522F',
 } as const;
 
+const adaptive = (light: string, dark: string): ColorValue =>
+  Platform.OS === 'ios' ? DynamicColorIOS({ light, dark }) : light;
+
 /** Semantic aliases — light theme (default). */
 export const colors = {
-  bg: paper[50],
-  bgApp: paper[50],
-  surface1: paper[0],
-  surface2: paper[0],
-  surface3: paper[100],
+  bg: adaptive(paper[50], ink[950]),
+  bgApp: adaptive(paper[50], ink[950]),
+  surface1: adaptive(paper[0], ink[850]),
+  surface2: adaptive(paper[0], ink[900]),
+  surface3: adaptive(paper[100], ink[800]),
 
-  text1: '#0E0E10',
-  text2: 'rgba(14, 14, 16, 0.60)',
-  text3: 'rgba(14, 14, 16, 0.38)',
-  textDisabled: 'rgba(14, 14, 16, 0.24)',
+  text1: adaptive('#0E0E10', '#F7F7F9'),
+  text2: adaptive('rgba(14, 14, 16, 0.60)', 'rgba(247, 247, 249, 0.66)'),
+  text3: adaptive('rgba(14, 14, 16, 0.38)', 'rgba(247, 247, 249, 0.42)'),
+  textDisabled: adaptive('rgba(14, 14, 16, 0.24)', 'rgba(247, 247, 249, 0.24)'),
 
-  line1: 'rgba(14, 14, 16, 0.08)',
-  line2: 'rgba(14, 14, 16, 0.15)',
+  line1: adaptive('rgba(14, 14, 16, 0.08)', 'rgba(255, 255, 255, 0.09)'),
+  line2: adaptive('rgba(14, 14, 16, 0.15)', 'rgba(255, 255, 255, 0.16)'),
 
-  accent: '#0E0E10',
-  accentHover: '#26262C',
-  accentPress: '#000000',
-  accentSoft: 'rgba(14, 14, 16, 0.06)',
-  onAccent: '#FFFFFF',
+  accent: adaptive('#0E0E10', '#F7F7F9'),
+  accentHover: adaptive('#26262C', '#FFFFFF'),
+  accentPress: adaptive('#000000', '#EDEDF0'),
+  accentSoft: adaptive('rgba(14, 14, 16, 0.06)', 'rgba(255, 255, 255, 0.08)'),
+  onAccent: adaptive('#FFFFFF', '#0E0E10'),
 
   live: signal[500],
   liveSoft: 'rgba(48, 209, 88, 0.13)',
@@ -73,18 +78,18 @@ export const colors = {
   emberSoft: 'rgba(255, 107, 74, 0.12)',
   onEmber: '#FFFFFF',
 
-  glassBorder: 'rgba(14, 14, 16, 0.10)',
-  glassPanel: 'rgba(255, 255, 255, 0.72)',
-  scrim: 'rgba(14, 14, 16, 0.35)',
+  glassBorder: adaptive('rgba(14, 14, 16, 0.10)', 'rgba(255, 255, 255, 0.12)'),
+  glassPanel: adaptive('rgba(255, 255, 255, 0.72)', 'rgba(20, 20, 24, 0.78)'),
+  scrim: adaptive('rgba(14, 14, 16, 0.35)', 'rgba(0, 0, 0, 0.62)'),
 
   // Legacy aliases used by early screens — map to live tokens.
-  bgElevated: paper[0],
-  bgMuted: paper[100],
-  text: '#0E0E10',
-  textSecondary: 'rgba(14, 14, 16, 0.60)',
-  textTertiary: 'rgba(14, 14, 16, 0.38)',
-  border: 'rgba(14, 14, 16, 0.08)',
-  tabInactive: 'rgba(14, 14, 16, 0.38)',
+  bgElevated: adaptive(paper[0], ink[850]),
+  bgMuted: adaptive(paper[100], ink[800]),
+  text: adaptive('#0E0E10', '#F7F7F9'),
+  textSecondary: adaptive('rgba(14, 14, 16, 0.60)', 'rgba(247, 247, 249, 0.66)'),
+  textTertiary: adaptive('rgba(14, 14, 16, 0.38)', 'rgba(247, 247, 249, 0.42)'),
+  border: adaptive('rgba(14, 14, 16, 0.08)', 'rgba(255, 255, 255, 0.09)'),
+  tabInactive: adaptive('rgba(14, 14, 16, 0.38)', 'rgba(247, 247, 249, 0.42)'),
 } as const;
 
 export const radius = {
@@ -112,19 +117,19 @@ export const hitMin = 44;
 
 export const shadow = {
   1: {
-    shadowColor: '#0E0E10',
+    shadowColor: adaptive('#0E0E10', '#000000'),
     shadowOpacity: 0.1,
     shadowRadius: 2,
     shadowOffset: { width: 0, height: 1 },
   },
   2: {
-    shadowColor: '#0E0E10',
+    shadowColor: adaptive('#0E0E10', '#000000'),
     shadowOpacity: 0.12,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 8 },
   },
   glass: {
-    shadowColor: '#0E0E10',
+    shadowColor: adaptive('#0E0E10', '#000000'),
     shadowOpacity: 0.1,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },

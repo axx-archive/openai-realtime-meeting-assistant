@@ -1,0 +1,8 @@
+{
+  "name": "bonfire-camera-framing",
+  "version": "1.0.0",
+  "description": "Capability-gated native camera framing controls for BonfireOS calls.",
+  "main": "index.ts",
+  "types": "index.ts",
+  "private": true
+}

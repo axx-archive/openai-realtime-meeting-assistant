@@ -96,6 +96,7 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 		"/capabilities": {handler: capabilitiesHandler, method: http.MethodGet, path: "/capabilities", allowed: []int{http.StatusOK}},
 		"/sw.js":        {handler: serviceWorkerHandler, method: http.MethodGet, path: "/sw.js", allowed: []int{http.StatusOK}},
 		"/public/":      {handler: publicAssetHandler, method: http.MethodGet, path: "/public/route-walk-not-a-file.js", allowed: []int{http.StatusNotFound}},
+		"/.well-known/apple-app-site-association": {handler: appleAppSiteAssociationHandler, method: http.MethodGet, path: "/.well-known/apple-app-site-association", allowed: []int{http.StatusOK}},
 
 		// ---- the guest surface (§5.3 allowlist)
 		"/g": {handler: guestPageHandler, method: http.MethodGet, path: "/g", allowed: []int{http.StatusOK},
@@ -171,6 +172,8 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 		"/assistant/push/unsubscribe":          {handler: assistantPushUnsubscribeHandler, memberGated: true},
 		"/assistant/push/prefs":                {handler: assistantPushPrefsHandler, memberGated: true},
 		"/assistant/board":                     {handler: assistantBoardHandler, memberGated: true},
+		"/assistant/board/cards":               {handler: assistantBoardCardsHandler, memberGated: true},
+		"/assistant/board/cards/":              {handler: assistantBoardCardsHandler, memberGated: true, path: "/assistant/board/cards/card-1"},
 		"/assistant/board/drafts/":             {handler: assistantBoardDraftActionHandler, memberGated: true, path: "/assistant/board/drafts/draft-1"},
 		"/assistant/memory":                    {handler: assistantMemoryHandler, memberGated: true},
 		"/assistant/files":                     {handler: assistantFilesHandler, memberGated: true},

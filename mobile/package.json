@@ -6,34 +6,60 @@
     "@react-navigation/bottom-tabs": "^7.18.13",
     "@react-navigation/native": "^7.3.13",
     "@react-navigation/native-stack": "^7.18.5",
+    "@shopify/flash-list": "2.0.2",
     "expo": "~57.0.8",
+    "expo-blur": "~57.0.2",
+    "expo-build-properties": "~57.0.7",
     "expo-constants": "~57.0.7",
+    "expo-document-picker": "~57.0.1",
+    "expo-file-system": "~57.0.1",
+    "expo-font": "~57.0.1",
+    "expo-haptics": "~57.0.1",
+    "expo-image-picker": "~57.0.6",
+    "expo-keep-awake": "~57.0.1",
+    "expo-linear-gradient": "~57.0.1",
     "expo-linking": "~57.0.4",
     "expo-secure-store": "~57.0.1",
+    "expo-sharing": "~57.0.7",
     "expo-splash-screen": "~57.0.5",
     "expo-status-bar": "~57.0.1",
+    "expo-symbols": "~57.0.1",
     "expo-system-ui": "~57.0.1",
     "react": "19.2.3",
     "react-native": "0.86.0",
+    "react-native-passkeys": "^0.4.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
     "react-native-svg": "15.15.4",
+    "react-native-webrtc": "^124.0.8",
     "react-native-webview": "13.16.1"
   },
   "devDependencies": {
+    "@bacons/apple-targets": "5.0.0",
+    "@types/node": "^26.1.1",
     "@types/react": "~19.2.2",
     "tsx": "^4.23.1",
-    "typescript": "~5.9.2"
+    "typescript": "~6.0.3"
   },
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test src/__tests__/*.test.ts",
     "eas:build:ios": "eas build --platform ios --profile production",
-    "eas:submit:ios": "eas submit --platform ios --profile production --latest"
+    "eas:submit:ios": "eas submit --platform ios --profile production"
+  },
+  "expo": {
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "exclude": [
+          "react-native-passkeys",
+          "react-native-webrtc"
+        ]
+      }
+    }
   },
   "private": true
 }

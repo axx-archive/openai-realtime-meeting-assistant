@@ -228,6 +228,16 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(parts) == 1 && r.Method == http.MethodGet {
+		thread, _, err := kanbanApp.scoutChatThreadByID(user.Email, threadID)
+		if err != nil {
+			writeScoutChatThreadError(w, err)
+			return
+		}
+		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "thread": thread})
+		return
+	}
+
 	if len(parts) == 1 && r.Method == http.MethodPatch {
 		payload := struct {
 			Archived *bool   `json:"archived"`

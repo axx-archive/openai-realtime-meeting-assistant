@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Linking,
   Pressable,
   StyleSheet,
   Text,
@@ -30,22 +31,17 @@ export function OSWebScreen({ route, navigation }: Props) {
 
   const uri = useMemo(() => {
     const base = WEB_APP_URL.replace(/\/$/, '');
-    if (path.startsWith('http')) return path;
-    return `${base}${path.startsWith('/') ? path : `/${path}`}`;
+    const safePath = path.startsWith('/') && !path.startsWith('//') ? path : '/';
+    return `${base}/auth/native-web-session?path=${encodeURIComponent(safePath)}`;
   }, [path]);
 
-  const injectedBefore = useMemo(() => {
-    if (!sessionToken) return undefined;
-    const secure = WEB_APP_URL.startsWith('https') ? '; Secure' : '';
-    return `
-      (function() {
-        try {
-          document.cookie = "bonfire_session=${sessionToken}; Path=/${secure}; SameSite=Lax; Max-Age=${30 * 24 * 3600}";
-        } catch (e) {}
-        true;
-      })();
-    `;
-  }, [sessionToken]);
+  const allowedHost = useMemo(() => {
+    try {
+      return new URL(WEB_APP_URL).host;
+    } catch {
+      return '';
+    }
+  }, []);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -83,11 +79,27 @@ export function OSWebScreen({ route, navigation }: Props) {
         ) : null}
         <WebView
           ref={webRef}
-          source={{ uri }}
           style={styles.web}
           sharedCookiesEnabled
-          thirdPartyCookiesEnabled
-          injectedJavaScriptBeforeContentLoaded={injectedBefore}
+          source={{
+            uri,
+            headers: sessionToken
+              ? {
+                  Authorization: `Bearer ${sessionToken}`,
+                  'X-Bonfire-Client': 'expo',
+                }
+              : undefined,
+          }}
+          onShouldStartLoadWithRequest={(request) => {
+            try {
+              const next = new URL(request.url);
+              if (next.host === allowedHost) return true;
+              void Linking.openURL(request.url);
+              return false;
+            } catch {
+              return false;
+            }
+          }}
           onLoadStart={() => setLoading(true)}
           onLoadEnd={() => setLoading(false)}
           onError={() => {

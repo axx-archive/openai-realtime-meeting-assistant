@@ -1,12 +1,14 @@
 #!/usr/bin/env node
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const appleDir = join(rootDir, "apple");
 const sourceSVG = join(appleDir, "Xcode", "AppIconSource.svg");
+const macSourceSVG = join(appleDir, "Xcode", "AppIconMacSource.svg");
+const canonicalIOSPNG = join(rootDir, "mobile", "assets", "bonfire-icon-v2.png");
 const assetCatalogDir = join(appleDir, "Xcode", "Assets.xcassets");
 const iconSetDir = join(appleDir, "Xcode", "Assets.xcassets", "AppIcon.appiconset");
 
@@ -41,8 +43,60 @@ const slots = [
   ["mac", "512x512", "2x", 1024],
 ];
 
-if (!existsSync(sourceSVG)) {
-  throw new Error(`Missing icon source SVG: ${sourceSVG}`);
+for (const source of [sourceSVG, macSourceSVG, canonicalIOSPNG]) {
+  if (!existsSync(source)) {
+    throw new Error(`Missing icon source: ${source}`);
+  }
+}
+
+function commandAvailable(command, args) {
+  const result = spawnSync(command, args, { stdio: "ignore" });
+  return !result.error && result.status === 0;
+}
+
+const renderer = commandAvailable("rsvg-convert", ["--version"])
+  ? "rsvg-convert"
+  : commandAvailable("sips", ["--version"])
+    ? "sips"
+    : null;
+
+if (!renderer) {
+  throw new Error("App icon generation requires rsvg-convert or macOS sips.");
+}
+
+function pngHasAlpha(path) {
+  const png = readFileSync(path);
+  if (png.length < 33 || png.toString("ascii", 1, 4) !== "PNG") {
+    throw new Error(`Generated icon is not a PNG: ${path}`);
+  }
+  const colorType = png[25];
+  return colorType === 4 || colorType === 6 || png.includes(Buffer.from("tRNS"));
+}
+
+function renderIcon({ idiom, pixels, output }) {
+  const svg = idiom === "mac" ? macSourceSVG : sourceSVG;
+  if (renderer === "rsvg-convert") {
+    const args = [
+      "--width", String(pixels),
+      "--height", String(pixels),
+    ];
+    // Even though the iOS source paints the whole canvas, librsvg otherwise
+    // writes an RGBA PNG. App Store icons must not contain an alpha channel.
+    if (idiom !== "mac") args.push("--background-color", "#0E0E10");
+    args.push("--output", output, svg);
+    execFileSync(renderer, args);
+    return;
+  }
+
+  // sips preserves the RGB color model of the approved opaque iOS PNG and
+  // preserves the alpha channel when rasterizing the inset macOS SVG.
+  const input = idiom === "mac" ? macSourceSVG : canonicalIOSPNG;
+  execFileSync(renderer, [
+    "-z", String(pixels), String(pixels),
+    "-s", "format", "png",
+    input,
+    "--out", output,
+  ], { stdio: "ignore" });
 }
 
 rmSync(iconSetDir, { recursive: true, force: true });
@@ -58,12 +112,12 @@ for (const stale of ["Contents.json"]) {
 const images = [];
 for (const [idiom, size, scale, pixels] of slots) {
   const filename = `AppIcon-${idiom}-${size.replaceAll(".", "_")}@${scale}.png`;
-  execFileSync("rsvg-convert", [
-    "--width", String(pixels),
-    "--height", String(pixels),
-    "--output", join(iconSetDir, filename),
-    sourceSVG,
-  ]);
+  const output = join(iconSetDir, filename);
+  renderIcon({ idiom, pixels, output });
+  const hasAlpha = pngHasAlpha(output);
+  if (idiom === "mac" ? !hasAlpha : hasAlpha) {
+    throw new Error(`${filename} has an invalid alpha model for ${idiom}.`);
+  }
   images.push({ idiom, size, scale, filename });
 }
 
@@ -72,4 +126,4 @@ writeFileSync(
   `${JSON.stringify({ images, info: { author: "xcode", version: 1 } }, null, 2)}\n`
 );
 
-console.log(`Generated ${images.length} app icon images in ${iconSetDir}`);
+console.log(`Generated ${images.length} app icon images with ${renderer} in ${iconSetDir}`);

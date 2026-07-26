@@ -1,15 +1,31 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
+import { Appearance, useColorScheme } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { AuthProvider } from './src/auth/AuthContext';
+import { AuthProvider, useAuth } from './src/auth/AuthContext';
 import { RootNavigator } from './src/navigation/RootNavigator';
+import { OfficeEventsProvider } from './src/realtime/OfficeEventsContext';
+
+function AdaptiveStatusBar() {
+  const system = useColorScheme();
+  const { user } = useAuth();
+  const preference = user?.themePref ?? 'system';
+  useEffect(() => {
+    const colorScheme = preference === 'dark' ? 'dark' : preference === 'light' ? 'light' : 'unspecified';
+    Appearance.setColorScheme(colorScheme);
+  }, [preference]);
+  const dark = preference === 'dark' || (preference === 'system' && system === 'dark');
+  return <StatusBar style={dark ? 'light' : 'dark'} />;
+}
 
 export default function App() {
   return (
     <SafeAreaProvider>
       <AuthProvider>
-        <StatusBar style="dark" />
-        <RootNavigator />
+        <OfficeEventsProvider>
+          <AdaptiveStatusBar />
+          <RootNavigator />
+        </OfficeEventsProvider>
       </AuthProvider>
     </SafeAreaProvider>
   );

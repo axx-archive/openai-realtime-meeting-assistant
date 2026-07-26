@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -18,12 +20,13 @@ import (
 
 const (
 	webauthnCeremonyCookieName = "bonfire_webauthn"
+	webauthnCeremonyHeaderName = "X-Bonfire-WebAuthn-Ceremony"
 	webauthnCeremonyTTL        = 5 * time.Minute
 )
 
-// webAuthnForRequest builds a relying party scoped to the host actually being
-// browsed (thebonfire.xyz in production, localhost during smoke tests), so
-// passkeys bind to whichever origin served the page.
+// webAuthnForRequest prefers the configured public origin so a native request
+// and a browser request share the same relying party. Loopback/tests retain
+// request-scoped fallback behavior when no public URL is configured.
 func webAuthnForRequest(r *http.Request) (*webauthn.WebAuthn, error) {
 	host := r.Host
 	if splitHost, _, err := net.SplitHostPort(r.Host); err == nil {
@@ -34,11 +37,23 @@ func webAuthnForRequest(r *http.Request) (*webauthn.WebAuthn, error) {
 	if requestIsSecure(r) {
 		scheme = "https"
 	}
+	origin := scheme + "://" + r.Host
+	if configured := strings.TrimSpace(os.Getenv("BONFIRE_PUBLIC_URL")); configured != "" {
+		parsed, err := url.Parse(configured)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return nil, errors.New("BONFIRE_PUBLIC_URL is invalid")
+		}
+		host = parsed.Hostname()
+		origin = strings.TrimRight(parsed.Scheme+"://"+parsed.Host, "/")
+	}
+	if configured := strings.TrimSpace(os.Getenv("BONFIRE_WEBAUTHN_RP_ID")); configured != "" {
+		host = configured
+	}
 
 	return webauthn.New(&webauthn.Config{
 		RPID:          host,
 		RPDisplayName: "Bonfire",
-		RPOrigins:     []string{scheme + "://" + r.Host},
+		RPOrigins:     []string{origin},
 	})
 }
 
@@ -72,6 +87,9 @@ func storeWebauthnCeremony(w http.ResponseWriter, r *http.Request, email string,
 		expires: time.Now().Add(webauthnCeremonyTTL),
 	}
 	webauthnCeremonyMu.Unlock()
+	if wantsNativeSessionToken(r) {
+		w.Header().Set(webauthnCeremonyHeaderName, id)
+	}
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     webauthnCeremonyCookieName,
@@ -86,15 +104,23 @@ func storeWebauthnCeremony(w http.ResponseWriter, r *http.Request, email string,
 }
 
 func takeWebauthnCeremony(r *http.Request) (*webauthnCeremony, error) {
-	cookie, err := r.Cookie(webauthnCeremonyCookieName)
-	if err != nil || cookie.Value == "" {
+	id := ""
+	if wantsNativeSessionToken(r) {
+		id = strings.TrimSpace(r.Header.Get(webauthnCeremonyHeaderName))
+	}
+	if id == "" {
+		if cookie, err := r.Cookie(webauthnCeremonyCookieName); err == nil {
+			id = cookie.Value
+		}
+	}
+	if id == "" {
 		return nil, errors.New("no passkey ceremony in progress")
 	}
 
 	webauthnCeremonyMu.Lock()
 	defer webauthnCeremonyMu.Unlock()
-	ceremony, ok := webauthnCeremonies[cookie.Value]
-	delete(webauthnCeremonies, cookie.Value)
+	ceremony, ok := webauthnCeremonies[id]
+	delete(webauthnCeremonies, id)
 	if !ok || time.Now().After(ceremony.expires) {
 		return nil, errors.New("the passkey ceremony expired; try again")
 	}
@@ -252,7 +278,7 @@ func handlePasskeyLoginFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setSessionCookie(w, r, token, int(sessionTTL/time.Second))
-	writeAuthJSON(w, http.StatusOK, identityPayload(matchedUser))
+	writeAuthJSON(w, http.StatusOK, identityPayloadForRequest(r, matchedUser, token))
 }
 
 func handlePasskeyList(w http.ResponseWriter, r *http.Request) {

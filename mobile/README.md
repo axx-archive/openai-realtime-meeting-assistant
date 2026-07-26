@@ -15,7 +15,7 @@ Native clients send `X-Bonfire-Client: expo` so the server returns a `sessionTok
 ## Prerequisites
 
 - Node 20+
-- Expo account (this project is owned by `axx_archive`)
+- Expo account with access to the **axxonlabs** org (paid plan — faster EAS queues)
 - Apple Developer membership for TestFlight
 - Backend with mobile session support deployed (`sessionToken` on native login)
 
@@ -44,8 +44,9 @@ npx tsc --noEmit
 
 ## EAS / TestFlight
 
-**Project:** [@axx_archive/bonfireos](https://expo.dev/accounts/axx_archive/projects/bonfireos)  
-**EAS project id:** `0236310a-4904-4eaf-b1d4-a86e50e49d88`  
+**Project:** [@axxonlabs/bonfireos](https://expo.dev/accounts/axxonlabs/projects/bonfireos)
+**EAS project id:** `30cd10a4-275d-45e3-8084-a1d7617b42f8`
+**Owner org:** `axxonlabs` (paid — do not use free-tier `axx_archive`)
 **Bundle id:** `xyz.thebonfire.app`
 
 ### One-time Apple setup (interactive — needs your Apple ID)
@@ -54,7 +55,7 @@ EAS cannot set distribution credentials non-interactively without an App Store C
 
 ```bash
 cd mobile
-npx eas-cli login          # axx_archive
+npx eas-cli login          # any user that is Owner/Admin on axxonlabs
 npx eas-cli credentials   # iOS → production → let EAS create/reuse dist cert + provisioning
 ```
 
@@ -67,16 +68,27 @@ In [App Store Connect](https://appstoreconnect.apple.com):
 
 ```bash
 cd mobile
-npx eas-cli build --platform ios --profile production
-# when the build finishes:
-npx eas-cli submit --platform ios --profile production --latest
+npx --yes eas-cli@20.1.0 build \
+  --platform ios \
+  --profile production \
+  --non-interactive \
+  --wait
 ```
 
-Or one shot after credentials exist:
+Record the exact build ID printed by EAS, inspect that artifact, and submit that
+same ID only:
 
 ```bash
-npx eas-cli build --platform ios --profile production --auto-submit
+npx --yes eas-cli@20.1.0 submit \
+  --platform ios \
+  --profile production \
+  --id <exact-build-id> \
+  --non-interactive \
+  --wait
 ```
+
+Do not use `--latest` or `--auto-submit`; both remove the exact-artifact gate
+between build inspection and TestFlight submission.
 
 Credentials (certificates, provisioning, App Store Connect API key) are managed by EAS and never committed.
 

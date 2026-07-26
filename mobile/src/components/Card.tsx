@@ -1,5 +1,12 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type AccessibilityState,
+  type ViewStyle,
+} from 'react-native';
 import { colors, radius, shadow, space, type } from '../theme/tokens';
 
 type Props = {
@@ -9,6 +16,9 @@ type Props = {
   badge?: string;
   badgeTone?: 'live' | 'muted' | 'warn';
   onPress?: () => void;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
+  accessibilityState?: AccessibilityState;
   style?: ViewStyle;
   children?: React.ReactNode;
 };
@@ -21,6 +31,9 @@ export function Card({
   badge,
   badgeTone = 'muted',
   onPress,
+  accessibilityLabel,
+  accessibilityHint,
+  accessibilityState,
   style,
   children,
 }: Props) {
@@ -63,6 +76,10 @@ export function Card({
   if (onPress) {
     return (
       <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel ?? [title, subtitle, meta, badge].filter(Boolean).join('. ')}
+        accessibilityHint={accessibilityHint ?? `Opens ${title}.`}
+        accessibilityState={accessibilityState}
         onPress={onPress}
         style={({ pressed }) => [
           styles.card,
@@ -90,7 +107,7 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.92,
-    transform: [{ scale: 0.97 }],
+    transform: [{ scale: 0.96 }],
   },
   row: {
     flexDirection: 'row',

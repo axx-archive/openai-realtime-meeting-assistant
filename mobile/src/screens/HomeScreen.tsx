@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { SymbolView } from 'expo-symbols';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { CompositeNavigationProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -9,6 +10,9 @@ import { BrandMark } from '../components/BrandMark';
 import { Card } from '../components/Card';
 import { Screen } from '../components/Screen';
 import { API_BASE_URL } from '../config';
+import { api } from '../api/client';
+import { useOfficeEvents } from '../realtime/OfficeEventsContext';
+import { firstArray } from '../utils/records';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
 import { colors, product, radius, space, type } from '../theme/tokens';
 
@@ -22,66 +26,103 @@ type HomeNav = CompositeNavigationProp<
  * (Rooms, Chat/Scout, Board) against the same backend.
  */
 export function HomeScreen() {
-  const { user, signOut } = useAuth();
+  const { user, sessionToken } = useAuth();
+  const office = useOfficeEvents();
   const navigation = useNavigation<HomeNav>();
+  const [roomCount, setRoomCount] = useState(0);
+  const [liveCount, setLiveCount] = useState(0);
+  const [alertCount, setAlertCount] = useState(0);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!sessionToken) return;
+      let cancelled = false;
+      void Promise.all([api.rooms(sessionToken), api.notifications(sessionToken)]).then(([rooms, alerts]) => {
+        if (cancelled) return;
+        setRoomCount((rooms.rooms ?? []).filter((room) => !room.archived).length);
+        setLiveCount((rooms.rooms ?? []).filter((room) => room.live).length);
+        const rows = firstArray(alerts, ['notifications']);
+        setAlertCount(rows.filter((item) => !(item as { read?: boolean })?.read).length);
+      }).catch(() => {});
+      return () => { cancelled = true; };
+    }, [sessionToken]),
+  );
+
+  useEffect(() => {
+    if (!sessionToken || !['rooms', 'participants', 'notification', 'notification_backlog'].includes(office.event ?? '')) return;
+    void Promise.all([api.rooms(sessionToken), api.notifications(sessionToken)]).then(([rooms, alerts]) => {
+      setRoomCount((rooms.rooms ?? []).filter((room) => !room.archived).length);
+      setLiveCount((rooms.rooms ?? []).filter((room) => room.live).length);
+      setAlertCount(firstArray(alerts, ['notifications']).filter((item) => !(item as { read?: boolean })?.read).length);
+    }).catch(() => {});
+  }, [office.event, office.version, sessionToken]);
 
   return (
     <Screen
       title={product.name}
       subtitle={user ? user.name : undefined}
-      right={
-        <Pressable onPress={() => void signOut()} hitSlop={12} style={styles.signOutHit}>
-          <Text style={styles.signOut}>sign out</Text>
-        </Pressable>
-      }
+      right={<BrandMark size={40} />}
     >
       <View style={styles.hero}>
-        <BrandMark size={44} />
         <View style={styles.heroCopy}>
-          <Text style={styles.heroTitle}>Office</Text>
+          <Text style={styles.eyebrow}>YOUR OFFICE</Text>
+          <Text style={styles.heroTitle}>Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}, {user?.name?.split(' ')[0]}.</Text>
           <Text style={styles.heroBody}>
-            Same session, rooms, Scout, and board as the web OS at{' '}
-            {API_BASE_URL.replace(/^https?:\/\//, '')}.
+            Everything here is live with {API_BASE_URL.replace(/^https?:\/\//, '')}.
           </Text>
         </View>
-        <Pressable
-          style={({ pressed }) => [styles.primary, pressed && styles.pressed]}
-          onPress={() => navigation.navigate('OSWeb', { path: '/', title: product.name })}
-        >
-          <Text style={styles.primaryText}>Open full OS</Text>
-        </Pressable>
+        <View style={styles.metrics}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${liveCount} live ${liveCount === 1 ? 'room' : 'rooms'}`}
+            accessibilityHint="Opens rooms."
+            style={({ pressed }) => [styles.metric, pressed && styles.metricPressed]}
+            onPress={() => navigation.navigate('Rooms')}
+          >
+            <Text style={styles.metricValue}>{liveCount}</Text><Text style={styles.metricLabel}>live</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${roomCount} active ${roomCount === 1 ? 'room' : 'rooms'}`}
+            accessibilityHint="Opens rooms."
+            style={({ pressed }) => [styles.metric, pressed && styles.metricPressed]}
+            onPress={() => navigation.navigate('Rooms')}
+          >
+            <Text style={styles.metricValue}>{roomCount}</Text><Text style={styles.metricLabel}>rooms</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${alertCount} unread ${alertCount === 1 ? 'alert' : 'alerts'}`}
+            accessibilityHint="Opens alerts."
+            style={({ pressed }) => [styles.metric, pressed && styles.metricPressed]}
+            onPress={() => navigation.navigate('Alerts')}
+          >
+            <Text style={styles.metricValue}>{alertCount}</Text><Text style={styles.metricLabel}>unread</Text>
+          </Pressable>
+        </View>
       </View>
 
       <Card
-        title="Rooms"
-        subtitle="Live spaces — same roster and presence as desktop."
-        onPress={() => navigation.navigate('Rooms')}
-      />
-      <Card
-        title="Chat"
-        subtitle="Scout threads and queries against organizational memory."
+        title="Ask Scout"
+        subtitle="Turn company memory into a clear next move."
+        badge="AI"
         onPress={() => navigation.navigate('Chat')}
       />
       <Card
-        title="Board"
-        subtitle="Kanban shared with agents and the web board surface."
-        onPress={() => navigation.navigate('Board')}
+        title="Intelligence"
+        subtitle="Themes, signals, and opportunities distilled from the work."
+        onPress={() => navigation.navigate('Intelligence')}
+      />
+      <Card
+        title="Meeting memory"
+        subtitle="Catch up on decisions without replaying the entire room."
+        onPress={() => navigation.navigate('Meetings')}
       />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  signOutHit: {
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  signOut: {
-    ...type.label,
-    color: colors.text3,
-    textDecorationLine: 'underline',
-    textTransform: 'none',
-  },
   hero: {
     backgroundColor: colors.surface1,
     borderRadius: radius.xl,
@@ -94,6 +135,11 @@ const styles = StyleSheet.create({
   heroCopy: {
     gap: 6,
   },
+  eyebrow: {
+    ...type.label,
+    color: colors.ember,
+    letterSpacing: 1.1,
+  },
   heroTitle: {
     ...type.title2,
     color: colors.text1,
@@ -102,21 +148,9 @@ const styles = StyleSheet.create({
     ...type.bodySm,
     color: colors.text2,
   },
-  primary: {
-    alignSelf: 'flex-start',
-    backgroundColor: colors.accent,
-    borderRadius: radius.md,
-    paddingHorizontal: space[4],
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: space[1],
-  },
-  pressed: {
-    transform: [{ scale: 0.97 }],
-  },
-  primaryText: {
-    ...type.button,
-    color: colors.onAccent,
-  },
+  metrics: { flexDirection: 'row', gap: space[2], marginTop: space[2] },
+  metric: { flex: 1, minHeight: 66, borderRadius: radius.md, backgroundColor: colors.surface3, alignItems: 'center', justifyContent: 'center' },
+  metricPressed: { opacity: 0.92, transform: [{ scale: 0.96 }] },
+  metricValue: { ...type.title2, color: colors.text1, fontVariant: ['tabular-nums'] },
+  metricLabel: { ...type.label, color: colors.text3, marginTop: 2, textTransform: 'uppercase' },
 });

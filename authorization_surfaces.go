@@ -61,6 +61,8 @@ var authorizationHTTPSurfaces = []AuthorizationSurface{
 	authSurface("http.assistant.notifications_read", AuthorizationHTTP, "/assistant/notifications/read", []string{"notification"}, []ACLAction{ACLWrite}, []string{"user"}, false, true, AuthorizationLegacyGuarded),
 	authSurface("http.assistant.notifications_clear", AuthorizationHTTP, "/assistant/notifications/clear", []string{"notification"}, []ACLAction{ACLDelete}, []string{"user"}, false, true, AuthorizationLegacyGuarded),
 	authSurface("http.assistant.board", AuthorizationHTTP, "/assistant/board", []string{"board_card"}, []ACLAction{ACLReadContent}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
+	authSurface("http.assistant.board_cards", AuthorizationHTTP, "/assistant/board/cards", []string{"board_card"}, []ACLAction{ACLWrite, ACLDelete}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
+	authSurface("http.assistant.board_card", AuthorizationHTTP, "/assistant/board/cards/", []string{"board_card"}, []ACLAction{ACLWrite, ACLDelete}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.board_drafts", AuthorizationHTTP, "/assistant/board/drafts/", []string{"board_card"}, []ACLAction{ACLWrite, ACLApprove}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.memory", AuthorizationHTTP, "/assistant/memory", []string{"memory", "meeting", "artifact"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.assistant.files", AuthorizationHTTP, "/assistant/files", []string{"file", "blob", "artifact", "folder"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),

@@ -7,10 +7,20 @@ export type MainTabParamList = {
   Rooms: undefined;
   Chat: undefined;
   Board: undefined;
+  More: undefined;
 };
 
 export type RootStackParamList = {
   Main: { screen?: keyof MainTabParamList } | undefined;
   Login: undefined;
   OSWeb: { path?: string; title?: string } | undefined;
+  Room: { roomId: string; title: string };
+  CreateRoom: undefined;
+  Thread: { threadId: string; title: string };
+  Intelligence: undefined;
+  Memory: undefined;
+  Meetings: undefined;
+  Files: undefined;
+  Alerts: undefined;
+  Settings: undefined;
 };

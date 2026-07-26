@@ -7,7 +7,8 @@ import React, {
   useState,
 } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import { api, BonfireApiError } from '../api/client';
+import * as Passkeys from 'react-native-passkeys';
+import { api, BonfireApiError, setUnauthorizedHandler } from '../api/client';
 import type { Identity } from '../api/types';
 import { LAST_NAME_STORAGE_KEY, SESSION_STORAGE_KEY } from '../config';
 
@@ -17,8 +18,11 @@ type AuthState = {
   bootstrapping: boolean;
   lastLoginName: string;
   signIn: (name: string, password: string) => Promise<void>;
+  signInWithPasskey: () => Promise<void>;
   signOut: () => Promise<void>;
   refreshMe: () => Promise<void>;
+  updateIdentity: (identity: Identity) => void;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -48,6 +52,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [bootstrapping, setBootstrapping] = useState(true);
   const [lastLoginName, setLastLoginName] = useState('');
+
+  const clearLocalSession = useCallback(async () => {
+    setUser(null);
+    setSessionToken(null);
+    await writeSecure(SESSION_STORAGE_KEY, null);
+  }, []);
+
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      void clearLocalSession();
+    });
+    return () => setUnauthorizedHandler(null);
+  }, [clearLocalSession]);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,11 +116,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(identity);
   }, []);
 
+  const signInWithPasskey = useCallback(async () => {
+    if (!Passkeys.isSupported()) {
+      throw new Error('Passkeys are not available on this device.');
+    }
+    const begin = await api.beginPasskeyLogin();
+    const credential = await Passkeys.get(begin.publicKey as never);
+    if (!credential) throw new Error('Passkey sign-in was cancelled.');
+    const identity = await api.finishPasskeyLogin(begin.ceremony, credential);
+    const token = identity.sessionToken;
+    if (!token) throw new Error('The server did not return a native session.');
+    await writeSecure(SESSION_STORAGE_KEY, token);
+    await writeSecure(LAST_NAME_STORAGE_KEY, identity.name);
+    setLastLoginName(identity.name);
+    setSessionToken(token);
+    setUser(identity);
+  }, []);
+
   const signOut = useCallback(async () => {
     const token = sessionToken;
-    setUser(null);
-    setSessionToken(null);
-    await writeSecure(SESSION_STORAGE_KEY, null);
+    await clearLocalSession();
     if (token) {
       try {
         await api.logout(token);
@@ -111,13 +143,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Local sign-out still succeeds if the network is down.
       }
     }
-  }, [sessionToken]);
+  }, [sessionToken, clearLocalSession]);
 
   const refreshMe = useCallback(async () => {
     if (!sessionToken) return;
     const me = await api.me(sessionToken);
     setUser(me);
   }, [sessionToken]);
+
+  const updateIdentity = useCallback((identity: Identity) => setUser(identity), []);
+
+  const changePassword = useCallback(
+    async (currentPassword: string, newPassword: string) => {
+      if (!sessionToken) throw new Error('Sign in again to change your password.');
+      const identity = await api.changePassword(sessionToken, currentPassword, newPassword);
+      const nextToken = identity.sessionToken;
+      if (!nextToken) throw new Error('The server did not return the rotated session.');
+      await writeSecure(SESSION_STORAGE_KEY, nextToken);
+      setSessionToken(nextToken);
+      setUser(identity);
+    },
+    [sessionToken],
+  );
 
   const value = useMemo(
     () => ({
@@ -126,10 +173,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       bootstrapping,
       lastLoginName,
       signIn,
+      signInWithPasskey,
       signOut,
       refreshMe,
+      updateIdentity,
+      changePassword,
     }),
-    [user, sessionToken, bootstrapping, lastLoginName, signIn, signOut, refreshMe],
+    [
+      user,
+      sessionToken,
+      bootstrapping,
+      lastLoginName,
+      signIn,
+      signInWithPasskey,
+      signOut,
+      refreshMe,
+      updateIdentity,
+      changePassword,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

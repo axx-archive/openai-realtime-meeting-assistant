@@ -200,6 +200,77 @@ func TestLogoutDestroysSession(t *testing.T) {
 	}
 }
 
+func TestNativeLogoutDestroysBearerSession(t *testing.T) {
+	setupAuthTestEnv(t)
+
+	loginReq := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"name":"AJ","password":"B0NFIRE!"}`))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginReq.Header.Set("X-Bonfire-Client", "expo")
+	loginRec := httptest.NewRecorder()
+	authHandler(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("native login failed: %d %s", loginRec.Code, loginRec.Body.String())
+	}
+	var login struct {
+		SessionToken string `json:"sessionToken"`
+	}
+	if err := json.Unmarshal(loginRec.Body.Bytes(), &login); err != nil || login.SessionToken == "" {
+		t.Fatalf("native login token missing: err=%v body=%s", err, loginRec.Body.String())
+	}
+
+	logoutReq := httptest.NewRequest(http.MethodPost, "/auth/logout", strings.NewReader(`{}`))
+	logoutReq.Header.Set("Content-Type", "application/json")
+	logoutReq.Header.Set("Authorization", "Bearer "+login.SessionToken)
+	logoutRec := httptest.NewRecorder()
+	authHandler(logoutRec, logoutReq)
+	if logoutRec.Code != http.StatusOK {
+		t.Fatalf("native logout failed: %d %s", logoutRec.Code, logoutRec.Body.String())
+	}
+
+	meReq := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	meReq.Header.Set("Authorization", "Bearer "+login.SessionToken)
+	meRec := httptest.NewRecorder()
+	authHandler(meRec, meReq)
+	if meRec.Code != http.StatusUnauthorized {
+		t.Fatalf("bearer session survived native logout: status=%d body=%s", meRec.Code, meRec.Body.String())
+	}
+}
+
+func TestAppleAppSiteAssociationPublishesPasskeyAppID(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/apple-app-site-association", nil)
+	recorder := httptest.NewRecorder()
+	appleAppSiteAssociationHandler(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("AASA status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if contentType := recorder.Header().Get("Content-Type"); contentType != "application/json" {
+		t.Fatalf("AASA content type=%q", contentType)
+	}
+	var payload struct {
+		WebCredentials struct {
+			Apps []string `json:"apps"`
+		} `json:"webcredentials"`
+		AppLinks struct {
+			Details []struct {
+				AppIDs     []string         `json:"appIDs"`
+				Components []map[string]any `json:"components"`
+			} `json:"details"`
+		} `json:"applinks"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode AASA: %v", err)
+	}
+	if len(payload.WebCredentials.Apps) != 1 || payload.WebCredentials.Apps[0] != "73PT36P58W.xyz.thebonfire.app" {
+		t.Fatalf("unexpected AASA apps: %v", payload.WebCredentials.Apps)
+	}
+	if len(payload.AppLinks.Details) != 1 || len(payload.AppLinks.Details[0].Components) != 1 {
+		t.Fatalf("unexpected AASA applinks: %+v", payload.AppLinks.Details)
+	}
+	if got := payload.AppLinks.Details[0].AppIDs; len(got) != 1 || got[0] != "73PT36P58W.xyz.thebonfire.app" {
+		t.Fatalf("unexpected applink app IDs: %v", got)
+	}
+}
+
 func TestSessionsPersistAcrossReload(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
 	store := newSessionStore(path)
@@ -446,6 +517,98 @@ func TestChangePasswordEndpoint(t *testing.T) {
 	}
 	if _, ok := accountStore().authenticate("tyler@shareability.com", "freshpass99"); !ok {
 		t.Error("expected new password to work")
+	}
+}
+
+func TestNativeChangePasswordRotatesBearerSession(t *testing.T) {
+	setupAuthTestEnv(t)
+
+	loginReq := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"name":"Tyler","password":"B0NFIRE!"}`))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginReq.Header.Set("X-Bonfire-Client", "expo")
+	loginRec := httptest.NewRecorder()
+	authHandler(loginRec, loginReq)
+	var login struct {
+		SessionToken string `json:"sessionToken"`
+	}
+	if err := json.Unmarshal(loginRec.Body.Bytes(), &login); err != nil || login.SessionToken == "" {
+		t.Fatalf("native login failed: err=%v body=%s", err, loginRec.Body.String())
+	}
+
+	changeReq := httptest.NewRequest(http.MethodPost, "/auth/change-password", strings.NewReader(`{"currentPassword":"B0NFIRE!","newPassword":"freshpass99"}`))
+	changeReq.Header.Set("Content-Type", "application/json")
+	changeReq.Header.Set("X-Bonfire-Client", "expo")
+	changeReq.Header.Set("Authorization", "Bearer "+login.SessionToken)
+	changeRec := httptest.NewRecorder()
+	authHandler(changeRec, changeReq)
+	if changeRec.Code != http.StatusOK {
+		t.Fatalf("native password change failed: %d %s", changeRec.Code, changeRec.Body.String())
+	}
+	var changed struct {
+		SessionToken string `json:"sessionToken"`
+	}
+	if err := json.Unmarshal(changeRec.Body.Bytes(), &changed); err != nil || changed.SessionToken == "" {
+		t.Fatalf("rotated token missing: err=%v body=%s", err, changeRec.Body.String())
+	}
+	if changed.SessionToken == login.SessionToken {
+		t.Fatal("password change must rotate the native token")
+	}
+
+	for token, want := range map[string]int{
+		login.SessionToken:   http.StatusUnauthorized,
+		changed.SessionToken: http.StatusOK,
+	} {
+		meReq := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+		meReq.Header.Set("Authorization", "Bearer "+token)
+		meRec := httptest.NewRecorder()
+		authHandler(meRec, meReq)
+		if meRec.Code != want {
+			t.Fatalf("/auth/me token status=%d want=%d body=%s", meRec.Code, want, meRec.Body.String())
+		}
+	}
+}
+
+func TestNativeWebSessionBridgeSetsHttpOnlyCookieAndSafeRedirect(t *testing.T) {
+	setupAuthTestEnv(t)
+
+	loginReq := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"name":"AJ","password":"B0NFIRE!"}`))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginReq.Header.Set("X-Bonfire-Client", "expo")
+	loginRec := httptest.NewRecorder()
+	authHandler(loginRec, loginReq)
+	var login struct {
+		SessionToken string `json:"sessionToken"`
+	}
+	_ = json.Unmarshal(loginRec.Body.Bytes(), &login)
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/native-web-session?path=%2F%3Ftool%3Dchat", nil)
+	req.Header.Set("X-Bonfire-Client", "expo")
+	req.Header.Set("Authorization", "Bearer "+login.SessionToken)
+	recorder := httptest.NewRecorder()
+	authHandler(recorder, req)
+	if recorder.Code != http.StatusSeeOther || recorder.Header().Get("Location") != "/?tool=chat" {
+		t.Fatalf("bridge redirect status=%d location=%q", recorder.Code, recorder.Header().Get("Location"))
+	}
+	foundCookie := false
+	for _, cookie := range recorder.Result().Cookies() {
+		if cookie.Name == sessionCookieName {
+			foundCookie = true
+			if !cookie.HttpOnly || cookie.Value != login.SessionToken {
+				t.Fatalf("bridge cookie not secure: %+v", cookie)
+			}
+		}
+	}
+	if !foundCookie {
+		t.Fatal("bridge did not set the session cookie")
+	}
+
+	bad := httptest.NewRequest(http.MethodGet, "/auth/native-web-session?path=https%3A%2F%2Fevil.example", nil)
+	bad.Header.Set("X-Bonfire-Client", "expo")
+	bad.Header.Set("Authorization", "Bearer "+login.SessionToken)
+	badRec := httptest.NewRecorder()
+	authHandler(badRec, bad)
+	if badRec.Code != http.StatusBadRequest {
+		t.Fatalf("external bridge path status=%d want=400", badRec.Code)
 	}
 }
 

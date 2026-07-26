@@ -1,0 +1,28 @@
+# The Expo app is a self-contained package inside this larger server repo.
+# Keep build uploads deterministic and exclude local dev/prod-like data,
+# unrelated sites, Git internals, and server-only source from App Store builds.
+**
+!mobile
+!mobile/**
+!**/mobile
+!**/mobile/**
+
+**/mobile/node_modules/**
+**/mobile/.expo/**
+**/mobile/dist/**
+**/mobile/ios/**
+**/mobile/android/**
+**/mobile/.claude/**
+**/mobile/AGENTS.md
+**/mobile/CLAUDE.md
+
+# EAS matches paths below relative to the app working directory as well as the
+# repository archive root, so keep both forms explicit.
+node_modules/**
+.expo/**
+dist/**
+ios/**
+android/**
+.claude/**
+AGENTS.md
+CLAUDE.md

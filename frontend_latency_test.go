@@ -21,21 +21,24 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 		"groupMaxWidth: 960",
 		"crowdedMaxBitrate: 450000",
 		"crowdedMaxWidth: 640",
-		"constrainedMaxBitrate: 250000",
-		"constrainedMaxWidth: 480",
+		"bandwidthScaleResolutionDownBy: 2",
 		"function useGroupVideoLimits()",
 		"function useCrowdedVideoLimits()",
 		"return currentRoomParticipantCount() >= 5",
 		"function retuneLocalCameraCapture()",
+		"function cameraCaptureNeedsRetune(track, target)",
+		"width: { ideal: target.width, max: target.width }",
 		"configureOutboundSenders().catch(error => {",
 		"function startMediaQualityMonitor(sessionPeer)",
-		"function constrainCameraForLag(reason)",
-		"const sustainedLag = mediaQualityLagSamples >= 2",
+		"function adaptDesktopCameraForLowBandwidth(availableBitrate)",
+		"function restoreDesktopCameraAfterBandwidthRecovery(availableBitrate)",
+		"outgoingBitrate < 350000",
+		"outgoingBitrate >= 650000",
 		"if (isMobileDevice) {",
-		"Reduced mobile sender bandwidth without restarting camera capture",
 		"screenShareMaxBitrate: 2500000",
 		"parameters.degradationPreference = isScreenShare",
 		": 'maintain-framerate'",
+		"encoding.scaleResolutionDownBy = !isScreenShare && mediaQualityBandwidthLimited",
 		"function remoteVideoStreamForTrack(stream, videoTrack)",
 		"function mediaStreamTrackSignature(stream)",
 		"function videoPlaybackStreamForElement(video, stream)",
@@ -60,6 +63,8 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 		"const safariBrowser = forcedSafariMediaPath || /^((?!chrome|android|crios|fxios|edgios).)*safari/i.test(navigator.userAgent)",
 		"function scheduleConnectionRecovery(sessionPeer)",
 		"const connectionRecoveryDelayMs = 20000",
+		"const iceDisconnectRestartGraceMs = 3000",
+		"function scheduleIceRestartAfterDisconnect(sessionPeer)",
 		"function requestIceRestart(reason)",
 		"event: 'restart_ice'",
 		"state === 'disconnected'",
@@ -78,6 +83,11 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 	for _, unwanted := range []string{
 		"lowLatencyJitterBufferTargetMs",
 		"jitterBufferTarget",
+		"snapshot.outboundRtt > 0.45",
+		"snapshot.inboundVideoJitter > 0.28",
+		"function constrainCameraForLag(reason)",
+		"mediaQualityConstrained",
+		"const sustainedLag = mediaQualityLagSamples >= 2",
 	} {
 		if strings.Contains(html, unwanted) {
 			t.Fatalf("index.html still forces choppy receiver buffering via %q", unwanted)
@@ -229,8 +239,17 @@ func TestIndexKeepsWidescreenCaptureAndCalmRemoteTiles(t *testing.T) {
 	if retune == "" {
 		t.Fatal("missing retuneLocalCameraCapture helper")
 	}
-	if got := strings.Count(retune, "aspectRatio: widescreenAspectRatio"); got != 4 {
-		t.Fatalf("retuneLocalCameraCapture should pin 16:9 in all four desktop quality tiers, found %d", got)
+	if got := strings.Count(retune, "aspectRatio: widescreenAspectRatio"); got != 1 {
+		t.Fatalf("retuneLocalCameraCapture should build one shared 16:9 constraint after selecting the room-size tier, found %d", got)
+	}
+	for _, want := range []string{
+		"{ width: limits.crowdedMaxWidth, height: limits.crowdedMaxHeight, frameRate: limits.crowdedMaxFramerate }",
+		"{ width: limits.groupMaxWidth, height: limits.groupMaxHeight, frameRate: limits.groupMaxFramerate }",
+		"{ width: 1280, height: 720, frameRate: limits.maxFramerate }",
+	} {
+		if !strings.Contains(retune, want) {
+			t.Fatalf("retuneLocalCameraCapture is missing room-size capture target %q", want)
+		}
 	}
 	// Phones keep their native orientation: pinning a landscape aspect ratio and
 	// re-applying capture constraints on every roster change made the mobile feed

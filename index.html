@@ -17,7 +17,7 @@
          keeps its JS across a deploy compares it to the version pushed over the
          websocket and refreshes itself once when they diverge. -->
     <meta name="bonfire-build" content="__BONFIRE_BUILD_VERSION__">
-    <link rel="icon" href="/public/app-icon.svg" type="image/svg+xml">
+    <link rel="icon" href="/public/favicon.svg" type="image/svg+xml">
     <!-- iOS ignores SVG icons — a PNG apple-touch-icon is required or the
          home-screen tile becomes a page screenshot. -->
     <link rel="apple-touch-icon" href="/public/apple-touch-icon.png">
@@ -1798,6 +1798,10 @@
         color: var(--on-accent);
         box-shadow: 0 12px 32px rgba(0, 0, 0, .28);
       }
+      .login-mark svg {
+        width: 48px;
+        height: 48px;
+      }
 
       .login-wordmark {
         margin: 0;
@@ -2057,6 +2061,10 @@
         width: 44px;
         height: 44px;
         border-radius: var(--r-lg);
+      }
+      #appShell.is-guest .login-mark svg {
+        width: 38px;
+        height: 38px;
       }
       #appShell.is-guest .login-wordmark {
         font: var(--type-headline);
@@ -14584,6 +14592,174 @@
       .lobby__passerror[hidden] { display: none; }
       .lobby__joinerror { font: var(--type-label); letter-spacing: var(--track-label); color: var(--warn); max-width: 360px; text-align: center; }
       .lobby__joinerror[hidden] { display: none; }
+
+      /* Same-account handoff: joining is a deliberate device decision when a
+         fresh authoritative room snapshot shows this person on another
+         endpoint. The modal lives above every shell surface, but keeps the
+         same glass-and-ink material as the room lobby. */
+      .room-transfer {
+        position: fixed;
+        inset: 0;
+        z-index: 1500;
+        display: grid;
+        place-items: center;
+        padding: max(24px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+        background: var(--scrim);
+        backdrop-filter: var(--glass-scrim);
+        -webkit-backdrop-filter: var(--glass-scrim);
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transition: opacity var(--dur-med) var(--ease), visibility 0s linear var(--dur-med);
+      }
+      .room-transfer[hidden] { display: none; }
+      .room-transfer.is-open {
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+        transition: opacity var(--dur-med) var(--ease), visibility 0s linear 0s;
+      }
+      .room-transfer__panel {
+        width: min(456px, 100%);
+        padding: 28px;
+        border-radius: var(--r-2xl);
+        background: var(--glass-chrome);
+        box-shadow: 0 0 0 1px var(--glass-border), var(--glass-highlight), var(--shadow-3);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        color: var(--text-1);
+        text-align: left;
+        opacity: 0;
+        filter: blur(4px);
+        transform: translateY(12px);
+        transition: opacity var(--dur-med) var(--ease), filter var(--dur-med) var(--ease), transform var(--dur-med) var(--ease);
+      }
+      .room-transfer.is-open .room-transfer__panel {
+        opacity: 1;
+        filter: blur(0);
+        transform: translateY(0);
+      }
+      .room-transfer.is-leaving .room-transfer__panel {
+        transform: translateY(-8px);
+      }
+      .room-transfer__mark,
+      .room-transfer__title,
+      .room-transfer__copy,
+      .room-transfer__actions,
+      .room-transfer__cancel {
+        opacity: 0;
+        transform: translateY(8px);
+        transition: opacity var(--dur-med) var(--ease), transform var(--dur-med) var(--ease);
+      }
+      .room-transfer.is-open .room-transfer__mark,
+      .room-transfer.is-open .room-transfer__title,
+      .room-transfer.is-open .room-transfer__copy,
+      .room-transfer.is-open .room-transfer__actions,
+      .room-transfer.is-open .room-transfer__cancel {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      .room-transfer.is-open .room-transfer__title { transition-delay: 35ms; }
+      .room-transfer.is-open .room-transfer__copy { transition-delay: 70ms; }
+      .room-transfer.is-open .room-transfer__actions { transition-delay: 105ms; }
+      .room-transfer.is-open .room-transfer__cancel { transition-delay: 140ms; }
+      .room-transfer.is-leaving .room-transfer__mark,
+      .room-transfer.is-leaving .room-transfer__title,
+      .room-transfer.is-leaving .room-transfer__copy,
+      .room-transfer.is-leaving .room-transfer__actions,
+      .room-transfer.is-leaving .room-transfer__cancel {
+        transform: translateY(-6px);
+        transition-delay: 0ms;
+      }
+      .room-transfer__mark {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 48px;
+        height: 48px;
+        margin-bottom: 20px;
+        border-radius: var(--r-lg);
+        background: var(--surface-3);
+        color: var(--text-1);
+        box-shadow: 0 0 0 1px var(--line-1), var(--shadow-1);
+      }
+      .room-transfer__title {
+        margin: 0;
+        font: var(--type-title-1);
+        letter-spacing: var(--track-title-1);
+        text-wrap: balance;
+      }
+      .room-transfer__copy {
+        margin: 10px 0 24px;
+        color: var(--text-2);
+        font: var(--type-body);
+        text-wrap: pretty;
+      }
+      .room-transfer__copy strong { color: var(--text-1); font-weight: 600; }
+      .room-transfer__actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .room-transfer__choice {
+        min-height: 88px;
+        padding: 15px 16px;
+        border: 0;
+        border-radius: var(--r-lg);
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        justify-content: center;
+        gap: 4px;
+        background: var(--surface-3);
+        color: var(--text-1);
+        box-shadow: 0 0 0 1px var(--line-1), var(--shadow-1);
+        cursor: pointer;
+        text-align: left;
+        transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+      .room-transfer__choice:hover {
+        box-shadow: 0 0 0 1px var(--line-2), var(--shadow-2);
+      }
+      .room-transfer__choice:active,
+      .room-transfer__cancel:active { transform: scale(0.96); }
+      .room-transfer__choice--primary {
+        background: var(--accent);
+        color: var(--on-accent);
+        box-shadow: var(--shadow-2);
+      }
+      .room-transfer__choice--primary:hover { background: var(--accent-hover); }
+      .room-transfer__choice strong {
+        font: var(--type-body-medium);
+        letter-spacing: var(--track-text);
+      }
+      .room-transfer__choice span {
+        color: var(--text-2);
+        font: var(--type-caption);
+        text-wrap: pretty;
+      }
+      .room-transfer__choice--primary span { color: color-mix(in srgb, var(--on-accent) 70%, transparent); }
+      .room-transfer__cancel {
+        display: block;
+        min-width: var(--hit-min);
+        min-height: var(--hit-min);
+        margin: 12px auto -8px;
+        padding: 0 14px;
+        border: 0;
+        border-radius: var(--r-md);
+        background: transparent;
+        color: var(--text-2);
+        font: var(--type-caption-medium);
+        cursor: pointer;
+        transition: color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+      .room-transfer__cancel:hover { color: var(--text-1); }
+      @media (max-width: 520px) {
+        .room-transfer { align-items: end; padding: 12px; }
+        .room-transfer__panel { padding: 24px; border-radius: var(--r-xl); }
+        .room-transfer__actions { grid-template-columns: minmax(0, 1fr); }
+        .room-transfer__choice { min-height: 72px; }
+      }
       /* RW2 green room — theme tokens for the gate mount; the lobby mount
          overrides to the stage's white-alpha idiom (the stage is always
          black, whatever the theme). Canon: a 16/10 preview tile with a
@@ -21836,8 +22012,16 @@
     <main id="appShell" data-tool="office">
       <nav id="toolRail" class="tool-rail" aria-label="Tools">
         <span id="brandMark" class="topbar__mark" role="img" aria-label="BonfireOS">
-          <svg viewBox="0 0 64 64">
-            <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path>
+          <svg viewBox="0 0 1024 1024">
+            <defs>
+              <mask id="bonfireRailLogCutout" x="0" y="0" width="1024" height="1024" maskUnits="userSpaceOnUse">
+                <rect width="1024" height="1024" fill="#fff"></rect>
+                <path fill="#fff" stroke="#000" stroke-width="160" stroke-linejoin="bevel" d="M214 859L791 692L811 703L821 737L810 757L233 924L213 913L203 879Z"></path>
+              </mask>
+            </defs>
+            <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M553 98C531 173 470 222 431 286C401 336 400 384 380 426C380 389 355 359 318 334C330 382 300 426 279 479C248 520 284 548 373 563C418 571 466 577 513 580C562 577 610 566 651 545C710 515 745 493 741 462C732 430 701 397 674 360C628 296 531 252 553 98ZM539 324C526 373 486 407 454 441C423 476 424 506 447 526C463 540 486 548 511 552C542 536 564 512 567 485C570 456 550 430 526 406C546 385 552 354 539 324Z"></path>
+            <path fill="currentColor" mask="url(#bonfireRailLogCutout)" d="M233 692L810 859L821 879L811 913L791 924L214 757L203 737L213 703Z"></path>
+            <path fill="currentColor" d="M214 859L791 692L811 703L821 737L810 757L233 924L213 913L203 879Z"></path>
           </svg>
         </span>
         <span class="tool-rail__slot">
@@ -22101,7 +22285,12 @@
           </button>
           <header class="login-head login-rise">
             <span class="login-mark" aria-hidden="true">
-              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"></path></svg>
+              <svg viewBox="0 0 1024 1024" fill="none">
+                <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M553 92C531 173 464 225 425 296C394 352 394 410 370 458C376 413 350 374 307 339C320 400 285 447 263 506C226 604 273 670 391 710C431 724 472 731 513 735C559 731 603 719 642 700C720 662 765 604 755 528C746 468 710 427 680 380C633 306 529 253 553 92ZM538 435C528 485 492 527 463 566C436 603 434 637 454 665C468 687 489 699 513 706C540 687 558 660 561 628C565 591 548 558 526 529C544 505 550 470 538 435Z"></path>
+                <path fill="currentColor" d="M233 693L814 818L828 839L816 898L794 912L213 787L199 766L211 707Z"></path>
+                <path fill="none" stroke="var(--accent)" stroke-width="42" stroke-linejoin="bevel" d="M209 814L792 679L813 693L827 752L814 773L231 908L210 895L195 836Z"></path>
+                <path fill="currentColor" d="M209 814L792 679L813 693L827 752L814 773L231 908L210 895L195 836Z"></path>
+              </svg>
             </span>
             <h1 class="login-wordmark">bonfireOS</h1>
             <p class="login-subline"></p>
@@ -23211,6 +23400,31 @@
         <p id="consentStatus" class="consent-panel__status" role="status" aria-live="polite"></p>
       </section>
     </main>
+    <section id="roomTransferDialog" class="room-transfer" role="dialog" aria-modal="true" aria-labelledby="roomTransferTitle" aria-describedby="roomTransferCopy" hidden>
+      <div id="roomTransferPanel" class="room-transfer__panel" tabindex="-1">
+        <span class="room-transfer__mark" aria-hidden="true">
+          <svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="4" width="13" height="10" rx="2"></rect>
+            <path d="M5 18h7"></path><path d="M8.5 14v4"></path>
+            <rect x="17" y="8" width="5" height="10" rx="1.4"></rect>
+            <path d="m13 7 2 2-2 2"></path>
+          </svg>
+        </span>
+        <h2 id="roomTransferTitle" class="room-transfer__title">Already in this room</h2>
+        <p id="roomTransferCopy" class="room-transfer__copy">You're connected to <strong id="roomTransferRoomName">this room</strong> on another device. Transfer the call here, or keep both devices connected.</p>
+        <div class="room-transfer__actions">
+          <button id="roomTransferKeep" class="room-transfer__choice" type="button">
+            <strong>Add this device</strong>
+            <span>Keep both devices in the call.</span>
+          </button>
+          <button id="roomTransferHere" class="room-transfer__choice room-transfer__choice--primary" type="button">
+            <strong>Transfer here</strong>
+            <span>Leave on the other device.</span>
+          </button>
+        </div>
+        <button id="roomTransferCancel" class="room-transfer__cancel" type="button">Cancel</button>
+      </div>
+    </section>
     <aside id="osAssistant" class="os-assistant" hidden aria-label="Scout">
       <section class="os-assistant__panel" aria-label="Assistant conversation">
         <header class="os-assistant__head">
@@ -24219,6 +24433,12 @@
       const officeRoomInvited = document.getElementById('officeRoomInvited')
       const officeRoomJoin = document.getElementById('officeRoomJoin')
       const roomEmptyJoinButton = document.getElementById('roomEmptyJoin')
+      const roomTransferDialog = document.getElementById('roomTransferDialog')
+      const roomTransferPanel = document.getElementById('roomTransferPanel')
+      const roomTransferRoomName = document.getElementById('roomTransferRoomName')
+      const roomTransferKeep = document.getElementById('roomTransferKeep')
+      const roomTransferHere = document.getElementById('roomTransferHere')
+      const roomTransferCancel = document.getElementById('roomTransferCancel')
       // RW2 green room + join hardening handles
       const greenRoomEl = document.getElementById('greenRoom')
       const greenRoomTileEl = document.getElementById('greenRoomTile')
@@ -24296,6 +24516,9 @@
       let localStream
       let roomEntryInProgress = false
       let roomEntryStartedAt = 0
+      let roomTransferDecisionResolve = null
+      let roomTransferRestoreFocusEl = null
+      let roomTransferCloseTimer = 0
       let screenShareStream
       let screenShareStartInFlight = false
       let isReplacingLocalAudio = false
@@ -24470,6 +24693,7 @@
       // 0 until a `meeting` event delivers the record
       let sharedMeetingStartMs = 0
       let connectionRecoveryTimer = 0
+      let iceDisconnectRestartTimer = 0
       let signalingReconnectTimer = 0
       let signalingReconnectAttempts = 0
       let signalingReconnectStartedAt = 0
@@ -24692,8 +24916,9 @@
       let roomStateRefreshTimer = 0
       let roomAudioUnlockRetryTimer = 0
       let lastRoomAudioUnlockNoticeAt = 0
-      let mediaQualityConstrained = false
-      let mediaQualityLagSamples = 0
+      let mediaQualityBandwidthLimited = false
+      let mediaQualityBandwidthLowSamples = 0
+      let mediaQualityBandwidthHealthySamples = 0
       let previousMediaQualityStats = null
       let lastMediaQualityReportAt = 0
       let auxiliaryVideoRepairTimer = 0
@@ -24864,10 +25089,9 @@
           crowdedMaxFramerate: 20,
           crowdedMaxWidth: 640,
           crowdedMaxHeight: 360,
-          constrainedMaxBitrate: 250000,
-          constrainedMaxFramerate: 12,
-          constrainedMaxWidth: 480,
-          constrainedMaxHeight: 270,
+          bandwidthMaxBitrate: 350000,
+          bandwidthMaxFramerate: 24,
+          bandwidthScaleResolutionDownBy: 2,
           screenShareMaxBitrate: 2500000,
           screenShareMaxFramerate: 15,
           screenShareMaxWidth: 1280,
@@ -24881,6 +25105,10 @@
       const screenShareCaptureProbeIntervalMs = 120
       const screenShareOutboundProbeTimeoutMs = 2200
       const connectionRecoveryDelayMs = 20000
+      // A WebRTC `disconnected` state is often a sub-second network handoff,
+      // especially between Wi-Fi and cellular. Let ICE recover in place before
+      // renegotiating the whole transport; `failed` still restarts immediately.
+      const iceDisconnectRestartGraceMs = 3000
       const iceRestartThrottleMs = 3500
       const maxIceRestartAttempts = 5
       const iceRestartRetryBackoffMs = [0, 1000, 2000, 4000, 8000]
@@ -24889,6 +25117,15 @@
       const serverActiveSpeakerStaleMs = 3000
 
       joinButton.addEventListener('click', joinRoom)
+      roomTransferKeep?.addEventListener('click', () => finishRoomTransferDecision('keep'))
+      roomTransferHere?.addEventListener('click', () => finishRoomTransferDecision('transfer'))
+      roomTransferCancel?.addEventListener('click', () => finishRoomTransferDecision('cancel'))
+      roomTransferDialog?.addEventListener('click', event => {
+        if (event.target === roomTransferDialog) {
+          finishRoomTransferDecision('cancel')
+        }
+      })
+      roomTransferDialog?.addEventListener('keydown', trapRoomTransferFocus)
       // the login gate is a real form — password managers + Enter-to-submit
       document.getElementById('loginForm').addEventListener('submit', event => {
         event.preventDefault()
@@ -25494,6 +25731,10 @@
         schedulePrimaryVideoPlaybackRepair('orientation change', 320)
       })
       document.addEventListener('visibilitychange', () => {
+        previousMediaQualityStats = null
+        mediaQualityBandwidthLowSamples = 0
+        mediaQualityBandwidthHealthySamples = 0
+        rebaseRemoteVideoFreezeSamples()
         if (document.visibilityState === 'visible') {
           syncLocalMirrorPreview()
           scheduleAuxiliaryVideoPlaybackRepair('visibility restored', 120)
@@ -25519,7 +25760,9 @@
       // disconnected/failed, proactively kick the bounded ICE-restart ladder
       // instead of waiting for the connection-state watchdog to notice.
       window.addEventListener('online', () => {
-        if (pc && ['disconnected', 'failed'].includes(pc.connectionState)) {
+        if (pc && pc.connectionState === 'disconnected') {
+          scheduleIceRestartAfterDisconnect(pc)
+        } else if (pc && pc.connectionState === 'failed') {
           requestIceRestart('network change')
         }
       })
@@ -27550,17 +27793,24 @@
         window.location.reload()
       })
 
+      async function fetchSelectedRoomSnapshot() {
+        const response = await fetch(`/participants?room=${encodeURIComponent(activeJoin.roomId || 'office')}`, { cache: 'no-store' })
+        if (!response.ok) {
+          return null
+        }
+        return response.json()
+      }
+
       async function loadParticipantPreview() {
         // A signed-out tab must not poll authed endpoints into 401 noise.
         if (!authedUser) {
           return
         }
         try {
-          const response = await fetch(`/participants?room=${encodeURIComponent(activeJoin.roomId || 'office')}`, { cache: 'no-store' })
-          if (!response.ok) {
+          const payload = await fetchSelectedRoomSnapshot()
+          if (!payload) {
             return
           }
-          const payload = await response.json()
           const names = applyRoomSnapshot(payload)
           participantPreview = names
           if (appShell.classList.contains('is-in-room')) {
@@ -27569,6 +27819,145 @@
           updateParticipantPreviewText()
         } catch {
           // The room can still be joined if the preview endpoint is unavailable.
+        }
+      }
+
+      function roomSnapshotValueForParticipant(record, participantName) {
+        if (!record || typeof record !== 'object') {
+          return undefined
+        }
+        const wanted = String(participantName || '').trim().toLowerCase()
+        if (!wanted) {
+          return undefined
+        }
+        const matched = Object.entries(record).find(([name]) => String(name || '').trim().toLowerCase() === wanted)
+        return matched?.[1]
+      }
+
+      // A fresh room snapshot carries endpointMediaStates keyed by account and
+      // endpoint id. Comparing those ids with this browser's stable endpoint
+      // distinguishes a harmless same-device refresh from a real laptop ↔
+      // phone handoff. The count fallback only claims another device when it
+      // proves 2+, keeping ordinary joins safe against older snapshots.
+      function roomSnapshotHasOtherAccountEndpoint(payload, participantName, endpointId) {
+        const names = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.participants) ? payload.participants : []
+        const wanted = String(participantName || '').trim().toLowerCase()
+        const present = normalizeParticipantList(names)
+          .some(name => name.toLowerCase() === wanted)
+        if (!wanted || !present) {
+          return false
+        }
+        const endpointStates = roomSnapshotValueForParticipant(payload?.endpointMediaStates, participantName)
+        const endpointIds = endpointStates && typeof endpointStates === 'object'
+          ? Object.keys(endpointStates).map(id => String(id || '').trim()).filter(Boolean)
+          : []
+        if (endpointIds.length) {
+          return endpointIds.some(id => id !== endpointId)
+        }
+        const endpointCount = Number(roomSnapshotValueForParticipant(payload?.endpointCounts, participantName))
+        return Number.isFinite(endpointCount) && endpointCount > 1
+      }
+
+      async function resolveRoomJoinDeviceDecision() {
+        // Guests have no canonical account to transfer, and signed-out members
+        // are authenticated earlier in joinRoom before this helper is called.
+        if (!authedUser || activeJoin.guest || guestMode) {
+          return 'keep'
+        }
+        try {
+          const payload = await fetchSelectedRoomSnapshot()
+          if (!payload) {
+            return 'keep'
+          }
+          participantPreview = applyRoomSnapshot(payload)
+          updateParticipantPreviewText()
+          const participantName = participantNameFromAccount(authedUser)
+          if (!roomSnapshotHasOtherAccountEndpoint(payload, participantName, ensureEndpointId())) {
+            return 'keep'
+          }
+          const roomName = String(activeJoinRoomRecord()?.name || '').trim() || 'this room'
+          return promptRoomTransferDecision(roomName)
+        } catch {
+          // Presence is advisory UX, not an admission dependency. A transient
+          // snapshot failure preserves the ordinary multi-device join path.
+          return 'keep'
+        }
+      }
+
+      function promptRoomTransferDecision(roomName) {
+        if (!roomTransferDialog || !roomTransferPanel || roomTransferDecisionResolve) {
+          return Promise.resolve('keep')
+        }
+        if (roomTransferCloseTimer) {
+          window.clearTimeout(roomTransferCloseTimer)
+          roomTransferCloseTimer = 0
+        }
+        roomTransferRestoreFocusEl = document.activeElement instanceof HTMLElement ? document.activeElement : null
+        roomTransferRoomName.textContent = String(roomName || '').trim() || 'this room'
+        roomTransferDialog.classList.remove('is-open', 'is-leaving')
+        roomTransferDialog.hidden = false
+        const decision = new Promise(resolve => {
+          roomTransferDecisionResolve = resolve
+        })
+        window.requestAnimationFrame(() => {
+          if (!roomTransferDialog.hidden && roomTransferDecisionResolve) {
+            roomTransferDialog.classList.add('is-open')
+            roomTransferPanel.focus()
+          }
+        })
+        return decision
+      }
+
+      function finishRoomTransferDecision(decision) {
+        if (!roomTransferDecisionResolve) {
+          return
+        }
+        const resolve = roomTransferDecisionResolve
+        roomTransferDecisionResolve = null
+        roomTransferDialog.classList.add('is-leaving')
+        roomTransferDialog.classList.remove('is-open')
+        const delay = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 220
+        roomTransferCloseTimer = window.setTimeout(() => {
+          roomTransferCloseTimer = 0
+          roomTransferDialog.hidden = true
+          roomTransferDialog.classList.remove('is-leaving')
+          if (decision === 'cancel') {
+            roomTransferRestoreFocusEl?.focus?.()
+          }
+          roomTransferRestoreFocusEl = null
+          resolve(decision === 'transfer' ? 'transfer' : decision === 'cancel' ? 'cancel' : 'keep')
+        }, delay)
+      }
+
+      function trapRoomTransferFocus(event) {
+        if (roomTransferDialog.hidden) {
+          return
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+          finishRoomTransferDecision('cancel')
+          return
+        }
+        if (event.key !== 'Tab') {
+          return
+        }
+        const focusable = [roomTransferKeep, roomTransferHere, roomTransferCancel]
+          .filter(element => element && !element.disabled)
+        if (!focusable.length) {
+          event.preventDefault()
+          return
+        }
+        const first = focusable[0]
+        const last = focusable[focusable.length - 1]
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === roomTransferPanel)) {
+          event.preventDefault()
+          last.focus()
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault()
+          first.focus()
         }
       }
 
@@ -32902,6 +33291,25 @@
           }
         }
 
+        const deviceJoinDecision = await resolveRoomJoinDeviceDecision()
+        if (deviceJoinDecision === 'cancel') {
+          setConnectionState('idle', 'not connected')
+          setRoomEntryInProgress(false)
+          syncOSAssistantAvailability()
+          joinButton.disabled = false
+          joinAccessButton.disabled = false
+          updatePasskeyButton()
+          if (voiceOnly) {
+            setRealtimeVoiceMode('idle')
+            realtimeVoiceOnlyPending = false
+            realtimeVoiceStartedRoom = false
+            setVoiceIslandState('idle')
+          }
+          setLog('join cancelled')
+          return
+        }
+        const transferExisting = deviceJoinDecision === 'transfer'
+
         // the server forces the "Guest " prefix + dedupe suffix at admission;
         // this local guess is corrected by the access_granted seat name
         currentParticipantName = activeJoin.guest
@@ -32943,7 +33351,7 @@
         setLog('checking room access')
 
         try {
-          openRoomWebSocket()
+          openRoomWebSocket({ transferExisting })
         } catch (error) {
           setLog(error.message || String(error))
           leaveRoom()
@@ -33028,6 +33436,10 @@
 
       function openRoomWebSocket(options = {}) {
         const reconnect = Boolean(options.reconnect)
+        // A transfer is a one-shot admission choice from the explicit desktop
+        // prompt. Every signaling reconnect intentionally recomputes this as
+        // false, so recovering transport can never evict a newly joined device.
+        const initialTransferExisting = !reconnect && options.transferExisting === true
         const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
         // the room identity rides the dial; a reconnect re-dials the SAME room.
         // A guest tab dials as=guest so the server seats it on its GUEST
@@ -33049,13 +33461,17 @@
           accessHint.textContent = reconnect ? 'restoring room connection.' : 'checking room access.'
           // passcode rides the hello, never the URL (it would land in logs);
           // JSON.stringify drops the undefined so office hellos keep today's shape
+          const participantHello = {
+            name: currentParticipantName,
+            endpointId: ensureEndpointId(),
+            passcode: activeJoin.passcode || undefined
+          }
+          if (initialTransferExisting) {
+            participantHello.transferExisting = true
+          }
           socket.send(JSON.stringify({
             event: 'participant',
-            data: JSON.stringify({
-              name: currentParticipantName,
-              endpointId: ensureEndpointId(),
-              passcode: activeJoin.passcode || undefined
-            })
+            data: JSON.stringify(participantHello)
           }))
           // Room-liveness heartbeat: an APP-level frame the server stamps
           // liveness on (not the network-layer pong, which a backgrounded tab
@@ -33201,6 +33617,7 @@
         isSignalReconnecting = true
         lastSignalReconnectReason = reason || 'room signal interrupted'
         clearConnectionRecoveryTimer()
+        clearIceDisconnectRestartTimer()
         clearIceRestartRetryTimer()
         stopMediaQualityMonitor()
         stopRoomStateRefresh()
@@ -33338,11 +33755,15 @@
         const maxFramerate = outboundMaxFramerateForTrack(track, limits, isScreenShare)
         if (track.kind === 'video' && Number.isFinite(maxFramerate)) {
           encoding.maxFramerate = maxFramerate
-          if ('degradationPreference' in parameters) {
-            parameters.degradationPreference = isScreenShare
-              ? 'maintain-resolution'
-              : 'maintain-framerate'
-          }
+          encoding.scaleResolutionDownBy = !isScreenShare && mediaQualityBandwidthLimited
+            ? limits.bandwidthScaleResolutionDownBy
+            : 1
+          // Chrome may omit degradationPreference from getParameters() until it
+          // is explicitly set. Assigning it unconditionally lets congestion
+          // reduce camera resolution instead of silently dropping most frames.
+          parameters.degradationPreference = isScreenShare
+            ? 'maintain-resolution'
+            : 'maintain-framerate'
         }
 
         try {
@@ -33372,8 +33793,8 @@
         if (isScreenShare && Number.isFinite(limits.screenShareMaxBitrate)) {
           return limits.screenShareMaxBitrate
         }
-        if (track.kind === 'video' && mediaQualityConstrained && Number.isFinite(limits.constrainedMaxBitrate)) {
-          return limits.constrainedMaxBitrate
+        if (track.kind === 'video' && mediaQualityBandwidthLimited && Number.isFinite(limits.bandwidthMaxBitrate)) {
+          return limits.bandwidthMaxBitrate
         }
         if (track.kind === 'video' && useCrowdedVideoLimits() && Number.isFinite(limits.crowdedMaxBitrate)) {
           return limits.crowdedMaxBitrate
@@ -33388,8 +33809,8 @@
         if (isScreenShare && Number.isFinite(limits.screenShareMaxFramerate)) {
           return limits.screenShareMaxFramerate
         }
-        if (track.kind === 'video' && mediaQualityConstrained && Number.isFinite(limits.constrainedMaxFramerate)) {
-          return limits.constrainedMaxFramerate
+        if (track.kind === 'video' && mediaQualityBandwidthLimited && Number.isFinite(limits.bandwidthMaxFramerate)) {
+          return limits.bandwidthMaxFramerate
         }
         if (track.kind === 'video' && useCrowdedVideoLimits() && Number.isFinite(limits.crowdedMaxFramerate)) {
           return limits.crowdedMaxFramerate
@@ -33428,38 +33849,44 @@
           return
         }
         const limits = outboundMediaLimits.video
-        const constraints = mediaQualityConstrained
-          ? {
-              width: { max: limits.constrainedMaxWidth },
-              height: { max: limits.constrainedMaxHeight },
-              aspectRatio: widescreenAspectRatio,
-              frameRate: { max: limits.constrainedMaxFramerate }
-            }
-          : useCrowdedVideoLimits()
-            ? {
-                width: { max: limits.crowdedMaxWidth },
-                height: { max: limits.crowdedMaxHeight },
-                aspectRatio: widescreenAspectRatio,
-                frameRate: { max: limits.crowdedMaxFramerate }
-              }
+        // Capture resolution follows room size only. Receive-side packet loss
+        // must never shrink this source: doing so on a later re-offer stranded
+        // healthy desktop cameras at 640x360 after the sender recovered.
+        const target = useCrowdedVideoLimits()
+          ? { width: limits.crowdedMaxWidth, height: limits.crowdedMaxHeight, frameRate: limits.crowdedMaxFramerate }
           : useGroupVideoLimits()
-            ? {
-                width: { max: limits.groupMaxWidth },
-                height: { max: limits.groupMaxHeight },
-                aspectRatio: widescreenAspectRatio,
-                frameRate: { max: limits.groupMaxFramerate }
-              }
-            : {
-                width: { max: 1280 },
-                height: { max: 720 },
-                aspectRatio: widescreenAspectRatio,
-                frameRate: { max: limits.maxFramerate }
-              }
+            ? { width: limits.groupMaxWidth, height: limits.groupMaxHeight, frameRate: limits.groupMaxFramerate }
+            : { width: 1280, height: 720, frameRate: limits.maxFramerate }
+        const constraints = {
+          width: { ideal: target.width, max: target.width },
+          height: { ideal: target.height, max: target.height },
+          aspectRatio: widescreenAspectRatio,
+          frameRate: { ideal: target.frameRate, max: target.frameRate }
+        }
+        if (!cameraCaptureNeedsRetune(track, target)) {
+          return
+        }
         try {
           await track.applyConstraints(constraints)
         } catch (error) {
           console.warn('Could not retune camera capture for room size', error)
         }
+      }
+
+      function cameraCaptureNeedsRetune(track, target) {
+        const settings = track?.getSettings?.() || {}
+        const width = Number(settings.width) || 0
+        const height = Number(settings.height) || 0
+        if (!width || !height) {
+          return true
+        }
+        // Keep re-offers idempotent. A material room-size transition or a
+        // legacy 640x360 strand is retuned once on the same track; ordinary
+        // encoder/frame-rate fluctuation never restarts camera capture.
+        return width < target.width * 0.85
+          || height < target.height * 0.85
+          || width > target.width * 1.15
+          || height > target.height * 1.15
       }
 
       // Abort a /client-config refetch that hangs — it fires precisely when the
@@ -33637,18 +34064,21 @@
           const state = sessionPeer.connectionState
           if (state === 'connected') {
             clearConnectionRecoveryTimer()
+            clearIceDisconnectRestartTimer()
             resetIceRestartRecovery()
             if (!statusPillEl.classList.contains('pill--listening')) {
               setRoomListeningConnectionState()
             }
           } else if (state === 'connecting' || state === 'new') {
             clearConnectionRecoveryTimer()
+            clearIceDisconnectRestartTimer()
             setConnectionState('connecting', 'connecting…')
           } else if (state === 'disconnected') {
             setConnectionState('connecting', 'reconnecting…')
-            requestIceRestart('media connection interrupted')
+            scheduleIceRestartAfterDisconnect(sessionPeer)
             scheduleConnectionRecovery(sessionPeer)
           } else if (state === 'failed') {
+            clearIceDisconnectRestartTimer()
             setConnectionState('connecting', 'reconnecting…')
             requestIceRestart('media connection failed')
             scheduleConnectionRecovery(sessionPeer)
@@ -33661,9 +34091,11 @@
             return
           }
           if (sessionPeer.iceConnectionState === 'failed') {
+            clearIceDisconnectRestartTimer()
             requestIceRestart('ICE connection failed')
             scheduleConnectionRecovery(sessionPeer)
           } else if (sessionPeer.iceConnectionState === 'connected' || sessionPeer.iceConnectionState === 'completed') {
+            clearIceDisconnectRestartTimer()
             resetIceRestartRecovery()
           }
         }
@@ -33695,6 +34127,25 @@
         }
       }
 
+      function clearIceDisconnectRestartTimer() {
+        if (iceDisconnectRestartTimer) {
+          window.clearTimeout(iceDisconnectRestartTimer)
+          iceDisconnectRestartTimer = 0
+        }
+      }
+
+      function scheduleIceRestartAfterDisconnect(sessionPeer) {
+        if (iceDisconnectRestartTimer || pc !== sessionPeer) {
+          return
+        }
+        iceDisconnectRestartTimer = window.setTimeout(() => {
+          iceDisconnectRestartTimer = 0
+          if (pc === sessionPeer && sessionPeer.connectionState === 'disconnected') {
+            requestIceRestart('media connection remained interrupted')
+          }
+        }, iceDisconnectRestartGraceMs)
+      }
+
       function clearIceRestartRetryTimer() {
         if (iceRestartRetryTimer) {
           window.clearTimeout(iceRestartRetryTimer)
@@ -33708,6 +34159,7 @@
       let mediaDisconnectRecoveryTried = false
 
       function resetIceRestartRecovery() {
+        clearIceDisconnectRestartTimer()
         clearIceRestartRetryTimer()
         iceRestartAttempts = 0
         iceRestartRecoveryStartedAt = 0
@@ -33855,8 +34307,9 @@
         }
         stopRemoteVideoFreezeWatch()
         previousMediaQualityStats = null
-        mediaQualityConstrained = false
-        mediaQualityLagSamples = 0
+        mediaQualityBandwidthLimited = false
+        mediaQualityBandwidthLowSamples = 0
+        mediaQualityBandwidthHealthySamples = 0
         lastMediaQualityReportAt = 0
       }
 
@@ -33915,10 +34368,28 @@
             const report = await sessionPeer.getStats()
             const snapshot = summarizeMediaQualityStats(report)
             const rawLaggy = mediaQualityLooksLaggy(snapshot, previousMediaQualityStats)
-            mediaQualityLagSamples = rawLaggy ? mediaQualityLagSamples + 1 : 0
-            const sustainedLag = mediaQualityLagSamples >= 2
-            if (sustainedLag) {
-              await constrainCameraForLag('media stats')
+            if (document.visibilityState !== 'visible') {
+              // Browsers may suspend decoders and timers in the background.
+              // Keep the diagnostic sample, but never mutate sender/receiver
+              // state or trigger repair from those synthetic stalls.
+              mediaQualityBandwidthLowSamples = 0
+              mediaQualityBandwidthHealthySamples = 0
+              sendMediaQualityReport(snapshot, previousMediaQualityStats, false, remoteMediaHealthSnapshot())
+              previousMediaQualityStats = snapshot
+              return
+            }
+            const outgoingBitrate = Number(snapshot.candidatePair?.availableOutgoingBitrate) || 0
+            const sentVideoBytes = previousMediaQualityStats
+              ? snapshot.outboundVideoBytesSent - previousMediaQualityStats.outboundVideoBytesSent
+              : 0
+            const desktopBandwidthLow = !isMobileDevice && sentVideoBytes > 0 && outgoingBitrate > 0 && outgoingBitrate < 350000
+            const desktopBandwidthHealthy = !isMobileDevice && outgoingBitrate >= 650000
+            mediaQualityBandwidthLowSamples = desktopBandwidthLow ? mediaQualityBandwidthLowSamples + 1 : 0
+            mediaQualityBandwidthHealthySamples = desktopBandwidthHealthy ? mediaQualityBandwidthHealthySamples + 1 : 0
+            if (!mediaQualityBandwidthLimited && mediaQualityBandwidthLowSamples >= 2) {
+              await adaptDesktopCameraForLowBandwidth(outgoingBitrate)
+            } else if (mediaQualityBandwidthLimited && mediaQualityBandwidthHealthySamples >= 3) {
+              await restoreDesktopCameraAfterBandwidthRecovery(outgoingBitrate)
             }
             const remoteHealth = repairRemoteMediaHealth('media quality monitor')
             syncRoomAudioPlaybackState()
@@ -33938,6 +34409,8 @@
           outboundVideoBytesSent: 0,
           outboundVideoFramesEncoded: 0,
           outboundVideoFramesSent: 0,
+          outboundVideoTargetBitrate: 0,
+          outboundVideoQualityLimitationReason: '',
           inboundAudioJitter: 0,
           inboundAudioLost: 0,
           inboundAudioPacketsReceived: 0,
@@ -33953,9 +34426,13 @@
           candidatePair: {}
         }
         let selectedCandidatePair = null
+        let selectedCandidatePairId = ''
+        let selectedCandidatePairFallback = null
+        let nominatedCandidatePairFallback = null
+        let succeededCandidatePairFallback = null
         report.forEach(stat => {
-          if (stat.type === 'transport' && stat.selectedCandidatePairId && typeof report.get === 'function') {
-            selectedCandidatePair = report.get(stat.selectedCandidatePairId) || selectedCandidatePair
+          if (stat.type === 'transport' && stat.selectedCandidatePairId) {
+            selectedCandidatePairId = String(stat.selectedCandidatePairId)
           } else if (stat.type === 'inbound-rtp' && stat.kind === 'audio') {
             snapshot.inboundAudioJitter = Math.max(snapshot.inboundAudioJitter, Number(stat.jitter) || 0)
             snapshot.inboundAudioLost += Number(stat.packetsLost) || 0
@@ -33975,13 +34452,29 @@
             snapshot.outboundVideoBytesSent += Number(stat.bytesSent) || 0
             snapshot.outboundVideoFramesEncoded += Number(stat.framesEncoded) || 0
             snapshot.outboundVideoFramesSent += Number(stat.framesSent) || 0
-          } else if (stat.type === 'candidate-pair' && (stat.nominated || stat.state === 'succeeded')) {
-            selectedCandidatePair = selectedCandidatePair || stat
-            snapshot.outboundRtt = Math.max(snapshot.outboundRtt, Number(stat.currentRoundTripTime) || 0)
+            snapshot.outboundVideoTargetBitrate = Math.max(snapshot.outboundVideoTargetBitrate, Number(stat.targetBitrate) || 0)
+            if (stat.qualityLimitationReason) {
+              snapshot.outboundVideoQualityLimitationReason = String(stat.qualityLimitationReason)
+            }
+          } else if (stat.type === 'candidate-pair') {
+            if (stat.selected) {
+              selectedCandidatePairFallback = stat
+            } else if (stat.nominated && stat.state === 'succeeded') {
+              nominatedCandidatePairFallback = nominatedCandidatePairFallback || stat
+            } else if (stat.state === 'succeeded') {
+              succeededCandidatePairFallback = succeededCandidatePairFallback || stat
+            }
           }
         })
+        if (selectedCandidatePairId && typeof report.get === 'function') {
+          selectedCandidatePair = report.get(selectedCandidatePairId) || null
+        }
+        selectedCandidatePair = selectedCandidatePair
+          || selectedCandidatePairFallback
+          || nominatedCandidatePairFallback
+          || succeededCandidatePairFallback
         if (selectedCandidatePair) {
-          snapshot.outboundRtt = Math.max(snapshot.outboundRtt, Number(selectedCandidatePair.currentRoundTripTime) || 0)
+          snapshot.outboundRtt = Number(selectedCandidatePair.currentRoundTripTime) || 0
         }
         snapshot.candidatePair = summarizeCandidatePair(selectedCandidatePair, report)
         snapshot.frozenVideoTracks = frozenRemoteVideoTrackIds.size
@@ -34269,7 +34762,7 @@
             outputSettings: trackSettingsSnapshot(localAudioTrack(), ['sampleRate', 'sampleSize', 'channelCount', 'echoCancellation', 'noiseSuppression', 'autoGainControl', 'voiceIsolation', 'latency'])
           },
           video: {
-            constrained: mediaQualityConstrained,
+            constrained: mediaQualityBandwidthLimited,
             settings: trackSettingsSnapshot(localVideoTrack(), ['width', 'height', 'frameRate', 'facingMode']),
             screenShare: screenShareStream ? {
               active: true,
@@ -34317,9 +34810,6 @@
         if (!snapshot) {
           return false
         }
-        if (snapshot.outboundRtt > 0.45 || snapshot.inboundVideoJitter > 0.28) {
-          return true
-        }
         if (!previous) {
           return false
         }
@@ -34334,42 +34824,31 @@
           || (audioReceivedDelta > 120 && audioLostDelta / Math.max(1, audioReceivedDelta + audioLostDelta) > 0.08)
       }
 
-      async function constrainCameraForLag(reason) {
-        if (mediaQualityConstrained || !pc) {
+      async function adaptDesktopCameraForLowBandwidth(availableBitrate) {
+        if (isMobileDevice || mediaQualityBandwidthLimited || !pc) {
           return
         }
-        const limits = outboundMediaLimits.video
+        mediaQualityBandwidthLimited = true
+        mediaQualityBandwidthHealthySamples = 0
         const sender = pc.getSenders().find(candidate => candidate.track?.kind === 'video' && candidate.track === localVideoTrack())
-        if (!sender?.track) {
+        if (sender?.track) {
+          await configureOutboundSender(sender, sender.track)
+        }
+        console.info('Adapted desktop camera for low-bandwidth room uplink without restarting capture', Math.round(availableBitrate || 0))
+      }
+
+      async function restoreDesktopCameraAfterBandwidthRecovery(availableBitrate) {
+        if (!mediaQualityBandwidthLimited || !pc) {
           return
         }
-        mediaQualityConstrained = true
-        const parameters = sender.getParameters?.()
-        if (parameters?.encodings?.length) {
-          const encoding = parameters.encodings[0]
-          encoding.maxBitrate = limits.constrainedMaxBitrate
-          encoding.maxFramerate = limits.constrainedMaxFramerate
-          try {
-            await sender.setParameters(parameters)
-          } catch (error) {
-            console.warn('Could not constrain camera sender after lag detection', error)
-          }
+        mediaQualityBandwidthLimited = false
+        mediaQualityBandwidthLowSamples = 0
+        mediaQualityBandwidthHealthySamples = 0
+        const sender = pc.getSenders().find(candidate => candidate.track?.kind === 'video' && candidate.track === localVideoTrack())
+        if (sender?.track) {
+          await configureOutboundSender(sender, sender.track)
         }
-        if (isMobileDevice) {
-          console.info('Reduced mobile sender bandwidth without restarting camera capture', reason)
-          return
-        }
-        try {
-          await sender.track.applyConstraints?.({
-            width: { max: limits.constrainedMaxWidth },
-            height: { max: limits.constrainedMaxHeight },
-            aspectRatio: widescreenAspectRatio,
-            frameRate: { max: limits.constrainedMaxFramerate }
-          })
-        } catch (error) {
-          console.warn('Could not constrain camera capture after lag detection', error)
-        }
-        console.info('Reduced camera bandwidth to protect room latency', reason)
+        console.info('Restored desktop camera after bandwidth recovery', Math.round(availableBitrate || 0))
       }
 
       async function getPreferredUserMedia() {
@@ -48433,6 +48912,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         roomCongestionBreakerProbeStage = 0
       }
 
+      function rebaseRemoteVideoFreezeSamples() {
+        remoteVideoFreezeStates.clear()
+        frozenRemoteVideoTrackIds.clear()
+        roomCongestionBreakerOpen = false
+        roomCongestionBreakerLastProbeAt = 0
+        roomCongestionBreakerProbeStage = 0
+      }
+
       // Room-sickness census over the freeze watch's own per-track state.
       // Only FRAME-CAPABLE tiles vote (2026-07-10 gate finding 2): a tile that
       // shows a freeze-watch-tracked video track AND whose participant is not
@@ -48552,6 +49039,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       async function pollRemoteVideoFreezeStats(sessionPeer) {
         if (pc !== sessionPeer || sessionPeer.connectionState === 'closed') {
           stopRemoteVideoFreezeWatch()
+          return
+        }
+        if (document.visibilityState !== 'visible') {
+          rebaseRemoteVideoFreezeSamples()
           return
         }
         const seenTrackIds = new Set()
@@ -54119,6 +54610,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         hideMultiDeviceHandoffChip()
         stopScreenShare().catch(() => {})
         clearConnectionRecoveryTimer()
+        clearIceDisconnectRestartTimer()
         clearIceRestartRetryTimer()
         resetSignalingReconnectState()
         stopMediaQualityMonitor()

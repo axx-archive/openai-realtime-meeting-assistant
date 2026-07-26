@@ -2,6 +2,7 @@ import React from 'react';
 import {
   ActivityIndicator,
   RefreshControl,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -9,6 +10,8 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import { SymbolView } from 'expo-symbols';
 import { colors, space, type } from '../theme/tokens';
 
 type Props = {
@@ -39,10 +42,23 @@ export function Screen({
   right,
   style,
 }: Props) {
+  const navigation = useNavigation();
+  const canGoBack = navigation.canGoBack();
   const body = (
     <>
       {(title || subtitle || right) && (
         <View style={styles.header}>
+          {canGoBack ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+              hitSlop={10}
+              onPress={() => navigation.goBack()}
+              style={({ pressed }) => [styles.back, pressed && styles.backPressed]}
+            >
+              <SymbolView name="chevron.left" tintColor={colors.text1} size={19} />
+            </Pressable>
+          ) : null}
           <View style={styles.headerText}>
             {title ? <Text style={styles.title}>{title}</Text> : null}
             {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
@@ -120,6 +136,20 @@ const styles = StyleSheet.create({
   },
   headerText: {
     flex: 1,
+  },
+  back: {
+    width: 42,
+    height: 42,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.line1,
+  },
+  backPressed: {
+    opacity: 0.72,
+    transform: [{ scale: 0.96 }],
   },
   title: {
     ...type.title1,

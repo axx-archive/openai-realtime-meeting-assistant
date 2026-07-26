@@ -10,7 +10,7 @@ import (
 )
 
 var authorizationNonObjectHTTPRoutes = map[string]struct{}{
-	"/healthz": {}, "/livez": {}, "/readyz": {}, "/capabilities": {}, "/auth/": {},
+	"/healthz": {}, "/livez": {}, "/readyz": {}, "/capabilities": {}, "/auth/": {}, "/.well-known/apple-app-site-association": {},
 	"/assistant/push/config": {}, "/assistant/push/subscribe": {}, "/assistant/push/unsubscribe": {}, "/assistant/push/prefs": {},
 	"/assistant/realtime/usage": {}, "/api/usage/rollup": {}, "/calendar/event.ics": {},
 	"/client-config": {}, "/native/config": {}, "/g": {}, "/g/": {}, "/guest/lookup": {}, "/guest/me": {},

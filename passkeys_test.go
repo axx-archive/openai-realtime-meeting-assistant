@@ -9,6 +9,33 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 )
 
+func TestNativePasskeyBeginReturnsOneUseCeremonyHeader(t *testing.T) {
+	setupAuthTestEnv(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/passkey/login/begin", nil)
+	req.Header.Set("X-Bonfire-Client", "expo")
+	recorder := httptest.NewRecorder()
+	authHandler(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("native passkey begin status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	ceremonyID := recorder.Header().Get(webauthnCeremonyHeaderName)
+	if ceremonyID == "" {
+		t.Fatal("native passkey begin did not return a ceremony header")
+	}
+
+	finishReq := httptest.NewRequest(http.MethodPost, "/auth/passkey/login/finish", nil)
+	finishReq.Header.Set("X-Bonfire-Client", "expo")
+	finishReq.Header.Set(webauthnCeremonyHeaderName, ceremonyID)
+	ceremony, err := takeWebauthnCeremony(finishReq)
+	if err != nil || ceremony == nil || ceremony.session == nil {
+		t.Fatalf("native ceremony header was not accepted: ceremony=%v err=%v", ceremony, err)
+	}
+	if _, err := takeWebauthnCeremony(finishReq); err == nil {
+		t.Fatal("native ceremony header must be one-use")
+	}
+}
+
 func TestPasskeyRegisterBeginRequiresSession(t *testing.T) {
 	setupAuthTestEnv(t)
 
