@@ -21,11 +21,11 @@ function pngHeader(path: string) {
   };
 }
 
-function decodeRgbPng(path: string) {
+function decodeOpaquePng(path: string) {
   const png = read(path);
   const { width, height, colorType } = pngHeader(path);
   assert.equal(png[24], 8, `${path} must use 8-bit channels`);
-  assert.equal(colorType, 2, `${path} must be an opaque RGB PNG`);
+  assert.ok(colorType === 0 || colorType === 2, `${path} must be an opaque grayscale or RGB PNG`);
   assert.equal(png[28], 0, `${path} must not be interlaced`);
 
   const idat: Buffer[] = [];
@@ -36,7 +36,8 @@ function decodeRgbPng(path: string) {
     offset += 12 + length;
   }
   const encoded = inflateSync(Buffer.concat(idat));
-  const stride = width * 3;
+  const channels = colorType === 0 ? 1 : 3;
+  const stride = width * channels;
   const pixels = Buffer.alloc(stride * height);
   const paeth = (a: number, b: number, c: number) => {
     const p = a + b - c;
@@ -51,9 +52,9 @@ function decodeRgbPng(path: string) {
     const sourceStart = y * (stride + 1) + 1;
     for (let x = 0; x < stride; x += 1) {
       const raw = encoded[sourceStart + x];
-      const left = x >= 3 ? pixels[rowStart + x - 3] : 0;
+      const left = x >= channels ? pixels[rowStart + x - channels] : 0;
       const above = y > 0 ? pixels[rowStart + x - stride] : 0;
-      const upperLeft = y > 0 && x >= 3 ? pixels[rowStart + x - stride - 3] : 0;
+      const upperLeft = y > 0 && x >= channels ? pixels[rowStart + x - stride - channels] : 0;
       const predictor = filter === 0 ? 0
         : filter === 1 ? left
           : filter === 2 ? above
@@ -63,20 +64,21 @@ function decodeRgbPng(path: string) {
       pixels[rowStart + x] = (raw + predictor) & 0xff;
     }
   }
-  return { width, height, pixels };
+  return { width, height, pixels, channels };
 }
 
 test('approved Bonfire masters are the exact release sources', () => {
   const masterSvg = read('assets/bonfire-icon-v2.svg');
   const canonicalSvg = read('assets/icon-source.svg');
-  const masterPng = read('assets/bonfire-icon-v2.png');
+  const masterPng = read('assets/bonfire-icon-v3.png');
   const releasePng = read('assets/icon.png');
   const tintedPng = read('assets/ios-icon-tinted.png');
 
   assert.equal(sha256(masterSvg), 'd3800f27d5ae917390af6303fc29472f3f6623339a8df55982d63539e51bcc39');
   assert.equal(sha256(canonicalSvg), sha256(masterSvg));
-  assert.equal(sha256(releasePng), sha256(masterPng));
-  assert.equal(sha256(tintedPng), sha256(masterPng));
+  assert.equal(sha256(masterPng), 'fe204e0feb3277ce5df098087f933598e87f34a2dc85ef5fbc997b5433e07c4e');
+  assert.equal(sha256(releasePng), '9517b2d4b02295ad06045983583bb2e45656d0dba2879829e1871faa050981fe');
+  assert.equal(sha256(tintedPng), 'ce87005dc7efb81f543d94b5a7f0a87327fd28503ea0f2cadf4a54d6fdf75bfc');
 });
 
 test('React Native full and micro marks carry the approved paths exactly', () => {
@@ -116,19 +118,27 @@ test('Expo icon and splash sources have release-safe dimensions and alpha models
 
   // iOS 18 uses this grayscale image as a luminosity map. Guard both sides of
   // that map so the tinted appearance can never silently become a blank tile.
-  const tinted = decodeRgbPng('assets/ios-icon-tinted.png');
+  const tinted = decodeOpaquePng('assets/ios-icon-tinted.png');
   let dark = 0;
   let light = 0;
-  for (let offset = 0; offset < tinted.pixels.length; offset += 3) {
-    const luminance = 0.2126 * tinted.pixels[offset]
-      + 0.7152 * tinted.pixels[offset + 1]
-      + 0.0722 * tinted.pixels[offset + 2];
+  for (let offset = 0; offset < tinted.pixels.length; offset += tinted.channels) {
+    const luminance = tinted.channels === 1
+      ? tinted.pixels[offset]
+      : 0.2126 * tinted.pixels[offset]
+        + 0.7152 * tinted.pixels[offset + 1]
+        + 0.0722 * tinted.pixels[offset + 2];
     if (luminance < 32) dark += 1;
-    if (luminance > 223) light += 1;
+    if (luminance > 160) light += 1;
   }
   const pixelCount = tinted.width * tinted.height;
   assert.ok(dark / pixelCount > 0.5, 'tinted icon needs a substantial dark field');
-  assert.ok(light / pixelCount > 0.15, 'tinted icon needs a substantial light Bonfire silhouette');
+  // The textured mark deliberately carries midtone ember detail instead of a
+  // flat white glyph. Keep enough near-white core for the system tint to read
+  // while allowing the grayscale relief to survive.
+  assert.ok(
+    light / pixelCount > 0.08,
+    `tinted icon needs a substantial light Bonfire core (got ${light / pixelCount})`,
+  );
 
   const config = text('app.config.ts');
   assert.match(config, /light: '\.\/assets\/icon\.png'/);

@@ -31,11 +31,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         dark: './assets/icon.png',
         tinted: './assets/ios-icon-tinted.png',
       },
-      // Build 14 keeps a quiet join's audio m-line inactive until the member
+      // Build 15 keeps a quiet join's audio m-line inactive until the member
       // explicitly unmutes, preventing hidden AudioUnit activation while the
-      // app and roster both report an honestly muted microphone.
+      // app and roster both report an honestly muted microphone, and ships the
+      // final ember-glass Bonfire icon across the default icon appearances.
       // Pin the multi-target release so the app and ReplayKit extension match.
-      buildNumber: '14',
+      buildNumber: '15',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

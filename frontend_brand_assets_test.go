@@ -50,6 +50,8 @@ func brandColorDistance(a, b color.Color) uint32 {
 func TestBonfireBrandAssetContract(t *testing.T) {
 	for path, size := range map[string][2]int{
 		"public/apple-touch-icon.png":  {180, 180},
+		"public/favicon.png":           {64, 64},
+		"public/app-icon.png":          {512, 512},
 		"public/icon-192.png":          {192, 192},
 		"public/icon-512.png":          {512, 512},
 		"public/icon-maskable-512.png": {512, 512},
@@ -78,8 +80,8 @@ func TestBonfireBrandAssetContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	index := string(indexRaw)
-	if !strings.Contains(index, `<link rel="icon" href="/public/favicon.svg" type="image/svg+xml">`) {
-		t.Fatal("index.html does not use the micro Bonfire favicon")
+	if !strings.Contains(index, `<link rel="icon" href="/public/favicon.png" type="image/png">`) {
+		t.Fatal("index.html does not use the textured Bonfire favicon")
 	}
 	if !strings.Contains(index, `id="bonfireRailLogCutout"`) ||
 		!strings.Contains(index, `mask="url(#bonfireRailLogCutout)"`) {
