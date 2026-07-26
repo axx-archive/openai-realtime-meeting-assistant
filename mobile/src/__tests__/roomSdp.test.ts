@@ -4,10 +4,11 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import {
   isServerUplinkSection,
-  missingSendonlyUplinkKinds,
+  nativeUplinkAnswerDirection,
   nativeVideoUplinkCodecViolation,
   offeredRemoteVideoTrackIds,
   remoteMediaSections,
+  unexpectedNativeUplinkDirectionKinds,
 } from '../realtime/sdp';
 import {
   NativeH264UnavailableError,
@@ -79,7 +80,7 @@ describe('native room offer planning', () => {
     );
     assert.match(
       roomSource,
-      /transceiver\.direction = 'sendonly';[\s\S]*if \(section\.kind === 'video'\) \{[\s\S]*nativeH264UplinkCodecPreferences\([\s\S]*transceiver\.setCodecPreferences\(codecPreferences\);/,
+      /transceiver\.direction = nativeUplinkAnswerDirection\([\s\S]*if \(section\.kind === 'video'\) \{[\s\S]*nativeH264UplinkCodecPreferences\([\s\S]*transceiver\.setCodecPreferences\(codecPreferences\);/,
     );
   });
 
@@ -129,7 +130,7 @@ describe('native room offer planning', () => {
     assert.equal(offeredRemoteVideoTrackIds(ambiguous), null);
   });
 
-  it('requires both fixed uplinks to remain sendonly in the native answer', () => {
+  it('keeps quiet-join audio inactive while video remains ready to publish', () => {
     const mids = new Map<'audio' | 'video', string>([
       ['audio', 'uplink-audio'],
       ['video', 'uplink-video'],
@@ -143,16 +144,41 @@ describe('native room offer planning', () => {
       'a=mid:uplink-video',
       'a=sendonly',
     ].join('\r\n');
-    assert.deepEqual(missingSendonlyUplinkKinds(sendonlyAnswer, mids), []);
+    assert.equal(nativeUplinkAnswerDirection('audio', false), 'inactive');
+    assert.equal(nativeUplinkAnswerDirection('audio', true), 'sendonly');
+    assert.equal(nativeUplinkAnswerDirection('video', false), 'sendonly');
+    assert.deepEqual(unexpectedNativeUplinkDirectionKinds(sendonlyAnswer, mids, true), []);
+
+    const quietAnswer = sendonlyAnswer.replace(
+      'a=mid:uplink-audio\r\na=sendonly',
+      'a=mid:uplink-audio\r\na=inactive',
+    );
+    assert.deepEqual(unexpectedNativeUplinkDirectionKinds(quietAnswer, mids, false), []);
+    assert.deepEqual(unexpectedNativeUplinkDirectionKinds(sendonlyAnswer, mids, false), ['audio']);
 
     const inactiveVideo = sendonlyAnswer.replace(
       'a=mid:uplink-video\r\na=sendonly',
       'a=mid:uplink-video\r\na=inactive',
     );
-    assert.deepEqual(missingSendonlyUplinkKinds(inactiveVideo, mids), ['video']);
+    assert.deepEqual(unexpectedNativeUplinkDirectionKinds(inactiveVideo, mids, true), ['video']);
     assert.deepEqual(
-      missingSendonlyUplinkKinds(sendonlyAnswer, new Map([['audio', 'uplink-audio']])),
+      unexpectedNativeUplinkDirectionKinds(
+        sendonlyAnswer,
+        new Map([['audio', 'uplink-audio']]),
+        true,
+      ),
       ['video'],
+    );
+  });
+
+  it('renegotiates before publishing a microphone after a quiet join', () => {
+    const roomSource = fs.readFileSync(
+      path.resolve(import.meta.dirname, '..', 'realtime', 'useNativeRoom.ts'),
+      'utf8',
+    );
+    assert.match(
+      roomSource,
+      /audioTransceiver\.currentDirection !== 'sendonly'[\s\S]*audioTransceiver\.direction = 'sendonly';[\s\S]*send\('request_participant_tracks'/,
     );
   });
 });

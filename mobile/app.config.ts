@@ -31,10 +31,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         dark: './assets/icon.png',
         tinted: './assets/ios-icon-tinted.png',
       },
-      // Build 13 carries the physically verified camera framing path plus the
-      // fail-closed microphone publication and cross-platform video fixes.
+      // Build 14 keeps a quiet join's audio m-line inactive until the member
+      // explicitly unmutes, preventing hidden AudioUnit activation while the
+      // app and roster both report an honestly muted microphone.
       // Pin the multi-target release so the app and ReplayKit extension match.
-      buildNumber: '13',
+      buildNumber: '14',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

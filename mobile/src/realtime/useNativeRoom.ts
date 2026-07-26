@@ -58,10 +58,11 @@ import {
 } from './remoteTrackProgress';
 import {
   isServerUplinkSection,
-  missingSendonlyUplinkKinds,
+  nativeUplinkAnswerDirection,
   nativeVideoUplinkCodecViolation,
   offeredRemoteVideoTrackIds,
   remoteMediaSections,
+  unexpectedNativeUplinkDirectionKinds,
 } from './sdp';
 import { nativeH264UplinkCodecPreferences } from './nativeVideoCodec';
 import {
@@ -1850,6 +1851,7 @@ export function useNativeRoom(
         });
       }
       const local = localRef.current;
+      const microphoneRequestedForOffer = requestedAudio.current;
       const uplinkTransceivers = new Map<'audio' | 'video', RTCRtpTransceiver>();
       for (const transceiver of peer.getTransceivers()) {
         if (!isCurrentPeerContext(peerContext)) return;
@@ -1859,7 +1861,10 @@ export function useNativeRoom(
         // codec envelope. The selected H.264 capabilities are shared by the
         // installed iOS sender/receiver factories, so the synchronous native
         // preference call remains valid while the direction mutation settles.
-        transceiver.direction = 'sendonly';
+        transceiver.direction = nativeUplinkAnswerDirection(
+          section.kind as 'audio' | 'video',
+          microphoneRequestedForOffer,
+        );
         if (section.kind === 'audio') {
           audioSenderRef.current = transceiver.sender;
           uplinkTransceivers.set('audio', transceiver);
@@ -1953,14 +1958,21 @@ export function useNativeRoom(
         if (transceiver.mid) uplinkMids.set(kind, transceiver.mid);
       });
       const negotiatedAnswerSdp = peer.localDescription?.sdp ?? answer.sdp;
-      const invalidAnswerKinds = new Set(missingSendonlyUplinkKinds(negotiatedAnswerSdp, uplinkMids));
+      const invalidAnswerKinds = new Set(unexpectedNativeUplinkDirectionKinds(
+        negotiatedAnswerSdp,
+        uplinkMids,
+        microphoneRequestedForOffer,
+      ));
       const videoUplinkMid = uplinkMids.get('video') ?? '';
       const videoCodecViolation = videoUplinkMid
         ? nativeVideoUplinkCodecViolation(negotiatedAnswerSdp, videoUplinkMid)
         : 'video uplink MID is missing';
       const invalidUplinkKinds = (['audio', 'video'] as const).filter((kind) => (
         invalidAnswerKinds.has(kind)
-        || uplinkTransceivers.get(kind)?.currentDirection !== 'sendonly'
+        || uplinkTransceivers.get(kind)?.currentDirection !== nativeUplinkAnswerDirection(
+          kind,
+          microphoneRequestedForOffer,
+        )
       ));
       if (
         uplinkTransceivers.size !== 2
@@ -1973,7 +1985,7 @@ export function useNativeRoom(
           kind: 'native_uplink_negotiation',
           reason: videoCodecViolation
             ? `Native video codec rejected: ${videoCodecViolation}`
-            : `Uplink slots were not sendonly: ${invalidKinds}`,
+            : `Uplink directions did not match publication intent: ${invalidKinds}`,
           client: { platform: 'ios', version: NATIVE_ROOM_CLIENT_VERSION },
         });
         throw new Error('The call could not prepare your microphone and camera. Reconnecting…');
@@ -2506,6 +2518,16 @@ export function useNativeRoom(
     // Existing and newly captured tracks use the same serialized publication
     // barrier. Never turn a live track on directly from the button callback.
     setState((current) => ({ ...current, muted: true, microphoneStarting: true, error: null }));
+    const peer = peerContextRef.current?.peer ?? peerRef.current;
+    const audioTransceiver = peer?.getTransceivers()
+      .find((candidate) => candidate.receiver.track?.kind === 'audio');
+    if (audioTransceiver && audioTransceiver.currentDirection !== 'sendonly') {
+      audioTransceiver.direction = 'sendonly';
+      send('request_participant_tracks', {
+        reason: 'microphone enabled after quiet join',
+      });
+      return;
+    }
     if (!microphoneRecoveryGuardRef.current?.isRunning()) {
       recoverNativeMicrophone('microphone enabled after joining muted');
     }

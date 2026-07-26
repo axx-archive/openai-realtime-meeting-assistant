@@ -52,15 +52,31 @@ export function offeredRemoteVideoTrackIds(
  * transceiver direction setter before later null-to-track replacement relies on
  * those publication slots.
  */
-export function missingSendonlyUplinkKinds(
+export function nativeUplinkAnswerDirection(
+  kind: 'audio' | 'video',
+  microphoneRequested: boolean,
+): 'sendonly' | 'inactive' {
+  return kind === 'audio' && !microphoneRequested ? 'inactive' : 'sendonly';
+}
+
+/**
+ * Return any fixed native uplink whose negotiated direction does not match the
+ * current publication intent. A quiet join deliberately keeps its audio m-line
+ * inactive: negotiating a trackless sendonly audio slot makes WebRTC start the
+ * iOS recording AudioUnit even though the UI and roster both say muted.
+ */
+export function unexpectedNativeUplinkDirectionKinds(
   answerSdp: string,
   uplinkMids: ReadonlyMap<'audio' | 'video', string>,
+  microphoneRequested: boolean,
 ): Array<'audio' | 'video'> {
   const answerSections = remoteMediaSections(answerSdp);
   return (['audio', 'video'] as const).filter((kind) => {
     const mid = uplinkMids.get(kind);
     const section = mid ? answerSections.get(mid) : undefined;
-    return !section || section.kind !== kind || section.direction !== 'sendonly';
+    return !section
+      || section.kind !== kind
+      || section.direction !== nativeUplinkAnswerDirection(kind, microphoneRequested);
   });
 }
 
