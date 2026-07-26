@@ -2659,6 +2659,28 @@ func newRoomPeerConnection() (*webrtc.PeerConnection, error) {
 	return peerConnection, nil
 }
 
+func addRoomPublisherUplinkTransceivers(pc *webrtc.PeerConnection) error {
+	for _, typ := range []webrtc.RTPCodecType{webrtc.RTPCodecTypeVideo, webrtc.RTPCodecTypeAudio} {
+		transceiver, err := pc.AddTransceiverFromKind(typ, webrtc.RTPTransceiverInit{
+			Direction: webrtc.RTPTransceiverDirectionRecvonly,
+		})
+		if err != nil {
+			return err
+		}
+		if typ != webrtc.RTPCodecTypeVideo {
+			continue
+		}
+		preferences := []webrtc.RTPCodecParameters{
+			roomCodecPreferenceWithTransportCC(roomH264Codec),
+			roomH264RTXCodec,
+		}
+		if err := transceiver.SetCodecPreferences(preferences); err != nil {
+			return fmt.Errorf("prefer H.264 for room publisher uplink: %w", err)
+		}
+	}
+	return nil
+}
+
 // serverICEServersFromEnv resolves the TURN servers the SERVER dials for its
 // own relay candidates. It reuses the browser-facing MEETING_TURN_URLS and the
 // ephemeral HMAC credential mint, so no new deployment configuration is
@@ -5218,14 +5240,16 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 		}
 		websocketPeerAllocations.Add(1)
 
-		// Accept one audio and one video track incoming
-		for _, typ := range []webrtc.RTPCodecType{webrtc.RTPCodecTypeVideo, webrtc.RTPCodecTypeAudio} {
-			if _, err := pc.AddTransceiverFromKind(typ, webrtc.RTPTransceiverInit{
-				Direction: webrtc.RTPTransceiverDirectionRecvonly,
-			}); err != nil {
-				_ = pc.Close()
-				return err
-			}
+		// Accept one audio and one video track incoming. Keep the publisher
+		// video offer inside the H.264 envelope that the native iOS client uses
+		// for its camera uplink. react-native-webrtc can preserve VP8 in an
+		// answer even after setCodecPreferences is called after the remote offer;
+		// offering only H.264 here makes the negotiation deterministic and also
+		// prevents the native fail-closed validator from entering a reconnect
+		// loop that churns every desktop participant in the room.
+		if err := addRoomPublisherUplinkTransceivers(pc); err != nil {
+			_ = pc.Close()
+			return err
 		}
 
 		// Trickle ICE. Emit server candidate to client
