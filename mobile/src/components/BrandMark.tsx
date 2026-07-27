@@ -39,6 +39,11 @@ export function BrandMark({ size = 56, style }: Props) {
 
 type GlyphProps = {
   size?: number;
+  /**
+   * A resolved color string, NOT a semantic token: `expo-image`'s `tintColor`
+   * rejects `DynamicColorIOS` values, so callers resolve light/dark themselves
+   * (see `markTint` in CanvasScreen).
+   */
   color: string;
 };
 

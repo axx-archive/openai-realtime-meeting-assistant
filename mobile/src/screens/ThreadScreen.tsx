@@ -1,51 +1,68 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActionSheetIOS,
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import * as DocumentPicker from 'expo-document-picker';
 import { SymbolView } from 'expo-symbols';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { api, BonfireApiError } from '../api/client';
-import type { ScoutFileAttachment, ScoutMessage } from '../api/types';
+import type { ScoutMessage } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
-import { FilePreviewModal } from '../components/FilePreviewModal';
-import { Screen } from '../components/Screen';
-import { isInlinePreviewable, shareOrSaveRemoteFile } from '../files/fileActions';
+import { MessageBubble } from '../messaging/MessageBubble';
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
+import { Glass } from '../theme/glass';
+import { Waveform } from '../components/Waveform';
+import { useDictation } from '../voice/useDictation';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, hitMin, radius, space, type } from '../theme/tokens';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Thread'>;
 
+/**
+ * A thread — design §14.
+ *
+ * Rebuilt from a card list plus an "Ask" box into genuine messaging. The
+ * composer is glass (it floats above the conversation, §7); the bubbles are not
+ * (they ARE the conversation).
+ *
+ * The mic is a peer of the keyboard, not an afterthought: holding it dictates
+ * into the draft with company-vocabulary transcription, which is the whole
+ * reason to type work messages here rather than in Slack (§10).
+ */
 export function ThreadScreen({ route, navigation }: Props) {
   const { sessionToken, user } = useAuth();
   const office = useOfficeEvents();
   const [messages, setMessages] = useState<ScoutMessage[]>([]);
-  const [title, setTitle] = useState(route.params.title);
   const [draft, setDraft] = useState('');
-  const [attachment, setAttachment] = useState<ScoutFileAttachment & { uri: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [fileAction, setFileAction] = useState<string | null>(null);
-  const [preview, setPreview] = useState<ScoutFileAttachment | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+
+  const dictation = useDictation({
+    context: 'chat',
+    threadId: route.params.threadId,
+    // A transcript lands in the DRAFT, never straight into the thread. Holding
+    // produces text; posting stays an explicit act (§13.5).
+    onTranscript: ({ text }) =>
+      setDraft((previous) => (previous ? `${previous.trimEnd()} ${text}` : text)),
+  });
 
   const load = useCallback(async () => {
     if (!sessionToken) return;
-    setError(null);
     try {
       const response = await api.scoutThread(sessionToken, route.params.threadId);
       setMessages(response.thread?.messages ?? response.messages ?? []);
+      setError(null);
     } catch (err) {
       setError(err instanceof BonfireApiError ? err.message : 'Could not load this thread.');
     } finally {
@@ -61,26 +78,33 @@ export function ThreadScreen({ route, navigation }: Props) {
     if (office.event === 'chat_thread') void load();
   }, [load, office.event, office.version]);
 
+  const email = user?.email?.trim().toLowerCase() ?? '';
+  const rows = useMemo(
+    () =>
+      messages.map((message, index) => {
+        const own =
+          String(message.role ?? '').toLowerCase() === 'user' &&
+          (!message.authorEmail || String(message.authorEmail).toLowerCase() === email);
+        const previous = messages[index - 1];
+        const showAuthor =
+          !previous ||
+          previous.role !== message.role ||
+          previous.authorEmail !== message.authorEmail;
+        return { message, own, showAuthor };
+      }),
+    [email, messages],
+  );
+
   async function send() {
     const text = draft.trim();
-    if (!sessionToken || (!text && !attachment) || sending) return;
+    if (!sessionToken || !text || sending) return;
     setSending(true);
     setError(null);
     try {
-      const uploaded = attachment
-        ? await api.uploadScoutAttachment(sessionToken, attachment)
-        : null;
-      const response = await api.sendScoutMessage(
-        sessionToken,
-        route.params.threadId,
-        text || `Shared ${attachment?.name}`,
-        uploaded ? [uploaded] : [],
-      );
+      const response = await api.sendScoutMessage(sessionToken, route.params.threadId, text);
       setDraft('');
-      setAttachment(null);
       setMessages(response.thread?.messages ?? response.messages ?? []);
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      if (!(response.thread?.messages ?? response.messages)?.length) await load();
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } catch (err) {
       setError(err instanceof BonfireApiError ? err.message : 'Message did not send.');
     } finally {
@@ -88,272 +112,210 @@ export function ThreadScreen({ route, navigation }: Props) {
     }
   }
 
-  async function chooseAttachment() {
-    const result = await DocumentPicker.getDocumentAsync({
-      type: ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf'],
-      copyToCacheDirectory: true,
-      multiple: false,
-    });
-    if (result.canceled) return;
-    const file = result.assets[0];
-    if (!file) return;
-    setAttachment({
-      uri: file.uri,
-      name: file.name,
-      ref: '',
-      mime: file.mimeType || 'application/octet-stream',
-      size: file.size,
-    });
-  }
-
-  function showThreadActions() {
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        options: ['Cancel', 'Rename thread', 'Archive thread'],
-        cancelButtonIndex: 0,
-        destructiveButtonIndex: 2,
-        title: title,
-      },
-      (index) => {
-        if (index === 1) {
-          Alert.prompt('Rename thread', undefined, async (value) => {
-            const next = value.trim();
-            if (!sessionToken || !next) return;
-            try {
-              await api.updateScoutThread(sessionToken, route.params.threadId, { title: next });
-              setTitle(next);
-            } catch (err) {
-              setError(err instanceof BonfireApiError ? err.message : 'Could not rename this thread.');
-            }
-          }, 'plain-text', title);
-        }
-        if (index === 2) {
-          Alert.alert('Archive this thread?', 'It stays available from the web archive.', [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Archive',
-              style: 'destructive',
-              onPress: () => {
-                if (!sessionToken) return;
-                void api.updateScoutThread(sessionToken, route.params.threadId, { archived: true })
-                  .then(() => navigation.goBack())
-                  .catch((err) => setError(err instanceof BonfireApiError ? err.message : 'Could not archive this thread.'));
-              },
-            },
-          ]);
-        }
-      },
-    );
-  }
-
-  function confirmDeleteMessage(message: ScoutMessage) {
-    if (!sessionToken || !message.id) return;
-    Alert.alert('Delete this message?', 'This removes your message from the shared thread.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
-          void api.deleteScoutMessage(sessionToken, route.params.threadId, message.id)
-            .then((response) => setMessages(response.thread?.messages ?? response.messages ?? []))
-            .catch((err) => setError(err instanceof BonfireApiError ? err.message : 'Could not delete the message.'));
-        },
-      },
-    ]);
-  }
-
-  function openFile(file: ScoutFileAttachment) {
-    if (!sessionToken || fileAction) return;
-    if (!file.ref) {
-      setError('This older attachment does not include downloadable file data.');
-      return;
-    }
-    if (isInlinePreviewable(file)) {
-      setPreview(file);
-      return;
-    }
-    void shareFile(file);
-  }
-
-  async function shareFile(file: ScoutFileAttachment) {
-    if (!sessionToken || fileAction || !file.ref) return;
-    const key = file.ref || file.name;
-    setFileAction(key);
-    setError(null);
-    try {
-      await shareOrSaveRemoteFile(sessionToken, file);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not share the attachment.');
-    } finally {
-      setFileAction(null);
-    }
-  }
+  const listening = dictation.state === 'listening';
 
   return (
-    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <Screen
-        title={title}
-        subtitle="Scout thread · shared with the web"
-        loading={loading}
-        error={error}
-        onRetry={() => void load()}
-        right={
-          <Pressable accessibilityRole="button" accessibilityLabel="Thread actions" onPress={showThreadActions} style={styles.iconButton}>
-            <SymbolView name="ellipsis" tintColor={colors.text1} size={20} />
-          </Pressable>
-        }
+    <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
+      <View style={styles.header}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          hitSlop={10}
+          onPress={() => navigation.goBack()}
+          style={styles.back}
+        >
+          <SymbolView name="chevron.left" tintColor={colors.text1} size={19} />
+        </Pressable>
+        <Text style={styles.title} numberOfLines={1}>
+          {route.params.title}
+        </Text>
+      </View>
+
+      <KeyboardAvoidingView
+        style={styles.fill}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={8}
       >
-        {messages.map((message, index) => {
-          const mine = message.role === 'user' || message.authorEmail === user?.email;
-          const text = message.text || String(message.content ?? '');
-          return (
-            <Pressable
-              key={message.id || `${message.createdAt}-${index}`}
-              onLongPress={mine ? () => confirmDeleteMessage(message) : undefined}
-              style={[styles.message, mine ? styles.mine : styles.scout]}
-            >
-              <Text style={[styles.messageLabel, mine && styles.mineText]}>{mine ? 'You' : message.authorName || 'Scout'}</Text>
-              <Text style={[styles.messageText, mine && styles.mineText]}>{text}</Text>
-              {message.files?.map((file) => {
-                const key = file.ref || file.name;
-                const unavailable = !file.ref;
-                return (
-                  <View
-                    key={key}
-                    style={[styles.fileChip, mine ? styles.mineFileChip : styles.scoutFileChip]}
-                  >
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`Open ${file.name}`}
-                      accessibilityHint={unavailable ? 'File data is unavailable' : 'Previews or opens the attachment'}
-                      accessibilityState={{ disabled: unavailable || Boolean(fileAction) }}
-                      disabled={unavailable || Boolean(fileAction)}
-                      onPress={() => openFile(file)}
-                      style={({ pressed }) => [styles.fileOpen, pressed && styles.filePressed]}
-                    >
-                      <SymbolView
-                        name={file.mime === 'application/pdf' ? 'doc.richtext.fill' : 'photo.fill'}
-                        tintColor={mine ? colors.onAccent : colors.text2}
-                        size={16}
-                      />
-                      <Text
-                        numberOfLines={1}
-                        style={[styles.fileLabel, mine && styles.mineText]}
-                      >
-                        {file.name}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`Share or save ${file.name}`}
-                      accessibilityHint="Downloads securely and opens the system share sheet"
-                      accessibilityState={{ disabled: unavailable || Boolean(fileAction) }}
-                      disabled={unavailable || Boolean(fileAction)}
-                      hitSlop={4}
-                      onPress={() => void shareFile(file)}
-                      style={({ pressed }) => [styles.fileShare, pressed && styles.filePressed]}
-                    >
-                      {fileAction === key ? (
-                        <ActivityIndicator size="small" color={mine ? colors.onAccent : colors.text2} />
-                      ) : (
-                        <SymbolView
-                          name="square.and.arrow.up"
-                          tintColor={mine ? colors.onAccent : colors.text2}
-                          size={16}
-                        />
-                      )}
-                    </Pressable>
-                  </View>
-                );
-              })}
+        {loading ? (
+          <ActivityIndicator color={colors.accent} style={styles.loading} />
+        ) : (
+          <ScrollView
+            ref={scrollRef}
+            contentContainerStyle={styles.list}
+            keyboardShouldPersistTaps="handled"
+            onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
+          >
+            {rows.map(({ message, own, showAuthor }) => (
+              <MessageBubble
+                key={String(message.id)}
+                message={message}
+                own={own}
+                showAuthor={showAuthor}
+              />
+            ))}
+          </ScrollView>
+        )}
+
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {dictation.error ? (
+          <View style={styles.dictationError}>
+            <Text style={styles.error}>{dictation.error}</Text>
+            <Pressable onPress={dictation.retry} accessibilityRole="button">
+              <Text style={styles.retry}>Retry</Text>
             </Pressable>
-          );
-        })}
-        {!messages.length && !loading ? <Text style={styles.empty}>Start the conversation below.</Text> : null}
-        <View style={styles.composer}>
-          {attachment ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Remove attachment ${attachment.name}`}
-              accessibilityHint="Removes this file from the message."
-              accessibilityState={{ selected: true }}
-              onPress={() => setAttachment(null)}
-              style={styles.attachmentChip}
-            >
-              <Text numberOfLines={1} style={styles.attachmentText}>📎 {attachment.name}</Text>
-              <SymbolView name="xmark.circle.fill" tintColor={colors.text2} size={17} />
-            </Pressable>
-          ) : null}
-          <TextInput
-            accessibilityLabel="Message Scout"
-            accessibilityHint="Enter the message you want to send."
-            value={draft}
-            onChangeText={setDraft}
-            placeholder="Message Scout…"
-            placeholderTextColor={colors.text3}
-            multiline
-            style={styles.input}
-          />
+          </View>
+        ) : null}
+
+        <Glass radius={radius.xl} style={styles.composer}>
+          {listening ? (
+            <View style={styles.listening}>
+              <Waveform amplitude={dictation.amplitude} listening height={28} />
+              <Text style={styles.listeningHint}>Release to transcribe · slide up to cancel</Text>
+            </View>
+          ) : (
+            <TextInput
+              style={styles.input}
+              placeholder={`Message ${route.params.title}`}
+              placeholderTextColor={colors.text3}
+              value={draft}
+              onChangeText={setDraft}
+              multiline
+              editable={dictation.state !== 'transcribing'}
+            />
+          )}
+
           <View style={styles.composerActions}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={attachment ? 'Replace attached file' : 'Attach a file'}
-              accessibilityHint={attachment ? `Currently attached: ${attachment.name}. Opens the file picker.` : 'Opens the file picker.'}
-              accessibilityState={{ disabled: sending, selected: Boolean(attachment) }}
-              onPress={() => void chooseAttachment()}
-              disabled={sending}
-              style={styles.attachButton}
+              accessibilityLabel={listening ? 'Listening' : 'Hold to dictate'}
+              accessibilityHint="Touch and hold to dictate a message."
+              onPressIn={() => void dictation.start()}
+              onPressOut={() => void dictation.stop()}
+              style={({ pressed }) => [styles.mic, pressed && styles.micPressed]}
             >
-              <SymbolView name="paperclip" tintColor={colors.text1} size={20} />
+              {dictation.state === 'transcribing' ? (
+                <ActivityIndicator color={colors.ember} />
+              ) : (
+                <SymbolView
+                  name={listening ? 'waveform' : 'mic.fill'}
+                  tintColor={listening ? colors.ember : colors.text2}
+                  size={20}
+                />
+              )}
             </Pressable>
+
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Send message"
-              accessibilityHint="Sends this message to Scout."
-              accessibilityState={{ disabled: (!draft.trim() && !attachment) || sending, busy: sending }}
-              onPress={send}
-              disabled={(!draft.trim() && !attachment) || sending}
-              style={({ pressed }) => [styles.send, pressed && styles.pressed, ((!draft.trim() && !attachment) || sending) && styles.disabled]}
+              accessibilityLabel="Send"
+              disabled={!draft.trim() || sending}
+              onPress={() => void send()}
+              style={({ pressed }) => [
+                styles.send,
+                (!draft.trim() || sending || pressed) && styles.sendDim,
+              ]}
             >
-              {sending ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.sendText}>Send</Text>}
+              {sending ? (
+                <ActivityIndicator color={colors.onAccent} />
+              ) : (
+                <SymbolView name="arrow.up" tintColor={colors.onAccent} size={18} />
+              )}
             </Pressable>
           </View>
-        </View>
-        <FilePreviewModal
-          file={preview}
-          sessionToken={sessionToken ?? ''}
-          onClose={() => setPreview(null)}
-        />
-      </Screen>
-    </KeyboardAvoidingView>
+        </Glass>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: colors.bgApp },
-  message: { maxWidth: '88%', paddingHorizontal: space[4], paddingVertical: space[3], borderRadius: radius.lg, marginBottom: space[3] },
-  scout: { alignSelf: 'flex-start', backgroundColor: colors.surface1, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line1 },
-  mine: { alignSelf: 'flex-end', backgroundColor: colors.accent },
-  messageLabel: { ...type.label, color: colors.ember, marginBottom: 5, textTransform: 'uppercase' },
-  messageText: { ...type.body, color: colors.text1 },
-  fileChip: { minHeight: hitMin, flexDirection: 'row', alignItems: 'stretch', borderRadius: radius.md, marginTop: space[2], overflow: 'hidden' },
-  scoutFileChip: { backgroundColor: colors.surface3 },
-  mineFileChip: { backgroundColor: 'rgba(255,255,255,0.16)' },
-  fileOpen: { minHeight: hitMin, flex: 1, flexDirection: 'row', alignItems: 'center', gap: space[2], paddingLeft: space[3] },
-  fileLabel: { ...type.captionMedium, flex: 1, color: colors.text2 },
-  fileShare: { width: hitMin, minHeight: hitMin, alignItems: 'center', justifyContent: 'center' },
-  filePressed: { opacity: 0.7 },
-  mineText: { color: colors.onAccent },
-  empty: { ...type.bodySm, color: colors.text2 },
-  composer: { marginTop: space[4], backgroundColor: colors.surface1, borderRadius: radius.xl, padding: space[3], borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line1 },
-  input: { minHeight: 72, color: colors.text1, fontSize: 15, textAlignVertical: 'top' },
-  composerActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: space[2] },
-  attachButton: { width: hitMin, height: hitMin, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface3 },
-  attachmentChip: { minHeight: hitMin, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: space[3], borderRadius: radius.md, backgroundColor: colors.surface3, marginBottom: space[2] },
-  attachmentText: { ...type.caption, flex: 1, color: colors.text1 },
-  send: { alignSelf: 'flex-end', minWidth: 74, minHeight: hitMin, borderRadius: radius.md, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
-  sendText: { ...type.button, color: colors.onAccent },
-  pressed: { transform: [{ scale: 0.96 }] },
-  disabled: { opacity: 0.45 },
-  iconButton: { width: hitMin, height: hitMin, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface1 },
+  safe: { flex: 1, backgroundColor: colors.bgApp },
+  fill: { flex: 1 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[3],
+    paddingHorizontal: space[4],
+    paddingBottom: space[3],
+  },
+  back: {
+    width: 42,
+    height: 42,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.line1,
+  },
+  title: {
+    ...type.title2,
+    color: colors.text1,
+    flex: 1,
+  },
+  loading: { paddingVertical: space[10] },
+  list: {
+    paddingTop: space[2],
+    paddingBottom: space[4],
+  },
+  composer: {
+    marginHorizontal: space[4],
+    marginBottom: space[2],
+    paddingHorizontal: space[4],
+    paddingTop: space[3],
+    paddingBottom: space[2],
+    gap: space[2],
+  },
+  input: {
+    minHeight: 40,
+    maxHeight: 132,
+    ...type.body,
+    color: colors.text1,
+    textAlignVertical: 'top',
+  },
+  listening: {
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space[2],
+  },
+  listeningHint: {
+    ...type.caption,
+    color: colors.ember,
+  },
+  composerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: space[2],
+  },
+  mic: {
+    width: hitMin,
+    height: hitMin,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.full,
+  },
+  micPressed: { backgroundColor: colors.emberSoft },
+  send: {
+    width: hitMin,
+    height: hitMin,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.accent,
+  },
+  sendDim: { opacity: 0.4 },
+  error: {
+    ...type.bodySm,
+    color: colors.danger,
+    paddingHorizontal: space[5],
+    paddingBottom: space[2],
+  },
+  dictationError: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[3],
+    paddingHorizontal: space[5],
+  },
+  retry: { ...type.button, color: colors.ember },
 });

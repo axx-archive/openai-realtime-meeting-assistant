@@ -90,8 +90,14 @@ test('React Native shell uses the approved momentum assets everywhere', () => {
   assert.match(component, /export function MomentumGlyph/);
   assert.doesNotMatch(component, /fullFlamePath|microFlamePath|bonfireMicroLogCutout/);
 
+  // The voice-first shell has no tab bar, so the glyph's home moved from the
+  // navigator to the canvas mark — the shell's one brand moment. Pin it there
+  // so a redesign can never silently drop the momentum identity again.
+  const canvas = text('src/screens/CanvasScreen.tsx');
+  assert.match(canvas, /<MomentumGlyph/);
+  assert.doesNotMatch(canvas, /BonfireGlyph/);
+
   const navigation = text('src/navigation/RootNavigator.tsx');
-  assert.match(navigation, /<MomentumGlyph/);
   assert.doesNotMatch(navigation, /BonfireGlyph/);
   assert.doesNotMatch(navigation, /Home:\s*'flame\.fill'/);
 });

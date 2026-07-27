@@ -80,6 +80,7 @@ const (
 	seatVoicePrivate         = "voice_private"         // private dashboard voice (browser beacon)
 	seatTranscriptionLane    = "transcription_lane"    // authoritative transcript lane (per-segment)
 	seatTranscriptionSession = "transcription_session" // voice-peer realtime transcription (fallback lane)
+	seatDictation            = "dictation"             // hold-to-dictate uploads (transcribe_dictation.go)
 
 	// Non-text lanes.
 	seatEmbeddings = "embeddings" // text-embedding-3-small maintainer
@@ -102,6 +103,7 @@ var allLLMSeats = []string{
 	seatMeetingDigest, seatCompanyDigest, seatMissionIntel, seatSlop,
 	seatRecallMapReduce, seatAgentThreadText,
 	seatVoiceRoom, seatVoicePrivate, seatTranscriptionLane, seatTranscriptionSession,
+	seatDictation,
 	seatEmbeddings, seatImages, seatCodex,
 	seatUntagged,
 }

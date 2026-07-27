@@ -348,8 +348,10 @@ func TestUsageLedgerDefaultPathSitsBesideMemoryStore(t *testing.T) {
 }
 
 func TestSeatVocabularyIsCompleteUniqueAndWellFormed(t *testing.T) {
-	if len(allLLMSeats) != 34 {
-		t.Fatalf("seat vocabulary drifted: %d seats, want 34 (update the frozen contract deliberately)", len(allLLMSeats))
+	// 35 as of 2026-07-27: seatDictation joined for hold-to-dictate uploads
+	// (transcribe_dictation.go). Duration-billed like the other STT lanes.
+	if len(allLLMSeats) != 35 {
+		t.Fatalf("seat vocabulary drifted: %d seats, want 35 (update the frozen contract deliberately)", len(allLLMSeats))
 	}
 	seen := map[string]bool{}
 	for _, seat := range allLLMSeats {

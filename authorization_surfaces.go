@@ -50,6 +50,10 @@ var authorizationHTTPSurfaces = []AuthorizationSurface{
 	authSurface("http.assistant.chat_threads", AuthorizationHTTP, "/assistant/chat-threads", []string{"chat_thread"}, []ACLAction{ACLReadContent, ACLCreateChild}, []string{"user"}, true, true, AuthorizationLegacyGuarded),
 	authSurface("http.assistant.chat_thread", AuthorizationHTTP, "/assistant/chat-threads/", []string{"chat_thread", "artifact", "file"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"user"}, true, true, AuthorizationLegacyGuarded),
 	authSurface("http.assistant.attachments", AuthorizationHTTP, "/assistant/attachments", []string{"file", "blob", "chat_thread"}, []ACLAction{ACLCreateChild, ACLWrite}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
+	// Dictation uploads: the audio is transcribed and discarded (no object is
+	// persisted), but the request is body-reading and spends vendor minutes, so
+	// it is inventoried rather than waved through as non-object.
+	authSurface("http.assistant.transcribe", AuthorizationHTTP, "/assistant/transcribe", []string{"chat_thread"}, []ACLAction{ACLExecute}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.agent_threads", AuthorizationHTTP, "/assistant/threads", []string{"workflow", "artifact"}, []ACLAction{ACLExecute, ACLReadContent}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.agent_followup", AuthorizationHTTP, "/assistant/threads/follow-up", []string{"workflow", "artifact"}, []ACLAction{ACLReadContent, ACLExecute, ACLWrite}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.assistant.goal", AuthorizationHTTP, "/assistant/goal", []string{"goal", "workflow", "artifact"}, []ACLAction{ACLExecute, ACLReadContent}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),

@@ -49,7 +49,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         NSCameraUsageDescription:
           'BonfireOS uses the camera when you join a live room with video.',
         NSMicrophoneUsageDescription:
-          'BonfireOS uses the microphone when you join a live room or talk to Scout.',
+          'BonfireOS uses the microphone when you join a live room, talk to Scout, or dictate a message.',
         NSPhotoLibraryUsageDescription:
           'BonfireOS can attach photos to Scout threads and board cards.',
         // Audio keeps the call audible; VoIP lets iOS 18+ grant WebRTC's
@@ -84,6 +84,16 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     },
     plugins: [
       'expo-image',
+      // Dictation records locally and transcribes server-side with the company
+      // vocabulary lane. The system mic prompt says nothing about where audio
+      // goes, so the app also shows a first-use disclosure (design §12.5).
+      [
+        'expo-audio',
+        {
+          microphonePermission:
+            'BonfireOS uses the microphone to dictate messages and talk to Scout.',
+        },
+      ],
       './plugins/withWebRTCMultitaskingCamera',
       [
         './plugins/withWebRTCBroadcastExtension',
@@ -94,6 +104,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         './plugins/withWebRTCBroadcastExtension',
         { stage: 'eas' },
       ],
+      // Must run after the WebRTC plugins so it edits the final Podfile.
+      './plugins/withSwiftUICoreWeakLink',
       'expo-secure-store',
       'expo-font',
       'expo-sharing',

@@ -505,6 +505,56 @@ export const api = {
     };
   },
 
+  /**
+   * Uploads a held dictation for transcription against the company vocabulary
+   * lane. `durationMs` is the recorder's own measurement — the server clamps it
+   * and bills the minute, so it must be the real recording length.
+   */
+  async transcribeDictation(
+    sessionToken: string,
+    recording: { uri: string; durationMs: number },
+    options: { context?: 'chat' | 'board' | 'search'; threadId?: string } = {},
+  ): Promise<{ text: string; durationMs: number; model: string; biased: boolean }> {
+    const form = new FormData();
+    // React Native's FormData takes the local file URI directly — reading the
+    // recording into a JS blob first would double a multi-megabyte recording in
+    // memory for no benefit.
+    form.append('audio', {
+      uri: recording.uri,
+      name: 'dictation.m4a',
+      type: 'audio/m4a',
+    } as unknown as Blob);
+    form.append('durationMs', String(Math.round(recording.durationMs)));
+    if (options.context) form.append('context', options.context);
+    if (options.threadId) form.append('threadId', options.threadId);
+
+    const response = await fetch(buildApiUrl(API_BASE_URL, '/assistant/transcribe'), {
+      method: 'POST',
+      // Content-Type is deliberately unset: fetch must add the multipart
+      // boundary itself, and setting it by hand produces a body the server
+      // cannot parse.
+      headers: buildAuthHeaders(NATIVE_CLIENT_HEADER, sessionToken),
+      body: form,
+    });
+    const payload = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      text?: string;
+      durationMs?: number;
+      model?: string;
+      biased?: boolean;
+    };
+    if (!response.ok || typeof payload.text !== 'string') {
+      if (response.status === 401) unauthorizedHandler?.();
+      throw new BonfireApiError(response.status, payload.error || 'Could not transcribe that.');
+    }
+    return {
+      text: payload.text,
+      durationMs: payload.durationMs ?? recording.durationMs,
+      model: payload.model ?? '',
+      biased: Boolean(payload.biased),
+    };
+  },
+
   createScoutThread(
     sessionToken: string,
     body: { title?: string; visibility?: string; intake?: string } = {},
