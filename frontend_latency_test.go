@@ -33,6 +33,9 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 		"function startMediaQualityMonitor(sessionPeer)",
 		"function adaptDesktopCameraForLowBandwidth(availableBitrate)",
 		"function restoreDesktopCameraAfterBandwidthRecovery(availableBitrate)",
+		"function succeededDirectCandidatePairAvailable(report, selectedCandidatePair)",
+		"requestIceRestart('a better direct media path is available')",
+		"function completeIceRestartRecovery()",
 		"outgoingBitrate < 350000",
 		"outgoingBitrate >= 650000",
 		"if (isMobileDevice) {",
@@ -134,6 +137,47 @@ func TestIndexComposesRoomSizeAndBandwidthVideoLimits(t *testing.T) {
 			if !strings.Contains(body, marker) {
 				t.Fatalf("%s must compose room-size and bandwidth limits with %q", tc.signature, marker)
 			}
+		}
+	}
+}
+
+func TestIndexUpgradesRelayAndClearsStaleBandwidthModeAfterICERecovery(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	html := string(rawHTML)
+
+	directPairBody := functionBody(html, "function succeededDirectCandidatePairAvailable(report, selectedCandidatePair)")
+	for _, want := range []string{
+		"stat.state !== 'succeeded'",
+		"localType !== 'relay'",
+		"remoteType !== 'relay'",
+	} {
+		if !strings.Contains(directPairBody, want) {
+			t.Fatalf("direct-path upgrade must require a proven non-relay pair via %q", want)
+		}
+	}
+
+	monitorBody := functionBody(html, "function startMediaQualityMonitor(sessionPeer)")
+	for _, want := range []string{
+		"directRouteUpgradeAvailable",
+		"mediaQualityRouteUpgradeCooldownMs",
+		"requestIceRestart('a better direct media path is available')",
+	} {
+		if !strings.Contains(monitorBody, want) {
+			t.Fatalf("media monitor missing relay-upgrade behavior %q", want)
+		}
+	}
+
+	recoveryBody := functionBody(html, "function completeIceRestartRecovery()")
+	for _, want := range []string{
+		"recoveredFromRestart",
+		"resetIceRestartRecovery()",
+		"restoreDesktopCameraAfterBandwidthRecovery(0)",
+	} {
+		if !strings.Contains(recoveryBody, want) {
+			t.Fatalf("ICE recovery must clear stale low-bandwidth encoding via %q", want)
 		}
 	}
 }

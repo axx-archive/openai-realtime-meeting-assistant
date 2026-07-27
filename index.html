@@ -24918,6 +24918,7 @@
       let mediaQualityBandwidthLimited = false
       let mediaQualityBandwidthLowSamples = 0
       let mediaQualityBandwidthHealthySamples = 0
+      let mediaQualityRouteUpgradeRequestedAt = 0
       let previousMediaQualityStats = null
       let lastMediaQualityReportAt = 0
       let auxiliaryVideoRepairTimer = 0
@@ -24926,6 +24927,7 @@
       let localMirrorFrame = 0
       const localMirrorCanvasStates = new WeakMap()
       const mediaQualityReportIntervalMs = 12000
+      const mediaQualityRouteUpgradeCooldownMs = 60000
       const audioSettingsStorageKey = 'bonfire.audio.settings.v1'
       // Stable per-device id so one account can be in the room on a laptop and a
       // phone at once. It persists across reloads: a refreshed tab reuses the id
@@ -34080,7 +34082,7 @@
           if (state === 'connected') {
             clearConnectionRecoveryTimer()
             clearIceDisconnectRestartTimer()
-            resetIceRestartRecovery()
+            completeIceRestartRecovery()
             if (!statusPillEl.classList.contains('pill--listening')) {
               setRoomListeningConnectionState()
             }
@@ -34111,7 +34113,7 @@
             scheduleConnectionRecovery(sessionPeer)
           } else if (sessionPeer.iceConnectionState === 'connected' || sessionPeer.iceConnectionState === 'completed') {
             clearIceDisconnectRestartTimer()
-            resetIceRestartRecovery()
+            completeIceRestartRecovery()
           }
         }
 
@@ -34180,6 +34182,16 @@
         iceRestartRecoveryStartedAt = 0
         lastIceRestartRequestAt = 0
         mediaDisconnectRecoveryTried = false
+      }
+
+      function completeIceRestartRecovery() {
+        const recoveredFromRestart = iceRestartRecoveryStartedAt > 0
+        resetIceRestartRecovery()
+        if (recoveredFromRestart && mediaQualityBandwidthLimited) {
+          restoreDesktopCameraAfterBandwidthRecovery(0).catch(error => {
+            console.warn('Could not restore desktop camera after ICE recovery', error)
+          })
+        }
       }
 
       // Server signalled our media path dropped (main.go). Rather than eject the
@@ -34325,6 +34337,7 @@
         mediaQualityBandwidthLimited = false
         mediaQualityBandwidthLowSamples = 0
         mediaQualityBandwidthHealthySamples = 0
+        mediaQualityRouteUpgradeRequestedAt = 0
         lastMediaQualityReportAt = 0
       }
 
@@ -34399,9 +34412,24 @@
               : 0
             const desktopBandwidthLow = !isMobileDevice && sentVideoBytes > 0 && outgoingBitrate > 0 && outgoingBitrate < 350000
             const desktopBandwidthHealthy = !isMobileDevice && outgoingBitrate >= 650000
+            const selectedPairUsesRelay = snapshot.candidatePair?.localCandidateType === 'relay'
+              || snapshot.candidatePair?.remoteCandidateType === 'relay'
+            const directRouteUpgradeAvailable = !isMobileDevice
+              && selectedPairUsesRelay
+              && snapshot.candidatePair?.directCandidatePairAvailable
+            const routeUpgradeCoolingDown = mediaQualityRouteUpgradeRequestedAt
+              && Date.now() - mediaQualityRouteUpgradeRequestedAt < mediaQualityRouteUpgradeCooldownMs
             mediaQualityBandwidthLowSamples = desktopBandwidthLow ? mediaQualityBandwidthLowSamples + 1 : 0
             mediaQualityBandwidthHealthySamples = desktopBandwidthHealthy ? mediaQualityBandwidthHealthySamples + 1 : 0
-            if (!mediaQualityBandwidthLimited && mediaQualityBandwidthLowSamples >= 2) {
+            if (!selectedPairUsesRelay) {
+              mediaQualityRouteUpgradeRequestedAt = 0
+            }
+            if (directRouteUpgradeAvailable && !routeUpgradeCoolingDown) {
+              mediaQualityRouteUpgradeRequestedAt = Date.now()
+              mediaQualityBandwidthLowSamples = 0
+              mediaQualityBandwidthHealthySamples = 0
+              requestIceRestart('a better direct media path is available')
+            } else if (!mediaQualityBandwidthLimited && mediaQualityBandwidthLowSamples >= 2) {
               await adaptDesktopCameraForLowBandwidth(outgoingBitrate)
             } else if (mediaQualityBandwidthLimited && mediaQualityBandwidthHealthySamples >= 3) {
               await restoreDesktopCameraAfterBandwidthRecovery(outgoingBitrate)
@@ -34511,9 +34539,31 @@
           networkType: String(localCandidate?.networkType || ''),
           localCandidateType: String(localCandidate?.candidateType || ''),
           remoteCandidateType: String(remoteCandidate?.candidateType || ''),
+          directCandidatePairAvailable: succeededDirectCandidatePairAvailable(report, candidatePair),
           availableOutgoingBitrate: Number(candidatePair.availableOutgoingBitrate) || 0,
           currentRoundTripTime: Number(candidatePair.currentRoundTripTime) || 0
         }
+      }
+
+      function succeededDirectCandidatePairAvailable(report, selectedCandidatePair) {
+        if (!report || typeof report.forEach !== 'function' || typeof report.get !== 'function') {
+          return false
+        }
+        let available = false
+        report.forEach(stat => {
+          if (available
+              || stat.type !== 'candidate-pair'
+              || stat.id === selectedCandidatePair?.id
+              || stat.state !== 'succeeded') {
+            return
+          }
+          const localCandidate = stat.localCandidateId ? report.get(stat.localCandidateId) : null
+          const remoteCandidate = stat.remoteCandidateId ? report.get(stat.remoteCandidateId) : null
+          const localType = String(localCandidate?.candidateType || '')
+          const remoteType = String(remoteCandidate?.candidateType || '')
+          available = Boolean(localType && remoteType && localType !== 'relay' && remoteType !== 'relay')
+        })
+        return available
       }
 
       function trackSettingsSnapshot(track, keys) {

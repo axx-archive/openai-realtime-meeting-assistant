@@ -2617,6 +2617,14 @@ func newPeerConnectionWithConfiguration(configuration webrtc.Configuration) (*we
 	if nat1To1IP := os.Getenv("PION_NAT1TO1_IP"); nat1To1IP != "" {
 		settingEngine.SetNAT1To1IPs([]string{nat1To1IP}, webrtc.ICECandidateTypeHost)
 	}
+	if len(configuration.ICEServers) > 0 {
+		// Pion normally accepts a relay pair after two seconds. In a trickle-ICE
+		// room that can nominate TURN just before the browser's higher-priority
+		// server-reflexive pair finishes its check, pinning an otherwise healthy
+		// call to the relay for its entire lifetime. Give the direct pair one more
+		// short window; relay-only networks still connect after 3.5 seconds.
+		settingEngine.SetRelayAcceptanceMinWait(3500 * time.Millisecond)
+	}
 	if err := configureEphemeralUDPPortRange(&settingEngine); err != nil {
 		return nil, err
 	}

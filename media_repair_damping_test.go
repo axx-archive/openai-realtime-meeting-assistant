@@ -151,7 +151,7 @@ func TestMemberMediaRepairWiredInHandler(t *testing.T) {
 		"member_media_repair_rate_limited",
 		// S2: accepted member repairs are logged with the sanitized reason.
 		"member_media_repair session=",
-		"participantTrackRefreshReason(message.Data)",
+		"participantTrackRefreshRequestFromData(message.Data)",
 		// per-socket bucket released in the session cleanup seam.
 		"dropMemberMediaRepairBucket(connRoomID, participantSessionID)",
 	} {

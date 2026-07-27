@@ -153,8 +153,11 @@ console.log('[2c] receive loss stays receive-only')
     let mediaQualityBandwidthLimited = false
     let mediaQualityBandwidthLowSamples = 0
     let mediaQualityBandwidthHealthySamples = 0
+    let mediaQualityRouteUpgradeRequestedAt = 0
+    const mediaQualityRouteUpgradeCooldownMs = 60000
     let adapted = 0
     let restored = 0
+    let restarts = 0
     let nextSnapshot = null
     const isMobileDevice = false
     function stopMediaQualityMonitor() {}
@@ -163,6 +166,7 @@ console.log('[2c] receive loss stays receive-only')
     function mediaQualityLooksLaggy(snapshot) { return Boolean(snapshot.inboundLaggy) }
     async function adaptDesktopCameraForLowBandwidth() { adapted++; mediaQualityBandwidthLimited = true; mediaQualityBandwidthHealthySamples = 0 }
     async function restoreDesktopCameraAfterBandwidthRecovery() { restored++; mediaQualityBandwidthLimited = false; mediaQualityBandwidthLowSamples = 0; mediaQualityBandwidthHealthySamples = 0 }
+    function requestIceRestart() { restarts++ }
     function repairRemoteMediaHealth() { return {} }
     function remoteMediaHealthSnapshot() { return {} }
     function syncRoomAudioPlaybackState() {}
@@ -171,7 +175,7 @@ console.log('[2c] receive loss stays receive-only')
     return {
       start: () => startMediaQualityMonitor(peer),
       sample: async snapshot => { nextSnapshot = snapshot; await window.tick() },
-      state: () => ({ adapted, restored, limited: mediaQualityBandwidthLimited })
+      state: () => ({ adapted, restored, restarts, limited: mediaQualityBandwidthLimited })
     }
   `)
   const windowMock = {
@@ -190,11 +194,15 @@ console.log('[2c] receive loss stays receive-only')
   await harness.sample({ at:20000, inboundLaggy:true, outboundVideoBytesSent:6000, candidatePair:{ availableOutgoingBitrate:700000 } })
   await harness.sample({ at:24000, inboundLaggy:true, outboundVideoBytesSent:7000, candidatePair:{ availableOutgoingBitrate:700000 } })
   ok('outgoing recovery restores quality despite continued inbound loss', harness.state().restored === 1 && !harness.state().limited)
+  await harness.sample({ at:28000, inboundLaggy:false, outboundVideoBytesSent:8000, candidatePair:{ availableOutgoingBitrate:200000, localCandidateType:'relay', remoteCandidateType:'host', directCandidatePairAvailable:true } })
+  await harness.sample({ at:32000, inboundLaggy:false, outboundVideoBytesSent:9000, candidatePair:{ availableOutgoingBitrate:200000, localCandidateType:'relay', remoteCandidateType:'host', directCandidatePairAvailable:true } })
+  ok('a proven direct alternative upgrades a selected relay once per cooldown', harness.state().restarts === 1)
 }
 
 console.log('[2d] selected ICE pair - stale paths do not poison RTT')
 {
   const make = new Function('performance', 'frozenRemoteVideoTrackIds', `
+    ${extractFn('succeededDirectCandidatePairAvailable')}
     ${extractFn('summarizeCandidatePair')}
     ${extractFn('summarizeMediaQualityStats')}
     return summarizeMediaQualityStats
