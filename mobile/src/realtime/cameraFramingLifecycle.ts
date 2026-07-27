@@ -231,6 +231,25 @@ export function explicitFramingIntentAfterResult(
   return operationSucceeded ? requested : null;
 }
 
+export function wideUprightFramingNeedsUpdate(
+  requested: boolean | null,
+  state: Pick<
+    CameraFramingState,
+    'wideUprightSupported' | 'wideUprightEnabled' | 'dynamicWidth' | 'dynamicHeight'
+  >,
+): boolean {
+  if (requested === null || !state.wideUprightSupported) return false;
+  const dimensionsConfirmed = state.dynamicWidth > 0 && state.dynamicHeight > 0;
+  const geometryMatchesIntent = requested
+    ? state.wideUprightEnabled
+      && dimensionsConfirmed
+      && state.dynamicWidth > state.dynamicHeight
+    : !state.wideUprightEnabled
+      && dimensionsConfirmed
+      && state.dynamicHeight > state.dynamicWidth;
+  return !geometryMatchesIntent;
+}
+
 export function wideUprightIntentAfterTransition(
   currentIntent: boolean | null,
   transition: 'call-start' | 'camera-reset' | 'call-end',

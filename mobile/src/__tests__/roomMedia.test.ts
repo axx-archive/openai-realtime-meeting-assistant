@@ -14,6 +14,7 @@ import {
 } from '../realtime/iceRecovery';
 import {
   createSerializedLocalMediaRecovery,
+  detachStalledLocalVideoTracks,
   installRecoveredLocalAudioTrack,
   installRecoveredLocalVideoTrack,
   localAudioPublicationPendingState,
@@ -671,6 +672,50 @@ describe('native room media', () => {
     assert.equal(freshTrack.enabled, true);
     assert.equal(freshTrack.stopped, false);
     assert.equal(captureReleasedWithTracks, false);
+  });
+
+  it('detaches and releases a stalled camera before replacement capture begins', async () => {
+    const stalledTrack = {
+      enabled: true,
+      kind: 'video',
+      readyState: 'live',
+      stopped: false,
+      released: false,
+      stop() { this.stopped = true; },
+      release() { this.released = true; },
+    };
+    let localTracks = [stalledTrack];
+    const local = {
+      addTrack: (track: typeof stalledTrack) => { localTracks.push(track); },
+      getAudioTracks: () => [],
+      getVideoTracks: () => localTracks,
+      removeTrack: (track: typeof stalledTrack) => {
+        localTracks = localTracks.filter((candidate) => candidate !== track);
+      },
+    };
+    let senderTrack: typeof stalledTrack | null = stalledTrack;
+    const replacements: Array<typeof stalledTrack | null> = [];
+    const sender = {
+      get track() { return senderTrack; },
+      replaceTrack: async (track: typeof stalledTrack | null) => {
+        replacements.push(track);
+        senderTrack = track;
+      },
+    };
+
+    const result = await detachStalledLocalVideoTracks({
+      isCurrent: () => true,
+      local,
+      sender,
+    });
+
+    assert.equal(result, 'detached');
+    assert.deepEqual(replacements, [null]);
+    assert.equal(sender.track, null);
+    assert.deepEqual(local.getVideoTracks(), []);
+    assert.equal(stalledTrack.enabled, false);
+    assert.equal(stalledTrack.stopped, true);
+    assert.equal(stalledTrack.released, true);
   });
 
   it('requires both outbound bytes and frames before announcing a screen share', () => {

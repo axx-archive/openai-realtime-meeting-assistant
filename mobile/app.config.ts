@@ -31,10 +31,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         dark: './assets/ios-icon-dark.png',
         tinted: './assets/ios-icon-tinted.png',
       },
-      // Build 17 ships the quiet-join microphone renegotiation hotfix and the
-      // portrait-first premium framing baseline with the shared momentum identity.
+      // Build 18 ships explicit portrait normalization for the adaptive camera,
+      // safe stalled-camera recapture, and the quiet-join microphone hotfix.
       // Pin the multi-target release so the app and ReplayKit extension match.
-      buildNumber: '17',
+      buildNumber: '18',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

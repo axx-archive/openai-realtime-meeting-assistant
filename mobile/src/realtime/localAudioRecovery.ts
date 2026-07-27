@@ -392,3 +392,39 @@ export function installRecoveredLocalVideoTrack<TTrack extends RecoverableLocalT
 }): Promise<'installed' | 'cancelled'> {
   return installRecoveredLocalVideoTrackInternal(options);
 }
+
+/**
+ * Fully releases a live-but-stalled camera before requesting the same physical
+ * camera again. iOS must not own two concurrent WebRTC capture sessions for
+ * the adaptive front camera: overlapping the replacement getUserMedia call
+ * with the stalled session can terminate the process in native capture code.
+ */
+export async function detachStalledLocalVideoTracks<TTrack extends RecoverableLocalTrack>(options: {
+  isCurrent: () => boolean;
+  local: RecoverableLocalStream<TTrack>;
+  sender: RecoverableLocalSender<TTrack>;
+}): Promise<'detached' | 'cancelled'> {
+  const { isCurrent, local, sender } = options;
+  if (!isCurrent()) return 'cancelled';
+  const localTracks = local.getVideoTracks();
+  const attachedTrack = senderTrack(sender);
+  const staleTracks = new Set<TTrack>([
+    ...localTracks,
+    ...(attachedTrack?.kind === 'video' ? [attachedTrack] : []),
+  ]);
+
+  if (attachedTrack?.kind === 'video') {
+    await sender.replaceTrack(null);
+    if (senderTrack(sender) !== null) {
+      throw new Error('The stalled camera track could not be detached.');
+    }
+  }
+
+  localTracks.forEach((track) => local.removeTrack(track));
+  staleTracks.forEach((track) => {
+    track.enabled = false;
+    track.stop();
+    track.release?.();
+  });
+  return isCurrent() ? 'detached' : 'cancelled';
+}

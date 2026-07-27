@@ -24,6 +24,7 @@ import { createDisconnectedIceRestartController } from './iceRecovery';
 import {
   attachLocalAudioTrackAfterPublicationCommit,
   createSerializedLocalMediaRecovery,
+  detachStalledLocalVideoTracks,
   installRecoveredLocalAudioTrack,
   installRecoveredLocalVideoTrack,
   localAudioPublicationPendingState,
@@ -107,6 +108,7 @@ import {
   explicitFramingIntentAfterResult,
   readLiveCameraTrackIdentity,
   wideFramingRestoreDeviceId,
+  wideUprightFramingNeedsUpdate,
   wideUprightIntentAfterTransition,
   type CameraFramingOperation,
   type CameraFramingState,
@@ -180,7 +182,7 @@ type PendingMicrophonePublicationCommit = {
   version: number;
 };
 
-const NATIVE_ROOM_CLIENT_VERSION = 'expo-native-8';
+const NATIVE_ROOM_CLIENT_VERSION = 'expo-native-9';
 const reconnectDelaysMs = [500, 1_000, 2_000, 4_000, 8_000, 12_000];
 const cameraRecoveryCooldownMs = 8_000;
 const cameraFramingRestoreTimeoutMs = 750;
@@ -731,9 +733,10 @@ export function useNativeRoom(
     const centerStageNeedsUpdate = requestedCenterStage !== null
       && framingState.centerStageSupported
       && framingState.centerStageEnabled !== requestedCenterStage;
-    const wideUprightNeedsUpdate = requestedWideUpright !== null
-      && framingState.wideUprightSupported
-      && framingState.wideUprightEnabled !== requestedWideUpright;
+    const wideUprightNeedsUpdate = wideUprightFramingNeedsUpdate(
+      requestedWideUpright,
+      framingState,
+    );
     if (!centerStageNeedsUpdate && !wideUprightNeedsUpdate) return;
 
     setState((current) => (
@@ -775,8 +778,7 @@ export function useNativeRoom(
     const refreshedWideState = cameraFramingStateFromCapabilities(capabilities, operation.deviceId);
     if (
       requestedWideUpright !== null
-      && refreshedWideState.wideUprightSupported
-      && refreshedWideState.wideUprightEnabled !== requestedWideUpright
+      && wideUprightFramingNeedsUpdate(requestedWideUpright, refreshedWideState)
     ) {
       let result = await runCameraFramingNativeOperation(() => (
         BonfireCameraFraming.setWideUprightFramingEnabled(requestedWideUpright, operation.deviceId)
@@ -1155,8 +1157,6 @@ export function useNativeRoom(
     ) return false;
     const { socketContext } = peerContext;
     videoSenderRef.current = sender;
-    const startedWithoutVideo = !local.getVideoTracks()
-      .some((track) => track.readyState === 'live');
     const recoveryGuard = cameraRecoveryGuardRef.current;
     const attempt = recoveryGuard?.begin() ?? null;
     if (attempt === null) return false;
@@ -1185,6 +1185,19 @@ export function useNativeRoom(
       try {
         if (wideFramingRestore) await wideFramingRestore;
         if (!attemptIsCurrent()) return;
+
+        if (local.getVideoTracks().some((track) => track.readyState === 'live')) {
+          attempted = true;
+          const detached = await videoSenderMutationsRef.current!.run(sender, () => (
+            detachStalledLocalVideoTracks({
+              isCurrent: attemptIsCurrent,
+              local,
+              sender,
+            })
+          ));
+          if (detached !== 'detached' || !attemptIsCurrent()) return;
+        }
+
         attempted = true;
         capture = await mediaDevices.getUserMedia({ audio: false, video: nativeCameraConstraints });
         const ownedCapture = capture;
@@ -1243,7 +1256,9 @@ export function useNativeRoom(
           ? error.message
           : 'The camera recovery request failed.';
         const message = 'Could not start the camera. Check iOS permissions and try again.';
-        if (startedWithoutVideo && requestedVideo.current) {
+        const cameraTrackUnavailable = !local.getVideoTracks()
+          .some((track) => track.readyState === 'live');
+        if (cameraTrackUnavailable && requestedVideo.current) {
           requestedVideo.current = false;
           systemVideoSuspendedRef.current = false;
           setState((current) => ({

@@ -13,6 +13,7 @@ import {
   explicitFramingIntentAfterResult,
   readLiveCameraTrackIdentity,
   wideFramingRestoreDeviceId,
+  wideUprightFramingNeedsUpdate,
   wideUprightIntentAfterTransition,
 } from '../realtime/cameraFramingLifecycle';
 
@@ -185,6 +186,33 @@ describe('camera framing lifecycle', () => {
     assert.equal(cameraFramingRenderRevision(checking), cameraFramingRenderRevision(portrait));
     assert.equal(cameraFramingRenderRevision(centerStageChanged), cameraFramingRenderRevision(portrait));
     assert.notEqual(cameraFramingRenderRevision(wide), cameraFramingRenderRevision(portrait));
+  });
+
+  it('normalizes a square adaptive-camera default to explicit portrait while assists are off', () => {
+    const square = cameraFramingStateFromCapabilities({
+      ...supportedCapabilities,
+      wideUprightFramingEnabled: false,
+      centerStageEnabled: false,
+      centerStageActive: false,
+      dynamicWidth: 1280,
+      dynamicHeight: 1280,
+    }, 'front-camera');
+    const portrait = {
+      ...square,
+      dynamicWidth: 720,
+      dynamicHeight: 1280,
+    };
+    const landscape = {
+      ...square,
+      wideUprightEnabled: true,
+      dynamicWidth: 1280,
+      dynamicHeight: 720,
+    };
+
+    assert.equal(wideUprightFramingNeedsUpdate(false, square), true);
+    assert.equal(wideUprightFramingNeedsUpdate(false, portrait), false);
+    assert.equal(wideUprightFramingNeedsUpdate(true, landscape), false);
+    assert.equal(wideUprightFramingNeedsUpdate(null, square), false);
   });
 
   it('labels Center Stage on only after the active device confirms it is active', () => {
