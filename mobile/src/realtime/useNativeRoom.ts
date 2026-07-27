@@ -681,7 +681,7 @@ export function useNativeRoom(
     return cameraFramingGenerationGuardRef.current?.isCurrent(operation, currentIdentity) === true;
   }, [currentCameraFramingContext]);
 
-  const refreshCameraFramingInternal = useCallback((reapplyExplicitRequests: boolean) => {
+  const refreshCameraFramingInternal = useCallback(async (reapplyExplicitRequests: boolean): Promise<void> => {
     const context = currentCameraFramingContext();
     if (!context) {
       resetCameraFraming();
@@ -691,105 +691,122 @@ export function useNativeRoom(
     cameraFramingCapabilitiesRef.current = null;
     setState((current) => ({
       ...current,
-      cameraFraming: { ...emptyCameraFramingState(), checking: true },
+      // A capability query does not replace the capture track or its geometry.
+      // Preserve the last confirmed dimensions so routine foreground/Center
+      // Stage reconciliation cannot remount and blink the local RTC renderer.
+      cameraFraming: {
+        ...current.cameraFraming,
+        checking: true,
+        applying: false,
+        pendingControl: null,
+        message: null,
+      },
     }));
 
-    void (async () => {
-      let capabilities = await runCameraFramingNativeOperation(() => (
-        BonfireCameraFraming.getCapabilities(operation.deviceId)
+    let capabilities = await runCameraFramingNativeOperation(() => (
+      BonfireCameraFraming.getCapabilities(operation.deviceId)
+    ));
+    recordWideUprightCapability(operation.deviceId, capabilities);
+    if (!cameraFramingOperationIsCurrent(operation)) return;
+
+    let framingState = cameraFramingStateFromCapabilities(capabilities, operation.deviceId);
+    if (!reapplyExplicitRequests && requestedCenterStageRef.current !== null) {
+      // Center Stage is cooperative with Control Center. Once this call has
+      // an explicit app preference, a query-only foreground refresh adopts
+      // the exact current system choice instead of resurrecting stale intent
+      // on a later recovery or camera switch.
+      requestedCenterStageRef.current = cooperativeCenterStageIntentAfterRefresh(
+        requestedCenterStageRef.current,
+        framingState.centerStageSupported,
+        framingState.centerStageEnabled,
+      );
+    }
+    cameraFramingCapabilitiesRef.current = { identity: context.identity, capabilities };
+    setState((current) => ({ ...current, cameraFraming: framingState }));
+    if (!reapplyExplicitRequests) return;
+
+    const requestedCenterStage = requestedCenterStageRef.current;
+    const requestedWideUpright = requestedWideUprightFramingRef.current;
+    const centerStageNeedsUpdate = requestedCenterStage !== null
+      && framingState.centerStageSupported
+      && framingState.centerStageEnabled !== requestedCenterStage;
+    const wideUprightNeedsUpdate = requestedWideUpright !== null
+      && framingState.wideUprightSupported
+      && framingState.wideUprightEnabled !== requestedWideUpright;
+    if (!centerStageNeedsUpdate && !wideUprightNeedsUpdate) return;
+
+    setState((current) => (
+      cameraFramingOperationIsCurrent(operation)
+        ? {
+            ...current,
+            cameraFraming: {
+              ...current.cameraFraming,
+              applying: true,
+              pendingControl: centerStageNeedsUpdate ? 'centerStage' : 'wideUpright',
+              message: null,
+            },
+          }
+        : current
+    ));
+    if (centerStageNeedsUpdate) {
+      const result = await runCameraFramingNativeOperation(() => (
+        BonfireCameraFraming.setCenterStageEnabled(requestedCenterStage, operation.deviceId)
       ));
-      recordWideUprightCapability(operation.deviceId, capabilities);
+      recordWideUprightCapability(operation.deviceId, result.capabilities);
       if (!cameraFramingOperationIsCurrent(operation)) return;
-
-      let framingState = cameraFramingStateFromCapabilities(capabilities, operation.deviceId);
-      if (!reapplyExplicitRequests && requestedCenterStageRef.current !== null) {
-        // Center Stage is cooperative with Control Center. Once this call has
-        // an explicit app preference, a query-only foreground refresh adopts
-        // the exact current system choice instead of resurrecting stale intent
-        // on a later recovery or camera switch.
-        requestedCenterStageRef.current = cooperativeCenterStageIntentAfterRefresh(
-          requestedCenterStageRef.current,
-          framingState.centerStageSupported,
-          framingState.centerStageEnabled,
-        );
+      capabilities = result.capabilities;
+      framingState = cameraFramingStateFromCapabilities(capabilities, operation.deviceId);
+      if (wideUprightNeedsUpdate) {
+        setState((current) => (
+          cameraFramingOperationIsCurrent(operation)
+            ? {
+                ...current,
+                cameraFraming: {
+                  ...current.cameraFraming,
+                  pendingControl: 'wideUpright',
+                },
+              }
+            : current
+        ));
       }
-      cameraFramingCapabilitiesRef.current = { identity: context.identity, capabilities };
-      setState((current) => ({ ...current, cameraFraming: framingState }));
-      if (!reapplyExplicitRequests) return;
+    }
 
-      const requestedCenterStage = requestedCenterStageRef.current;
-      const requestedWideUpright = requestedWideUprightFramingRef.current;
-      const centerStageNeedsUpdate = requestedCenterStage !== null
-        && framingState.centerStageSupported
-        && framingState.centerStageEnabled !== requestedCenterStage;
-      const wideUprightNeedsUpdate = requestedWideUpright !== null
-        && framingState.wideUprightSupported
-        && framingState.wideUprightEnabled !== requestedWideUpright;
-      if (!centerStageNeedsUpdate && !wideUprightNeedsUpdate) return;
-
-      setState((current) => (
-        cameraFramingOperationIsCurrent(operation)
-          ? {
-              ...current,
-              cameraFraming: {
-                ...current.cameraFraming,
-                applying: true,
-                pendingControl: centerStageNeedsUpdate ? 'centerStage' : 'wideUpright',
-                message: null,
-              },
-            }
-          : current
+    const refreshedWideState = cameraFramingStateFromCapabilities(capabilities, operation.deviceId);
+    if (
+      requestedWideUpright !== null
+      && refreshedWideState.wideUprightSupported
+      && refreshedWideState.wideUprightEnabled !== requestedWideUpright
+    ) {
+      let result = await runCameraFramingNativeOperation(() => (
+        BonfireCameraFraming.setWideUprightFramingEnabled(requestedWideUpright, operation.deviceId)
       ));
-      if (centerStageNeedsUpdate) {
-        const result = await runCameraFramingNativeOperation(() => (
-          BonfireCameraFraming.setCenterStageEnabled(requestedCenterStage, operation.deviceId)
+      recordWideUprightCapability(operation.deviceId, result.capabilities);
+      if (!cameraFramingOperationIsCurrent(operation)) return;
+      // A failed default-wide transition must not leave a cold adaptive
+      // camera at its invalid 1:1 ratio. Explicit OFF establishes the
+      // validated 9:16 fallback before this track is offered to the SFU.
+      if (!result.ok && requestedWideUpright) {
+        result = await runCameraFramingNativeOperation(() => (
+          BonfireCameraFraming.setWideUprightFramingEnabled(false, operation.deviceId)
         ));
         recordWideUprightCapability(operation.deviceId, result.capabilities);
         if (!cameraFramingOperationIsCurrent(operation)) return;
-        capabilities = result.capabilities;
-        framingState = cameraFramingStateFromCapabilities(capabilities, operation.deviceId);
-        if (wideUprightNeedsUpdate) {
-          setState((current) => (
-            cameraFramingOperationIsCurrent(operation)
-              ? {
-                  ...current,
-                  cameraFraming: {
-                    ...current.cameraFraming,
-                    pendingControl: 'wideUpright',
-                  },
-                }
-              : current
-          ));
-        }
       }
+      capabilities = result.capabilities;
+      framingState = cameraFramingStateFromCapabilities(capabilities, operation.deviceId);
+    }
 
-      const refreshedWideState = cameraFramingStateFromCapabilities(capabilities, operation.deviceId);
-      if (
-        requestedWideUpright !== null
-        && refreshedWideState.wideUprightSupported
-        && refreshedWideState.wideUprightEnabled !== requestedWideUpright
-      ) {
-        const result = await runCameraFramingNativeOperation(() => (
-          BonfireCameraFraming.setWideUprightFramingEnabled(requestedWideUpright, operation.deviceId)
-        ));
-        recordWideUprightCapability(operation.deviceId, result.capabilities);
-        if (!cameraFramingOperationIsCurrent(operation)) return;
-        capabilities = result.capabilities;
-        framingState = cameraFramingStateFromCapabilities(capabilities, operation.deviceId);
-      }
-
-      if (!cameraFramingOperationIsCurrent(operation)) return;
-      cameraFramingCapabilitiesRef.current = { identity: context.identity, capabilities };
-      setState((current) => ({
-        ...current,
-        cameraFraming: {
-          ...framingState,
-          applying: false,
-          pendingControl: null,
-          message: null,
-        },
-      }));
-    })();
+    if (!cameraFramingOperationIsCurrent(operation)) return;
+    cameraFramingCapabilitiesRef.current = { identity: context.identity, capabilities };
+    setState((current) => ({
+      ...current,
+      cameraFraming: {
+        ...framingState,
+        applying: false,
+        pendingControl: null,
+        message: null,
+      },
+    }));
   }, [
     cameraFramingOperationIsCurrent,
     currentCameraFramingContext,
@@ -807,12 +824,12 @@ export function useNativeRoom(
     cameraFramingRefreshTimerRef.current = setTimeout(() => {
       if (cameraFramingRefreshTimerEpochRef.current !== timerEpoch) return;
       cameraFramingRefreshTimerRef.current = null;
-      refreshCameraFramingInternal(reapplyExplicitRequests);
+      void refreshCameraFramingInternal(reapplyExplicitRequests);
     }, delayMs);
   }, [refreshCameraFramingInternal]);
 
   const refreshCameraFraming = useCallback(() => {
-    refreshCameraFramingInternal(false);
+    void refreshCameraFramingInternal(false);
   }, [refreshCameraFramingInternal]);
 
   const setCenterStageEnabled = useCallback((enabled: boolean) => {
@@ -2438,13 +2455,26 @@ export function useNativeRoom(
       if (!clientConfigResult.current) return;
       const clientConfig = clientConfigResult.value;
       const iceServers = clientConfig.rtcConfiguration?.iceServers ?? [];
-      const streamResult = await settleGenerationResource(
-        withAudio || withVideo
-          ? mediaDevices.getUserMedia({
+      const captureRequestedMedia = async (): Promise<MediaStream> => {
+        if (!withAudio && !withVideo) return new MediaStream();
+        try {
+          return await mediaDevices.getUserMedia({
             audio: withAudio,
             video: withVideo ? nativeCameraConstraints : false,
-          })
-          : Promise.resolve(new MediaStream()),
+          });
+        } catch (error) {
+          if (!withVideo) throw error;
+          // Camera permission or hardware failure should not lock someone out
+          // of the room. Join quietly without video; they can retry the camera
+          // control after fixing permission or choosing another device.
+          requestedVideo.current = false;
+          return withAudio
+            ? mediaDevices.getUserMedia({ audio: true, video: false })
+            : new MediaStream();
+        }
+      };
+      const streamResult = await settleGenerationResource(
+        captureRequestedMedia(),
         joinIsCurrent,
         releaseNativeMediaStream,
       );
@@ -2461,7 +2491,7 @@ export function useNativeRoom(
             ...current,
             localStream: stream,
             ...localAudioPublicationPendingState(requestedAudio.current),
-            cameraOff: !withVideo,
+            cameraOff: !requestedVideo.current,
             cameraStarting: false,
             videoSuspended: false,
           }
@@ -2472,7 +2502,10 @@ export function useNativeRoom(
         releaseNativeMediaStream(stream);
         return;
       }
-      scheduleCameraFramingRefresh(0, true);
+      // Establish a valid 16:9 wide or 9:16 portrait capture before signaling.
+      // Unsupported cameras complete capability discovery without mutation.
+      await refreshCameraFramingInternal(true);
+      if (!joinIsCurrent()) return;
       reconnectContextRef.current = { iceServers, passcode, transferExisting };
       reconnectAttemptRef.current = 0;
       connectSocket();
@@ -2485,7 +2518,7 @@ export function useNativeRoom(
     fail,
     resetCameraFraming,
     roomId,
-    scheduleCameraFramingRefresh,
+    refreshCameraFramingInternal,
     sessionToken,
     state.lifecycle,
   ]);

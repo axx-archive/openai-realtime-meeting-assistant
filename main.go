@@ -668,6 +668,7 @@ const (
 	sdesMidExtensionURI                 = "urn:ietf:params:rtp-hdrext:sdes:mid"
 	sdesRTPStreamIDExtensionURI         = "urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id"
 	sdesRepairedRTPStreamIDExtensionURI = "urn:ietf:params:rtp-hdrext:sdes:repaired-rtp-stream-id"
+	videoOrientationExtensionURI        = "urn:3gpp:video-orientation"
 )
 
 // transportScopedRTPExtensionIDs resolves which extension ids the PUBLISHER's
@@ -2800,6 +2801,15 @@ func stableRoomMediaEngine() (*webrtc.MediaEngine, *interceptor.Registry, error)
 	}
 	if err := webrtc.ConfigureSimulcastExtensionHeaders(mediaEngine); err != nil {
 		return nil, nil, fmt.Errorf("configure simulcast extension headers: %w", err)
+	}
+	// iOS may keep portrait pixels in the encoded H.264 frame and signal the
+	// display rotation through CVO. Negotiate that media-scoped extension on
+	// both publisher and subscriber transports so forwarding can preserve it.
+	if err := mediaEngine.RegisterHeaderExtension(
+		webrtc.RTPHeaderExtensionCapability{URI: videoOrientationExtensionURI},
+		webrtc.RTPCodecTypeVideo,
+	); err != nil {
+		return nil, nil, fmt.Errorf("register video orientation extension: %w", err)
 	}
 	if err := webrtc.ConfigureStatsInterceptor(registry); err != nil {
 		return nil, nil, fmt.Errorf("configure stats interceptor: %w", err)

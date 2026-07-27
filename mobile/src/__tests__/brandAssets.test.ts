@@ -67,48 +67,46 @@ function decodeOpaquePng(path: string) {
   return { width, height, pixels, channels };
 }
 
-test('approved Bonfire masters are the exact release sources', () => {
-  const masterSvg = read('assets/bonfire-icon-v2.svg');
+test('approved STRIDE momentum master is the exact release source', () => {
   const canonicalSvg = read('assets/icon-source.svg');
-  const masterPng = read('assets/bonfire-icon-v3.png');
+  const masterPng = read('assets/bonfire-stride-master.png');
   const releasePng = read('assets/icon.png');
+  const darkPng = read('assets/ios-icon-dark.png');
   const tintedPng = read('assets/ios-icon-tinted.png');
 
-  assert.equal(sha256(masterSvg), 'd3800f27d5ae917390af6303fc29472f3f6623339a8df55982d63539e51bcc39');
-  assert.equal(sha256(canonicalSvg), sha256(masterSvg));
-  assert.equal(sha256(masterPng), 'fe204e0feb3277ce5df098087f933598e87f34a2dc85ef5fbc997b5433e07c4e');
-  assert.equal(sha256(releasePng), '9517b2d4b02295ad06045983583bb2e45656d0dba2879829e1871faa050981fe');
-  assert.equal(sha256(tintedPng), 'ce87005dc7efb81f543d94b5a7f0a87327fd28503ea0f2cadf4a54d6fdf75bfc');
+  assert.equal(sha256(canonicalSvg), '9257a122ee8d5964753853fc74f98d43d45ad974f6e85e5388b554d466ad7707');
+  assert.match(canonicalSvg.toString('utf8'), /bonfire-stride-master\.png/);
+  assert.equal(sha256(masterPng), 'e2ff95e0396c7cc1bae147530f8c2414440c2069115b5836eb72588042159bde');
+  assert.equal(sha256(releasePng), sha256(masterPng));
+  assert.equal(sha256(darkPng), sha256(masterPng));
+  assert.equal(sha256(tintedPng), '81af6fac3171fb2b480c5f7652f3aeceaf91f9351e0b1dbc7c5f2169ea465541');
 });
 
-test('React Native full and micro marks carry the approved paths exactly', () => {
+test('React Native shell uses the approved momentum assets everywhere', () => {
   const component = text('src/components/BrandMark.tsx');
-  const microSvg = text('assets/bonfire-icon-micro.svg');
-  const masterSvg = text('assets/bonfire-icon-v2.svg');
-
-  for (const source of [masterSvg, microSvg]) {
-    const paths = [...source.matchAll(/\bd="([^"]+)"/g)].map((match) => match[1]);
-    assert.equal(paths.length, 3);
-    for (const path of paths) assert.ok(component.includes(path), 'BrandMark path drifted from approved SVG');
-  }
-  assert.match(component, /<Mask id="bonfireMicroLogCutout"/);
-  assert.match(component, /mask="url\(#bonfireMicroLogCutout\)"/);
-  assert.doesNotMatch(component, /cutoutColor/);
+  assert.match(component, /from 'expo-image'/);
+  assert.match(component, /bonfire-stride-mark\.png/);
+  assert.match(component, /android-icon-monochrome\.png/);
+  assert.match(component, /export function MomentumGlyph/);
+  assert.doesNotMatch(component, /fullFlamePath|microFlamePath|bonfireMicroLogCutout/);
 
   const navigation = text('src/navigation/RootNavigator.tsx');
-  assert.match(navigation, /<BonfireGlyph/);
+  assert.match(navigation, /<MomentumGlyph/);
+  assert.doesNotMatch(navigation, /BonfireGlyph/);
   assert.doesNotMatch(navigation, /Home:\s*'flame\.fill'/);
 });
 
 test('Expo icon and splash sources have release-safe dimensions and alpha models', () => {
   const expected = new Map<string, [number, number, number]>([
     ['assets/icon.png', [1024, 1024, 2]],
+    ['assets/ios-icon-dark.png', [1024, 1024, 2]],
     ['assets/ios-icon-tinted.png', [1024, 1024, 2]],
     ['assets/splash-icon.png', [1024, 1024, 6]],
     ['assets/splash-icon-dark.png', [1024, 1024, 6]],
     ['assets/android-icon-foreground.png', [1024, 1024, 6]],
     ['assets/android-icon-background.png', [1024, 1024, 2]],
     ['assets/android-icon-monochrome.png', [1024, 1024, 6]],
+    ['assets/bonfire-stride-mark.png', [1024, 1024, 6]],
     ['assets/favicon.png', [48, 48, 2]],
   ]);
   for (const [path, wanted] of expected) {
@@ -142,7 +140,7 @@ test('Expo icon and splash sources have release-safe dimensions and alpha models
 
   const config = text('app.config.ts');
   assert.match(config, /light: '\.\/assets\/icon\.png'/);
-  assert.match(config, /dark: '\.\/assets\/icon\.png'/);
+  assert.match(config, /dark: '\.\/assets\/ios-icon-dark\.png'/);
   assert.match(config, /tinted: '\.\/assets\/ios-icon-tinted\.png'/);
   assert.match(config, /imageWidth: 144/);
   assert.match(config, /image: '\.\/assets\/splash-icon-dark\.png'/);

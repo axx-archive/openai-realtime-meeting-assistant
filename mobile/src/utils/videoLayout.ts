@@ -14,8 +14,9 @@ export function nativeVideoRenderIdentity(
   streamURL: string | undefined,
   trackId: string | undefined,
   mode: 'camera' | 'screen',
+  framingRevision = '',
 ): string {
-  return `${mode}:${streamURL ?? ''}:${trackId ?? 'pending'}`;
+  return `${mode}:${streamURL ?? ''}:${trackId ?? 'pending'}:${framingRevision}`;
 }
 
 /** Sizes a video surface to its pixels without cropping or letterboxing. */

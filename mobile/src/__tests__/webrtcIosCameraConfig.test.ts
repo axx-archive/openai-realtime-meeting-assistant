@@ -128,6 +128,29 @@ describe('iOS WebRTC camera prebuild patch', () => {
       roomSource,
       /mediaDevices\.getUserMedia\(\{[\s\S]*video: withVideo \? nativeCameraConstraints : false/,
     );
+    const joinSource = roomSource.slice(
+      roomSource.indexOf('const join = useCallback'),
+      roomSource.indexOf('const setMuted = useCallback'),
+    );
+    assert.ok(joinSource.length > 0, 'native join implementation must remain discoverable');
+    assert.ok(
+      joinSource.indexOf('await refreshCameraFramingInternal(true)')
+        < joinSource.indexOf('connectSocket();'),
+      'initial framing must settle before the camera is offered to the SFU',
+    );
+    assert.match(
+      joinSource,
+      /catch \(error\) \{[\s\S]*requestedVideo\.current = false;[\s\S]*mediaDevices\.getUserMedia\(\{ audio: true, video: false \}\)/,
+      'camera acquisition failure must fall back to a camera-off room join',
+    );
+    const roomScreenSource = fs.readFileSync(
+      path.join(mobileRoot, 'src', 'screens', 'RoomScreen.tsx'),
+      'utf8',
+    );
+    assert.match(
+      roomScreenSource,
+      /accessibilityLabel="Join room with camera on and microphone off"[\s\S]*onPress=\{\(\) => joinRoom\(true, false\)\}/,
+    );
     assert.match(
       roomSource,
       /await track\.applyConstraints\(\{[\s\S]*\.\.\.nativeCameraConstraints,[\s\S]*facingMode: targetFacingMode/,
@@ -139,6 +162,40 @@ describe('iOS WebRTC camera prebuild patch', () => {
     assert.match(
       cameraSource,
       /if \(self\.running && hasChanged\) \{[\s\S]*\[self startCapture\];/,
+    );
+  });
+
+  it('requires confirmed landscape or explicit 9:16 portrait dimensions instead of accepting the square sensor default', () => {
+    const guardSource = fs.readFileSync(
+      path.join(
+        mobileRoot,
+        'modules',
+        'bonfire-camera-framing',
+        'ios',
+        'BonfireCameraDeviceGuard.m',
+      ),
+      'utf8',
+    );
+
+    assert.match(
+      guardSource,
+      /wideEnabled\s*=\s*\[device\.dynamicAspectRatio isEqualToString:AVCaptureAspectRatio16x9\]\s*&&\s*dimensions\.width > 0\s*&&\s*dimensions\.height > 0\s*&&\s*dimensions\.width > dimensions\.height;/,
+    );
+    assert.match(
+      guardSource,
+      /currentlyEnabled && currentLandscapeDimensionsValid/,
+    );
+    assert.match(
+      guardSource,
+      /currentlyPortrait && currentPortraitDimensionsValid/,
+    );
+    assert.match(
+      guardSource,
+      /targetRatio = \[supportedRatios containsObject:AVCaptureAspectRatio9x16\][\s\S]*\? AVCaptureAspectRatio9x16/,
+    );
+    assert.match(
+      guardSource,
+      /dimensionsMatchRequestedOrientation = mutation\.isEnabled[\s\S]*\? dimensions\.width > dimensions\.height[\s\S]*: dimensions\.height > dimensions\.width/,
     );
   });
 

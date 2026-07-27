@@ -18,8 +18,8 @@ func TestIndexPWAPushWiring(t *testing.T) {
 	html := string(raw)
 
 	for _, want := range []string{
-		// The tab favicon uses the optically simplified micro Bonfire mark.
-		`<link rel="icon" href="/public/favicon.svg" type="image/svg+xml">`,
+		// The tab favicon uses the selected STRIDE momentum mark.
+		`<link rel="icon" href="/public/favicon.png" type="image/png">`,
 		// iOS home-screen tile needs a PNG apple-touch-icon (SVG is ignored).
 		`<link rel="apple-touch-icon" href="/public/apple-touch-icon.png">`,
 		// iOS push requires launching standalone from a home-screen install.

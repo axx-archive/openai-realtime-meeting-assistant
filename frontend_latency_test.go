@@ -16,12 +16,13 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 	html := string(rawHTML)
 	for _, want := range []string{
 		"width: { ideal: 1280, max: 1280 }",
-		"maxBitrate: 1500000",
-		"groupMaxBitrate: 800000",
-		"groupMaxWidth: 960",
-		"crowdedMaxBitrate: 450000",
-		"crowdedMaxWidth: 640",
-		"bandwidthScaleResolutionDownBy: 2",
+		"maxBitrate: 2500000",
+		"groupMaxBitrate: 1500000",
+		"groupMaxWidth: 1280",
+		"crowdedMaxBitrate: 1000000",
+		"crowdedMaxWidth: 960",
+		"bandwidthMaxBitrate: 750000",
+		"bandwidthScaleResolutionDownBy: 1.5",
 		"function useGroupVideoLimits()",
 		"function useCrowdedVideoLimits()",
 		"return currentRoomParticipantCount() >= 5",
@@ -91,6 +92,48 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 	} {
 		if strings.Contains(html, unwanted) {
 			t.Fatalf("index.html still forces choppy receiver buffering via %q", unwanted)
+		}
+	}
+}
+
+func TestIndexComposesRoomSizeAndBandwidthVideoLimits(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+
+	html := string(rawHTML)
+	for _, tc := range []struct {
+		signature string
+		markers   []string
+	}{
+		{
+			signature: "function outboundMaxBitrateForTrack(track, limits, isScreenShare)",
+			markers: []string{
+				"applicableBitrates.push(limits.groupMaxBitrate)",
+				"applicableBitrates.push(limits.crowdedMaxBitrate)",
+				"applicableBitrates.push(limits.bandwidthMaxBitrate)",
+				"Math.min(...applicableBitrates.filter(Number.isFinite))",
+			},
+		},
+		{
+			signature: "function outboundMaxFramerateForTrack(track, limits, isScreenShare)",
+			markers: []string{
+				"applicableFramerates.push(limits.groupMaxFramerate)",
+				"applicableFramerates.push(limits.crowdedMaxFramerate)",
+				"applicableFramerates.push(limits.bandwidthMaxFramerate)",
+				"Math.min(...applicableFramerates.filter(Number.isFinite))",
+			},
+		},
+	} {
+		body := functionBody(html, tc.signature)
+		if body == "" {
+			t.Fatalf("missing %s", tc.signature)
+		}
+		for _, marker := range tc.markers {
+			if !strings.Contains(body, marker) {
+				t.Fatalf("%s must compose room-size and bandwidth limits with %q", tc.signature, marker)
+			}
 		}
 	}
 }
@@ -270,7 +313,7 @@ func TestIndexKeepsWidescreenCaptureAndCalmRemoteTiles(t *testing.T) {
 	}
 }
 
-func TestIndexPreservesPortraitMobileFramingOnDesktop(t *testing.T) {
+func TestIndexMakesPortraitMobileCamerasFillDesktopTiles(t *testing.T) {
 	rawHTML, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatalf("read index.html: %v", err)
@@ -286,12 +329,14 @@ func TestIndexPreservesPortraitMobileFramingOnDesktop(t *testing.T) {
 		"html:not(.is-mobile-device) .video-tile video.has-portrait-frame",
 		".video-tile > video {",
 		"position: absolute;\n        inset: 0;\n        min-width: 0;\n        min-height: 0;",
-		"object-fit: contain;",
+		"object-fit: cover;\n          object-position: 50% 35%;",
+		".screen-stage video {",
+		"object-fit: contain;\n          object-position: center;",
 		"frameOrientation: video.dataset.frameOrientation || 'unknown'",
 		"objectFit: getComputedStyle(video).objectFit",
 	} {
 		if !strings.Contains(html, want) {
-			t.Fatalf("index.html missing portrait-frame preservation %q", want)
+			t.Fatalf("index.html missing equal-fill portrait framing %q", want)
 		}
 	}
 	if strings.Index(html, ".video-tile > video {") > strings.Index(html, "html:not(.is-mobile-device) .video-tile video.has-portrait-frame") {
@@ -2299,7 +2344,7 @@ func TestIndexWakePulseGrillLabelAndChannelDeepLinkWiring(t *testing.T) {
 
 	// nothing may loop under reduced motion: both wake selectors are covered
 	reduced := html[strings.LastIndex(html, "@media (prefers-reduced-motion: reduce)"):]
-	for _, want := range []string{".topbar__mark.is-wake svg", ".voice-island.is-wake .bf-wave-bar"} {
+	for _, want := range []string{".topbar__mark.is-wake img", ".voice-island.is-wake .bf-wave-bar"} {
 		if !strings.Contains(reduced, want) {
 			t.Fatalf("reduced-motion block missing wake pulse coverage %q", want)
 		}

@@ -8,9 +8,10 @@ const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const appleDir = join(rootDir, "apple");
 const sourceSVG = join(appleDir, "Xcode", "AppIconSource.svg");
 const macSourceSVG = join(appleDir, "Xcode", "AppIconMacSource.svg");
-const canonicalIOSPNG = join(rootDir, "mobile", "assets", "bonfire-icon-v2.png");
+const canonicalIOSPNG = join(rootDir, "mobile", "assets", "bonfire-stride-master.png");
 const assetCatalogDir = join(appleDir, "Xcode", "Assets.xcassets");
 const iconSetDir = join(appleDir, "Xcode", "Assets.xcassets", "AppIcon.appiconset");
+const materializedMacSource = join(iconSetDir, ".AppIconMacSource.render.svg");
 
 const slots = [
   ["iphone", "20x20", "2x", 40],
@@ -74,15 +75,24 @@ function pngHasAlpha(path) {
 }
 
 function renderIcon({ idiom, pixels, output }) {
-  const svg = idiom === "mac" ? macSourceSVG : sourceSVG;
+  // Preserve the exact approved RGB master for iOS. The macOS companion needs
+  // an inset transparent tile, so only that idiom goes through the SVG source.
+  if (idiom !== "mac") {
+    execFileSync("sips", [
+      "-z", String(pixels), String(pixels),
+      "-s", "format", "png",
+      canonicalIOSPNG,
+      "--out", output,
+    ], { stdio: "ignore" });
+    return;
+  }
+
+  const svg = materializedMacSource;
   if (renderer === "rsvg-convert") {
     const args = [
       "--width", String(pixels),
       "--height", String(pixels),
     ];
-    // Even though the iOS source paints the whole canvas, librsvg otherwise
-    // writes an RGBA PNG. App Store icons must not contain an alpha channel.
-    if (idiom !== "mac") args.push("--background-color", "#0E0E10");
     args.push("--output", output, svg);
     execFileSync(renderer, args);
     return;
@@ -90,7 +100,7 @@ function renderIcon({ idiom, pixels, output }) {
 
   // sips preserves the RGB color model of the approved opaque iOS PNG and
   // preserves the alpha channel when rasterizing the inset macOS SVG.
-  const input = idiom === "mac" ? macSourceSVG : canonicalIOSPNG;
+  const input = macSourceSVG;
   execFileSync(renderer, [
     "-z", String(pixels), String(pixels),
     "-s", "format", "png",
@@ -101,6 +111,15 @@ function renderIcon({ idiom, pixels, output }) {
 
 rmSync(iconSetDir, { recursive: true, force: true });
 mkdirSync(iconSetDir, { recursive: true });
+const macTemplate = readFileSync(macSourceSVG, "utf8");
+const momentumDataURI = `data:image/png;base64,${readFileSync(canonicalIOSPNG).toString("base64")}`;
+if (!macTemplate.includes("__MOMENTUM_MASTER_DATA_URI__")) {
+  throw new Error("macOS icon template is missing the momentum master placeholder.");
+}
+writeFileSync(
+  materializedMacSource,
+  macTemplate.replace("__MOMENTUM_MASTER_DATA_URI__", momentumDataURI),
+);
 writeFileSync(
   join(assetCatalogDir, "Contents.json"),
   `${JSON.stringify({ info: { author: "xcode", version: 1 } }, null, 2)}\n`
@@ -120,6 +139,7 @@ for (const [idiom, size, scale, pixels] of slots) {
   }
   images.push({ idiom, size, scale, filename });
 }
+rmSync(materializedMacSource, { force: true });
 
 writeFileSync(
   join(iconSetDir, "Contents.json"),

@@ -880,7 +880,7 @@
         }
       }
 
-      /* brand mark — lives at the top of the rail (design canon); keeps its
+      /* momentum mark — lives at the top of the rail (design canon); keeps its
          listening/wake/hot-ember cues wherever it stands */
       .topbar__mark {
         display: inline-flex;
@@ -891,23 +891,26 @@
         height: 38px;
         flex: 0 0 auto;
         margin-bottom: 12px;
-        color: var(--text-1);
-        transition: color var(--dur-med) var(--ease);
+        overflow: hidden;
+        border-radius: 11px;
+        background: #0e0e10;
+        transition: opacity var(--dur-med) var(--ease);
       }
-      .topbar__mark svg {
-        width: 21px;
-        height: 21px;
+      .topbar__mark img {
+        width: 38px;
+        height: 38px;
+        object-fit: cover;
       }
       .topbar__mark.is-listening {
-        color: var(--live);
+        box-shadow: 0 0 0 2px var(--live);
       }
       /* wake-word presence cue — Scout heard its name; one breathe cycle,
          a separate class so it never fights setConnectionState's
          is-listening ownership */
       .topbar__mark.is-wake {
-        color: var(--live);
+        box-shadow: 0 0 0 2px var(--live);
       }
-      .topbar__mark.is-wake svg {
+      .topbar__mark.is-wake img {
         animation: bf-breathe var(--dur-breathe) var(--ease) 1;
       }
       .voice-island.is-wake .bf-wave-bar {
@@ -916,7 +919,7 @@
       /* recognition handshake — the mark acknowledges with a MONOCHROME breath
          (scale + opacity), never a hue. Presence/live still reads green via
          .is-listening; the flare itself stays ink. */
-      .topbar__mark.is-hot-ember svg {
+      .topbar__mark.is-hot-ember img {
         animation: mark-recognize 1.6s var(--ease) 1;
       }
       @keyframes mark-recognize {
@@ -1496,16 +1499,25 @@
         contain: paint;
       }
 
-      /* A phone publishes its native portrait frame. Wide desktop tiles must
-         preserve that complete frame instead of cropping the top and bottom
-         with cover; the tile's true-black media ground supplies pillarboxes. */
+      /* Every camera participant owns the same desktop tile geometry. Phones
+         without Wide Upright still publish portrait video, so bias cover toward
+         the upper center where a face normally sits instead of adding black
+         pillarboxes. Screen shares remain uncropped because their full content
+         matters more than equal camera framing. */
       @media (min-width: 641px) {
         html:not(.is-mobile-device) .video-tile video.has-portrait-frame,
         html:not(.is-mobile-device) .hearth-speaker video.has-portrait-frame,
         html:not(.is-mobile-device) .screen-stage__pip video.has-portrait-frame,
         html:not(.is-mobile-device) .pip-tile video.has-portrait-frame,
         html:not(.is-mobile-device) .board-video-tile video.has-portrait-frame {
+          object-fit: cover;
+          object-position: 50% 35%;
+        }
+
+        html:not(.is-mobile-device) .video-tile.is-sharing-screen video.has-portrait-frame,
+        html:not(.is-mobile-device) .board-video-tile.is-sharing-screen video.has-portrait-frame {
           object-fit: contain;
+          object-position: center;
         }
       }
 
@@ -1786,7 +1798,7 @@
         text-align: center;
       }
 
-      /* 56px accent app-icon tile with the brand flame */
+      /* 56px tile with the canonical momentum app icon */
       .login-mark {
         display: flex;
         align-items: center;
@@ -1794,13 +1806,14 @@
         width: 56px;
         height: 56px;
         border-radius: 16px;
-        background: var(--accent);
-        color: var(--on-accent);
+        overflow: hidden;
+        background: #0e0e10;
         box-shadow: 0 12px 32px rgba(0, 0, 0, .28);
       }
-      .login-mark svg {
-        width: 48px;
-        height: 48px;
+      .login-mark img {
+        width: 56px;
+        height: 56px;
+        object-fit: cover;
       }
 
       .login-wordmark {
@@ -2062,9 +2075,9 @@
         height: 44px;
         border-radius: var(--r-lg);
       }
-      #appShell.is-guest .login-mark svg {
-        width: 38px;
-        height: 38px;
+      #appShell.is-guest .login-mark img {
+        width: 44px;
+        height: 44px;
       }
       #appShell.is-guest .login-wordmark {
         font: var(--type-headline);
@@ -2260,6 +2273,7 @@
         width: 100%;
         min-height: min(62vh, 680px);
         object-fit: contain;
+        object-position: center;
         background: var(--ink-900);
       }
 
@@ -21885,8 +21899,8 @@
       @media (prefers-reduced-motion: reduce) {
         .mount-stagger { opacity: 1; transform: none; animation: none !important; }
         .topbar__mark.is-listening,
-        .topbar__mark.is-wake svg,
-        .topbar__mark.is-hot-ember svg,
+        .topbar__mark.is-wake img,
+        .topbar__mark.is-hot-ember img,
         .voice-island.is-wake .bf-wave-bar,
         .pill--listening,
         .login-rise,
@@ -22012,17 +22026,7 @@
     <main id="appShell" data-tool="office">
       <nav id="toolRail" class="tool-rail" aria-label="Tools">
         <span id="brandMark" class="topbar__mark" role="img" aria-label="BonfireOS">
-          <svg viewBox="0 0 1024 1024">
-            <defs>
-              <mask id="bonfireRailLogCutout" x="0" y="0" width="1024" height="1024" maskUnits="userSpaceOnUse">
-                <rect width="1024" height="1024" fill="#fff"></rect>
-                <path fill="#fff" stroke="#000" stroke-width="160" stroke-linejoin="bevel" d="M214 859L791 692L811 703L821 737L810 757L233 924L213 913L203 879Z"></path>
-              </mask>
-            </defs>
-            <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M553 98C531 173 470 222 431 286C401 336 400 384 380 426C380 389 355 359 318 334C330 382 300 426 279 479C248 520 284 548 373 563C418 571 466 577 513 580C562 577 610 566 651 545C710 515 745 493 741 462C732 430 701 397 674 360C628 296 531 252 553 98ZM539 324C526 373 486 407 454 441C423 476 424 506 447 526C463 540 486 548 511 552C542 536 564 512 567 485C570 456 550 430 526 406C546 385 552 354 539 324Z"></path>
-            <path fill="currentColor" mask="url(#bonfireRailLogCutout)" d="M233 692L810 859L821 879L811 913L791 924L214 757L203 737L213 703Z"></path>
-            <path fill="currentColor" d="M214 859L791 692L811 703L821 737L810 757L233 924L213 913L203 879Z"></path>
-          </svg>
+          <img src="/public/app-icon.png" alt="">
         </span>
         <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" data-tool="office" aria-label="BonfireOS home" aria-pressed="true">
@@ -22285,12 +22289,7 @@
           </button>
           <header class="login-head login-rise">
             <span class="login-mark" aria-hidden="true">
-              <svg viewBox="0 0 1024 1024" fill="none">
-                <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M553 92C531 173 464 225 425 296C394 352 394 410 370 458C376 413 350 374 307 339C320 400 285 447 263 506C226 604 273 670 391 710C431 724 472 731 513 735C559 731 603 719 642 700C720 662 765 604 755 528C746 468 710 427 680 380C633 306 529 253 553 92ZM538 435C528 485 492 527 463 566C436 603 434 637 454 665C468 687 489 699 513 706C540 687 558 660 561 628C565 591 548 558 526 529C544 505 550 470 538 435Z"></path>
-                <path fill="currentColor" d="M233 693L814 818L828 839L816 898L794 912L213 787L199 766L211 707Z"></path>
-                <path fill="none" stroke="var(--accent)" stroke-width="42" stroke-linejoin="bevel" d="M209 814L792 679L813 693L827 752L814 773L231 908L210 895L195 836Z"></path>
-                <path fill="currentColor" d="M209 814L792 679L813 693L827 752L814 773L231 908L210 895L195 836Z"></path>
-              </svg>
+              <img src="/public/app-icon.png" alt="">
             </span>
             <h1 class="login-wordmark">bonfireOS</h1>
             <p class="login-subline"></p>
@@ -25079,19 +25078,27 @@
       const outboundMediaLimits = {
         audio: { maxBitrate: 32000 },
         video: {
-          maxBitrate: 1500000,
+          // Two- and three-person rooms keep full 720p motion quality. The
+          // SFU still forwards one publisher stream, while the explicit group
+          // and crowded limits below protect larger rooms and weak uplinks.
+          maxBitrate: 2500000,
           maxFramerate: 30,
-          groupMaxBitrate: 800000,
-          groupMaxFramerate: 24,
-          groupMaxWidth: 960,
-          groupMaxHeight: 540,
-          crowdedMaxBitrate: 450000,
-          crowdedMaxFramerate: 20,
-          crowdedMaxWidth: 640,
-          crowdedMaxHeight: 360,
-          bandwidthMaxBitrate: 350000,
+          groupMaxBitrate: 1500000,
+          groupMaxFramerate: 30,
+          groupMaxWidth: 1280,
+          groupMaxHeight: 720,
+          crowdedMaxBitrate: 1000000,
+          crowdedMaxFramerate: 24,
+          crowdedMaxWidth: 960,
+          crowdedMaxHeight: 540,
+          // Keep the degraded-mode ceiling above the recovery threshold. A
+          // 350 kbps cap paired with a 650 kbps recovery gate could strand a
+          // healthy call at 360p after one transient join-time dip because the
+          // sender had too little room to probe upward. WebRTC may still send
+          // below this ceiling when the path is genuinely constrained.
+          bandwidthMaxBitrate: 750000,
           bandwidthMaxFramerate: 24,
-          bandwidthScaleResolutionDownBy: 2,
+          bandwidthScaleResolutionDownBy: 1.5,
           screenShareMaxBitrate: 2500000,
           screenShareMaxFramerate: 15,
           screenShareMaxWidth: 1280,
@@ -33793,14 +33800,18 @@
         if (isScreenShare && Number.isFinite(limits.screenShareMaxBitrate)) {
           return limits.screenShareMaxBitrate
         }
-        if (track.kind === 'video' && mediaQualityBandwidthLimited && Number.isFinite(limits.bandwidthMaxBitrate)) {
-          return limits.bandwidthMaxBitrate
-        }
-        if (track.kind === 'video' && useCrowdedVideoLimits() && Number.isFinite(limits.crowdedMaxBitrate)) {
-          return limits.crowdedMaxBitrate
-        }
-        if (track.kind === 'video' && useGroupVideoLimits() && Number.isFinite(limits.groupMaxBitrate)) {
-          return limits.groupMaxBitrate
+        if (track.kind === 'video') {
+          const applicableBitrates = [limits.maxBitrate]
+          if (useGroupVideoLimits()) {
+            applicableBitrates.push(limits.groupMaxBitrate)
+          }
+          if (useCrowdedVideoLimits()) {
+            applicableBitrates.push(limits.crowdedMaxBitrate)
+          }
+          if (mediaQualityBandwidthLimited) {
+            applicableBitrates.push(limits.bandwidthMaxBitrate)
+          }
+          return Math.min(...applicableBitrates.filter(Number.isFinite))
         }
         return limits.maxBitrate
       }
@@ -33809,14 +33820,18 @@
         if (isScreenShare && Number.isFinite(limits.screenShareMaxFramerate)) {
           return limits.screenShareMaxFramerate
         }
-        if (track.kind === 'video' && mediaQualityBandwidthLimited && Number.isFinite(limits.bandwidthMaxFramerate)) {
-          return limits.bandwidthMaxFramerate
-        }
-        if (track.kind === 'video' && useCrowdedVideoLimits() && Number.isFinite(limits.crowdedMaxFramerate)) {
-          return limits.crowdedMaxFramerate
-        }
-        if (track.kind === 'video' && useGroupVideoLimits() && Number.isFinite(limits.groupMaxFramerate)) {
-          return limits.groupMaxFramerate
+        if (track.kind === 'video') {
+          const applicableFramerates = [limits.maxFramerate]
+          if (useGroupVideoLimits()) {
+            applicableFramerates.push(limits.groupMaxFramerate)
+          }
+          if (useCrowdedVideoLimits()) {
+            applicableFramerates.push(limits.crowdedMaxFramerate)
+          }
+          if (mediaQualityBandwidthLimited) {
+            applicableFramerates.push(limits.bandwidthMaxFramerate)
+          }
+          return Math.min(...applicableFramerates.filter(Number.isFinite))
         }
         return limits.maxFramerate
       }

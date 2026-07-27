@@ -63,6 +63,17 @@ export function emptyCameraFramingState(): CameraFramingState {
   };
 }
 
+/** Only capture geometry can require rebuilding the native RTC renderer. */
+export function cameraFramingRenderRevision(state: Pick<
+  CameraFramingState,
+  'wideUprightEnabled' | 'dynamicWidth' | 'dynamicHeight'
+>): string {
+  return [
+    state.wideUprightEnabled ? 'wide' : 'portrait',
+    `${state.dynamicWidth}x${state.dynamicHeight}`,
+  ].join(':');
+}
+
 export function readLiveCameraTrackIdentity(
   track: CameraFramingTrack | null | undefined,
   requireFrontCamera = true,
@@ -224,9 +235,11 @@ export function wideUprightIntentAfterTransition(
   currentIntent: boolean | null,
   transition: 'call-start' | 'camera-reset' | 'call-end',
 ): boolean | null {
-  // Keep the stable WebRTC capture geometry on join. Wide Upright remains an
-  // explicit user action on a camera that proves the capability is operational.
-  if (transition === 'call-start') return false;
+  // The adaptive iOS 26 front camera needs an explicit dynamic aspect ratio.
+  // Prefer its landscape-upright output when the exact active device proves the
+  // capability is operational; unsupported cameras simply ignore this intent.
+  // This also gives desktop peers a full 16:9 frame without cropping or bars.
+  if (transition === 'call-start') return true;
   if (transition === 'call-end') return null;
   return currentIntent;
 }

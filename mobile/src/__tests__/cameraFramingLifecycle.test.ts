@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import type { CameraFramingCapabilities } from '../../modules/bonfire-camera-framing';
 import {
   cameraFramingStateFromCapabilities,
+  cameraFramingRenderRevision,
   centerStageControlStatus,
   cameraFramingTelemetryFromCapabilities,
   createCameraFramingGenerationGuard,
@@ -147,12 +148,43 @@ describe('camera framing lifecycle', () => {
     assert.equal(reportedNonOperationalUltraWide.centerStageSupported, false);
     assert.equal(reportedNonOperationalUltraWide.centerStageEnabled, false);
 
+    const persistedWideIntentWithoutFrames = cameraFramingStateFromCapabilities({
+      ...supportedCapabilities,
+      wideUprightFramingEnabled: false,
+      dynamicWidth: 0,
+      dynamicHeight: 0,
+    }, 'front-camera');
+    assert.equal(persistedWideIntentWithoutFrames.wideUprightSupported, true);
+    assert.equal(persistedWideIntentWithoutFrames.wideUprightEnabled, false);
+    assert.equal(persistedWideIntentWithoutFrames.dynamicWidth, 0);
+    assert.equal(persistedWideIntentWithoutFrames.dynamicHeight, 0);
+
     const legacyWideCameraPayload = cameraFramingStateFromCapabilities({
       ...supportedCapabilities,
       activeDeviceType: 'AVCaptureDeviceTypeBuiltInWideAngleCamera',
       centerStageOperational: undefined,
     }, 'front-camera');
     assert.equal(legacyWideCameraPayload.centerStageSupported, false);
+  });
+
+  it('rebuilds the native renderer only when confirmed capture geometry changes', () => {
+    const portrait = cameraFramingStateFromCapabilities({
+      ...supportedCapabilities,
+      wideUprightFramingEnabled: false,
+      dynamicWidth: 1080,
+      dynamicHeight: 1920,
+    }, 'front-camera');
+    const checking = { ...portrait, checking: true };
+    const centerStageChanged = {
+      ...portrait,
+      centerStageEnabled: !portrait.centerStageEnabled,
+      centerStageActive: !portrait.centerStageActive,
+    };
+    const wide = cameraFramingStateFromCapabilities(supportedCapabilities, 'front-camera');
+
+    assert.equal(cameraFramingRenderRevision(checking), cameraFramingRenderRevision(portrait));
+    assert.equal(cameraFramingRenderRevision(centerStageChanged), cameraFramingRenderRevision(portrait));
+    assert.notEqual(cameraFramingRenderRevision(wide), cameraFramingRenderRevision(portrait));
   });
 
   it('labels Center Stage on only after the active device confirms it is active', () => {
@@ -246,9 +278,9 @@ describe('camera framing lifecycle', () => {
     assert.equal(explicitFramingIntentAfterResult(true, false), null);
   });
 
-  it('defaults wide-upright off per call, preserves explicit opt-in across camera resets, and clears on leave', () => {
+  it('defaults supported cameras to wide-upright per call, preserves intent across camera resets, and clears on leave', () => {
     let intent = wideUprightIntentAfterTransition(null, 'call-start');
-    assert.equal(intent, false);
+    assert.equal(intent, true);
 
     intent = explicitFramingIntentAfterResult(true, true);
     assert.equal(wideUprightIntentAfterTransition(intent, 'camera-reset'), true);
@@ -256,7 +288,7 @@ describe('camera framing lifecycle', () => {
 
     intent = wideUprightIntentAfterTransition(intent, 'call-end');
     assert.equal(intent, null);
-    assert.equal(wideUprightIntentAfterTransition(intent, 'call-start'), false);
+    assert.equal(wideUprightIntentAfterTransition(intent, 'call-start'), true);
   });
 
   it('restores the device that was actually widened before considering the current track', () => {

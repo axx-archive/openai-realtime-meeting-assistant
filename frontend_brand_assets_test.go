@@ -81,27 +81,31 @@ func TestBonfireBrandAssetContract(t *testing.T) {
 	}
 	index := string(indexRaw)
 	if !strings.Contains(index, `<link rel="icon" href="/public/favicon.png" type="image/png">`) {
-		t.Fatal("index.html does not use the textured Bonfire favicon")
+		t.Fatal("index.html does not use the momentum favicon")
 	}
-	if !strings.Contains(index, `id="bonfireRailLogCutout"`) ||
-		!strings.Contains(index, `mask="url(#bonfireRailLogCutout)"`) {
-		t.Fatal("the web rail micro mark does not use a transparent log cutout")
+	if got := strings.Count(index, `<img src="/public/app-icon.png" alt="">`); got < 2 {
+		t.Fatalf("web rail and sign-in must both use the momentum app icon, got %d references", got)
 	}
-	if strings.Contains(index, `stroke="var(--bg-app)"`) {
-		t.Fatal("the web rail micro mark must not fake its cutout with an app-background stroke")
+	for _, legacy := range []string{"bonfireRailLogCutout", "M553 92", "M553 98"} {
+		if strings.Contains(index, legacy) {
+			t.Fatalf("index.html still contains retired Bonfire artwork %q", legacy)
+		}
 	}
-	for path, approvedPaths := range map[string][]string{
-		"public/app-icon.svg": {"M553 92", "M209 814"},
-		"public/favicon.svg":  {"M553 98", "M214 859"},
+	for path, approvedImage := range map[string]string{
+		"public/app-icon.svg":        "app-icon.png",
+		"public/favicon.svg":         "favicon.png",
+		"public/logo-mark.svg":       "app-icon.png",
+		"public/logo-mark-white.svg": "app-icon.png",
 	} {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, approvedPath := range approvedPaths {
-			if !strings.Contains(string(raw), approvedPath) {
-				t.Fatalf("%s does not carry the approved Bonfire silhouette", path)
-			}
+		if !strings.Contains(string(raw), approvedImage) {
+			t.Fatalf("%s does not reference the approved momentum asset", path)
+		}
+		if strings.Contains(string(raw), "M553") {
+			t.Fatalf("%s still contains the retired Bonfire silhouette", path)
 		}
 	}
 }

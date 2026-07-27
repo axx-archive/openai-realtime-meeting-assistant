@@ -23,7 +23,7 @@ import {
   MemoryScreen,
 } from '../screens/LibraryScreens';
 import { SettingsScreen } from '../screens/SettingsScreen';
-import { BonfireGlyph } from '../components/BrandMark';
+import { MomentumGlyph } from '../components/BrandMark';
 import { colors, product } from '../theme/tokens';
 import type { MainTabParamList, RootStackParamList } from './types';
 
@@ -62,7 +62,7 @@ function MainTabs() {
           const iconSize = Math.min(size, 22);
           if (route.name === 'Home') {
             return (
-              <BonfireGlyph
+              <MomentumGlyph
                 size={iconSize}
                 color={color}
               />

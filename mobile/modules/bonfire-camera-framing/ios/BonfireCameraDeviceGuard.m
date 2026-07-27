@@ -127,10 +127,17 @@ static NSMutableDictionary<NSString *, AVCaptureDevice *> *lockedDevices;
     if (device != nil) {
       dynamicActiveFormatSupported =
           [device.activeFormat.supportedDynamicAspectRatios containsObject:AVCaptureAspectRatio16x9];
-      wideEnabled = [device.dynamicAspectRatio isEqualToString:AVCaptureAspectRatio16x9];
       CMVideoDimensions dimensions = device.dynamicDimensions;
       dynamicWidth = dimensions.width;
       dynamicHeight = dimensions.height;
+      // A persisted ratio is intent, not proof that AVFoundation is producing
+      // usable frames. Report wide framing active only after the adaptive
+      // camera confirms nonzero landscape output dimensions.
+      wideEnabled =
+          [device.dynamicAspectRatio isEqualToString:AVCaptureAspectRatio16x9] &&
+          dimensions.width > 0 &&
+          dimensions.height > 0 &&
+          dimensions.width > dimensions.height;
     }
   }
 
@@ -348,7 +355,23 @@ static NSMutableDictionary<NSString *, AVCaptureDevice *> *lockedDevices;
 
   AVCaptureAspectRatio currentRatio = device.dynamicAspectRatio;
   BOOL currentlyEnabled = [currentRatio isEqualToString:AVCaptureAspectRatio16x9];
-  if (mutation.isEnabled == currentlyEnabled) {
+  BOOL currentlyPortrait = [currentRatio isEqualToString:AVCaptureAspectRatio9x16];
+  CMVideoDimensions currentDimensions = device.dynamicDimensions;
+  BOOL currentDimensionsValid =
+      currentDimensions.width > 0 && currentDimensions.height > 0;
+  BOOL currentLandscapeDimensionsValid =
+      currentDimensionsValid && currentDimensions.width > currentDimensions.height;
+  BOOL currentPortraitDimensionsValid =
+      currentDimensionsValid && currentDimensions.height > currentDimensions.width;
+  // The adaptive front camera initializes to the first supported ratio. On
+  // current iPhones that can be 1:1, which is neither Wide Upright nor a safe
+  // portrait WebRTC output: the square sensor keeps reporting live while the
+  // encoder stops producing frames. "Off" therefore means an explicitly
+  // confirmed 9:16 portrait crop, never merely "not 16:9".
+  BOOL confirmedAlreadyApplied = mutation.isEnabled
+      ? currentlyEnabled && currentLandscapeDimensionsValid
+      : currentlyPortrait && currentPortraitDimensionsValid;
+  if (confirmedAlreadyApplied) {
     [device unlockForConfiguration];
     if (!mutation.isEnabled) {
       @synchronized(self) {
@@ -367,20 +390,23 @@ static NSMutableDictionary<NSString *, AVCaptureDevice *> *lockedDevices;
 
   AVCaptureAspectRatio targetRatio = AVCaptureAspectRatio16x9;
   if (mutation.isEnabled) {
-    if (currentRatio != nil) {
+    if (currentlyPortrait) {
       @synchronized(self) {
         savedAspectRatios[deviceID] = currentRatio;
       }
     }
   } else {
-    @synchronized(self) {
-      targetRatio = savedAspectRatios[deviceID];
-    }
-    if (targetRatio == nil || [targetRatio isEqualToString:AVCaptureAspectRatio16x9] ||
-        ![supportedRatios containsObject:targetRatio]) {
-      targetRatio = [supportedRatios containsObject:AVCaptureAspectRatio9x16]
-          ? AVCaptureAspectRatio9x16
-          : nil;
+    // Always prefer the portrait counterpart to Wide Upright. Restoring the
+    // pre-call 1:1 default reintroduces the zero-frame capture state this guard
+    // exists to prevent. Retain a previously confirmed portrait ratio only as
+    // a defensive fallback for an unusual active format without 9:16.
+    targetRatio = [supportedRatios containsObject:AVCaptureAspectRatio9x16]
+        ? AVCaptureAspectRatio9x16
+        : nil;
+    if (targetRatio == nil) {
+      @synchronized(self) {
+        targetRatio = savedAspectRatios[deviceID];
+      }
     }
     if (targetRatio == nil) {
       [device unlockForConfiguration];
@@ -430,7 +456,11 @@ static NSMutableDictionary<NSString *, AVCaptureDevice *> *lockedDevices;
       CMVideoDimensions dimensions = completionDevice != nil
           ? completionDevice.dynamicDimensions
           : (CMVideoDimensions){ 0, 0 };
-      if (mutation.isEnabled && (dimensions.width <= dimensions.height || dimensions.height <= 0)) {
+      BOOL dimensionsMatchRequestedOrientation = mutation.isEnabled
+          ? dimensions.width > dimensions.height
+          : dimensions.height > dimensions.width;
+      if (dimensions.width <= 0 || dimensions.height <= 0 ||
+          !dimensionsMatchRequestedOrientation) {
         applied = NO;
       }
 

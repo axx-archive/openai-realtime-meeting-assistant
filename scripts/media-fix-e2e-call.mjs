@@ -377,15 +377,15 @@ try {
   // the landscape count must not DROP (C's own feed is legitimately portrait).
   ok('A: existing landscape feeds did NOT flip to portrait when C joined', land(afterA) >= land(beforeA) && land(afterA) >= 1)
   ok('B: existing landscape feeds did NOT flip to portrait when C joined', land(afterB) >= land(beforeB) && land(afterB) >= 1)
-  ok('A: portrait iPhone feed preserves its complete frame with contain', cOnA?.videoHeight > cOnA?.videoWidth
+  ok('A: portrait iPhone camera fills its tile with upper-center cover', cOnA?.videoHeight > cOnA?.videoWidth
     && cOnA?.frameOrientation === 'portrait'
-    && cOnA?.objectFit === 'contain'
+    && cOnA?.objectFit === 'cover'
     && cOnA?.position === 'absolute'
     && Math.abs(cOnA?.visualWidth - cOnA?.tileWidth) <= 1
     && Math.abs(cOnA?.visualHeight - cOnA?.tileHeight) <= 1)
-  ok('B (Safari engine): portrait iPhone feed preserves its complete frame with contain', cOnB?.videoHeight > cOnB?.videoWidth
+  ok('B (Safari engine): portrait iPhone camera fills its tile with upper-center cover', cOnB?.videoHeight > cOnB?.videoWidth
     && cOnB?.frameOrientation === 'portrait'
-    && cOnB?.objectFit === 'contain'
+    && cOnB?.objectFit === 'cover'
     && cOnB?.position === 'absolute'
     && Math.abs(cOnB?.visualWidth - cOnB?.tileWidth) <= 1
     && Math.abs(cOnB?.visualHeight - cOnB?.tileHeight) <= 1)
@@ -417,9 +417,17 @@ try {
   }, null, { timeout: 25000 }).then(()=>true).catch(()=>false)
   const bSees = await stageVisible(B)
   const cSees = await stageVisible(C)
+  const stageFit = await B.page.evaluate(() => {
+    const video = document.getElementById('screenStageVideo')
+    if (!video) return null
+    const style = getComputedStyle(video)
+    return { objectFit: style.objectFit, objectPosition: style.objectPosition }
+  })
   console.log('   B sees screen stage:', bSees, '| C sees screen stage:', cSees)
   ok('B (Safari engine) sees the shared screen on the presentation stage', bSees)
   ok('C (iPhone) sees the shared screen on the presentation stage', cSees)
+  ok('Shared content is fully visible and centered', stageFit?.objectFit === 'contain'
+    && stageFit?.objectPosition === '50% 50%')
 
   console.log('\n[4] Screen share SURVIVES renegotiation — D joins WHILE A is sharing')
   // A new participant joining triggers SDP renegotiation on every peer. The old

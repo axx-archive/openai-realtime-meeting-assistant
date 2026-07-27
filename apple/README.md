@@ -605,7 +605,9 @@ issues, stapling validation, Gatekeeper acceptance, distribution artifact
 filename/hash, and operator confirmations for the current build and completed
 notarization/stapling/Gatekeeper checks.
 
-The app icon asset catalog is generated from `Xcode/AppIconSource.svg`:
+The app icon asset catalog is generated from the approved momentum master at
+`../mobile/assets/bonfire-stride-master.png` (with `Xcode/AppIconMacSource.svg`
+providing the macOS inset mask):
 
 ```bash
 node scripts/generate-native-apple-app-icons.mjs

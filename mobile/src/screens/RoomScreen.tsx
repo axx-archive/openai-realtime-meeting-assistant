@@ -36,7 +36,10 @@ import { RoomParticipantsSheet, type RoomParticipantRow } from '../components/Ro
 import { RoomConsentSheet } from '../components/RoomConsentSheet';
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
 import { useNativeRoom } from '../realtime/useNativeRoom';
-import { centerStageControlStatus } from '../realtime/cameraFramingLifecycle';
+import {
+  cameraFramingRenderRevision,
+  centerStageControlStatus,
+} from '../realtime/cameraFramingLifecycle';
 import {
   focusedVideoParticipant,
   participantVideoAccessibilityStatus,
@@ -219,6 +222,7 @@ type LocalPreviewProps = {
   streamURL?: string;
   cameraOff: boolean;
   suspended: boolean;
+  framingRevision?: string;
   screenSharing?: boolean;
   videoTrackId?: string;
   bottom?: number;
@@ -227,12 +231,14 @@ type LocalPreviewProps = {
   style?: StyleProp<ViewStyle>;
 };
 
-const LocalPreview = memo(function LocalPreview({ name, streamURL, cameraOff, suspended, screenSharing = false, videoTrackId, bottom, inline = false, onSwitchCamera, style }: LocalPreviewProps) {
-  const videoVisible = Boolean(streamURL && (screenSharing || (!cameraOff && !suspended)));
+const LocalPreview = memo(function LocalPreview({ name, streamURL, cameraOff, suspended, framingRevision = '', screenSharing = false, videoTrackId, bottom, inline = false, onSwitchCamera, style }: LocalPreviewProps) {
+  // Outbound publication recovery must not blank a healthy local capture.
+  const videoVisible = Boolean(streamURL && (screenSharing || !cameraOff));
   const renderIdentity = nativeVideoRenderIdentity(
     streamURL,
     videoTrackId,
     screenSharing ? 'screen' : 'camera',
+    screenSharing ? '' : framingRevision,
   );
   const [rendererState, setRendererState] = useState({ identity: '', ready: false });
   const rendererReady = rendererState.identity === renderIdentity && rendererState.ready;
@@ -366,6 +372,7 @@ type CallLayoutProps = {
   localVideoVisible: boolean;
   localCameraOff: boolean;
   localVideoSuspended: boolean;
+  localCameraFramingRevision: string;
   landscape: boolean;
   bottomInset: number;
   onSwitchCamera?: () => void;
@@ -384,6 +391,7 @@ const CallLayout = memo(function CallLayout({
   localVideoVisible,
   localCameraOff,
   localVideoSuspended,
+  localCameraFramingRevision,
   landscape,
   bottomInset,
   onSwitchCamera,
@@ -391,14 +399,14 @@ const CallLayout = memo(function CallLayout({
 }: CallLayoutProps) {
   const remoteCount = participants.length;
   const localParticipant = useMemo<CallParticipant>(() => ({
-    key: `local-stage:${localScreenSharing ? localScreenShareTrackId ?? 'pending' : localVideoTrackId ?? 'pending'}`,
+    key: `local-stage:${localScreenSharing ? localScreenShareTrackId ?? 'pending' : `${localVideoTrackId ?? 'pending'}:${localCameraFramingRevision}`}`,
     name: 'You',
     streamURL: localScreenSharing ? localScreenShareURL : localVideoVisible ? localStreamURL : undefined,
     active: false,
     micMuted: false,
     screenSharing: localScreenSharing,
-    videoOff: localScreenSharing ? false : localCameraOff || localVideoSuspended,
-  }), [localCameraOff, localScreenShareTrackId, localScreenShareURL, localScreenSharing, localStreamURL, localVideoSuspended, localVideoTrackId, localVideoVisible]);
+    videoOff: localScreenSharing ? false : localCameraOff,
+  }), [localCameraFramingRevision, localCameraOff, localScreenShareTrackId, localScreenShareURL, localScreenSharing, localStreamURL, localVideoTrackId, localVideoVisible]);
   const dockClearance = bottomInset + 96;
   const [stageSlotDimensions, setStageSlotDimensions] = useState<VideoDimensions | null>(null);
   const [stageVideoMeasurement, setStageVideoMeasurement] = useState<(VideoDimensions & { identity: string }) | null>(null);
@@ -484,6 +492,7 @@ const CallLayout = memo(function CallLayout({
       <View style={[styles.participantRail, landscape && styles.participantRailLandscape]}>
         <LocalPreview
           cameraOff={localCameraOff}
+          framingRevision={localCameraFramingRevision}
           inline
           name={localName}
           onSwitchCamera={onSwitchCamera}
@@ -628,6 +637,14 @@ export function RoomScreen({ route, navigation }: Props) {
   );
   const screenShareVideoTrackId = nativeRoom.state.screenShareStream?.getVideoTracks()[0]?.id;
   const hasLocalVideo = Boolean(nativeRoom.state.localStream?.getVideoTracks().length);
+  const localCameraFramingRevision = useMemo(
+    () => cameraFramingRenderRevision(nativeRoom.state.cameraFraming),
+    [
+      nativeRoom.state.cameraFraming.dynamicHeight,
+      nativeRoom.state.cameraFraming.dynamicWidth,
+      nativeRoom.state.cameraFraming.wideUprightEnabled,
+    ],
+  );
   const callParticipants = useMemo<CallParticipant[]>(() => {
     const rawRoster = inNativeRoom ? nativeRoom.state.participants : participants;
     return presentRemoteVideoParticipants({
@@ -1094,13 +1111,14 @@ export function RoomScreen({ route, navigation }: Props) {
             bottomInset={bottomInset}
             landscape={window.width > window.height}
             localCameraOff={nativeRoom.state.cameraOff}
+            localCameraFramingRevision={localCameraFramingRevision}
             localName={user?.name ?? 'You'}
             localScreenShareURL={screenShareStreamURL}
             localScreenShareTrackId={screenShareVideoTrackId}
             localScreenSharing={nativeRoom.state.screenSharing}
             localStreamURL={localStreamURL}
             localVideoTrackId={localVideoTrackId}
-            localVideoVisible={hasLocalVideo && !nativeRoom.state.cameraOff && !videoSuspended}
+            localVideoVisible={hasLocalVideo && !nativeRoom.state.cameraOff}
             localVideoSuspended={videoSuspended}
             onSelectParticipant={selectParticipant}
             onSwitchCamera={nativeRoom.switchCamera}
@@ -1145,6 +1163,7 @@ export function RoomScreen({ route, navigation }: Props) {
             <LocalPreview
               bottom={bottomInset + 96}
               cameraOff={nativeRoom.state.cameraOff}
+              framingRevision={localCameraFramingRevision}
               name={user?.name ?? 'You'}
               onSwitchCamera={nativeRoom.switchCamera}
               screenSharing={nativeRoom.state.screenSharing}
@@ -1252,14 +1271,14 @@ export function RoomScreen({ route, navigation }: Props) {
             </View>
             <View style={styles.joinCopy}>
               <Text style={styles.joinTitle}>{room?.live ? `${room.participantCount} here now` : 'Start the conversation'}</Text>
-              <Text style={styles.joinBody}>Join quietly. Your camera and microphone start off.</Text>
+              <Text style={styles.joinBody}>Join visibly. Your camera starts on and your microphone stays muted.</Text>
             </View>
           </View>
           {nativeRoom.state.lifecycle === 'idle' && !room?.archived ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Join room with camera and microphone off"
-              onPress={() => joinRoom(false, false)}
+              accessibilityLabel="Join room with camera on and microphone off"
+              onPress={() => joinRoom(true, false)}
               style={({ pressed }) => [styles.join, pressed && styles.pressed]}
             >
               <SymbolView name="person.2.fill" tintColor={colors.onAccent} size={18} />

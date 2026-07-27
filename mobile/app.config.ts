@@ -28,15 +28,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       bundleIdentifier: iosBundleIdentifier,
       icon: {
         light: './assets/icon.png',
-        dark: './assets/icon.png',
+        dark: './assets/ios-icon-dark.png',
         tinted: './assets/ios-icon-tinted.png',
       },
-      // Build 15 keeps a quiet join's audio m-line inactive until the member
-      // explicitly unmutes, preventing hidden AudioUnit activation while the
-      // app and roster both report an honestly muted microphone, and ships the
-      // final ember-glass Bonfire icon across the default icon appearances.
+      // Build 16 ships the verified upright-camera framing and premium media
+      // policy together with the shared human-and-agent momentum identity.
       // Pin the multi-target release so the app and ReplayKit extension match.
-      buildNumber: '15',
+      buildNumber: '16',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',
@@ -72,7 +70,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         foregroundImage: './assets/android-icon-foreground.png',
         backgroundImage: './assets/android-icon-background.png',
         monochromeImage: './assets/android-icon-monochrome.png',
-        backgroundColor: '#F5F5F7',
+        backgroundColor: '#0E0E10',
       },
       permissions: [
         'CAMERA',
@@ -85,6 +83,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       favicon: './assets/favicon.png',
     },
     plugins: [
+      'expo-image',
       './plugins/withWebRTCMultitaskingCamera',
       [
         './plugins/withWebRTCBroadcastExtension',

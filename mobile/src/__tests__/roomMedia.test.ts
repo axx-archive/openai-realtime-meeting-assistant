@@ -74,7 +74,7 @@ describe('native room media', () => {
     });
   });
 
-  it('gives square iPhone video enough headroom while preserving congestion control', () => {
+  it('gives iPhone camera video enough headroom while preserving congestion control', () => {
     const parameters = {
       encodings: [{
         maxBitrate: 1_200_000,
@@ -1091,6 +1091,10 @@ describe('native room media', () => {
     const replacement = nativeVideoRenderIdentity('stream://local', 'camera-b', 'camera');
     assert.notEqual(first, replacement);
     assert.notEqual(replacement, nativeVideoRenderIdentity('stream://local', 'camera-b', 'screen'));
+    assert.notEqual(
+      replacement,
+      nativeVideoRenderIdentity('stream://local', 'camera-b', 'camera', 'wide:1920x1080'),
+    );
   });
 
   it('waits through transient disconnects and only restarts the same sustained disconnected peer', () => {
