@@ -153,7 +153,9 @@ export function Dock({
           <SymbolView
             name={listening ? 'waveform' : busy ? 'ellipsis' : 'mic.fill'}
             tintColor={live ? colors.ember : colors.text1}
-            size={20}
+            // 18 against 15pt text. At 20 the glyph out-weighed the label and
+            // the pill read icon-first instead of as one phrase.
+            size={18}
           />
           {listening ? (
             <Waveform trace={trace} listening height={24} scale={0.62} />
@@ -172,7 +174,9 @@ export function Dock({
           onPress={onKeyboard}
           style={({ pressed }) => [styles.keyboard, pressed && styles.pressed]}
         >
-          <SymbolView name="keyboard" tintColor={colors.text3} size={18} />
+          {/* text2, not text3: this is the silent path's entry point (§9.5), a
+              peer of the mic — at 38% ink it read as disabled. */}
+          <SymbolView name="keyboard" tintColor={colors.text2} size={18} />
         </Pressable>
       </Glass>
     </View>
@@ -187,20 +191,26 @@ const styles = StyleSheet.create({
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 56,
-    paddingLeft: space[5],
-    paddingRight: space[3],
+    minHeight: 58,
+    // Asymmetric on purpose. The leading edge holds a glyph, which reads
+    // optically wider than its box, so it needs less inset than text would;
+    // the trailing edge holds a 44pt tap target whose own padding supplies the
+    // rest of the breathing room.
+    paddingLeft: 18,
+    paddingRight: space[2],
     gap: space[2],
   },
   press: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space[3],
+    gap: 11,
     minHeight: hitMin,
   },
   label: {
-    ...type.bodyMedium,
+    fontSize: 15,
+    fontWeight: '500',
+    letterSpacing: -0.1,
     color: colors.text1,
     flexShrink: 1,
   },

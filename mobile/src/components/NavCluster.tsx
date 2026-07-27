@@ -128,7 +128,7 @@ export function NavCluster({ open, onToggle, destinations }: NavClusterProps) {
       {/* Absolutely positioned so a COLLAPSED cluster occupies no layout space.
           Left in flow, the hidden items reserve a ~250pt invisible column that
           shoves the Dock to mid-screen. */}
-      <View style={styles.items} pointerEvents={open ? 'auto' : 'none'}>
+      <View style={[styles.items, !open && styles.inert]}>
         {items}
       </View>
       <Glass radius={radius.full} interactive style={styles.toggle}>
@@ -153,7 +153,7 @@ export function NavCluster({ open, onToggle, destinations }: NavClusterProps) {
   );
 
   return (
-    <View style={styles.wrap} pointerEvents="box-none">
+    <View style={styles.wrap}>
       {usingLiquidGlass() ? (
         // `spacing` is the distance at which sibling glass starts to merge, so
         // the collapsed cluster reads as a single body that separates as it
@@ -194,6 +194,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: space[2],
+  },
+  /** Collapsed items must not swallow taps meant for the canvas beneath. */
+  inert: {
+    pointerEvents: 'none',
   },
   item: {
     width: hitMin,

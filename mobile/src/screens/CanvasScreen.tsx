@@ -44,31 +44,26 @@ type CanvasNav = NativeStackNavigationProp<RootStackParamList>;
  */
 
 /**
- * Honorifics are not names. Accounts here carry values like "Dr. Dana Reed", and
- * taking the first token greets someone as "Dr." — which reads as a bug to the
- * one person guaranteed to see it every morning.
+ * The greeting carries no name — matching the web canon, whose
+ * `officeLaunchGreeting` is simply "good morning."
+ *
+ * A name in a 36pt headline cannot be made robust. "Good afternoon,
+ * Christopher." wraps; a display name stored as "Dr. May" greets you by your
+ * title; initials, single names, and non-Latin scripts each break differently.
+ * Every fix is another heuristic that is wrong for somebody, and a headline
+ * that is occasionally wrong is worse than one that is never personal.
+ *
+ * The personal content belongs in the live line, which says something that
+ * actually matters — who mentioned you, what is live — rather than proving the
+ * app can read your account record.
  */
-const HONORIFICS = new Set(['dr', 'mr', 'mrs', 'ms', 'mx', 'prof', 'sir', 'rev', 'capt']);
-
-function firstName(name: string | undefined): string | undefined {
-  const tokens = name?.trim().split(/\s+/).filter(Boolean) ?? [];
-  for (const token of tokens) {
-    const bare = token.replace(/\./g, '').toLowerCase();
-    if (!bare || HONORIFICS.has(bare)) continue;
-    return token;
-  }
-  return undefined;
-}
-
-function greeting(name: string | undefined): string {
+function greeting(): string {
   const hour = new Date().getHours();
   const part = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
-  const first = firstName(name);
-  return first ? `Good ${part}, ${first}.` : `Good ${part}.`;
+  return `Good ${part}.`;
 }
 
 export function CanvasScreen() {
-  const { user } = useAuth();
   const navigation = useNavigation<CanvasNav>();
   // `colors.text3` is a DynamicColorIOS pair, which expo-image's tintColor
   // rejects — so the glyph's tint is resolved here instead.
@@ -151,11 +146,13 @@ export function CanvasScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
+          <View style={styles.skyAbove} />
+
           {/* The web's `.office-launch__mark`: the momentum glyph beside a
               small label, in text-3. This is the shell's only brand moment —
               removing the tab bar took away the glyph's old home. */}
           <View style={styles.mark} accessibilityRole="header" accessibilityLabel="Scout">
-            <MomentumGlyph size={16} color={markTint} />
+            <MomentumGlyph size={15} color={markTint} />
             <Text style={styles.markLabel}>SCOUT</Text>
           </View>
 
@@ -181,13 +178,12 @@ export function CanvasScreen() {
                 start={{ x: 0, y: 0.5 }}
                 end={{ x: 1, y: 0.5 }}
                 style={styles.glow}
-                pointerEvents="none"
               />
             ) : null}
             <Waveform trace={dictation.trace} listening={listening} />
           </Pressable>
 
-          <Text style={styles.greeting}>{greeting(user?.name)}</Text>
+          <Text style={styles.greeting}>{greeting()}</Text>
 
           {live.text ? (
             <Pressable
@@ -241,6 +237,8 @@ export function CanvasScreen() {
               Microphone access is off. You can still type — tap the keyboard.
             </Text>
           ) : null}
+
+          <View style={styles.skyBelow} />
         </ScrollView>
 
         {typing ? (
@@ -330,14 +328,20 @@ const styles = StyleSheet.create({
   body: {
     flexGrow: 1,
     alignItems: 'center',
-    // Optical centre, not geometric: a cluster centred on the true midpoint
-    // reads as sagging, because the Dock weights the bottom of the screen.
-    justifyContent: 'center',
     paddingHorizontal: space[6],
-    paddingTop: space[8],
-    paddingBottom: space[12],
-    gap: space[4],
   },
+  /**
+   * Composition, not centring. Flex spacers weighted 1.25 : 1 sit the content
+   * group slightly BELOW true centre.
+   *
+   * The rule: empty space above content reads as sky and is felt as
+   * intentional; the same emptiness below content, stacked above a heavy UI
+   * element, reads as a gap where something is missing. Geometric centring gave
+   * 185pt above and 232pt below — the wrong way round, and the single biggest
+   * reason the screen felt unfinished.
+   */
+  skyAbove: { flex: 1.25, pointerEvents: 'none' },
+  skyBelow: { flex: 1, pointerEvents: 'none' },
   dockRow: {
     // Column, not row: the nav stacks above the Dock so neither covers the
     // other, and the cluster expands upward into empty canvas.
@@ -346,14 +350,24 @@ const styles = StyleSheet.create({
   glow: {
     ...StyleSheet.absoluteFill,
     borderRadius: 999,
+    pointerEvents: 'none',
   },
   mark: {
     flexDirection: 'row',
+    // Baseline, not box: small caps sit high inside their line box, so centring
+    // on the box leaves the glyph looking dropped. A 13pt line height on an
+    // 11pt label collapses the slack and the two align optically.
     alignItems: 'center',
     gap: 7,
+    marginBottom: space[6],
   },
   markLabel: {
-    ...type.label,
+    fontSize: 11,
+    fontWeight: '600',
+    // Wider than the label token: tracking has to open up as size drops or
+    // uppercase text reads as a smudge at 11pt.
+    letterSpacing: 1.4,
+    lineHeight: 13,
     color: colors.text3,
     textTransform: 'uppercase',
   },
@@ -362,28 +376,39 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: space[4],
-    paddingVertical: space[6],
+    // 14 keeps a comfortable tap target without inflating the optical gap —
+    // padding on a tap target still spends vertical rhythm.
+    paddingVertical: 14,
     borderRadius: radius.xxl,
-    marginBottom: space[2],
+    marginBottom: space[5],
   },
   greeting: {
-    // Larger and tighter than title1: this is the only sentence on the page, so
-    // it should carry the page rather than share weight with the live line.
-    fontSize: 34,
+    // The only sentence on the page, so it carries the page rather than sharing
+    // weight with the live line. Tracking tightens as size grows — at 36pt the
+    // default spacing reads loose and juvenile.
+    fontSize: 36,
     fontWeight: '600',
-    letterSpacing: -0.9,
-    lineHeight: 40,
+    letterSpacing: -1,
+    lineHeight: 42,
     color: colors.text1,
     textAlign: 'center',
+    // Bound to the greeting so the two read as one unit, not two stacked items.
+    marginBottom: space[2],
   },
   liveLine: {
     paddingHorizontal: space[3],
-    paddingVertical: space[2],
+    paddingVertical: 6,
     borderRadius: radius.md,
+    // Wraps to two lines at most on a long sentence, and keeps the measure
+    // short enough to stay readable centred.
+    maxWidth: 330,
   },
   pressed: { opacity: 0.6 },
   liveText: {
-    ...type.bodySm,
+    fontSize: 15,
+    fontWeight: '400',
+    letterSpacing: -0.08,
+    lineHeight: 21,
     color: colors.text2,
     textAlign: 'center',
   },

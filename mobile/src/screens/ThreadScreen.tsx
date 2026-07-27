@@ -262,7 +262,9 @@ const styles = StyleSheet.create({
   loading: { paddingVertical: space[10] },
   list: {
     paddingTop: space[2],
-    paddingBottom: space[4],
+    // Clears the glass composer floating above the list bottom, so the last
+    // message never sits tucked under it.
+    paddingBottom: space[5],
   },
   composer: {
     marginHorizontal: space[4],

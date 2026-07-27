@@ -54,7 +54,11 @@ export const MessageBubble = React.memo(function MessageBubble({
   if (!body) return null;
 
   return (
-    <View style={[styles.row, own && styles.rowOwn]}>
+    // Grouping is spacing, not just a hidden name. Consecutive messages from
+    // one person are one utterance and sit tight; a change of author is a turn
+    // in the conversation and earns real air. A uniform gap makes a thread read
+    // as a list of records rather than as people talking.
+    <View style={[styles.row, own && styles.rowOwn, showAuthor && styles.rowNewAuthor]}>
       <View
         style={[
           styles.bubble,
@@ -97,8 +101,9 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     paddingHorizontal: space[4],
-    marginBottom: space[2],
+    marginBottom: 3,
   },
+  rowNewAuthor: { marginTop: space[3] },
   rowOwn: { justifyContent: 'flex-end' },
   bubble: {
     maxWidth: '82%',
@@ -122,9 +127,12 @@ const styles = StyleSheet.create({
     borderColor: colors.ember,
   },
   author: {
-    ...type.captionMedium,
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: -0.05,
+    lineHeight: 17,
     color: colors.text2,
-    marginBottom: 2,
+    marginBottom: 3,
   },
   authorScout: { color: colors.ember },
   body: {
@@ -139,10 +147,17 @@ const styles = StyleSheet.create({
   mentionOwn: { color: colors.onAccent, textDecorationLine: 'underline' },
   mentionScout: { color: colors.ember },
   time: {
-    ...type.label,
+    // The label token's 0.66 tracking is for uppercase eyebrows; on a timestamp
+    // it reads as spaced-out noise. Tabular figures stop the clock jittering as
+    // digits change.
+    fontSize: 11,
+    fontWeight: '400',
+    letterSpacing: 0,
+    lineHeight: 13,
+    fontVariant: ['tabular-nums'],
     color: colors.text3,
     alignSelf: 'flex-end',
-    marginTop: 2,
+    marginTop: 3,
   },
   timeOwn: { color: 'rgba(255,255,255,0.55)' },
 });

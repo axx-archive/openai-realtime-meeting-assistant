@@ -65,47 +65,70 @@ export function Glass({
   const reduceTransparency = useReduceTransparency();
   const shape: ViewStyle = { borderRadius: radius, overflow: 'hidden' };
 
-  // Reduce Transparency wins over everything: the user asked for no material.
-  if (reduceTransparency) {
-    return (
-      <View style={[shape, styles.opaque, style]} {...rest}>
-        {children}
-      </View>
-    );
-  }
-
-  if (liquidGlass) {
-    return (
-      <GlassView
-        // NOTE: never animate a GlassView by driving `opacity` to 0 — that kills
-        // the effect outright. Use `glassEffectStyle.animate` instead.
-        glassEffectStyle={variant}
-        isInteractive={interactive}
-        tintColor={tint}
-        style={[shape, style]}
-        {...rest}
-      >
-        {children}
-      </GlassView>
-    );
-  }
-
-  // Pre-iOS 26: blur plus an explicit hairline, because BlurView alone has no
-  // edge and the panel dissolves into the canvas without one.
-  return (
-    <View style={[shape, styles.legacyEdge, style]} {...rest}>
+  /**
+   * Elevation is not decoration here — it is what makes the material read as
+   * glass at all. Glass means "floating above the conversation" (§7), and on a
+   * flat canvas an unshadowed GlassView is just white paper lying on white
+   * paper. The shadow lives on an OUTER wrapper because iOS will not draw a
+   * shadow on the same view that clips its children with `overflow: hidden`.
+   */
+  // The material is a BACKGROUND, not a wrapper: it fills the container
+  // absolutely while the children lay out normally on top. That way the
+  // caller's own style still drives size, padding and margin, and the shadow
+  // sits on a view that is not clipping anything.
+  const material = reduceTransparency ? (
+    <View style={[shape, styles.opaque, StyleSheet.absoluteFill, styles.inert]} />
+  ) : liquidGlass ? (
+    <GlassView
+      // NOTE: never animate a GlassView by driving `opacity` to 0 — that kills
+      // the effect outright. Use `glassEffectStyle.animate` instead.
+      glassEffectStyle={variant}
+      isInteractive={interactive}
+      tintColor={tint}
+      style={[shape, StyleSheet.absoluteFill, styles.inert]}
+    />
+  ) : (
+    // Pre-iOS 26: blur plus an explicit hairline, because BlurView alone has no
+    // edge and the panel dissolves into the canvas without one.
+    <View style={[shape, styles.legacyEdge, StyleSheet.absoluteFill, styles.inert]}>
       <BlurView
         intensity={variant === 'clear' ? 24 : 42}
         tint="systemChromeMaterial"
         style={StyleSheet.absoluteFill}
       />
-      {tint ? <View style={[StyleSheet.absoluteFill, { backgroundColor: tint, opacity: 0.12 }]} /> : null}
+      {tint ? (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: tint, opacity: 0.12 }]} />
+      ) : null}
+    </View>
+  );
+
+  return (
+    <View style={[{ borderRadius: radius }, styles.lift, style]} {...rest}>
+      {material}
       {children}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  /**
+   * Soft and wide, not dark and tight. A floating control needs to read as
+   * hovering a few millimetres off the page; a hard shadow reads as a sticker.
+   */
+  lift: {
+    shadowColor: '#0E0E10',
+    shadowOpacity: 0.1,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 6 },
+  },
+  /**
+   * The material never takes touches — the children sit on top of it and own
+   * every interaction. Declared in style rather than as a `pointerEvents` prop,
+   * which React Native now deprecates in favour of the style property.
+   */
+  inert: {
+    pointerEvents: 'none',
+  },
   opaque: {
     backgroundColor: colors.surface1,
     borderWidth: StyleSheet.hairlineWidth,

@@ -27,11 +27,12 @@ export const ease: EasingFunction = Easing.bezier(0.32, 0.72, 0, 1);
 export const easeSpring: EasingFunction = Easing.bezier(0.34, 1.25, 0.5, 1);
 
 /**
- * Amplitude sampling. 100ms keeps the JS thread quiet while still reading as
- * responsive — the bars interpolate between samples on the native driver, so
- * perceived smoothness is decoupled from this rate (design §18).
+ * Amplitude sampling. Bar heights are pushed straight to the native driver
+ * rather than tweened (see Waveform), so this interval IS the frame rate of the
+ * trace — ~14fps, which reads as continuous for a scrolling level meter while
+ * keeping the polling cost off the JS thread (design §18).
  */
-export const meteringIntervalMs = 100;
+export const meteringIntervalMs = 70;
 
 /**
  * Waveform geometry. Bars scale on Y only — law 4. Defined in a pure module so

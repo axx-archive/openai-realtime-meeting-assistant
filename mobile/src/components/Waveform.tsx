@@ -42,25 +42,37 @@ export function Waveform({
   scale = 1,
 }: WaveformProps) {
   const reduceMotion = useReduceMotion();
-  const tint = color ?? (listening ? colors.ember : colors.text3);
+  // text2, not text3. At 38% ink knocked back to 0.55 opacity the resting wave
+  // sat around 21% black, which reads as a disabled control rather than the
+  // hero of the screen. The web canon rests this at --text-2.
+  const tint = color ?? (listening ? colors.ember : colors.text2);
 
   const targets = barScales(trace, listening);
   const values = useRef(targets.map((value) => new Animated.Value(value))).current;
 
   useEffect(() => {
-    if (reduceMotion) {
-      // Amplitude response survives Reduce Motion — it is information, not
-      // decoration — but nothing tweens between samples.
+    /**
+     * While listening, push values STRAIGHT to native rather than starting
+     * animations.
+     *
+     * Tweening each sample meant spawning 28 `Animated.timing`s every sampling
+     * interval — ~280 animation starts a second, which is what produced RN's
+     * "onAnimatedValueUpdate with no listeners" warning. A scrolling trace does
+     * not need per-sample easing anyway: the motion the eye reads is the row
+     * SHIFTING, and at this sample rate `setValue` is both smoother and
+     * effectively free. Reduce Motion takes the same path, since amplitude
+     * response is information rather than decoration.
+     */
+    if (listening || reduceMotion) {
       values.forEach((value, index) => value.setValue(targets[index] ?? 0));
       return;
     }
+    // Settling back to rest is a single, rare transition — worth easing.
     Animated.parallel(
       values.map((value, index) =>
         Animated.timing(value, {
           toValue: targets[index] ?? 0,
-          // One sampling interval, so each sample lands as the next arrives and
-          // the row reads as continuous rather than stepped.
-          duration: listening ? duration.fast : duration.slow,
+          duration: duration.slow,
           easing: ease,
           useNativeDriver: true,
         }),
@@ -88,7 +100,7 @@ export function Waveform({
               width: waveform.barWidth * scale,
               borderRadius: waveform.barWidth * scale,
               backgroundColor: tint,
-              opacity: listening ? 1 : 0.55,
+              opacity: listening ? 1 : 0.72,
               transform: [{ scaleY: value }],
             },
           ]}

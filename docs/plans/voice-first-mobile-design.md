@@ -379,9 +379,26 @@ The canvas holds three text elements and no more:
 
 | Element | Style | Content |
 |---|---|---|
-| Mark | `type.label`, `text3`, uppercase | `SCOUT` |
-| Greeting | `type.title1`, `text1` | "Good morning, AJ." |
-| Live line | `type.bodySm`, `text2` | One sentence about what's live. Absent if nothing is. |
+| Mark | 11 / 600 / +1.4 tracking, `text3`, uppercase | Momentum glyph + `SCOUT` |
+| Greeting | 36 / 600 / −1.0 tracking, `text1` | "Good morning." — **no name** |
+| Live line | 15 / 400, `text2` | One sentence about what's live. Absent if nothing is. |
+
+**The greeting carries no name,** matching the web canon's `officeLaunchGreeting`.
+A name in a 36pt headline cannot be made robust: "Good afternoon, Christopher."
+wraps; a display name stored as "Dr. May" greets someone by their title; initials,
+mononyms, and non-Latin scripts each break differently. Every fix is another
+heuristic that is wrong for somebody, and **a headline that is occasionally wrong
+is worse than one that is never personal**. The personal content lives in the live
+line, which says something that matters — who mentioned you, what is live — rather
+than proving the app can read your account record.
+
+**Vertical rhythm.** Gaps descend as the hierarchy descends: mark → wave 24,
+wave → greeting 34, greeting → live line 8. The greeting and live line are bound
+tightly because they are one thought; everything else gets air. And the content
+group sits *slightly below* true centre (flex spacers weighted 1.25 : 1), because
+empty space above content reads as sky and feels intentional, while the same
+emptiness below content stacked above a heavy Dock reads as a gap where something
+is missing.
 
 If nothing is live, the line is **absent**, not "Nothing live." Empty states that
 narrate their own emptiness are noise. The quiet page stays quiet.
