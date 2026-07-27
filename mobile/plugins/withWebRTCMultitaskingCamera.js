@@ -7,7 +7,7 @@ const {
 } = require('@expo/config-plugins');
 
 const pluginName = 'with-webrtc-multitasking-camera';
-const pluginVersion = '1.6.0';
+const pluginVersion = '1.7.0';
 const appDelegateMarker = '// BonfireOS: keep WebRTC camera capture available during iOS call multitasking.';
 const bridgingImport = '#import <react-native-webrtc/WebRTCModuleOptions.h>';
 const centerStageMarker = '// BonfireOS: preserve the user and system Center Stage choice.';
@@ -16,6 +16,8 @@ const adaptiveFrontCameraMarker =
 const forcedCenterStageAssignment = /AVCaptureDevice\.centerStageEnabled\s*=\s*(?:YES|NO)\s*;/g;
 const pictureInPictureScaleMarker =
   '// BonfireOS: honor the requested PiP gravity when rotating mobile frames.';
+const pictureInPictureObjectFitMarker =
+  '// BonfireOS: recalculate the rotation transform when PiP fit changes.';
 const defaultPictureInPictureScale = [
   '        CGFloat scale = 1;',
   '        if (rotation == 90 || rotation == 270) {',
@@ -38,6 +40,26 @@ const gravityAwarePictureInPictureScale = [
   '                ? MAX(widthToHeight, heightToWidth)',
   '                : MIN(widthToHeight, heightToWidth);',
   '        }',
+].join('\n');
+const defaultPictureInPictureObjectFit = [
+  '- (void)setObjectFit:(RTCVideoViewObjectFit)fit {',
+  '    if (fit == RTCVideoViewObjectFitCover) {',
+  '        self.sampleView.sampleBufferLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;',
+  '    } else {',
+  '        self.sampleView.sampleBufferLayer.videoGravity = AVLayerVideoGravityResizeAspect;',
+  '    }',
+  '}',
+].join('\n');
+const recalculatingPictureInPictureObjectFit = [
+  '- (void)setObjectFit:(RTCVideoViewObjectFit)fit {',
+  `    ${pictureInPictureObjectFitMarker}`,
+  '    if (fit == RTCVideoViewObjectFitCover) {',
+  '        self.sampleView.sampleBufferLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;',
+  '    } else {',
+  '        self.sampleView.sampleBufferLayer.videoGravity = AVLayerVideoGravityResizeAspect;',
+  '    }',
+  '    [self.sampleView requestScaleRecalculation];',
+  '}',
 ].join('\n');
 
 const forcedCenterStageBlock = [
@@ -315,6 +337,25 @@ function resolveWebRTCPictureInPictureSource(projectRoot) {
   );
 }
 
+function resolveWebRTCPictureInPictureControllerSource(projectRoot) {
+  let packageJson;
+  try {
+    packageJson = require.resolve('react-native-webrtc/package.json', {
+      paths: [projectRoot],
+    });
+  } catch (error) {
+    throw new Error(
+      `${pluginName} could not resolve react-native-webrtc from ${projectRoot}: ${error.message}`,
+    );
+  }
+  return path.join(
+    path.dirname(packageJson),
+    'ios',
+    'RCTWebRTC',
+    'PIPController.m',
+  );
+}
+
 function patchPictureInPictureScale(source, sourcePath = 'SampleBufferVideoCallView.m') {
   const defaultCount = occurrenceCount(source, defaultPictureInPictureScale);
   const patchedCount = occurrenceCount(source, gravityAwarePictureInPictureScale);
@@ -332,6 +373,28 @@ function patchPictureInPictureScale(source, sourcePath = 'SampleBufferVideoCallV
   ) {
     throw new Error(
       `${pluginName} refuses to prebuild ${sourcePath}: the gravity-aware PiP scale patch is missing or duplicated.`,
+    );
+  }
+  return patchedSource;
+}
+
+function patchPictureInPictureObjectFit(source, sourcePath = 'PIPController.m') {
+  const defaultCount = occurrenceCount(source, defaultPictureInPictureObjectFit);
+  const patchedCount = occurrenceCount(source, recalculatingPictureInPictureObjectFit);
+  if (defaultCount + patchedCount !== 1) {
+    throw new Error(
+      `${pluginName} refuses to prebuild ${sourcePath}: the react-native-webrtc PiP object-fit source no longer matches the reviewed patched or unpatched shape.`,
+    );
+  }
+  const patchedSource = defaultCount === 1
+    ? source.replace(defaultPictureInPictureObjectFit, recalculatingPictureInPictureObjectFit)
+    : source;
+  if (
+    occurrenceCount(patchedSource, recalculatingPictureInPictureObjectFit) !== 1
+    || occurrenceCount(patchedSource, defaultPictureInPictureObjectFit) !== 0
+  ) {
+    throw new Error(
+      `${pluginName} refuses to prebuild ${sourcePath}: the PiP object-fit recalculation patch is missing or duplicated.`,
     );
   }
   return patchedSource;
@@ -396,6 +459,21 @@ function withWebRTCMultitaskingCamera(config) {
       fs.writeFileSync(pictureInPictureSource, patchedPictureInPictureSource);
     }
 
+    const pictureInPictureControllerSource = resolveWebRTCPictureInPictureControllerSource(
+      dangerousConfig.modRequest.projectRoot,
+    );
+    const originalPictureInPictureControllerSource = fs.readFileSync(
+      pictureInPictureControllerSource,
+      'utf8',
+    );
+    const patchedPictureInPictureControllerSource = patchPictureInPictureObjectFit(
+      originalPictureInPictureControllerSource,
+      pictureInPictureControllerSource,
+    );
+    if (patchedPictureInPictureControllerSource !== originalPictureInPictureControllerSource) {
+      fs.writeFileSync(pictureInPictureControllerSource, patchedPictureInPictureControllerSource);
+    }
+
     const projectDirectories = fs.readdirSync(iosRoot, { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && !entry.name.endsWith('.xcodeproj') && entry.name !== 'Pods')
       .map((entry) => path.join(iosRoot, entry.name));
@@ -432,13 +510,18 @@ plugin.__testing = {
   centerStageMarker,
   cooperativeCenterStageBlock,
   defaultPositionCameraSelection,
+  defaultPictureInPictureObjectFit,
   forcedCenterStageBlock,
   defaultPictureInPictureScale,
   gravityAwarePictureInPictureScale,
+  recalculatingPictureInPictureObjectFit,
   patchCenterStageSource,
+  patchPictureInPictureObjectFit,
   patchPictureInPictureScale,
+  pictureInPictureObjectFitMarker,
   pictureInPictureScaleMarker,
   resolveWebRTCCameraSource,
+  resolveWebRTCPictureInPictureControllerSource,
   resolveWebRTCPictureInPictureSource,
   safeCenterStageFormatSelection,
   unsafeCenterStageFormatSelection,

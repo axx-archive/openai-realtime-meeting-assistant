@@ -35,6 +35,7 @@ public final class BonfireMediaSessionModule: Module {
     var options: AVAudioSession.CategoryOptions = [
       .defaultToSpeaker,
       .allowBluetoothA2DP,
+      .allowAirPlay,
     ]
     if #available(iOS 26.0, *) {
       options.insert(.allowBluetoothHFP)

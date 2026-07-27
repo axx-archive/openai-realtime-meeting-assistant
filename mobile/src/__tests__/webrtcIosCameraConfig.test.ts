@@ -11,12 +11,16 @@ type CameraPluginTestApi = {
   centerStageMarker: string;
   cooperativeCenterStageBlock: string;
   defaultPositionCameraSelection: string;
+  defaultPictureInPictureObjectFit: string;
   defaultPictureInPictureScale: string;
   forcedCenterStageBlock: string;
   patchCenterStageSource: (source: string, sourcePath?: string) => string;
+  patchPictureInPictureObjectFit: (source: string, sourcePath?: string) => string;
   patchPictureInPictureScale: (source: string, sourcePath?: string) => string;
+  pictureInPictureObjectFitMarker: string;
   pictureInPictureScaleMarker: string;
   resolveWebRTCCameraSource: (projectRoot: string) => string;
+  resolveWebRTCPictureInPictureControllerSource: (projectRoot: string) => string;
   resolveWebRTCPictureInPictureSource: (projectRoot: string) => string;
   safeCenterStageFormatSelection: string;
   unsafeCenterStageFormatSelection: string;
@@ -37,12 +41,16 @@ const {
   centerStageMarker,
   cooperativeCenterStageBlock,
   defaultPositionCameraSelection,
+  defaultPictureInPictureObjectFit,
   defaultPictureInPictureScale,
   forcedCenterStageBlock,
   patchCenterStageSource,
+  patchPictureInPictureObjectFit,
   patchPictureInPictureScale,
+  pictureInPictureObjectFitMarker,
   pictureInPictureScaleMarker,
   resolveWebRTCCameraSource,
+  resolveWebRTCPictureInPictureControllerSource,
   resolveWebRTCPictureInPictureSource,
   safeCenterStageFormatSelection,
   unsafeCenterStageFormatSelection,
@@ -130,6 +138,23 @@ describe('iOS WebRTC camera prebuild patch', () => {
     assert.match(patchedSource, /: MIN\(widthToHeight, heightToWidth\)/);
     assert.doesNotMatch(patchedSource, new RegExp(defaultPictureInPictureScale.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.equal(patchPictureInPictureScale(patchedSource, sourcePath), patchedSource);
+  });
+
+  it('recalculates the PiP transform when camera cover switches to screen-share contain', () => {
+    const sourcePath = resolveWebRTCPictureInPictureControllerSource(mobileRoot);
+    const originalSource = fs.readFileSync(sourcePath, 'utf8');
+    const patchedSource = patchPictureInPictureObjectFit(originalSource, sourcePath);
+
+    assert.match(patchedSource, new RegExp(pictureInPictureObjectFitMarker));
+    assert.match(
+      patchedSource,
+      /AVLayerVideoGravityResizeAspectFill;[\s\S]*AVLayerVideoGravityResizeAspect;[\s\S]*requestScaleRecalculation/,
+    );
+    assert.doesNotMatch(
+      patchedSource,
+      new RegExp(defaultPictureInPictureObjectFit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+    );
+    assert.equal(patchPictureInPictureObjectFit(patchedSource, sourcePath), patchedSource);
   });
 
   it('routes both initial user capture and rear-to-front switching through the native selector', () => {

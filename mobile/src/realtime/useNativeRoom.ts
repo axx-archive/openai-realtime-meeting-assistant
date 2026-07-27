@@ -3105,10 +3105,13 @@ export function useNativeRoom(
         }
         return;
       }
-      void BonfireMediaSession.activateVideoMeeting();
       // iOS multitasking camera access is enabled natively. AppState alone is
       // not evidence that capture stopped, so keep tracks and signaling live.
       if (previousAppState === 'active' || intentionallyLeaving.current) return;
+      // The hook remains mounted on Canvas after Leave. Never reacquire the
+      // app-wide audio session unless this hook still owns live room media.
+      if (!localRef.current) return;
+      void BonfireMediaSession.activateVideoMeeting();
       if (
         requestedAudio.current
         && !localMediaTrackIsPublishing(localRef.current, 'audio')

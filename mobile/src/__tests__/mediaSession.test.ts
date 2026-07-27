@@ -54,12 +54,16 @@ test('iOS room audio forces built-in speaker while preserving external routes', 
   assert.match(swift, /setCategory\(\.playAndRecord, mode: \.videoChat, options: options\)/);
   assert.match(swift, /\.defaultToSpeaker/);
   assert.match(swift, /\.allowBluetoothHFP/);
+  assert.match(swift, /\.allowAirPlay/);
   assert.match(swift, /let builtInOutputs: Set<AVAudioSession\.Port> = \[\.builtInReceiver, \.builtInSpeaker\]/);
   assert.match(swift, /hasExternalOutput \? \.none : \.speaker/);
   assert.match(swift, /meetingActive == true/);
   assert.match(room, /await BonfireMediaSession\.activateVideoMeeting\(\);[\s\S]*await refreshCameraFramingInternal\(true\)/);
   assert.match(room, /outcome === 'installed'[\s\S]*await BonfireMediaSession\.activateVideoMeeting\(\)/);
-  assert.match(room, /nextState !== 'active'[\s\S]*void BonfireMediaSession\.activateVideoMeeting\(\)/);
+  assert.match(
+    room,
+    /nextState !== 'active'[\s\S]*if \(previousAppState === 'active' \|\| intentionallyLeaving\.current\) return;[\s\S]*if \(!localRef\.current\) return;[\s\S]*void BonfireMediaSession\.activateVideoMeeting\(\)/,
+  );
   assert.match(room, /track\.kind === 'audio'[\s\S]*void BonfireMediaSession\.activateVideoMeeting\(\)/);
   assert.match(room, /requestedAudio\.current = true;[\s\S]*void BonfireMediaSession\.activateVideoMeeting\(\)/);
 });
