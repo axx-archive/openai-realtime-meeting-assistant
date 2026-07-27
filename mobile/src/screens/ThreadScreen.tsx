@@ -169,13 +169,20 @@ export function ThreadScreen({ route, navigation }: Props) {
         <Glass radius={radius.xl} style={styles.composer}>
           {listening ? (
             <View style={styles.listening}>
-              <Waveform amplitude={dictation.amplitude} listening height={28} />
+              <Waveform trace={dictation.trace} listening height={30} scale={0.7} />
               <Text style={styles.listeningHint}>Release to transcribe · slide up to cancel</Text>
             </View>
           ) : (
             <TextInput
               style={styles.input}
-              placeholder={`Message ${route.params.title}`}
+              // Channel names run long ("#Open-source model delegation
+              // benchmark"), and a placeholder that wraps to two lines doubles
+              // the composer's height before a single character is typed.
+              placeholder={
+                route.params.title.length > 22
+                  ? `Message ${route.params.title.slice(0, 21).trimEnd()}…`
+                  : `Message ${route.params.title}`
+              }
               placeholderTextColor={colors.text3}
               value={draft}
               onChangeText={setDraft}

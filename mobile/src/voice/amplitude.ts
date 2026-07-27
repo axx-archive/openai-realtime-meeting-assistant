@@ -1,6 +1,6 @@
 // Imported from the pure geometry module rather than `theme/motion`, which
 // pulls in the react-native runtime and would make this file untestable.
-import { waveform } from '../theme/waveformGeometry';
+import { RESTING_PROFILE, TRACE_TAPER, waveform } from '../theme/waveformGeometry';
 
 /**
  * dBFS → bar heights. This is the file that makes the waveform an *instrument*
@@ -47,23 +47,40 @@ export function smoothAmplitude(previous: number, next: number): number {
 }
 
 /**
- * Spreads one amplitude across the bar row.
+ * Appends one sample to the rolling trace, oldest first.
  *
- * A single microphone gives one number, but one number rendered as five
- * identical bars looks like a loading indicator. The profile weights the centre
- * bars highest so the row reads as a voice — and it is a fixed shape scaled by
- * live amplitude, never an independent per-bar animation, so the row still obeys
- * the breathe-only-while-listening law (design §8).
+ * The live waveform is a SCROLLING HISTORY of the last couple of seconds of your
+ * voice, not a symmetric pulse. A pulse is decoration — every bar shows the same
+ * number. A trace is a record: each bar is a distinct moment you actually spoke,
+ * so you can see the shape of the sentence you just said. It is also what a
+ * person expects a waveform to mean.
  */
-const PROFILE = [0.45, 0.78, 1, 0.78, 0.45];
+export function pushTrace(history: readonly number[], sample: number): number[] {
+  const next = history.length >= waveform.barCount ? history.slice(1) : history.slice();
+  next.push(sample);
+  return next;
+}
 
-export function barScales(amplitude: number, listening: boolean): number[] {
+/** A trace buffer pre-filled with silence, so the row starts flat and fills in. */
+export function emptyTrace(): number[] {
+  return Array.from({ length: waveform.barCount }, () => 0);
+}
+
+/**
+ * Resolves the bar heights to render.
+ *
+ * At rest this returns the sculpted RESTING_PROFILE — static, per the
+ * breathe-only-while-listening law, but still shaped like a voice. Rest means
+ * "not animating"; it does not mean "flat". A row of identical short ticks reads
+ * as an ellipsis glyph, not as the hero of the screen.
+ */
+export function barScales(trace: readonly number[], listening: boolean): number[] {
   if (!listening) {
-    // Rest is STATIC. This is the law, and it is why the waveform carries
-    // information at all.
-    return PROFILE.map(() => waveform.restScale);
+    return RESTING_PROFILE.slice(0, waveform.barCount);
   }
-  return PROFILE.slice(0, waveform.barCount).map((weight) =>
-    Math.max(waveform.minScale, Math.min(1, amplitude * weight)),
-  );
+  return Array.from({ length: waveform.barCount }, (_, index) => {
+    const sample = trace[index] ?? 0;
+    const shaped = sample * (TRACE_TAPER[index] ?? 1);
+    return Math.max(waveform.minScale, Math.min(1, shaped));
+  });
 }

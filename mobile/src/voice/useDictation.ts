@@ -11,7 +11,7 @@ import {
 import { api, BonfireApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { meteringIntervalMs } from '../theme/motion';
-import { normalizeMetering, smoothAmplitude } from './amplitude';
+import { emptyTrace, normalizeMetering, pushTrace, smoothAmplitude } from './amplitude';
 
 /**
  * Hold-to-dictate — design §11.
@@ -67,6 +67,8 @@ export function useDictation({ context = 'chat', threadId, onTranscript }: UseDi
 
   const [state, setState] = useState<DictationState>('idle');
   const [amplitude, setAmplitude] = useState(0);
+  /** Rolling history of the last ~3s of speech — drives the scrolling trace. */
+  const [trace, setTrace] = useState<number[]>(emptyTrace);
   const [error, setError] = useState<string | null>(null);
   const [permissionDenied, setPermissionDenied] = useState(false);
 
@@ -84,9 +86,17 @@ export function useDictation({ context = 'chat', threadId, onTranscript }: UseDi
   useEffect(() => {
     if (!listening) {
       setAmplitude(0);
+      // Clear the trace so the next dictation starts from silence rather than
+      // replaying the tail of the previous one.
+      setTrace(emptyTrace);
       return;
     }
-    setAmplitude((previous) => smoothAmplitude(previous, normalizeMetering(recorderState.metering)));
+    const sample = normalizeMetering(recorderState.metering);
+    setAmplitude((previous) => {
+      const smoothed = smoothAmplitude(previous, sample);
+      setTrace((history) => pushTrace(history, smoothed));
+      return smoothed;
+    });
   }, [listening, recorderState.metering]);
 
   const upload = useCallback(
@@ -198,8 +208,10 @@ export function useDictation({ context = 'chat', threadId, onTranscript }: UseDi
 
   return {
     state,
-    /** 0..1, smoothed. Drives the waveform. */
+    /** 0..1, smoothed. The current level. */
     amplitude,
+    /** Rolling amplitude history, oldest first. Drives the waveform. */
+    trace,
     durationMs: listening ? recorderState.durationMillis : 0,
     error,
     permissionDenied,

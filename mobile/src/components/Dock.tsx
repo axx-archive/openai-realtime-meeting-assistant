@@ -37,8 +37,8 @@ const CANCEL_DY = -90;
 
 export type DockProps = {
   dictation: DictationState;
-  /** Live while listening; drives the pill's waveform. */
-  amplitude: number;
+  /** Rolling amplitude history; drives the pill's waveform while listening. */
+  trace: readonly number[];
   /** True while the tap-to-converse loop is open. */
   conversing: boolean;
   onTap: () => void;
@@ -52,7 +52,7 @@ export type DockProps = {
 
 export function Dock({
   dictation,
-  amplitude,
+  trace,
   conversing,
   onTap,
   onHoldStart,
@@ -156,7 +156,7 @@ export function Dock({
             size={20}
           />
           {listening ? (
-            <Waveform amplitude={amplitude} listening height={22} />
+            <Waveform trace={trace} listening height={24} scale={0.62} />
           ) : (
             <Text style={[styles.label, live && styles.labelLive]} numberOfLines={1}>
               {label}

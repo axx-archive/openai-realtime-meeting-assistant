@@ -73,6 +73,13 @@ of it), the audio session is pre-warmed on mount, the waveform renders before an
 network call resolves, and no data fetch may block first paint. Everything else on
 the canvas is allowed to arrive late.
 
+**C3b — Voice-first must never mean voice-only.**
+Speech being the *substrate* says nothing about speech being the only *path*. The
+moment the pipeline degrades — quota, signal, permission, a loud room — every
+destination must still be reachable, or the thesis has built a single point of
+failure into the shell. See §6.4; this corollary was added after the first build
+made exactly that mistake.
+
 **C4 — Silence is a design material.**
 A voice-first app that animates constantly is exhausting, and worse, it lies: if the
 waveform always moves, movement carries no information. The desktop already
@@ -97,6 +104,20 @@ live `metering` in dBFS. So:
 
 > **The mobile waveform is not an animation. It is an instrument.**
 > The bars are a real-time render of your actual voice.
+
+And it is a **scrolling trace**, not a symmetric pulse: 28 bars holding the last
+few seconds of speech, newest arriving at the centre and ageing outward. A pulse
+shows the same number in every bar, which is decoration. A trace is a record —
+each bar is a distinct moment you actually spoke, so you can see the shape of the
+sentence you just said.
+
+**Rest is static; rest is not flat.** The breathe law says the bars do not
+*animate* at rest. It does not say they collapse. The web canon rests at fourteen
+varied heights (34%, 58%, 82%, 46%, 96%, …) so that even paused it still reads as
+a waveform. Collapsing every resting bar to one short uniform height — the first
+build did this — turns the hero of the screen into an ellipsis glyph. The
+resting silhouette is a hand-tuned envelope: a quiet lead-in, two crests, a dip,
+a decaying tail. The shape of a spoken sentence, paused.
 
 This is the "something even cooler" the brief asked for, and it is not a gimmick —
 it does real work:
@@ -214,6 +235,50 @@ The third row is the one that earns trust. An agent that sends messages on your
 behalf without a confirm is a liability; an agent that drafts perfectly and waits
 is a superpower. This also lines up exactly with the product direction diagram:
 evidence-bound suggestion → **human approval** → execution.
+
+### 6.4 When voice isn't available — the NavCluster
+
+**This section is a correction.** The design as first written made voice the only
+*fast* path: every destination lived behind a drag-up into the Deck. That is a
+resilience failure dressed up as purity, and the failure mode is not exotic —
+it is Tuesday:
+
+| Voice is gone because | How often |
+|---|---|
+| The model quota expired | Has already happened on this deployment |
+| No signal, or the transcription round trip times out | Any lift, any basement |
+| Microphone permission denied | First launch, or a corporate profile |
+| The room is too loud, or you're already in a meeting | Constantly |
+| You simply don't want to talk out loud right now | Most of the day |
+
+In every one of those cases you still need to **start a video room right now**.
+A product that becomes unusable when its headline feature degrades is a demo,
+not an operating system. So:
+
+> **Every destination is reachable in at most two taps without the voice
+> pipeline, and starting a room is always one of them.**
+
+The **NavCluster** is a collapsed glass toggle sitting above the Dock. Tapping it
+opens a row of glass icon buttons — **Room** (ember, emphasized: this is the one
+that must survive a dead pipeline), Threads, Live, Work — that route straight
+into the Deck or the room composer and never touch transcription.
+
+It is deliberately **not** the tab bar returning. A tab bar is permanent
+structure that declares itself the app's spine, which is what made the old shell
+a dashboard. This is collapsed by default, absent from the canvas until asked
+for, and additive to the Deck rather than a replacement for it. The quiet page
+stays quiet; the escape hatch is one tap away.
+
+On iOS 26 the buttons live inside a `GlassContainer`, so they physically merge
+and separate as the cluster opens — `UIGlassContainerEffect`, the platform's own
+behaviour rather than an imitation of it. Two layout rules were paid for in the
+build and are recorded so they are not re-broken:
+
+- The collapsed items must be **absolutely positioned**. Left in normal flow,
+  hidden-but-laid-out items reserve an invisible ~250pt band that shoves the Dock
+  to mid-screen.
+- The cluster opens **sideways**, not upward. A vertical stack on the right edge
+  overlays the greeting and forces 44pt-wide labels that truncate to "Threa…".
 
 ### 6.5 Inside the Deck
 

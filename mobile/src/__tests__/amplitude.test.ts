@@ -4,10 +4,12 @@ import {
   CEILING_DB,
   NOISE_FLOOR_DB,
   barScales,
+  emptyTrace,
   normalizeMetering,
+  pushTrace,
   smoothAmplitude,
 } from '../voice/amplitude';
-import { waveform } from '../theme/waveformGeometry';
+import { RESTING_PROFILE, waveform } from '../theme/waveformGeometry';
 
 /**
  * The waveform is an instrument, not an animation (design §3) — so these are
@@ -55,20 +57,50 @@ test('smoothing always moves toward the target and never overshoots it', () => {
   assert.ok(smoothAmplitude(0.9, 0.2) > 0.2);
 });
 
-test('bars rest STATIC when not listening — the breathe law', () => {
-  const resting = barScales(0.95, false);
-  // Loud input while NOT listening must still produce a flat, calm line.
-  assert.ok(resting.every((scale) => scale === waveform.restScale));
+test('rest ignores live input entirely — the breathe law', () => {
+  // A loud trace while NOT listening must not move the bars at all.
+  const loud = Array.from({ length: waveform.barCount }, () => 0.95);
+  assert.deepEqual(barScales(loud, false), RESTING_PROFILE.slice(0, waveform.barCount));
 });
 
-test('while listening the row is centre-weighted and stays within bounds', () => {
-  const bars = barScales(1, true);
+test('rest is a SCULPTED silhouette, not a flat row of ticks', () => {
+  // The regression this pins: collapsing every resting bar to one short uniform
+  // height turns the hero of the canvas into an ellipsis glyph. The web canon
+  // rests at fourteen varied heights; mobile must too. "Static" != "flat".
+  const resting = barScales(emptyTrace(), false);
+  const unique = new Set(resting);
+  assert.ok(unique.size > 8, `resting profile had only ${unique.size} distinct heights`);
+  assert.ok(Math.max(...resting) > 0.8, 'resting silhouette needs a real crest');
+  assert.ok(Math.min(...resting) < 0.2, 'resting silhouette needs a real trough');
+});
+
+test('the trace scrolls: newest sample lands last, oldest falls off', () => {
+  let trace = emptyTrace();
+  trace = pushTrace(trace, 0.4);
+  trace = pushTrace(trace, 0.9);
+  assert.equal(trace.length, waveform.barCount);
+  assert.equal(trace[trace.length - 1], 0.9);
+  assert.equal(trace[trace.length - 2], 0.4);
+});
+
+test('the trace never grows past the bar count', () => {
+  let trace = emptyTrace();
+  for (let index = 0; index < waveform.barCount * 3; index += 1) {
+    trace = pushTrace(trace, index / 100);
+  }
+  assert.equal(trace.length, waveform.barCount);
+});
+
+test('while listening the row reflects the trace and stays within bounds', () => {
+  const trace = Array.from({ length: waveform.barCount }, () => 1);
+  const bars = barScales(trace, true);
   assert.equal(bars.length, waveform.barCount);
   assert.ok(bars.every((scale) => scale >= waveform.minScale && scale <= 1));
+  // The taper weights the centre, so the middle must out-rank the edge.
   const middle = Math.floor(waveform.barCount / 2);
-  assert.ok(bars[middle] >= bars[0], 'centre bar should not be shorter than the edge');
+  assert.ok(bars[middle] > bars[0], 'centre should be taller than the edge under a flat trace');
 });
 
 test('silence while listening still shows a floor, so the row never vanishes', () => {
-  assert.ok(barScales(0, true).every((scale) => scale >= waveform.minScale));
+  assert.ok(barScales(emptyTrace(), true).every((scale) => scale >= waveform.minScale));
 });

@@ -13,11 +13,13 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../auth/AuthContext';
 import { MomentumGlyph } from '../components/BrandMark';
 import { Dock } from '../components/Dock';
+import { NavCluster } from '../components/NavCluster';
 import { Waveform } from '../components/Waveform';
 import { useLiveLine } from '../canvas/useLiveLine';
 import { useDictation } from '../voice/useDictation';
@@ -75,6 +77,7 @@ export function CanvasScreen() {
   const live = useLiveLine();
   const conversation = useScoutConversation();
   const [typing, setTyping] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const inputRef = useRef<TextInput>(null);
 
@@ -163,7 +166,25 @@ export function CanvasScreen() {
             onPress={handleTap}
             style={styles.wave}
           >
-            <Waveform amplitude={dictation.amplitude} listening={listening} height={72} />
+            {/* Ambient light, EARNED. A resting wash renders as a stray grey
+                lozenge — a horizontal gradient inside a rounded box has hard
+                top and bottom edges — so the canvas stays truly flat at rest
+                and the glow only exists while listening, where it is ember and
+                means something. */}
+            {listening ? (
+              <LinearGradient
+                colors={[
+                  'rgba(255,107,74,0.00)',
+                  'rgba(255,107,74,0.13)',
+                  'rgba(255,107,74,0.00)',
+                ]}
+                start={{ x: 0, y: 0.5 }}
+                end={{ x: 1, y: 0.5 }}
+                style={styles.glow}
+                pointerEvents="none"
+              />
+            ) : null}
+            <Waveform trace={dictation.trace} listening={listening} />
           </Pressable>
 
           <Text style={styles.greeting}>{greeting(user?.name)}</Text>
@@ -238,17 +259,65 @@ export function CanvasScreen() {
             />
           </Glass>
         ) : (
-          <Dock
-            dictation={dictation.state}
-            amplitude={dictation.amplitude}
-            conversing={conversation.open}
-            onTap={handleTap}
-            onHoldStart={() => void dictation.start()}
-            onHoldEnd={() => void dictation.stop()}
-            onHoldCancel={dictation.cancel}
-            onReveal={openDeck}
-            onKeyboard={handleKeyboard}
-          />
+          <View style={styles.dockRow}>
+            {/* Never routed through the voice pipeline — this is the path that
+                still works when the model quota is gone or the mic is denied.
+                Sits above the Dock so neither covers the other. */}
+            <NavCluster
+              open={navOpen}
+              onToggle={() => setNavOpen((previous) => !previous)}
+              destinations={[
+                {
+                  id: 'room',
+                  label: 'Room',
+                  icon: 'video.fill',
+                  emphasis: true,
+                  onPress: () => {
+                    setNavOpen(false);
+                    navigation.navigate('CreateRoom');
+                  },
+                },
+                {
+                  id: 'threads',
+                  label: 'Threads',
+                  icon: 'bubble.left.and.bubble.right.fill',
+                  onPress: () => {
+                    setNavOpen(false);
+                    navigation.navigate('Deck', { segment: 'threads' });
+                  },
+                },
+                {
+                  id: 'rooms',
+                  label: 'Live',
+                  icon: 'person.2.fill',
+                  onPress: () => {
+                    setNavOpen(false);
+                    navigation.navigate('Deck', { segment: 'rooms' });
+                  },
+                },
+                {
+                  id: 'work',
+                  label: 'Work',
+                  icon: 'rectangle.3.group.fill',
+                  onPress: () => {
+                    setNavOpen(false);
+                    navigation.navigate('Deck', { segment: 'work' });
+                  },
+                },
+              ]}
+            />
+            <Dock
+              dictation={dictation.state}
+              trace={dictation.trace}
+              conversing={conversation.open}
+              onTap={handleTap}
+              onHoldStart={() => void dictation.start()}
+              onHoldEnd={() => void dictation.stop()}
+              onHoldCancel={dictation.cancel}
+              onReveal={openDeck}
+              onKeyboard={handleKeyboard}
+            />
+          </View>
         )}
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -261,10 +330,22 @@ const styles = StyleSheet.create({
   body: {
     flexGrow: 1,
     alignItems: 'center',
+    // Optical centre, not geometric: a cluster centred on the true midpoint
+    // reads as sagging, because the Dock weights the bottom of the screen.
     justifyContent: 'center',
     paddingHorizontal: space[6],
-    paddingVertical: space[8],
-    gap: space[5],
+    paddingTop: space[8],
+    paddingBottom: space[12],
+    gap: space[4],
+  },
+  dockRow: {
+    // Column, not row: the nav stacks above the Dock so neither covers the
+    // other, and the cluster expands upward into empty canvas.
+    justifyContent: 'flex-end',
+  },
+  glow: {
+    ...StyleSheet.absoluteFill,
+    borderRadius: 999,
   },
   mark: {
     flexDirection: 'row',
@@ -277,12 +358,21 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   wave: {
-    paddingHorizontal: space[10],
-    paddingVertical: space[5],
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: space[4],
+    paddingVertical: space[6],
     borderRadius: radius.xxl,
+    marginBottom: space[2],
   },
   greeting: {
-    ...type.title1,
+    // Larger and tighter than title1: this is the only sentence on the page, so
+    // it should carry the page rather than share weight with the live line.
+    fontSize: 34,
+    fontWeight: '600',
+    letterSpacing: -0.9,
+    lineHeight: 40,
     color: colors.text1,
     textAlign: 'center',
   },

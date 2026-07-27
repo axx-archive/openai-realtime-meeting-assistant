@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, View, type ColorValue } from 'react-native';
 import { barScales } from '../voice/amplitude';
 import { colors } from '../theme/tokens';
-import { duration, ease, useReduceMotion, waveform } from '../theme/motion';
+import { duration, ease, useReduceMotion } from '../theme/motion';
+import { waveform } from '../theme/waveformGeometry';
 
 /**
  * The instrument — design §3.
@@ -13,87 +14,81 @@ import { duration, ease, useReduceMotion, waveform } from '../theme/motion';
  * voice interface. This one answers continuously, by physics.
  *
  * Two laws are enforced here rather than left to call sites:
- *   - Rest is STATIC (§8 law 1). `listening=false` renders a flat, calm line.
+ *
+ *   - Rest is STATIC (§8 law 1) — but static is not flat. At rest the row holds
+ *     a sculpted silhouette, matching the web canon's fourteen varied resting
+ *     heights. A row of identical ticks is an ellipsis, not a waveform.
  *   - Transforms only (§8 law 4). Bars have a fixed layout height and scale on
- *     Y; animating height would relayout the row every sample. This is the same
- *     width→transform lesson already paid for on the web client.
+ *     Y; animating height would relayout the row on every sample.
  */
 
 export type WaveformProps = {
-  /** 0..1, already smoothed by `useDictation`. */
-  amplitude: number;
-  /** While false the bars rest static — the breathe-only-while-listening law. */
+  /** Rolling amplitude history, oldest first. Ignored while not listening. */
+  trace: readonly number[];
+  /** While false the bars hold the resting silhouette, unanimated. */
   listening: boolean;
   /** Ember while listening, muted ink at rest. Ember is earned (§8 law 2). */
   color?: ColorValue;
   height?: number;
+  /** Scales bar width/gap for compact placements (the Dock, the composer). */
+  scale?: number;
 };
 
-export function Waveform({ amplitude, listening, color, height = waveform.height }: WaveformProps) {
+export function Waveform({
+  trace,
+  listening,
+  color,
+  height = waveform.height,
+  scale = 1,
+}: WaveformProps) {
   const reduceMotion = useReduceMotion();
-  const tint = color ?? (listening ? colors.ember : colors.text2);
+  const tint = color ?? (listening ? colors.ember : colors.text3);
 
-  const targets = barScales(amplitude, listening);
-  const values = useRef(targets.map((scale) => new Animated.Value(scale))).current;
+  const targets = barScales(trace, listening);
+  const values = useRef(targets.map((value) => new Animated.Value(value))).current;
 
   useEffect(() => {
-    const animations = values.map((value, index) =>
-      Animated.timing(value, {
-        toValue: targets[index] ?? waveform.restScale,
-        // One sampling interval, so each sample lands exactly as the next
-        // arrives — the row reads as continuous rather than stepped.
-        duration: listening ? duration.fast : duration.slow,
-        easing: ease,
-        useNativeDriver: true,
-      }),
-    );
-    Animated.parallel(animations).start();
-    // `targets` is a fresh array each render; the join is the actual dependency.
+    if (reduceMotion) {
+      // Amplitude response survives Reduce Motion — it is information, not
+      // decoration — but nothing tweens between samples.
+      values.forEach((value, index) => value.setValue(targets[index] ?? 0));
+      return;
+    }
+    Animated.parallel(
+      values.map((value, index) =>
+        Animated.timing(value, {
+          toValue: targets[index] ?? 0,
+          // One sampling interval, so each sample lands as the next arrives and
+          // the row reads as continuous rather than stepped.
+          duration: listening ? duration.fast : duration.slow,
+          easing: ease,
+          useNativeDriver: true,
+        }),
+      ),
+    ).start();
+    // `targets` is a fresh array each render; its contents are the dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targets.join(','), listening]);
-
-  const bars = useMemo(
-    () => values.slice(0, waveform.barCount),
-    [values],
-  );
-
-  // Reduce Motion: one static level bar instead of an animated row. The
-  // amplitude RESPONSE survives — it is information about whether the mic hears
-  // you, not decoration — but nothing tweens between samples.
-  if (reduceMotion) {
-    return (
-      <View
-        style={[styles.row, { height }]}
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants"
-      >
-        <View
-          style={[
-            styles.reducedTrack,
-            { backgroundColor: tint, height: Math.max(4, height * (listening ? amplitude : 0.06)) },
-          ]}
-        />
-      </View>
-    );
-  }
+  }, [targets.join(','), listening, reduceMotion]);
 
   return (
     // Decorative to a screen reader: the STATE is announced by the Dock, which
     // says "Listening" and a duration rather than streaming bar heights (§9.5).
     <View
-      style={[styles.row, { height }]}
+      style={[styles.row, { height, gap: waveform.barGap * scale }]}
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
     >
-      {bars.map((value, index) => (
+      {values.map((value, index) => (
         <Animated.View
           key={index}
           style={[
             styles.bar,
             {
               height,
+              width: waveform.barWidth * scale,
+              borderRadius: waveform.barWidth * scale,
               backgroundColor: tint,
-              opacity: listening ? 1 : waveform.restOpacity,
+              opacity: listening ? 1 : 0.55,
               transform: [{ scaleY: value }],
             },
           ]}
@@ -106,19 +101,12 @@ export function Waveform({ amplitude, listening, color, height = waveform.height
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    // Centre origin reads as an audio meter rather than a bar chart, and keeps
+    // the row optically balanced against the greeting beneath it.
+    alignItems: 'center',
     justifyContent: 'center',
-    gap: waveform.barGap,
   },
   bar: {
-    width: waveform.barWidth,
-    borderRadius: waveform.barWidth,
-    // Bottom origin matches the web `.office-launch__bars` canon, so the row
-    // grows up off a baseline instead of blooming from its middle.
-    transformOrigin: 'bottom',
-  },
-  reducedTrack: {
-    width: waveform.barWidth * waveform.barCount + waveform.barGap * (waveform.barCount - 1),
-    borderRadius: waveform.barWidth,
+    transformOrigin: 'center',
   },
 });
