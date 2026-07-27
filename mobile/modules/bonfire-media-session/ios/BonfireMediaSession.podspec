@@ -16,6 +16,7 @@ Pod::Spec.new do |s|
   s.swift_version  = '5.9'
 
   s.dependency 'ExpoModulesCore'
+  s.dependency 'JitsiWebRTC', '~> 124.0.0'
 
   s.frameworks = 'AVFoundation'
   s.source_files = '**/*.{h,m,mm,swift}'

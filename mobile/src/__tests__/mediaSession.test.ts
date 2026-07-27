@@ -51,13 +51,34 @@ test('iOS room audio forces built-in speaker while preserving external routes', 
     'utf8',
   );
 
-  assert.match(swift, /setCategory\(\.playAndRecord, mode: \.videoChat, options: options\)/);
+  assert.match(swift, /import WebRTC/);
   assert.match(swift, /\.defaultToSpeaker/);
   assert.match(swift, /\.allowBluetoothHFP/);
   assert.match(swift, /\.allowAirPlay/);
+  assert.match(swift, /RTCAudioSessionConfiguration\.setWebRTC\(configuration\)/);
+  assert.match(swift, /rtcSession\.lockForConfiguration\(\)/);
+  assert.match(swift, /try rtcSession\.setConfiguration\(configuration, active: true\)/);
+  assert.match(
+    swift,
+    /activationSucceeded = true[\s\S]*catch \{[\s\S]*if activationSucceeded \{[\s\S]*try\? rtcSession\.setActive\(false\)[\s\S]*throw error/,
+  );
+  assert.match(swift, /audioSessionDidStartPlayOrRecord/);
+  assert.match(swift, /audioSessionDidChangeRoute/);
+  assert.match(swift, /scheduleRouteReassertion\(\)/);
+  assert.match(swift, /OnDestroy \{[\s\S]*deactivateVideoMeetingRoute\(\)/);
+  assert.match(swift, /AsyncFunction\("deactivateVideoMeeting"\)[\s\S]*deactivateVideoMeetingRoute\(\)/);
+  assert.match(swift, /try rtcSession\.setActive\(false\)[\s\S]*ownsWebRTCActivation = false/);
   assert.match(swift, /let builtInOutputs: Set<AVAudioSession\.Port> = \[\.builtInReceiver, \.builtInSpeaker\]/);
-  assert.match(swift, /hasExternalOutput \? \.none : \.speaker/);
+  assert.match(swift, /alreadyOnSpeaker/);
   assert.match(swift, /meetingActive == true/);
+  assert.doesNotMatch(swift, /session\.setCategory\(/);
+  assert.doesNotMatch(swift, /session\.setActive\(true/);
+
+  const podspec = fs.readFileSync(
+    path.join(mobileRoot, 'modules', 'bonfire-media-session', 'ios', 'BonfireMediaSession.podspec'),
+    'utf8',
+  );
+  assert.match(podspec, /s\.dependency 'JitsiWebRTC', '~> 124\.0\.0'/);
   assert.match(room, /await BonfireMediaSession\.activateVideoMeeting\(\);[\s\S]*await refreshCameraFramingInternal\(true\)/);
   assert.match(room, /outcome === 'installed'[\s\S]*await BonfireMediaSession\.activateVideoMeeting\(\)/);
   assert.match(

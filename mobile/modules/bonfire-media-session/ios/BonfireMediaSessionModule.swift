@@ -1,62 +1,156 @@
 import AVFoundation
 import ExpoModulesCore
+import WebRTC
+
+private final class BonfireWebRTCAudioDelegate: NSObject, RTCAudioSessionDelegate {
+  weak var owner: BonfireMediaSessionModule?
+
+  func audioSessionDidStartPlayOrRecord(_ session: RTCAudioSession) {
+    owner?.scheduleRouteReassertion()
+  }
+
+  func audioSessionDidChangeRoute(
+    _ session: RTCAudioSession,
+    reason: AVAudioSession.RouteChangeReason,
+    previousRoute: AVAudioSessionRouteDescription
+  ) {
+    owner?.scheduleRouteReassertion()
+  }
+
+  func audioSessionMediaServerReset(_ session: RTCAudioSession) {
+    owner?.scheduleRouteReassertion()
+  }
+}
 
 public final class BonfireMediaSessionModule: Module {
+  private let routeQueue = DispatchQueue(label: "xyz.thebonfire.media-session-route")
   private var meetingActive = false
+  private var ownsWebRTCActivation = false
+  private lazy var webRTCAudioDelegate: BonfireWebRTCAudioDelegate = {
+    let delegate = BonfireWebRTCAudioDelegate()
+    delegate.owner = self
+    return delegate
+  }()
 
   public func definition() -> ModuleDefinition {
     Name("BonfireMediaSession")
 
-    AsyncFunction("activateVideoMeeting") { () -> [String: Any] in
-      let session = AVAudioSession.sharedInstance()
-      self.meetingActive = true
-      let snapshot = try Self.configureVideoMeetingRoute(session)
+    OnCreate {
+      RTCAudioSession.sharedInstance().add(self.webRTCAudioDelegate)
+    }
 
-      // WebRTC can rewrite AVAudioSession once its first remote audio track is
-      // attached. Reassert after that transaction settles; the generation flag
-      // prevents a late callback from reopening audio after Leave.
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+    OnDestroy {
+      RTCAudioSession.sharedInstance().remove(self.webRTCAudioDelegate)
+      self.routeQueue.sync {
+        _ = try? self.deactivateVideoMeetingRoute()
+      }
+    }
+
+    AsyncFunction("activateVideoMeeting") { () -> [String: Any] in
+      let snapshot = try self.routeQueue.sync {
+        let shouldActivate = !self.ownsWebRTCActivation
+        let snapshot = try Self.configureVideoMeetingRoute(activate: shouldActivate)
+        self.meetingActive = true
+        if shouldActivate {
+          self.ownsWebRTCActivation = true
+        }
+        return snapshot
+      }
+
+      // Keep one delayed pass for older libwebrtc builds whose audio-unit start
+      // callback can precede their final category transaction. The delegate is
+      // the primary lifecycle edge; this bounded compatibility pass never
+      // increments RTCAudioSession's activation count.
+      self.routeQueue.asyncAfter(deadline: .now() + 0.35) { [weak self] in
         guard self?.meetingActive == true else { return }
-        try? Self.configureVideoMeetingRoute(AVAudioSession.sharedInstance())
+        _ = try? Self.configureVideoMeetingRoute(activate: false)
       }
       return snapshot
     }
 
     AsyncFunction("deactivateVideoMeeting") { () -> Bool in
-      self.meetingActive = false
-      let session = AVAudioSession.sharedInstance()
-      try? session.overrideOutputAudioPort(.none)
-      try session.setActive(false, options: .notifyOthersOnDeactivation)
-      return true
+      return try self.routeQueue.sync { () throws -> Bool in
+        try self.deactivateVideoMeetingRoute()
+      }
     }
   }
 
-  private static func configureVideoMeetingRoute(_ session: AVAudioSession) throws -> [String: Any] {
+  private func deactivateVideoMeetingRoute() throws -> Bool {
+    meetingActive = false
+    let rtcSession = RTCAudioSession.sharedInstance()
+    rtcSession.lockForConfiguration()
+    defer { rtcSession.unlockForConfiguration() }
+
+    _ = try? rtcSession.overrideOutputAudioPort(.none)
+
+    guard ownsWebRTCActivation else { return true }
+    try rtcSession.setActive(false)
+    ownsWebRTCActivation = false
+    return true
+  }
+
+  fileprivate func scheduleRouteReassertion() {
+    routeQueue.async { [weak self] in
+      guard self?.meetingActive == true else { return }
+      _ = try? Self.configureVideoMeetingRoute(activate: false)
+    }
+  }
+
+  private static func configureVideoMeetingRoute(activate: Bool) throws -> [String: Any] {
     var options: AVAudioSession.CategoryOptions = [
       .defaultToSpeaker,
       .allowBluetoothA2DP,
       .allowAirPlay,
     ]
-    if #available(iOS 26.0, *) {
-      options.insert(.allowBluetoothHFP)
-    } else {
-      options.insert(.allowBluetooth)
-    }
+    options.insert(.allowBluetoothHFP)
 
-    try session.setCategory(.playAndRecord, mode: .videoChat, options: options)
-    try session.setActive(true)
+    // WebRTC owns and locks the audio session while its VoIP audio unit starts.
+    // Configure that owner rather than racing AVAudioSession directly. Updating
+    // its global configuration also prevents later audio-unit restarts from
+    // restoring the receiver route behind the app's back.
+    let configuration = RTCAudioSessionConfiguration.webRTC()
+    configuration.category = AVAudioSession.Category.playAndRecord.rawValue
+    configuration.mode = AVAudioSession.Mode.videoChat.rawValue
+    configuration.categoryOptions = options
+    RTCAudioSessionConfiguration.setWebRTC(configuration)
 
-    // A Bonfire room is a video meeting, not a telephone call. WebRTC may
-    // explicitly select the receiver after category activation, so the
-    // defaultToSpeaker option alone is insufficient. Override only when every
-    // current output is built-in; wired, Bluetooth, AirPlay, USB, and car
-    // routes are all classified as external and remain user-owned.
-    let builtInOutputs: Set<AVAudioSession.Port> = [.builtInReceiver, .builtInSpeaker]
-    let hasExternalOutput = session.currentRoute.outputs.contains { output in
-      !builtInOutputs.contains(output.portType)
+    let rtcSession = RTCAudioSession.sharedInstance()
+    rtcSession.lockForConfiguration()
+    defer { rtcSession.unlockForConfiguration() }
+
+    var activationSucceeded = false
+    do {
+      if activate {
+        try rtcSession.setConfiguration(configuration, active: true)
+        activationSucceeded = true
+      } else {
+        try rtcSession.setConfiguration(configuration)
+      }
+
+      // A Bonfire room is a video meeting, not a telephone call. Preserve wired,
+      // Bluetooth, AirPlay, USB, and car routes; only replace the built-in
+      // receiver with the built-in speaker.
+      let session = rtcSession.session
+      let builtInOutputs: Set<AVAudioSession.Port> = [.builtInReceiver, .builtInSpeaker]
+      let hasExternalOutput = session.currentRoute.outputs.contains { output in
+        !builtInOutputs.contains(output.portType)
+      }
+      let alreadyOnSpeaker = session.currentRoute.outputs.contains { output in
+        output.portType == .builtInSpeaker
+      }
+
+      if hasExternalOutput {
+        try rtcSession.overrideOutputAudioPort(.none)
+      } else if !alreadyOnSpeaker {
+        try rtcSession.overrideOutputAudioPort(.speaker)
+      }
+      return routeSnapshot(session)
+    } catch {
+      if activationSucceeded {
+        _ = try? rtcSession.setActive(false)
+      }
+      throw error
     }
-    try session.overrideOutputAudioPort(hasExternalOutput ? .none : .speaker)
-    return routeSnapshot(session)
   }
 
   private static func routeSnapshot(_ session: AVAudioSession) -> [String: Any] {
