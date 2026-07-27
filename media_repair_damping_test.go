@@ -24,6 +24,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pion/webrtc/v4"
 )
 
 /* ---------- S1(a): targeted, video-only keyframes ---------- */
@@ -186,5 +188,49 @@ func TestParticipantTrackRefreshReasonSanitized(t *testing.T) {
 	long := participantTrackRefreshReason(`{"reason":"` + strings.Repeat("a", 5000) + `"}`)
 	if len(long) > 256 {
 		t.Fatalf("reason not capped: %d runes", len(long))
+	}
+}
+
+func TestParticipantTrackRefreshRequestRecognizesNativeUplinkRenegotiation(t *testing.T) {
+	explicit := participantTrackRefreshRequestFromData(`{"reason":"unmute","renegotiateUplink":true}`)
+	if !explicit.renegotiateUplink || explicit.reason != "unmute" {
+		t.Fatalf("explicit native uplink request not preserved: %#v", explicit)
+	}
+	legacy := participantTrackRefreshRequestFromData(`{"reason":"microphone enabled after quiet join"}`)
+	if !legacy.renegotiateUplink {
+		t.Fatal("Build 16 quiet-join unmute request must force an offer")
+	}
+	ordinary := participantTrackRefreshRequestFromData(`{"reason":"frozen remote video"}`)
+	if ordinary.renegotiateUplink {
+		t.Fatal("ordinary media repair must not force an offer")
+	}
+}
+
+func TestMarkPeerConnectionForceOfferTargetsExactGeneration(t *testing.T) {
+	listLock.Lock()
+	previous := peerConnections
+	first := new(webrtc.PeerConnection)
+	second := new(webrtc.PeerConnection)
+	peerConnections = []peerConnectionState{
+		{peerConnection: first, mediaGeneration: 7},
+		{peerConnection: second, mediaGeneration: 7},
+	}
+	listLock.Unlock()
+	t.Cleanup(func() {
+		listLock.Lock()
+		peerConnections = previous
+		listLock.Unlock()
+	})
+
+	if markPeerConnectionForceOffer(first, 6) {
+		t.Fatal("stale media generation forced an offer")
+	}
+	if !markPeerConnectionForceOffer(first, 7) {
+		t.Fatal("current native peer did not accept forced offer")
+	}
+	listLock.RLock()
+	defer listLock.RUnlock()
+	if !peerConnections[0].forceOffer || peerConnections[1].forceOffer {
+		t.Fatalf("forced offer was not scoped to exact peer: %#v", peerConnections)
 	}
 }

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import {
   isServerUplinkSection,
+  nativeUplinkTransceiverForSender,
   nativeUplinkAnswerDirection,
   nativeVideoUplinkCodecViolation,
   offeredRemoteVideoTrackIds,
@@ -109,6 +110,36 @@ describe('native room offer planning', () => {
       trackId: 'remote-track',
     });
     assert.deepEqual(offeredRemoteVideoTrackIds(sections), ['remote-track']);
+  });
+
+  it('resolves the native uplink by sender identity when remote audio downlinks coexist', () => {
+    const remoteSender = { id: 'remote-downlink-sender' };
+    const uplinkSender = { id: 'fixed-native-uplink-sender' };
+    const transceivers = [
+      { sender: remoteSender, receiver: { track: { kind: 'audio' } } },
+      { sender: uplinkSender, receiver: { track: { kind: 'audio' } } },
+    ];
+
+    assert.equal(
+      nativeUplinkTransceiverForSender(transceivers, uplinkSender),
+      transceivers[1],
+    );
+    assert.equal(nativeUplinkTransceiverForSender(transceivers, null), null);
+  });
+
+  it('requests an explicit server offer before enabling a quiet-join microphone', () => {
+    const roomSource = fs.readFileSync(
+      path.join(process.cwd(), 'src/realtime/useNativeRoom.ts'),
+      'utf8',
+    );
+    assert.match(
+      roomSource,
+      /nativeUplinkTransceiverForSender\([\s\S]*reason: 'microphone enabled after quiet join',[\s\S]*renegotiateUplink: true/,
+    );
+    assert.doesNotMatch(
+      roomSource,
+      /getTransceivers\(\)\.find\(\(candidate\) => candidate\.receiver\.track\?\.kind === 'audio'/,
+    );
   });
 
   it('treats inactive video m-lines as removed and fails safe without track identity', () => {

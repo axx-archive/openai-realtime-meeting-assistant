@@ -31,10 +31,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         dark: './assets/ios-icon-dark.png',
         tinted: './assets/ios-icon-tinted.png',
       },
-      // Build 16 ships the verified upright-camera framing and premium media
-      // policy together with the shared human-and-agent momentum identity.
+      // Build 17 ships the quiet-join microphone renegotiation hotfix and the
+      // portrait-first premium framing baseline with the shared momentum identity.
       // Pin the multi-target release so the app and ReplayKit extension match.
-      buildNumber: '16',
+      buildNumber: '17',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

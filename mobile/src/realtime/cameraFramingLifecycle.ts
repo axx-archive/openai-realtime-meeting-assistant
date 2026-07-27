@@ -235,11 +235,11 @@ export function wideUprightIntentAfterTransition(
   currentIntent: boolean | null,
   transition: 'call-start' | 'camera-reset' | 'call-end',
 ): boolean | null {
-  // The adaptive iOS 26 front camera needs an explicit dynamic aspect ratio.
-  // Prefer its landscape-upright output when the exact active device proves the
-  // capability is operational; unsupported cameras simply ignore this intent.
-  // This also gives desktop peers a full 16:9 frame without cropping or bars.
-  if (transition === 'call-start') return true;
+  // The premium baseline is the adaptive camera's explicit 9:16 portrait
+  // output. Desktop's cover crop then produces the equal-fill composition
+  // without the over-tight native crop caused by Wide Upright. The control is
+  // still available as an in-call power-user choice.
+  if (transition === 'call-start') return false;
   if (transition === 'call-end') return null;
   return currentIntent;
 }

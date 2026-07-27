@@ -415,6 +415,10 @@ type peerConnectionState struct {
 	pendingOfferID       string
 	pendingOfferRevision uint64
 	iceRestart           peerICERestartState
+	// forceOffer requests an ordinary (non-ICE-restart) offer even when the
+	// room's forwarded track set is unchanged. Native quiet-join audio uses it
+	// to change its fixed uplink answer from inactive to sendonly.
+	forceOffer bool
 }
 
 // officeConnectionState is the registry entry for an authenticated websocket
@@ -3555,11 +3559,27 @@ func sanitizeLogField(s string) string {
 // diagnosis needs, but they are attacker-shaped input so they go through
 // sanitizeLogField). Garbage payloads degrade to "".
 func participantTrackRefreshReason(data string) string {
+	return participantTrackRefreshRequestFromData(data).reason
+}
+
+type participantTrackRefreshRequest struct {
+	reason            string
+	renegotiateUplink bool
+}
+
+func participantTrackRefreshRequestFromData(data string) participantTrackRefreshRequest {
 	payload := map[string]any{}
 	if err := json.Unmarshal([]byte(data), &payload); err != nil {
-		return ""
+		return participantTrackRefreshRequest{}
 	}
-	return stringFromPayload(payload, "reason")
+	reason := stringFromPayload(payload, "reason")
+	return participantTrackRefreshRequest{
+		reason: reason,
+		// The exact reason keeps Build 16 compatible; Build 17+ sends the
+		// explicit flag so this behavior no longer depends on display text.
+		renegotiateUplink: boolFromPayload(payload, "renegotiateUplink") ||
+			reason == "microphone enabled after quiet join",
+	}
 }
 
 func boolFromPayload(payload map[string]any, key string) bool {
@@ -3916,6 +3936,22 @@ func peerConnectionStateLocked(peerConnection *webrtc.PeerConnection) *peerConne
 	return nil
 }
 
+func markPeerConnectionForceOffer(peerConnection *webrtc.PeerConnection, mediaGeneration uint64) bool {
+	if peerConnection == nil {
+		return false
+	}
+	listLock.Lock()
+	defer listLock.Unlock()
+	for i := range peerConnections {
+		peer := &peerConnections[i]
+		if peer.peerConnection == peerConnection && peer.mediaGeneration == mediaGeneration {
+			peer.forceOffer = true
+			return true
+		}
+	}
+	return false
+}
+
 func closeParticipantConnections(states []peerConnectionState) {
 	closeParticipantConnectionsWithMessage(states, "This browser session was replaced by a newer room join.")
 }
@@ -4091,7 +4127,9 @@ func signalPeerConnectionsForRoom(roomID string, mediaGeneration uint64, enforce
 			}
 
 			peer := &peerConnections[i]
-			forceSignal := peer.iceRestart.queued
+			forceRestart := peer.iceRestart.queued
+			forceOffer := peer.forceOffer
+			forceSignal := forceRestart || forceOffer
 
 			if peer.peerConnection.SignalingState() != webrtc.SignalingStateStable {
 				retryLater = true
@@ -4248,7 +4286,7 @@ func signalPeerConnectionsForRoom(roomID string, mediaGeneration uint64, enforce
 			}
 
 			var offerOptions *webrtc.OfferOptions
-			if forceSignal {
+			if forceRestart {
 				offerOptions = &webrtc.OfferOptions{ICERestart: true}
 			}
 
@@ -4269,8 +4307,11 @@ func signalPeerConnectionsForRoom(roomID string, mediaGeneration uint64, enforce
 				retryLater = true
 				return true
 			}
-			if forceSignal {
+			if forceRestart {
 				peer.iceRestart.start(time.Now())
+			}
+			if forceOffer {
+				peer.forceOffer = false
 			}
 			offerMetadata := startPendingOfferMetadata(peer)
 
@@ -4294,8 +4335,8 @@ func signalPeerConnectionsForRoom(roomID string, mediaGeneration uint64, enforce
 			}
 
 			totalTracks, audioTracks, videoTracks := forwardedTrackCountsLocked()
-			log.Infof("room_signal_offer participant=%s session=%s offer_id=%s revision=%d restart=%t desired_tracks=%d sender_tracks=%d receiver_tracks=%d total_tracks=%d audio_tracks=%d video_tracks=%d signaling_state=%s",
-				peer.participantName, peer.sessionID, offerMetadata.OfferID, offerMetadata.Revision, forceSignal, desiredTrackCount, countPeerSenders(peer.peerConnection), countPeerReceivers(peer.peerConnection), totalTracks, audioTracks, videoTracks, peer.peerConnection.SignalingState())
+			log.Infof("room_signal_offer participant=%s session=%s offer_id=%s revision=%d restart=%t forced_offer=%t desired_tracks=%d sender_tracks=%d receiver_tracks=%d total_tracks=%d audio_tracks=%d video_tracks=%d signaling_state=%s",
+				peer.participantName, peer.sessionID, offerMetadata.OfferID, offerMetadata.Revision, forceRestart, forceOffer, desiredTrackCount, countPeerSenders(peer.peerConnection), countPeerReceivers(peer.peerConnection), totalTracks, audioTracks, videoTracks, peer.peerConnection.SignalingState())
 
 			if peer.signal != nil {
 				signal := peer.signal
@@ -5953,9 +5994,10 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			// with a rate-limited drop log. Accepted requests are logged at most
 			// once per 10s per session with a suppressed-count so a repair storm
 			// can't become a log storm.
+			refreshRequest := participantTrackRefreshRequestFromData(message.Data)
 			if guest == nil {
 				repairNow := time.Now()
-				reason := participantTrackRefreshReason(message.Data)
+				reason := refreshRequest.reason
 				if !kanbanApp.allowMemberMediaRepair(connRoomID, participantSessionID, repairNow) {
 					memberRepairDropsSuppressed++
 					if repairNow.Sub(memberRepairDropLogAt) >= memberMediaRepairLogInterval {
@@ -5973,6 +6015,11 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 					memberRepairLogsSuppressed = 0
 				} else {
 					memberRepairLogsSuppressed++
+				}
+			}
+			if refreshRequest.renegotiateUplink {
+				if markPeerConnectionForceOffer(peerConnection, participantMediaGeneration.Load()) {
+					log.Infof("native_uplink_offer_queued session=%s room=%s participant=%s", participantSessionID, connRoomID, currentParticipantName())
 				}
 			}
 			sendParticipantTrackSnapshots(c, connRoomID, currentParticipantName())

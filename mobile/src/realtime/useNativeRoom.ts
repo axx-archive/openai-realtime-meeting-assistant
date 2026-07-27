@@ -58,6 +58,7 @@ import {
 } from './remoteTrackProgress';
 import {
   isServerUplinkSection,
+  nativeUplinkTransceiverForSender,
   nativeUplinkAnswerDirection,
   nativeVideoUplinkCodecViolation,
   offeredRemoteVideoTrackIds,
@@ -179,7 +180,7 @@ type PendingMicrophonePublicationCommit = {
   version: number;
 };
 
-const NATIVE_ROOM_CLIENT_VERSION = 'expo-native-7';
+const NATIVE_ROOM_CLIENT_VERSION = 'expo-native-8';
 const reconnectDelaysMs = [500, 1_000, 2_000, 4_000, 8_000, 12_000];
 const cameraRecoveryCooldownMs = 8_000;
 const cameraFramingRestoreTimeoutMs = 750;
@@ -406,10 +407,10 @@ export function useNativeRoom(
     return true;
   }, []);
 
-  const send = useCallback((event: string, payload: unknown = {}, metadata: { offerId?: string; revision?: number } = {}) => {
+  const send = useCallback((event: string, payload: unknown = {}, metadata: { offerId?: string; revision?: number } = {}): boolean => {
     const socketContext = socketContextRef.current;
-    if (!socketContext) return;
-    sendOnSocket(socketContext, event, payload, metadata);
+    if (!socketContext) return false;
+    return sendOnSocket(socketContext, event, payload, metadata);
   }, [sendOnSocket]);
 
   const localParticipantMediaState = useCallback((overrides: Partial<{
@@ -970,9 +971,10 @@ export function useNativeRoom(
     }
     const peerContext = peerContextRef.current;
     const peer = peerContext?.peer ?? null;
-    const sender = audioSenderRef.current
-      ?? peer?.getTransceivers().find((candidate) => candidate.receiver.track?.kind === 'audio')?.sender
-      ?? null;
+    // The fixed audio uplink is established from the server's recvonly m-line
+    // and retained here. Never guess it from receiver.kind: every remote audio
+    // downlink has the same receiver kind and can otherwise steal unmute.
+    const sender = audioSenderRef.current;
     const local = localRef.current;
     if (
       !peerContext
@@ -2437,6 +2439,10 @@ export function useNativeRoom(
     if (!joinAttempt) return;
     const joinIsCurrent = () => joinAttemptGuardRef.current?.isCurrent(joinAttempt) === true;
     resetCameraFraming(true);
+    // Each call starts from the premium composition the user validated:
+    // Center Stage off and explicit 9:16 portrait capture. Both controls stay
+    // available in-call as deliberate power-user choices.
+    requestedCenterStageRef.current = false;
     intentionallyLeaving.current = false;
     requestedAudio.current = withAudio;
     requestedVideo.current = withVideo;
@@ -2551,19 +2557,43 @@ export function useNativeRoom(
     // Existing and newly captured tracks use the same serialized publication
     // barrier. Never turn a live track on directly from the button callback.
     setState((current) => ({ ...current, muted: true, microphoneStarting: true, error: null }));
+    const failMicrophoneStart = (reason: string) => {
+      requestedAudio.current = false;
+      setState((current) => ({
+        ...current,
+        muted: true,
+        microphoneStarting: false,
+        error: 'The microphone is not ready yet. Rejoin the room and try again.',
+      }));
+      send('participant_media_state', localParticipantMediaState({ micMuted: true }));
+      send('media_error', {
+        kind: 'microphone_uplink_unavailable',
+        reason,
+        client: { platform: 'ios', version: NATIVE_ROOM_CLIENT_VERSION, appState: appStateRef.current },
+      });
+    };
     const peer = peerContextRef.current?.peer ?? peerRef.current;
-    const audioTransceiver = peer?.getTransceivers()
-      .find((candidate) => candidate.receiver.track?.kind === 'audio');
+    const audioTransceiver = nativeUplinkTransceiverForSender(
+      peer?.getTransceivers() ?? [],
+      audioSenderRef.current,
+    );
     if (audioTransceiver && audioTransceiver.currentDirection !== 'sendonly') {
       audioTransceiver.direction = 'sendonly';
-      send('request_participant_tracks', {
+      if (send('request_participant_tracks', {
         reason: 'microphone enabled after quiet join',
-      });
+        renegotiateUplink: true,
+      })) return;
+      audioTransceiver.direction = 'inactive';
+      failMicrophoneStart('unmute could not request a server offer');
       return;
     }
-    if (!microphoneRecoveryGuardRef.current?.isRunning()) {
-      recoverNativeMicrophone('microphone enabled after joining muted');
+    if (
+      !microphoneRecoveryGuardRef.current?.isRunning()
+      && recoverNativeMicrophone('microphone enabled after joining muted')
+    ) {
+      return;
     }
+    failMicrophoneStart('unmute could not resolve the fixed audio publication sender');
   }, [cancelMicrophonePublicationCommit, localParticipantMediaState, recoverNativeMicrophone, send]);
 
   const setCameraOff = useCallback((cameraOff: boolean) => {

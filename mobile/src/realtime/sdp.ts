@@ -31,6 +31,17 @@ export function isServerUplinkSection(
   return section?.direction === 'recvonly';
 }
 
+/** Resolve the fixed native publication slot by sender identity, never by the
+ * receiver kind. A room can contain several same-kind remote downlinks, whose
+ * receiver tracks are deliberately unrelated to the local uplink. */
+export function nativeUplinkTransceiverForSender<TTransceiver extends { sender: unknown }>(
+  transceivers: readonly TTransceiver[],
+  sender: unknown | null | undefined,
+): TTransceiver | null {
+  if (!sender) return null;
+  return transceivers.find((candidate) => candidate.sender === sender) ?? null;
+}
+
 /**
  * Return the server's active video downlinks. Null means an active m-line had
  * no msid track identity, so pruning would be unsafe; an empty array is an

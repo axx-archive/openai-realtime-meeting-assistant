@@ -278,9 +278,9 @@ describe('camera framing lifecycle', () => {
     assert.equal(explicitFramingIntentAfterResult(true, false), null);
   });
 
-  it('defaults supported cameras to wide-upright per call, preserves intent across camera resets, and clears on leave', () => {
+  it('defaults supported cameras to portrait per call, preserves explicit intent across camera resets, and clears on leave', () => {
     let intent = wideUprightIntentAfterTransition(null, 'call-start');
-    assert.equal(intent, true);
+    assert.equal(intent, false);
 
     intent = explicitFramingIntentAfterResult(true, true);
     assert.equal(wideUprightIntentAfterTransition(intent, 'camera-reset'), true);
@@ -288,7 +288,7 @@ describe('camera framing lifecycle', () => {
 
     intent = wideUprightIntentAfterTransition(intent, 'call-end');
     assert.equal(intent, null);
-    assert.equal(wideUprightIntentAfterTransition(intent, 'call-start'), true);
+    assert.equal(wideUprightIntentAfterTransition(intent, 'call-start'), false);
   });
 
   it('restores the device that was actually widened before considering the current track', () => {

@@ -133,6 +133,11 @@ describe('iOS WebRTC camera prebuild patch', () => {
       roomSource.indexOf('const setMuted = useCallback'),
     );
     assert.ok(joinSource.length > 0, 'native join implementation must remain discoverable');
+    assert.match(
+      joinSource,
+      /resetCameraFraming\(true\);[\s\S]*requestedCenterStageRef\.current = false;[\s\S]*wideUprightIntentAfterTransition\([\s\S]*'call-start'/,
+      'each call must actively start with Center Stage and Wide Upright off',
+    );
     assert.ok(
       joinSource.indexOf('await refreshCameraFramingInternal(true)')
         < joinSource.indexOf('connectSocket();'),
