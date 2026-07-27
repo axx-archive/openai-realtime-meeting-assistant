@@ -7,13 +7,38 @@ const {
 } = require('@expo/config-plugins');
 
 const pluginName = 'with-webrtc-multitasking-camera';
-const pluginVersion = '1.5.0';
+const pluginVersion = '1.6.0';
 const appDelegateMarker = '// BonfireOS: keep WebRTC camera capture available during iOS call multitasking.';
 const bridgingImport = '#import <react-native-webrtc/WebRTCModuleOptions.h>';
 const centerStageMarker = '// BonfireOS: preserve the user and system Center Stage choice.';
 const adaptiveFrontCameraMarker =
   '// BonfireOS: prefer the iOS 26 square-sensor front camera when WebRTC can use its adaptive format.';
 const forcedCenterStageAssignment = /AVCaptureDevice\.centerStageEnabled\s*=\s*(?:YES|NO)\s*;/g;
+const pictureInPictureScaleMarker =
+  '// BonfireOS: honor the requested PiP gravity when rotating mobile frames.';
+const defaultPictureInPictureScale = [
+  '        CGFloat scale = 1;',
+  '        if (rotation == 90 || rotation == 270) {',
+  '            CGSize size = self.bounds.size;',
+  '            scale = size.height / size.width;',
+  '        }',
+].join('\n');
+const gravityAwarePictureInPictureScale = [
+  `        ${pictureInPictureScaleMarker}`,
+  '        CGFloat scale = 1;',
+  '        if (rotation == 90 || rotation == 270) {',
+  '            CGSize size = self.bounds.size;',
+  '            CGFloat width = MAX(1, size.width);',
+  '            CGFloat height = MAX(1, size.height);',
+  '            CGFloat widthToHeight = width / height;',
+  '            CGFloat heightToWidth = height / width;',
+  '            BOOL fillsBounds =',
+  '                [self.sampleBufferLayer.videoGravity isEqualToString:AVLayerVideoGravityResizeAspectFill];',
+  '            scale = fillsBounds',
+  '                ? MAX(widthToHeight, heightToWidth)',
+  '                : MIN(widthToHeight, heightToWidth);',
+  '        }',
+].join('\n');
 
 const forcedCenterStageBlock = [
   '    // Enable Center Stage when the device supports it; cooperative with Control Center.',
@@ -271,6 +296,47 @@ function resolveWebRTCCameraSource(projectRoot) {
   );
 }
 
+function resolveWebRTCPictureInPictureSource(projectRoot) {
+  let packageJson;
+  try {
+    packageJson = require.resolve('react-native-webrtc/package.json', {
+      paths: [projectRoot],
+    });
+  } catch (error) {
+    throw new Error(
+      `${pluginName} could not resolve react-native-webrtc from ${projectRoot}: ${error.message}`,
+    );
+  }
+  return path.join(
+    path.dirname(packageJson),
+    'ios',
+    'RCTWebRTC',
+    'SampleBufferVideoCallView.m',
+  );
+}
+
+function patchPictureInPictureScale(source, sourcePath = 'SampleBufferVideoCallView.m') {
+  const defaultCount = occurrenceCount(source, defaultPictureInPictureScale);
+  const patchedCount = occurrenceCount(source, gravityAwarePictureInPictureScale);
+  if (defaultCount + patchedCount !== 1) {
+    throw new Error(
+      `${pluginName} refuses to prebuild ${sourcePath}: the react-native-webrtc PiP scale source no longer matches the reviewed patched or unpatched shape.`,
+    );
+  }
+  const patchedSource = defaultCount === 1
+    ? source.replace(defaultPictureInPictureScale, gravityAwarePictureInPictureScale)
+    : source;
+  if (
+    occurrenceCount(patchedSource, gravityAwarePictureInPictureScale) !== 1
+    || occurrenceCount(patchedSource, defaultPictureInPictureScale) !== 0
+  ) {
+    throw new Error(
+      `${pluginName} refuses to prebuild ${sourcePath}: the gravity-aware PiP scale patch is missing or duplicated.`,
+    );
+  }
+  return patchedSource;
+}
+
 function withWebRTCMultitaskingCamera(config) {
   config = withAppDelegate(config, (appDelegateConfig) => {
     if (appDelegateConfig.modResults.language !== 'swift') {
@@ -318,6 +384,18 @@ function withWebRTCMultitaskingCamera(config) {
       fs.writeFileSync(cameraSource, patchedCameraSource);
     }
 
+    const pictureInPictureSource = resolveWebRTCPictureInPictureSource(
+      dangerousConfig.modRequest.projectRoot,
+    );
+    const originalPictureInPictureSource = fs.readFileSync(pictureInPictureSource, 'utf8');
+    const patchedPictureInPictureSource = patchPictureInPictureScale(
+      originalPictureInPictureSource,
+      pictureInPictureSource,
+    );
+    if (patchedPictureInPictureSource !== originalPictureInPictureSource) {
+      fs.writeFileSync(pictureInPictureSource, patchedPictureInPictureSource);
+    }
+
     const projectDirectories = fs.readdirSync(iosRoot, { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && !entry.name.endsWith('.xcodeproj') && entry.name !== 'Pods')
       .map((entry) => path.join(iosRoot, entry.name));
@@ -355,8 +433,13 @@ plugin.__testing = {
   cooperativeCenterStageBlock,
   defaultPositionCameraSelection,
   forcedCenterStageBlock,
+  defaultPictureInPictureScale,
+  gravityAwarePictureInPictureScale,
   patchCenterStageSource,
+  patchPictureInPictureScale,
+  pictureInPictureScaleMarker,
   resolveWebRTCCameraSource,
+  resolveWebRTCPictureInPictureSource,
   safeCenterStageFormatSelection,
   unsafeCenterStageFormatSelection,
 };

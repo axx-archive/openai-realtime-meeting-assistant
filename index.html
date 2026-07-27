@@ -1499,19 +1499,41 @@
         contain: paint;
       }
 
-      /* Every camera participant owns the same desktop tile geometry. Phones
-         without Wide Upright still publish portrait video, so bias cover toward
-         the upper center where a face normally sits instead of adding black
-         pillarboxes. Screen shares remain uncropped because their full content
-         matters more than equal camera framing. */
+      /* Every camera participant owns the same desktop tile geometry. Adaptive
+         iPhones publish a landscape composition while upright. Older iPhones
+         can only publish a true portrait frame; forcing that 9:16 image through
+         cover discards most of the person and looks aggressively zoomed. Keep
+         the whole portrait visible over a low-resolution ambient fill instead:
+         the tile remains full and premium without black bars or destructive
+         cropping. Screen shares remain uncropped and never receive a backdrop. */
+      .portrait-frame-backdrop {
+        position: absolute;
+        inset: -18px;
+        z-index: 0;
+        width: calc(100% + 36px);
+        height: calc(100% + 36px);
+        border-radius: inherit;
+        opacity: 0;
+        filter: blur(22px) brightness(0.5) saturate(0.82);
+        transform: scale(1.08);
+        transition: opacity 180ms var(--ease);
+        pointer-events: none;
+      }
+
+      .portrait-frame-backdrop.is-ready {
+        opacity: 0.92;
+      }
+
       @media (min-width: 641px) {
-        html:not(.is-mobile-device) .video-tile video.has-portrait-frame,
-        html:not(.is-mobile-device) .hearth-speaker video.has-portrait-frame,
-        html:not(.is-mobile-device) .screen-stage__pip video.has-portrait-frame,
-        html:not(.is-mobile-device) .pip-tile video.has-portrait-frame,
-        html:not(.is-mobile-device) .board-video-tile video.has-portrait-frame {
-          object-fit: cover;
-          object-position: 50% 35%;
+        html:not(.is-mobile-device) .video-tile.has-portrait-composition video.has-portrait-frame,
+        html:not(.is-mobile-device) .hearth-speaker.has-portrait-composition video.has-portrait-frame,
+        html:not(.is-mobile-device) .screen-stage__pip.has-portrait-composition video.has-portrait-frame,
+        html:not(.is-mobile-device) .pip-tile.has-portrait-composition video.has-portrait-frame,
+        html:not(.is-mobile-device) .board-video-tile.has-portrait-composition video.has-portrait-frame {
+          z-index: 1;
+          object-fit: contain;
+          object-position: center;
+          background: transparent;
         }
 
         html:not(.is-mobile-device) .video-tile.is-sharing-screen video.has-portrait-frame,
@@ -24636,8 +24658,21 @@
       }
 
       let lastNonBoardTool = 'office'
+      // Mission-intelligence state is boot-reachable through applyToolState →
+      // syncIntelLivePoll. Keep it with the shell state, before any login or
+      // tool-routing render can run, so an early office/room paint cannot hit
+      // a top-level lexical binding in its temporal dead zone.
+      let intelData = null
+      let intelLoadedAt = 0
+      let intelRefreshing = false
+      let expandedIntelDecisionId = ''
+      let intelLivePollTimer = 0
       let railHidden = false
       const pipVideoTilesByParticipant = new Map()
+      // Video elements are attached during login-gate rendering, before the
+      // later room-media helper section is parsed. Hoist the ambient portrait
+      // composition registry with the rest of the boot-reachable media state.
+      const portraitVideoBackdropStates = new WeakMap()
       let pipMoreIndicator = null
       let pipEmptyIndicator = null
       let pipRenderTimer = 0
@@ -47344,6 +47379,102 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return remoteVideoElementForParticipant(participantName)
       }
 
+      function portraitVideoCompositionHost(video) {
+        return video?.closest?.('.video-tile, .hearth-speaker, .screen-stage__pip, .pip-tile, .board-video-tile') || null
+      }
+
+      function stopPortraitVideoComposition(video) {
+        const state = portraitVideoBackdropStates.get(video)
+        if (!state) {
+          portraitVideoCompositionHost(video)?.classList.remove('has-portrait-composition')
+          return
+        }
+        window.clearInterval(state.timer)
+        state.host.classList.remove('has-portrait-composition')
+        state.canvas.remove()
+        portraitVideoBackdropStates.delete(video)
+      }
+
+      function portraitVideoCompositionIsEligible(video, orientation) {
+        if (isMobileDevice || orientation !== 'portrait' || !video?.srcObject) {
+          return false
+        }
+        const host = portraitVideoCompositionHost(video)
+        if (!host || host.classList.contains('is-sharing-screen')) {
+          return false
+        }
+        return video.id !== 'screenStageVideo'
+      }
+
+      function drawPortraitVideoBackdrop(video, state) {
+        if (!video.isConnected || !video.srcObject || portraitVideoBackdropStates.get(video) !== state) {
+          stopPortraitVideoComposition(video)
+          return
+        }
+        if (video.dataset.frameOrientation !== 'portrait'
+            || state.host !== portraitVideoCompositionHost(video)
+            || state.host.classList.contains('is-sharing-screen')) {
+          stopPortraitVideoComposition(video)
+          return
+        }
+        const hostRect = state.host.getBoundingClientRect()
+        const sourceWidth = Number(video.videoWidth || 0)
+        const sourceHeight = Number(video.videoHeight || 0)
+        if (hostRect.width <= 0 || hostRect.height <= 0 || sourceWidth <= 0 || sourceHeight <= 0) {
+          return
+        }
+        // The canvas is deliberately capped: blur removes fine detail, so a
+        // full-resolution second composition would waste CPU in large rooms.
+        const resolutionScale = Math.min(1, 480 / hostRect.width)
+        const width = Math.max(1, Math.round(hostRect.width * resolutionScale))
+        const height = Math.max(1, Math.round(hostRect.height * resolutionScale))
+        if (state.canvas.width !== width || state.canvas.height !== height) {
+          state.canvas.width = width
+          state.canvas.height = height
+        }
+        const scale = Math.max(width / sourceWidth, height / sourceHeight)
+        const drawWidth = sourceWidth * scale
+        const drawHeight = sourceHeight * scale
+        const dx = (width - drawWidth) / 2
+        const dy = (height - drawHeight) / 2
+        try {
+          state.context.drawImage(video, dx, dy, drawWidth, drawHeight)
+          state.canvas.classList.add('is-ready')
+        } catch {
+          // A transient decoder reset is handled by the next bounded sample.
+        }
+      }
+
+      function syncPortraitVideoComposition(video, orientation) {
+        if (!portraitVideoCompositionIsEligible(video, orientation)) {
+          stopPortraitVideoComposition(video)
+          return false
+        }
+        const host = portraitVideoCompositionHost(video)
+        const current = portraitVideoBackdropStates.get(video)
+        if (current?.host === host) {
+          drawPortraitVideoBackdrop(video, current)
+          return true
+        }
+        if (current) stopPortraitVideoComposition(video)
+        const canvas = document.createElement('canvas')
+        canvas.className = 'portrait-frame-backdrop'
+        canvas.setAttribute('aria-hidden', 'true')
+        const context = canvas.getContext('2d', { alpha: false })
+        if (!context) return false
+        host.prepend(canvas)
+        host.classList.add('has-portrait-composition')
+        const state = {
+          canvas,
+          context,
+          host,
+          timer: window.setInterval(() => drawPortraitVideoBackdrop(video, state), 125)
+        }
+        portraitVideoBackdropStates.set(video, state)
+        drawPortraitVideoBackdrop(video, state)
+        return true
+      }
+
       function syncVideoFrameOrientation(video) {
         if (video?.tagName?.toLowerCase?.() !== 'video') {
           return 'unknown'
@@ -47355,6 +47486,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           : 'unknown'
         video.dataset.frameOrientation = orientation
         video.classList.toggle('has-portrait-frame', orientation === 'portrait')
+        syncPortraitVideoComposition(video, orientation)
         return orientation
       }
 
@@ -49480,13 +49612,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       /* ---------- Mission Intelligence — the company brain, visible ----------
          GET /assistant/mission serves every signed-in user counts + generated
          themes only; artifact text stays behind the admin library gate. */
-      let intelData = null
-      let intelLoadedAt = 0
-      let intelRefreshing = false
       // card 081: which decision ledger row is expanded to its inline detail.
       // Module state (never DOM) so a live "decision" office re-render keeps the
       // open row open; shared by the intel ledger and the package-binder ledger.
-      let expandedIntelDecisionId = ''
 
       function intelPulseTotal() {
         const week = intelData?.pulse?.last7d
@@ -49788,8 +49916,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       /* while the intel canvas is open AND a meeting is live, the counters
          re-fetch every 15s so "counting — the room is live" stays honest */
-      let intelLivePollTimer = 0
-
       function syncIntelLivePoll() {
         const live = Number(intelData?.pulse?.liveParticipants) > 0
         const wanted = Boolean(authedUser) && live && (appShell.dataset.tool || '') === 'artifacts'
@@ -56700,6 +56826,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         boardSurface.classList.toggle('is-empty', isBoardReady && cards.length === 0)
         boardSurface.classList.toggle('is-locked', !isBoardReady)
       }
+      // Deterministic browser/E2E readiness: function declarations are
+      // hoisted before later top-level lexical state is initialized, so
+      // checking for a function name alone can race the rest of this bundle.
+      window.__bonfireClientBootReady = true
     </script>
   </body>
 </html>

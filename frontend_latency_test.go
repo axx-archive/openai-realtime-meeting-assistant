@@ -357,7 +357,7 @@ func TestIndexKeepsWidescreenCaptureAndCalmRemoteTiles(t *testing.T) {
 	}
 }
 
-func TestIndexMakesPortraitMobileCamerasFillDesktopTiles(t *testing.T) {
+func TestIndexComposesPortraitMobileCamerasWithoutBlackBarsOrDestructiveCrop(t *testing.T) {
 	rawHTML, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatalf("read index.html: %v", err)
@@ -367,23 +367,27 @@ func TestIndexMakesPortraitMobileCamerasFillDesktopTiles(t *testing.T) {
 	for _, want := range []string{
 		"function syncVideoFrameOrientation(video)",
 		"function observeVideoFrameOrientation(video)",
+		"function syncPortraitVideoComposition(video, orientation)",
+		"function drawPortraitVideoBackdrop(video, state)",
 		"video.addEventListener('loadedmetadata', () => syncVideoFrameOrientation(video))",
 		"video.addEventListener('resize', () => syncVideoFrameOrientation(video))",
 		"video.classList.toggle('has-portrait-frame', orientation === 'portrait')",
-		"html:not(.is-mobile-device) .video-tile video.has-portrait-frame",
+		"html:not(.is-mobile-device) .video-tile.has-portrait-composition video.has-portrait-frame",
+		"canvas.className = 'portrait-frame-backdrop'",
+		"filter: blur(22px) brightness(0.5) saturate(0.82);",
 		".video-tile > video {",
 		"position: absolute;\n        inset: 0;\n        min-width: 0;\n        min-height: 0;",
-		"object-fit: cover;\n          object-position: 50% 35%;",
+		"object-fit: contain;\n          object-position: center;\n          background: transparent;",
 		".screen-stage video {",
 		"object-fit: contain;\n          object-position: center;",
 		"frameOrientation: video.dataset.frameOrientation || 'unknown'",
 		"objectFit: getComputedStyle(video).objectFit",
 	} {
 		if !strings.Contains(html, want) {
-			t.Fatalf("index.html missing equal-fill portrait framing %q", want)
+			t.Fatalf("index.html missing premium portrait composition %q", want)
 		}
 	}
-	if strings.Index(html, ".video-tile > video {") > strings.Index(html, "html:not(.is-mobile-device) .video-tile video.has-portrait-frame") {
+	if strings.Index(html, ".video-tile > video {") > strings.Index(html, "html:not(.is-mobile-device) .video-tile.has-portrait-composition video.has-portrait-frame") {
 		t.Fatal("gallery videos must receive definite tile bounds before portrait object-fit overrides are applied")
 	}
 

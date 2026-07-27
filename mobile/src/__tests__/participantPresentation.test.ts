@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   focusedVideoParticipant,
   participantVideoAccessibilityStatus,
+  pictureInPictureParticipant,
   pinnedVideoParticipantIsStale,
   presentRemoteParticipantDevices,
   presentRemoteVideoParticipants,
@@ -227,6 +228,22 @@ describe('native participant presentation', () => {
 
     assert.equal(focusedVideoParticipant([unavailableActive, healthy], null)?.key, 'erick');
     assert.equal(focusedVideoParticipant([unavailableActive, healthy], 'aj')?.key, 'aj');
+  });
+
+  it('uses PiP only for a deliberate group focus or the sole remote participant', () => {
+    const erick = {
+      key: 'erick', name: 'Erick', streamURL: 'stream://erick', active: false,
+      micMuted: false, screenSharing: false, videoOff: false,
+    };
+    const aj = {
+      key: 'aj', name: 'AJ', streamURL: 'stream://aj', active: false,
+      micMuted: false, screenSharing: false, videoOff: false,
+    };
+
+    assert.equal(pictureInPictureParticipant([erick, aj], null), undefined);
+    assert.equal(pictureInPictureParticipant([erick, { ...aj, active: true }], null)?.key, 'aj');
+    assert.equal(pictureInPictureParticipant([erick, aj], 'erick')?.key, 'erick');
+    assert.equal(pictureInPictureParticipant([erick], null)?.key, 'erick');
   });
 
   it('includes camera-off endpoints in the People device roster without adding blank stage tiles', () => {

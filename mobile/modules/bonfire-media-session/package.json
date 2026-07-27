@@ -1,0 +1,8 @@
+{
+  "name": "bonfire-media-session",
+  "version": "1.0.0",
+  "description": "Meeting-first native audio routing for BonfireOS rooms.",
+  "main": "index.ts",
+  "types": "index.ts",
+  "private": true
+}

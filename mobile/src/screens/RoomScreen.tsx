@@ -42,6 +42,7 @@ import {
 } from '../realtime/cameraFramingLifecycle';
 import {
   focusedVideoParticipant,
+  pictureInPictureParticipant,
   participantVideoAccessibilityStatus,
   pinnedVideoParticipantIsStale,
   presentRemoteParticipantDevices,
@@ -98,6 +99,7 @@ type CallVideoTileProps = {
   mirror?: boolean;
   compact?: boolean;
   pinned?: boolean;
+  pictureInPicture?: boolean;
   fit?: 'contain' | 'cover';
   labelBottomClearance?: number;
   onVideoDimensionsChange?: (dimensions: VideoDimensions) => void;
@@ -111,6 +113,7 @@ const CallVideoTile = memo(function CallVideoTile({
   mirror = false,
   compact = false,
   pinned = false,
+  pictureInPicture = false,
   fit = 'cover',
   labelBottomClearance = 0,
   onVideoDimensionsChange,
@@ -171,7 +174,7 @@ const CallVideoTile = memo(function CallVideoTile({
     >
       {streamURL ? (
         <RTCView
-          iosPIP={primary && !mirror ? remotePIPOptions : undefined}
+          iosPIP={pictureInPicture && !mirror ? remotePIPOptions : undefined}
           mirror={mirror}
           objectFit={fit}
           onDimensionsChange={fit === 'contain' ? handleVideoDimensionsChange : undefined}
@@ -363,6 +366,7 @@ const CallControl = memo(function CallControl({
 type CallLayoutProps = {
   participants: CallParticipant[];
   pinnedParticipantKey: string | null;
+  pictureInPictureParticipantKey: string | null;
   localName: string;
   localStreamURL?: string;
   localVideoTrackId?: string;
@@ -382,6 +386,7 @@ type CallLayoutProps = {
 const CallLayout = memo(function CallLayout({
   participants,
   pinnedParticipantKey,
+  pictureInPictureParticipantKey,
   localName,
   localStreamURL,
   localVideoTrackId,
@@ -411,6 +416,7 @@ const CallLayout = memo(function CallLayout({
   const [stageSlotDimensions, setStageSlotDimensions] = useState<VideoDimensions | null>(null);
   const [stageVideoMeasurement, setStageVideoMeasurement] = useState<(VideoDimensions & { identity: string }) | null>(null);
   const stageParticipant = participants[0];
+  const stageIsScreenShare = Boolean(stageParticipant?.screenSharing);
   const stageMediaIdentity = `${stageParticipant?.key ?? 'none'}:${stageParticipant?.streamURL ?? ''}`;
   const stageVideoDimensions = stageVideoMeasurement?.identity === stageMediaIdentity
     ? stageVideoMeasurement
@@ -438,10 +444,11 @@ const CallLayout = memo(function CallLayout({
       fit={item.screenSharing ? 'contain' : 'cover'}
       onPress={() => onSelectParticipant(item)}
       participant={item}
+      pictureInPicture={item.key === pictureInPictureParticipantKey}
       pinned={item.key === pinnedParticipantKey}
       style={[styles.participantStripTile, landscape && styles.participantStripTileLandscape]}
     />
-  ), [landscape, onSelectParticipant, pinnedParticipantKey]);
+  ), [landscape, onSelectParticipant, pictureInPictureParticipantKey, pinnedParticipantKey]);
 
   if (remoteCount === 0) {
     return <CallVideoTile key={localParticipant.key} fit={localScreenSharing ? 'contain' : 'cover'} mirror={!localScreenSharing} participant={localParticipant} style={styles.oneUpTile} />;
@@ -455,6 +462,7 @@ const CallLayout = memo(function CallLayout({
           labelBottomClearance={dockClearance}
           onPress={() => onSelectParticipant(participants[0])}
           participant={participants[0]}
+          pictureInPicture={participants[0].key === pictureInPictureParticipantKey}
           pinned={participants[0].key === pinnedParticipantKey}
           primary
           style={styles.oneUpTile}
@@ -468,6 +476,7 @@ const CallLayout = memo(function CallLayout({
           onPress={() => onSelectParticipant(participants[0])}
           onVideoDimensionsChange={handleStageVideoDimensions}
           participant={participants[0]}
+          pictureInPicture={participants[0].key === pictureInPictureParticipantKey}
           pinned={participants[0].key === pinnedParticipantKey}
           primary
           style={[styles.oneUpPrimaryTile, stageTileDimensions]}
@@ -480,13 +489,16 @@ const CallLayout = memo(function CallLayout({
     <View style={[styles.largeCallShell, { paddingBottom: dockClearance }, landscape && styles.largeCallShellLandscape]}>
       <View onLayout={handleStageSlotLayout} style={styles.primaryStageSlot}>
         <CallVideoTile
-          fit="contain"
+          fit={stageIsScreenShare ? 'contain' : 'cover'}
           onPress={() => onSelectParticipant(participants[0])}
-          onVideoDimensionsChange={handleStageVideoDimensions}
+          onVideoDimensionsChange={stageIsScreenShare ? handleStageVideoDimensions : undefined}
           participant={participants[0]}
+          pictureInPicture={participants[0].key === pictureInPictureParticipantKey}
           pinned={participants[0].key === pinnedParticipantKey}
           primary
-          style={[styles.largePrimaryTile, stageTileDimensions]}
+          style={stageIsScreenShare
+            ? [styles.largePrimaryTile, stageTileDimensions]
+            : styles.largePrimaryCameraTile}
         />
       </View>
       <View style={[styles.participantRail, landscape && styles.participantRailLandscape]}>
@@ -498,7 +510,7 @@ const CallLayout = memo(function CallLayout({
           onSwitchCamera={onSwitchCamera}
           screenSharing={localScreenSharing}
           streamURL={localScreenSharing ? localScreenShareURL : localStreamURL}
-          style={landscape ? styles.localPreviewStripLandscape : styles.localPreviewStripPortrait}
+          style={[styles.participantStripTile, landscape && styles.participantStripTileLandscape]}
           suspended={localVideoSuspended}
           videoTrackId={localScreenSharing ? localScreenShareTrackId : localVideoTrackId}
         />
@@ -679,6 +691,10 @@ export function RoomScreen({ route, navigation }: Props) {
       ...callParticipants.filter((participant) => participant.key !== focusedParticipant.key),
     ];
   }, [callParticipants, focusedParticipant]);
+  const pictureInPictureParticipantKey = useMemo(
+    () => pictureInPictureParticipant(callParticipants, pinnedParticipantKey)?.key ?? null,
+    [callParticipants, pinnedParticipantKey],
+  );
   useEffect(() => {
     if (pinnedVideoParticipantIsStale(pinnedParticipantKey, callParticipants)) {
       setPinnedParticipantKey(null);
@@ -1123,6 +1139,7 @@ export function RoomScreen({ route, navigation }: Props) {
             onSelectParticipant={selectParticipant}
             onSwitchCamera={nativeRoom.switchCamera}
             participants={presentedParticipants}
+            pictureInPictureParticipantKey={pictureInPictureParticipantKey}
             pinnedParticipantKey={pinnedParticipantKey}
           />
           {Platform.OS === 'ios' ? (
@@ -1159,7 +1176,11 @@ export function RoomScreen({ route, navigation }: Props) {
             </View>
           </View>
 
-          {callParticipants.length > 0 && callParticipants.length < 4 ? (
+          {/* CallLayout already owns the inline self-view when two or more
+              remote participants are present. Keep the floating preview only
+              for the one-remote layout so the local camera is never rendered
+              twice as two separate "You" tiles. */}
+          {callParticipants.length === 1 ? (
             <LocalPreview
               bottom={bottomInset + 96}
               cameraOff={nativeRoom.state.cameraOff}
@@ -1438,8 +1459,6 @@ const styles = StyleSheet.create({
     backgroundColor: ink[850],
   },
   localPreviewInline: { position: 'relative', right: undefined, zIndex: 1 },
-  localPreviewStripPortrait: { width: 92, height: 96, flexShrink: 0 },
-  localPreviewStripLandscape: { width: 108, height: 80, flexShrink: 0 },
   localPlaceholder: {
     flex: 1,
     alignItems: 'center',
@@ -1495,6 +1514,7 @@ const styles = StyleSheet.create({
   largeCallShellLandscape: { flexDirection: 'row', paddingTop: 58 },
   primaryStageSlot: { flex: 1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   largePrimaryTile: { flex: 0 },
+  largePrimaryCameraTile: { flex: 1, alignSelf: 'stretch' },
   participantRail: { height: 104, flexDirection: 'row', gap: space[2] },
   participantRailLandscape: { width: 108, height: '100%', flexDirection: 'column' },
   participantStrip: { flex: 1, height: 104 },
@@ -1528,7 +1548,7 @@ const styles = StyleSheet.create({
   },
   callRoomIdentityPressed: { backgroundColor: 'rgba(7,7,8,0.88)', transform: [{ scale: 0.99 }] },
   callRoomName: { color: '#FFFFFF', fontSize: 13, fontWeight: '600', lineHeight: 16, letterSpacing: -0.08 },
-  callParticipantCount: { marginTop: 1, color: 'rgba(255,255,255,0.58)', fontSize: 10, fontWeight: '500', lineHeight: 13 },
+  callParticipantCount: { marginTop: 1, color: 'rgba(255,255,255,0.58)', fontSize: 10, fontWeight: '500', lineHeight: 13, fontVariant: ['tabular-nums'] },
   callStatusPill: {
     minHeight: 42,
     maxWidth: '48%',

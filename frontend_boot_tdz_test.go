@@ -78,7 +78,19 @@ func TestIndexBootPassAvoidsLateDeclarations(t *testing.T) {
 
 	// Functions the boot render pass reaches synchronously today. Keep this
 	// list small and honest: the direct render entry points near the anchor.
-	bootReach := []string{"renderArtifacts", "renderArtifactDetail", "probeRenderSidecar", "renderBoard"}
+	bootReach := []string{
+		"renderArtifacts",
+		"renderArtifactDetail",
+		"probeRenderSidecar",
+		"renderBoard",
+		// Authentication paints the selected tool before the later mission-
+		// intelligence section is parsed. Keep both the router and its polling
+		// helper inside the same TDZ gate as the explicit render entries.
+		"applyToolState",
+		"syncIntelLivePoll",
+		"syncPortraitVideoComposition",
+		"stopPortraitVideoComposition",
+	}
 	body := map[string]string{}
 	fnRe := regexp.MustCompile(`(?m)^\s*(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(`)
 	fnStarts := fnRe.FindAllStringSubmatchIndex(html, -1)
@@ -102,6 +114,15 @@ func TestIndexBootPassAvoidsLateDeclarations(t *testing.T) {
 				t.Errorf("boot-reachable %s references %q declared at line %d (after the boot block) — TDZ on load; use var or lazy init", fn, name, declLine)
 			}
 		}
+	}
+}
+
+func TestIndexExposesReadinessOnlyAfterTheClientBundleInitializes(t *testing.T) {
+	html := readIndexHTMLForBootTDZ(t)
+	ready := strings.Index(html, "window.__bonfireClientBootReady = true")
+	finalState := strings.Index(html, "function updateBoardEmptyState()")
+	if ready < 0 || finalState < 0 || ready < finalState {
+		t.Fatal("client readiness must be set only at the end of the initialized inline bundle")
 	}
 }
 

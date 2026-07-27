@@ -11,9 +11,13 @@ type CameraPluginTestApi = {
   centerStageMarker: string;
   cooperativeCenterStageBlock: string;
   defaultPositionCameraSelection: string;
+  defaultPictureInPictureScale: string;
   forcedCenterStageBlock: string;
   patchCenterStageSource: (source: string, sourcePath?: string) => string;
+  patchPictureInPictureScale: (source: string, sourcePath?: string) => string;
+  pictureInPictureScaleMarker: string;
   resolveWebRTCCameraSource: (projectRoot: string) => string;
+  resolveWebRTCPictureInPictureSource: (projectRoot: string) => string;
   safeCenterStageFormatSelection: string;
   unsafeCenterStageFormatSelection: string;
 };
@@ -33,9 +37,13 @@ const {
   centerStageMarker,
   cooperativeCenterStageBlock,
   defaultPositionCameraSelection,
+  defaultPictureInPictureScale,
   forcedCenterStageBlock,
   patchCenterStageSource,
+  patchPictureInPictureScale,
+  pictureInPictureScaleMarker,
   resolveWebRTCCameraSource,
+  resolveWebRTCPictureInPictureSource,
   safeCenterStageFormatSelection,
   unsafeCenterStageFormatSelection,
 } = plugin.__testing;
@@ -109,6 +117,19 @@ describe('iOS WebRTC camera prebuild patch', () => {
       patchCenterStageSource(stableSource, sourcePath),
       adaptiveSource,
     );
+  });
+
+  it('fills iOS PiP after rotating mobile frames instead of shrinking them twice', () => {
+    const sourcePath = resolveWebRTCPictureInPictureSource(mobileRoot);
+    const originalSource = fs.readFileSync(sourcePath, 'utf8');
+    const patchedSource = patchPictureInPictureScale(originalSource, sourcePath);
+
+    assert.match(patchedSource, new RegExp(pictureInPictureScaleMarker));
+    assert.match(patchedSource, /AVLayerVideoGravityResizeAspectFill/);
+    assert.match(patchedSource, /\? MAX\(widthToHeight, heightToWidth\)/);
+    assert.match(patchedSource, /: MIN\(widthToHeight, heightToWidth\)/);
+    assert.doesNotMatch(patchedSource, new RegExp(defaultPictureInPictureScale.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.equal(patchPictureInPictureScale(patchedSource, sourcePath), patchedSource);
   });
 
   it('routes both initial user capture and rear-to-front switching through the native selector', () => {

@@ -39,6 +39,7 @@ export type NavDestination = {
 
 /** Wide enough for "Threads" at 10px without truncating. */
 const ITEM_WIDTH = 58;
+const ITEM_LABEL_HEIGHT = 16;
 
 export type NavClusterProps = {
   open: boolean;
@@ -49,6 +50,10 @@ export type NavClusterProps = {
 export function NavCluster({ open, onToggle, destinations }: NavClusterProps) {
   const reduceMotion = useReduceMotion();
   const progress = useRef(new Animated.Value(open ? 1 : 0)).current;
+  const expandedWidth = hitMin
+    + space[5]
+    + (destinations.length * ITEM_WIDTH)
+    + (Math.max(0, destinations.length - 1) * space[2]);
 
   useEffect(() => {
     if (reduceMotion) {
@@ -153,16 +158,21 @@ export function NavCluster({ open, onToggle, destinations }: NavClusterProps) {
   );
 
   return (
-    <View style={styles.wrap}>
+    <View
+      style={[
+        styles.wrap,
+        open && { width: expandedWidth, height: hitMin + ITEM_LABEL_HEIGHT },
+      ]}
+    >
       {usingLiquidGlass() ? (
         // `spacing` is the distance at which sibling glass starts to merge, so
         // the collapsed cluster reads as a single body that separates as it
         // opens. Below iOS 26 the Glass fallbacks simply stack.
-        <GlassContainer spacing={18} style={styles.container}>
+        <GlassContainer spacing={18} style={[styles.container, open && styles.containerOpen]}>
           {body}
         </GlassContainer>
       ) : (
-        <View style={styles.container}>{body}</View>
+        <View style={[styles.container, open && styles.containerOpen]}>{body}</View>
       )}
     </View>
   );
@@ -181,6 +191,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     backgroundColor: 'transparent',
+  },
+  containerOpen: {
+    // React Native only dispatches a touch inside an ancestor's measured
+    // bounds. The shortcut buttons animate outside the collapsed toggle's
+    // 44pt box, so the expanded cluster must own the whole visible hit region.
+    width: '100%',
+    height: '100%',
+    justifyContent: 'flex-end',
+    alignItems: 'flex-start',
   },
   items: {
     // Absolute so a COLLAPSED cluster occupies no layout space. Left in flow,
@@ -216,6 +235,7 @@ const styles = StyleSheet.create({
     // 10px in a 58pt column fits "Threads" without an ellipsis; the 11pt label
     // token truncated it at 44pt.
     fontSize: 10,
+    lineHeight: 12,
     fontWeight: '500',
     letterSpacing: 0.3,
     color: colors.text2,

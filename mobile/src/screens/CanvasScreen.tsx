@@ -266,13 +266,13 @@ export function CanvasScreen() {
               onToggle={() => setNavOpen((previous) => !previous)}
               destinations={[
                 {
-                  id: 'room',
-                  label: 'Room',
+                  id: 'rooms',
+                  label: 'Rooms',
                   icon: 'video.fill',
                   emphasis: true,
                   onPress: () => {
                     setNavOpen(false);
-                    navigation.navigate('CreateRoom');
+                    navigation.navigate('Deck', { segment: 'rooms' });
                   },
                 },
                 {
@@ -285,12 +285,12 @@ export function CanvasScreen() {
                   },
                 },
                 {
-                  id: 'rooms',
-                  label: 'Live',
-                  icon: 'person.2.fill',
+                  id: 'new-room',
+                  label: 'New',
+                  icon: 'plus',
                   onPress: () => {
                     setNavOpen(false);
-                    navigation.navigate('Deck', { segment: 'rooms' });
+                    navigation.navigate('CreateRoom');
                   },
                 },
                 {

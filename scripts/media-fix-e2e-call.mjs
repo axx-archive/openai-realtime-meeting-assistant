@@ -5,7 +5,7 @@
 // SFU + render paths all run). Reproduces what unit tests can't:
 //   [1] a real WebRTC remote track rendered in the Safari engine shows ZERO
 //       same-track srcObject reattaches over 18s (the flicker is gone);
-//   [2] a real iPhone-13 WebKit peer joins portrait → detected mobile, capture
+//   [2] an iPhone-13-sized mobile peer joins portrait → detected mobile, capture
 //       has no landscape aspectRatio pin, zero applyConstraints (no camera
 //       restart), and existing landscape feeds do NOT flip to portrait;
 //   [3] a shared screen reaches BOTH a Safari-engine peer and an iPhone peer on
@@ -176,6 +176,7 @@ async function join(browserType, ctxOpts, label, portrait) {
   if (!resp.ok()) throw new Error(label+' login failed: '+resp.status())
   const page = await context.newPage()
   page.on('console', m => { const t = m.text(); if (/error|fail/i.test(t) && !/auth\/me|401/.test(t)) console.log(`   [${label} console] ${t.slice(0,120)}`) })
+  page.on('pageerror', error => console.log(`   [${label} pageerror] ${error.stack || error.message}`))
   await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await page.waitForLoadState('domcontentloaded')
   const mediaOverridesInstalled = await page.evaluate(() => {
@@ -186,8 +187,9 @@ async function join(browserType, ctxOpts, label, portrait) {
   if (!mediaOverridesInstalled) {
     throw new Error(`${label} synthetic media overrides were not installed on the final document`)
   }
-  await page.waitForFunction(() => typeof joinRoom === 'function' && typeof setActiveTool === 'function', null, { timeout: 30000 })
+  await page.waitForFunction(() => window.__bonfireClientBootReady === true, null, { timeout: 30000 })
   if (roomControl?.id) {
+    await page.evaluate(async () => { await loadRoomsList() })
     await page.waitForFunction(roomId => (
       Array.isArray(roomsList)
       && roomsList.some(room => room?.id === roomId && !room.archived)
@@ -327,7 +329,11 @@ try {
     return vids.map(v => v.videoWidth >= v.videoHeight ? 'landscape' : 'portrait')
   })
   const beforeA = await orient(A), beforeB = await orient(B)
-  const C = await join(webkit, { ...devices['iPhone 13'] }, 'Erick', true)
+  // The native app is libwebrtc, not Mobile Safari. Use Chromium's WebRTC
+  // engine with the real iPhone viewport/UA so the publisher stays stable,
+  // while B remains the Safari/WebKit receiver that must render the portrait
+  // composition correctly.
+  const C = await join(chromium, { ...devices['iPhone 13'] }, 'Erick', true)
   sessions.push(C)
   await sleep(8000) // let C negotiate + roster propagate + any retune fire
   const cInfo = await C.page.evaluate(() => {
@@ -357,7 +363,9 @@ try {
       tileHeight: Math.round(tileRect.height),
       frameOrientation: video.dataset.frameOrientation || 'unknown',
       objectFit: getComputedStyle(video).objectFit,
-      position: getComputedStyle(video).position
+      position: getComputedStyle(video).position,
+      portraitComposition: tile.classList.contains('has-portrait-composition'),
+      backdropReady: tile.querySelector('.portrait-frame-backdrop.is-ready') !== null
     }
   }, participantName, { timeout: 25000 }).then(handle => handle.jsonValue()).catch(() => null)
   const cOnA = await remotePortraitFrame(A, C.label)
@@ -377,15 +385,19 @@ try {
   // the landscape count must not DROP (C's own feed is legitimately portrait).
   ok('A: existing landscape feeds did NOT flip to portrait when C joined', land(afterA) >= land(beforeA) && land(afterA) >= 1)
   ok('B: existing landscape feeds did NOT flip to portrait when C joined', land(afterB) >= land(beforeB) && land(afterB) >= 1)
-  ok('A: portrait iPhone camera fills its tile with upper-center cover', cOnA?.videoHeight > cOnA?.videoWidth
+  ok('A: portrait iPhone camera uses the full-frame ambient composition', cOnA?.videoHeight > cOnA?.videoWidth
     && cOnA?.frameOrientation === 'portrait'
-    && cOnA?.objectFit === 'cover'
+    && cOnA?.objectFit === 'contain'
+    && cOnA?.portraitComposition === true
+    && cOnA?.backdropReady === true
     && cOnA?.position === 'absolute'
     && Math.abs(cOnA?.visualWidth - cOnA?.tileWidth) <= 1
     && Math.abs(cOnA?.visualHeight - cOnA?.tileHeight) <= 1)
-  ok('B (Safari engine): portrait iPhone camera fills its tile with upper-center cover', cOnB?.videoHeight > cOnB?.videoWidth
+  ok('B (Safari engine): portrait iPhone camera uses the full-frame ambient composition', cOnB?.videoHeight > cOnB?.videoWidth
     && cOnB?.frameOrientation === 'portrait'
-    && cOnB?.objectFit === 'cover'
+    && cOnB?.objectFit === 'contain'
+    && cOnB?.portraitComposition === true
+    && cOnB?.backdropReady === true
     && cOnB?.position === 'absolute'
     && Math.abs(cOnB?.visualWidth - cOnB?.tileWidth) <= 1
     && Math.abs(cOnB?.visualHeight - cOnB?.tileHeight) <= 1)
@@ -445,7 +457,7 @@ try {
   ok('C still sees the screen after renegotiation', cStill)
 
 } catch (e) {
-  console.log('\nHARNESS ERROR:', e.message)
+  console.log('\nHARNESS ERROR:', e.stack || e.message)
   fail++
 } finally {
   for (const s of sessions) {

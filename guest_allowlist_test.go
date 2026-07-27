@@ -154,6 +154,7 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 		// ---- everything else: member-gated, guest fails closed
 		"/auth/":                               {handler: authHandler, memberGated: true, path: "/auth/me"},
 		"/assistant/query":                     {handler: assistantQueryHandler, memberGated: true},
+		"/assistant/transcribe":                {handler: assistantTranscribeHandler, memberGated: true},
 		"/assistant/chat-threads":              {handler: assistantChatThreadsHandler, memberGated: true},
 		"/assistant/chat-threads/":             {handler: assistantChatThreadHandler, memberGated: true, path: "/assistant/chat-threads/thread-1"},
 		"/assistant/attachments":               {handler: assistantAttachmentUploadHandler, memberGated: true},

@@ -62,6 +62,26 @@ export function focusedVideoParticipant(
 }
 
 /**
+ * Group-call PiP should communicate a real presentation choice, never imply
+ * that the first roster entry is speaking. A manual pin, a shared screen, or a
+ * currently active speaker may own PiP. One-to-one calls retain the sole remote
+ * participant as the natural fallback; silent group calls remain audio-only in
+ * the system overlay until somebody actually speaks or is pinned.
+ */
+export function pictureInPictureParticipant(
+  participants: readonly PresentedVideoParticipant[],
+  pinnedParticipantKey: string | null,
+): PresentedVideoParticipant | undefined {
+  const eligible = (participant: PresentedVideoParticipant | undefined) => (
+    participant?.streamURL ? participant : undefined
+  );
+  return eligible(participants.find((participant) => participant.key === pinnedParticipantKey))
+    ?? eligible(participants.find((participant) => participant.screenSharing))
+    ?? eligible(participants.find((participant) => participant.active))
+    ?? (participants.length === 1 ? eligible(participants[0]) : undefined);
+}
+
+/**
  * Track identity is endpoint-scoped. Unlike a name/count-derived key, it does
  * not change when another device using the same display name joins or leaves.
  */

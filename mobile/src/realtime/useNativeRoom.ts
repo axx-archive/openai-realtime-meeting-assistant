@@ -12,6 +12,7 @@ import {
 import BonfireCameraFraming, {
   type CameraFramingCapabilities,
 } from '../../modules/bonfire-camera-framing';
+import BonfireMediaSession from '../../modules/bonfire-media-session';
 import { api } from '../api/client';
 import { API_BASE_URL, NATIVE_CLIENT_HEADER } from '../config';
 import {
@@ -186,6 +187,7 @@ const NATIVE_ROOM_CLIENT_VERSION = 'expo-native-9';
 const reconnectDelaysMs = [500, 1_000, 2_000, 4_000, 8_000, 12_000];
 const cameraRecoveryCooldownMs = 8_000;
 const cameraFramingRestoreTimeoutMs = 750;
+const activeSpeakerStaleMs = 3_000;
 const screenShareStartTimeoutMs = 20_000;
 const screenShareProgressPollMs = 500;
 const nativeCameraConstraints = { facingMode: 'user', width: 1280, height: 720, frameRate: 30 } as const;
@@ -323,6 +325,7 @@ export function useNativeRoom(
   const intentionallyLeaving = useRef(false);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const qualityTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activeSpeakerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptRef = useRef(0);
   const reconnectContextRef = useRef<ReconnectContext | null>(null);
@@ -1043,7 +1046,10 @@ export function useNativeRoom(
               sender,
             });
           })();
-        if (outcome === 'installed' && attemptIsCurrent()) return;
+        if (outcome === 'installed' && attemptIsCurrent()) {
+          await BonfireMediaSession.activateVideoMeeting();
+          if (attemptIsCurrent()) return;
+        }
 
         setLocalAudioTracksEnabled([
           ...local.getAudioTracks(),
@@ -1344,6 +1350,8 @@ export function useNativeRoom(
     heartbeatRef.current = null;
     if (qualityTimerRef.current) clearInterval(qualityTimerRef.current);
     qualityTimerRef.current = null;
+    if (activeSpeakerTimerRef.current) clearTimeout(activeSpeakerTimerRef.current);
+    activeSpeakerTimerRef.current = null;
     resetQualityBaseline();
     participantsByTrackRef.current = new Map();
     endpointsByTrackRef.current = new Map();
@@ -1411,6 +1419,7 @@ export function useNativeRoom(
     connectionGenerationGuardRef.current?.retireSocket(socketContext?.generation);
     if (socket && socket.readyState < WebSocket.CLOSING) socket.close(1000, 'left room');
     disposeMedia();
+    void BonfireMediaSession.deactivateVideoMeeting();
     roomChatOpenRef.current = false;
     dispatchConversation({ type: 'reset', roomId });
     setState(initialState);
@@ -1425,6 +1434,7 @@ export function useNativeRoom(
     connectionGenerationGuardRef.current?.retireSocket(socketContext?.generation);
     if (socket && socket.readyState < WebSocket.CLOSING) socket.close(1011, 'room error');
     disposeMedia();
+    void BonfireMediaSession.deactivateVideoMeeting();
     roomChatOpenRef.current = false;
     dispatchConversation({ type: 'reset', roomId });
     setState({ ...initialState, error: message });
@@ -1490,7 +1500,15 @@ export function useNativeRoom(
       if (!isCurrentPeerContext(peerContext)) return;
       const event = rawEvent as unknown as TrackEventShape;
       const track = event.track;
-      if (!track || track.kind !== 'video') return;
+      if (!track) return;
+      if (track.kind === 'audio') {
+        // libwebrtc can switch AVAudioSession back to the receiver when its
+        // first remote audio track attaches. Reassert the video-meeting route
+        // at the exact lifecycle edge where that native mutation occurs.
+        void BonfireMediaSession.activateVideoMeeting();
+        return;
+      }
+      if (track.kind !== 'video') return;
       if (trackIdentityWasRetired(track.id, retiredRemoteTrackIdsRef.current)) return;
       // Publishers commonly use the same stream id ("-") for every SFU
       // transceiver. Keying tiles by MediaStream.id merges unrelated people;
@@ -2295,16 +2313,36 @@ export function useNativeRoom(
       case 'active_speaker': {
         const speaker = parseNestedData<unknown>(nested.data, '');
         let activeSpeaker: string | undefined;
+        let observedAt = Date.now();
         if (typeof speaker === 'string') {
           activeSpeaker = speaker.trim() || undefined;
         } else if (speaker && typeof speaker === 'object') {
-          const payload = speaker as { name?: unknown; participant?: unknown };
+          const payload = speaker as { name?: unknown; participant?: unknown; at?: unknown };
           const value = typeof payload.name === 'string'
             ? payload.name
             : typeof payload.participant === 'string'
               ? payload.participant
               : '';
           activeSpeaker = value.trim() || undefined;
+          if (typeof payload.at === 'number' && Number.isFinite(payload.at)) {
+            observedAt = payload.at;
+          }
+        }
+        if (activeSpeakerTimerRef.current) clearTimeout(activeSpeakerTimerRef.current);
+        activeSpeakerTimerRef.current = null;
+        const remainingMs = activeSpeakerStaleMs - Math.max(0, Date.now() - observedAt);
+        if (activeSpeaker && remainingMs > 0) {
+          const expiringSpeaker = activeSpeaker;
+          activeSpeakerTimerRef.current = setTimeout(() => {
+            activeSpeakerTimerRef.current = null;
+            updateStateForSocket((current) => (
+              normalizedParticipantName(current.activeSpeaker) === normalizedParticipantName(expiringSpeaker)
+                ? { ...current, activeSpeaker: undefined }
+                : current
+            ));
+          }, remainingMs);
+        } else {
+          activeSpeaker = undefined;
         }
         updateStateForSocket((current) => ({ ...current, activeSpeaker }));
         break;
@@ -2523,6 +2561,12 @@ export function useNativeRoom(
         releaseNativeMediaStream(stream);
         return;
       }
+      // Route rooms like video meetings: use the built-in speaker by default,
+      // while AVAudioSession continues to honor wired and Bluetooth outputs.
+      // Apply after WebRTC capture so its audio-session activation cannot
+      // silently restore the telephone earpiece route.
+      await BonfireMediaSession.activateVideoMeeting();
+      if (!joinIsCurrent()) return;
       // Establish a valid 16:9 wide or 9:16 portrait capture before signaling.
       // Unsupported cameras complete capability discovery without mutation.
       await refreshCameraFramingInternal(true);
@@ -2565,6 +2609,7 @@ export function useNativeRoom(
     }
 
     requestedAudio.current = true;
+    void BonfireMediaSession.activateVideoMeeting();
     setLocalAudioTracksEnabled([
       ...liveTracks,
       audioSenderRef.current?.track,
@@ -3060,6 +3105,7 @@ export function useNativeRoom(
         }
         return;
       }
+      void BonfireMediaSession.activateVideoMeeting();
       // iOS multitasking camera access is enabled natively. AppState alone is
       // not evidence that capture stopped, so keep tracks and signaling live.
       if (previousAppState === 'active' || intentionallyLeaving.current) return;

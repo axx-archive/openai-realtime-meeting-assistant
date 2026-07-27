@@ -83,6 +83,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       favicon: './assets/favicon.png',
     },
     plugins: [
+      'expo-asset',
       'expo-image',
       // Dictation records locally and transcribes server-side with the company
       // vocabulary lane. The system mic prompt says nothing about where audio
