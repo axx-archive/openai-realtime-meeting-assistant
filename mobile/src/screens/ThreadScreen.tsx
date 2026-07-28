@@ -13,12 +13,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import * as Linking from 'expo-linking';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { api, BonfireApiError } from '../api/client';
-import type { ScoutMessage } from '../api/types';
+import type { ScoutMessage, ThreadDigestResponse } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { MessageBubble } from '../messaging/MessageBubble';
 import { firstUnreadIndex } from '../messaging/unreadBoundary';
+import { CatchUpSheet } from '../messaging/CatchUpSheet';
+import { DepositRail } from '../messaging/DepositRail';
 
 type ThreadRow = {
   message: ScoutMessage;
@@ -64,6 +67,18 @@ export function ThreadScreen({ route, navigation }: Props) {
   // being short enough that there is no bottom to reach (below).
   const atBottomRef = useRef(false);
   const listHeightRef = useRef(0);
+  const [digest, setDigest] = useState<ThreadDigestResponse | null>(null);
+  const [catchUpOpen, setCatchUpOpen] = useState(false);
+
+  // Scroll to a cited message. Both the catch-up and the deposit rail point at
+  // real messages, so both need to be able to land on one.
+  const scrollToMessage = useCallback(
+    (messageId: string) => {
+      const index = messages.findIndex((message) => String(message.id) === messageId);
+      if (index >= 0) listRef.current?.scrollToIndex({ index, animated: true });
+    },
+    [messages],
+  );
 
   const dictation = useDictation({
     context: 'chat',
@@ -96,6 +111,25 @@ export function ThreadScreen({ route, navigation }: Props) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Catch-up and deposits arrive after first paint — the thread must render
+  // immediately, and neither is needed to read a message.
+  useEffect(() => {
+    if (!sessionToken) return;
+    let cancelled = false;
+    void api
+      .threadDigest(sessionToken, route.params.threadId)
+      .then((response) => {
+        if (!cancelled) setDigest(response);
+      })
+      .catch(() => {
+        // Absent digest simply means no rail and no catch-up affordance. The
+        // thread itself is unaffected.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [route.params.threadId, sessionToken]);
 
   // Append, don't refetch. The old code called load() on every chat_thread
   // event, re-downloading the entire thread because ONE message arrived — the
@@ -213,6 +247,23 @@ export function ThreadScreen({ route, navigation }: Props) {
         </Text>
       </View>
 
+      {/* What this conversation produced, in the thread that produced it. */}
+      <DepositRail
+        deposits={digest?.deposits ?? null}
+        onOpenMessage={scrollToMessage}
+        onOpenLink={(url) => void Linking.openURL(url).catch(() => {})}
+      />
+
+      <CatchUpSheet
+        visible={catchUpOpen}
+        catchUp={digest?.catchUp ?? null}
+        onClose={() => setCatchUpOpen(false)}
+        onOpenMessage={(messageId) => {
+          setCatchUpOpen(false);
+          scrollToMessage(messageId);
+        }}
+      />
+
       <KeyboardAvoidingView
         style={styles.fill}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -255,13 +306,28 @@ export function ThreadScreen({ route, navigation }: Props) {
             renderItem={({ item }) => (
               <>
                 {item.boundary ? (
-                  <View style={styles.boundary}>
-                    <View style={styles.boundaryRule} />
-                    <Text style={styles.boundaryLabel}>
-                      {unreadBelow} new {unreadBelow === 1 ? 'message' : 'messages'}
-                    </Text>
-                    <View style={styles.boundaryRule} />
-                  </View>
+                  <>
+                    <View style={styles.boundary}>
+                      <View style={styles.boundaryRule} />
+                      <Text style={styles.boundaryLabel}>
+                        {unreadBelow} new {unreadBelow === 1 ? 'message' : 'messages'}
+                      </Text>
+                      <View style={styles.boundaryRule} />
+                    </View>
+                    {/* The catch-up lives ON the boundary, which is the exact
+                        moment the question "what did I miss?" is asked. */}
+                    {digest?.catchUp?.bullets?.length ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Catch me up"
+                        onPress={() => setCatchUpOpen(true)}
+                        style={({ pressed }) => [styles.catchUp, pressed && styles.pressedRow]}
+                      >
+                        <SymbolView name="text.line.first.and.arrowtriangle.forward" tintColor={colors.ember} size={14} />
+                        <Text style={styles.catchUpText}>Catch me up</Text>
+                      </Pressable>
+                    ) : null}
+                  </>
                 ) : null}
                 <MessageBubble
                   message={item.message}
@@ -464,4 +530,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: space[5],
   },
   retry: { ...type.button, color: colors.ember },
+  catchUp: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: 6,
+    paddingHorizontal: space[4],
+    paddingVertical: 7,
+    marginBottom: space[3],
+    borderRadius: radius.full,
+    backgroundColor: colors.emberSoft,
+  },
+  catchUpText: {
+    ...type.button,
+    color: colors.ember,
+  },
+  pressedRow: { opacity: 0.6 },
 });

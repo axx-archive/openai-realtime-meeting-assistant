@@ -932,6 +932,7 @@ func main() {
 	http.HandleFunc("/assistant/threads/follow-up", assistantThreadFollowUpHandler)
 	http.HandleFunc("/assistant/threads/read", assistantThreadReadHandler)
 	http.HandleFunc("/assistant/threads/mute", assistantThreadMuteHandler)
+	http.HandleFunc("/assistant/threads/digest", assistantThreadDigestHandler)
 	http.HandleFunc("/assistant/push/devices", pushDevicesHandler)
 	http.HandleFunc("/assistant/goal", assistantGoalHandler)
 	http.HandleFunc("/assistant/goal/cancel", assistantGoalCancelHandler)

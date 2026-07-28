@@ -14,6 +14,7 @@ import type {
   ScoutThreadDetailResponse,
   ScoutThreadsResponse,
   ScoutFileAttachment,
+  ThreadDigestResponse,
 } from './types';
 import {
   buildConsentDecision,
@@ -463,6 +464,17 @@ export const api = {
       body: { threadId, lastReadMessageId },
       sessionToken,
     });
+  },
+
+  /**
+   * Catch-up and the deposit rail in one call — the thread screen needs both
+   * on open, and one round trip beats two.
+   */
+  threadDigest(sessionToken: string, threadId: string): Promise<ThreadDigestResponse> {
+    return request<ThreadDigestResponse>(
+      `/assistant/threads/digest?threadId=${encodeURIComponent(threadId)}`,
+      { sessionToken },
+    );
   },
 
   muteThread(

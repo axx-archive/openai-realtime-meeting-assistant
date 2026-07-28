@@ -60,9 +60,12 @@ var authorizationHTTPSurfaces = []AuthorizationSurface{
 	// authorizes the thread through scoutChatThreadByID before writing, so
 	// marking a thread you cannot see is refused rather than silently recorded.
 	authSurface("http.assistant.thread_read", AuthorizationHTTP, "/assistant/threads/read", []string{"chat_thread"}, []ACLAction{ACLWrite}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
-	// Per-thread mute: the valve for the Table's push-everything default. Both
-	// authorize the thread through scoutChatThreadByID before writing.
+	// Per-thread mute: the valve for the Table's push-everything default. It
+	// authorizes the thread through scoutChatThreadByID before writing.
 	authSurface("http.assistant.thread_mute", AuthorizationHTTP, "/assistant/threads/mute", []string{"chat_thread"}, []ACLAction{ACLWrite}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
+	// Catch-up + deposit rail: reads one thread's own messages, authorized
+	// through scoutChatThreadByID before anything is summarized or surfaced.
+	authSurface("http.assistant.thread_digest", AuthorizationHTTP, "/assistant/threads/digest", []string{"chat_thread"}, []ACLAction{ACLReadContent}, []string{"user"}, false, true, AuthorizationCanonicalNeeded),
 	// NOTE: /assistant/push/devices is deliberately NOT inventoried here. It is
 	// account-bound state with no object read, exactly like its web-push
 	// siblings (/assistant/push/subscribe, /unsubscribe, /prefs), so it is

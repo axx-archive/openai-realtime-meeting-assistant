@@ -50,6 +50,31 @@ export type ScoutThread = {
   [key: string]: unknown;
 };
 
+export type ThreadCatchUpBullet = {
+  text: string;
+  author: string;
+  messageId: string;
+  createdAt: string;
+};
+
+export type ThreadDeposit = {
+  messageId: string;
+  author?: string;
+};
+
+export type ThreadDigestResponse = {
+  ok: boolean;
+  catchUp: {
+    headline: string;
+    bullets: ThreadCatchUpBullet[];
+    totalUnread: number;
+  };
+  deposits: {
+    files: Array<ThreadDeposit & { name: string; mime?: string; ref?: string }>;
+    links: Array<ThreadDeposit & { url: string; host: string }>;
+  };
+};
+
 export type ScoutThreadsResponse = {
   ok: boolean;
   threads: ScoutThread[];
