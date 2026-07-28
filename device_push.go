@@ -39,7 +39,11 @@ const deviceLaneHonorsOnlyWhenAway = false
 // correctness requirement, not an optimization.
 const expoPushMaxBatch = 100
 
-const expoPushSendURL = "https://exp.host/--/api/v2/push/send"
+// expoPushSendURL is a var, not a const, so the delivery path can be exercised
+// end-to-end against a stub in tests. Everything between "a teammate posts" and
+// "bytes on the wire to Expo" is then verifiable without a device; only APNs
+// itself is not.
+var expoPushSendURL = "https://exp.host/--/api/v2/push/send"
 
 type deviceTokenRecord struct {
 	TenantID  string `json:"tenantId,omitempty"`
