@@ -161,8 +161,10 @@ func assistantChatThreadsHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		includeArchived := strings.EqualFold(r.URL.Query().Get("archived"), "true") || strings.EqualFold(r.URL.Query().Get("includeArchived"), "true")
 		writeAuthJSON(w, http.StatusOK, map[string]any{
-			"ok":      true,
-			"threads": kanbanApp.scoutChatThreadsSnapshot(user.Email, includeArchived, 100),
+			"ok": true,
+			// The view adds per-viewer unreadCount / lastReadMessageId, which
+			// must not live on the shared persisted record.
+			"threads": kanbanApp.scoutChatThreadsView(user.Email, includeArchived, 100),
 		})
 	case http.MethodPost:
 		payload := struct {

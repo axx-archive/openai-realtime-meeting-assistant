@@ -930,6 +930,7 @@ func main() {
 	http.HandleFunc("/assistant/transcribe", assistantTranscribeHandler)
 	http.HandleFunc("/assistant/threads", assistantThreadsHandler)
 	http.HandleFunc("/assistant/threads/follow-up", assistantThreadFollowUpHandler)
+	http.HandleFunc("/assistant/threads/read", assistantThreadReadHandler)
 	http.HandleFunc("/assistant/goal", assistantGoalHandler)
 	http.HandleFunc("/assistant/goal/cancel", assistantGoalCancelHandler)
 	http.HandleFunc("/assistant/decisions/supersede", assistantDecisionSupersedeHandler)
