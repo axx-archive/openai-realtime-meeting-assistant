@@ -224,6 +224,9 @@ func pushNotificationRecord(record notificationRecord) {
 	pushNotificationRecordLocal(record)
 	// Ordinary notifications keep web push off the websocket fan-out path.
 	go deliverWebPushForRecord(record)
+	// Native devices are a fourth sibling on the same fan-out, reusing the
+	// same per-recipient filtering rather than re-deriving it (device_push.go).
+	pushNotificationRecordDevice(record)
 }
 
 func pushNotificationRecordLocal(record notificationRecord) {

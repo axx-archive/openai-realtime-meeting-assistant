@@ -60,6 +60,13 @@ var authorizationHTTPSurfaces = []AuthorizationSurface{
 	// authorizes the thread through scoutChatThreadByID before writing, so
 	// marking a thread you cannot see is refused rather than silently recorded.
 	authSurface("http.assistant.thread_read", AuthorizationHTTP, "/assistant/threads/read", []string{"chat_thread"}, []ACLAction{ACLWrite}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
+	// Per-thread mute: the valve for the Table's push-everything default. Both
+	// authorize the thread through scoutChatThreadByID before writing.
+	authSurface("http.assistant.thread_mute", AuthorizationHTTP, "/assistant/threads/mute", []string{"chat_thread"}, []ACLAction{ACLWrite}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
+	// NOTE: /assistant/push/devices is deliberately NOT inventoried here. It is
+	// account-bound state with no object read, exactly like its web-push
+	// siblings (/assistant/push/subscribe, /unsubscribe, /prefs), so it is
+	// declared non-object alongside them in authorization_surfaces_test.go.
 	authSurface("http.assistant.goal", AuthorizationHTTP, "/assistant/goal", []string{"goal", "workflow", "artifact"}, []ACLAction{ACLExecute, ACLReadContent}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.goal_cancel", AuthorizationHTTP, "/assistant/goal/cancel", []string{"goal"}, []ACLAction{ACLExecute}, []string{"user"}, false, true, AuthorizationLegacyGuarded),
 	authSurface("http.assistant.decision_supersede", AuthorizationHTTP, "/assistant/decisions/supersede", []string{"decision"}, []ACLAction{ACLWrite}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
