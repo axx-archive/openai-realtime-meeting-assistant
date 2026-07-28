@@ -20,6 +20,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../auth/AuthContext';
 import { MomentumGlyph } from '../components/BrandMark';
 import { Dock } from '../components/Dock';
+import { ChatCircle } from '../components/ChatCircle';
 import { NavCluster } from '../components/NavCluster';
 import { Waveform } from '../components/Waveform';
 import { useLiveLine } from '../canvas/useLiveLine';
@@ -320,6 +321,24 @@ export function CanvasScreen() {
           </Glass>
         ) : (
           <View style={styles.dockRow}>
+            <View style={styles.navRow}>
+              {/* One tap to the team thread, always. The circle yields while
+                  the cluster is open rather than competing for the same band. */}
+              <ChatCircle
+                clusterOpen={navOpen}
+                mentioned={live.mentioned}
+                onPress={() => {
+                  setNavOpen(false);
+                  if (live.threadId) {
+                    navigation.navigate('Thread', {
+                      threadId: live.threadId,
+                      title: '#team',
+                    });
+                    return;
+                  }
+                  navigation.navigate('Deck', { segment: 'threads' });
+                }}
+              />
             {/* Never routed through the voice pipeline — this is the path that
                 still works when the model quota is gone or the mic is denied.
                 Sits above the Dock so neither covers the other. */}
@@ -366,6 +385,7 @@ export function CanvasScreen() {
                 },
               ]}
             />
+            </View>
             <Dock
               dictation={dictation.state}
               trace={dictation.trace}
@@ -408,6 +428,15 @@ const styles = StyleSheet.create({
     // Column, not row: the nav stacks above the Dock so neither covers the
     // other, and the cluster expands upward into empty canvas.
     justifyContent: 'flex-end',
+  },
+  navRow: {
+    // The band above the Dock: chat on the left, the cluster toggle on the
+    // right, the cluster expanding right-to-left between them. Bottom-aligned
+    // so the circle and the toggle share a baseline even though the cluster's
+    // items carry labels below theirs.
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
   },
   glow: {
     ...StyleSheet.absoluteFill,
