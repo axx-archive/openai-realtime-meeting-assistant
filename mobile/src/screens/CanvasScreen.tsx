@@ -24,6 +24,7 @@ import { ChatCircle } from '../components/ChatCircle';
 import { NavCluster } from '../components/NavCluster';
 import { Waveform } from '../components/Waveform';
 import { useLiveLine } from '../canvas/useLiveLine';
+import { liveLineDisplay } from '../canvas/liveLineDisplay';
 import { useDictation } from '../voice/useDictation';
 import { useScoutConversation } from '../voice/useScoutConversation';
 import { Glass } from '../theme/glass';
@@ -74,6 +75,7 @@ export function CanvasScreen() {
   const markTint = dark ? 'rgba(247, 247, 249, 0.42)' : 'rgba(14, 14, 16, 0.38)';
   const reduceMotion = useReduceMotion();
   const live = useLiveLine();
+  const lineDisplay = liveLineDisplay(live);
   const conversation = useScoutConversation();
   const [typing, setTyping] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
@@ -237,11 +239,14 @@ export function CanvasScreen() {
 
           <Text style={styles.greeting}>{greeting()}</Text>
 
-          {live.text ? (
+          {/* Every decision about WHAT text appears lives in liveLineDisplay,
+              so it can be asserted without a React renderer — this component
+              keeps only the styling and the motion. */}
+          {lineDisplay.visible ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={live.author ? `${live.author}: ${live.text}` : live.text}
-              accessibilityHint={live.threadId ? 'Opens the thread.' : 'Opens threads.'}
+              accessibilityLabel={lineDisplay.accessibilityLabel}
+              accessibilityHint={lineDisplay.accessibilityHint}
               onPress={openLiveTarget}
               style={({ pressed }) => [styles.liveLine, pressed && styles.pressed]}
             >
@@ -256,8 +261,10 @@ export function CanvasScreen() {
                 numberOfLines={2}
                 ellipsizeMode="tail"
               >
-                {live.author ? <Text style={styles.liveAuthor}>{live.author} · </Text> : null}
-                {live.text}
+                {lineDisplay.authorSpan ? (
+                  <Text style={styles.liveAuthor}>{lineDisplay.authorSpan}</Text>
+                ) : null}
+                {lineDisplay.bodySpan}
               </Animated.Text>
             </Pressable>
           ) : null}
