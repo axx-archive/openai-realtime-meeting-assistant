@@ -248,7 +248,18 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			writeScoutChatThreadError(w, err)
 			return
 		}
-		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "thread": thread})
+		// Per-viewer read state rides alongside the record rather than on it —
+		// the record is shared, and writing one user's read state into it would
+		// mark the thread read for the whole team (see thread_read_markers.go).
+		// The client needs readAt (a timestamp) to place its unread divider.
+		marker := lookupThreadReadMarker("", user.Email, threadID)
+		writeAuthJSON(w, http.StatusOK, map[string]any{
+			"ok":                true,
+			"thread":            thread,
+			"readAt":            marker.ReadAt,
+			"lastReadMessageId": marker.LastReadMessageID,
+			"muted":             threadMuted("", user.Email, threadID),
+		})
 		return
 	}
 

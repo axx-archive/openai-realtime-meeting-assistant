@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+
 import type { ScoutMessage } from '../api/types';
 import { parseMentions } from './mentions';
 import { colors, radius, space, type } from '../theme/tokens';
@@ -47,6 +48,7 @@ export const MessageBubble = React.memo(function MessageBubble({
 }: MessageBubbleProps) {
   const body = bodyOf(message);
   const scout = isScout(message);
+  const viaScout = String(message.postedOnBehalfOf ?? '').trim() !== '';
   // Memoized per message: parsing every message on every list render is the
   // performance trap this list exists to avoid (§15).
   const segments = useMemo(() => parseMentions(body), [body]);
@@ -70,6 +72,18 @@ export const MessageBubble = React.memo(function MessageBubble({
           <Text style={[styles.author, scout && styles.authorScout]}>
             {scout ? 'Scout' : String(message.authorName ?? 'Someone')}
           </Text>
+        ) : null}
+
+        {/* The disclosure chip. `postedOnBehalfOf` is stamped server-side
+            UNCONDITIONALLY from the authenticated requester whenever Scout
+            posts as a user, precisely so Scout can never silently impersonate
+            anyone — and this bubble ignored it until now. Rendering it is a
+            disclosure requirement, not decoration, and it matters more the
+            moment a team's primary conversation lives in this surface. */}
+        {viaScout ? (
+          <View style={[styles.viaChip, own && styles.viaChipOwn]}>
+            <Text style={[styles.viaText, own && styles.viaTextOwn]}>via Scout</Text>
+          </View>
         ) : null}
 
         <Text style={[styles.body, own && styles.bodyOwn]}>
@@ -135,6 +149,22 @@ const styles = StyleSheet.create({
     marginBottom: 3,
   },
   authorScout: { color: colors.ember },
+  viaChip: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: radius.full,
+    backgroundColor: colors.emberSoft,
+    marginBottom: 4,
+  },
+  viaChipOwn: { backgroundColor: 'rgba(255,255,255,0.18)' },
+  viaText: {
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+    color: colors.ember,
+  },
+  viaTextOwn: { color: colors.onAccent },
   body: {
     ...type.body,
     color: colors.text1,

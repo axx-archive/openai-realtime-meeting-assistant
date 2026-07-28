@@ -82,6 +82,10 @@ export type ScoutThreadDetailResponse = {
   ok?: boolean;
   thread?: ScoutThread & { messages?: ScoutMessage[] };
   messages?: ScoutMessage[];
+  /** Per-viewer read state — beside the record, never on it. */
+  readAt?: string;
+  lastReadMessageId?: string;
+  muted?: boolean;
   [key: string]: unknown;
 };
 

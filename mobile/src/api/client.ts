@@ -448,6 +448,55 @@ export const api = {
     );
   },
 
+  /**
+   * Advance this viewer's read marker. Flat route with the id in the body,
+   * matching /assistant/threads/follow-up — the server registers plain paths
+   * and has no path-parameter router.
+   */
+  markThreadRead(
+    sessionToken: string,
+    threadId: string,
+    lastReadMessageId: string,
+  ): Promise<{ ok: boolean; readAt?: string }> {
+    return request('/assistant/threads/read', {
+      method: 'POST',
+      body: { threadId, lastReadMessageId },
+      sessionToken,
+    });
+  },
+
+  muteThread(
+    sessionToken: string,
+    threadId: string,
+    muted: boolean,
+  ): Promise<{ ok: boolean; muted: boolean }> {
+    return request('/assistant/threads/mute', {
+      method: 'POST',
+      body: { threadId, muted },
+      sessionToken,
+    });
+  },
+
+  registerPushDevice(
+    sessionToken: string,
+    token: string,
+    platform: string,
+  ): Promise<{ ok: boolean }> {
+    return request('/assistant/push/devices', {
+      method: 'POST',
+      body: { token, platform },
+      sessionToken,
+    });
+  },
+
+  unregisterPushDevice(sessionToken: string, token: string): Promise<{ ok: boolean }> {
+    return request('/assistant/push/devices', {
+      method: 'DELETE',
+      body: { token },
+      sessionToken,
+    });
+  },
+
   sendScoutMessage(
     sessionToken: string,
     threadId: string,

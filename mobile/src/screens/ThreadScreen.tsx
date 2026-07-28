@@ -4,7 +4,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -14,10 +13,19 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { api, BonfireApiError } from '../api/client';
 import type { ScoutMessage } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { MessageBubble } from '../messaging/MessageBubble';
+import { firstUnreadIndex } from '../messaging/unreadBoundary';
+
+type ThreadRow = {
+  message: ScoutMessage;
+  own: boolean;
+  showAuthor: boolean;
+  boundary: boolean;
+};
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
 import { Glass } from '../theme/glass';
 import { Waveform } from '../components/Waveform';
@@ -46,7 +54,10 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const scrollRef = useRef<ScrollView>(null);
+  // null means "not yet loaded" — distinct from "" which means never read.
+  const [readAt, setReadAt] = useState<string | null>(null);
+  const listRef = useRef<FlashListRef<ThreadRow>>(null);
+  const atBottomRef = useRef(true);
 
   const dictation = useDictation({
     context: 'chat',
@@ -61,7 +72,13 @@ export function ThreadScreen({ route, navigation }: Props) {
     if (!sessionToken) return;
     try {
       const response = await api.scoutThread(sessionToken, route.params.threadId);
-      setMessages(response.thread?.messages ?? response.messages ?? []);
+      const next = response.thread?.messages ?? response.messages ?? [];
+      setMessages(next);
+      // Captured once, on the FIRST load only. If it tracked every refresh the
+      // divider would jump to the bottom the moment the marker advanced, and
+      // the "80 new messages" line would vanish while you were still reading
+      // through them.
+      setReadAt((current) => (current === null ? String(response.readAt ?? '') : current));
       setError(null);
     } catch (err) {
       setError(err instanceof BonfireApiError ? err.message : 'Could not load this thread.');
@@ -74,11 +91,41 @@ export function ThreadScreen({ route, navigation }: Props) {
     void load();
   }, [load]);
 
+  // Append, don't refetch. The old code called load() on every chat_thread
+  // event, re-downloading the entire thread because ONE message arrived — the
+  // obvious scaling failure at Table volume.
   useEffect(() => {
-    if (office.event === 'chat_thread') void load();
-  }, [load, office.event, office.version]);
+    if (office.event !== 'chat_thread' || !sessionToken) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await api.scoutThread(sessionToken, route.params.threadId);
+        if (cancelled) return;
+        const next = response.thread?.messages ?? response.messages ?? [];
+        setMessages((previous) => {
+          const seen = new Set(previous.map((message) => String(message.id)));
+          const added = next.filter((message) => !seen.has(String(message.id)));
+          return added.length ? [...previous, ...added] : previous;
+        });
+      } catch {
+        // A dropped refresh leaves what is already on screen. The next event
+        // or a manual reopen recovers it.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [office.event, office.version, route.params.threadId, sessionToken]);
 
   const email = user?.email?.trim().toLowerCase() ?? '';
+
+  // Where the "N new messages" divider goes. -1 means everything is read and
+  // no divider renders.
+  const boundary = useMemo(
+    () => firstUnreadIndex(messages, readAt ?? undefined, email),
+    [email, messages, readAt],
+  );
+
   const rows = useMemo(
     () =>
       messages.map((message, index) => {
@@ -90,10 +137,39 @@ export function ThreadScreen({ route, navigation }: Props) {
           !previous ||
           previous.role !== message.role ||
           previous.authorEmail !== message.authorEmail;
-        return { message, own, showAuthor };
+        return {
+          message,
+          own,
+          showAuthor,
+          // The divider is part of the row above the first unread message
+          // rather than a separate list item, so it cannot desync from it.
+          boundary: index === boundary,
+        };
       }),
-    [email, messages],
+    [boundary, email, messages],
   );
+
+  const unreadBelow = boundary >= 0 ? messages.length - boundary : 0;
+
+  // Advance the marker on GENUINE reads only — never on open. Marking eighty
+  // messages read because the screen appeared is how people lose messages they
+  // never saw.
+  const markRead = useCallback(() => {
+    if (!sessionToken || messages.length === 0) return;
+    const last = messages[messages.length - 1];
+    if (!last?.id) return;
+    void api.markThreadRead(sessionToken, route.params.threadId, String(last.id)).catch(() => {
+      // Best-effort: a failed mark just means the thread still shows unread,
+      // which is the safe direction to fail in.
+    });
+  }, [messages, route.params.threadId, sessionToken]);
+
+  // Leaving the thread while at the bottom counts as having read it.
+  useEffect(() => {
+    return () => {
+      if (atBottomRef.current) markRead();
+    };
+  }, [markRead]);
 
   async function send() {
     const text = draft.trim();
@@ -139,21 +215,44 @@ export function ThreadScreen({ route, navigation }: Props) {
         {loading ? (
           <ActivityIndicator color={colors.accent} style={styles.loading} />
         ) : (
-          <ScrollView
-            ref={scrollRef}
+          <FlashList
+            ref={listRef}
+            data={rows}
+            // Stable identity on the message id. Index keys would recycle
+            // bubbles onto the wrong messages as the list grows.
+            keyExtractor={(row) => String(row.message.id)}
             contentContainerStyle={styles.list}
             keyboardShouldPersistTaps="handled"
-            onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
-          >
-            {rows.map(({ message, own, showAuthor }) => (
-              <MessageBubble
-                key={String(message.id)}
-                message={message}
-                own={own}
-                showAuthor={showAuthor}
-              />
-            ))}
-          </ScrollView>
+            // Land where you stopped reading, not at the bottom. iMessage's
+            // bottom-landing is right for a five-message thread and wrong for
+            // an eighty-message one.
+            initialScrollIndex={boundary >= 0 ? boundary : undefined}
+            onScroll={(event) => {
+              const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+              atBottomRef.current =
+                contentOffset.y + layoutMeasurement.height >= contentSize.height - 48;
+              if (atBottomRef.current) markRead();
+            }}
+            scrollEventThrottle={200}
+            renderItem={({ item }) => (
+              <>
+                {item.boundary ? (
+                  <View style={styles.boundary}>
+                    <View style={styles.boundaryRule} />
+                    <Text style={styles.boundaryLabel}>
+                      {unreadBelow} new {unreadBelow === 1 ? 'message' : 'messages'}
+                    </Text>
+                    <View style={styles.boundaryRule} />
+                  </View>
+                ) : null}
+                <MessageBubble
+                  message={item.message}
+                  own={item.own}
+                  showAuthor={item.showAuthor}
+                />
+              </>
+            )}
+          />
         )}
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -260,6 +359,26 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   loading: { paddingVertical: space[10] },
+  boundary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[3],
+    paddingHorizontal: space[4],
+    paddingTop: space[4],
+    paddingBottom: space[2],
+  },
+  boundaryRule: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.ember,
+  },
+  boundaryLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.4,
+    color: colors.ember,
+    textTransform: 'uppercase',
+  },
   list: {
     paddingTop: space[2],
     // Clears the glass composer floating above the list bottom, so the last
