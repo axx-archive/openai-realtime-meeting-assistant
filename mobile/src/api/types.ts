@@ -34,6 +34,13 @@ export type ScoutThread = {
   createdAt?: string;
   messageCount?: number;
   preview?: string;
+  /** True for the deployment's single permanent team thread — the Table. */
+  table?: boolean;
+  /** Per-viewer, computed server-side from the read marker. Never persisted. */
+  unreadCount?: number;
+  /** Anchors the client's "new messages" divider. */
+  lastReadMessageId?: string;
+  messages?: ScoutMessage[];
   lastMessage?: {
     text?: string;
     role?: string;

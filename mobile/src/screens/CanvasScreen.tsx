@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -25,6 +26,7 @@ import { useLiveLine } from '../canvas/useLiveLine';
 import { useDictation } from '../voice/useDictation';
 import { useScoutConversation } from '../voice/useScoutConversation';
 import { Glass } from '../theme/glass';
+import { duration, ease, useReduceMotion } from '../theme/motion';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, radius, space, type } from '../theme/tokens';
 
@@ -69,6 +71,7 @@ export function CanvasScreen() {
   // rejects — so the glyph's tint is resolved here instead.
   const dark = useColorScheme() === 'dark';
   const markTint = dark ? 'rgba(247, 247, 249, 0.42)' : 'rgba(14, 14, 16, 0.38)';
+  const reduceMotion = useReduceMotion();
   const live = useLiveLine();
   const conversation = useScoutConversation();
   const [typing, setTyping] = useState(false);
@@ -135,6 +138,54 @@ export function CanvasScreen() {
 
   const openDeck = useCallback(() => navigation.navigate('Deck', {}), [navigation]);
 
+  // The live line routes to whatever it is actually talking about. A line that
+  // names a specific message and then dumps you in a thread list would make the
+  // user navigate twice to reach the thing they were just shown.
+  const openLiveTarget = useCallback(() => {
+    if (live.threadId) {
+      navigation.navigate('Thread', {
+        threadId: live.threadId,
+        title: live.kind === 'rooms' ? 'Rooms' : '#team',
+      });
+      return;
+    }
+    if (live.kind === 'rooms') {
+      navigation.navigate('Deck', { segment: 'rooms' });
+      return;
+    }
+    navigation.navigate('Deck', { segment: 'threads' });
+  }, [live.kind, live.threadId, navigation]);
+
+  // Cross-fade plus a 4pt rise when the line's content changes. transform and
+  // opacity only (motion canon §8.4); Reduce Motion sets the values outright so
+  // the CONTENT still updates and only the movement goes away.
+  const liveFade = useRef(new Animated.Value(1)).current;
+  const liveRise = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!live.text) return;
+    if (reduceMotion) {
+      liveFade.setValue(1);
+      liveRise.setValue(0);
+      return;
+    }
+    liveFade.setValue(0);
+    liveRise.setValue(4);
+    Animated.parallel([
+      Animated.timing(liveFade, {
+        toValue: 1,
+        duration: duration.med,
+        easing: ease,
+        useNativeDriver: true,
+      }),
+      Animated.timing(liveRise, {
+        toValue: 0,
+        duration: duration.med,
+        easing: ease,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [ease, liveFade, liveRise, live.author, live.text, reduceMotion]);
+
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
       <KeyboardAvoidingView
@@ -188,14 +239,25 @@ export function CanvasScreen() {
           {live.text ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={live.text}
-              accessibilityHint="Opens threads."
-              onPress={openDeck}
+              accessibilityLabel={live.author ? `${live.author}: ${live.text}` : live.text}
+              accessibilityHint={live.threadId ? 'Opens the thread.' : 'Opens threads.'}
+              onPress={openLiveTarget}
               style={({ pressed }) => [styles.liveLine, pressed && styles.pressed]}
             >
-              <Text style={[styles.liveText, live.mentioned && styles.liveMention]}>
+              <Animated.Text
+                style={[
+                  styles.liveText,
+                  live.mentioned && styles.liveMention,
+                  { opacity: liveFade, transform: [{ translateY: liveRise }] },
+                ]}
+                // Two lines, then ellipsis. A long message must never push the
+                // Dock around — the composition (§9) is load-bearing.
+                numberOfLines={2}
+                ellipsizeMode="tail"
+              >
+                {live.author ? <Text style={styles.liveAuthor}>{live.author} · </Text> : null}
                 {live.text}
-              </Text>
+              </Animated.Text>
             </Pressable>
           ) : null}
 
@@ -414,6 +476,12 @@ const styles = StyleSheet.create({
   },
   liveMention: {
     color: colors.text1,
+  },
+  liveAuthor: {
+    // The author carries the line's weight; the message stays in text2 so the
+    // pair reads as one sentence rather than two competing items.
+    color: colors.text1,
+    fontWeight: '500',
   },
   turn: {
     alignSelf: 'stretch',

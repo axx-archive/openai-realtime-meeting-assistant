@@ -4,6 +4,7 @@ import {
   Image,
   Pressable,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -16,6 +17,7 @@ import { api, BonfireApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { passkeyErrorMessage } from '../auth/passkeyError';
 import { Screen } from '../components/Screen';
+import { useShowPreviews } from '../canvas/previewPreference';
 import { colors, hitMin, radius, shadow, space, type } from '../theme/tokens';
 
 type PasskeyRow = { id: string; label: string };
@@ -29,6 +31,7 @@ export function SettingsScreen() {
     changePassword,
     signOut,
   } = useAuth();
+  const { showPreviews, setShowPreviews } = useShowPreviews();
   const [displayName, setDisplayName] = useState(user?.name ?? '');
   const [passkeys, setPasskeys] = useState<PasskeyRow[]>([]);
   const [currentPassword, setCurrentPassword] = useState('');
@@ -224,6 +227,27 @@ export function SettingsScreen() {
         })}
       </View>
 
+      <Text style={styles.sectionTitle}>Privacy</Text>
+      <View style={[styles.section, shadow[1]]}>
+        <Pressable
+          accessibilityRole="switch"
+          accessibilityState={{ checked: showPreviews }}
+          accessibilityLabel="Show message previews"
+          accessibilityHint="When off, the home screen shows how many messages are waiting instead of what they say."
+          onPress={() => setShowPreviews(!showPreviews)}
+          style={({ pressed }) => [styles.toggleRow, pressed && styles.pressed]}
+        >
+          <View style={styles.toggleText}>
+            <Text style={styles.toggleLabel}>Show message previews</Text>
+            <Text style={styles.toggleHint}>
+              Your team&rsquo;s latest message appears on the home screen. Turn this off to show a
+              count instead.
+            </Text>
+          </View>
+          <Switch value={showPreviews} onValueChange={setShowPreviews} />
+        </Pressable>
+      </View>
+
       <Text style={styles.sectionTitle}>Passkeys</Text>
       <View style={[styles.section, shadow[1]]}>
         {passkeys.map((row) => (
@@ -294,6 +318,21 @@ const styles = StyleSheet.create({
   segmentSelected: { backgroundColor: colors.accent },
   segmentText: { ...type.button, color: colors.text2 },
   segmentTextSelected: { color: colors.onAccent },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[3],
+    paddingVertical: space[2],
+  },
+  toggleText: { flex: 1, gap: 2 },
+  toggleLabel: {
+    ...type.bodyMedium,
+    color: colors.text1,
+  },
+  toggleHint: {
+    ...type.caption,
+    color: colors.text2,
+  },
   passkeyRow: { minHeight: 42, flexDirection: 'row', alignItems: 'center', gap: 10 },
   passkeyLabel: { ...type.bodySm, color: colors.text1, flex: 1 },
   remove: { ...type.captionMedium, color: colors.danger },

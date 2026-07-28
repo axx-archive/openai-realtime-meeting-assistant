@@ -1,36 +1,27 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { api } from '../api/client';
+import type { ScoutMessage, ScoutThread } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
 import { firstArray } from '../utils/records';
+import { resolveLiveLine, type LiveLineInput, type LiveLineResult } from './liveLine';
+import { useShowPreviews } from './previewPreference';
 
 /**
- * The canvas live line — design §14.5.
+ * The canvas live line — design §5.
  *
- * Killing the tab bar removed the conventional home of the unread badge, so the
- * canvas's one line of prose becomes the unread surface. A sentence beats a dot
- * because it can say *who* and *where*:
+ * This hook fetches; `resolveLiveLine` decides. The split exists because mobile
+ * tests run on plain node:test with no React renderer, so the five-rung ladder
+ * is only testable outside a hook — and the arbitration is the part with real
+ * rules in it (see canvas/liveLine.ts and __tests__/liveLine.test.ts).
  *
- *     "Three unread in #pricing. Dana mentioned you."
- *
- * The escalation rule is the important part: ambient channel volume never earns
- * pixels outside the Deck — only a DIRECT MENTION does. The server already draws
- * that line (a targeted notification carries `userEmail`; a broadcast channel
- * post does not), and the client must not flatten it back into one
- * undifferentiated red dot.
+ * The mention-versus-volume distinction comes straight from the server: a
+ * targeted notification carries `userEmail`, a broadcast channel post does not.
+ * It is never re-derived from message text.
  */
 
-export type LiveLine = {
-  /** The sentence, or null when nothing is live — the line is ABSENT, not empty. */
-  text: string | null;
-  /** True when at least one unread notification is addressed to this user. */
-  mentioned: boolean;
-  unreadCount: number;
-  liveRooms: number;
-  /** Thread to open when the line is tapped, if the line names one. */
-  threadId: string | null;
-};
+export type LiveLine = LiveLineResult;
 
 type NotificationRow = {
   read?: boolean;
@@ -39,35 +30,53 @@ type NotificationRow = {
   kind?: string;
   text?: string;
   threadId?: string;
+  authorName?: string;
 };
 
 const EMPTY: LiveLine = {
+  kind: 'none',
+  author: null,
   text: null,
   mentioned: false,
-  unreadCount: 0,
-  liveRooms: 0,
   threadId: null,
 };
 
-function plural(count: number, one: string, many: string): string {
-  return count === 1 ? one : many;
+function channelLabel(thread: ScoutThread | undefined): string {
+  const title = String(thread?.title || 'team').trim();
+  return `#${title.replace(/^#/, '')}`;
+}
+
+function lastFrom(thread: ScoutThread | undefined): LiveLineInput['tableLastMessage'] {
+  const messages = (thread?.messages ?? []) as ScoutMessage[];
+  const last = messages[messages.length - 1];
+  if (!last) return null;
+  return {
+    authorName: String(last.authorName ?? '').trim(),
+    authorEmail: String(last.authorEmail ?? '').trim(),
+    text: String(last.text ?? last.content ?? '').trim(),
+  };
 }
 
 export function useLiveLine(): LiveLine {
   const { sessionToken, user } = useAuth();
   const office = useOfficeEvents();
+  const { showPreviews } = useShowPreviews();
   const [line, setLine] = useState<LiveLine>(EMPTY);
 
   const load = useCallback(async () => {
     if (!sessionToken) return;
     try {
-      const [rooms, alerts] = await Promise.all([
+      const [rooms, alerts, threadList] = await Promise.all([
         api.rooms(sessionToken),
         api.notifications(sessionToken),
+        api.scoutThreads(sessionToken),
       ]);
 
-      const liveRooms = (rooms.rooms ?? []).filter((room) => room.live).length;
       const email = user?.email?.trim().toLowerCase() ?? '';
+      const threads = threadList.threads ?? [];
+      const table = threads.find((thread) => thread.table === true);
+      const tableId = table ? String(table.id) : null;
+
       const unread = firstArray(alerts, ['notifications']).filter((row) => {
         const item = row as NotificationRow;
         if (item.read) return false;
@@ -75,39 +84,48 @@ export function useLiveLine(): LiveLine {
         return true;
       }) as NotificationRow[];
 
-      // A targeted notification carries the recipient; a broadcast channel post
-      // does not. That is the mention-versus-volume distinction, straight from
-      // the server rather than re-derived from message text.
-      const mentions = unread.filter(
-        (item) => email && item.userEmail?.trim().toLowerCase() === email,
+      // Targeted only — the server already drew this line for us.
+      const mentions = unread
+        .filter((item) => email && item.userEmail?.trim().toLowerCase() === email)
+        .map((item) => {
+          const mentionThread = threads.find((thread) => String(thread.id) === String(item.threadId));
+          return {
+            threadId: String(item.threadId ?? ''),
+            threadName: channelLabel(mentionThread),
+            text: String(item.text ?? '').trim(),
+            authorName: String(item.authorName ?? '').trim(),
+          };
+        });
+
+      // Ambient volume in every thread that is NOT the Table — the Table gets
+      // its own rung with a real preview, so counting it here would double it.
+      const otherUnreadThreads = threads.filter(
+        (thread) => !thread.table && (thread.unreadCount ?? 0) > 0,
+      );
+      const otherUnreadCount = otherUnreadThreads.reduce(
+        (total, thread) => total + (thread.unreadCount ?? 0),
+        0,
       );
 
-      const parts: string[] = [];
-      if (liveRooms > 0) {
-        parts.push(`${liveRooms} ${plural(liveRooms, 'room is', 'rooms are')} live.`);
-      }
-      if (unread.length > 0) {
-        parts.push(`${unread.length} unread ${plural(unread.length, 'message', 'messages')}.`);
-      }
-      if (mentions.length > 0) {
-        const first = mentions[0]?.text?.trim();
-        parts.push(first ? first.replace(/\s+/g, ' ') : 'Someone mentioned you.');
-      }
-
-      setLine({
-        // Absent, not "Nothing live" — empty states that narrate their own
-        // emptiness are noise, and the quiet page stays quiet (§9).
-        text: parts.length ? parts.join(' ') : null,
-        mentioned: mentions.length > 0,
-        unreadCount: unread.length,
-        liveRooms,
-        threadId: mentions[0]?.threadId ?? null,
-      });
+      setLine(
+        resolveLiveLine({
+          viewerEmail: email,
+          tableThreadId: tableId,
+          tableName: channelLabel(table),
+          tableUnreadCount: table?.unreadCount ?? 0,
+          tableLastMessage: lastFrom(table),
+          mentions,
+          liveRooms: (rooms.rooms ?? []).filter((room) => room.live).length,
+          otherUnreadCount,
+          otherUnreadThreads: otherUnreadThreads.length,
+          showPreviews,
+        }),
+      );
     } catch {
       // A failed poll leaves the previous line in place rather than blanking
       // the canvas — a transient network blip should not look like "all clear".
     }
-  }, [sessionToken, user?.email]);
+  }, [sessionToken, showPreviews, user?.email]);
 
   useFocusEffect(
     useCallback(() => {
@@ -116,7 +134,11 @@ export function useLiveLine(): LiveLine {
   );
 
   useEffect(() => {
-    if (!['rooms', 'participants', 'notification', 'notification_backlog', 'chat_thread'].includes(office.event ?? '')) {
+    if (
+      !['rooms', 'participants', 'notification', 'notification_backlog', 'chat_thread'].includes(
+        office.event ?? '',
+      )
+    ) {
       return;
     }
     void load();
