@@ -202,6 +202,7 @@ func TestLogoutDestroysSession(t *testing.T) {
 
 func TestNativeLogoutDestroysBearerSession(t *testing.T) {
 	setupAuthTestEnv(t)
+	t.Setenv("DEVICE_PUSH_TOKENS_PATH", filepath.Join(t.TempDir(), "devices.json"))
 
 	loginReq := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"name":"AJ","password":"B0NFIRE!"}`))
 	loginReq.Header.Set("Content-Type", "application/json")
@@ -217,14 +218,21 @@ func TestNativeLogoutDestroysBearerSession(t *testing.T) {
 	if err := json.Unmarshal(loginRec.Body.Bytes(), &login); err != nil || login.SessionToken == "" {
 		t.Fatalf("native login token missing: err=%v body=%s", err, loginRec.Body.String())
 	}
+	deviceToken := "ExponentPushToken[logout-device]"
+	if err := upsertDeviceToken(deviceTokenRecord{UserEmail: "aj@shareability.com", Token: deviceToken, Platform: "ios"}); err != nil {
+		t.Fatalf("register device: %v", err)
+	}
 
-	logoutReq := httptest.NewRequest(http.MethodPost, "/auth/logout", strings.NewReader(`{}`))
+	logoutReq := httptest.NewRequest(http.MethodPost, "/auth/logout", strings.NewReader(`{"deviceToken":"`+deviceToken+`"}`))
 	logoutReq.Header.Set("Content-Type", "application/json")
 	logoutReq.Header.Set("Authorization", "Bearer "+login.SessionToken)
 	logoutRec := httptest.NewRecorder()
 	authHandler(logoutRec, logoutReq)
 	if logoutRec.Code != http.StatusOK {
 		t.Fatalf("native logout failed: %d %s", logoutRec.Code, logoutRec.Body.String())
+	}
+	if tokens := snapshotDeviceTokenStore().Tokens; len(tokens) != 0 {
+		t.Fatalf("device binding survived authenticated logout: %+v", tokens)
 	}
 
 	meReq := httptest.NewRequest(http.MethodGet, "/auth/me", nil)

@@ -141,8 +141,12 @@ export const api = {
     return request<Identity>('/auth/me', { sessionToken });
   },
 
-  logout(sessionToken: string): Promise<unknown> {
-    return request('/auth/logout', { method: 'POST', body: {}, sessionToken });
+  logout(sessionToken: string, deviceToken?: string | null): Promise<unknown> {
+	return request('/auth/logout', {
+		method: 'POST',
+		body: { deviceToken: deviceToken?.trim() || undefined },
+		sessionToken,
+	});
   },
 
   changePassword(

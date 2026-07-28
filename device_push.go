@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -163,6 +164,8 @@ func upsertDeviceToken(record deviceTokenRecord) error {
 }
 
 func removeDeviceToken(tenantID, userEmail, token string) error {
+	tenantID = strings.TrimSpace(tenantID)
+	userEmail = normalizeAccountEmail(userEmail)
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return nil
@@ -170,7 +173,9 @@ func removeDeviceToken(tenantID, userEmail, token string) error {
 	return mutateDeviceTokenStore(func(state *deviceTokenStoreData) {
 		kept := state.Tokens[:0]
 		for _, existing := range state.Tokens {
-			if existing.Token == token {
+			ownerMatches := userEmail == "" || normalizeAccountEmail(existing.UserEmail) == userEmail
+			tenantMatches := tenantID == "" || strings.TrimSpace(existing.TenantID) == tenantID
+			if existing.Token == token && ownerMatches && tenantMatches {
 				continue
 			}
 			kept = append(kept, existing)
@@ -212,7 +217,9 @@ func deviceRecipientMatches(record notificationRecord, token deviceTokenRecord) 
 	if !notificationTenantMatches(record, token.TenantID) {
 		return false
 	}
-	return record.UserEmail == "" || record.UserEmail == normalizeAccountEmail(token.UserEmail)
+	userEmail := normalizeAccountEmail(token.UserEmail)
+	return !notificationExcludedForUser(record, userEmail) &&
+		(record.UserEmail == "" || record.UserEmail == userEmail)
 }
 
 // chunkExpoPushMessages splits tokens into Expo-sized batches.
@@ -249,6 +256,12 @@ func expoPushMessagesFor(record notificationRecord, tokens []string) []expoPushM
 		// A notification is a request to see ONE thing. Without a thread the
 		// tap lands on the canvas and the user has to navigate twice.
 		data["threadId"] = threadID
+	}
+	if messageID := strings.TrimSpace(record.MessageID); messageID != "" {
+		data["messageId"] = messageID
+	}
+	if threadName := strings.TrimSpace(record.ThreadName); threadName != "" {
+		data["threadName"] = threadName
 	}
 	if tool := strings.TrimSpace(record.Tool); tool != "" {
 		data["tool"] = tool
@@ -341,6 +354,9 @@ func sendExpoPushBatch(ctx context.Context, messages []expoPushMessage) ([]expoP
 		return nil, err
 	}
 	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("Expo push returned HTTP %d", response.StatusCode)
+	}
 
 	var decoded expoPushResponse
 	if err := json.NewDecoder(response.Body).Decode(&decoded); err != nil {

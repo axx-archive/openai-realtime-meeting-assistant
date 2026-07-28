@@ -258,7 +258,9 @@ func pushRecipientMatches(record notificationRecord, subscription pushSubscripti
 	if !notificationTenantMatches(record, subscription.TenantID) {
 		return false
 	}
-	return record.UserEmail == "" || record.UserEmail == normalizeAccountEmail(subscription.UserEmail)
+	userEmail := normalizeAccountEmail(subscription.UserEmail)
+	return !notificationExcludedForUser(record, userEmail) &&
+		(record.UserEmail == "" || record.UserEmail == userEmail)
 }
 
 // --- VAPID keys -------------------------------------------------------------

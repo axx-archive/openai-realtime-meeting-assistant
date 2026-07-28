@@ -30,7 +30,10 @@ type NotificationRow = {
   kind?: string;
   text?: string;
   threadId?: string;
-  authorName?: string;
+	messageId?: string;
+	threadName?: string;
+	authorName?: string;
+	messagePreview?: string;
 };
 
 const EMPTY: LiveLine = {
@@ -91,9 +94,12 @@ export function useLiveLine(): LiveLine {
         .map((item) => {
           const mentionThread = threads.find((thread) => String(thread.id) === String(item.threadId));
           return {
-            threadId: String(item.threadId ?? ''),
-            threadName: channelLabel(mentionThread),
-            text: String(item.text ?? '').trim(),
+			threadId: String(item.threadId ?? ''),
+			messageId: String(item.messageId ?? ''),
+			threadName: String(item.threadName ?? '').trim()
+			  ? `#${String(item.threadName).trim().replace(/^#/, '')}`
+			  : channelLabel(mentionThread),
+			text: String(item.messagePreview ?? item.text ?? '').trim(),
             authorName: String(item.authorName ?? '').trim(),
           };
         });

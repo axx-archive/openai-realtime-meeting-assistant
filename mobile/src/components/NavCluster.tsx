@@ -137,7 +137,11 @@ export function NavCluster({ open, onToggle, destinations }: NavClusterProps) {
       {/* Absolutely positioned so a COLLAPSED cluster occupies no layout space.
           Left in flow, the hidden items reserve a ~250pt invisible column that
           shoves the Dock to mid-screen. */}
-      <View style={[styles.items, !open && styles.inert]}>
+	  <View
+		style={[styles.items, !open && styles.inert]}
+		accessibilityElementsHidden={!open}
+		importantForAccessibility={open ? 'auto' : 'no-hide-descendants'}
+	  >
         {items}
       </View>
       <Glass radius={radius.full} interactive style={styles.toggle}>

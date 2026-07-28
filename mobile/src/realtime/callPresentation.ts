@@ -64,9 +64,9 @@ export function focusedVideoParticipant(
 /**
  * Group-call PiP should communicate a real presentation choice, never imply
  * that the first roster entry is speaking. A manual pin, a shared screen, or a
- * currently active speaker may own PiP. One-to-one calls retain the sole remote
- * participant as the natural fallback; silent group calls remain audio-only in
- * the system overlay until somebody actually speaks or is pinned.
+ * currently active speaker may own PiP. A healthy remote fallback keeps iOS's
+ * system call overlay available before anyone speaks; without one, backgrounding
+ * a newly joined group call produces no PiP at all.
  */
 export function pictureInPictureParticipant(
   participants: readonly PresentedVideoParticipant[],
@@ -78,7 +78,7 @@ export function pictureInPictureParticipant(
   return eligible(participants.find((participant) => participant.key === pinnedParticipantKey))
     ?? eligible(participants.find((participant) => participant.screenSharing))
     ?? eligible(participants.find((participant) => participant.active))
-    ?? (participants.length === 1 ? eligible(participants[0]) : undefined);
+    ?? eligible(participants.find((participant) => participant.streamURL));
 }
 
 /**

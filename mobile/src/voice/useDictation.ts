@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as Haptics from 'expo-haptics';
+import { File } from 'expo-file-system';
 import {
   AudioModule,
   RecordingPresets,
@@ -30,6 +31,17 @@ export type DictationState = 'idle' | 'listening' | 'transcribing' | 'error';
 
 /** Mirrors the server's cap so a stuck recorder can't bill a surprise. */
 export const MAX_DICTATION_MS = 600_000;
+
+function deleteDictationFile(uri: string | null | undefined): void {
+	if (!uri) return;
+	try {
+		const file = new File(uri);
+		if (file.exists) file.delete();
+	} catch {
+		// Privacy cleanup is best-effort at the filesystem boundary. The file is
+		// never intentionally retained after success, cancel, or discard.
+	}
+}
 
 /**
  * Speech, not music: mono at a modest bitrate is indistinguishable to a
@@ -74,6 +86,9 @@ export function useDictation({ context = 'chat', threadId, onTranscript }: UseDi
 
   // Survives re-renders and the async gap between release and upload.
   const cancelledRef = useRef(false);
+	const heldRef = useRef(false);
+	const startingRef = useRef(false);
+	const listeningRef = useRef(false);
   const pendingRef = useRef<{ uri: string; durationMs: number } | null>(null);
   const onTranscriptRef = useRef(onTranscript);
   onTranscriptRef.current = onTranscript;
@@ -109,8 +124,9 @@ export function useDictation({ context = 'chat', threadId, onTranscript }: UseDi
       setState('transcribing');
       setError(null);
       try {
-        const result = await api.transcribeDictation(sessionToken, recording, { context, threadId });
-        pendingRef.current = null;
+		const result = await api.transcribeDictation(sessionToken, recording, { context, threadId });
+		deleteDictationFile(recording.uri);
+		pendingRef.current = null;
         setState('idle');
         if (result.text.trim()) {
           void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -127,44 +143,60 @@ export function useDictation({ context = 'chat', threadId, onTranscript }: UseDi
   );
 
   const start = useCallback(async () => {
-    if (state === 'listening' || state === 'transcribing') return;
+	if (startingRef.current || listeningRef.current || state === 'transcribing') return;
+	heldRef.current = true;
+	startingRef.current = true;
     cancelledRef.current = false;
     setError(null);
+	try {
+		const permission = await AudioModule.requestRecordingPermissionsAsync();
+		if (!permission.granted) {
+			setPermissionDenied(true);
+			setState('idle');
+			return;
+		}
+		setPermissionDenied(false);
 
-    const permission = await AudioModule.requestRecordingPermissionsAsync();
-    if (!permission.granted) {
-      setPermissionDenied(true);
-      setState('idle');
-      return;
-    }
-    setPermissionDenied(false);
-
-    // allowsRecording routes the session to the mic; playsInSilentMode keeps a
-    // spoken answer audible when the ringer switch is off, which is the common
-    // case for a phone on a desk.
-    await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-    await recorder.prepareToRecordAsync();
-    recorder.record();
-    setState('listening');
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+		// allowsRecording routes the session to the mic; playsInSilentMode keeps a
+		// spoken answer audible when the ringer switch is off.
+		await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+		await recorder.prepareToRecordAsync();
+		// A release can happen while permission/audio preparation is awaiting.
+		// Never begin a recording after the initiating finger has already left.
+		if (!heldRef.current) {
+			await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+			setState('idle');
+			return;
+		}
+		recorder.record();
+		listeningRef.current = true;
+		setState('listening');
+		void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+	} finally {
+		startingRef.current = false;
+	}
   }, [recorder, state]);
 
   /** Release: stop, then upload — unless the finger slid away first. */
   const stop = useCallback(async () => {
-    if (state !== 'listening') return;
+	heldRef.current = false;
+	if (!listeningRef.current) return;
+	listeningRef.current = false;
     const durationMs = recorderState.durationMillis;
     await recorder.stop();
     // Release the mic so other audio (a room, a spoken answer) is not ducked
     // behind an idle recording session.
     await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
 
-    if (cancelledRef.current) {
+	if (cancelledRef.current) {
+		deleteDictationFile(recorder.uri);
       cancelledRef.current = false;
       setState('idle');
       return;
     }
     const uri = recorder.uri;
-    if (!uri || durationMs < 400) {
+	if (!uri || durationMs < 400) {
+		deleteDictationFile(uri);
       // Below ~400ms this is a mistap, not speech. Silently returning to idle
       // beats surfacing an error for something the user did not intend to do.
       setState('idle');
@@ -177,10 +209,10 @@ export function useDictation({ context = 'chat', threadId, onTranscript }: UseDi
 
   /** Slide-away while still holding. Marks the intent; `stop` honors it. */
   const cancel = useCallback(() => {
-    if (state !== 'listening') return;
+	if (!startingRef.current && !listeningRef.current) return;
     cancelledRef.current = true;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Rigid);
-  }, [state]);
+	}, []);
 
   /** Re-uploads the retained audio after a failure. */
   const retry = useCallback(() => {
@@ -194,7 +226,8 @@ export function useDictation({ context = 'chat', threadId, onTranscript }: UseDi
   }, [upload]);
 
   const dismissError = useCallback(() => {
-    pendingRef.current = null;
+	deleteDictationFile(pendingRef.current?.uri);
+	pendingRef.current = null;
     setState('idle');
     setError(null);
   }, []);

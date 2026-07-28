@@ -57,6 +57,11 @@
     "eas:submit:ios": "eas submit --platform ios --profile production"
   },
   "expo": {
+    "install": {
+      "exclude": [
+        "typescript"
+      ]
+    },
     "doctor": {
       "reactNativeDirectoryCheck": {
         "exclude": [

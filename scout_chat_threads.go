@@ -99,9 +99,9 @@ type scoutChatMessageRecord struct {
 	// Sources are the thread messages a Scout answer provably quotes. omitempty
 	// for the same round-trip reason every other added field is: pre-Sources
 	// messages on disk must decode unchanged.
-	Sources          []answerSource            `json:"sources,omitempty"`
-	Files            []scoutChatFileAttachment `json:"files,omitempty"`
-	Thread           *scoutChatThreadRef       `json:"thread,omitempty"`
+	Sources []answerSource            `json:"sources,omitempty"`
+	Files   []scoutChatFileAttachment `json:"files,omitempty"`
+	Thread  *scoutChatThreadRef       `json:"thread,omitempty"`
 	// Proposal carries a router proposal card (Kind "proposal") — DATA the
 	// client renders as the confirmation trust surface, never an action. See
 	// the propose-confirm router in scout_chat.go.
@@ -475,7 +475,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 		saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, messages...)
 		if err == nil && mentionsPending {
 			mentionsPending = false
-			app.notifyScoutChatMentions(saved, userMessage)
+			app.notifyScoutChatChannelMessage(saved, userMessage)
 		}
 		return saved, err
 	}

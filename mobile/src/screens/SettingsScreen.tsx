@@ -210,6 +210,9 @@ export function SettingsScreen() {
         >
           <Text style={styles.primaryText}>{busy === 'profile' ? 'Saving…' : 'Save profile'}</Text>
         </Pressable>
+		<Text style={styles.privacyNote}>
+			Voice dictation is sent securely to Bonfire for company-aware transcription. The audio file is deleted after transcription or when you cancel or discard it; only text remains.
+		</Text>
       </View>
 
       <Text style={styles.sectionTitle}>Appearance</Text>
@@ -345,6 +348,7 @@ const styles = StyleSheet.create({
     ...type.caption,
     color: colors.text2,
   },
+	privacyNote: { ...type.caption, color: colors.text2, lineHeight: 18 },
   passkeyRow: { minHeight: 42, flexDirection: 'row', alignItems: 'center', gap: 10 },
   passkeyLabel: { ...type.bodySm, color: colors.text1, flex: 1 },
   remove: { ...type.captionMedium, color: colors.danger },

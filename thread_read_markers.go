@@ -239,9 +239,29 @@ func assistantThreadReadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Authorize before writing: reading a thread you cannot see must not
-	// silently create a marker for it.
-	if _, _, err := kanbanApp.scoutChatThreadByID(user.Email, threadID); err != nil {
+	// silently create a marker for it. The marker is anchored to the exact
+	// server-authored message timestamp, not request arrival time; otherwise a
+	// concurrent message committed between render and this POST is erased from
+	// unread state even though the viewer never saw it.
+	thread, _, err := kanbanApp.scoutChatThreadByID(user.Email, threadID)
+	if err != nil {
 		writeAuthError(w, http.StatusNotFound, "chat thread not found")
+		return
+	}
+	lastReadMessageID := strings.TrimSpace(payload.LastReadMessageID)
+	readAt := ""
+	readMessageIDs := map[string]struct{}{}
+	for _, message := range thread.Messages {
+		if message.ID != "" {
+			readMessageIDs[message.ID] = struct{}{}
+		}
+		if message.ID == lastReadMessageID {
+			readAt = strings.TrimSpace(message.CreatedAt)
+			break
+		}
+	}
+	if lastReadMessageID == "" || readAt == "" {
+		writeAuthError(w, http.StatusBadRequest, "lastReadMessageId is not in this thread")
 		return
 	}
 
@@ -251,12 +271,15 @@ func assistantThreadReadHandler(w http.ResponseWriter, r *http.Request) {
 	marker := threadReadMarker{
 		UserEmail:         user.Email,
 		ThreadID:          threadID,
-		LastReadMessageID: strings.TrimSpace(payload.LastReadMessageID),
-		ReadAt:            time.Now().UTC().Format(time.RFC3339),
+		LastReadMessageID: lastReadMessageID,
+		ReadAt:            readAt,
 	}
 	if err := upsertThreadReadMarker(marker); err != nil {
 		writeAuthError(w, http.StatusInternalServerError, "could not save read state")
 		return
+	}
+	if _, err := kanbanApp.markThreadNotificationsRead(user.Email, threadID, readMessageIDs); err != nil {
+		log.Errorf("Failed to settle thread notifications for %s: %v", user.Email, err)
 	}
 
 	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "readAt": marker.ReadAt})

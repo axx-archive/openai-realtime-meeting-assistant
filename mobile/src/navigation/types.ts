@@ -13,7 +13,7 @@ export type RootStackParamList = {
   OSWeb: { path?: string; title?: string } | undefined;
   Room: { roomId: string; title: string };
   CreateRoom: undefined;
-  Thread: { threadId: string; title: string };
+  Thread: { threadId: string; title: string; messageId?: string };
   Intelligence: undefined;
   Memory: undefined;
   Meetings: undefined;

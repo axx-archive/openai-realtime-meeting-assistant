@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
+import * as SecureStore from 'expo-secure-store';
 import { api } from '../api/client';
-import { EAS_PROJECT_ID } from '../config';
+import { EAS_PROJECT_ID, PUSH_TOKEN_STORAGE_KEY } from '../config';
 import { parsePushTarget, type PushTarget } from './deepLink';
 
 /**
@@ -35,8 +36,6 @@ export type PushRegistrationOptions = {
 };
 
 export function usePushRegistration({ sessionToken, onOpenTarget }: PushRegistrationOptions) {
-  // Held so logout can unregister the exact token that was registered.
-  const tokenRef = useRef<string | null>(null);
   // Kept in a ref so the listener effect does not re-subscribe every time the
   // navigation callback is re-created.
   const openRef = useRef(onOpenTarget);
@@ -58,7 +57,10 @@ export function usePushRegistration({ sessionToken, onOpenTarget }: PushRegistra
       if (!granted) return;
 
       const token = await Notifications.getExpoPushTokenAsync({ projectId: EAS_PROJECT_ID });
-      tokenRef.current = token.data;
+	  // Persist before the network request. Auth logout sends this token in the
+	  // same request that revokes the session, so a cold relaunch or a sign-out
+	  // racing registration cannot strand the previous account's binding.
+	  await SecureStore.setItemAsync(PUSH_TOKEN_STORAGE_KEY, token.data);
       await api.registerPushDevice(sessionToken, token.data, Platform.OS);
     } catch {
       // Registration is best-effort and must never block sign-in. A simulator
@@ -70,15 +72,12 @@ export function usePushRegistration({ sessionToken, onOpenTarget }: PushRegistra
     void register();
   }, [register]);
 
-  // Unregister on sign-out. This is not housekeeping: a token left bound to the
-  // previous account delivers their messages to whoever signs in next on this
-  // phone.
+  // Badge cleanup is local. Server unregistering is intentionally performed by
+  // AuthContext BEFORE it clears the old session token; by the time this hook
+  // observes null, an authenticated DELETE would be impossible.
   useEffect(() => {
-    if (sessionToken) return;
-    const token = tokenRef.current;
-    if (!token) return;
-    tokenRef.current = null;
-    void Notifications.setBadgeCountAsync(0).catch(() => {});
+	if (sessionToken) return;
+	void Notifications.setBadgeCountAsync(0).catch(() => {});
   }, [sessionToken]);
 
   useEffect(() => {
@@ -102,11 +101,7 @@ export function usePushRegistration({ sessionToken, onOpenTarget }: PushRegistra
  * token is cleared — the request needs it to authenticate.
  */
 export async function unregisterPushDevice(sessionToken: string, token: string): Promise<void> {
-  try {
-    await api.unregisterPushDevice(sessionToken, token);
-  } catch {
-    // Best-effort: the server also prunes on DeviceNotRegistered.
-  }
+	await api.unregisterPushDevice(sessionToken, token);
 }
 
 /** Direct mentions only — matches the chat circle's dot rule (§6). */

@@ -21,6 +21,8 @@ export type MessageBubbleProps = {
   message: ScoutMessage;
   /** Scrolls to a cited message when a source chip is tapped. */
   onOpenSource?: (messageId: string) => void;
+	/** Opens an authenticated attachment from desktop or mobile. */
+	onOpenAttachment?: (file: NonNullable<ScoutMessage['files']>[number]) => void;
   /** True when the signed-in user wrote it. */
   own: boolean;
   /** False when the previous message shares this author — suppresses the name. */
@@ -49,16 +51,18 @@ export const MessageBubble = React.memo(function MessageBubble({
   own,
   showAuthor,
   onOpenSource,
+	onOpenAttachment,
 }: MessageBubbleProps) {
   const body = bodyOf(message);
   const scout = isScout(message);
   const viaScout = String(message.postedOnBehalfOf ?? '').trim() !== '';
   const sources = Array.isArray(message.sources) ? message.sources : [];
+	const files = Array.isArray(message.files) ? message.files : [];
   // Memoized per message: parsing every message on every list render is the
   // performance trap this list exists to avoid (§15).
   const segments = useMemo(() => parseMentions(body), [body]);
 
-  if (!body) return null;
+	if (!body && files.length === 0) return null;
 
   return (
     // Grouping is spacing, not just a hidden name. Consecutive messages from
@@ -94,7 +98,7 @@ export const MessageBubble = React.memo(function MessageBubble({
           </View>
         ) : null}
 
-        <Text style={[styles.body, own && styles.bodyOwn]}>
+		{body ? <Text style={[styles.body, own && styles.bodyOwn]}>
           {segments.map((segment, index) =>
             segment.kind === 'text' ? (
               segment.text
@@ -111,7 +115,24 @@ export const MessageBubble = React.memo(function MessageBubble({
               </Text>
             ),
           )}
-        </Text>
+		</Text> : null}
+
+		{files.length > 0 ? (
+			<View style={styles.attachments}>
+				{files.map((file) => (
+					<Pressable
+						key={`${file.ref}:${file.name}`}
+						accessibilityRole="button"
+						accessibilityLabel={`Open attachment ${file.name}`}
+						onPress={() => onOpenAttachment?.(file)}
+						style={({ pressed }) => [styles.attachment, own && styles.attachmentOwn, pressed && styles.sourcePressed]}
+					>
+						<SymbolView name="paperclip" tintColor={own ? colors.onAccent : colors.text2} size={14} />
+						<Text style={[styles.attachmentText, own && styles.bodyOwn]} numberOfLines={1}>{file.name}</Text>
+					</Pressable>
+				))}
+			</View>
+		) : null}
 
         <Text style={[styles.time, own && styles.timeOwn]}>{timeOf(message)}</Text>
       </View>
@@ -228,6 +249,19 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
   timeOwn: { color: 'rgba(255,255,255,0.55)' },
+	attachments: { gap: space[1], marginTop: space[1] },
+	attachment: {
+		minHeight: 44,
+		maxWidth: 240,
+		paddingHorizontal: space[3],
+		borderRadius: radius.md,
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: space[2],
+		backgroundColor: colors.surface3,
+	},
+	attachmentOwn: { backgroundColor: 'rgba(255,255,255,0.16)' },
+	attachmentText: { ...type.captionMedium, color: colors.text1, flexShrink: 1 },
   sources: {
     flexDirection: 'row',
     flexWrap: 'wrap',

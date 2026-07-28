@@ -146,10 +146,11 @@ export function CanvasScreen() {
   // user navigate twice to reach the thing they were just shown.
   const openLiveTarget = useCallback(() => {
     if (live.threadId) {
-      navigation.navigate('Thread', {
-        threadId: live.threadId,
-        title: live.kind === 'rooms' ? 'Rooms' : '#team',
-      });
+		navigation.navigate('Thread', {
+		  threadId: live.threadId,
+		  title: live.threadTitle ?? '#team',
+		  messageId: live.messageId ?? undefined,
+		});
       return;
     }
     if (live.kind === 'rooms') {

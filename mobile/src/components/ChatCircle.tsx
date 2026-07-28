@@ -68,6 +68,8 @@ export function ChatCircle({ clusterOpen, mentioned, onPress }: ChatCircleProps)
         },
       ]}
       pointerEvents={clusterOpen ? 'none' : 'auto'}
+	  accessibilityElementsHidden={clusterOpen}
+	  importantForAccessibility={clusterOpen ? 'no-hide-descendants' : 'auto'}
     >
       <Glass radius={radius.full} interactive style={styles.circle}>
         <Pressable

@@ -21,6 +21,7 @@
 
 export type LiveLineMention = {
   threadId: string;
+	messageId?: string;
   threadName: string;
   text: string;
   authorName: string;
@@ -59,6 +60,9 @@ export type LiveLineResult = {
   mentioned: boolean;
   /** Thread to open when THE LINE is tapped, if the line names one. */
   threadId: string | null;
+	/** Exact message and display title for the live-line navigation target. */
+	messageId?: string | null;
+	threadTitle?: string | null;
   /**
    * The Table, always — regardless of what the line happens to be showing.
    *
@@ -126,7 +130,9 @@ export function resolveLiveLine(input: LiveLineInput): LiveLineResult {
           ? `You were mentioned in ${tableName}.`
           : `You were mentioned in ${oneLine(mention.threadName) || 'a thread'}.`,
         mentioned: true,
-        threadId: String(mention.threadId).trim() || null,
+		threadId: String(mention.threadId).trim() || null,
+		messageId: String(mention.messageId ?? '').trim() || null,
+		threadTitle: oneLine(mention.threadName) || null,
         tableThreadId: tableId || null,
       };
     }
@@ -140,7 +146,9 @@ export function resolveLiveLine(input: LiveLineInput): LiveLineResult {
         ? body
         : `${body} — in ${oneLine(mention.threadName) || 'another thread'}`,
       mentioned: true,
-      threadId: String(mention.threadId).trim() || null,
+	  threadId: String(mention.threadId).trim() || null,
+	  messageId: String(mention.messageId ?? '').trim() || null,
+	  threadTitle: oneLine(mention.threadName) || null,
       tableThreadId: tableId || null,
     };
   }

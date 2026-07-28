@@ -93,6 +93,7 @@ export function ChannelList() {
     <View>
       {threads.map((thread) => {
         const body = preview(thread);
+		const unread = Math.max(0, Number(thread.unreadCount ?? 0));
         return (
           <Pressable
             key={String(thread.id)}
@@ -116,7 +117,14 @@ export function ChannelList() {
                 </Text>
               ) : null}
             </View>
-            <Text style={styles.time}>{timeAgo(thread.updatedAt)}</Text>
+			<View style={styles.meta}>
+				<Text style={styles.time}>{timeAgo(thread.updatedAt)}</Text>
+				{unread > 0 ? (
+					<View style={styles.unreadBadge}>
+						<Text style={styles.unreadText}>{unread > 99 ? '99+' : unread}</Text>
+					</View>
+				) : null}
+			</View>
           </Pressable>
         );
       })}
@@ -148,6 +156,17 @@ const styles = StyleSheet.create({
     ...type.label,
     color: colors.text3,
   },
+	meta: { alignItems: 'flex-end', gap: space[1] },
+	unreadBadge: {
+		minWidth: 20,
+		height: 20,
+		paddingHorizontal: 6,
+		borderRadius: radius.full,
+		backgroundColor: colors.ember,
+		alignItems: 'center',
+		justifyContent: 'center',
+	},
+	unreadText: { ...type.label, color: colors.onAccent, fontSize: 10, lineHeight: 12 },
   empty: {
     ...type.bodySm,
     color: colors.text2,

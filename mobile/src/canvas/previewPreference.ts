@@ -16,6 +16,27 @@ import * as SecureStore from 'expo-secure-store';
 
 const KEY = 'bonfire.canvas.showPreviews';
 
+let currentValue = true;
+let hydrated = false;
+let hydration: Promise<void> | null = null;
+const listeners = new Set<(value: boolean) => void>();
+
+function publish(next: boolean) {
+	currentValue = next;
+	for (const listener of listeners) listener(next);
+}
+
+function hydrate(): Promise<void> {
+	if (hydrated) return Promise.resolve();
+	if (!hydration) {
+		hydration = read().then((stored) => {
+			hydrated = true;
+			publish(stored);
+		});
+	}
+	return hydration;
+}
+
 async function read(): Promise<boolean> {
   try {
     const stored = await SecureStore.getItemAsync(KEY);
@@ -33,22 +54,21 @@ export function useShowPreviews(): {
   showPreviews: boolean;
   setShowPreviews: (next: boolean) => void;
 } {
-  const [showPreviews, setValue] = useState(true);
+	const [showPreviews, setValue] = useState(currentValue);
 
   useEffect(() => {
-    let cancelled = false;
-    void read().then((stored) => {
-      if (!cancelled) setValue(stored);
-    });
-    return () => {
-      cancelled = true;
-    };
+	const listener = (next: boolean) => setValue(next);
+	listeners.add(listener);
+	void hydrate();
+	return () => {
+		listeners.delete(listener);
+	};
   }, []);
 
   const setShowPreviews = useCallback((next: boolean) => {
     // Optimistic: the toggle must feel instant, and a failed write only means
     // the choice does not survive a restart.
-    setValue(next);
+	publish(next);
     void SecureStore.setItemAsync(KEY, next ? 'true' : 'false').catch(() => {});
   }, []);
 

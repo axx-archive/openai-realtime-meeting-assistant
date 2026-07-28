@@ -59,14 +59,25 @@ type notificationRecord struct {
 	// TenantID is populated for security-sensitive canonical publications. The
 	// process is single-tenant today, but carrying the binding prevents a
 	// recovered row from being merged into another tenant's notification log.
-	TenantID   string `json:"tenantId,omitempty"`
-	UserEmail  string `json:"userEmail,omitempty"`
-	Kind       string `json:"kind"`
-	Text       string `json:"text"`
-	Tool       string `json:"tool,omitempty"`
-	ArtifactID string `json:"artifactId,omitempty"`
+	TenantID  string `json:"tenantId,omitempty"`
+	UserEmail string `json:"userEmail,omitempty"`
+	// ExcludedUserEmails keeps a broadcast out of specific accounts' lanes.
+	// Table posts use it for the author and directly-mentioned teammates: the
+	// author must not buzz their own phone, and a mention gets one targeted
+	// notification rather than an ambient duplicate.
+	ExcludedUserEmails []string `json:"excludedUserEmails,omitempty"`
+	Kind               string   `json:"kind"`
+	Text               string   `json:"text"`
+	Tool               string   `json:"tool,omitempty"`
+	ArtifactID         string   `json:"artifactId,omitempty"`
 	// ThreadID deep-links the bell entry to a chat thread/channel.
-	ThreadID string `json:"threadId,omitempty"`
+	ThreadID   string `json:"threadId,omitempty"`
+	MessageID  string `json:"messageId,omitempty"`
+	ThreadName string `json:"threadName,omitempty"`
+	AuthorName string `json:"authorName,omitempty"`
+	// MessagePreview is the raw one-line chat body used by the Canvas. Text is
+	// the human-readable notification wrapper and remains the push body.
+	MessagePreview string `json:"messagePreview,omitempty"`
 	// ProposalID links a codex-proposal nudge back to its proposal so
 	// settleProposalNotification can find and settle this record when the
 	// proposal resolves.
@@ -132,6 +143,7 @@ func loadNotificationStoreState(path string) ([]notificationRecord, error) {
 		record.Kind = normalizeNotificationKind(record.Kind)
 		record.TenantID = strings.TrimSpace(record.TenantID)
 		record.UserEmail = normalizeAccountEmail(record.UserEmail)
+		record.ExcludedUserEmails = normalizeNotificationExcludedUsers(record.ExcludedUserEmails)
 		records = append(records, record)
 	}
 	if len(records) > notificationStoreCap {
@@ -165,13 +177,27 @@ func normalizeNotificationKind(kind string) string {
 // skips the push entirely — flushDeferredNotifications delivers it when the
 // meeting ends.
 func (app *kanbanBoardApp) createNotification(userEmail string, kind string, text string, tool string, artifactID string, threadID string, deferred bool) (notificationRecord, error) {
-	return app.createLinkedNotification(userEmail, kind, text, tool, artifactID, threadID, "", deferred)
+	return app.createNotificationRecord(userEmail, nil, kind, text, tool, artifactID, threadID, "", "", "", "", "", deferred)
+}
+
+// createBroadcastNotificationExcluding creates one durable shared record while
+// omitting accounts that should not receive or see it on any delivery lane.
+func (app *kanbanBoardApp) createBroadcastNotificationExcluding(excludedUserEmails []string, kind string, text string, tool string, artifactID string, threadID string, deferred bool) (notificationRecord, error) {
+	return app.createNotificationRecord("", excludedUserEmails, kind, text, tool, artifactID, threadID, "", "", "", "", "", deferred)
+}
+
+func (app *kanbanBoardApp) createChatNotification(userEmail string, excludedUserEmails []string, text string, thread scoutChatThreadRecord, message scoutChatMessageRecord) (notificationRecord, error) {
+	return app.createNotificationRecord(userEmail, excludedUserEmails, notificationKindChat, text, "chat", "", thread.ID, "", message.ID, thread.Title, message.AuthorName, trimForStorage(message.Text, 500), false)
 }
 
 // createLinkedNotification is createNotification plus the proposal linkage:
 // proposalID stamps the record so settleProposalNotification can rewrite it
 // when the proposal resolves.
 func (app *kanbanBoardApp) createLinkedNotification(userEmail string, kind string, text string, tool string, artifactID string, threadID string, proposalID string, deferred bool) (notificationRecord, error) {
+	return app.createNotificationRecord(userEmail, nil, kind, text, tool, artifactID, threadID, proposalID, "", "", "", "", deferred)
+}
+
+func (app *kanbanBoardApp) createNotificationRecord(userEmail string, excludedUserEmails []string, kind string, text string, tool string, artifactID string, threadID string, proposalID string, messageID string, threadName string, authorName string, messagePreview string, deferred bool) (notificationRecord, error) {
 	if app == nil {
 		return notificationRecord{}, fmt.Errorf("notifications are unavailable")
 	}
@@ -185,14 +211,19 @@ func (app *kanbanBoardApp) createLinkedNotification(userEmail string, kind strin
 	}
 
 	record := notificationRecord{
-		UserEmail:  normalizeAccountEmail(userEmail),
-		Kind:       normalizeNotificationKind(kind),
-		Text:       text,
-		Tool:       strings.TrimSpace(tool),
-		ArtifactID: strings.TrimSpace(artifactID),
-		ThreadID:   strings.TrimSpace(threadID),
-		ProposalID: strings.TrimSpace(proposalID),
-		CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+		UserEmail:          normalizeAccountEmail(userEmail),
+		ExcludedUserEmails: normalizeNotificationExcludedUsers(excludedUserEmails),
+		Kind:               normalizeNotificationKind(kind),
+		Text:               text,
+		Tool:               strings.TrimSpace(tool),
+		ArtifactID:         strings.TrimSpace(artifactID),
+		ThreadID:           strings.TrimSpace(threadID),
+		MessageID:          strings.TrimSpace(messageID),
+		ThreadName:         strings.TrimSpace(threadName),
+		AuthorName:         strings.TrimSpace(authorName),
+		MessagePreview:     trimForStorage(messagePreview, 500),
+		ProposalID:         strings.TrimSpace(proposalID),
+		CreatedAt:          time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if deferred {
 		record.DeliverAfter = notificationDeliverAfterMeetingMarker
@@ -239,7 +270,16 @@ func pushNotificationRecordLocal(record notificationRecord) {
 
 func pushNotificationRecordWebsocket(record notificationRecord) {
 	if record.UserEmail == "" {
-		broadcastSignedInKanbanEvent("notification", notificationForViewer(record, ""))
+		if len(record.ExcludedUserEmails) == 0 {
+			broadcastSignedInKanbanEvent("notification", notificationForViewer(record, ""))
+			return
+		}
+		for _, email := range accountStore().accountEmails() {
+			if notificationExcludedForUser(record, email) {
+				continue
+			}
+			sendKanbanEventToUser(email, "notification", notificationForViewer(record, email))
+		}
 	} else {
 		sendKanbanEventToUser(record.UserEmail, "notification", notificationForViewer(record, record.UserEmail))
 	}
@@ -258,7 +298,15 @@ func pushNotificationRecordOS(record notificationRecord) {
 		OriginSurface: firstNonEmptyString(record.Tool, "room"),
 	}
 	if record.UserEmail == "" {
-		broadcastOSEvent(osEvt)
+		if len(record.ExcludedUserEmails) == 0 {
+			broadcastOSEvent(osEvt)
+			return
+		}
+		for _, email := range accountStore().accountEmails() {
+			if !notificationExcludedForUser(record, email) {
+				sendOSEventToUser(email, osEvt)
+			}
+		}
 	} else {
 		sendOSEventToUser(record.UserEmail, osEvt)
 	}
@@ -442,8 +490,40 @@ func notificationTenantMatches(record notificationRecord, viewerTenantID string)
 	return recordTenantID == "" || (strings.TrimSpace(viewerTenantID) != "" && recordTenantID == strings.TrimSpace(viewerTenantID))
 }
 
+func normalizeNotificationExcludedUsers(emails []string) []string {
+	if len(emails) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(emails))
+	normalized := make([]string, 0, len(emails))
+	for _, email := range emails {
+		email = normalizeAccountEmail(email)
+		if email == "" {
+			continue
+		}
+		if _, exists := seen[email]; exists {
+			continue
+		}
+		seen[email] = struct{}{}
+		normalized = append(normalized, email)
+	}
+	return normalized
+}
+
+func notificationExcludedForUser(record notificationRecord, userEmail string) bool {
+	userEmail = normalizeAccountEmail(userEmail)
+	for _, excluded := range record.ExcludedUserEmails {
+		if normalizeAccountEmail(excluded) == userEmail {
+			return true
+		}
+	}
+	return false
+}
+
 func notificationVisibleToTenant(record notificationRecord, viewerTenantID, viewerEmail string) bool {
-	return notificationTenantMatches(record, viewerTenantID) && (record.UserEmail == "" || record.UserEmail == viewerEmail)
+	return notificationTenantMatches(record, viewerTenantID) &&
+		!notificationExcludedForUser(record, viewerEmail) &&
+		(record.UserEmail == "" || record.UserEmail == viewerEmail)
 }
 
 func notificationVisibleTo(record notificationRecord, viewerEmail string) bool {
@@ -505,6 +585,18 @@ func notificationForViewer(record notificationRecord, viewerEmail string) map[st
 	}
 	if record.ThreadID != "" {
 		payload["threadId"] = record.ThreadID
+	}
+	if record.MessageID != "" {
+		payload["messageId"] = record.MessageID
+	}
+	if record.ThreadName != "" {
+		payload["threadName"] = record.ThreadName
+	}
+	if record.AuthorName != "" {
+		payload["authorName"] = record.AuthorName
+	}
+	if record.MessagePreview != "" {
+		payload["messagePreview"] = record.MessagePreview
 	}
 	if record.ProposalID != "" {
 		payload["proposalId"] = record.ProposalID
@@ -693,6 +785,40 @@ func (app *kanbanBoardApp) markNotificationsReadForTenant(viewerTenantID, viewer
 		return marked, persistErr
 	}
 	return marked, nil
+}
+
+// markThreadNotificationsRead settles chat notifications whose exact source
+// messages the viewer has reached. Thread read markers and notification dots
+// are separate stores; advancing only the former leaves the chat circle lit
+// until the user redundantly opens Alerts.
+func (app *kanbanBoardApp) markThreadNotificationsRead(viewerEmail, threadID string, readMessageIDs map[string]struct{}) (int, error) {
+	if app == nil || len(readMessageIDs) == 0 {
+		return 0, nil
+	}
+	viewerEmail = normalizeAccountEmail(viewerEmail)
+	threadID = strings.TrimSpace(threadID)
+	app.mu.Lock()
+	marked := 0
+	for index := range app.notifications {
+		record := &app.notifications[index]
+		if record.Kind != notificationKindChat || record.ThreadID != threadID {
+			continue
+		}
+		if _, read := readMessageIDs[record.MessageID]; !read {
+			continue
+		}
+		if !notificationVisibleTo(*record, viewerEmail) || notificationReadFor(*record, viewerEmail) {
+			continue
+		}
+		record.ReadBy = append(record.ReadBy, viewerEmail)
+		marked++
+	}
+	var persistErr error
+	if marked > 0 {
+		persistErr = app.persistNotificationsLocked()
+	}
+	app.mu.Unlock()
+	return marked, persistErr
 }
 
 // clearNotifications dismisses notifications from the viewer's bell by stamping

@@ -34,3 +34,4 @@ export const NATIVE_CLIENT_HEADER = 'expo';
 
 export const SESSION_STORAGE_KEY = 'bonfire.sessionToken.v1';
 export const LAST_NAME_STORAGE_KEY = 'bonfire.lastLoginName.v1';
+export const PUSH_TOKEN_STORAGE_KEY = 'bonfire.expoPushToken.v1';

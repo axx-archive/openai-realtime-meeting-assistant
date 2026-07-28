@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View, useColorScheme } from 'react-native';
 import {
   NavigationContainer,
@@ -8,6 +8,7 @@ import {
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '../auth/AuthContext';
 import { usePushRegistration } from '../push/usePushRegistration';
+import type { PushTarget } from '../push/deepLink';
 import { BoardScreen } from '../screens/BoardScreen';
 import { CanvasScreen } from '../screens/CanvasScreen';
 import { DeckScreen } from '../screens/DeckScreen';
@@ -56,18 +57,34 @@ export const navigationRef = createNavigationContainerRef<RootStackParamList>();
 export function RootNavigator() {
   const { user, bootstrapping, sessionToken } = useAuth();
   const dark = useColorScheme() === 'dark';
+	const [pendingPushTarget, setPendingPushTarget] = useState<PushTarget | null>(null);
+
+	const openPushTarget = useCallback((target: PushTarget) => {
+		if (!user || !navigationRef.isReady()) {
+			setPendingPushTarget(target);
+			return;
+		}
+		navigationRef.navigate('Thread', {
+			threadId: target.threadId,
+			title: target.threadName ? `#${target.threadName.replace(/^#/, '')}` : '#team',
+			messageId: target.messageId ?? undefined,
+		});
+		setPendingPushTarget(null);
+	}, [user]);
+
+	const flushPendingPushTarget = useCallback(() => {
+		if (pendingPushTarget) openPushTarget(pendingPushTarget);
+	}, [openPushTarget, pendingPushTarget]);
+
+	useEffect(() => {
+		flushPendingPushTarget();
+	}, [flushPendingPushTarget]);
 
   // A notification is a request to see ONE thing, so it opens the THREAD, never
   // the canvas — landing home would make the user navigate twice (§8).
   usePushRegistration({
     sessionToken,
-    onOpenTarget: (target) => {
-      if (!navigationRef.isReady()) return;
-      navigationRef.navigate('Thread', {
-        threadId: target.threadId,
-        title: target.threadName ?? '#team',
-      });
-    },
+	onOpenTarget: openPushTarget,
   });
   const navTheme = {
     ...DefaultTheme,
@@ -91,7 +108,7 @@ export function RootNavigator() {
   }
 
   return (
-    <NavigationContainer ref={navigationRef} theme={navTheme}>
+    <NavigationContainer ref={navigationRef} theme={navTheme} onReady={flushPendingPushTarget}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {user ? (
           <>

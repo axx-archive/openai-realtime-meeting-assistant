@@ -55,19 +55,31 @@ func isChatMentionNameRune(r rune) bool {
 // message. Self-mentions never notify, and unresolvable names (guests, typos)
 // are silently skipped. Callers invoke this only after the message persisted —
 // a rejected send must never ring anyone's bell.
-func (app *kanbanBoardApp) notifyScoutChatMentions(thread scoutChatThreadRecord, message scoutChatMessageRecord) {
+func (app *kanbanBoardApp) notifyScoutChatChannelMessage(thread scoutChatThreadRecord, message scoutChatMessageRecord) {
 	if app == nil {
 		return
 	}
 	authorEmail := normalizeAccountEmail(message.AuthorEmail)
 	author := firstNonEmptyString(strings.TrimSpace(message.AuthorName), "Someone")
+	excluded := []string{authorEmail}
+	mentions := []string{}
 	for _, name := range chatMentionNames(message.Text) {
 		email := participantEmail(name)
 		if email == "" || email == authorEmail {
 			continue
 		}
+		excluded = append(excluded, email)
+		mentions = append(mentions, email)
+	}
+	if thread.Table {
+		ambientText := author + " posted in #" + thread.Title + ": " + trimForStorage(message.Text, 140)
+		if _, err := app.createChatNotification("", excluded, ambientText, thread, message); err != nil {
+			log.Errorf("Failed to create Table notification: %v", err)
+		}
+	}
+	for _, email := range mentions {
 		text := author + " mentioned you in #" + thread.Title + ": " + trimForStorage(message.Text, 140)
-		if _, err := app.createNotification(email, notificationKindChat, text, "chat", "", thread.ID, false); err != nil {
+		if _, err := app.createChatNotification(email, nil, text, thread, message); err != nil {
 			log.Errorf("Failed to create mention notification for %s: %v", email, err)
 		}
 	}

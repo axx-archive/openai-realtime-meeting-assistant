@@ -588,8 +588,23 @@ func handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	// the browser cookie. Resolve all supported transports so signing out from
 	// iOS actually revokes the server-side session instead of only clearing the
 	// local Keychain copy and leaving a live 30-day token behind.
+	user := userFromRequest(r)
+	payload := struct {
+		DeviceToken string `json:"deviceToken"`
+	}{}
+	if r.Body != nil {
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&payload)
+	}
 	if token := sessionTokenFromRequest(r); token != "" {
 		userSessionStore().destroy(token)
+	}
+	if user != nil && strings.TrimSpace(payload.DeviceToken) != "" {
+		if err := removeDeviceToken("", user.Email, payload.DeviceToken); err != nil {
+			// Session revocation has already completed. Report cleanup failure so
+			// the client can retry later, but never strand a live 30-day session.
+			writeAuthError(w, http.StatusInternalServerError, "could not unregister device")
+			return
+		}
 	}
 	setSessionCookie(w, r, "", -1)
 	writeAuthJSON(w, http.StatusOK, map[string]bool{"ok": true})

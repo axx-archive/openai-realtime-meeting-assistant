@@ -164,11 +164,6 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 		"/assistant/threads/mute":              {handler: assistantThreadMuteHandler, memberGated: true},
 		"/assistant/threads/digest":            {handler: assistantThreadDigestHandler, memberGated: true},
 		"/assistant/push/devices":              {handler: pushDevicesHandler, memberGated: true},
-		// Pre-existing gap from the dictation wave (a0a369f): the route shipped
-		// registered and inventoried but with no guest-allowlist decision, which
-		// left this fail-closed walk red. Dictation spends vendor minutes, so it
-		// is member-gated like every other body-reading assistant route.
-		"/assistant/transcribe":                {handler: assistantTranscribeHandler, memberGated: true},
 		"/assistant/goal":                      {handler: assistantGoalHandler, memberGated: true},
 		"/assistant/goal/cancel":               {handler: assistantGoalCancelHandler, memberGated: true},
 		"/assistant/decisions/supersede":       {handler: assistantDecisionSupersedeHandler, memberGated: true},

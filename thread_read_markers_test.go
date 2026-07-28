@@ -2,11 +2,61 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestReadHandlerAnchorsToExactMessageInsteadOfRequestTime(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("THREAD_READ_MARKERS_PATH", filepath.Join(t.TempDir(), "markers.json"))
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	thread, err := kanbanApp.createScoutChatThread("tim@shareability.com", "Tim", "team", "public")
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := []scoutChatMessageRecord{
+		{ID: "seen", Role: "user", Text: "first", AuthorEmail: "tim@shareability.com", CreatedAt: "2026-07-28T10:00:00Z"},
+		{ID: "concurrent", Role: "user", Text: "second", AuthorEmail: "tim@shareability.com", CreatedAt: "2026-07-28T10:01:00Z"},
+	}
+	saved, err := kanbanApp.commitScoutChatThreadMessages("tim@shareability.com", thread.ID, messages...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kanbanApp.createChatNotification("aj@shareability.com", nil, "Tim mentioned you", saved, messages[0]); err != nil {
+		t.Fatal(err)
+	}
+	if got := kanbanApp.unreadNotificationsFor("aj@shareability.com", notificationListLimit); len(got) != 1 {
+		t.Fatalf("precondition mention notifications=%#v", got)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/assistant/threads/read", strings.NewReader(`{"threadId":"`+thread.ID+`","lastReadMessageId":"seen"}`))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+		req.AddCookie(cookie)
+	}
+	rec := httptest.NewRecorder()
+	assistantThreadReadHandler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("mark read status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	marker := lookupThreadReadMarker("", "aj@shareability.com", thread.ID)
+	if marker.ReadAt != messages[0].CreatedAt || marker.LastReadMessageID != "seen" {
+		t.Fatalf("marker=%+v, want exact seen message anchor", marker)
+	}
+	if got := threadUnreadCount(messages, marker.ReadAt, "aj@shareability.com"); got != 1 {
+		t.Fatalf("concurrent unseen messages=%d, want 1", got)
+	}
+	if got := kanbanApp.unreadNotificationsFor("aj@shareability.com", notificationListLimit); len(got) != 0 {
+		t.Fatalf("read thread left its mention dot lit: %#v", got)
+	}
+}
 
 func readMarkerMessage(id, author, createdAt string) scoutChatMessageRecord {
 	return scoutChatMessageRecord{ID: id, AuthorEmail: author, CreatedAt: createdAt}

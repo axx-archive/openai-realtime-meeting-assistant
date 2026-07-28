@@ -10,7 +10,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as Passkeys from 'react-native-passkeys';
 import { api, BonfireApiError, setUnauthorizedHandler } from '../api/client';
 import type { Identity } from '../api/types';
-import { LAST_NAME_STORAGE_KEY, SESSION_STORAGE_KEY } from '../config';
+import { LAST_NAME_STORAGE_KEY, PUSH_TOKEN_STORAGE_KEY, SESSION_STORAGE_KEY } from '../config';
 
 type AuthState = {
   user: Identity | null;
@@ -135,14 +135,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(async () => {
     const token = sessionToken;
-    await clearLocalSession();
     if (token) {
       try {
-        await api.logout(token);
+		const deviceToken = await readSecure(PUSH_TOKEN_STORAGE_KEY);
+		await api.logout(token, deviceToken);
       } catch {
         // Local sign-out still succeeds if the network is down.
       }
     }
+	await writeSecure(PUSH_TOKEN_STORAGE_KEY, null);
+	await clearLocalSession();
   }, [sessionToken, clearLocalSession]);
 
   const refreshMe = useCallback(async () => {

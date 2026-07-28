@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+	Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -9,10 +10,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 import * as Linking from 'expo-linking';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { api, BonfireApiError } from '../api/client';
@@ -22,6 +25,7 @@ import { MessageBubble } from '../messaging/MessageBubble';
 import { firstUnreadIndex } from '../messaging/unreadBoundary';
 import { CatchUpSheet } from '../messaging/CatchUpSheet';
 import { DepositRail } from '../messaging/DepositRail';
+import { shareOrSaveRemoteFile } from '../files/fileActions';
 
 type ThreadRow = {
   message: ScoutMessage;
@@ -37,6 +41,7 @@ import type { RootStackParamList } from '../navigation/types';
 import { colors, hitMin, radius, space, type } from '../theme/tokens';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Thread'>;
+const DICTATION_DISCLOSURE_KEY = 'bonfire.dictation.serverDisclosure.v1';
 
 /**
  * A thread — design §14.
@@ -67,8 +72,16 @@ export function ThreadScreen({ route, navigation }: Props) {
   // being short enough that there is no bottom to reach (below).
   const atBottomRef = useRef(false);
   const listHeightRef = useRef(0);
+	const lastMarkedMessageIDRef = useRef<string | null>(null);
+	const markingMessageIDRef = useRef<string | null>(null);
   const [digest, setDigest] = useState<ThreadDigestResponse | null>(null);
   const [catchUpOpen, setCatchUpOpen] = useState(false);
+	const [muted, setMuted] = useState(false);
+	const [muting, setMuting] = useState(false);
+	const dictationDisclosureAcceptedRef = useRef(false);
+	const dictationDisclosureOpenRef = useRef(false);
+	const dictationTouchStartYRef = useRef<number | null>(null);
+	const dictationTouchActiveRef = useRef(false);
 
   // Scroll to a cited message. Both the catch-up and the deposit rail point at
   // real messages, so both need to be able to land on one.
@@ -89,12 +102,43 @@ export function ThreadScreen({ route, navigation }: Props) {
       setDraft((previous) => (previous ? `${previous.trimEnd()} ${text}` : text)),
   });
 
+	const beginDictation = useCallback(async () => {
+		if (dictationDisclosureAcceptedRef.current) {
+			if (dictationTouchActiveRef.current) await dictation.start();
+			return;
+		}
+		const stored = await SecureStore.getItemAsync(DICTATION_DISCLOSURE_KEY).catch(() => null);
+		if (stored === 'accepted') {
+			dictationDisclosureAcceptedRef.current = true;
+			if (dictationTouchActiveRef.current) await dictation.start();
+			return;
+		}
+		if (dictationDisclosureOpenRef.current) return;
+		dictationDisclosureOpenRef.current = true;
+		Alert.alert(
+			'Voice transcription',
+			'Your voice is sent to Bonfire to transcribe with your company\'s vocabulary, then the audio is deleted. Only the text stays.',
+			[
+				{ text: 'Not now', style: 'cancel', onPress: () => { dictationDisclosureOpenRef.current = false; } },
+				{
+					text: 'I understand',
+					onPress: () => {
+						dictationDisclosureOpenRef.current = false;
+						dictationDisclosureAcceptedRef.current = true;
+						void SecureStore.setItemAsync(DICTATION_DISCLOSURE_KEY, 'accepted');
+					},
+				},
+			],
+		);
+	}, [dictation]);
+
   const load = useCallback(async () => {
     if (!sessionToken) return;
     try {
       const response = await api.scoutThread(sessionToken, route.params.threadId);
       const next = response.thread?.messages ?? response.messages ?? [];
       setMessages(next);
+	  setMuted(Boolean(response.muted));
       // Captured once, on the FIRST load only. If it tracked every refresh the
       // divider would jump to the bottom the moment the marker advanced, and
       // the "80 new messages" line would vanish while you were still reading
@@ -108,9 +152,16 @@ export function ThreadScreen({ route, navigation }: Props) {
     }
   }, [route.params.threadId, sessionToken]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+	useFocusEffect(useCallback(() => {
+		void load();
+	}, [load]));
+
+	useEffect(() => {
+		const messageId = route.params.messageId;
+		if (!loading && messageId) {
+			requestAnimationFrame(() => scrollToMessage(messageId));
+		}
+	}, [loading, route.params.messageId, scrollToMessage]);
 
   // Catch-up and deposits arrive after first paint — the thread must render
   // immediately, and neither is needed to read a message.
@@ -131,9 +182,9 @@ export function ThreadScreen({ route, navigation }: Props) {
     };
   }, [route.params.threadId, sessionToken]);
 
-  // Append, don't refetch. The old code called load() on every chat_thread
-  // event, re-downloading the entire thread because ONE message arrived — the
-  // obvious scaling failure at Table volume.
+  // Reconcile with the authoritative thread on invalidation. Replacement is
+  // necessary for cross-device edits and deletes; append-only merging leaves
+  // removed messages visible forever.
   useEffect(() => {
     if (office.event !== 'chat_thread' || !sessionToken) return;
     let cancelled = false;
@@ -142,11 +193,9 @@ export function ThreadScreen({ route, navigation }: Props) {
         const response = await api.scoutThread(sessionToken, route.params.threadId);
         if (cancelled) return;
         const next = response.thread?.messages ?? response.messages ?? [];
-        setMessages((previous) => {
-          const seen = new Set(previous.map((message) => String(message.id)));
-          const added = next.filter((message) => !seen.has(String(message.id)));
-          return added.length ? [...previous, ...added] : previous;
-        });
+		const shouldFollow = atBottomRef.current;
+		setMessages(next);
+		if (shouldFollow) requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
       } catch {
         // A dropped refresh leaves what is already on screen. The next event
         // or a manual reopen recovers it.
@@ -156,6 +205,13 @@ export function ThreadScreen({ route, navigation }: Props) {
       cancelled = true;
     };
   }, [office.event, office.version, route.params.threadId, sessionToken]);
+
+	const wasConnectedRef = useRef(office.connected);
+	useEffect(() => {
+		const reconnected = !wasConnectedRef.current && office.connected;
+		wasConnectedRef.current = office.connected;
+		if (reconnected) void load();
+	}, [load, office.connected]);
 
   const email = user?.email?.trim().toLowerCase() ?? '';
 
@@ -196,12 +252,20 @@ export function ThreadScreen({ route, navigation }: Props) {
   // never saw.
   const markRead = useCallback(() => {
     if (!sessionToken || messages.length === 0) return;
-    const last = messages[messages.length - 1];
-    if (!last?.id) return;
-    void api.markThreadRead(sessionToken, route.params.threadId, String(last.id)).catch(() => {
-      // Best-effort: a failed mark just means the thread still shows unread,
-      // which is the safe direction to fail in.
-    });
+	const last = messages[messages.length - 1];
+	if (!last?.id) return;
+	const messageID = String(last.id);
+	if (lastMarkedMessageIDRef.current === messageID || markingMessageIDRef.current === messageID) return;
+	markingMessageIDRef.current = messageID;
+	void api.markThreadRead(sessionToken, route.params.threadId, messageID)
+		.then(() => { lastMarkedMessageIDRef.current = messageID; })
+		.catch(() => {
+			// Best-effort: a failed mark just means the thread still shows unread,
+			// which is the safe direction to fail in.
+		})
+		.finally(() => {
+			if (markingMessageIDRef.current === messageID) markingMessageIDRef.current = null;
+		});
   }, [messages, route.params.threadId, sessionToken]);
 
   // Leaving the thread while at the bottom counts as having read it.
@@ -220,6 +284,8 @@ export function ThreadScreen({ route, navigation }: Props) {
       const response = await api.sendScoutMessage(sessionToken, route.params.threadId, text);
       setDraft('');
       setMessages(response.thread?.messages ?? response.messages ?? []);
+	  atBottomRef.current = true;
+	  requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } catch (err) {
       setError(err instanceof BonfireApiError ? err.message : 'Message did not send.');
@@ -229,6 +295,23 @@ export function ThreadScreen({ route, navigation }: Props) {
   }
 
   const listening = dictation.state === 'listening';
+
+	async function toggleMuted() {
+		if (!sessionToken || muting) return;
+		const next = !muted;
+		setMuting(true);
+		setMuted(next);
+		try {
+			const response = await api.muteThread(sessionToken, route.params.threadId, next);
+			setMuted(response.muted);
+			void Haptics.selectionAsync();
+		} catch (err) {
+			setMuted(!next);
+			setError(err instanceof BonfireApiError ? err.message : 'Could not update notifications.');
+		} finally {
+			setMuting(false);
+		}
+	}
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
@@ -245,6 +328,16 @@ export function ThreadScreen({ route, navigation }: Props) {
         <Text style={styles.title} numberOfLines={1}>
           {route.params.title}
         </Text>
+		<Pressable
+			accessibilityRole="switch"
+			accessibilityLabel="Mute this thread"
+			accessibilityState={{ checked: muted, disabled: muting }}
+			disabled={muting}
+			onPress={() => void toggleMuted()}
+			style={({ pressed }) => [styles.mute, pressed && styles.pressedRow]}
+		>
+			<SymbolView name={muted ? 'bell.slash.fill' : 'bell.fill'} tintColor={muted ? colors.text3 : colors.text2} size={17} />
+		</Pressable>
       </View>
 
       {/* What this conversation produced, in the thread that produced it. */}
@@ -334,6 +427,12 @@ export function ThreadScreen({ route, navigation }: Props) {
                   own={item.own}
                   showAuthor={item.showAuthor}
                   onOpenSource={scrollToMessage}
+				  onOpenAttachment={(file) => {
+					if (!sessionToken) return;
+					void shareOrSaveRemoteFile(sessionToken, file).catch((err) => {
+						setError(err instanceof Error ? err.message : 'Could not open that attachment.');
+					});
+				  }}
                 />
               </>
             )}
@@ -379,9 +478,21 @@ export function ThreadScreen({ route, navigation }: Props) {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={listening ? 'Listening' : 'Hold to dictate'}
-              accessibilityHint="Touch and hold to dictate a message."
-              onPressIn={() => void dictation.start()}
-              onPressOut={() => void dictation.stop()}
+			  accessibilityHint="Touch and hold to dictate. While recording, slide your finger up to cancel."
+			  onPressIn={(event) => {
+				dictationTouchActiveRef.current = true;
+				dictationTouchStartYRef.current = event.nativeEvent.pageY;
+				void beginDictation();
+			  }}
+			  onPressMove={(event) => {
+				const startY = dictationTouchStartYRef.current;
+				if (startY !== null && event.nativeEvent.pageY < startY - 44) dictation.cancel();
+			  }}
+			  onPressOut={() => {
+				dictationTouchActiveRef.current = false;
+				dictationTouchStartYRef.current = null;
+				void dictation.stop();
+			  }}
               style={({ pressed }) => [styles.mic, pressed && styles.micPressed]}
             >
               {dictation.state === 'transcribing' ? (
@@ -443,6 +554,16 @@ const styles = StyleSheet.create({
     color: colors.text1,
     flex: 1,
   },
+	mute: {
+		width: 42,
+		height: 42,
+		borderRadius: 15,
+		alignItems: 'center',
+		justifyContent: 'center',
+		backgroundColor: colors.surface1,
+		borderWidth: StyleSheet.hairlineWidth,
+		borderColor: colors.line1,
+	},
   loading: { paddingVertical: space[10] },
   boundary: {
     flexDirection: 'row',

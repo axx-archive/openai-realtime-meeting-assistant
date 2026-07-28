@@ -31,10 +31,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         dark: './assets/ios-icon-dark.png',
         tinted: './assets/ios-icon-tinted.png',
       },
-      // Build 18 ships explicit portrait normalization for the adaptive camera,
-      // safe stalled-camera recapture, and the quiet-join microphone hotfix.
+      // Build 19 combines the voice-first redesign with the verified adaptive
+      // camera, speaker-route, PiP, and quiet-join media fixes.
       // Pin the multi-target release so the app and ReplayKit extension match.
-      buildNumber: '18',
+      buildNumber: '19',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

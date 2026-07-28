@@ -230,7 +230,7 @@ describe('native participant presentation', () => {
     assert.equal(focusedVideoParticipant([unavailableActive, healthy], 'aj')?.key, 'aj');
   });
 
-  it('uses PiP only for a deliberate group focus or the sole remote participant', () => {
+  it('keeps PiP available for silent group calls and follows deliberate focus', () => {
     const erick = {
       key: 'erick', name: 'Erick', streamURL: 'stream://erick', active: false,
       micMuted: false, screenSharing: false, videoOff: false,
@@ -240,7 +240,7 @@ describe('native participant presentation', () => {
       micMuted: false, screenSharing: false, videoOff: false,
     };
 
-    assert.equal(pictureInPictureParticipant([erick, aj], null), undefined);
+    assert.equal(pictureInPictureParticipant([erick, aj], null)?.key, 'erick');
     assert.equal(pictureInPictureParticipant([erick, { ...aj, active: true }], null)?.key, 'aj');
     assert.equal(pictureInPictureParticipant([erick, aj], 'erick')?.key, 'erick');
     assert.equal(pictureInPictureParticipant([erick], null)?.key, 'erick');
