@@ -394,8 +394,8 @@ Each wave ships something usable on its own.
 
 | Wave | Scope | Gate |
 |---|---|---|
-| **A — It exists and it reaches you** | Read markers (§15.5) · Table flag + auto-provision · native push lane · **per-thread mute** · live line rebuild · chat circle · unread boundary · "via Scout" chip · FlashList + append-not-refetch | Device test: locked phone receives a Table message |
-| **B — Table stakes** | Tapbacks · photos in bubbles + composer · previews setting | Simulator + `/code-review` |
+| **A — It exists and it reaches you** | Read markers (§15.5) · Table flag + auto-provision · native push lane · **per-thread mute** · live line rebuild · **previews setting** · chat circle · unread boundary · "via Scout" chip · FlashList + append-not-refetch | Device test: locked phone receives a Table message |
+| **B — Table stakes** | Tapbacks · photos in bubbles + composer | Simulator + `/code-review` |
 | **C — Why you never go back** | Ask-the-thread with source chips · thread catch-up · deposit rail | Evidence-citation correctness review |
 | **D — End-to-end design audit** | Visual + interaction audit across the whole app, including these surfaces | Contrast + motion + `/code-review` |
 
