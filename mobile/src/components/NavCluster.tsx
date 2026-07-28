@@ -5,6 +5,7 @@ import * as Haptics from 'expo-haptics';
 import { GlassContainer } from 'expo-glass-effect';
 import { Glass, usingLiquidGlass } from '../theme/glass';
 import { duration, ease, easeSpring, useReduceMotion } from '../theme/motion';
+import { NAV_ITEM_WIDTH, NAV_ITEMS_RIGHT_INSET } from './dockRowLayout';
 import { colors, hitMin, radius, space, type } from '../theme/tokens';
 
 /**
@@ -37,8 +38,11 @@ export type NavDestination = {
   emphasis?: boolean;
 };
 
-/** Wide enough for "Threads" at 10px without truncating. */
-const ITEM_WIDTH = 58;
+// Geometry lives in dockRowLayout so it can be TESTED — on a 375pt SE the
+// expanded cluster and the chat circle overlap by 29pt, and the design only
+// survives that because the circle cross-fades out first. See
+// __tests__/dockRowLayout.test.ts.
+const ITEM_WIDTH = NAV_ITEM_WIDTH;
 const ITEM_LABEL_HEIGHT = 16;
 
 export type NavClusterProps = {
@@ -208,7 +212,7 @@ const styles = StyleSheet.create({
     // Clear of the toggle by more than the container's merge `spacing`, so the
     // last item and the toggle stay two distinct pieces of glass instead of
     // bridging into a lump.
-    right: hitMin + space[5],
+    right: NAV_ITEMS_RIGHT_INSET,
     bottom: 0,
     flexDirection: 'row',
     alignItems: 'flex-end',

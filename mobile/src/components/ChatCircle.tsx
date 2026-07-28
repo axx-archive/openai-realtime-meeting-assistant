@@ -4,6 +4,7 @@ import { SymbolView } from 'expo-symbols';
 import * as Haptics from 'expo-haptics';
 import { Glass } from '../theme/glass';
 import { duration, ease, useReduceMotion } from '../theme/motion';
+import { DOCK_ROW_MARGIN } from './dockRowLayout';
 import { colors, hitMin, radius, space } from '../theme/tokens';
 
 /**
@@ -103,7 +104,7 @@ const styles = StyleSheet.create({
     // Mirrors NavCluster's own insets exactly (marginRight/marginBottom), so
     // the two ends of the row sit on the same optical margin as the Dock's
     // pill edge below them. Vertical alignment comes from the parent row.
-    marginLeft: space[5],
+    marginLeft: DOCK_ROW_MARGIN,
     marginBottom: space[3],
   },
   circle: {
