@@ -7,7 +7,15 @@ import Constants from 'expo-constants';
 const extra = (Constants.expoConfig?.extra ?? {}) as {
   apiBaseUrl?: string;
   webAppUrl?: string;
+  eas?: { projectId?: string };
 };
+
+/**
+ * Required by `getExpoPushTokenAsync`. Absent in bare/dev contexts where the
+ * EAS block was not injected — registration skips rather than throwing, so a
+ * missing id degrades push instead of breaking sign-in.
+ */
+export const EAS_PROJECT_ID = extra.eas?.projectId ?? null;
 
 export const API_BASE_URL = (
   process.env.EXPO_PUBLIC_API_BASE_URL ||

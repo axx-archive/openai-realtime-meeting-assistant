@@ -1,8 +1,13 @@
 import React from 'react';
 import { ActivityIndicator, StyleSheet, View, useColorScheme } from 'react-native';
-import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
+import {
+  NavigationContainer,
+  DefaultTheme,
+  createNavigationContainerRef,
+} from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '../auth/AuthContext';
+import { usePushRegistration } from '../push/usePushRegistration';
 import { BoardScreen } from '../screens/BoardScreen';
 import { CanvasScreen } from '../screens/CanvasScreen';
 import { DeckScreen } from '../screens/DeckScreen';
@@ -41,9 +46,29 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
  */
 const DECK_DETENTS = [0.14, 0.5, 1];
 
+/**
+ * A ref rather than the `useNavigation` hook, because push taps arrive from
+ * outside the React tree — including on a cold start, before any screen has
+ * mounted.
+ */
+export const navigationRef = createNavigationContainerRef<RootStackParamList>();
+
 export function RootNavigator() {
-  const { user, bootstrapping } = useAuth();
+  const { user, bootstrapping, sessionToken } = useAuth();
   const dark = useColorScheme() === 'dark';
+
+  // A notification is a request to see ONE thing, so it opens the THREAD, never
+  // the canvas — landing home would make the user navigate twice (§8).
+  usePushRegistration({
+    sessionToken,
+    onOpenTarget: (target) => {
+      if (!navigationRef.isReady()) return;
+      navigationRef.navigate('Thread', {
+        threadId: target.threadId,
+        title: target.threadName ?? '#team',
+      });
+    },
+  });
   const navTheme = {
     ...DefaultTheme,
     dark,
@@ -66,7 +91,7 @@ export function RootNavigator() {
   }
 
   return (
-    <NavigationContainer theme={navTheme}>
+    <NavigationContainer ref={navigationRef} theme={navTheme}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {user ? (
           <>

@@ -95,6 +95,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
             'BonfireOS uses the microphone to dictate messages and talk to Scout.',
         },
       ],
+      // Native push. The plugin configures the APNs entitlement (development;
+      // Xcode promotes it for release builds). Adding this changes native
+      // config, so it requires a rebuild — and CocoaPods on this Mac needs
+      // LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 or pod install throws
+      // "Unicode Normalization not appropriate for ASCII-8BIT".
+      'expo-notifications',
       './plugins/withWebRTCMultitaskingCamera',
       [
         './plugins/withWebRTCBroadcastExtension',
