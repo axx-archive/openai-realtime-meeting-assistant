@@ -46,7 +46,9 @@ export function OSWebScreen({ route, navigation }: Props) {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <View style={styles.toolbar}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={12} style={styles.side}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => navigation.goBack()} hitSlop={12} style={styles.side}>
           <Text style={styles.back}>Close</Text>
         </Pressable>
         <Text style={styles.title} numberOfLines={1}>
@@ -61,6 +63,7 @@ export function OSWebScreen({ route, navigation }: Props) {
         <View style={styles.errorBox}>
           <Text style={styles.errorText}>{error}</Text>
           <Pressable
+            accessibilityRole="button"
             onPress={() => {
               setError(null);
               webRef.current?.reload();

@@ -182,7 +182,9 @@ export function SettingsScreen() {
 
       <Text style={styles.sectionTitle}>Profile</Text>
       <View style={[styles.section, shadow[1]]}>
-        <Pressable onPress={chooseAvatar} style={styles.avatarButton}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={chooseAvatar} style={styles.avatarButton}>
           {user?.avatarDataURL ? (
             <Image source={{ uri: user.avatarDataURL }} style={styles.avatar} />
           ) : (
@@ -201,6 +203,7 @@ export function SettingsScreen() {
           placeholderTextColor={colors.text3}
         />
         <Pressable
+          accessibilityRole="button"
           onPress={() => void saveProfile()}
           disabled={busy === 'profile'}
           style={({ pressed }) => [styles.primary, pressed && styles.pressed]}
@@ -215,6 +218,7 @@ export function SettingsScreen() {
           const selected = (user?.themePref ?? 'system') === theme;
           return (
             <Pressable
+              accessibilityRole="button"
               key={theme}
               onPress={() => void setTheme(theme)}
               style={[styles.segmentItem, selected && styles.segmentSelected]}
@@ -254,12 +258,16 @@ export function SettingsScreen() {
           <View key={row.id} style={styles.passkeyRow}>
             <SymbolView name="key.fill" tintColor={colors.text2} size={17} />
             <Text style={styles.passkeyLabel}>{row.label}</Text>
-            <Pressable onPress={() => confirmDeletePasskey(row)} hitSlop={12}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => confirmDeletePasskey(row)} hitSlop={12}>
               <Text style={styles.remove}>Remove</Text>
             </Pressable>
           </View>
         ))}
-        <Pressable onPress={addPasskey} style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={addPasskey} style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}>
           <SymbolView name="plus.circle.fill" tintColor={colors.text1} size={18} />
           <Text style={styles.secondaryText}>{busy === 'passkey' ? 'Waiting…' : 'Add a passkey'}</Text>
         </Pressable>
@@ -285,12 +293,16 @@ export function SettingsScreen() {
           onChangeText={setNewPassword}
           style={styles.input}
         />
-        <Pressable onPress={savePassword} style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={savePassword} style={({ pressed }) => [styles.secondary, pressed && styles.pressed]}>
           <Text style={styles.secondaryText}>{busy === 'password' ? 'Updating…' : 'Change password'}</Text>
         </Pressable>
       </View>
 
-      <Pressable onPress={() => void signOut()} style={({ pressed }) => [styles.signOut, pressed && styles.pressed]}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => void signOut()} style={({ pressed }) => [styles.signOut, pressed && styles.pressed]}>
         <Text style={styles.signOutText}>Sign out</Text>
       </Pressable>
     </Screen>

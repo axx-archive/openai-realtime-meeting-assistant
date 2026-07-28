@@ -200,10 +200,13 @@ export function LoginScreen() {
                   onSubmitEditing={finishReset}
                 />
                 {error ? <Text style={styles.error}>{error}</Text> : null}
-                <Pressable onPress={finishReset} disabled={busy} style={({ pressed }) => [styles.cta, (pressed || busy) && styles.ctaPressed]}>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={finishReset} disabled={busy} style={({ pressed }) => [styles.cta, (pressed || busy) && styles.ctaPressed]}>
                   {busy ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.ctaText}>Reset password</Text>}
                 </Pressable>
                 <Pressable
+                  accessibilityRole="button"
                   onPress={() => {
                     setResetToken('');
                     setNewPassword('');
@@ -234,10 +237,14 @@ export function LoginScreen() {
                 />
                 {error ? <Text style={styles.error}>{error}</Text> : null}
                 {notice ? <Text style={styles.notice}>{notice}</Text> : null}
-                <Pressable onPress={requestReset} disabled={busy} style={({ pressed }) => [styles.cta, (pressed || busy) && styles.ctaPressed]}>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={requestReset} disabled={busy} style={({ pressed }) => [styles.cta, (pressed || busy) && styles.ctaPressed]}>
                   {busy ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.ctaText}>Send reset link</Text>}
                 </Pressable>
-                <Pressable onPress={() => { setRecoveryMode(false); setError(null); setNotice(null); }} style={styles.quietAction}>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => { setRecoveryMode(false); setError(null); setNotice(null); }} style={styles.quietAction}>
                   <Text style={styles.quietActionText}>Back to sign in</Text>
                 </Pressable>
               </>

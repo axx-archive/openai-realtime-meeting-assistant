@@ -323,7 +323,7 @@ export function ThreadScreen({ route, navigation }: Props) {
                         onPress={() => setCatchUpOpen(true)}
                         style={({ pressed }) => [styles.catchUp, pressed && styles.pressedRow]}
                       >
-                        <SymbolView name="text.line.first.and.arrowtriangle.forward" tintColor={colors.ember} size={14} />
+                        <SymbolView name="text.line.first.and.arrowtriangle.forward" tintColor={colors.emberText} size={14} />
                         <Text style={styles.catchUpText}>Catch me up</Text>
                       </Pressable>
                     ) : null}
@@ -461,7 +461,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     letterSpacing: 0.4,
-    color: colors.ember,
+    color: colors.emberText,
     textTransform: 'uppercase',
   },
   list: {
@@ -493,7 +493,7 @@ const styles = StyleSheet.create({
   },
   listeningHint: {
     ...type.caption,
-    color: colors.ember,
+    color: colors.emberText,
   },
   composerActions: {
     flexDirection: 'row',
@@ -544,7 +544,7 @@ const styles = StyleSheet.create({
   },
   catchUpText: {
     ...type.button,
-    color: colors.ember,
+    color: colors.emberText,
   },
   pressedRow: { opacity: 0.6 },
 });

@@ -78,6 +78,25 @@ export const colors = {
   emberSoft: 'rgba(255, 107, 74, 0.12)',
   onEmber: '#FFFFFF',
 
+  /**
+   * Ember for TEXT AND GLYPHS. Not a second brand colour — the same signal at a
+   * luminance that can actually be read.
+   *
+   * `ember` is #FF6B4A, a coral tuned to glow against dark. On the light
+   * theme's #F5F5F7 it measures **2.59:1**, and on an emberSoft chip **2.30:1**
+   * — both far under the 4.5:1 AA floor for body text, and under even the 3:1
+   * non-text floor for icons. Every ember label in light mode was effectively
+   * decorative.
+   *
+   * #B83A18 measures 5.27:1 on bgApp and 4.68:1 on emberSoft. Dark mode keeps
+   * ember[500], which already passes at 7.06:1 and is where the coral belongs.
+   *
+   * FILLS stay `ember`: the Dock tint, the listening glow, the mention dot, and
+   * emberSoft backgrounds carry no text and have no contrast requirement.
+   * Swapping those would dull the brand for no accessibility gain.
+   */
+  emberText: adaptive('#B83A18', ember[500]),
+
   glassBorder: adaptive('rgba(14, 14, 16, 0.10)', 'rgba(255, 255, 255, 0.12)'),
   glassPanel: adaptive('rgba(255, 255, 255, 0.72)', 'rgba(20, 20, 24, 0.78)'),
   scrim: adaptive('rgba(14, 14, 16, 0.35)', 'rgba(0, 0, 0, 0.62)'),

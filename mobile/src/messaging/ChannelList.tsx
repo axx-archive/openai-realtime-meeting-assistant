@@ -77,7 +77,9 @@ export function ChannelList() {
   }
   if (error) {
     return (
-      <Pressable onPress={() => void load()} style={styles.errorBox}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => void load()} style={styles.errorBox}>
         <Text style={styles.error}>{error}</Text>
         <Text style={styles.retry}>Tap to retry</Text>
       </Pressable>

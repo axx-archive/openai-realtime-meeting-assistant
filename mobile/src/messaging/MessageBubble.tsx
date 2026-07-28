@@ -131,7 +131,7 @@ export const MessageBubble = React.memo(function MessageBubble({
               onPress={() => onOpenSource?.(source.messageId)}
               style={({ pressed }) => [styles.sourceChip, pressed && styles.sourcePressed]}
             >
-              <SymbolView name="quote.opening" tintColor={colors.ember} size={10} />
+              <SymbolView name="quote.opening" tintColor={colors.emberText} size={10} />
               <Text style={styles.sourceText} numberOfLines={1}>
                 {source.author || 'message'}
               </Text>
@@ -200,7 +200,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     letterSpacing: 0.3,
-    color: colors.ember,
+    color: colors.emberText,
   },
   viaTextOwn: { color: colors.onAccent },
   body: {
@@ -251,7 +251,7 @@ const styles = StyleSheet.create({
   sourceText: {
     fontSize: 11,
     fontWeight: '500',
-    color: colors.ember,
+    color: colors.emberText,
     flexShrink: 1,
   },
 });

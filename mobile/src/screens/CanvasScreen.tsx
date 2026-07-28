@@ -547,7 +547,7 @@ const styles = StyleSheet.create({
   },
   errorAction: {
     ...type.button,
-    color: colors.ember,
+    color: colors.emberText,
   },
   errorActionMuted: {
     ...type.button,

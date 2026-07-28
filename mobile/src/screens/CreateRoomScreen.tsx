@@ -48,7 +48,9 @@ export function CreateRoomScreen({ navigation }: Props) {
           </View>
           <Switch value={guestAccess} onValueChange={setGuestAccess} />
         </View>
-        <Pressable onPress={create} disabled={!name.trim() || busy} style={({ pressed }) => [styles.create, pressed && styles.pressed, (!name.trim() || busy) && styles.disabled]}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={create} disabled={!name.trim() || busy} style={({ pressed }) => [styles.create, pressed && styles.pressed, (!name.trim() || busy) && styles.disabled]}>
           <Text style={styles.createText}>{busy ? 'Creating…' : 'Create room'}</Text>
         </Pressable>
       </View>

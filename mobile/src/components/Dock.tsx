@@ -215,7 +215,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   labelLive: {
-    color: colors.ember,
+    color: colors.emberText,
   },
   keyboard: {
     width: hitMin,
