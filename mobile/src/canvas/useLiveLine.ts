@@ -39,6 +39,7 @@ const EMPTY: LiveLine = {
   text: null,
   mentioned: false,
   threadId: null,
+  tableThreadId: null,
 };
 
 function channelLabel(thread: ScoutThread | undefined): string {

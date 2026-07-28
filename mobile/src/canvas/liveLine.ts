@@ -57,8 +57,18 @@ export type LiveLineResult = {
   text: string | null;
   /** True when at least one unread notification is addressed to this viewer. */
   mentioned: boolean;
-  /** Thread to open when the line is tapped, if the line names one. */
+  /** Thread to open when THE LINE is tapped, if the line names one. */
   threadId: string | null;
+  /**
+   * The Table, always — regardless of what the line happens to be showing.
+   *
+   * Kept separate from `threadId` because the chat circle and the line are
+   * different controls: the line follows its content (a mention elsewhere opens
+   * THAT channel), while a control labelled "Team" must always open the team
+   * thread. Sharing one field sent the circle to whichever channel had most
+   * recently mentioned you.
+   */
+  tableThreadId: string | null;
 };
 
 const ABSENT: LiveLineResult = {
@@ -67,6 +77,7 @@ const ABSENT: LiveLineResult = {
   text: null,
   mentioned: false,
   threadId: null,
+  tableThreadId: null,
 };
 
 function normalizeEmail(value: string | null | undefined): string {
@@ -116,6 +127,7 @@ export function resolveLiveLine(input: LiveLineInput): LiveLineResult {
           : `You were mentioned in ${oneLine(mention.threadName) || 'a thread'}.`,
         mentioned: true,
         threadId: String(mention.threadId).trim() || null,
+        tableThreadId: tableId || null,
       };
     }
 
@@ -129,6 +141,7 @@ export function resolveLiveLine(input: LiveLineInput): LiveLineResult {
         : `${body} — in ${oneLine(mention.threadName) || 'another thread'}`,
       mentioned: true,
       threadId: String(mention.threadId).trim() || null,
+      tableThreadId: tableId || null,
     };
   }
 
@@ -150,6 +163,7 @@ export function resolveLiveLine(input: LiveLineInput): LiveLineResult {
           text: `${input.tableUnreadCount} new in ${tableName}`,
           mentioned: false,
           threadId: tableId,
+          tableThreadId: tableId,
         };
       }
       return {
@@ -158,6 +172,7 @@ export function resolveLiveLine(input: LiveLineInput): LiveLineResult {
         text: body,
         mentioned: false,
         threadId: tableId,
+        tableThreadId: tableId,
       };
     }
   }
@@ -170,6 +185,7 @@ export function resolveLiveLine(input: LiveLineInput): LiveLineResult {
       text: `${input.liveRooms} ${plural(input.liveRooms, 'room is', 'rooms are')} live.`,
       mentioned: false,
       threadId: null,
+      tableThreadId: tableId || null,
     };
   }
 
@@ -188,10 +204,13 @@ export function resolveLiveLine(input: LiveLineInput): LiveLineResult {
         `${plural(threads, 'thread', 'threads')}.`,
       mentioned: false,
       threadId: null,
+      tableThreadId: tableId || null,
     };
   }
 
   // Absent, not "Nothing live" — empty states that narrate their own emptiness
-  // are noise, and the quiet page stays quiet (shell §9).
-  return ABSENT;
+  // are noise, and the quiet page stays quiet (shell §9). The Table id still
+  // rides along: the chat circle needs a destination even on a silent canvas,
+  // which is exactly when the line is gone and the circle is the only way in.
+  return { ...ABSENT, tableThreadId: tableId || null };
 }

@@ -174,6 +174,45 @@ test('message text is collapsed to a single line', () => {
   assert.equal(line.text, 'first line second line');
 });
 
+// The chat circle and the line are DIFFERENT controls. The line follows its
+// content — a mention elsewhere opens that channel — but a control labelled
+// "Team" must always open the team thread. Sharing one field sent the circle to
+// whichever channel had most recently mentioned you.
+test('tableThreadId always points at the Table, even when the line does not', () => {
+  const line = resolveLiveLine({
+    ...base,
+    mentions: [
+      { threadId: 'pricing', threadName: '#pricing', text: 'look?', authorName: 'Dana' },
+    ],
+  });
+  assert.equal(line.threadId, 'pricing');
+  assert.equal(line.tableThreadId, 'table-1');
+});
+
+// The silent canvas is exactly when the circle is the ONLY way into the Table,
+// so the destination has to survive the line being absent.
+test('tableThreadId survives an absent line', () => {
+  const line = resolveLiveLine(base);
+  assert.equal(line.kind, 'none');
+  assert.equal(line.text, null);
+  assert.equal(line.tableThreadId, 'table-1');
+});
+
+test('every rung carries the Table destination', () => {
+  const rungs = [
+    resolveLiveLine({ ...base, liveRooms: 2 }),
+    resolveLiveLine({ ...base, otherUnreadCount: 3, otherUnreadThreads: 2 }),
+    resolveLiveLine({
+      ...base,
+      tableUnreadCount: 1,
+      tableLastMessage: { authorName: 'Dana', authorEmail: 'd@x.com', text: 'hi' },
+    }),
+  ];
+  for (const line of rungs) {
+    assert.equal(line.tableThreadId, 'table-1', `${line.kind} lost the Table id`);
+  }
+});
+
 // A mention whose threadId matches the Table must take the Table rung, not the
 // elsewhere rung — otherwise the line says "in #team" while you are looking at
 // a canvas whose chat button goes to exactly that thread.

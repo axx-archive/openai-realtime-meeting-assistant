@@ -57,7 +57,13 @@ export function ThreadScreen({ route, navigation }: Props) {
   // null means "not yet loaded" — distinct from "" which means never read.
   const [readAt, setReadAt] = useState<string | null>(null);
   const listRef = useRef<FlashListRef<ThreadRow>>(null);
-  const atBottomRef = useRef(true);
+  // Starts FALSE. Initialising it true meant opening a thread with 80 unread
+  // and immediately backing out marked all 80 read without the user scrolling
+  // a pixel — exactly the "never mark read on open" failure this is here to
+  // prevent. It is set true only by reaching the bottom, or by the content
+  // being short enough that there is no bottom to reach (below).
+  const atBottomRef = useRef(false);
+  const listHeightRef = useRef(0);
 
   const dictation = useDictation({
     context: 'chat',
@@ -234,6 +240,18 @@ export function ThreadScreen({ route, navigation }: Props) {
               if (atBottomRef.current) markRead();
             }}
             scrollEventThrottle={200}
+            onLayout={(event) => {
+              listHeightRef.current = event.nativeEvent.layout.height;
+            }}
+            // A thread short enough to fit on screen has no bottom to scroll
+            // to, so onScroll never fires and it would stay unread forever.
+            // Fitting entirely on screen IS having read it.
+            onContentSizeChange={(_width, height) => {
+              if (listHeightRef.current > 0 && height <= listHeightRef.current) {
+                atBottomRef.current = true;
+                markRead();
+              }
+            }}
             renderItem={({ item }) => (
               <>
                 {item.boundary ? (

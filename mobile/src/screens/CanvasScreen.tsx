@@ -329,9 +329,12 @@ export function CanvasScreen() {
                 mentioned={live.mentioned}
                 onPress={() => {
                   setNavOpen(false);
-                  if (live.threadId) {
+                  // The TABLE, always — not live.threadId, which follows the
+                  // line and can point at a mention in another channel. A
+                  // control labelled "Team" that opens #pricing is a bug.
+                  if (live.tableThreadId) {
                     navigation.navigate('Thread', {
-                      threadId: live.threadId,
+                      threadId: live.tableThreadId,
                       title: '#team',
                     });
                     return;
