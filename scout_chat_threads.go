@@ -95,7 +95,11 @@ type scoutChatMessageRecord struct {
 	// — it is set server-side, never from a model argument, so Scout can never
 	// silently impersonate. The client renders a visible "via Scout" chip
 	// whenever this is present.
-	PostedOnBehalfOf string                    `json:"postedOnBehalfOf,omitempty"`
+	PostedOnBehalfOf string `json:"postedOnBehalfOf,omitempty"`
+	// Sources are the thread messages a Scout answer provably quotes. omitempty
+	// for the same round-trip reason every other added field is: pre-Sources
+	// messages on disk must decode unchanged.
+	Sources          []answerSource            `json:"sources,omitempty"`
 	Files            []scoutChatFileAttachment `json:"files,omitempty"`
 	Thread           *scoutChatThreadRef       `json:"thread,omitempty"`
 	// Proposal carries a router proposal card (Kind "proposal") — DATA the
@@ -813,6 +817,11 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 		Role:      "scout",
 		Text:      answer,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		// Ask-the-thread citations. Grounded by provable quotation against the
+		// thread's own messages, never by "it was in my context window" — an
+		// answer that quotes nothing carries no chips, visibly, rather than
+		// borrowing unearned authority (design §10, shell §13.5).
+		Sources: groundAnswerInMessages(answer, thread.Messages, 3),
 	}
 	saved, err := commitUserMessage(userMessage, assistantMessage)
 	if err != nil {

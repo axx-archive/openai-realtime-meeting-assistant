@@ -90,9 +90,17 @@ export type ScoutMessage = {
   authorName?: string;
   authorEmail?: string;
   files?: ScoutFileAttachment[];
+  sources?: ScoutAnswerSource[];
   proposal?: Record<string, unknown>;
   choices?: Array<Record<string, unknown>>;
   [key: string]: unknown;
+};
+
+export type ScoutAnswerSource = {
+  messageId: string;
+  author?: string;
+  /** The phrase the answer provably quotes — why this was cited. */
+  quote: string;
 };
 
 export type ScoutFileAttachment = {

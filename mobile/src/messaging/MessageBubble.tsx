@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { SymbolView } from 'expo-symbols';
 
 import type { ScoutMessage } from '../api/types';
 import { parseMentions } from './mentions';
@@ -18,6 +19,8 @@ import { colors, radius, space, type } from '../theme/tokens';
 
 export type MessageBubbleProps = {
   message: ScoutMessage;
+  /** Scrolls to a cited message when a source chip is tapped. */
+  onOpenSource?: (messageId: string) => void;
   /** True when the signed-in user wrote it. */
   own: boolean;
   /** False when the previous message shares this author — suppresses the name. */
@@ -45,10 +48,12 @@ export const MessageBubble = React.memo(function MessageBubble({
   message,
   own,
   showAuthor,
+  onOpenSource,
 }: MessageBubbleProps) {
   const body = bodyOf(message);
   const scout = isScout(message);
   const viaScout = String(message.postedOnBehalfOf ?? '').trim() !== '';
+  const sources = Array.isArray(message.sources) ? message.sources : [];
   // Memoized per message: parsing every message on every list render is the
   // performance trap this list exists to avoid (§15).
   const segments = useMemo(() => parseMentions(body), [body]);
@@ -61,6 +66,9 @@ export const MessageBubble = React.memo(function MessageBubble({
     // in the conversation and earns real air. A uniform gap makes a thread read
     // as a list of records rather than as people talking.
     <View style={[styles.row, own && styles.rowOwn, showAuthor && styles.rowNewAuthor]}>
+      {/* Column so the source chips stack BENEATH the bubble. In the row
+          container they would sit beside it and push the bubble narrow. */}
+      <View style={[styles.stack, own && styles.stackOwn]}>
       <View
         style={[
           styles.bubble,
@@ -107,6 +115,31 @@ export const MessageBubble = React.memo(function MessageBubble({
 
         <Text style={[styles.time, own && styles.timeOwn]}>{timeOf(message)}</Text>
       </View>
+
+      {/* Ask-the-thread citations — design §10.
+          Only ever present on a Scout answer that PROVABLY quotes a message in
+          this thread. An answer that quotes nothing shows nothing, which is the
+          design's explicit requirement: no chips beats unearned authority. */}
+      {scout && sources.length > 0 ? (
+        <View style={styles.sources}>
+          {sources.map((source) => (
+            <Pressable
+              key={source.messageId}
+              accessibilityRole="button"
+              accessibilityLabel={`Source: ${source.author || 'a message'} — ${source.quote}`}
+              accessibilityHint="Scrolls to the message this answer draws on."
+              onPress={() => onOpenSource?.(source.messageId)}
+              style={({ pressed }) => [styles.sourceChip, pressed && styles.sourcePressed]}
+            >
+              <SymbolView name="quote.opening" tintColor={colors.ember} size={10} />
+              <Text style={styles.sourceText} numberOfLines={1}>
+                {source.author || 'message'}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+      </View>
     </View>
   );
 });
@@ -119,8 +152,13 @@ const styles = StyleSheet.create({
   },
   rowNewAuthor: { marginTop: space[3] },
   rowOwn: { justifyContent: 'flex-end' },
-  bubble: {
+  stack: {
+    // maxWidth lives here now so the bubble AND its chips share one measure.
     maxWidth: '82%',
+    alignItems: 'flex-start',
+  },
+  stackOwn: { alignItems: 'flex-end' },
+  bubble: {
     paddingHorizontal: space[4],
     paddingVertical: space[3],
     borderRadius: radius.lg,
@@ -190,4 +228,30 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
   timeOwn: { color: 'rgba(255,255,255,0.55)' },
+  sources: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 5,
+    marginLeft: space[1],
+  },
+  sourceChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.ember,
+    backgroundColor: colors.emberSoft,
+    maxWidth: 150,
+  },
+  sourcePressed: { opacity: 0.6 },
+  sourceText: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: colors.ember,
+    flexShrink: 1,
+  },
 });

@@ -333,6 +333,7 @@ export function ThreadScreen({ route, navigation }: Props) {
                   message={item.message}
                   own={item.own}
                   showAuthor={item.showAuthor}
+                  onOpenSource={scrollToMessage}
                 />
               </>
             )}
