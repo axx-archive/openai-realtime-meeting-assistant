@@ -31,10 +31,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         dark: './assets/ios-icon-dark.png',
         tinted: './assets/ios-icon-tinted.png',
       },
-      // Build 19 combines the voice-first redesign with the verified adaptive
-      // camera, speaker-route, PiP, and quiet-join media fixes.
+      // Build 20 layers the elevated #team chat experience onto the verified
+      // voice-first media release from build 19.
       // Pin the multi-target release so the app and ReplayKit extension match.
-      buildNumber: '19',
+      buildNumber: '20',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',
