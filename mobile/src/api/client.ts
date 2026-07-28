@@ -14,6 +14,8 @@ import type {
   ScoutThreadDetailResponse,
   ScoutThreadsResponse,
   ScoutFileAttachment,
+  LinkPreview,
+  ChatMentionCandidate,
   ThreadDigestResponse,
 } from './types';
 import {
@@ -493,6 +495,22 @@ export const api = {
     });
   },
 
+  setThreadNotificationLevel(
+    sessionToken: string,
+    threadId: string,
+    level: 'all' | 'mentions' | 'none',
+  ): Promise<{ ok: boolean; muted: boolean; level: 'all' | 'mentions' | 'none' }> {
+    return request('/assistant/threads/mute', {
+      method: 'POST',
+      body: { threadId, level },
+      sessionToken,
+    });
+  },
+
+  chatParticipants(sessionToken: string): Promise<{ ok: boolean; participants: ChatMentionCandidate[] }> {
+    return request('/assistant/chat-participants', { sessionToken });
+  },
+
   registerPushDevice(
     sessionToken: string,
     token: string,
@@ -518,10 +536,11 @@ export const api = {
     threadId: string,
     text: string,
     files: ScoutFileAttachment[] = [],
+    replyToMessageId = '',
   ): Promise<ScoutThreadDetailResponse> {
     return request<ScoutThreadDetailResponse>(
       `/assistant/chat-threads/${encodeURIComponent(threadId)}/messages`,
-      { method: 'POST', body: { text, files }, sessionToken },
+      { method: 'POST', body: { text, files, replyToMessageId }, sessionToken },
     );
   },
 
@@ -541,6 +560,38 @@ export const api = {
       `/assistant/chat-threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}`,
       { method: 'DELETE', sessionToken },
     );
+  },
+
+  updateScoutMessage(
+    sessionToken: string,
+    threadId: string,
+    messageId: string,
+    text: string,
+    files: ScoutFileAttachment[],
+  ): Promise<ScoutThreadDetailResponse> {
+    return request(
+      `/assistant/chat-threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}`,
+      { method: 'PATCH', body: { text, files }, sessionToken },
+    );
+  },
+
+  setScoutMessageReaction(
+    sessionToken: string,
+    threadId: string,
+    messageId: string,
+    emoji: string,
+    active: boolean,
+  ): Promise<ScoutThreadDetailResponse> {
+    const base = `/assistant/chat-threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}/reaction`;
+    return request(active ? base : `${base}?emoji=${encodeURIComponent(emoji)}`, {
+      method: active ? 'PUT' : 'DELETE',
+      ...(active ? { body: { emoji } } : {}),
+      sessionToken,
+    });
+  },
+
+  linkPreview(sessionToken: string, url: string): Promise<{ ok: boolean; preview: LinkPreview }> {
+    return request(`/assistant/link-preview?url=${encodeURIComponent(url)}`, { sessionToken });
   },
 
   async uploadScoutAttachment(

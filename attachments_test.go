@@ -11,6 +11,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -39,12 +42,23 @@ func decodeAnthropicSourceBlock(t *testing.T, raw json.RawMessage) anthropicSour
 	return view
 }
 
+func tinyPNG(t *testing.T) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	pixel := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	pixel.Set(0, 0, color.RGBA{R: 255, G: 90, B: 60, A: 255})
+	if err := png.Encode(&buffer, pixel); err != nil {
+		t.Fatalf("encode PNG fixture: %v", err)
+	}
+	return buffer.Bytes()
+}
+
 func TestAssistantAttachmentUploadHandlerAuthMimeAndSize(t *testing.T) {
 	setupAuthTestEnv(t)
 	setupIsolatedBlobStore(t)
 	t.Setenv("MEETING_ALLOWED_ORIGINS", "")
 
-	pngBytes := []byte("\x89PNG\r\n\x1a\nfake image payload")
+	pngBytes := tinyPNG(t)
 
 	// Method gate.
 	recorder := httptest.NewRecorder()
@@ -97,6 +111,15 @@ func TestAssistantAttachmentUploadHandlerAuthMimeAndSize(t *testing.T) {
 	// Empty body rejects before putBlob.
 	if recorder := post("image/png", nil); recorder.Code != http.StatusBadRequest {
 		t.Fatalf("empty-body status=%d, want 400", recorder.Code)
+	}
+
+	// A declared safe type is not enough: malformed or type-confused bytes
+	// never enter the content-addressed store.
+	if recorder := post("image/png", []byte("\x89PNG\r\n\x1a\nfake image payload")); recorder.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("malformed png status=%d, want 415", recorder.Code)
+	}
+	if recorder := post("application/pdf", []byte("<script>alert(1)</script>")); recorder.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("type-confused pdf status=%d, want 415", recorder.Code)
 	}
 
 	// One byte over the 25MB cap → 413.

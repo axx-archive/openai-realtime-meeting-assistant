@@ -152,18 +152,25 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 		"/artifacts/render": {handler: artifactRenderHandler, method: http.MethodGet, path: "/artifacts/render?id=art-1&t=bogus", allowed: []int{http.StatusForbidden}},
 
 		// ---- everything else: member-gated, guest fails closed
-		"/auth/":                               {handler: authHandler, memberGated: true, path: "/auth/me"},
-		"/assistant/query":                     {handler: assistantQueryHandler, memberGated: true},
+		"/auth/":                        {handler: authHandler, memberGated: true, path: "/auth/me"},
+		"/assistant/query":              {handler: assistantQueryHandler, memberGated: true},
+		"/assistant/chat-threads":       {handler: assistantChatThreadsHandler, memberGated: true},
+		"/assistant/chat-threads/":      {handler: assistantChatThreadHandler, memberGated: true, path: "/assistant/chat-threads/thread-1"},
+		"/assistant/attachments":        {handler: assistantAttachmentUploadHandler, memberGated: true},
+		"/assistant/link-preview":       {handler: assistantLinkPreviewHandler, memberGated: true},
+		"/assistant/link-preview/image": {handler: assistantLinkPreviewImageHandler, memberGated: true},
+		"/assistant/chat-participants":  {handler: assistantChatParticipantsHandler, memberGated: true},
+		"/assistant/threads":            {handler: assistantThreadsHandler, memberGated: true},
+		"/assistant/threads/follow-up":  {handler: assistantThreadFollowUpHandler, memberGated: true},
+		"/assistant/threads/read":       {handler: assistantThreadReadHandler, memberGated: true},
+		"/assistant/threads/mute":       {handler: assistantThreadMuteHandler, memberGated: true},
+		"/assistant/threads/digest":     {handler: assistantThreadDigestHandler, memberGated: true},
+		"/assistant/push/devices":       {handler: pushDevicesHandler, memberGated: true},
+		// Pre-existing gap from the dictation wave (a0a369f): the route shipped
+		// registered and inventoried but with no guest-allowlist decision, which
+		// left this fail-closed walk red. Dictation spends vendor minutes, so it
+		// is member-gated like every other body-reading assistant route.
 		"/assistant/transcribe":                {handler: assistantTranscribeHandler, memberGated: true},
-		"/assistant/chat-threads":              {handler: assistantChatThreadsHandler, memberGated: true},
-		"/assistant/chat-threads/":             {handler: assistantChatThreadHandler, memberGated: true, path: "/assistant/chat-threads/thread-1"},
-		"/assistant/attachments":               {handler: assistantAttachmentUploadHandler, memberGated: true},
-		"/assistant/threads":                   {handler: assistantThreadsHandler, memberGated: true},
-		"/assistant/threads/follow-up":         {handler: assistantThreadFollowUpHandler, memberGated: true},
-		"/assistant/threads/read":              {handler: assistantThreadReadHandler, memberGated: true},
-		"/assistant/threads/mute":              {handler: assistantThreadMuteHandler, memberGated: true},
-		"/assistant/threads/digest":            {handler: assistantThreadDigestHandler, memberGated: true},
-		"/assistant/push/devices":              {handler: pushDevicesHandler, memberGated: true},
 		"/assistant/goal":                      {handler: assistantGoalHandler, memberGated: true},
 		"/assistant/goal/cancel":               {handler: assistantGoalCancelHandler, memberGated: true},
 		"/assistant/decisions/supersede":       {handler: assistantDecisionSupersedeHandler, memberGated: true},

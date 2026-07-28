@@ -96,6 +96,8 @@ export const colors = {
    * Swapping those would dull the brand for no accessibility gain.
    */
   emberText: adaptive('#B83A18', ember[500]),
+  /** Ember text when the surrounding fill is `accent` (dark in light mode, light in dark mode). */
+  onAccentEmber: adaptive(ember[500], '#B83A18'),
 
   glassBorder: adaptive('rgba(14, 14, 16, 0.10)', 'rgba(255, 255, 255, 0.12)'),
   glassPanel: adaptive('rgba(255, 255, 255, 0.72)', 'rgba(20, 20, 24, 0.78)'),

@@ -1,31 +1,37 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-	Alert,
+  Alert,
+  Animated,
   KeyboardAvoidingView,
+  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
+import * as DocumentPicker from 'expo-document-picker';
 import { SymbolView } from 'expo-symbols';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Linking from 'expo-linking';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { api, BonfireApiError } from '../api/client';
-import type { ScoutMessage, ThreadDigestResponse } from '../api/types';
+import type { ChatMentionCandidate, ScoutFileAttachment, ScoutMessage, ThreadDigestResponse } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { MessageBubble } from '../messaging/MessageBubble';
 import { firstUnreadIndex } from '../messaging/unreadBoundary';
 import { CatchUpSheet } from '../messaging/CatchUpSheet';
 import { DepositRail } from '../messaging/DepositRail';
-import { shareOrSaveRemoteFile } from '../files/fileActions';
+import { MessageActionSheet } from '../messaging/MessageActionSheet';
+import { MentionComposerInput } from '../messaging/MentionComposerInput';
+import { ThreadNotificationMenu, type ThreadNotificationLevel } from '../messaging/ThreadNotificationMenu';
+import { groupMessageReactions, isOwnMessageForViewer } from '../messaging/messagePresentation';
+import { FilePreviewModal } from '../components/FilePreviewModal';
 
 type ThreadRow = {
   message: ScoutMessage;
@@ -61,6 +67,18 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<ScoutFileAttachment[]>([]);
+  const [editingMessage, setEditingMessage] = useState<ScoutMessage | null>(null);
+  const [replyingTo, setReplyingTo] = useState<ScoutMessage | null>(null);
+  const [actionMessage, setActionMessage] = useState<{ message: ScoutMessage; own: boolean } | null>(null);
+  const [previewFile, setPreviewFile] = useState<ScoutFileAttachment | null>(null);
+  const [participants, setParticipants] = useState<ChatMentionCandidate[]>([{ name: 'Scout', kind: 'scout' }]);
+  const [threadVisibility, setThreadVisibility] = useState('private');
+  const [threadOwnerEmail, setThreadOwnerEmail] = useState('');
+  const [notificationLevel, setNotificationLevel] = useState<ThreadNotificationLevel>('all');
+  const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
+  const [notificationBusy, setNotificationBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // null means "not yet loaded" — distinct from "" which means never read.
   const [readAt, setReadAt] = useState<string | null>(null);
@@ -76,12 +94,25 @@ export function ThreadScreen({ route, navigation }: Props) {
 	const markingMessageIDRef = useRef<string | null>(null);
   const [digest, setDigest] = useState<ThreadDigestResponse | null>(null);
   const [catchUpOpen, setCatchUpOpen] = useState(false);
-	const [muted, setMuted] = useState(false);
-	const [muting, setMuting] = useState(false);
-	const dictationDisclosureAcceptedRef = useRef(false);
-	const dictationDisclosureOpenRef = useRef(false);
-	const dictationTouchStartYRef = useRef<number | null>(null);
-	const dictationTouchActiveRef = useRef(false);
+  const dictationDisclosureAcceptedRef = useRef(false);
+  const dictationDisclosureOpenRef = useRef(false);
+  const dictationTouchStartYRef = useRef<number | null>(null);
+  const dictationTouchActiveRef = useRef(false);
+  const timestampReveal = useRef(new Animated.Value(0)).current;
+  const timestampPan = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponder: (_event, gesture) => (
+      gesture.dx < -8 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.35
+    ),
+    onPanResponderMove: (_event, gesture) => {
+      timestampReveal.setValue(Math.max(0, Math.min(1, -gesture.dx / 68)));
+    },
+    onPanResponderRelease: () => {
+      Animated.spring(timestampReveal, { toValue: 0, damping: 18, stiffness: 240, mass: 0.8, useNativeDriver: true }).start();
+    },
+    onPanResponderTerminate: () => {
+      Animated.spring(timestampReveal, { toValue: 0, damping: 18, stiffness: 240, mass: 0.8, useNativeDriver: true }).start();
+    },
+  }), [timestampReveal]);
 
   // Scroll to a cited message. Both the catch-up and the deposit rail point at
   // real messages, so both need to be able to land on one.
@@ -138,7 +169,10 @@ export function ThreadScreen({ route, navigation }: Props) {
       const response = await api.scoutThread(sessionToken, route.params.threadId);
       const next = response.thread?.messages ?? response.messages ?? [];
       setMessages(next);
-	  setMuted(Boolean(response.muted));
+      setThreadVisibility(String(response.thread?.visibility ?? 'private'));
+      setThreadOwnerEmail(String(response.thread?.ownerEmail ?? ''));
+      const level = String(response.notificationLevel ?? (response.muted ? 'mentions' : 'all'));
+      setNotificationLevel(level === 'mentions' || level === 'none' ? level : 'all');
       // Captured once, on the FIRST load only. If it tracked every refresh the
       // divider would jump to the bottom the moment the marker advanced, and
       // the "80 new messages" line would vanish while you were still reading
@@ -152,16 +186,25 @@ export function ThreadScreen({ route, navigation }: Props) {
     }
   }, [route.params.threadId, sessionToken]);
 
-	useFocusEffect(useCallback(() => {
-		void load();
-	}, [load]));
+  useFocusEffect(useCallback(() => {
+    void load();
+  }, [load]));
 
-	useEffect(() => {
-		const messageId = route.params.messageId;
-		if (!loading && messageId) {
-			requestAnimationFrame(() => scrollToMessage(messageId));
-		}
-	}, [loading, route.params.messageId, scrollToMessage]);
+  useEffect(() => {
+    const messageId = route.params.messageId;
+    if (!loading && messageId) {
+      requestAnimationFrame(() => scrollToMessage(messageId));
+    }
+  }, [loading, route.params.messageId, scrollToMessage]);
+
+  useEffect(() => {
+    if (!sessionToken) return;
+    let active = true;
+    void api.chatParticipants(sessionToken).then((response) => {
+      if (active && response.participants.length > 0) setParticipants(response.participants);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [sessionToken]);
 
   // Catch-up and deposits arrive after first paint — the thread must render
   // immediately, and neither is needed to read a message.
@@ -193,9 +236,12 @@ export function ThreadScreen({ route, navigation }: Props) {
         const response = await api.scoutThread(sessionToken, route.params.threadId);
         if (cancelled) return;
         const next = response.thread?.messages ?? response.messages ?? [];
-		const shouldFollow = atBottomRef.current;
-		setMessages(next);
-		if (shouldFollow) requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+        const shouldFollow = atBottomRef.current;
+        // The fetched snapshot is authoritative. This reconciles same-id edits
+        // and reactions and removes deleted messages without changing IDs or
+        // timeline order.
+        setMessages(next);
+        if (shouldFollow) requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
       } catch {
         // A dropped refresh leaves what is already on screen. The next event
         // or a manual reopen recovers it.
@@ -225,9 +271,11 @@ export function ThreadScreen({ route, navigation }: Props) {
   const rows = useMemo(
     () =>
       messages.map((message, index) => {
-        const own =
-          String(message.role ?? '').toLowerCase() === 'user' &&
-          (!message.authorEmail || String(message.authorEmail).toLowerCase() === email);
+        const own = isOwnMessageForViewer(message, {
+          viewerEmail: email,
+          threadVisibility,
+          threadOwnerEmail,
+        });
         const previous = messages[index - 1];
         const showAuthor =
           !previous ||
@@ -242,7 +290,7 @@ export function ThreadScreen({ route, navigation }: Props) {
           boundary: index === boundary,
         };
       }),
-    [boundary, email, messages],
+    [boundary, email, messages, threadOwnerEmail, threadVisibility],
   );
 
   const unreadBelow = boundary >= 0 ? messages.length - boundary : 0;
@@ -277,12 +325,17 @@ export function ThreadScreen({ route, navigation }: Props) {
 
   async function send() {
     const text = draft.trim();
-    if (!sessionToken || !text || sending) return;
+    if (!sessionToken || (!text && pendingFiles.length === 0) || sending || uploading) return;
     setSending(true);
     setError(null);
     try {
-      const response = await api.sendScoutMessage(sessionToken, route.params.threadId, text);
+      const response = editingMessage
+        ? await api.updateScoutMessage(sessionToken, route.params.threadId, String(editingMessage.id), text, pendingFiles)
+        : await api.sendScoutMessage(sessionToken, route.params.threadId, text, pendingFiles, String(replyingTo?.id ?? ''));
       setDraft('');
+      setPendingFiles([]);
+      setEditingMessage(null);
+      setReplyingTo(null);
       setMessages(response.thread?.messages ?? response.messages ?? []);
 	  atBottomRef.current = true;
 	  requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
@@ -294,24 +347,122 @@ export function ThreadScreen({ route, navigation }: Props) {
     }
   }
 
-  const listening = dictation.state === 'listening';
+  async function pickAttachments() {
+    if (!sessionToken || uploading || pendingFiles.length >= 6) return;
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf'],
+        multiple: true,
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled) return;
+      const remaining = 6 - pendingFiles.length;
+      const selected = result.assets.slice(0, remaining);
+      const oversized = selected.find((asset) => Number(asset.size ?? 0) > 25 * 1024 * 1024);
+      if (oversized) {
+        setError(`${oversized.name} is larger than the 25 MB attachment limit.`);
+        return;
+      }
+      setUploading(true);
+      setError(null);
+      const uploaded: ScoutFileAttachment[] = [];
+      for (const asset of selected) {
+        const extension = asset.name.split('.').pop()?.toLowerCase();
+        const fallbackMime = extension === 'pdf' ? 'application/pdf'
+          : extension === 'png' ? 'image/png'
+            : extension === 'webp' ? 'image/webp'
+              : extension === 'gif' ? 'image/gif'
+                : 'image/jpeg';
+        uploaded.push(await api.uploadScoutAttachment(sessionToken, {
+          uri: asset.uri,
+          name: asset.name,
+          mime: asset.mimeType || fallbackMime,
+        }));
+      }
+      setPendingFiles((current) => [...current, ...uploaded].slice(0, 6));
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (caught) {
+      setError(caught instanceof BonfireApiError ? caught.message : 'Could not attach that file.');
+    } finally {
+      setUploading(false);
+    }
+  }
 
-	async function toggleMuted() {
-		if (!sessionToken || muting) return;
-		const next = !muted;
-		setMuting(true);
-		setMuted(next);
-		try {
-			const response = await api.muteThread(sessionToken, route.params.threadId, next);
-			setMuted(response.muted);
-			void Haptics.selectionAsync();
-		} catch (err) {
-			setMuted(!next);
-			setError(err instanceof BonfireApiError ? err.message : 'Could not update notifications.');
-		} finally {
-			setMuting(false);
-		}
-	}
+  function beginEdit(message: ScoutMessage) {
+    setActionMessage(null);
+    setReplyingTo(null);
+    setEditingMessage(message);
+    setDraft(String(message.text ?? message.content ?? ''));
+    setPendingFiles(Array.isArray(message.files) ? message.files : []);
+    void Haptics.selectionAsync();
+  }
+
+  function cancelEdit() {
+    setEditingMessage(null);
+    setDraft('');
+    setPendingFiles([]);
+  }
+
+  function beginReply(message: ScoutMessage) {
+    setActionMessage(null);
+    setEditingMessage(null);
+    setReplyingTo(message);
+    void Haptics.selectionAsync();
+  }
+
+  function cancelReply() {
+    setReplyingTo(null);
+  }
+
+  function confirmDelete(message: ScoutMessage) {
+    setActionMessage(null);
+    Alert.alert('Delete message?', 'This removes it for everyone in the channel.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          if (!sessionToken) return;
+          void api.deleteScoutMessage(sessionToken, route.params.threadId, String(message.id))
+            .then((response) => {
+              setMessages(response.thread?.messages ?? response.messages ?? []);
+              if (String(editingMessage?.id) === String(message.id)) cancelEdit();
+              void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            })
+            .catch((caught) => setError(caught instanceof BonfireApiError ? caught.message : 'Message was not deleted.'));
+        },
+      },
+    ]);
+  }
+
+  const toggleReaction = useCallback(async (message: ScoutMessage, emoji: string, active: boolean) => {
+    if (!sessionToken) return;
+    setActionMessage(null);
+    try {
+      const response = await api.setScoutMessageReaction(sessionToken, route.params.threadId, String(message.id), emoji, active);
+      setMessages(response.thread?.messages ?? response.messages ?? []);
+      void Haptics.selectionAsync();
+    } catch (caught) {
+      setError(caught instanceof BonfireApiError ? caught.message : 'Reaction was not saved.');
+    }
+  }, [route.params.threadId, sessionToken]);
+
+  async function changeNotificationLevel(level: ThreadNotificationLevel) {
+    if (!sessionToken || notificationBusy) return;
+    setNotificationBusy(true);
+    try {
+      const response = await api.setThreadNotificationLevel(sessionToken, route.params.threadId, level);
+      setNotificationLevel(response.level);
+      setNotificationMenuOpen(false);
+      void Haptics.selectionAsync();
+    } catch (caught) {
+      setError(caught instanceof BonfireApiError ? caught.message : 'Notification setting was not saved.');
+    } finally {
+      setNotificationBusy(false);
+    }
+  }
+
+  const listening = dictation.state === 'listening';
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
@@ -328,23 +479,25 @@ export function ThreadScreen({ route, navigation }: Props) {
         <Text style={styles.title} numberOfLines={1}>
           {route.params.title}
         </Text>
-		<Pressable
-			accessibilityRole="switch"
-			accessibilityLabel="Mute this thread"
-			accessibilityState={{ checked: muted, disabled: muting }}
-			disabled={muting}
-			onPress={() => void toggleMuted()}
-			style={({ pressed }) => [styles.mute, pressed && styles.pressedRow]}
-		>
-			<SymbolView name={muted ? 'bell.slash.fill' : 'bell.fill'} tintColor={muted ? colors.text3 : colors.text2} size={17} />
-		</Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Notifications: ${notificationLevel}`}
+          accessibilityHint="Choose all messages, mentions only, or none"
+          onPress={() => setNotificationMenuOpen(true)}
+          style={({ pressed }) => [styles.headerAction, pressed && styles.headerActionPressed]}
+        >
+          <SymbolView
+            name={notificationLevel === 'none' ? 'bell.slash.fill' : notificationLevel === 'mentions' ? 'bell.badge.fill' : 'bell.fill'}
+            tintColor={colors.text2}
+            size={18}
+          />
+        </Pressable>
       </View>
 
       {/* What this conversation produced, in the thread that produced it. */}
       <DepositRail
         deposits={digest?.deposits ?? null}
         onOpenMessage={scrollToMessage}
-        onOpenLink={(url) => void Linking.openURL(url).catch(() => {})}
       />
 
       <CatchUpSheet
@@ -357,15 +510,47 @@ export function ThreadScreen({ route, navigation }: Props) {
         }}
       />
 
+      <ThreadNotificationMenu
+        visible={notificationMenuOpen}
+        level={notificationLevel}
+        busy={notificationBusy}
+        onClose={() => setNotificationMenuOpen(false)}
+        onChange={(level) => void changeNotificationLevel(level)}
+      />
+
+      <FilePreviewModal
+        file={previewFile}
+        sessionToken={sessionToken ?? ''}
+        onClose={() => setPreviewFile(null)}
+      />
+
+      <MessageActionSheet
+        visible={Boolean(actionMessage)}
+        own={Boolean(actionMessage?.own)}
+        snippet={String(actionMessage?.message.text ?? actionMessage?.message.content ?? '')}
+        reactions={actionMessage?.message.reactions ?? []}
+        onClose={() => setActionMessage(null)}
+        onReact={(emoji) => {
+          if (!actionMessage) return;
+          const current = groupMessageReactions(actionMessage.message.reactions, email)
+            .find((reaction) => reaction.emoji === emoji);
+          void toggleReaction(actionMessage.message, emoji, !current?.reactedByViewer);
+        }}
+        onReply={() => { if (actionMessage) beginReply(actionMessage.message); }}
+        onEdit={() => { if (actionMessage) beginEdit(actionMessage.message); }}
+        onDelete={() => { if (actionMessage) confirmDelete(actionMessage.message); }}
+      />
+
       <KeyboardAvoidingView
         style={styles.fill}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={8}
       >
-        {loading ? (
-          <ActivityIndicator color={colors.accent} style={styles.loading} />
-        ) : (
-          <FlashList
+        <View style={styles.fill} {...timestampPan.panHandlers}>
+          {loading ? (
+            <ActivityIndicator color={colors.accent} style={styles.loading} />
+          ) : (
+            <FlashList
             ref={listRef}
             data={rows}
             // Stable identity on the message id. Index keys would recycle
@@ -426,18 +611,23 @@ export function ThreadScreen({ route, navigation }: Props) {
                   message={item.message}
                   own={item.own}
                   showAuthor={item.showAuthor}
+                  sessionToken={sessionToken ?? ''}
+                  viewerEmail={email}
+                  timestampReveal={timestampReveal}
                   onOpenSource={scrollToMessage}
-				  onOpenAttachment={(file) => {
-					if (!sessionToken) return;
-					void shareOrSaveRemoteFile(sessionToken, file).catch((err) => {
-						setError(err instanceof Error ? err.message : 'Could not open that attachment.');
-					});
-				  }}
+                  onOpenReplySource={scrollToMessage}
+                  onOpenAttachment={setPreviewFile}
+                  onLongPress={(message, own) => {
+                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    setActionMessage({ message, own });
+                  }}
+                  onToggleReaction={(message, emoji, active) => void toggleReaction(message, emoji, active)}
                 />
               </>
             )}
-          />
-        )}
+            />
+          )}
+        </View>
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {dictation.error ? (
@@ -449,32 +639,83 @@ export function ThreadScreen({ route, navigation }: Props) {
           </View>
         ) : null}
 
+        {editingMessage ? (
+          <View style={styles.editingBar}>
+            <View style={styles.editingCopy}>
+              <Text style={styles.editingTitle}>Editing message</Text>
+              <Text style={styles.editingHint} numberOfLines={1}>Send replaces it in the same spot</Text>
+            </View>
+            <Pressable accessibilityRole="button" accessibilityLabel="Cancel editing" onPress={cancelEdit} style={({ pressed }) => [styles.editingCancel, pressed && styles.headerActionPressed]}>
+              <SymbolView name="xmark" tintColor={colors.text2} size={14} />
+            </Pressable>
+          </View>
+        ) : null}
+
+        {replyingTo ? (
+          <View style={styles.replyingBar}>
+            <View style={styles.replyingMark} />
+            <View style={styles.editingCopy}>
+              <Text style={styles.replyingTitle}>
+                Replying to {String(replyingTo.authorName ?? (replyingTo.role === 'scout' || replyingTo.role === 'assistant' ? 'Scout' : 'message'))}
+              </Text>
+              <Text style={styles.editingHint} numberOfLines={1}>{String(replyingTo.text ?? replyingTo.content ?? 'Attachment')}</Text>
+            </View>
+            <Pressable accessibilityRole="button" accessibilityLabel="Cancel reply" onPress={cancelReply} style={({ pressed }) => [styles.editingCancel, pressed && styles.headerActionPressed]}>
+              <SymbolView name="xmark" tintColor={colors.text2} size={14} />
+            </Pressable>
+          </View>
+        ) : null}
+
         <Glass radius={radius.xl} style={styles.composer}>
+          {pendingFiles.length > 0 || uploading ? (
+            <View style={styles.pendingFiles}>
+              {pendingFiles.map((file) => (
+                <View key={`${file.ref}-${file.name}`} style={styles.pendingFile}>
+                  <SymbolView name={file.mime.startsWith('image/') ? 'photo' : 'doc.richtext'} tintColor={colors.text2} size={14} />
+                  <Text style={styles.pendingFileText} numberOfLines={1}>{file.name}</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove ${file.name}`}
+                    onPress={() => setPendingFiles((current) => current.filter((candidate) => candidate.ref !== file.ref))}
+                    style={({ pressed }) => [styles.pendingRemove, pressed && styles.headerActionPressed]}
+                  >
+                    <SymbolView name="xmark" tintColor={colors.text3} size={10} />
+                  </Pressable>
+                </View>
+              ))}
+              {uploading ? <ActivityIndicator color={colors.text2} size="small" /> : null}
+            </View>
+          ) : null}
           {listening ? (
             <View style={styles.listening}>
               <Waveform trace={dictation.trace} listening height={30} scale={0.7} />
               <Text style={styles.listeningHint}>Release to transcribe · slide up to cancel</Text>
             </View>
           ) : (
-            <TextInput
-              style={styles.input}
-              // Channel names run long ("#Open-source model delegation
-              // benchmark"), and a placeholder that wraps to two lines doubles
-              // the composer's height before a single character is typed.
+            <MentionComposerInput
               placeholder={
                 route.params.title.length > 22
                   ? `Message ${route.params.title.slice(0, 21).trimEnd()}…`
                   : `Message ${route.params.title}`
               }
-              placeholderTextColor={colors.text3}
               value={draft}
               onChangeText={setDraft}
-              multiline
+              candidates={participants}
               editable={dictation.state !== 'transcribing'}
             />
           )}
 
           <View style={styles.composerActions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Add attachment"
+              accessibilityState={{ disabled: uploading || pendingFiles.length >= 6 }}
+              disabled={uploading || pendingFiles.length >= 6}
+              onPress={() => void pickAttachments()}
+              style={({ pressed }) => [styles.mic, pressed && styles.micPressed, (uploading || pendingFiles.length >= 6) && styles.sendDim]}
+            >
+              <SymbolView name="plus" tintColor={colors.text2} size={20} />
+            </Pressable>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={listening ? 'Listening' : 'Hold to dictate'}
@@ -509,11 +750,11 @@ export function ThreadScreen({ route, navigation }: Props) {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Send"
-              disabled={!draft.trim() || sending}
+              disabled={(!draft.trim() && pendingFiles.length === 0) || sending || uploading}
               onPress={() => void send()}
               style={({ pressed }) => [
                 styles.send,
-                (!draft.trim() || sending || pressed) && styles.sendDim,
+                ((!draft.trim() && pendingFiles.length === 0) || sending || uploading || pressed) && styles.sendDim,
               ]}
             >
               {sending ? (
@@ -549,6 +790,17 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.line1,
   },
+  headerAction: {
+    width: hitMin,
+    height: hitMin,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.md,
+    backgroundColor: colors.surface1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.line1,
+  },
+  headerActionPressed: { opacity: 0.72, transform: [{ scale: 0.96 }] },
   title: {
     ...type.title2,
     color: colors.text1,
@@ -599,13 +851,34 @@ const styles = StyleSheet.create({
     paddingBottom: space[2],
     gap: space[2],
   },
-  input: {
-    minHeight: 40,
-    maxHeight: 132,
-    ...type.body,
-    color: colors.text1,
-    textAlignVertical: 'top',
+  editingBar: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[3],
+    marginHorizontal: space[5],
+    paddingHorizontal: space[3],
+    borderLeftWidth: 3,
+    borderLeftColor: colors.info,
   },
+  editingCopy: { flex: 1 },
+  editingTitle: { ...type.captionMedium, color: colors.info },
+  editingHint: { ...type.caption, color: colors.text2 },
+  editingCancel: { width: hitMin, height: hitMin, alignItems: 'center', justifyContent: 'center', borderRadius: radius.full },
+  replyingBar: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space[3],
+    marginHorizontal: space[5],
+    paddingHorizontal: space[3],
+  },
+  replyingMark: { width: 3, alignSelf: 'stretch', marginVertical: 8, borderRadius: radius.full, backgroundColor: colors.info },
+  replyingTitle: { ...type.captionMedium, color: colors.info },
+  pendingFiles: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 },
+  pendingFile: { maxWidth: '100%', minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 9, paddingRight: 3, borderRadius: radius.full, backgroundColor: colors.surface3 },
+  pendingFileText: { ...type.caption, maxWidth: 190, color: colors.text1 },
+  pendingRemove: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: radius.full },
   listening: {
     minHeight: 40,
     alignItems: 'center',

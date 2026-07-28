@@ -56,6 +56,15 @@ func scoutChatMentionsScout(text string) bool {
 	return strings.Contains(strings.ToLower(text), "@scout")
 }
 
+const tableScoutChatResponseStyle = "You are replying in #team, a casual group chat with coworkers. Sound like a smart teammate joining the thread, not a report or assistant dashboard. Answer the person who tagged you directly. Default to one to three short paragraphs; use a few bullets only when they genuinely improve clarity. Use contractions and natural language. Do not add a title, preamble, summary heading, or mention that you are an AI. Keep the same factual grounding, permission boundaries, and honesty."
+
+func scoutChatResponseStyle(thread scoutChatThreadRecord) string {
+	if thread.Table && scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+		return tableScoutChatResponseStyle
+	}
+	return ""
+}
+
 type scoutChatFileAttachment struct {
 	Name string `json:"name"`
 	Kind string `json:"kind,omitempty"`
@@ -79,12 +88,46 @@ type scoutChatThreadRef struct {
 	ArtifactID string `json:"artifactId,omitempty"`
 }
 
+// scoutChatMessageReaction is one authenticated member's durable reaction to
+// a message. Actor identity and time are always stamped by the server; clients
+// submit only the emoji.
+type scoutChatMessageReaction struct {
+	Emoji      string `json:"emoji"`
+	ActorEmail string `json:"actorEmail"`
+	ActorName  string `json:"actorName,omitempty"`
+	CreatedAt  string `json:"createdAt"`
+}
+
+// scoutChatReplyRef is an immutable snapshot of the message being answered.
+// MessageID preserves navigation to the live original while the author/snippet
+// keep the reply intelligible if that original is later edited or deleted.
+type scoutChatReplyRef struct {
+	MessageID   string `json:"messageId"`
+	AuthorName  string `json:"authorName"`
+	AuthorEmail string `json:"authorEmail,omitempty"`
+	Text        string `json:"text"`
+}
+
+// scoutChatReactionEmojis is deliberately closed: the mobile long-press tray
+// and the server accept the same small, iMessage-like vocabulary. This also
+// avoids accepting arbitrary multi-codepoint/control payloads as reactions.
+var scoutChatReactionEmojis = map[string]bool{
+	"❤️": true,
+	"👍":  true,
+	"👎":  true,
+	"😂":  true,
+	"‼️": true,
+	"❓":  true,
+	"🔥":  true,
+}
+
 type scoutChatMessageRecord struct {
 	ID          string `json:"id"`
 	Kind        string `json:"kind"`
 	Role        string `json:"role"`
 	Text        string `json:"text,omitempty"`
 	CreatedAt   string `json:"createdAt"`
+	EditedAt    string `json:"editedAt,omitempty"`
 	AuthorName  string `json:"authorName,omitempty"`
 	AuthorEmail string `json:"authorEmail,omitempty"`
 	// Via marks messages relayed by a tool (e.g. "scout_voice" for
@@ -99,9 +142,11 @@ type scoutChatMessageRecord struct {
 	// Sources are the thread messages a Scout answer provably quotes. omitempty
 	// for the same round-trip reason every other added field is: pre-Sources
 	// messages on disk must decode unchanged.
-	Sources []answerSource            `json:"sources,omitempty"`
-	Files   []scoutChatFileAttachment `json:"files,omitempty"`
-	Thread  *scoutChatThreadRef       `json:"thread,omitempty"`
+	Sources   []answerSource             `json:"sources,omitempty"`
+	Files     []scoutChatFileAttachment  `json:"files,omitempty"`
+	Reactions []scoutChatMessageReaction `json:"reactions,omitempty"`
+	ReplyTo   *scoutChatReplyRef         `json:"replyTo,omitempty"`
+	Thread    *scoutChatThreadRef        `json:"thread,omitempty"`
 	// Proposal carries a router proposal card (Kind "proposal") — DATA the
 	// client renders as the confirmation trust surface, never an action. See
 	// the propose-confirm router in scout_chat.go.
@@ -236,7 +281,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 
 	suffix := strings.Trim(strings.TrimPrefix(r.URL.Path, "/assistant/chat-threads/"), "/")
 	parts := strings.Split(suffix, "/")
-	if suffix == "" || len(parts) > 3 {
+	if suffix == "" || len(parts) > 4 {
 		http.NotFound(w, r)
 		return
 	}
@@ -263,6 +308,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			"readAt":            marker.ReadAt,
 			"lastReadMessageId": marker.LastReadMessageID,
 			"muted":             threadMuted("", user.Email, threadID),
+			"notificationLevel": threadNotificationLevel("", user.Email, threadID),
 		})
 		return
 	}
@@ -334,6 +380,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 		payload := struct {
 			Text               string                    `json:"text"`
 			Files              []scoutChatFileAttachment `json:"files"`
+			ReplyToMessageID   string                    `json:"replyToMessageId"`
 			FollowUpArtifactId string                    `json:"followUpArtifactId"`
 			ToolTemplate       string                    `json:"toolTemplate"`
 		}{}
@@ -341,7 +388,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, http.StatusBadRequest, "could not read chat message")
 			return
 		}
-		response, err := kanbanApp.appendScoutChatThreadMessageWithTool(r.Context(), user, threadID, payload.Text, payload.Files, payload.FollowUpArtifactId, payload.ToolTemplate)
+		response, err := kanbanApp.appendScoutChatThreadMessageWithReplyAndTool(r.Context(), user, threadID, payload.Text, payload.Files, payload.FollowUpArtifactId, payload.ReplyToMessageID, payload.ToolTemplate)
 		if err != nil {
 			writeScoutChatThreadError(w, err)
 			return
@@ -357,6 +404,53 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "thread": thread})
+		return
+	}
+
+	if len(parts) == 3 && parts[1] == "messages" && r.Method == http.MethodPatch {
+		payload := struct {
+			Text  *string                    `json:"text"`
+			Files *[]scoutChatFileAttachment `json:"files"`
+		}{}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, scoutChatThreadRequestLimit)).Decode(&payload); err != nil {
+			writeAuthError(w, http.StatusBadRequest, "could not read chat message update")
+			return
+		}
+		thread, message, err := kanbanApp.editScoutChatThreadMessage(r.Context(), user, threadID, parts[2], payload.Text, payload.Files)
+		if err != nil {
+			writeScoutChatThreadError(w, err)
+			return
+		}
+		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "thread": thread, "message": message})
+		return
+	}
+
+	if len(parts) == 4 && parts[1] == "messages" && parts[3] == "reaction" {
+		emoji := ""
+		set := false
+		switch r.Method {
+		case http.MethodPut:
+			payload := struct {
+				Emoji string `json:"emoji"`
+			}{}
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<10)).Decode(&payload); err != nil {
+				writeAuthError(w, http.StatusBadRequest, "could not read message reaction")
+				return
+			}
+			emoji = payload.Emoji
+			set = true
+		case http.MethodDelete:
+			emoji = r.URL.Query().Get("emoji")
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		thread, message, err := kanbanApp.updateScoutChatMessageReaction(user, threadID, parts[2], emoji, set)
+		if err != nil {
+			writeScoutChatThreadError(w, err)
+			return
+		}
+		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "thread": thread, "message": message})
 		return
 	}
 
@@ -416,7 +510,7 @@ func (app *kanbanBoardApp) createScoutChatThread(ownerEmail string, createdBy st
 }
 
 func (app *kanbanBoardApp) appendScoutChatThreadMessage(ctx context.Context, user *userAccount, threadID string, text string, files []scoutChatFileAttachment, followUpArtifactID string) (map[string]any, error) {
-	return app.appendScoutChatThreadMessageWithTool(ctx, user, threadID, text, files, followUpArtifactID, "")
+	return app.appendScoutChatThreadMessageWithReplyAndTool(ctx, user, threadID, text, files, followUpArtifactID, "", "")
 }
 
 // appendScoutChatThreadMessageWithTool is appendScoutChatThreadMessage plus an
@@ -425,12 +519,45 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessage(ctx context.Context, use
 // the same tool must produce the same contract-gated output from the talk-it-out
 // door as from the Run door.
 func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Context, user *userAccount, threadID string, text string, files []scoutChatFileAttachment, followUpArtifactID string, toolTemplate string) (map[string]any, error) {
+	return app.appendScoutChatThreadMessageWithReplyAndTool(ctx, user, threadID, text, files, followUpArtifactID, "", toolTemplate)
+}
+
+func scoutChatReplyRefFromThread(thread scoutChatThreadRecord, messageID string) (*scoutChatReplyRef, error) {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return nil, nil
+	}
+	index := scoutChatMessageIndex(thread, messageID)
+	if index < 0 {
+		return nil, fmt.Errorf("chat message not found")
+	}
+	message := thread.Messages[index]
+	text := strings.Join(strings.Fields(strings.TrimSpace(message.Text)), " ")
+	if text == "" && len(message.Files) > 0 {
+		text = firstNonEmptyString(strings.TrimSpace(message.Files[0].Name), "Attachment")
+	}
+	if text == "" {
+		text = "Message"
+	}
+	runes := []rune(text)
+	if len(runes) > 180 {
+		text = strings.TrimSpace(string(runes[:179])) + "…"
+	}
+	author := firstNonEmptyString(strings.TrimSpace(message.AuthorName), map[string]string{"assistant": "Scout", "scout": "Scout"}[strings.ToLower(message.Role)], "Someone")
+	return &scoutChatReplyRef{MessageID: message.ID, AuthorName: author, AuthorEmail: normalizeAccountEmail(message.AuthorEmail), Text: text}, nil
+}
+
+func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx context.Context, user *userAccount, threadID string, text string, files []scoutChatFileAttachment, followUpArtifactID string, replyToMessageID string, toolTemplate string) (map[string]any, error) {
 	thread, _, err := app.scoutChatThreadByID(user.Email, threadID)
 	if err != nil {
 		return nil, err
 	}
 	if thread.ArchivedAt != "" {
 		return nil, fmt.Errorf("chat thread is archived")
+	}
+	replyTo, err := scoutChatReplyRefFromThread(thread, replyToMessageID)
+	if err != nil {
+		return nil, err
 	}
 
 	files = sanitizeScoutChatFiles(files)
@@ -462,6 +589,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 		AuthorName:  scoutChatAuthorName(user),
 		AuthorEmail: normalizeAccountEmail(user.Email),
 		Files:       files,
+		ReplyTo:     replyTo,
 	}
 	history := scoutChatHistoryFromThread(thread)
 
@@ -475,7 +603,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 		saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, messages...)
 		if err == nil && mentionsPending {
 			mentionsPending = false
-			app.notifyScoutChatChannelMessage(saved, userMessage)
+			app.notifyScoutChatTargets(saved, userMessage)
 		}
 		return saved, err
 	}
@@ -795,7 +923,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithTool(ctx context.Cont
 		}
 	}
 
-	result, err := app.resolveAssistantQueryContextForUserWithAttachments(ctx, user.Email, modelQuery, history, attachmentBlocks)
+	result, err := app.resolveAssistantQueryContextForUserWithAttachments(withAssistantResponseStyle(ctx, scoutChatResponseStyle(thread)), user.Email, modelQuery, history, attachmentBlocks)
 	if err != nil {
 		errorMessage := scoutChatMessageRecord{
 			ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
@@ -1526,6 +1654,213 @@ func (app *kanbanBoardApp) commitScoutChatThreadMessages(viewerEmail string, thr
 	return thread, nil
 }
 
+func scoutChatMessageIndex(thread scoutChatThreadRecord, messageID string) int {
+	messageID = strings.TrimSpace(messageID)
+	for index := range thread.Messages {
+		if thread.Messages[index].ID == messageID {
+			return index
+		}
+	}
+	return -1
+}
+
+// scoutChatMessageAuthoredBy applies the same compatibility rule to edits and
+// deletes. Current messages prove authorship with the server-stamped email. A
+// legacy unstamped message is editable only in its owner-only private thread;
+// public-channel authorship cannot be inferred safely.
+func scoutChatMessageAuthoredBy(thread scoutChatThreadRecord, message scoutChatMessageRecord, viewerEmail string) bool {
+	own := message.AuthorEmail != "" && normalizeAccountEmail(message.AuthorEmail) == normalizeAccountEmail(viewerEmail)
+	if message.AuthorEmail == "" {
+		own = scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic
+	}
+	return message.Role == "user" && own
+}
+
+func preserveExistingScoutChatFileText(files []scoutChatFileAttachment, existing []scoutChatFileAttachment) []scoutChatFileAttachment {
+	if len(files) == 0 || len(existing) == 0 {
+		return files
+	}
+	byRef := make(map[string]string, len(existing))
+	for _, file := range existing {
+		if ref := strings.TrimSpace(file.Ref); ref != "" && strings.TrimSpace(file.Text) != "" {
+			byRef[ref] = file.Text
+		}
+	}
+	for index := range files {
+		if text := byRef[strings.TrimSpace(files[index].Ref)]; text != "" {
+			files[index].Text = text
+		}
+	}
+	return files
+}
+
+// editScoutChatThreadMessage updates one authored user message in place. The
+// durable id, creation time, author, reactions, and slice position never move.
+// Omitted text/files preserve the latest stored values; an explicitly empty
+// files array clears attachments. As with append, attachment derivation stays
+// outside the per-thread mutation lock.
+func (app *kanbanBoardApp) editScoutChatThreadMessage(ctx context.Context, user *userAccount, threadID string, messageID string, text *string, files *[]scoutChatFileAttachment) (scoutChatThreadRecord, scoutChatMessageRecord, error) {
+	if user == nil {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, fmt.Errorf("chat thread not found")
+	}
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, fmt.Errorf("message id is required")
+	}
+	if text == nil && files == nil {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, fmt.Errorf("message update is required")
+	}
+
+	// Authorize before attachment reads/model work, then repeat under the lock
+	// immediately before mutation so a concurrent archive/delete cannot race it.
+	preflight, _, err := app.scoutChatThreadByID(user.Email, threadID)
+	if err != nil {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, err
+	}
+	if preflight.ArchivedAt != "" {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, fmt.Errorf("chat thread is archived")
+	}
+	preflightIndex := scoutChatMessageIndex(preflight, messageID)
+	if preflightIndex < 0 {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, fmt.Errorf("chat message not found")
+	}
+	if !scoutChatMessageAuthoredBy(preflight, preflight.Messages[preflightIndex], user.Email) {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, fmt.Errorf("you can only edit your own messages")
+	}
+
+	var preparedFiles []scoutChatFileAttachment
+	if files != nil {
+		preparedFiles = sanitizeScoutChatFiles(*files)
+		preparedFiles = preserveExistingScoutChatFileText(preparedFiles, preflight.Messages[preflightIndex].Files)
+		if currentAnthropicAPIKey() != "" {
+			preparedFiles = deriveAttachmentText(ctx, preparedFiles, attachmentContentBlocks(preparedFiles))
+		}
+	}
+
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	thread, _, err := app.scoutChatThreadByID(user.Email, threadID)
+	if err != nil {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, err
+	}
+	if thread.ArchivedAt != "" {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, fmt.Errorf("chat thread is archived")
+	}
+	index := scoutChatMessageIndex(thread, messageID)
+	if index < 0 {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, fmt.Errorf("chat message not found")
+	}
+	message := thread.Messages[index]
+	if !scoutChatMessageAuthoredBy(thread, message, user.Email) {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, fmt.Errorf("you can only edit your own messages")
+	}
+	if text != nil {
+		message.Text = strings.TrimSpace(*text)
+	}
+	if files != nil {
+		message.Files = preparedFiles
+	}
+	if strings.TrimSpace(message.Text) == "" && len(message.Files) == 0 {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, fmt.Errorf("message text or attachment is required")
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	message.EditedAt = now
+	thread.Messages[index] = message
+	thread.UpdatedAt = now
+	thread.Preview = scoutChatThreadPreview(thread)
+	if err := app.saveScoutChatThread(thread); err != nil {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, err
+	}
+	deliverScoutChatThreadUpdate(thread, message)
+	return thread, message, nil
+}
+
+func normalizeScoutChatReactionEmoji(emoji string) (string, error) {
+	emoji = strings.TrimSpace(emoji)
+	if !scoutChatReactionEmojis[emoji] {
+		return "", fmt.Errorf("unsupported message reaction")
+	}
+	return emoji, nil
+}
+
+// updateScoutChatMessageReaction idempotently sets or clears this authenticated
+// member's selected emoji on any message they may read. PUT retries never
+// duplicate an entry; DELETE retries remain successful after it is gone.
+func (app *kanbanBoardApp) updateScoutChatMessageReaction(user *userAccount, threadID string, messageID string, emoji string, set bool) (scoutChatThreadRecord, scoutChatMessageRecord, error) {
+	if user == nil {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, fmt.Errorf("chat thread not found")
+	}
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, fmt.Errorf("message id is required")
+	}
+
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	thread, _, err := app.scoutChatThreadByID(user.Email, threadID)
+	if err != nil {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, err
+	}
+	if thread.ArchivedAt != "" {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, fmt.Errorf("chat thread is archived")
+	}
+	emoji, err = normalizeScoutChatReactionEmoji(emoji)
+	if err != nil {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, err
+	}
+	index := scoutChatMessageIndex(thread, messageID)
+	if index < 0 {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, fmt.Errorf("chat message not found")
+	}
+
+	message := thread.Messages[index]
+	actorEmail := normalizeAccountEmail(user.Email)
+	found := false
+	kept := make([]scoutChatMessageReaction, 0, len(message.Reactions)+1)
+	for _, reaction := range message.Reactions {
+		if normalizeAccountEmail(reaction.ActorEmail) == actorEmail && reaction.Emoji == emoji {
+			if set && !found {
+				kept = append(kept, reaction)
+				found = true
+			}
+			continue
+		}
+		kept = append(kept, reaction)
+	}
+	changed := false
+	if set && !found {
+		kept = append(kept, scoutChatMessageReaction{
+			Emoji:      emoji,
+			ActorEmail: actorEmail,
+			ActorName:  scoutChatAuthorName(user),
+			CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+		})
+		changed = true
+	} else if !set && len(kept) != len(message.Reactions) {
+		changed = true
+	} else if set && len(kept) != len(message.Reactions) {
+		// Heal duplicate persisted actor+emoji rows while honoring an idempotent
+		// set. The first server-stamped entry stays canonical.
+		changed = true
+	}
+	if !changed {
+		return thread, message, nil
+	}
+
+	message.Reactions = kept
+	thread.Messages[index] = message
+	thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	if err := app.saveScoutChatThread(thread); err != nil {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, err
+	}
+	deliverScoutChatThreadUpdate(thread, message)
+	return thread, message, nil
+}
+
 // deleteScoutChatThreadMessage removes one message its author posted in the
 // wrong place — same per-thread lock + re-read + save discipline as message
 // commits. Authorship is the whole authz story: only the message's own author
@@ -1546,22 +1881,12 @@ func (app *kanbanBoardApp) deleteScoutChatThreadMessage(viewerEmail string, thre
 	if err != nil {
 		return scoutChatThreadRecord{}, err
 	}
-	index := -1
-	for candidate := range thread.Messages {
-		if thread.Messages[candidate].ID == messageID {
-			index = candidate
-			break
-		}
-	}
+	index := scoutChatMessageIndex(thread, messageID)
 	if index < 0 {
 		return scoutChatThreadRecord{}, fmt.Errorf("chat message not found")
 	}
 	message := thread.Messages[index]
-	own := message.AuthorEmail != "" && normalizeAccountEmail(message.AuthorEmail) == normalizeAccountEmail(viewerEmail)
-	if message.AuthorEmail == "" {
-		own = scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic
-	}
-	if message.Role != "user" || !own {
+	if !scoutChatMessageAuthoredBy(thread, message, viewerEmail) {
 		return scoutChatThreadRecord{}, fmt.Errorf("you can only delete your own messages")
 	}
 	thread.Messages = append(thread.Messages[:index], thread.Messages[index+1:]...)

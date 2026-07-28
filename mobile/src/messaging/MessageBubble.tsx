@@ -1,32 +1,33 @@
-import React, { useMemo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
+import * as Linking from 'expo-linking';
 
-import type { ScoutMessage } from '../api/types';
-import { parseMentions } from './mentions';
-import { colors, radius, space, type } from '../theme/tokens';
-
-/**
- * A message — design §14.
- *
- * Bubbles are deliberately NOT glass. Glass is a variable backdrop with no
- * contrast guarantee, and this is the text people read all day; the glass law
- * (§7) reserves the material for things floating above the conversation, not the
- * conversation itself.
- *
- * Scout renders in ember because agent work is exactly what ember is earned for.
- */
+import type { ScoutFileAttachment, ScoutMessage } from '../api/types';
+import { authenticatedFileHeaders, authenticatedFileUrl } from '../files/fileActions';
+import { colors, radius, shadow, space, type } from '../theme/tokens';
+import { LinkPreviewCard } from './LinkPreviewCard';
+import { LongMessageSheet } from './LongMessageSheet';
+import { ScoutRichText } from './ScoutRichText';
+import {
+  extractHttpUrls,
+  groupMessageReactions,
+  parseMessageTextSegments,
+} from './messagePresentation';
 
 export type MessageBubbleProps = {
   message: ScoutMessage;
-  /** Scrolls to a cited message when a source chip is tapped. */
-  onOpenSource?: (messageId: string) => void;
-	/** Opens an authenticated attachment from desktop or mobile. */
-	onOpenAttachment?: (file: NonNullable<ScoutMessage['files']>[number]) => void;
-  /** True when the signed-in user wrote it. */
   own: boolean;
-  /** False when the previous message shares this author — suppresses the name. */
   showAuthor: boolean;
+  sessionToken: string;
+  viewerEmail: string;
+  timestampReveal: Animated.Value;
+  onOpenSource?: (messageId: string) => void;
+  onOpenReplySource?: (messageId: string) => void;
+  onLongPress?: (message: ScoutMessage, own: boolean) => void;
+  onOpenAttachment?: (file: ScoutFileAttachment) => void;
+  onToggleReaction?: (message: ScoutMessage, emoji: string, active: boolean) => void;
 };
 
 function isScout(message: ScoutMessage): boolean {
@@ -39,253 +40,306 @@ function bodyOf(message: ScoutMessage): string {
 }
 
 function timeOf(message: ScoutMessage): string {
-  const raw = message.createdAt;
-  if (!raw) return '';
-  const at = new Date(String(raw));
+  if (!message.createdAt) return '';
+  const at = new Date(String(message.createdAt));
   if (Number.isNaN(at.getTime())) return '';
   return at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function attachmentLabel(file: ScoutFileAttachment): string {
+  const size = Number(file.size ?? 0);
+  const detail = size > 0 ? ` · ${size < 1_048_576 ? `${Math.max(1, Math.round(size / 1024))} KB` : `${(size / 1_048_576).toFixed(1)} MB`}` : '';
+  return `${file.name}${detail}`;
+}
+
+function shortenedMessage(value: string, maxCharacters: number): string {
+  if (value.length <= maxCharacters) return value;
+  const slice = value.slice(0, maxCharacters).replace(/\s+\S*$/u, '').trimEnd();
+  return `${slice || value.slice(0, maxCharacters).trimEnd()}…`;
 }
 
 export const MessageBubble = React.memo(function MessageBubble({
   message,
   own,
   showAuthor,
+  sessionToken,
+  viewerEmail,
+  timestampReveal,
   onOpenSource,
-	onOpenAttachment,
+  onOpenReplySource,
+  onLongPress,
+  onOpenAttachment,
+  onToggleReaction,
 }: MessageBubbleProps) {
   const body = bodyOf(message);
+  const [showFullMessage, setShowFullMessage] = useState(false);
+  const files = Array.isArray(message.files) ? message.files : [];
   const scout = isScout(message);
+  const replyTo = message.replyTo;
   const viaScout = String(message.postedOnBehalfOf ?? '').trim() !== '';
   const sources = Array.isArray(message.sources) ? message.sources : [];
-	const files = Array.isArray(message.files) ? message.files : [];
-  // Memoized per message: parsing every message on every list render is the
-  // performance trap this list exists to avoid (§15).
-  const segments = useMemo(() => parseMentions(body), [body]);
+  const longMessage = body.length > 700 || body.split('\n').length > 12;
+  const inlineBody = longMessage && !scout ? shortenedMessage(body, 560) : body;
+  const segments = useMemo(() => parseMessageTextSegments(inlineBody), [inlineBody]);
+  const urls = useMemo(() => extractHttpUrls(body), [body]);
+  const firstURL = urls[0]?.url ?? '';
+  const linkOnly = urls.length === 1 && body.trim() === firstURL;
+  const standaloneLinkPreview = linkOnly && !replyTo;
+  const reactions = useMemo(
+    () => groupMessageReactions(message.reactions, viewerEmail),
+    [message.reactions, viewerEmail],
+  );
+  const translated = useMemo(() => ({
+    transform: [{ translateX: timestampReveal.interpolate({ inputRange: [0, 1], outputRange: [0, -68] }) }],
+  }), [timestampReveal]);
+  const timestampOpacity = useMemo(() => ({ opacity: timestampReveal }), [timestampReveal]);
 
-	if (!body && files.length === 0) return null;
+  if (!body && files.length === 0) return null;
 
   return (
-    // Grouping is spacing, not just a hidden name. Consecutive messages from
-    // one person are one utterance and sit tight; a change of author is a turn
-    // in the conversation and earns real air. A uniform gap makes a thread read
-    // as a list of records rather than as people talking.
-    <View style={[styles.row, own && styles.rowOwn, showAuthor && styles.rowNewAuthor]}>
-      {/* Column so the source chips stack BENEATH the bubble. In the row
-          container they would sit beside it and push the bubble narrow. */}
-      <View style={[styles.stack, own && styles.stackOwn]}>
-      <View
-        style={[
-          styles.bubble,
-          own ? styles.bubbleOwn : styles.bubbleOther,
-          scout && styles.bubbleScout,
-        ]}
-      >
-        {showAuthor && !own ? (
-          <Text style={[styles.author, scout && styles.authorScout]}>
-            {scout ? 'Scout' : String(message.authorName ?? 'Someone')}
-          </Text>
-        ) : null}
+    <View style={[styles.row, own && styles.rowOwn, showAuthor && styles.rowNewAuthor, reactions.length > 0 && styles.rowWithReactions]}>
+      <Animated.View pointerEvents="none" style={[styles.timestampWrap, timestampOpacity]}>
+        <Text style={styles.time}>{message.editedAt ? 'Edited · ' : ''}{timeOf(message)}</Text>
+      </Animated.View>
+      <Animated.View style={[styles.stack, own && styles.stackOwn, translated]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${own ? 'You' : String(message.authorName ?? (scout ? 'Scout' : 'Someone'))}: ${body || `${files.length} attachment${files.length === 1 ? '' : 's'}`}. ${timeOf(message)}`}
+          accessibilityHint={longMessage ? 'Opens the full message. Touch and hold for message actions' : 'Touch and hold for message actions'}
+          delayLongPress={430}
+          onPress={longMessage ? () => setShowFullMessage(true) : undefined}
+          onLongPress={() => onLongPress?.(message, own)}
+          style={[
+            styles.bubble,
+            own ? styles.bubbleOwn : styles.bubbleOther,
+            scout && styles.bubbleScout,
+            standaloneLinkPreview && styles.bubbleLinkOnly,
+          ]}
+        >
+          {showAuthor && !own ? (
+            <Text style={[styles.author, scout && styles.authorScout]}>
+              {scout ? 'Scout' : String(message.authorName ?? 'Someone')}
+            </Text>
+          ) : null}
 
-        {/* The disclosure chip. `postedOnBehalfOf` is stamped server-side
-            UNCONDITIONALLY from the authenticated requester whenever Scout
-            posts as a user, precisely so Scout can never silently impersonate
-            anyone — and this bubble ignored it until now. Rendering it is a
-            disclosure requirement, not decoration, and it matters more the
-            moment a team's primary conversation lives in this surface. */}
-        {viaScout ? (
-          <View style={[styles.viaChip, own && styles.viaChipOwn]}>
-            <Text style={[styles.viaText, own && styles.viaTextOwn]}>via Scout</Text>
+          {viaScout ? (
+            <View style={[styles.viaChip, own && styles.viaChipOwn]}>
+              <Text style={[styles.viaText, own && styles.viaTextOwn]}>via Scout</Text>
+            </View>
+          ) : null}
+
+          {replyTo?.messageId ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Replying to ${replyTo.authorName}: ${replyTo.text}`}
+              accessibilityHint="Jumps to the original message"
+              onPress={() => onOpenReplySource?.(replyTo.messageId)}
+              onLongPress={() => onLongPress?.(message, own)}
+              delayLongPress={430}
+              style={({ pressed }) => [styles.replyContext, pressed && styles.replyContextPressed]}
+            >
+              <View style={[styles.replyLine, own && styles.replyLineOwn]} />
+              <View style={styles.replyCopy}>
+                <Text numberOfLines={1} style={[styles.replyAuthor, own && styles.replyAuthorOwn]}>{replyTo.authorName}</Text>
+                <Text numberOfLines={2} style={[styles.replyText, own && styles.replyTextOwn]}>{replyTo.text}</Text>
+              </View>
+            </Pressable>
+          ) : null}
+
+          {body && !linkOnly && scout ? (
+            <ScoutRichText text={body} maxCharacters={longMessage ? 560 : undefined} />
+          ) : body && !linkOnly ? (
+            <Text style={[styles.body, own && styles.bodyOwn]}>
+              {segments.map((segment, index) => {
+                if (segment.kind === 'text') return <React.Fragment key={index}>{segment.text}</React.Fragment>;
+                if (segment.kind === 'link') {
+                  return (
+                    <Text
+                      key={index}
+                      accessibilityRole="link"
+                      onPress={() => void Linking.openURL(segment.url).catch(() => undefined)}
+                      style={[styles.link, own && styles.linkOwn]}
+                    >
+                      {segment.text}
+                    </Text>
+                  );
+                }
+                return (
+                  <Text
+                    key={index}
+                    accessibilityLabel={`Mention ${segment.text.replace(/^@/, '')}`}
+                    style={[
+                      styles.mention,
+                      own && styles.mentionOwn,
+                      segment.scout && styles.mentionScout,
+                      segment.scout && own && styles.mentionScoutOwn,
+                    ]}
+                  >
+                    {segment.text.replace(/^@/, '')}
+                  </Text>
+                );
+              })}
+            </Text>
+          ) : null}
+
+          {longMessage ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={scout ? 'Read full Scout response' : 'Read full message'}
+              onPress={() => setShowFullMessage(true)}
+              style={({ pressed }) => [styles.readMore, own && styles.readMoreOwn, pressed && styles.readMorePressed]}
+            >
+              <Text style={[styles.readMoreText, own && styles.readMoreTextOwn]}>{scout ? 'Read full response' : 'Read full message'}</Text>
+              <SymbolView name="arrow.up.left.and.arrow.down.right" size={12} tintColor={own ? colors.onAccent : colors.text2} />
+            </Pressable>
+          ) : null}
+
+          {files.map((file) => {
+            const image = file.mime?.toLowerCase().startsWith('image/') && authenticatedFileUrl(file);
+            return (
+              <Pressable
+                key={`${file.ref}-${file.name}`}
+                accessibilityRole="button"
+                accessibilityLabel={`Open ${file.name}`}
+                onPress={() => onOpenAttachment?.(file)}
+                onLongPress={() => onLongPress?.(message, own)}
+                delayLongPress={430}
+                style={({ pressed }) => [styles.attachment, own && styles.attachmentOwn, pressed && styles.attachmentPressed]}
+              >
+                {image ? (
+                  <Image
+                    source={{ uri: image, headers: authenticatedFileHeaders(sessionToken, file.mime) }}
+                    cachePolicy="memory-disk"
+                    contentFit="cover"
+                    recyclingKey={file.ref}
+                    transition={160}
+                    style={styles.attachmentImage}
+                  />
+                ) : (
+                  <View style={[styles.fileIcon, own && styles.fileIconOwn]}>
+                    <SymbolView name="doc.richtext" tintColor={own ? colors.onAccent : colors.text2} size={19} />
+                  </View>
+                )}
+                <Text numberOfLines={1} style={[styles.attachmentText, own && styles.bodyOwn]}>{attachmentLabel(file)}</Text>
+              </Pressable>
+            );
+          })}
+
+          {firstURL ? (
+            <LinkPreviewCard
+              url={firstURL}
+              sessionToken={sessionToken}
+              own={own}
+              seamless={standaloneLinkPreview}
+              onLongPress={() => onLongPress?.(message, own)}
+            />
+          ) : null}
+        </Pressable>
+
+        {reactions.length > 0 ? (
+          <View style={[styles.reactions, own ? styles.reactionsOwn : styles.reactionsOther]}>
+            {reactions.map((reaction) => (
+              <Pressable
+                key={reaction.emoji}
+                accessibilityRole="button"
+                accessibilityLabel={`${reaction.emoji}, ${reaction.count} reaction${reaction.count === 1 ? '' : 's'}`}
+                onPress={() => onToggleReaction?.(message, reaction.emoji, !reaction.reactedByViewer)}
+                hitSlop={{ top: 3, bottom: 3 }}
+                style={({ pressed }) => [styles.reactionChip, reaction.reactedByViewer && styles.reactionChipOwn, pressed && styles.reactionPressed]}
+              >
+                <Text style={styles.reactionEmoji}>{reaction.emoji}</Text>
+              </Pressable>
+            ))}
           </View>
         ) : null}
 
-		{body ? <Text style={[styles.body, own && styles.bodyOwn]}>
-          {segments.map((segment, index) =>
-            segment.kind === 'text' ? (
-              segment.text
-            ) : (
-              <Text
-                key={index}
-                style={[
-                  styles.mention,
-                  own && styles.mentionOwn,
-                  segment.scout && styles.mentionScout,
-                ]}
+        {scout && sources.length > 0 ? (
+          <View style={styles.sources}>
+            {sources.map((source) => (
+              <Pressable
+                key={source.messageId}
+                accessibilityRole="button"
+                accessibilityLabel={`Source: ${source.author || 'a message'} — ${source.quote}`}
+                accessibilityHint="Scrolls to the source message"
+                onPress={() => onOpenSource?.(source.messageId)}
+                style={({ pressed }) => [styles.sourceChip, pressed && styles.sourcePressed]}
               >
-                {segment.text}
-              </Text>
-            ),
-          )}
-		</Text> : null}
-
-		{files.length > 0 ? (
-			<View style={styles.attachments}>
-				{files.map((file) => (
-					<Pressable
-						key={`${file.ref}:${file.name}`}
-						accessibilityRole="button"
-						accessibilityLabel={`Open attachment ${file.name}`}
-						onPress={() => onOpenAttachment?.(file)}
-						style={({ pressed }) => [styles.attachment, own && styles.attachmentOwn, pressed && styles.sourcePressed]}
-					>
-						<SymbolView name="paperclip" tintColor={own ? colors.onAccent : colors.text2} size={14} />
-						<Text style={[styles.attachmentText, own && styles.bodyOwn]} numberOfLines={1}>{file.name}</Text>
-					</Pressable>
-				))}
-			</View>
-		) : null}
-
-        <Text style={[styles.time, own && styles.timeOwn]}>{timeOf(message)}</Text>
-      </View>
-
-      {/* Ask-the-thread citations — design §10.
-          Only ever present on a Scout answer that PROVABLY quotes a message in
-          this thread. An answer that quotes nothing shows nothing, which is the
-          design's explicit requirement: no chips beats unearned authority. */}
-      {scout && sources.length > 0 ? (
-        <View style={styles.sources}>
-          {sources.map((source) => (
-            <Pressable
-              key={source.messageId}
-              accessibilityRole="button"
-              accessibilityLabel={`Source: ${source.author || 'a message'} — ${source.quote}`}
-              accessibilityHint="Scrolls to the message this answer draws on."
-              onPress={() => onOpenSource?.(source.messageId)}
-              style={({ pressed }) => [styles.sourceChip, pressed && styles.sourcePressed]}
-            >
-              <SymbolView name="quote.opening" tintColor={colors.emberText} size={10} />
-              <Text style={styles.sourceText} numberOfLines={1}>
-                {source.author || 'message'}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-      ) : null}
-      </View>
+                <SymbolView name="quote.opening" tintColor={colors.emberText} size={10} />
+                <Text style={styles.sourceText} numberOfLines={1}>{source.author || 'message'}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+      </Animated.View>
+      <LongMessageSheet
+        visible={showFullMessage}
+        text={body}
+        authorName={scout ? 'Scout' : own ? 'You' : String(message.authorName ?? 'Someone')}
+        scout={scout}
+        onClose={() => setShowFullMessage(false)}
+      />
     </View>
   );
 });
 
 const styles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    paddingHorizontal: space[4],
-    marginBottom: 3,
-  },
+  row: { flexDirection: 'row', paddingHorizontal: space[4], marginBottom: 3 },
   rowNewAuthor: { marginTop: space[3] },
+  rowWithReactions: { marginTop: space[5] },
   rowOwn: { justifyContent: 'flex-end' },
-  stack: {
-    // maxWidth lives here now so the bubble AND its chips share one measure.
-    maxWidth: '82%',
-    alignItems: 'flex-start',
-  },
+  timestampWrap: { position: 'absolute', top: 0, right: space[4], bottom: 0, justifyContent: 'center' },
+  time: { fontSize: 11, lineHeight: 13, fontVariant: ['tabular-nums'], color: colors.text3 },
+  stack: { maxWidth: '82%', alignItems: 'flex-start' },
   stackOwn: { alignItems: 'flex-end' },
-  bubble: {
-    paddingHorizontal: space[4],
-    paddingVertical: space[3],
-    borderRadius: radius.lg,
-    gap: 2,
-  },
-  bubbleOther: {
-    backgroundColor: colors.surface1,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.line1,
-    borderBottomLeftRadius: radius.sm,
-  },
-  bubbleOwn: {
-    backgroundColor: colors.accent,
-    borderBottomRightRadius: radius.sm,
-  },
-  bubbleScout: {
-    backgroundColor: colors.emberSoft,
-    borderColor: colors.ember,
-  },
-  author: {
-    fontSize: 13,
-    fontWeight: '600',
-    letterSpacing: -0.05,
-    lineHeight: 17,
-    color: colors.text2,
-    marginBottom: 3,
-  },
-  authorScout: { color: colors.ember },
-  viaChip: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: radius.full,
-    backgroundColor: colors.emberSoft,
-    marginBottom: 4,
-  },
-  viaChipOwn: { backgroundColor: 'rgba(255,255,255,0.18)' },
-  viaText: {
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 0.3,
-    color: colors.emberText,
-  },
+  bubble: { paddingHorizontal: space[4], paddingVertical: 10, borderRadius: radius.lg, gap: 2 },
+  bubbleOther: { backgroundColor: colors.surface1, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line1, borderBottomLeftRadius: radius.sm },
+  bubbleOwn: { backgroundColor: colors.accent, borderBottomRightRadius: radius.sm },
+  bubbleScout: { backgroundColor: colors.surface1, borderColor: colors.ember },
+  bubbleLinkOnly: { overflow: 'visible', paddingHorizontal: 0, paddingVertical: 0, borderWidth: 0, backgroundColor: 'transparent' },
+  author: { fontSize: 13, fontWeight: '600', letterSpacing: -0.05, lineHeight: 17, color: colors.text2, marginBottom: 3 },
+  authorScout: { color: colors.emberText },
+  viaChip: { alignSelf: 'flex-start', paddingHorizontal: 7, paddingVertical: 2, borderRadius: radius.full, backgroundColor: colors.emberSoft, marginBottom: 4 },
+  viaChipOwn: { backgroundColor: 'rgba(0,0,0,0.08)' },
+  viaText: { fontSize: 10, fontWeight: '600', letterSpacing: 0.3, color: colors.emberText },
   viaTextOwn: { color: colors.onAccent },
-  body: {
-    ...type.body,
-    color: colors.text1,
-  },
+  replyContext: { minWidth: 176, maxWidth: 270, flexDirection: 'row', gap: space[2], paddingVertical: 5, marginBottom: 4 },
+  replyContextPressed: { opacity: 0.7 },
+  replyLine: { width: 3, alignSelf: 'stretch', borderRadius: radius.full, backgroundColor: colors.info },
+  replyLineOwn: { backgroundColor: colors.onAccent },
+  replyCopy: { flex: 1 },
+  replyAuthor: { ...type.captionMedium, color: colors.info },
+  replyAuthorOwn: { color: colors.onAccent },
+  replyText: { ...type.caption, color: colors.text2 },
+  replyTextOwn: { color: colors.onAccent, opacity: 0.68 },
+  body: { ...type.body, color: colors.text1 },
   bodyOwn: { color: colors.onAccent },
-  mention: {
-    ...type.bodyMedium,
-    color: colors.info,
-  },
+  link: { color: colors.info, textDecorationLine: 'underline' },
+  linkOwn: { color: colors.onAccent, textDecorationColor: 'rgba(14,14,16,0.45)' },
+  mention: { ...type.bodyMedium, color: colors.info },
   mentionOwn: { color: colors.onAccent, textDecorationLine: 'underline' },
-  mentionScout: { color: colors.ember },
-  time: {
-    // The label token's 0.66 tracking is for uppercase eyebrows; on a timestamp
-    // it reads as spaced-out noise. Tabular figures stop the clock jittering as
-    // digits change.
-    fontSize: 11,
-    fontWeight: '400',
-    letterSpacing: 0,
-    lineHeight: 13,
-    fontVariant: ['tabular-nums'],
-    color: colors.text3,
-    alignSelf: 'flex-end',
-    marginTop: 3,
-  },
-  timeOwn: { color: 'rgba(255,255,255,0.55)' },
-	attachments: { gap: space[1], marginTop: space[1] },
-	attachment: {
-		minHeight: 44,
-		maxWidth: 240,
-		paddingHorizontal: space[3],
-		borderRadius: radius.md,
-		flexDirection: 'row',
-		alignItems: 'center',
-		gap: space[2],
-		backgroundColor: colors.surface3,
-	},
-	attachmentOwn: { backgroundColor: 'rgba(255,255,255,0.16)' },
-	attachmentText: { ...type.captionMedium, color: colors.text1, flexShrink: 1 },
-  sources: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 5,
-    marginLeft: space[1],
-  },
-  sourceChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: radius.full,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.ember,
-    backgroundColor: colors.emberSoft,
-    maxWidth: 150,
-  },
+  mentionScout: { color: colors.emberText },
+  mentionScoutOwn: { color: colors.onAccentEmber },
+  readMore: { minHeight: 34, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: space[3], paddingHorizontal: 10, borderRadius: radius.full, backgroundColor: colors.surface3 },
+  readMoreOwn: { backgroundColor: 'rgba(255,255,255,0.14)' },
+  readMorePressed: { opacity: 0.72, transform: [{ scale: 0.98 }] },
+  readMoreText: { ...type.captionMedium, color: colors.text1 },
+  readMoreTextOwn: { color: colors.onAccent },
+  attachment: { minWidth: 190, maxWidth: 280, minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: space[2], marginTop: space[2], overflow: 'hidden', borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line2, backgroundColor: colors.surface2 },
+  attachmentOwn: { borderColor: 'rgba(0,0,0,0.10)', backgroundColor: 'rgba(0,0,0,0.07)' },
+  attachmentPressed: { opacity: 0.76, transform: [{ scale: 0.98 }] },
+  attachmentImage: { width: 72, height: 64, backgroundColor: colors.surface3 },
+  fileIcon: { width: 42, height: 42, marginLeft: 3, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm, backgroundColor: colors.surface3 },
+  fileIconOwn: { backgroundColor: 'rgba(0,0,0,0.08)' },
+  attachmentText: { ...type.captionMedium, flex: 1, marginRight: space[3], color: colors.text1 },
+  reactions: { position: 'absolute', top: -17, zIndex: 2, flexDirection: 'row', gap: 5 },
+  reactionsOwn: { left: -8 },
+  reactionsOther: { right: -8 },
+  reactionChip: { ...shadow[1], width: 34, height: 34, alignItems: 'center', justifyContent: 'center', borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.glassBorder, backgroundColor: colors.glassPanel },
+  reactionChipOwn: { backgroundColor: colors.surface3, transform: [{ scale: 1.02 }] },
+  reactionPressed: { transform: [{ scale: 0.96 }], opacity: 0.78 },
+  reactionEmoji: { fontSize: 17, lineHeight: 22 },
+  sources: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 5, marginLeft: space[1] },
+  sourceChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.ember, backgroundColor: colors.emberSoft, maxWidth: 150 },
   sourcePressed: { opacity: 0.6 },
-  sourceText: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: colors.emberText,
-    flexShrink: 1,
-  },
+  sourceText: { fontSize: 11, fontWeight: '500', color: colors.emberText, flexShrink: 1 },
 });

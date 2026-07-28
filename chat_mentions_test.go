@@ -106,6 +106,34 @@ func TestScoutChatChannelMentionNotifiesMentionedUsers(t *testing.T) {
 	}
 }
 
+func TestScoutChatChannelReplyNotifiesOriginalAuthorOnce(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	channel, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "warroom", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	seedScoutChatUserMessage(t, channel.ID, "aj@shareability.com", "tim-original", "tim@shareability.com", "I can own the first pass.")
+	aj := accountStore().findUser("aj@shareability.com")
+	if aj == nil {
+		t.Fatal("seed user AJ missing")
+	}
+	// The explicit @Tim and reply target compose into one notification, not two.
+	if _, err := kanbanApp.appendScoutChatThreadMessageWithReplyAndTool(context.Background(), aj, channel.ID, "@Tim perfect, thank you.", nil, "", "tim-original", ""); err != nil {
+		t.Fatalf("append reply: %v", err)
+	}
+	unread := kanbanApp.unreadNotificationsFor("tim@shareability.com", notificationListLimit)
+	if len(unread) != 1 {
+		t.Fatalf("Tim unread=%#v, want one deduped reply notification", unread)
+	}
+	if text := asString(unread[0]["text"]); !strings.Contains(text, "AJ replied to you in #warroom") || !strings.Contains(text, "perfect") {
+		t.Fatalf("reply notification text=%q", text)
+	}
+}
+
 // @scout keeps its answer-gate role in channels, and user mentions in the same
 // message still notify: the two systems compose instead of colliding.
 func TestScoutChatChannelScoutMentionAnswersAndUserMentionNotifies(t *testing.T) {
@@ -156,6 +184,56 @@ func TestScoutChatChannelScoutMentionAnswersAndUserMentionNotifies(t *testing.T)
 	kanbanApp.mu.Unlock()
 	if total != 1 {
 		t.Fatalf("notifications=%d, want only Tyler's mention", total)
+	}
+}
+
+func TestScoutChatResponseStyleIsExclusiveToTheTable(t *testing.T) {
+	table := scoutChatThreadRecord{Title: "team", Visibility: scoutChatVisibilityPublic, Table: true}
+	if got := scoutChatResponseStyle(table); got != tableScoutChatResponseStyle || !strings.Contains(got, "casual group chat") {
+		t.Fatalf("Table response style=%q, want the casual #team contract", got)
+	}
+	for name, thread := range map[string]scoutChatThreadRecord{
+		"same title without durable Table identity": {Title: "team", Visibility: scoutChatVisibilityPublic},
+		"another public channel":                    {Title: "warroom", Visibility: scoutChatVisibilityPublic},
+		"private Scout chat":                        {Title: "Scout", Visibility: scoutChatVisibilityPrivate, Table: true},
+	} {
+		if got := scoutChatResponseStyle(thread); got != "" {
+			t.Fatalf("%s style=%q, want no #team voice outside the flagged public Table", name, got)
+		}
+	}
+}
+
+func TestTableScoutMentionAddsCasualStyleToModelInstructions(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.mu.Lock()
+	kanbanApp.apiKey = "test-key"
+	kanbanApp.mu.Unlock()
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	var captured openAITextRequest
+	originalResponder := createOpenAITextResponse
+	createOpenAITextResponse = func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		captured = request
+		return "yeah — that tracks. i’d keep the first pass small.", nil
+	}
+	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
+
+	table, err := kanbanApp.ensureTable("aj@shareability.com")
+	if err != nil {
+		t.Fatalf("ensure Table: %v", err)
+	}
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seed user AJ missing")
+	}
+	if _, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, table.ID, "@scout quick gut check on cobalt banana?", nil, ""); err != nil {
+		t.Fatalf("append Table mention: %v", err)
+	}
+	if !strings.Contains(captured.Instructions, tableScoutChatResponseStyle) {
+		t.Fatalf("instructions=%q, want the #team-only casual style", captured.Instructions)
 	}
 }
 

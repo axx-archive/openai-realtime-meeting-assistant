@@ -390,6 +390,9 @@ func deliverWebPushForRecordWithSender(ctx context.Context, record notificationR
 		if !pushRecipientMatches(record, sub) {
 			continue
 		}
+		if threadMutedForUser(sub.UserEmail, record) {
+			continue
+		}
 		prefs := resolvePushPrefs(state, sub.UserEmail)
 		if !prefs.Kinds[record.Kind] {
 			continue

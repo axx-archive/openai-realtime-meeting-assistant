@@ -50,37 +50,52 @@ func isChatMentionNameRune(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
-// notifyScoutChatMentions posts one targeted, thread-deep-linked bell
-// notification per roster member @-mentioned in a committed public-channel
-// message. Self-mentions never notify, and unresolvable names (guests, typos)
-// are silently skipped. Callers invoke this only after the message persisted —
-// a rejected send must never ring anyone's bell.
-func (app *kanbanBoardApp) notifyScoutChatChannelMessage(thread scoutChatThreadRecord, message scoutChatMessageRecord) {
+// notifyScoutChatTargets posts targeted, thread-deep-linked bell notifications
+// for direct reply recipients and @-mentioned roster members. A reply is a
+// direct conversation target, so it delivers at the Mentions notification
+// level as well. Recipients are deduped, self-targets never notify, and callers
+// invoke this only after the message persisted. The Table's ambient broadcast
+// excludes the author and every direct target so nobody receives duplicates.
+func (app *kanbanBoardApp) notifyScoutChatTargets(thread scoutChatThreadRecord, message scoutChatMessageRecord) {
 	if app == nil {
 		return
 	}
 	authorEmail := normalizeAccountEmail(message.AuthorEmail)
 	author := firstNonEmptyString(strings.TrimSpace(message.AuthorName), "Someone")
 	excluded := []string{authorEmail}
-	mentions := []string{}
+	notified := map[string]struct{}{}
+	if message.ReplyTo != nil {
+		email := normalizeAccountEmail(message.ReplyTo.AuthorEmail)
+		if email != "" && email != authorEmail {
+			excluded = append(excluded, email)
+			text := author + " replied to you in #" + thread.Title + ": " + trimForStorage(message.Text, 140)
+			if _, err := app.createChatNotification(email, nil, text, thread, message); err != nil {
+				log.Errorf("Failed to create reply notification for %s: %v", email, err)
+			} else {
+				notified[email] = struct{}{}
+			}
+		}
+	}
 	for _, name := range chatMentionNames(message.Text) {
 		email := participantEmail(name)
 		if email == "" || email == authorEmail {
 			continue
 		}
+		if _, exists := notified[email]; exists {
+			continue
+		}
 		excluded = append(excluded, email)
-		mentions = append(mentions, email)
+		text := author + " mentioned you in #" + thread.Title + ": " + trimForStorage(message.Text, 140)
+		if _, err := app.createChatNotification(email, nil, text, thread, message); err != nil {
+			log.Errorf("Failed to create mention notification for %s: %v", email, err)
+		} else {
+			notified[email] = struct{}{}
+		}
 	}
 	if thread.Table {
 		ambientText := author + " posted in #" + thread.Title + ": " + trimForStorage(message.Text, 140)
 		if _, err := app.createChatNotification("", excluded, ambientText, thread, message); err != nil {
 			log.Errorf("Failed to create Table notification: %v", err)
-		}
-	}
-	for _, email := range mentions {
-		text := author + " mentioned you in #" + thread.Title + ": " + trimForStorage(message.Text, 140)
-		if _, err := app.createChatNotification(email, nil, text, thread, message); err != nil {
-			log.Errorf("Failed to create mention notification for %s: %v", email, err)
 		}
 	}
 }

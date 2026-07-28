@@ -19,10 +19,15 @@ package main
 // and binary blocks are skipped, degrading to today's name-only behavior.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/gif"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"net/http"
 	"os"
@@ -120,6 +125,10 @@ func assistantAttachmentUploadHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, "attachment body is empty")
 		return
 	}
+	if err := validateAttachmentBytes(mime, data); err != nil {
+		writeAuthError(w, http.StatusUnsupportedMediaType, "attachment contents do not match the selected file type")
+		return
+	}
 
 	ref, err := putBlob(data, mime)
 	if err != nil {
@@ -138,6 +147,42 @@ func assistantAttachmentUploadHandler(w http.ResponseWriter, r *http.Request) {
 		"mime": meta.Mime,
 		"size": meta.Size,
 	})
+}
+
+// validateAttachmentBytes refuses type-confused and malformed files before
+// they are persisted or forwarded to a model. DecodeConfig reads dimensions
+// without expanding full raster pixel buffers, and the pixel ceiling blocks
+// ordinary image decompression bombs while preserving phone photography.
+func validateAttachmentBytes(mime string, data []byte) error {
+	const maxAttachmentPixels = 64_000_000
+	var (
+		config image.Config
+		err    error
+	)
+	switch mime {
+	case "image/png":
+		config, err = png.DecodeConfig(bytes.NewReader(data))
+	case "image/jpeg":
+		config, err = jpeg.DecodeConfig(bytes.NewReader(data))
+	case "image/gif":
+		config, err = gif.DecodeConfig(bytes.NewReader(data))
+	case "image/webp":
+		if len(data) < 16 || !bytes.Equal(data[:4], []byte("RIFF")) || !bytes.Equal(data[8:12], []byte("WEBP")) {
+			return fmt.Errorf("invalid webp")
+		}
+		return nil
+	case "application/pdf":
+		if len(data) < 8 || !bytes.HasPrefix(data, []byte("%PDF-")) {
+			return fmt.Errorf("invalid pdf")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported attachment type")
+	}
+	if err != nil || config.Width <= 0 || config.Height <= 0 || config.Width > 12_000 || config.Height > 12_000 || int64(config.Width)*int64(config.Height) > maxAttachmentPixels {
+		return fmt.Errorf("invalid or oversized image dimensions")
+	}
+	return nil
 }
 
 // blobStatForRef is the cheap existence + mime check for a ref: one os.Stat

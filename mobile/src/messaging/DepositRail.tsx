@@ -20,7 +20,6 @@ import { colors, radius, space, type } from '../theme/tokens';
 export type DepositRailProps = {
   deposits: ThreadDigestResponse['deposits'] | null;
   onOpenMessage: (messageId: string) => void;
-  onOpenLink: (url: string) => void;
 };
 
 function iconFor(mime: string | undefined): SFSymbol {
@@ -30,16 +29,20 @@ function iconFor(mime: string | undefined): SFSymbol {
   return 'doc';
 }
 
-export function DepositRail({ deposits, onOpenMessage, onOpenLink }: DepositRailProps) {
+export function DepositRail({ deposits, onOpenMessage }: DepositRailProps) {
   const files = deposits?.files ?? [];
-  const links = deposits?.links ?? [];
-  if (files.length === 0 && links.length === 0) return null;
+  // Ordinary links belong to the message that carried them. Repeating them in
+  // this rail detached the URL from its context and, on iOS, allowed the
+  // horizontal ScrollView to claim the whole remaining height. Only durable
+  // file deposits stay pinned here; links now render inline with rich previews.
+  if (files.length === 0) return null;
 
   return (
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.rail}
+      style={styles.scroller}
       accessibilityLabel="Shared in this thread"
     >
       {files.map((file) => (
@@ -58,28 +61,12 @@ export function DepositRail({ deposits, onOpenMessage, onOpenLink }: DepositRail
           </Text>
         </Pressable>
       ))}
-
-      {links.map((link) => (
-        <Pressable
-          key={`link-${link.url}`}
-          accessibilityRole="link"
-          accessibilityLabel={`${link.host}, shared by ${link.author || 'someone'}`}
-          onPress={() => onOpenLink(link.url)}
-          style={({ pressed }) => [styles.chip, pressed && styles.pressed]}
-        >
-          <SymbolView name="link" tintColor={colors.text2} size={13} />
-          {/* The host, not the URL — a full URL truncates to nothing useful
-              in a chip this size. */}
-          <Text style={styles.chipText} numberOfLines={1}>
-            {link.host || link.url}
-          </Text>
-        </Pressable>
-      ))}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
+  scroller: { flexGrow: 0, maxHeight: 48 },
   rail: {
     flexDirection: 'row',
     gap: space[2],

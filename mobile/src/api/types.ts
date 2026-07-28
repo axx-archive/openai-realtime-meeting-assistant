@@ -30,6 +30,7 @@ export type ScoutThread = {
   id: string;
   title?: string;
   visibility?: string;
+  ownerEmail?: string;
   updatedAt?: string;
   createdAt?: string;
   messageCount?: number;
@@ -87,13 +88,30 @@ export type ScoutMessage = {
   text?: string;
   content?: string;
   createdAt: string;
+  editedAt?: string;
   authorName?: string;
   authorEmail?: string;
   files?: ScoutFileAttachment[];
+  reactions?: ScoutMessageReaction[];
+  replyTo?: ScoutMessageReplyRef;
   sources?: ScoutAnswerSource[];
   proposal?: Record<string, unknown>;
   choices?: Array<Record<string, unknown>>;
   [key: string]: unknown;
+};
+
+export type ScoutMessageReplyRef = {
+  messageId: string;
+  authorName: string;
+  authorEmail?: string;
+  text: string;
+};
+
+export type ScoutMessageReaction = {
+  emoji: string;
+  actorEmail: string;
+  actorName?: string;
+  createdAt?: string;
 };
 
 export type ScoutAnswerSource = {
@@ -119,7 +137,27 @@ export type ScoutThreadDetailResponse = {
   readAt?: string;
   lastReadMessageId?: string;
   muted?: boolean;
+  notificationLevel?: 'all' | 'mentions' | 'none' | string;
   [key: string]: unknown;
+};
+
+export type LinkPreview = {
+  url: string;
+  kind?: string;
+  title?: string;
+  description?: string;
+  siteName?: string;
+  imageUrl?: string;
+  mediaType?: string;
+  authorName?: string;
+  authorHandle?: string;
+  publishedAt?: string;
+};
+
+export type ChatMentionCandidate = {
+  name: string;
+  email?: string;
+  kind: 'person' | 'scout';
 };
 
 export type BoardCard = {

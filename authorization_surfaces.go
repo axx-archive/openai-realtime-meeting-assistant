@@ -50,6 +50,9 @@ var authorizationHTTPSurfaces = []AuthorizationSurface{
 	authSurface("http.assistant.chat_threads", AuthorizationHTTP, "/assistant/chat-threads", []string{"chat_thread"}, []ACLAction{ACLReadContent, ACLCreateChild}, []string{"user"}, true, true, AuthorizationLegacyGuarded),
 	authSurface("http.assistant.chat_thread", AuthorizationHTTP, "/assistant/chat-threads/", []string{"chat_thread", "artifact", "file"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"user"}, true, true, AuthorizationLegacyGuarded),
 	authSurface("http.assistant.attachments", AuthorizationHTTP, "/assistant/attachments", []string{"file", "blob", "chat_thread"}, []ACLAction{ACLCreateChild, ACLWrite}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
+	authSurface("http.assistant.link_preview", AuthorizationHTTP, "/assistant/link-preview", []string{"external_link"}, []ACLAction{ACLReadMetadata}, []string{"user"}, true, true, AuthorizationCanonicalNeeded),
+	authSurface("http.assistant.link_preview_image", AuthorizationHTTP, "/assistant/link-preview/image", []string{"external_link", "blob"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalNeeded),
+	authSurface("http.assistant.chat_participants", AuthorizationHTTP, "/assistant/chat-participants", []string{"membership"}, []ACLAction{ACLReadMetadata}, []string{"user"}, false, true, AuthorizationCanonicalNeeded),
 	// Dictation uploads: the audio is transcribed and discarded (no object is
 	// persisted), but the request is body-reading and spends vendor minutes, so
 	// it is inventoried rather than waved through as non-object.

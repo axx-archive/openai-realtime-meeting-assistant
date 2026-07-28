@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -89,5 +90,44 @@ func TestThreadMutedForUserIgnoresRecordsWithoutAThread(t *testing.T) {
 	}
 	if !threadMutedForUser("aj@x.com", notificationRecord{ThreadID: "table-1"}) {
 		t.Fatal("an ambient record in a muted thread was not suppressed")
+	}
+}
+
+func TestThreadNotificationLevelsDistinguishAllMentionsAndNone(t *testing.T) {
+	t.Setenv("THREAD_MUTES_PATH", filepath.Join(t.TempDir(), "levels.json"))
+	ambient := notificationRecord{ThreadID: "table-1", Kind: notificationKindChat}
+	mention := notificationRecord{ThreadID: "table-1", Kind: notificationKindChat, UserEmail: "aj@x.com"}
+
+	if got := threadNotificationLevel("", "aj@x.com", "table-1"); got != threadNotificationAll {
+		t.Fatalf("initial level=%q", got)
+	}
+	if err := setThreadNotificationLevel("", "aj@x.com", "table-1", threadNotificationMentions); err != nil {
+		t.Fatal(err)
+	}
+	if !threadMutedForUser("aj@x.com", ambient) || threadMutedForUser("aj@x.com", mention) {
+		t.Fatal("mentions level did not suppress ambient while preserving direct mentions")
+	}
+	if err := setThreadNotificationLevel("", "aj@x.com", "table-1", threadNotificationNone); err != nil {
+		t.Fatal(err)
+	}
+	if !threadMutedForUser("aj@x.com", ambient) || !threadMutedForUser("aj@x.com", mention) {
+		t.Fatal("none level did not suppress both ambient and mention delivery")
+	}
+	if err := setThreadNotificationLevel("", "aj@x.com", "table-1", threadNotificationAll); err != nil {
+		t.Fatal(err)
+	}
+	if threadMutedForUser("aj@x.com", ambient) || threadMutedForUser("aj@x.com", mention) {
+		t.Fatal("all level suppressed thread notifications")
+	}
+}
+
+func TestLegacyMuteRowsLoadAsMentions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.json")
+	t.Setenv("THREAD_MUTES_PATH", path)
+	if err := os.WriteFile(path, []byte(`{"mutes":[{"userEmail":"AJ@X.COM","threadId":"table-1","mutedAt":"2026-01-01T00:00:00Z"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := threadNotificationLevel("", "aj@x.com", "table-1"); got != threadNotificationMentions {
+		t.Fatalf("legacy level=%q, want mentions", got)
 	}
 }

@@ -1,0 +1,41 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import {
+  parseScoutMarkdown,
+  truncateScoutBlocks,
+} from '../messaging/scoutRichTextPresentation';
+
+test('Scout markdown becomes native semantic blocks without visible syntax', () => {
+  const blocks = parseScoutMarkdown([
+    '# Decision',
+    '- **Ship Friday** with @scout watching [the plan](https://example.com/plan).',
+    '1. Tell the team',
+    '> Keep the first pass small.',
+  ].join('\n'));
+
+  assert.deepEqual(blocks.map((block) => block.kind), ['heading', 'bullet', 'number', 'quote']);
+  const visible = blocks.flatMap((block) => block.inlines.map((inline) => inline.text)).join(' ');
+  assert.equal(visible.includes('#'), false);
+  assert.equal(visible.includes('**'), false);
+  assert.equal(visible.includes('@'), false);
+  assert.equal(blocks[1].inlines.some((inline) => inline.kind === 'strong' && inline.text === 'Ship Friday'), true);
+  assert.equal(blocks[1].inlines.some((inline) => inline.kind === 'mention' && inline.scout && inline.text === 'scout'), true);
+  assert.equal(blocks[1].inlines.some((inline) => inline.kind === 'link' && inline.url === 'https://example.com/plan'), true);
+});
+
+test('inline memory headings are promoted instead of leaking raw hashes', () => {
+  const blocks = parseScoutMarkdown('Proposal — # Launch plan **Status:** ready. ## Next Ship it.');
+  assert.deepEqual(blocks.map((block) => block.kind), ['paragraph', 'heading', 'heading']);
+  assert.equal(blocks.flatMap((block) => block.inlines).some((inline) => inline.text.includes('#')), false);
+});
+
+test('long Scout responses truncate on a word and end with one ellipsis', () => {
+  const blocks = parseScoutMarkdown(`- ${'clear decision context '.repeat(40)}`);
+  const result = truncateScoutBlocks(blocks, 120);
+  const visible = result.blocks.flatMap((block) => block.inlines.map((inline) => inline.text)).join('');
+  assert.equal(result.truncated, true);
+  assert.equal(visible.endsWith('…'), true);
+  assert.equal(visible.includes('…') && visible.indexOf('…') === visible.lastIndexOf('…'), true);
+  assert.ok(visible.length <= 121);
+});

@@ -283,6 +283,33 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModel(ctx context.Context, re
 	return app.answerAssistantQueryWithModelAttachments(ctx, requester, query, cards, entries, history, nil)
 }
 
+type assistantResponseStyleContextKey struct{}
+
+// withAssistantResponseStyle adds request-scoped presentation guidance without
+// contaminating the user's query, recall search, or persisted conversation.
+func withAssistantResponseStyle(ctx context.Context, style string) context.Context {
+	style = strings.TrimSpace(style)
+	if style == "" {
+		return ctx
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, assistantResponseStyleContextKey{}, style)
+}
+
+func assistantQueryInstructionsForContext(ctx context.Context) string {
+	instructions := assistantQueryInstructions()
+	if ctx == nil {
+		return instructions
+	}
+	style, _ := ctx.Value(assistantResponseStyleContextKey{}).(string)
+	if style = strings.TrimSpace(style); style != "" {
+		return instructions + " Surface-specific response style: " + style
+	}
+	return instructions
+}
+
 // answerAssistantQueryWithModelAttachments is answerAssistantQueryWithModel
 // plus the current turn's binary attachment blocks (card 085). Attachments
 // ride the Sonnet path only; the keyless gpt-5.5 fallback ignores them and
@@ -308,6 +335,7 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModelAttachments(ctx context.
 
 	includeBoard := shouldIncludeBoardContextForAssistant(query, history)
 	input := buildAssistantQueryInput(query, cards, entries, app.activeDecisionEntries(decisionContextLimit), app.activeNarrativeEntries(narrativeStorylineContextLimit), history, time.Now(), includeBoard, app.pinnedProfileNotes(requester)...)
+	instructions := assistantQueryInstructionsForContext(ctx)
 	// Sonnet 5 fronts chat whenever an Anthropic key is present (packaging-os
 	// §1 role matrix, Wave 2 item 7); keyless-Anthropic keeps the gpt-5.5 path
 	// below byte-for-byte so keyless deploys degrade exactly as before.
@@ -329,7 +357,7 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModelAttachments(ctx context.
 	if anthropicKey != "" {
 		return createAnthropicTextResponse(ctx, anthropicKey, anthropicTextRequest{
 			Model:        chatModel(),
-			Instructions: assistantQueryInstructions(),
+			Instructions: instructions,
 			Input:        input,
 			Effort:       "medium",
 			MaxTokens:    anthropicChatMaxTokens,
@@ -341,7 +369,7 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModelAttachments(ctx context.
 		// Keyless-fallback twin: same seat as the keyed chat path, provider
 		// openai recorded at the wire seam (W0 item 4).
 		Seat:            seatChat,
-		Instructions:    assistantQueryInstructions(),
+		Instructions:    instructions,
 		Input:           input,
 		ReasoningEffort: "low",
 		Verbosity:       "low",
