@@ -133,9 +133,14 @@ type scoutChatThreadRecord struct {
 	// handler instead of the propose-confirm router, and IntakeStep is the
 	// 0-based cursor into brainIntakeSteps. Both are omitempty so every
 	// pre-082 thread on disk round-trips unchanged (absent == not an intake).
-	Intake     string                   `json:"intake,omitempty"`
-	IntakeStep int                      `json:"intakeStep,omitempty"`
-	Messages   []scoutChatMessageRecord `json:"messages,omitempty"`
+	Intake     string `json:"intake,omitempty"`
+	IntakeStep int    `json:"intakeStep,omitempty"`
+	// Table marks the deployment's single permanent team thread — the one the
+	// canvas live line and the mobile shell's chat control point at. omitempty
+	// for exactly the reason Intake above is: every pre-Table thread already on
+	// disk must round-trip unchanged.
+	Table    bool                     `json:"table,omitempty"`
+	Messages []scoutChatMessageRecord `json:"messages,omitempty"`
 }
 
 func assistantChatThreadsHandler(w http.ResponseWriter, r *http.Request) {
@@ -160,6 +165,13 @@ func assistantChatThreadsHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		includeArchived := strings.EqualFold(r.URL.Query().Get("archived"), "true") || strings.EqualFold(r.URL.Query().Get("includeArchived"), "true")
+		// Provision the Table lazily on first list. A team chat that requires
+		// an admin setup step before the first message does not get a first
+		// message. A failure here must not blank the list — the user still has
+		// every other thread, and the next load retries.
+		if _, err := kanbanApp.ensureTable(user.Email); err != nil {
+			log.Errorf("Failed to ensure the Table thread: %v", err)
+		}
 		writeAuthJSON(w, http.StatusOK, map[string]any{
 			"ok": true,
 			// The view adds per-viewer unreadCount / lastReadMessageId, which
@@ -2093,6 +2105,12 @@ func (app *kanbanBoardApp) scoutChatThreadsSnapshot(ownerEmail string, includeAr
 		threads = append(threads, thread)
 	}
 	sort.SliceStable(threads, func(i, j int) bool {
+		// The Table is the permanent home thread and pins to the top. Without
+		// this it sinks the moment any other channel gets a message, which
+		// defeats the point of it being permanent.
+		if threads[i].Table != threads[j].Table {
+			return threads[i].Table
+		}
 		return scoutChatThreadTime(threads[i]).After(scoutChatThreadTime(threads[j]))
 	})
 	if limit > 0 && len(threads) > limit {

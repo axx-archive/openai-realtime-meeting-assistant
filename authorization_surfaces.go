@@ -56,6 +56,10 @@ var authorizationHTTPSurfaces = []AuthorizationSurface{
 	authSurface("http.assistant.transcribe", AuthorizationHTTP, "/assistant/transcribe", []string{"chat_thread"}, []ACLAction{ACLExecute}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.agent_threads", AuthorizationHTTP, "/assistant/threads", []string{"workflow", "artifact"}, []ACLAction{ACLExecute, ACLReadContent}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.agent_followup", AuthorizationHTTP, "/assistant/threads/follow-up", []string{"workflow", "artifact"}, []ACLAction{ACLReadContent, ACLExecute, ACLWrite}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	// Read markers: writes per-viewer read state for one thread. The handler
+	// authorizes the thread through scoutChatThreadByID before writing, so
+	// marking a thread you cannot see is refused rather than silently recorded.
+	authSurface("http.assistant.thread_read", AuthorizationHTTP, "/assistant/threads/read", []string{"chat_thread"}, []ACLAction{ACLWrite}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.goal", AuthorizationHTTP, "/assistant/goal", []string{"goal", "workflow", "artifact"}, []ACLAction{ACLExecute, ACLReadContent}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.goal_cancel", AuthorizationHTTP, "/assistant/goal/cancel", []string{"goal"}, []ACLAction{ACLExecute}, []string{"user"}, false, true, AuthorizationLegacyGuarded),
 	authSurface("http.assistant.decision_supersede", AuthorizationHTTP, "/assistant/decisions/supersede", []string{"decision"}, []ACLAction{ACLWrite}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),

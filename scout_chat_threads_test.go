@@ -63,7 +63,20 @@ func TestScoutChatChannelVisibilityAccessControl(t *testing.T) {
 	if err := json.Unmarshal(listRecorder.Body.Bytes(), &listPayload); err != nil {
 		t.Fatalf("decode list response: %v", err)
 	}
-	if len(listPayload.Threads) != 1 || listPayload.Threads[0].ID != channel.ID || listPayload.Threads[0].Visibility != scoutChatVisibilityPublic {
+	// The list is now auto-provisioned with the Table (#team) on first load, so
+	// find the channel under test rather than asserting on list length. The
+	// private thread must still be absent for this non-owner — that is the
+	// access control this test exists to pin.
+	var listedChannel *scoutChatThreadRecord
+	for index, listed := range listPayload.Threads {
+		if listed.ID == private.ID {
+			t.Fatalf("private thread leaked to a non-owner: %#v", listPayload.Threads)
+		}
+		if listed.ID == channel.ID {
+			listedChannel = &listPayload.Threads[index]
+		}
+	}
+	if listedChannel == nil || listedChannel.Visibility != scoutChatVisibilityPublic {
 		t.Fatalf("threads=%#v, want the public channel with visibility field", listPayload.Threads)
 	}
 

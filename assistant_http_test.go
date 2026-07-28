@@ -1049,7 +1049,15 @@ func TestAssistantChatThreadsPersistMessagesAndAttachments(t *testing.T) {
 	if err := json.Unmarshal(listRecorder.Body.Bytes(), &listPayload); err != nil {
 		t.Fatalf("decode list response: %v", err)
 	}
-	if len(listPayload.Threads) != 1 || listPayload.Threads[0].ID != createPayload.Thread.ID {
+	// Find by id rather than index: the auto-provisioned Table (#team) is
+	// always present and sorts first.
+	persisted := false
+	for _, listed := range listPayload.Threads {
+		if listed.ID == createPayload.Thread.ID {
+			persisted = true
+		}
+	}
+	if !persisted {
 		t.Fatalf("threads=%#v, want persisted thread", listPayload.Threads)
 	}
 }
@@ -1099,8 +1107,13 @@ func TestAssistantChatThreadsArchiveHidesFromDefaultList(t *testing.T) {
 	if err := json.Unmarshal(listRecorder.Body.Bytes(), &listPayload); err != nil {
 		t.Fatalf("decode list response: %v", err)
 	}
-	if len(listPayload.Threads) != 0 {
-		t.Fatalf("threads=%#v, want archived thread hidden", listPayload.Threads)
+	// Assert on the archived thread specifically rather than on list length:
+	// the list is now auto-provisioned with the Table (#team) on first load,
+	// so it is never empty.
+	for _, listed := range listPayload.Threads {
+		if listed.ID == thread.ID {
+			t.Fatalf("threads=%#v, want archived thread hidden", listPayload.Threads)
+		}
 	}
 
 	archivedReq := httptest.NewRequest(http.MethodGet, "/assistant/chat-threads?archived=true", nil)
@@ -1115,7 +1128,13 @@ func TestAssistantChatThreadsArchiveHidesFromDefaultList(t *testing.T) {
 	if err := json.Unmarshal(archivedRecorder.Body.Bytes(), &listPayload); err != nil {
 		t.Fatalf("decode archived list response: %v", err)
 	}
-	if len(listPayload.Threads) != 1 || listPayload.Threads[0].ArchivedAt == "" {
+	archivedListed := false
+	for _, listed := range listPayload.Threads {
+		if listed.ID == thread.ID && listed.ArchivedAt != "" {
+			archivedListed = true
+		}
+	}
+	if !archivedListed {
 		t.Fatalf("threads=%#v, want archived thread when requested", listPayload.Threads)
 	}
 }
