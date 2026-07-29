@@ -11,11 +11,11 @@ export type RemoteFile = {
 };
 
 function safeLocalName(name: string): string {
-  const trimmed = name.trim() || 'Bonfire file';
+  const trimmed = name.trim() || 'Stride file';
   return trimmed
     .replace(/[\x00-\x1f\x7f/\\:?*"<>|]/g, '-')
     .replace(/^\.+/, '')
-    .slice(0, 140) || 'Bonfire file';
+    .slice(0, 140) || 'Stride file';
 }
 
 function stableCacheKey(value: string): string {

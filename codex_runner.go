@@ -232,7 +232,7 @@ func (app *kanbanBoardApp) buildCodexAgentThreadPrompt(thread scoutAgentThread, 
 	authority = normalizeCodexJobAuthority(authority)
 
 	var builder strings.Builder
-	builder.WriteString("You are the Codex execution worker launched by Bonfire OS / Scout.\n\n")
+	builder.WriteString("You are the Codex execution worker launched by Stride / Scout.\n\n")
 	builder.WriteString("User-visible worker mode: ")
 	builder.WriteString(assistantToolLabel(thread.Mode))
 	builder.WriteString("\nThread id: ")
@@ -276,7 +276,7 @@ func (app *kanbanBoardApp) buildCodexAgentThreadPrompt(thread scoutAgentThread, 
 		builder.WriteString(agentThreadModeContract(thread.Mode))
 	}
 	builder.WriteString("\n\n")
-	builder.WriteString("Bonfire OS context: ")
+	builder.WriteString("Stride context: ")
 	builder.WriteString(contextLine)
 	builder.WriteString("\n\nRecent durable memory:\n")
 	for _, entry := range memory {

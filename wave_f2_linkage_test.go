@@ -88,14 +88,14 @@ func TestGoalHTTPEndpointAcceptsPackageIdAlias(t *testing.T) {
 
 // --- Frontend markers (function-body-scoped, not substring-anywhere) --------
 
-func TestIndexTitleIsBonfireOS(t *testing.T) {
+func TestIndexTitleIsStride(t *testing.T) {
 	raw, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatalf("read index.html: %v", err)
 	}
 	html := string(raw)
-	if !strings.Contains(html, "<title>BonfireOS</title>") {
-		t.Error("the document <title> must be BonfireOS")
+	if !strings.Contains(html, "<title>Stride</title>") {
+		t.Error("the document <title> must be Stride")
 	}
 	if strings.Contains(html, "<title>Bonfire</title>") {
 		t.Error("the stale <title>Bonfire</title> must be gone")

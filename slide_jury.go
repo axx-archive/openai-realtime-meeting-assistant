@@ -172,7 +172,7 @@ Rules: score EVERY page you were shown, 0-10. A fix is EXECUTABLE (a concrete co
 // slideJurySynthesisSystem merges the three scoreboards. It deliberately says
 // "slide jury synthesizer" so responder fakes can route it, mirroring the
 // engine's other addressable system prompts.
-const slideJurySynthesisSystem = "You are Scout's slide jury synthesizer for Bonfire OS. Merge the seats' per-page scoreboards into ONE merged scoreboard: for every page, the average score, the seats' verdicts side by side, and ONE executable fix (or KEEP when the seats agree it stands). Then name the consensus weakest_three and strongest_three pages. Weigh agreement heavily; name genuine disagreement instead of averaging it away. These are REVISION NOTES for a human — decisive, executable, never auto-applied."
+const slideJurySynthesisSystem = "You are Scout's slide jury synthesizer for Stride. Merge the seats' per-page scoreboards into ONE merged scoreboard: for every page, the average score, the seats' verdicts side by side, and ONE executable fix (or KEEP when the seats agree it stands). Then name the consensus weakest_three and strongest_three pages. Weigh agreement heavily; name genuine disagreement instead of averaging it away. These are REVISION NOTES for a human — decisive, executable, never auto-applied."
 
 // slideJuryPersonas is the /packaging jury trio: the headline ear, the design
 // eye, and the domain-literate room gut. Each seat sees ALL rendered pages

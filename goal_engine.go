@@ -1023,7 +1023,7 @@ func (e *goalEngine) decompose(ctx context.Context, plan *goalPlan) error {
 		return instantiateProcessPlan(def, plan)
 	}
 	system := strings.Join([]string{
-		"You are Scout's goal decomposer for Bonfire OS. Break the goal into an ordered plan of independent subtasks.",
+		"You are Scout's goal decomposer for Stride. Break the goal into an ordered plan of independent subtasks.",
 		fmt.Sprintf("Return STRICT JSON only, no prose: {\"subtasks\":[{\"id\":\"st-1\",\"title\":\"...\",\"detail\":\"...\",\"mode\":\"research|design|grill|workflow|artifacts\",\"authority\":\"read_only|workspace_write\",\"dependsOn\":[]}]}."),
 		fmt.Sprintf("Use at most %d subtasks — coarsen aggressively; this is a small team on one server, not a swarm.", goalMaxSubtasks),
 		"Each subtask must have a unique id like st-1, a real mode, and dependsOn referencing only earlier subtask ids (no cycles). Prefer read_only unless the subtask must change the board, memory, or a package.",
@@ -1428,7 +1428,7 @@ type goalPanelOutcome struct {
 	Synthesis string
 }
 
-const goalPanelDefaultSynthesisSystem = "You are Scout's panel synthesizer for Bonfire OS. Read every panelist's reply below and synthesize them into one decisive result per the task's instructions. Weigh agreement between panelists heavily; name genuine disagreement instead of averaging it away."
+const goalPanelDefaultSynthesisSystem = "You are Scout's panel synthesizer for Stride. Read every panelist's reply below and synthesize them into one decisive result per the task's instructions. Weigh agreement between panelists heavily; name genuine disagreement instead of averaging it away."
 
 // runGoalPanel fans the personas out in parallel (each with its per-persona
 // system prompt + the shared strict-JSON schema), waits for all of them, then
@@ -1831,7 +1831,7 @@ func (e *goalEngine) runProcessPanelStage(ctx context.Context, plan *goalPlan, p
 // runProcessSynthesizerStage is the single-voice inline stage: one model call
 // producing the stage output from its inputs.
 func (e *goalEngine) runProcessSynthesizerStage(ctx context.Context, plan *goalPlan, parentID string, st *goalSubtask, stage ProcessStage) {
-	system := "You are Scout's process stage synthesizer for Bonfire OS, running the \"" + stage.Title + "\" stage. Produce the stage's output exactly per its instructions — write the deliverable text itself, no preamble, no meta-commentary."
+	system := "You are Scout's process stage synthesizer for Stride, running the \"" + stage.Title + "\" stage. Produce the stage's output exactly per its instructions — write the deliverable text itself, no preamble, no meta-commentary."
 	text, err := e.callModel(ctx, system, e.processStageTask(plan, st, stage))
 	if err != nil {
 		failProcessStage(st, "synthesizer stage failed: "+err.Error())
@@ -1909,7 +1909,7 @@ func (e *goalEngine) runProcessGateStage(ctx context.Context, plan *goalPlan, pa
 // Errors and malformed replies fold to a revise verdict — a broken scorer
 // never silently passes work.
 func (e *goalEngine) scoreProcessGateRound(ctx context.Context, plan *goalPlan, st *goalSubtask, stage ProcessStage) goalGateRound {
-	system := "You are Scout's process gate scorer for Bonfire OS. Score the produced work against the stage's gate rubric. Return STRICT JSON only: {\"dimensions\":[{\"name\":\"...\",\"score\":0,\"gap\":\"what closing it would take\"}],\"reasons\":\"one line\"}. Scores are 0-10. Score every rubric dimension the stage instructions name; if they name none, score Quality and Completeness."
+	system := "You are Scout's process gate scorer for Stride. Score the produced work against the stage's gate rubric. Return STRICT JSON only: {\"dimensions\":[{\"name\":\"...\",\"score\":0,\"gap\":\"what closing it would take\"}],\"reasons\":\"one line\"}. Scores are 0-10. Score every rubric dimension the stage instructions name; if they name none, score Quality and Completeness."
 	text, err := e.callReviewModel(ctx, system, e.processStageTask(plan, st, stage))
 	if err != nil {
 		return goalGateRound{Verdict: goalReviewRevise, Reasons: "gate scorer call failed: " + err.Error()}
@@ -2624,7 +2624,7 @@ func (e *goalEngine) scoreSubtaskAgainstRubric(ctx context.Context, plan *goalPl
 		}
 	}
 	produced := goalReviewArtifactBody(full)
-	system := "You are Scout's reviewer for Bonfire OS. Judge whether a subtask's produced artifact actually satisfies the subtask against the overall goal. Return STRICT JSON only: {\"verdict\":\"pass|fail|revise\",\"score\":0-10,\"reasons\":\"one line\",\"strengths_to_keep\":[\"...\"]}. strengths_to_keep names what the work already does WELL (0-4 short phrases of explicit praise) so a revision never loses it; leave it empty if nothing stands out."
+	system := "You are Scout's reviewer for Stride. Judge whether a subtask's produced artifact actually satisfies the subtask against the overall goal. Return STRICT JSON only: {\"verdict\":\"pass|fail|revise\",\"score\":0-10,\"reasons\":\"one line\",\"strengths_to_keep\":[\"...\"]}. strengths_to_keep names what the work already does WELL (0-4 short phrases of explicit praise) so a revision never loses it; leave it empty if nothing stands out."
 	// For a tool-templated goal, the review scores against the tool's gate rubric
 	// (dimensions + bars + kill condition) rather than a generic "does it match"
 	// pass — the studio-grade quality bar for this contract.
@@ -2680,7 +2680,7 @@ func (e *goalEngine) gate(ctx context.Context, plan *goalPlan) {
 	defer func() {
 		recordGoalGateResult(goalShipGateRunner(plan), plan.Gate.Status, plan.GoalID)
 	}()
-	system := "You are Scout's ship gate for Bonfire OS. Answer one question: is the work safe and complete to publish/deliver? Return STRICT JSON only: {\"safe\":true|false,\"external_write_required\":true|false,\"command\":\"\",\"reason\":\"one line\"}. Set external_write_required true only if shipping needs a commit, push, deploy, email, or other production side effect."
+	system := "You are Scout's ship gate for Stride. Answer one question: is the work safe and complete to publish/deliver? Return STRICT JSON only: {\"safe\":true|false,\"external_write_required\":true|false,\"command\":\"\",\"reason\":\"one line\"}. Set external_write_required true only if shipping needs a commit, push, deploy, email, or other production side effect."
 	tool, hasTool := e.resolvedTool(plan)
 	if hasTool {
 		// The ship gate also runs the tool's kill condition: a triggered kill
@@ -2950,7 +2950,7 @@ func goalRevisionNote(plan *goalPlan) string {
 // card plus the assumed-claim count the future return card will surface. Only
 // the headline is meant to be spoken/notified; the detail lives in the artifact.
 func (e *goalEngine) report(ctx context.Context, plan *goalPlan) {
-	system := "You are Scout reporting a finished goal for Bonfire OS. Report only what matters. Return STRICT JSON only: {\"changed\":\"one line\",\"headline\":\"one line\",\"gap\":\"one line or empty\",\"next\":\"one line or empty\",\"assumed_claim_count\":0,\"decision\":\"\"}. assumed_claim_count is how many claims in the work are assumptions not backed by a produced artifact. decision is the ONE concrete decision this goal explicitly established (a price, an attach/no-attach, a go/no-go) that the team should be held to later — leave it empty unless the work clearly settled one; never invent a decision."
+	system := "You are Scout reporting a finished goal for Stride. Report only what matters. Return STRICT JSON only: {\"changed\":\"one line\",\"headline\":\"one line\",\"gap\":\"one line or empty\",\"next\":\"one line or empty\",\"assumed_claim_count\":0,\"decision\":\"\"}. assumed_claim_count is how many claims in the work are assumptions not backed by a produced artifact. decision is the ONE concrete decision this goal explicitly established (a price, an attach/no-attach, a go/no-go) that the team should be held to later — leave it empty unless the work clearly settled one; never invent a decision."
 	user := "Goal: " + plan.Objective + "\nSubtasks:\n" + goalSubtaskSummary(plan) + "\nGate: " + plan.Gate.Status
 	text, err := e.callModel(ctx, system, user)
 
@@ -3012,7 +3012,7 @@ func (e *goalEngine) recordGoalDecision(plan *goalPlan, decision string) {
 // --- Stage: verify_goal_completed -------------------------------------------
 
 func (e *goalEngine) verify(ctx context.Context, plan *goalPlan) bool {
-	system := "You are Scout's final verifier for Bonfire OS. Check the produced work against the original goal. Return STRICT JSON only: {\"verdict\":\"pass|fail\",\"reasons\":\"one line\"}."
+	system := "You are Scout's final verifier for Stride. Check the produced work against the original goal. Return STRICT JSON only: {\"verdict\":\"pass|fail\",\"reasons\":\"one line\"}."
 	user := "Goal: " + plan.Objective + "\nSubtasks:\n" + goalSubtaskSummary(plan) + "\nReport headline: " + plan.Report.Headline
 	text, err := e.callModel(ctx, system, user)
 	if err != nil {

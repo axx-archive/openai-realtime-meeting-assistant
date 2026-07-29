@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "BonfireOS",
-  "short_name": "BonfireOS",
-  "description": "BonfireOS — your company as intelligence. Meet, decide, and ship together.",
+  "name": "Stride",
+  "short_name": "Stride",
+  "description": "Stride — your voice-first company OS. Talk, decide, and keep work moving.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#F5F5F7",

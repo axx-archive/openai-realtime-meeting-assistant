@@ -47,7 +47,7 @@ func brandColorDistance(a, b color.Color) uint32 {
 	return uint32(math.Abs(float64(ar)-float64(br)) + math.Abs(float64(ag)-float64(bg)) + math.Abs(float64(ab)-float64(bb)))
 }
 
-func TestBonfireBrandAssetContract(t *testing.T) {
+func TestStrideBrandAssetContract(t *testing.T) {
 	for path, size := range map[string][2]int{
 		"public/apple-touch-icon.png":  {180, 180},
 		"public/favicon.png":           {64, 64},
@@ -81,10 +81,10 @@ func TestBonfireBrandAssetContract(t *testing.T) {
 	}
 	index := string(indexRaw)
 	if !strings.Contains(index, `<link rel="icon" href="/public/favicon.png" type="image/png">`) {
-		t.Fatal("index.html does not use the momentum favicon")
+		t.Fatal("index.html does not use the Stride Signal favicon")
 	}
 	if got := strings.Count(index, `<img src="/public/app-icon.png" alt="">`); got < 2 {
-		t.Fatalf("web rail and sign-in must both use the momentum app icon, got %d references", got)
+		t.Fatalf("web rail and sign-in must both use the Stride Signal app icon, got %d references", got)
 	}
 	for _, legacy := range []string{"bonfireRailLogCutout", "M553 92", "M553 98"} {
 		if strings.Contains(index, legacy) {
@@ -102,7 +102,7 @@ func TestBonfireBrandAssetContract(t *testing.T) {
 			t.Fatal(err)
 		}
 		if !strings.Contains(string(raw), approvedImage) {
-			t.Fatalf("%s does not reference the approved momentum asset", path)
+			t.Fatalf("%s does not reference the approved Stride Signal asset", path)
 		}
 		if strings.Contains(string(raw), "M553") {
 			t.Fatalf("%s still contains the retired Bonfire silhouette", path)

@@ -227,7 +227,7 @@ func TestEndPrivateGrillFilesReportAttachesAndReportsDelta(t *testing.T) {
 	}
 	// Revert instructions: the standard private-voice set the browser re-applies.
 	revert := asString(result["instructions"])
-	if !strings.Contains(revert, "private Bonfire OS voice assistant") {
+	if !strings.Contains(revert, "private Stride voice assistant") {
 		t.Fatalf("end_private_grill must return the standard private-voice revert instructions, got:\n%s", revert)
 	}
 	if result["reportFiled"] != true {
@@ -403,7 +403,7 @@ func TestEndPrivateGrillWithoutPackageStillRevertsAndFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("end_private_grill without package: %v", err)
 	}
-	if !strings.Contains(asString(result["instructions"]), "private Bonfire OS voice assistant") {
+	if !strings.Contains(asString(result["instructions"]), "private Stride voice assistant") {
 		t.Fatal("end_private_grill must still return revert instructions with no package")
 	}
 	if _, hasPrev := result["priorReadiness"]; hasPrev {

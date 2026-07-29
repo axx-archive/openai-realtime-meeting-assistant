@@ -1,7 +1,7 @@
 import Constants from 'expo-constants';
 
 /**
- * Production BonfireOS / STRIDE backend — same host as the web app.
+ * Production Stride backend — same host as the web app.
  * Override with EXPO_PUBLIC_API_BASE_URL for local/staging builds.
  */
 const extra = (Constants.expoConfig?.extra ?? {}) as {

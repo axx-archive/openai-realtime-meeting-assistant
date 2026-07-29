@@ -7,7 +7,7 @@ const iceTestHTML = `<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MeetingAssist ICE Test</title>
+  <title>Stride ICE Test</title>
   <style>
     :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #101418; color: #f4f7f5; }
@@ -27,7 +27,7 @@ const iceTestHTML = `<!doctype html>
 <body>
   <main>
     <h1>ICE candidate test</h1>
-    <p>This authenticated diagnostic checks whether the browser can gather local, reflexive, and relay candidates for the current MeetingAssist configuration.</p>
+    <p>This authenticated diagnostic checks whether the browser can gather local, reflexive, and relay candidates for the current Stride configuration.</p>
     <dl>
       <div class="row"><dt>Local candidates</dt><dd id="host">checking</dd></div>
       <div class="row"><dt>Server-reflexive candidates</dt><dd id="srflx">checking</dd></div>

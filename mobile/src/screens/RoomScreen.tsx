@@ -817,7 +817,7 @@ export function RoomScreen({ route, navigation }: Props) {
       void api.createRoomGuestLink(sessionToken, route.params.roomId, label || 'Guest link')
         .then(async (result) => {
           const url = new URL(result.url, API_BASE_URL).toString();
-          await Share.share({ message: `Join ${room?.name ?? 'the room'} in BonfireOS: ${url}`, url });
+          await Share.share({ message: `Join ${room?.name ?? 'the room'} in Stride: ${url}`, url });
           await load();
         })
         .catch((err) => setError(err instanceof BonfireApiError ? err.message : 'Could not create a guest link.'));
@@ -828,7 +828,7 @@ export function RoomScreen({ route, navigation }: Props) {
     const url = new URL('/', API_BASE_URL);
     url.searchParams.set('room', route.params.roomId);
     void Share.share({
-      message: `Join ${room?.name ?? 'the room'} in BonfireOS: ${url.toString()}`,
+      message: `Join ${room?.name ?? 'the room'} in Stride: ${url.toString()}`,
       url: url.toString(),
     });
   }
@@ -910,7 +910,7 @@ export function RoomScreen({ route, navigation }: Props) {
     }
     Alert.alert(
       'Landscape while upright',
-      'On supported iPhones, BonfireOS can send a landscape view while you keep your phone upright. Your video may briefly reframe when it turns on.',
+      'On supported iPhones, Stride can send a landscape view while you keep your phone upright. Your video may briefly reframe when it turns on.',
       [
         { text: 'Not now', style: 'cancel' },
         {

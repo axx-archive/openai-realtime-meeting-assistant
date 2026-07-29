@@ -1,6 +1,6 @@
-# BonfireOS iOS (Expo)
+# Stride iOS (Expo)
 
-Native iOS client for the **live** [BonfireOS](https://thebonfire.xyz) web OS. Design and product language are rooted in the deployed Glass & Ink system (`index.html` + `.superdesign/design-system.md`) — not the older Swift package under `../apple`, which targeted an earlier build.
+Native iOS client for **Stride**. Until the coordinated domain cutover, the live authenticated app remains at [thebonfire.xyz](https://thebonfire.xyz). Design and product language are rooted in the deployed Glass & Ink system (`index.html` + `.superdesign/design-system.md`) — not the older Swift package under `../apple`, which targeted an earlier build.
 
 | Surface | How it works |
 |---|---|
@@ -61,7 +61,7 @@ npx eas-cli credentials   # iOS → production → let EAS create/reuse dist cer
 
 In [App Store Connect](https://appstoreconnect.apple.com):
 
-1. Create app **BonfireOS** with bundle id `xyz.thebonfire.app` if missing.
+1. Use the existing App Store Connect record with bundle id `xyz.thebonfire.app`; update its customer-facing name to **Stride** only as part of the coordinated release.
 2. (Recommended) Create an **App Store Connect API key** (Users and Access → Keys) and upload it to EAS so future builds/submits are non-interactive.
 
 ### Build + TestFlight
@@ -94,10 +94,12 @@ Credentials (certificates, provisioning, App Store Connect API key) are managed 
 
 ## Bundle identity
 
-- **Name:** BonfireOS  
-- **Slug:** bonfireos  
-- **iOS bundle id:** `xyz.thebonfire.app`  
+- **Display name:** Stride
+- **Slug:** bonfireos
+- **iOS bundle id:** `xyz.thebonfire.app`
 - **Default API host:** `https://thebonfire.xyz`
+
+The slug, bundle id, API host, session headers, and EAS project remain compatibility identifiers during the brand transition. Changing them is a separate migration, not a visual rename.
 
 ## Design source of truth
 

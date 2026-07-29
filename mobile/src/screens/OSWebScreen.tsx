@@ -107,7 +107,7 @@ export function OSWebScreen({ route, navigation }: Props) {
           onLoadEnd={() => setLoading(false)}
           onError={() => {
             setLoading(false);
-            setError('Could not load BonfireOS. Check your connection.');
+            setError('Could not load Stride. Check your connection.');
           }}
           onHttpError={(e) => {
             if (e.nativeEvent.statusCode >= 500) {
@@ -116,7 +116,7 @@ export function OSWebScreen({ route, navigation }: Props) {
           }}
           allowsBackForwardNavigationGestures
           setSupportMultipleWindows={false}
-          applicationNameForUserAgent="BonfireOS-Expo"
+          applicationNameForUserAgent="Stride-Expo"
         />
       </View>
     </SafeAreaView>

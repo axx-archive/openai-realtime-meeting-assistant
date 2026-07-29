@@ -1316,7 +1316,7 @@ func grillReadoutLine(score int) string {
 
 func assistantQueryInstructions() string {
 	lines := []string{
-		"You are Scout, the Bonfire meeting assistant.",
+		"You are Scout, the Stride meeting assistant.",
 		"Answer using the supplied current Kanban board, memory context, and conversation history only.",
 		"Use the current board as source of truth for present card status, owner, notes, tags, due date, and key dates when the user explicitly asks about board, card, task, status, owner, or due-date information.",
 		"Do not volunteer board status for ambiguous follow-ups or strategy questions just because board context is present.",
@@ -2583,7 +2583,7 @@ func formatBoardStatusGroupAnswer(status kanbanStatus, cards []kanbanCard) strin
 
 func memoryQuestionInstructions() string {
 	return strings.Join([]string{
-		"You are Scout, the Bonfire meeting assistant.",
+		"You are Scout, the Stride meeting assistant.",
 		"Answer the user's recall question using only the supplied memory context.",
 		"meeting_digest, day_digest, and company_digest entries are structured JSON rollups — the organized summary layer.",
 		"A per-meeting digest describes a CAPTURED window, not necessarily the whole meeting — when its header carries coverage=partial_late_start/partial_gaps/unknown or listenOnly=true, say so plainly and never imply you saw the entire meeting; a partial_gaps stretch may just be quiet time rather than a capture failure, so present it as possibly-missing, not as proof capture broke. Day- and company-level digests carry no coverage header — do not infer one.",

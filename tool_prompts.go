@@ -22,7 +22,7 @@ import (
 // Slots in {{...}} are filled by assembleToolPrompt. It encodes the ten-step loop
 // as instructions to the orchestrator, not decoration.
 const masterWrapper = `================ BONFIRE /goal MASTER WRAPPER v1 ================
-You are an agent inside Bonfire OS, the operating system for a six-person
+You are an agent inside Stride, the operating system for a six-person
 venture-packaging studio. The studio ideates IP, packages it, takes it to
 market for talent and capital, and supports a portfolio. Your work will be
 put in front of real talent and real investors. Mediocre is failure.

@@ -411,7 +411,7 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 	html := string(rawHTML)
 	for _, want := range []string{
 		`<main id="appShell" data-tool="office">`,
-		`data-tool="office" aria-label="BonfireOS home" aria-pressed="true"`,
+		`data-tool="office" aria-label="Stride home" aria-pressed="true"`,
 		`data-tool="room" aria-label="The room" aria-pressed="false"`,
 		`data-tool="chat" aria-label="Chat" aria-pressed="false"`,
 		`id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings"`,
@@ -541,7 +541,7 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"#appShell.is-in-room ~ .os-assistant",
 		"--shell-topbar-height: 0px;",
 		`id="toolRail" class="tool-rail" aria-label="Tools"`,
-		`id="brandMark" class="topbar__mark" role="img" aria-label="BonfireOS"`,
+		`id="brandMark" class="topbar__mark" role="img" aria-label="Stride"`,
 		".tool-rail:hover,",
 		".tool-rail__label",
 		`id="accountMenuButton" class="tool-rail__tool tool-rail__account-button"`,
@@ -875,7 +875,7 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 	html := string(rawHTML)
 	for _, want := range []string{
 		`id="toolRail" class="tool-rail" aria-label="Tools"`,
-		`id="brandMark" class="topbar__mark" role="img" aria-label="BonfireOS"`,
+		`id="brandMark" class="topbar__mark" role="img" aria-label="Stride"`,
 		"top: 50%;",
 		"inset: 0 auto 0 0;",
 		"border-right: 1px solid var(--line-1);",
@@ -894,7 +894,7 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 		"transition-delay: 350ms;",
 		"#appShell.is-authed .workspace",
 		"padding-left: 60px;",
-		`<span class="tool-rail__label">BonfireOS</span>`,
+		`<span class="tool-rail__label">Stride</span>`,
 		`<span class="tool-rail__label">the room</span>`,
 		`<span class="tool-rail__label">chat</span>`,
 		`id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings"`,
@@ -2471,12 +2471,12 @@ func TestIndexOfficeShellResilienceGuards(t *testing.T) {
 	}
 }
 
-// TestIndexBonfireOSRenameAndAgentToken pins the Spectacular OS Wave 5
-// design-system foundation: the "Office" tab renamed to BonfireOS everywhere it
+// TestIndexStrideRenameAndAgentToken pins the Stride design-system foundation:
+// the "Office" tab renamed to Stride everywhere it
 // surfaces, and the single agent-working ember accent token. A future refactor
 // that drops the rename or the token fails CI here. The load-bearing `office`
 // data-tool KEY must survive the rename — it is asserted to stay.
-func TestIndexBonfireOSRenameAndAgentToken(t *testing.T) {
+func TestIndexStrideRenameAndAgentToken(t *testing.T) {
 	rawHTML, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatalf("read index.html: %v", err)
@@ -2485,13 +2485,13 @@ func TestIndexBonfireOSRenameAndAgentToken(t *testing.T) {
 
 	// The rename surfaces (labels only).
 	for _, want := range []string{
-		`<span class="tool-rail__label">BonfireOS</span>`,
-		`data-tool="office" aria-label="BonfireOS home" aria-pressed="true"`,
-		`aria-label="Back to BonfireOS"`,
-		`id="officeTool" class="office-tool" aria-label="BonfireOS"`,
-		"office: 'BonfireOS',",
-		"? 'BonfireOS'",
-		"|| 'BonfireOS'",
+		`<span class="tool-rail__label">Stride</span>`,
+		`data-tool="office" aria-label="Stride home" aria-pressed="true"`,
+		`aria-label="Back to Stride"`,
+		`id="officeTool" class="office-tool" aria-label="Stride"`,
+		"office: 'Stride',",
+		"? 'Stride'",
+		"|| 'Stride'",
 		"'ready'",
 		// the one warm ignition accent (coral ember), migrated from the
 		// heritage flame; --agent now aliases the sanctioned --ember token
@@ -2501,7 +2501,7 @@ func TestIndexBonfireOSRenameAndAgentToken(t *testing.T) {
 		"--glow-agent:",
 	} {
 		if !strings.Contains(html, want) {
-			t.Fatalf("index.html missing BonfireOS rename / agent-token marker %q", want)
+			t.Fatalf("index.html missing Stride rename / agent-token marker %q", want)
 		}
 	}
 
@@ -2518,7 +2518,7 @@ func TestIndexBonfireOSRenameAndAgentToken(t *testing.T) {
 
 	// The rename must not leave the tab labelled "Office" in the title map.
 	if strings.Contains(html, "office: 'Office',") {
-		t.Fatal("toolTitles still maps office -> 'Office'; expected 'BonfireOS'")
+		t.Fatal("toolTitles still maps office -> 'Office'; expected 'Stride'")
 	}
 	// The ember accent (via the --agent alias) is defined in BOTH theme blocks.
 	if got := strings.Count(html, "--agent: var(--ember);"); got < 2 {

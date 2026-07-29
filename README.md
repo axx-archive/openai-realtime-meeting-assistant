@@ -9,7 +9,7 @@
 
 Built by **That's Cool**, an independent lab for ambitious ways of working.
 
-**STRIDE** is the product and the emerging open operating platform for human-and-agent work. **BonfireOS** is its first implementation and proving ground.
+**Stride** is the product and this repository is its working implementation: an open operating platform for human-and-agent work.
 
 At STRIDE's core is an idea called **AmbientMind**: a permissioned organizational intelligence layer that can remember what happened, understand what is changing, help the company act, and explain its work with evidence. AmbientMind is part of STRIDE—not a second product or identity.
 
@@ -65,7 +65,7 @@ These are not separate mini-products. They are views into one loop: **conversati
 
 ## What gets remembered
 
-BonfireOS preserves more than transcripts.
+Stride preserves more than transcripts.
 
 - Private Scout history remains owner-scoped. Private content is not silently promoted into organization-wide recall.
 - Shared conversations and consented room activity can produce source-linked memory, decisions, narratives, and follow-up work.
@@ -122,7 +122,7 @@ The deeper contracts live in [canonical events and ACLs](docs/plans/canonical-ev
 
 ## Architecture
 
-BonfireOS is intentionally a modular Go control plane, not a microservice fleet.
+Stride is intentionally a modular Go control plane, not a microservice fleet.
 
 ```text
 Browser shell
@@ -207,7 +207,7 @@ The naming hierarchy is:
 
 - **STRIDE** — the product and eventual open platform.
 - **AmbientMind** — a core STRIDE concept: its permissioned, evidence-bearing organizational intelligence layer.
-- **BonfireOS** — the first implementation and proving ground.
+- **Stride** — the product and repository identity.
 - **That's Cool** — the independent lab building it.
 
 The repository will earn that abstraction from working contracts and conformance evidence—not from a rename alone. Until then, the code and active 2.0 ledger remain the most honest description of what exists.

@@ -1367,7 +1367,7 @@ func artifactExportPDFHandler(w http.ResponseWriter, r *http.Request) {
 	// Decks and paper-kit documents print their own HTML (deck: flatten law;
 	// paper: text-native direct print). A markdown body — the research-report
 	// contract — has nothing for chromium to lay out, so the server converts
-	// it into the branded BonfireOS print document
+	// it into the branded Stride print document
 	// (renderResearchReportPrintHTML) and ships it down the text-native paper
 	// path.
 	printHTML := artifact.Text

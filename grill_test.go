@@ -48,7 +48,7 @@ func TestGrillSessionSwapsInstructionsAndToolChoice(t *testing.T) {
 			t.Fatalf("grill instructions missing %q: %s", want, instructions)
 		}
 	}
-	if strings.Contains(instructions, "Bonfire OS voice operator") {
+	if strings.Contains(instructions, "Stride voice operator") {
 		t.Fatal("grill instructions must replace the normal operator role, not append to it")
 	}
 	if choice := app.realtimeToolChoice(); choice != "auto" {
@@ -67,7 +67,7 @@ func TestGrillSessionSwapsInstructionsAndToolChoice(t *testing.T) {
 		t.Fatal("grill still active after end")
 	}
 	restored := app.sessionInstructions()
-	if !strings.Contains(restored, "Bonfire OS voice operator") || strings.Contains(restored, defaultGrillPersona) {
+	if !strings.Contains(restored, "Stride voice operator") || strings.Contains(restored, defaultGrillPersona) {
 		t.Fatal("normal operator instructions must be restored after the grill ends")
 	}
 	if choice := app.realtimeToolChoice(); choice != "required" {

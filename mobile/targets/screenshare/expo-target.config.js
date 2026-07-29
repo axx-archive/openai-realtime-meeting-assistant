@@ -2,7 +2,7 @@
 module.exports = {
   type: 'broadcast-upload',
   name: 'BonfireOSBroadcastExtension',
-  displayName: 'BonfireOS Screen Share',
+  displayName: 'Stride Screen Share',
   bundleIdentifier: 'xyz.thebonfire.app.broadcast',
   deploymentTarget: '16.4',
   entitlements: {

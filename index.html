@@ -4,15 +4,15 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
     <meta name="theme-color" content="#F5F5F7">
-    <meta name="application-name" content="BonfireOS">
-    <meta name="apple-mobile-web-app-title" content="BonfireOS">
+    <meta name="application-name" content="Stride">
+    <meta name="apple-mobile-web-app-title" content="Stride">
     <!-- iOS home-screen install (card 089): launching standalone is a hard
          requirement for Web Push on iOS 16.4+ — a Safari tab has no
          Notification API. mobile-web-app-capable is the standard equivalent. -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>BonfireOS</title>
+    <title>Stride</title>
     <!-- Build stamp: the server rewrites this token at serve time. A tab that
          keeps its JS across a deploy compares it to the version pushed over the
          websocket and refreshes itself once when they diverge. -->
@@ -617,7 +617,7 @@
         translate: 0 -50%;
         transition-delay: 0ms;
       }
-      /* the office/BonfireOS chip is a proper product name — the one sanctioned
+      /* the office/Stride chip is a proper product name — the one sanctioned
          exception to the lowercase rail-label house style */
       .tool-rail__tool[data-tool="office"] .tool-rail__label {
         text-transform: none;
@@ -4221,7 +4221,7 @@
         from { opacity: 0; }
       }
 
-      /* Bonfire OS canon motion + waveform primitives (additive; used by redesigned surfaces) */
+      /* Stride canon motion + waveform primitives (additive; used by redesigned surfaces) */
       @keyframes bf-ringpulse { 0%, 100% { transform: scale(1); opacity: 0.55; } 50% { transform: scale(1.25); opacity: 0.1; } }
       @keyframes bf-flamebreathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.93); opacity: 0.74; } }
       @keyframes bf-sheetin { from { transform: translateY(26px) scale(0.98); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
@@ -5926,22 +5926,42 @@
 
       .office-launch__bars {
         display: flex;
-        align-items: flex-end;
+        flex-direction: column;
+        align-items: center;
         justify-content: center;
-        gap: 5px;
-        height: 64px;
+        gap: 4px;
+        width: 196px;
+        height: 196px;
+        overflow: hidden;
+        border-radius: 50%;
         /* rest = a calm muted-ink waveform; the ember breath is EARNED, lit
            only while actually listening (breathe-only-while-listening law) */
-        color: var(--text-2);
+        color: var(--ember);
       }
 
       .office-launch.is-listening .office-launch__bars { color: var(--ember); }
 
       .office-launch__bars .bf-wave-bar {
-        border-radius: 99px;
-        transform-origin: bottom;
-        opacity: 0.5;
+        flex: 0 0 9px;
+        width: var(--stride-band-width);
+        height: 9px;
+        border-radius: 2px 8px 8px 2px;
+        transform: translateX(var(--stride-band-shift));
+        transform-origin: center;
+        opacity: 0.72;
         transition: opacity var(--dur-med) var(--ease);
+      }
+
+      .office-launch.is-listening .office-launch__bars .bf-wave-bar {
+        animation-name: stride-signal-listen;
+        animation-duration: 760ms;
+        animation-timing-function: var(--ease);
+        animation-iteration-count: infinite;
+      }
+
+      @keyframes stride-signal-listen {
+        0%, 100% { transform: translateX(var(--stride-band-shift)) scaleX(0.92); }
+        50% { transform: translateX(var(--stride-band-shift)) scaleX(1.08); opacity: 1; }
       }
 
       .office-launch__line {
@@ -18485,7 +18505,7 @@
 
         /* A live room is an immersive surface, not another tab above the OS
            dock. Keep one calm call island and expose the existing top-left
-           back control as "minimize to BonfireOS"; media keeps running and
+           back control as "minimize to Stride"; media keeps running and
            the live pill returns to the room from every other tool. */
         #appShell.is-in-room[data-tool="room"]:not(.is-board-expanded) .tool-rail {
           display: none;
@@ -19618,16 +19638,18 @@
         }
 
         .office-launch__bars {
-          height: 48px;
-          gap: 4px;
-          align-items: flex-end;
+          width: 148px;
+          height: 148px;
+          gap: 3px;
+          align-items: center;
           /* rest = muted ink; the listening rule lights it ember (specificity) */
-          color: var(--text-2);
+          color: var(--ember);
         }
 
         .office-launch__bars .bf-wave-bar {
-          width: 4px;
-          transform-origin: bottom;
+          flex-basis: 7px;
+          height: 7px;
+          transform-origin: center;
         }
 
         .office-launch__line {
@@ -22047,13 +22069,13 @@
   <body>
     <main id="appShell" data-tool="office">
       <nav id="toolRail" class="tool-rail" aria-label="Tools">
-        <span id="brandMark" class="topbar__mark" role="img" aria-label="BonfireOS">
+        <span id="brandMark" class="topbar__mark" role="img" aria-label="Stride">
           <img src="/public/app-icon.png" alt="">
         </span>
         <span class="tool-rail__slot">
-          <button class="tool-rail__tool" type="button" data-tool="office" aria-label="BonfireOS home" aria-pressed="true">
+          <button class="tool-rail__tool" type="button" data-tool="office" aria-label="Stride home" aria-pressed="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg>
-            <span class="tool-rail__label">BonfireOS</span>
+            <span class="tool-rail__label">Stride</span>
           </button>
         </span>
         <span class="tool-rail__slot">
@@ -22157,7 +22179,7 @@
         </span>
       </nav>
       <header class="topbar mount-stagger">
-        <button id="topbarBack" class="topbar__back" type="button" aria-label="Back to BonfireOS">
+        <button id="topbarBack" class="topbar__back" type="button" aria-label="Back to Stride">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
         </button>
         <h1 class="topbar__heading"><span id="topbarProject">meeting</span><span id="topbarToolTitle" hidden></span></h1>
@@ -22203,32 +22225,27 @@
       </header>
 
       <div class="workspace">
-        <section id="officeTool" class="office-tool" aria-label="BonfireOS">
+        <section id="officeTool" class="office-tool" aria-label="Stride">
           <div class="office-launch bf-view">
             <div class="office-launch__wrap">
               <div class="office-launch__island">
                 <div class="office-launch__mark">
-                  <svg width="12" height="12" viewBox="0 0 64 64" aria-hidden="true">
-                    <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M32 5c2 10 18 16.5 18 34a18 18 0 1 1-36 0C14 21.5 30 15 32 5Zm0 25c1.2 6 9 8.5 9 16a9 9 0 1 1-18 0c0-7.5 7.8-10 9-16Z"></path>
-                  </svg>
+                  <img src="/public/favicon.png" width="12" height="12" alt="">
                   scout
                 </div>
                 <button type="button" aria-label="tap to talk to Scout" data-start-realtime-voice class="office-launch__wave pressable">
                   <span class="office-launch__bars">
-                    <span class="bf-wave-bar" style="width:5px; height:34%; animation-delay:0ms;"></span>
-                    <span class="bf-wave-bar" style="width:5px; height:58%; animation-delay:120ms;"></span>
-                    <span class="bf-wave-bar" style="width:5px; height:82%; animation-delay:240ms;"></span>
-                    <span class="bf-wave-bar" style="width:5px; height:46%; animation-delay:80ms;"></span>
-                    <span class="bf-wave-bar" style="width:5px; height:96%; animation-delay:300ms;"></span>
-                    <span class="bf-wave-bar" style="width:5px; height:64%; animation-delay:160ms;"></span>
-                    <span class="bf-wave-bar" style="width:5px; height:38%; animation-delay:60ms;"></span>
-                    <span class="bf-wave-bar" style="width:5px; height:74%; animation-delay:220ms;"></span>
-                    <span class="bf-wave-bar" style="width:5px; height:100%; animation-delay:340ms;"></span>
-                    <span class="bf-wave-bar" style="width:5px; height:50%; animation-delay:100ms;"></span>
-                    <span class="bf-wave-bar" style="width:5px; height:86%; animation-delay:280ms;"></span>
-                    <span class="bf-wave-bar" style="width:5px; height:30%; animation-delay:40ms;"></span>
-                    <span class="bf-wave-bar" style="width:5px; height:68%; animation-delay:200ms;"></span>
-                    <span class="bf-wave-bar" style="width:5px; height:44%; animation-delay:140ms;"></span>
+                    <span class="bf-wave-bar" style="--stride-band-width:42%; --stride-band-shift:7px; animation-delay:0ms;"></span>
+                    <span class="bf-wave-bar" style="--stride-band-width:66%; --stride-band-shift:3px; animation-delay:70ms;"></span>
+                    <span class="bf-wave-bar" style="--stride-band-width:80%; --stride-band-shift:1px; animation-delay:140ms;"></span>
+                    <span class="bf-wave-bar" style="--stride-band-width:90%; --stride-band-shift:-2px; animation-delay:210ms;"></span>
+                    <span class="bf-wave-bar" style="--stride-band-width:96%; --stride-band-shift:2px; animation-delay:280ms;"></span>
+                    <span class="bf-wave-bar" style="--stride-band-width:100%; --stride-band-shift:0px; animation-delay:350ms;"></span>
+                    <span class="bf-wave-bar" style="--stride-band-width:96%; --stride-band-shift:-3px; animation-delay:420ms;"></span>
+                    <span class="bf-wave-bar" style="--stride-band-width:88%; --stride-band-shift:3px; animation-delay:490ms;"></span>
+                    <span class="bf-wave-bar" style="--stride-band-width:76%; --stride-band-shift:-1px; animation-delay:560ms;"></span>
+                    <span class="bf-wave-bar" style="--stride-band-width:60%; --stride-band-shift:-5px; animation-delay:630ms;"></span>
+                    <span class="bf-wave-bar" style="--stride-band-width:36%; --stride-band-shift:-7px; animation-delay:700ms;"></span>
                   </span>
                   <span class="office-launch__line" id="officeLaunchGreeting">good morning.</span>
                   <span class="office-launch__tap-hint" id="officeLaunchHint">tap to talk to Scout</span>
@@ -22277,7 +22294,7 @@
           <div class="bsheet__panel">
             <header class="bsheet__head">
               <div class="bsheet__titles">
-                <span class="bsheet__eyebrow">BonfireOS</span>
+                <span class="bsheet__eyebrow">Stride</span>
                 <h2 class="bsheet__title" id="briefGreeting">Morning Brief</h2>
               </div>
               <button class="bsheet__close pressable" type="button" data-close-brief aria-label="Close">
@@ -22293,7 +22310,7 @@
           <div class="bsheet__panel">
             <header class="bsheet__head">
               <div class="bsheet__titles">
-                <span class="bsheet__eyebrow">BonfireOS</span>
+                <span class="bsheet__eyebrow">Stride</span>
                 <h2 class="bsheet__title">Portfolio Health</h2>
               </div>
               <button class="bsheet__close pressable" type="button" data-close-portfolio aria-label="Close">
@@ -22313,7 +22330,7 @@
             <span class="login-mark" aria-hidden="true">
               <img src="/public/app-icon.png" alt="">
             </span>
-            <h1 class="login-wordmark">bonfireOS</h1>
+            <h1 class="login-wordmark">Stride</h1>
             <p class="login-subline"></p>
             <span id="accessState" class="access-state" hidden>locked</span>
           </header>
@@ -23828,7 +23845,7 @@
             </section>
             <section data-settings-section="notifications" hidden aria-label="Notifications">
               <div class="voice-profile__label">phone notifications</div>
-              <p class="push-settings__intro">Get a buzz on your phone when something needs you — chat mentions, task proposals, agent milestones — even with BonfireOS closed.</p>
+              <p class="push-settings__intro">Get a buzz on your phone when something needs you — chat mentions, task proposals, agent milestones — even with Stride closed.</p>
               <label class="wake-word-setting">
                 <input type="checkbox" id="pushMasterToggle">
                 <span class="wake-word-setting__text">
@@ -23841,7 +23858,7 @@
                    install-prompt API, so the only path is Share → Add to Home
                    Screen, then launch standalone. Shown when Notification is
                    unavailable or we're an iOS browser not yet standalone. -->
-              <p class="push-ios-hint" id="pushIosHint" role="status" hidden>On iPhone or iPad: tap the <strong>Share</strong> button and choose <strong>Add to Home Screen</strong>, then open BonfireOS from your home screen and enable this here. Push needs iOS 16.4 or later.</p>
+              <p class="push-ios-hint" id="pushIosHint" role="status" hidden>On iPhone or iPad: tap the <strong>Share</strong> button and choose <strong>Add to Home Screen</strong>, then open Stride from your home screen and enable this here. Push needs iOS 16.4 or later.</p>
               <div class="push-kinds" id="pushKinds" hidden>
                 <div class="voice-profile__label">what buzzes</div>
                 <label class="push-setting"><input type="checkbox" data-push-kind="chat"><span>chat mentions &amp; channel posts</span></label>
@@ -23849,7 +23866,7 @@
                 <label class="push-setting"><input type="checkbox" data-push-kind="agent"><span>agent &amp; workflow updates</span></label>
                 <label class="push-setting"><input type="checkbox" data-push-kind="alert"><span>alerts</span></label>
                 <label class="push-setting"><input type="checkbox" data-push-kind="info"><span>everything else</span></label>
-                <label class="push-setting push-setting--away"><input type="checkbox" id="pushOnlyWhenAway"><span>only when I'm away — skip if I'm active in BonfireOS on another device</span></label>
+                <label class="push-setting push-setting--away"><input type="checkbox" id="pushOnlyWhenAway"><span>only when I'm away — skip if I'm active in Stride on another device</span></label>
                 <p class="av-saved" id="pushPrefsSaved" hidden>✓ saved</p>
               </div>
             </section>
@@ -25201,7 +25218,7 @@
       })
       consentCloseButton?.addEventListener('click', () => setConsentPanelOpen(false))
       document.getElementById('dockScoutState')?.addEventListener('click', () => {
-        // Scout now lives in the chat tool under the Bonfire OS design; jump there.
+        // Scout now lives in the chat tool under the Stride design; jump there.
         setActiveTool('chat')
       })
       settingsClose.addEventListener('click', closeSettings)
@@ -28609,7 +28626,7 @@
         const toolPage = osToolIds.includes(tool)
         const phone = phoneLayoutQuery.matches
         const toolTitles = {
-          office: 'BonfireOS',
+          office: 'Stride',
           room: 'Rooms',
           chat: 'Chat',
           artifacts: 'Intelligence',
@@ -28625,8 +28642,8 @@
         topbarProjectEl.hidden = true
         topbarToolTitle.hidden = false
         topbarToolTitle.textContent = phone && tool === 'office'
-          ? 'BonfireOS'
-          : toolTitles[tool] || 'BonfireOS'
+          ? 'Stride'
+          : toolTitles[tool] || 'Stride'
         if (topbarSubtitleEl) {
           topbarSubtitleEl.textContent = phone ? phoneToolSubtitle(tool) : toolSubtitle(tool)
         }
@@ -37498,7 +37515,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         buildVersionGuard.scheduled = true
         try { window.sessionStorage?.setItem(reloadedForVersionKey, version) } catch { /* private mode */ }
-        showToast({ text: 'BonfireOS updated — refreshing…', kind: 'note' })
+        showToast({ text: 'Stride updated — refreshing…', kind: 'note' })
         window.setTimeout(() => {
           try { window.location.reload() } catch { /* navigation blocked */ }
         }, 2200)

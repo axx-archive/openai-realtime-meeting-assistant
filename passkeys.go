@@ -52,7 +52,7 @@ func webAuthnForRequest(r *http.Request) (*webauthn.WebAuthn, error) {
 
 	return webauthn.New(&webauthn.Config{
 		RPID:          host,
-		RPDisplayName: "Bonfire",
+		RPDisplayName: "Stride",
 		RPOrigins:     []string{origin},
 	})
 }

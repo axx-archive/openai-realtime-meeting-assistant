@@ -15,13 +15,17 @@ const iosBroadcastExtensionTargetName = 'BonfireOSBroadcastExtension';
 export default ({ config }: ConfigContext): ExpoConfig => {
   const expo: ExpoConfig = {
     ...config,
-    name: 'BonfireOS',
+    name: 'Stride',
+    description:
+      'The voice-first company OS where conversation becomes memory, approved work, and verified results.',
     slug: 'bonfireos',
     version: '1.0.0',
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'automatic',
-    scheme: 'bonfireos',
+    // Retain the installed deep-link scheme while adding the visible Stride
+    // identity. Existing password-reset and room links must keep opening.
+    scheme: ['stride', 'bonfireos'],
     owner: 'axxonlabs',
     ios: {
       supportsTablet: true,
@@ -47,11 +51,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       },
       infoPlist: {
         NSCameraUsageDescription:
-          'BonfireOS uses the camera when you join a live room with video.',
+          'Stride uses the camera when you join a live room with video.',
         NSMicrophoneUsageDescription:
-          'BonfireOS uses the microphone when you join a live room, talk to Scout, or dictate a message.',
+          'Stride uses the microphone when you join a live room, talk to Scout, or dictate a message.',
         NSPhotoLibraryUsageDescription:
-          'BonfireOS uses selected photos for your profile and chat attachments.',
+          'Stride uses selected photos for your profile and chat attachments.',
         // Audio keeps the call audible; VoIP lets iOS 18+ grant WebRTC's
         // multitasking camera access while the call is in Picture in Picture.
         UIBackgroundModes: ['audio', 'voip'],
@@ -92,7 +96,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         'expo-audio',
         {
           microphonePermission:
-            'BonfireOS uses the microphone to dictate messages and talk to Scout.',
+            'Stride uses the microphone to dictate messages and talk to Scout.',
         },
       ],
       // Native push. The plugin configures the APNs entitlement (development;

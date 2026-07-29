@@ -67,38 +67,37 @@ function decodeOpaquePng(path: string) {
   return { width, height, pixels, channels };
 }
 
-test('approved STRIDE momentum master is the exact release source', () => {
+test('approved Stride Signal master is the exact release source', () => {
   const canonicalSvg = read('assets/icon-source.svg');
-  const masterPng = read('assets/bonfire-stride-master.png');
+  const masterPng = read('assets/stride-signal-master.png');
   const releasePng = read('assets/icon.png');
   const darkPng = read('assets/ios-icon-dark.png');
   const tintedPng = read('assets/ios-icon-tinted.png');
 
-  assert.equal(sha256(canonicalSvg), '9257a122ee8d5964753853fc74f98d43d45ad974f6e85e5388b554d466ad7707');
-  assert.match(canonicalSvg.toString('utf8'), /bonfire-stride-master\.png/);
-  assert.equal(sha256(masterPng), 'e2ff95e0396c7cc1bae147530f8c2414440c2069115b5836eb72588042159bde');
+  assert.equal(sha256(canonicalSvg), '2b45115baa17237cfb2da7ed5ec3e87ab9d2f235d1f9b0ab8287902c3156f85b');
+  assert.match(canonicalSvg.toString('utf8'), /<title>Stride Signal<\/title>/);
+  assert.equal(sha256(masterPng), 'e512e90847302dec49bdecd2f16023363a8f87a7aeb16d707763ca10c5b17f07');
   assert.equal(sha256(releasePng), sha256(masterPng));
   assert.equal(sha256(darkPng), sha256(masterPng));
-  assert.equal(sha256(tintedPng), '81af6fac3171fb2b480c5f7652f3aeceaf91f9351e0b1dbc7c5f2169ea465541');
+  assert.equal(sha256(tintedPng), '3cf36bb362031dbfa3cf6a620a203b5c7a30bff130408e02f7840ee3c1beb13e');
 });
 
-test('React Native shell uses the approved momentum assets everywhere', () => {
+test('React Native shell uses the approved Stride Signal assets everywhere', () => {
   const component = text('src/components/BrandMark.tsx');
   assert.match(component, /from 'expo-image'/);
-  assert.match(component, /bonfire-stride-mark\.png/);
+  assert.match(component, /stride-signal-mark\.png/);
   assert.match(component, /android-icon-monochrome\.png/);
-  assert.match(component, /export function MomentumGlyph/);
+  assert.match(component, /export function StrideSignalGlyph/);
   assert.doesNotMatch(component, /fullFlamePath|microFlamePath|bonfireMicroLogCutout/);
 
-  // The voice-first shell has no tab bar, so the glyph's home moved from the
-  // navigator to the canvas mark — the shell's one brand moment. Pin it there
-  // so a redesign can never silently drop the momentum identity again.
+  // The voice-first shell has no tab bar, so the compact signal lives in the
+  // canvas mark while the large signal is the real-amplitude talk control.
   const canvas = text('src/screens/CanvasScreen.tsx');
-  assert.match(canvas, /<MomentumGlyph/);
-  assert.doesNotMatch(canvas, /BonfireGlyph/);
+  assert.match(canvas, /<StrideSignalGlyph/);
+  assert.match(canvas, /<StridePulse trace=\{dictation\.trace\} listening=\{listening\}/);
 
   const navigation = text('src/navigation/RootNavigator.tsx');
-  assert.doesNotMatch(navigation, /BonfireGlyph/);
+  assert.doesNotMatch(navigation, /StrideSignalGlyph/);
   assert.doesNotMatch(navigation, /Home:\s*'flame\.fill'/);
 });
 
@@ -112,7 +111,7 @@ test('Expo icon and splash sources have release-safe dimensions and alpha models
     ['assets/android-icon-foreground.png', [1024, 1024, 6]],
     ['assets/android-icon-background.png', [1024, 1024, 2]],
     ['assets/android-icon-monochrome.png', [1024, 1024, 6]],
-    ['assets/bonfire-stride-mark.png', [1024, 1024, 6]],
+    ['assets/stride-signal-mark.png', [1024, 1024, 2]],
     ['assets/favicon.png', [48, 48, 2]],
   ]);
   for (const [path, wanted] of expected) {
@@ -141,7 +140,7 @@ test('Expo icon and splash sources have release-safe dimensions and alpha models
   // while allowing the grayscale relief to survive.
   assert.ok(
     light / pixelCount > 0.08,
-    `tinted icon needs a substantial light Bonfire core (got ${light / pixelCount})`,
+    `tinted icon needs a substantial light Stride Signal (got ${light / pixelCount})`,
   );
 
   const config = text('app.config.ts');

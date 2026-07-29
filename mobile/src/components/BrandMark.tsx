@@ -3,15 +3,15 @@ import { StyleSheet, View, type ViewStyle } from 'react-native';
 import { Image } from 'expo-image';
 import { radius, shadow } from '../theme/tokens';
 
-const momentumMark = require('../../assets/bonfire-stride-mark.png');
-const momentumGlyph = require('../../assets/android-icon-monochrome.png');
+const strideSignalMark = require('../../assets/stride-signal-mark.png');
+const strideSignalGlyph = require('../../assets/android-icon-monochrome.png');
 
 type Props = {
   size?: number;
   style?: ViewStyle;
 };
 
-/** Canonical human-and-agent momentum mark used throughout the native app. */
+/** Canonical Stride Signal mark used throughout the native app. */
 export function BrandMark({ size = 56, style }: Props) {
   const r = size <= 44 ? radius.lg : 16;
   return (
@@ -28,7 +28,7 @@ export function BrandMark({ size = 56, style }: Props) {
       ]}
     >
       <Image
-        source={momentumMark}
+        source={strideSignalMark}
         style={{ width: size, height: size }}
         contentFit="contain"
         cachePolicy="memory-disk"
@@ -47,11 +47,11 @@ type GlyphProps = {
   color: string;
 };
 
-/** Tintable momentum silhouette for compact navigation chrome. */
-export function MomentumGlyph({ size = 22, color }: GlyphProps) {
+/** Tintable Stride Signal for compact navigation chrome. */
+export function StrideSignalGlyph({ size = 22, color }: GlyphProps) {
   return (
     <Image
-      source={momentumGlyph}
+      source={strideSignalGlyph}
       style={{ width: size, height: size }}
       contentFit="contain"
       tintColor={color}

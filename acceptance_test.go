@@ -150,8 +150,8 @@ func TestAcceptanceSuiteCoverage(t *testing.T) {
 			[]string{"TestUnifiedPushChannelTwoSessionAcceptance"},
 		},
 		{
-			"A13 BonfireOS rename (shell label + unchanged office data-tool key)",
-			[]string{"TestIndexBonfireOSRenameAndAgentToken", "TestScoutChatThreadRename"},
+			"A13 Stride rename (shell label + unchanged office data-tool key)",
+			[]string{"TestIndexStrideRenameAndAgentToken", "TestScoutChatThreadRename"},
 		},
 		{
 			"E1–E4 Deal Room capstone (approve mints token, binder escaped)",

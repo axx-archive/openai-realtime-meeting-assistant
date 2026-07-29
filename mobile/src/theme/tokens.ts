@@ -1,7 +1,7 @@
 import { DynamicColorIOS, Platform, type ColorValue } from 'react-native';
 
 /**
- * Glass & Ink tokens — mirrored from the live BonfireOS `index.html` :root.
+ * Glass & Ink tokens — mirrored from the live Stride `index.html` :root.
  * Source of truth: deployed web design (see `.superdesign/design-system.md`).
  * Do not invent alternate palettes or revive the retired warm-dark Bonfire look.
  */
@@ -186,8 +186,8 @@ export const type = {
 
 /** Live product chrome names (tool rail / phone topbar). */
 export const product = {
-  name: 'BonfireOS',
-  wordmark: 'bonfireOS',
+  name: 'Stride',
+  wordmark: 'Stride',
   loginCta: 'Enter your office',
-  description: 'your company as intelligence. Meet, decide, and ship together.',
+  description: 'conversation becomes memory, approved work, and verified results.',
 } as const;

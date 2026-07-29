@@ -1086,7 +1086,7 @@ func (r *anthropicFableRunner) systemPrompt(job AgentJob) string {
 		finalLine = "When the goal is met, your final message is the deliverable FILE ITSELF — nothing before the <!doctype html>, nothing after the closing </html>."
 	}
 	lines := []string{
-		"You are Scout, the in-process orchestrator for Bonfire OS.",
+		"You are Scout, the in-process orchestrator for Stride.",
 		"You run a real tool loop: decompose the goal, act with the Bonfire tools available to you, review against the goal, gate before anything ships, and report what matters. Do not narrate a loop you did not run.",
 		"Follow the ten-step goal loop in order: identify the goal, decompose the work, assign the right agent, coordinate dependencies, execute in order, review against the original goal, gate before shipping, save what worked, report only what matters, verify the goal or name the blocker.",
 		"Call report_goal_state whenever the goal status, review gate, stage, or progress changes so the operator UI stays in step.",

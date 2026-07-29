@@ -18,11 +18,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../auth/AuthContext';
-import { MomentumGlyph } from '../components/BrandMark';
+import { StrideSignalGlyph } from '../components/BrandMark';
 import { Dock } from '../components/Dock';
 import { ChatCircle } from '../components/ChatCircle';
 import { NavCluster } from '../components/NavCluster';
-import { Waveform } from '../components/Waveform';
+import { StridePulse } from '../components/StridePulse';
 import { useLiveLine } from '../canvas/useLiveLine';
 import { liveLineDisplay } from '../canvas/liveLineDisplay';
 import { useDictation } from '../voice/useDictation';
@@ -203,11 +203,11 @@ export function CanvasScreen() {
         >
           <View style={styles.skyAbove} />
 
-          {/* The web's `.office-launch__mark`: the momentum glyph beside a
+          {/* The web's `.office-launch__mark`: the Stride Signal beside a
               small label, in text-3. This is the shell's only brand moment —
               removing the tab bar took away the glyph's old home. */}
           <View style={styles.mark} accessibilityRole="header" accessibilityLabel="Scout">
-            <MomentumGlyph size={15} color={markTint} />
+            <StrideSignalGlyph size={15} color={markTint} />
             <Text style={styles.markLabel}>SCOUT</Text>
           </View>
 
@@ -235,7 +235,7 @@ export function CanvasScreen() {
                 style={styles.glow}
               />
             ) : null}
-            <Waveform trace={dictation.trace} listening={listening} />
+            <StridePulse trace={dictation.trace} listening={listening} />
           </Pressable>
 
           <Text style={styles.greeting}>{greeting()}</Text>

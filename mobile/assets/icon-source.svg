@@ -1,6 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <!-- The approved raster master preserves the subtle edge softness and color
-       variation selected for the production icon. Platform-specific alpha and
-       monochrome assets are derived from bonfire-stride-master.png. -->
-  <image href="bonfire-stride-master.png" width="1024" height="1024"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Stride Signal</title>
+  <rect id="background" width="1024" height="1024" fill="#050505"/>
+  <g id="stride-signal" fill="#FF5A19">
+    <path d="M432 216h180l42 16-28 30H398l34-46Z"/>
+    <path d="M332 278h358l38 18-26 32H304l28-50Z"/>
+    <path d="M270 342h474l26 19-22 35H252l18-54Z"/>
+    <path d="M238 408h540l16 20-20 38H226l12-58Z"/>
+    <path d="M222 478h574l8 20-14 42H218l4-62Z"/>
+    <path d="M218 552h572l14 22-8 40H222l-4-62Z"/>
+    <path d="M228 626h546l20 20-16 38H240l-12-58Z"/>
+    <path d="M252 696h496l22 18-26 36H270l-18-54Z"/>
+    <path d="M300 762h402l26 16-38 34H332l-32-50Z"/>
+    <path d="M382 824h244l28 14-42 30H432l-50-44Z"/>
+    <path d="M474 874h112l30 10-42 24h-80l-20-34Z"/>
+  </g>
 </svg>

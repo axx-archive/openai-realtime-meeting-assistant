@@ -175,7 +175,7 @@ export function LoginScreen() {
             {resetToken ? (
               <>
                 <Text style={styles.recoveryTitle}>Choose a new password</Text>
-                <Text style={styles.recoveryBody}>This reset link opened securely in BonfireOS.</Text>
+                <Text style={styles.recoveryBody}>This reset link opened securely in Stride.</Text>
                 <TextInput
                   accessibilityLabel="New password"
                   secureTextEntry

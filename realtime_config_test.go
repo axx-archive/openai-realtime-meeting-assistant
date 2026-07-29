@@ -168,7 +168,7 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 	}
 	instructions := session["instructions"].(string)
 	for _, want := range []string{
-		"private Bonfire OS voice assistant",
+		"private Stride voice assistant",
 		"outside the video room",
 		"Do not describe yourself as the shared room Scout",
 		// Wave 6: the boundary is now "on the user's behalf; not the room's
@@ -383,7 +383,7 @@ func TestRealtimeToolsExposeOSControlAndArtifacts(t *testing.T) {
 		}
 	}
 	instructions := app.sessionInstructions()
-	for _, want := range []string{"Bonfire OS voice operator", "control_app", "set_voice_control", "set_recording", "archive_meeting", "undo_delete_ticket", "update_artifact", "publish_artifact", "browser and device permissions", "pinning a speaker", "create_artifact", "launch_agent_thread", "goal workflow", "conversational thread", "agent workforce", "vision", "Latest published artifacts", "Voice control mode"} {
+	for _, want := range []string{"Stride voice operator", "control_app", "set_voice_control", "set_recording", "archive_meeting", "undo_delete_ticket", "update_artifact", "publish_artifact", "browser and device permissions", "pinning a speaker", "create_artifact", "launch_agent_thread", "goal workflow", "conversational thread", "agent workforce", "vision", "Latest published artifacts", "Voice control mode"} {
 		if !strings.Contains(instructions, want) {
 			t.Fatalf("session instructions missing %q: %s", want, instructions)
 		}

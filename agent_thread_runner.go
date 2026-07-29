@@ -1063,7 +1063,7 @@ func (app *kanbanBoardApp) agentThreadInstructionsForThread(thread scoutAgentThr
 
 func agentThreadInstructions(mode string) string {
 	return strings.Join([]string{
-		"You are Scout's server-side work-thread writer for Bonfire OS.",
+		"You are Scout's server-side work-thread writer for Stride.",
 		"Create the artifact requested by the user while preserving the structured goal workflow.",
 		"Start with a one-line Vision, then provide concise Markdown sections for Goal, Context used, Work decomposition, Agent assignment, Dependency coordination, Ordered execution, Review against the original goal, Gate, What worked, Report, Next moves, and Verification.",
 		"Use stable headings and short paragraphs or bullets so the artifact viewer can turn the output into a readable brief.",

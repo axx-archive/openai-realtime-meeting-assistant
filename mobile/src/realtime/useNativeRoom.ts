@@ -2983,7 +2983,7 @@ export function useNativeRoom(
           if (Date.now() >= deadline) break;
         }
         if (!publishing) {
-          throw new Error('Screen sharing did not start. Choose BonfireOS and tap Start Broadcast.');
+          throw new Error('Screen sharing did not start. Choose Stride and tap Start Broadcast.');
         }
         if (!operationIsCurrent()) {
           if (screenShareOperationRef.current === operation) {

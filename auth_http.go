@@ -430,7 +430,7 @@ func appleAppSiteAssociationHandler(w http.ResponseWriter, r *http.Request) {
 						map[string]any{
 							"/":       "/",
 							"?":       map[string]string{"reset": "*"},
-							"comment": "Open password reset links in BonfireOS.",
+							"comment": "Open password reset links in Stride.",
 						},
 					},
 				},
@@ -762,7 +762,7 @@ func handleAuthResetRequest(w http.ResponseWriter, r *http.Request) {
 			log.Errorf("Password reset email for %s not sent: %v", user.Email, err)
 		} else if token, err := accountStore().createPasswordResetToken(user.Email); err == nil {
 			resetURL := base + "/?reset=" + token
-			if err := sendAccountEmail(user.Email, "Reset your BonfireOS password", passwordResetEmailHTML(user.Name, resetURL)); err != nil {
+			if err := sendAccountEmail(user.Email, "Reset your Stride password", passwordResetEmailHTML(user.Name, resetURL)); err != nil {
 				log.Errorf("Failed to send password reset email to %s: %v", user.Email, err)
 			}
 		}
