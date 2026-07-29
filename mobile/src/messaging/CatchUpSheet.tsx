@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
 import type { ThreadDigestResponse } from '../api/types';
 import { colors, radius, space, type } from '../theme/tokens';
+import { useReduceMotion } from '../theme/motion';
 
 /**
  * Thread catch-up — design §11 of docs/plans/the-table-design.md.
@@ -26,6 +27,7 @@ export type CatchUpSheetProps = {
 };
 
 export function CatchUpSheet({ visible, catchUp, onClose, onOpenMessage }: CatchUpSheetProps) {
+  const reduceMotion = useReduceMotion();
   const bullets = catchUp?.bullets ?? [];
   const total = catchUp?.totalUnread ?? 0;
   // What the cap left out. Silently truncating would misrepresent the thread
@@ -33,7 +35,7 @@ export function CatchUpSheet({ visible, catchUp, onClose, onOpenMessage }: Catch
   const omitted = Math.max(0, total - bullets.length);
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <Modal visible={visible} animationType={reduceMotion ? 'none' : 'slide'} presentationStyle="pageSheet" onRequestClose={onClose}>
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
         <View style={styles.header}>
           <Text style={styles.title}>Catch up</Text>

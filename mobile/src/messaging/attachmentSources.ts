@@ -1,5 +1,6 @@
 export const maxMessageAttachments = 6;
 export const maxAttachmentBytes = 25 * 1024 * 1024;
+export const maxConcurrentAttachmentUploads = 3;
 
 const supportedMimeByExtension: Record<string, string> = {
   gif: 'image/gif',

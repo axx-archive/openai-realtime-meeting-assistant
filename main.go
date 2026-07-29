@@ -930,6 +930,7 @@ func main() {
 	http.HandleFunc("/assistant/link-preview", assistantLinkPreviewHandler)
 	http.HandleFunc("/assistant/link-preview/image", assistantLinkPreviewImageHandler)
 	http.HandleFunc("/assistant/giphy/search", assistantGiphySearchHandler)
+	http.HandleFunc("/assistant/giphy/import", assistantGiphyImportHandler)
 	http.HandleFunc("/assistant/chat-participants", assistantChatParticipantsHandler)
 	http.HandleFunc("/assistant/transcribe", assistantTranscribeHandler)
 	http.HandleFunc("/assistant/threads", assistantThreadsHandler)
@@ -5943,6 +5944,22 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if err := c.WriteJSON(&websocketMessage{Event: "office_pong"}); err != nil {
 				log.Errorf("Failed to send office pong: %v", err)
 			}
+		case "chat_typing":
+			if !officeAccepted || sessionUser == nil {
+				continue
+			}
+			typing := struct {
+				ThreadID string `json:"threadId"`
+				Typing   bool   `json:"typing"`
+			}{}
+			if err := json.Unmarshal([]byte(message.Data), &typing); err != nil {
+				continue
+			}
+			payload, err := scoutChatTypingEventPayload(kanbanApp, sessionUser, typing.ThreadID, typing.Typing)
+			if err != nil {
+				continue
+			}
+			broadcastSignedInKanbanEvent("chat_typing", payload)
 		case "room_ping":
 			// Client room-liveness heartbeat (mirrors office_ping). The read loop
 			// already refreshed this participant's liveness stamp on this inbound

@@ -31,10 +31,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         dark: './assets/ios-icon-dark.png',
         tinted: './assets/ios-icon-tinted.png',
       },
-      // Build 21 hardens native chat attachments, first-launch appearance,
-      // profile photos, keyboard dismissal, and visual stability on build 20.
+      // Build 22 adds realtime chat presence and reconciliation, polished
+      // avatars and media flows, and a compact composer reset after sending.
       // Pin the multi-target release so the app and ReplayKit extension match.
-      buildNumber: '21',
+      buildNumber: '22',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

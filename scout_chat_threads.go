@@ -565,6 +565,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	if text == "" && len(files) == 0 {
 		return nil, fmt.Errorf("message text or attachment is required")
 	}
+	deferAttachmentDerivation := shouldDeferScoutChatAttachmentDerivation(thread, text, files, followUpArtifactID, toolTemplate)
 
 	// Binary attachments (card 085): build the image/document blocks once,
 	// then run the bounded derived-text pass BEFORE any commit so file.Text
@@ -574,7 +575,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// blocks, so keyless deploys skip the blob reads entirely and keep
 	// today's name-only behavior — the chips still render.
 	var attachmentBlocks []json.RawMessage
-	if currentAnthropicAPIKey() != "" {
+	if currentAnthropicAPIKey() != "" && !deferAttachmentDerivation {
 		attachmentBlocks = attachmentContentBlocks(files)
 		files = deriveAttachmentText(ctx, files, attachmentBlocks)
 	}
@@ -808,6 +809,9 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		if err != nil {
 			return nil, err
 		}
+		if deferAttachmentDerivation && currentAnthropicAPIKey() != "" {
+			app.deferScoutChatAttachmentDerivation(user.Email, threadID, userMessage.ID)
+		}
 		response["thread"] = saved
 		return response, nil
 	}
@@ -958,6 +962,89 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	response["answer"] = assistantMessage
 	response["thread"] = saved
 	return response, nil
+}
+
+// shouldDeferScoutChatAttachmentDerivation identifies the latency-safe lane:
+// an ordinary human post in a public channel. Private threads always engage
+// Scout, and explicit mentions, artifact follow-ups, palette tools, and brain
+// intake all need the attachment text/blocks synchronously for the current
+// turn's model or action context.
+func shouldDeferScoutChatAttachmentDerivation(thread scoutChatThreadRecord, text string, files []scoutChatFileAttachment, followUpArtifactID string, toolTemplate string) bool {
+	return len(files) > 0 &&
+		scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic &&
+		thread.Intake == "" &&
+		!scoutChatMentionsScout(text) &&
+		strings.TrimSpace(followUpArtifactID) == "" &&
+		strings.TrimSpace(toolTemplate) == ""
+}
+
+// deferScoutChatAttachmentDerivation starts only after the human message has
+// durably committed. The worker re-reads twice: once to derive from the
+// committed attachment set, then again under the per-thread write lock before
+// applying the result. That final ref match means an intervening edit/delete
+// wins; background work can never resurrect a removed file or message.
+func (app *kanbanBoardApp) deferScoutChatAttachmentDerivation(viewerEmail string, threadID string, messageID string) {
+	go func() {
+		if err := app.enrichScoutChatMessageAttachments(context.Background(), viewerEmail, threadID, messageID); err != nil {
+			log.Warnf("Deferred attachment transcription failed (message remains available): %v", err)
+		}
+	}()
+}
+
+func (app *kanbanBoardApp) enrichScoutChatMessageAttachments(ctx context.Context, viewerEmail string, threadID string, messageID string) error {
+	thread, _, err := app.scoutChatThreadByID(viewerEmail, threadID)
+	if err != nil {
+		return err
+	}
+	index := scoutChatMessageIndex(thread, messageID)
+	if index < 0 {
+		return nil
+	}
+	originalFiles := append([]scoutChatFileAttachment(nil), thread.Messages[index].Files...)
+	blocks := attachmentContentBlocks(originalFiles)
+	derivedFiles := deriveAttachmentText(ctx, append([]scoutChatFileAttachment(nil), originalFiles...), blocks)
+
+	derivedByRef := map[string]string{}
+	for index := range derivedFiles {
+		ref := strings.TrimSpace(derivedFiles[index].Ref)
+		text := strings.TrimSpace(derivedFiles[index].Text)
+		if ref != "" && text != "" && index < len(originalFiles) && strings.TrimSpace(originalFiles[index].Text) == "" {
+			derivedByRef[ref] = text
+		}
+	}
+	if len(derivedByRef) == 0 {
+		return nil
+	}
+
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	defer lock.Unlock()
+	thread, _, err = app.scoutChatThreadByID(viewerEmail, threadID)
+	if err != nil {
+		return err
+	}
+	index = scoutChatMessageIndex(thread, messageID)
+	if index < 0 {
+		return nil
+	}
+	message := &thread.Messages[index]
+	changed := false
+	for fileIndex := range message.Files {
+		ref := strings.TrimSpace(message.Files[fileIndex].Ref)
+		if text := derivedByRef[ref]; ref != "" && text != "" && strings.TrimSpace(message.Files[fileIndex].Text) == "" {
+			message.Files[fileIndex].Text = text
+			changed = true
+			delete(derivedByRef, ref)
+		}
+	}
+	if !changed {
+		return nil
+	}
+	if err := app.saveScoutChatThread(thread); err != nil {
+		return err
+	}
+	deliverScoutChatThreadUpdate(thread, *message)
+	return nil
 }
 
 // scoutWorkstreamReplyText is the design-canon channel reply for the three

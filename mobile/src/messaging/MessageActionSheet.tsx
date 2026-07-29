@@ -1,12 +1,11 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { Animated, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SymbolView } from 'expo-symbols';
 
 import { useReduceMotion, duration, ease } from '../theme/motion';
 import { colors, hitMin, radius, shadow, space, type } from '../theme/tokens';
 import type { ScoutMessageReaction } from '../api/types';
-
-export const messageReactionChoices = ['❤️', '👍', '👎', '😂', '‼️', '❓', '🔥'] as const;
+import { messageReactionChoices } from './messageGestures';
 
 type Props = {
   visible: boolean;
@@ -55,7 +54,7 @@ export function MessageActionSheet({ visible, own, snippet, reactions, onClose, 
           <Animated.View
             accessibilityLabel="React to message"
             style={[
-              styles.picker,
+              styles.pickerShell,
               {
                 opacity: progress.interpolate({ inputRange: [0.08, 0.8], outputRange: [0, 1], extrapolate: 'clamp' }),
                 transform: [
@@ -65,17 +64,24 @@ export function MessageActionSheet({ visible, own, snippet, reactions, onClose, 
               },
             ]}
           >
-            {messageReactionChoices.map((emoji) => (
-              <Pressable
-                key={emoji}
-                accessibilityRole="button"
-                accessibilityLabel={`React ${emoji}`}
-                onPress={() => onReact(emoji)}
-                style={({ pressed }) => [styles.reaction, pressed && styles.reactionPressed]}
-              >
-                <Text style={styles.emoji}>{emoji}</Text>
-              </Pressable>
-            ))}
+            <ScrollView
+              horizontal
+              bounces={false}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.picker}
+            >
+              {messageReactionChoices.map((emoji) => (
+                <Pressable
+                  key={emoji}
+                  accessibilityRole="button"
+                  accessibilityLabel={`React ${emoji}`}
+                  onPress={() => onReact(emoji)}
+                  style={({ pressed }) => [styles.reaction, pressed && styles.reactionPressed]}
+                >
+                  <Text style={styles.emoji}>{emoji}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
           </Animated.View>
           {visibleReactions.length > 0 ? (
             <Animated.View
@@ -156,15 +162,16 @@ const styles = StyleSheet.create({
     color: colors.text2,
     backgroundColor: colors.surface1,
   },
-  picker: {
-    flexDirection: 'row',
+  pickerShell: {
     alignSelf: 'center',
-    padding: 5,
+    maxWidth: '100%',
     borderRadius: radius.full,
     backgroundColor: colors.surface1,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.line2,
+    overflow: 'hidden',
   },
+  picker: { flexDirection: 'row', padding: 5 },
   reaction: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22 },
   reactionPressed: { backgroundColor: colors.accentSoft, transform: [{ scale: 0.96 }] },
   emoji: { fontSize: 25, lineHeight: 31 },

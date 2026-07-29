@@ -4,8 +4,13 @@ import test from 'node:test';
 import {
   attachmentBatchMessage,
   maxAttachmentBytes,
+  maxConcurrentAttachmentUploads,
   prepareAttachmentBatch,
 } from '../messaging/attachmentSources';
+
+test('attachment network work is intentionally capped below the message limit', () => {
+  assert.equal(maxConcurrentAttachmentUploads, 3);
+});
 
 test('prepares picker files using a supported normalized MIME and filename', () => {
   assert.deepEqual(

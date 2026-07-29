@@ -10,6 +10,7 @@ import { API_BASE_URL, NATIVE_CLIENT_HEADER } from '../config';
 import { buildApiUrl, buildAuthHeaders } from '../api/requestHelpers';
 import { colors, radius, space, type } from '../theme/tokens';
 import { cachedLinkPreview } from './linkPreviewCache';
+import { messageLongPressDelayMs } from './messageGestures';
 
 const previewCache = new Map<string, Promise<LinkPreview | null>>();
 const resolvedPreviewCache = new Map<string, LinkPreview | null>();
@@ -97,7 +98,7 @@ export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessio
         accessibilityLabel={`Open ${url}`}
         onPress={() => void Linking.openURL(url).catch(() => undefined)}
         onLongPress={onLongPress}
-        delayLongPress={430}
+        delayLongPress={messageLongPressDelayMs}
         style={({ pressed }) => [styles.card, styles.cardSeamless, styles.plainCard, own && styles.cardSeamlessOwn, pressed && styles.pressed]}
       >
         <View style={[styles.plainIcon, own && styles.plainIconOwn]}><SymbolView name="link" tintColor={own ? colors.onAccent : colors.text2} size={15} /></View>
@@ -119,7 +120,7 @@ export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessio
         accessibilityHint="Opens this post on X"
         onPress={() => void Linking.openURL(url).catch(() => undefined)}
         onLongPress={onLongPress}
-        delayLongPress={430}
+        delayLongPress={messageLongPressDelayMs}
         style={({ pressed }) => [
           styles.card,
           styles.postCard,
@@ -160,7 +161,7 @@ export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessio
         accessibilityHint={`Opens this ${playable ? 'video' : 'website'}`}
         onPress={() => void Linking.openURL(url).catch(() => undefined)}
         onLongPress={onLongPress}
-        delayLongPress={430}
+        delayLongPress={messageLongPressDelayMs}
         style={({ pressed }) => [
           styles.card,
           styles.visualCard,
@@ -198,7 +199,7 @@ export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessio
       accessibilityHint="Opens this link"
       onPress={() => void Linking.openURL(url).catch(() => undefined)}
       onLongPress={onLongPress}
-      delayLongPress={430}
+      delayLongPress={messageLongPressDelayMs}
       style={({ pressed }) => [
         styles.card,
         seamless && styles.cardSeamless,
@@ -277,6 +278,6 @@ const styles = StyleSheet.create({
   title: { ...type.bodyMedium, color: colors.text1 },
   description: { ...type.caption, color: colors.text2 },
   copyOwn: { color: colors.onAccent },
-  descriptionOwn: { color: 'rgba(14,14,16,0.66)' },
+  descriptionOwn: { color: colors.onAccent, opacity: 0.68 },
   pressed: { opacity: 0.78, transform: [{ scale: 0.98 }] },
 });

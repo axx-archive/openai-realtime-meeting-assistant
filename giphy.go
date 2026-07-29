@@ -6,6 +6,7 @@ package main
 // projected down to the small set of trusted giphy.com URLs the client needs.
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -25,6 +26,7 @@ const (
 	giphySearchMaxLimit     = 25
 	giphySearchMaxQuery     = 120
 	giphySearchMaxResponse  = 1 << 20
+	giphyImportMaxBody      = 8 << 10
 )
 
 var (
@@ -32,6 +34,12 @@ var (
 	giphyTrendingEndpoint = "https://api.giphy.com/v1/gifs/trending"
 	giphySearchClient     = &http.Client{
 		Timeout: 8 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	giphyImportClient = &http.Client{
+		Timeout: 12 * time.Second,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
@@ -68,6 +76,13 @@ type giphySearchResult struct {
 	Rating     string `json:"rating,omitempty"`
 }
 
+type giphyImportRequest struct {
+	URL   string `json:"url"`
+	Name  string `json:"name,omitempty"`
+	Title string `json:"title,omitempty"`
+	ID    string `json:"id,omitempty"`
+}
+
 func giphyAPIKey() string {
 	return strings.TrimSpace(os.Getenv("GIPHY_API_KEY"))
 }
@@ -79,7 +94,7 @@ func giphyCustomerID(email string) string {
 
 func trustedGiphyURL(raw string) string {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || parsed.Scheme != "https" || parsed.User != nil {
+	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Port() != "" {
 		return ""
 	}
 	host := strings.ToLower(parsed.Hostname())
@@ -87,6 +102,34 @@ func trustedGiphyURL(raw string) string {
 		return ""
 	}
 	return parsed.String()
+}
+
+// trustedGiphyMediaURL narrows the broader search-result URL allowlist to an
+// actual GIF asset. The import endpoint follows no redirects and validates
+// the downloaded bytes, so user-controlled URLs can never turn it into a
+// general-purpose fetch proxy or smuggle a non-image payload into storage.
+func trustedGiphyMediaURL(raw string) string {
+	trusted := trustedGiphyURL(raw)
+	if trusted == "" {
+		return ""
+	}
+	parsed, err := url.Parse(trusted)
+	if err != nil || !strings.EqualFold(pathExtension(parsed.Path), ".gif") {
+		return ""
+	}
+	return trusted
+}
+
+func pathExtension(path string) string {
+	lastSlash := strings.LastIndex(path, "/")
+	if lastSlash >= 0 {
+		path = path[lastSlash+1:]
+	}
+	lastDot := strings.LastIndex(path, ".")
+	if lastDot < 0 {
+		return ""
+	}
+	return path[lastDot:]
 }
 
 func giphyDimension(raw string) int {
@@ -223,4 +266,98 @@ func assistantGiphySearchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "results": results})
+}
+
+// assistantGiphyImportHandler copies one selected, allowlisted GIPHY GIF into
+// Bonfire's content-addressed blob store. This keeps the native app from
+// downloading the media to device storage and uploading it again, while the
+// ordinary attachment validation, size cap, MIME pinning, and dedupe contract
+// remain identical to /assistant/attachments.
+func assistantGiphyImportHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	if userFromRequest(r) == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, giphyImportMaxBody))
+	if err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read GIF import request")
+		return
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	payload := giphyImportRequest{}
+	if err := decoder.Decode(&payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read GIF import request")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeAuthError(w, http.StatusBadRequest, "could not read GIF import request")
+		return
+	}
+	mediaURL := trustedGiphyMediaURL(payload.URL)
+	if mediaURL == "" {
+		writeAuthError(w, http.StatusBadRequest, "GIF URL is not a trusted GIPHY media URL")
+		return
+	}
+
+	request, err := http.NewRequestWithContext(r.Context(), http.MethodGet, mediaURL, nil)
+	if err != nil {
+		writeAuthError(w, http.StatusBadGateway, "GIF could not be imported")
+		return
+	}
+	request.Header.Set("Accept", "image/gif")
+	response, err := giphyImportClient.Do(request)
+	if err != nil {
+		writeAuthError(w, http.StatusBadGateway, "GIF could not be imported")
+		return
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4<<10))
+		writeAuthError(w, http.StatusBadGateway, "GIF could not be imported")
+		return
+	}
+	if canonicalAttachmentUploadMime(response.Header.Get("Content-Type")) != "image/gif" {
+		writeAuthError(w, http.StatusUnsupportedMediaType, "GIPHY media is not a GIF")
+		return
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, attachmentUploadMaxBytes+1))
+	if err != nil {
+		writeAuthError(w, http.StatusBadGateway, "GIF could not be imported")
+		return
+	}
+	if len(data) > attachmentUploadMaxBytes {
+		writeAuthError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("GIF exceeds the %dMB cap", attachmentUploadMaxBytes>>20))
+		return
+	}
+	if err := validateAttachmentBytes("image/gif", data); err != nil {
+		writeAuthError(w, http.StatusUnsupportedMediaType, "GIPHY media is not a valid GIF")
+		return
+	}
+	ref, err := putBlob(data, "image/gif")
+	if err != nil {
+		writeAuthError(w, http.StatusInternalServerError, "GIF could not be stored")
+		return
+	}
+	meta, err := blobStatForRef(ref)
+	if err != nil {
+		meta = blobMeta{Mime: "image/gif", Size: int64(len(data))}
+	}
+	name := trimForStorage(firstNonEmptyString(strings.TrimSpace(payload.Name), strings.TrimSpace(payload.Title)), 180)
+	if name == "" {
+		name = "GIPHY.gif"
+	} else if !strings.HasSuffix(strings.ToLower(name), ".gif") {
+		name += ".gif"
+	}
+	file := scoutChatFileAttachment{Name: name, Kind: "gif", Size: meta.Size, Ref: ref, Mime: meta.Mime}
+	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "file": file})
 }

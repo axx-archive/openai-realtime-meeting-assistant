@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // anthropicSourceBlockView decodes the wire shape shared by image and
@@ -567,6 +568,159 @@ func TestScoutChatAttachmentKeylessDegradesToNameOnly(t *testing.T) {
 	}
 	if file.Ref != pngRef {
 		t.Fatalf("keyless ref=%q, want the ref preserved for the render path", file.Ref)
+	}
+}
+
+func TestPublicHumanAttachmentCommitsBeforeDeferredDerivation(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+	ref, err := putBlob([]byte("public channel raster"), "image/png")
+	if err != nil {
+		t.Fatalf("putBlob: %v", err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+		}
+	}()
+	swapAnthropicTextResponder(t, func(_ context.Context, _ string, request anthropicTextRequest) (string, error) {
+		if request.Instructions != attachmentDeriveInstructions {
+			t.Errorf("unexpected async request instructions=%q", request.Instructions)
+		}
+		close(started)
+		<-release
+		return "Launch note says September 8 with a $40,000 budget.", nil
+	})
+
+	thread, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "team", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatalf("create public channel: %v", err)
+	}
+	user := accountStore().findUser("aj@shareability.com")
+	type appendResult struct {
+		response map[string]any
+		err      error
+	}
+	result := make(chan appendResult, 1)
+	go func() {
+		response, appendErr := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "latest launch note", []scoutChatFileAttachment{{Name: "launch.png", Ref: ref}}, "")
+		result <- appendResult{response: response, err: appendErr}
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("deferred derivation did not start")
+	}
+	var appended appendResult
+	select {
+	case appended = <-result:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("public human message waited for attachment derivation")
+	}
+	if appended.err != nil {
+		t.Fatalf("append message: %v", appended.err)
+	}
+	saved, ok := appended.response["thread"].(scoutChatThreadRecord)
+	if !ok || len(saved.Messages) != 1 || len(saved.Messages[0].Files) != 1 {
+		t.Fatalf("unexpected immediate response thread: %#v", appended.response["thread"])
+	}
+	if saved.Messages[0].Files[0].Text != "" {
+		t.Fatalf("immediate commit already carried derived text %q", saved.Messages[0].Files[0].Text)
+	}
+	messageID := saved.Messages[0].ID
+	close(release)
+	released = true
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		current, _, readErr := kanbanApp.scoutChatThreadByID(user.Email, thread.ID)
+		if readErr != nil {
+			t.Fatalf("read enriched thread: %v", readErr)
+		}
+		index := scoutChatMessageIndex(current, messageID)
+		if index >= 0 && current.Messages[index].Files[0].Text == "Launch note says September 8 with a $40,000 budget." {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("deferred text did not persist onto message %s: %+v", messageID, current.Messages)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestAttachmentDerivationDeferralExcludesScoutAndActionFlows(t *testing.T) {
+	file := []scoutChatFileAttachment{{Name: "brief.pdf", Ref: strings.Repeat("a", 64)}}
+	public := scoutChatThreadRecord{Visibility: scoutChatVisibilityPublic}
+	private := scoutChatThreadRecord{}
+	if !shouldDeferScoutChatAttachmentDerivation(public, "for the team", file, "", "") {
+		t.Fatal("ordinary public human attachment should defer")
+	}
+	for name, deferred := range map[string]bool{
+		"scout mention":        shouldDeferScoutChatAttachmentDerivation(public, "@Scout read this", file, "", ""),
+		"artifact follow-up":   shouldDeferScoutChatAttachmentDerivation(public, "feedback", file, "artifact-1", ""),
+		"tool launch":          shouldDeferScoutChatAttachmentDerivation(public, "run it", file, "", "research"),
+		"private Scout thread": shouldDeferScoutChatAttachmentDerivation(private, "read this", file, "", ""),
+		"brain intake":         shouldDeferScoutChatAttachmentDerivation(scoutChatThreadRecord{Visibility: scoutChatVisibilityPublic, Intake: brainIntakeKind}, "contribution", file, "", ""),
+	} {
+		if deferred {
+			t.Fatalf("%s unexpectedly deferred attachment derivation", name)
+		}
+	}
+}
+
+func TestDeferredAttachmentEnrichmentDoesNotResurrectDeletedMessage(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	ref, err := putBlob([]byte("delete race raster"), "image/png")
+	if err != nil {
+		t.Fatalf("putBlob: %v", err)
+	}
+	thread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "team", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	message := scoutChatMessageRecord{ID: "deferred-delete-message", Kind: "message", Role: "user", Text: "temporary", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), AuthorName: "AJ", AuthorEmail: "aj@shareability.com", Files: []scoutChatFileAttachment{{Name: "delete.png", Ref: ref, Mime: "image/png"}}}
+	if _, err := app.commitScoutChatThreadMessages("aj@shareability.com", thread.ID, message); err != nil {
+		t.Fatalf("commit message: %v", err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
+		close(started)
+		<-release
+		return "stale derived text", nil
+	})
+	done := make(chan error, 1)
+	go func() {
+		done <- app.enrichScoutChatMessageAttachments(context.Background(), "aj@shareability.com", thread.ID, message.ID)
+	}()
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("enrichment did not start")
+	}
+	if _, err := app.deleteScoutChatThreadMessage("aj@shareability.com", thread.ID, message.ID); err != nil {
+		t.Fatalf("delete message: %v", err)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("enrichment after delete: %v", err)
+	}
+	current, _, err := app.scoutChatThreadByID("aj@shareability.com", thread.ID)
+	if err != nil {
+		t.Fatalf("read thread: %v", err)
+	}
+	if scoutChatMessageIndex(current, message.ID) >= 0 {
+		t.Fatal("deferred enrichment resurrected a deleted message")
 	}
 }
 

@@ -608,6 +608,37 @@ export const api = {
     );
   },
 
+  async importGiphy(
+    sessionToken: string,
+    gif: Pick<GiphySearchResult, 'id' | 'title' | 'mediaUrl'>,
+  ): Promise<ScoutFileAttachment> {
+    const response = await request<{
+      ok?: boolean;
+      file?: ScoutFileAttachment;
+      attachment?: ScoutFileAttachment;
+      ref?: string;
+      name?: string;
+      mime?: string;
+      size?: number;
+      kind?: string;
+    }>('/assistant/giphy/import', {
+      method: 'POST',
+      body: { url: gif.mediaUrl, title: gif.title, id: gif.id },
+      sessionToken,
+    });
+    const attachment = response.file ?? response.attachment ?? response;
+    if (!attachment.ref || !attachment.mime) {
+      throw new Error('The GIF import completed without a usable attachment.');
+    }
+    return {
+      name: attachment.name || `${gif.title.trim() || 'GIPHY'}.gif`,
+      kind: attachment.kind || 'gif',
+      ref: attachment.ref,
+      mime: attachment.mime,
+      size: attachment.size,
+    };
+  },
+
   async uploadScoutAttachment(
     sessionToken: string,
     file: { uri: string; name: string; mime: string },

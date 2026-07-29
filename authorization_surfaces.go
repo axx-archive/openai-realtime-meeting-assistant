@@ -53,6 +53,7 @@ var authorizationHTTPSurfaces = []AuthorizationSurface{
 	authSurface("http.assistant.link_preview", AuthorizationHTTP, "/assistant/link-preview", []string{"external_link"}, []ACLAction{ACLReadMetadata}, []string{"user"}, true, true, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.link_preview_image", AuthorizationHTTP, "/assistant/link-preview/image", []string{"external_link", "blob"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.giphy_search", AuthorizationHTTP, "/assistant/giphy/search", []string{"external_media"}, []ACLAction{ACLReadMetadata}, []string{"user"}, false, true, AuthorizationCanonicalNeeded),
+	authSurface("http.assistant.giphy_import", AuthorizationHTTP, "/assistant/giphy/import", []string{"external_media", "blob", "file"}, []ACLAction{ACLReadContent, ACLCreateChild, ACLWrite}, []string{"user"}, true, true, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.chat_participants", AuthorizationHTTP, "/assistant/chat-participants", []string{"membership"}, []ACLAction{ACLReadMetadata}, []string{"user"}, false, true, AuthorizationCanonicalNeeded),
 	// Dictation uploads: the audio is transcribed and discarded (no object is
 	// persisted), but the request is body-reading and spends vendor minutes, so
@@ -137,7 +138,7 @@ var authorizationCapabilitySurfaces = []AuthorizationSurface{
 }
 
 var authorizationWebSocketInboundEvents = []string{
-	"participant", "office", "office_ping", "room_ping", "media_ready", "request_participant_tracks", "candidate", "answer", "restart_ice", "select_layer",
+	"participant", "office", "office_ping", "chat_typing", "room_ping", "media_ready", "request_participant_tracks", "candidate", "answer", "restart_ice", "select_layer",
 	"assistant_query", "catch_me_up", "scout_chat_reset", "scout_chat", "room_chat", "room_chat_delete", "manual_create_ticket", "manual_update_ticket", "manual_delete_ticket",
 	"undo_delete_ticket", "archive_meeting", "set_recording", "participant_media_state", "voice_control", "media_quality", "media_error", "screen_share_started", "screen_share_stopped",
 }
@@ -150,7 +151,11 @@ func websocketInboundAuthorizationSurfaces() []AuthorizationSurface {
 		readsBody := false
 		authorizeBeforeBodyRead := false
 		status := AuthorizationLegacyGuarded
+		principals := []string{"user", "guest"}
 		switch event {
+		case "chat_typing":
+			action, families, readsBody, authorizeBeforeBodyRead, status = ACLReadMetadata, []string{"chat_thread", "membership"}, true, true, AuthorizationCanonicalNeeded
+			principals = []string{"user"}
 		case "assistant_query", "scout_chat_reset", "scout_chat":
 			action, families, readsBody, status = ACLReadContent, []string{"memory", "chat_thread", "artifact"}, true, AuthorizationCanonicalNeeded
 			if event == "assistant_query" {
@@ -172,7 +177,7 @@ func websocketInboundAuthorizationSurfaces() []AuthorizationSurface {
 		case "set_recording", "voice_control":
 			action, families, status = ACLManage, []string{"room", "meeting"}, AuthorizationCanonicalNeeded
 		}
-		result = append(result, authSurface("ws.in."+event, AuthorizationWebSocketIn, event, families, []ACLAction{action}, []string{"user", "guest"}, readsBody, authorizeBeforeBodyRead, status))
+		result = append(result, authSurface("ws.in."+event, AuthorizationWebSocketIn, event, families, []ACLAction{action}, principals, readsBody, authorizeBeforeBodyRead, status))
 	}
 	return result
 }
@@ -186,6 +191,7 @@ var authorizationFanoutSurfaces = []AuthorizationSurface{
 	authSurface("ws.out.memory", AuthorizationWebSocketOut, "memory", []string{"memory", "meeting", "artifact"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("ws.out.artifact", AuthorizationWebSocketOut, "artifact", []string{"artifact", "revision"}, []ACLAction{ACLReadMetadata, ACLReadContent}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("ws.out.room_chat", AuthorizationWebSocketOut, "room_chat", []string{"room", "meeting", "room_chat"}, []ACLAction{ACLReadContent}, []string{"user", "guest"}, true, true, AuthorizationLegacyGuarded),
+	authSurface("ws.out.chat_typing", AuthorizationWebSocketOut, "chat_typing", []string{"chat_thread", "membership"}, []ACLAction{ACLReadMetadata}, []string{"user"}, false, true, AuthorizationCanonicalNeeded),
 	authSurface("ws.out.meeting", AuthorizationWebSocketOut, "meeting", []string{"room", "meeting"}, []ACLAction{ACLReadMetadata, ACLReadContent}, []string{"user", "guest"}, true, true, AuthorizationLegacyGuarded),
 	authSurface("ws.out.notification", AuthorizationWebSocketOut, "notification", []string{"notification"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationLegacyGuarded),
 	authSurface("ws.out.proposal", AuthorizationWebSocketOut, "codex_proposal", []string{"proposal", "workflow"}, []ACLAction{ACLReadContent, ACLApprove, ACLExecute}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),

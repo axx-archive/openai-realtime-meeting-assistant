@@ -8,7 +8,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { WebView } from 'react-native-webview';
 import { SymbolView } from 'expo-symbols';
@@ -19,6 +19,7 @@ import {
   type RemoteFile,
 } from '../files/fileActions';
 import { colors, hitMin, radius, space, type } from '../theme/tokens';
+import { useReduceMotion } from '../theme/motion';
 
 type Props = {
   file: RemoteFile | null;
@@ -27,6 +28,8 @@ type Props = {
 };
 
 export function FilePreviewModal({ file, sessionToken, onClose }: Props) {
+  const insets = useSafeAreaInsets();
+  const reduceMotion = useReduceMotion();
   const [loading, setLoading] = useState(true);
   const [sharing, setSharing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,22 +73,46 @@ export function FilePreviewModal({ file, sessionToken, onClose }: Props) {
   return (
     <Modal
       visible={Boolean(file && url)}
-      animationType="slide"
+      animationType={reduceMotion ? 'none' : 'slide'}
       presentationStyle="fullScreen"
+      statusBarTranslucent
+      navigationBarTranslucent
       onRequestClose={onClose}
     >
-      <SafeAreaView style={styles.safe} edges={['top', 'right', 'bottom', 'left']}>
-        <View style={styles.toolbar}>
+      <View
+        style={[
+          styles.safe,
+          image && styles.mediaSafe,
+          !image && {
+            paddingTop: insets.top,
+            paddingRight: insets.right,
+            paddingBottom: insets.bottom,
+            paddingLeft: insets.left,
+          },
+        ]}
+      >
+        <View style={[
+          styles.toolbar,
+          image && styles.mediaToolbar,
+          image && {
+            minHeight: insets.top + 60,
+            paddingTop: insets.top + space[2],
+            paddingRight: insets.right + space[3],
+            paddingLeft: insets.left + space[3],
+          },
+        ]}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Close file preview"
             hitSlop={4}
             onPress={onClose}
-            style={({ pressed }) => [styles.toolbarButton, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.toolbarButton, image && styles.mediaButton, pressed && styles.pressed]}
           >
-            <SymbolView name="xmark" tintColor={colors.text1} size={17} />
+            <SymbolView name="xmark" tintColor={image ? '#FFFFFF' : colors.text1} size={17} />
           </Pressable>
-          <Text numberOfLines={1} style={styles.title}>{file?.name ?? ''}</Text>
+          {image ? <View style={styles.mediaTitleSpacer} /> : (
+            <Text numberOfLines={1} style={styles.title}>{file?.name ?? ''}</Text>
+          )}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Share or save ${file?.name ?? 'file'}`}
@@ -94,18 +121,19 @@ export function FilePreviewModal({ file, sessionToken, onClose }: Props) {
             onPress={() => void share()}
             style={({ pressed }) => [
               styles.toolbarButton,
+              image && styles.mediaButton,
               pressed && styles.pressed,
               sharing && styles.disabled,
             ]}
           >
             {sharing ? (
-              <ActivityIndicator size="small" color={colors.text1} />
+              <ActivityIndicator size="small" color={image ? '#FFFFFF' : colors.text1} />
             ) : (
-              <SymbolView name="square.and.arrow.up" tintColor={colors.text1} size={19} />
+              <SymbolView name="square.and.arrow.up" tintColor={image ? '#FFFFFF' : colors.text1} size={19} />
             )}
           </Pressable>
         </View>
-        <View style={styles.preview}>
+        <View style={[styles.preview, image && styles.mediaPreview]}>
           {file && localPreviewUrl && image ? (
             <Image
               source={{ uri: localPreviewUrl }}
@@ -151,18 +179,18 @@ export function FilePreviewModal({ file, sessionToken, onClose }: Props) {
             />
           ) : null}
           {loading ? (
-            <View style={styles.loading} pointerEvents="none">
+            <View style={[styles.loading, image && styles.mediaLoading]} pointerEvents="none">
               <ActivityIndicator color={colors.accent} />
             </View>
           ) : null}
           {error ? (
-            <View style={styles.error} accessibilityRole="alert">
+            <View style={[styles.error, image && { bottom: insets.bottom + space[4] }]} accessibilityRole="alert">
               <SymbolView name="exclamationmark.circle.fill" tintColor={colors.danger} size={18} />
               <Text style={styles.errorText}>{error}</Text>
             </View>
           ) : null}
         </View>
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }
@@ -172,6 +200,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.bgApp,
   },
+  mediaSafe: { backgroundColor: '#000000' },
   toolbar: {
     minHeight: 58,
     flexDirection: 'row',
@@ -182,6 +211,15 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.line1,
   },
+  mediaToolbar: {
+    position: 'absolute',
+    zIndex: 4,
+    top: 0,
+    left: 0,
+    right: 0,
+    borderBottomWidth: 0,
+    backgroundColor: 'transparent',
+  },
   toolbarButton: {
     width: hitMin,
     height: hitMin,
@@ -190,23 +228,26 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.surface3,
   },
+  mediaButton: { backgroundColor: 'rgba(8,8,10,0.66)', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.18)' },
   title: {
     flex: 1,
     ...type.headline,
     color: colors.text1,
     textAlign: 'center',
   },
+  mediaTitleSpacer: { flex: 1 },
   preview: {
     flex: 1,
     backgroundColor: colors.surface3,
   },
+  mediaPreview: { backgroundColor: '#000000' },
   web: {
     flex: 1,
     backgroundColor: colors.surface3,
   },
   image: {
     flex: 1,
-    backgroundColor: colors.bgApp,
+    backgroundColor: '#000000',
   },
   loading: {
     ...StyleSheet.absoluteFill,
@@ -214,6 +255,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.surface3,
   },
+  mediaLoading: { backgroundColor: 'rgba(0,0,0,0.16)' },
   error: {
     position: 'absolute',
     left: space[4],

@@ -10,17 +10,24 @@ import React, {
 import { AppState } from 'react-native';
 import { useAuth } from '../auth/AuthContext';
 import { API_BASE_URL, NATIVE_CLIENT_HEADER } from '../config';
+import { encodeOfficeCommand, parseOfficeEventEnvelope } from './officeEventProtocol';
 
 type OfficeEventState = {
   event: string | null;
+  data: unknown;
   version: number;
   connected: boolean;
+  send: (event: string, data: unknown) => boolean;
 };
+
+const unavailableSend = () => false;
 
 const OfficeEventsContext = createContext<OfficeEventState>({
   event: null,
+  data: null,
   version: 0,
   connected: false,
+  send: unavailableSend,
 });
 
 type NativeWebSocketConstructor = new (
@@ -44,8 +51,10 @@ export function OfficeEventsProvider({ children }: PropsWithChildren) {
   const { sessionToken, user } = useAuth();
   const [state, setState] = useState<OfficeEventState>({
     event: null,
+    data: null,
     version: 0,
     connected: false,
+    send: unavailableSend,
   });
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
@@ -104,19 +113,15 @@ export function OfficeEventsProvider({ children }: PropsWithChildren) {
 
       socket.onmessage = (message) => {
         if (disposed || socketRef.current !== socket) return;
-        try {
-          const envelope = JSON.parse(String(message.data)) as { event?: string; data?: string };
-          if (envelope.event !== 'kanban' || typeof envelope.data !== 'string') return;
-          const nested = JSON.parse(envelope.data) as { event?: string };
-          if (!nested.event) return;
-          setState((currentState) => ({
-            event: nested.event ?? null,
-            version: currentState.version + 1,
-            connected: true,
-          }));
-        } catch {
-          // A malformed or future event must not destabilize the native shell.
-        }
+        const nested = parseOfficeEventEnvelope(String(message.data));
+        if (!nested) return;
+        setState((currentState) => ({
+          ...currentState,
+          event: nested.event,
+          data: nested.data,
+          version: currentState.version + 1,
+          connected: true,
+        }));
       };
 
       socket.onerror = () => socket.close();
@@ -145,7 +150,19 @@ export function OfficeEventsProvider({ children }: PropsWithChildren) {
     };
   }, [sessionToken, user]);
 
-  const value = useMemo(() => state, [state]);
+  const send = React.useCallback((event: string, data: unknown) => {
+    const socket = socketRef.current;
+    const encoded = encodeOfficeCommand(event, data);
+    if (!encoded || !socket || socket.readyState !== WebSocket.OPEN) return false;
+    try {
+      socket.send(encoded);
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const value = useMemo(() => ({ ...state, send }), [send, state]);
   return <OfficeEventsContext.Provider value={value}>{children}</OfficeEventsContext.Provider>;
 }
 

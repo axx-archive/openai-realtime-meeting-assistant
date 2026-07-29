@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
@@ -6,10 +6,13 @@ import { SymbolView } from 'expo-symbols';
 import type { ChatMentionCandidate } from '../api/types';
 import { colors, radius, space, type } from '../theme/tokens';
 import { activeMentionQuery, completeMention } from './messagePresentation';
+import { compactComposerHeight, composerHeight } from './composerMeasurement';
+import { useReduceMotion } from '../theme/motion';
 
 type Props = {
   value: string;
   onChangeText: (value: string) => void;
+  onBlur?: () => void;
   candidates: ChatMentionCandidate[];
   placeholder: string;
   editable: boolean;
@@ -33,8 +36,10 @@ function draftSegments(value: string, candidates: ChatMentionCandidate[]): Draft
   return result;
 }
 
-export function MentionComposerInput({ value, onChangeText, candidates, placeholder, editable }: Props) {
+export function MentionComposerInput({ value, onChangeText, onBlur, candidates, placeholder, editable }: Props) {
+  const reduceMotion = useReduceMotion();
   const shimmer = useRef(new Animated.Value(1)).current;
+  const [measuredHeight, setMeasuredHeight] = useState(compactComposerHeight);
   const active = useMemo(() => activeMentionQuery(value), [value]);
   const suggestions = useMemo(() => {
     if (!active) return [];
@@ -43,9 +48,14 @@ export function MentionComposerInput({ value, onChangeText, candidates, placehol
   }, [active, candidates]);
   const segments = useMemo(() => draftSegments(value, candidates), [candidates, value]);
 
+  useEffect(() => {
+    if (!value) setMeasuredHeight(compactComposerHeight);
+  }, [value]);
+
   function select(candidate: ChatMentionCandidate) {
     onChangeText(completeMention(value, candidate.name));
     void Haptics.selectionAsync();
+    if (reduceMotion) return;
     shimmer.setValue(0.58);
     Animated.timing(shimmer, { toValue: 1, duration: 360, useNativeDriver: true }).start();
   }
@@ -71,7 +81,7 @@ export function MentionComposerInput({ value, onChangeText, candidates, placehol
           ))}
         </View>
       ) : null}
-      <View style={styles.frame}>
+      <View style={[styles.frame, { height: measuredHeight }]}>
         {value ? (
           <Animated.Text pointerEvents="none" style={[styles.overlay, { opacity: shimmer }]}>
             {segments.map((segment, index) => segment.mention ? (
@@ -84,14 +94,19 @@ export function MentionComposerInput({ value, onChangeText, candidates, placehol
         ) : null}
         <TextInput
           accessibilityLabel="Message"
-          style={[styles.input, value ? styles.inputTransparent : null]}
           placeholder={placeholder}
           placeholderTextColor={colors.text3}
           selectionColor={colors.info}
           value={value}
           onChangeText={onChangeText}
+          onBlur={onBlur}
+          onContentSizeChange={(event) => {
+            setMeasuredHeight(composerHeight(value, event.nativeEvent.contentSize.height));
+          }}
           multiline
           editable={editable}
+          scrollEnabled={measuredHeight >= 132}
+          style={[styles.input, { height: measuredHeight }, value ? styles.inputTransparent : null]}
         />
       </View>
     </View>

@@ -10,6 +10,8 @@ import { colors, radius, shadow, space, type } from '../theme/tokens';
 import { LinkPreviewCard } from './LinkPreviewCard';
 import { LongMessageSheet } from './LongMessageSheet';
 import { ScoutRichText } from './ScoutRichText';
+import { ChatAvatar } from './ChatAvatar';
+import { messageLongPressDelayMs } from './messageGestures';
 import {
   extractHttpUrls,
   groupMessageReactions,
@@ -20,6 +22,8 @@ export type MessageBubbleProps = {
   message: ScoutMessage;
   own: boolean;
   showAuthor: boolean;
+  showAvatar?: boolean;
+  avatarDataURL?: string;
   sessionToken: string;
   viewerEmail: string;
   timestampReveal: Animated.Value;
@@ -62,6 +66,8 @@ export const MessageBubble = React.memo(function MessageBubble({
   message,
   own,
   showAuthor,
+  showAvatar = false,
+  avatarDataURL,
   sessionToken,
   viewerEmail,
   timestampReveal,
@@ -103,12 +109,19 @@ export const MessageBubble = React.memo(function MessageBubble({
         {message.editedAt ? <Text style={styles.editedLabel}>Edited</Text> : null}
         <Text style={styles.time}>{timeOf(message)}</Text>
       </Animated.View>
+      {!own && !scout ? (
+        <View style={styles.avatarSlot}>
+          {showAvatar ? (
+            <ChatAvatar name={String(message.authorName ?? 'Someone')} avatarDataURL={avatarDataURL} size={28} />
+          ) : null}
+        </View>
+      ) : null}
       <Animated.View style={[styles.stack, own && styles.stackOwn, translated]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`${own ? 'You' : String(message.authorName ?? (scout ? 'Scout' : 'Someone'))}: ${body || `${files.length} attachment${files.length === 1 ? '' : 's'}`}. ${message.editedAt ? 'Edited. ' : ''}${timeOf(message)}`}
           accessibilityHint={longMessage ? 'Opens the full message. Touch and hold for message actions' : 'Touch and hold for message actions'}
-          delayLongPress={430}
+          delayLongPress={messageLongPressDelayMs}
           onPress={longMessage ? () => setShowFullMessage(true) : undefined}
           onLongPress={() => onLongPress?.(message, own)}
           style={[
@@ -138,7 +151,7 @@ export const MessageBubble = React.memo(function MessageBubble({
               accessibilityHint="Jumps to the original message"
               onPress={() => onOpenReplySource?.(replyTo.messageId)}
               onLongPress={() => onLongPress?.(message, own)}
-              delayLongPress={430}
+              delayLongPress={messageLongPressDelayMs}
               style={({ pressed }) => [styles.replyContext, pressed && styles.replyContextPressed]}
             >
               <View style={[styles.replyLine, own && styles.replyLineOwn]} />
@@ -207,7 +220,7 @@ export const MessageBubble = React.memo(function MessageBubble({
                 accessibilityLabel={`Open ${file.name}`}
                 onPress={() => onOpenAttachment?.(file)}
                 onLongPress={() => onLongPress?.(message, own)}
-                delayLongPress={430}
+                delayLongPress={messageLongPressDelayMs}
                 style={({ pressed }) => [
                   styles.attachment,
                   image && styles.attachmentMedia,
@@ -301,6 +314,7 @@ const styles = StyleSheet.create({
   rowWithReactions: { marginTop: space[5] },
   rowOwn: { justifyContent: 'flex-end' },
   timestampWrap: { position: 'absolute', top: 0, right: space[4], bottom: 0, justifyContent: 'center' },
+  avatarSlot: { width: 34, alignSelf: 'stretch', alignItems: 'flex-start', justifyContent: 'flex-end', paddingBottom: 1 },
   time: { fontSize: 11, lineHeight: 13, fontVariant: ['tabular-nums'], color: colors.text3, textAlign: 'right' },
   editedLabel: { fontSize: 10, lineHeight: 12, fontWeight: '600', color: colors.text3, textAlign: 'right' },
   stack: { maxWidth: '82%', alignItems: 'flex-start' },

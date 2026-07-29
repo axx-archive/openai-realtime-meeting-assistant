@@ -167,6 +167,7 @@ export type GiphySearchResult = {
 export type ChatMentionCandidate = {
   name: string;
   email?: string;
+  avatarDataURL?: string;
   kind: 'person' | 'scout';
 };
 

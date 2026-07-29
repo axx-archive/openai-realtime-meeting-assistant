@@ -6,9 +6,10 @@ import (
 )
 
 type chatMentionCandidate struct {
-	Name  string `json:"name"`
-	Email string `json:"email,omitempty"`
-	Kind  string `json:"kind"`
+	Name          string `json:"name"`
+	Email         string `json:"email,omitempty"`
+	Kind          string `json:"kind"`
+	AvatarDataURL string `json:"avatarDataURL,omitempty"`
 }
 
 func chatMentionCandidates(viewerEmail string) []chatMentionCandidate {
@@ -23,7 +24,11 @@ func chatMentionCandidates(viewerEmail string) []chatMentionCandidate {
 		if name == "" {
 			continue
 		}
-		candidates = append(candidates, chatMentionCandidate{Name: name, Email: email, Kind: "person"})
+		avatarDataURL := ""
+		if user := accountStore().findUser(email); user != nil {
+			avatarDataURL = user.AvatarDataURL
+		}
+		candidates = append(candidates, chatMentionCandidate{Name: name, Email: email, Kind: "person", AvatarDataURL: avatarDataURL})
 	}
 	return candidates
 }
