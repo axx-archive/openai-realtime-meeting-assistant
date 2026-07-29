@@ -9,6 +9,7 @@ import type { LinkPreview } from '../api/types';
 import { API_BASE_URL, NATIVE_CLIENT_HEADER } from '../config';
 import { buildApiUrl, buildAuthHeaders } from '../api/requestHelpers';
 import { colors, radius, space, type } from '../theme/tokens';
+import { cachedLinkPreview } from './linkPreviewCache';
 
 const previewCache = new Map<string, Promise<LinkPreview | null>>();
 const resolvedPreviewCache = new Map<string, LinkPreview | null>();
@@ -21,9 +22,7 @@ function previewFor(sessionToken: string, url: string): Promise<LinkPreview | nu
   const key = previewCacheKey(url);
   const cached = previewCache.get(key);
   if (cached) return cached;
-  const request = api.linkPreview(sessionToken, url)
-    .then((result) => result.preview)
-    .catch(() => null)
+  const request = cachedLinkPreview(url, () => api.linkPreview(sessionToken, url).then((result) => result.preview))
     .then((value) => {
       resolvedPreviewCache.set(key, value);
       return value;

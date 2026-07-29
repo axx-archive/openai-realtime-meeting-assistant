@@ -85,6 +85,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   const firstURL = urls[0]?.url ?? '';
   const linkOnly = urls.length === 1 && body.trim() === firstURL;
   const standaloneLinkPreview = linkOnly && !replyTo;
+  const attachmentOnly = !body && !replyTo && files.length > 0;
   const reactions = useMemo(
     () => groupMessageReactions(message.reactions, viewerEmail),
     [message.reactions, viewerEmail],
@@ -115,6 +116,7 @@ export const MessageBubble = React.memo(function MessageBubble({
             own ? styles.bubbleOwn : styles.bubbleOther,
             scout && styles.bubbleScout,
             standaloneLinkPreview && styles.bubbleLinkOnly,
+            attachmentOnly && styles.bubbleAttachmentOnly,
           ]}
         >
           {showAuthor && !own ? (
@@ -198,7 +200,6 @@ export const MessageBubble = React.memo(function MessageBubble({
           {files.map((file) => {
             const imageAttachment = file.mime?.toLowerCase().startsWith('image/');
             const image = imageAttachment && authenticatedFileUrl(file);
-            const gif = file.mime?.toLowerCase() === 'image/gif';
             return (
               <Pressable
                 key={`${file.ref}-${file.name}`}
@@ -207,7 +208,12 @@ export const MessageBubble = React.memo(function MessageBubble({
                 onPress={() => onOpenAttachment?.(file)}
                 onLongPress={() => onLongPress?.(message, own)}
                 delayLongPress={430}
-                style={({ pressed }) => [styles.attachment, image && styles.attachmentMedia, pressed && styles.attachmentPressed]}
+                style={({ pressed }) => [
+                  styles.attachment,
+                  image && styles.attachmentMedia,
+                  image && styles.attachmentVisual,
+                  pressed && styles.attachmentPressed,
+                ]}
               >
                 {image ? (
                   <>
@@ -218,11 +224,6 @@ export const MessageBubble = React.memo(function MessageBubble({
                       recyclingKey={file.ref}
                       style={styles.attachmentImage}
                     />
-                    {gif ? <View style={styles.gifBadge}><Text style={styles.gifBadgeText}>GIF</Text></View> : null}
-                    <View style={styles.attachmentMediaFooter}>
-                      <SymbolView name={gif ? 'sparkles' : 'photo'} tintColor={colors.text2} size={13} />
-                      <Text numberOfLines={1} style={styles.attachmentMediaText}>{attachmentLabel(file)}</Text>
-                    </View>
                   </>
                 ) : (
                   <>
@@ -309,6 +310,7 @@ const styles = StyleSheet.create({
   bubbleOwn: { backgroundColor: colors.accent, borderBottomRightRadius: radius.sm },
   bubbleScout: { backgroundColor: colors.surface1, borderColor: colors.ember },
   bubbleLinkOnly: { overflow: 'visible', paddingHorizontal: 0, paddingVertical: 0, borderWidth: 0, backgroundColor: 'transparent' },
+  bubbleAttachmentOnly: { overflow: 'visible', paddingHorizontal: 0, paddingVertical: 0, borderWidth: 0, backgroundColor: 'transparent' },
   author: { fontSize: 13, fontWeight: '600', letterSpacing: -0.05, lineHeight: 17, color: colors.text2, marginBottom: 3 },
   authorScout: { color: colors.emberText },
   viaChip: { alignSelf: 'flex-start', paddingHorizontal: 7, paddingVertical: 2, borderRadius: radius.full, backgroundColor: colors.emberSoft, marginBottom: 4 },
@@ -339,12 +341,9 @@ const styles = StyleSheet.create({
   readMoreTextOwn: { color: colors.onAccent },
   attachment: { minWidth: 210, maxWidth: 280, minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: space[2], marginTop: space[2], paddingRight: space[3], overflow: 'hidden', borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line2, backgroundColor: colors.surface1 },
   attachmentMedia: { width: 248, minHeight: 0, flexDirection: 'column', alignItems: 'stretch', gap: 0, paddingRight: 0, backgroundColor: colors.surface1 },
+  attachmentVisual: { marginTop: 0, borderWidth: 0, borderRadius: radius.lg, backgroundColor: 'transparent' },
   attachmentPressed: { opacity: 0.76, transform: [{ scale: 0.98 }] },
   attachmentImage: { width: '100%', height: 168, backgroundColor: colors.surface3 },
-  attachmentMediaFooter: { minHeight: 38, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: space[3], backgroundColor: colors.surface1 },
-  attachmentMediaText: { ...type.captionMedium, flex: 1, color: colors.text1 },
-  gifBadge: { position: 'absolute', top: 9, right: 9, zIndex: 2, paddingHorizontal: 7, paddingVertical: 3, borderRadius: radius.full, backgroundColor: 'rgba(0,0,0,0.64)' },
-  gifBadgeText: { ...type.label, color: '#FFFFFF', letterSpacing: 0.5 },
   fileIcon: { width: 42, height: 42, marginLeft: 7, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm, backgroundColor: colors.surface3 },
   attachmentText: { ...type.captionMedium, flex: 1, color: colors.text1 },
   reactions: { position: 'absolute', top: -17, zIndex: 2, flexDirection: 'row', gap: 5 },

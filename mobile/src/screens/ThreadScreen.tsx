@@ -383,7 +383,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         try {
           uploaded.push(await api.uploadScoutAttachment(sessionToken, asset));
         } catch (caught) {
-          failures.push(caught instanceof BonfireApiError ? caught.message : `${asset.name} could not be attached.`);
+          failures.push(caught instanceof Error ? caught.message : `${asset.name} could not be attached.`);
         }
       }
       if (uploaded.length > 0) {

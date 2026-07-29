@@ -1,3 +1,5 @@
+import { File } from 'expo-file-system';
+
 import {
   API_BASE_URL,
   NATIVE_CLIENT_HEADER,
@@ -611,21 +613,28 @@ export const api = {
     file: { uri: string; name: string; mime: string },
   ): Promise<ScoutFileAttachment> {
     const form = new FormData();
-    // Native picker URIs are file:// or content:// handles. Fetching one into a
-    // JS Blob is unreliable on device (and needlessly duplicates the file in
-    // memory); React Native's multipart bridge can stream the URI directly.
-    form.append('file', {
-      uri: file.uri,
-      name: file.name,
-      type: file.mime,
-    } as unknown as Blob);
+    // Expo SDK 57's WinterCG fetch accepts Blob-compatible FileSystem Files,
+    // not React Native's legacy { uri, name, type } FormData shape. File reads
+    // the picker/cache URI directly without a second JS-memory copy.
+    form.append('file', new File(file.uri));
     const response = await fetch(buildApiUrl(API_BASE_URL, '/assistant/attachments'), {
       method: 'POST',
       // Deliberately omit Content-Type so fetch adds the multipart boundary.
       headers: buildAuthHeaders(NATIVE_CLIENT_HEADER, sessionToken),
       body: form,
     });
-    const payload = await response.json() as { error?: string; ref?: string; mime?: string; size?: number };
+    const rawPayload = await response.text();
+    let payload: { error?: string; ref?: string; mime?: string; size?: number } = {};
+    try {
+      payload = rawPayload ? JSON.parse(rawPayload) as typeof payload : {};
+    } catch {
+      throw new BonfireApiError(
+        response.status,
+        response.ok
+          ? 'The attachment service returned an unreadable response.'
+          : `Attachment upload failed (${response.status}).`,
+      );
+    }
     if (!response.ok || !payload.ref || !payload.mime) {
       if (response.status === 401) unauthorizedHandler?.();
       throw new BonfireApiError(response.status, payload.error || 'Attachment upload failed.');
@@ -650,14 +659,8 @@ export const api = {
     options: { context?: 'chat' | 'board' | 'search'; threadId?: string } = {},
   ): Promise<{ text: string; durationMs: number; model: string; biased: boolean }> {
     const form = new FormData();
-    // React Native's FormData takes the local file URI directly — reading the
-    // recording into a JS blob first would double a multi-megabyte recording in
-    // memory for no benefit.
-    form.append('audio', {
-      uri: recording.uri,
-      name: 'dictation.m4a',
-      type: 'audio/m4a',
-    } as unknown as Blob);
+    // Use the same SDK 57 File-backed multipart path as chat attachments.
+    form.append('audio', new File(recording.uri));
     form.append('durationMs', String(Math.round(recording.durationMs)));
     if (options.context) form.append('context', options.context);
     if (options.threadId) form.append('threadId', options.threadId);

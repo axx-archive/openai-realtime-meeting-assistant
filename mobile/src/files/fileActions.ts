@@ -18,6 +18,15 @@ function safeLocalName(name: string): string {
     .slice(0, 140) || 'Bonfire file';
 }
 
+function stableCacheKey(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
 export function remoteFilePath(file: RemoteFile): string {
   if (file.downloadUrl?.trim()) return file.downloadUrl.trim();
   if (!file.ref?.trim()) return '';
@@ -57,10 +66,12 @@ export async function downloadRemoteFile(
 
   const destination = new File(
     Paths.cache,
-    `bonfire-${Date.now()}-${safeLocalName(file.name)}`,
+    `bonfire-preview-${stableCacheKey(remoteFilePath(file))}-${safeLocalName(file.name)}`,
   );
+  if (destination.exists && destination.size > 0) return destination;
   return File.downloadFileAsync(url, destination, {
     headers: authenticatedFileHeaders(sessionToken, file.mime),
+    idempotent: true,
   });
 }
 

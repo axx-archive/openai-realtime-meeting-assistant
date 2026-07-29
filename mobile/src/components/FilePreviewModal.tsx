@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -13,8 +13,8 @@ import { Image } from 'expo-image';
 import { WebView } from 'react-native-webview';
 import { SymbolView } from 'expo-symbols';
 import {
-  authenticatedFileHeaders,
   authenticatedFileUrl,
+  downloadRemoteFile,
   shareOrSaveRemoteFile,
   type RemoteFile,
 } from '../files/fileActions';
@@ -30,8 +30,27 @@ export function FilePreviewModal({ file, sessionToken, onClose }: Props) {
   const [loading, setLoading] = useState(true);
   const [sharing, setSharing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [localPreviewUrl, setLocalPreviewUrl] = useState('');
   const url = file ? authenticatedFileUrl(file) : '';
   const image = Boolean(file?.mime?.toLowerCase().startsWith('image/'));
+
+  useEffect(() => {
+    let active = true;
+    setLocalPreviewUrl('');
+    if (!file || !url || !sessionToken) return () => { active = false; };
+    setLoading(true);
+    setError(null);
+    void downloadRemoteFile(sessionToken, file)
+      .then((downloaded) => {
+        if (active) setLocalPreviewUrl(downloaded.uri);
+      })
+      .catch((caught) => {
+        if (!active) return;
+        setLoading(false);
+        setError(caught instanceof Error ? caught.message : 'The file could not be downloaded.');
+      });
+    return () => { active = false; };
+  }, [file?.name, file?.ref, sessionToken, url]);
 
   async function share() {
     if (!file || sharing) return;
@@ -54,10 +73,6 @@ export function FilePreviewModal({ file, sessionToken, onClose }: Props) {
       animationType="slide"
       presentationStyle="fullScreen"
       onRequestClose={onClose}
-      onShow={() => {
-        setLoading(true);
-        setError(null);
-      }}
     >
       <SafeAreaView style={styles.safe} edges={['top', 'right', 'bottom', 'left']}>
         <View style={styles.toolbar}>
@@ -91,33 +106,30 @@ export function FilePreviewModal({ file, sessionToken, onClose }: Props) {
           </Pressable>
         </View>
         <View style={styles.preview}>
-          {file && url && image ? (
+          {file && localPreviewUrl && image ? (
             <Image
-              source={{
-                uri: url,
-                headers: authenticatedFileHeaders(sessionToken, file.mime),
-              }}
+              source={{ uri: localPreviewUrl }}
               accessibilityLabel={`Preview of ${file.name}`}
               cachePolicy="memory-disk"
               contentFit="contain"
-              recyclingKey={file.ref}
+              recyclingKey={`${file.ref}-full-preview`}
               onLoadStart={() => {
                 setLoading(true);
                 setError(null);
               }}
               onLoad={() => setLoading(false)}
+              onDisplay={() => setLoading(false)}
               onError={() => {
                 setLoading(false);
                 setError('The image preview could not be loaded. You can still share or save the file.');
               }}
               style={styles.image}
             />
-          ) : file && url ? (
+          ) : file && localPreviewUrl ? (
             <WebView
-              source={{
-                uri: url,
-                headers: authenticatedFileHeaders(sessionToken, file.mime),
-              }}
+              source={{ uri: localPreviewUrl }}
+              originWhitelist={['file://*']}
+              allowFileAccess
               style={styles.web}
               javaScriptEnabled={false}
               sharedCookiesEnabled={false}
