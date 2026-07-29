@@ -8,8 +8,7 @@ import { OfficeEventsProvider } from './src/realtime/OfficeEventsContext';
 
 function AdaptiveStatusBar() {
   const system = useColorScheme();
-  const { user } = useAuth();
-  const preference = user?.themePref ?? 'system';
+  const { themePreference: preference } = useAuth();
   useEffect(() => {
     const colorScheme = preference === 'dark' ? 'dark' : preference === 'light' ? 'light' : 'unspecified';
     Appearance.setColorScheme(colorScheme);

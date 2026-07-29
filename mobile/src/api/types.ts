@@ -154,6 +154,16 @@ export type LinkPreview = {
   publishedAt?: string;
 };
 
+export type GiphySearchResult = {
+  id: string;
+  title: string;
+  previewUrl: string;
+  stillUrl?: string;
+  mediaUrl: string;
+  width: number;
+  height: number;
+};
+
 export type ChatMentionCandidate = {
   name: string;
   email?: string;

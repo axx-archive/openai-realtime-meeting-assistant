@@ -86,11 +86,20 @@ export function usePushRegistration({ sessionToken, onOpenTarget }: PushRegistra
     // to navigate to the thing they were just told about.
     const initial = Notifications.getLastNotificationResponse();
     const initialTarget = parsePushTarget(initial?.notification?.request?.content?.data);
-    if (initialTarget) openRef.current(initialTarget);
+    if (initialTarget) {
+      openRef.current(initialTarget);
+      // The API exposes the most recently handled response, not only the one
+      // that launched this process. Consume it after routing so a later
+      // navigator remount cannot reopen a stale thread.
+      Notifications.clearLastNotificationResponse();
+    }
 
     const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
       const target = parsePushTarget(response.notification.request.content.data);
-      if (target) openRef.current(target);
+      if (target) {
+        openRef.current(target);
+        Notifications.clearLastNotificationResponse();
+      }
     });
     return () => subscription.remove();
   }, []);

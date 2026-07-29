@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
-  Image,
   Pressable,
   StyleSheet,
   Switch,
@@ -10,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as Passkeys from 'react-native-passkeys';
 import { SymbolView } from 'expo-symbols';
@@ -18,16 +18,22 @@ import { useAuth } from '../auth/AuthContext';
 import { passkeyErrorMessage } from '../auth/passkeyError';
 import { Screen } from '../components/Screen';
 import { useShowPreviews } from '../canvas/previewPreference';
+import { prepareAvatarDataURL } from '../profile/prepareAvatar';
+import {
+  MOBILE_THEME_PREFERENCES,
+  type MobileThemePreference,
+} from '../theme/appearancePreference';
 import { colors, hitMin, radius, shadow, space, type } from '../theme/tokens';
 
 type PasskeyRow = { id: string; label: string };
-const themes = ['system', 'light', 'dark'] as const;
 
 export function SettingsScreen() {
   const {
     user,
     sessionToken,
     updateIdentity,
+    themePreference,
+    changeThemePreference,
     changePassword,
     signOut,
   } = useAuth();
@@ -39,6 +45,7 @@ export function SettingsScreen() {
   const [busy, setBusy] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
 
   const loadPasskeys = useCallback(async () => {
     if (!sessionToken) return;
@@ -77,25 +84,48 @@ export function SettingsScreen() {
   }
 
   async function chooseAvatar() {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.72,
-      base64: true,
-    });
-    if (result.canceled || !result.assets[0]?.base64) return;
-    const asset = result.assets[0];
-    await saveProfile(`data:${asset.mimeType ?? 'image/jpeg'};base64,${asset.base64}`);
+    if (!sessionToken || !displayName.trim()) {
+      setError('Add a display name before choosing a profile photo.');
+      return;
+    }
+    setError(null);
+    setStatus(null);
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 1,
+        shouldDownloadFromNetwork: true,
+      });
+      if (result.canceled || !result.assets[0]) return;
+
+      setBusy('avatar');
+      const asset = result.assets[0];
+      const avatarDataURL = await prepareAvatarDataURL(asset.uri, asset.width);
+      setAvatarPreview(avatarDataURL);
+      const identity = await api.updateProfile(
+        sessionToken,
+        displayName.trim(),
+        avatarDataURL,
+      );
+      updateIdentity(identity);
+      setDisplayName(identity.name);
+      setStatus('Profile photo updated.');
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      fail(err);
+    } finally {
+      setAvatarPreview(null);
+      setBusy(null);
+    }
   }
 
-  async function setTheme(theme: (typeof themes)[number]) {
-    if (!sessionToken) return;
+  async function selectTheme(theme: MobileThemePreference) {
     setBusy('theme');
     setError(null);
     try {
-      const identity = await api.setTheme(sessionToken, theme);
-      updateIdentity(identity);
+      await changeThemePreference(theme);
       setStatus(`Appearance set to ${theme}.`);
       await Haptics.selectionAsync();
     } catch (err) {
@@ -184,15 +214,27 @@ export function SettingsScreen() {
       <View style={[styles.section, shadow[1]]}>
         <Pressable
           accessibilityRole="button"
-          onPress={chooseAvatar} style={styles.avatarButton}>
-          {user?.avatarDataURL ? (
-            <Image source={{ uri: user.avatarDataURL }} style={styles.avatar} />
+          accessibilityLabel="Change profile photo"
+          accessibilityHint="Opens your photo library and saves the selected image to your profile."
+          disabled={busy === 'avatar' || busy === 'profile'}
+          onPress={chooseAvatar}
+          style={({ pressed }) => [styles.avatarButton, pressed && styles.pressed]}
+        >
+          {avatarPreview || user?.avatarDataURL ? (
+            <Image
+              source={{ uri: avatarPreview || user?.avatarDataURL }}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              style={styles.avatar}
+            />
           ) : (
             <View style={[styles.avatar, styles.avatarFallback]}>
               <Text style={styles.avatarInitial}>{(user?.name || '?').slice(0, 1).toUpperCase()}</Text>
             </View>
           )}
-          <Text style={styles.avatarAction}>Change photo</Text>
+          <Text style={styles.avatarAction}>
+            {busy === 'avatar' ? 'Saving photo…' : 'Change photo'}
+          </Text>
         </Pressable>
         <TextInput
           accessibilityLabel="Display name"
@@ -217,13 +259,13 @@ export function SettingsScreen() {
 
       <Text style={styles.sectionTitle}>Appearance</Text>
       <View style={[styles.segment, shadow[1]]}>
-        {themes.map((theme) => {
-          const selected = (user?.themePref ?? 'system') === theme;
+        {MOBILE_THEME_PREFERENCES.map((theme) => {
+          const selected = themePreference === theme;
           return (
             <Pressable
               accessibilityRole="button"
               key={theme}
-              onPress={() => void setTheme(theme)}
+              onPress={() => void selectTheme(theme)}
               style={[styles.segmentItem, selected && styles.segmentSelected]}
             >
               <Text style={[styles.segmentText, selected && styles.segmentTextSelected]}>
@@ -318,7 +360,13 @@ const styles = StyleSheet.create({
   error: { ...type.bodySm, color: colors.danger, backgroundColor: colors.dangerSoft, padding: space[3], borderRadius: radius.md },
   status: { ...type.bodySm, color: colors.live, backgroundColor: colors.liveSoft, padding: space[3], borderRadius: radius.md },
   avatarButton: { flexDirection: 'row', alignItems: 'center', gap: space[3] },
-  avatar: { width: 58, height: 58, borderRadius: 20 },
+  avatar: {
+    width: 58,
+    height: 58,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.line2,
+  },
   avatarFallback: { backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
   avatarInitial: { ...type.title2, color: colors.onAccent },
   avatarAction: { ...type.bodyMedium, color: colors.text1 },

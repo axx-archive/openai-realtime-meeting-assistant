@@ -15,6 +15,7 @@ import type {
   ScoutThreadsResponse,
   ScoutFileAttachment,
   LinkPreview,
+  GiphySearchResult,
   ChatMentionCandidate,
   ThreadDigestResponse,
 } from './types';
@@ -594,18 +595,35 @@ export const api = {
     return request(`/assistant/link-preview?url=${encodeURIComponent(url)}`, { sessionToken });
   },
 
+  searchGiphy(
+    sessionToken: string,
+    query: string,
+    signal?: AbortSignal,
+  ): Promise<{ ok: boolean; results: GiphySearchResult[] }> {
+    return request(
+      `/assistant/giphy/search?q=${encodeURIComponent(query.trim())}&limit=20`,
+      { sessionToken, signal },
+    );
+  },
+
   async uploadScoutAttachment(
     sessionToken: string,
     file: { uri: string; name: string; mime: string },
   ): Promise<ScoutFileAttachment> {
-    const localResponse = await fetch(file.uri);
-    const body = await localResponse.blob();
+    const form = new FormData();
+    // Native picker URIs are file:// or content:// handles. Fetching one into a
+    // JS Blob is unreliable on device (and needlessly duplicates the file in
+    // memory); React Native's multipart bridge can stream the URI directly.
+    form.append('file', {
+      uri: file.uri,
+      name: file.name,
+      type: file.mime,
+    } as unknown as Blob);
     const response = await fetch(buildApiUrl(API_BASE_URL, '/assistant/attachments'), {
       method: 'POST',
-      headers: buildAuthHeaders(NATIVE_CLIENT_HEADER, sessionToken, {
-        'Content-Type': file.mime,
-      }),
-      body,
+      // Deliberately omit Content-Type so fetch adds the multipart boundary.
+      headers: buildAuthHeaders(NATIVE_CLIENT_HEADER, sessionToken),
+      body: form,
     });
     const payload = await response.json() as { error?: string; ref?: string; mime?: string; size?: number };
     if (!response.ok || !payload.ref || !payload.mime) {

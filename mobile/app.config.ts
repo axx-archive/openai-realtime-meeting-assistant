@@ -31,10 +31,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         dark: './assets/ios-icon-dark.png',
         tinted: './assets/ios-icon-tinted.png',
       },
-      // Build 20 layers the elevated #team chat experience onto the verified
-      // voice-first media release from build 19.
+      // Build 21 hardens native chat attachments, first-launch appearance,
+      // profile photos, keyboard dismissal, and visual stability on build 20.
       // Pin the multi-target release so the app and ReplayKit extension match.
-      buildNumber: '20',
+      buildNumber: '21',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',
@@ -51,7 +51,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         NSMicrophoneUsageDescription:
           'BonfireOS uses the microphone when you join a live room, talk to Scout, or dictate a message.',
         NSPhotoLibraryUsageDescription:
-          'BonfireOS can attach photos to Scout threads and board cards.',
+          'BonfireOS uses selected photos for your profile and chat attachments.',
         // Audio keeps the call audible; VoIP lets iOS 18+ grant WebRTC's
         // multitasking camera access while the call is in Picture in Picture.
         UIBackgroundModes: ['audio', 'voip'],

@@ -11,12 +11,24 @@ import { buildApiUrl, buildAuthHeaders } from '../api/requestHelpers';
 import { colors, radius, space, type } from '../theme/tokens';
 
 const previewCache = new Map<string, Promise<LinkPreview | null>>();
+const resolvedPreviewCache = new Map<string, LinkPreview | null>();
+
+function previewCacheKey(url: string): string {
+  return url;
+}
 
 function previewFor(sessionToken: string, url: string): Promise<LinkPreview | null> {
-  const cached = previewCache.get(url);
+  const key = previewCacheKey(url);
+  const cached = previewCache.get(key);
   if (cached) return cached;
-  const request = api.linkPreview(sessionToken, url).then((result) => result.preview).catch(() => null);
-  previewCache.set(url, request);
+  const request = api.linkPreview(sessionToken, url)
+    .then((result) => result.preview)
+    .catch(() => null)
+    .then((value) => {
+      resolvedPreviewCache.set(key, value);
+      return value;
+    });
+  previewCache.set(key, request);
   return request;
 }
 
@@ -37,14 +49,22 @@ type Props = {
 };
 
 export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessionToken, own, seamless = false, onLongPress }: Props) {
-  const [preview, setPreview] = useState<LinkPreview | null | undefined>(undefined);
+  const key = previewCacheKey(url);
+  const [preview, setPreview] = useState<LinkPreview | null | undefined>(() => (
+    resolvedPreviewCache.has(key) ? resolvedPreviewCache.get(key) : undefined
+  ));
   useEffect(() => {
     let active = true;
+    if (resolvedPreviewCache.has(key)) {
+      setPreview(resolvedPreviewCache.get(key));
+      return () => { active = false; };
+    }
+    setPreview(undefined);
     void previewFor(sessionToken, url).then((value) => {
       if (active) setPreview(value);
     });
     return () => { active = false; };
-  }, [sessionToken, url]);
+  }, [key, sessionToken, url]);
 
   const imageSource = useMemo(() => {
     const path = preview?.imageUrl?.trim();
@@ -111,7 +131,7 @@ export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessio
       >
         <View style={styles.postHeader}>
           {imageSource ? (
-            <Image source={imageSource} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`${url}-avatar`} transition={160} style={styles.avatar} />
+            <Image source={imageSource} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`${url}-avatar`} style={styles.avatar} />
           ) : (
             <View style={[styles.avatar, styles.avatarFallback]}><Text style={styles.avatarInitial}>{author.slice(0, 1)}</Text></View>
           )}
@@ -155,7 +175,6 @@ export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessio
             cachePolicy="memory-disk"
             contentFit="cover"
             recyclingKey={url}
-            transition={160}
             style={StyleSheet.absoluteFill}
           />
           <View pointerEvents="none" style={styles.imageOutline} />

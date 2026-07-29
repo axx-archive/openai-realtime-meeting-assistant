@@ -929,6 +929,7 @@ func main() {
 	http.HandleFunc("/assistant/attachments", assistantAttachmentUploadHandler)
 	http.HandleFunc("/assistant/link-preview", assistantLinkPreviewHandler)
 	http.HandleFunc("/assistant/link-preview/image", assistantLinkPreviewImageHandler)
+	http.HandleFunc("/assistant/giphy/search", assistantGiphySearchHandler)
 	http.HandleFunc("/assistant/chat-participants", assistantChatParticipantsHandler)
 	http.HandleFunc("/assistant/transcribe", assistantTranscribeHandler)
 	http.HandleFunc("/assistant/threads", assistantThreadsHandler)

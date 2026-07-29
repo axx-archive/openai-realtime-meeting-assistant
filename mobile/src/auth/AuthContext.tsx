@@ -11,17 +11,27 @@ import * as Passkeys from 'react-native-passkeys';
 import { api, BonfireApiError, setUnauthorizedHandler } from '../api/client';
 import type { Identity } from '../api/types';
 import { LAST_NAME_STORAGE_KEY, PUSH_TOKEN_STORAGE_KEY, SESSION_STORAGE_KEY } from '../config';
+import {
+  resolveInstalledThemePreference,
+  type MobileThemePreference,
+} from '../theme/appearancePreference';
+import {
+  readInstalledThemePreference,
+  writeInstalledThemePreference,
+} from '../theme/mobileAppearanceStore';
 
 type AuthState = {
   user: Identity | null;
   sessionToken: string | null;
   bootstrapping: boolean;
   lastLoginName: string;
+  themePreference: MobileThemePreference;
   signIn: (name: string, password: string) => Promise<void>;
   signInWithPasskey: () => Promise<void>;
   signOut: () => Promise<void>;
   refreshMe: () => Promise<void>;
   updateIdentity: (identity: Identity) => void;
+  changeThemePreference: (preference: MobileThemePreference) => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
 };
 
@@ -52,10 +62,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [bootstrapping, setBootstrapping] = useState(true);
   const [lastLoginName, setLastLoginName] = useState('');
+  const [themePreference, setThemePreference] = useState<MobileThemePreference>('system');
 
   const clearLocalSession = useCallback(async () => {
     setUser(null);
     setSessionToken(null);
+    setThemePreference('system');
     await writeSecure(SESSION_STORAGE_KEY, null);
   }, []);
 
@@ -69,9 +81,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [token, savedName] = await Promise.all([
+      const [token, savedName, installedTheme] = await Promise.all([
         readSecure(SESSION_STORAGE_KEY),
         readSecure(LAST_NAME_STORAGE_KEY),
+        readInstalledThemePreference(),
       ]);
       if (cancelled) return;
       if (savedName) setLastLoginName(savedName);
@@ -81,6 +94,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       try {
         const me = await api.me(token);
+        if (cancelled) return;
+        const preference = resolveInstalledThemePreference(installedTheme, me.email);
+        setThemePreference(preference);
+        await writeInstalledThemePreference(me.email, preference);
         if (cancelled) return;
         setSessionToken(token);
         setUser(me);
@@ -111,7 +128,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     await writeSecure(SESSION_STORAGE_KEY, token);
     await writeSecure(LAST_NAME_STORAGE_KEY, name.trim());
+    const preference = resolveInstalledThemePreference(
+      await readInstalledThemePreference(),
+      identity.email,
+    );
+    await writeInstalledThemePreference(identity.email, preference);
     setLastLoginName(name.trim());
+    setThemePreference(preference);
     setSessionToken(token);
     setUser(identity);
   }, []);
@@ -128,7 +151,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!token) throw new Error('The server did not return a native session.');
     await writeSecure(SESSION_STORAGE_KEY, token);
     await writeSecure(LAST_NAME_STORAGE_KEY, identity.name);
+    const preference = resolveInstalledThemePreference(
+      await readInstalledThemePreference(),
+      identity.email,
+    );
+    await writeInstalledThemePreference(identity.email, preference);
     setLastLoginName(identity.name);
+    setThemePreference(preference);
     setSessionToken(token);
     setUser(identity);
   }, []);
@@ -155,6 +184,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const updateIdentity = useCallback((identity: Identity) => setUser(identity), []);
 
+  const changeThemePreference = useCallback(
+    async (preference: MobileThemePreference) => {
+      if (!sessionToken || !user) throw new Error('Sign in again to change appearance.');
+      const identity = await api.setTheme(sessionToken, preference);
+      await writeInstalledThemePreference(user.email, preference);
+      setThemePreference(preference);
+      setUser(identity);
+    },
+    [sessionToken, user],
+  );
+
   const changePassword = useCallback(
     async (currentPassword: string, newPassword: string) => {
       if (!sessionToken) throw new Error('Sign in again to change your password.');
@@ -174,11 +214,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       sessionToken,
       bootstrapping,
       lastLoginName,
+      themePreference,
       signIn,
       signInWithPasskey,
       signOut,
       refreshMe,
       updateIdentity,
+      changeThemePreference,
       changePassword,
     }),
     [
@@ -186,11 +228,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       sessionToken,
       bootstrapping,
       lastLoginName,
+      themePreference,
       signIn,
       signInWithPasskey,
       signOut,
       refreshMe,
       updateIdentity,
+      changeThemePreference,
       changePassword,
     ],
   );

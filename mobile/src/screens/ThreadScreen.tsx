@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  Keyboard,
   KeyboardAvoidingView,
   PanResponder,
   Platform,
@@ -15,13 +16,15 @@ import * as SecureStore from 'expo-secure-store';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
+import { File, Paths } from 'expo-file-system';
 import { SymbolView } from 'expo-symbols';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Linking from 'expo-linking';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { api, BonfireApiError } from '../api/client';
-import type { ChatMentionCandidate, ScoutFileAttachment, ScoutMessage, ThreadDigestResponse } from '../api/types';
+import type { ChatMentionCandidate, GiphySearchResult, ScoutFileAttachment, ScoutMessage, ThreadDigestResponse } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { MessageBubble } from '../messaging/MessageBubble';
 import { firstUnreadIndex } from '../messaging/unreadBoundary';
@@ -29,6 +32,14 @@ import { CatchUpSheet } from '../messaging/CatchUpSheet';
 import { DepositRail } from '../messaging/DepositRail';
 import { MessageActionSheet } from '../messaging/MessageActionSheet';
 import { MentionComposerInput } from '../messaging/MentionComposerInput';
+import { AttachmentSourceSheet } from '../messaging/AttachmentSourceSheet';
+import { GifPickerSheet } from '../messaging/GifPickerSheet';
+import {
+  attachmentBatchMessage,
+  maxMessageAttachments,
+  prepareAttachmentBatch,
+  type AttachmentAssetInput,
+} from '../messaging/attachmentSources';
 import { ThreadNotificationMenu, type ThreadNotificationLevel } from '../messaging/ThreadNotificationMenu';
 import { groupMessageReactions, isOwnMessageForViewer } from '../messaging/messagePresentation';
 import { FilePreviewModal } from '../components/FilePreviewModal';
@@ -79,6 +90,8 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [notificationLevel, setNotificationLevel] = useState<ThreadNotificationLevel>('all');
   const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
   const [notificationBusy, setNotificationBusy] = useState(false);
+  const [attachmentSourceOpen, setAttachmentSourceOpen] = useState(false);
+  const [gifPickerOpen, setGifPickerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // null means "not yet loaded" — distinct from "" which means never read.
   const [readAt, setReadAt] = useState<string | null>(null);
@@ -241,7 +254,10 @@ export function ThreadScreen({ route, navigation }: Props) {
         // and reactions and removes deleted messages without changing IDs or
         // timeline order.
         setMessages(next);
-        if (shouldFollow) requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+        // A background reconciliation should never make the conversation
+        // visibly lurch. The user is already at the bottom, so pin it without
+        // replaying a scroll animation.
+        if (shouldFollow) requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }));
       } catch {
         // A dropped refresh leaves what is already on screen. The next event
         // or a manual reopen recovers it.
@@ -337,8 +353,9 @@ export function ThreadScreen({ route, navigation }: Props) {
       setEditingMessage(null);
       setReplyingTo(null);
       setMessages(response.thread?.messages ?? response.messages ?? []);
+      Keyboard.dismiss();
 	  atBottomRef.current = true;
-	  requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+	  requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }));
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } catch (err) {
       setError(err instanceof BonfireApiError ? err.message : 'Message did not send.');
@@ -347,8 +364,42 @@ export function ThreadScreen({ route, navigation }: Props) {
     }
   }
 
-  async function pickAttachments() {
-    if (!sessionToken || uploading || pendingFiles.length >= 6) return;
+  async function uploadAttachmentAssets(assets: readonly AttachmentAssetInput[]): Promise<boolean> {
+    if (!sessionToken || uploading) return false;
+    const remaining = maxMessageAttachments - pendingFiles.length;
+    const batch = prepareAttachmentBatch(assets, remaining);
+    const issues = attachmentBatchMessage(batch);
+    if (batch.accepted.length === 0) {
+      if (issues) setError(issues);
+      return false;
+    }
+
+    setUploading(true);
+    setError(issues || null);
+    const uploaded: ScoutFileAttachment[] = [];
+    const failures: string[] = [];
+    try {
+      for (const asset of batch.accepted) {
+        try {
+          uploaded.push(await api.uploadScoutAttachment(sessionToken, asset));
+        } catch (caught) {
+          failures.push(caught instanceof BonfireApiError ? caught.message : `${asset.name} could not be attached.`);
+        }
+      }
+      if (uploaded.length > 0) {
+        setPendingFiles((current) => [...current, ...uploaded].slice(0, maxMessageAttachments));
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+      const message = [issues, ...failures].filter(Boolean).join(' ');
+      setError(message || null);
+      return uploaded.length > 0 && failures.length === 0;
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function pickFiles() {
+    if (uploading || pendingFiles.length >= maxMessageAttachments) return;
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf'],
@@ -356,35 +407,56 @@ export function ThreadScreen({ route, navigation }: Props) {
         copyToCacheDirectory: true,
       });
       if (result.canceled) return;
-      const remaining = 6 - pendingFiles.length;
-      const selected = result.assets.slice(0, remaining);
-      const oversized = selected.find((asset) => Number(asset.size ?? 0) > 25 * 1024 * 1024);
-      if (oversized) {
-        setError(`${oversized.name} is larger than the 25 MB attachment limit.`);
-        return;
-      }
-      setUploading(true);
-      setError(null);
-      const uploaded: ScoutFileAttachment[] = [];
-      for (const asset of selected) {
-        const extension = asset.name.split('.').pop()?.toLowerCase();
-        const fallbackMime = extension === 'pdf' ? 'application/pdf'
-          : extension === 'png' ? 'image/png'
-            : extension === 'webp' ? 'image/webp'
-              : extension === 'gif' ? 'image/gif'
-                : 'image/jpeg';
-        uploaded.push(await api.uploadScoutAttachment(sessionToken, {
-          uri: asset.uri,
-          name: asset.name,
-          mime: asset.mimeType || fallbackMime,
-        }));
-      }
-      setPendingFiles((current) => [...current, ...uploaded].slice(0, 6));
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await uploadAttachmentAssets(result.assets.map((asset) => ({
+        uri: asset.uri,
+        name: asset.name,
+        mime: asset.mimeType,
+        size: asset.size,
+      })));
+    } catch {
+      setError('Could not open Files. Please try again.');
+    }
+  }
+
+  async function pickPhotos() {
+    if (uploading || pendingFiles.length >= maxMessageAttachments) return;
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+        selectionLimit: maxMessageAttachments - pendingFiles.length,
+        quality: 1,
+        preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+        shouldDownloadFromNetwork: true,
+      });
+      if (result.canceled) return;
+      await uploadAttachmentAssets(result.assets.map((asset, index) => ({
+        uri: asset.uri,
+        name: asset.fileName || `Photo ${index + 1}.jpg`,
+        mime: asset.mimeType,
+        size: asset.fileSize,
+      })));
+    } catch {
+      setError('Could not open your photo library. Please try again.');
+    }
+  }
+
+  async function addGiphyGif(gif: GiphySearchResult): Promise<boolean> {
+    if (uploading || pendingFiles.length >= maxMessageAttachments) return false;
+    const safeID = gif.id.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80) || 'gif';
+    const destination = new File(Paths.cache, `bonfire-giphy-${safeID}.gif`);
+    try {
+      const downloaded = await File.downloadFileAsync(gif.mediaUrl, destination, { idempotent: true });
+      return await uploadAttachmentAssets([{
+        uri: downloaded.uri,
+        name: `${gif.title?.trim() || 'GIPHY'}.gif`,
+        mime: 'image/gif',
+        size: downloaded.size,
+      }]);
     } catch (caught) {
-      setError(caught instanceof BonfireApiError ? caught.message : 'Could not attach that file.');
-    } finally {
-      setUploading(false);
+      const message = caught instanceof Error ? caught.message : 'Could not download that GIF.';
+      setError(message);
+      throw new Error(message);
     }
   }
 
@@ -524,6 +596,21 @@ export function ThreadScreen({ route, navigation }: Props) {
         onClose={() => setPreviewFile(null)}
       />
 
+      <AttachmentSourceSheet
+        visible={attachmentSourceOpen}
+        onClose={() => setAttachmentSourceOpen(false)}
+        onPhotos={() => void pickPhotos()}
+        onFiles={() => void pickFiles()}
+        onGifs={() => setGifPickerOpen(true)}
+      />
+
+      <GifPickerSheet
+        visible={gifPickerOpen}
+        sessionToken={sessionToken ?? ''}
+        onClose={() => setGifPickerOpen(false)}
+        onSelect={addGiphyGif}
+      />
+
       <MessageActionSheet
         visible={Boolean(actionMessage)}
         own={Boolean(actionMessage?.own)}
@@ -558,6 +645,7 @@ export function ThreadScreen({ route, navigation }: Props) {
             keyExtractor={(row) => String(row.message.id)}
             contentContainerStyle={styles.list}
             keyboardShouldPersistTaps="handled"
+            maintainVisibleContentPosition={{ disabled: true }}
             // Land where you stopped reading, not at the bottom. iMessage's
             // bottom-landing is right for a five-message thread and wrong for
             // an eighty-message one.
@@ -709,10 +797,10 @@ export function ThreadScreen({ route, navigation }: Props) {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Add attachment"
-              accessibilityState={{ disabled: uploading || pendingFiles.length >= 6 }}
-              disabled={uploading || pendingFiles.length >= 6}
-              onPress={() => void pickAttachments()}
-              style={({ pressed }) => [styles.mic, pressed && styles.micPressed, (uploading || pendingFiles.length >= 6) && styles.sendDim]}
+              accessibilityState={{ disabled: uploading || pendingFiles.length >= maxMessageAttachments }}
+              disabled={uploading || pendingFiles.length >= maxMessageAttachments}
+              onPress={() => setAttachmentSourceOpen(true)}
+              style={({ pressed }) => [styles.mic, pressed && styles.micPressed, (uploading || pendingFiles.length >= maxMessageAttachments) && styles.sendDim]}
             >
               <SymbolView name="plus" tintColor={colors.text2} size={20} />
             </Pressable>

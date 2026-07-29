@@ -179,6 +179,7 @@ Without a working AI provider, the browser and media room still load, but AI-bac
 | `OPENAI_TRANSCRIPT_MODEL` | Dedicated transcript-lane override |
 | `OPENAI_BRAIN_MODEL` | Ambient extraction and company-memory model |
 | `ANTHROPIC_API_KEY` | Enables Anthropic-backed orchestration and review seats |
+| `GIPHY_API_KEY` | Enables authenticated chat GIF search and trending results; the key stays server-side |
 | `BONFIRE_AGENT_THREAD_WORKER` | Selects structured text output or sidecar Codex execution |
 | `BONFIRE_CODEX_RUNNER_MODE` | Sidecar queue or local development execution |
 | `MEETING_ROOM_MAX_PARTICIPANTS` | Room capacity; defaults to 10 |

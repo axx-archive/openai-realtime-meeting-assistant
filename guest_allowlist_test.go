@@ -159,6 +159,7 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 		"/assistant/attachments":        {handler: assistantAttachmentUploadHandler, memberGated: true},
 		"/assistant/link-preview":       {handler: assistantLinkPreviewHandler, memberGated: true},
 		"/assistant/link-preview/image": {handler: assistantLinkPreviewImageHandler, memberGated: true},
+		"/assistant/giphy/search":       {handler: assistantGiphySearchHandler, memberGated: true},
 		"/assistant/chat-participants":  {handler: assistantChatParticipantsHandler, memberGated: true},
 		"/assistant/threads":            {handler: assistantThreadsHandler, memberGated: true},
 		"/assistant/threads/follow-up":  {handler: assistantThreadFollowUpHandler, memberGated: true},

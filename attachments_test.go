@@ -11,11 +11,15 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"strings"
@@ -101,8 +105,10 @@ func TestAssistantAttachmentUploadHandlerAuthMimeAndSize(t *testing.T) {
 		return recorder
 	}
 
-	// Mime allowlist: script-capable and unknown types never enter the store.
-	for _, mime := range []string{"", "text/html", "image/svg+xml", "application/octet-stream"} {
+	// Explicit script-capable and unsupported types never enter the store.
+	// Missing/generic declarations are handled later through byte validation
+	// for native picker compatibility.
+	for _, mime := range []string{"text/html", "image/svg+xml", "image/heic"} {
 		if recorder := post(mime, pngBytes); recorder.Code != http.StatusUnsupportedMediaType {
 			t.Fatalf("mime %q status=%d, want 415", mime, recorder.Code)
 		}
@@ -151,6 +157,84 @@ func TestAssistantAttachmentUploadHandlerAuthMimeAndSize(t *testing.T) {
 	}
 	if !bytes.Equal(stored, pngBytes) || meta.Mime != "image/png" {
 		t.Fatalf("stored=%q mime=%q, want the uploaded bytes with the pinned mime", stored, meta.Mime)
+	}
+}
+
+func TestAssistantAttachmentUploadHandlerSupportsNativeMultipartAndSafeMIMEFallbacks(t *testing.T) {
+	setupAuthTestEnv(t)
+	setupIsolatedBlobStore(t)
+	t.Setenv("MEETING_ALLOWED_ORIGINS", "")
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	pngBytes := tinyPNG(t)
+
+	postMultipart := func(field, filename, declared string, data []byte) *httptest.ResponseRecorder {
+		t.Helper()
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		var part io.Writer
+		var err error
+		if declared == "" {
+			part, err = writer.CreateFormFile(field, filename)
+		} else {
+			header := make(textproto.MIMEHeader)
+			header.Set("Content-Disposition", fmt.Sprintf(`form-data; name=%q; filename=%q`, field, filename))
+			header.Set("Content-Type", declared)
+			part, err = writer.CreatePart(header)
+		}
+		if err != nil {
+			t.Fatalf("create multipart part: %v", err)
+		}
+		if _, err := part.Write(data); err != nil {
+			t.Fatalf("write multipart part: %v", err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatalf("close multipart body: %v", err)
+		}
+		request := httptest.NewRequest(http.MethodPost, "/assistant/attachments", &body)
+		request.Header.Set("Content-Type", writer.FormDataContentType())
+		for _, cookie := range cookies {
+			request.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		assistantAttachmentUploadHandler(recorder, request)
+		return recorder
+	}
+
+	// Expo/React Native's reliable URI upload shape is multipart. A generic
+	// part MIME is content-sniffed and returns the canonical stored MIME.
+	recorder := postMultipart("file", "screenshot.png", "application/octet-stream", pngBytes)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("native multipart status=%d body=%s, want 200", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		Ref  string `json:"ref"`
+		Mime string `json:"mime"`
+		Size int64  `json:"size"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode multipart response: %v", err)
+	}
+	if payload.Mime != "image/png" || payload.Size != int64(len(pngBytes)) || !validBlobRef(payload.Ref) {
+		t.Fatalf("multipart response=%s", recorder.Body.String())
+	}
+
+	if recorder := postMultipart("wrong", "screenshot.png", "image/png", pngBytes); recorder.Code != http.StatusBadRequest {
+		t.Fatalf("wrong field status=%d, want 400", recorder.Code)
+	}
+	if recorder := postMultipart("file", "screenshot.png", "image/jpeg", pngBytes); recorder.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("conflicting declared MIME status=%d, want 415", recorder.Code)
+	}
+
+	// Native MIME aliases canonicalize, but only when the bytes match.
+	request := httptest.NewRequest(http.MethodPost, "/assistant/attachments", bytes.NewReader(pngBytes))
+	request.Header.Set("Content-Type", "application/octet-stream")
+	for _, cookie := range cookies {
+		request.AddCookie(cookie)
+	}
+	recorder = httptest.NewRecorder()
+	assistantAttachmentUploadHandler(recorder, request)
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"mime":"image/png"`) {
+		t.Fatalf("raw generic status=%d body=%s, want sniffed PNG", recorder.Code, recorder.Body.String())
 	}
 }
 

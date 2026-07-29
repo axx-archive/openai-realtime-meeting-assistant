@@ -97,14 +97,20 @@ export const MessageBubble = React.memo(function MessageBubble({
   if (!body && files.length === 0) return null;
 
   return (
-    <View style={[styles.row, own && styles.rowOwn, showAuthor && styles.rowNewAuthor, reactions.length > 0 && styles.rowWithReactions]}>
+    <View style={[
+      styles.row,
+      own && styles.rowOwn,
+      showAuthor && styles.rowNewAuthor,
+      reactions.length > 0 && styles.rowWithReactions,
+      message.editedAt && styles.rowEdited,
+    ]}>
       <Animated.View pointerEvents="none" style={[styles.timestampWrap, timestampOpacity]}>
-        <Text style={styles.time}>{message.editedAt ? 'Edited · ' : ''}{timeOf(message)}</Text>
+        <Text style={styles.time}>{timeOf(message)}</Text>
       </Animated.View>
       <Animated.View style={[styles.stack, own && styles.stackOwn, translated]}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${own ? 'You' : String(message.authorName ?? (scout ? 'Scout' : 'Someone'))}: ${body || `${files.length} attachment${files.length === 1 ? '' : 's'}`}. ${timeOf(message)}`}
+          accessibilityLabel={`${own ? 'You' : String(message.authorName ?? (scout ? 'Scout' : 'Someone'))}: ${body || `${files.length} attachment${files.length === 1 ? '' : 's'}`}. ${message.editedAt ? 'Edited. ' : ''}${timeOf(message)}`}
           accessibilityHint={longMessage ? 'Opens the full message. Touch and hold for message actions' : 'Touch and hold for message actions'}
           delayLongPress={430}
           onPress={longMessage ? () => setShowFullMessage(true) : undefined}
@@ -195,7 +201,9 @@ export const MessageBubble = React.memo(function MessageBubble({
           ) : null}
 
           {files.map((file) => {
-            const image = file.mime?.toLowerCase().startsWith('image/') && authenticatedFileUrl(file);
+            const imageAttachment = file.mime?.toLowerCase().startsWith('image/');
+            const image = imageAttachment && authenticatedFileUrl(file);
+            const gif = file.mime?.toLowerCase() === 'image/gif';
             return (
               <Pressable
                 key={`${file.ref}-${file.name}`}
@@ -204,23 +212,32 @@ export const MessageBubble = React.memo(function MessageBubble({
                 onPress={() => onOpenAttachment?.(file)}
                 onLongPress={() => onLongPress?.(message, own)}
                 delayLongPress={430}
-                style={({ pressed }) => [styles.attachment, own && styles.attachmentOwn, pressed && styles.attachmentPressed]}
+                style={({ pressed }) => [styles.attachment, image && styles.attachmentMedia, pressed && styles.attachmentPressed]}
               >
                 {image ? (
-                  <Image
-                    source={{ uri: image, headers: authenticatedFileHeaders(sessionToken, file.mime) }}
-                    cachePolicy="memory-disk"
-                    contentFit="cover"
-                    recyclingKey={file.ref}
-                    transition={160}
-                    style={styles.attachmentImage}
-                  />
+                  <>
+                    <Image
+                      source={{ uri: image, headers: authenticatedFileHeaders(sessionToken, file.mime) }}
+                      cachePolicy="memory-disk"
+                      contentFit="cover"
+                      recyclingKey={file.ref}
+                      style={styles.attachmentImage}
+                    />
+                    {gif ? <View style={styles.gifBadge}><Text style={styles.gifBadgeText}>GIF</Text></View> : null}
+                    <View style={styles.attachmentMediaFooter}>
+                      <SymbolView name={gif ? 'sparkles' : 'photo'} tintColor={colors.text2} size={13} />
+                      <Text numberOfLines={1} style={styles.attachmentMediaText}>{attachmentLabel(file)}</Text>
+                    </View>
+                  </>
                 ) : (
-                  <View style={[styles.fileIcon, own && styles.fileIconOwn]}>
-                    <SymbolView name="doc.richtext" tintColor={own ? colors.onAccent : colors.text2} size={19} />
-                  </View>
+                  <>
+                    <View style={styles.fileIcon}>
+                      <SymbolView name="doc.richtext" tintColor={colors.text2} size={20} />
+                    </View>
+                    <Text numberOfLines={2} style={styles.attachmentText}>{attachmentLabel(file)}</Text>
+                    <SymbolView name="chevron.right" tintColor={colors.text3} size={12} />
+                  </>
                 )}
-                <Text numberOfLines={1} style={[styles.attachmentText, own && styles.bodyOwn]}>{attachmentLabel(file)}</Text>
               </Pressable>
             );
           })}
@@ -235,6 +252,17 @@ export const MessageBubble = React.memo(function MessageBubble({
             />
           ) : null}
         </Pressable>
+
+        {message.editedAt ? (
+          <View
+            accessible
+            accessibilityLabel="Edited"
+            pointerEvents="none"
+            style={[styles.editedBadge, own ? styles.editedBadgeOwn : styles.editedBadgeOther]}
+          >
+            <Text style={styles.editedBadgeText}>E</Text>
+          </View>
+        ) : null}
 
         {reactions.length > 0 ? (
           <View style={[styles.reactions, own ? styles.reactionsOwn : styles.reactionsOther]}>
@@ -286,6 +314,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', paddingHorizontal: space[4], marginBottom: 3 },
   rowNewAuthor: { marginTop: space[3] },
   rowWithReactions: { marginTop: space[5] },
+  rowEdited: { marginBottom: 7 },
   rowOwn: { justifyContent: 'flex-end' },
   timestampWrap: { position: 'absolute', top: 0, right: space[4], bottom: 0, justifyContent: 'center' },
   time: { fontSize: 11, lineHeight: 13, fontVariant: ['tabular-nums'], color: colors.text3 },
@@ -324,13 +353,16 @@ const styles = StyleSheet.create({
   readMorePressed: { opacity: 0.72, transform: [{ scale: 0.98 }] },
   readMoreText: { ...type.captionMedium, color: colors.text1 },
   readMoreTextOwn: { color: colors.onAccent },
-  attachment: { minWidth: 190, maxWidth: 280, minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: space[2], marginTop: space[2], overflow: 'hidden', borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line2, backgroundColor: colors.surface2 },
-  attachmentOwn: { borderColor: 'rgba(0,0,0,0.10)', backgroundColor: 'rgba(0,0,0,0.07)' },
+  attachment: { minWidth: 210, maxWidth: 280, minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: space[2], marginTop: space[2], paddingRight: space[3], overflow: 'hidden', borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line2, backgroundColor: colors.surface1 },
+  attachmentMedia: { width: 248, minHeight: 0, flexDirection: 'column', alignItems: 'stretch', gap: 0, paddingRight: 0, backgroundColor: colors.surface1 },
   attachmentPressed: { opacity: 0.76, transform: [{ scale: 0.98 }] },
-  attachmentImage: { width: 72, height: 64, backgroundColor: colors.surface3 },
-  fileIcon: { width: 42, height: 42, marginLeft: 3, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm, backgroundColor: colors.surface3 },
-  fileIconOwn: { backgroundColor: 'rgba(0,0,0,0.08)' },
-  attachmentText: { ...type.captionMedium, flex: 1, marginRight: space[3], color: colors.text1 },
+  attachmentImage: { width: '100%', height: 168, backgroundColor: colors.surface3 },
+  attachmentMediaFooter: { minHeight: 38, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: space[3], backgroundColor: colors.surface1 },
+  attachmentMediaText: { ...type.captionMedium, flex: 1, color: colors.text1 },
+  gifBadge: { position: 'absolute', top: 9, right: 9, zIndex: 2, paddingHorizontal: 7, paddingVertical: 3, borderRadius: radius.full, backgroundColor: 'rgba(0,0,0,0.64)' },
+  gifBadgeText: { ...type.label, color: '#FFFFFF', letterSpacing: 0.5 },
+  fileIcon: { width: 42, height: 42, marginLeft: 7, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm, backgroundColor: colors.surface3 },
+  attachmentText: { ...type.captionMedium, flex: 1, color: colors.text1 },
   reactions: { position: 'absolute', top: -17, zIndex: 2, flexDirection: 'row', gap: 5 },
   reactionsOwn: { left: -8 },
   reactionsOther: { right: -8 },
@@ -338,6 +370,23 @@ const styles = StyleSheet.create({
   reactionChipOwn: { backgroundColor: colors.surface3, transform: [{ scale: 1.02 }] },
   reactionPressed: { transform: [{ scale: 0.96 }], opacity: 0.78 },
   reactionEmoji: { fontSize: 17, lineHeight: 22 },
+  editedBadge: {
+    ...shadow[1],
+    position: 'absolute',
+    bottom: -7,
+    zIndex: 2,
+    width: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.line2,
+    backgroundColor: colors.glassPanel,
+  },
+  editedBadgeOwn: { left: -6 },
+  editedBadgeOther: { right: -6 },
+  editedBadgeText: { fontSize: 9, lineHeight: 11, fontWeight: '700', color: colors.text2 },
   sources: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 5, marginLeft: space[1] },
   sourceChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.ember, backgroundColor: colors.emberSoft, maxWidth: 150 },
   sourcePressed: { opacity: 0.6 },

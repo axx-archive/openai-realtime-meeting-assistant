@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Image } from 'expo-image';
 import { WebView } from 'react-native-webview';
 import { SymbolView } from 'expo-symbols';
 import {
@@ -30,6 +31,7 @@ export function FilePreviewModal({ file, sessionToken, onClose }: Props) {
   const [sharing, setSharing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const url = file ? authenticatedFileUrl(file) : '';
+  const image = Boolean(file?.mime?.toLowerCase().startsWith('image/'));
 
   async function share() {
     if (!file || sharing) return;
@@ -89,7 +91,28 @@ export function FilePreviewModal({ file, sessionToken, onClose }: Props) {
           </Pressable>
         </View>
         <View style={styles.preview}>
-          {file && url ? (
+          {file && url && image ? (
+            <Image
+              source={{
+                uri: url,
+                headers: authenticatedFileHeaders(sessionToken, file.mime),
+              }}
+              accessibilityLabel={`Preview of ${file.name}`}
+              cachePolicy="memory-disk"
+              contentFit="contain"
+              recyclingKey={file.ref}
+              onLoadStart={() => {
+                setLoading(true);
+                setError(null);
+              }}
+              onLoad={() => setLoading(false)}
+              onError={() => {
+                setLoading(false);
+                setError('The image preview could not be loaded. You can still share or save the file.');
+              }}
+              style={styles.image}
+            />
+          ) : file && url ? (
             <WebView
               source={{
                 uri: url,
@@ -168,6 +191,10 @@ const styles = StyleSheet.create({
   web: {
     flex: 1,
     backgroundColor: colors.surface3,
+  },
+  image: {
+    flex: 1,
+    backgroundColor: colors.bgApp,
   },
   loading: {
     ...StyleSheet.absoluteFill,

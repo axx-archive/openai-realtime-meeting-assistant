@@ -29,6 +29,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"strings"
@@ -85,11 +86,107 @@ func attachmentUploadMime(header string) string {
 	return strings.ToLower(strings.TrimSpace(mime))
 }
 
+// canonicalAttachmentUploadMime accepts the harmless aliases native document
+// pickers use for otherwise-supported formats. Validation still happens
+// against the bytes before anything is stored.
+func canonicalAttachmentUploadMime(header string) string {
+	switch mime := attachmentUploadMime(header); mime {
+	case "image/jpg", "image/pjpeg":
+		return "image/jpeg"
+	case "application/x-pdf":
+		return "application/pdf"
+	default:
+		return mime
+	}
+}
+
+func detectedAttachmentUploadMime(data []byte) string {
+	detected := canonicalAttachmentUploadMime(http.DetectContentType(data))
+	if attachmentModelSafeMimes[detected] && validateAttachmentBytes(detected, data) == nil {
+		return detected
+	}
+	// Go's generic content sniffer has not recognized WebP in every supported
+	// toolchain. The strict RIFF/WEBP validator remains the authority.
+	if validateAttachmentBytes("image/webp", data) == nil {
+		return "image/webp"
+	}
+	return ""
+}
+
+// resolveAttachmentUploadMime preserves strict matching for declared safe
+// types while giving native pickers' absent/generic declarations a safe
+// content-sniffed fallback. An actively conflicting safe declaration is never
+// silently rewritten to another type.
+func resolveAttachmentUploadMime(declared string, data []byte) (string, error) {
+	normalized := canonicalAttachmentUploadMime(declared)
+	if attachmentModelSafeMimes[normalized] {
+		if err := validateAttachmentBytes(normalized, data); err != nil {
+			return "", err
+		}
+		return normalized, nil
+	}
+	switch normalized {
+	case "", "application/octet-stream", "binary/octet-stream":
+		if detected := detectedAttachmentUploadMime(data); detected != "" {
+			return detected, nil
+		}
+	}
+	return "", fmt.Errorf("unsupported attachment type")
+}
+
+// readAssistantAttachmentUpload accepts both the original raw-body contract
+// and multipart/form-data with one `file` part. React Native can stream a
+// picker URI through multipart without first materializing a JS Blob, while
+// web/legacy callers remain compatible with the raw contract.
+func readAssistantAttachmentUpload(w http.ResponseWriter, r *http.Request) ([]byte, string, int, string) {
+	contentType := strings.TrimSpace(r.Header.Get("Content-Type"))
+	mediaType, _, parseErr := mime.ParseMediaType(contentType)
+	if strings.HasPrefix(strings.ToLower(contentType), "multipart/") {
+		if parseErr != nil || !strings.EqualFold(mediaType, "multipart/form-data") {
+			return nil, "", http.StatusBadRequest, "could not read attachment form"
+		}
+		// Allow bounded framing overhead, but cap the decoded part itself at the
+		// exact same 25MB contract as a raw upload.
+		r.Body = http.MaxBytesReader(w, r.Body, attachmentUploadMaxBytes+(1<<20))
+		if err := r.ParseMultipartForm(8 << 20); err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				return nil, "", http.StatusRequestEntityTooLarge, fmt.Sprintf("attachment exceeds the %dMB cap", attachmentUploadMaxBytes>>20)
+			}
+			return nil, "", http.StatusBadRequest, "could not read attachment form"
+		}
+		defer r.MultipartForm.RemoveAll()
+		part, header, err := r.FormFile("file")
+		if err != nil {
+			return nil, "", http.StatusBadRequest, "attachment form needs a file field"
+		}
+		defer part.Close()
+		data, err := io.ReadAll(io.LimitReader(part, attachmentUploadMaxBytes+1))
+		if err != nil {
+			return nil, "", http.StatusBadRequest, "could not read attachment body"
+		}
+		if len(data) > attachmentUploadMaxBytes {
+			return nil, "", http.StatusRequestEntityTooLarge, fmt.Sprintf("attachment exceeds the %dMB cap", attachmentUploadMaxBytes>>20)
+		}
+		return data, header.Header.Get("Content-Type"), 0, ""
+	}
+
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, attachmentUploadMaxBytes))
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return nil, "", http.StatusRequestEntityTooLarge, fmt.Sprintf("attachment exceeds the %dMB cap", attachmentUploadMaxBytes>>20)
+		}
+		return nil, "", http.StatusBadRequest, "could not read attachment body"
+	}
+	return data, contentType, 0, ""
+}
+
 // assistantAttachmentUploadHandler serves POST /assistant/attachments — the
 // composer's binary upload door. Session-gated exactly like its
-// /artifacts/blob neighbor (origin check, signed-in user); the raw body is
-// the file, Content-Type declares the mime, and the response carries the
-// content-addressed ref the message record will reference. Dedupe, mime
+// /artifacts/blob neighbor (origin check, signed-in user); callers may send a
+// raw body or one multipart `file` part, and the response carries the
+// content-addressed ref the message record will reference. Dedupe, MIME
 // pinning, and immutability all come free from putBlob.
 func assistantAttachmentUploadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -105,27 +202,17 @@ func assistantAttachmentUploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mime := attachmentUploadMime(r.Header.Get("Content-Type"))
-	if !attachmentModelSafeMimes[mime] {
-		writeAuthError(w, http.StatusUnsupportedMediaType, "attachments must be png, jpeg, webp, gif, or pdf")
-		return
-	}
-
-	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, attachmentUploadMaxBytes))
-	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeAuthError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("attachment exceeds the %dMB cap", attachmentUploadMaxBytes>>20))
-			return
-		}
-		writeAuthError(w, http.StatusBadRequest, "could not read attachment body")
+	data, declaredMime, status, message := readAssistantAttachmentUpload(w, r)
+	if status != 0 {
+		writeAuthError(w, status, message)
 		return
 	}
 	if len(data) == 0 {
 		writeAuthError(w, http.StatusBadRequest, "attachment body is empty")
 		return
 	}
-	if err := validateAttachmentBytes(mime, data); err != nil {
+	mime, err := resolveAttachmentUploadMime(declaredMime, data)
+	if err != nil {
 		writeAuthError(w, http.StatusUnsupportedMediaType, "attachment contents do not match the selected file type")
 		return
 	}
