@@ -5,7 +5,12 @@ import { SymbolView } from 'expo-symbols';
 import { useReduceMotion, duration, ease } from '../theme/motion';
 import { colors, hitMin, radius, shadow, space, type } from '../theme/tokens';
 import type { ScoutMessageReaction } from '../api/types';
-import { messageReactionChoices } from './messageGestures';
+import {
+  messageReactionButtonSize,
+  messageReactionChoices,
+  messageReactionTrayHeight,
+  messageReactionTrayPadding,
+} from './messageGestures';
 
 type Props = {
   visible: boolean;
@@ -68,6 +73,7 @@ export function MessageActionSheet({ visible, own, snippet, reactions, onClose, 
               horizontal
               bounces={false}
               showsHorizontalScrollIndicator={false}
+              style={styles.pickerScroll}
               contentContainerStyle={styles.picker}
             >
               {messageReactionChoices.map((emoji) => (
@@ -164,6 +170,8 @@ const styles = StyleSheet.create({
   },
   pickerShell: {
     alignSelf: 'center',
+    flexGrow: 0,
+    height: messageReactionTrayHeight,
     maxWidth: '100%',
     borderRadius: radius.full,
     backgroundColor: colors.surface1,
@@ -171,8 +179,15 @@ const styles = StyleSheet.create({
     borderColor: colors.line2,
     overflow: 'hidden',
   },
-  picker: { flexDirection: 'row', padding: 5 },
-  reaction: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22 },
+  pickerScroll: { flexGrow: 0 },
+  picker: { flexDirection: 'row', padding: messageReactionTrayPadding },
+  reaction: {
+    width: messageReactionButtonSize,
+    height: messageReactionButtonSize,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: messageReactionButtonSize / 2,
+  },
   reactionPressed: { backgroundColor: colors.accentSoft, transform: [{ scale: 0.96 }] },
   emoji: { fontSize: 25, lineHeight: 31 },
   reactionPeople: {

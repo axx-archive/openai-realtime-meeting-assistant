@@ -1,4 +1,7 @@
 export const messageLongPressDelayMs = 430;
+export const messageReactionButtonSize = 44;
+export const messageReactionTrayPadding = 5;
+export const messageReactionTrayHeight = messageReactionButtonSize + (messageReactionTrayPadding * 2);
 export const timestampRevealDistance = 68;
 export const timestampRevealStartDistance = 8;
 export const timestampRevealHorizontalBias = 1.35;

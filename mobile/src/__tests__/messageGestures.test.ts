@@ -3,7 +3,10 @@ import test from 'node:test';
 
 import {
   messageLongPressDelayMs,
+  messageReactionButtonSize,
   messageReactionChoices,
+  messageReactionTrayHeight,
+  messageReactionTrayPadding,
   shouldBeginTimestampReveal,
   timestampRevealProgress,
 } from '../messaging/messageGestures';
@@ -27,4 +30,7 @@ test('timestamp reveal progress clamps and fully reveals at 68 points', () => {
 test('long press and reaction contracts stay deliberate and complete', () => {
   assert.equal(messageLongPressDelayMs, 430);
   assert.deepEqual(messageReactionChoices, ['❤️', '👍', '👎', '😂', '‼️', '❓', '🔥']);
+  assert.equal(messageReactionButtonSize, 44);
+  assert.equal(messageReactionTrayPadding, 5);
+  assert.equal(messageReactionTrayHeight, 54);
 });
