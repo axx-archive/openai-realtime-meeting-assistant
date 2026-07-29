@@ -97,14 +97,9 @@ export const MessageBubble = React.memo(function MessageBubble({
   if (!body && files.length === 0) return null;
 
   return (
-    <View style={[
-      styles.row,
-      own && styles.rowOwn,
-      showAuthor && styles.rowNewAuthor,
-      reactions.length > 0 && styles.rowWithReactions,
-      message.editedAt && styles.rowEdited,
-    ]}>
+    <View style={[styles.row, own && styles.rowOwn, showAuthor && styles.rowNewAuthor, reactions.length > 0 && styles.rowWithReactions]}>
       <Animated.View pointerEvents="none" style={[styles.timestampWrap, timestampOpacity]}>
+        {message.editedAt ? <Text style={styles.editedLabel}>Edited</Text> : null}
         <Text style={styles.time}>{timeOf(message)}</Text>
       </Animated.View>
       <Animated.View style={[styles.stack, own && styles.stackOwn, translated]}>
@@ -253,17 +248,6 @@ export const MessageBubble = React.memo(function MessageBubble({
           ) : null}
         </Pressable>
 
-        {message.editedAt ? (
-          <View
-            accessible
-            accessibilityLabel="Edited"
-            pointerEvents="none"
-            style={[styles.editedBadge, own ? styles.editedBadgeOwn : styles.editedBadgeOther]}
-          >
-            <Text style={styles.editedBadgeText}>E</Text>
-          </View>
-        ) : null}
-
         {reactions.length > 0 ? (
           <View style={[styles.reactions, own ? styles.reactionsOwn : styles.reactionsOther]}>
             {reactions.map((reaction) => (
@@ -314,10 +298,10 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', paddingHorizontal: space[4], marginBottom: 3 },
   rowNewAuthor: { marginTop: space[3] },
   rowWithReactions: { marginTop: space[5] },
-  rowEdited: { marginBottom: 7 },
   rowOwn: { justifyContent: 'flex-end' },
   timestampWrap: { position: 'absolute', top: 0, right: space[4], bottom: 0, justifyContent: 'center' },
-  time: { fontSize: 11, lineHeight: 13, fontVariant: ['tabular-nums'], color: colors.text3 },
+  time: { fontSize: 11, lineHeight: 13, fontVariant: ['tabular-nums'], color: colors.text3, textAlign: 'right' },
+  editedLabel: { fontSize: 10, lineHeight: 12, fontWeight: '600', color: colors.text3, textAlign: 'right' },
   stack: { maxWidth: '82%', alignItems: 'flex-start' },
   stackOwn: { alignItems: 'flex-end' },
   bubble: { paddingHorizontal: space[4], paddingVertical: 10, borderRadius: radius.lg, gap: 2 },
@@ -370,23 +354,6 @@ const styles = StyleSheet.create({
   reactionChipOwn: { backgroundColor: colors.surface3, transform: [{ scale: 1.02 }] },
   reactionPressed: { transform: [{ scale: 0.96 }], opacity: 0.78 },
   reactionEmoji: { fontSize: 17, lineHeight: 22 },
-  editedBadge: {
-    ...shadow[1],
-    position: 'absolute',
-    bottom: -7,
-    zIndex: 2,
-    width: 18,
-    height: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radius.full,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.line2,
-    backgroundColor: colors.glassPanel,
-  },
-  editedBadgeOwn: { left: -6 },
-  editedBadgeOther: { right: -6 },
-  editedBadgeText: { fontSize: 9, lineHeight: 11, fontWeight: '700', color: colors.text2 },
   sources: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 5, marginLeft: space[1] },
   sourceChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.ember, backgroundColor: colors.emberSoft, maxWidth: 150 },
   sourcePressed: { opacity: 0.6 },
