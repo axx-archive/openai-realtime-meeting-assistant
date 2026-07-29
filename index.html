@@ -1525,14 +1525,21 @@
       }
 
       @media (min-width: 641px) {
+        html:not(.is-mobile-device) .video-tile video.has-portrait-frame,
+        html:not(.is-mobile-device) .hearth-speaker video.has-portrait-frame,
+        html:not(.is-mobile-device) .screen-stage__pip video.has-portrait-frame,
+        html:not(.is-mobile-device) .pip-tile video.has-portrait-frame,
+        html:not(.is-mobile-device) .board-video-tile video.has-portrait-frame {
+          object-fit: contain;
+          object-position: center;
+        }
+
         html:not(.is-mobile-device) .video-tile.has-portrait-composition video.has-portrait-frame,
         html:not(.is-mobile-device) .hearth-speaker.has-portrait-composition video.has-portrait-frame,
         html:not(.is-mobile-device) .screen-stage__pip.has-portrait-composition video.has-portrait-frame,
         html:not(.is-mobile-device) .pip-tile.has-portrait-composition video.has-portrait-frame,
         html:not(.is-mobile-device) .board-video-tile.has-portrait-composition video.has-portrait-frame {
           z-index: 1;
-          object-fit: contain;
-          object-position: center;
           background: transparent;
         }
 
@@ -24756,6 +24763,7 @@
       let roomSessionGrantedAt = 0
       let rapidSeatLossCount = 0
       let signalChain = Promise.resolve()
+      const outboundSenderConfigurationTasks = new WeakMap()
       let lastIceRestartRequestAt = 0
       let iceRestartAttempts = 0
       let iceRestartRetryTimer = 0
@@ -33509,6 +33517,7 @@
         // shared endpoint id (that collision made two same-browser tabs evict
         // each other in an endless seat duel).
         const socket = new WebSocket(`${scheme}://${window.location.host}/websocket?room=${encodeURIComponent(activeJoin.roomId || 'office')}${guestMode ? '&as=guest' : ''}`)
+        const handledOfferKeys = new Set()
         ws = socket
         socket.onopen = () => {
           // handshake truth for onclose: a socket that NEVER opened was
@@ -33558,6 +33567,18 @@
             setLog('could not read room signal')
             return
           }
+          const offerKey = websocketOfferKey(message)
+          if (offerKey && handledOfferKeys.has(offerKey)) {
+            recordMediaSoakProofEvent('offer_duplicate_ignored', { offerKey })
+            return
+          }
+          if (offerKey) {
+            // Claim before entering the serial chain: the server watchdog can
+            // resend the same offer while camera/sender work is still pending.
+            // Answering that resend twice queues a stale answer behind the next
+            // offer and can leave both ends in incompatible signaling states.
+            handledOfferKeys.add(offerKey)
+          }
           signalChain = signalChain
             .catch(() => {})
             .then(() => {
@@ -33570,6 +33591,12 @@
               return handleSignal(message, { socket, sessionPeer: pc })
             })
             .catch(error => {
+              // A failed first attempt remains retryable when the server
+              // resends it. Successfully handled offer keys live only for this
+              // socket and are naturally discarded on reconnect.
+              if (offerKey) {
+                handledOfferKeys.delete(offerKey)
+              }
               console.warn('Signal handling failed', error)
               if (ws === socket) {
                 setLog(error.message || String(error))
@@ -33590,6 +33617,19 @@
           // the login card so the password field comes back
           refreshAuthState()
         }
+      }
+
+      function websocketOfferKey(message) {
+        if (message?.event !== 'offer') {
+          return ''
+        }
+        const offerId = String(message.offerId || '').trim()
+        const revision = Number(message.revision) || 0
+        if (!offerId && !revision) {
+          // Legacy uncorrelated offers cannot be safely deduplicated.
+          return ''
+        }
+        return `${offerId}:${revision}`
       }
 
       function roomCanReconnectSignal() {
@@ -33901,6 +33941,31 @@
         await Promise.all(sessionPeer.getSenders()
           .filter(sender => sender.track)
           .map(sender => configureOutboundSender(sender, sender.track)))
+      }
+
+      function scheduleOutboundSenderConfiguration(sessionPeer = pc, isCurrent = () => pc === sessionPeer) {
+        if (!sessionPeer || !isCurrent()) {
+          return
+        }
+        const existing = outboundSenderConfigurationTasks.get(sessionPeer)
+        if (existing) {
+          existing.dirty = true
+          return
+        }
+        const task = { dirty: false }
+        outboundSenderConfigurationTasks.set(sessionPeer, task)
+        Promise.resolve().then(async () => {
+          do {
+            task.dirty = false
+            await configureOutboundSenders(sessionPeer, isCurrent)
+          } while (task.dirty && isCurrent())
+        }).catch(error => {
+          console.warn('Outbound sender tuning failed after answer', error)
+        }).finally(() => {
+          if (outboundSenderConfigurationTasks.get(sessionPeer) === task) {
+            outboundSenderConfigurationTasks.delete(sessionPeer)
+          }
+        })
       }
 
       async function retuneLocalCameraCapture() {
@@ -37135,11 +37200,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             if (!contextIsCurrent()) {
               return
             }
-            try {
-              await configureOutboundSenders(sessionPeer, contextIsCurrent)
-            } catch (error) {
-              console.warn('Outbound sender tuning failed after answer', error)
-            }
+            // The answer is already on the wire. Camera capture retuning and
+            // RTCRtpSender.setParameters must never hold the serial signaling
+            // queue, or a watchdog resend can pile up behind the next offer.
+            scheduleOutboundSenderConfiguration(sessionPeer, contextIsCurrent)
             break
           }
           case 'candidate': {
@@ -48400,6 +48464,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         window.setTimeout(syncRoomAudioPlaybackState, 250)
       }
 
+      function unlockRoomAudioPlaybackFromGesture(event) {
+        // A rejected media play promise can only be repaired while the browser
+        // is handling a real user gesture. The room toast promises that a click
+        // anywhere will unlock audio, so honor that promise at the document
+        // boundary instead of requiring the user to rediscover a call control.
+        if (event && event.isTrusted === false) {
+          return
+        }
+        if (roomAudioPlaybackBlocked()) {
+          unlockRoomAudioPlayback()
+        }
+      }
+
+      document.addEventListener('pointerdown', unlockRoomAudioPlaybackFromGesture, { capture: true, passive: true })
+      document.addEventListener('keydown', unlockRoomAudioPlaybackFromGesture, { capture: true })
+
       function remotePlaybackNeedsGesture(element) {
         if (!element || element.muted || element.defaultMuted || Number(element.volume) === 0) {
           return false
@@ -48409,7 +48489,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function remotePlaybackPendingCount(options = {}) {
-        const elements = Array.from(pendingRemotePlaybackElements)
+        const elements = Array.from(pendingRemotePlaybackElements).filter(element => {
+          // A play() rejection may settle after its monitor was detached. Do
+          // not let that late rejection resurrect a removed element and keep
+          // the room in a permanent, ever-growing "audio blocked" state.
+          const current = Boolean(element?.isConnected && element.srcObject)
+          if (!current) {
+            pendingRemotePlaybackElements.delete(element)
+          }
+          return current
+        })
         if (options.audibleOnly) {
           return elements.filter(remotePlaybackNeedsGesture).length
         }
@@ -48451,6 +48540,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           pendingRemotePlaybackElements.delete(element)
           syncRoomAudioPlaybackState()
         }).catch(error => {
+          if (!element?.isConnected || !element.srcObject) {
+            pendingRemotePlaybackElements.delete(element)
+            syncRoomAudioPlaybackState()
+            return
+          }
           if (remotePlaybackNeedsGesture(element)) {
             pendingRemotePlaybackElements.add(element)
             const now = Date.now()

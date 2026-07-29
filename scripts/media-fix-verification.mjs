@@ -22,8 +22,22 @@ function extractFn(name) {
   let start = html.indexOf(`function ${name}(`)
   if (start < 0) throw new Error(`function ${name} not found in index.html`)
   if (html.slice(start - 6, start) === 'async ') start -= 6 // preserve async keyword
+  let parameterDepth = 0
+  let bodyStart = -1
+  for (let j = html.indexOf('(', start); j < html.length; j++) {
+    const c = html[j]
+    if (c === '(') parameterDepth++
+    else if (c === ')') {
+      parameterDepth--
+      if (parameterDepth === 0) {
+        bodyStart = html.indexOf('{', j + 1)
+        break
+      }
+    }
+  }
+  if (bodyStart < 0) throw new Error(`function ${name} body not found in index.html`)
   let depth = 0
-  for (let j = html.indexOf('{', start); j < html.length; j++) {
+  for (let j = bodyStart; j < html.length; j++) {
     const c = html[j]
     if (c === '{') depth++
     else if (c === '}') { depth--; if (depth === 0) return html.slice(start, j + 1) }
@@ -242,6 +256,95 @@ console.log('[2e] transient disconnect - ICE restart grace')
   peer.connectionState = 'connected'
   scheduled.fn()
   ok('a self-healed disconnect never restarts ICE', harness.restarts() === 0)
+}
+
+console.log('[2f] remote audio playback - gesture recovery and stale promise cleanup')
+{
+  const make = new Function(`
+    const pendingRemotePlaybackElements = new Set()
+    const audioMonitors = new Map()
+    let audioContext = null
+    let unlocks = 0
+    function liveTrack(track) { return track && track.readyState !== 'ended' }
+    function ensureAudioContext() {}
+    function syncRoomAudioPlaybackState() {}
+    function notifyRoomAudioBlocked() {}
+    function unlockRoomAudioPlayback() { unlocks++ }
+    ${extractFn('remotePlaybackNeedsGesture')}
+    ${extractFn('remotePlaybackPendingCount')}
+    ${extractFn('roomAudioPlaybackBlocked')}
+    ${extractFn('unlockRoomAudioPlaybackFromGesture')}
+    ${extractFn('playRemoteMedia')}
+    return {
+      pendingRemotePlaybackElements,
+      pendingCount: remotePlaybackPendingCount,
+      play: playRemoteMedia,
+      gesture: unlockRoomAudioPlaybackFromGesture,
+      unlocks: () => unlocks,
+    }
+  `)
+  const harness = make()
+  let rejectPlay
+  const stale = {
+    isConnected: true,
+    srcObject: {},
+    muted: false,
+    defaultMuted: false,
+    volume: 1,
+    tagName: 'AUDIO',
+    dataset: {},
+    play: () => new Promise((resolve, reject) => { rejectPlay = reject }),
+  }
+  harness.play(stale)
+  stale.isConnected = false
+  stale.srcObject = null
+  rejectPlay(new Error('detached before play settled'))
+  await Promise.resolve()
+  await Promise.resolve()
+  ok('a late rejected play promise cannot resurrect a detached audio element', harness.pendingCount() === 0)
+
+  const active = { isConnected: true, srcObject: {}, muted: false, defaultMuted: false, volume: 1, tagName: 'AUDIO', dataset: {} }
+  const detached = { ...active, isConnected: false, srcObject: null }
+  harness.pendingRemotePlaybackElements.add(active)
+  harness.pendingRemotePlaybackElements.add(detached)
+  ok('pending playback accounting prunes detached elements', harness.pendingCount() === 1 && harness.pendingRemotePlaybackElements.size === 1)
+  harness.gesture({ isTrusted: true })
+  ok('a real click or key gesture retries blocked room audio immediately', harness.unlocks() === 1)
+  harness.gesture({ isTrusted: false })
+  ok('synthetic events cannot impersonate an audio-unlock gesture', harness.unlocks() === 1)
+}
+
+console.log('[2g] signaling - correlated offer dedupe and non-blocking sender tuning')
+{
+  const offerKey = new Function(`${extractFn('websocketOfferKey')}\nreturn websocketOfferKey`)()
+  ok('correlated offers get a stable dedupe key', offerKey({ event:'offer', offerId:'session-offer-7', revision:7 }) === 'session-offer-7:7')
+  ok('legacy offers remain retryable instead of guessed-duplicate', offerKey({ event:'offer', data:'{}' }) === '')
+  ok('non-offer events never enter offer dedupe', offerKey({ event:'candidate', offerId:'x', revision:1 }) === '')
+
+  const make = new Function(`
+    const outboundSenderConfigurationTasks = new WeakMap()
+    let calls = 0
+    let finishFirst
+    async function configureOutboundSenders() {
+      calls++
+      if (calls === 1) await new Promise(resolve => { finishFirst = resolve })
+    }
+    ${extractFn('scheduleOutboundSenderConfiguration')}
+    return {
+      schedule: scheduleOutboundSenderConfiguration,
+      calls: () => calls,
+      finish: () => finishFirst(),
+    }
+  `)
+  const harness = make()
+  const peer = {}
+  const firstReturn = harness.schedule(peer, () => true)
+  await Promise.resolve()
+  ok('post-answer sender tuning returns immediately and cannot block signalChain', firstReturn === undefined && harness.calls() === 1)
+  harness.schedule(peer, () => true)
+  harness.finish()
+  await new Promise(resolve => setTimeout(resolve, 0))
+  ok('offers arriving during tuning coalesce to one latest rerun', harness.calls() === 2)
 }
 
 // ---------- ISSUE 3: screen share ----------

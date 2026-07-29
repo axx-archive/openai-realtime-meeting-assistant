@@ -92,6 +92,37 @@ func TestSignalingMetadataCanComeFromEnvelopeOrData(t *testing.T) {
 	}
 }
 
+func TestCompletedAnswerCannotClearConcurrentNewOffer(t *testing.T) {
+	answeredOffer := signalingOfferMetadata{OfferID: "participant-1-offer-1", Revision: 1}
+	newOffer := signalingOfferMetadata{OfferID: "participant-1-offer-2", Revision: 2}
+	peer := peerConnectionState{
+		pendingOfferID:       newOffer.OfferID,
+		pendingOfferRevision: newOffer.Revision,
+		iceRestart:           peerICERestartState{inFlight: true},
+	}
+
+	if peer.completePendingOfferIfMatching(answeredOffer) {
+		t.Fatal("answer N must not complete concurrently-created offer N+1")
+	}
+	pending := pendingOfferMetadata(&peer)
+	if pending != newOffer {
+		t.Fatalf("pending offer = %+v; want concurrent offer %+v preserved", pending, newOffer)
+	}
+	if !peer.iceRestart.inFlight {
+		t.Fatal("answer N must not complete offer N+1's ICE restart")
+	}
+
+	if !peer.completePendingOfferIfMatching(newOffer) {
+		t.Fatal("matching answer should complete the pending offer")
+	}
+	if pending := pendingOfferMetadata(&peer); !pending.empty() {
+		t.Fatalf("matching offer metadata was not cleared: %+v", pending)
+	}
+	if peer.iceRestart.inFlight {
+		t.Fatal("matching answer should complete its ICE restart")
+	}
+}
+
 func TestRoomWebsocketHeartbeatTimings(t *testing.T) {
 	if !roomWebsocketHeartbeatTimingsValid() {
 		t.Fatalf("invalid heartbeat timings: write=%s ping=%s read=%s", websocketWriteTimeout, websocketPingInterval, websocketReadTimeout)

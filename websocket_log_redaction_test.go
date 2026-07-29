@@ -83,3 +83,31 @@ func TestWebsocketReadLoopLogsThroughScrubber(t *testing.T) {
 		t.Fatal("read loop logs the raw inbound frame — the hello passcode would land in the logs (§4.5)")
 	}
 }
+
+func TestWebsocketFrameNeedsVerboseLogSkipsHighVolumeTelemetry(t *testing.T) {
+	for _, event := range []string{"media_quality", "room_ping"} {
+		if websocketFrameNeedsVerboseLog(event) {
+			t.Fatalf("high-volume event %q must use its structured diagnostics instead of duplicating the raw payload", event)
+		}
+	}
+	for _, event := range []string{"participant", "answer", "candidate", "room_chat"} {
+		if !websocketFrameNeedsVerboseLog(event) {
+			t.Fatalf("diagnostic event %q unexpectedly lost verbose logging", event)
+		}
+	}
+}
+
+func TestWebsocketReadLoopAttributesSocketCloses(t *testing.T) {
+	source, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	for _, marker := range []string{
+		"room_ws_unexpected_close participant=%s session=%s room=%s error=%v",
+		"room_ws_closed participant=%s session=%s room=%s error=%v",
+	} {
+		if !strings.Contains(string(source), marker) {
+			t.Fatalf("read loop missing attributed close marker %q", marker)
+		}
+	}
+}

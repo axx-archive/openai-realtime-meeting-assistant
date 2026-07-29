@@ -41,6 +41,7 @@ import {
   screenShareStopShouldBegin,
 } from './localScreenShare';
 import { createRemoteVideoMuteController } from './remoteTrackMute';
+import { createRemoteStreamRetirementQueue } from './remoteStreamLifecycle';
 import {
   participantEndpointMediaStatesFromSnapshot,
   participantEndpointMediaStatesSnapshotIsAuthoritative,
@@ -116,6 +117,7 @@ import {
   type CameraFramingTrackIdentity,
 } from './cameraFramingLifecycle';
 import { applyNativeCameraSenderPolicy } from './videoSenderPolicy';
+import { correlatedOfferKey } from './signalCorrelation';
 
 type RoomLifecycle = 'idle' | 'joining' | 'admitted' | 'connected' | 'reconnecting';
 type ScreenShareStopReason = 'user' | 'ended' | 'cancelled' | 'start-failed' | 'stalled';
@@ -166,6 +168,7 @@ type NativeRoomSocketContext = {
   socket: WebSocket;
   generation: SocketGeneration;
   pendingCandidates: unknown[];
+  handledOfferKeys: Set<string>;
   signalQueue: Promise<void>;
 };
 type NativeRoomPeerContext = {
@@ -393,6 +396,10 @@ export function useNativeRoom(
   if (!remoteVideoMuteControllerRef.current) {
     remoteVideoMuteControllerRef.current = createRemoteVideoMuteController();
   }
+  const remoteStreamRetirementRef = useRef<ReturnType<typeof createRemoteStreamRetirementQueue> | null>(null);
+  if (!remoteStreamRetirementRef.current) {
+    remoteStreamRetirementRef.current = createRemoteStreamRetirementQueue();
+  }
 
   const sendOnSocket = useCallback((
     socketContext: NativeRoomSocketContext,
@@ -539,6 +546,20 @@ export function useNativeRoom(
     if (!hasParticipantSnapshotRef.current) return true;
     return participantsRef.current.some((name) => normalizedParticipantName(name) === normalized);
   }, []);
+
+  const retireRemoteVideoEntry = useCallback((entry: RemoteVideoTrackEntry) => {
+    remoteVideoMuteControllerRef.current?.cancel(entry.track);
+    remoteVideoProgressRef.current.delete(entry.trackId);
+    remoteStreamRetirementRef.current?.retire(entry);
+  }, []);
+
+  useEffect(() => {
+    // Effects run after RTCView has committed the new feed list. Only then is
+    // it safe to remove an obsolete one-track wrapper from native localStreams.
+    remoteStreamRetirementRef.current?.flush(
+      new Set(state.remoteVideoFeeds.map((feed) => feed.stream)),
+    );
+  }, [state.remoteVideoFeeds]);
 
   const restoreRemoteVideoEntry = useCallback((
     entry: RemoteVideoTrackEntry,
@@ -1342,6 +1363,8 @@ export function useNativeRoom(
     microphoneRecoveryGuardRef.current?.retire();
     disconnectedIceRestartControllerRef.current?.cancel();
     remoteVideoMuteControllerRef.current?.cancelAll();
+    const retiredRemoteEntries = [...remoteVideoTracksRef.current.values()];
+    retiredRemoteEntries.forEach(retireRemoteVideoEntry);
     remoteVideoTracksRef.current = new Map();
     remoteVideoProgressRef.current = new Map();
     remoteVideoRecoveryRef.current = createRemoteVideoRecoveryState();
@@ -1363,7 +1386,18 @@ export function useNativeRoom(
     audioSenderRef.current = null;
     videoSenderRef.current = null;
     peer?.close();
-  }, [cancelMicrophonePublicationCommit, resetQualityBaseline]);
+    if (retiredRemoteEntries.length > 0) {
+      setState((current) => (
+        current.remoteVideoFeeds.length > 0
+          ? { ...current, remoteVideoFeeds: [] }
+          : current
+      ));
+      // Unmount cleanup may prevent the committed-state effect above from
+      // running. This deferred fallback still releases every wrapper exactly
+      // once after the RTCView tree has had time to detach.
+      setTimeout(() => remoteStreamRetirementRef.current?.flushAll(), 250);
+    }
+  }, [cancelMicrophonePublicationCommit, resetQualityBaseline, retireRemoteVideoEntry]);
 
   const disposeMedia = useCallback(() => {
     const wideFramingRestore = restoreWideUprightFraming();
@@ -1518,8 +1552,7 @@ export function useNativeRoom(
       const trackEndpointId = endpointForTrack(track.id, endpointsByTrackRef.current);
       const previousEntry = remoteVideoTracksRef.current.get(track.id);
       if (previousEntry && previousEntry.track !== track) {
-        remoteVideoMuteControllerRef.current?.cancel(previousEntry.track);
-        remoteVideoProgressRef.current.delete(track.id);
+        retireRemoteVideoEntry(previousEntry);
       }
       const entry: RemoteVideoTrackEntry = {
         trackId: track.id,
@@ -1568,9 +1601,8 @@ export function useNativeRoom(
       };
       track.onended = () => {
         if (!isCurrentTrack()) return;
-        remoteVideoMuteControllerRef.current?.cancel(track);
+        retireRemoteVideoEntry(entry);
         remoteVideoTracksRef.current.delete(track.id);
-        remoteVideoProgressRef.current.delete(track.id);
         participantsByTrackRef.current = removeRemoteTrackIdentity(participantsByTrackRef.current, track.id);
         endpointsByTrackRef.current = removeRemoteTrackIdentity(endpointsByTrackRef.current, track.id);
         setState((current) => (
@@ -1818,6 +1850,7 @@ export function useNativeRoom(
     isCurrentPeerContext,
     participantCanPublishVideo,
     recoverNativeCamera,
+    retireRemoteVideoEntry,
     restoreRemoteVideoEntry,
     sendOnSocket,
     setSystemVideoSuspended,
@@ -1877,8 +1910,7 @@ export function useNativeRoom(
         currentEntries.forEach((entry) => {
           if (!retainedEntrySet.has(entry)) {
             retiredRemoteTrackIdsRef.current.add(entry.trackId);
-            remoteVideoMuteControllerRef.current?.cancel(entry.track);
-            remoteVideoProgressRef.current.delete(entry.trackId);
+            retireRemoteVideoEntry(entry);
           }
         });
         remoteVideoTracksRef.current = new Map(retainedEntries.map((entry) => [entry.trackId, entry]));
@@ -2161,8 +2193,7 @@ export function useNativeRoom(
           currentEntries.forEach((entry) => {
             if (!retainedEntrySet.has(entry)) {
               retiredRemoteTrackIdsRef.current.add(entry.trackId);
-              remoteVideoMuteControllerRef.current?.cancel(entry.track);
-              remoteVideoProgressRef.current.delete(entry.trackId);
+              retireRemoteVideoEntry(entry);
             }
           });
           remoteVideoTracksRef.current = new Map(retainedEntries.map((entry) => [entry.trackId, entry]));
@@ -2253,8 +2284,7 @@ export function useNativeRoom(
         currentEntries.forEach((entry) => {
           if (!retainedEntrySet.has(entry)) {
             retiredRemoteTrackIdsRef.current.add(entry.trackId);
-            remoteVideoMuteControllerRef.current?.cancel(entry.track);
-            remoteVideoProgressRef.current.delete(entry.trackId);
+            retireRemoteVideoEntry(entry);
           }
         });
         remoteVideoTracksRef.current = new Map(retainedEntries.map((entry) => [entry.trackId, entry]));
@@ -2377,6 +2407,7 @@ export function useNativeRoom(
     participantCanPublishVideo,
     recoverNativeCamera,
     recoverNativeMicrophone,
+    retireRemoteVideoEntry,
     restoreRemoteVideoEntry,
     sendOnSocket,
   ]);
@@ -2420,6 +2451,7 @@ export function useNativeRoom(
       socket,
       generation,
       pendingCandidates: [],
+      handledOfferKeys: new Set(),
       signalQueue: Promise.resolve(),
     };
     socketContextRef.current = socketContext;
@@ -2443,13 +2475,25 @@ export function useNativeRoom(
       }, 15_000);
     };
     socket.onmessage = (message) => {
+      let envelope: SignalEnvelope;
+      try {
+        envelope = JSON.parse(String(message.data)) as SignalEnvelope;
+      } catch (error) {
+        if (socketIsCurrent() && socket.readyState < WebSocket.CLOSING) {
+          socket.close(1012, 'invalid signaling message');
+        }
+        return;
+      }
+      const offerKey = correlatedOfferKey(envelope);
+      if (offerKey && socketContext.handledOfferKeys.has(offerKey)) return;
+      if (offerKey) socketContext.handledOfferKeys.add(offerKey);
       socketContext.signalQueue = socketContext.signalQueue
         .then(async () => {
           if (!socketIsCurrent()) return;
-          const envelope = JSON.parse(String(message.data)) as SignalEnvelope;
           await handleSignal(envelope, { iceServers: context.iceServers }, socketContext);
         })
         .catch((err) => {
+          if (offerKey) socketContext.handledOfferKeys.delete(offerKey);
           if (!socketIsCurrent()) return;
           if (socket.readyState < WebSocket.CLOSING) {
             socket.close(1012, 'signaling retry');

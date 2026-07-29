@@ -99,6 +99,34 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 	}
 }
 
+func TestIndexDeduplicatesCorrelatedOffersWithoutBlockingTheSignalQueue(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	html := string(rawHTML)
+
+	for _, want := range []string{
+		"const handledOfferKeys = new Set()",
+		"function websocketOfferKey(message)",
+		"handledOfferKeys.has(offerKey)",
+		"handledOfferKeys.delete(offerKey)",
+		"function scheduleOutboundSenderConfiguration(sessionPeer = pc",
+		"const outboundSenderConfigurationTasks = new WeakMap()",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing signaling queue hardening %q", want)
+		}
+	}
+
+	if !strings.Contains(html, "scheduleOutboundSenderConfiguration(sessionPeer, contextIsCurrent)") {
+		t.Fatal("offer handling must schedule post-answer sender tuning")
+	}
+	if strings.Contains(html, "await configureOutboundSenders(sessionPeer, contextIsCurrent)") {
+		t.Fatal("post-answer sender tuning still blocks the serial signaling queue")
+	}
+}
+
 func TestIndexComposesRoomSizeAndBandwidthVideoLimits(t *testing.T) {
 	rawHTML, err := os.ReadFile("index.html")
 	if err != nil {
@@ -372,12 +400,14 @@ func TestIndexComposesPortraitMobileCamerasWithoutBlackBarsOrDestructiveCrop(t *
 		"video.addEventListener('loadedmetadata', () => syncVideoFrameOrientation(video))",
 		"video.addEventListener('resize', () => syncVideoFrameOrientation(video))",
 		"video.classList.toggle('has-portrait-frame', orientation === 'portrait')",
+		"html:not(.is-mobile-device) .video-tile video.has-portrait-frame",
 		"html:not(.is-mobile-device) .video-tile.has-portrait-composition video.has-portrait-frame",
 		"canvas.className = 'portrait-frame-backdrop'",
 		"filter: blur(22px) brightness(0.5) saturate(0.82);",
 		".video-tile > video {",
 		"position: absolute;\n        inset: 0;\n        min-width: 0;\n        min-height: 0;",
-		"object-fit: contain;\n          object-position: center;\n          background: transparent;",
+		"object-fit: contain;\n          object-position: center;",
+		"z-index: 1;\n          background: transparent;",
 		".screen-stage video {",
 		"object-fit: contain;\n          object-position: center;",
 		"frameOrientation: video.dataset.frameOrientation || 'unknown'",
@@ -387,7 +417,7 @@ func TestIndexComposesPortraitMobileCamerasWithoutBlackBarsOrDestructiveCrop(t *
 			t.Fatalf("index.html missing premium portrait composition %q", want)
 		}
 	}
-	if strings.Index(html, ".video-tile > video {") > strings.Index(html, "html:not(.is-mobile-device) .video-tile.has-portrait-composition video.has-portrait-frame") {
+	if strings.Index(html, ".video-tile > video {") > strings.Index(html, "html:not(.is-mobile-device) .video-tile video.has-portrait-frame") {
 		t.Fatal("gallery videos must receive definite tile bounds before portrait object-fit overrides are applied")
 	}
 
@@ -1646,6 +1676,9 @@ func TestIndexKeepsRemoteAudioSeparateForLowLatency(t *testing.T) {
 		"function remotePlaybackNeedsGesture(element)",
 		"function remotePlaybackPendingCount(options = {})",
 		"function roomAudioPlaybackBlocked()",
+		"function unlockRoomAudioPlaybackFromGesture(event)",
+		"document.addEventListener('pointerdown', unlockRoomAudioPlaybackFromGesture",
+		"document.addEventListener('keydown', unlockRoomAudioPlaybackFromGesture",
 		"function notifyRoomAudioBlocked()",
 		"function startRoomAudioUnlockRetry()",
 		"click anywhere to enable room audio",
@@ -1693,6 +1726,7 @@ func TestIndexReportsBrowserMediaQualityDiagnostics(t *testing.T) {
 		"remoteAudioLevels: audioSignal.levels",
 		"function syncRoomAudioPlaybackState()",
 		"pendingRemotePlaybackElements.add(element)",
+		"if (!element?.isConnected || !element.srcObject)",
 		"notifyRoomAudioBlocked()",
 		"summarizeCandidatePair(selectedCandidatePair, report)",
 		"function mediaQualityDelta(snapshot, previous)",

@@ -508,6 +508,16 @@ func pendingOfferMetadata(peer *peerConnectionState) signalingOfferMetadata {
 	return signalingOfferMetadata{OfferID: peer.pendingOfferID, Revision: peer.pendingOfferRevision}
 }
 
+func (peer *peerConnectionState) completePendingOfferIfMatching(answered signalingOfferMetadata) bool {
+	if peer == nil || pendingOfferMetadata(peer) != answered {
+		return false
+	}
+	peer.pendingOfferID = ""
+	peer.pendingOfferRevision = 0
+	peer.iceRestart.complete()
+	return true
+}
+
 func signalingOfferID(sessionID string, revision uint64) string {
 	return fmt.Sprintf("%s-offer-%d", mediaIDPart(sessionID, "session"), revision)
 }
@@ -571,20 +581,25 @@ func currentPendingOfferMetadata(peerConnection *webrtc.PeerConnection) signalin
 	return signalingOfferMetadata{}
 }
 
-func clearPendingOfferMetadata(peerConnection *webrtc.PeerConnection) {
+func completePendingOfferIfMatching(peerConnection *webrtc.PeerConnection, answered signalingOfferMetadata) bool {
 	if peerConnection == nil {
-		return
+		return false
 	}
 
 	listLock.Lock()
 	defer listLock.Unlock()
 	for i := range peerConnections {
 		if peerConnections[i].peerConnection == peerConnection {
-			peerConnections[i].pendingOfferID = ""
-			peerConnections[i].pendingOfferRevision = 0
-			return
+			// SetRemoteDescription makes the PeerConnection stable before this
+			// handler can reacquire listLock. The room-media actor may use that
+			// window to create offer N+1. Only complete the exact offer whose
+			// answer we just applied; clearing N+1 here strands the peer in
+			// have-local-offer until the negotiation watchdog ejects it.
+			return peerConnections[i].completePendingOfferIfMatching(answered)
 		}
 	}
+
+	return false
 }
 
 func countPeerSenders(peerConnection *webrtc.PeerConnection) int {
@@ -4070,20 +4085,6 @@ func notePeerConnectionICEState(peerConnection *webrtc.PeerConnection, state web
 	}
 }
 
-func completePeerConnectionICERestart(peerConnection *webrtc.PeerConnection) {
-	if peerConnection == nil {
-		return
-	}
-	listLock.Lock()
-	defer listLock.Unlock()
-	for i := range peerConnections {
-		if peerConnections[i].peerConnection == peerConnection {
-			peerConnections[i].iceRestart.complete()
-			return
-		}
-	}
-}
-
 func schedulePeerConnectionSignal(roomID string) {
 	schedulePeerConnectionSignalForGeneration(roomID, 0, false)
 }
@@ -5031,6 +5032,19 @@ func sendServerBuildVersion(c *threadSafeWriter) {
 	}
 }
 
+// websocketFrameNeedsVerboseLog keeps high-volume liveness and telemetry
+// frames out of the raw frame log. media_quality already emits a compact,
+// queryable summary and room_ping is represented by session liveness; logging
+// their full payloads duplicated most of the room log during the incident.
+func websocketFrameNeedsVerboseLog(event string) bool {
+	switch strings.TrimSpace(event) {
+	case "media_quality", "room_ping":
+		return false
+	default:
+		return true
+	}
+}
+
 // websocketFrameForLog scrubs secrets out of a raw inbound room frame before
 // it reaches the read-loop Info log. The participant hello carries the room
 // passcode (§4.5 — "never in URL/logs"), and prod runs PION_LOG_INFO=all, so
@@ -5614,15 +5628,13 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if isWebsocketReadTimeout(err) {
 				log.Infof("room_ws_read_timeout participant=%s session=%s timeout=%s; cleaning up half-open session", currentParticipantName(), participantSessionID, websocketReadTimeout)
 			} else if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived) {
-				log.Errorf("Failed to read message: %v", err)
+				log.Errorf("room_ws_unexpected_close participant=%s session=%s room=%s error=%v", currentParticipantName(), participantSessionID, connRoomID, err)
 			} else {
-				log.Infof("WebSocket closed: %v", err)
+				log.Infof("room_ws_closed participant=%s session=%s room=%s error=%v", currentParticipantName(), participantSessionID, connRoomID, err)
 			}
 
 			return
 		}
-
-		log.Infof("Got message: %s", websocketFrameForLog(raw))
 
 		// An inbound room frame is proof of life for the liveness sweep, alongside
 		// the heartbeat pong (no-op until this socket is admitted).
@@ -5632,6 +5644,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			log.Errorf("Failed to unmarshal json to message: %v", err)
 
 			return
+		}
+		if websocketFrameNeedsVerboseLog(message.Event) {
+			log.Infof("Got message: %s", websocketFrameForLog(raw))
 		}
 
 		// §5.4 guest inbound containment: the hello, signaling, liveness, and
@@ -6124,8 +6139,11 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 
 				continue
 			}
-			completePeerConnectionICERestart(peerConnection)
-			clearPendingOfferMetadata(peerConnection)
+			if !completePendingOfferIfMatching(peerConnection, pendingMetadata) {
+				currentPending := currentPendingOfferMetadata(peerConnection)
+				log.Infof("room_signal_answer_superseded participant=%s session=%s answered_offer_id=%s answered_revision=%d current_offer_id=%s current_revision=%d",
+					currentParticipantName(), participantSessionID, pendingMetadata.OfferID, pendingMetadata.Revision, currentPending.OfferID, currentPending.Revision)
+			}
 			matchingCandidates, discardedCandidates := pendingRemoteCandidates.takeMatching(peerConnection.RemoteDescription())
 			if discardedCandidates > 0 {
 				log.Infof("Discarded %d queued ICE candidates from stale explicit generations", discardedCandidates)

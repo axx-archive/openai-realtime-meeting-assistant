@@ -38,7 +38,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // Build 23 restores the compact message-action tray so reactions,
       // replies, edits, and deletes remain usable after a long press.
       // Pin the multi-target release so the app and ReplayKit extension match.
-      buildNumber: '23',
+      buildNumber: '24',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',
