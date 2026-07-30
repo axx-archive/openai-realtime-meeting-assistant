@@ -98,14 +98,21 @@
         --signal-500: #30D158;
         --signal-600: #23A847;
 
-        /* ember — the one warm ignition accent (modern coral, not literal fire).
-           Reserved for igniting work: Run/launch, a running goal node, the live
-           ingestion pulse, deck emphasis. Earned, never ambient — a screen at
-           rest holds no ember. (glass & ink v2) */
-        --ember-300: #FF9E85;
-        --ember-400: #FF8163;
-        --ember-500: #FF6B4A;
-        --ember-600: #F0522F;
+        /* ember — the one warm ignition accent. Reserved for igniting work:
+           Run/launch, a running goal node, the live ingestion pulse, deck
+           emphasis. Earned, never ambient — a screen at rest holds no ember.
+           (glass & ink v2)
+
+           --ember-500 IS Stride Orange: the same #FF5A19 the Stride Signal is
+           drawn in, in scripts/stride-signal-geometry.mjs. It used to be a
+           slightly pinker coral (#FF6B4A), which meant the logo and every accent
+           in the product were two different oranges sitting next to each other.
+           One brand, one orange. The ramp is that hue held at 100% saturation
+           and stepped on lightness (74 / 65 / 55 / 45). */
+        --ember-300: #FFA07A;
+        --ember-400: #FF7F4D;
+        --ember-500: #FF5A19;
+        --ember-600: #E64100;
 
         /* semantic hues (state only) */
         --red-500: #FF453A;
@@ -162,7 +169,7 @@
         --ember: var(--ember-500);
         --ember-hover: var(--ember-400);
         --ember-press: var(--ember-600);
-        --ember-soft: rgba(255, 107, 74, 0.12);
+        --ember-soft: rgba(255, 90, 25, 0.12);
         /* Ember is a light coral; white on it measures 2.82:1 and fails on the
            primary CTA. Dark theme already uses this near-black (6.84:1) — both
            themes now read the same on the same button. */
@@ -278,7 +285,6 @@
         --dur-slow: 360ms;   /* panels, sheets, PiP travel */
         --dur-breathe: 2400ms; /* ambient "listening" pulse */
         --press-scale: 0.97;
-
         /* breathing amplitude — the whole room swells on one switch */
         --breathe-rest: 0.4;
         --breathe-live: 1;
@@ -298,7 +304,7 @@
            earned-vs-ambient placement is refined per surface with the mocks. */
         --agent: var(--ember);
         --agent-soft: var(--ember-soft);
-        --glow-agent: 0 0 0 1.5px var(--ember), 0 4px 20px rgba(255,107,74,0.28);
+        --glow-agent: 0 0 0 1.5px var(--ember), 0 4px 20px rgba(255,90,25,0.28);
       }
 
       [data-theme="dark"] {
@@ -339,7 +345,7 @@
         --ember: var(--ember-500);
         --ember-hover: var(--ember-400);
         --ember-press: var(--ember-600);
-        --ember-soft: rgba(255, 107, 74, 0.16);
+        --ember-soft: rgba(255, 90, 25, 0.16);
         --on-ember: #1A0A05;
 
         --scrim: rgba(0, 0, 0, 0.60);
@@ -361,7 +367,7 @@
            same ember reads on true black; the soft/glow carry a touch more lift. */
         --agent: var(--ember);
         --agent-soft: var(--ember-soft);
-        --glow-agent: 0 0 0 1.5px var(--ember), 0 4px 22px rgba(255,107,74,0.34);
+        --glow-agent: 0 0 0 1.5px var(--ember), 0 4px 22px rgba(255,90,25,0.34);
       }
 
       @media (prefers-reduced-motion: reduce) {
@@ -5912,6 +5918,13 @@
         letter-spacing: var(--track-label);
       }
 
+      .office-launch__mini-signal {
+        width: 12px;
+        height: 1.5px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+
       /* the one big tappable area — transparent at rest, an accent wash
          on hover (design hover background) */
       .office-launch__wave {
@@ -5931,44 +5944,78 @@
       }
       .office-launch__wave:hover { background: var(--accent-soft); }
 
+      /* ---------- THE STRIDE SIGNAL ----------
+
+         The logo, as the instrument. One surface does both jobs: at rest it is
+         the same canonical curve as the app icon, and while a voice is in the room it is the only
+         thing on screen that moves.
+
+         Canon: docs/stride-signal-canon.md. Geometry: scripts/stride-signal-geometry.mjs.
+
+         The mark is ONE aperture — a closed horizontal lens whose OPENNESS
+         carries the signal. The path in the markup is the idle cut (25:1). While
+         the drive runs, JS rewrites the path's `d` each frame from the live
+         microphone level, which is also how the ripple gets its side-to-side
+         travel; a CSS transform cannot ripple a path. At rest JS restores the
+         idle path, so the resting control is the stylesheet's mark rather than a
+         JS approximation of it. */
       .office-launch__bars {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 4px;
-        width: 196px;
-        height: 196px;
-        overflow: hidden;
-        border-radius: 50%;
-        /* rest = a calm muted-ink waveform; the ember breath is EARNED, lit
-           only while actually listening (breathe-only-while-listening law) */
-        color: var(--ember);
+        position: relative;
+        display: grid;
+        place-items: center;
+        /* The hero of the page. Scales with the viewport's SHORT axis so the
+           mark never collides with the greeting on a laptop screen. */
+        --aperture-width: clamp(300px, 34vw, 460px);
+        width: var(--aperture-width);
+        /* Room for the FULLY OPEN cut (8:1) plus the ripple, so opening never
+           clips. The idle mark occupies under a third of this box. */
+        height: calc(var(--aperture-width) / 8 * 1.5);
+        /* Ember is EARNED. Grey at rest; the listening rule below lights it.
+           Colour means something is happening — a resting screen holds no ember,
+           and that trade (brand presence at rest for an honest signal) is
+           founder-ratified. */
+        color: var(--text-2);
+        transition: color var(--dur-med) var(--ease);
       }
 
       .office-launch.is-listening .office-launch__bars { color: var(--ember); }
 
-      .office-launch__bars .bf-wave-bar {
-        flex: 0 0 9px;
-        width: var(--stride-band-width);
-        height: 9px;
-        border-radius: 2px 8px 8px 2px;
-        transform: translateX(var(--stride-band-shift));
-        transform-origin: center;
-        opacity: 0.72;
-        transition: opacity var(--dur-med) var(--ease);
+      .office-launch__aperture {
+        display: block;
+        width: 100%;
+        height: auto;
+        overflow: visible;
+        fill: currentColor;
       }
 
-      .office-launch.is-listening .office-launch__bars .bf-wave-bar {
-        animation-name: stride-signal-listen;
-        animation-duration: 760ms;
-        animation-timing-function: var(--ease);
-        animation-iteration-count: infinite;
+      /* The glow is earned too: a resting wash renders as a stray grey lozenge,
+         so it exists only while listening, where it is ember and means something. */
+      .office-launch__bars::after {
+        content: '';
+        position: absolute;
+        inset: -18% -6%;
+        pointer-events: none;
+        opacity: 0;
+        background: radial-gradient(ellipse at center, var(--ember-soft), transparent 68%);
+        transition: opacity var(--dur-slow) var(--ease);
       }
+      .office-launch.is-listening .office-launch__bars::after { opacity: 1; }
 
-      @keyframes stride-signal-listen {
-        0%, 100% { transform: translateX(var(--stride-band-shift)) scaleX(0.92); }
-        50% { transform: translateX(var(--stride-band-shift)) scaleX(1.08); opacity: 1; }
+      /* Hover opens the aperture a sliver. An idle mark gives you no reason to
+         believe pressing it will do anything; one small stir does. Transform, so
+         it composites and never fights the JS-owned path. */
+      @media (hover: hover) and (pointer: fine) {
+        .office-launch__wave:hover .office-launch__aperture,
+        .office-launch__wave:focus-visible .office-launch__aperture {
+          transform: scaleY(1.5);
+        }
+        .office-launch__aperture {
+          transition: transform var(--dur-slow) var(--ease);
+          transform-origin: center;
+        }
+        /* While the drive owns the geometry, hover must not also scale it — the
+           two would multiply and overshoot the 8:1 floor. */
+        .office-launch.is-listening .office-launch__aperture { transform: none; }
       }
 
       .office-launch__line {
@@ -19645,18 +19692,20 @@
         }
 
         .office-launch__bars {
-          width: 148px;
-          height: 148px;
-          gap: 3px;
-          align-items: center;
-          /* rest = muted ink; the listening rule lights it ember (specificity) */
-          color: var(--ember);
+          /* Phone: still the widest thing on the screen, but the greeting and
+             the live-now strip have to fit under it without scrolling. */
+          --aperture-width: min(74vw, 320px);
         }
 
-        .office-launch__bars .bf-wave-bar {
-          flex-basis: 7px;
-          height: 7px;
+        /* Touch has no hover, so the press is where the affordance has to live:
+           the aperture opens a sliver under your thumb. */
+        .office-launch__wave:active .office-launch__aperture {
+          transform: scaleY(1.6);
+          transition: transform var(--dur-fast) var(--ease);
           transform-origin: center;
+        }
+        .office-launch.is-listening .office-launch__wave:active .office-launch__aperture {
+          transform: none;
         }
 
         .office-launch__line {
@@ -22016,6 +22065,16 @@
         .office-launch.is-listening .bf-wave-bar,
         .bf-island.is-speaking .bf-wave-bar,
         .bf-fab.is-speaking .bf-wave-bar { animation: none; }
+        /* The Stride Signal keeps its ANSWER and loses its travel.
+           Dropping the ripple is right — that is decoration. Dropping the
+           amplitude response would not be: "can you hear me?" is the only
+           question a voice control is ever asked, and a mark that cannot answer
+           it is broken, not calm. So the aperture still OPENS with your voice; it
+           just stops rippling, which `strideSignalReduceMotion()` enforces at the
+           one place the geometry is computed. The hover scale goes too, since a
+           held-open pose is not something the visitor can dismiss. */
+        .office-launch__aperture { transform: none; transition: none; }
+        .office-launch__bars::after { transition: none; }
         .voice-ledger { animation: none; }
         /* Private grill (Wave 12): keep every act's STATE (tone, color, content),
            drop the MOTION — the scorecard appears assembled with final values,
@@ -22237,22 +22296,31 @@
             <div class="office-launch__wrap">
               <div class="office-launch__island">
                 <div class="office-launch__mark">
-                  <img src="/public/favicon.png" width="12" height="12" alt="">
+                  <span class="office-launch__mini-signal" aria-hidden="true"></span>
                   scout
                 </div>
                 <button type="button" aria-label="tap to talk to Scout" data-start-realtime-voice class="office-launch__wave pressable">
-                  <span class="office-launch__bars">
-                    <span class="bf-wave-bar" style="--stride-band-width:42%; --stride-band-shift:7px; animation-delay:0ms;"></span>
-                    <span class="bf-wave-bar" style="--stride-band-width:66%; --stride-band-shift:3px; animation-delay:70ms;"></span>
-                    <span class="bf-wave-bar" style="--stride-band-width:80%; --stride-band-shift:1px; animation-delay:140ms;"></span>
-                    <span class="bf-wave-bar" style="--stride-band-width:90%; --stride-band-shift:-2px; animation-delay:210ms;"></span>
-                    <span class="bf-wave-bar" style="--stride-band-width:96%; --stride-band-shift:2px; animation-delay:280ms;"></span>
-                    <span class="bf-wave-bar" style="--stride-band-width:100%; --stride-band-shift:0px; animation-delay:350ms;"></span>
-                    <span class="bf-wave-bar" style="--stride-band-width:96%; --stride-band-shift:-3px; animation-delay:420ms;"></span>
-                    <span class="bf-wave-bar" style="--stride-band-width:88%; --stride-band-shift:3px; animation-delay:490ms;"></span>
-                    <span class="bf-wave-bar" style="--stride-band-width:76%; --stride-band-shift:-1px; animation-delay:560ms;"></span>
-                    <span class="bf-wave-bar" style="--stride-band-width:60%; --stride-band-shift:-5px; animation-delay:630ms;"></span>
-                    <span class="bf-wave-bar" style="--stride-band-width:36%; --stride-band-shift:-7px; animation-delay:700ms;"></span>
+                  <!-- THE STRIDE SIGNAL. Not a waveform wearing our colour — the
+                       logo itself, and the surface you press to speak.
+
+                       One aperture. The path below is the IDLE cut (25:1), a print
+                       of scripts/stride-signal-geometry.mjs. The app icon uses the
+                       same curve at a more legible 12:1 cut; pressing this 25:1
+                       instrument never swaps pictures. It just opens.
+
+                       While the drive runs, `updateApertureGeometry` rewrites this
+                       `d` each frame from real microphone amplitude: the opening is
+                       the level, and the ripple travelling along it is the
+                       side-to-side motion. Openness never passes 8:1 — past that a
+                       lens reads as an eye, which is the wrong thing to be on a
+                       product that remembers what people said.
+
+                       Canon: docs/stride-signal-canon.md
+                       Regenerate: node scripts/stride-signal-geometry.mjs -->
+                  <span class="office-launch__bars" id="officeStrideSignal" aria-hidden="true">
+                    <svg class="office-launch__aperture" viewBox="0 -42.24 675.84 84.48" preserveAspectRatio="xMidYMid meet">
+                      <path id="officeAperturePath" d="M0.00 0.00 L10.56 -1.04 L21.12 -1.88 L31.68 -2.64 L42.24 -3.37 L52.80 -4.06 L63.36 -4.72 L73.92 -5.36 L84.48 -5.97 L95.04 -6.56 L105.60 -7.13 L116.16 -7.68 L126.72 -8.20 L137.28 -8.70 L147.84 -9.18 L158.40 -9.64 L168.96 -10.07 L179.52 -10.48 L190.08 -10.86 L200.64 -11.22 L211.20 -11.55 L221.76 -11.86 L232.32 -12.15 L242.88 -12.41 L253.44 -12.64 L264.00 -12.84 L274.56 -13.02 L285.12 -13.17 L295.68 -13.30 L306.24 -13.39 L316.80 -13.46 L327.36 -13.50 L337.92 -13.52 L348.48 -13.50 L359.04 -13.46 L369.60 -13.39 L380.16 -13.30 L390.72 -13.17 L401.28 -13.02 L411.84 -12.84 L422.40 -12.64 L432.96 -12.41 L443.52 -12.15 L454.08 -11.86 L464.64 -11.55 L475.20 -11.22 L485.76 -10.86 L496.32 -10.48 L506.88 -10.07 L517.44 -9.64 L528.00 -9.18 L538.56 -8.70 L549.12 -8.20 L559.68 -7.68 L570.24 -7.13 L580.80 -6.56 L591.36 -5.97 L601.92 -5.36 L612.48 -4.72 L623.04 -4.06 L633.60 -3.37 L644.16 -2.64 L654.72 -1.88 L665.28 -1.04 L675.84 0.00 L675.84 0.00 L665.28 1.04 L654.72 1.88 L644.16 2.64 L633.60 3.37 L623.04 4.06 L612.48 4.72 L601.92 5.36 L591.36 5.97 L580.80 6.56 L570.24 7.13 L559.68 7.68 L549.12 8.20 L538.56 8.70 L528.00 9.18 L517.44 9.64 L506.88 10.07 L496.32 10.48 L485.76 10.86 L475.20 11.22 L464.64 11.55 L454.08 11.86 L443.52 12.15 L432.96 12.41 L422.40 12.64 L411.84 12.84 L401.28 13.02 L390.72 13.17 L380.16 13.30 L369.60 13.39 L359.04 13.46 L348.48 13.50 L337.92 13.52 L327.36 13.50 L316.80 13.46 L306.24 13.39 L295.68 13.30 L285.12 13.17 L274.56 13.02 L264.00 12.84 L253.44 12.64 L242.88 12.41 L232.32 12.15 L221.76 11.86 L211.20 11.55 L200.64 11.22 L190.08 10.86 L179.52 10.48 L168.96 10.07 L158.40 9.64 L147.84 9.18 L137.28 8.70 L126.72 8.20 L116.16 7.68 L105.60 7.13 L95.04 6.56 L84.48 5.97 L73.92 5.36 L63.36 4.72 L52.80 4.06 L42.24 3.37 L31.68 2.64 L21.12 1.88 L10.56 1.04 L0.00 0.00 Z"/>
+                    </svg>
                   </span>
                   <span class="office-launch__line" id="officeLaunchGreeting">good morning.</span>
                   <span class="office-launch__tap-hint" id="officeLaunchHint">tap to talk to Scout</span>
@@ -25793,6 +25861,10 @@
         window.requestAnimationFrame(updateMobileRoomStageMetrics)
         scheduleAuxiliaryVideoPlaybackRepair('viewport resize', 160)
         schedulePrimaryVideoPlaybackRepair('viewport resize', 180)
+        // The Stride Signal needs nothing on resize: the aperture is drawn in
+        // its own viewBox and scaled by CSS, so its geometry is resolution- and
+        // viewport-independent. Kept as a note because the previous mark cached
+        // a pixel width here and silently went stale when the window moved.
       })
       window.addEventListener('orientationchange', () => {
         window.requestAnimationFrame(updateMobileRoomStageMetrics)
@@ -31209,6 +31281,10 @@
         outboundTrack.enabled = true
         privateRealtimeVoiceProcessor = audio.processor
         privateRealtimeVoiceStream = new MediaStream([outboundTrack])
+        // Your leg of the conversation. Tapped from the OUTBOUND track, so the
+        // mark shows what Scout is actually being sent — including the moment
+        // suppression or a mute takes your voice away.
+        openStrideSignalTap(privateRealtimeVoiceStream, 'human')
 
         const rtcConfiguration = await loadRTCConfiguration()
         assertPrivateRealtimeVoiceSession(sessionToken, () => closePrivateRealtimeVoiceSession())
@@ -31325,6 +31401,266 @@
         return `${normalized.split('\n').map(line => line.trimEnd()).join('\r\n')}\r\n`
       }
 
+      /* ---------- The Stride Signal's drive ----------
+
+         The mark on the home screen is the logo AND the talk control, and the
+         only thing that makes the second half of that true is this: every pixel
+         of movement traces back to an audio sample. A keyframe loop cannot tell
+         you whether the room is actually being heard, and "is this thing
+         listening?" is the one question a voice interface has to answer without
+         being asked. So at rest the mark is exactly the logo, and it moves if
+         and only if there is a voice in the pipeline.
+
+         Two taps, not one. The mark leans toward whoever is speaking — your
+         voice while Scout listens, Scout's voice while it answers. It is one
+         conversation, so it gets one instrument.
+
+         JS writes a single custom property. The gait itself is 16 CSS keyframe
+         animations keeping time on the compositor, scaled by that property, so
+         the main thread does arithmetic on one number per frame instead of
+         restyling sixteen elements. */
+      const STRIDE_SIGNAL_FLOOR = 0.16
+      // RMS that reads as a full stride. Conversational speech into a laptop
+      // mic lands around 0.04–0.14, so 0.2 keeps the top of the range reachable
+      // by emphasis rather than by shouting.
+      const STRIDE_SIGNAL_FULL_RMS = 0.2
+      /* The mark's geometry, printed from scripts/stride-signal-geometry.mjs.
+         Canon: docs/stride-signal-canon.md §2.
+
+         RATIO_IDLE is the logo and the resting control. RATIO_OPEN is a HARD
+         FLOOR on the whole identity: past 8:1 a lens reads as an eye, which is
+         the wrong connotation for a product whose job is remembering what people
+         said. Nothing here may open further, at any amplitude. */
+      const APERTURE_WIDTH = 675.84
+      const APERTURE_RATIO_IDLE = 25
+      const APERTURE_RATIO_OPEN = 8
+      const APERTURE_EXPONENT = 0.85
+      const APERTURE_STEPS = 64
+      const APERTURE_RIPPLE_DEPTH = 0.18
+      const APERTURE_RIPPLE_FREQUENCY = 6.2
+      const APERTURE_RIPPLE_SPEED = 1.9
+      const APERTURE_RIPPLE_EDGE_OFFSET = 0.8
+      const STRIDE_SIGNAL_ATTACK = 0.5
+      const STRIDE_SIGNAL_RELEASE = 0.12
+      let strideSignalFrame = 0
+      let strideSignalTaps = []
+      let strideSignalIdlePath = ''
+      let strideSignalLevel = 0
+
+      function strideSignalElement() {
+        return document.getElementById('officeStrideSignal')
+      }
+
+      function strideSignalPath() {
+        return document.getElementById('officeAperturePath')
+      }
+
+      function strideSignalReduceMotion() {
+        return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
+      }
+
+      /**
+       * Half-height of the aperture at a normalised position across it.
+       *
+       * Exactly closed at the tips: Math.sin(Math.PI) is 1.22e-16, not 0, and
+       * that residue survives the exponent — without the special case the mark's
+       * ends are infinitesimally open and "closed at the tips" becomes a claim
+       * the geometry does not honour.
+       */
+      function apertureHalfHeight(p, peak) {
+        if (p <= 0 || p >= 1) {
+          return 0
+        }
+        return peak * Math.pow(Math.sin(p * Math.PI), APERTURE_EXPONENT)
+      }
+
+      /**
+       * The aperture's path at a given level and time.
+       *
+       * The opening interpolates the PEAK rather than the ratio. The ratio is a
+       * reciprocal, so interpolating it directly makes the aperture rush at one
+       * end of the range and crawl at the other — which reads as a broken
+       * control rather than a smooth one.
+       *
+       * The ripple is the side-to-side element, and it is deliberately a detail
+       * ON TOP of the lens rather than a competing wave: an earlier pass let it
+       * reach 0.42 and the slot stopped reading as a lens and became an amoeba.
+       * At level 0 it is exactly 1, so silence draws the logo.
+       */
+      function aperturePathData(level, seconds) {
+        const idle = APERTURE_WIDTH / APERTURE_RATIO_IDLE / 2
+        const open = APERTURE_WIDTH / APERTURE_RATIO_OPEN / 2
+        const clamped = Math.min(1, Math.max(0, level))
+        const peak = idle + (open - idle) * clamped
+        const rippling = clamped > 0 && !strideSignalReduceMotion()
+        const edge = (p, sign) => {
+          const base = apertureHalfHeight(p, peak)
+          if (!rippling) {
+            return sign * base
+          }
+          const phase = p * APERTURE_RIPPLE_FREQUENCY
+            - seconds * APERTURE_RIPPLE_SPEED
+            + (sign > 0 ? APERTURE_RIPPLE_EDGE_OFFSET : 0)
+          // The ripple only ever CLOSES, spanning [1 - depth*level, 1]. The
+          // symmetric form (1 + depth*sin) put the crests 18% past the stated
+          // opening and took the mark to 7.07:1 — through the 8:1 floor that
+          // exists so a lens never reads as an eye. Measurement caught it; a
+          // decorative detail does not get to breach a ratified constraint.
+          const ripple = 1 - APERTURE_RIPPLE_DEPTH * clamped * (0.5 + 0.5 * Math.sin(phase))
+          return sign * base * ripple
+        }
+        const top = []
+        const bottom = []
+        for (let index = 0; index <= APERTURE_STEPS; index += 1) {
+          const p = index / APERTURE_STEPS
+          const x = (p * APERTURE_WIDTH).toFixed(2)
+          top.push(`${index === 0 ? 'M' : 'L'}${x} ${edge(p, -1).toFixed(2)}`)
+          bottom.push(`L${x} ${edge(p, 1).toFixed(2)}`)
+        }
+        return `${top.join(' ')} ${bottom.reverse().join(' ')} Z`
+      }
+
+      function openStrideSignalTap(stream, role) {
+        if (!stream) {
+          return
+        }
+        // Replace rather than skip. A renegotiated inbound track arrives on a NEW
+        // MediaStream, and keeping the first tap would leave an analyser reading a
+        // dead stream — the mark would sit at its floor through Scout's entire
+        // answer, which is the failure mode this control exists to make
+        // impossible.
+        closeStrideSignalTap(role)
+        const context = ensureAudioContext()
+        if (!context?.createMediaStreamSource) {
+          return
+        }
+        try {
+          const source = context.createMediaStreamSource(stream)
+          const analyser = context.createAnalyser()
+          analyser.fftSize = 512
+          // Deliberately low: the ballistics live in the attack/release below,
+          // and the analyser's own smoothing on top of them reads as lag.
+          analyser.smoothingTimeConstant = 0.2
+          source.connect(analyser)
+          // Never connected to the destination — a tap that reaches the speakers
+          // is an echo, and for the microphone leg it is feedback.
+          strideSignalTaps.push({ role, source, analyser, data: new Uint8Array(analyser.fftSize) })
+        } catch (error) {
+          // A tap is a nicety. If Web Audio refuses the stream the control still
+          // works; it just cannot show amplitude, which the caller cannot fix.
+          console.warn('Could not tap audio for the Stride Signal', error)
+        }
+      }
+
+      function readStrideSignalTap(tap) {
+        tap.analyser.getByteTimeDomainData(tap.data)
+        let sum = 0
+        for (let index = 0; index < tap.data.length; index += 1) {
+          const sample = (tap.data[index] - 128) / 128
+          sum += sample * sample
+        }
+        return Math.sqrt(sum / tap.data.length)
+      }
+
+      function strideSignalTargetLevel() {
+        if (!['listening', 'hearing', 'thinking', 'talking', 'acting', 'hand-raised'].includes(voiceIslandState)) {
+          return 0
+        }
+        // While Scout answers, the mark follows Scout. Otherwise it follows you.
+        const role = voiceIslandState === 'talking' ? 'scout' : 'human'
+        const tap = strideSignalTaps.find(candidate => candidate.role === role)
+          || strideSignalTaps[0]
+        if (!tap) {
+          // Connected but untappable (Safari can refuse a receiver stream). Hold
+          // the floor: the pipeline IS open, so total stillness would be a lie.
+          return STRIDE_SIGNAL_FLOOR
+        }
+        const rms = readStrideSignalTap(tap)
+        const scaled = Math.min(1, rms / STRIDE_SIGNAL_FULL_RMS)
+        return Math.max(STRIDE_SIGNAL_FLOOR, scaled)
+      }
+
+      function driveStrideSignal() {
+        strideSignalFrame = 0
+        const path = strideSignalPath()
+        if (!path) {
+          return
+        }
+        const target = strideSignalTargetLevel()
+        // Rise fast, fall slow — level-meter ballistics. A consonant has to
+        // register on the very next frame, because latency here reads directly
+        // as "it isn't hearing me"; the slow release stops the aperture
+        // flickering shut on the gaps between syllables.
+        const coefficient = target > strideSignalLevel ? STRIDE_SIGNAL_ATTACK : STRIDE_SIGNAL_RELEASE
+        strideSignalLevel += (target - strideSignalLevel) * coefficient
+        if (strideSignalLevel < 0.004) {
+          strideSignalLevel = 0
+        }
+        if (strideSignalLevel > 0) {
+          path.setAttribute('d', aperturePathData(strideSignalLevel, performance.now() / 1000))
+          strideSignalFrame = requestAnimationFrame(driveStrideSignal)
+          return
+        }
+        // Back to the logo. Restoring the ORIGINAL attribute rather than
+        // recomputing it means the resting control is the markup's mark — the
+        // exact path printed in the markup — instead of a JS approximation that
+        // happens to round to the same place.
+        restoreStrideSignalIdlePath()
+      }
+
+      function restoreStrideSignalIdlePath() {
+        const path = strideSignalPath()
+        if (path && strideSignalIdlePath) {
+          path.setAttribute('d', strideSignalIdlePath)
+        }
+      }
+
+      function startStrideSignalDrive() {
+        if (strideSignalFrame) {
+          return
+        }
+        // Captured once, before the drive has ever touched it, so "back to the
+        // logo" always means the exact shape the page shipped with.
+        if (!strideSignalIdlePath) {
+          strideSignalIdlePath = strideSignalPath()?.getAttribute('d') || ''
+        }
+        strideSignalFrame = requestAnimationFrame(driveStrideSignal)
+      }
+
+      function stopStrideSignalDrive() {
+        if (strideSignalFrame) {
+          cancelAnimationFrame(strideSignalFrame)
+          strideSignalFrame = 0
+        }
+        strideSignalLevel = 0
+        restoreStrideSignalIdlePath()
+      }
+
+      function closeStrideSignalTap(role) {
+        const keep = []
+        for (const tap of strideSignalTaps) {
+          if (tap.role !== role) {
+            keep.push(tap)
+            continue
+          }
+          try {
+            tap.source.disconnect()
+            tap.analyser.disconnect()
+          } catch {
+            // Already torn down with the context.
+          }
+        }
+        strideSignalTaps = keep
+      }
+
+      function releaseStrideSignalTaps() {
+        for (const tap of strideSignalTaps.slice()) {
+          closeStrideSignalTap(tap.role)
+        }
+        strideSignalTaps = []
+        stopStrideSignalDrive()
+      }
+
       function attachPrivateRealtimeVoiceTrack(event) {
         if (event.track?.kind !== 'audio') {
           return
@@ -31340,6 +31676,9 @@
           console.warn('Could not autoplay private Realtime voice', error)
           showToast({ text: 'click once to hear Scout', kind: 'note' })
         })
+        // Scout's leg of the conversation. The element keeps playing the stream;
+        // this only reads it, so the mark can lean to Scout's voice too.
+        openStrideSignalTap(stream, 'scout')
         event.track.addEventListener?.('unmute', () => setVoiceIslandState('talking', 'answering…'))
         event.track.addEventListener?.('mute', () => {
           if (privateRealtimeVoiceActive()) {
@@ -31858,6 +32197,9 @@
         privateRealtimeVoiceStream = undefined
         cleanupAudioProcessor(privateRealtimeVoiceProcessor, { stopOutput: true, stopSource: true })
         privateRealtimeVoiceProcessor = undefined
+        // Both taps die with the session, so the next one starts from silence
+        // rather than inheriting a stale analyser on a stopped track.
+        releaseStrideSignalTaps()
       }
 
       function privateRealtimeVoiceInFlight() {
@@ -31943,10 +32285,17 @@
         voiceIsland.dataset.state = next
         // breathe canon (D10): the office waveform swells only while the
         // realtime voice pipeline is genuinely listening/answering/acting
-        officeLaunchHome?.classList.toggle(
-          'is-listening',
-          ['listening', 'hearing', 'thinking', 'talking', 'acting', 'hand-raised'].includes(next)
-        )
+        const voiceInPipeline = ['listening', 'hearing', 'thinking', 'talking', 'acting', 'hand-raised'].includes(next)
+        officeLaunchHome?.classList.toggle('is-listening', voiceInPipeline)
+        // The Stride Signal's gait starts and stops with the pipeline, not with
+        // the click. Pressing the mark and then failing to connect must leave a
+        // still logo, because a mark that walks while nothing is listening is
+        // the exact lie this control exists to avoid.
+        if (voiceInPipeline) {
+          startStrideSignalDrive()
+        } else {
+          stopStrideSignalDrive()
+        }
         syncOfficeLaunchVoiceCopy()
         const labels = {
           connecting: 'Realtime 2',

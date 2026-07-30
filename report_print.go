@@ -326,7 +326,7 @@ func reportPrintInlineHTML(text string) string {
 // sidecar's CSP blocks every fetch). Light-only print typography: a system
 // stack close to Google Sans Flex, 11pt body on a 68ch measure, hairline
 // tables, sections that avoid breaking mid-block, headings that keep their
-// content. The ember (#FF6B4A) appears exactly twice — the flame mark and
+// content. The ember (#FF5A19, Stride Orange) appears exactly twice — the mark and
 // the gate strip's rule — the earned-accent law in print.
 const reportPrintCSS = `:root{color-scheme:light}
 *{margin:0;padding:0;box-sizing:border-box}
@@ -334,13 +334,13 @@ const reportPrintCSS = `:root{color-scheme:light}
 body{font-family:"Google Sans Flex",-apple-system,"Segoe UI",sans-serif;font-size:11pt;line-height:1.55;color:#1a1d23;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .masthead{padding-bottom:14pt;border-bottom:1.5pt solid #1a1d23;margin-bottom:16pt}
 .brand{display:flex;align-items:baseline;gap:5pt;margin-bottom:16pt}
-.brand .mark{color:#ff6b4a;font-size:9pt;line-height:1}
+.brand .mark{color:#ff5a19;font-size:9pt;line-height:1}
 .brand .wordmark{font-weight:700;font-size:10.5pt;letter-spacing:.01em}
 .brand .kicker{margin-left:auto;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:7.5pt;letter-spacing:.18em;color:#6a7180}
 .title{font-size:22pt;line-height:1.15;font-weight:700;letter-spacing:-.015em;max-width:36ch}
 .meta{margin-top:8pt;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:8pt;letter-spacing:.04em;color:#6a7180;font-variant-numeric:tabular-nums}
 .meta span+span::before{content:"·";margin:0 6pt;color:#c3c9d4}
-.gate{margin-top:10pt;padding:6pt 9pt;border-left:2pt solid #ff6b4a;background:#f7f8fa;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:8pt;line-height:1.5;color:#3c424e;page-break-inside:avoid;break-inside:avoid}
+.gate{margin-top:10pt;padding:6pt 9pt;border-left:2pt solid #ff5a19;background:#f7f8fa;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:8pt;line-height:1.5;color:#3c424e;page-break-inside:avoid;break-inside:avoid}
 .gate-label{display:block;font-size:6.5pt;letter-spacing:.16em;text-transform:uppercase;color:#6a7180;margin-bottom:2pt}
 .tags{margin-top:9pt}
 .tag{display:inline-block;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:7.5pt;color:#6a7180;border:.5pt solid #d8dce4;border-radius:3pt;padding:1.5pt 5pt;margin:0 3pt 3pt 0}

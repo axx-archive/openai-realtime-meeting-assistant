@@ -36,7 +36,7 @@ const choices: ConsentChoice[] = [
   {
     scope: 'audio_capture',
     title: 'Server microphone copy',
-    detail: 'Lets Bonfire receive a server-side copy of your microphone for this room sitting.',
+    detail: 'Lets Stride receive a server-side copy of your microphone for this room sitting.',
     dependency: 'Your direct call audio never depends on this.',
     icon: 'waveform',
   },

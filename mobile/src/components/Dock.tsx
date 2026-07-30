@@ -5,11 +5,9 @@ import {
   StyleSheet,
   Text,
   View,
-  type GestureResponderEvent,
 } from 'react-native';
-import { SymbolView } from 'expo-symbols';
 import { Glass } from '../theme/glass';
-import { Waveform } from './Waveform';
+import { StridePulse } from './StridePulse';
 import { colors, hitMin, radius, space, type } from '../theme/tokens';
 import type { DictationState } from '../voice/useDictation';
 
@@ -46,8 +44,7 @@ export type DockProps = {
   onHoldEnd: () => void;
   onHoldCancel: () => void;
   onReveal: () => void;
-  /** Silent path (§9.5) — opens the keyboard composer instead of the mic. */
-  onKeyboard: () => void;
+  durationMs: number;
 };
 
 export function Dock({
@@ -59,7 +56,7 @@ export function Dock({
   onHoldEnd,
   onHoldCancel,
   onReveal,
-  onKeyboard,
+  durationMs,
 }: DockProps) {
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const holding = useRef(false);
@@ -123,7 +120,7 @@ export function Dock({
   );
 
   const label = listening
-    ? 'Listening'
+    ? `Listening · ${Math.floor(durationMs / 60_000)}:${String(Math.floor(durationMs / 1000) % 60).padStart(2, '0')}`
     : busy
       ? 'Transcribing'
       : conversing
@@ -150,33 +147,10 @@ export function Dock({
           onPressOut={handlePressOut}
           style={styles.press}
         >
-          <SymbolView
-            name={listening ? 'waveform' : busy ? 'ellipsis' : 'mic.fill'}
-            tintColor={live ? colors.ember : colors.text1}
-            // 18 against 15pt text. At 20 the glyph out-weighed the label and
-            // the pill read icon-first instead of as one phrase.
-            size={18}
-          />
-          {listening ? (
-            <Waveform trace={trace} listening height={24} scale={0.62} />
-          ) : (
-            <Text style={[styles.label, live && styles.labelLive]} numberOfLines={1}>
-              {label}
-            </Text>
-          )}
-        </Pressable>
-
-        {/* Silent path: the keyboard is a peer control, never a downgrade. */}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Type instead"
-          hitSlop={8}
-          onPress={onKeyboard}
-          style={({ pressed }) => [styles.keyboard, pressed && styles.pressed]}
-        >
-          {/* text2, not text3: this is the silent path's entry point (§9.5), a
-              peer of the mic — at 38% ink it read as disabled. */}
-          <SymbolView name="keyboard" tintColor={colors.text2} size={18} />
+          <StridePulse trace={trace} listening={listening} size={28} />
+          <Text style={[styles.label, live && styles.labelLive]} numberOfLines={1}>
+            {label}
+          </Text>
         </Pressable>
       </Glass>
     </View>
@@ -187,6 +161,7 @@ const styles = StyleSheet.create({
   wrap: {
     paddingHorizontal: space[5],
     paddingBottom: space[2],
+    alignItems: 'center',
   },
   pill: {
     flexDirection: 'row',
@@ -196,14 +171,14 @@ const styles = StyleSheet.create({
     // optically wider than its box, so it needs less inset than text would;
     // the trailing edge holds a 44pt tap target whose own padding supplies the
     // rest of the breathing room.
-    paddingLeft: 18,
-    paddingRight: space[2],
+    minWidth: 222,
+    paddingHorizontal: 20,
     gap: space[2],
   },
   press: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 11,
     minHeight: hitMin,
   },
@@ -216,12 +191,6 @@ const styles = StyleSheet.create({
   },
   labelLive: {
     color: colors.emberText,
-  },
-  keyboard: {
-    width: hitMin,
-    height: hitMin,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   pressed: {
     opacity: 0.6,

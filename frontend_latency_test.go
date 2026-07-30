@@ -2527,9 +2527,12 @@ func TestIndexStrideRenameAndAgentToken(t *testing.T) {
 		"? 'Stride'",
 		"|| 'Stride'",
 		"'ready'",
-		// the one warm ignition accent (coral ember), migrated from the
-		// heritage flame; --agent now aliases the sanctioned --ember token
-		"--ember-500: #FF6B4A;",
+		// the one warm ignition accent, migrated from the heritage flame;
+		// --agent now aliases the sanctioned --ember token. The value is Stride
+		// Orange — the SAME hex the Stride Signal is drawn in, so the logo and
+		// the product's accent can never drift into two different oranges again.
+		// Source of truth: STRIDE_ORANGE in scripts/stride-signal-geometry.mjs.
+		"--ember-500: #FF5A19;",
 		"--agent: var(--ember);",
 		"--agent-soft:",
 		"--glow-agent:",

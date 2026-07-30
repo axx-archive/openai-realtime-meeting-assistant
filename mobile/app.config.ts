@@ -35,10 +35,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         dark: './assets/ios-icon-dark.png',
         tinted: './assets/ios-icon-tinted.png',
       },
-      // Build 23 restores the compact message-action tray so reactions,
-      // replies, edits, and deletes remain usable after a long press.
-      // Pin the multi-target release so the app and ReplayKit extension match.
-      buildNumber: '24',
+      // Build 25 carries the Stride Signal across the instrument and icon family
+      // on top of build 24's room-media stability fixes. Pin the multi-target
+      // release so the app and ReplayKit extension match.
+      buildNumber: '25',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

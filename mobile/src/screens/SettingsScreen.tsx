@@ -253,7 +253,7 @@ export function SettingsScreen() {
           <Text style={styles.primaryText}>{busy === 'profile' ? 'Saving…' : 'Save profile'}</Text>
         </Pressable>
 		<Text style={styles.privacyNote}>
-			Voice dictation is sent securely to Bonfire for company-aware transcription. The audio file is deleted after transcription or when you cancel or discard it; only text remains.
+			Voice dictation is sent securely to Stride for company-aware transcription. The audio file is deleted after transcription or when you cancel or discard it; only text remains.
 		</Text>
       </View>
 

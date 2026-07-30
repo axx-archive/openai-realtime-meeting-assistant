@@ -203,7 +203,7 @@ export function ThreadScreen({ route, navigation }: Props) {
 		dictationDisclosureOpenRef.current = true;
 		Alert.alert(
 			'Voice transcription',
-			'Your voice is sent to Bonfire to transcribe with your company\'s vocabulary, then the audio is deleted. Only the text stays.',
+			'Your voice is sent to Stride to transcribe with your company\'s vocabulary, then the audio is deleted. Only the text stays.',
 			[
 				{ text: 'Not now', style: 'cancel', onPress: () => { dictationDisclosureOpenRef.current = false; } },
 				{

@@ -2,15 +2,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
-  Keyboard,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
-  useColorScheme,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,7 +13,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../auth/AuthContext';
-import { StrideSignalGlyph } from '../components/BrandMark';
 import { Dock } from '../components/Dock';
 import { ChatCircle } from '../components/ChatCircle';
 import { NavCluster } from '../components/NavCluster';
@@ -27,7 +21,6 @@ import { useLiveLine } from '../canvas/useLiveLine';
 import { liveLineDisplay } from '../canvas/liveLineDisplay';
 import { useDictation } from '../voice/useDictation';
 import { useScoutConversation } from '../voice/useScoutConversation';
-import { Glass } from '../theme/glass';
 import { duration, ease, useReduceMotion } from '../theme/motion';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, radius, space, type } from '../theme/tokens';
@@ -69,18 +62,13 @@ function greeting(): string {
 
 export function CanvasScreen() {
   const navigation = useNavigation<CanvasNav>();
-  // `colors.text3` is a DynamicColorIOS pair, which expo-image's tintColor
-  // rejects — so the glyph's tint is resolved here instead.
-  const dark = useColorScheme() === 'dark';
-  const markTint = dark ? 'rgba(247, 247, 249, 0.42)' : 'rgba(14, 14, 16, 0.38)';
+  // The aperture takes a semantic token directly; react-native-svg accepts
+  // DynamicColorIOS on `fill`, unlike expo-image's tintColor.
   const reduceMotion = useReduceMotion();
   const live = useLiveLine();
   const lineDisplay = liveLineDisplay(live);
   const conversation = useScoutConversation();
-  const [typing, setTyping] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
-  const [draft, setDraft] = useState('');
-  const inputRef = useRef<TextInput>(null);
 
   // Hold-to-dictate. On the canvas a transcript is a question, so it feeds the
   // conversation loop rather than a text field.
@@ -117,27 +105,12 @@ export function CanvasScreen() {
   const answered = Boolean(conversation.turn?.answer) && !conversation.thinking;
   useEffect(() => {
     if (!conversation.open || !answered) return;
-    if (dictation.state !== 'idle' || typing) return;
+    if (dictation.state !== 'idle') return;
     void dictation.start();
     // `dictation.start` is stable per state; re-running on every render would
     // restart the recorder mid-turn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [answered, conversation.open, dictation.state, typing]);
-
-  const handleKeyboard = useCallback(() => {
-    setTyping(true);
-    conversation.start();
-    requestAnimationFrame(() => inputRef.current?.focus());
-  }, [conversation]);
-
-  const submitTyped = useCallback(() => {
-    const text = draft.trim();
-    if (!text) return;
-    setDraft('');
-    Keyboard.dismiss();
-    setTyping(false);
-    void conversation.ask(text);
-  }, [conversation, draft]);
+  }, [answered, conversation.open, dictation.state]);
 
   const openDeck = useCallback(() => navigation.navigate('Deck', {}), [navigation]);
 
@@ -192,10 +165,7 @@ export function CanvasScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
-      <KeyboardAvoidingView
-        style={styles.fill}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      <View style={styles.fill}>
         <ScrollView
           contentContainerStyle={styles.body}
           keyboardShouldPersistTaps="handled"
@@ -203,11 +173,9 @@ export function CanvasScreen() {
         >
           <View style={styles.skyAbove} />
 
-          {/* The web's `.office-launch__mark`: the Stride Signal beside a
-              small label, in text-3. This is the shell's only brand moment —
-              removing the tab bar took away the glyph's old home. */}
+          {/* A bare resting aperture, never the boxed app tile. */}
           <View style={styles.mark} accessibilityRole="header" accessibilityLabel="Scout">
-            <StrideSignalGlyph size={15} color={markTint} />
+            <StridePulse trace={dictation.trace} listening={false} size={22} />
             <Text style={styles.markLabel}>SCOUT</Text>
           </View>
 
@@ -226,9 +194,9 @@ export function CanvasScreen() {
             {listening ? (
               <LinearGradient
                 colors={[
-                  'rgba(255,107,74,0.00)',
-                  'rgba(255,107,74,0.13)',
-                  'rgba(255,107,74,0.00)',
+                  'rgba(255,90,25,0.00)',
+                  'rgba(255,90,25,0.13)',
+                  'rgba(255,90,25,0.00)',
                 ]}
                 start={{ x: 0, y: 0.5 }}
                 end={{ x: 1, y: 0.5 }}
@@ -305,30 +273,14 @@ export function CanvasScreen() {
 
           {dictation.permissionDenied ? (
             <Text style={styles.error}>
-              Microphone access is off. You can still type — tap the keyboard.
+              Microphone access is off. Enable it in Settings to talk to Scout.
             </Text>
           ) : null}
 
           <View style={styles.skyBelow} />
         </ScrollView>
 
-        {typing ? (
-          <Glass radius={radius.xl} style={styles.composer}>
-            <TextInput
-              ref={inputRef}
-              style={styles.input}
-              placeholder="Ask Scout…"
-              placeholderTextColor={colors.text3}
-              value={draft}
-              onChangeText={setDraft}
-              onSubmitEditing={submitTyped}
-              returnKeyType="send"
-              multiline
-              onBlur={() => setTyping(false)}
-            />
-          </Glass>
-        ) : (
-          <View style={styles.dockRow}>
+        <View style={styles.dockRow}>
             <View style={styles.navRow}>
               {/* One tap to the team thread, always. The circle yields while
                   the cluster is open rather than competing for the same band. */}
@@ -406,11 +358,10 @@ export function CanvasScreen() {
               onHoldEnd={() => void dictation.stop()}
               onHoldCancel={dictation.cancel}
               onReveal={openDeck}
-              onKeyboard={handleKeyboard}
+              durationMs={dictation.durationMs}
             />
           </View>
-        )}
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -456,9 +407,6 @@ const styles = StyleSheet.create({
   },
   mark: {
     flexDirection: 'row',
-    // Baseline, not box: small caps sit high inside their line box, so centring
-    // on the box leaves the glyph looking dropped. A 13pt line height on an
-    // 11pt label collapses the slack and the two align optically.
     alignItems: 'center',
     gap: 7,
     marginBottom: space[6],
@@ -560,18 +508,5 @@ const styles = StyleSheet.create({
   errorActionMuted: {
     ...type.button,
     color: colors.text3,
-  },
-  composer: {
-    marginHorizontal: space[5],
-    marginBottom: space[2],
-    paddingHorizontal: space[4],
-    paddingVertical: space[3],
-  },
-  input: {
-    minHeight: 44,
-    maxHeight: 140,
-    ...type.body,
-    color: colors.text1,
-    textAlignVertical: 'top',
   },
 });

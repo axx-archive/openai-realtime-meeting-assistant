@@ -2,9 +2,14 @@
 
 Founder directives that apply across ALL surfaces, in addition to the per-surface inventory (docs/reskin-inventory.md) and the design laws (.ds-ref/readme.md).
 
+> **The brand identity moved on 2026-07-29.** The mark, the orange, the lockups, and
+> the icons are now canonised in **[docs/stride-signal-canon.md](stride-signal-canon.md)**,
+> which wins wherever it disagrees with this file. §1 below has been corrected in
+> place; nothing else in this document was affected.
+
 ## 1. Glass & ink v2 core laws (recap)
-- Monochrome `--accent` (ink light / white dark): primary buttons, brand mark, unread badges, "you" bubbles.
-- Color = STATE + one earned exception: `--live #30D158` (live/speaking/presence); `--ember #FF6B4A` coral = the sanctioned IGNITION accent, EARNED never ambient (Run/launch, a running goal node, live pulse, deck emphasis). Semantic `--danger/--warn/--info` at *-soft. No decorative hue, no gradients, no third accent.
+- Monochrome `--accent` (ink light / white dark): primary buttons, unread badges, "you" bubbles. **NOT the brand mark** — the Stride Signal is orange and is the one earned exception, not monochrome chrome (see the canon).
+- Color = STATE + one earned exception: `--live #30D158` (live/speaking/presence); `--ember #FF5A19` = **Stride Orange**, the sanctioned IGNITION accent AND the mark's own colour — one orange for the whole product. EARNED never ambient (Run/launch, a running goal node, live pulse, deck emphasis, the talk control while listening). Semantic `--danger/--warn/--info` at *-soft. No decorative hue, no gradients, no third accent.
 - Fonts: sans = **Google Sans Flex**; mono = **Geist Mono**. System text (labels, statuses, timestamps, pills, log lines, counts) = lowercase Geist Mono; person text = Google Sans Flex. Numbers mono.
 - Glass floating chrome: bg var(--glass-chrome|panel) + backdrop-filter var(--glass-blur) + var(--glass-border) + box-shadow var(--glass-highlight),var(--glass-shadow). Radii 12/16/22/28/full. Cards: surface-2 + line-1 + r16, no rest shadow. Avatars: monochrome initials on surface-3. Motion: press .97, breathe 2400ms only-while-listening. No emoji.
 

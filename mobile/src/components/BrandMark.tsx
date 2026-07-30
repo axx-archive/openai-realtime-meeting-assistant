@@ -4,7 +4,6 @@ import { Image } from 'expo-image';
 import { radius, shadow } from '../theme/tokens';
 
 const strideSignalMark = require('../../assets/stride-signal-mark.png');
-const strideSignalGlyph = require('../../assets/android-icon-monochrome.png');
 
 type Props = {
   size?: number;
@@ -34,29 +33,6 @@ export function BrandMark({ size = 56, style }: Props) {
         cachePolicy="memory-disk"
       />
     </View>
-  );
-}
-
-type GlyphProps = {
-  size?: number;
-  /**
-   * A resolved color string, NOT a semantic token: `expo-image`'s `tintColor`
-   * rejects `DynamicColorIOS` values, so callers resolve light/dark themselves
-   * (see `markTint` in CanvasScreen).
-   */
-  color: string;
-};
-
-/** Tintable Stride Signal for compact navigation chrome. */
-export function StrideSignalGlyph({ size = 22, color }: GlyphProps) {
-  return (
-    <Image
-      source={strideSignalGlyph}
-      style={{ width: size, height: size }}
-      contentFit="contain"
-      tintColor={color}
-      cachePolicy="memory-disk"
-    />
   );
 }
 

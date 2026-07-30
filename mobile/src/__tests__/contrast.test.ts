@@ -57,7 +57,8 @@ const WHITE = hexToRgb('#FFFFFF');
 const INK_850 = hexToRgb('#141418');
 const TEXT1_LIGHT = hexToRgb('#0E0E10');
 const TEXT1_DARK = hexToRgb('#F7F7F9');
-const EMBER = hexToRgb('#FF6B4A');
+// Stride Orange — the same value the Stride Signal is drawn in.
+const EMBER = hexToRgb('#FF5A19');
 const EMBER_TEXT_LIGHT = hexToRgb('#B83A18');
 
 const AA_BODY = 4.5;
@@ -74,8 +75,8 @@ test('secondary text clears AA on the app background in both themes', () => {
   assert.ok(contrast(dark, INK_950) >= AA_BODY, 'text2 dark');
 });
 
-// The failure this audit found. #FF6B4A is tuned to glow against dark; on
-// #F5F5F7 it measures 2.59:1, and on an emberSoft chip 2.30:1 — every ember
+// The failure this audit found. Stride Orange is tuned to glow against dark; on
+// #F5F5F7 it measures 2.87:1, and on an emberSoft chip 2.50:1 — every ember
 // label in light mode was effectively decorative.
 test('ember TEXT clears AA on the light background', () => {
   const ratio = contrast(EMBER_TEXT_LIGHT, PAPER_50);

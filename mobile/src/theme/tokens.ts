@@ -31,11 +31,20 @@ export const signal = {
   600: '#23A847',
 } as const;
 
+/**
+ * ember — the one warm ignition accent.
+ *
+ * `500` IS Stride Orange: the same #FF5A19 the Stride Signal is drawn in (see
+ * `scripts/stride-signal-geometry.mjs`). It used to be a slightly pinker coral
+ * (#FF6B4A), which meant the logo and every accent in the product were two
+ * different oranges sitting next to each other. One brand, one orange. The ramp
+ * is that hue held at 100% saturation and stepped on lightness (74/65/55/45).
+ */
 export const ember = {
-  300: '#FF9E85',
-  400: '#FF8163',
-  500: '#FF6B4A',
-  600: '#F0522F',
+  300: '#FFA07A',
+  400: '#FF7F4D',
+  500: '#FF5A19',
+  600: '#E64100',
 } as const;
 
 const adaptive = (light: string, dark: string): ColorValue =>
@@ -75,21 +84,23 @@ export const colors = {
 
   /** Earned only — agent work / ignition, never ambient chrome. */
   ember: ember[500],
-  emberSoft: 'rgba(255, 107, 74, 0.12)',
+  emberSoft: 'rgba(255, 90, 25, 0.12)',
   onEmber: '#FFFFFF',
 
   /**
    * Ember for TEXT AND GLYPHS. Not a second brand colour — the same signal at a
    * luminance that can actually be read.
    *
-   * `ember` is #FF6B4A, a coral tuned to glow against dark. On the light
-   * theme's #F5F5F7 it measures **2.59:1**, and on an emberSoft chip **2.30:1**
-   * — both far under the 4.5:1 AA floor for body text, and under even the 3:1
-   * non-text floor for icons. Every ember label in light mode was effectively
-   * decorative.
+   * `ember` is Stride Orange, tuned to glow against dark. On the light theme's
+   * #F5F5F7 it measures **2.87:1**, and on an emberSoft chip **2.50:1** — both
+   * far under the 4.5:1 AA floor for body text, and under even the 3:1 non-text
+   * floor for icons. Every ember label in light mode was effectively decorative.
    *
-   * #B83A18 measures 5.27:1 on bgApp and 4.68:1 on emberSoft. Dark mode keeps
-   * ember[500], which already passes at 7.06:1 and is where the coral belongs.
+   * #B83A18 measures 5.27:1 on bgApp and **4.60:1** on emberSoft. That second
+   * number is the tight one: it clears AA by a tenth of a point, so darkening
+   * emberSoft or lightening #B83A18 will break it. `contrast.test.ts` holds the
+   * line. Dark mode keeps ember[500], which passes at 6.37:1 on bgApp and
+   * 5.68:1 on a soft chip, and is where the orange belongs.
    *
    * FILLS stay `ember`: the Dock tint, the listening glow, the mention dot, and
    * emberSoft backgrounds carry no text and have no contrast requirement.

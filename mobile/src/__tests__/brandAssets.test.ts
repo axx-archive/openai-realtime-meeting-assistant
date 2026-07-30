@@ -74,30 +74,49 @@ test('approved Stride Signal master is the exact release source', () => {
   const darkPng = read('assets/ios-icon-dark.png');
   const tintedPng = read('assets/ios-icon-tinted.png');
 
-  assert.equal(sha256(canonicalSvg), '2b45115baa17237cfb2da7ed5ec3e87ab9d2f235d1f9b0ab8287902c3156f85b');
+  // Regenerate with `node scripts/generate-stride-brand-assets.mjs` and update
+  // these digests in the same commit. The SVG is a print of
+  // `scripts/stride-signal-geometry.mjs`, never hand-edited.
+  assert.equal(sha256(canonicalSvg), '0a153994ed0b746f5be5446126b872990ca426be610c12a7d1d60a6fba71fa2f');
   assert.match(canonicalSvg.toString('utf8'), /<title>Stride Signal<\/title>/);
-  assert.equal(sha256(masterPng), 'e512e90847302dec49bdecd2f16023363a8f87a7aeb16d707763ca10c5b17f07');
+  assert.equal(sha256(masterPng), '7fde78fe45760658fd7f8e434b163b824ded954ef163bbbdcbaf68366ec61961');
   assert.equal(sha256(releasePng), sha256(masterPng));
-  assert.equal(sha256(darkPng), sha256(masterPng));
-  assert.equal(sha256(tintedPng), '3cf36bb362031dbfa3cf6a620a203b5c7a30bff130408e02f7840ee3c1beb13e');
+  // The dark-appearance icon is no longer a copy of the master. The primary tile
+  // is INVERTED (orange ground, aperture cut out in ink), so the sanctioned
+  // dark-ground alternate does real work as the iOS dark icon rather than being
+  // a duplicate.
+  assert.notEqual(sha256(darkPng), sha256(masterPng));
+  assert.equal(sha256(darkPng), '9a9c0800f3f255d6c90dc9184dfdb530fff99e5d8fd7f3ba62855477f00a073e');
+  assert.equal(sha256(tintedPng), 'db4569211ed0faa8bd38a1499f526c33b1a3aff1df913f9821f95f552ee36aa3');
 });
 
 test('React Native shell uses the approved Stride Signal assets everywhere', () => {
   const component = text('src/components/BrandMark.tsx');
   assert.match(component, /from 'expo-image'/);
   assert.match(component, /stride-signal-mark\.png/);
-  assert.match(component, /android-icon-monochrome\.png/);
-  assert.match(component, /export function StrideSignalGlyph/);
+  assert.doesNotMatch(component, /android-icon-monochrome\.png/);
   assert.doesNotMatch(component, /fullFlamePath|microFlamePath|bonfireMicroLogCutout/);
 
-  // The voice-first shell has no tab bar, so the compact signal lives in the
-  // canvas mark while the large signal is the real-amplitude talk control.
+  // The voice-first shell uses the bare signal at all three interaction scales:
+  // a quiet Scout label, the real-amplitude centrepiece, and the bottom talk
+  // control. Boxed tiles belong to launchers, never in-product chrome.
   const canvas = text('src/screens/CanvasScreen.tsx');
-  assert.match(canvas, /<StrideSignalGlyph/);
+  assert.match(canvas, /<StridePulse trace=\{dictation\.trace\} listening=\{false\} size=\{22\}/);
   assert.match(canvas, /<StridePulse trace=\{dictation\.trace\} listening=\{listening\}/);
 
+  // The bottom control is the second explicit path into the same voice loop.
+  const dock = text('src/components/Dock.tsx');
+  assert.match(dock, /<StridePulse trace=\{trace\} listening=\{listening\} size=\{28\}/);
+  assert.doesNotMatch(dock, /Type instead|onKeyboard|keyboard/);
+
+  // The centrepiece is the APERTURE, drawn from the shared geometry — not the
+  // sliced disc the founder rejected, and not a hand-drawn near-copy of the mark.
+  const pulse = text('src/components/StridePulse.tsx');
+  assert.match(pulse, /from 'react-native-svg'/);
+  assert.match(pulse, /aperturePathData/);
+  assert.doesNotMatch(pulse, /STRIDE_BANDS|strideOffset/);
+
   const navigation = text('src/navigation/RootNavigator.tsx');
-  assert.doesNotMatch(navigation, /StrideSignalGlyph/);
   assert.doesNotMatch(navigation, /Home:\s*'flame\.fill'/);
 });
 
@@ -135,11 +154,12 @@ test('Expo icon and splash sources have release-safe dimensions and alpha models
   }
   const pixelCount = tinted.width * tinted.height;
   assert.ok(dark / pixelCount > 0.5, 'tinted icon needs a substantial dark field');
-  // The textured mark deliberately carries midtone ember detail instead of a
-  // flat white glyph. Keep enough near-white core for the system tint to read
-  // while allowing the grayscale relief to survive.
+  // The mark is an APERTURE — a thin lens — so its light area is a few percent
+  // of the tile, not the double-digit share a filled disc gave. Measured at
+  // 3.6%; the floor is 2% so the test is not brittle, while a blank or
+  // all-dark tile (0%) still fails, which is the regression this exists for.
   assert.ok(
-    light / pixelCount > 0.08,
+    light / pixelCount > 0.02,
     `tinted icon needs a substantial light Stride Signal (got ${light / pixelCount})`,
   );
 

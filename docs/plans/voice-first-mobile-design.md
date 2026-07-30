@@ -1,5 +1,20 @@
 # Voice-First Mobile — Unified Design
 
+
+> **Partly superseded, 2026-07-29.** The centrepiece described below is a row of
+> 28 amplitude **bars**. It is now a single **aperture** — see
+> **[docs/stride-signal-canon.md](../stride-signal-canon.md)**, which is canon for
+> the mark and the instrument.
+>
+> What this document got right and what still binds: *breathe only while
+> listening*, *rest is static*, *amplitude drives the instrument and never a
+> keyframe loop*, *transforms only*, and the Reduced Motion contract. Those laws
+> survived the redesign intact and the aperture honours them more literally than
+> the bars did. Read §3 for the reasoning, not the geometry.
+>
+> Still unbuilt and now unspecified: "the transcript materializes out of the bars."
+> Re-decide that against the aperture before building it.
+
 > Branch `design/voice-first-mobile` · 2026-07-27
 > Context: [`voice-first-mobile-context.md`](voice-first-mobile-context.md)
 
