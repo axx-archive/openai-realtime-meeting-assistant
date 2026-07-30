@@ -15,11 +15,11 @@ import {
 /**
  * The Signal Cradle.
  *
- * Six floating masses turn microphone level into a literal equal-mass transfer:
- * the left edge hits four still centres, momentum exits through the far right,
+ * Five floating masses turn microphone level into a literal equal-mass transfer:
+ * the left edge hits three still centres, momentum exits through the far right,
  * then returns. No frame or suspension lines compete with the interaction.
  */
-const BALL_COUNT = 6;
+const BALL_COUNT = 5;
 const FRAME_MS = 1000 / 30;
 
 type Props = {
@@ -65,8 +65,6 @@ export function StrideCradle({ trace, listening, source = 'human', size = 391 }:
   const ballRefs = useRef<Array<Circle | null>>([]);
   const haloRefs = useRef<Array<Circle | null>>([]);
   const energyRefs = useRef<Array<Circle | null>>([]);
-  const carrierHaloRef = useRef<Circle | null>(null);
-  const carrierRef = useRef<Circle | null>(null);
 
   useEffect(() => {
     const draw = (level: number, still: boolean) => {
@@ -108,7 +106,7 @@ export function StrideCradle({ trace, listening, source = 'human', size = 391 }:
               ? activeEnergy * handoff
               : transferActive ? 0 : activeEnergy
             : 0;
-        const contactEnergy = contactWeights[index] * 0.42 * transferStrength;
+        const contactEnergy = contactWeights[index] * 0.92 * transferStrength;
         const visibleEnergy = Math.max(edgeEnergy, contactEnergy);
         ballRefs.current[index]?.setNativeProps({
           cx: point.x,
@@ -127,29 +125,6 @@ export function StrideCradle({ trace, listening, source = 'human', size = 391 }:
         });
       });
 
-      if (transferProgress === null) {
-        carrierHaloRef.current?.setNativeProps({ opacity: 0 });
-        carrierRef.current?.setNativeProps({ opacity: 0 });
-        return;
-      }
-
-      const sourceIndex = physics.transferDirection > 0 ? 0 : BALL_COUNT - 1;
-      const rowX = anchors[sourceIndex]
-        + (anchors[outgoingIndex] - anchors[sourceIndex]) * transferProgress;
-      const destination = points[outgoingIndex];
-      const carrierX = rowX + (destination.x - anchors[outgoingIndex]) * handoff;
-      const carrierY = restY + (destination.y - restY) * handoff;
-      const carrierEnergy = transferStrength * (1 - handoff);
-      carrierHaloRef.current?.setNativeProps({
-        cx: carrierX,
-        cy: carrierY,
-        opacity: carrierEnergy * 0.14,
-      });
-      carrierRef.current?.setNativeProps({
-        cx: carrierX,
-        cy: carrierY,
-        opacity: carrierEnergy * 0.85,
-      });
     };
 
     if (!listening) {
@@ -231,22 +206,6 @@ export function StrideCradle({ trace, listening, source = 'human', size = 391 }:
               />
             </React.Fragment>
           ))}
-          <Circle
-            ref={carrierHaloRef}
-            cx={anchors[0]}
-            cy={restY}
-            r={radius * 0.72}
-            fill={ember[500]}
-            opacity={0}
-          />
-          <Circle
-            ref={carrierRef}
-            cx={anchors[0]}
-            cy={restY}
-            r={radius * 0.18}
-            fill={ember[500]}
-            opacity={0}
-          />
         </Svg>
       </View>
     ),

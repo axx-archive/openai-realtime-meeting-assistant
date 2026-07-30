@@ -99,7 +99,7 @@ test('React Native shell separates the static logo from the live Signal Cradle',
 
   const cradle = text('src/components/StrideCradle.tsx');
   const physics = text('src/theme/strideCradle.ts');
-  assert.match(cradle, /BALL_COUNT = 6/);
+  assert.match(cradle, /BALL_COUNT = 5/);
   assert.match(cradle, /const spacing = radius \* 2;/);
   assert.match(cradle, /apertureAmplitude\(trace, listening\)/);
   assert.match(cradle, /useReduceMotion/);
@@ -107,15 +107,14 @@ test('React Native shell separates the static logo from the live Signal Cradle',
   assert.match(cradle, /draw\(amplitudeRef\.current, true\)/);
   assert.match(cradle, /const isSourceEdge = sourceRef\.current === 'human'/);
   assert.match(cradle, /strideCradleContactWeights\(physics, BALL_COUNT\)/);
-  assert.match(cradle, /const carrierEnergy = transferStrength \* \(1 - handoff\)/);
-  assert.match(cradle, /ref=\{carrierRef\}/);
+  assert.doesNotMatch(cradle, /carrierRef|carrierHaloRef/);
   assert.doesNotMatch(cradle, /coreRefs|ember\[300\]/);
   assert.doesNotMatch(cradle, /<Line|\bLine,/);
   assert.doesNotMatch(cradle, /RadialGradient|<Defs|\bStop,/);
   assert.doesNotMatch(cradle, /Animated\.loop|withRepeat|setInterval/);
   assert.match(physics, /RESTITUTION = 0\.985/);
   assert.match(physics, /PENDULUM_LENGTH_METRES = 0\.52/);
-  assert.match(physics, /STRIDE_CRADLE_TRANSFER_SECONDS = 0\.14/);
+  assert.match(physics, /STRIDE_CRADLE_TRANSFER_SECONDS = 0\.26/);
   assert.match(physics, /leftVelocity = 0/);
   assert.match(physics, /rightVelocity = outgoing/);
   assert.match(physics, /rightVelocity = 0/);

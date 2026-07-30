@@ -1292,14 +1292,14 @@ export function RoomScreen({ route, navigation }: Props) {
             </View>
             <View style={styles.joinCopy}>
               <Text style={styles.joinTitle}>{room?.live ? `${room.participantCount} here now` : 'Start the conversation'}</Text>
-              <Text style={styles.joinBody}>Join visibly. Your camera starts on and your microphone stays muted.</Text>
+              <Text style={styles.joinBody}>Your camera and microphone start on. You can switch either off at any time.</Text>
             </View>
           </View>
           {nativeRoom.state.lifecycle === 'idle' && !room?.archived ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Join room with camera on and microphone off"
-              onPress={() => joinRoom(true, false)}
+              accessibilityLabel="Join room with camera and microphone on"
+              onPress={() => joinRoom(true, true)}
               style={({ pressed }) => [styles.join, pressed && styles.pressed]}
             >
               <SymbolView name="person.2.fill" tintColor={colors.onAccent} size={18} />

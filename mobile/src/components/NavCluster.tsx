@@ -5,7 +5,7 @@ import * as Haptics from 'expo-haptics';
 import { GlassContainer } from 'expo-glass-effect';
 import { Glass, usingLiquidGlass } from '../theme/glass';
 import { duration, ease, easeSpring, useReduceMotion } from '../theme/motion';
-import { NAV_ITEM_WIDTH, NAV_ITEMS_RIGHT_INSET } from './dockRowLayout';
+import { DOCK_ROW_BOTTOM_MARGIN, NAV_ITEM_WIDTH, NAV_ITEMS_RIGHT_INSET } from './dockRowLayout';
 import { colors, hitMin, radius, space, type } from '../theme/tokens';
 
 /**
@@ -193,7 +193,7 @@ const styles = StyleSheet.create({
     // shortcut that exists for the same reason.
     alignSelf: 'flex-end',
     marginRight: space[5],
-    marginBottom: space[3],
+    marginBottom: DOCK_ROW_BOTTOM_MARGIN,
   },
   container: {
     flexDirection: 'row',

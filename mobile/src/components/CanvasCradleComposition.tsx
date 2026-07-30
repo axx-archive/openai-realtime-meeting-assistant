@@ -17,7 +17,9 @@ export const canvasCradleComposition = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: space[6],
   },
-  skyAbove: { flex: 1.25, pointerEvents: 'none' },
+  // Equal optical sky puts the midpoint between the cradle and greeting at the
+  // usable screen centre. The former 1.25/1 split pushed the entire hero low.
+  skyAbove: { flex: 1, pointerEvents: 'none' },
   skyBelow: { flex: 1, pointerEvents: 'none' },
   wave: {
     alignSelf: 'stretch',

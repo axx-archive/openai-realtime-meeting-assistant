@@ -5944,7 +5944,7 @@
       /* ---------- THE STRIDE SIGNAL CRADLE ----------
 
          The Strike is the static logo. This is the live instrument:
-         two edge masses and four fixed centres that make energy transfer
+         two edge masses and three fixed centres that make energy transfer
          visible. Real audio controls the energy; no live pipeline means no
          movement. Suspension lines and a literal frame are intentionally absent. */
       .office-launch__bars {
@@ -5988,15 +5988,6 @@
         fill: var(--ember);
         opacity: 0;
         filter: drop-shadow(0 0 7px rgba(255, 90, 25, 0.22));
-      }
-
-      .office-launch__carrier,
-      .office-launch__carrier-halo {
-        fill: var(--ember);
-        opacity: 0;
-      }
-      .office-launch__carrier {
-        filter: drop-shadow(0 0 7px rgba(255, 90, 25, 0.56));
       }
 
       /* Hover opens the aperture a sliver. An idle mark gives you no reason to
@@ -22283,7 +22274,7 @@
             <div class="office-launch__wrap">
               <div class="office-launch__island">
                 <button type="button" aria-label="tap to talk to Scout" data-start-realtime-voice class="office-launch__wave pressable">
-                  <!-- THE STRIDE SIGNAL CRADLE. A six-mass audio instrument,
+                  <!-- THE STRIDE SIGNAL CRADLE. A five-mass audio instrument,
                        separate from the static Strike identity, and the surface
                        you press to speak.
 
@@ -22295,14 +22286,11 @@
                        Regenerate: node scripts/stride-signal-geometry.mjs -->
                   <span class="office-launch__bars" id="officeStrideSignal" aria-hidden="true">
                     <svg class="office-launch__cradle" id="officeStrideCradle" viewBox="0 0 720 220" preserveAspectRatio="xMidYMid meet">
-                      <g data-cradle-ball data-anchor="200"><circle class="office-launch__ball" cx="200" cy="160" r="32"/><circle class="office-launch__energy" cx="200" cy="160" r="32"/></g>
-                      <g data-cradle-ball data-anchor="264"><circle class="office-launch__ball" cx="264" cy="160" r="32"/><circle class="office-launch__energy" cx="264" cy="160" r="32"/></g>
-                      <g data-cradle-ball data-anchor="328"><circle class="office-launch__ball" cx="328" cy="160" r="32"/><circle class="office-launch__energy" cx="328" cy="160" r="32"/></g>
-                      <g data-cradle-ball data-anchor="392"><circle class="office-launch__ball" cx="392" cy="160" r="32"/><circle class="office-launch__energy" cx="392" cy="160" r="32"/></g>
-                      <g data-cradle-ball data-anchor="456"><circle class="office-launch__ball" cx="456" cy="160" r="32"/><circle class="office-launch__energy" cx="456" cy="160" r="32"/></g>
-                      <g data-cradle-ball data-anchor="520"><circle class="office-launch__ball" cx="520" cy="160" r="32"/><circle class="office-launch__energy" cx="520" cy="160" r="32"/></g>
-                      <circle class="office-launch__carrier-halo" cx="200" cy="160" r="23"/>
-                      <circle class="office-launch__carrier" cx="200" cy="160" r="6"/>
+                      <g data-cradle-ball data-anchor="232"><circle class="office-launch__ball" cx="232" cy="160" r="32"/><circle class="office-launch__energy" cx="232" cy="160" r="32"/></g>
+                      <g data-cradle-ball data-anchor="296"><circle class="office-launch__ball" cx="296" cy="160" r="32"/><circle class="office-launch__energy" cx="296" cy="160" r="32"/></g>
+                      <g data-cradle-ball data-anchor="360"><circle class="office-launch__ball" cx="360" cy="160" r="32"/><circle class="office-launch__energy" cx="360" cy="160" r="32"/></g>
+                      <g data-cradle-ball data-anchor="424"><circle class="office-launch__ball" cx="424" cy="160" r="32"/><circle class="office-launch__energy" cx="424" cy="160" r="32"/></g>
+                      <g data-cradle-ball data-anchor="488"><circle class="office-launch__ball" cx="488" cy="160" r="32"/><circle class="office-launch__energy" cx="488" cy="160" r="32"/></g>
                     </svg>
                     <svg class="office-launch__aperture" viewBox="0 -42.24 675.84 84.48" preserveAspectRatio="xMidYMid meet">
                       <path id="officeAperturePath" d="M0.00 0.00 L10.56 -1.04 L21.12 -1.88 L31.68 -2.64 L42.24 -3.37 L52.80 -4.06 L63.36 -4.72 L73.92 -5.36 L84.48 -5.97 L95.04 -6.56 L105.60 -7.13 L116.16 -7.68 L126.72 -8.20 L137.28 -8.70 L147.84 -9.18 L158.40 -9.64 L168.96 -10.07 L179.52 -10.48 L190.08 -10.86 L200.64 -11.22 L211.20 -11.55 L221.76 -11.86 L232.32 -12.15 L242.88 -12.41 L253.44 -12.64 L264.00 -12.84 L274.56 -13.02 L285.12 -13.17 L295.68 -13.30 L306.24 -13.39 L316.80 -13.46 L327.36 -13.50 L337.92 -13.52 L348.48 -13.50 L359.04 -13.46 L369.60 -13.39 L380.16 -13.30 L390.72 -13.17 L401.28 -13.02 L411.84 -12.84 L422.40 -12.64 L432.96 -12.41 L443.52 -12.15 L454.08 -11.86 L464.64 -11.55 L475.20 -11.22 L485.76 -10.86 L496.32 -10.48 L506.88 -10.07 L517.44 -9.64 L528.00 -9.18 L538.56 -8.70 L549.12 -8.20 L559.68 -7.68 L570.24 -7.13 L580.80 -6.56 L591.36 -5.97 L601.92 -5.36 L612.48 -4.72 L623.04 -4.06 L633.60 -3.37 L644.16 -2.64 L654.72 -1.88 L665.28 -1.04 L675.84 0.00 L675.84 0.00 L665.28 1.04 L654.72 1.88 L644.16 2.64 L633.60 3.37 L623.04 4.06 L612.48 4.72 L601.92 5.36 L591.36 5.97 L580.80 6.56 L570.24 7.13 L559.68 7.68 L549.12 8.20 L538.56 8.70 L528.00 9.18 L517.44 9.64 L506.88 10.07 L496.32 10.48 L485.76 10.86 L475.20 11.22 L464.64 11.55 L454.08 11.86 L443.52 12.15 L432.96 12.41 L422.40 12.64 L411.84 12.84 L401.28 13.02 L390.72 13.17 L380.16 13.30 L369.60 13.39 L359.04 13.46 L348.48 13.50 L337.92 13.52 L327.36 13.50 L316.80 13.46 L306.24 13.39 L295.68 13.30 L285.12 13.17 L274.56 13.02 L264.00 12.84 L253.44 12.64 L242.88 12.41 L232.32 12.15 L221.76 11.86 L211.20 11.55 L200.64 11.22 L190.08 10.86 L179.52 10.48 L168.96 10.07 L158.40 9.64 L147.84 9.18 L137.28 8.70 L126.72 8.20 L116.16 7.68 L105.60 7.13 L95.04 6.56 L84.48 5.97 L73.92 5.36 L63.36 4.72 L52.80 4.06 L42.24 3.37 L31.68 2.64 L21.12 1.88 L10.56 1.04 L0.00 0.00 Z"/>
@@ -22618,8 +22606,8 @@
                   <!-- RW2 green room — the join seam's AV check. Media only on
                        EXPLICIT intent (tile tap / cam chip flipping on); the
                        preview releases fully on join, deselect, tool switch and
-                       gate unmount. Chips persist to localStorage bonfire:joinAV
-                       and carry into the join through the real mute machinery.
+                       gate unmount. Chips start on/on for each call and carry
+                       into the join through the real mute machinery.
                        One block, two mounts: guest boot re-parents it into the
                        guest name gate (mountGreenRoomInGuestGate). Canon layout:
                        16/10 tile + a vertical 52px control stack (mic / cam /
@@ -24624,6 +24612,7 @@
       let isReplacingLocalVideo = false
       let isMicMuted = false
       let isCameraOff = false
+      let joinAVPreferences = { mic: true, cam: true }
       // Separate the person's intent from a temporary device failure. Recovery
       // may show camera-off UI while it reacquires, but it must never restart a
       // camera the person deliberately turned off.
@@ -31430,7 +31419,7 @@
       const STRIDE_CRADLE_DRIVE_BLEND = 0.18
       const STRIDE_CRADLE_MIN_ANGLE = 0
       const STRIDE_CRADLE_MAX_ANGLE = Math.PI * 0.27
-      const STRIDE_CRADLE_TRANSFER_SECONDS = 0.14
+      const STRIDE_CRADLE_TRANSFER_SECONDS = 0.26
       const STRIDE_CRADLE_ACTIVATION_LEVEL = 0.025
       let strideSignalFrame = 0
       let strideSignalTaps = []
@@ -31664,43 +31653,17 @@
                 ? activeEnergy * handoff
                 : transferActive ? 0 : activeEnergy
               : 0
-          const lower = Math.floor(pulseAt)
-          const upper = Math.ceil(pulseAt)
-          const contactWeight = transferActive
-            ? index === lower
-              ? 1 - (pulseAt - lower)
-              : index === upper ? pulseAt - lower : 0
+          const pulseDistance = Math.abs(pulseAt - index)
+          const pulseRadius = 0.72
+          const contactWeight = transferActive && pulseDistance < pulseRadius
+            ? Math.pow(0.5 + 0.5 * Math.cos(Math.PI * pulseDistance / pulseRadius), 0.72)
             : 0
-          const contactEnergy = contactWeight * 0.42 * transferStrength
+          const contactEnergy = contactWeight * 0.92 * transferStrength
           if (energyBall) {
             energyBall.setAttribute('opacity', String(Math.max(edgeEnergy, contactEnergy)))
           }
         }
 
-        const carrierHalo = document.querySelector('#officeStrideCradle .office-launch__carrier-halo')
-        const carrier = document.querySelector('#officeStrideCradle .office-launch__carrier')
-        if (transferProgress === null || reduced) {
-          carrierHalo?.setAttribute('opacity', '0')
-          carrier?.setAttribute('opacity', '0')
-          return
-        }
-
-        const sourceIndex = physics.transferDirection > 0 ? 0 : balls.length - 1
-        const sourceAnchor = Number(balls[sourceIndex]?.dataset.anchor || 0)
-        const destinationAnchor = Number(balls[outgoingIndex]?.dataset.anchor || 0)
-        const destinationAngle = outgoingIndex === 0 ? physics.leftAngle : physics.rightAngle
-        const destinationX = destinationAnchor + Math.sin(destinationAngle) * 142
-        const destinationY = 18 + Math.cos(destinationAngle) * 142
-        const rowX = sourceAnchor + (destinationAnchor - sourceAnchor) * transferProgress
-        const carrierX = rowX + (destinationX - destinationAnchor) * handoff
-        const carrierY = 160 + (destinationY - 160) * handoff
-        const carrierEnergy = transferStrength * (1 - handoff)
-        carrierHalo?.setAttribute('cx', String(carrierX))
-        carrierHalo?.setAttribute('cy', String(carrierY))
-        carrierHalo?.setAttribute('opacity', String(carrierEnergy * 0.14))
-        carrier?.setAttribute('cx', String(carrierX))
-        carrier?.setAttribute('cy', String(carrierY))
-        carrier?.setAttribute('opacity', String(carrierEnergy * 0.85))
       }
 
       function strideCradleReleaseAngle(level) {
@@ -31794,8 +31757,6 @@
           ball?.removeAttribute('opacity')
           group.querySelector('.office-launch__energy')?.removeAttribute('opacity')
         }
-        document.querySelector('#officeStrideCradle .office-launch__carrier-halo')?.removeAttribute('opacity')
-        document.querySelector('#officeStrideCradle .office-launch__carrier')?.removeAttribute('opacity')
         const path = strideSignalPath()
         if (path && strideSignalIdlePath) {
           path.setAttribute('d', strideSignalIdlePath)
@@ -33945,7 +33906,7 @@
             return
           }
         }
-        // bonfire:joinAV carry — read AFTER media resolves, applied through
+        // Pre-join AV intent — read AFTER media resolves, applied through
         // the real mute machinery so the meeting bar reflects it. Tracks are
         // still acquired when off (fast unmute mid-call, the shipped model).
         const joinAV = loadJoinAVPreferences()
@@ -55522,6 +55483,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         isMicMuted = false
         isCameraOff = false
         localCameraRequested = false
+        joinAVPreferences = { mic: true, cam: true }
         resetLocalVideoRecovery()
         updateMuteButton()
         updateCameraButton()
@@ -55875,19 +55837,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
          block, two mounts (lobby hero / guest gate); the preview rides the
          real look pipeline, retargeted at the green-room tile. */
       function loadJoinAVPreferences() {
-        try {
-          const saved = JSON.parse(window.localStorage?.getItem('bonfire:joinAV') || 'null')
-          if (saved && typeof saved === 'object') {
-            return { mic: saved.mic !== false, cam: saved.cam !== false }
-          }
-        } catch { /* corrupted record falls back to on/on */ }
-        return { mic: true, cam: true }
+        return { ...joinAVPreferences }
       }
 
       function saveJoinAVPreferences(prefs) {
-        try {
-          window.localStorage?.setItem('bonfire:joinAV', JSON.stringify({ mic: prefs.mic !== false, cam: prefs.cam !== false }))
-        } catch { /* private mode: session-only behavior */ }
+        joinAVPreferences = { mic: prefs.mic !== false, cam: prefs.cam !== false }
       }
 
       function greenRoomPreviewLive() {

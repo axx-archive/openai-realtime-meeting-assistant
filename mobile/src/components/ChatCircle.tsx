@@ -4,8 +4,8 @@ import { SymbolView } from 'expo-symbols';
 import * as Haptics from 'expo-haptics';
 import { Glass } from '../theme/glass';
 import { duration, ease, useReduceMotion } from '../theme/motion';
-import { DOCK_ROW_MARGIN } from './dockRowLayout';
-import { colors, hitMin, radius, space } from '../theme/tokens';
+import { DOCK_ROW_BOTTOM_MARGIN, DOCK_ROW_MARGIN } from './dockRowLayout';
+import { colors, hitMin, radius } from '../theme/tokens';
 
 /**
  * The chat circle — design §6 of docs/plans/the-table-design.md.
@@ -107,7 +107,7 @@ const styles = StyleSheet.create({
     // the two ends of the row sit on the same optical margin as the Dock's
     // pill edge below them. Vertical alignment comes from the parent row.
     marginLeft: DOCK_ROW_MARGIN,
-    marginBottom: space[3],
+    marginBottom: DOCK_ROW_BOTTOM_MARGIN,
   },
   circle: {
     width: hitMin,

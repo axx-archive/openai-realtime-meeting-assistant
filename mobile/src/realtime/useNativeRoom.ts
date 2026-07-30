@@ -321,7 +321,7 @@ export function useNativeRoom(
   const microphonePublicationOperationRef = useRef(0);
   const microphonePublicationCommitSequenceRef = useRef(0);
   const pendingMicrophonePublicationCommitRef = useRef<PendingMicrophonePublicationCommit | null>(null);
-  const requestedVideo = useRef(false);
+  const requestedVideo = useRef(true);
   const roomChatOpenRef = useRef(false);
   const conversationViewerRef = useRef<RoomConversationViewer>(viewer);
   conversationViewerRef.current = viewer;

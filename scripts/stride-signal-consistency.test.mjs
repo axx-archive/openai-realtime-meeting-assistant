@@ -3,7 +3,7 @@
  *
  *   npm run test:brand
  *
- * The legacy aperture geometry remains inert while the six-mass Signal Cradle
+ * The legacy aperture geometry remains inert while the five-mass Signal Cradle
  * owns visible audio response. These tests keep that compatibility geometry,
  * the live cradle prints, the new Strike identity source, and the product's one
  * orange from drifting independently.
@@ -309,7 +309,7 @@ test('the Signal Cradle is the visible audio-reactive instrument on desktop and 
   const desktop = read('index.html');
   const native = read('mobile/src/components/StrideCradle.tsx');
   const physics = read('mobile/src/theme/strideCradle.ts');
-  assert.equal((desktop.match(/<g data-cradle-ball/g) ?? []).length, 6);
+  assert.equal((desktop.match(/<g data-cradle-ball/g) ?? []).length, 5);
   assert.match(desktop, /function updateStrideCradle\(level, seconds\)/);
   assert.match(desktop, /function stepStrideCradlePhysics\(state, elapsedSeconds, level, source = 'human'\)/);
   assert.match(desktop, /STRIDE_CRADLE_RESTITUTION = 0\.985/);
@@ -317,19 +317,17 @@ test('the Signal Cradle is the visible audio-reactive instrument on desktop and 
   assert.match(desktop, /const tap = strideSignalTaps\.find\(candidate => candidate\.role === role\)/);
   assert.doesNotMatch(desktop, /\|\| strideSignalTaps\[0\]/);
   assert.doesNotMatch(desktop, /strideCradleSource !== source/);
-  assert.equal((desktop.match(/class="office-launch__energy"/g) ?? []).length, 6);
-  assert.equal((desktop.match(/class="office-launch__carrier"/g) ?? []).length, 1);
-  assert.equal((desktop.match(/class="office-launch__carrier-halo"/g) ?? []).length, 1);
+  assert.equal((desktop.match(/class="office-launch__energy"/g) ?? []).length, 5);
+  assert.doesNotMatch(desktop, /office-launch__carrier/);
   assert.match(desktop, /STRIDE_CRADLE_LENGTH = 0\.52/);
-  assert.match(desktop, /STRIDE_CRADLE_TRANSFER_SECONDS = 0\.14/);
-  assert.match(desktop, /const contactEnergy = contactWeight \* 0\.42 \* transferStrength/);
-  assert.match(desktop, /const carrierEnergy = transferStrength \* \(1 - handoff\)/);
+  assert.match(desktop, /STRIDE_CRADLE_TRANSFER_SECONDS = 0\.26/);
+  assert.match(desktop, /const contactEnergy = contactWeight \* 0\.92 \* transferStrength/);
   assert.doesNotMatch(desktop, /office-launch__core|#ffb08c/i);
   assert.doesNotMatch(desktop, /\.office-launch__bars::after/);
   assert.doesNotMatch(desktop, /class="office-launch__thread"/);
   assert.doesNotMatch(desktop, /officeCradleGradient/);
   assert.match(desktop, /analyser\.getByteTimeDomainData\(tap\.data\)/);
-  assert.match(native, /BALL_COUNT = 6/);
+  assert.match(native, /BALL_COUNT = 5/);
   assert.match(native, /const spacing = radius \* 2;/);
   assert.match(native, /apertureAmplitude\(trace, listening\)/);
   assert.match(native, /useReduceMotion/);
@@ -337,13 +335,13 @@ test('the Signal Cradle is the visible audio-reactive instrument on desktop and 
   assert.match(native, /draw\(amplitudeRef\.current, true\)/);
   assert.match(native, /const isSourceEdge = sourceRef\.current === 'human'/);
   assert.match(native, /strideCradleContactWeights\(physics, BALL_COUNT\)/);
-  assert.match(native, /ref=\{carrierRef\}/);
+  assert.doesNotMatch(native, /carrierRef|carrierHaloRef/);
   assert.doesNotMatch(native, /coreRefs|ember\[300\]/);
   assert.doesNotMatch(native, /<Line|\bLine,/);
   assert.doesNotMatch(native, /RadialGradient|<Defs|\bStop,/);
   assert.match(physics, /RESTITUTION = 0\.985/);
   assert.match(physics, /PENDULUM_LENGTH_METRES = 0\.52/);
-  assert.match(physics, /STRIDE_CRADLE_TRANSFER_SECONDS = 0\.14/);
+  assert.match(physics, /STRIDE_CRADLE_TRANSFER_SECONDS = 0\.26/);
   assert.match(physics, /leftVelocity = 0/);
   assert.match(physics, /rightVelocity = outgoing/);
   assert.match(physics, /rightVelocity = 0/);

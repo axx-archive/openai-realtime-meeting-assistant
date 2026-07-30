@@ -74,6 +74,7 @@ import { useDictation } from '../voice/useDictation';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, hitMin, radius, space, type } from '../theme/tokens';
 import { useReduceMotion } from '../theme/motion';
+import { readThreadDetailCache, writeThreadDetailCache } from '../messaging/threadCache';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Thread'>;
 const DICTATION_DISCLOSURE_KEY = 'bonfire.dictation.serverDisclosure.v1';
@@ -93,9 +94,12 @@ export function ThreadScreen({ route, navigation }: Props) {
   const { sessionToken, user } = useAuth();
   const office = useOfficeEvents();
   const reduceMotion = useReduceMotion();
-  const [messages, setMessages] = useState<ScoutMessage[]>([]);
+  const cacheScope = String(user?.email ?? '');
+  const cachedThread = readThreadDetailCache(cacheScope, route.params.threadId);
+  const cachedMessages = cachedThread?.thread?.messages ?? cachedThread?.messages ?? [];
+  const [messages, setMessages] = useState<ScoutMessage[]>(cachedMessages);
   const [draft, setDraft] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(cachedThread === null);
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<ScoutFileAttachment[]>([]);
@@ -105,9 +109,12 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [actionMessage, setActionMessage] = useState<{ message: ScoutMessage; own: boolean } | null>(null);
   const [previewFile, setPreviewFile] = useState<ScoutFileAttachment | null>(null);
   const [participants, setParticipants] = useState<ChatMentionCandidate[]>([{ name: 'Scout', kind: 'scout' }]);
-  const [threadVisibility, setThreadVisibility] = useState('private');
-  const [threadOwnerEmail, setThreadOwnerEmail] = useState('');
-  const [notificationLevel, setNotificationLevel] = useState<ThreadNotificationLevel>('all');
+  const [threadVisibility, setThreadVisibility] = useState(String(cachedThread?.thread?.visibility ?? 'private'));
+  const [threadOwnerEmail, setThreadOwnerEmail] = useState(String(cachedThread?.thread?.ownerEmail ?? ''));
+  const cachedNotification = String(cachedThread?.notificationLevel ?? (cachedThread?.muted ? 'mentions' : 'all'));
+  const [notificationLevel, setNotificationLevel] = useState<ThreadNotificationLevel>(
+    cachedNotification === 'mentions' || cachedNotification === 'none' ? cachedNotification : 'all',
+  );
   const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
   const [notificationBusy, setNotificationBusy] = useState(false);
   const [attachmentSourceOpen, setAttachmentSourceOpen] = useState(false);
@@ -115,7 +122,7 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [typingParticipants, setTypingParticipants] = useState<TypingParticipant[]>([]);
   const [error, setError] = useState<string | null>(null);
   // null means "not yet loaded" — distinct from "" which means never read.
-  const [readAt, setReadAt] = useState<string | null>(null);
+  const [readAt, setReadAt] = useState<string | null>(cachedThread ? String(cachedThread.readAt ?? '') : null);
   const listRef = useRef<FlashListRef<ThreadRow>>(null);
   // Starts FALSE. Initialising it true meant opening a thread with 80 unread
   // and immediately backing out marked all 80 read without the user scrolling
@@ -223,6 +230,7 @@ export function ThreadScreen({ route, navigation }: Props) {
     const generationAtRequest = transcriptGenerationRef.current;
     try {
       const response = await api.scoutThread(sessionToken, route.params.threadId);
+      writeThreadDetailCache(cacheScope, route.params.threadId, response);
       const next = response.thread?.messages ?? response.messages ?? [];
       applyTranscriptSnapshot(generationAtRequest, next);
       setThreadVisibility(String(response.thread?.visibility ?? 'private'));
@@ -240,7 +248,7 @@ export function ThreadScreen({ route, navigation }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [applyTranscriptSnapshot, route.params.threadId, sessionToken]);
+  }, [applyTranscriptSnapshot, cacheScope, route.params.threadId, sessionToken]);
 
   useFocusEffect(useCallback(() => {
     void load();
@@ -288,6 +296,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       const shouldFollow = atBottomRef.current;
       const next = response.thread?.messages ?? response.messages ?? [];
       if (!applyTranscriptSnapshot(generationAtStart, next)) return;
+      writeThreadDetailCache(cacheScope, route.params.threadId, response);
       setThreadVisibility(String(response.thread?.visibility ?? 'private'));
       setThreadOwnerEmail(String(response.thread?.ownerEmail ?? ''));
       if (shouldFollow) requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }));
@@ -295,7 +304,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       // Recovery is intentionally silent; the live transcript remains usable
       // and the next 12-second pass or socket frame can self-heal it.
     }
-  }, [applyTranscriptSnapshot, route.params.threadId, sessionToken]);
+  }, [applyTranscriptSnapshot, cacheScope, route.params.threadId, sessionToken]);
 
   // The socket is the fast path: matching message additions, replacements,
   // and deletions land immediately without waiting on a network round trip.
@@ -464,6 +473,21 @@ export function ThreadScreen({ route, navigation }: Props) {
   );
 
   const unreadBelow = boundary >= 0 ? messages.length - boundary : 0;
+
+  useEffect(() => {
+    if (loading || !cacheScope) return;
+    writeThreadDetailCache(cacheScope, route.params.threadId, {
+      thread: {
+        id: route.params.threadId,
+        visibility: threadVisibility,
+        ownerEmail: threadOwnerEmail,
+        messages,
+      },
+      messages,
+      readAt: readAt ?? '',
+      notificationLevel,
+    });
+  }, [cacheScope, loading, messages, notificationLevel, readAt, route.params.threadId, threadOwnerEmail, threadVisibility]);
 
   // Advance the marker on GENUINE reads only — never on open. Marking eighty
   // messages read because the screen appeared is how people lose messages they

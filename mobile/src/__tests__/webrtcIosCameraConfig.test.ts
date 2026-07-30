@@ -200,7 +200,7 @@ describe('iOS WebRTC camera prebuild patch', () => {
     );
     assert.match(
       roomScreenSource,
-      /accessibilityLabel="Join room with camera on and microphone off"[\s\S]*onPress=\{\(\) => joinRoom\(true, false\)\}/,
+      /accessibilityLabel="Join room with camera and microphone on"[\s\S]*onPress=\{\(\) => joinRoom\(true, true\)\}/,
     );
     assert.match(
       roomSource,

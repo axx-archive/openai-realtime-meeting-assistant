@@ -4,7 +4,7 @@
  *   npm run brand:regen
  *
  * `brand/stride-strike-source.svg` is the source of truth. The live voice
- * instrument remains the six-mass Signal Cradle; splash artwork uses its rest
+ * instrument remains the five-mass Signal Cradle; splash artwork uses its rest
  * geometry so native bootstrap can cross-fade into the home control without a
  * logo swap or positional jump.
  */
@@ -52,7 +52,7 @@ function strikeGlyphSvg({ active = STRIDE_ORANGE, mass = STRIDE_MASS } = {}) {
 }
 
 function cradleSvg(color) {
-  const centers = [192, 320, 448, 576, 704, 832];
+  const centers = [256, 384, 512, 640, 768];
   return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
     ${centers.map((cx) => `<circle cx="${cx}" cy="512" r="64" fill="${color}"/>`).join('')}
   </svg>`);
@@ -153,7 +153,7 @@ const monochromeTile = await sharp({
 }).composite([{ input: strikeGlyphSvg({ active: '#FFFFFF', mass: '#FFFFFF' }) }]).png().toBuffer();
 await render(monochromeTile, resolve(mobileDir, 'ios-icon-tinted.png'), 1024, { opaque: true });
 
-// The native loading artwork is the real six-mass cradle at rest—not the icon.
+// The native loading artwork is the real five-mass cradle at rest—not the icon.
 await render(cradleSvg(STRIDE_MASS), resolve(mobileDir, 'splash-icon.png'), 1024);
 await render(cradleSvg(STRIDE_MASS_DARK), resolve(mobileDir, 'splash-icon-dark.png'), 1024);
 

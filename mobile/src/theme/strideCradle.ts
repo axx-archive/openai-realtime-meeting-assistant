@@ -1,11 +1,11 @@
 /**
  * Hybrid Newton's-cradle model for two equal edge masses and a rigid line of
- * four equal centre masses.
+ * three equal centre masses.
  *
  * Between impacts each edge follows the nonlinear pendulum equation. At the
  * contact line the incoming mass stops and its velocity is transferred to the
  * opposite equal mass. The centres remain visually fixed: their Hertzian
- * compression is far shorter than a UI frame. `transferAge` exposes a 120 ms
+ * compression is far shorter than a UI frame. `transferAge` exposes a short
  * perceptual trace of that impulse without changing the collision itself.
  */
 const GRAVITY = 9.81;
@@ -18,7 +18,7 @@ const MAX_RELEASE_ANGLE = Math.PI * 0.27;
 const MAX_STEP_SECONDS = 1 / 120;
 const ACTIVATION_LEVEL = 0.025;
 
-export const STRIDE_CRADLE_TRANSFER_SECONDS = 0.14;
+export const STRIDE_CRADLE_TRANSFER_SECONDS = 0.26;
 export type StrideCradleSource = 'human' | 'agent';
 
 export type StrideCradleState = {
@@ -162,10 +162,15 @@ export function strideCradleContactWeights(
   const position = state.transferDirection > 0
     ? progress * (count - 1)
     : (1 - progress) * (count - 1);
-  const lower = Math.max(0, Math.min(count - 1, Math.floor(position)));
-  const upper = Math.max(0, Math.min(count - 1, Math.ceil(position)));
-  const fraction = position - lower;
-  weights[lower] = 1 - fraction;
-  weights[upper] += fraction;
+  // A localized cosine pulse makes each mass visibly receive the impulse in
+  // sequence. This is a luminance trace only: the centre masses stay fixed and
+  // the equal-mass velocity transfer remains instantaneous in the physics.
+  const pulseRadius = 0.72;
+  for (let index = 0; index < count; index += 1) {
+    const distance = Math.abs(position - index);
+    if (distance >= pulseRadius) continue;
+    const phase = distance / pulseRadius;
+    weights[index] = Math.pow(0.5 + 0.5 * Math.cos(Math.PI * phase), 0.72);
+  }
   return weights;
 }

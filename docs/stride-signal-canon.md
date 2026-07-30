@@ -41,31 +41,30 @@ Every raster derivative is generated deterministically from the SVG source.
 
 ## 2. Signal Cradle
 
-The voice control is an abstract Newton's cradle: two edge masses, four fixed
+The voice control is an abstract Newton's cradle: two edge masses, three fixed
 centre masses, no suspension lines, no literal frame, and no decorative
 perpetual-motion loop.
 
-- At rest, all six masses touch and remain still.
+- At rest, all five masses touch and remain still.
 - An open but silent microphone adds a quiet field glow, not fake momentum.
   Motion begins on measured voice energy and is allowed to decay naturally
   across the following collisions.
 - While listening, the left mass falls under the nonlinear pendulum equation,
-  stops at contact, and transfers its velocity through four equal, still centre
+  stops at contact, and transfers its velocity through three equal, still centre
   masses to the far right. The right mass rises, returns under gravity, stops at
   contact, and sends the far left back out.
 - Restitution and air damping remove a small amount of energy on every cycle.
   Live microphone amplitude acts as an external force only at impact, setting
   the target energy without falsifying the free swing between collisions.
 - Hertzian sphere contact is much shorter than a UI frame and remains
-  instantaneous in the motion model. A separate 140 ms perceptual trace makes
+  instantaneous in the motion model. A separate 260 ms perceptual trace makes
   that otherwise invisible transfer legible at 30–60 fps without changing the
   pendulum physics; the centre masses do not fake a travelling displacement.
-- Impact color is one continuous signal, never a sequence of flashes. A small
-  Stride Orange carrier moves linearly through the contact row while the two
-  nearest masses receive a low-opacity barycentric tint. Over the final half of
-  the trace, the carrier merges into the physically moving receiving edge.
-  Luminance never falls into the gap between two masses.
-- The carrier, its halo, the contact tint, and the moving edge all use exact
+- Impact color is a rapid sequence of localized flashes across the five masses.
+  The masses themselves reveal the transfer; no separate particle or carrier
+  crosses the row. Over the final half of the trace, the receiving edge earns
+  the impulse and rises under the physical pendulum model.
+- The contact tint and the moving edge both use exact
   Stride Orange. Do not introduce a peach or white impact core, multi-color
   sparks, gradients, or accumulating trails; intensity comes from opacity and
   spatial focus rather than hue changes.
@@ -82,7 +81,7 @@ perpetual-motion loop.
 This is not a literal desk toy. It is a picture of conversational momentum:
 
 - The **left edge is the human**. Their voice lifts and releases that mass.
-- The **four fixed centres are shared context**: the words, company memory,
+- The **three fixed centres are shared context**: the words, company memory,
   constraints, and work already in the conversation. They transmit the impulse
   without being displaced by every new turn.
 - The **right edge is the active agent**. It receives the human impulse and

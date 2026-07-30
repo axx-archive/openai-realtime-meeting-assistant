@@ -4,7 +4,7 @@ package main
 // room (pre-join AV check) + join hardening pins. The invariants: the preview
 // camera lights ONLY inside the two explicit-tap handlers (never a boot or
 // render path); joinRoom acquires media BEFORE the websocket dials, under a
-// 12s watchdog with an honest lobby failure state; bonfire:joinAV is read
+// 12s watchdog with an honest lobby failure state; pre-join AV intent is read
 // after media resolves and carried through the real mute machinery; the guest
 // gate names its room via POST /guest/lookup and demotes member sign-in to a
 // quiet text link.
@@ -213,23 +213,30 @@ func TestIndexGreenRoomWatchdogAndTeardownSeams(t *testing.T) {
 	}
 }
 
-// bonfire:joinAV: chips persist per device, and joinRoom reads the record
-// AFTER media resolves, applying it through the real mute machinery so the
-// meeting bar reflects it (tracks still acquired when off — fast unmute).
+// Pre-join chips start on/on for each call, and joinRoom reads that session's
+// intent AFTER media resolves, applying it through the real mute machinery so
+// the meeting bar reflects it (tracks still acquired when off — fast unmute).
 func TestIndexGreenRoomJoinAVCarriedAfterMediaResolve(t *testing.T) {
 	html := readIndexHTMLForGreenRoom(t)
 
 	loadBody := functionBody(html, "function loadJoinAVPreferences()")
 	saveBody := functionBody(html, "function saveJoinAVPreferences(prefs)")
-	if !strings.Contains(loadBody, "'bonfire:joinAV'") || !strings.Contains(saveBody, "'bonfire:joinAV'") {
-		t.Error("mic/cam chips must persist to localStorage bonfire:joinAV")
+	if !strings.Contains(loadBody, "{ ...joinAVPreferences }") || !strings.Contains(saveBody, "joinAVPreferences = { mic:") {
+		t.Error("mic/cam chips must use the current call's in-memory on/on intent")
+	}
+	if strings.Contains(loadBody, "localStorage") || strings.Contains(saveBody, "localStorage") {
+		t.Error("an old muted call must not become the next call's default")
+	}
+	leaveBody := functionBody(html, "function leaveRoom()")
+	if !strings.Contains(leaveBody, "joinAVPreferences = { mic: true, cam: true }") {
+		t.Error("leaving a call must restore the next pre-join state to camera and microphone on")
 	}
 
 	joinSource := joinRoomSource(t, html)
 	mediaAt := strings.Index(joinSource, "localStream = await createLocalMediaStream(captureStream)")
 	readAt := strings.Index(joinSource, "loadJoinAVPreferences()")
 	if mediaAt == -1 || readAt == -1 || readAt < mediaAt {
-		t.Error("joinRoom must read bonfire:joinAV AFTER the join media resolves")
+		t.Error("joinRoom must read pre-join AV intent AFTER the join media resolves")
 	}
 	if !strings.Contains(joinSource, "setLocalCameraOff(true)") || !strings.Contains(joinSource, "setLocalMute(true)") {
 		t.Error("the joinAV carry must ride the existing mute machinery (track.enabled + meeting-bar state)")

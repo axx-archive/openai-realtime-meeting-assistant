@@ -121,8 +121,8 @@ func TestStrideSignalInstrumentContract(t *testing.T) {
 	}
 	index := string(indexRaw)
 
-	if got := strings.Count(index, `<g data-cradle-ball`); got != 6 {
-		t.Fatalf("the Signal Cradle must contain two edge and four centre masses, got %d", got)
+	if got := strings.Count(index, `<g data-cradle-ball`); got != 5 {
+		t.Fatalf("the Signal Cradle must contain two edge and three centre masses, got %d", got)
 	}
 	for _, wiring := range []string{
 		"function updateStrideCradle(level, seconds)",
@@ -133,11 +133,8 @@ func TestStrideSignalInstrumentContract(t *testing.T) {
 		"const tap = strideSignalTaps.find(candidate => candidate.role === role)",
 		"const transferActive = transferProgress !== null",
 		"STRIDE_CRADLE_LENGTH = 0.52",
-		"STRIDE_CRADLE_TRANSFER_SECONDS = 0.14",
-		"const contactEnergy = contactWeight * 0.42 * transferStrength",
-		"const carrierEnergy = transferStrength * (1 - handoff)",
-		`class="office-launch__carrier"`,
-		`class="office-launch__carrier-halo"`,
+		"STRIDE_CRADLE_TRANSFER_SECONDS = 0.26",
+		"const contactEnergy = contactWeight * 0.92 * transferStrength",
 		`class="office-launch__energy"`,
 		"state.leftVelocity = 0",
 		"state.rightVelocity = outgoing",
@@ -152,6 +149,9 @@ func TestStrideSignalInstrumentContract(t *testing.T) {
 	if strings.Contains(index, `class="office-launch__thread"`) {
 		t.Fatal("the abstract cradle must not draw suspension lines")
 	}
+	if strings.Contains(index, "office-launch__carrier") {
+		t.Fatal("energy transfer must light the masses themselves, not draw a carrier particle")
+	}
 	if strings.Contains(index, "|| strideSignalTaps[0]") {
 		t.Fatal("agent motion must never fall back to human microphone energy")
 	}
@@ -159,7 +159,7 @@ func TestStrideSignalInstrumentContract(t *testing.T) {
 		t.Fatal("a source change must not teleport an active cradle flight")
 	}
 	if strings.Contains(index, "officeCradleGradient") {
-		t.Fatal("the abstract signal carrier must not use a glossy marble gradient")
+		t.Fatal("the abstract signal must not use a glossy marble gradient")
 	}
 	if strings.Contains(index, "office-launch__core") || strings.Contains(strings.ToLower(index), "#ffb08c") {
 		t.Fatal("impact color must stay one Stride Orange without an intermittent peach core")

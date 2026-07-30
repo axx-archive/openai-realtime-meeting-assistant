@@ -61,34 +61,34 @@ test('an equal-mass impact stops the left and launches only the far right', () =
   assert.ok(strideCradleTransferProgress(state) !== null);
 });
 
-test('the sub-frame collision leaves at least four frames of perceptual trace', () => {
+test('the collision leaves enough perceptual trace for all five masses to flash', () => {
   const state = advanceUntil(function (candidate) {
     return candidate.transferDirection === 1 && candidate.transferAge < 0.01;
   });
-  assert.equal(STRIDE_CRADLE_TRANSFER_SECONDS, 0.14);
+  assert.equal(STRIDE_CRADLE_TRANSFER_SECONDS, 0.26);
   let visibleFrames = 0;
   while (strideCradleTransferProgress(state) !== null && visibleFrames < 10) {
     visibleFrames += 1;
     stepStrideCradle(state, 1 / 30, 0.8);
   }
-  assert.ok(visibleFrames >= 4 && visibleFrames <= 5);
+  assert.ok(visibleFrames >= 7 && visibleFrames <= 8);
 });
 
-test('contact tint crossfades continuously between adjacent masses', () => {
+test('contact tint flashes each of five masses in transfer order', () => {
   const state = createStrideCradleState(0);
   state.transferDirection = 1;
-  for (const progress of [0, 0.1, 0.25, 0.5, 0.75, 0.9]) {
+  for (let index = 0; index < 5; index += 1) {
+    const progress = index === 4 ? 0.999 : index / 4;
     state.transferAge = progress * STRIDE_CRADLE_TRANSFER_SECONDS;
-    const weights = strideCradleContactWeights(state, 6);
-    const active = weights.filter((weight) => weight > 0);
-    assert.ok(active.length >= 1 && active.length <= 2);
-    assert.ok(Math.abs(weights.reduce((sum, weight) => sum + weight, 0) - 1) < 1e-9);
+    const weights = strideCradleContactWeights(state, 5);
+    assert.equal(weights.indexOf(Math.max(...weights)), index);
+    assert.ok(weights[index] > 0.99);
   }
 
-  state.transferAge = STRIDE_CRADLE_TRANSFER_SECONDS * 0.1;
-  assert.deepEqual(strideCradleContactWeights(state, 6), [0.5, 0.5, 0, 0, 0, 0]);
+  state.transferAge = STRIDE_CRADLE_TRANSFER_SECONDS * 0.25;
+  assert.deepEqual(strideCradleContactWeights(state, 5), [0, 1, 0, 0, 0]);
   state.transferDirection = -1;
-  assert.deepEqual(strideCradleContactWeights(state, 6), [0, 0, 0, 0, 0.5, 0.5]);
+  assert.deepEqual(strideCradleContactWeights(state, 5), [0, 0, 0, 1, 0]);
 });
 
 test('the returning right mass transfers momentum back to the far left', () => {
