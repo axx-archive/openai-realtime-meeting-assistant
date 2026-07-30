@@ -1,248 +1,134 @@
-# The Stride Signal — identity canon
+# Stride identity and Signal Cradle canon
 
-**Status:** Canon. Ratified by AJ, 2026-07-29.
-**Supersedes:** the sliced-disc mark, and the bar-waveform centrepiece on every surface.
-**Code of record:** `scripts/stride-signal-geometry.mjs` — the mark is defined there and nowhere else.
-**Guard:** `npm run test:brand`. **Regenerate artwork:** `npm run brand:regen`.
+**Status:** Canon. Ratified by AJ, 2026-07-30.
+**Static source of truth:** `brand/stride-strike-source.svg`
+**Source SHA-256:** `6a9ea0e4858dd5d6e15842766b646aa807ee6da9bf6c9d87eb0111820e621475`
+**Guard:** `npm run test:brand`
+**Regenerate:** `npm run brand:regen`
 
-This document exists because the identity had drifted into three hand-drawn
-approximations of itself and two different oranges. Everything below is either
-derived from the code of record or was decided by the founder on a dated
-decision. Where it contradicts an older document, this one wins, and §7 says
-exactly which older claims are dead.
+Stride has two deliberately separate visual jobs:
 
----
+1. **The Strike** is the static identity: app icon, favicon, lockup, login mark,
+   social card, and every other place a logo appears.
+2. The **Signal Cradle** is the live voice instrument: the large control that
+   shows whether audio energy is entering or leaving the conversation.
 
-## 1. The mark
+The native loading screen is the cradle at rest. It occupies the Canvas
+cradle's exact composition and cross-fades into the live control after
+bootstrap. The instrument is not otherwise used as a static logo.
 
-An **aperture**: one closed, symmetric, horizontal lens. A slot that opens
-because something is listening.
+## 1. Static identity — The Strike
 
-There is exactly one curve in the identity:
+The Strike is one caught frame of the cradle rather than a drawing of the whole
+apparatus. It uses a Stride Ink field, one energised Stride Orange mass entering
+from the left, and the equal neutral-mass row exiting the right.
 
-```
-t(p) = T · sin(pπ)^0.85        p ∈ [0,1] across the width
-```
+- Every mass has radius `0.2 × tile width`.
+- The active mass is centred `0.3r` outside the left frame.
+- The visible receiving masses are centred at `0.6w` and `1.0w`, so the row
+  deliberately runs off the right edge.
+- No strings, frame, glow, gradient, trail, or type appear in the tile.
+- The crop is the meaning: a moment caught, not an apparatus described.
 
-`t` is the half-height at each point; `T` is the half-height at the centre. The
-exponent is the entire character of the form. At `1.0` it is a plain ellipse; below
-about `0.7` the tips go needle-sharp and brittle. **0.85** keeps a full belly and
-draws the ends to a clean point, which is what lets the mark scale down to a
-hairline without its tips turning into blunt stubs. The curve is closed *exactly*
-at `p = 0` and `p = 1` — `lensHalfHeight` special-cases the endpoints, because
-`Math.sin(Math.PI)` is `1.22e-16` and that residue would leave the mark
-infinitesimally open, making "closed at the tips" a claim the geometry did not
-actually honour.
+### Colorways
 
-The outline is **sampled, not bézier-approximated**. Every surface — SVG, Canvas,
-React Native — reproduces the same curve and ratios. Committed artwork uses 160
-samples for clean rasterisation; live instruments use 64 to keep per-frame path
-updates light. Those are intentional fidelity tiers of one formula, not parallel
-hand-drawn marks.
+- **Field:** Stride Ink `#050505`.
+- **Active mass:** Stride Orange `#FF5A19`.
+- **Receiving masses:** Signal Graphite `#5E5E66`.
+- **iOS tinted / Android monochrome:** white Strike geometry on black.
 
-### Why this and not the alternatives
+Every raster derivative is generated deterministically from the SVG source.
 
-Four other candidates were built and driven side by side against the same
-synthetic utterance before this was chosen: The Thread (a line that keeps a record
-of what you said), The Pair (two equal threads, an equals sign at rest), The Caret
-(a text cursor with mass), and The Gait (two masses trading places). The bench that
-produced them is preserved in the session record. The Thread and The Pair remain the
-strongest unbuilt ideas in the drawer, and The Pair in particular encodes the
-company thesis — two voices, same size — better than the Aperture does. They were
-not rejected on quality. The Aperture won because it is **one closed form whose
-openness is a variable**, which is what turns a picture into a system.
+## 2. Signal Cradle
 
----
+The voice control is an abstract Newton's cradle: two edge masses, four fixed
+centre masses, no suspension lines, no literal frame, and no decorative
+perpetual-motion loop.
 
-## 2. Openness is the system
+- At rest, all six masses touch and remain still.
+- An open but silent microphone adds a quiet field glow, not fake momentum.
+  Motion begins on measured voice energy and is allowed to decay naturally
+  across the following collisions.
+- While listening, the left mass falls under the nonlinear pendulum equation,
+  stops at contact, and transfers its velocity through four equal, still centre
+  masses to the far right. The right mass rises, returns under gravity, stops at
+  contact, and sends the far left back out.
+- Restitution and air damping remove a small amount of energy on every cycle.
+  Live microphone amplitude acts as an external force only at impact, setting
+  the target energy without falsifying the free swing between collisions.
+- Hertzian sphere contact is much shorter than a UI frame and remains
+  instantaneous in the motion model. A separate 140 ms perceptual trace makes
+  that otherwise invisible transfer legible at 30–60 fps without changing the
+  pendulum physics; the centre masses do not fake a travelling displacement.
+- Impact color is one continuous signal, never a sequence of flashes. A small
+  Stride Orange carrier moves linearly through the contact row while the two
+  nearest masses receive a low-opacity barycentric tint. Over the final half of
+  the trace, the carrier merges into the physically moving receiving edge.
+  Luminance never falls into the gap between two masses.
+- The carrier, its halo, the contact tint, and the moving edge all use exact
+  Stride Orange. Do not introduce a peach or white impact core, multi-color
+  sparks, gradients, or accumulating trails; intensity comes from opacity and
+  spatial focus rather than hue changes.
+- Attack is fast and release is slower so consonants register without flicker.
+- The 0.52 m virtual pendulum length deliberately slows the exchange by roughly
+  eleven percent from the initial cradle study. It should feel calm and
+  hypnotic without delaying the first response to live audio.
+- Reduced Motion removes the pendulum travel but keeps amplitude as a static
+  glow. The control must still answer “can you hear me?”
+- Press feedback is `scale(0.96)` and remains interruptible.
 
-The mark is not one fixed shape. It is one shape at a stated **openness**, and
-openness carries meaning everywhere it appears — the logo, the talk control, a
-section rule, a progress bar, a live badge, a focus underscore. A divider is the
-mark closed. A microphone that can hear you is the mark open.
+### Conversation interpretation
 
-Openness is an **aspect ratio**, width : full height. Bigger is tighter.
+This is not a literal desk toy. It is a picture of conversational momentum:
 
-| | Ratio | Where |
+- The **left edge is the human**. Their voice lifts and releases that mass.
+- The **four fixed centres are shared context**: the words, company memory,
+  constraints, and work already in the conversation. They transmit the impulse
+  without being displaced by every new turn.
+- The **right edge is the active agent**. It receives the human impulse and
+  swings out; when the agent speaks, the system seeds from the right and returns
+  momentum toward the human.
+- Only the active edge and the short contact wave carry Stride Orange. The
+  inactive row stays neutral, making the direction and custody of energy clear.
+
+Amplitude controls release energy. Cadence controls when new energy enters.
+Role controls which edge originates it. Color shows custody, not decoration.
+The result should read first as a futuristic conversational waveform and only
+then reveal the Newton's-cradle idea underneath.
+
+Direction must come from the audio source that is actually producing the
+measured level. Desktop may seed the right edge only from the active agent's
+real output analyser; it must never relabel microphone energy as agent speech.
+The native home currently meters only the human microphone, so it truthfully
+uses the left edge. Native right-to-left motion remains dormant until a real
+agent-output meter is connected—never synthesize a reply merely for symmetry.
+Changing roles during an active flight must not teleport the energy to the
+other edge; the current collision resolves before the newly measured source can
+seed a settled cradle.
+
+The cradle should feel like information moving through a system, not like a
+skeuomorphic executive toy. The masses and the travelling energy are the entire
+visual; no strings, stand, or frame are drawn.
+
+## 3. Surface map
+
+| Surface | Static logo | Live instrument |
 |---|---|---|
-| `RATIO_IDLE` | **25:1** | The logo. Also the instrument at rest. |
-| `CUTS.logo` | 25:1 | Lockups, large display. Never inside a tile. |
-| `CUTS.icon` | 12:1 | App tiles and anything ≥ 40px. |
-| `CUTS.micro` | 8:1 | Below 40px and small in-product apertures. |
-| `RATIO_OPEN` | **8:1** | Fully open — loudest voice, smallest icon. |
+| Expo app icon | The Strike | — |
+| Expo native loading screen | — | Signal Cradle at rest |
+| Native login | The Strike | — |
+| Native home | — | Signal Cradle |
+| Desktop rail / sign-in / favicon | The Strike | — |
+| Desktop voice home | — | Signal Cradle |
+| Marketing hero / nav / product window / closing / footer | The Strike | — |
+| Marketing favicon / social card | The Strike | — |
+| Native Apple companion icons | The Strike | — |
 
-### 8:1 is a hard floor on the whole identity
+## 4. Release rules
 
-A lens is eye-adjacent, and the wider it opens the more it reads as an **eye**
-rather than a mouth or a slot. On a product whose entire job is remembering what
-people said, that connotation is a liability, not a flourish.
-
-So 8:1 binds **static artwork as well as animation**. This is the rule that shaped
-the small-size solution: below 40px the mark does *not* open further to stay
-legible — it gets **wider**, spanning up to 88% of the tile instead of 66%. Same
-ratio, longer mark. `npm run test:brand` enforces the floor against every cut and
-every amplitude, including out-of-range input.
-
-### Interpolate the peak, never the ratio
-
-The ratio is a reciprocal of the opening. Interpolating it directly makes the
-aperture rush at one end of the range and crawl at the other, which reads as a
-broken control. `ratioForAmplitude` interpolates the **peak half-height** so equal
-steps of amplitude give equal steps of height. Pinned by test.
-
----
-
-## 3. Colour
-
-**One orange.** `STRIDE_ORANGE = #FF5A19` is simultaneously the mark, the app
-icon, and `--ember-500` — the product's ignition accent. Before this, the icon was
-`#FF5A19` and the UI accent was a pinker coral `#FF6B4A`, so the logo and every
-button in the product were two different oranges sitting next to each other.
-
-The ramp is that hue at 100% saturation, stepped on lightness:
-
-| Token | Value |
-|---|---|
-| `--ember-300` | `#FFA07A` |
-| `--ember-400` | `#FF7F4D` |
-| `--ember-500` | `#FF5A19` ← Stride Orange |
-| `--ember-600` | `#E64100` |
-| `--ember-soft` | `rgba(255, 90, 25, 0.12)` light · `0.16` dark |
-
-`STRIDE_INK = #050505` is the mark's ground, and the mark's own colour when it
-sits on orange.
-
-**Contrast, re-derived after the hue change.** Ember correctly *fails* as
-light-theme text (2.87:1) — that is why `emberText #B83A18` exists, clearing AA at
-5.27:1 on `bgApp`. The tight one is **4.60:1 on an emberSoft chip**: a tenth of a
-point of headroom, so darkening emberSoft or lightening `#B83A18` breaks AA.
-`mobile/src/__tests__/contrast.test.ts` holds that line. Dark mode keeps
-`ember[500]` at 6.37:1 on `bgApp` and 5.68:1 on a soft chip.
-
----
-
-## 4. Lockups
-
-**B — the mark as the baseline. Primary.** "Stride" with the lens swelling
-underneath it. The mark becomes the company's own rule. It cannot be misread as
-punctuation, and it echoes the hairline already above the site tagline.
-
-**C — stacked, mark above. Secondary.** For the splash, the app, the hero.
-
-**A — mark leading. Retired, do not use.** At a glance the sliver reads as an
-em-dash in front of the word. Worst on dark, where the mark and the type are both
-orange.
-
-Wordmark is **Google Sans Flex**, 600, tracking −0.03em. Mono is **Geist Mono**.
-
----
-
-## 5. Icons
-
-**The inverted tile is primary**: a full-bleed Stride Orange field with the
-aperture cut out of it in ink. It is louder than the dark tile and unmistakable on
-a crowded home screen, which is what an icon has to win at.
-
-**The dark tile is the sanctioned alternate**, and it does real work rather than
-sitting in a folder: it ships as the **iOS dark-appearance icon**. It is therefore
-no longer byte-identical to the master, which the brand-asset test now asserts
-explicitly so the divergence cannot be mistaken for a regression.
-
-- **Maskable / circular crops** use `safeFit`. Useful discovery: at the standard
-  0.66 inset the lens *already* fits every safe circle, because a lens is nearly
-  all width and 0.33 of the tile sits inside a 0.38 radius. `safeFit` is a no-op
-  there and only bites at wider insets — the test asserts the property rather than
-  demanding a shrink that is not needed.
-- **iOS tinted** is a *luminosity map*, so it is white-on-ink at the micro cut. Its
-  light area is **3.6%** of the tile — a few percent, not the double-digit share a
-  filled disc gave — so the test floor moved from 8% to 2%. A blank tile is still
-  0% and still fails, which is the regression that guard exists for.
-- **Below 24px the aperture is faint and that is accepted.** At favicon size people
-  recognise apps by colour and silhouette, not detail. No second simplified glyph
-  enters the system; a system with an exception is a system people stop trusting.
-
----
-
-## 6. The instrument
-
-The talk control **is** the logo. Not a meter wearing the brand colour.
-
-1. **Rest is the logo, exactly.** Amplitude 0 renders `RATIO_IDLE` to the number,
-   and the ripple is exactly 1. Pressing the control never swaps one picture for
-   another — it just opens.
-2. **Grey at rest, orange only while listening.** Ember stays earned: colour means
-   something is happening. The cost, accepted knowingly, is that the resting home
-   screen carries almost no brand presence.
-3. **Amplitude, never a keyframe loop.** Movement means audio is flowing. A mark
-   that idles on a timer cannot answer "can you hear me?", which is the only
-   question a voice interface is ever asked.
-4. **The side-to-side element is the ripple** travelling along the open aperture —
-   depth 0.18, ~6.2 cycles across the width. It is a *detail on top of* the lens,
-   never a competing wave: an earlier pass let it reach 0.42 and the slot stopped
-   reading as a lens and became an amoeba.
-5. **Reduced Motion** drops the gait and keeps the amplitude answer as a static
-   opening. Dropping the response too would leave a Reduce Motion user holding a
-   control that cannot answer the only question it exists to answer.
-
-### Small chrome
-
-Small in-product placements use the **bare aperture**, never an app-tile box.
-The Scout label stays quiet and the bottom Talk to Scout control repeats the same
-shape as the primary voice surface. The tile belongs to the launcher only.
-
----
-
-## 7. Reconciliation — what is dead, what is kept
-
-### Dead. Do not follow these.
-
-| Source | Retired claim | Replaced by |
-|---|---|---|
-| `docs/reskin-standing-requirements.md` §1 | `--ember #FF6B4A` coral | §3 — `#FF5A19` |
-| `docs/reskin-standing-requirements.md` §1 | "brand mark" listed under monochrome `--accent` | §3 — the Stride Signal is orange; it is the one earned exception, not monochrome chrome |
-| `docs/plans/voice-first-mobile-design.md` §3 | 28 **bars**, `RESTING_PROFILE`'s fourteen varied heights, bars `scaleY` | §1, §6 — one aperture that opens |
-| `docs/plans/voice-first-mobile-design.md` | "the transcript materializes out of the bars" | Unbuilt, and now unspecified. Re-decide against the aperture before building it. |
-| Session work, 2026-07-29 (uncommitted) | the sliced-disc mark, its 16-band table, `--stride-reach`, `@keyframes stride-signal-gait` | §1 — rejected by the founder before it shipped |
-
-`docs/reskin-inventory.md` refers to an even older ember, `--agent:#FF7A2B`. It is a
-dated audit of a state that no longer exists; no action, and it should be read as
-history.
-
-`stride-site/BRAND.md` documents **That's Cool**, the maker brand, not Stride. Its
-"maker signs the work, does not overpower the product identity" rule is intact and
-unaffected.
-
-### Kept. These laws survived the redesign and still bind.
-
-- **Breathe only while listening** (`voice-first-mobile-design.md`). Rest is static.
-  The aperture honours this more literally than the bars did.
-- **Amplitude drives the instrument; never a keyframe loop** (same source). This is
-  now §6.3 and is the reason two `AnalyserNode` taps exist on desktop.
-- **Transforms and opacity only; never animate layout** (`animation-wave-2`). The
-  aperture animates its own path geometry inside a canvas/SVG, so it never
-  triggers layout.
-- **Ember is earned, never ambient** (`visual-upgrade-thesis.md`, founder-ratified).
-  Directly responsible for §6.2.
-- **`emberText` for text and glyphs; fills stay `ember`** (The Table wave D). The
-  contrast floors in §3 are the re-derived version of that work, not a replacement.
-- **Google Sans Flex + Geist Mono; system text lowercase mono**
-  (`reskin-standing-requirements.md` §1). Unchanged.
-- **The compact composer/Dock level meter stays a linear bar meter**
-  (`mobile/src/components/Waveform.tsx`, `theme/waveformGeometry.ts`). It is a
-  *meter*, not the mark, and one hero mark is the point. Do not convert it to an
-  aperture; do not delete it.
-
----
-
-## 8. Current implementation state
-
-- Desktop and native are migrated to the aperture. Root and mobile tests pin
-  their printed constants and the desktop idle path to the code of record.
-- Marketing is migrated in its separately deployed repository and pins the same
-  ratios, exponent, colour, and interaction floor in its own rendered-contract
-  suite. It demonstrates the motion with a synthetic phrase; product surfaces
-  replace that phrase with real audio amplitude.
-- **The native centrepiece has never been seen on a device.** The Simulator MCP
-  needs `sudo xcode-select`, outstanding across three waves now.
-- The Thread and The Pair are in the drawer, undamaged. If the Aperture's quietness
-  at rest becomes a problem in real use, The Pair is the first thing to revisit.
+- Run `npm run brand:regen`; never hand-edit a derived PNG.
+- Run root brand tests, mobile tests/typecheck, marketing build/render tests,
+  and native icon generation before calling the rollout complete.
+- Inspect the actual 1024px icon and at least one home-screen-size render.
+- A successful local build does not authorize TestFlight, device installation,
+  Git shipping, or deployment.

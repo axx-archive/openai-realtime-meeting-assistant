@@ -22,9 +22,6 @@
          home-screen tile becomes a page screenshot. -->
     <link rel="apple-touch-icon" href="/public/apple-touch-icon.png">
     <link rel="manifest" href="/public/manifest.webmanifest">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
     <script>
       /* pre-paint theme: stored choice wins (the signed-in account preference
          re-applies after session bootstrap), else LIGHT — the product default
@@ -44,6 +41,12 @@
       })()
     </script>
     <style>
+      @font-face { font-family: "Google Sans Flex"; src: url("/public/fonts/google-sans-flex-400.ttf") format("truetype"); font-style: normal; font-weight: 400; font-display: swap; }
+      @font-face { font-family: "Google Sans Flex"; src: url("/public/fonts/google-sans-flex-500.ttf") format("truetype"); font-style: normal; font-weight: 500; font-display: swap; }
+      @font-face { font-family: "Google Sans Flex"; src: url("/public/fonts/google-sans-flex-600.ttf") format("truetype"); font-style: normal; font-weight: 600; font-display: swap; }
+      @font-face { font-family: "Google Sans Flex"; src: url("/public/fonts/google-sans-flex-700.ttf") format("truetype"); font-style: normal; font-weight: 700; font-display: swap; }
+      @font-face { font-family: "Geist Mono"; src: url("/public/fonts/geist-mono-400.ttf") format("truetype"); font-style: normal; font-weight: 400; font-display: swap; }
+      @font-face { font-family: "Geist Mono"; src: url("/public/fonts/geist-mono-500.ttf") format("truetype"); font-style: normal; font-weight: 500; font-display: swap; }
       /* =====================================================================
          index.html review checklist (Spectacular OS · ux §7.4)
          Every diff to this 34.9k-line monolith passes this gate before ship:
@@ -285,6 +288,7 @@
         --dur-slow: 360ms;   /* panels, sheets, PiP travel */
         --dur-breathe: 2400ms; /* ambient "listening" pulse */
         --press-scale: 0.97;
+
         /* breathing amplitude — the whole room swells on one switch */
         --breathe-rest: 0.4;
         --breathe-live: 1;
@@ -5918,13 +5922,6 @@
         letter-spacing: var(--track-label);
       }
 
-      .office-launch__mini-signal {
-        width: 12px;
-        height: 1.5px;
-        border-radius: 50%;
-        background: currentColor;
-      }
-
       /* the one big tappable area — transparent at rest, an accent wash
          on hover (design hover background) */
       .office-launch__wave {
@@ -5944,32 +5941,21 @@
       }
       .office-launch__wave:hover { background: var(--accent-soft); }
 
-      /* ---------- THE STRIDE SIGNAL ----------
+      /* ---------- THE STRIDE SIGNAL CRADLE ----------
 
-         The logo, as the instrument. One surface does both jobs: at rest it is
-         the same canonical curve as the app icon, and while a voice is in the room it is the only
-         thing on screen that moves.
-
-         Canon: docs/stride-signal-canon.md. Geometry: scripts/stride-signal-geometry.mjs.
-
-         The mark is ONE aperture — a closed horizontal lens whose OPENNESS
-         carries the signal. The path in the markup is the idle cut (25:1). While
-         the drive runs, JS rewrites the path's `d` each frame from the live
-         microphone level, which is also how the ripple gets its side-to-side
-         travel; a CSS transform cannot ripple a path. At rest JS restores the
-         idle path, so the resting control is the stylesheet's mark rather than a
-         JS approximation of it. */
+         The Strike is the static logo. This is the live instrument:
+         two edge masses and four fixed centres that make energy transfer
+         visible. Real audio controls the energy; no live pipeline means no
+         movement. Suspension lines and a literal frame are intentionally absent. */
       .office-launch__bars {
         position: relative;
         display: grid;
         place-items: center;
         /* The hero of the page. Scales with the viewport's SHORT axis so the
            mark never collides with the greeting on a laptop screen. */
-        --aperture-width: clamp(300px, 34vw, 460px);
-        width: var(--aperture-width);
-        /* Room for the FULLY OPEN cut (8:1) plus the ripple, so opening never
-           clips. The idle mark occupies under a third of this box. */
-        height: calc(var(--aperture-width) / 8 * 1.5);
+        --cradle-width: clamp(330px, 39vw, 520px);
+        width: var(--cradle-width);
+        height: calc(var(--cradle-width) * 0.34);
         /* Ember is EARNED. Grey at rest; the listening rule below lights it.
            Colour means something is happening — a resting screen holds no ember,
            and that trade (brand presence at rest for an honest signal) is
@@ -5981,41 +5967,45 @@
       .office-launch.is-listening .office-launch__bars { color: var(--ember); }
 
       .office-launch__aperture {
+        display: none;
+      }
+
+      .office-launch__cradle {
         display: block;
         width: 100%;
         height: auto;
         overflow: visible;
-        fill: currentColor;
+        transform-origin: center;
+        transition: transform var(--dur-slow) var(--ease);
       }
 
-      /* The glow is earned too: a resting wash renders as a stray grey lozenge,
-         so it exists only while listening, where it is ember and means something. */
-      .office-launch__bars::after {
-        content: '';
-        position: absolute;
-        inset: -18% -6%;
-        pointer-events: none;
-        opacity: 0;
-        background: radial-gradient(ellipse at center, var(--ember-soft), transparent 68%);
-        transition: opacity var(--dur-slow) var(--ease);
+      .office-launch__ball {
+        fill: var(--text-2);
+        opacity: 0.54;
       }
-      .office-launch.is-listening .office-launch__bars::after { opacity: 1; }
+
+      .office-launch__energy {
+        fill: var(--ember);
+        opacity: 0;
+        filter: drop-shadow(0 0 7px rgba(255, 90, 25, 0.22));
+      }
+
+      .office-launch__carrier,
+      .office-launch__carrier-halo {
+        fill: var(--ember);
+        opacity: 0;
+      }
+      .office-launch__carrier {
+        filter: drop-shadow(0 0 7px rgba(255, 90, 25, 0.56));
+      }
 
       /* Hover opens the aperture a sliver. An idle mark gives you no reason to
          believe pressing it will do anything; one small stir does. Transform, so
          it composites and never fights the JS-owned path. */
       @media (hover: hover) and (pointer: fine) {
-        .office-launch__wave:hover .office-launch__aperture,
-        .office-launch__wave:focus-visible .office-launch__aperture {
-          transform: scaleY(1.5);
-        }
-        .office-launch__aperture {
-          transition: transform var(--dur-slow) var(--ease);
-          transform-origin: center;
-        }
-        /* While the drive owns the geometry, hover must not also scale it — the
-           two would multiply and overshoot the 8:1 floor. */
-        .office-launch.is-listening .office-launch__aperture { transform: none; }
+        .office-launch__wave:hover .office-launch__cradle,
+        .office-launch__wave:focus-visible .office-launch__cradle { transform: scale(1.02); }
+        .office-launch.is-listening .office-launch__cradle { transform: none; }
       }
 
       .office-launch__line {
@@ -19692,19 +19682,17 @@
         }
 
         .office-launch__bars {
-          /* Phone: still the widest thing on the screen, but the greeting and
-             the live-now strip have to fit under it without scrolling. */
-          --aperture-width: min(74vw, 320px);
+          --cradle-width: min(78vw, 340px);
         }
 
         /* Touch has no hover, so the press is where the affordance has to live:
            the aperture opens a sliver under your thumb. */
-        .office-launch__wave:active .office-launch__aperture {
-          transform: scaleY(1.6);
+        .office-launch__wave:active .office-launch__cradle {
+          transform: scale(0.96);
           transition: transform var(--dur-fast) var(--ease);
           transform-origin: center;
         }
-        .office-launch.is-listening .office-launch__wave:active .office-launch__aperture {
+        .office-launch.is-listening .office-launch__wave:active .office-launch__cradle {
           transform: none;
         }
 
@@ -22073,8 +22061,7 @@
            just stops rippling, which `strideSignalReduceMotion()` enforces at the
            one place the geometry is computed. The hover scale goes too, since a
            held-open pose is not something the visitor can dismiss. */
-        .office-launch__aperture { transform: none; transition: none; }
-        .office-launch__bars::after { transition: none; }
+        .office-launch__cradle { transform: none; transition: none; }
         .voice-ledger { animation: none; }
         /* Private grill (Wave 12): keep every act's STATE (tone, color, content),
            drop the MOTION — the scorecard appears assembled with final values,
@@ -22295,29 +22282,28 @@
           <div class="office-launch bf-view">
             <div class="office-launch__wrap">
               <div class="office-launch__island">
-                <div class="office-launch__mark">
-                  <span class="office-launch__mini-signal" aria-hidden="true"></span>
-                  scout
-                </div>
                 <button type="button" aria-label="tap to talk to Scout" data-start-realtime-voice class="office-launch__wave pressable">
-                  <!-- THE STRIDE SIGNAL. Not a waveform wearing our colour — the
-                       logo itself, and the surface you press to speak.
+                  <!-- THE STRIDE SIGNAL CRADLE. A six-mass audio instrument,
+                       separate from the static Strike identity, and the surface
+                       you press to speak.
 
-                       One aperture. The path below is the IDLE cut (25:1), a print
-                       of scripts/stride-signal-geometry.mjs. The app icon uses the
-                       same curve at a more legible 12:1 cut; pressing this 25:1
-                       instrument never swaps pictures. It just opens.
-
-                       While the drive runs, `updateApertureGeometry` rewrites this
-                       `d` each frame from real microphone amplitude: the opening is
-                       the level, and the ripple travelling along it is the
-                       side-to-side motion. Openness never passes 8:1 — past that a
-                       lens reads as an eye, which is the wrong thing to be on a
-                       product that remembers what people said.
+                       The hidden aperture path remains only as compatibility
+                       geometry for older callers. Visible motion belongs to the
+                       cradle below and comes from measured audio energy.
 
                        Canon: docs/stride-signal-canon.md
                        Regenerate: node scripts/stride-signal-geometry.mjs -->
                   <span class="office-launch__bars" id="officeStrideSignal" aria-hidden="true">
+                    <svg class="office-launch__cradle" id="officeStrideCradle" viewBox="0 0 720 220" preserveAspectRatio="xMidYMid meet">
+                      <g data-cradle-ball data-anchor="200"><circle class="office-launch__ball" cx="200" cy="160" r="32"/><circle class="office-launch__energy" cx="200" cy="160" r="32"/></g>
+                      <g data-cradle-ball data-anchor="264"><circle class="office-launch__ball" cx="264" cy="160" r="32"/><circle class="office-launch__energy" cx="264" cy="160" r="32"/></g>
+                      <g data-cradle-ball data-anchor="328"><circle class="office-launch__ball" cx="328" cy="160" r="32"/><circle class="office-launch__energy" cx="328" cy="160" r="32"/></g>
+                      <g data-cradle-ball data-anchor="392"><circle class="office-launch__ball" cx="392" cy="160" r="32"/><circle class="office-launch__energy" cx="392" cy="160" r="32"/></g>
+                      <g data-cradle-ball data-anchor="456"><circle class="office-launch__ball" cx="456" cy="160" r="32"/><circle class="office-launch__energy" cx="456" cy="160" r="32"/></g>
+                      <g data-cradle-ball data-anchor="520"><circle class="office-launch__ball" cx="520" cy="160" r="32"/><circle class="office-launch__energy" cx="520" cy="160" r="32"/></g>
+                      <circle class="office-launch__carrier-halo" cx="200" cy="160" r="23"/>
+                      <circle class="office-launch__carrier" cx="200" cy="160" r="6"/>
+                    </svg>
                     <svg class="office-launch__aperture" viewBox="0 -42.24 675.84 84.48" preserveAspectRatio="xMidYMid meet">
                       <path id="officeAperturePath" d="M0.00 0.00 L10.56 -1.04 L21.12 -1.88 L31.68 -2.64 L42.24 -3.37 L52.80 -4.06 L63.36 -4.72 L73.92 -5.36 L84.48 -5.97 L95.04 -6.56 L105.60 -7.13 L116.16 -7.68 L126.72 -8.20 L137.28 -8.70 L147.84 -9.18 L158.40 -9.64 L168.96 -10.07 L179.52 -10.48 L190.08 -10.86 L200.64 -11.22 L211.20 -11.55 L221.76 -11.86 L232.32 -12.15 L242.88 -12.41 L253.44 -12.64 L264.00 -12.84 L274.56 -13.02 L285.12 -13.17 L295.68 -13.30 L306.24 -13.39 L316.80 -13.46 L327.36 -13.50 L337.92 -13.52 L348.48 -13.50 L359.04 -13.46 L369.60 -13.39 L380.16 -13.30 L390.72 -13.17 L401.28 -13.02 L411.84 -12.84 L422.40 -12.64 L432.96 -12.41 L443.52 -12.15 L454.08 -11.86 L464.64 -11.55 L475.20 -11.22 L485.76 -10.86 L496.32 -10.48 L506.88 -10.07 L517.44 -9.64 L528.00 -9.18 L538.56 -8.70 L549.12 -8.20 L559.68 -7.68 L570.24 -7.13 L580.80 -6.56 L591.36 -5.97 L601.92 -5.36 L612.48 -4.72 L623.04 -4.06 L633.60 -3.37 L644.16 -2.64 L654.72 -1.88 L665.28 -1.04 L675.84 0.00 L675.84 0.00 L665.28 1.04 L654.72 1.88 L644.16 2.64 L633.60 3.37 L623.04 4.06 L612.48 4.72 L601.92 5.36 L591.36 5.97 L580.80 6.56 L570.24 7.13 L559.68 7.68 L549.12 8.20 L538.56 8.70 L528.00 9.18 L517.44 9.64 L506.88 10.07 L496.32 10.48 L485.76 10.86 L475.20 11.22 L464.64 11.55 L454.08 11.86 L443.52 12.15 L432.96 12.41 L422.40 12.64 L411.84 12.84 L401.28 13.02 L390.72 13.17 L380.16 13.30 L369.60 13.39 L359.04 13.46 L348.48 13.50 L337.92 13.52 L327.36 13.50 L316.80 13.46 L306.24 13.39 L295.68 13.30 L285.12 13.17 L274.56 13.02 L264.00 12.84 L253.44 12.64 L242.88 12.41 L232.32 12.15 L221.76 11.86 L211.20 11.55 L200.64 11.22 L190.08 10.86 L179.52 10.48 L168.96 10.07 L158.40 9.64 L147.84 9.18 L137.28 8.70 L126.72 8.20 L116.16 7.68 L105.60 7.13 L95.04 6.56 L84.48 5.97 L73.92 5.36 L63.36 4.72 L52.80 4.06 L42.24 3.37 L31.68 2.64 L21.12 1.88 L10.56 1.04 L0.00 0.00 Z"/>
                     </svg>
@@ -31401,24 +31387,19 @@
         return `${normalized.split('\n').map(line => line.trimEnd()).join('\r\n')}\r\n`
       }
 
-      /* ---------- The Stride Signal's drive ----------
+      /* ---------- The Stride Signal Cradle's drive ----------
 
-         The mark on the home screen is the logo AND the talk control, and the
-         only thing that makes the second half of that true is this: every pixel
-         of movement traces back to an audio sample. A keyframe loop cannot tell
-         you whether the room is actually being heard, and "is this thing
-         listening?" is the one question a voice interface has to answer without
-         being asked. So at rest the mark is exactly the logo, and it moves if
-         and only if there is a voice in the pipeline.
+         The static Strike tile is the logo. This separate live control has
+         one harder job: answer “is this thing hearing me?” Every excursion
+         therefore traces back to sampled audio; there is no decorative loop.
 
-         Two taps, not one. The mark leans toward whoever is speaking — your
-         voice while Scout listens, Scout's voice while it answers. It is one
-         conversation, so it gets one instrument.
-
-         JS writes a single custom property. The gait itself is 16 CSS keyframe
-         animations keeping time on the compositor, scaled by that property, so
-         the main thread does arithmetic on one number per frame instead of
-         restyling sixteen elements. */
+         Between contacts, the two edge masses integrate the nonlinear pendulum
+         equation under gravity. At contact, equal-mass momentum transfer stops
+         the incoming edge and launches only the opposite edge. Four centre
+         masses stay fixed. A short light impulse represents the Hertzian contact
+         wave that happens much faster than a display frame. Audio is an external
+         force only at impact, while restitution and damping keep the motion from
+         reading as impossible perpetual motion. */
       const STRIDE_SIGNAL_FLOOR = 0.16
       // RMS that reads as a full stride. Conversational speech into a laptop
       // mic lands around 0.04–0.14, so 0.2 keeps the top of the range reachable
@@ -31442,10 +31423,21 @@
       const APERTURE_RIPPLE_EDGE_OFFSET = 0.8
       const STRIDE_SIGNAL_ATTACK = 0.5
       const STRIDE_SIGNAL_RELEASE = 0.12
+      const STRIDE_CRADLE_GRAVITY = 9.81
+      const STRIDE_CRADLE_LENGTH = 0.52
+      const STRIDE_CRADLE_DAMPING = 0.045
+      const STRIDE_CRADLE_RESTITUTION = 0.985
+      const STRIDE_CRADLE_DRIVE_BLEND = 0.18
+      const STRIDE_CRADLE_MIN_ANGLE = 0
+      const STRIDE_CRADLE_MAX_ANGLE = Math.PI * 0.27
+      const STRIDE_CRADLE_TRANSFER_SECONDS = 0.14
+      const STRIDE_CRADLE_ACTIVATION_LEVEL = 0.025
       let strideSignalFrame = 0
       let strideSignalTaps = []
       let strideSignalIdlePath = ''
       let strideSignalLevel = 0
+      let strideCradlePhysics = null
+      let strideCradleLastSeconds = 0
 
       function strideSignalElement() {
         return document.getElementById('officeStrideSignal')
@@ -31453,6 +31445,10 @@
 
       function strideSignalPath() {
         return document.getElementById('officeAperturePath')
+      }
+
+      function strideCradleBalls() {
+        return Array.from(document.querySelectorAll('#officeStrideCradle [data-cradle-ball]'))
       }
 
       function strideSignalReduceMotion() {
@@ -31569,7 +31565,6 @@
         // While Scout answers, the mark follows Scout. Otherwise it follows you.
         const role = voiceIslandState === 'talking' ? 'scout' : 'human'
         const tap = strideSignalTaps.find(candidate => candidate.role === role)
-          || strideSignalTaps[0]
         if (!tap) {
           // Connected but untappable (Safari can refuse a receiver stream). Hold
           // the floor: the pipeline IS open, so total stillness would be a lie.
@@ -31582,8 +31577,7 @@
 
       function driveStrideSignal() {
         strideSignalFrame = 0
-        const path = strideSignalPath()
-        if (!path) {
+        if (!document.getElementById('officeStrideCradle')) {
           return
         }
         const target = strideSignalTargetLevel()
@@ -31597,22 +31591,217 @@
           strideSignalLevel = 0
         }
         if (strideSignalLevel > 0) {
-          path.setAttribute('d', aperturePathData(strideSignalLevel, performance.now() / 1000))
+          updateStrideCradle(strideSignalLevel, performance.now() / 1000)
           strideSignalFrame = requestAnimationFrame(driveStrideSignal)
           return
         }
-        // Back to the logo. Restoring the ORIGINAL attribute rather than
-        // recomputing it means the resting control is the markup's mark — the
-        // exact path printed in the markup — instead of a JS approximation that
-        // happens to round to the same place.
         restoreStrideSignalIdlePath()
       }
 
+      function updateStrideCradle(level, seconds) {
+        const balls = strideCradleBalls()
+        const clamped = Math.min(1, Math.max(0, level))
+        const energy = clamped <= STRIDE_SIGNAL_FLOOR
+          ? 0
+          : (clamped - STRIDE_SIGNAL_FLOOR) / (1 - STRIDE_SIGNAL_FLOOR)
+        const reduced = strideSignalReduceMotion()
+        const source = voiceIslandState === 'talking' ? 'scout' : 'human'
+        if (!strideCradlePhysics || strideCradleLastSeconds <= 0) {
+          strideCradlePhysics = createStrideCradlePhysics(energy, source)
+          strideCradleLastSeconds = seconds
+        } else if (!reduced) {
+          stepStrideCradlePhysics(
+            strideCradlePhysics,
+            Math.min(0.1, Math.max(0, seconds - strideCradleLastSeconds)),
+            energy,
+            source,
+          )
+          strideCradleLastSeconds = seconds
+        }
+        const physics = strideCradlePhysics
+        const transferProgress = !reduced
+          && physics.transferDirection !== 0
+          && physics.transferAge < STRIDE_CRADLE_TRANSFER_SECONDS
+          ? physics.transferAge / STRIDE_CRADLE_TRANSFER_SECONDS
+          : null
+        const transferStrength = 0.28 + 0.72 * Math.sqrt(energy)
+        const handoff = transferProgress === null
+          ? 1
+          : Math.max(0, Math.min(1, (transferProgress - 0.5) / 0.5))
+        const outgoingIndex = physics.transferDirection > 0 ? balls.length - 1 : 0
+        const pulseAt = transferProgress === null
+          ? -1
+          : physics.transferDirection > 0
+            ? transferProgress * (balls.length - 1)
+            : (1 - transferProgress) * (balls.length - 1)
+        for (const [index, group] of balls.entries()) {
+          const anchor = Number(group.dataset.anchor || 0)
+          const angle = reduced
+            ? 0
+            : index === 0
+              ? physics.leftAngle
+              : index === balls.length - 1
+                ? physics.rightAngle
+                : 0
+          group.setAttribute('transform', `rotate(${angle * 180 / Math.PI} ${anchor} 18)`)
+          const ball = group.querySelector('.office-launch__ball')
+          const energyBall = group.querySelector('.office-launch__energy')
+          if (ball) {
+            ball.setAttribute('opacity', '0.54')
+          }
+          const transferActive = transferProgress !== null
+          const sourceEdge = source === 'human' ? index === 0 : index === balls.length - 1
+          const isMovingEdge = index === 0
+            ? Math.abs(physics.leftAngle) > 0.001 || Math.abs(physics.leftVelocity) > 0.001
+            : index === balls.length - 1
+              ? Math.abs(physics.rightAngle) > 0.001 || Math.abs(physics.rightVelocity) > 0.001
+              : false
+          const activeEnergy = 0.76 + energy * 0.24
+          const edgeEnergy = reduced
+            ? sourceEdge ? energy * 0.3 : 0
+            : isMovingEdge
+              ? transferActive && index === outgoingIndex
+                ? activeEnergy * handoff
+                : transferActive ? 0 : activeEnergy
+              : 0
+          const lower = Math.floor(pulseAt)
+          const upper = Math.ceil(pulseAt)
+          const contactWeight = transferActive
+            ? index === lower
+              ? 1 - (pulseAt - lower)
+              : index === upper ? pulseAt - lower : 0
+            : 0
+          const contactEnergy = contactWeight * 0.42 * transferStrength
+          if (energyBall) {
+            energyBall.setAttribute('opacity', String(Math.max(edgeEnergy, contactEnergy)))
+          }
+        }
+
+        const carrierHalo = document.querySelector('#officeStrideCradle .office-launch__carrier-halo')
+        const carrier = document.querySelector('#officeStrideCradle .office-launch__carrier')
+        if (transferProgress === null || reduced) {
+          carrierHalo?.setAttribute('opacity', '0')
+          carrier?.setAttribute('opacity', '0')
+          return
+        }
+
+        const sourceIndex = physics.transferDirection > 0 ? 0 : balls.length - 1
+        const sourceAnchor = Number(balls[sourceIndex]?.dataset.anchor || 0)
+        const destinationAnchor = Number(balls[outgoingIndex]?.dataset.anchor || 0)
+        const destinationAngle = outgoingIndex === 0 ? physics.leftAngle : physics.rightAngle
+        const destinationX = destinationAnchor + Math.sin(destinationAngle) * 142
+        const destinationY = 18 + Math.cos(destinationAngle) * 142
+        const rowX = sourceAnchor + (destinationAnchor - sourceAnchor) * transferProgress
+        const carrierX = rowX + (destinationX - destinationAnchor) * handoff
+        const carrierY = 160 + (destinationY - 160) * handoff
+        const carrierEnergy = transferStrength * (1 - handoff)
+        carrierHalo?.setAttribute('cx', String(carrierX))
+        carrierHalo?.setAttribute('cy', String(carrierY))
+        carrierHalo?.setAttribute('opacity', String(carrierEnergy * 0.14))
+        carrier?.setAttribute('cx', String(carrierX))
+        carrier?.setAttribute('cy', String(carrierY))
+        carrier?.setAttribute('opacity', String(carrierEnergy * 0.85))
+      }
+
+      function strideCradleReleaseAngle(level) {
+        return STRIDE_CRADLE_MIN_ANGLE
+          + (STRIDE_CRADLE_MAX_ANGLE - STRIDE_CRADLE_MIN_ANGLE) * Math.min(1, Math.max(0, level))
+      }
+
+      function strideCradleImpactSpeed(level) {
+        const angle = strideCradleReleaseAngle(level)
+        return Math.sqrt((2 * STRIDE_CRADLE_GRAVITY / STRIDE_CRADLE_LENGTH) * (1 - Math.cos(angle)))
+      }
+
+      function createStrideCradlePhysics(level, source = 'human') {
+        const release = strideCradleReleaseAngle(level)
+        return {
+          leftAngle: source === 'human' ? -release : 0,
+          leftVelocity: 0,
+          rightAngle: source === 'scout' ? release : 0,
+          rightVelocity: 0,
+          transferDirection: 0,
+          transferAge: STRIDE_CRADLE_TRANSFER_SECONDS,
+        }
+      }
+
+      function strideCradleDrivenSpeed(incomingSpeed, level) {
+        const conserved = incomingSpeed * STRIDE_CRADLE_RESTITUTION
+        const driven = strideCradleImpactSpeed(level)
+        return conserved + (driven - conserved) * STRIDE_CRADLE_DRIVE_BLEND
+      }
+
+      function stepStrideCradlePhysics(state, elapsedSeconds, level, source = 'human') {
+        const dormant = Math.abs(state.leftAngle) < 0.001
+          && Math.abs(state.leftVelocity) < 0.001
+          && Math.abs(state.rightAngle) < 0.001
+          && Math.abs(state.rightVelocity) < 0.001
+        if (dormant && level > STRIDE_CRADLE_ACTIVATION_LEVEL) {
+          if (source === 'scout') {
+            state.rightAngle = strideCradleReleaseAngle(level)
+          } else {
+            state.leftAngle = -strideCradleReleaseAngle(level)
+          }
+        }
+        let remaining = elapsedSeconds
+        while (remaining > 0) {
+          const step = Math.min(1 / 120, remaining)
+          const leftAcceleration = -(STRIDE_CRADLE_GRAVITY / STRIDE_CRADLE_LENGTH) * Math.sin(state.leftAngle)
+            - STRIDE_CRADLE_DAMPING * state.leftVelocity
+          state.leftVelocity += leftAcceleration * step
+          state.leftAngle += state.leftVelocity * step
+          const rightAcceleration = -(STRIDE_CRADLE_GRAVITY / STRIDE_CRADLE_LENGTH) * Math.sin(state.rightAngle)
+            - STRIDE_CRADLE_DAMPING * state.rightVelocity
+          state.rightVelocity += rightAcceleration * step
+          state.rightAngle += state.rightVelocity * step
+          if (state.leftAngle >= 0 && state.leftVelocity > 0) {
+            const outgoing = strideCradleDrivenSpeed(state.leftVelocity, level)
+            state.leftAngle = 0
+            state.leftVelocity = 0
+            state.rightAngle = 0
+            state.rightVelocity = outgoing
+            state.transferDirection = 1
+            state.transferAge = 0
+          } else if (state.rightAngle <= 0 && state.rightVelocity < 0) {
+            const outgoing = strideCradleDrivenSpeed(-state.rightVelocity, level)
+            state.rightAngle = 0
+            state.rightVelocity = 0
+            state.leftAngle = 0
+            state.leftVelocity = -outgoing
+            state.transferDirection = -1
+            state.transferAge = 0
+          }
+          state.transferAge += step
+          remaining -= step
+        }
+        if (
+          Math.abs(state.leftAngle) < 0.0001
+          && Math.abs(state.leftVelocity) < 0.0001
+          && Math.abs(state.rightAngle) < 0.0001
+          && Math.abs(state.rightVelocity) < 0.0001
+        ) {
+          state.leftAngle = 0
+          state.leftVelocity = 0
+          state.rightAngle = 0
+          state.rightVelocity = 0
+        }
+      }
+
       function restoreStrideSignalIdlePath() {
+        for (const group of strideCradleBalls()) {
+          group.removeAttribute('transform')
+          const ball = group.querySelector('.office-launch__ball')
+          ball?.removeAttribute('opacity')
+          group.querySelector('.office-launch__energy')?.removeAttribute('opacity')
+        }
+        document.querySelector('#officeStrideCradle .office-launch__carrier-halo')?.removeAttribute('opacity')
+        document.querySelector('#officeStrideCradle .office-launch__carrier')?.removeAttribute('opacity')
         const path = strideSignalPath()
         if (path && strideSignalIdlePath) {
           path.setAttribute('d', strideSignalIdlePath)
         }
+        strideCradlePhysics = null
+        strideCradleLastSeconds = 0
       }
 
       function startStrideSignalDrive() {

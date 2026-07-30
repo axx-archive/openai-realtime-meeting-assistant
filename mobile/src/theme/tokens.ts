@@ -178,21 +178,31 @@ export const shadow = {
  * Type scale (weights + sizes). On iOS, SF Pro is the closest system match to
  * Google Sans Flex; letterSpacing approximates the live --track-* values.
  */
+export const fonts = {
+  sansRegular: 'GoogleSansFlex_400Regular',
+  sansMedium: 'GoogleSansFlex_500Medium',
+  sansSemiBold: 'GoogleSansFlex_600SemiBold',
+  sansBold: 'GoogleSansFlex_700Bold',
+  monoRegular: 'GeistMono_400Regular',
+  monoMedium: 'GeistMono_500Medium',
+  monoSemiBold: 'GeistMono_600SemiBold',
+} as const;
+
 export const type = {
-  title1: { fontSize: 28, fontWeight: '600' as const, letterSpacing: -0.6, lineHeight: 32 },
-  title2: { fontSize: 21, fontWeight: '600' as const, letterSpacing: -0.34, lineHeight: 26 },
+  title1: { fontFamily: fonts.sansSemiBold, fontSize: 28, fontWeight: '600' as const, letterSpacing: -0.6, lineHeight: 32 },
+  title2: { fontFamily: fonts.sansSemiBold, fontSize: 21, fontWeight: '600' as const, letterSpacing: -0.34, lineHeight: 26 },
   /** Live login wordmark: 600 22px / -0.022em */
-  wordmark: { fontSize: 22, fontWeight: '600' as const, letterSpacing: -0.48, lineHeight: 22 },
-  headline: { fontSize: 17, fontWeight: '600' as const, letterSpacing: -0.17, lineHeight: 22 },
-  body: { fontSize: 15, fontWeight: '400' as const, letterSpacing: -0.08, lineHeight: 22 },
-  bodyMedium: { fontSize: 15, fontWeight: '500' as const, letterSpacing: -0.08, lineHeight: 22 },
-  bodySm: { fontSize: 14, fontWeight: '400' as const, letterSpacing: -0.07, lineHeight: 22 },
-  caption: { fontSize: 13, fontWeight: '400' as const, letterSpacing: -0.06, lineHeight: 19 },
-  captionMedium: { fontSize: 13, fontWeight: '500' as const, letterSpacing: -0.06, lineHeight: 19 },
+  wordmark: { fontFamily: fonts.sansSemiBold, fontSize: 22, fontWeight: '600' as const, letterSpacing: -0.48, lineHeight: 22 },
+  headline: { fontFamily: fonts.sansSemiBold, fontSize: 17, fontWeight: '600' as const, letterSpacing: -0.17, lineHeight: 22 },
+  body: { fontFamily: fonts.sansRegular, fontSize: 15, fontWeight: '400' as const, letterSpacing: -0.08, lineHeight: 22 },
+  bodyMedium: { fontFamily: fonts.sansMedium, fontSize: 15, fontWeight: '500' as const, letterSpacing: -0.08, lineHeight: 22 },
+  bodySm: { fontFamily: fonts.sansRegular, fontSize: 14, fontWeight: '400' as const, letterSpacing: -0.07, lineHeight: 22 },
+  caption: { fontFamily: fonts.sansRegular, fontSize: 13, fontWeight: '400' as const, letterSpacing: -0.06, lineHeight: 19 },
+  captionMedium: { fontFamily: fonts.sansMedium, fontSize: 13, fontWeight: '500' as const, letterSpacing: -0.06, lineHeight: 19 },
   /** Mono-ish labels — use system font with wider tracking like --type-label */
-  label: { fontSize: 11, fontWeight: '500' as const, letterSpacing: 0.66, lineHeight: 13 },
-  labelLg: { fontSize: 13, fontWeight: '500' as const, letterSpacing: 0.52, lineHeight: 17 },
-  button: { fontSize: 14, fontWeight: '600' as const, letterSpacing: -0.08, lineHeight: 18 },
+  label: { fontFamily: fonts.monoMedium, fontSize: 11, fontWeight: '500' as const, letterSpacing: 0.66, lineHeight: 13 },
+  labelLg: { fontFamily: fonts.monoMedium, fontSize: 13, fontWeight: '500' as const, letterSpacing: 0.52, lineHeight: 17 },
+  button: { fontFamily: fonts.sansSemiBold, fontSize: 14, fontWeight: '600' as const, letterSpacing: -0.08, lineHeight: 18 },
 } as const;
 
 /** Live product chrome names (tool rail / phone topbar). */

@@ -3,14 +3,16 @@ import { StyleSheet, View, type ViewStyle } from 'react-native';
 import { Image } from 'expo-image';
 import { radius, shadow } from '../theme/tokens';
 
-const strideSignalMark = require('../../assets/stride-signal-mark.png');
+const strideLogoMark = require('../../assets/stride-logo-mark.png');
+const strideLogoBlack = require('../../assets/stride-logo-black.png');
+const strideLogoWhite = require('../../assets/stride-logo-white.png');
 
 type Props = {
   size?: number;
   style?: ViewStyle;
 };
 
-/** Canonical Stride Signal mark used throughout the native app. */
+/** “The Strike” — the cropped momentum frame used by static identity surfaces. */
 export function BrandMark({ size = 56, style }: Props) {
   const r = size <= 44 ? radius.lg : 16;
   return (
@@ -27,7 +29,7 @@ export function BrandMark({ size = 56, style }: Props) {
       ]}
     >
       <Image
-        source={strideSignalMark}
+        source={strideLogoMark}
         style={{ width: size, height: size }}
         contentFit="contain"
         cachePolicy="memory-disk"
@@ -36,10 +38,28 @@ export function BrandMark({ size = 56, style }: Props) {
   );
 }
 
+/** Compatibility colorways; The Strike tile is theme-invariant. */
+export function StrideLogo({
+  size = 44,
+  tone = 'black',
+}: {
+  size?: number;
+  tone?: 'black' | 'white';
+}) {
+  return (
+    <Image
+      source={tone === 'white' ? strideLogoWhite : strideLogoBlack}
+      style={{ width: size, height: size }}
+      contentFit="contain"
+      cachePolicy="memory-disk"
+    />
+  );
+}
+
 const styles = StyleSheet.create({
   mark: {
     overflow: 'hidden',
-    backgroundColor: '#0E0E10',
+    backgroundColor: '#050505',
     alignItems: 'center',
     justifyContent: 'center',
   },

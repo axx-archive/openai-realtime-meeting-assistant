@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
+    "@expo-google-fonts/geist-mono": "^0.4.3",
+    "@expo-google-fonts/google-sans-flex": "^0.4.3",
     "@react-navigation/bottom-tabs": "^7.18.13",
     "@react-navigation/native": "^7.3.13",
     "@react-navigation/native-stack": "^7.18.5",

@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View, useColorScheme } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Animated, StyleSheet, View, useColorScheme } from 'react-native';
 import {
   NavigationContainer,
   DefaultTheme,
@@ -25,6 +25,8 @@ import {
   MemoryScreen,
 } from '../screens/LibraryScreens';
 import { SettingsScreen } from '../screens/SettingsScreen';
+import { LaunchCradle } from '../components/CanvasCradleComposition';
+import { duration, ease, useReduceMotion } from '../theme/motion';
 import { colors } from '../theme/tokens';
 import type { RootStackParamList } from './types';
 
@@ -57,7 +59,33 @@ export const navigationRef = createNavigationContainerRef<RootStackParamList>();
 export function RootNavigator() {
   const { user, bootstrapping, sessionToken } = useAuth();
   const dark = useColorScheme() === 'dark';
+	const reduceMotion = useReduceMotion();
+	const launchOpacity = useRef(new Animated.Value(1)).current;
+	const [launchVisible, setLaunchVisible] = useState(true);
 	const [pendingPushTarget, setPendingPushTarget] = useState<PushTarget | null>(null);
+
+	useEffect(() => {
+		if (bootstrapping) {
+			launchOpacity.setValue(1);
+			setLaunchVisible(true);
+			return;
+		}
+		if (reduceMotion) {
+			launchOpacity.setValue(0);
+			setLaunchVisible(false);
+			return;
+		}
+		const fade = Animated.timing(launchOpacity, {
+			toValue: 0,
+			duration: duration.slow,
+			easing: ease,
+			useNativeDriver: true,
+		});
+		fade.start(({ finished }) => {
+			if (finished) setLaunchVisible(false);
+		});
+		return () => fade.stop();
+	}, [bootstrapping, launchOpacity, reduceMotion]);
 
 	const openPushTarget = useCallback((target: PushTarget) => {
 		if (!user || !navigationRef.isReady()) {
@@ -100,16 +128,13 @@ export function RootNavigator() {
   };
 
   if (bootstrapping) {
-    return (
-      <View style={styles.boot}>
-        <ActivityIndicator size="large" color={colors.accent} />
-      </View>
-    );
+    return <LaunchCradle />;
   }
 
   return (
-    <NavigationContainer ref={navigationRef} theme={navTheme} onReady={flushPendingPushTarget}>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <View style={styles.root}>
+      <NavigationContainer ref={navigationRef} theme={navTheme} onReady={flushPendingPushTarget}>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
         {user ? (
           <>
             <Stack.Screen name="Canvas" component={CanvasScreen} />
@@ -151,16 +176,31 @@ export function RootNavigator() {
         ) : (
           <Stack.Screen name="Login" component={LoginScreen} />
         )}
-      </Stack.Navigator>
-    </NavigationContainer>
+        </Stack.Navigator>
+      </NavigationContainer>
+      {launchVisible ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.launchOverlay, { opacity: launchOpacity }]}
+        >
+          <LaunchCradle />
+        </Animated.View>
+      ) : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  boot: {
+  root: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+  },
+  launchOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     backgroundColor: colors.bgApp,
+    zIndex: 20,
   },
 });

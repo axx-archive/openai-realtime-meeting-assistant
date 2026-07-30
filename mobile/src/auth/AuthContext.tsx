@@ -12,6 +12,7 @@ import { api, BonfireApiError, setUnauthorizedHandler } from '../api/client';
 import type { Identity } from '../api/types';
 import { LAST_NAME_STORAGE_KEY, PUSH_TOKEN_STORAGE_KEY, SESSION_STORAGE_KEY } from '../config';
 import {
+  DEFAULT_MOBILE_THEME,
   resolveInstalledThemePreference,
   type MobileThemePreference,
 } from '../theme/appearancePreference';
@@ -62,12 +63,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [bootstrapping, setBootstrapping] = useState(true);
   const [lastLoginName, setLastLoginName] = useState('');
-  const [themePreference, setThemePreference] = useState<MobileThemePreference>('system');
+  const [themePreference, setThemePreference] = useState<MobileThemePreference>(
+    DEFAULT_MOBILE_THEME,
+  );
 
   const clearLocalSession = useCallback(async () => {
     setUser(null);
     setSessionToken(null);
-    setThemePreference('system');
     await writeSecure(SESSION_STORAGE_KEY, null);
   }, []);
 
@@ -89,13 +91,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (cancelled) return;
       if (savedName) setLastLoginName(savedName);
       if (!token) {
+        if (installedTheme) setThemePreference(installedTheme.preference);
         setBootstrapping(false);
         return;
       }
       try {
         const me = await api.me(token);
         if (cancelled) return;
-        const preference = resolveInstalledThemePreference(installedTheme, me.email);
+        const preference = resolveInstalledThemePreference(
+          installedTheme,
+          me.email,
+          me.themePref,
+        );
         setThemePreference(preference);
         await writeInstalledThemePreference(me.email, preference);
         if (cancelled) return;
@@ -106,6 +113,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           await writeSecure(SESSION_STORAGE_KEY, null);
         }
         if (!cancelled) {
+          if (installedTheme) setThemePreference(installedTheme.preference);
           setSessionToken(null);
           setUser(null);
         }
@@ -131,6 +139,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const preference = resolveInstalledThemePreference(
       await readInstalledThemePreference(),
       identity.email,
+      identity.themePref,
     );
     await writeInstalledThemePreference(identity.email, preference);
     setLastLoginName(name.trim());
@@ -154,6 +163,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const preference = resolveInstalledThemePreference(
       await readInstalledThemePreference(),
       identity.email,
+      identity.themePref,
     );
     await writeInstalledThemePreference(identity.email, preference);
     setLastLoginName(identity.name);

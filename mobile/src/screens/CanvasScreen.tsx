@@ -9,14 +9,12 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useAuth } from '../auth/AuthContext';
-import { Dock } from '../components/Dock';
 import { ChatCircle } from '../components/ChatCircle';
+import { canvasCradleComposition } from '../components/CanvasCradleComposition';
 import { NavCluster } from '../components/NavCluster';
-import { StridePulse } from '../components/StridePulse';
+import { StrideCradle } from '../components/StrideCradle';
 import { useLiveLine } from '../canvas/useLiveLine';
 import { liveLineDisplay } from '../canvas/liveLineDisplay';
 import { useDictation } from '../voice/useDictation';
@@ -32,8 +30,8 @@ type CanvasNav = NativeStackNavigationProp<RootStackParamList>;
  *
  * The root of the app is a microphone, not a dashboard. "You don't operate it,
  * you just talk" only survives contact with a home screen that has almost
- * nothing to operate, so this page holds exactly three text elements — a mark, a
- * greeting, and one live line — plus the waveform and the Dock.
+ * nothing to operate, so this page holds a greeting, one live line, and the
+ * Signal Cradle. The cradle itself is the voice control.
  *
  * Nothing here blocks first paint: the waveform renders before any network call
  * resolves, because time-to-first-word is the only performance metric that
@@ -62,8 +60,6 @@ function greeting(): string {
 
 export function CanvasScreen() {
   const navigation = useNavigation<CanvasNav>();
-  // The aperture takes a semantic token directly; react-native-svg accepts
-  // DynamicColorIOS on `fill`, unlike expo-image's tintColor.
   const reduceMotion = useReduceMotion();
   const live = useLiveLine();
   const lineDisplay = liveLineDisplay(live);
@@ -111,8 +107,6 @@ export function CanvasScreen() {
     // restart the recorder mid-turn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [answered, conversation.open, dictation.state]);
-
-  const openDeck = useCallback(() => navigation.navigate('Deck', {}), [navigation]);
 
   // The live line routes to whatever it is actually talking about. A line that
   // names a specific message and then dumps you in a thread list would make the
@@ -165,52 +159,26 @@ export function CanvasScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
-      <View style={styles.fill}>
-        <ScrollView
-          contentContainerStyle={styles.body}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
+      <ScrollView
+        contentContainerStyle={canvasCradleComposition.body}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={canvasCradleComposition.skyAbove} />
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={listening ? 'Listening' : 'Talk to Scout'}
+          accessibilityHint={listening ? 'Tap to end this voice conversation.' : 'Tap to start a voice conversation.'}
+          onPress={handleTap}
+          style={({ pressed }) => [canvasCradleComposition.wave, pressed && styles.wavePressed]}
         >
-          <View style={styles.skyAbove} />
+          <StrideCradle trace={dictation.trace} listening={listening} />
+        </Pressable>
 
-          {/* A bare resting aperture, never the boxed app tile. */}
-          <View style={styles.mark} accessibilityRole="header" accessibilityLabel="Scout">
-            <StridePulse trace={dictation.trace} listening={false} size={22} />
-            <Text style={styles.markLabel}>SCOUT</Text>
-          </View>
-
-          {/* The one big tappable area, matching the web canon. */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={listening ? 'Listening' : 'Talk to Scout'}
-            onPress={handleTap}
-            style={styles.wave}
-          >
-            {/* Ambient light, EARNED. A resting wash renders as a stray grey
-                lozenge — a horizontal gradient inside a rounded box has hard
-                top and bottom edges — so the canvas stays truly flat at rest
-                and the glow only exists while listening, where it is ember and
-                means something. */}
-            {listening ? (
-              <LinearGradient
-                colors={[
-                  'rgba(255,90,25,0.00)',
-                  'rgba(255,90,25,0.13)',
-                  'rgba(255,90,25,0.00)',
-                ]}
-                start={{ x: 0, y: 0.5 }}
-                end={{ x: 1, y: 0.5 }}
-                style={styles.glow}
-              />
-            ) : null}
-            <StridePulse trace={dictation.trace} listening={listening} />
-          </Pressable>
-
+        <View style={canvasCradleComposition.copyBlock}>
           <Text style={styles.greeting}>{greeting()}</Text>
 
-          {/* Every decision about WHAT text appears lives in liveLineDisplay,
-              so it can be asserted without a React renderer — this component
-              keeps only the styling and the motion. */}
           {lineDisplay.visible ? (
             <Pressable
               accessibilityRole="button"
@@ -225,8 +193,6 @@ export function CanvasScreen() {
                   live.mentioned && styles.liveMention,
                   { opacity: liveFade, transform: [{ translateY: liveRise }] },
                 ]}
-                // Two lines, then ellipsis. A long message must never push the
-                // Dock around — the composition (§9) is load-bearing.
                 numberOfLines={2}
                 ellipsizeMode="tail"
               >
@@ -237,130 +203,103 @@ export function CanvasScreen() {
               </Animated.Text>
             </Pressable>
           ) : null}
+        </View>
 
-          {/* Scout's turn. Text-primary always — we never build an interaction
-              whose output exists only as audio (§9.5). */}
-          {conversation.turn ? (
-            <View style={styles.turn}>
-              <Text style={styles.question}>{conversation.turn.question}</Text>
-              {conversation.thinking ? (
-                <ActivityIndicator color={colors.ember} style={styles.thinking} />
-              ) : conversation.turn.answer ? (
-                <Text style={styles.answer}>{conversation.turn.answer}</Text>
-              ) : null}
-            </View>
-          ) : null}
-
-          {conversation.error ? (
-            <Text style={styles.error}>{conversation.error}</Text>
-          ) : null}
-
-          {dictation.error ? (
-            <View style={styles.dictationError}>
-              <Text style={styles.error}>{dictation.error}</Text>
-              <View style={styles.errorActions}>
-                {/* The recording is retained, so retry re-sends the same audio
-                    rather than asking the user to say it again (§11). */}
-                <Pressable onPress={dictation.retry} accessibilityRole="button">
-                  <Text style={styles.errorAction}>Retry</Text>
-                </Pressable>
-                <Pressable onPress={dictation.dismissError} accessibilityRole="button">
-                  <Text style={styles.errorActionMuted}>Discard</Text>
-                </Pressable>
-              </View>
-            </View>
-          ) : null}
-
-          {dictation.permissionDenied ? (
-            <Text style={styles.error}>
-              Microphone access is off. Enable it in Settings to talk to Scout.
-            </Text>
-          ) : null}
-
-          <View style={styles.skyBelow} />
-        </ScrollView>
-
-        <View style={styles.dockRow}>
-            <View style={styles.navRow}>
-              {/* One tap to the team thread, always. The circle yields while
-                  the cluster is open rather than competing for the same band. */}
-              <ChatCircle
-                clusterOpen={navOpen}
-                mentioned={live.mentioned}
-                onPress={() => {
-                  setNavOpen(false);
-                  // The TABLE, always — not live.threadId, which follows the
-                  // line and can point at a mention in another channel. A
-                  // control labelled "Team" that opens #pricing is a bug.
-                  if (live.tableThreadId) {
-                    navigation.navigate('Thread', {
-                      threadId: live.tableThreadId,
-                      title: '#team',
-                    });
-                    return;
-                  }
-                  navigation.navigate('Deck', { segment: 'threads' });
-                }}
-              />
-            {/* Never routed through the voice pipeline — this is the path that
-                still works when the model quota is gone or the mic is denied.
-                Sits above the Dock so neither covers the other. */}
-            <NavCluster
-              open={navOpen}
-              onToggle={() => setNavOpen((previous) => !previous)}
-              destinations={[
-                {
-                  id: 'rooms',
-                  label: 'Rooms',
-                  icon: 'video.fill',
-                  emphasis: true,
-                  onPress: () => {
-                    setNavOpen(false);
-                    navigation.navigate('Deck', { segment: 'rooms' });
-                  },
-                },
-                {
-                  id: 'threads',
-                  label: 'Threads',
-                  icon: 'bubble.left.and.bubble.right.fill',
-                  onPress: () => {
-                    setNavOpen(false);
-                    navigation.navigate('Deck', { segment: 'threads' });
-                  },
-                },
-                {
-                  id: 'new-room',
-                  label: 'New',
-                  icon: 'plus',
-                  onPress: () => {
-                    setNavOpen(false);
-                    navigation.navigate('CreateRoom');
-                  },
-                },
-                {
-                  id: 'work',
-                  label: 'Work',
-                  icon: 'rectangle.3.group.fill',
-                  onPress: () => {
-                    setNavOpen(false);
-                    navigation.navigate('Deck', { segment: 'work' });
-                  },
-                },
-              ]}
-            />
-            </View>
-            <Dock
-              dictation={dictation.state}
-              trace={dictation.trace}
-              conversing={conversation.open}
-              onTap={handleTap}
-              onHoldStart={() => void dictation.start()}
-              onHoldEnd={() => void dictation.stop()}
-              onHoldCancel={dictation.cancel}
-              onReveal={openDeck}
-              durationMs={dictation.durationMs}
-            />
+        {conversation.turn ? (
+          <View style={styles.turn}>
+            <Text style={styles.question}>{conversation.turn.question}</Text>
+            {conversation.thinking ? (
+              <ActivityIndicator color={colors.ember} style={styles.thinking} />
+            ) : conversation.turn.answer ? (
+              <Text style={styles.answer}>{conversation.turn.answer}</Text>
+            ) : null}
           </View>
+        ) : null}
+
+        {conversation.error ? <Text style={styles.error}>{conversation.error}</Text> : null}
+
+        {dictation.error ? (
+          <View style={styles.dictationError}>
+            <Text style={styles.error}>{dictation.error}</Text>
+            <View style={styles.errorActions}>
+              <Pressable onPress={dictation.retry} accessibilityRole="button">
+                <Text style={styles.errorAction}>Retry</Text>
+              </Pressable>
+              <Pressable onPress={dictation.dismissError} accessibilityRole="button">
+                <Text style={styles.errorActionMuted}>Discard</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
+
+        {dictation.permissionDenied ? (
+          <Text style={styles.error}>
+            Microphone access is off. Enable it in Settings to talk to Scout.
+          </Text>
+        ) : null}
+
+        <View style={canvasCradleComposition.skyBelow} />
+      </ScrollView>
+
+      <View style={styles.navOverlay} pointerEvents="box-none">
+        <ChatCircle
+          clusterOpen={navOpen}
+          mentioned={live.mentioned}
+          onPress={() => {
+            setNavOpen(false);
+            if (live.tableThreadId) {
+              navigation.navigate('Thread', {
+                threadId: live.tableThreadId,
+                title: '#team',
+              });
+              return;
+            }
+            navigation.navigate('Deck', { segment: 'threads' });
+          }}
+        />
+        <NavCluster
+          open={navOpen}
+          onToggle={() => setNavOpen((previous) => !previous)}
+          destinations={[
+            {
+              id: 'rooms',
+              label: 'Rooms',
+              icon: 'video.fill',
+              emphasis: true,
+              onPress: () => {
+                setNavOpen(false);
+                navigation.navigate('Deck', { segment: 'rooms' });
+              },
+            },
+            {
+              id: 'threads',
+              label: 'Threads',
+              icon: 'bubble.left.and.bubble.right.fill',
+              onPress: () => {
+                setNavOpen(false);
+                navigation.navigate('Deck', { segment: 'threads' });
+              },
+            },
+            {
+              id: 'new-room',
+              label: 'New',
+              icon: 'plus',
+              onPress: () => {
+                setNavOpen(false);
+                navigation.navigate('CreateRoom');
+              },
+            },
+            {
+              id: 'work',
+              label: 'Work',
+              icon: 'rectangle.3.group.fill',
+              onPress: () => {
+                setNavOpen(false);
+                navigation.navigate('Deck', { segment: 'work' });
+              },
+            },
+          ]}
+        />
       </View>
     </SafeAreaView>
   );
@@ -368,70 +307,16 @@ export function CanvasScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bgApp },
-  fill: { flex: 1 },
-  body: {
-    flexGrow: 1,
-    alignItems: 'center',
-    paddingHorizontal: space[6],
-  },
-  /**
-   * Composition, not centring. Flex spacers weighted 1.25 : 1 sit the content
-   * group slightly BELOW true centre.
-   *
-   * The rule: empty space above content reads as sky and is felt as
-   * intentional; the same emptiness below content, stacked above a heavy UI
-   * element, reads as a gap where something is missing. Geometric centring gave
-   * 185pt above and 232pt below — the wrong way round, and the single biggest
-   * reason the screen felt unfinished.
-   */
-  skyAbove: { flex: 1.25, pointerEvents: 'none' },
-  skyBelow: { flex: 1, pointerEvents: 'none' },
-  dockRow: {
-    // Column, not row: the nav stacks above the Dock so neither covers the
-    // other, and the cluster expands upward into empty canvas.
-    justifyContent: 'flex-end',
-  },
-  navRow: {
-    // The band above the Dock: chat on the left, the cluster toggle on the
-    // right, the cluster expanding right-to-left between them. Bottom-aligned
-    // so the circle and the toggle share a baseline even though the cluster's
-    // items carry labels below theirs.
+  navOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
   },
-  glow: {
-    ...StyleSheet.absoluteFill,
-    borderRadius: 999,
-    pointerEvents: 'none',
-  },
-  mark: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    marginBottom: space[6],
-  },
-  markLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    // Wider than the label token: tracking has to open up as size drops or
-    // uppercase text reads as a smudge at 11pt.
-    letterSpacing: 1.4,
-    lineHeight: 13,
-    color: colors.text3,
-    textTransform: 'uppercase',
-  },
-  wave: {
-    alignSelf: 'stretch',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: space[4],
-    // 14 keeps a comfortable tap target without inflating the optical gap —
-    // padding on a tap target still spends vertical rhythm.
-    paddingVertical: 14,
-    borderRadius: radius.xxl,
-    marginBottom: space[5],
-  },
+  wavePressed: { transform: [{ scale: 0.98 }] },
   greeting: {
     // The only sentence on the page, so it carries the page rather than sharing
     // weight with the live line. Tracking tightens as size grows — at 36pt the

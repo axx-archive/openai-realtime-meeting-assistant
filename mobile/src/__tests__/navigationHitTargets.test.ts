@@ -34,4 +34,6 @@ test('canvas shortcuts distinguish the room list from room creation', () => {
     /id: 'new-room',[\s\S]*label: 'New',[\s\S]*navigation\.navigate\('CreateRoom'\)/,
   );
   assert.doesNotMatch(source, /label: 'Live'/);
+  assert.match(source, /<View style=\{styles\.navOverlay\} pointerEvents="box-none">/);
+  assert.match(source, /navOverlay: \{[\s\S]*position: 'absolute',[\s\S]*bottom: 0/);
 });

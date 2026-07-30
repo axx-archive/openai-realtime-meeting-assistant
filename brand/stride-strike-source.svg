@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>Stride — The Strike</title>
+  <desc>The energised edge mass enters from the left while the equal-mass row exits the right frame.</desc>
+  <rect width="1024" height="1024" fill="#050505"/>
+  <circle cx="-61.44" cy="512" r="204.8" fill="#FF5A19"/>
+  <circle cx="614.4" cy="512" r="204.8" fill="#5E5E66"/>
+  <circle cx="1024" cy="512" r="204.8" fill="#5E5E66"/>
+</svg>

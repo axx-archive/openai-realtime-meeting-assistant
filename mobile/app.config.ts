@@ -35,10 +35,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         dark: './assets/ios-icon-dark.png',
         tinted: './assets/ios-icon-tinted.png',
       },
-      // Build 25 carries the Stride Signal across the instrument and icon family
-      // on top of build 24's room-media stability fixes. Pin the multi-target
-      // release so the app and ReplayKit extension match.
-      buildNumber: '25',
+      // Build 26 carries The Strike identity, the physics-driven Signal Cradle,
+      // bottom-opening threads, dark-first appearance, and the matched launch
+      // transition. Pin the app and ReplayKit extension to the same release.
+      buildNumber: '26',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',
@@ -74,7 +74,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         foregroundImage: './assets/android-icon-foreground.png',
         backgroundImage: './assets/android-icon-background.png',
         monochromeImage: './assets/android-icon-monochrome.png',
-        backgroundColor: '#0E0E10',
+        backgroundColor: '#050505',
       },
       permissions: [
         'CAMERA',
@@ -131,10 +131,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       [
         'expo-splash-screen',
         {
-          // Live PWA theme_color / paper-50
+          // The OS splash is the cradle at rest. The in-app launch overlay uses
+          // the same component and scale, then fades into the live Canvas.
           backgroundColor: '#F5F5F7',
           image: './assets/splash-icon.png',
-          imageWidth: 144,
+          // Matches the live Canvas cradle's 391 * 0.8 rendered width so the
+          // native launch image hands off without changing scale.
+          imageWidth: 313,
           resizeMode: 'contain',
           dark: {
             backgroundColor: '#0E0E10',

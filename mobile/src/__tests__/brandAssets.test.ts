@@ -67,57 +67,92 @@ function decodeOpaquePng(path: string) {
   return { width, height, pixels, channels };
 }
 
-test('approved Stride Signal master is the exact release source', () => {
+test('The Strike vector is the exact static identity source', () => {
+  const strikeSource = read('../brand/stride-strike-source.svg');
   const canonicalSvg = read('assets/icon-source.svg');
-  const masterPng = read('assets/stride-signal-master.png');
   const releasePng = read('assets/icon.png');
   const darkPng = read('assets/ios-icon-dark.png');
   const tintedPng = read('assets/ios-icon-tinted.png');
 
-  // Regenerate with `node scripts/generate-stride-brand-assets.mjs` and update
-  // these digests in the same commit. The SVG is a print of
-  // `scripts/stride-signal-geometry.mjs`, never hand-edited.
-  assert.equal(sha256(canonicalSvg), '0a153994ed0b746f5be5446126b872990ca426be610c12a7d1d60a6fba71fa2f');
-  assert.match(canonicalSvg.toString('utf8'), /<title>Stride Signal<\/title>/);
-  assert.equal(sha256(masterPng), '7fde78fe45760658fd7f8e434b163b824ded954ef163bbbdcbaf68366ec61961');
-  assert.equal(sha256(releasePng), sha256(masterPng));
-  // The dark-appearance icon is no longer a copy of the master. The primary tile
-  // is INVERTED (orange ground, aperture cut out in ink), so the sanctioned
-  // dark-ground alternate does real work as the iOS dark icon rather than being
-  // a duplicate.
-  assert.notEqual(sha256(darkPng), sha256(masterPng));
-  assert.equal(sha256(darkPng), '9a9c0800f3f255d6c90dc9184dfdb530fff99e5d8fd7f3ba62855477f00a073e');
-  assert.equal(sha256(tintedPng), 'db4569211ed0faa8bd38a1499f526c33b1a3aff1df913f9821f95f552ee36aa3');
+  assert.equal(sha256(strikeSource), '6a9ea0e4858dd5d6e15842766b646aa807ee6da9bf6c9d87eb0111820e621475');
+  assert.equal(sha256(canonicalSvg), '96ba41b8f1bbfb4407d443e4647ba455774f9676834b5cb230d72237b55d3dda');
+  assert.match(canonicalSvg.toString('utf8'), /<title>Stride — The Strike<\/title>/);
+  assert.equal(sha256(releasePng), '9aa61a44db4509d2620038872329ad55e4fe2fb1824a658f1001edd7de713825');
+  assert.equal(sha256(darkPng), sha256(releasePng));
+  assert.notEqual(sha256(tintedPng), sha256(releasePng));
 });
 
-test('React Native shell uses the approved Stride Signal assets everywhere', () => {
+test('React Native shell separates the static logo from the live Signal Cradle', () => {
   const component = text('src/components/BrandMark.tsx');
   assert.match(component, /from 'expo-image'/);
-  assert.match(component, /stride-signal-mark\.png/);
-  assert.doesNotMatch(component, /android-icon-monochrome\.png/);
-  assert.doesNotMatch(component, /fullFlamePath|microFlamePath|bonfireMicroLogCutout/);
+  assert.match(component, /stride-logo-mark\.png/);
+  assert.match(component, /stride-logo-black\.png/);
+  assert.match(component, /stride-logo-white\.png/);
+  assert.match(component, /export function StrideLogo/);
 
-  // The voice-first shell uses the bare signal at all three interaction scales:
-  // a quiet Scout label, the real-amplitude centrepiece, and the bottom talk
-  // control. Boxed tiles belong to launchers, never in-product chrome.
+  // The hero Signal is both identity and the real-amplitude talk control. A
+  // second micro lockup and a second bottom voice control would only dilute it.
   const canvas = text('src/screens/CanvasScreen.tsx');
-  assert.match(canvas, /<StridePulse trace=\{dictation\.trace\} listening=\{false\} size=\{22\}/);
-  assert.match(canvas, /<StridePulse trace=\{dictation\.trace\} listening=\{listening\}/);
+  assert.match(canvas, /<StrideCradle trace=\{dictation\.trace\} listening=\{listening\} \/>/);
+  assert.doesNotMatch(canvas, /styles\.glow|rgba\(255,90,25,0\.035\)/);
+  assert.doesNotMatch(canvas, />SCOUT<|<Dock/);
 
-  // The bottom control is the second explicit path into the same voice loop.
-  const dock = text('src/components/Dock.tsx');
-  assert.match(dock, /<StridePulse trace=\{trace\} listening=\{listening\} size=\{28\}/);
-  assert.doesNotMatch(dock, /Type instead|onKeyboard|keyboard/);
-
-  // The centrepiece is the APERTURE, drawn from the shared geometry — not the
-  // sliced disc the founder rejected, and not a hand-drawn near-copy of the mark.
-  const pulse = text('src/components/StridePulse.tsx');
-  assert.match(pulse, /from 'react-native-svg'/);
-  assert.match(pulse, /aperturePathData/);
-  assert.doesNotMatch(pulse, /STRIDE_BANDS|strideOffset/);
+  const cradle = text('src/components/StrideCradle.tsx');
+  const physics = text('src/theme/strideCradle.ts');
+  assert.match(cradle, /BALL_COUNT = 6/);
+  assert.match(cradle, /const spacing = radius \* 2;/);
+  assert.match(cradle, /apertureAmplitude\(trace, listening\)/);
+  assert.match(cradle, /useReduceMotion/);
+  assert.match(cradle, /source\?: StrideCradleSource/);
+  assert.match(cradle, /draw\(amplitudeRef\.current, true\)/);
+  assert.match(cradle, /const isSourceEdge = sourceRef\.current === 'human'/);
+  assert.match(cradle, /strideCradleContactWeights\(physics, BALL_COUNT\)/);
+  assert.match(cradle, /const carrierEnergy = transferStrength \* \(1 - handoff\)/);
+  assert.match(cradle, /ref=\{carrierRef\}/);
+  assert.doesNotMatch(cradle, /coreRefs|ember\[300\]/);
+  assert.doesNotMatch(cradle, /<Line|\bLine,/);
+  assert.doesNotMatch(cradle, /RadialGradient|<Defs|\bStop,/);
+  assert.doesNotMatch(cradle, /Animated\.loop|withRepeat|setInterval/);
+  assert.match(physics, /RESTITUTION = 0\.985/);
+  assert.match(physics, /PENDULUM_LENGTH_METRES = 0\.52/);
+  assert.match(physics, /STRIDE_CRADLE_TRANSFER_SECONDS = 0\.14/);
+  assert.match(physics, /leftVelocity = 0/);
+  assert.match(physics, /rightVelocity = outgoing/);
+  assert.match(physics, /rightVelocity = 0/);
+  assert.match(physics, /leftVelocity = -outgoing/);
 
   const navigation = text('src/navigation/RootNavigator.tsx');
+  const composition = text('src/components/CanvasCradleComposition.tsx');
+  assert.match(navigation, /return <LaunchCradle \/>/);
+  assert.match(navigation, /Animated\.timing\(launchOpacity,[\s\S]*useNativeDriver: true/);
+  assert.match(navigation, /<LaunchCradle \/>/g);
+  assert.match(composition, /<StrideCradle trace=\{EMPTY_TRACE\} listening=\{false\} \/>/);
+  assert.match(composition, /export const canvasCradleComposition/);
+  assert.match(canvas, /contentContainerStyle=\{canvasCradleComposition\.body\}/);
+  assert.match(canvas, /style=\{canvasCradleComposition\.skyAbove\}/);
+  assert.match(canvas, /canvasCradleComposition\.wave/);
+  assert.match(canvas, /style=\{canvasCradleComposition\.copyBlock\}/);
+  assert.match(canvas, /style=\{canvasCradleComposition\.skyBelow\}/);
+  assert.doesNotMatch(navigation, /StrideSignalGlyph/);
   assert.doesNotMatch(navigation, /Home:\s*'flame\.fill'/);
+});
+
+test('native typography bundles the same brand families as desktop and marketing', () => {
+  const app = text('App.tsx');
+  const tokens = text('src/theme/tokens.ts');
+  const install = text('src/theme/installTypography.ts');
+  const packageJson = text('package.json');
+
+  assert.match(packageJson, /"@expo-google-fonts\/google-sans-flex": "\^0\.4\.3"/);
+  assert.match(packageJson, /"@expo-google-fonts\/geist-mono": "\^0\.4\.3"/);
+  assert.match(app, /GoogleSansFlex_400Regular/);
+  assert.match(app, /GoogleSansFlex_700Bold/);
+  assert.match(app, /GeistMono_400Regular/);
+  assert.match(app, /useFonts\(\{/);
+  assert.match(tokens, /sansRegular: 'GoogleSansFlex_400Regular'/);
+  assert.match(tokens, /monoMedium: 'GeistMono_500Medium'/);
+  assert.match(install, /TextInput/);
+  assert.match(install, /fontFamily: fonts\.sansRegular/);
 });
 
 test('Expo icon and splash sources have release-safe dimensions and alpha models', () => {
@@ -130,7 +165,9 @@ test('Expo icon and splash sources have release-safe dimensions and alpha models
     ['assets/android-icon-foreground.png', [1024, 1024, 6]],
     ['assets/android-icon-background.png', [1024, 1024, 2]],
     ['assets/android-icon-monochrome.png', [1024, 1024, 6]],
-    ['assets/stride-signal-mark.png', [1024, 1024, 2]],
+    ['assets/stride-logo-mark.png', [1024, 1024, 2]],
+    ['assets/stride-logo-black.png', [1024, 1024, 2]],
+    ['assets/stride-logo-white.png', [1024, 1024, 2]],
     ['assets/favicon.png', [48, 48, 2]],
   ]);
   for (const [path, wanted] of expected) {
@@ -154,19 +191,15 @@ test('Expo icon and splash sources have release-safe dimensions and alpha models
   }
   const pixelCount = tinted.width * tinted.height;
   assert.ok(dark / pixelCount > 0.5, 'tinted icon needs a substantial dark field');
-  // The mark is an APERTURE — a thin lens — so its light area is a few percent
-  // of the tile, not the double-digit share a filled disc gave. Measured at
-  // 3.6%; the floor is 2% so the test is not brittle, while a blank or
-  // all-dark tile (0%) still fails, which is the regression this exists for.
   assert.ok(
-    light / pixelCount > 0.02,
-    `tinted icon needs a substantial light Stride Signal (got ${light / pixelCount})`,
+    light / pixelCount > 0.2,
+    `tinted icon needs a substantial light Strike glyph (got ${light / pixelCount})`,
   );
 
   const config = text('app.config.ts');
   assert.match(config, /light: '\.\/assets\/icon\.png'/);
   assert.match(config, /dark: '\.\/assets\/ios-icon-dark\.png'/);
   assert.match(config, /tinted: '\.\/assets\/ios-icon-tinted\.png'/);
-  assert.match(config, /imageWidth: 144/);
+  assert.match(config, /imageWidth: 313/);
   assert.match(config, /image: '\.\/assets\/splash-icon-dark\.png'/);
 });

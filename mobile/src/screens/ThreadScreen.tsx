@@ -828,14 +828,18 @@ export function ThreadScreen({ route, navigation }: Props) {
             keyExtractor={(row) => String(row.message.id)}
             contentContainerStyle={styles.list}
             keyboardShouldPersistTaps="handled"
-            maintainVisibleContentPosition={{ disabled: true }}
+            maintainVisibleContentPosition={{ disabled: true, startRenderingFromBottom: true }}
             ListFooterComponent={typingParticipants.length > 0 ? (
               <TypingIndicator participants={typingParticipants} />
             ) : null}
-            // Land where you stopped reading, not at the bottom. iMessage's
-            // bottom-landing is right for a five-message thread and wrong for
-            // an eighty-message one.
-            initialScrollIndex={boundary >= 0 ? boundary : undefined}
+            // Normal opens land at the latest message. A targeted message link
+            // still owns its explicit focus in the effect above.
+            onLoad={() => {
+              if (route.params.messageId) return;
+              atBottomRef.current = true;
+              listRef.current?.scrollToEnd({ animated: false });
+              markRead();
+            }}
             onScroll={(event) => {
               const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
               atBottomRef.current =

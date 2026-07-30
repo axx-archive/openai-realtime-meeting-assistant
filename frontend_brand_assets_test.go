@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"image"
 	"image/color"
 	_ "image/png"
@@ -48,6 +50,14 @@ func brandColorDistance(a, b color.Color) uint32 {
 }
 
 func TestStrideBrandAssetContract(t *testing.T) {
+	source, err := os.ReadFile("brand/stride-strike-source.svg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprintf("%x", sha256.Sum256(source)); got != "6a9ea0e4858dd5d6e15842766b646aa807ee6da9bf6c9d87eb0111820e621475" {
+		t.Fatalf("canonical Strike source changed: %s", got)
+	}
+
 	for path, size := range map[string][2]int{
 		"public/apple-touch-icon.png":  {180, 180},
 		"public/favicon.png":           {64, 64},
@@ -62,17 +72,11 @@ func TestStrideBrandAssetContract(t *testing.T) {
 	maskable := loadBrandPNG(t, "public/icon-maskable-512.png")
 	bounds := maskable.Bounds()
 	background := maskable.At(bounds.Min.X, bounds.Min.Y)
-	cx, cy := float64(bounds.Dx())/2, float64(bounds.Dy())/2
-	safeRadius := float64(bounds.Dx()) * 0.4
-	for y := 0; y < bounds.Dy(); y++ {
-		for x := 0; x < bounds.Dx(); x++ {
-			if brandColorDistance(maskable.At(x, y), background) < 0x1800 {
-				continue
-			}
-			if math.Hypot(float64(x)+0.5-cx, float64(y)+0.5-cy) > safeRadius {
-				t.Fatalf("maskable artwork escapes the central 80%% safe circle at %d,%d", x, y)
-			}
-		}
+	if brandColorDistance(maskable.At(bounds.Min.X, bounds.Min.Y+bounds.Dy()/2), background) < 0x6000 {
+		t.Fatal("The Strike must bleed the active orange mass through the left edge")
+	}
+	if brandColorDistance(maskable.At(bounds.Max.X-1, bounds.Min.Y+bounds.Dy()/2), background) < 0x3000 {
+		t.Fatal("The Strike must let the receiving row exit the right edge")
 	}
 
 	indexRaw, err := os.ReadFile("index.html")
@@ -94,8 +98,8 @@ func TestStrideBrandAssetContract(t *testing.T) {
 	for path, approvedImage := range map[string]string{
 		"public/app-icon.svg":        "app-icon.png",
 		"public/favicon.svg":         "favicon.png",
-		"public/logo-mark.svg":       "app-icon.png",
-		"public/logo-mark-white.svg": "app-icon.png",
+		"public/logo-mark.svg":       "brand-mark-black.png",
+		"public/logo-mark-white.svg": "brand-mark-white.png",
 	} {
 		raw, err := os.ReadFile(path)
 		if err != nil {
@@ -110,17 +114,6 @@ func TestStrideBrandAssetContract(t *testing.T) {
 	}
 }
 
-// TestStrideSignalInstrumentContract pins the home-screen talk control to the
-// canonical mark and to the laws that make it honest.
-//
-// The centrepiece is not a waveform wearing the brand colour — it IS the logo, an
-// aperture whose OPENNESS carries the signal. Canon: docs/stride-signal-canon.md.
-// Two earlier passes at this surface drifted: first a CSS keyframe loop that could
-// not tell you whether the microphone was live, then a sliced disc the founder
-// rejected. What survives is the honest part — real audio, and rest that is the
-// logo exactly.
-//
-// Regenerate the idle path with scripts/stride-signal-geometry.mjs.
 func TestStrideSignalInstrumentContract(t *testing.T) {
 	indexRaw, err := os.ReadFile("index.html")
 	if err != nil {
@@ -128,63 +121,51 @@ func TestStrideSignalInstrumentContract(t *testing.T) {
 	}
 	index := string(indexRaw)
 
-	// ONE aperture, not a row of anything. The retired sliced-disc mark and its
-	// 16-band machinery must be entirely gone.
-	if got := strings.Count(index, `id="officeAperturePath"`); got != 1 {
-		t.Fatalf("the Stride Signal must be exactly one aperture path, got %d", got)
+	if got := strings.Count(index, `<g data-cradle-ball`); got != 6 {
+		t.Fatalf("the Signal Cradle must contain two edge and four centre masses, got %d", got)
 	}
-	for _, retired := range []string{
-		"stride-signal__band", "--stride-reach", "stride-signal-gait",
-		"--b-travel", "--b-phase", "--b-rest", "STRIDE_SIGNAL_PEAK_TRAVEL",
-	} {
-		if strings.Contains(index, retired) {
-			t.Fatalf("index.html still carries retired sliced-disc machinery %q", retired)
-		}
-	}
-
-	// The viewBox has to hold the FULLY OPEN cut, or opening clips the mark.
-	// Width 675.84 = 0.66 * 1024; half-height 42.24 = width / 8 / 2.
-	if !strings.Contains(index, `viewBox="0 -42.24 675.84 84.48"`) {
-		t.Fatal("the aperture viewBox must leave room for the 8:1 open cut")
-	}
-
-	// The geometry constants, which must agree with the code of record.
-	for _, want := range []string{
-		"const APERTURE_WIDTH = 675.84",
-		"const APERTURE_RATIO_IDLE = 25",
-		"const APERTURE_RATIO_OPEN = 8",
-		"const APERTURE_EXPONENT = 0.85",
-	} {
-		if !strings.Contains(index, want) {
-			t.Fatalf("aperture geometry drifted from the canon: missing %q", want)
-		}
-	}
-
-	// The 8:1 floor exists so a lens never reads as an eye. The ripple must only
-	// ever CLOSE the aperture — a symmetric ripple put the crests 18% past the
-	// stated opening and drove a real render to 7.07:1, straight through the
-	// floor. Decoration does not get to breach a ratified constraint.
-	if !strings.Contains(index, "1 - APERTURE_RIPPLE_DEPTH * clamped * (0.5 + 0.5 * Math.sin(phase))") {
-		t.Fatal("the ripple must modulate inward only, or it breaches the 8:1 floor")
-	}
-
-	// Rest is the logo, exactly: the drive restores the markup's own path rather
-	// than recomputing something that rounds to the same place.
 	for _, wiring := range []string{
-		"function aperturePathData(level, seconds)",
+		"function updateStrideCradle(level, seconds)",
 		"function restoreStrideSignalIdlePath()",
-		"strideSignalIdlePath = strideSignalPath()?.getAttribute('d')",
-		"path.setAttribute('d', aperturePathData(strideSignalLevel, performance.now() / 1000))",
+		"function stepStrideCradlePhysics(state, elapsedSeconds, level, source = 'human')",
+		"STRIDE_CRADLE_RESTITUTION = 0.985",
+		"voiceIslandState === 'talking' ? 'scout' : 'human'",
+		"const tap = strideSignalTaps.find(candidate => candidate.role === role)",
+		"const transferActive = transferProgress !== null",
+		"STRIDE_CRADLE_LENGTH = 0.52",
+		"STRIDE_CRADLE_TRANSFER_SECONDS = 0.14",
+		"const contactEnergy = contactWeight * 0.42 * transferStrength",
+		"const carrierEnergy = transferStrength * (1 - handoff)",
+		`class="office-launch__carrier"`,
+		`class="office-launch__carrier-halo"`,
+		`class="office-launch__energy"`,
+		"state.leftVelocity = 0",
+		"state.rightVelocity = outgoing",
+		"state.rightVelocity = 0",
+		"state.leftVelocity = -outgoing",
+		"updateStrideCradle(strideSignalLevel, performance.now() / 1000)",
 	} {
 		if !strings.Contains(index, wiring) {
-			t.Fatalf("the resting-logo law is not wired: missing %q", wiring)
+			t.Fatalf("the Signal Cradle motion contract is not wired: missing %q", wiring)
 		}
 	}
-
-	// Interpolate the PEAK, never the ratio — the ratio is a reciprocal, and
-	// interpolating it makes the aperture rush at one end of the range.
-	if !strings.Contains(index, "const peak = idle + (open - idle) * clamped") {
-		t.Fatal("the opening must interpolate the peak, not the ratio")
+	if strings.Contains(index, `class="office-launch__thread"`) {
+		t.Fatal("the abstract cradle must not draw suspension lines")
+	}
+	if strings.Contains(index, "|| strideSignalTaps[0]") {
+		t.Fatal("agent motion must never fall back to human microphone energy")
+	}
+	if strings.Contains(index, "strideCradleSource !== source") {
+		t.Fatal("a source change must not teleport an active cradle flight")
+	}
+	if strings.Contains(index, "officeCradleGradient") {
+		t.Fatal("the abstract signal carrier must not use a glossy marble gradient")
+	}
+	if strings.Contains(index, "office-launch__core") || strings.Contains(strings.ToLower(index), "#ffb08c") {
+		t.Fatal("impact color must stay one Stride Orange without an intermittent peach core")
+	}
+	if strings.Contains(index, ".office-launch__bars::after") {
+		t.Fatal("the Signal Cradle must sit directly on the surface without an ambient ember wash")
 	}
 
 	// The gait is driven by real audio and torn down with the session. Without
@@ -209,12 +190,12 @@ func TestStrideSignalInstrumentContract(t *testing.T) {
 		t.Fatal("ember must be earned — the mark is ink at rest and ember only while listening")
 	}
 
-	// Reduced motion keeps the amplitude answer and drops the travel.
+	// Reduced motion keeps the level glow and drops the pendulum travel.
 	reduced := index[strings.LastIndex(index, "@media (prefers-reduced-motion: reduce)"):]
-	if !strings.Contains(reduced, ".office-launch__aperture { transform: none; transition: none; }") {
-		t.Fatal("the reduced-motion block must stop the aperture's hover travel")
+	if !strings.Contains(reduced, ".office-launch__cradle { transform: none; transition: none; }") {
+		t.Fatal("the reduced-motion block must stop the cradle's hover travel")
 	}
-	if !strings.Contains(index, "!strideSignalReduceMotion()") {
-		t.Fatal("the ripple must be suppressed under reduced motion at the geometry")
+	if !strings.Contains(index, "const reduced = strideSignalReduceMotion()") {
+		t.Fatal("the cradle must suppress swinging under reduced motion")
 	}
 }
