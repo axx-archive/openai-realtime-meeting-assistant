@@ -35,10 +35,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         dark: './assets/ios-icon-dark.png',
         tinted: './assets/ios-icon-tinted.png',
       },
-      // Build 26 carries The Strike identity, the physics-driven Signal Cradle,
-      // bottom-opening threads, dark-first appearance, and the matched launch
-      // transition. Pin the app and ReplayKit extension to the same release.
-      buildNumber: '26',
+      // Build 27 carries the five-ball energy-transfer cradle, cached team-chat
+      // handoff, balanced mobile home, and camera/microphone-on call defaults.
+      // Pin the app and ReplayKit extension to the same release.
+      buildNumber: '27',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',
