@@ -2178,6 +2178,84 @@
         box-shadow: 0 0 0 3px var(--ring);
       }
 
+      /* THE DESIGNED DROPDOWN — the last control that opened a system popup.
+         The closed select was already ours (appearance: none, our chevron, our
+         tokens); only the open popup belonged to the OS, and it was the first
+         thing anyone touched on the sign-in gate. The popup is now the same
+         warm glass as every other floating surface.
+         The real <select> stays in the DOM and keeps the value, the form
+         semantics, and autofill; this panel is how POINTER users choose. Touch
+         keeps the platform picker (it is better than anything we would build),
+         and plain arrow-key value changes stay native — only the popup-opening
+         gestures are redirected. */
+      .stride-select {
+        position: fixed;
+        z-index: 1600;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 6px;
+        max-height: min(320px, 45vh);
+        overflow: auto;
+        background: color-mix(in srgb, var(--glass-chrome) 96%, transparent);
+        border: 1px solid color-mix(in srgb, var(--glass-border) 86%, transparent);
+        border-radius: var(--r-lg);
+        backdrop-filter: var(--glass-blur-chrome);
+        -webkit-backdrop-filter: var(--glass-blur-chrome);
+        box-shadow:
+          var(--glass-highlight),
+          0 18px 44px rgb(0 0 0 / 0.22);
+        opacity: 1;
+        translate: 0 0;
+        transition:
+          opacity var(--dur-fast) var(--ease),
+          translate var(--dur-fast) var(--ease);
+      }
+      @starting-style {
+        .stride-select {
+          opacity: 0;
+          translate: 0 -4px;
+        }
+      }
+      .stride-select__option {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 38px;
+        padding: 0 12px;
+        border: 0;
+        border-radius: var(--r-md);
+        background: transparent;
+        color: var(--text-1);
+        font: var(--type-body);
+        letter-spacing: var(--track-text);
+        text-align: left;
+        cursor: pointer;
+      }
+      .stride-select__option:hover,
+      .stride-select__option:focus-visible {
+        background: var(--accent-soft);
+        outline: none;
+      }
+      .stride-select__option[data-placeholder] {
+        color: var(--text-3);
+      }
+      /* Selection is a mark, not a repaint — the row you are ON is the hover
+         fill, the row you HAVE is the check. */
+      .stride-select__check {
+        width: 14px;
+        height: 14px;
+        flex: 0 0 auto;
+        opacity: 0;
+        color: var(--text-2);
+      }
+      .stride-select__option[aria-selected="true"] .stride-select__check {
+        opacity: 1;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .stride-select { transition: none; }
+      }
+
       .field textarea {
         height: auto;
         min-height: 96px;
@@ -57556,6 +57634,156 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       // hoisted before later top-level lexical state is initialized, so
       // checking for a function name alone can race the rest of this bundle.
       window.__bonfireClientBootReady = true
+    </script>
+    <script>
+      /* THE DESIGNED DROPDOWN — see the .stride-select rules for the why.
+         One document-level enhancer covers every <select> in the shell,
+         including ones created later (the palette's package picker), because it
+         delegates rather than binds. Opt a control out with data-native-select.
+         Fine pointers only: on touch the platform picker wins, and a screen
+         reader driving the closed select keeps fully native semantics. */
+      (() => {
+        const finePointer = window.matchMedia('(hover: hover) and (pointer: fine)')
+        let openState = null
+
+        function closeStrideSelect(refocus) {
+          if (!openState) return
+          const { panel, select } = openState
+          openState = null
+          panel.remove()
+          if (refocus) select.focus({ preventScroll: true })
+        }
+
+        function selectStrideOption(index) {
+          if (!openState) return
+          const { select } = openState
+          const option = select.options[index]
+          if (!option || option.disabled) return
+          if (select.selectedIndex !== index) {
+            select.selectedIndex = index
+            select.dispatchEvent(new Event('input', { bubbles: true }))
+            select.dispatchEvent(new Event('change', { bubbles: true }))
+          }
+          closeStrideSelect(true)
+        }
+
+        function moveStrideActive(delta, absolute) {
+          if (!openState) return
+          const rows = openState.rows
+          let index = absolute !== undefined
+            ? absolute
+            : openState.active + delta
+          index = Math.max(0, Math.min(rows.length - 1, index))
+          openState.active = index
+          rows[index].focus({ preventScroll: true })
+          rows[index].scrollIntoView({ block: 'nearest' })
+        }
+
+        function openStrideSelect(select) {
+          closeStrideSelect(false)
+          const panel = document.createElement('div')
+          panel.className = 'stride-select'
+          panel.setAttribute('role', 'listbox')
+          panel.setAttribute('aria-label', select.getAttribute('aria-label') || 'options')
+          const rows = []
+          Array.from(select.options).forEach((option, index) => {
+            const row = document.createElement('button')
+            row.type = 'button'
+            row.className = 'stride-select__option'
+            row.setAttribute('role', 'option')
+            row.setAttribute('aria-selected', index === select.selectedIndex ? 'true' : 'false')
+            if (option.value === '') row.dataset.placeholder = ''
+            row.tabIndex = -1
+            const check = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+            check.setAttribute('class', 'stride-select__check')
+            check.setAttribute('viewBox', '0 0 24 24')
+            check.setAttribute('fill', 'none')
+            check.setAttribute('stroke', 'currentColor')
+            check.setAttribute('stroke-width', '2.4')
+            check.setAttribute('stroke-linecap', 'round')
+            check.setAttribute('stroke-linejoin', 'round')
+            check.innerHTML = '<path d="M20 6 9 17l-5-5"></path>'
+            row.append(check, document.createTextNode(option.textContent))
+            row.addEventListener('click', () => selectStrideOption(index))
+            row.addEventListener('pointermove', () => { if (openState) openState.active = index })
+            rows.push(row)
+            panel.appendChild(row)
+          })
+          document.body.appendChild(panel)
+          const rect = select.getBoundingClientRect()
+          panel.style.minWidth = rect.width + 'px'
+          panel.style.left = rect.left + 'px'
+          const height = panel.offsetHeight
+          const below = window.innerHeight - rect.bottom - 12
+          if (height <= below) {
+            panel.style.top = (rect.bottom + 6) + 'px'
+          } else {
+            panel.style.top = Math.max(12, rect.top - 6 - height) + 'px'
+          }
+          openState = {
+            select,
+            panel,
+            rows,
+            active: Math.max(0, select.selectedIndex),
+            typeahead: '',
+            typeaheadAt: 0,
+          }
+          moveStrideActive(0, openState.active)
+        }
+
+        function strideSelectFor(target) {
+          if (!(target instanceof HTMLSelectElement)) return null
+          if (!finePointer.matches || target.disabled) return null
+          if (target.dataset.nativeSelect !== undefined) return null
+          if (target.closest('[aria-hidden="true"]')) return null
+          return target
+        }
+
+        document.addEventListener('mousedown', event => {
+          if (openState && !openState.panel.contains(event.target) && event.target !== openState.select) {
+            closeStrideSelect(false)
+          }
+          const select = strideSelectFor(event.target)
+          if (!select) return
+          event.preventDefault()
+          select.focus({ preventScroll: true })
+          openStrideSelect(select)
+        })
+
+        document.addEventListener('keydown', event => {
+          if (openState) {
+            const rows = openState.rows
+            if (event.key === 'Escape') { event.preventDefault(); closeStrideSelect(true); return }
+            if (event.key === 'Tab') { closeStrideSelect(false); return }
+            if (event.key === 'ArrowDown') { event.preventDefault(); moveStrideActive(1); return }
+            if (event.key === 'ArrowUp') { event.preventDefault(); moveStrideActive(-1); return }
+            if (event.key === 'Home') { event.preventDefault(); moveStrideActive(0, 0); return }
+            if (event.key === 'End') { event.preventDefault(); moveStrideActive(0, rows.length - 1); return }
+            if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectStrideOption(openState.active); return }
+            if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
+              const now = Date.now()
+              openState.typeahead = (now - openState.typeaheadAt < 600 ? openState.typeahead : '') + event.key.toLowerCase()
+              openState.typeaheadAt = now
+              const hit = Array.from(openState.select.options).findIndex(
+                option => option.textContent.trim().toLowerCase().startsWith(openState.typeahead),
+              )
+              if (hit >= 0) moveStrideActive(0, hit)
+            }
+            return
+          }
+          const select = strideSelectFor(event.target)
+          if (!select) return
+          const opensPopup = event.key === 'Enter' || event.key === ' '
+            || ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && event.altKey)
+          if (opensPopup) {
+            event.preventDefault()
+            openStrideSelect(select)
+          }
+        })
+
+        window.addEventListener('resize', () => closeStrideSelect(false))
+        window.addEventListener('scroll', () => closeStrideSelect(false), true)
+      })()
     </script>
   </body>
 </html>
