@@ -19,7 +19,7 @@ import { SymbolView } from 'expo-symbols';
 import { api, BonfireApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { passkeyErrorMessage } from '../auth/passkeyError';
-import { BrandMark } from '../components/BrandMark';
+import { BrandMark, StrideWordmark } from '../components/BrandMark';
 import { API_BASE_URL } from '../config';
 import { colors, hitMin, product, radius, shadow, space, type } from '../theme/tokens';
 
@@ -167,8 +167,14 @@ export function LoginScreen() {
       >
         <View style={styles.inner}>
           <View style={styles.head}>
-            <BrandMark size={56} />
-            <Text style={styles.wordmark}>{product.wordmark}</Text>
+            {/* The mark and the name are ONE lockup — the tile sits beside the
+                wordmark, matching the desktop gate and the marketing nav.
+                Stacked, they read as two separate marks that happen to be near
+                each other. */}
+            <View style={styles.lockup}>
+              <BrandMark size={56} />
+              <StrideWordmark height={22} />
+            </View>
           </View>
 
           <View style={[styles.card, shadow.glass]}>
@@ -372,9 +378,10 @@ const styles = StyleSheet.create({
     gap: 14,
     marginBottom: space[6],
   },
-  wordmark: {
-    ...type.wordmark,
-    color: colors.text1,
+  lockup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
   },
   card: {
     alignSelf: 'stretch',

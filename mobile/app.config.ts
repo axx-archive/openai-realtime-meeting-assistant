@@ -30,11 +30,16 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ios: {
       supportsTablet: true,
       bundleIdentifier: iosBundleIdentifier,
-      icon: {
-        light: './assets/icon.png',
-        dark: './assets/ios-icon-dark.png',
-        tinted: './assets/ios-icon-tinted.png',
-      },
+      // The Icon Composer bundle, not the PNG appearance set. iOS composes the
+      // specular, the shadow, the dark ground, and the Tinted and Clear
+      // renditions from flat layers, so the icon is rendered by the OS instead
+      // of being a picture of what we guessed the OS would do — and Clear
+      // Light/Dark exist at all, which the PNG path cannot reach.
+      //
+      // The PNGs are still generated (Android, web manifest, Xcode catalog)
+      // and remain the fallback if this bundle is ever rejected.
+      // Regenerate both with `npm run brand:regen` from the repo root.
+      icon: './assets/Stride.icon',
       // Build 27 carries the five-ball energy-transfer cradle, cached team-chat
       // handoff, balanced mobile home, and camera/microphone-on call defaults.
       // Pin the app and ReplayKit extension to the same release.
@@ -74,7 +79,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         foregroundImage: './assets/android-icon-foreground.png',
         backgroundImage: './assets/android-icon-background.png',
         monochromeImage: './assets/android-icon-monochrome.png',
-        backgroundColor: '#050505',
+        // Matches android-icon-background.png. Launchers that use the colour
+        // instead of the image must land on the same ground, not on ink.
+        backgroundColor: '#CFC5B7',
       },
       permissions: [
         'CAMERA',
@@ -133,7 +140,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         {
           // The OS splash is the cradle at rest. The in-app launch overlay uses
           // the same component and scale, then fades into the live Canvas.
-          backgroundColor: '#F5F5F7',
+          backgroundColor: '#CFC5B7',
           image: './assets/splash-icon.png',
           // Matches the live Canvas cradle's 391 * 0.8 rendered width so the
           // native launch image hands off without changing scale.

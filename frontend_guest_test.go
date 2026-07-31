@@ -353,7 +353,9 @@ func TestIndexGuestGateCanonColumn(t *testing.T) {
 
 	// static markup order: icon → wordmark → invite line → glass card
 	markAt := strings.Index(html, `class="login-mark"`)
-	wordAt := strings.Index(html, `class="login-wordmark"`)
+	// The wordmark is artwork now, so the h1 carries `login-wordmark wordmark`.
+	// This assertion is about column ORDER, not the class list.
+	wordAt := strings.Index(html, `class="login-wordmark`)
 	sublineAt := strings.Index(html, `class="login-subline"`)
 	cardAt := strings.Index(html, `id="loginForm"`)
 	if !(markAt != -1 && markAt < wordAt && wordAt < sublineAt && sublineAt < cardAt) {

@@ -6,11 +6,24 @@ import { DynamicColorIOS, Platform, type ColorValue } from 'react-native';
  * Do not invent alternate palettes or revive the retired warm-dark Bonfire look.
  */
 
+/**
+ * paper — WARM PUTTY, not white.
+ *
+ * Light mode is grounded on the same #CFC5B7 the app icon's light appearance is
+ * built on, so the tile on the home screen and the app behind it are one
+ * material. The names stay `paper` because the role did not change: this is
+ * still the stock the ink is printed on, it is just a warmer stock.
+ *
+ * The ramp keeps the old relationship exactly — panels lift OFF the ground,
+ * wells sink UNDER it — so no screen had to be re-thought, only re-measured.
+ * Mirrored from index.html's `--paper-*`; contrast.test.ts holds both copies to
+ * the same numbers.
+ */
 export const paper = {
-  0: '#FFFFFF',
-  50: '#F5F5F7',
-  100: '#EDEDF0',
-  200: '#E2E2E7',
+  0: '#EDE8DF',
+  50: '#CFC5B7',
+  100: '#C2B7A7',
+  200: '#B2A695',
 } as const;
 
 export const ink = {
@@ -58,19 +71,34 @@ export const colors = {
   surface2: adaptive(paper[0], ink[900]),
   surface3: adaptive(paper[100], ink[800]),
 
-  text1: adaptive('#0E0E10', '#F7F7F9'),
-  text2: adaptive('rgba(14, 14, 16, 0.60)', 'rgba(247, 247, 249, 0.66)'),
-  text3: adaptive('rgba(14, 14, 16, 0.38)', 'rgba(247, 247, 249, 0.42)'),
-  textDisabled: adaptive('rgba(14, 14, 16, 0.24)', 'rgba(247, 247, 249, 0.24)'),
+  /**
+   * The ink ladder, re-solved for the putty ground.
+   *
+   * THE INK IS A WARM DARK GREY, NOT BLACK. Near-black on warm putty reads as a
+   * printing error — the two sit on opposite sides of neutral and the eye sees
+   * the mismatch before it sees the words. This is the "putty / dark grey"
+   * pairing.
+   *
+   * The ground's luminance fell from 0.90 to 0.57, so every alpha that used to
+   * clear AA had to move; nothing here was carried over. On the worst-case
+   * surface (paper[100] = #C2B7A7): text1 7.9:1 · text2 6.1:1 · text3 4.6:1.
+   * text3 sits nine hundredths over the floor — do not lower without re-solving.
+   */
+  text1: adaptive('#26231E', '#F7F7F9'),
+  text2: adaptive('rgba(38, 35, 30, 0.87)', 'rgba(247, 247, 249, 0.66)'),
+  text3: adaptive('rgba(38, 35, 30, 0.75)', 'rgba(247, 247, 249, 0.42)'),
+  textDisabled: adaptive('rgba(38, 35, 30, 0.43)', 'rgba(247, 247, 249, 0.24)'),
 
-  line1: adaptive('rgba(14, 14, 16, 0.08)', 'rgba(255, 255, 255, 0.09)'),
-  line2: adaptive('rgba(14, 14, 16, 0.15)', 'rgba(255, 255, 255, 0.16)'),
+  // Hairlines gained weight: an 8% ink line that read on #EDEDF0 is nearly
+  // invisible on a ground this dark.
+  line1: adaptive('rgba(38, 35, 30, 0.12)', 'rgba(255, 255, 255, 0.09)'),
+  line2: adaptive('rgba(38, 35, 30, 0.22)', 'rgba(255, 255, 255, 0.16)'),
 
-  accent: adaptive('#0E0E10', '#F7F7F9'),
-  accentHover: adaptive('#26262C', '#FFFFFF'),
-  accentPress: adaptive('#000000', '#EDEDF0'),
-  accentSoft: adaptive('rgba(14, 14, 16, 0.06)', 'rgba(255, 255, 255, 0.08)'),
-  onAccent: adaptive('#FFFFFF', '#0E0E10'),
+  accent: adaptive('#26231E', '#F7F7F9'),
+  accentHover: adaptive('#3A362E', '#FFFFFF'),
+  accentPress: adaptive('#16140F', '#EDEDF0'),
+  accentSoft: adaptive('rgba(38, 35, 30, 0.08)', 'rgba(255, 255, 255, 0.08)'),
+  onAccent: adaptive('#FFFDF8', '#0E0E10'),
 
   live: signal[500],
   liveSoft: 'rgba(48, 209, 88, 0.13)',
@@ -84,44 +112,67 @@ export const colors = {
 
   /** Earned only — agent work / ignition, never ambient chrome. */
   ember: ember[500],
-  emberSoft: 'rgba(255, 90, 25, 0.12)',
+  emberSoft: 'rgba(255, 90, 25, 0.14)',
   onEmber: '#FFFFFF',
 
   /**
    * Ember for TEXT AND GLYPHS. Not a second brand colour — the same signal at a
    * luminance that can actually be read.
    *
-   * `ember` is Stride Orange, tuned to glow against dark. On the light theme's
-   * #F5F5F7 it measures **2.87:1**, and on an emberSoft chip **2.50:1** — both
-   * far under the 4.5:1 AA floor for body text, and under even the 3:1 non-text
-   * floor for icons. Every ember label in light mode was effectively decorative.
+   * `ember` is Stride Orange, tuned to glow against dark. It was already only
+   * **2.87:1** on the old white paper; on the putty ground it measures
+   * **1.83:1**. A darker ground makes an already-failing value worse, so the
+   * darkened cut had to move too: #B83A18 fell to 3.37:1 on putty and no longer
+   * clears AA either.
    *
-   * #B83A18 measures 5.27:1 on bgApp and **4.60:1** on emberSoft. That second
-   * number is the tight one: it clears AA by a tenth of a point, so darkening
-   * emberSoft or lightening #B83A18 will break it. `contrast.test.ts` holds the
-   * line. Dark mode keeps ember[500], which passes at 6.37:1 on bgApp and
-   * 5.68:1 on a soft chip, and is where the orange belongs.
+   * #86290F measures 5.27:1 on bgApp, **4.55:1** on the worst-case well, and
+   * 4.80:1 on an emberSoft chip. The WELL is the tight one now — darkening the
+   * well or lightening this breaks AA. `contrast.test.ts` holds the line. Dark
+   * mode keeps ember[500], which passes at 6.37:1 on bgApp and 5.68:1 on a soft
+   * chip, and is where the orange belongs.
    *
    * FILLS stay `ember`: the Dock tint, the listening glow, the mention dot, and
    * emberSoft backgrounds carry no text and have no contrast requirement.
    * Swapping those would dull the brand for no accessibility gain.
    */
-  emberText: adaptive('#B83A18', ember[500]),
+  emberText: adaptive('#86290F', ember[500]),
+
+  /**
+   * THE WORDMARK'S COLOUR — the receiving row's graphite, never orange.
+   * AJ, 2026-07-31: "the only orange thing is the ball in motion."
+   *
+   * In the Strike, orange is custody of energy — the mass that is moving — and
+   * the neutral row is everything at rest: the name, the shared context, the
+   * company. A wordmark painted orange claims to be in motion, and it is the
+   * one thing on screen that never is. So the name takes the row's colour and
+   * orange stays earned in the logotype exactly as it is everywhere else.
+   *
+   * The two cuts come from the SAME graphite family the icon's receiving rows
+   * use, but are chosen by the GROUND the mark sits on rather than copied from
+   * whichever tile is beside it — a tile's row is picked for that tile's own
+   * field, so the two do not always coincide. Ground decides legibility, so
+   * ground decides this.
+   * 4.4:1 on the putty ground, 4.9:1 on true black — and the orange it replaces
+   * measured 1.83:1 on putty, so this is more legible as well as more correct.
+   */
+  wordmark: adaptive('#54545C', '#77777D'),
   /** Ember text when the surrounding fill is `accent` (dark in light mode, light in dark mode). */
   onAccentEmber: adaptive(ember[500], '#B83A18'),
 
-  glassBorder: adaptive('rgba(14, 14, 16, 0.10)', 'rgba(255, 255, 255, 0.12)'),
-  glassPanel: adaptive('rgba(255, 255, 255, 0.72)', 'rgba(20, 20, 24, 0.78)'),
-  scrim: adaptive('rgba(14, 14, 16, 0.35)', 'rgba(0, 0, 0, 0.62)'),
+  // The glass is WARM. White glass over a putty ground composites to a dead
+  // grey and makes every panel look like it is on the wrong wallpaper.
+  glassBorder: adaptive('rgba(38, 35, 30, 0.14)', 'rgba(255, 255, 255, 0.12)'),
+  glassPanel: adaptive('rgba(255, 253, 248, 0.72)', 'rgba(20, 20, 24, 0.78)'),
+  scrim: adaptive('rgba(38, 35, 30, 0.35)', 'rgba(0, 0, 0, 0.62)'),
 
   // Legacy aliases used by early screens — map to live tokens.
   bgElevated: adaptive(paper[0], ink[850]),
   bgMuted: adaptive(paper[100], ink[800]),
-  text: adaptive('#0E0E10', '#F7F7F9'),
-  textSecondary: adaptive('rgba(14, 14, 16, 0.60)', 'rgba(247, 247, 249, 0.66)'),
-  textTertiary: adaptive('rgba(14, 14, 16, 0.38)', 'rgba(247, 247, 249, 0.42)'),
-  border: adaptive('rgba(14, 14, 16, 0.08)', 'rgba(255, 255, 255, 0.09)'),
-  tabInactive: adaptive('rgba(14, 14, 16, 0.38)', 'rgba(247, 247, 249, 0.42)'),
+  text: adaptive('#26231E', '#F7F7F9'),
+  textSecondary: adaptive('rgba(38, 35, 30, 0.87)', 'rgba(247, 247, 249, 0.66)'),
+  textTertiary: adaptive('rgba(38, 35, 30, 0.75)', 'rgba(247, 247, 249, 0.42)'),
+  border: adaptive('rgba(38, 35, 30, 0.12)', 'rgba(255, 255, 255, 0.09)'),
+  tabInactive: adaptive('rgba(38, 35, 30, 0.75)', 'rgba(247, 247, 249, 0.42)'),
 } as const;
 
 export const radius = {
@@ -149,19 +200,19 @@ export const hitMin = 44;
 
 export const shadow = {
   1: {
-    shadowColor: adaptive('#0E0E10', '#000000'),
+    shadowColor: adaptive('#26231E', '#000000'),
     shadowOpacity: 0.1,
     shadowRadius: 2,
     shadowOffset: { width: 0, height: 1 },
   },
   2: {
-    shadowColor: adaptive('#0E0E10', '#000000'),
+    shadowColor: adaptive('#26231E', '#000000'),
     shadowOpacity: 0.12,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 8 },
   },
   glass: {
-    shadowColor: adaptive('#0E0E10', '#000000'),
+    shadowColor: adaptive('#26231E', '#000000'),
     shadowOpacity: 0.1,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },

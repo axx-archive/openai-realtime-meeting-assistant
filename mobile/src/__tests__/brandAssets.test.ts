@@ -74,12 +74,18 @@ test('The Strike vector is the exact static identity source', () => {
   const darkPng = read('assets/ios-icon-dark.png');
   const tintedPng = read('assets/ios-icon-tinted.png');
 
-  assert.equal(sha256(strikeSource), '6a9ea0e4858dd5d6e15842766b646aa807ee6da9bf6c9d87eb0111820e621475');
+  assert.equal(sha256(strikeSource), '1e861145f455804b608d7c663ff4e9a892957be9f27094dd69f64b5cbdee2423');
   assert.equal(sha256(canonicalSvg), '96ba41b8f1bbfb4407d443e4647ba455774f9676834b5cb230d72237b55d3dda');
   assert.match(canonicalSvg.toString('utf8'), /<title>Stride — The Strike<\/title>/);
-  assert.equal(sha256(releasePng), '9aa61a44db4509d2620038872329ad55e4fe2fb1824a658f1001edd7de713825');
-  assert.equal(sha256(darkPng), sha256(releasePng));
-  assert.notEqual(sha256(tintedPng), sha256(releasePng));
+  // icon.png is the LIGHT appearance — the Default rendition, and what every
+  // non-Apple platform means when it says "the icon".
+  assert.equal(sha256(releasePng), '729c00fafe50a48b6101db057de5795790361fec1c71dbf8053db2822ef16e4a');
+  // These used to be asserted EQUAL, which is the signature of an icon that has
+  // no appearance set at all: one tile pretending to be three. All three must
+  // now differ, or a variant has silently collapsed back onto another.
+  assert.notEqual(sha256(darkPng), sha256(releasePng), 'the dark appearance must not be the light one');
+  assert.notEqual(sha256(tintedPng), sha256(releasePng), 'the tinted appearance must not be the light one');
+  assert.notEqual(sha256(tintedPng), sha256(darkPng), 'the tinted appearance must not be the dark one');
 });
 
 test('React Native shell separates the static logo from the live Signal Cradle', () => {
@@ -174,10 +180,27 @@ test('Expo icon and splash sources have release-safe dimensions and alpha models
     assert.deepEqual([actual.width, actual.height, actual.colorType], wanted, path);
   }
 
-  // iOS 18 uses this grayscale image as a luminosity map. Guard both sides of
-  // that map so the tinted appearance can never silently become a blank tile.
+  /**
+   * iOS uses this grayscale image as a luminosity map, so the tinted appearance
+   * has to survive losing all colour. Guard every side of that map.
+   *
+   * This used to assert one bright mass of pixels, because the tinted asset
+   * painted EVERY mass white. That is a blank cheque: three identical dots pass
+   * it, and three identical dots throw away the only thing the tile means —
+   * which mass has the energy. The Strike now maps to THREE bands, and all
+   * three are checked:
+   *
+   *   dark    the field
+   *   mid     the receiving row, present and distinctly not the field
+   *   light   the striking mass, and the brightest thing in the tile
+   *
+   * The striking mass is a half-disc, so it is only ~6% of the tile by area.
+   * Requiring it to be a fifth of the pixels is what forced the old asset to
+   * light up the row as well.
+   */
   const tinted = decodeOpaquePng('assets/ios-icon-tinted.png');
   let dark = 0;
+  let mid = 0;
   let light = 0;
   for (let offset = 0; offset < tinted.pixels.length; offset += tinted.channels) {
     const luminance = tinted.channels === 1
@@ -186,19 +209,35 @@ test('Expo icon and splash sources have release-safe dimensions and alpha models
         + 0.7152 * tinted.pixels[offset + 1]
         + 0.0722 * tinted.pixels[offset + 2];
     if (luminance < 32) dark += 1;
-    if (luminance > 160) light += 1;
+    else if (luminance > 200) light += 1;
+    else if (luminance > 96) mid += 1;
   }
   const pixelCount = tinted.width * tinted.height;
-  assert.ok(dark / pixelCount > 0.5, 'tinted icon needs a substantial dark field');
+  assert.ok(dark / pixelCount > 0.5, `tinted icon needs a substantial dark field (got ${dark / pixelCount})`);
   assert.ok(
-    light / pixelCount > 0.2,
-    `tinted icon needs a substantial light Strike glyph (got ${light / pixelCount})`,
+    mid / pixelCount > 0.1,
+    `the tinted receiving row must survive the luminance map (got ${mid / pixelCount})`,
+  );
+  assert.ok(
+    light / pixelCount > 0.04,
+    `the tinted striking mass must survive the luminance map (got ${light / pixelCount})`,
+  );
+  // …and the striking mass must be the BRIGHTEST thing in the tile, or custody
+  // of the energy is lost the moment colour is.
+  assert.ok(
+    mid > light,
+    'the receiving row must cover more of the tile than the striking mass, not outshine it',
   );
 
   const config = text('app.config.ts');
-  assert.match(config, /light: '\.\/assets\/icon\.png'/);
-  assert.match(config, /dark: '\.\/assets\/ios-icon-dark\.png'/);
-  assert.match(config, /tinted: '\.\/assets\/ios-icon-tinted\.png'/);
+  // iOS reads the Icon Composer bundle, not the PNG appearance set: the system
+  // composes the material and the Clear renditions, which PNGs cannot reach.
+  assert.match(config, /icon: '\.\/assets\/Stride\.icon'/);
+  assert.doesNotMatch(config, /light: '\.\/assets\/icon\.png'/, 'the PNG appearance set was superseded by the bundle');
+  // The PNGs remain the fallback and the Android/web source, so they must keep
+  // being generated even though iOS no longer reads them.
+  assert.ok(read('assets/ios-icon-dark.png').length > 0);
+  assert.ok(read('assets/ios-icon-tinted.png').length > 0);
   assert.match(config, /imageWidth: 313/);
   assert.match(config, /image: '\.\/assets\/splash-icon-dark\.png'/);
 });

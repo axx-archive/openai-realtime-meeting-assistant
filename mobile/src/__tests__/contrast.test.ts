@@ -51,15 +51,27 @@ function contrast(a: RGB, b: RGB): number {
 // Values mirrored from theme/tokens.ts. tokens.ts imports react-native, which
 // node:test cannot load, so the pins carry their own copies — a divergence here
 // is itself a finding worth failing on.
-const PAPER_50 = hexToRgb('#F5F5F7');
+// Light mode is grounded on WARM PUTTY. The ground's luminance fell from 0.90
+// to 0.57 when it moved off white paper, so every value below was re-solved —
+// none of them survived the move unchanged.
+const PAPER_50 = hexToRgb('#CFC5B7');   // the ground
+const PAPER_0 = hexToRgb('#EDE8DF');    // panels — the ground lifted
+const PAPER_100 = hexToRgb('#C2B7A7');  // wells — the WORST CASE for text
 const INK_950 = hexToRgb('#09090B');
-const WHITE = hexToRgb('#FFFFFF');
 const INK_850 = hexToRgb('#141418');
-const TEXT1_LIGHT = hexToRgb('#0E0E10');
+const TEXT1_LIGHT = hexToRgb('#26231E'); // warm dark grey, not black
 const TEXT1_DARK = hexToRgb('#F7F7F9');
+const ON_ACCENT_LIGHT = hexToRgb('#FFFDF8');
 // Stride Orange — the same value the Stride Signal is drawn in.
 const EMBER = hexToRgb('#FF5A19');
-const EMBER_TEXT_LIGHT = hexToRgb('#B83A18');
+const EMBER_TEXT_LIGHT = hexToRgb('#86290F');
+const TEXT2_ALPHA = 0.87;
+const TEXT3_ALPHA = 0.75;
+const EMBER_SOFT_ALPHA = 0.14;
+// The wordmark's two cuts ARE the icon's two receiving rows, so the mark and
+// the tile beside it are drawn in the same grey.
+const WORDMARK_LIGHT = hexToRgb('#54545C');
+const WORDMARK_DARK = hexToRgb('#77777D');
 
 const AA_BODY = 4.5;
 
@@ -69,40 +81,102 @@ test('body text clears AA on the app background in both themes', () => {
 });
 
 test('secondary text clears AA on the app background in both themes', () => {
-  const light = composite(TEXT1_LIGHT, 0.6, PAPER_50);
+  const light = composite(TEXT1_LIGHT, TEXT2_ALPHA, PAPER_50);
   const dark = composite(TEXT1_DARK, 0.66, INK_950);
   assert.ok(contrast(light, PAPER_50) >= AA_BODY, 'text2 light');
   assert.ok(contrast(dark, INK_950) >= AA_BODY, 'text2 dark');
 });
 
-// The failure this audit found. Stride Orange is tuned to glow against dark; on
-// #F5F5F7 it measures 2.87:1, and on an emberSoft chip 2.50:1 — every ember
-// label in light mode was effectively decorative.
+/**
+ * The ground is not the worst case any more.
+ *
+ * On white paper the app background and the deepest well were close enough that
+ * measuring against the background was near enough. On putty the well is a full
+ * step darker, and text3 clears the floor there by nine hundredths — so the
+ * whole ladder has to be measured against the WELL or the tightest number in
+ * the system goes unmeasured.
+ */
+test('the whole light ladder clears AA on the worst-case surface', () => {
+  const rungs: Array<[string, number]> = [
+    ['text1', 1],
+    ['text2', TEXT2_ALPHA],
+    ['text3', TEXT3_ALPHA],
+  ];
+  for (const [name, alpha] of rungs) {
+    const ratio = contrast(composite(TEXT1_LIGHT, alpha, PAPER_100), PAPER_100);
+    assert.ok(ratio >= AA_BODY, `${name} on the well was ${ratio.toFixed(2)}:1`);
+  }
+});
+
+test('the putty ramp keeps its order: panels lift, wells sink', () => {
+  // The relationship, not the values — this is what let every screen survive
+  // the re-ground without being re-thought.
+  assert.ok(luminance(PAPER_0) > luminance(PAPER_50), 'panels must lift off the ground');
+  assert.ok(luminance(PAPER_50) > luminance(PAPER_100), 'wells must sink under it');
+});
+
+// The failure the Wave D audit found, made worse by the re-ground: Stride
+// Orange is tuned to glow against dark. It was 2.87:1 on white paper and is
+// 1.83:1 on putty, and the old darkened cut (#B83A18) fell to 3.37:1 and stopped
+// clearing AA too. Both had to move.
 test('ember TEXT clears AA on the light background', () => {
   const ratio = contrast(EMBER_TEXT_LIGHT, PAPER_50);
   assert.ok(ratio >= AA_BODY, `emberText on bgApp light was ${ratio.toFixed(2)}:1`);
-  // And the raw brand coral must NOT be used as light-theme text.
+  // And on the well, which is the tight one now.
+  const onWell = contrast(EMBER_TEXT_LIGHT, PAPER_100);
+  assert.ok(onWell >= AA_BODY, `emberText on the well was ${onWell.toFixed(2)}:1`);
+  // The raw brand orange must NOT be used as light-theme text.
   assert.ok(contrast(EMBER, PAPER_50) < AA_BODY, 'ember unexpectedly passes — retune emberText');
+  // Nor may the retired cut come back.
+  assert.ok(contrast(hexToRgb('#B83A18'), PAPER_50) < AA_BODY, '#B83A18 no longer clears the putty ground');
 });
 
 test('ember TEXT clears AA on an emberSoft chip in both themes', () => {
-  const softLight = composite(EMBER, 0.12, PAPER_50);
-  const softDark = composite(EMBER, 0.12, INK_950);
+  const softLight = composite(EMBER, EMBER_SOFT_ALPHA, PAPER_50);
+  const softDark = composite(EMBER, EMBER_SOFT_ALPHA, INK_950);
   assert.ok(
     contrast(EMBER_TEXT_LIGHT, softLight) >= AA_BODY,
     `emberText on emberSoft light was ${contrast(EMBER_TEXT_LIGHT, softLight).toFixed(2)}:1`,
   );
-  // Dark keeps the coral, which already passes — that is where it belongs.
+  // Dark keeps the brand orange, which already passes — that is where it belongs.
   assert.ok(contrast(EMBER, softDark) >= AA_BODY);
 });
 
 test('text on raised surfaces clears AA in both themes', () => {
-  assert.ok(contrast(TEXT1_LIGHT, WHITE) >= AA_BODY);
+  assert.ok(contrast(TEXT1_LIGHT, PAPER_0) >= AA_BODY);
   assert.ok(contrast(TEXT1_DARK, INK_850) >= AA_BODY);
-  assert.ok(contrast(composite(TEXT1_LIGHT, 0.6, WHITE), WHITE) >= AA_BODY);
+  assert.ok(contrast(composite(TEXT1_LIGHT, TEXT3_ALPHA, PAPER_0), PAPER_0) >= AA_BODY);
   assert.ok(contrast(composite(TEXT1_DARK, 0.66, INK_850), INK_850) >= AA_BODY);
 });
 
 test('the accent button clears AA', () => {
-  assert.ok(contrast(WHITE, TEXT1_LIGHT) >= AA_BODY);
+  assert.ok(contrast(ON_ACCENT_LIGHT, TEXT1_LIGHT) >= AA_BODY);
+});
+
+/**
+ * The wordmark is NEVER orange.
+ *
+ * AJ, 2026-07-31: "the only orange thing is the ball in motion." In the Strike,
+ * orange is custody of energy — the mass that is moving — and the neutral row
+ * is everything at rest: the name, the shared context, the company. A wordmark
+ * painted orange claims to be in motion, and it is the one thing on screen that
+ * never is.
+ *
+ * So the name takes the receiving row's graphite, and each value IS that
+ * appearance's row — the wordmark matches the balls in the tile beside it.
+ * This test exists to stop the orange creeping back as "more on-brand".
+ */
+test('the wordmark is the receiving row, never the orange', () => {
+  assert.notDeepEqual(WORDMARK_LIGHT, EMBER, 'the wordmark must not be Stride Orange');
+  assert.notDeepEqual(WORDMARK_DARK, EMBER, 'the wordmark must not be Stride Orange');
+  // Neutral: a graphite has no meaningful hue spread. Orange does.
+  for (const [name, c] of [['light', WORDMARK_LIGHT], ['dark', WORDMARK_DARK]] as const) {
+    assert.ok(Math.max(...c) - Math.min(...c) < 24, `the ${name} wordmark must stay neutral, not tinted`);
+  }
+  // And it must out-read the orange it replaced on the ground it sits on.
+  const grey = contrast(WORDMARK_LIGHT, PAPER_50);
+  const orange = contrast(EMBER, PAPER_50);
+  assert.ok(grey > orange, `graphite ${grey.toFixed(2)}:1 must beat orange ${orange.toFixed(2)}:1 on the putty`);
+  assert.ok(grey >= 3, `the wordmark on the ground was ${grey.toFixed(2)}:1`);
+  assert.ok(contrast(WORDMARK_DARK, INK_950) >= 3, 'the wordmark must read on true black too');
 });

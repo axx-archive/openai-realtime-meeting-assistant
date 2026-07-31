@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Stride — The Strike</title>
+  <desc>The energised mass falls in from the left while the equal-mass row exits the right frame.</desc>
+  <defs>
+    <linearGradient id="field" x1="0" y1="0" x2="0" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#000000"/>
+      <stop offset="1" stop-color="#000000"/>
+    </linearGradient>
+    <radialGradient id="satin-0-body" gradientUnits="userSpaceOnUse" cx="-73.73" cy="339.97" r="262.14">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.52" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E3E3E3"/>
+    </radialGradient>
+    <radialGradient id="satin-0-bounce" gradientUnits="userSpaceOnUse" cx="86.02" cy="540.67" r="159.74">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="satin-0-seat" gradientUnits="userSpaceOnUse" cx="0.00" cy="430.08" r="204.80">
+      <stop offset="0.84" stop-color="#E3E3E3" stop-opacity="0"/>
+      <stop offset="1" stop-color="#E3E3E3" stop-opacity="0.5"/>
+    </radialGradient>
+    <radialGradient id="satin-1-body" gradientUnits="userSpaceOnUse" cx="540.67" cy="421.89" r="262.14">
+      <stop offset="0" stop-color="#A1A1A1"/>
+      <stop offset="0.52" stop-color="#8A8A8A"/>
+      <stop offset="1" stop-color="#717171"/>
+    </radialGradient>
+    <radialGradient id="satin-1-bounce" gradientUnits="userSpaceOnUse" cx="700.42" cy="622.59" r="159.74">
+      <stop offset="0" stop-color="#9B9B9B" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#9B9B9B" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="satin-1-seat" gradientUnits="userSpaceOnUse" cx="614.40" cy="512.00" r="204.80">
+      <stop offset="0.84" stop-color="#717171" stop-opacity="0"/>
+      <stop offset="1" stop-color="#717171" stop-opacity="0.5"/>
+    </radialGradient>
+    <radialGradient id="satin-2-body" gradientUnits="userSpaceOnUse" cx="950.27" cy="421.89" r="262.14">
+      <stop offset="0" stop-color="#A1A1A1"/>
+      <stop offset="0.52" stop-color="#8A8A8A"/>
+      <stop offset="1" stop-color="#717171"/>
+    </radialGradient>
+    <radialGradient id="satin-2-bounce" gradientUnits="userSpaceOnUse" cx="1110.02" cy="622.59" r="159.74">
+      <stop offset="0" stop-color="#9B9B9B" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#9B9B9B" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="satin-2-seat" gradientUnits="userSpaceOnUse" cx="1024.00" cy="512.00" r="204.80">
+      <stop offset="0.84" stop-color="#717171" stop-opacity="0"/>
+      <stop offset="1" stop-color="#717171" stop-opacity="0.5"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#field)"/>
+  <circle cx="0" cy="430.08" r="204.8" fill="url(#satin-0-body)"/>
+  <circle cx="0" cy="430.08" r="204.8" fill="url(#satin-0-bounce)"/>
+  <circle cx="0" cy="430.08" r="204.8" fill="url(#satin-0-seat)"/>
+  <circle cx="614.4" cy="512" r="204.8" fill="url(#satin-1-body)"/>
+  <circle cx="614.4" cy="512" r="204.8" fill="url(#satin-1-bounce)"/>
+  <circle cx="614.4" cy="512" r="204.8" fill="url(#satin-1-seat)"/>
+  <circle cx="1024" cy="512" r="204.8" fill="url(#satin-2-body)"/>
+  <circle cx="1024" cy="512" r="204.8" fill="url(#satin-2-bounce)"/>
+  <circle cx="1024" cy="512" r="204.8" fill="url(#satin-2-seat)"/>
+</svg>

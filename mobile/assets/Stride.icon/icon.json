@@ -1,0 +1,65 @@
+{
+  "fill": {
+    "solid": "srgb:0.8118,0.7725,0.7176,1.0000"
+  },
+  "groups": [
+    {
+      "name": "Receiving row",
+      "layers": [
+        {
+          "name": "Mass 1",
+          "image-name": "receiving-mass-1.svg",
+          "fill": {
+            "solid": "srgb:0.4471,0.4471,0.4784,1.0000"
+          }
+        },
+        {
+          "name": "Mass 2",
+          "image-name": "receiving-mass-2.svg",
+          "fill": {
+            "solid": "srgb:0.4471,0.4471,0.4784,1.0000"
+          }
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.42
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0.5
+      },
+      "specular": true
+    },
+    {
+      "name": "Strike",
+      "layers": [
+        {
+          "name": "Strike mass",
+          "image-name": "strike-mass.svg",
+          "fill": {
+            "solid": "srgb:1.0000,0.3529,0.0980,1.0000"
+          }
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.62
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0.5
+      },
+      "specular": true
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": [
+      "iOS",
+      "macOS"
+    ]
+  }
+}

@@ -924,7 +924,7 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 		"transition-delay: 350ms;",
 		"#appShell.is-authed .workspace",
 		"padding-left: 60px;",
-		`<span class="tool-rail__label">Stride</span>`,
+		`<span class="tool-rail__label"><span class="wordmark" role="img" aria-label="Stride"></span></span>`,
 		`<span class="tool-rail__label">the room</span>`,
 		`<span class="tool-rail__label">chat</span>`,
 		`id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings"`,
@@ -2519,7 +2519,7 @@ func TestIndexStrideRenameAndAgentToken(t *testing.T) {
 
 	// The rename surfaces (labels only).
 	for _, want := range []string{
-		`<span class="tool-rail__label">Stride</span>`,
+		`<span class="tool-rail__label"><span class="wordmark" role="img" aria-label="Stride"></span></span>`,
 		`data-tool="office" aria-label="Stride home" aria-pressed="true"`,
 		`aria-label="Back to Stride"`,
 		`id="officeTool" class="office-tool" aria-label="Stride"`,

@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-    <meta name="theme-color" content="#F5F5F7">
+    <meta name="theme-color" content="#CFC5B7">
     <meta name="application-name" content="Stride">
     <meta name="apple-mobile-web-app-title" content="Stride">
     <!-- iOS home-screen install (card 089): launching standalone is a hard
@@ -17,6 +17,12 @@
          keeps its JS across a deploy compares it to the version pushed over the
          websocket and refreshes itself once when they diverge. -->
     <meta name="bonfire-build" content="__BONFIRE_BUILD_VERSION__">
+    <!-- ONE tile in the tab, in both themes, and deliberately the ink one.
+         A putty tile was built and tried first: at 16px on light browser chrome
+         it dissolves, which is the opposite of what a favicon is for. The
+         light/dark appearance set exists because Apple asks for it on the home
+         screen, not as a general theming rule — everywhere the tile is small
+         and sits in someone else's chrome, ink wins. -->
     <link rel="icon" href="/public/favicon.png" type="image/png">
     <!-- iOS ignores SVG icons — a PNG apple-touch-icon is required or the
          home-screen tile becomes a page screenshot. -->
@@ -37,7 +43,7 @@
         }
         if (theme === 'dark') document.documentElement.dataset.theme = 'dark'
         const meta = document.querySelector('meta[name="theme-color"]')
-        if (meta) meta.setAttribute('content', theme === 'dark' ? '#000000' : '#F5F5F7')
+        if (meta) meta.setAttribute('content', theme === 'dark' ? '#000000' : '#CFC5B7')
       })()
     </script>
     <style>
@@ -91,10 +97,19 @@
         --ink-300: #9A9AA4;
 
         /* paper — cool neutral lights */
-        --paper-0: #FFFFFF;
-        --paper-50: #F5F5F7;
-        --paper-100: #EDEDF0;
-        --paper-200: #E2E2E7;
+        /* paper — WARM PUTTY, not white.
+           Light mode is grounded on the same #CFC5B7 the app icon's light
+           appearance is built on, so the tile in the dock and the app behind it
+           are one material. The names stay `paper` because the role did not
+           change: this is still the stock the ink is printed on, it is just a
+           warmer stock. The ramp keeps the old relationship exactly — panels
+           lift OFF the ground, wells sink UNDER it — so nothing in the shell
+           had to be re-thought, only re-measured.
+           Every value below is solved, not picked; see the ink ladder. */
+        --paper-0: #EDE8DF;   /* panels, cards — the ground lifted toward warm white */
+        --paper-50: #CFC5B7;  /* the ground. Stride Putty, exactly as ratified */
+        --paper-100: #C2B7A7; /* inputs, wells, hover fills — the worst case for text */
+        --paper-200: #B2A695; /* deepest well */
 
         /* signal — live/speaking green. The loudest color in the system. */
         --signal-400: #5CE08A;
@@ -135,28 +150,43 @@
            surface (--surface-3). Hierarchy comes from size and weight, not from
            fading text past the point of legibility. Alphas solved against real
            painted backgrounds; do not lower without re-measuring. All three
-           figures below are on ONE basis — --surface-3, the worst-case light
-           surface: text-1 16.5:1 · text-2 7.3:1 · text-3 4.8:1 */
-        --text-1: #0E0E10;
-        --text-2: rgba(14, 14, 16, 0.72);
-        --text-3: rgba(14, 14, 16, 0.60);
-        --text-disabled: rgba(14, 14, 16, 0.24);
+           figures below are on ONE basis — --surface-3 = #C2B7A7, the worst-case
+           light surface: text-1 7.9:1 · text-2 6.1:1 · text-3 4.6:1
 
-        --line-1: rgba(14, 14, 16, 0.08);   /* hairline */
-        --line-2: rgba(14, 14, 16, 0.15);   /* emphasized hairline */
+           THE INK IS A WARM DARK GREY, NOT BLACK. Near-black on a warm putty
+           ground reads as a printing error — the two are on different sides of
+           neutral and the eye sees the mismatch before it sees the words. This
+           is the "putty / dark grey" pairing, and the ladder was re-solved from
+           scratch for it: the ground's luminance fell from 0.90 to 0.57, so
+           every alpha that used to clear AA had to move. Nothing here was
+           carried over.
+
+           The margins are thinner than they were on paper, because a darker
+           ground leaves less room. text-3 sits at 4.59:1 — nine hundredths over
+           the floor. Do not lower these without re-running the solve. */
+        --text-1: #26231E;
+        --text-2: rgba(38, 35, 30, 0.87);
+        --text-3: rgba(38, 35, 30, 0.75);
+        --text-disabled: rgba(38, 35, 30, 0.43);
+
+        /* Hairlines had to gain weight: an 8% ink line that read on #EDEDF0 is
+           nearly invisible on a ground this dark. */
+        --line-1: rgba(38, 35, 30, 0.12);   /* hairline */
+        --line-2: rgba(38, 35, 30, 0.22);   /* emphasized hairline */
 
         /* accent = ink. Inverts in dark mode. */
-        --accent: #0E0E10;
-        --accent-hover: #26262C;
-        --accent-press: #000000;
-        --accent-soft: rgba(14, 14, 16, 0.06);
+        --accent: #26231E;
+        --accent-hover: #3A362E;
+        --accent-press: #16140F;
+        --accent-soft: rgba(38, 35, 30, 0.08);
         /* focus ring for wrappers that own their own :focus-within signal.
            --accent-soft is a 6% fill tint — as a ring it measured 1.13:1 and
-           was effectively invisible. A ring must clear SC 1.4.11 (3:1); at 0.52
-           this is 3.7:1 on --surface-3, the worst-case light surface (0.45 sat
-           exactly on 3.00 there, with no margin). Fill tints keep --accent-soft. */
-        --ring: rgba(14, 14, 16, 0.52);
-        --on-accent: #FFFFFF;
+           was effectively invisible. A ring must clear SC 1.4.11 (3:1). On the
+           putty ground 0.52 no longer reaches it, so this is re-solved to 0.60,
+           which measures 3.23:1 on --surface-3 (the worst-case light surface).
+           Fill tints keep --accent-soft. */
+        --ring: rgba(38, 35, 30, 0.60);
+        --on-accent: #FFFDF8;
 
         --live: var(--signal-500);
         --live-soft: rgba(35, 168, 71, 0.13);
@@ -172,24 +202,63 @@
         --ember: var(--ember-500);
         --ember-hover: var(--ember-400);
         --ember-press: var(--ember-600);
-        --ember-soft: rgba(255, 90, 25, 0.12);
+        --ember-soft: rgba(255, 90, 25, 0.14);
         /* Ember is a light coral; white on it measures 2.82:1 and fails on the
            primary CTA. Dark theme already uses this near-black (6.84:1) — both
            themes now read the same on the same button. */
         --on-ember: #1A0A05;
+        /* Ember for TEXT AND GLYPHS on the light ground. Not a second brand
+           colour — the same signal at a luminance that can be read.
+           Stride Orange itself measures 1.83:1 on the putty ground; it was
+           already only 2.87:1 on the old white paper, and a darker ground makes
+           it worse. #86290F measures 5.27:1 on the ground, 4.55:1 on the
+           worst-case well, and 4.80:1 on an --ember-soft chip — the tight one
+           is the well, so darkening the well or lightening this breaks AA.
+           FILLS keep --ember: chips, glows and the CTA carry no text and have
+           no contrast requirement, and dulling them would cost the brand for no
+           accessibility gain. */
+        --ember-text: #86290F;
 
-        --scrim: rgba(14, 14, 16, 0.35);
+        /* THE WORDMARK'S COLOUR — the receiving row's graphite, never orange.
+           AJ, 2026-07-31: "the only orange thing is the ball in motion."
+
+           That is the whole identity in one line. In the Strike, orange is
+           custody of energy — the mass that is moving — and the neutral row is
+           everything at rest: the name, the shared context, the company. A
+           wordmark painted orange claims to be in motion, and it is the one
+           thing on screen that never is. So the name takes the row's colour and
+           orange stays earned, in the logotype exactly as it is everywhere else.
+
+           The two cuts are drawn from the SAME graphite family the icon's
+           receiving rows use, but chosen by the GROUND the mark sits on rather
+           than copied from whichever tile is next to it — the tile's row is
+           picked for the tile's own field, so the two do not always coincide
+           (the sign-in shows the dark tile on putty). Ground is what decides
+           legibility, so ground is what decides this.
+           4.4:1 on the putty ground; the orange it replaces measured 1.83:1,
+           so this is also simply more legible. */
+        --wordmark: #54545C;
+
+        --scrim: rgba(38, 35, 30, 0.35);
         --blur-material: var(--glass-blur); /* legacy alias */
 
-        /* ambient backdrop — the wallpaper glass refracts. Barely-there washes. */
+        /* ambient backdrop — the wallpaper glass refracts. Barely-there washes.
+           One of the two washes is now Stride Orange at 3%: on a warm putty
+           ground a purely neutral wash reads as dirt, and this is the subtle
+           way the brand hue enters light mode without a single element being
+           "an orange element". Earned stays earned. */
         --backdrop-ambient:
-          radial-gradient(1100px 700px at 12% -10%, rgba(14, 14, 16, 0.05), transparent 60%),
-          radial-gradient(900px 600px at 105% 15%, rgba(14, 14, 16, 0.04), transparent 55%),
+          radial-gradient(1100px 700px at 12% -10%, rgba(38, 35, 30, 0.06), transparent 60%),
+          radial-gradient(900px 600px at 105% 15%, rgba(255, 90, 25, 0.03), transparent 55%),
           var(--paper-50);
 
-        /* ---------- glass.css · LIGHT ---------- */
-        --glass-chrome: rgba(255, 255, 255, 0.62);
-        --glass-panel: rgba(255, 255, 255, 0.44);
+        /* ---------- glass.css · LIGHT ----------
+           The glass is WARM. White glass over a putty ground composites to a
+           dead grey and makes every panel look like it is sitting on the wrong
+           wallpaper; #FFFDF8 at 0.66 composites to exactly --paper-0 over the
+           ground, so a panel and the ramp agree by construction. */
+        --glass-chrome: rgba(255, 253, 248, 0.66);
+        --glass-panel: rgba(255, 253, 248, 0.46);
         /* One substance, two thicknesses. saturate() is the material's signature
            and NEVER varies — the app had grown five recipes at 1.8/1.45/1.35/
            1.3/1.25, and two panes of the same glass cannot boost colour by
@@ -202,9 +271,11 @@
         --glass-blur: saturate(1.8) blur(28px);
         --glass-blur-chrome: saturate(1.8) blur(20px);
         --glass-scrim: blur(2px);
-        --glass-border: rgba(14, 14, 16, 0.10);
-        --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.70);
-        --glass-shadow: 0 8px 32px rgba(14, 14, 16, 0.10);
+        --glass-border: rgba(38, 35, 30, 0.14);
+        --glass-highlight: inset 0 1px 0 rgba(255, 253, 248, 0.72);
+        /* A darker ground swallows a 10% shadow. Panels have to sit ON the
+           putty, not dissolve into it. */
+        --glass-shadow: 0 8px 32px rgba(38, 35, 30, 0.16);
 
         /* Over-media chrome — rides live video, so it stays dark in BOTH themes
            (deliberately no [data-theme] override). The 0.62 body is a contrast
@@ -351,12 +422,22 @@
         --ember-press: var(--ember-600);
         --ember-soft: rgba(255, 90, 25, 0.16);
         --on-ember: #1A0A05;
+        /* Dark mode needs no darkened cut: Stride Orange measures 6.37:1 on
+           true black, which is where the orange belongs. One token, two
+           values, so callers never have to ask which theme they are in. */
+        --ember-text: var(--ember-500);
+
+        /* The dark appearance's receiving row — the graphite that reads on
+           true black. 4.9:1. */
+        --wordmark: #77777D;
 
         --scrim: rgba(0, 0, 0, 0.60);
 
+        /* The same 3% orange wash the light ground carries, so the brand hue
+           enters both themes the same quiet way. */
         --backdrop-ambient:
           radial-gradient(1100px 700px at 12% -10%, rgba(255, 255, 255, 0.05), transparent 60%),
-          radial-gradient(900px 600px at 105% 15%, rgba(255, 255, 255, 0.035), transparent 55%),
+          radial-gradient(900px 600px at 105% 15%, rgba(255, 90, 25, 0.03), transparent 55%),
           #000000;
 
         /* ---------- glass.css · DARK ---------- */
@@ -628,9 +709,16 @@
         transition-delay: 0ms;
       }
       /* the office/Stride chip is a proper product name — the one sanctioned
-         exception to the lowercase rail-label house style */
+         exception to the lowercase rail-label house style. It now carries the
+         mark instead of the word, so the exception is drawn rather than
+         declared; text-transform stays for the accessible name. */
       .tool-rail__tool[data-tool="office"] .tool-rail__label {
         text-transform: none;
+      }
+      .tool-rail__label .wordmark {
+        display: block;
+        height: 11px;
+        color: var(--wordmark);
       }
       @media (hover: hover) and (pointer: fine) {
         .tool-rail__tool:hover {
@@ -1829,12 +1917,23 @@
       [data-theme="dark"] .login-theme .tool-rail__icon--sun { display: block; }
       [data-theme="dark"] .login-theme .tool-rail__icon--moon { display: none; }
 
+      /* The mark and the name are ONE lockup — the tile sits beside the
+         wordmark, the way it does in the marketing nav and footer, rather than
+         stacked above it. Stacked, they read as two separate marks that happen
+         to be near each other. The column below them is unchanged: lockup →
+         invite line → glass panel, which is the ratified gate order. */
       .login-head {
         display: flex;
         flex-direction: column;
         align-items: center;
         gap: 14px;
         text-align: center;
+      }
+
+      .login-lockup {
+        display: flex;
+        align-items: center;
+        gap: 14px;
       }
 
       /* 56px tile with the canonical momentum app icon */
@@ -1855,11 +1954,30 @@
         object-fit: cover;
       }
 
+      /* THE WORDMARK — the name as artwork, not as type.
+         One asset (public/wordmark.svg, generated by `npm run brand:regen`)
+         painted through a CSS mask, so the colour is `color` and a theme
+         switch never has to swap a file. Height comes from font-size in `em`,
+         which means every existing type override that sized the old text still
+         sizes the mark and nothing had to learn a new unit. */
+      .wordmark {
+        display: inline-block;
+        vertical-align: baseline;
+        /* traced outline: 1000 × 262.238 */
+        aspect-ratio: 1000 / 262.238;
+        background-color: currentColor;
+        -webkit-mask: url(/public/wordmark.svg) no-repeat center / contain;
+        mask: url(/public/wordmark.svg) no-repeat center / contain;
+      }
+
       .login-wordmark {
         margin: 0;
         font: 600 22px/1 var(--font-sans);
         letter-spacing: -0.022em;
-        color: var(--text-1);
+        color: var(--wordmark);
+        /* The traced mark's cap height fills the box, so it needs less height
+           than the 22px type it replaces to read at the same optical size. */
+        height: 0.82em;
       }
 
       /* mode line — empty on the normal gate; speaks during the reset flow */
@@ -2044,7 +2162,7 @@
         appearance: none;
         -webkit-appearance: none;
         padding-right: 38px;
-        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='rgba%2814%2C14%2C16%2C0.38%29' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='rgba%2838%2C35%2C30%2C0.75%29' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
         background-repeat: no-repeat;
         background-position: right 14px center;
       }
@@ -3616,7 +3734,7 @@
         border: 1px solid var(--line-1);
         border-radius: var(--r-md);
         background-color: var(--surface-3);
-        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='rgba%2814%2C14%2C16%2C0.38%29' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1.5L6 6.5L11 1.5' stroke='rgba%2838%2C35%2C30%2C0.75%29' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
         background-position: right 14px center;
         background-repeat: no-repeat;
         color: var(--text-1);
@@ -17593,6 +17711,9 @@
       }
       .bsheet__titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
       .bsheet__eyebrow { font: var(--type-label); letter-spacing: var(--track-label); color: var(--text-3); text-transform: none; }
+      /* The sheet eyebrow is the product signing the sheet, so it is the mark
+         rather than the word. */
+      .bsheet__eyebrow.wordmark { color: var(--wordmark); height: 0.92em; }
       .bsheet__title { margin: 0; font: 600 18px var(--font-sans); letter-spacing: -0.01em; color: var(--text-1); }
       .bsheet__close {
         flex: none;
@@ -22119,7 +22240,7 @@
         <span class="tool-rail__slot">
           <button class="tool-rail__tool" type="button" data-tool="office" aria-label="Stride home" aria-pressed="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg>
-            <span class="tool-rail__label">Stride</span>
+            <span class="tool-rail__label"><span class="wordmark" role="img" aria-label="Stride"></span></span>
           </button>
         </span>
         <span class="tool-rail__slot">
@@ -22343,7 +22464,7 @@
           <div class="bsheet__panel">
             <header class="bsheet__head">
               <div class="bsheet__titles">
-                <span class="bsheet__eyebrow">Stride</span>
+                <span class="bsheet__eyebrow wordmark" role="img" aria-label="Stride"></span>
                 <h2 class="bsheet__title" id="briefGreeting">Morning Brief</h2>
               </div>
               <button class="bsheet__close pressable" type="button" data-close-brief aria-label="Close">
@@ -22359,7 +22480,7 @@
           <div class="bsheet__panel">
             <header class="bsheet__head">
               <div class="bsheet__titles">
-                <span class="bsheet__eyebrow">Stride</span>
+                <span class="bsheet__eyebrow wordmark" role="img" aria-label="Stride"></span>
                 <h2 class="bsheet__title">Portfolio Health</h2>
               </div>
               <button class="bsheet__close pressable" type="button" data-close-portfolio aria-label="Close">
@@ -22376,10 +22497,12 @@
             <svg class="tool-rail__icon--sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
           </button>
           <header class="login-head login-rise">
-            <span class="login-mark" aria-hidden="true">
-              <img src="/public/app-icon.png" alt="">
+            <span class="login-lockup">
+              <span class="login-mark" aria-hidden="true">
+                <img src="/public/app-icon.png" alt="">
+              </span>
+              <h1 class="login-wordmark wordmark" role="img" aria-label="Stride"></h1>
             </span>
-            <h1 class="login-wordmark">Stride</h1>
             <p class="login-subline"></p>
             <span id="accessState" class="access-state" hidden>locked</span>
           </header>
@@ -24084,7 +24207,7 @@
         } else {
           delete document.documentElement.dataset.theme
         }
-        if (themeColorMeta) themeColorMeta.setAttribute('content', next === 'dark' ? '#000000' : '#F5F5F7')
+        if (themeColorMeta) themeColorMeta.setAttribute('content', next === 'dark' ? '#000000' : '#CFC5B7')
         return next
       }
       function applyTheme(theme) {

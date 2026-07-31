@@ -1,16 +1,20 @@
 # Stride identity and Signal Cradle canon
 
-**Status:** Canon. Ratified by AJ, 2026-07-30.
-**Static source of truth:** `brand/stride-strike-source.svg`
-**Source SHA-256:** `6a9ea0e4858dd5d6e15842766b646aa807ee6da9bf6c9d87eb0111820e621475`
-**Guard:** `npm run test:brand`
+**Status:** Canon. Ratified by AJ, 2026-07-30; §1, §1a and §4 revised 2026-07-31.  
+**Code of record (tile):** `scripts/stride-strike-geometry.mjs`  
+**Code of record (wordmark):** `brand/stride-wordmark-source.svg`  
+**Printed tile source:** `brand/stride-strike-source.svg`  
+**Source SHA-256:** `1e861145f455804b608d7c663ff4e9a892957be9f27094dd69f64b5cbdee2423`  
+**Guard:** `npm run test:brand`  
 **Regenerate:** `npm run brand:regen`
 
-Stride has two deliberately separate visual jobs:
+Stride has three deliberately separate visual jobs:
 
-1. **The Strike** is the static identity: app icon, favicon, lockup, login mark,
-   social card, and every other place a logo appears.
-2. The **Signal Cradle** is the live voice instrument: the large control that
+1. **The Strike** is the static tile: app icon, favicon, lockup mark, login
+   mark, social card.
+2. **The Wordmark** is the name, set as artwork rather than type — everywhere
+   the product says "Stride" as a brand rather than as a sentence.
+3. The **Signal Cradle** is the live voice instrument: the large control that
    shows whether audio energy is entering or leaving the conversation.
 
 The native loading screen is the cradle at rest. It occupies the Canvas
@@ -20,24 +24,118 @@ bootstrap. The instrument is not otherwise used as a static logo.
 ## 1. Static identity — The Strike
 
 The Strike is one caught frame of the cradle rather than a drawing of the whole
-apparatus. It uses a Stride Ink field, one energised Stride Orange mass entering
-from the left, and the equal neutral-mass row exiting the right.
+apparatus: one energised Stride Orange mass falling in from the left, and the
+equal neutral-mass row exiting the right.
 
 - Every mass has radius `0.2 × tile width`.
-- The active mass is centred `0.3r` outside the left frame.
-- The visible receiving masses are centred at `0.6w` and `1.0w`, so the row
-  deliberately runs off the right edge.
-- No strings, frame, glow, gradient, trail, or type appear in the tile.
+- **The striking mass is bisected by the left frame** (`cx = 0`). Ratified by
+  AJ 2026-07-31, replacing the earlier `0.3r`-outside crop, which left only 14%
+  of the tile orange — about five pixels at icon size, where the lift below
+  could not be seen at all.
+- **The striking mass rides `0.08 × tile` above the row's axis** — exactly two
+  fifths of a mass radius. A mass level with the row it is about to hit has
+  already arrived; the lift is what gives the tile a before and an after. It
+  stays under a full radius on purpose: at `1.0r` the mass clears the row and
+  the tile reads as two unrelated objects.
+- The receiving masses are centred at `0.6w` and `1.0w`, so the row runs off the
+  right edge, and they are **exactly tangent** — a cradle row is in contact.
+- The receiving masses must be drawn as **separate layers**. Two tangent circles
+  in one shape give a renderer a single fused outline to rim, which pinches the
+  contact into a metallic web; steel does not bleed into steel.
+- No strings, frame, glow, trail, or type appear in the tile.
 - The crop is the meaning: a moment caught, not an apparatus described.
+
+### Material
+
+The masses carry **satin** depth: one broad, low-contrast highlight from the
+upper left, no specular dot, and a bounce on the shadowed limb. The ramp lives
+in OKLab so it applies equally to any base colour — shadows gain chroma and
+highlights lose a little, which is what pigment does and what the approved comp
+measures.
+
+**Where the platform supplies its own material, we do not draw ours.** On the
+Icon Composer path the layers ship flat and iOS composes the depth; the satin
+build is for every surface that will never get that — the web, Android, the
+favicon, the Xcode catalog.
+
+This material belongs to the Strike only. The live Signal Cradle stays flat and
+its tests forbid gradients.
 
 ### Colorways
 
-- **Field:** Stride Ink `#050505`.
-- **Active mass:** Stride Orange `#FF5A19`.
-- **Receiving masses:** Signal Graphite `#5E5E66`.
-- **iOS tinted / Android monochrome:** white Strike geometry on black.
+The Strike has an **appearance set**, not a colorway list:
 
-Every raster derivative is generated deterministically from the SVG source.
+| Appearance | Field | Active mass | Receiving row |
+|---|---|---|---|
+| light (iOS Default) | Warm Putty `#CFC5B7` | Stride Orange `#FF5A19` | `#54545C` |
+| dark | `#121212` → Stride Ink `#050505` | Stride Orange `#FF5A19` | `#77777D` |
+| tinted | black | white | mid grey `#8A8A8A` |
+
+The tinted cut is a luminance map the system re-tints, so the only thing it has
+to preserve is the story: the striking mass stays the brightest thing in the
+tile, so custody of the energy still reads after all colour is gone. Painting
+every mass white leaves three identical dots and throws that away.
+
+**On the web, one tile in both themes, and it is the dark one.** The light
+appearance exists because Apple asks for it on the home screen, not as a general
+theming rule. A putty tile at 16px on light browser chrome dissolves.
+
+Every raster derivative is generated deterministically from the code of record.
+
+## 1a. The Wordmark
+
+The name is artwork, not type. A wordmark set in a font is whatever the font
+fallback decides it is on a machine that does not have the font.
+
+- **Source:** `brand/stride-wordmark-source.svg` — a sampled outline traced from
+  the approved 1430px master at a 0.2px simplification tolerance (0.12% edge
+  deviation). Sampled rather than bézier-fitted, for the same reason the lens
+  geometry is: the sampled curve IS the approved shape, and a fit would be a
+  second wordmark.
+- **Eight closed rings.** Six letters, three counters. A trace that loses one has
+  dropped a counter and the mark is wrong in a way nobody notices until it is on
+  a wall.
+- **The wordmark is NEVER orange.** Ratified by AJ 2026-07-31:
+
+  > "the only orange thing is the ball in motion"
+
+  This is the whole identity in one line. Orange is **custody of energy** — the
+  mass that is moving. The neutral row is everything at rest: the name, the
+  shared context, the company. A wordmark painted orange claims to be in motion,
+  and it is the one thing on screen that never is. So the name takes the row's
+  graphite and orange stays earned in the logotype exactly as it is everywhere
+  else in the product.
+- The two cuts come from the **same graphite family the icon's receiving rows
+  use**, but are chosen by the **ground the mark sits on** — not copied from
+  whichever tile is beside it. A tile's row is picked for that tile's own field,
+  so the two do not always coincide (the desktop sign-in shows the dark tile on
+  putty). Ground decides legibility, so ground decides this:
+
+  | Ground | Wordmark | Contrast |
+  |---|---|---|
+  | light / putty | `#54545C` | 4.4:1 |
+  | dark / ink | `#77777D` | 4.9:1 |
+
+  The orange it replaced measured **1.83:1** on putty, so this is more legible
+  as well as more correct. An earlier pass shipped it orange and then black;
+  both are superseded.
+- Where a page has light and dark *sections* rather than a theme — the marketing
+  site — each placement takes the cut that matches its own ground. The hero and
+  footer ride `--black` and take `#77777D`; the nav rides paper and takes
+  `#54545C`.
+- One asset, every surface: desktop and marketing paint it through a CSS mask so
+  colour is `color`; native draws the printed outline in
+  `mobile/src/theme/strideWordmark.ts`. Nothing carries a second copy.
+- **Ink, putty and white cuts are generated but unused in product.** They exist
+  for photographs, partner slides, and merchandise.
+
+### The lockup
+
+Where the tile and the name appear together they are ONE lockup: **the tile sits
+beside the wordmark**, never stacked above it. Stacked, they read as two
+separate marks that happen to be near each other. This holds on the desktop
+sign-in, the native login, and the marketing nav and footer. The gate's column
+order is unchanged — lockup → invite line → glass panel.
 
 ## 2. Signal Cradle
 
@@ -111,23 +209,113 @@ visual; no strings, stand, or frame are drawn.
 
 ## 3. Surface map
 
-| Surface | Static logo | Live instrument |
+| Surface | Tile | Wordmark | Live instrument |
+|---|---|---|---|
+| iOS app icon | `Stride.icon` (all 6 renditions) | — | — |
+| Android launcher | The Strike, flat cut | — | — |
+| Expo native loading screen | — | — | Signal Cradle at rest |
+| Native login | The Strike | orange, 22pt | — |
+| Native home | — | — | Signal Cradle |
+| Desktop sign-in | The Strike | orange, `0.82em` | — |
+| Desktop tool rail chip | — | orange, 11px | — |
+| Desktop sheet eyebrow | — | orange, `0.92em` | — |
+| Desktop favicon | The Strike (dark) | — | — |
+| Desktop voice home | — | — | Signal Cradle |
+| Marketing hero / nav / footer | The Strike (nav, footer) | orange | — |
+| Marketing favicon / social card | The Strike (dark) | orange (card) | — |
+| Native Apple companion icons | The Strike | — | — |
+
+## 3a. The iOS bundle
+
+iOS reads `mobile/assets/Stride.icon`, an Icon Composer bundle, not the PNG
+appearance set. Ratified by AJ 2026-07-31. The PNGs are still generated for
+Android, the web manifest and the Xcode catalog, and remain the fallback.
+
+The bundle's schema is undocumented. It was read off `IconComposerFoundation`'s
+symbols and then **proved** with `ictool` (ships with Xcode 26) by setting each
+value to magenta and checking whether it appeared. What the renderer actually
+honours, because half of it is silently ignored:
+
+- `fill` — honoured, **but only in the Default rendition**. Dark replaces the
+  background with the system's own ground. This is why Apple's guidance is to
+  drop the dark background rather than paint one.
+- **every `*-specializations` key — IGNORED**, at icon, group and layer level.
+  Writing one reads like a per-appearance override exists when it does not.
+- layer `fill` — honoured; it **replaces** the asset's colour rather than
+  tinting it, so layer art ships flat white.
+- `translucency` — honoured, and load-bearing. Left unset the masses blend
+  toward the ground (3.47:1 on putty collapsing to 1.50:1 on dark). Disabled,
+  they hold their colour. They are steel, not glass: momentum is conserved
+  through solid bodies.
+- `specular`, `shadow` — honoured. This is where the depth comes from.
+
+The consequence is that **there is no per-appearance colour**. One set of layer
+colours holds against putty in Default and Apple's dark ground in Dark, which is
+why the row is `#72727A` — the only value in the graphite family clearing 2.7:1
+on both.
+
+Verify with:
+
+```bash
+"/Applications/Xcode.app/Contents/Applications/Icon Composer.app/Contents/Executables/ictool" mobile/assets/Stride.icon --export-image --output-file /tmp/icon.png --platform iOS --rendition Default --width 1024 --height 1024 --scale 1
+```
+
+Renditions: `Default`, `Dark`, `TintedLight`, `TintedDark`, `ClearLight`,
+`ClearDark`. Look at all six before calling an icon change done.
+
+## 4. Light mode is grounded on putty
+
+Ratified by AJ 2026-07-31. Light mode uses the same `#CFC5B7` the icon's light
+appearance is built on, so the tile on the home screen and the app behind it are
+one material.
+
+The ramp keeps the old relationship exactly — **panels lift OFF the ground,
+wells sink UNDER it** — which is why no screen had to be re-thought, only
+re-measured. The token family is still called `paper`: the role did not change,
+only the stock.
+
+| Token | Value | Role |
 |---|---|---|
-| Expo app icon | The Strike | — |
-| Expo native loading screen | — | Signal Cradle at rest |
-| Native login | The Strike | — |
-| Native home | — | Signal Cradle |
-| Desktop rail / sign-in / favicon | The Strike | — |
-| Desktop voice home | — | Signal Cradle |
-| Marketing hero / nav / product window / closing / footer | The Strike | — |
-| Marketing favicon / social card | The Strike | — |
-| Native Apple companion icons | The Strike | — |
+| `--paper-0` | `#EDE8DF` | panels, cards |
+| `--paper-50` | `#CFC5B7` | the ground |
+| `--paper-100` | `#C2B7A7` | wells — **the worst case for text** |
+| `--paper-200` | `#B2A695` | deepest well |
 
-## 4. Release rules
+**The ink is a warm dark grey, not black.** `#26231E`. Near-black on warm putty
+reads as a printing error — the two sit on opposite sides of neutral and the eye
+sees the mismatch before it sees the words.
 
-- Run `npm run brand:regen`; never hand-edit a derived PNG.
+The ground's luminance fell from 0.90 to 0.57, so **every alpha was re-solved
+from scratch**; nothing was carried over. On `--paper-100`: text-1 7.9:1 ·
+text-2 6.1:1 · text-3 4.6:1 · focus ring 3.2:1.
+
+Two things moved that are easy to miss:
+
+- **The ground is no longer the worst case.** On white paper the background and
+  the deepest well were close enough that measuring against the background was
+  near enough. On putty the well is a full step darker and text-3 clears the
+  floor there by nine hundredths. Measure against the WELL.
+- **Ember text had to move again.** `#B83A18` — itself already a fix for the
+  brand orange failing on white — fell to 3.37:1 on putty. `--ember-text` /
+  `emberText` is now `#86290F` (5.27:1 on the ground, 4.55:1 on the well).
+  Fills keep `--ember`; so does the wordmark (§1a).
+
+Orange enters both themes ambiently at 3% in `--backdrop-ambient` and nowhere
+else. Earned stays earned.
+
+The marketing site keeps its own warmer paper (`#f4f0e8`) and was deliberately
+left alone — it was already in this family.
+
+## 5. Release rules
+
+- Run `npm run brand:regen`; never hand-edit a derived PNG, and never hand-edit
+  `brand/stride-strike-*.svg` — they are prints of the code of record.
 - Run root brand tests, mobile tests/typecheck, marketing build/render tests,
   and native icon generation before calling the rollout complete.
-- Inspect the actual 1024px icon and at least one home-screen-size render.
+- Inspect the actual 1024px icon and at least one home-screen-size render, and
+  **all six `ictool` renditions** (§3a).
+- Re-measure contrast after any palette move; `mobile/src/__tests__/contrast.test.ts`
+  pins the VALUES, not just their usage, and it is the only thing that caught
+  the last two ember failures.
 - A successful local build does not authorize TestFlight, device installation,
   Git shipping, or deployment.

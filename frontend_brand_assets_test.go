@@ -54,7 +54,7 @@ func TestStrideBrandAssetContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := fmt.Sprintf("%x", sha256.Sum256(source)); got != "6a9ea0e4858dd5d6e15842766b646aa807ee6da9bf6c9d87eb0111820e621475" {
+	if got := fmt.Sprintf("%x", sha256.Sum256(source)); got != "1e861145f455804b608d7c663ff4e9a892957be9f27094dd69f64b5cbdee2423" {
 		t.Fatalf("canonical Strike source changed: %s", got)
 	}
 

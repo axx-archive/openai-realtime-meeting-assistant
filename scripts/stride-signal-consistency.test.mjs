@@ -43,21 +43,313 @@ import {
   safeFit,
   strideSignalSvg,
 } from './stride-signal-geometry.mjs';
+import {
+  APPEARANCES,
+  CANVAS as STRIKE_CANVAS,
+  CUT,
+  ROW_AXIS,
+  STRIDE_PUTTY,
+  STRIKE_LIFT,
+  massesFor,
+  radiusFor,
+  strikeSvg,
+} from './stride-strike-geometry.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (path) => readFileSync(resolve(root, path), 'utf8');
 const readBytes = (path) => readFileSync(resolve(root, path));
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
-test('The Strike vector is the static identity source', () => {
+test('The Strike vector is a faithful print of the code of record', () => {
+  // Not a hand-drawn file: the source IS the module's output, so a hand edit is
+  // erased by the next `npm run brand:regen` and caught here in between.
+  assert.equal(read('brand/stride-strike-source.svg'), strikeSvg({ appearance: 'dark' }));
+  assert.equal(read('brand/stride-strike-light.svg'), strikeSvg({ appearance: 'light' }));
+  assert.equal(read('brand/stride-strike-tinted.svg'), strikeSvg({ appearance: 'tinted' }));
   assert.equal(
     sha256(readBytes('brand/stride-strike-source.svg')),
-    '6a9ea0e4858dd5d6e15842766b646aa807ee6da9bf6c9d87eb0111820e621475',
+    '1e861145f455804b608d7c663ff4e9a892957be9f27094dd69f64b5cbdee2423',
   );
   assert.match(read('brand/stride-strike-source.svg'), /Stride — The Strike/);
-  assert.match(read('brand/stride-strike-source.svg'), /cx="-61\.44"[\s\S]*cx="614\.4"[\s\S]*cx="1024"/);
   assert.match(read('mobile/src/components/BrandMark.tsx'), /stride-logo-(?:mark|black|white)\.png/g);
   assert.match(read('stride-site/app/components/BrandMark.tsx'), /brand-mark-\$\{tone\}\.png/);
+});
+
+test('the striking mass is lifted, and lifted by a stated amount', () => {
+  // A mass level with the row it is about to hit has already arrived. The lift
+  // is the entire difference between a tile that has a before and an after and
+  // one that does not, so it is a number and not a nudge.
+  assert.equal(STRIKE_LIFT, STRIKE_CANVAS * 0.08);
+  // 81.92 / 204.8 is 0.39999999999999997 in binary floating point, not 0.4.
+  // The canon number is two fifths of a radius; asserting the exact double
+  // would be pinning an artefact of the representation, not the design.
+  assert.ok(Math.abs(STRIKE_LIFT / radiusFor(CUT) - 0.4) < 1e-9);
+
+  const masses = massesFor(CUT);
+  const striker = masses.find((mass) => mass.role === 'active');
+  const row = masses.filter((mass) => mass.role === 'neutral');
+  assert.ok(striker.cy < ROW_AXIS, 'the striking mass must ride above the row');
+  for (const mass of row) {
+    assert.equal(mass.cy, ROW_AXIS, 'only the striker moves — the row is at rest');
+  }
+
+  // Below a full radius on purpose: at 1.0r the mass clears the row entirely
+  // and the tile reads as two unrelated objects rather than one row with one of
+  // them raised.
+  assert.ok(STRIKE_LIFT < radiusFor(CUT), 'a lift of a full radius breaks the row');
+});
+
+test('the receiving row is in contact, and drawn so contact stays contact', () => {
+  /**
+   * Two things have to hold at once, and they pull against each other.
+   *
+   * The masses are EXACTLY tangent, because a cradle row is in contact and
+   * spacing them would be a lie about the mechanism. But two tangent circles in
+   * ONE asset give Icon Composer a single fused outline to rim, which pinches
+   * the contact into a metallic web — the pair stops reading as two steel balls
+   * touching and starts reading as one poured shape. Steel does not bleed into
+   * steel.
+   *
+   * So: tangency is asserted on the geometry, and one-mass-per-layer is
+   * asserted on the bundle. Either one alone lets the bug back in.
+   */
+  const row = massesFor(CUT).filter((mass) => mass.role === 'neutral');
+  assert.equal(row.length, 2);
+  const gap = Math.abs(row[1].cx - row[0].cx) - 2 * radiusFor(CUT);
+  assert.equal(gap, 0, `the receiving masses must touch exactly (gap ${gap})`);
+
+  const bundle = JSON.parse(read('mobile/assets/Stride.icon/icon.json'));
+  const rowGroup = bundle.groups.find((group) => group.name === 'Receiving row');
+  assert.ok(rowGroup, 'the bundle has no receiving row');
+  assert.equal(rowGroup.layers.length, 2, 'each mass needs its own layer or the contact fuses');
+  const images = rowGroup.layers.map((layer) => layer['image-name']);
+  assert.equal(new Set(images).size, 2, 'the two masses must be two distinct assets');
+  for (const name of images) {
+    const asset = read(`mobile/assets/Stride.icon/Assets/${name}`);
+    assert.equal((asset.match(/<circle/g) ?? []).length, 1, `${name} must draw exactly one mass`);
+  }
+});
+
+test('the icon bundle only uses keys the renderer actually honours', () => {
+  /**
+   * `*-specializations` are accepted by the parser and silently ignored by the
+   * renderer — proved by setting a dark specialization to magenta and watching
+   * it never appear. Writing one is worse than not writing it: it reads like a
+   * per-appearance override exists when the appearance is coming out of the
+   * system instead. If this fails, re-verify with ictool before believing it.
+   */
+  const raw = read('mobile/assets/Stride.icon/icon.json');
+  assert.doesNotMatch(raw, /-specializations/, 'appearance specializations do not apply — do not ship them');
+
+  const bundle = JSON.parse(raw);
+  assert.ok(bundle.groups.length <= 4, 'Icon Composer allows at most four visible groups');
+  for (const group of bundle.groups) {
+    // The masses are steel: momentum conserved through solid bodies. Glass
+    // masses would transmit light instead of transmitting force, and the row
+    // would sink toward whatever ground it is on — measured at 1.50:1 on dark.
+    assert.equal(group.translucency?.enabled, false, `${group.name} must stay solid`);
+    assert.equal(group.specular, true, `${group.name} must still catch the OS light`);
+  }
+  // No baked mask. Every platform applies its own, and one baked in shows up as
+  // a dark seam inside the system's.
+  for (const group of bundle.groups) {
+    for (const layer of group.layers) {
+      const asset = read(`mobile/assets/Stride.icon/Assets/${layer['image-name']}`);
+      assert.doesNotMatch(asset, /<rect/, 'a layer must not carry a background or a mask');
+    }
+  }
+  assert.match(read('mobile/app.config.ts'), /icon: '\.\/assets\/Stride\.icon'/);
+});
+
+test('the wordmark is one outline, and every surface draws that one', () => {
+  const source = read('brand/stride-wordmark-source.svg');
+  const outline = source.match(/ d="([^"]+)"/)?.[1];
+  assert.ok(outline, 'the wordmark source has no outline');
+  // "stride" is six letters with three counters — d, e, and the eye of the e's
+  // terminal. Eight closed rings. A trace that loses one has dropped a counter
+  // and the mark is subtly wrong in a way nobody spots until it is on a wall.
+  assert.equal((outline.match(/Z/g) ?? []).length, 8, 'the wordmark must keep all eight rings');
+  assert.match(source, /fill="currentColor"/, 'one asset, every colourway');
+
+  // The native print carries its own copy because react-native cannot read an
+  // SVG off disk. A divergence here is the phone drawing a different wordmark.
+  const native = read('mobile/src/theme/strideWordmark.ts');
+  assert.ok(native.includes(`'${outline}'`), 'the native wordmark print has drifted — regenerate it');
+
+  // Desktop and marketing both mask the same generated file rather than
+  // carrying a copy at all, which is why there is nothing else to compare.
+  assert.match(read('index.html'), /mask: url\(\/public\/wordmark\.svg\)/);
+  assert.match(read('stride-site/app/globals.css'), /mask: url\(\/wordmark\.svg\)/);
+});
+
+test('every ground that is declared rather than painted is the same putty', () => {
+  /**
+   * The grounds that live OUTSIDE CSS are the ones that rot.
+   *
+   * A token is read by everything and noticed immediately when it is wrong.
+   * These four are copies of the ground written into config files, each read by
+   * exactly one platform at one moment, and each one flashes the OLD ground for
+   * a beat before the app paints the new one:
+   *
+   *   the PWA manifest       the installed app's splash and chrome
+   *   the desktop meta tag   mobile Safari's chrome while the shell boots
+   *   the Expo splash        the native launch screen
+   *   the Android adaptive   launchers that use the colour, not the image
+   *
+   * All four were still white after the re-ground, and none of them is visible
+   * in normal development. Pinned to the canon so a palette move has to update
+   * them or fail here.
+   */
+  assert.equal(APPEARANCES.light.field, STRIDE_PUTTY);
+
+  const manifest = JSON.parse(read('public/manifest.webmanifest'));
+  assert.equal(manifest.background_color, STRIDE_PUTTY);
+  assert.equal(manifest.theme_color, STRIDE_PUTTY);
+  // …and the manifest's icons must be the generated ones, not hand-added paths.
+  for (const icon of manifest.icons) {
+    assert.match(icon.src, /^\/public\/(icon-192|icon-512|icon-maskable-512|app-icon)\.png$/, icon.src);
+  }
+
+  const html = read('index.html');
+  assert.match(html, new RegExp(`<meta name="theme-color" content="${STRIDE_PUTTY}">`));
+  // The boot script and the theme toggle both rewrite it; all copies must agree.
+  assert.equal(
+    (html.match(new RegExp(`'${STRIDE_PUTTY}'`, 'g')) ?? []).length,
+    2,
+    'both theme-color writers must carry the same ground',
+  );
+
+  const config = read('mobile/app.config.ts');
+  assert.match(config, new RegExp(`backgroundColor: '${STRIDE_PUTTY}'`));
+  assert.equal(
+    (config.match(new RegExp(`backgroundColor: '${STRIDE_PUTTY}'`, 'g')) ?? []).length,
+    2,
+    'the native splash and the Android adaptive ground must both be the putty',
+  );
+});
+
+test('the two lockup cuts are different tiles, because the ground differs', () => {
+  /**
+   * `black` and `white` name the GROUND, not the tile's colour: black = for
+   * light grounds, white = for dark ones.
+   *
+   * They were byte-identical — both rendered from the ink tile, from back when
+   * there was only one tile. The marketing footer asks for `tone="white"` and
+   * sits on `--black` (#050505), so it was painting a near-black tile onto a
+   * near-black ground with no visible edge. A caller passing a prop that does
+   * nothing is worse than no prop, because the site looks like it made a choice.
+   */
+  for (const [dark, light] of [
+    ['public/brand-mark-black.png', 'public/brand-mark-white.png'],
+    ['mobile/assets/stride-logo-black.png', 'mobile/assets/stride-logo-white.png'],
+  ]) {
+    assert.notEqual(
+      sha256(readBytes(dark)),
+      sha256(readBytes(light)),
+      `${dark} and ${light} are the same tile — the tone prop does nothing`,
+    );
+  }
+  // The site still consumes them through the tone prop, so the fix has to hold
+  // at the call site too.
+  assert.match(read('stride-site/app/components/BrandMark.tsx'), /brand-mark-\$\{tone\}\.png/);
+  assert.match(read('stride-site/app/page.tsx'), /<BrandMark size="nav" tone="white" \/>/);
+});
+
+test('no retired ink survives inside a data: URI', () => {
+  /**
+   * Colours encoded into `data:image/svg+xml` are invisible to a token grep and
+   * to every colour sweep that has run on this file. The select chevrons kept
+   * the retired cool ink at the retired alpha through an entire re-ground, and
+   * only a screenshot caught them.
+   *
+   * The percent-encoding is why: `rgba(38, 35, 30, 0.75)` is stored as
+   * `rgba%2838%2C35%2C30%2C0.75%29`, which matches nothing anyone would search
+   * for. So the search happens here instead.
+   */
+  const html = read('index.html');
+  for (const retired of ['rgba%2814%2C14%2C16', 'rgba%280%2C0%2C0', '%230E0E10', '%23F5F5F7']) {
+    assert.ok(!html.includes(retired), `a data: URI still carries the retired ink ${retired}`);
+  }
+  // And the ones that are there must be the solved ladder values.
+  assert.ok(html.includes('rgba%2838%2C35%2C30%2C0.75%29'), 'the light chevron must use the warm ink at the text-3 alpha');
+});
+
+test('the light theme is grounded on the putty, in both token copies', () => {
+  // The desktop declares the ramp and native mirrors it. They have to agree, or
+  // the phone and the browser are two different products in light mode.
+  assert.match(read('index.html'), new RegExp(`--paper-50: ${STRIDE_PUTTY};`));
+  assert.match(read('mobile/src/theme/tokens.ts'), new RegExp(`50: '${STRIDE_PUTTY}'`));
+  // The ink is a warm dark grey, not black — near-black on warm putty reads as
+  // a printing error.
+  assert.match(read('index.html'), /--text-1: #26231E;/);
+  assert.match(read('mobile/src/theme/tokens.ts'), /text1: adaptive\('#26231E'/);
+  // Orange enters light mode ambiently and nowhere else. Earned stays earned.
+  assert.match(read('index.html'), /rgba\(255, 90, 25, 0\.03\), transparent 55%/);
+});
+
+test('the wordmark is the receiving row, never the orange, on every surface', () => {
+  /**
+   * "The only orange thing is the ball in motion." — AJ, 2026-07-31.
+   *
+   * Orange is custody of energy. The name is the one thing that never moves, so
+   * it takes the row's graphite, and each cut IS that appearance's row — the
+   * wordmark matches the balls in the tile beside it. The three surfaces each
+   * declare it separately, so all three are checked, and each is checked for
+   * the orange creeping back as "more on-brand".
+   */
+  const ROW_ON_LIGHT = '#54545C';
+  const ROW_ON_DARK = '#77777D';
+
+  const html = read('index.html');
+  assert.match(html, new RegExp(`--wordmark: ${ROW_ON_LIGHT};`));
+  assert.match(html, new RegExp(`--wordmark: ${ROW_ON_DARK};`));
+  // Every placement reads the token rather than picking its own colour.
+  assert.equal((html.match(/color: var\(--wordmark\)/g) ?? []).length, 3);
+  // Bounded to the rule's own block. An unbounded `[\s\S]*?` here matches the
+  // next --ember ANYWHERE later in a 30k-line file and always fails.
+  const loginRule = html.slice(html.indexOf('.login-wordmark {'));
+  assert.match(loginRule.slice(0, loginRule.indexOf('}')), /color: var\(--wordmark\)/);
+  assert.doesNotMatch(loginRule.slice(0, loginRule.indexOf('}')), /--ember/);
+
+  assert.match(read('mobile/src/theme/tokens.ts'), new RegExp(`wordmark: adaptive\\('${ROW_ON_LIGHT}', '${ROW_ON_DARK}'\\)`));
+  assert.match(read('mobile/src/components/BrandMark.tsx'), /color = colors\.wordmark/);
+  assert.doesNotMatch(read('mobile/src/components/BrandMark.tsx'), /color = colors\.ember/);
+
+  const css = read('stride-site/app/globals.css');
+  assert.match(css, new RegExp(`--wordmark-on-light: ${ROW_ON_LIGHT.toLowerCase()};`));
+  assert.match(css, new RegExp(`--wordmark-on-dark: ${ROW_ON_DARK.toLowerCase()};`));
+  // The hero and footer ride --black, the nav rides paper: each takes its own cut.
+  for (const rule of ['.hero-wordmark', '.nav-brand > a', '.footer-brand > a']) {
+    const block = css.slice(css.indexOf(rule));
+    assert.match(block.slice(0, 200), /color: var\(--wordmark-on-(light|dark)\)/, `${rule} must use a wordmark cut`);
+  }
+});
+
+test('the mark and the name are one lockup, not two marks near each other', () => {
+  // Stacked, a tile above a wordmark reads as two separate marks. Every surface
+  // that shows both now sets them side by side.
+  assert.match(read('index.html'), /<span class="login-lockup">[\s\S]{0,400}?login-wordmark wordmark/);
+  assert.match(read('index.html'), /\.login-lockup \{[\s\S]{0,120}?flex/);
+  assert.match(read('mobile/src/screens/LoginScreen.tsx'), /<View style=\{styles\.lockup\}>[\s\S]{0,200}?<StrideWordmark/);
+  assert.match(read('mobile/src/screens/LoginScreen.tsx'), /lockup: \{\s*flexDirection: 'row'/);
+  assert.match(read('stride-site/app/globals.css'), /\.nav-brand,\n\.footer-brand \{\n  display: flex;/);
+});
+
+test('the name is never set as type on a brand surface', () => {
+  // The whole point of having a wordmark is that the name stops being whatever
+  // the font fallback decides it is. These are the four places it used to be
+  // typed; a regression here is invisible until a machine without Google Sans
+  // Flex loads the page.
+  assert.doesNotMatch(read('index.html'), /<h1 class="login-wordmark">Stride<\/h1>/);
+  assert.doesNotMatch(read('index.html'), /<span class="bsheet__eyebrow">Stride<\/span>/);
+  assert.doesNotMatch(read('stride-site/app/page.tsx'), />STRIDE</);
+  assert.doesNotMatch(read('mobile/src/screens/LoginScreen.tsx'), /\{product\.wordmark\}/);
+
+  // …and the accessible name survives the swap. A masked span with no label is
+  // a heading screen readers announce as nothing at all.
+  assert.match(read('index.html'), /class="login-wordmark wordmark" role="img" aria-label="Stride"/);
+  assert.match(read('mobile/src/components/BrandMark.tsx'), /accessibilityLabel="Stride"/);
+  assert.match(read('stride-site/app/components/Wordmark.tsx'), /aria-label="Stride"/);
 });
 
 test('the curve is a lens: closed at the tips, fullest at the centre', () => {
