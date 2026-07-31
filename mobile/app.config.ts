@@ -40,10 +40,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and remain the fallback if this bundle is ever rejected.
       // Regenerate both with `npm run brand:regen` from the repo root.
       icon: './assets/Stride.icon',
-      // Build 27 carries the five-ball energy-transfer cradle, cached team-chat
-      // handoff, balanced mobile home, and camera/microphone-on call defaults.
+      // Build 28 carries the Stride identity: the Icon Composer appearance set
+      // (Default/Dark/Tinted/Clear rendered by iOS from Stride.icon), the
+      // wordmark login lockup, and light mode re-grounded on putty.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '27',
+      buildNumber: '28',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',
