@@ -44,6 +44,13 @@ func TestIndexDesignedDropdown(t *testing.T) {
 		"event.key === 'Escape'",
 		"openState.typeahead",
 		"panel.setAttribute('role', 'listbox')",
+		// WebKit opens the native picker even on a cancelled mousedown, so
+		// suppression is structural: the select leaves the pointer path and
+		// the click resolves from its host. If these go, Safari regresses to
+		// the system popup while every Chromium check stays green.
+		"pointer-events: none;",
+		"function resolveStrideSelect(target)",
+		"target.closest(':has(> select)')",
 	} {
 		if !strings.Contains(index, wiring) {
 			t.Fatalf("the designed dropdown contract is not wired: missing %q", wiring)

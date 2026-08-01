@@ -2255,6 +2255,20 @@
       @media (prefers-reduced-motion: reduce) {
         .stride-select { transition: none; }
       }
+      /* WebKit opens the native picker on mousedown even when the event is
+         cancelled, so suppression cannot be an event-listener courtesy. On
+         fine pointers the select is removed from the pointer path entirely —
+         the click lands on its host and the enhancer picks it up from there.
+         There is no native popup because the control was never hit. Keyboard
+         and touch never see this rule. */
+      @media (hover: hover) and (pointer: fine) {
+        select:not([data-native-select]):not(:disabled) {
+          pointer-events: none;
+        }
+        :has(> select:not([data-native-select]):not(:disabled)):hover {
+          cursor: pointer;
+        }
+      }
 
       .field textarea {
         height: auto;
@@ -57739,11 +57753,33 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return target
         }
 
-        document.addEventListener('mousedown', event => {
-          if (openState && !openState.panel.contains(event.target) && event.target !== openState.select) {
-            closeStrideSelect(false)
+        /* With pointer-events off, the mousedown target is the select's HOST,
+           not the select — walk to the nearest ancestor with a direct select
+           child and qualify that. A click on the field label opens the panel
+           too, which the native control never offered. */
+        function resolveStrideSelect(target) {
+          const direct = strideSelectFor(target)
+          if (direct) return direct
+          if (!(target instanceof Element)) return null
+          const host = target.closest(':has(> select)')
+          if (!host) return null
+          for (const candidate of host.querySelectorAll(':scope > select')) {
+            const qualified = strideSelectFor(candidate)
+            if (qualified) return qualified
           }
-          const select = strideSelectFor(event.target)
+          return null
+        }
+
+        document.addEventListener('mousedown', event => {
+          const select = resolveStrideSelect(event.target)
+          if (openState && !openState.panel.contains(event.target)) {
+            const wasOpenFor = openState.select
+            closeStrideSelect(false)
+            if (select === wasOpenFor) {
+              event.preventDefault()
+              return
+            }
+          }
           if (!select) return
           event.preventDefault()
           select.focus({ preventScroll: true })
