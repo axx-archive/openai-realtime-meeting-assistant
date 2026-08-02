@@ -17,7 +17,7 @@ import (
 )
 
 func main() {
-	mode := flag.String("mode", "", "registry, corpus, io-pilots, or external-matrix")
+	mode := flag.String("mode", "", "registry, corpus, io-pilots, external-matrix, or qualification-result")
 	inputPath := flag.String("input", "", "canonical compact JSON packet to validate")
 	trustRootsPath := flag.String("trust-roots", "", "explicitly approved trust-root JSON")
 	approvedTrustRootSHA256 := flag.String("approved-trust-root-sha256", "", "SHA-256 anchor copied from the separately approved release ledger")
@@ -28,6 +28,12 @@ func main() {
 	operatorPublicKeyPath := flag.String("operator-public-key", "", "operator Ed25519 public key in lowercase hex")
 	reviewerSignaturePath := flag.String("reviewer-signature", "", "detached independent-review Ed25519 signature in lowercase hex")
 	reviewerPublicKeyPath := flag.String("reviewer-public-key", "", "independent-review Ed25519 public key in lowercase hex")
+	sourcePath := flag.String("source", "", "canonical signed source packet (qualification-result mode)")
+	sourceKind := flag.String("source-kind", "", "corpus or io_pilots (qualification-result mode)")
+	sourceOperatorSignaturePath := flag.String("source-operator-signature", "", "detached source operator signature in lowercase hex (qualification-result mode)")
+	sourceOperatorPublicKeyPath := flag.String("source-operator-public-key", "", "source operator public key in lowercase hex (qualification-result mode)")
+	sourceReviewerSignaturePath := flag.String("source-reviewer-signature", "", "detached source independent-review signature in lowercase hex (qualification-result mode)")
+	sourceReviewerPublicKeyPath := flag.String("source-reviewer-public-key", "", "source independent-review public key in lowercase hex (qualification-result mode)")
 	expectedReceiptPath := flag.String("expected-receipt", "", "optional previously emitted receipt that must exactly match a fresh verification")
 	consumeLedgerPath := flag.String("consume-ledger", "", "optional private replay-ledger path used to consume the freshly verified receipt exactly once")
 	flag.Parse()
@@ -91,8 +97,33 @@ func main() {
 				fatal(verifyErr)
 			}
 			receipt = verifiedReceipt
+		case "qualification-result":
+			if strings.TrimSpace(*sourcePath) == "" || (*sourceKind != "corpus" && *sourceKind != "io_pilots") {
+				fatal(errors.New("-source and -source-kind=corpus|io_pilots are required for qualification-result mode"))
+			}
+			if strings.TrimSpace(*expectedReceiptPath) != "" || strings.TrimSpace(*consumeLedgerPath) != "" {
+				fatal(errors.New("qualification-result mode emits an import bundle; -expected-receipt and -consume-ledger do not apply"))
+			}
+			sourceRaw, readErr := os.ReadFile(*sourcePath)
+			if readErr != nil {
+				fatal(readErr)
+			}
+			sourceOperatorSignature, sourceOperatorPublicKey, sourceReviewerSignature, sourceReviewerPublicKey, sourceSignatureErr := readPacketSignatureSet(*sourceOperatorSignaturePath, *sourceOperatorPublicKeyPath, *sourceReviewerSignaturePath, *sourceReviewerPublicKeyPath)
+			if sourceSignatureErr != nil {
+				fatal(sourceSignatureErr)
+			}
+			result, decodeErr := e10evidence.DecodeCanonicalStrict[e10evidence.QualificationResultPacket](raw)
+			if decodeErr != nil {
+				fatal(decodeErr)
+			}
+			bundleRaw, _, buildErr := e10evidence.BuildQualificationImportBundle(result.TenantID, *sourceKind, registryRaw, registrySignature, registryPublicKey, sourceRaw, sourceOperatorSignature, sourceOperatorPublicKey, sourceReviewerSignature, sourceReviewerPublicKey, raw, operatorSignature, operatorPublicKey, reviewerSignature, reviewerPublicKey, roots)
+			if buildErr != nil {
+				fatal(buildErr)
+			}
+			fmt.Print(string(bundleRaw))
+			return
 		default:
-			fatal(errors.New("-mode must be registry, corpus, io-pilots, or external-matrix"))
+			fatal(errors.New("-mode must be registry, corpus, io-pilots, external-matrix, or qualification-result"))
 		}
 	}
 

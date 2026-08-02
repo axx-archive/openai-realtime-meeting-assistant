@@ -212,11 +212,11 @@ the independently governed source store and Critic gate remain authoritative.
 Corpus and pilot validation receipts remain structure-only and can never be
 promoted by copying their JSON into the application. After an approved
 evaluator has run over the exact source packet, create one canonical
-`stride.e10.qualification-result/v1` packet with evidence class
+`stride.e10.qualification-result/v2` packet with evidence class
 `dual_signed_evaluator_result`. It binds:
 
-- the tenant, lane, result ID, preregistered target, and qualified/not-qualified
-  disposition;
+- the tenant, lane, result ID, preregistered target, qualification-subject
+  digest, and qualified/not-qualified disposition;
 - the exact source packet kind and SHA-256;
 - the complete candidate binding, including release commit, tree, image,
   configuration, and route-map digests;
@@ -233,16 +233,22 @@ result signatures. A copied receipt, hand-built capability, changed target,
 fixture, tenant, candidate/config/route digest, evaluator revision, result
 digest, source packet, or trust root fails closed.
 
-Only the returned opaque `VerifiedQualificationResult` may be passed to
-`QualificationEvidenceStore.ImportVerifiedQualificationResult`. The store
-persists the immutable import record in its existing locked `0600`, fsynced,
-hash-chained journal and rejects reuse of either the source or result packet
-across store instances sharing that journal and across restarts.
+Run `e10-evidence -mode qualification-result` with the canonical result,
+registry, source packet, and all registry/source/result signature and public-key
+files. It emits a canonical `stride.e10.qualification-import-bundle/v1`.
+`OpenTrustedQualificationEvidenceStore` requires the separately approved
+trust-root bytes and digest plus an externally retained, tenant-bound minimum
+ledger anchor. `ImportQualificationBundle` re-verifies every signed byte,
+persists the complete bundle in the locked `0600`, fsynced journal, and returns
+the new head for external compare-and-swap custody. Reload re-verifies every
+trusted event and refuses a changed anchored prefix or a valid-prefix rollback.
+The old opaque-capability import path is deliberately unavailable because it
+cannot be re-verified across processes.
 `QualificationEvidenceSeed`, local test
 rows, and the existing structure-only evaluator candidates cannot mint or
 enter this trusted map. Reading a stored result does not enable a route,
 deployment, release, or launch; those remain separate gates. Preserve the
-original packets, evaluator output, signatures, trust-root anchor, and journal
+original packets, evaluator output, signatures, trust-root and ledger anchors, and journal
 together as the audit set.
 
 ## Physical-device, real-WebRTC, HA/DR, and worker matrices

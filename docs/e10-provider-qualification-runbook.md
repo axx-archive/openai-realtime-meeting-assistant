@@ -144,11 +144,19 @@ and the route-specific rollback evidence in the master plan.
 
 After evaluation, retain the full evaluator output outside the application and
 place its SHA-256 in a dual-signed
-`stride.e10.qualification-result/v1` packet. The packet must bind the original
-opaque source-packet receipt, tenant, registry, candidate tree/image/config/route
-digests, and the exact preregistered evaluator measurement-code digest. Only
-`VerifyQualificationResultReceipt` can mint the opaque capability accepted by
-`QualificationEvidenceStore.ImportVerifiedQualificationResult`; local seed
-data and structure-only evaluator candidates remain ineligible. Import is
-durable and one-use but still does not authorize route activation, deployment,
-release, or launch.
+`stride.e10.qualification-result/v2` packet. The packet and its signed
+`corpus/v4` or `pilot-packet/v5` source bind the tenant, qualification-subject
+digest, registry, candidate tree/image/config/route digests, and exact
+preregistered evaluator revision. `e10-evidence -mode qualification-result`
+emits a canonical import bundle containing the registry, source, result, and
+all detached signing material. The trusted store re-verifies that bundle
+against separately configured trust-root bytes and their approved digest on
+every import and reload; opaque in-process capabilities and local seed data are
+ineligible. Import is durable and one-use but still does not authorize route
+activation, deployment, release, or launch.
+
+For `meeting_specialist`, the target fixture is the canonical digest of the
+signed provider/model/voice, route, accounting profile, runtime profile, and
+capability-policy binding. The same digest appears as the qualification subject
+in the source and result. An adapter configured for any different field set
+therefore cannot borrow the qualified result.
