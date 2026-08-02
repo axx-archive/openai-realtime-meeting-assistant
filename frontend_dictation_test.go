@@ -21,6 +21,7 @@ func TestWebComposerDictationInstallsEveryFirstPartyComposer(t *testing.T) {
 	for _, want := range []string{
 		`<script src="/public/composer-dictation.js"></script>`,
 		"mount(scoutChatForm, scoutChatInput, 'chat')",
+		"mount(homeScoutComposer, homeScoutInput, 'chat')",
 		"mount(roomChatForm, roomChatInput, 'chat')",
 		"mount(osAssistantForm, osAssistantInput, 'chat')",
 		"mount(assistantForm, assistantInput, 'chat')",
@@ -29,9 +30,72 @@ func TestWebComposerDictationInstallsEveryFirstPartyComposer(t *testing.T) {
 		"fetch('/assistant/transcribe'",
 		"form.requestSubmit()",
 		".stride-dictation-action[hidden]",
+		"min-width: 44px; height: 44px",
 	} {
 		if !strings.Contains(combined, want) {
 			t.Errorf("dictation integration missing %q", want)
+		}
+	}
+}
+
+func TestWebHomeScoutComposerUsesAtomicPrivateOpening(t *testing.T) {
+	body, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(body)
+	for _, want := range []string{
+		`id="homeScoutComposer"`,
+		`id="homeScoutInput"`,
+		`id="homeScoutComposerStatus"`,
+		"'Idempotency-Key': attempt.key",
+		"JSON.stringify({ openingMessage: { text: attempt.text } })",
+		"homeScoutInput.value = attempt.text",
+		"setScoutTab('private')",
+		"selectScoutChatThread(thread.id)",
+		"setMobileChatView('convo')",
+		"terminalReason: 'superseded_by_text_composer'",
+		`.home-scout-composer__send {`,
+		"box-sizing: border-box;",
+		"grid-template-columns: minmax(0, 1fr);",
+		"width: 44px;",
+		"height: 44px;",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("atomic web home opening missing %q", want)
+		}
+	}
+}
+
+func TestWebHomeScoutOpeningRendersReplyLifecycleWithoutFalseProviderClaims(t *testing.T) {
+	body, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(body)
+	for _, want := range []string{
+		"function scoutReplyLifecyclePresentation(message)",
+		"Scout is queued",
+		"Scout is responding",
+		"Scout response canceled",
+		"scout-chat-reply-state__retry",
+		"/messages/${encodeURIComponent(messageId)}/retry",
+		"decorateScoutReplyLifecycle(node, message, replyLifecycle)",
+		"const messageActionsReady = !message.reply || message.reply.state === 'completed'",
+		"message.id && kind !== 'error' && messageActionsReady",
+		"idname.textContent = 'scout'",
+		"isPhone ? 'ask…'",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("web Scout reply lifecycle missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"idname.textContent = 'claude'",
+		"idmodel.textContent = `· fable 5",
+	} {
+		if strings.Contains(html, forbidden) {
+			t.Errorf("ordinary Scout reply exposes an unattested provider/model claim %q", forbidden)
 		}
 	}
 }
@@ -62,6 +126,10 @@ func TestWebDictationFocusParksForRoomAndMutesPrivateCapture(t *testing.T) {
 		"terminalReason: 'superseded_by_dictation'",
 		"window.__bonfirePrivateRealtimeTerminalReason",
 		"await window.__bonfireDictation?.parkForRoomJoin?.()",
+		"await acquireRealtimeVoiceAudioFocus('private_realtime')",
+		"await acquireRealtimeVoiceAudioFocus('room_realtime')",
+		"acquireRealtime(mode, close) { return focus.acquire(mode, { close }) }",
+		"controller.park('superseded_by_realtime')",
 		"const priorMuted = isMicMuted",
 		"window.__bonfirePrivateDictationCapture = true",
 		"setLocalMute(true, { announce: false })",

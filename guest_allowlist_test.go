@@ -214,6 +214,7 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 		"/assistant/realtime-offer":            {handler: assistantRealtimeOfferHandler, memberGated: true},
 		"/assistant/realtime-tool":             {handler: assistantRealtimeToolHandler, memberGated: true},
 		"/assistant/realtime/usage":            {handler: assistantRealtimeUsageHandler, memberGated: true},
+		"/assistant/realtime/milestone":        {handler: assistantRealtimeMilestoneHandler, memberGated: true},
 		"/api/usage/rollup":                    {handler: usageRollupHandler, memberGated: true},
 		"/internal/codex/jobs/result":          {handler: internalCodexRunnerResultHandler, memberGated: true},
 		"/internal/media-soak/":                {handler: mediaSoakObserverHandler, method: http.MethodPost, path: "/internal/media-soak/resources", allowed: []int{http.StatusNotFound}},

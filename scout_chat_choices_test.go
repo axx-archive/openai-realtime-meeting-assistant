@@ -81,9 +81,10 @@ func TestScoutChatChoicesMessageRoundTrip(t *testing.T) {
 // labels drop, and the card caps at 4 options.
 func TestScoutChatRouterOffersChoicesNeverLaunches(t *testing.T) {
 	setupAuthTestEnv(t)
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-router-test")
+	t.Setenv("OPENAI_API_KEY", "openai-router-test")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "openai-router-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
 
 	previousRunner := startAgentThreadAsync
@@ -91,28 +92,19 @@ func TestScoutChatRouterOffersChoicesNeverLaunches(t *testing.T) {
 		t.Fatal("a choices card must never launch an agent thread")
 	}
 	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
-	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
-		t.Fatal("a choices turn must not also run the Q&A path")
-		return "", nil
-	})
-
-	swapAnthropicMessagesResponder(t, func(_ context.Context, _ string, _ anthropicMessagesRequest) (anthropicMessagesResponse, error) {
-		return anthropicMessagesResponse{
-			StopReason: "tool_use",
-			Content: []json.RawMessage{
-				mockAnthropicToolUseBlock("toolu_choices", "offer_choices", map[string]any{
-					"question": "do you want outline work, or the deck built end to end?",
-					"options": []map[string]any{
-						{"label": "tighten the outline", "tool_id": "deck_outline"},
-						{"label": "full packaging run", "reply": "run the full packaging build from the outline", "tool_id": "packaging_studio"},
-						{"label": "phantom pill", "tool_id": "not_a_tool"},
-						{"label": ""},
-						{"label": "option five"},
-						{"label": "option six"},
-					},
-				}),
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Workflow != "scout_route" {
+			t.Fatal("a choices turn must not also run the Q&A path")
+		}
+		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
+			Route: "choices", Question: "do you want outline work, or the deck built end to end?",
+			Options: []openAIScoutRouterOption{
+				{Label: "tighten the outline", ToolID: "deck_outline"},
+				{Label: "full packaging run", Reply: "run the full packaging build from the outline", ToolID: "packaging_studio"},
+				{Label: "phantom pill", ToolID: "not_a_tool"},
+				{Label: "option five"},
 			},
-		}, nil
+		}), nil
 	})
 
 	user := accountStore().findUser("aj@shareability.com")
@@ -274,14 +266,15 @@ func TestScoutChatChoicePillPlainReplyAnswersTier0(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "openai-chat-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-router-test")
+	t.Setenv("OPENAI_API_KEY", "openai-chat-test")
 
 	swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
 		t.Fatal("a pill reply must not re-enter the router")
 		return anthropicMessagesResponse{}, nil
 	})
-	swapAnthropicTextResponder(t, func(_ context.Context, _ string, request anthropicTextRequest) (string, error) {
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		return "here's the short version, no run needed.", nil
 	})
 
@@ -375,10 +368,11 @@ func TestScoutChatRouterScenarioPhrasingsRouteToIntendedProposal(t *testing.T) {
 	}
 	for _, scenario := range scenarios {
 		t.Run(scenario.name, func(t *testing.T) {
-			setupAuthTestEnv(t)
-			t.Setenv("ANTHROPIC_API_KEY", "sk-ant-router-test")
-			previousApp := kanbanApp
-			kanbanApp = newIsolatedKanbanBoardApp(t)
+		setupAuthTestEnv(t)
+		t.Setenv("OPENAI_API_KEY", "openai-router-test")
+		previousApp := kanbanApp
+		kanbanApp = newIsolatedKanbanBoardApp(t)
+		kanbanApp.apiKey = "openai-router-test"
 			t.Cleanup(func() { kanbanApp = previousApp })
 
 			previousRunner := startAgentThreadAsync
@@ -387,18 +381,12 @@ func TestScoutChatRouterScenarioPhrasingsRouteToIntendedProposal(t *testing.T) {
 			}
 			t.Cleanup(func() { startAgentThreadAsync = previousRunner })
 
-			var routed anthropicMessagesRequest
-			swapAnthropicMessagesResponder(t, func(_ context.Context, _ string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+			var routed openAITextRequest
+			swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 				routed = request
-				return anthropicMessagesResponse{
-					StopReason: "tool_use",
-					Content: []json.RawMessage{
-						mockAnthropicToolUseBlock("toolu_scenario", "propose_tool_run", map[string]any{
-							"tool_id":   scenario.toolID,
-							"objective": scenario.objective,
-						}),
-					},
-				}, nil
+				return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
+					Route: "tool_run", ToolID: scenario.toolID, Objective: scenario.objective,
+				}), nil
 			})
 
 			user := accountStore().findUser("aj@shareability.com")
@@ -417,7 +405,7 @@ func TestScoutChatRouterScenarioPhrasingsRouteToIntendedProposal(t *testing.T) {
 			// The intent map rides the system prompt — that is what makes these
 			// phrasings route well on the live model.
 			for _, anchor := range []string{"Intent map", "deck_outline", "brand_design_brief", "packaging_studio", "offer_choices"} {
-				if !strings.Contains(routed.System, anchor) {
+				if !strings.Contains(routed.Instructions, anchor) {
 					t.Fatalf("router system prompt missing intent-map anchor %q", anchor)
 				}
 			}

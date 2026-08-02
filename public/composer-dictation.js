@@ -144,7 +144,7 @@
           .stride-dictation-composer { position: relative; }
           .stride-dictation-composer--nested { display: flex; align-items: flex-end; gap: 6px; width: 100%; min-width: 0; }
           .stride-dictation-composer--nested > .stride-dictation-input { flex: 1 1 auto; min-width: 0; }
-          .stride-dictation-mic, .stride-dictation-action { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; min-width: 34px; height: 34px; border: 0; border-radius: 999px; background: transparent; color: inherit; font: 600 11px/1 system-ui; cursor: pointer; }
+          .stride-dictation-mic, .stride-dictation-action { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; min-width: 44px; height: 44px; border: 0; border-radius: 999px; background: transparent; color: inherit; font: 600 11px/1 system-ui; cursor: pointer; }
           .stride-dictation-action[hidden], .stride-dictation-wave[hidden] { display: none !important; }
           .stride-dictation-mic:hover, .stride-dictation-action:hover { background: rgba(255,255,255,.09); }
           .stride-dictation-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }

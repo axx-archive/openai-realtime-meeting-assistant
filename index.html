@@ -6334,6 +6334,7 @@
       /* ---------- Office home (Scout waveform) ---------- */
       .office-tool {
         width: min(1180px, 100%);
+        grid-template-columns: minmax(0, 1fr);
         min-height: 0;
         align-self: stretch;
         justify-self: center;
@@ -6344,6 +6345,7 @@
          a greeting, and nothing else (design §5.1; no card chrome) */
       .office-launch {
         position: relative;
+        min-width: 0;
         min-height: calc(100vh - var(--shell-topbar-height, 0px));
         min-height: calc(100svh - var(--shell-topbar-height, 0px));
         display: flex;
@@ -6356,6 +6358,7 @@
 
       .office-launch__wrap {
         position: relative;
+        min-width: 0;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -6461,6 +6464,64 @@
         color: var(--text-1);
         font: 600 22px var(--font-sans);
         letter-spacing: -0.016em;
+        text-align: center;
+      }
+
+      .home-scout-composer {
+        box-sizing: border-box;
+        width: min(620px, 100%);
+        min-height: 54px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 20px;
+        padding: 8px 9px 8px 17px;
+        border: 1px solid var(--line-1);
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--surface-2) 86%, transparent);
+        box-shadow: 0 12px 32px rgba(12, 10, 8, 0.06);
+        color: var(--text-2);
+        transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+      }
+
+      .home-scout-composer:focus-within {
+        border-color: color-mix(in srgb, var(--ember) 40%, var(--line-1));
+        box-shadow: 0 14px 38px rgba(12, 10, 8, 0.08);
+      }
+
+      .home-scout-composer__input {
+        flex: 1 1 auto;
+        min-width: 0;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--text-1);
+        font: var(--type-body);
+      }
+
+      .home-scout-composer__input::placeholder { color: var(--text-3); }
+
+      .home-scout-composer__send {
+        width: 44px;
+        height: 44px;
+        flex: 0 0 44px;
+        display: grid;
+        place-items: center;
+        border: 0;
+        border-radius: 999px;
+        background: var(--text-1);
+        color: var(--surface-1);
+        transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+
+      .home-scout-composer__send:disabled { opacity: 0.34; }
+      .home-scout-composer__send:not(:disabled):active { transform: scale(0.94); }
+
+      .home-scout-composer-status {
+        min-height: 18px;
+        margin: 8px 0 0;
+        color: var(--danger, #b42318);
+        font: var(--type-caption);
         text-align: center;
       }
 
@@ -9339,7 +9400,7 @@
 
       /* sheet §3 letters: past ~400 chars a bubble stops being a bubble — it
          becomes a letter card on the feed measure with an identity header
-         ("claude · fable 5 · on aj's account · 22:42") and a clamped body
+         ("scout · 22:42") and a clamped body
          behind "read the full letter" */
       #chatTool .scout-chat-msg--longform {
         max-width: min(var(--feed-measure), 92%) !important;
@@ -9644,6 +9705,54 @@
         color: var(--danger);
         border: 1px solid transparent;
         border-radius: 18px 18px 18px 6px;
+      }
+
+      .scout-chat-reply-state {
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        color: var(--text-2);
+        font: var(--type-label);
+      }
+
+      .scout-chat-reply-state__pulse {
+        width: 8px;
+        height: 8px;
+        flex: 0 0 8px;
+        border-radius: 999px;
+        background: var(--ember);
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--ember) 28%, transparent);
+        animation: scoutReplyPulse 1.35s var(--ease) infinite;
+      }
+
+      .scout-chat-reply-state[data-state="failed"] {
+        color: var(--danger, #b42318);
+      }
+
+      .scout-chat-reply-state[data-state="canceled"] {
+        color: var(--text-3);
+      }
+
+      .scout-chat-reply-state__retry {
+        min-width: 44px;
+        min-height: 44px;
+        padding: 0 14px;
+        border: 1px solid var(--line-1);
+        border-radius: 999px;
+        background: var(--surface-2);
+        color: var(--text-1);
+        font: inherit;
+      }
+
+      .scout-chat-reply-state__retry:disabled { opacity: 0.5; }
+
+      @keyframes scoutReplyPulse {
+        50% { box-shadow: 0 0 0 6px transparent; opacity: 0.58; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .scout-chat-reply-state__pulse { animation: none; }
       }
 
       /* sheet §3 letter card — after the bubble variants so it wins */
@@ -21074,6 +21183,11 @@
           margin-top: 4px;
         }
 
+        .home-scout-composer {
+          width: 100%;
+          margin-top: 4px;
+        }
+
         .office-intel-card {
           display: flex;
         }
@@ -24081,6 +24195,13 @@
                   <span class="office-launch__tap-hint" id="officeLaunchHint">tap to talk to Scout</span>
                 </button>
               </div>
+              <form id="homeScoutComposer" class="home-scout-composer" autocomplete="off">
+                <input id="homeScoutInput" class="home-scout-composer__input" type="text" maxlength="4000" placeholder="Message Scout" aria-label="Message Scout from home" disabled>
+                <button id="homeScoutSend" class="home-scout-composer__send" type="submit" aria-label="Send message to a new private Scout thread" disabled>
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg>
+                </button>
+              </form>
+              <p id="homeScoutComposerStatus" class="home-scout-composer-status" role="status" aria-live="polite"></p>
             </div>
             <!-- multi-room: home carries ONLY the glanceable live-now strip
                  (rooms with people inside, else one quiet row). The full
@@ -26499,6 +26620,11 @@
       const officeLaunchGreeting = document.getElementById('officeLaunchGreeting')
       const officeLaunchHome = document.querySelector('.office-launch')
       const officeLaunchHint = document.getElementById('officeLaunchHint')
+      const homeScoutComposer = document.getElementById('homeScoutComposer')
+      const homeScoutInput = document.getElementById('homeScoutInput')
+      const homeScoutSend = document.getElementById('homeScoutSend')
+      const homeScoutComposerStatus = document.getElementById('homeScoutComposerStatus')
+      let homeScoutOpeningAttempt = null
       const officeIntelCard = document.getElementById('officeIntelCard')
       // mobile shell chrome (design mobile §1) — header back/bell/avatar,
       // the settings sheet head, and the chat stacked navigator
@@ -26725,6 +26851,7 @@
       let privateRealtimeVoiceStarting = false
       let privateRealtimeVoiceHandledCalls = new Set()
       let privateRealtimeVoiceSessionToken = 0
+      let privateRealtimeVoiceFocusLease = null
       let voiceIslandState = 'idle'
       let voiceIslandClearTimer = 0
       // Private grill (Wave 12) — a browser-driven ritual. The private Realtime
@@ -27733,6 +27860,19 @@
       topbarMobileAccountButton?.addEventListener('click', () => openSettings({ section: 'profile', allowLocked: true, restoreFocusTo: topbarMobileAccountButton }))
       // office → intelligence entry card (D14)
       officeIntelCard?.addEventListener('click', () => setActiveTool('artifacts'))
+      homeScoutComposer?.addEventListener('submit', submitHomeScoutOpening)
+      homeScoutInput?.addEventListener('input', () => {
+        if (homeScoutOpeningAttempt?.text !== homeScoutInput.value.trim()) {
+          homeScoutOpeningAttempt = null
+          homeScoutComposerStatus.textContent = ''
+        }
+        homeScoutSend.disabled = !Boolean(authedUser) || !homeScoutInput.value.trim()
+      })
+      homeScoutInput?.addEventListener('focus', () => {
+        if (privateRealtimeVoiceInFlight()) {
+          stopRealtimeVoiceConversation({ notifyServer: false, terminalReason: 'superseded_by_text_composer' })
+        }
+      })
       // settings sheet head — theme segmented + sign out
       sheetThemeDark?.addEventListener('click', () => setThemePreference('dark'))
       sheetThemeLight?.addEventListener('click', () => setThemePreference('light'))
@@ -34808,6 +34948,9 @@
           return
         }
         stopOSAssistantVoice()
+        closePrivateRealtimeVoiceSession()
+        const focusLease = await acquireRealtimeVoiceAudioFocus('room_realtime')
+        if (focusLease && !focusLease.isCurrent()) return
         setRealtimeVoiceMode('room')
         realtimeVoiceReturnTool = appShell.dataset.tool || 'office'
         realtimeVoiceStartedRoom = false
@@ -34868,6 +35011,8 @@
 
         stopOSAssistantVoice()
         closePrivateRealtimeVoiceSession()
+        const focusLease = await acquireRealtimeVoiceAudioFocus('private_realtime')
+        if (focusLease && !focusLease.isCurrent()) return
         setRealtimeVoiceMode('private')
         realtimeVoiceOnlyPending = false
         realtimeVoiceStartedRoom = false
@@ -34943,6 +35088,7 @@
           privateRealtimeVoiceHandledCalls = new Set()
           peer.ontrack = event => {
             if (sessionToken !== privateRealtimeVoiceSessionToken || privateRealtimeVoicePeer !== peer) return
+            postPrivateRealtimeMilestone('remote_track')
             attachPrivateRealtimeVoiceTrack(event, sessionToken, peer)
           }
         peer.onconnectionstatechange = () => {
@@ -34951,10 +35097,12 @@
           }
           const state = peer.connectionState
           if (state === 'connected') {
+            postPrivateRealtimeMilestone('peer_connected')
             setVoiceIslandState('listening', 'listening…')
           } else if (state === 'connecting' || state === 'new') {
             setVoiceIslandState('connecting', 'connecting…')
           } else if (state === 'failed' || state === 'disconnected') {
+            postPrivateRealtimeMilestone('transport_error')
             terminatePrivateRealtimeVoiceSession(sessionToken, peer, 'voice connection interrupted')
           } else if (state === 'closed' && privateRealtimeVoiceActive()) {
             terminatePrivateRealtimeVoiceSession(sessionToken, peer, 'voice connection ended')
@@ -34966,6 +35114,7 @@
         privateRealtimeVoiceDataChannel = dataChannel
         dataChannel.onopen = () => {
           if (sessionToken === privateRealtimeVoiceSessionToken && privateRealtimeVoiceDataChannel === dataChannel) {
+            postPrivateRealtimeMilestone('data_channel_open')
             setVoiceIslandState('listening', 'listening…')
           }
         }
@@ -35639,6 +35788,7 @@
         } else if (type === 'response.function_call_arguments.done') {
           handlePrivateRealtimeToolCall(privateRealtimeFunctionCallFromEvent(event))
         } else if (type === 'response.done') {
+          postPrivateRealtimeMilestone('response_done')
           const interrupted = ['cancelled', 'incomplete', 'failed'].includes(String(event.response?.status || '').trim().toLowerCase())
           for (const item of event.response?.output || []) {
             if (item?.type === 'function_call' && !interrupted) {
@@ -35653,6 +35803,7 @@
           postPrivateRealtimeUsageBeacon(event)
         }
         if (type === 'error') {
+          postPrivateRealtimeMilestone('transport_error')
           const message = event.error?.message || 'voice needs attention'
           terminatePrivateRealtimeVoiceSession(sessionToken, peer, message)
           return
@@ -35661,6 +35812,7 @@
         } else if (type.includes('speech_stopped')) {
           setVoiceIslandState('thinking', 'thinking…')
         } else if (type.includes('response.audio') || type.includes('output_audio_buffer.started')) {
+          postPrivateRealtimeMilestone('first_audio')
           setVoiceIslandState('talking', 'answering…')
         } else if (type.includes('response.done') || type.includes('output_audio_buffer.stopped')) {
           if (privateRealtimeVoiceActive()) {
@@ -35686,6 +35838,14 @@
           }).catch(() => {})
         } catch {
           // Never let telemetry disturb the voice surface.
+        }
+      }
+
+      function postPrivateRealtimeMilestone(milestone) {
+        try {
+          postAuthJSON('/assistant/realtime/milestone', { milestone: String(milestone || '') }).catch(() => {})
+        } catch {
+          // Transport telemetry must never disturb the voice surface.
         }
       }
 
@@ -36125,6 +36285,28 @@
         // Both taps die with the session, so the next one starts from silence
         // rather than inheriting a stale analyser on a stopped track.
         releaseStrideSignalTaps()
+        releaseRealtimeVoiceAudioFocus('session_closed')
+      }
+
+      async function acquireRealtimeVoiceAudioFocus(mode) {
+        const coordinator = window.__bonfireDictation
+        if (!coordinator?.acquireRealtime) {
+          await coordinator?.parkForRealtime?.()
+          return null
+        }
+        const lease = await coordinator.acquireRealtime(mode, reason => {
+          if (privateRealtimeVoiceInFlight()) {
+            stopRealtimeVoiceConversation({ notifyServer: false, terminalReason: reason || 'superseded_by_dictation' })
+          }
+        })
+        if (lease?.isCurrent?.()) privateRealtimeVoiceFocusLease = lease
+        return lease
+      }
+
+      function releaseRealtimeVoiceAudioFocus(reason) {
+        const lease = privateRealtimeVoiceFocusLease
+        privateRealtimeVoiceFocusLease = null
+        Promise.resolve(lease?.release?.(reason)).catch(() => {})
       }
 
       function privateRealtimeVoiceInFlight() {
@@ -44795,6 +44977,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      function updateScoutChatAvailability() {
 	        const joined = appShell.classList.contains('is-in-room') && ws?.readyState === WebSocket.OPEN
 	        const available = joined || Boolean(authedUser)
+	        if (homeScoutInput) homeScoutInput.disabled = !Boolean(authedUser)
+	        if (homeScoutSend) homeScoutSend.disabled = !Boolean(authedUser) || !homeScoutInput?.value.trim()
 	        scoutChatInput.disabled = !available
 	        scoutChatSend.disabled = !available
 	        if (scoutChatAttach) {
@@ -44817,6 +45001,63 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        updateRoomChatAvailability()
 	      }
+
+      function nextHomeScoutOpeningKey() {
+        const random = window.crypto?.randomUUID?.()
+        if (random) return `home-scout-${random}`
+        return `home-scout-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`
+      }
+
+      async function submitHomeScoutOpening(event) {
+        event?.preventDefault?.()
+        if (!authedUser || !homeScoutInput || homeScoutComposer?.dataset.submitting === 'true') return
+        const text = homeScoutInput.value.trim()
+        if (!text) {
+          homeScoutInput.focus()
+          return
+        }
+        if (!homeScoutOpeningAttempt || homeScoutOpeningAttempt.text !== text) {
+          homeScoutOpeningAttempt = { text, key: nextHomeScoutOpeningKey() }
+        }
+        const attempt = homeScoutOpeningAttempt
+        homeScoutComposer.dataset.submitting = 'true'
+        homeScoutComposer.setAttribute('aria-busy', 'true')
+        homeScoutInput.disabled = true
+        homeScoutSend.disabled = true
+        homeScoutComposerStatus.textContent = ''
+        if (privateRealtimeVoiceInFlight()) {
+          stopRealtimeVoiceConversation({ notifyServer: false, terminalReason: 'superseded_by_text_composer' })
+        }
+        try {
+          const response = await fetch('/assistant/chat-threads', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Idempotency-Key': attempt.key
+            },
+            body: JSON.stringify({ openingMessage: { text: attempt.text } })
+          })
+          const payload = await response.json().catch(() => ({}))
+          if (!response.ok || !payload?.thread?.id) {
+            if (response.status === 409) homeScoutOpeningAttempt = null
+            throw new Error(payload?.error || 'Scout could not open that thread. Your message is still here.')
+          }
+          const thread = upsertScoutChatThread(payload.thread)
+          homeScoutOpeningAttempt = null
+          homeScoutInput.value = ''
+          setScoutTab('private')
+          selectScoutChatThread(thread.id)
+          setMobileChatView('convo')
+        } catch (error) {
+          homeScoutInput.value = attempt.text
+          homeScoutComposerStatus.textContent = error?.message || 'Scout could not open that thread. Your message is still here.'
+        } finally {
+          homeScoutComposer.dataset.submitting = 'false'
+          homeScoutComposer.removeAttribute('aria-busy')
+          homeScoutInput.disabled = !Boolean(authedUser)
+          homeScoutSend.disabled = !Boolean(authedUser) || !homeScoutInput.value.trim()
+        }
+      }
 
 	      function syncScoutChatToRoomView(inRoom) {
 	        if (inRoom && !authedUser) {
@@ -45390,7 +45631,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        return chatThreadIsChannel(thread)
 	          ? (isPhone ? 'message…' : 'message the thread — @scout to ask')
-	          : (isPhone ? 'ask Scout…' : 'ask Scout, or tap + to run a task')
+	          : (isPhone ? 'ask…' : 'ask Scout, or tap + to run a task')
 	      }
 
 	      // card 070: destination guard — a persistent pill naming where the next
@@ -49269,6 +49510,81 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        updateChatThreadItem(thread.preview || messages[messages.length - 1]?.text || 'chat thread', thread.updatedAt || messages[messages.length - 1]?.createdAt)
 	      }
 
+	      function scoutReplyLifecyclePresentation(message) {
+	        const reply = message?.reply
+	        if (!reply || reply.state === 'completed') return null
+	        if (reply.state === 'queued') {
+	          return { state: 'queued', label: 'Scout is queued', fallbackText: '', active: true, retryable: false }
+	        }
+	        if (reply.state === 'running') {
+	          return { state: 'running', label: 'Scout is responding', fallbackText: '', active: true, retryable: false }
+	        }
+	        if (reply.state === 'failed') {
+	          return {
+	            state: 'failed',
+	            label: "Scout couldn't answer yet",
+	            fallbackText: "Scout couldn't answer yet. Your message is safe.",
+	            active: false,
+	            retryable: reply.retryable === true
+	          }
+	        }
+	        if (reply.state === 'canceled') {
+	          return { state: 'canceled', label: 'Scout response canceled', fallbackText: 'Scout response canceled.', active: false, retryable: false }
+	        }
+	        return null
+	      }
+
+	      async function retryScoutOpeningReplyFromWeb(messageId, button, label) {
+	        const threadId = activeScoutThreadId
+	        if (!threadId || !messageId || button?.disabled) return
+	        button.disabled = true
+	        label.textContent = 'Retrying Scout…'
+	        try {
+	          const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}/retry`, {
+	            method: 'POST'
+	          })
+	          const payload = await response.json().catch(() => ({}))
+	          if (!response.ok || !payload?.thread) {
+	            throw new Error(payload?.error || 'Scout could not retry that reply.')
+	          }
+	          upsertScoutChatThread(payload.thread, { select: false })
+	          if (activeScoutThreadId === threadId) renderActiveScoutThread()
+	        } catch (error) {
+	          button.disabled = false
+	          label.textContent = 'Retry failed. Try again.'
+	          showToast({ text: error?.message || 'Scout could not retry that reply.', kind: 'error' })
+	        }
+	      }
+
+	      function decorateScoutReplyLifecycle(node, message, presentation) {
+	        if (!node || !presentation) return
+	        const stack = node.querySelector('.scout-chat-msg__stack')
+	        if (!stack) return
+	        node.dataset.replyState = presentation.state
+	        if (presentation.active) node.setAttribute('aria-busy', 'true')
+	        const status = document.createElement('div')
+	        status.className = 'scout-chat-reply-state'
+	        status.dataset.state = presentation.state
+	        status.setAttribute('role', 'status')
+	        status.setAttribute('aria-live', 'polite')
+	        status.setAttribute('aria-atomic', 'true')
+	        if (presentation.active) {
+	          const pulse = document.createElement('span')
+	          pulse.className = 'scout-chat-reply-state__pulse'
+	          pulse.setAttribute('aria-hidden', 'true')
+	          status.appendChild(pulse)
+	        }
+	        const label = bfEl('span', 'scout-chat-reply-state__label', presentation.label)
+	        status.appendChild(label)
+	        if (presentation.retryable && message?.id) {
+	          const retry = bfEl('button', 'scout-chat-reply-state__retry', 'Retry')
+	          retry.type = 'button'
+	          retry.addEventListener('click', () => retryScoutOpeningReplyFromWeb(String(message.id), retry, label))
+	          status.appendChild(retry)
+	        }
+	        stack.appendChild(status)
+	      }
+
 	      function scoutChatMessageRecordNode(message) {
 	        const recordKind = String(message?.kind || '')
 	        // §1: only consecutive stage deliverables share a run log — any
@@ -49352,7 +49668,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          // only the email-prefix fallback keeps the lowercase idiom
 	          authorLabel = authorName || authorEmail.split('@')[0].toLowerCase()
 	        }
-	        const text = kind === 'scout' ? scoutVoice(message?.text || '') : String(message?.text || '')
+	        const replyLifecycle = scoutReplyLifecyclePresentation(message)
+	        const sourceText = String(message?.text || '') || replyLifecycle?.fallbackText || ''
+	        const text = kind === 'scout' ? scoutVoice(sourceText) : sourceText
 	        // Disclosure: a message Scout posted on someone's behalf carries a
 	        // server-stamped postedOnBehalfOf — render a visible "via Scout" chip
 	        // next to the author so authorship is never hidden.
@@ -49367,6 +49685,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const node = scoutChatMessageNode(kind, text, message?.createdAt || new Date().toISOString(), message?.files || [], authorLabel, viaScout)
 	        node.dataset.messageId = String(message?.id || '')
 	        decorateDesktopChatMessage(node, message, kind, authorLabel)
+	        decorateScoutReplyLifecycle(node, message, replyLifecycle)
 	        // card 073: your own committed message carries the delete control —
 	        // peer and scout bubbles never do (the server enforces the same
 	        // authorship rule). It rides the article, beside the bubble, so the
@@ -49397,6 +49716,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!stack) {
 	          return
 	        }
+	        const messageActionsReady = !message.reply || message.reply.state === 'completed'
 
 	        const reply = message.replyTo
 	        if (reply?.messageId) {
@@ -49438,7 +49758,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 
 	        const reactions = Array.isArray(message.reactions) ? message.reactions : []
-	        if (reactions.length) {
+	        if (reactions.length && messageActionsReady) {
 	          const grouped = new Map()
 	          reactions.forEach(reaction => {
 	            const emoji = String(reaction?.emoji || '')
@@ -49463,7 +49783,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          stack.appendChild(reactionRow)
 	        }
 
-	        if (message.id && kind !== 'error') {
+	        if (message.id && kind !== 'error' && messageActionsReady) {
 	          const actions = bfEl('div', 'desktop-chat-actions')
 	          actions.setAttribute('aria-label', 'Message actions')
 	          const replyButton = bfEl('button', '', 'reply')
@@ -50554,9 +50874,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         const agentSender = kind === 'scout' || kind === 'error'
         if (agentSender) {
-          // the SenderMark — ONE identity chip for a short Scout bubble AND a
-          // longform letter, so every claude message reads as one sender:
-          // flame (ember) · claude · fable 5 · time
+          // The SenderMark identifies the product voice. Provider/model claims
+          // only belong here when a reply carries server-attested provenance;
+          // ordinary Scout messages deliberately make no such claim.
           const idrow = document.createElement('div')
           idrow.className = 'scout-chat-msg__idrow'
           const badge = document.createElement('span')
@@ -50565,14 +50885,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           badge.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2c.8 4 7 6.5 7 13a7 7 0 1 1-14 0C5 8.5 11.2 6 12 2Zm0 10c.5 2.4 3.5 3.3 3.5 6.2a3.5 3.5 0 1 1-7 0C8.5 15.3 11.5 14.4 12 12Z"></path></svg>'
           const idname = document.createElement('span')
           idname.className = 'scout-chat-msg__idname'
-          idname.textContent = 'claude'
-          const idmodel = document.createElement('span')
-          idmodel.className = 'scout-chat-msg__idmodel'
-          idmodel.textContent = `· fable 5${viaScout ? ` · on ${scoutChatSelfHandle()}'s account` : ''}`
+          idname.textContent = 'scout'
           const idtime = document.createElement('span')
           idtime.className = 'scout-chat-msg__idtime'
           idtime.textContent = scoutChatTimeLabel(ts)
-          idrow.append(badge, idname, idmodel, idtime)
+          idrow.append(badge, idname)
+          if (viaScout) {
+            const idcontext = document.createElement('span')
+            idcontext.className = 'scout-chat-msg__idmodel'
+            idcontext.textContent = `· on ${scoutChatSelfHandle()}'s account`
+            idrow.appendChild(idcontext)
+          }
+          idrow.appendChild(idtime)
           stack.appendChild(idrow)
         } else if (longform) {
           // a person's letter reuses the identity row with monochrome initials
@@ -61810,13 +62134,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
         }
         mount(scoutChatForm, scoutChatInput, 'chat')
+        mount(homeScoutComposer, homeScoutInput, 'chat')
         mount(roomChatForm, roomChatInput, 'chat')
         mount(osAssistantForm, osAssistantInput, 'chat')
         mount(assistantForm, assistantInput, 'chat')
         agentToolForms.forEach(form => mount(form, form.querySelector('textarea,input[type="text"]'), 'chat'))
         window.__bonfireDictation = {
           controllers,
-          async parkForRoomJoin() { await Promise.all(controllers.map(controller => controller.park('superseded_by_meeting_media'))) }
+          async parkForRoomJoin() { await Promise.all(controllers.map(controller => controller.park('superseded_by_meeting_media'))) },
+          async parkForRealtime() { await Promise.all(controllers.map(controller => controller.park('superseded_by_realtime'))) },
+          acquireRealtime(mode, close) { return focus.acquire(mode, { close }) }
         }
       }
       installWebComposerDictation()

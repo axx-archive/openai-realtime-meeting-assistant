@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import * as Linking from 'expo-linking';
@@ -12,6 +12,7 @@ import { LongMessageSheet } from './LongMessageSheet';
 import { ScoutRichText } from './ScoutRichText';
 import { ChatAvatar } from './ChatAvatar';
 import { messageLongPressDelayMs } from './messageGestures';
+import { scoutReplyLifecyclePresentation } from './scoutReplyLifecycle';
 import {
   extractHttpUrls,
   groupMessageReactions,
@@ -32,6 +33,8 @@ export type MessageBubbleProps = {
   onLongPress?: (message: ScoutMessage, own: boolean) => void;
   onOpenAttachment?: (file: ScoutFileAttachment) => void;
   onToggleReaction?: (message: ScoutMessage, emoji: string, active: boolean) => void;
+  onRetryReply?: (message: ScoutMessage) => void;
+  retryingReply?: boolean;
 };
 
 function isScout(message: ScoutMessage): boolean {
@@ -76,8 +79,12 @@ export const MessageBubble = React.memo(function MessageBubble({
   onLongPress,
   onOpenAttachment,
   onToggleReaction,
+  onRetryReply,
+  retryingReply = false,
 }: MessageBubbleProps) {
-  const body = bodyOf(message);
+  const lifecycle = scoutReplyLifecyclePresentation(message);
+  const rawBody = bodyOf(message);
+  const body = rawBody || (!lifecycle?.active ? lifecycle?.fallbackText ?? '' : '');
   const [showFullMessage, setShowFullMessage] = useState(false);
   const files = Array.isArray(message.files) ? message.files : [];
   const scout = isScout(message);
@@ -101,7 +108,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   }), [timestampReveal]);
   const timestampOpacity = useMemo(() => ({ opacity: timestampReveal }), [timestampReveal]);
 
-  if (!body && files.length === 0) return null;
+  if (!body && files.length === 0 && !lifecycle) return null;
 
   return (
     <View style={[styles.row, own && styles.rowOwn, showAuthor && styles.rowNewAuthor, reactions.length > 0 && styles.rowWithReactions]}>
@@ -119,7 +126,7 @@ export const MessageBubble = React.memo(function MessageBubble({
       <Animated.View style={[styles.stack, own && styles.stackOwn, translated]}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${own ? 'You' : String(message.authorName ?? (scout ? 'Scout' : 'Someone'))}: ${body || `${files.length} attachment${files.length === 1 ? '' : 's'}`}. ${message.editedAt ? 'Edited. ' : ''}${timeOf(message)}`}
+          accessibilityLabel={`${own ? 'You' : String(message.authorName ?? (scout ? 'Scout' : 'Someone'))}: ${body || lifecycle?.label || `${files.length} attachment${files.length === 1 ? '' : 's'}`}. ${message.editedAt ? 'Edited. ' : ''}${timeOf(message)}`}
           accessibilityHint={longMessage ? 'Opens the full message. Touch and hold for message actions' : 'Touch and hold for message actions'}
           delayLongPress={messageLongPressDelayMs}
           onPress={longMessage ? () => setShowFullMessage(true) : undefined}
@@ -162,7 +169,16 @@ export const MessageBubble = React.memo(function MessageBubble({
             </Pressable>
           ) : null}
 
-          {body && !linkOnly && scout ? (
+          {lifecycle?.active ? (
+            <View accessibilityLiveRegion="polite" style={styles.lifecycleActive}>
+              <ActivityIndicator color={colors.emberText} size="small" />
+              <Text style={styles.lifecycleActiveText}>{lifecycle.label}</Text>
+            </View>
+          ) : null}
+
+          {body && lifecycle?.state === 'canceled' ? (
+            <Text style={styles.lifecycleCanceled}>{body}</Text>
+          ) : body && !linkOnly && scout ? (
             <ScoutRichText text={body} maxCharacters={longMessage ? 560 : undefined} />
           ) : body && !linkOnly ? (
             <Text style={[styles.body, own && styles.bodyOwn]}>
@@ -196,6 +212,20 @@ export const MessageBubble = React.memo(function MessageBubble({
                 );
               })}
             </Text>
+          ) : null}
+
+          {lifecycle?.state === 'failed' && lifecycle.retryable && onRetryReply ? (
+            <Pressable
+              accessibilityLabel="Retry Scout reply"
+              accessibilityRole="button"
+              accessibilityState={{ disabled: retryingReply }}
+              disabled={retryingReply}
+              onPress={() => onRetryReply(message)}
+              style={({ pressed }) => [styles.lifecycleRetry, pressed && styles.lifecycleRetryPressed]}
+            >
+              {retryingReply ? <ActivityIndicator color={colors.emberText} size="small" /> : null}
+              <Text style={styles.lifecycleRetryText}>{retryingReply ? 'Retrying' : 'Retry'}</Text>
+            </Pressable>
           ) : null}
 
           {longMessage ? (
@@ -342,6 +372,12 @@ const styles = StyleSheet.create({
   replyTextOwn: { color: colors.onAccent, opacity: 0.68 },
   body: { ...type.body, color: colors.text1 },
   bodyOwn: { color: colors.onAccent },
+  lifecycleActive: { minHeight: 28, flexDirection: 'row', alignItems: 'center', gap: space[2] },
+  lifecycleActiveText: { ...type.bodySm, color: colors.text2 },
+  lifecycleCanceled: { ...type.bodySm, color: colors.text3 },
+  lifecycleRetry: { minHeight: 34, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: space[2], paddingHorizontal: 10, borderRadius: radius.full, backgroundColor: colors.emberSoft },
+  lifecycleRetryPressed: { opacity: 0.68, transform: [{ scale: 0.98 }] },
+  lifecycleRetryText: { ...type.captionMedium, color: colors.emberText },
   link: { color: colors.info, textDecorationLine: 'underline' },
   linkOwn: { color: colors.onAccent, textDecorationColor: 'rgba(14,14,16,0.45)' },
   mention: { ...type.bodyMedium, color: colors.info },

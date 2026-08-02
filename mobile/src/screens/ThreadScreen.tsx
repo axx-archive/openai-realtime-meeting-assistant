@@ -118,6 +118,7 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
   const [typingParticipants, setTypingParticipants] = useState<TypingParticipant[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [retryingReplyID, setRetryingReplyID] = useState<string | null>(null);
   // null means "not yet loaded" — distinct from "" which means never read.
   const [readAt, setReadAt] = useState<string | null>(null);
   const listRef = useRef<FlashListRef<ThreadRow>>(null);
@@ -563,6 +564,30 @@ export function ThreadScreen({ route, navigation }: Props) {
     }
   }
 
+  const retryScoutReply = useCallback(async (message: ScoutMessage) => {
+    const replyID = String(message.id ?? '').trim();
+    if (
+      !sessionToken
+      || !replyID
+      || message.reply?.state !== 'failed'
+      || message.reply.retryable !== true
+      || retryingReplyID
+    ) return;
+    const generationAtRequest = transcriptGenerationRef.current;
+    setRetryingReplyID(replyID);
+    setError(null);
+    try {
+      const response = await api.retryScoutReply(sessionToken, route.params.threadId, replyID);
+      applyTranscriptSnapshot(generationAtRequest, response.thread?.messages ?? response.messages ?? []);
+      atBottomRef.current = true;
+      requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }));
+    } catch (caught) {
+      setError(caught instanceof BonfireApiError ? caught.message : 'Scout could not retry that reply.');
+    } finally {
+      setRetryingReplyID(null);
+    }
+  }, [applyTranscriptSnapshot, retryingReplyID, route.params.threadId, sessionToken]);
+
   async function uploadAttachmentAssets(assets: readonly AttachmentAssetInput[]): Promise<boolean> {
     if (!sessionToken || uploading) return false;
     const remaining = maxMessageAttachments - pendingFiles.length;
@@ -957,6 +982,8 @@ export function ThreadScreen({ route, navigation }: Props) {
                     setActionMessage({ message, own });
                   }}
                   onToggleReaction={(message, emoji, active) => void toggleReaction(message, emoji, active)}
+                  onRetryReply={(message) => { void retryScoutReply(message); }}
+                  retryingReply={retryingReplyID === String(item.message.id)}
                 />
               </>
             )}

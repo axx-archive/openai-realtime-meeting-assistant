@@ -37,7 +37,7 @@ import {
   parseConsentDecisionResponse,
   parseConsentStatus,
 } from './consent';
-import { buildApiUrl, buildAuthHeaders } from './requestHelpers';
+import { buildApiUrl, buildAuthHeaders, buildIdempotencyHeaders } from './requestHelpers';
 import {
   fenceUnauthorizedResponse,
   readTextAfterUnauthorizedFence,
@@ -354,6 +354,15 @@ export const api = {
   ): Promise<{ ok: boolean }> {
     return request('/assistant/realtime/usage', {
       method: 'POST', body: payload, sessionToken,
+    });
+  },
+
+  realtimeMilestone(
+    sessionToken: string,
+    milestone: 'peer_connected' | 'data_channel_open' | 'remote_track' | 'first_audio' | 'response_done' | 'transport_error',
+  ): Promise<{ ok: boolean }> {
+    return request('/assistant/realtime/milestone', {
+      method: 'POST', body: { milestone }, sessionToken,
     });
   },
 
@@ -809,13 +818,31 @@ export const api = {
 
   createScoutThread(
     sessionToken: string,
-    body: { title?: string; visibility?: string; intake?: string } = {},
+    body: {
+      title?: string;
+      visibility?: string;
+      intake?: string;
+      openingMessage?: { text: string };
+    } = {},
+    idempotencyKey = '',
   ): Promise<ScoutThreadDetailResponse> {
     return request<ScoutThreadDetailResponse>('/assistant/chat-threads', {
       method: 'POST',
       body,
       sessionToken,
+      headers: buildIdempotencyHeaders(idempotencyKey),
     });
+  },
+
+  retryScoutReply(
+    sessionToken: string,
+    threadId: string,
+    replyId: string,
+  ): Promise<ScoutThreadDetailResponse> {
+    return request<ScoutThreadDetailResponse>(
+      `/assistant/chat-threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(replyId)}/retry`,
+      { method: 'POST', body: {}, sessionToken },
+    );
   },
 
   /** Private Scout query — same path the web OS uses. */

@@ -571,9 +571,9 @@ func assistantFileUploadHandler(w http.ResponseWriter, r *http.Request) {
 		Ref:  ref,
 		Mime: meta.Mime,
 	}}
-	if currentAnthropicAPIKey() != "" && attachmentModelSafeMimes[meta.Mime] {
-		blocks := attachmentContentBlocks(files)
-		files = deriveAttachmentText(r.Context(), files, blocks)
+	if kanbanApp.currentOpenAIAPIKey() != "" && attachmentModelSafeMimes[meta.Mime] {
+		attachments := openAIAttachmentContent(files)
+		files = deriveAttachmentText(r.Context(), kanbanApp.currentOpenAIAPIKey(), files, attachments)
 	}
 	transcript := strings.TrimSpace(files[0].Text)
 	brainStatus := fileBrainStatusStored

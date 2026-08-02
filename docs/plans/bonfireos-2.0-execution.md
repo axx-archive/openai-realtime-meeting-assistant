@@ -1,121 +1,259 @@
-# bonfireOS 2.0 - Execution Ledger
+# BonfireOS 2.0 — Execution Ledger
 
-Goal and source pointers: active `$goal-loop`; `docs/model-routing-master-plan-2026-07-11.md`; `docs/plans/multi-room-2026-07-08.md`; architecture audit in the current Codex task.
+**Canonical design:** [STRIDE Next Evolution Master Plan](./stride-next-evolution-master-plan.md)
 
-Current phase: pre-W5 release installed and verified. W0 and W1 remain live; the W2 product/runtime slices and W4 secure-restore repository foundation are installed default-off/shadow from signed release `424f022`. Execution is stopped before quota-dependent commissioning.
+**Checkpoint date:** 2026-08-02
 
-## Invariants
+**Current wave:** E10, with Scout availability as the P0 safe frontier
 
-- Production truth lives in Docker volume `digitalocean_meeting_data`; repository and `/opt/meetingassist/data/` content are never treated as live data.
-- Preserve user-owned `README.md`, `stride-site/`, `design-system/`, and ignored native-Apple artifacts; none are part of this release.
-- Private Scout threads remain owner-scoped; guest or retrieved content never authorizes tools.
-- Video remains available when AI providers degrade; stale or partial AI output is always labeled.
-- No force-accept critic path, no unattended external publish, and no silent authority escalation.
-- JSONL, Pion, and prior per-seat model routes remain rollback paths until their replacements pass live gates.
+**Overall state:** `external_waiting`; production remains on the retained legacy release
 
-## Wave Map
+This is the durable resume ledger for the approved master plan. The master plan
+owns product and architecture decisions; this file owns current execution truth,
+dependencies, authority boundaries, rollback posture, and the next safe action.
 
-| Wave | Outcome | Dependencies | Gate / rollback | Status |
-|---|---|---|---|---|
-| W0 | Stop runaway spend; make output, authority, health, backup, and usage truth enforceable | None | Accepted digest advances cursor; code-level authority tests; offsite restore evidence; old env/code backup | Complete; model-output recovery canaries held for W5 |
-| W1 | Canonical event/ACL substrate, object authorization, outbox/jobs, retention, consent, revision-bound approval | W0 | Dual-write replay/checksum and ACL-negative parity; JSONL reader rollback | Complete; live in PostgreSQL shadow mode with JSON/JSONL authoritative; expiry repair restart-proven |
-| W2A | Per-room Scout, exact recap, guest policy, media backend pilot | W1 contracts | Two-room zero-leak live gate; Pion and feature-flag rollback | Installed default-off; actorized/scoped implementation independently passed; two-hour live soak held for W5 |
-| W2B | Restart-safe brain, complete historical recall, claim/evidence lineage | W1 contracts | Recall corpus and restart/replay gates; shadow-reader rollback | Installed with projection mode off; projection/backfill/retrieval gates passed; live 90-day replay held for W5 |
-| W2C | `insights_opportunities_v1`, structured feedback, verdict critic, pilots | W1 + W0 route/authority | Ten reviewed pilots; process disable and route rollback | Installed disabled; durable executor/feedback/capability gates passed; human pilots held for W5 |
-| W2D | Same-release evaluation, collector custody, cost derivation, and signed verdict receipts | W2A-W2C | Clean-commit and receipt-custody gate; no route mutation | Harness installed; live-provider corpora held for W5 |
-| W3 | Static versioned model-route registry and measured canaries | W2 eval corpora | One seat at a time; prior route pointer rollback | Canary/rollback plan ready; route changes remain blocked on W5 receipts |
-| W4 | HA/DR cutover and full operational release | W2 + W3 | Chaos, restore, live media/recall/workflow evidence; cutover rollback | Secure DR capture/manifest/restore gate repository-complete; managed HA, offsite immutable custody, and live restore drill remain external gates |
-| W5 | Final AI commissioning after API quota is restored | Pre-W5 code installed; W4 infrastructure/custody and human reviewers available | Bounded provider canaries, same-commit live receipts, then one-seat-at-a-time enablement; all AI routes remain degraded/disabled on failure | Pending top-up and remaining external prerequisites |
+## 1. Current verified checkpoint
 
-## Current Wave
+| Surface | Exact state | Meaning |
+|---|---|---|
+| Local `main` | `9217dbf7a9f1a96ceed20f174fd2a9894daa29af` | Clean except separately owned untracked `stride-site/`. |
+| Remote `axx/main` | `9217dbf7a9f1a96ceed20f174fd2a9894daa29af` | Read-only remote refresh matches local `main`. No E10 or P0 branch is published. |
+| Production | `30eb8891dd74edda` | Live `/healthz` identity on 2026-08-02. This is the retained older release; the sealed canonical repair release has not been activated. |
+| Production health | Traffic-ready, capability-degraded | `/capabilities` reports `trafficReady:true`, `ok:false`; Scout is disconnected/degraded and STT is disconnected/stale since `2026-07-31T18:28:56Z`. Aggregate readiness is not acceptance. |
+| P0 branch | `/tmp/meetingassist-scout-p0`, `codex/scout-p0`, base `9217dbf` | Isolated, dirty, uncommitted implementation. It is not a candidate release and must not be merged or deployed yet. |
+| E10 integration | `/tmp/meetingassist-e10-integration`, `codex/e10-integration`, `f808a0e41361f6a98ca5d1ef6db64a6c464fac2a` | Clean follow-up foundation: worker isolation, qualification registry, and specialist-agent join work. Not ready for `main`. |
+| Specialist repair | `/tmp/meetingassist-e10-specialist`, `codex/e10-specialist`, base `0aa1b090687d7a5d9ed3c10c9d792ee9044a545c` | Nine tracked files contain preserved uncommitted removal of the legacy alternate join path and request-context leakage. |
+| Registry repair | `/tmp/meetingassist-e10-registry`, `codex/e10-registry`, base `1d2f55cfa86e1f155b7b14d06c5928379e2b1ea3` | Seven tracked files plus untracked `meeting_specialist_qualification_bridge.go` preserve signed-evidence binding, expiry, and external ledger-head/CAS work. |
+| Independent E10 verdict | `REVISE` | Neither interrupted repair is approved for integration or `main`. |
+| TestFlight | Stride 1.0.0 Build 29 | Built from `97ff340097253ff3ad98481226f6159c3ce206ae`; EAS `7857b9b2-2de8-4248-b1c6-a50c54f6ca97` finished, Apple build `6a870589-8448-44fb-99d6-cea2f5a9ebb4` was last verified `VALID`, non-expired, and in internal `Team (Expo)`. External `Bonfire` excludes it. Physical-device acceptance is still open. |
 
-- Lead owns integration, Git, VPS configuration, restarts, migration cutovers, and release evidence.
-- Subagents own disjoint code paths only; they do not stage, commit, push, deploy, or mutate production.
-- W2 resumed on 2026-07-22. Independent audits found the existing W2A/W2B foundations, the absent W2C product, and the exact remaining gaps. Strategic design plus two critic rounds produced the approved W2 contract in `docs/plans/bonfireos-w2-design.md`, including W2D's complete pre-W3 evaluation wave.
-- Resume inspection found W1 canonical shadow at four target-only `guest_link` objects. Cold W1 backup evidence proved the exact four rows expired on 2026-07-16/17; the current expiry sweep had removed them without a lifecycle journal. No target history gap, pending capture, outbox failure, or principal-parity defect was present.
-- Commit `a0ae9c9` is pushed to `axx/main`. It journals future expiry before source removal, shares the importer digest projection, and recovers the journal-before-source-rewrite crash window before canonical boot. Focused normal/race tests, the full suite, and an independent adversarial re-gate passed.
-- The historical backfill was executed under a full mutation fence after explicit interruption authority. Matched data-volume/PostgreSQL snapshot: `/opt/meetingassist-backups/20260722T153417Z-guest-link-parity-repair/matched-snapshot`. The operator repair refused expansion beyond the exact four cold-backup/canonical-candidate fingerprints, appended four `guest_link_expired` lifecycle records, and reconciled with zero divergence.
-- Commit `a0ae9c9` was deployed with the Codex and render profiles. First live parity reached equal dirty/reconciled/checkpoint high-water 5,796; the independent PostgreSQL plus application restart proof reached equal high-water 5,804. Both had zero pending capture, outbox backlog/failures, or frozen families. App, PostgreSQL, Codex, render, Caddy, and coturn are running; both worker heartbeats are fresh.
-- The live `rooms.json` SHA-256 remained byte-identical to the pre-repair matched snapshot, PostgreSQL contains exactly four deleted `guest_link` events, all 13 historical queue jobs remain, the room is empty, and the public host returns HTTP 200. The one-time repair test and image were removed.
-- W2 shared foundation now has canonical evidence/revision/ACL/purge/trust references, half-open temporal and admission-relative queries, honest recall coverage, exhaustive terminal/count/manifest-proven inventory, local source-byte verification, boundary-safe byte-addressed clipping, and deterministic full-range prompt folding. Denied inventory cannot affect published counts or late-arrival state; guest/capability recall remains denied and service recall requires an explicit kind-bound ACL.
-- W2 projection checkpoints bind tenant, projection, partition, version, generation, authoritative source range/manifest, derived high-water/digest, and an opaque fence token. Publication verifies the derived sink inside the same advisory-locked transaction; rebuild, race, crash/restart, tamper, and ambiguous-commit tests pass.
-- W2A admission anchors now use a checksummed durable first-admission store and a separately durable monotonic capture sequence. Startup proves the exact atomic write path, runtime failure latches readiness, plaintext guest identifiers are refused, and live participant state is published only after the anchor persists under one visibility lock. Independent admission re-gate returned PASS.
-- W2A now actorizes Pion and Scout by room, sitting, and generation; exact-scope fencing reaches transcription completion, attribution, durable commit, recap, chat, artifact fanout, and teardown/restart. The independent final critic returned PASS after focused normal/race, vet, and diff gates.
-- W2B's production adapter, transactional projection queue, bounded admin backfill, exact as-of rebuild, catch-up publication, purge/ACL reauthorization, and restart readiness passed independent adversarial gates.
-- W2C's default-off durable executor now implements the immutable two-revision Insights chain, one-use capability enforcement, typed feedback, crash recovery, provider boundaries, and fail-closed reviewer eligibility. Independent adversarial re-gate returned PASS; only the ten human-reviewed pilots remain.
-- W2D's typed collector, local metric/cost replay, independent Ed25519/HMAC custody, clean-release binding, transitive input verification, and 48-hour receipt sets passed its repository gate. Synthetic or missing provider observations cannot qualify.
-- W4's signed four-root capture, repeatable-read logical PostgreSQL digest, purge-authority continuity, isolated restore-only boot gate, and one-use release/environment/image-bound receipt passed independent normal/race/vet/diff gates. Managed HA, immutable offsite storage/KMS custody, and a real restore-host drill are not created by this VPS code deploy.
-- Live containment applied at `2026-07-12T19:11Z`: `MEETING_DIGEST_DISABLED=true`; env backup at `/opt/meetingassist-backups/20260712T191102Z-digest-containment/env.before`.
-- Digest usage baseline after containment: 573 calls, last call `2026-07-12T19:07:49Z`, app-estimated cost `$61.80095` for 2026-07-12.
-- Digest count remained exactly 573 through `2026-07-12T21:30Z`; persisted digest count remained 5 across 2 meetings. No post-containment spend occurred.
-- Combined W0 implementation now includes strict Responses JSON Schema, 4,000-token reasoning/output headroom, accepted-vs-wire usage truth, poison-output circuit, provider-outage cursor hold, positive-evidence capability health, principal-aware tool policy, exact callback binding, monotonic queue status, and hardened runner isolation.
-- Codex production queue has 13 completed jobs and zero nonterminal jobs. Cutover must preserve those records, migrate usage books, and recreate the app plus profiled runner together.
-- W1 runs a private PostgreSQL 17 shadow service on the VPS with the protected external volume `digitalocean_canonical_postgres`. JSON/JSONL remains authoritative; `required` is not enabled in W1.
-- `meetingassist-demo` was permanently resized from 2 vCPU / 2 GB / 60 GB to `s-4vcpu-8gb` (4 vCPU / 8 GB / 160 GB, $48/month).
+No new migration, push, deployment, provider qualification, feature activation,
+or TestFlight upload is established by this checkpoint.
 
-## Completed Evidence
+## 2. Non-negotiable invariants
 
-- Baseline `cd78b8e` is synchronized with `axx/main`; key live file hashes match local HEAD.
-- `go test -count=1 ./...` passed in 101.151s.
-- Media verification passed 21/21; voice-focus benchmark passed.
-- Live `healthz` and `readyz` returned HTTP success after containment.
-- Root integration `go test -count=1 ./...` passed after all W0 revisions in 114.299s; the focused provider/principal/health gate passed in 0.394s and the isolated HOME/TMPDIR runner regression passed in 0.633s.
-- Read-only production compatibility gate confirmed Docker 29.4.3, Compose v5.1.3, empty rooms, healthy app/runner, fresh runner heartbeat, no nonterminal jobs, and successful parsing of both current and proposed Compose against the live environment.
-- Independent adversarial re-gate passed after provider holds were centralized across every ambient producer and authenticated principals were propagated through chat-launched process goals.
-- Exact-Compose VPS preflight built both images and started Codex CLI 0.144.1 under dropped capabilities, read-only root, no-new-privileges, isolated writable mounts, and read-only sandbox. Queue heartbeat and usage writes passed. The first job exposed and drove a HOME/TMPDIR isolation fix; the rerun reached OpenAI and stopped only on the current quota error.
-- Live W0 cutover completed from commit `7dbac83` with backup `/opt/meetingassist-backups/20260712T220050Z-w0-control-plane`. Historical usage books were prefix-verified in `digitalocean_usage_ledger`; all 13 completed jobs were checksum-verified in `digitalocean_codex_queue`; app and runner were recreated together and both have zero restarts.
-- External-volume deletion protection shipped in follow-up commit `cc780f1`; the live queue and usage volumes are explicit external resources.
-- Live `/livez`, `/readyz`, `/capabilities`, and `/participants` passed their contracts. Traffic is ready while AI capabilities truthfully report degraded; the runner heartbeat reports the new queue paths and a Git workspace; the sidecar has no company-brain mount. Digest remains disabled and the live call count remains exactly 573.
-- W1A durability/contracts slice passed an independent code gate after adversarial revisions: mode-gated fsync/rename/directory durability, RFC 8785 deterministic tenant-scoped imports, closed immutable payload schemas, deterministic replay, default-deny ACLs, revision/action-bound approval and ambiguous-effect handling, and a PostgreSQL 17 schema applied successfully to a disposable local database. Focused race tests passed. The repository-wide suite still has one reproducible-only-under-full-load async TempDir cleanup flake to resolve before this slice can deploy.
-- The async TempDir flake was traced to a test-owned revision goroutine chain and fixed by draining it before cleanup; 50 normal and 10 race repetitions passed. W1A now also has recoverable prepared/committed/aborted shadow frames, torn-tail recovery and ambiguity freeze, cross-process locked durable object versions, advisory-locked checksum migrations with future-version refusal, transactional event/projection/outbox append, revisioned PostgreSQL ACL grants, and state-only content-binding preservation. After two independent revision rounds the code gate passed; the final integrated repository suite passed in 112.739s and focused race gates passed.
-- W1 canonical migration/consent/retention/approval slice passed three adversarial rounds: deterministic secret-free legacy import, tenant-scoped non-mutating reconciliation with target ACL proof and current aggregate folding, exact consent withdrawal semantics, strict privacy-safe tombstones, PostgreSQL purge evidence across process restart, and row-locked atomic approval receipt/job/outbox dispatch. Focused normal and race gates passed; the final repository suite passed in 128.969s. Full-database rollback protection remains a W4 dependency because the purge authority must be retained separately from content snapshots.
-- W1 artifact/capability enforcement passed its independent critic after bounded adversarial revisions: body-free tenant-bound authorization headers; exact atomic header/body snapshots; owner-only private legacy migration; principal-filtered artifact, Files, follow-up, chat-drop, and client snapshot paths; revision/asset-bound share, Deal Room, render, and archive capabilities; approval-time reauthorization; hash-only token state; archive revocation and same-buffer serving; parent-goal authorization; and conditional/compensated Files mutations. Integrated focused normal/race gates passed, and the final post-fix repository suite passed in 128.435s.
-- W1 management, recall, worker, and runtime integration passed independent adversarial gates after bounded revisions: metadata-first package/folder/file authorization; organization-visible historical recall with owner/private and explicit room-only isolation; zero guest durable recall; per-principal HTTP/websocket/meeting/Brief projections; delegated service/agent context; scope-preserving ambient derivation; revision-bound imported PostgreSQL grants with member/owner/guest/service ACL parity; recoverable prepare/write/commit capture; lifecycle deletion advancement; autonomous retry; drained verified outbox; source-bound restart checkpoints; and blob two-file crash recovery.
-- Final integrated `go test -count=1 ./...` passed in 182.922s. The consolidated high-risk race gate for runtime, capture/import/reconcile, ACL, management, recall, ambient workers, and packages passed in 40.194s. Final focused registry/decision/package verification passed after the last registry correction. `gofmt` and `git diff --check` are clean.
-- W1 shipped through commits `8883ffb`, `f148096`, and `7c68c04` on `axx/main`. The 6,220-object initial import was made restart-practical with one batch version-map publication, and reconciliation was independently re-gated after moving its expensive scan/apply work outside the user-facing runtime lock while retaining single-flight ordering.
-- The repository-wide post-availability suite passed in 178.349s; focused normal and all `CanonicalRuntime` race tests passed; the independent availability critic returned PASS.
-- The W1 cutover used cold snapshot `/opt/meetingassist-backups/20260713T023028Z-w1-canonical-shadow` plus the scoped follow-up backup `/opt/meetingassist-backups/20260713-031023-w1-reconcile-availability`. Production was empty before recreation and remained empty afterward.
-- Live restart/checkpoint verification passed with canonical shadow healthy at equal dirty/reconciled/checkpoint high-water 10, zero pending capture, zero outbox backlog/failures, and no frozen families. PostgreSQL held 6,226 canonical events, 6,224 current objects, and 11,791 grants; imported guest/service/capability durable grants were exactly zero.
-- Production memory remained 5,455 lines; board, user, and room hashes exactly matched the pre-cutover baseline. All 13 queue jobs remained present, usage evidence advanced from 5 to 6 files, and app/PostgreSQL/Codex/render services were running with zero restarts and fresh worker heartbeats.
-- Pre-W5 release `424f02204a969ac6c7090c6f721a7097064ff57d` is pushed to `axx/main` and installed from immutable image digest `sha256:0d9c63683a340f7e197451cb0bae960c2101bf966a7542f1ed63635a78a17592`. Signed build-manifest verification passed against the running binary, OCI labels, registry manifest, commit, tree, build inputs, and source archive.
-- Cutover backup `/opt/meetingassist-backups/20260723-021325-pre-w5-424f022` contains the app source, logical PostgreSQL dump, and exact meeting-data, Codex-queue, and usage-ledger archives with verified SHA-256 values. An off-host copy is at `~/.backups/meetingassist/20260723-021325-pre-w5-424f022`; a disposable PostgreSQL 17 restore test recovered migrations 1-3 and 9,426 canonical events before cutover.
-- Live migrations advanced exactly to 1-7. The five core production-data hashes remained byte-identical, all 13 Codex queue records remained, app and sidecars have zero restarts, participants remain zero, media-soak ingress returns 403 externally, and canonical shadow converged at equal dirty/reconciled/checkpoint high-water 6,052 with no pending or failed outbox work. Brain projection, Insights v1, media observer, historical backfill, and restore mode remain explicitly off; provider-backed capabilities truthfully remain degraded until W5.
+- Conversation is evidence, not authority. Every approval remains explicit,
+  revision-bound, attributable, and revocable.
+- Private Scout threads remain owner-only. Retrieval, attachments, citations,
+  artifacts, search/history, and company-brain projection must preserve the
+  same ACL and consent intersection at write, model call, projection, and open.
+- Human chat, video, and meeting media remain usable when any AI lane fails.
+- No silent provider, model, effort, tool-policy, or coverage fallback is
+  allowed. A failed or unqualified lane stays visibly degraded or unavailable.
+- One model, effort, prompt, schema, or tool-policy variable changes per canary.
+- `stride-site/` and unrelated user work stay outside every commit, manifest,
+  sync, migration, and release boundary unless separately authorized.
+- Local or synthetic receipts may be `implemented` or
+  `deterministic_verified`; they are never relabeled `provider_qualified`,
+  physical-device accepted, production-enabled, or launch-accepted.
 
-## Pending Dependencies
+## 3. P0 incident truth
 
-- Dedicated managed PostgreSQL HA, immutable private object storage, independent signing/KMS custody, a separate restore host, and redundant app/TURN/routing are not present. The W4 repository gate fails closed without them; provisioning and the real restore drill remain operational work outside this single-VPS deploy. Managed Valkey remains intentionally deferred.
-- The OpenAI production project currently requires a user-reported balance top-up. Do not poll or run provider/model canaries until the user confirms it is ready; normal digest production remains disabled meanwhile.
-- Guest consent/retention language needs an authorized business/legal owner.
-- Native Apple GA requires signing team, privacy manifest decisions, and physical-device evidence; otherwise 2.0 must explicitly ship web-first with native labeled beta.
+The incident has three separately gated lanes; one shared cause is not claimed.
 
-## W5 Final AI Commissioning Queue
+1. **Realtime voice to Scout:** production is enabled but disconnected/degraded
+   on `gpt-realtime-2` at `high` reasoning. The target is
+   `gpt-realtime-2.1`, but only after an exact candidate passes the authorized
+   provider contract, quality, cost, lifecycle, and physical-device gates.
+2. **Composer dictation and meeting STT:** production still exposes the legacy
+   `gpt-realtime-whisper` meeting lane and `gpt-4o-transcribe` voice
+   transcription configuration. Meeting STT is disconnected and stale. The
+   target authoritative model is `gpt-transcribe`; dictation and meeting STT
+   remain distinct health and acceptance lanes.
+3. **Typed Scout:** production logged concrete Anthropic HTTP 400
+   insufficient-credit failures. Ordinary Scout routing and answers must not
+   depend on Anthropic credit or silently fall back across providers.
 
-Run this wave only after the OpenAI project used by the production key has usable API quota and the listed W4 infrastructure/custody prerequisites have owners. A balance change is not acceptance evidence; each check below must produce a fresh, same-release receipt. Keep media admission, video, deterministic workflows, and read-only company-brain access available while AI remains degraded.
+These observations prove degraded production behavior and one concrete typed
+routing failure. They do not by themselves prove voice quality, dictation
+quality, one common root cause, or qualification of a replacement route.
 
-1. Run one bounded provider canary for embeddings, Responses, Realtime voice, and transcription. Confirm successful usage attribution to the intended project/organization, model access, latency, and ledgered token/audio usage. Stop on `insufficient_quota`, permission, unknown-price, or model-access errors.
-2. Re-run the frozen W2D live-provider corpora from the release-candidate commit. Verify collector custody, raw evidence, price derivation, baseline pass, and candidate verdict receipts; missing or synthetic samples remain non-qualifying.
-3. Run the two-room 3x3 media soak from the same commit, including room-isolation canaries, head-of-line injection, Realtime/AI failure continuity, transcript/Scout fencing, resource limits, and recovery. Preserve the signed sanitized evidence packet.
-4. Run the production-shaped 90-day recall replay and catch-up checks. Verify semantic retrieval, source/ACL/purge lineage, honest partial-coverage labels, exact-window late-join recap, and zero cross-room or guest leakage.
-5. Execute the ten fixed-release `insights_opportunities_v1` pilots with at least two eligible human reviewers. Verify immutable evidence snapshots, bounded critic revisions, typed feedback, approval/capability enforcement, and no external write without current authority.
-6. Only after the receipts above pass, exercise the static W3 route canaries one seat at a time. Compare quality, latency, failure, retry, and cost against the frozen baseline; retain the prior route pointer and automatically roll back any negative verdict.
-7. Recheck `/readyz`, `/capabilities`, usage/price ledgers, provider console agreement, worker cursors, queue depth, and 24-hour/ten-sitting stability. Final commissioning fails closed if any AI lane is stale, unmetered, unattributed, or unable to reproduce its receipt.
+## 4. Frozen model-seat contract
 
-## Operations And Authority Queue
+| Seat | Target route | Activation boundary |
+|---|---|---|
+| Personal and meeting Scout voice | `gpt-realtime-2.1` | New-session cohort only after exact contract, audio, interruption, usage/cost, ACL, and physical-device qualification. |
+| Meeting STT | `gpt-transcribe` | Authoritative final transcript gate over the consented corpus; exact item correlation, ordering, fidelity, latency, accounting, and privacy required. |
+| Composer dictation | `gpt-transcribe` | Separate web/iPhone/iPad corpus and exactly-once, recoverable-recording, lifecycle, latency, and UI acceptance required. |
+| Typed Scout router | `gpt-5.6-terra`, `low` | Strict structured route; proposals only, never implicit launch. No Anthropic fallback. |
+| Typed Scout answer and routine `#team` chat | `gpt-5.6-terra`, `low` | Grounded, ACL-safe Responses path with explicit degraded state. |
+| Extraction and projections | `gpt-5.6-luna`, `low` | Bounded structured extraction with evidence and freshness checks. |
+| Goal/work orchestration | `gpt-5.6-sol`, `medium` | Durable approved-work stages; high-value generation may use Sol `high` only under its own receipt. |
+| Independent review | Separate provider/model family when available | Optional independent Anthropic review may remain, but it cannot own Scout availability or become an automatic fallback. |
 
-- Authorized by current objective: scoped code edits, tests, commit/push to `axx/main`, VPS deploy/restart, and production configuration needed to make 2.0 fully live.
-- Before irreversible data cutover: encrypted offsite restore drill, cold volume snapshot, dual-write high-water marks, empty-room window, and explicit rollback command.
-- External resource provisioning is allowed only where credentials and account authority are already available; missing credentials remain a reported dependency rather than a local-only substitute.
-- Authorized W1 maintenance action: cold live-data snapshot, reversible service stop, permanent disk-expanding droplet resize to `s-4vcpu-8gb`, creation of external `digitalocean_canonical_postgres`, env/Compose cutover, and app plus profiled runner recreation.
+Model-object access and synthetic contract receipts are not seat qualification.
+Every live route still needs exact project/billing, pricing, accepted-output,
+corpus, rollback, and downstream-replay evidence before activation.
 
-## Risks And Decisions
+## 5. Isolated P0 implementation state
 
-- Current digest failures were systemic truncation/parse failures, not provider transport failures. Identical rejected model output uses a bounded circuit; provider/quota/transport failures use capped probes while holding the cursor forever and can never consume the poison-input dead-letter budget.
-- Cost/eval books move to a dedicated `usage_ledger` volume nested at `/app/data/usage` for the app and mounted alone at `/app/usage-ledger` for the runner. Migrate the existing production usage directory before recreation; never restore runner access to the whole company-brain volume.
-- The HMAC callback contract requires app and runner to cut over together with `docker compose --profile codex ...`; a standard profile-less restart is a no-go.
-- LiveKit is a gated production-default candidate, not a foregone cutover. Pion remains per-sitting rollback; if LiveKit cannot pass the gate, Pion must be actorized per room before a 2.0 availability claim.
-- Use a modular Go control plane with durable shared state; do not split into a microservice fleet or add Kafka.
-- Implement only `insights_opportunities_v1`; no scheduler, provider marketplace, dynamic model chooser, or additional workflow before its pilot gate.
+The dirty `codex/scout-p0` worktree currently implements or begins:
 
-## Execution Frontier
+- OpenAI Responses ownership of ordinary Scout routing and answers: Terra
+  `low` for router/chat, Luna `low` for attachment extraction, strict router
+  schema, Responses-native image/PDF input, and no automatic Anthropic route for
+  core Scout availability.
+- Separate capability rows and safe milestones for room voice, private voice,
+  meeting STT, dictation, typed Scout router, and typed Scout answer while
+  retaining backward-compatible aggregate fields.
+- Dictation and transcription telemetry/accounting hooks, plus native Realtime
+  transport milestones and explicit failure reporting.
+- The server contract for atomic home opening: one private thread, one opening
+  user message, one durable Scout reply lifecycle placeholder, idempotency and
+  restart-safe background completion, safe failure/retry, lease recovery, and
+  owner-only live delivery.
+- Native home submission stops Realtime, retains the exact draft/idempotency
+  key on failure, clears only after durable acceptance, navigates immediately
+  to the bottom-first Thread route without a historical message target, and no
+  longer renders a question/answer transcript on home.
+- Web home now uses the same atomic private-opening contract and stable retry
+  key. It preserves the opening draft on failure, stops personal Realtime,
+  navigates immediately into the private thread, renders the durable
+  queued/running/failed/canceled lifecycle with accessible live status and
+  retry, and labels ordinary replies only as Scout rather than asserting an
+  unattested provider/model.
+- Web Realtime and composer dictation now share the same audio-focus
+  coordinator in both directions; starting either surface stops/parks the
+  other without discarding a held recording.
 
-STOP. Preserve signed runtime release `424f022` and its backup/manifest evidence unchanged. Resume at W5 item 1 only after the user confirms the production OpenAI project is topped up and the W4 infrastructure/custody owners are available; do not infer provider recovery from a balance change alone.
+The independent backend and UX code-artifact critics now report `PASS`; all
+raised lifecycle, causal-history, telemetry-authority, provider-label,
+touch-target, and mobile-containment findings were repaired. The P0 worktree
+passes the targeted root Go suite, targeted atomic-opening race suite,
+`go vet ./...`, official Responses image/PDF contract tests, web dictation
+coordinator suite (20/20), mobile TypeScript check, and full mobile suite
+(368/368). The first repository-wide run exposed seven real regressions in the
+keyed offer-never-deny prompt and coworker GIF/file exact-once paths. The fixes
+now gate capability offers on OpenAI core availability rather than Anthropic,
+and separate upload/render-safe GIF storage from the narrower model-forwarding
+MIME set. All seven regressions pass focused normal and race coverage. A clean
+`go test ./... -count=1 -timeout 20m` rerun passed every package, including the
+root package in 385.575 seconds; the post-fix `go vet ./...` and
+`git diff --check 9217dbf` gates also pass.
+
+Rendered local acceptance now covers desktop web at 1280x720, exact mobile web
+at 390x844, and the current native branch in the installed iPhone 17 Pro
+simulator development shell. Web and native both proved transcript-free home,
+atomic navigation, auto-title, a visible running placeholder, and replacement
+by one completed Scout answer against an isolated local fake Responses server.
+The 390px pass also found and repaired a clipped home composer and wrapped phone
+placeholder. These are synthetic/rendering receipts only: the physical iPhone
+is currently visible but offline, live Realtime/dictation/provider quality is
+not accepted, and the fake local provider response does not qualify any seat.
+No P0 change is on `main` or production, and no target model is
+provider-qualified by this work.
+
+The approved home behavior remains:
+
+- large waveform starts live Realtime Scout;
+- composer mic is dictation only;
+- typed or dictated send atomically creates a private Scout thread, persists
+  the first message, navigates there, streams the answer, and auto-titles from
+  the opening message;
+- home never becomes a transcript-like chat surface;
+- dictation stops active personal Realtime; personal Realtime or video join
+  stops dictation;
+- dictation exposes recording controls and `Transcribing`; failure preserves a
+  recoverable recording/draft rather than silently losing it.
+
+## 6. E10 convergence state
+
+The integration branch already contains patch-equivalent versions of the clean
+worker, specialist, and first registry commits; do not cherry-pick those commits
+again. When P0 is stable, reconcile from `f808a0e` in this order:
+
+1. Preserve and review both dirty worktrees before rebasing or applying patches.
+2. Apply the specialist dirty repair first; it previously applied cleanly to
+   the integration base.
+3. Integrate the registry repair semantically. Its tracked patch conflicts in
+   `meeting_specialist_realtime_adapter.go` and its snapshot was not a complete
+   compiling unit, so mechanical patch application is not acceptance.
+4. Remove every alternate provider-launch path and finish request-context
+   ownership.
+5. Bind signed evidence to the exact provider, model, voice, config, candidate,
+   and fixed freshness window.
+6. Finish the externally anchored ledger head with compare-and-swap semantics.
+7. Run an independent red-team/critic gate. The current verdict stays
+   `REVISE` until that evidence passes.
+
+## 7. Remaining dependency order
+
+1. Independently review the isolated Scout P0 branch. Complete the full
+   normal/race/vet and rendered browser/simulator matrix, then reproduce and
+   qualify web/physical-iPhone voice, dictation, and typed Scout as separate
+   lanes before activation.
+2. Reconcile the two interrupted E10 repairs onto `f808a0e`; complete the
+   security convergence and independent red-team pass.
+3. Freeze one candidate and run the complete non-`stride-site` normal, race,
+   vet, dependency, mobile/TypeScript, simulator, rendered desktop/mobile,
+   authority, restart, migration, release-pack, and founder matrix.
+4. Execute the manifest-confirmed canonical repair ceremony. Stop at each human
+   and parity gate; do not reuse any retired release pair or failed ceremony.
+5. Merge the verified scope, commit and push `main`, run only the reviewed
+   migrations, deploy the exact artifact, and prove public commit/tree/image,
+   health, capabilities, Scout, STT, canonical convergence, rollback, and data
+   integrity.
+6. Build the resulting mobile release (expected Build 30), submit it to internal
+   TestFlight, verify Apple `VALID` and `Team (Expo)`, then complete physical
+   device acceptance. Submission alone is not acceptance.
+7. Finish external E10 evidence: bounded paid-provider qualification, real
+   WebRTC/TURN device matrix, ten immutable I&O pilots with two eligible
+   reviewers, 24-hour/ten-sitting soak, encrypted immutable offsite backup,
+   authenticated restore, HA/DR, and independent anchor custody.
+
+Do not merge later gates into earlier ones. A release build cannot waive
+provider, canonical, data, device, restore, or owner evidence.
+
+## 8. Production data and release provenance
+
+- Live production state exists only in Docker volume
+  `digitalocean_meeting_data`, mounted at `/app/data`; on the VPS it is
+  `/var/lib/docker/volumes/digitalocean_meeting_data/_data/`.
+- `/opt/meetingassist/data/` and the repo `data/` are stale seed/dev artifacts,
+  not production truth. Every rsync must exclude `data/`.
+- Before replacing VPS files, create a timestamped backup under
+  `/opt/meetingassist-backups`. Before migrations or canonical repair, take and
+  attest the required cold named-volume backup and restore rehearsal.
+- Bind the reviewed commit/tree, source archive, build manifest, image digest,
+  runtime binary, configuration names without secret values, migration hashes,
+  and public release identity. Source-file parity alone is not serving-artifact
+  proof.
+- Preserve the retained rollback release and never restore behind purge or
+  consent authority. Public reopen requires exact canonical/data parity and
+  production observation, not merely HTTP 200.
+
+## 9. Operations and authority
+
+Existing shipping authority remains bounded by every documented gate. It does
+not authorize another paid provider call, activation of an unqualified route,
+a hidden fallback, or bypass of canonical, consent, data, device, or release
+evidence. Reconfirm current quota/project/billing and obtain explicit authority
+before any new paid provider attempt.
+
+The canonical ceremony requires the user at the shared terminal twice:
+
+1. enter the hidden roster password without recording it in Git, logs, this
+   ledger, or an agent message;
+2. after the clean clone receipt and private repair manifest are displayed,
+   provide the exact manifest-bound confirmation. Broad migration/deployment
+   approval does not substitute for this data-history decision.
+
+If either input is unavailable or any manifest, clone, count, source state,
+backup identity, or no-extra-delta check differs, stop fail-closed and preserve
+the retained production release. Physical iPhone acceptance also requires the
+user/device owner; it cannot be inferred from simulator or Apple processing.
+
+## 10. Resume here
+
+Resume in `/tmp/meetingassist-scout-p0`. The code, rendered, focused race/vet,
+mobile, and full repository gates are green; freeze this exact isolated
+candidate without changing production routes. The remaining P0 frontier is
+live-provider and physical-device evidence: verify voice, dictation, and typed
+Scout as three separate lanes, keep target routes default-off until
+qualification, and do not substitute simulator/fake-server receipts. Code-level
+P0 convergence may now move to semantic E10 reconciliation on `f808a0e` while
+those external acceptance gates remain explicit.
+
+No merge, push, migration, VPS mutation, provider call, TestFlight upload, or
+canonical append belongs before that frontier passes and its separate authority
+is current.

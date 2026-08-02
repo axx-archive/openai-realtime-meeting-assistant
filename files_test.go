@@ -279,13 +279,14 @@ func TestAssistantFileUploadRunsIngestionSeamOnce(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "sk-openai-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
 	t.Setenv("MEETING_ALLOWED_ORIGINS", "")
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("OPENAI_API_KEY", "sk-openai-test")
 
 	const transcription = "Deck claims: $2M ARR, 40% MoM growth, pilot with StationTenn."
 	deriveCalls := 0
-	swapAnthropicTextResponder(t, func(_ context.Context, _ string, request anthropicTextRequest) (string, error) {
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		deriveCalls++
 		if request.Instructions != attachmentDeriveInstructions {
 			t.Fatalf("derive instructions=%q, want the 085 transcription prompt", request.Instructions)

@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -184,6 +186,28 @@ type scoutChatReplyRef struct {
 	Text        string `json:"text"`
 }
 
+type scoutChatReplyLifecycle struct {
+	OperationID    string `json:"operationId"`
+	InReplyTo      string `json:"inReplyTo"`
+	State          string `json:"state"`
+	Attempt        int    `json:"attempt"`
+	QueuedAt       string `json:"queuedAt,omitempty"`
+	StartedAt      string `json:"startedAt,omitempty"`
+	FinishedAt     string `json:"finishedAt,omitempty"`
+	LeaseID        string `json:"leaseId,omitempty"`
+	LeaseExpiresAt string `json:"leaseExpiresAt,omitempty"`
+	Retryable      bool   `json:"retryable,omitempty"`
+	ErrorCode      string `json:"errorCode,omitempty"`
+}
+
+type scoutChatOpeningOperation struct {
+	OperationID    string `json:"operationId"`
+	KeyDigest      string `json:"keyDigest"`
+	BodyDigest     string `json:"bodyDigest"`
+	UserMessageID  string `json:"userMessageId"`
+	ReplyMessageID string `json:"replyMessageId"`
+}
+
 // scoutChatReactionEmojis is deliberately closed: the mobile long-press tray
 // and the server accept the same small, iMessage-like vocabulary. This also
 // avoids accepting arbitrary multi-codepoint/control payloads as reactions.
@@ -241,6 +265,14 @@ type scoutChatMessageRecord struct {
 	// renders inline via the session-gated /artifacts/blob route on every
 	// reload. Persisted DATA, the Proposal/Choices/Manifest pattern.
 	Image *scoutChatImageRef `json:"image,omitempty"`
+	// Reply is the durable lifecycle for an asynchronous Scout answer. Lease
+	// fields persist for crash recovery but are stripped from every viewer
+	// projection.
+	Reply *scoutChatReplyLifecycle `json:"reply,omitempty"`
+	// proposalSource is process-only provenance from the router verdict to the
+	// durable mint event. It is intentionally not viewer-controlled or stored
+	// on the message body.
+	proposalSource string
 	// attachmentDestinationRevision is an in-process commit fence. It is never
 	// serialized: a newly authorized source handle is bound to the destination
 	// audience snapshot that existed before model/derivation work, and the final
@@ -281,6 +313,10 @@ type scoutChatThreadRecord struct {
 	// disk must round-trip unchanged.
 	Table    bool                     `json:"table,omitempty"`
 	Messages []scoutChatMessageRecord `json:"messages,omitempty"`
+	// OpeningOperation binds the atomic home create+first-message request to
+	// one private thread. It contains hashes and deterministic ids only and is
+	// stripped from every client projection.
+	OpeningOperation *scoutChatOpeningOperation `json:"openingOperation,omitempty"`
 }
 
 func assistantChatThreadsHandler(w http.ResponseWriter, r *http.Request) {
@@ -320,12 +356,23 @@ func assistantChatThreadsHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	case http.MethodPost:
 		payload := struct {
-			Title      string `json:"title"`
-			Visibility string `json:"visibility"`
-			Intake     string `json:"intake"`
+			Title          string                   `json:"title"`
+			Visibility     string                   `json:"visibility"`
+			Intake         string                   `json:"intake"`
+			OpeningMessage *scoutHomeOpeningMessage `json:"openingMessage"`
 		}{}
 		if r.Body != nil {
-			_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&payload)
+			// A 4,000-rune opening can exceed 16 KiB after JSON escaping (for
+			// example control characters use six bytes each). Keep the transport
+			// envelope above the validated character contract.
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10)).Decode(&payload); err != nil && !errors.Is(err, io.EOF) {
+				writeAuthError(w, http.StatusBadRequest, "could not read chat thread request")
+				return
+			}
+		}
+		if payload.OpeningMessage != nil {
+			handleScoutHomeOpening(w, r, kanbanApp, user, payload.Title, payload.Visibility, payload.Intake, *payload.OpeningMessage)
+			return
 		}
 		// A brain-intake create seeds the guided "Feed the brain" thread (card
 		// 082) — always private, welcome + privacy disclosure + step 1 seeded —
@@ -480,6 +527,20 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeAuthJSON(w, http.StatusOK, kanbanApp.projectScoutChatResponseForViewer(user.Email, threadID, response))
+		return
+	}
+
+	if len(parts) == 4 && parts[1] == "messages" && parts[3] == "retry" && r.Method == http.MethodPost {
+		thread, message, err := kanbanApp.retryScoutOpeningReply(user.Email, threadID, parts[2])
+		if err != nil {
+			writeScoutChatThreadError(w, err)
+			return
+		}
+		writeAuthJSON(w, http.StatusAccepted, map[string]any{
+			"ok":      true,
+			"thread":  kanbanApp.projectScoutChatThreadForViewer(user.Email, thread),
+			"message": kanbanApp.projectScoutChatMessageForViewer(user.Email, thread, message),
+		})
 		return
 	}
 
@@ -723,19 +784,27 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	coworkerProviderFenced := app.strideAgentDirectThreadProviderFenced(thread.ID)
 	deferAttachmentDerivation := coworkerProviderFenced || shouldDeferScoutChatAttachmentDerivation(thread, text, files, followUpArtifactID, toolTemplate)
 
-	// Binary attachments (card 085): build the image/document blocks once,
+	// Binary attachments (card 085): build the provider-native content once,
 	// then run the bounded derived-text pass BEFORE any commit so file.Text
 	// carries what the model read on every path — history folding, channel
 	// team replies, previews, and launch objectives all inherit it. Both are
-	// best-effort and keyless-safe: only the Anthropic paths can see binary
-	// blocks, so keyless deploys skip the blob reads entirely and keep
-	// today's name-only behavior — the chips still render.
+	// best-effort and keyless-safe. OpenAI owns Scout Q&A and extraction;
+	// optional Anthropic specialist follow-ups receive their own block shape,
+	// but only when a follow-up artifact explicitly selects that path. An
+	// installed Anthropic key must not make an ordinary Scout turn reread the
+	// attachments. Keyless deploys keep name-only chips.
 	var attachmentBlocks []json.RawMessage
-	if currentAnthropicAPIKey() != "" && !deferAttachmentDerivation {
-		attachmentBlocks = app.attachmentContentBlocksAuthorized(user, thread, files, attachmentReservationID)
-		files = app.deriveAttachmentTextAuthorized(ctx, user, thread, files, attachmentReservationID, attachmentBlocks)
+	var openAIAttachments []openAIInputContent
+	if !deferAttachmentDerivation {
+		if app.currentOpenAIAPIKey() != "" {
+			openAIAttachments = app.openAIAttachmentContentAuthorized(user, thread, files, attachmentReservationID)
+			files = app.deriveAttachmentTextAuthorized(ctx, user, thread, files, attachmentReservationID, openAIAttachments)
+		}
+		if strings.TrimSpace(followUpArtifactID) != "" && currentAnthropicAPIKey() != "" {
+			attachmentBlocks = app.attachmentContentBlocksAuthorized(user, thread, files, attachmentReservationID)
+		}
 	}
-	if len(attachmentBlocks) > 0 && !app.attachmentSourcesAuthorizedForRead(user, thread, files, attachmentReservationID) {
+	if (len(openAIAttachments) > 0 || len(attachmentBlocks) > 0) && !app.attachmentSourcesAuthorizedForRead(user, thread, files, attachmentReservationID) {
 		return nil, fmt.Errorf("attachment authorization changed; attach the file again")
 	}
 
@@ -998,7 +1067,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		if err != nil {
 			return nil, err
 		}
-		if deferAttachmentDerivation && currentAnthropicAPIKey() != "" {
+		if deferAttachmentDerivation && app.currentOpenAIAPIKey() != "" {
 			app.deferScoutChatAttachmentDerivation(user.Email, threadID, userMessage.ID)
 		}
 		response["thread"] = saved
@@ -1173,7 +1242,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	if len(attachmentBlocks) > 0 && !app.attachmentSourcesAuthorizedForRead(user, thread, files, attachmentReservationID) {
 		return nil, fmt.Errorf("attachment authorization changed; attach the file again")
 	}
-	result, err := app.resolveAssistantQueryContextForUserWithAttachments(withAssistantResponseStyle(ctx, scoutChatResponseStyle(thread)), user.Email, modelQuery, history, attachmentBlocks)
+	result, err := app.resolveAssistantQueryContextForUserWithAttachments(withAssistantResponseStyle(ctx, scoutChatResponseStyle(thread)), user.Email, modelQuery, history, openAIAttachments)
 	if len(attachmentBlocks) > 0 && !app.attachmentSourcesAuthorizedForRead(user, thread, files, attachmentReservationID) {
 		return nil, fmt.Errorf("attachment authorization changed while Scout was reading it; attach the file again")
 	}
@@ -1250,11 +1319,11 @@ func (app *kanbanBoardApp) enrichScoutChatMessageAttachments(ctx context.Context
 		return nil
 	}
 	originalFiles := append([]scoutChatFileAttachment(nil), thread.Messages[index].Files...)
-	blocks := app.committedAttachmentContentBlocks(viewerEmail, threadID, messageID, originalFiles)
-	if len(blocks) == 0 || !app.committedAttachmentsAuthorized(viewerEmail, threadID, messageID, originalFiles) {
+	attachments := app.committedOpenAIAttachmentContent(viewerEmail, threadID, messageID, originalFiles)
+	if len(attachments) == 0 || !app.committedAttachmentsAuthorized(viewerEmail, threadID, messageID, originalFiles) {
 		return nil
 	}
-	derivedFiles := deriveAttachmentText(ctx, append([]scoutChatFileAttachment(nil), originalFiles...), blocks)
+	derivedFiles := deriveAttachmentText(ctx, app.currentOpenAIAPIKey(), append([]scoutChatFileAttachment(nil), originalFiles...), attachments)
 	if !app.committedAttachmentsAuthorized(viewerEmail, threadID, messageID, originalFiles) {
 		return nil
 	}
@@ -2223,6 +2292,11 @@ func (app *kanbanBoardApp) editScoutChatThreadMessage(ctx context.Context, user 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	message.EditedAt = now
 	thread.Messages[index] = message
+	canceledReply := scoutChatMessageRecord{}
+	canceledOpeningReply := false
+	if thread.OpeningOperation != nil && thread.OpeningOperation.UserMessageID == message.ID {
+		canceledReply, canceledOpeningReply = cancelScoutOpeningReplyInThread(&thread, scoutReplyCanceledAfterEditText, time.Now().UTC())
+	}
 	thread.UpdatedAt = now
 	thread.Preview = scoutChatThreadPreview(thread)
 	if attachmentReservationActive {
@@ -2253,6 +2327,9 @@ func (app *kanbanBoardApp) editScoutChatThreadMessage(ctx context.Context, user 
 	}
 	app.observeSTRIDETeamChatMessage(thread, message, "edit", user.Email)
 	deliverScoutChatThreadUpdate(thread, message)
+	if canceledOpeningReply {
+		app.sendScoutChatThreadUpdateToViewer(thread.OwnerEmail, thread, canceledReply)
+	}
 	return thread, message, nil
 }
 
@@ -2369,14 +2446,33 @@ func (app *kanbanBoardApp) deleteScoutChatThreadMessage(viewerEmail string, thre
 	if !scoutChatMessageAuthoredBy(thread, message, viewerEmail) {
 		return scoutChatThreadRecord{}, fmt.Errorf("you can only delete your own messages")
 	}
-	thread.Messages = append(thread.Messages[:index], thread.Messages[index+1:]...)
+	deletedIDs := []string{messageID}
+	if thread.OpeningOperation != nil && thread.OpeningOperation.UserMessageID == messageID {
+		replyID := thread.OpeningOperation.ReplyMessageID
+		filtered := make([]scoutChatMessageRecord, 0, len(thread.Messages)-1)
+		for _, candidate := range thread.Messages {
+			if candidate.ID == messageID || candidate.ID == replyID {
+				if candidate.ID == replyID {
+					deletedIDs = append(deletedIDs, replyID)
+				}
+				continue
+			}
+			filtered = append(filtered, candidate)
+		}
+		thread.Messages = filtered
+		thread.OpeningOperation = nil
+	} else {
+		thread.Messages = append(thread.Messages[:index], thread.Messages[index+1:]...)
+	}
 	thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	thread.Preview = scoutChatThreadPreview(thread)
 	if err := app.saveScoutChatThread(thread); err != nil {
 		return scoutChatThreadRecord{}, err
 	}
 	app.observeSTRIDETeamChatMessage(thread, message, "delete", viewerEmail)
-	deliverScoutChatThreadDeletion(thread, messageID)
+	for _, deletedID := range deletedIDs {
+		deliverScoutChatThreadDeletion(thread, deletedID)
+	}
 	return thread, nil
 }
 
@@ -2937,6 +3033,7 @@ func (app *kanbanBoardApp) setScoutChatThreadArchived(ownerEmail string, threadI
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if archived {
 		thread.ArchivedAt = now
+		_, _ = cancelScoutOpeningReplyInThread(&thread, "Scout reply canceled because the thread was archived.", time.Now().UTC())
 	} else {
 		thread.ArchivedAt = ""
 	}
@@ -3111,11 +3208,13 @@ func (app *kanbanBoardApp) sanitizeScoutChatFiles(ctx context.Context, user *use
 			}
 			text = strings.TrimSpace(text) + "\n[truncated]"
 		}
-		// A blob ref (card 085) must name a stored blob with a model-safe
+		// A blob ref (card 085) must name a stored blob with an upload-safe
 		// mime; anything else drops the ref and keeps the name/size chip. A
 		// valid ref takes the store's pinned mime over any client claim, and
 		// strips client Text — a ref'd binary's Text is the server-derived
-		// transcription only, never attacker-supplied "contents".
+		// transcription only, never attacker-supplied "contents". Model-safe
+		// forwarding is a narrower, later decision: GIF remains a valid durable
+		// and rendered chat attachment even when it is withheld from Responses.
 		ref := strings.TrimSpace(file.Ref)
 		mime := ""
 		if ref != "" {
@@ -3134,10 +3233,10 @@ func (app *kanbanBoardApp) sanitizeScoutChatFiles(ctx context.Context, user *use
 			text = ""
 			meta, err := blobStatForRef(ref)
 			if err == nil {
-				if attachmentModelSafeMimes[strings.ToLower(strings.TrimSpace(meta.Mime))] {
+				if attachmentUploadSafeMimes[strings.ToLower(strings.TrimSpace(meta.Mime))] {
 					err = app.reservePendingAttachmentUpload(user, destination, file, meta, reservationID)
 				} else {
-					err = fmt.Errorf("attachment type is not model-safe")
+					err = fmt.Errorf("attachment type is not upload-safe")
 				}
 			}
 			if err == nil {
@@ -3331,6 +3430,9 @@ func scoutChatHistoryFromThread(thread scoutChatThreadRecord) []scoutChatTurn {
 	}
 	history := make([]scoutChatTurn, 0, len(thread.Messages)-start)
 	for _, message := range thread.Messages[start:] {
+		if message.Reply != nil && strings.ToLower(strings.TrimSpace(message.Reply.State)) != scoutReplyStateCompleted {
+			continue
+		}
 		role := strings.TrimSpace(message.Role)
 		switch role {
 		case "assistant", "scout":

@@ -260,6 +260,9 @@ func TestScoutChatChannelScoutAnswersOnlyWhenMentioned(t *testing.T) {
 	var capturedRequest openAITextRequest
 	originalResponder := createOpenAITextResponse
 	createOpenAITextResponse = func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Workflow == "scout_route" {
+			return openAIScoutRouteJSON(t, openAIScoutRouterOutput{Route: "inline"}), nil
+		}
 		modelCalls++
 		capturedRequest = request
 		return "Scout answer from the channel.", nil
@@ -419,7 +422,10 @@ func TestScoutChatConcurrentAppendsBothSurvive(t *testing.T) {
 	t.Cleanup(func() { kanbanApp = previousApp })
 
 	originalResponder := createOpenAITextResponse
-	createOpenAITextResponse = func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
+	createOpenAITextResponse = func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Workflow == "scout_route" {
+			return openAIScoutRouteJSON(t, openAIScoutRouterOutput{Route: "inline"}), nil
+		}
 		// Hold the read -> model -> save window open so both writers overlap.
 		time.Sleep(80 * time.Millisecond)
 		return "overlapping answer", nil
@@ -934,14 +940,12 @@ func TestAssistantChatThreadPatchTitleRoute(t *testing.T) {
 // prompt.
 func TestScoutChatRouterProposesToolRunNeverLaunches(t *testing.T) {
 	setupAuthTestEnv(t)
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-router-test")
-	// card 096: with OpenAI configured the router also offers propose_image, so
-	// the enum pin below expects the fourth tool. The keyless-OpenAI absence is
-	// pinned by TestScoutChatRouterImageToolGatedOnOpenAIKey.
-	t.Setenv("OPENAI_API_KEY", "test-image-key")
-	t.Setenv("BONFIRE_ROUTER_MODEL", "")
+	t.Setenv("ANTHROPIC_API_KEY", "installed-but-unused")
+	t.Setenv("OPENAI_API_KEY", "openai-router-test")
+	t.Setenv("OPENAI_SCOUT_ROUTER_MODEL", "")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "openai-router-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
 
 	previousRunner := startAgentThreadAsync
@@ -950,32 +954,23 @@ func TestScoutChatRouterProposesToolRunNeverLaunches(t *testing.T) {
 	}
 	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
 
-	// A proposal replaces the inline answer — neither chat seam may fire.
-	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
-		t.Fatal("a proposing turn must not also run the Q&A path")
-		return "", nil
-	})
-	swapOpenAITextResponder(t, func(context.Context, string, openAITextRequest) (string, error) {
-		t.Fatal("a proposing turn must not also run the Q&A path")
-		return "", nil
-	})
-
-	var routed anthropicMessagesRequest
-	swapAnthropicMessagesResponder(t, func(_ context.Context, apiKey string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
-		if apiKey != "sk-ant-router-test" {
-			t.Fatalf("router apiKey=%q, want the env key", apiKey)
+	var routed openAITextRequest
+	swapOpenAITextResponder(t, func(_ context.Context, apiKey string, request openAITextRequest) (string, error) {
+		if apiKey != "openai-router-test" {
+			t.Fatalf("router apiKey=%q, want the OpenAI key", apiKey)
+		}
+		if request.Workflow != "scout_route" {
+			t.Fatal("a proposing turn must not also run the Q&A path")
 		}
 		routed = request
-		return anthropicMessagesResponse{
-			StopReason: "tool_use",
-			Content: []json.RawMessage{
-				mockAnthropicToolUseBlock("toolu_router", "propose_tool_run", map[string]any{
-					"tool_id":   "comps_precedent",
-					"objective": "comps for the rodeo doc against streaming buyers",
-					"fields":    map[string]any{"thesis": "rodeo doc", "format": "film", "bogus": "dropped"},
-				}),
-			},
-		}, nil
+		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
+			Route: "tool_run", ToolID: "comps_precedent", Objective: "comps for the rodeo doc against streaming buyers",
+			Fields: []openAIScoutRouterField{{Key: "thesis", Value: "rodeo doc"}, {Key: "format", Value: "film"}, {Key: "bogus", Value: "dropped"}},
+		}), nil
+	})
+	swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		t.Fatal("Anthropic must not receive core routing traffic")
+		return anthropicMessagesResponse{}, nil
 	})
 
 	user := accountStore().findUser("aj@shareability.com")
@@ -993,25 +988,17 @@ func TestScoutChatRouterProposesToolRunNeverLaunches(t *testing.T) {
 		t.Fatalf("append routed message: %v", err)
 	}
 
-	// The routing turn: Sonnet-5 default, registry-injected schemas, muted-agent
-	// system prompt.
-	if routed.Model != "claude-sonnet-5" {
-		t.Fatalf("router model=%q, want the Sonnet-5 default", routed.Model)
+	if routed.Model != defaultScoutRouterModel {
+		t.Fatalf("router model=%q, want Terra", routed.Model)
 	}
-	// The router runs at the doctrine floor: Sonnet 5 accepts
-	// output_config.effort (the retired Haiku router rejected it), so the
-	// routing turn carries effort=medium via routerEffort/flooredEffort.
-	if routed.Effort != "medium" {
-		t.Fatalf("router effort=%q, want medium (the doctrine floor)", routed.Effort)
+	if routed.ReasoningEffort != "low" || routed.JSONSchema == nil {
+		t.Fatalf("router request=%+v, want low + strict schema", routed)
 	}
-	if !strings.Contains(routed.System, "under-routes is trusted") || !strings.Contains(routed.System, "over-launches is muted") {
-		t.Fatalf("router system prompt missing the trust asymmetry: %s", routed.System)
-	}
-	if len(routed.Tools) != 5 || routed.Tools[0].Name != "propose_tool_run" || routed.Tools[1].Name != "propose_workstream" || routed.Tools[2].Name != "offer_choices" || routed.Tools[3].Name != "propose_goal" || routed.Tools[4].Name != "propose_image" {
-		t.Fatalf("router tools=%#v, want propose_tool_run + propose_workstream + offer_choices + propose_goal + propose_image", routed.Tools)
+	if !strings.Contains(routed.Instructions, "under-routes is trusted") || !strings.Contains(routed.Instructions, "over-launches is muted") {
+		t.Fatalf("router prompt missing trust asymmetry: %s", routed.Instructions)
 	}
 	for _, tool := range packagingTools() {
-		if !strings.Contains(routed.Tools[0].Description, tool.ID) {
+		if !strings.Contains(routed.Instructions, tool.ID) {
 			t.Errorf("router tool description missing registry tool %q — the registry must stay the single taxonomy source", tool.ID)
 		}
 	}
@@ -1059,34 +1046,22 @@ func TestScoutChatRouterProposesToolRunNeverLaunches(t *testing.T) {
 	}
 }
 
-// The router dials join the never-Haiku guard + effort floor: a configured
-// haiku id is refused down to the Sonnet default (mirrors
-// TestOrchestratorModelDialsRefuseHaiku), and a sub-floor effort clamps up to
-// medium. The Haiku exception is closed — the router is a worker seat now.
-func TestRouterModelDialsRefuseHaiku(t *testing.T) {
-	t.Setenv("BONFIRE_ROUTER_MODEL", "claude-haiku-4-5")
+// The router dial accepts only an OpenAI model id; Anthropic slugs cannot
+// move the core availability path back onto an optional provider.
+func TestRouterModelDialsRefuseNonOpenAI(t *testing.T) {
+	t.Setenv("OPENAI_SCOUT_ROUTER_MODEL", "claude-haiku-4-5")
 	if got := routerModel(); got != defaultRouterModel {
-		t.Fatalf("routerModel() with haiku=%q, want the %s doctrine default", got, defaultRouterModel)
+		t.Fatalf("routerModel() with Anthropic slug=%q, want %s", got, defaultRouterModel)
 	}
-	if defaultRouterModel != "claude-sonnet-5" {
-		t.Fatalf("defaultRouterModel=%q, want claude-sonnet-5", defaultRouterModel)
+	if defaultRouterModel != "gpt-5.6-terra" {
+		t.Fatalf("defaultRouterModel=%q, want gpt-5.6-terra", defaultRouterModel)
 	}
-	t.Setenv("BONFIRE_ROUTER_MODEL", "claude-opus-4-8")
-	if got := routerModel(); got != "claude-opus-4-8" {
-		t.Fatalf("routerModel() opus override=%q, want claude-opus-4-8", got)
+	t.Setenv("OPENAI_SCOUT_ROUTER_MODEL", "gpt-5.6-terra")
+	if got := routerModel(); got != "gpt-5.6-terra" {
+		t.Fatalf("routerModel() OpenAI override=%q, want gpt-5.6-terra", got)
 	}
-
-	t.Setenv("BONFIRE_ROUTER_EFFORT", "")
-	if got := routerEffort(); got != "medium" {
-		t.Fatalf("routerEffort() default=%q, want medium (the doctrine floor)", got)
-	}
-	t.Setenv("BONFIRE_ROUTER_EFFORT", "low")
-	if got := routerEffort(); got != "medium" {
-		t.Fatalf("routerEffort() with low=%q, want medium — sub-floor clamps up", got)
-	}
-	t.Setenv("BONFIRE_ROUTER_EFFORT", "high")
-	if got := routerEffort(); got != "high" {
-		t.Fatalf("routerEffort() high override=%q, want high", got)
+	if got := routerEffort(); got != "low" {
+		t.Fatalf("routerEffort()=%q, want low", got)
 	}
 }
 
@@ -1094,18 +1069,16 @@ func TestRouterModelDialsRefuseHaiku(t *testing.T) {
 // existing Q&A path as the answer — the router's own text is never the reply.
 func TestScoutChatRouterDefaultsToInlineAnswer(t *testing.T) {
 	setupAuthTestEnv(t)
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-router-test")
+	t.Setenv("OPENAI_API_KEY", "openai-core-test")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "openai-core-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
 
-	swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
-		return anthropicMessagesResponse{
-			StopReason: "end_turn",
-			Content:    []json.RawMessage{mockAnthropicTextBlock("Tier 0 — answering inline.")},
-		}, nil
-	})
-	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Workflow == "scout_route" {
+			return openAIScoutRouteJSON(t, openAIScoutRouterOutput{Route: "inline"}), nil
+		}
 		return "we decided the market is buyers-first.", nil
 	})
 
@@ -1131,24 +1104,19 @@ func TestScoutChatRouterDefaultsToInlineAnswer(t *testing.T) {
 	}
 }
 
-// Keyless: no Anthropic key means no router turn — plain Q&A, never a
+// Keyless: no OpenAI key means no router turn — deterministic fallback, never a
 // proposal, never an error (the launchGoalThread 503 posture).
 func TestScoutChatRouterKeylessSkipsRouterTurn(t *testing.T) {
 	setupAuthTestEnv(t)
-	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
-	kanbanApp.mu.Lock()
-	kanbanApp.apiKey = "test-key"
-	kanbanApp.mu.Unlock()
+	kanbanApp.apiKey = ""
 	t.Cleanup(func() { kanbanApp = previousApp })
 
-	swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
-		t.Fatal("keyless deploys must never attempt a router turn")
-		return anthropicMessagesResponse{}, nil
-	})
 	swapOpenAITextResponder(t, func(context.Context, string, openAITextRequest) (string, error) {
-		return "keyless answer.", nil
+		t.Fatal("keyless deploys must never attempt a core provider turn")
+		return "", nil
 	})
 
 	user := accountStore().findUser("aj@shareability.com")
@@ -1168,8 +1136,8 @@ func TestScoutChatRouterKeylessSkipsRouterTurn(t *testing.T) {
 		t.Fatalf("response keys=%v, want no proposal keyless", responseKeys(response))
 	}
 	answer, ok := response["answer"].(scoutChatMessageRecord)
-	if !ok || answer.Text != "keyless answer." {
-		t.Fatalf("answer=%#v, want the plain Q&A answer", response["answer"])
+	if !ok || strings.TrimSpace(answer.Text) == "" {
+		t.Fatalf("answer=%#v, want deterministic fallback text", response["answer"])
 	}
 }
 
@@ -1177,15 +1145,16 @@ func TestScoutChatRouterKeylessSkipsRouterTurn(t *testing.T) {
 // message still gets its inline answer.
 func TestScoutChatRouterErrorDegradesToInlineAnswer(t *testing.T) {
 	setupAuthTestEnv(t)
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-router-test")
+	t.Setenv("OPENAI_API_KEY", "openai-core-test")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "openai-core-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
 
-	swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
-		return anthropicMessagesResponse{}, fmt.Errorf("router upstream 500")
-	})
-	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Workflow == "scout_route" {
+			return "", fmt.Errorf("router upstream 500")
+		}
 		return "still answering.", nil
 	})
 
@@ -1213,16 +1182,17 @@ func TestScoutChatRouterErrorDegradesToInlineAnswer(t *testing.T) {
 // there (the @scout mention + prefix/keyword rules are unchanged).
 func TestScoutChatRouterSkipsPublicChannels(t *testing.T) {
 	setupAuthTestEnv(t)
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-router-test")
+	t.Setenv("OPENAI_API_KEY", "openai-core-test")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "openai-core-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
 
 	swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
 		t.Fatal("the router must not run for channel messages")
 		return anthropicMessagesResponse{}, nil
 	})
-	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
+	swapOpenAITextResponder(t, func(context.Context, string, openAITextRequest) (string, error) {
 		return "channel answer.", nil
 	})
 
@@ -1248,13 +1218,14 @@ func TestScoutChatRouterSkipsPublicChannels(t *testing.T) {
 // message as Tier 0 — committing only the scout answer.
 func TestScoutChatProposalDismissRecordsSignalAndAnswersTier0(t *testing.T) {
 	setupAuthTestEnv(t)
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-router-test")
+	t.Setenv("OPENAI_API_KEY", "openai-core-test")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "openai-core-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
 
 	var askedTier0 string
-	swapAnthropicTextResponder(t, func(_ context.Context, _ string, request anthropicTextRequest) (string, error) {
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		askedTier0 = request.Input
 		return "the market splits buyers-first.", nil
 	})

@@ -418,6 +418,33 @@ func TestAnthropicDocumentBlockWireShape(t *testing.T) {
 	}
 }
 
+func TestOpenAIAttachmentContentWireShape(t *testing.T) {
+	image := []byte("raster")
+	pdf := []byte("%PDF-1.7")
+	items := openAIAttachmentContentWithReader([]scoutChatFileAttachment{
+		{Name: "shot.png", Ref: strings.Repeat("a", 64)},
+		{Name: "../brief.pdf", Ref: strings.Repeat("b", 64)},
+		{Name: "animated.gif", Ref: strings.Repeat("c", 64)},
+	}, func(file scoutChatFileAttachment) ([]byte, blobMeta, bool) {
+		if strings.HasSuffix(file.Name, ".pdf") {
+			return pdf, blobMeta{Mime: "application/pdf"}, true
+		}
+		if strings.HasSuffix(file.Name, ".gif") {
+			return []byte("GIF89a"), blobMeta{Mime: "image/gif"}, true
+		}
+		return image, blobMeta{Mime: "image/png"}, true
+	})
+	if len(items) != 2 {
+		t.Fatalf("items=%d, want image and PDF", len(items))
+	}
+	if items[0].Type != "input_image" || items[0].ImageURL != "data:image/png;base64,"+base64.StdEncoding.EncodeToString(image) {
+		t.Fatalf("image item=%+v", items[0])
+	}
+	if items[1].Type != "input_file" || items[1].Filename != "brief.pdf" || items[1].FileData != "data:application/pdf;base64,"+base64.StdEncoding.EncodeToString(pdf) {
+		t.Fatalf("PDF item=%+v", items[1])
+	}
+}
+
 // Attachments land BEFORE the text block in the single user turn — the
 // documented order for vision/document requests — and a request without
 // attachments assembles exactly one text block as before.
@@ -670,7 +697,9 @@ func TestScoutChatAttachmentDerivedTextAndVisionQnA(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "sk-openai-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
+	t.Setenv("OPENAI_API_KEY", "sk-openai-test")
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 
 	pngRef, err := putBlob([]byte("raster bytes"), "image/png")
@@ -678,20 +707,30 @@ func TestScoutChatAttachmentDerivedTextAndVisionQnA(t *testing.T) {
 		t.Fatalf("putBlob: %v", err)
 	}
 
-	// The private-thread router turn rides the raw Messages seam — return no
-	// tool_use so the turn falls through to plain Q&A.
 	swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
-		return anthropicMessagesResponse{StopReason: "end_turn"}, nil
+		t.Fatal("installed Anthropic key received core Scout attachment traffic")
+		return anthropicMessagesResponse{}, nil
+	})
+	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
+		t.Fatal("installed Anthropic key received core Scout attachment traffic")
+		return "", nil
 	})
 
 	const transcription = "Deck claims: $2M ARR, 40% MoM growth, pilot with StationTenn."
-	var textRequests []anthropicTextRequest
-	swapAnthropicTextResponder(t, func(_ context.Context, _ string, request anthropicTextRequest) (string, error) {
+	var textRequests []openAITextRequest
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		textRequests = append(textRequests, request)
-		if len(textRequests) == 1 {
+		switch request.Workflow {
+		case "scout_route":
+			return `{"tool":"","imagePrompt":"","workstreamTitle":"","workstreamInstructions":"","goalObjective":"","goalScope":[],"goalAcceptanceCriteria":[],"goalExclusions":[],"goalConstraints":[],"goalQuestions":[],"goalReasons":[],"choices":[]}`, nil
+		case "attachment_extract":
 			return transcription, nil
+		case "scout_chat":
+			return "It says ARR is $2M.", nil
+		default:
+			t.Fatalf("unexpected OpenAI workflow %q", request.Workflow)
+			return "", nil
 		}
-		return "It says ARR is $2M.", nil
 	})
 
 	thread, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Deck check", "")
@@ -711,14 +750,22 @@ func TestScoutChatAttachmentDerivedTextAndVisionQnA(t *testing.T) {
 		t.Fatalf("append message: %v", err)
 	}
 
-	if len(textRequests) != 2 {
-		t.Fatalf("text seam calls=%d, want derive + Q&A", len(textRequests))
+	if len(textRequests) != 3 {
+		t.Fatalf("text seam calls=%d, want route + derive + Q&A", len(textRequests))
 	}
 	derive := textRequests[0]
-	if len(derive.Attachments) != 1 || derive.Instructions != attachmentDeriveInstructions || derive.MaxTokens != attachmentDeriveMaxTokens {
+	qna := textRequests[0]
+	for _, request := range textRequests {
+		if request.Workflow == "attachment_extract" {
+			derive = request
+		}
+		if request.Workflow == "scout_chat" {
+			qna = request
+		}
+	}
+	if len(derive.Attachments) != 1 || derive.Instructions != attachmentDeriveInstructions || derive.MaxOutputTokens != attachmentDeriveMaxTokens || derive.Model != defaultScoutExtractionModel {
 		t.Fatalf("derive request=%+v, want one attachment block under the transcription budget", derive)
 	}
-	qna := textRequests[1]
 	if len(qna.Attachments) != 1 {
 		t.Fatalf("Q&A request carries %d attachments, want the image block", len(qna.Attachments))
 	}
@@ -742,9 +789,8 @@ func TestScoutChatAttachmentDerivedTextAndVisionQnA(t *testing.T) {
 	}
 }
 
-// Keyless-Anthropic: no transcription runs, no blob is read for blocks, and
-// the gpt-5.5 path answers from the name-only placeholder byte-for-byte.
-func TestScoutChatAttachmentKeylessDegradesToNameOnly(t *testing.T) {
+// An installed Anthropic key is never selected for the core attachment path.
+func TestScoutChatAttachmentInstalledAnthropicKeyDoesNotReceiveCoreTraffic(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
@@ -752,7 +798,8 @@ func TestScoutChatAttachmentKeylessDegradesToNameOnly(t *testing.T) {
 	kanbanApp.apiKey = "test-openai-key"
 	kanbanApp.mu.Unlock()
 	t.Cleanup(func() { kanbanApp = previousApp })
-	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "test-openai-key")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-installed")
 
 	pngRef, err := putBlob([]byte("raster bytes"), "image/png")
 	if err != nil {
@@ -760,13 +807,27 @@ func TestScoutChatAttachmentKeylessDegradesToNameOnly(t *testing.T) {
 	}
 
 	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
-		t.Fatal("Anthropic seam must not be touched keyless")
+		t.Fatal("Anthropic text seam must not be touched by core Scout attachments")
 		return "", nil
 	})
+	swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		t.Fatal("Anthropic router seam must not be touched by core Scout attachments")
+		return anthropicMessagesResponse{}, nil
+	})
 	var gotInput string
+	const transcription = "OpenAI extracted attachment facts."
 	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
-		gotInput = request.Input
-		return "I can only see the file name.", nil
+		switch request.Workflow {
+		case "scout_route":
+			return `{"tool":"","imagePrompt":"","workstreamTitle":"","workstreamInstructions":"","goalObjective":"","goalScope":[],"goalAcceptanceCriteria":[],"goalExclusions":[],"goalConstraints":[],"goalQuestions":[],"goalReasons":[],"choices":[]}`, nil
+		case "attachment_extract":
+			return transcription, nil
+		case "scout_chat":
+			gotInput = request.Input
+			return "The attachment was read through OpenAI.", nil
+		default:
+			return "", fmt.Errorf("unexpected workflow %q", request.Workflow)
+		}
 	})
 
 	thread, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Deck check", "")
@@ -785,19 +846,19 @@ func TestScoutChatAttachmentKeylessDegradesToNameOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("append message: %v", err)
 	}
-	if !strings.Contains(gotInput, "Attached file: deck.png") {
-		t.Fatalf("keyless input=%q, want the name-only placeholder", gotInput)
+	if !strings.Contains(gotInput, transcription) {
+		t.Fatalf("OpenAI Q&A input=%q, want derived attachment text", gotInput)
 	}
 	saved, ok := response["thread"].(scoutChatThreadRecord)
 	if !ok {
 		t.Fatalf("response thread=%T, want scoutChatThreadRecord", response["thread"])
 	}
 	file := saved.Messages[0].Files[0]
-	if file.Text != "" {
-		t.Fatalf("keyless derived text=%q, want empty (no transcription without a key)", file.Text)
+	if file.Text != transcription {
+		t.Fatalf("derived text=%q, want OpenAI extraction", file.Text)
 	}
 	if file.Ref != pngRef {
-		t.Fatalf("keyless ref=%q, want the ref preserved for the render path", file.Ref)
+		t.Fatalf("ref=%q, want the ref preserved for the render path", file.Ref)
 	}
 }
 
@@ -805,8 +866,9 @@ func TestPublicHumanAttachmentCommitsBeforeDeferredDerivation(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "sk-openai-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("OPENAI_API_KEY", "sk-openai-test")
 
 	ref, err := putBlob([]byte("public channel raster"), "image/png")
 	if err != nil {
@@ -820,7 +882,7 @@ func TestPublicHumanAttachmentCommitsBeforeDeferredDerivation(t *testing.T) {
 			close(release)
 		}
 	}()
-	swapAnthropicTextResponder(t, func(_ context.Context, _ string, request anthropicTextRequest) (string, error) {
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		if request.Instructions != attachmentDeriveInstructions {
 			t.Errorf("unexpected async request instructions=%q", request.Instructions)
 		}
@@ -910,7 +972,8 @@ func TestAttachmentDerivationDeferralExcludesScoutAndActionFlows(t *testing.T) {
 func TestDeferredAttachmentEnrichmentDoesNotResurrectDeletedMessage(t *testing.T) {
 	setupAuthTestEnv(t)
 	app := newIsolatedKanbanBoardApp(t)
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	app.apiKey = "sk-openai-test"
+	t.Setenv("OPENAI_API_KEY", "sk-openai-test")
 	ref, err := putBlob([]byte("delete race raster"), "image/png")
 	if err != nil {
 		t.Fatalf("putBlob: %v", err)
@@ -934,7 +997,7 @@ func TestDeferredAttachmentEnrichmentDoesNotResurrectDeletedMessage(t *testing.T
 	}
 	started := make(chan struct{})
 	release := make(chan struct{})
-	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
+	swapOpenAITextResponder(t, func(context.Context, string, openAITextRequest) (string, error) {
 		close(started)
 		<-release
 		return "stale derived text", nil
@@ -1218,7 +1281,8 @@ func TestAttachmentBlobReadDropsBytesRevokedDuringRead(t *testing.T) {
 func TestAttachmentDerivedTextIsDiscardedWhenRevokedDuringModelRead(t *testing.T) {
 	setupAuthTestEnv(t)
 	app := newIsolatedKanbanBoardApp(t)
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("OPENAI_API_KEY", "sk-openai-test")
+	app.apiKey = "sk-openai-test"
 	user := accountStore().findUser("aj@shareability.com")
 	thread, err := app.createScoutChatThread(user.Email, user.Name, "revoke model", scoutChatVisibilityPrivate)
 	if err != nil {
@@ -1235,17 +1299,17 @@ func TestAttachmentDerivedTextIsDiscardedWhenRevokedDuringModelRead(t *testing.T
 	if err := app.reservePendingAttachmentUpload(user, thread, file, meta, reservationID); err != nil {
 		t.Fatalf("reserve source: %v", err)
 	}
-	blocks := app.attachmentContentBlocksAuthorized(user, thread, []scoutChatFileAttachment{file}, reservationID)
-	if len(blocks) != 1 {
-		t.Fatalf("authorized blocks=%d, want 1", len(blocks))
+	attachments := app.openAIAttachmentContentAuthorized(user, thread, []scoutChatFileAttachment{file}, reservationID)
+	if len(attachments) != 1 {
+		t.Fatalf("authorized attachments=%d, want 1", len(attachments))
 	}
-	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
+	swapOpenAITextResponder(t, func(context.Context, string, openAITextRequest) (string, error) {
 		if err := app.revokeAttachmentSource(file.SourceID); err != nil {
 			t.Errorf("revoke source during provider call: %v", err)
 		}
 		return "confidential derived text", nil
 	})
-	derived := app.deriveAttachmentTextAuthorized(context.Background(), user, thread, []scoutChatFileAttachment{file}, reservationID, blocks)
+	derived := app.deriveAttachmentTextAuthorized(context.Background(), user, thread, []scoutChatFileAttachment{file}, reservationID, attachments)
 	if len(derived) != 1 || strings.TrimSpace(derived[0].Text) != "" {
 		t.Fatalf("revoked model output persisted into attachment: %+v", derived)
 	}

@@ -915,6 +915,7 @@ func main() {
 	roomMixer = newAudioMixer()
 	defer roomMixer.close()
 	kanbanApp = newKanbanBoardApp()
+	kanbanApp.startScoutOpeningReplyWorkers()
 	installLiveMediaSoakObserver(kanbanApp)
 	configureProductionCatchUpResolver(kanbanApp)
 	if err := configureProductionInsightsOpportunitiesExecutor(kanbanApp); err != nil {
@@ -1058,6 +1059,7 @@ func main() {
 	// private voice peer, so the page posts each response.done usage object
 	// here and the server ledgers it under seat voice_private.
 	http.HandleFunc("/assistant/realtime/usage", assistantRealtimeUsageHandler)
+	http.HandleFunc("/assistant/realtime/milestone", assistantRealtimeMilestoneHandler)
 	// W0-9: signed-in JSON twin of the living Spend & Health artifact.
 	http.HandleFunc("/api/usage/rollup", usageRollupHandler)
 	http.HandleFunc("/api/consent", consentHandler)
@@ -2352,8 +2354,10 @@ func assistantRealtimeOfferHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	recordCapabilityPoll(capabilityPrivateVoice, time.Now().UTC())
 	answerSDP, err := kanbanApp.createPrivateRealtimeVoiceCall(apiKey, realtimeModel(), offerSDP, user.Email)
 	if err != nil {
+		recordCapabilityFailure(capabilityPrivateVoice, time.Now().UTC(), err)
 		log.Errorf("Failed to create private Realtime voice call for %s: %v", user.Email, err)
 		if message, status, ok := openAIAPIRequestUserMessage(err); ok {
 			writeAuthError(w, status, "Scout voice is unavailable: "+message)
@@ -2362,6 +2366,7 @@ func assistantRealtimeOfferHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	recordCapabilityMilestone(capabilityPrivateVoice, "offer_accepted", time.Now().UTC())
 
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok":  true,

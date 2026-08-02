@@ -275,6 +275,9 @@ func TestTableScoutMentionAddsCasualStyleToModelInstructions(t *testing.T) {
 	var captured openAITextRequest
 	originalResponder := createOpenAITextResponse
 	createOpenAITextResponse = func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Workflow == "scout_route" {
+			return openAIScoutRouteJSON(t, openAIScoutRouterOutput{Route: "inline"}), nil
+		}
 		captured = request
 		return "yeah — that tracks. i’d keep the first pass small.", nil
 	}
@@ -309,7 +312,10 @@ func TestScoutChatPrivateThreadMentionsDoNotNotify(t *testing.T) {
 
 	modelCalls := 0
 	originalResponder := createOpenAITextResponse
-	createOpenAITextResponse = func(context.Context, string, openAITextRequest) (string, error) {
+	createOpenAITextResponse = func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Workflow == "scout_route" {
+			return openAIScoutRouteJSON(t, openAIScoutRouterOutput{Route: "inline"}), nil
+		}
 		modelCalls++
 		return "Scout private answer.", nil
 	}

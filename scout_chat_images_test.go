@@ -99,14 +99,10 @@ func TestScoutChatImageMessageRoundTrip(t *testing.T) {
 // == image and generates NOTHING: the confirm is the only generate door.
 func TestScoutChatRouterProposesImageNeverGenerates(t *testing.T) {
 	setupAuthTestEnv(t)
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-router-test")
-	// OpenAI intentionally UNSET so the deterministic guard's image branch is
-	// off and this exercises the MODEL propose_image validation path; the mock
-	// returns propose_image regardless (scoutRouterProposalFromToolUse never
-	// checks the env, only the block name).
-	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "openai-router-test")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "openai-router-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
 
 	previousRunner := startScoutChatImageAsync
@@ -114,21 +110,10 @@ func TestScoutChatRouterProposesImageNeverGenerates(t *testing.T) {
 		t.Fatal("a proposal must never generate an image")
 	}
 	t.Cleanup(func() { startScoutChatImageAsync = previousRunner })
-	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
-		t.Fatal("a proposing turn must not also run the Q&A path")
-		return "", nil
-	})
-
-	swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
-		return anthropicMessagesResponse{
-			StopReason: "tool_use",
-			Content: []json.RawMessage{
-				mockAnthropicToolUseBlock("toolu_image", "propose_image", map[string]any{
-					"prompt": "a rooftop crowd of the crew mid-laugh, hats in the air",
-					"title":  "Rooftop celebration",
-				}),
-			},
-		}, nil
+	swapOpenAITextResponder(t, func(context.Context, string, openAITextRequest) (string, error) {
+		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
+			Route: "image", Prompt: "a rooftop crowd of the crew mid-laugh, hats in the air", Title: "Rooftop celebration",
+		}), nil
 	})
 
 	user := accountStore().findUser("aj@shareability.com")
@@ -181,6 +166,7 @@ func TestScoutChatImageDeterministicGuardProposesConceptRender(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-image-key")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "test-image-key"
 	t.Cleanup(func() { kanbanApp = previousApp })
 
 	previousRunner := startScoutChatImageAsync
@@ -188,9 +174,9 @@ func TestScoutChatImageDeterministicGuardProposesConceptRender(t *testing.T) {
 		t.Fatal("the guard proposes a card, it must never generate")
 	}
 	t.Cleanup(func() { startScoutChatImageAsync = previousRunner })
-	swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+	swapOpenAITextResponder(t, func(context.Context, string, openAITextRequest) (string, error) {
 		t.Fatal("the deterministic guard must short-circuit the model turn for a literal image ask")
-		return anthropicMessagesResponse{}, nil
+		return "", nil
 	})
 
 	user := accountStore().findUser("aj@shareability.com")
@@ -388,9 +374,10 @@ func TestScoutChatImageProposalAcceptQuotaExhaustedFriendlyError(t *testing.T) {
 // dismissal path, exercised for the image kind (a regression pin, no new code).
 func TestScoutChatImageProposalDismissReAsksTier0(t *testing.T) {
 	setupAuthTestEnv(t)
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-router-test")
+	t.Setenv("OPENAI_API_KEY", "openai-chat-test")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "openai-chat-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
 
 	previousRunner := startScoutChatImageAsync
@@ -400,7 +387,7 @@ func TestScoutChatImageProposalDismissReAsksTier0(t *testing.T) {
 	t.Cleanup(func() { startScoutChatImageAsync = previousRunner })
 
 	var askedTier0 string
-	swapAnthropicTextResponder(t, func(_ context.Context, _ string, request anthropicTextRequest) (string, error) {
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		askedTier0 = request.Input
 		return "sure — describe the vibe and I can propose a render.", nil
 	})

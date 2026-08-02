@@ -244,7 +244,7 @@ func scoutChatThreadModeForChannelText(text string) string {
 
 // --- the propose-confirm router (packaging OS §2, Wave 2 item 8) -------------
 //
-// Typed Scout's routing brain: one Sonnet-5 function-calling turn per private
+// Typed Scout's routing brain: one strict Responses turn per private
 // thread message decides whether the ask is answerable inline (Tier 0, the
 // heavily-biased default), worth PROPOSING as a quick single-shot workstream
 // (Tier 1), or worth PROPOSING as a contract-gated goal pipeline run (Tier 2).
@@ -255,18 +255,14 @@ func scoutChatThreadModeForChannelText(text string) string {
 // decide about the market?" used to silently launch a workstream — the only
 // silent heavy invoke in the system, retired per spec.
 //
-// Keyless (no ANTHROPIC_API_KEY): no router turn at all — plain Q&A, never a
+// Keyless (no OPENAI_API_KEY): no router turn at all — plain Q&A, never a
 // proposal, never an error. A failed router turn degrades the same way.
 
 const (
-	// defaultRouterModel: routing is still classification-shaped — strict tool
-	// use, enum over the registry — but per the resolved doctrine it rides the
-	// Sonnet worker tier, not Haiku (the exception is closed; agent_runner_
-	// anthropic.go: never-Haiku guard). routerModel() runs it through that guard.
-	defaultRouterModel = "claude-sonnet-5"
-	// scoutRouterMaxTokens bounds the routing turn: a proposal is one small
-	// tool call, an inline verdict is no call at all.
-	scoutRouterMaxTokens = 700
+	// scoutRouterMaxTokens bounds the strict routing object. This is generous
+	// enough for a four-choice clarification or pre-filled registry fields while
+	// remaining a small Luna turn.
+	scoutRouterMaxTokens = 1200
 
 	scoutRouterProposalKindToolRun    = "tool_run"
 	scoutRouterProposalKindWorkstream = "workstream"
@@ -346,20 +342,16 @@ func isRouterRoutingVerdict(verdict string) bool {
 	}
 }
 
-// routerModel is the routing-turn dial, distinct from chatModel() and
-// orchestratorModel(). It rides the same never-Haiku guard as every other
-// Anthropic seat, so a configured haiku id is refused down to the Sonnet
-// default rather than honored.
+// routerModel remains the common telemetry/test accessor for this seat. The
+// route itself is OpenAI-only; an Anthropic key cannot select it.
 func routerModel() string {
-	return doctrineModelOrDefault("BONFIRE_ROUTER_MODEL", defaultRouterModel)
+	return scoutRouterModel()
 }
 
-// routerEffort is the routing-turn thinking-depth dial. Sonnet 5 accepts
-// output_config.effort (the retired Haiku router rejected it), so the router
-// runs at the doctrine floor — a configured value below medium clamps up.
+// routerEffort is retained for older evaluation call sites. The OpenAI route
+// uses low reasoning directly in its Responses request.
 func routerEffort() string {
-	effort, _ := flooredEffort(getenvDefault("BONFIRE_ROUTER_EFFORT", doctrineEffortFloor), doctrineEffortFloor)
-	return effort
+	return "low"
 }
 
 // scoutRouterProposal is the wire/storage shape of one proposal card: enough
@@ -750,13 +742,18 @@ func deterministicRouterGuard(text string) *scoutRouterVerdict {
 	return nil
 }
 
-// routeScoutChatTurn runs the one routing turn and returns a verdict — a
+// routeScoutChatTurn runs the one OpenAI routing turn and returns a verdict — a
 // proposal card, a quick-reply question card — or nil for Tier 0 (answer
 // inline). nil is also every degraded path: keyless, router error,
 // undecodable/unknown tool call — the caller falls through to the normal Q&A,
 // so the router can only ever ADD a card, never break chat.
 func (app *kanbanBoardApp) routeScoutChatTurn(ctx context.Context, text string, history []scoutChatTurn) *scoutRouterVerdict {
-	apiKey := currentAnthropicAPIKey()
+	if app == nil {
+		return nil
+	}
+	app.mu.Lock()
+	apiKey := strings.TrimSpace(app.apiKey)
+	app.mu.Unlock()
 	if apiKey == "" {
 		return nil // keyless: plain Q&A — never a proposal, never an error
 	}
@@ -773,68 +770,53 @@ func (app *kanbanBoardApp) routeScoutChatTurn(ctx context.Context, text string, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	response, err := createAnthropicMessagesResponse(ctx, apiKey, anthropicMessagesRequest{
-		Model:  routerModel(),
-		System: scoutRouterSystemPrompt(),
-		Messages: []anthropicMessage{{
-			Role:    "user",
-			Content: []json.RawMessage{anthropicTextBlock(scoutRouterInput(text, history))},
-		}},
-		Tools:     scoutRouterTools(),
-		MaxTokens: scoutRouterMaxTokens,
-		// The router runs Sonnet 5 at the doctrine floor (routerEffort): Sonnet 5
-		// accepts output_config.effort, unlike the retired Haiku router.
-		Effort: routerEffort(),
-		// W1 item 11: Sonnet 5 runs ADAPTIVE thinking when the field is
-		// omitted, and max_tokens caps thinking + tool call COMBINED — inside
-		// the 700-token routing budget the thinking burn truncated the
-		// tool_use mid-JSON, so a typed work ask silently degraded to an
-		// inline answer with NO proposal card. Disabled exactly like the chat
-		// path (anthropic_text.go): the budget belongs to the tool call.
-		DisableThinking: true,
+	recordCapabilityPoll(capabilityTypedScoutRouter, time.Now().UTC())
+	response, err := createOpenAITextResponse(ctx, apiKey, openAITextRequest{
+		Model:           routerModel(),
+		Seat:            seatRouter,
+		Workflow:        "scout_route",
+		Instructions:    scoutRouterInstructions(),
+		Input:           scoutRouterInput(text, history),
+		ReasoningEffort: "low",
+		Verbosity:       "low",
+		MaxOutputTokens: scoutRouterMaxTokens,
+		JSONSchema:      scoutRouterJSONSchema(),
 	})
 	if err != nil {
 		log.Errorf("Scout router turn failed (degrading to inline answer): %v", err)
+		recordCapabilityFailure(capabilityTypedScoutRouter, time.Now().UTC(), err)
 		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
 			"verdict":  routerVerdictInline,
-			"degraded": "router_error",
+			"degraded": "router_error", "provider": providerOpenAI, "model": routerModel(),
 		})
 		return nil
 	}
-	sawToolUse := false
-	for _, raw := range response.Content {
-		block := decodeAnthropicBlock(raw)
-		if block.Type != "tool_use" {
-			continue
-		}
-		sawToolUse = true
-		if block.Name == "offer_choices" {
-			if choices := scoutChatChoicesFromToolUse(block, text); choices != nil {
-				recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
-					"verdict": routerVerdictChoicePills,
-				})
-				return &scoutRouterVerdict{choices: choices, source: proposalSourceChatRouter}
-			}
-			continue
-		}
-		if proposal := scoutRouterProposalFromToolUse(block, text); proposal != nil {
-			recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
-				"verdict": routerVerdictProposedTool,
-				"kind":    proposal.Kind,
-			})
-			return &scoutRouterVerdict{proposal: proposal, source: proposalSourceChatRouter}
-		}
+	output, err := decodeOpenAIScoutRouterOutput(response)
+	if err != nil {
+		recordRouterParseFailure("strict_route")
+		recordCapabilityFailure(capabilityTypedScoutRouter, time.Now().UTC(), err)
+		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
+			"verdict": routerVerdictInline, "degraded": "router_parse_error", "provider": providerOpenAI, "model": routerModel(),
+		})
+		return nil
 	}
-	// W0 item 6 truncation telemetry: a max_tokens stop (the silent-degrade
-	// signature DisableThinking exists to kill — the rollup alarms when its
-	// rate is not ~0) or a tool call the validators could not use both fall
-	// through to an inline answer; record WHY before degrading.
-	if response.StopReason == "max_tokens" || sawToolUse {
-		fields := map[string]any{"stop_reason": response.StopReason}
-		if sawToolUse {
-			fields["unusable_tool_call"] = true
-		}
-		recordEvalEvent(seatRouter, evalKindRouterTruncation, fields)
+	verdict, err := scoutRouterVerdictFromOpenAI(output, text)
+	if err != nil {
+		recordRouterParseFailure(strings.TrimSpace(output.Route))
+		recordCapabilityFailure(capabilityTypedScoutRouter, time.Now().UTC(), err)
+		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
+			"verdict": routerVerdictInline, "degraded": "router_parse_error", "provider": providerOpenAI, "model": routerModel(),
+		})
+		return nil
+	}
+	recordCapabilitySuccess(capabilityTypedScoutRouter, time.Now().UTC())
+	if verdict != nil && verdict.choices != nil {
+		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{"verdict": routerVerdictChoicePills})
+		return verdict
+	}
+	if verdict != nil && verdict.proposal != nil {
+		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{"verdict": routerVerdictProposedTool, "kind": verdict.proposal.Kind})
+		return verdict
 	}
 	recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
 		"verdict": routerVerdictInline,

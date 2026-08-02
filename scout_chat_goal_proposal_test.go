@@ -10,7 +10,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -22,9 +21,10 @@ import (
 // launches.
 func TestScoutChatRouterProposesGoalRun(t *testing.T) {
 	setupAuthTestEnv(t)
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-router-test")
+	t.Setenv("OPENAI_API_KEY", "openai-router-test")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "openai-router-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
 
 	startAgentThreadAsyncPrev := startAgentThreadAsync
@@ -37,21 +37,13 @@ func TestScoutChatRouterProposesGoalRun(t *testing.T) {
 		t.Fatal("a goal_run proposal must never launch a goal pipeline")
 	}
 	t.Cleanup(func() { startGoalThreadAsync = startGoalThreadAsyncPrev })
-	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
-		t.Fatal("a proposal turn must not also run the Q&A path")
-		return "", nil
-	})
-
-	swapAnthropicMessagesResponder(t, func(_ context.Context, _ string, _ anthropicMessagesRequest) (anthropicMessagesResponse, error) {
-		return anthropicMessagesResponse{
-			StopReason: "tool_use",
-			Content: []json.RawMessage{
-				mockAnthropicToolUseBlock("toolu_goal", "propose_goal", map[string]any{
-					"objective":      "package the Aurora IP into a one-pager and an investor deck",
-					"authority_hint": "workspace_write",
-				}),
-			},
-		}, nil
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Workflow != "scout_route" {
+			t.Fatal("a proposal turn must not also run the Q&A path")
+		}
+		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
+			Route: "goal_run", Objective: "package the Aurora IP into a one-pager and an investor deck", AuthorityHint: "workspace_write",
+		}), nil
 	})
 
 	user := accountStore().findUser("aj@shareability.com")
@@ -241,20 +233,15 @@ func TestScoutChatGoalRunAcceptIsSignalOnly(t *testing.T) {
 // the ask degrades to plain Q&A with no proposal.
 func TestScoutChatGoalRunKeylessNeverProposes(t *testing.T) {
 	setupAuthTestEnv(t)
-	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
-	kanbanApp.mu.Lock()
-	kanbanApp.apiKey = "test-key"
-	kanbanApp.mu.Unlock()
+	kanbanApp.apiKey = ""
 	t.Cleanup(func() { kanbanApp = previousApp })
 
-	swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
-		t.Fatal("keyless deploys must never attempt a router turn")
-		return anthropicMessagesResponse{}, nil
-	})
 	swapOpenAITextResponder(t, func(context.Context, string, openAITextRequest) (string, error) {
-		return "keyless answer.", nil
+		t.Fatal("keyless deploys must never attempt a core provider turn")
+		return "", nil
 	})
 
 	user := accountStore().findUser("aj@shareability.com")
@@ -272,8 +259,8 @@ func TestScoutChatGoalRunKeylessNeverProposes(t *testing.T) {
 	if _, proposed := response["proposal"]; proposed {
 		t.Fatalf("response keys=%v, want no proposal keyless", responseKeys(response))
 	}
-	if answer, ok := response["answer"].(scoutChatMessageRecord); !ok || answer.Text != "keyless answer." {
-		t.Fatalf("answer=%#v, want the plain Q&A answer", response["answer"])
+	if answer, ok := response["answer"].(scoutChatMessageRecord); !ok || strings.TrimSpace(answer.Text) == "" {
+		t.Fatalf("answer=%#v, want the deterministic fallback answer", response["answer"])
 	}
 }
 

@@ -6,7 +6,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buildApiUrl, buildAuthHeaders } from '../api/requestHelpers';
+import { buildApiUrl, buildAuthHeaders, buildIdempotencyHeaders } from '../api/requestHelpers';
 
 describe('Bonfire mobile API helpers', () => {
   it('joins API paths against the production base', () => {
@@ -24,5 +24,12 @@ describe('Bonfire mobile API helpers', () => {
     const headers = buildAuthHeaders('expo', 'abc123');
     assert.equal(headers.Authorization, 'Bearer abc123');
     assert.equal(headers['X-Bonfire-Session'], undefined);
+  });
+
+  it('puts the opening-turn operation key in the canonical header', () => {
+    assert.deepEqual(buildIdempotencyHeaders('  home-scout-123  '), {
+      'Idempotency-Key': 'home-scout-123',
+    });
+    assert.deepEqual(buildIdempotencyHeaders('   '), {});
   });
 });

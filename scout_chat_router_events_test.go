@@ -19,9 +19,9 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -61,29 +61,28 @@ func ledgerEventFields(event map[string]any) map[string]any {
 	return fields
 }
 
-// The routing turn's wire request pins DisableThinking (W1 item 11, mirroring
-// anthropic_text_test.go): the 700-token budget belongs to the tool call, not
-// to adaptive thinking. The rest of the request shape — router model, doctrine
-// floor effort, registry-injected tool schemas — rides along unchanged.
-func TestScoutRouterRequestPinsDisableThinking(t *testing.T) {
+// The required router is a strict Terra Responses seat. An installed Anthropic
+// key is irrelevant, and the registry taxonomy rides in the bounded prompt.
+func TestScoutRouterRequestUsesStrictTerraSeat(t *testing.T) {
 	ledgerTestDir(t)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-router-test")
-	t.Setenv("BONFIRE_ROUTER_MODEL", "")
-	t.Setenv("BONFIRE_ROUTER_EFFORT", "")
+	t.Setenv("OPENAI_SCOUT_ROUTER_MODEL", "")
 	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "openai-router-key"
 
 	calls := 0
-	var got anthropicMessagesRequest
-	swapAnthropicMessagesResponder(t, func(_ context.Context, apiKey string, request anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+	var got openAITextRequest
+	swapOpenAITextResponder(t, func(_ context.Context, apiKey string, request openAITextRequest) (string, error) {
 		calls++
-		if apiKey != "sk-ant-router-test" {
-			t.Fatalf("apiKey=%q, want sk-ant-router-test", apiKey)
+		if apiKey != "openai-router-key" {
+			t.Fatalf("apiKey=%q, want OpenAI router key", apiKey)
 		}
 		got = request
-		return anthropicMessagesResponse{
-			StopReason: "end_turn",
-			Content:    []json.RawMessage{mockAnthropicTextBlock("quick inline answer")},
-		}, nil
+		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{Route: "inline"}), nil
+	})
+	swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		t.Fatal("Anthropic router must not run")
+		return anthropicMessagesResponse{}, nil
 	})
 
 	if verdict := app.routeScoutChatTurn(context.Background(), "sort the launch follow-ups into a plan for tomorrow", nil); verdict != nil {
@@ -92,104 +91,76 @@ func TestScoutRouterRequestPinsDisableThinking(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("router wire calls=%d, want exactly one routing turn", calls)
 	}
-	if !got.DisableThinking {
-		t.Fatal("router request must set DisableThinking (Sonnet 5 adaptive thinking shares the 700-token tool-call budget and truncates proposals)")
+	if got.Model != defaultScoutRouterModel {
+		t.Fatalf("model=%q, want %s", got.Model, defaultScoutRouterModel)
 	}
-	if got.Model != "claude-sonnet-5" {
-		t.Fatalf("model=%q, want the claude-sonnet-5 router default", got.Model)
+	if got.MaxOutputTokens != scoutRouterMaxTokens || got.ReasoningEffort != "low" || got.Seat != seatRouter || got.Workflow != "scout_route" {
+		t.Fatalf("router request=%+v, want Terra/low strict seat", got)
 	}
-	if got.MaxTokens != scoutRouterMaxTokens || got.Effort != "medium" {
-		t.Fatalf("budget=%d/%q, want %d/medium (doctrine floor)", got.MaxTokens, got.Effort, scoutRouterMaxTokens)
-	}
-	if len(got.Tools) < 4 {
-		t.Fatalf("tools=%d, want the registry-injected routing schemas", len(got.Tools))
+	if got.JSONSchema == nil || !strings.Contains(got.Instructions, "comps_precedent") || !strings.Contains(got.Instructions, "under-routes is trusted") {
+		t.Fatalf("router instructions/schema missing registry or trust contract: %+v", got)
 	}
 }
 
-// One router_outcome event per routing turn, router_truncation on max_tokens
-// or an unusable tool call, parse_failure on undecodable tool JSON — the W0
-// item-6 funnel that proves the DisableThinking fix live (truncated-rate ~0).
+// One router_outcome event per routing turn. Strict-schema decode/validation
+// failures emit one parse_failure and degrade to inline; provider errors stay
+// separately attributable. The former Anthropic stop-reason/truncation funnel
+// is intentionally absent from this OpenAI Responses seat.
 func TestScoutRouterOutcomeAndTruncationEvents(t *testing.T) {
 	cases := []struct {
-		name            string
-		text            string
-		response        anthropicMessagesResponse
-		responderErr    error
-		wantWireCalls   int
-		wantVerdict     string
-		wantDegraded    string
-		wantSource      string
-		wantTruncations int
-		wantStopReason  string
-		wantUnusable    bool
-		wantParseTool   string
+		name          string
+		text          string
+		response      string
+		responderErr  error
+		wantWireCalls int
+		wantVerdict   string
+		wantDegraded  string
+		wantSource    string
+		wantParseTool string
 	}{
 		{
 			name: "model proposal records proposed_tool",
-			response: anthropicMessagesResponse{
-				StopReason: "tool_use",
-				Content: []json.RawMessage{
-					mockAnthropicToolUseBlock("toolu_ws", "propose_workstream", map[string]any{
-						"mode":  "research",
-						"query": "map the rodeo creator market",
-					}),
-				},
-			},
+			response: openAIScoutRouteJSON(t, openAIScoutRouterOutput{
+				Route: "workstream", Mode: "research", Objective: "map the rodeo creator market",
+			}),
 			wantWireCalls: 1,
 			wantVerdict:   routerVerdictProposedTool,
 			wantSource:    proposalSourceChatRouter,
 		},
 		{
 			name: "clarifying question records choice_pills",
-			response: anthropicMessagesResponse{
-				StopReason: "tool_use",
-				Content: []json.RawMessage{
-					mockAnthropicToolUseBlock("toolu_choices", "offer_choices", map[string]any{
-						"question": "outline work, or the deck built out?",
-						"options": []map[string]any{
-							{"label": "tighten the outline"},
-							{"label": "build the deck"},
-						},
-					}),
+			response: openAIScoutRouteJSON(t, openAIScoutRouterOutput{
+				Route: "choices", Question: "outline work, or the deck built out?",
+				Options: []openAIScoutRouterOption{
+					{Label: "tighten the outline", Reply: "tighten it"},
+					{Label: "build the deck", Reply: "build it"},
 				},
-			},
+			}),
 			wantWireCalls: 1,
 			wantVerdict:   routerVerdictChoicePills,
 			wantSource:    proposalSourceChatRouter,
 		},
 		{
-			name: "plain answer records inline",
-			response: anthropicMessagesResponse{
-				StopReason: "end_turn",
-				Content:    []json.RawMessage{mockAnthropicTextBlock("that is a chat answer")},
-			},
+			name:          "plain answer records inline",
+			response:      openAIScoutRouteJSON(t, openAIScoutRouterOutput{Route: "inline"}),
 			wantWireCalls: 1,
 			wantVerdict:   routerVerdictInline,
 		},
 		{
-			name:            "max_tokens stop records truncation then inline",
-			response:        anthropicMessagesResponse{StopReason: "max_tokens"},
-			wantWireCalls:   1,
-			wantVerdict:     routerVerdictInline,
-			wantTruncations: 1,
-			wantStopReason:  "max_tokens",
+			name:          "undecodable strict output records parse failure",
+			response:      `{"route":`,
+			wantWireCalls: 1,
+			wantVerdict:   routerVerdictInline,
+			wantDegraded:  "router_parse_error",
+			wantParseTool: "strict_route",
 		},
 		{
-			name: "unusable tool call records parse_failure and truncation",
-			response: anthropicMessagesResponse{
-				StopReason: "max_tokens",
-				Content: []json.RawMessage{
-					// A tool_use whose input was cut off mid-JSON — the exact
-					// silent-degrade signature DisableThinking exists to kill.
-					json.RawMessage(`{"type":"tool_use","id":"toolu_cut","name":"propose_workstream","input":"cut-off"}`),
-				},
-			},
-			wantWireCalls:   1,
-			wantVerdict:     routerVerdictInline,
-			wantTruncations: 1,
-			wantStopReason:  "max_tokens",
-			wantUnusable:    true,
-			wantParseTool:   "propose_workstream",
+			name:          "unknown route records validation failure",
+			response:      openAIScoutRouteJSON(t, openAIScoutRouterOutput{Route: "invented"}),
+			wantWireCalls: 1,
+			wantVerdict:   routerVerdictInline,
+			wantDegraded:  "router_parse_error",
+			wantParseTool: "invented",
 		},
 		{
 			name:          "wire error degrades to inline with the degraded stamp",
@@ -210,14 +181,22 @@ func TestScoutRouterOutcomeAndTruncationEvents(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := ledgerTestDir(t)
-			t.Setenv("ANTHROPIC_API_KEY", "sk-ant-router-test")
-			t.Setenv("BONFIRE_ROUTER_MODEL", "")
+			t.Setenv("ANTHROPIC_API_KEY", "installed-but-unused")
+			t.Setenv("OPENAI_SCOUT_ROUTER_MODEL", "")
 			app := newIsolatedKanbanBoardApp(t)
+			app.apiKey = "openai-router-test"
 
 			calls := 0
-			swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+			swapOpenAITextResponder(t, func(_ context.Context, apiKey string, request openAITextRequest) (string, error) {
 				calls++
+				if apiKey != "openai-router-test" || request.Workflow != "scout_route" {
+					t.Fatalf("unexpected OpenAI route call: key=%q request=%+v", apiKey, request)
+				}
 				return tc.response, tc.responderErr
+			})
+			swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+				t.Fatal("Anthropic must not receive core router traffic")
+				return anthropicMessagesResponse{}, nil
 			})
 
 			text := tc.text
@@ -248,18 +227,8 @@ func TestScoutRouterOutcomeAndTruncationEvents(t *testing.T) {
 				t.Fatalf("degraded=%v, want %q", fields["degraded"], tc.wantDegraded)
 			}
 
-			truncations := filterLedgerEvents(events, telemetryTypeEval, evalKindRouterTruncation)
-			if len(truncations) != tc.wantTruncations {
-				t.Fatalf("router_truncation events=%d, want %d", len(truncations), tc.wantTruncations)
-			}
-			if tc.wantTruncations == 1 {
-				truncationFields := ledgerEventFields(truncations[0])
-				if truncationFields["stop_reason"] != tc.wantStopReason {
-					t.Fatalf("stop_reason=%v, want %q", truncationFields["stop_reason"], tc.wantStopReason)
-				}
-				if tc.wantUnusable && truncationFields["unusable_tool_call"] != true {
-					t.Fatalf("unusable_tool_call=%v, want true", truncationFields["unusable_tool_call"])
-				}
+			if truncations := filterLedgerEvents(events, telemetryTypeEval, evalKindRouterTruncation); len(truncations) != 0 {
+				t.Fatalf("OpenAI strict router emitted obsolete router_truncation events: %v", truncations)
 			}
 
 			parseFailures := filterLedgerEvents(events, telemetryTypeEval, evalKindParseFailure)
@@ -273,7 +242,7 @@ func TestScoutRouterOutcomeAndTruncationEvents(t *testing.T) {
 				t.Fatalf("parse_failure events=%d, want exactly one", len(parseFailures))
 			}
 			parseFields := ledgerEventFields(parseFailures[0])
-			if parseFields["seat"] != seatRouter || parseFields["model"] != "claude-sonnet-5" || parseFields["tool"] != tc.wantParseTool {
+			if parseFields["seat"] != seatRouter || parseFields["model"] != defaultScoutRouterModel || parseFields["tool"] != tc.wantParseTool {
 				t.Fatalf("parse_failure fields=%v, want seat/model/tool stamped per the evalKindParseFailure contract", parseFields)
 			}
 		})
@@ -287,25 +256,23 @@ func TestScoutRouterOutcomeAndTruncationEvents(t *testing.T) {
 func TestScoutChatProposalLifecycleEvents(t *testing.T) {
 	setupAuthTestEnv(t)
 	dir := ledgerTestDir(t)
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-router-test")
+	t.Setenv("OPENAI_API_KEY", "openai-router-test")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "openai-router-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
 
 	previousRunner := startAgentThreadAsync
 	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
 	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
 
-	swapAnthropicMessagesResponder(t, func(_ context.Context, _ string, _ anthropicMessagesRequest) (anthropicMessagesResponse, error) {
-		return anthropicMessagesResponse{
-			StopReason: "tool_use",
-			Content: []json.RawMessage{
-				mockAnthropicToolUseBlock("toolu_ws", "propose_workstream", map[string]any{
-					"mode":  "research",
-					"query": "map the rodeo creator market",
-				}),
-			},
-		}, nil
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Workflow != "scout_route" {
+			t.Fatalf("unexpected workflow %q", request.Workflow)
+		}
+		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
+			Route: "workstream", Mode: "research", Objective: "map the rodeo creator market",
+		}), nil
 	})
 
 	user := accountStore().findUser("aj@shareability.com")
@@ -461,14 +428,15 @@ func TestScoutChatProposalDismissRecordsResolvedNeverLaunched(t *testing.T) {
 func TestScoutChatDeterministicGuardMintCarriesGuardSource(t *testing.T) {
 	setupAuthTestEnv(t)
 	dir := ledgerTestDir(t)
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-router-test")
+	t.Setenv("OPENAI_API_KEY", "openai-router-test")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "openai-router-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
 
-	swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+	swapOpenAITextResponder(t, func(context.Context, string, openAITextRequest) (string, error) {
 		t.Fatal("the deterministic guard must commit before any wire call")
-		return anthropicMessagesResponse{}, nil
+		return "", nil
 	})
 
 	user := accountStore().findUser("aj@shareability.com")

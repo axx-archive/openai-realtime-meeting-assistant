@@ -33,9 +33,13 @@ func openAIResponsesURL() string {
 }
 
 type openAITextRequest struct {
-	Model           string
-	Instructions    string
-	Input           string
+	Model        string
+	Instructions string
+	Input        string
+	// Attachments are Responses-native input_image/input_file content items.
+	// They are kept separate from Input so ordinary text-only callers preserve
+	// the compact string input wire shape byte-for-byte.
+	Attachments     []openAIInputContent
 	ReasoningEffort string
 	Verbosity       string
 	MaxOutputTokens int
@@ -56,6 +60,19 @@ type openAITextRequest struct {
 	ValidateOutput func(string) error
 }
 
+type openAIInputContent struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	ImageURL string `json:"image_url,omitempty"`
+	Filename string `json:"filename,omitempty"`
+	FileData string `json:"file_data,omitempty"`
+}
+
+type openAIInputMessage struct {
+	Role    string               `json:"role"`
+	Content []openAIInputContent `json:"content"`
+}
+
 type openAIJSONSchema struct {
 	Name        string
 	Description string
@@ -65,7 +82,7 @@ type openAIJSONSchema struct {
 type openAIResponsesPayload struct {
 	Model           string         `json:"model"`
 	Instructions    string         `json:"instructions,omitempty"`
-	Input           string         `json:"input"`
+	Input           any            `json:"input"`
 	Reasoning       map[string]any `json:"reasoning,omitempty"`
 	Text            map[string]any `json:"text,omitempty"`
 	MaxOutputTokens int            `json:"max_output_tokens,omitempty"`
@@ -199,10 +216,17 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 	}
 
 	store := false
+	input := any(strings.TrimSpace(request.Input))
+	if len(request.Attachments) > 0 {
+		content := make([]openAIInputContent, 0, len(request.Attachments)+1)
+		content = append(content, request.Attachments...)
+		content = append(content, openAIInputContent{Type: "input_text", Text: strings.TrimSpace(request.Input)})
+		input = []openAIInputMessage{{Role: "user", Content: content}}
+	}
 	payload := openAIResponsesPayload{
 		Model:        model,
 		Instructions: strings.TrimSpace(request.Instructions),
-		Input:        strings.TrimSpace(request.Input),
+		Input:        input,
 		Store:        &store,
 		ServiceTier:  strings.TrimSpace(request.ServiceTier),
 		Text: map[string]any{

@@ -1,15 +1,16 @@
 package main
 
 // Chat attachment ingestion (card 085) — the missing three seams between the
-// composer, the content-addressed blob store (blobs.go), and Scout's
-// Anthropic calls:
+// composer, the content-addressed blob store (blobs.go), and model calls:
 //
 //  1. POST /assistant/attachments uploads one image/PDF binary into putBlob
 //     and returns its ref, so message records carry refs instead of dropped
 //     bytes (the frontend previously read only text-like files).
-//  2. attachmentContentBlocks turns ref'd files into image/document content
-//     blocks under the wave-5 request budgets, so the CURRENT turn's binaries
-//     ride the model call (history keeps the bounded text placeholders).
+//  2. Provider adapters turn ref'd files into bounded image/document content
+//     so the CURRENT turn's binaries ride the model call (history keeps the
+//     bounded text placeholders). Scout's required path uses OpenAI Responses;
+//     the legacy block adapter remains only for an explicit specialist
+//     artifact follow-up.
 //  3. deriveAttachmentText runs one bounded transcription pass whose output
 //     lands in scoutChatFileAttachment.Text — the field every existing text
 //     consumer (history folding, channel team replies, thread previews,
@@ -44,7 +45,7 @@ import (
 const (
 	// attachmentUploadMaxBytes caps one composer upload at 25MB — generous
 	// for decks and screenshots while staying far under the blob store's
-	// 64MB ceiling and Anthropic's 32MB request cap after base64 expansion.
+	// 64MB ceiling and the provider request envelopes after base64 expansion.
 	attachmentUploadMaxBytes = 25 << 20
 
 	// One PDF per message, ≤20MB decoded. This is the per-category ceiling;
@@ -56,14 +57,14 @@ const (
 
 	// attachmentMaxRequestBytes caps the combined decoded payload of every
 	// image and document block in one message. base64 expands the whole body
-	// ~1.33x, so 22MB decoded → ~29MB on the wire, leaving headroom under
-	// Anthropic's 32MB request ceiling for the JSON envelope and text prompt.
+	// ~1.33x, so 22MB decoded → ~29MB on the wire, leaving headroom for the
+	// JSON envelope and text prompt across supported provider adapters.
 	// Without this guard the independent 20MB image and 20MB PDF budgets could
 	// sum to ~40MB decoded (~53MB base64) and the request would 413 opaquely.
 	attachmentMaxRequestBytes = 22 << 20
 
-	// The derived-text pass is bounded and best-effort: one sub-25s Sonnet
-	// call whose failure never blocks the message commit.
+	// The Luna derived-text pass is bounded and best-effort: one sub-25s call
+	// whose failure never blocks the message commit.
 	attachmentDeriveTimeout   = 25 * time.Second
 	attachmentDeriveMaxTokens = 1200
 
@@ -250,7 +251,7 @@ func (app *kanbanBoardApp) grantPendingAttachmentUpload(user *userAccount, desti
 	}
 	email := normalizeAccountEmail(user.Email)
 	mime := strings.ToLower(strings.TrimSpace(meta.Mime))
-	if email == "" || !attachmentModelSafeMimes[mime] || meta.Size < 1 {
+	if email == "" || !attachmentUploadSafeMimes[mime] || meta.Size < 1 {
 		return pendingAttachmentUploadGrant{}, fmt.Errorf("attachment source metadata is invalid")
 	}
 	if destination.ArchivedAt != "" {
@@ -504,15 +505,22 @@ func (app *kanbanBoardApp) commitAttachmentMessageSourcesLocked(messages []scout
 	return nil
 }
 
-// attachmentModelSafeMimes is the closed set of binary types the composer may
-// upload and Scout's model calls may attach: the image types Anthropic's
-// image blocks accept plus native PDF document blocks. Everything else keeps
-// today's name-only chip path.
-var attachmentModelSafeMimes = map[string]bool{
+// Composer storage and model forwarding are separate contracts. GIF remains
+// a supported rendered chat attachment, but Responses accepts only
+// non-animated GIF and this validator cannot yet prove that safely. GIFs are
+// therefore stored/rendered while model context degrades to the name chip.
+var attachmentUploadSafeMimes = map[string]bool{
 	"image/png":       true,
 	"image/jpeg":      true,
 	"image/webp":      true,
 	"image/gif":       true,
+	"application/pdf": true,
+}
+
+var attachmentModelSafeMimes = map[string]bool{
+	"image/png":       true,
+	"image/jpeg":      true,
+	"image/webp":      true,
 	"application/pdf": true,
 }
 
@@ -542,7 +550,7 @@ func canonicalAttachmentUploadMime(header string) string {
 
 func detectedAttachmentUploadMime(data []byte) string {
 	detected := canonicalAttachmentUploadMime(http.DetectContentType(data))
-	if attachmentModelSafeMimes[detected] && validateAttachmentBytes(detected, data) == nil {
+	if attachmentUploadSafeMimes[detected] && validateAttachmentBytes(detected, data) == nil {
 		return detected
 	}
 	// Go's generic content sniffer has not recognized WebP in every supported
@@ -559,7 +567,7 @@ func detectedAttachmentUploadMime(data []byte) string {
 // silently rewritten to another type.
 func resolveAttachmentUploadMime(declared string, data []byte) (string, error) {
 	normalized := canonicalAttachmentUploadMime(declared)
-	if attachmentModelSafeMimes[normalized] {
+	if attachmentUploadSafeMimes[normalized] {
 		if err := validateAttachmentBytes(normalized, data); err != nil {
 			return "", err
 		}
@@ -823,6 +831,62 @@ func attachmentContentBlocksWithReader(files []scoutChatFileAttachment, read fun
 	return blocks
 }
 
+// openAIAttachmentContent is the OpenAI Responses counterpart to
+// attachmentContentBlocks. Images use input_image data URLs; PDFs use
+// input_file with an inline data URL and a stable filename. It deliberately
+// reuses the existing conservative decoded-byte budgets.
+func openAIAttachmentContent(files []scoutChatFileAttachment) []openAIInputContent {
+	return openAIAttachmentContentWithReader(files, func(file scoutChatFileAttachment) ([]byte, blobMeta, bool) {
+		data, meta, err := getBlob(strings.TrimSpace(file.Ref))
+		if err != nil {
+			log.Warnf("Skipping unreadable chat attachment blob %s: %v", strings.TrimSpace(file.Ref), err)
+			return nil, blobMeta{}, false
+		}
+		return data, meta, true
+	})
+}
+
+func openAIAttachmentContentWithReader(files []scoutChatFileAttachment, read func(scoutChatFileAttachment) ([]byte, blobMeta, bool)) []openAIInputContent {
+	var content []openAIInputContent
+	images, pdfs := 0, 0
+	imageBytes, pdfBytes := 0, 0
+	for _, file := range files {
+		ref := strings.TrimSpace(file.Ref)
+		if !validBlobRef(ref) {
+			continue
+		}
+		data, meta, ok := read(file)
+		if !ok {
+			continue
+		}
+		mime := strings.ToLower(strings.TrimSpace(meta.Mime))
+		if !attachmentModelSafeMimes[mime] || imageBytes+pdfBytes+len(data) > attachmentMaxRequestBytes {
+			continue
+		}
+		dataURL := "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
+		if mime == "application/pdf" {
+			if pdfs+1 > attachmentMaxPDFBlocks || pdfBytes+len(data) > attachmentMaxPDFBytes {
+				continue
+			}
+			filename := filepath.Base(strings.TrimSpace(file.Name))
+			if filename == "." || filename == string(filepath.Separator) || !strings.EqualFold(filepath.Ext(filename), ".pdf") {
+				filename = "attachment.pdf"
+			}
+			pdfs++
+			pdfBytes += len(data)
+			content = append(content, openAIInputContent{Type: "input_file", Filename: filename, FileData: dataURL})
+			continue
+		}
+		if images+1 > anthropicMaxRequestImages || imageBytes+len(data) > anthropicMaxRequestImageBytes {
+			continue
+		}
+		images++
+		imageBytes += len(data)
+		content = append(content, openAIInputContent{Type: "input_image", ImageURL: dataURL})
+	}
+	return content
+}
+
 func (app *kanbanBoardApp) attachmentSourcesAuthorizedForRead(user *userAccount, destination scoutChatThreadRecord, files []scoutChatFileAttachment, reservationID string) bool {
 	for _, file := range files {
 		if strings.TrimSpace(file.Ref) == "" {
@@ -856,6 +920,23 @@ func (app *kanbanBoardApp) attachmentContentBlocksAuthorized(user *userAccount, 
 	})
 }
 
+func (app *kanbanBoardApp) openAIAttachmentContentAuthorized(user *userAccount, destination scoutChatThreadRecord, files []scoutChatFileAttachment, reservationID string) []openAIInputContent {
+	return openAIAttachmentContentWithReader(files, func(file scoutChatFileAttachment) ([]byte, blobMeta, bool) {
+		if !app.attachmentSourceAuthorizedForRead(user, destination, file, reservationID) {
+			return nil, blobMeta{}, false
+		}
+		data, meta, err := getBlob(strings.TrimSpace(file.Ref))
+		if attachmentBlobReadAfterProbe != nil {
+			attachmentBlobReadAfterProbe(strings.TrimSpace(file.SourceID))
+		}
+		if err != nil || attachmentSourceRevision(strings.TrimSpace(file.Ref), meta) != strings.TrimSpace(file.SourceRevision) ||
+			!app.attachmentSourceAuthorizedForRead(user, destination, file, reservationID) {
+			return nil, blobMeta{}, false
+		}
+		return data, meta, true
+	})
+}
+
 // attachmentDeriveInstructions is the transcription system prompt: the output
 // persists into the thread record as shared team memory, so it must be the
 // facts on the page, not commentary.
@@ -870,8 +951,8 @@ const attachmentDeriveInstructions = "You transcribe file attachments into a tea
 // consumer inherits the attachment content with zero further plumbing.
 // Best-effort: keyless deploys, timeouts, and refusals all leave files
 // untouched and the send proceeds.
-func deriveAttachmentText(ctx context.Context, files []scoutChatFileAttachment, blocks []json.RawMessage) []scoutChatFileAttachment {
-	if len(blocks) == 0 {
+func deriveAttachmentText(ctx context.Context, apiKey string, files []scoutChatFileAttachment, attachments []openAIInputContent) []scoutChatFileAttachment {
+	if len(attachments) == 0 {
 		return files
 	}
 	target := -1
@@ -884,7 +965,7 @@ func deriveAttachmentText(ctx context.Context, files []scoutChatFileAttachment, 
 	if target < 0 {
 		return files
 	}
-	apiKey := currentAnthropicAPIKey()
+	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {
 		return files
 	}
@@ -894,13 +975,16 @@ func deriveAttachmentText(ctx context.Context, files []scoutChatFileAttachment, 
 	ctx, cancel := context.WithTimeout(ctx, attachmentDeriveTimeout)
 	defer cancel()
 
-	transcript, err := createAnthropicTextResponse(ctx, apiKey, anthropicTextRequest{
-		Model:        chatModel(),
-		Instructions: attachmentDeriveInstructions,
-		Input:        "Transcribe the key facts, numbers, names, and claims in the attached files for the team's shared memory.",
-		Effort:       "low",
-		MaxTokens:    attachmentDeriveMaxTokens,
-		Attachments:  blocks,
+	transcript, err := createOpenAITextResponse(ctx, apiKey, openAITextRequest{
+		Model:           scoutExtractionModel(),
+		Seat:            seatAttachments,
+		Workflow:        "attachment_extract",
+		Instructions:    attachmentDeriveInstructions,
+		Input:           "Transcribe the key facts, numbers, names, and claims in the attached files for the team's shared memory.",
+		ReasoningEffort: "low",
+		Verbosity:       "low",
+		MaxOutputTokens: attachmentDeriveMaxTokens,
+		Attachments:     attachments,
 	})
 	if err != nil {
 		log.Warnf("Attachment transcription failed (message still sends): %v", err)
@@ -921,7 +1005,7 @@ func deriveAttachmentText(ctx context.Context, files []scoutChatFileAttachment, 
 	return files
 }
 
-func (app *kanbanBoardApp) deriveAttachmentTextAuthorized(ctx context.Context, user *userAccount, destination scoutChatThreadRecord, files []scoutChatFileAttachment, reservationID string, blocks []json.RawMessage) []scoutChatFileAttachment {
+func (app *kanbanBoardApp) deriveAttachmentTextAuthorized(ctx context.Context, user *userAccount, destination scoutChatThreadRecord, files []scoutChatFileAttachment, reservationID string, attachments []openAIInputContent) []scoutChatFileAttachment {
 	before := append([]scoutChatFileAttachment(nil), files...)
 	// This is the last check before the model call. The second check happens
 	// after its response and discards all derived text if authority changed
@@ -929,7 +1013,7 @@ func (app *kanbanBoardApp) deriveAttachmentTextAuthorized(ctx context.Context, u
 	if !app.attachmentSourcesAuthorizedForRead(user, destination, files, reservationID) {
 		return before
 	}
-	derived := deriveAttachmentText(ctx, files, blocks)
+	derived := deriveAttachmentText(ctx, app.currentOpenAIAPIKey(), files, attachments)
 	if !app.attachmentSourcesAuthorizedForRead(user, destination, files, reservationID) {
 		return before
 	}
@@ -985,6 +1069,23 @@ func (app *kanbanBoardApp) committedAttachmentContentBlocks(viewerEmail string, 
 	})
 }
 
+func (app *kanbanBoardApp) committedOpenAIAttachmentContent(viewerEmail string, threadID string, messageID string, files []scoutChatFileAttachment) []openAIInputContent {
+	return openAIAttachmentContentWithReader(files, func(file scoutChatFileAttachment) ([]byte, blobMeta, bool) {
+		if !app.committedChatAttachmentAuthorized(viewerEmail, threadID, messageID, file) {
+			return nil, blobMeta{}, false
+		}
+		data, meta, err := getBlob(strings.TrimSpace(file.Ref))
+		if attachmentBlobReadAfterProbe != nil {
+			attachmentBlobReadAfterProbe(strings.TrimSpace(file.SourceID))
+		}
+		if err != nil || attachmentSourceRevision(strings.TrimSpace(file.Ref), meta) != strings.TrimSpace(file.SourceRevision) ||
+			!app.committedChatAttachmentAuthorized(viewerEmail, threadID, messageID, file) {
+			return nil, blobMeta{}, false
+		}
+		return data, meta, true
+	})
+}
+
 func (app *kanbanBoardApp) committedAttachmentsAuthorized(viewerEmail string, threadID string, messageID string, files []scoutChatFileAttachment) bool {
 	for _, file := range files {
 		if strings.TrimSpace(file.Ref) != "" && !app.committedChatAttachmentAuthorized(viewerEmail, threadID, messageID, file) {
@@ -1006,12 +1107,19 @@ func (app *kanbanBoardApp) committedAttachmentsAuthorized(viewerEmail string, th
 // must never be used for a durable write.
 func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, thread scoutChatThreadRecord) scoutChatThreadRecord {
 	projected := thread
+	projected.OpeningOperation = nil
 	if len(thread.Messages) == 0 {
 		return projected
 	}
 	projected.Messages = append([]scoutChatMessageRecord(nil), thread.Messages...)
 	for messageIndex := range projected.Messages {
 		original := thread.Messages[messageIndex]
+		if original.Reply != nil {
+			reply := *original.Reply
+			reply.LeaseID = ""
+			reply.LeaseExpiresAt = ""
+			projected.Messages[messageIndex].Reply = &reply
+		}
 		files := make([]scoutChatFileAttachment, 0, len(original.Files))
 		for _, file := range original.Files {
 			if app.committedChatAttachmentAuthorized(viewerEmail, thread.ID, original.ID, file) {

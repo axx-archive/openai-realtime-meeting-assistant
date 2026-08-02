@@ -13,13 +13,16 @@ import (
 // update it when they have authoritative evidence; the HTTP snapshot combines
 // that evidence with boot configuration and live in-process state.
 type capabilityRuntimeState struct {
-	LastSuccess time.Time
-	LastPoll    time.Time
-	LastFailure time.Time
-	LastError   string
-	Backlog     *int
-	DeadLetters *int
-	Circuit     string
+	LastSuccess     time.Time
+	LastPoll        time.Time
+	LastFailure     time.Time
+	LastError       string
+	LastMilestone   string
+	LastMilestoneAt time.Time
+	MilestoneSource string
+	Backlog         *int
+	DeadLetters     *int
+	Circuit         string
 }
 
 func recordCapabilityPoll(name string, at time.Time) {
@@ -35,13 +38,19 @@ func recordCapabilityPoll(name string, at time.Time) {
 }
 
 const (
-	capabilityScout       = "scout"
-	capabilitySTT         = "stt"
-	capabilityRecap       = "recap"
-	capabilityBrain       = "brain"
-	capabilityEmbedding   = "embeddings"
-	capabilityWorkflows   = "workflows"
-	capabilityAttachments = "attachment_authority"
+	capabilityScout            = "scout"
+	capabilitySTT              = "stt"
+	capabilityRoomVoice        = "room_voice"
+	capabilityPrivateVoice     = "private_voice"
+	capabilityMeetingSTT       = "meeting_stt"
+	capabilityDictation        = "dictation"
+	capabilityTypedScoutRouter = "typed_scout_router"
+	capabilityTypedScoutAnswer = "typed_scout_answer"
+	capabilityRecap            = "recap"
+	capabilityBrain            = "brain"
+	capabilityEmbedding        = "embeddings"
+	capabilityWorkflows        = "workflows"
+	capabilityAttachments      = "attachment_authority"
 )
 
 var capabilityRuntime = struct {
@@ -75,6 +84,26 @@ func recordCapabilityFailure(name string, at time.Time, err error) {
 	} else {
 		state.LastError = "unknown failure"
 	}
+	capabilityRuntime.states[name] = state
+	capabilityRuntime.Unlock()
+}
+
+func recordCapabilityMilestone(name, milestone string, at time.Time) {
+	recordCapabilityMilestoneFrom(name, milestone, "server", at)
+}
+
+func recordCapabilityMilestoneFrom(name, milestone, source string, at time.Time) {
+	name = strings.TrimSpace(name)
+	milestone = strings.TrimSpace(milestone)
+	source = strings.TrimSpace(source)
+	if name == "" || milestone == "" {
+		return
+	}
+	capabilityRuntime.Lock()
+	state := capabilityRuntime.states[name]
+	state.LastMilestone = milestone
+	state.LastMilestoneAt = at
+	state.MilestoneSource = source
 	capabilityRuntime.states[name] = state
 	capabilityRuntime.Unlock()
 }
@@ -136,6 +165,11 @@ func capabilityEvidence(name string, now time.Time, staleAfter time.Duration) ma
 	}
 	if state.LastError != "" {
 		out["lastError"] = state.LastError
+	}
+	if state.LastMilestone != "" {
+		out["lastMilestone"] = state.LastMilestone
+		out["lastMilestoneAt"] = state.LastMilestoneAt.UTC().Format(time.RFC3339Nano)
+		out["lastMilestoneSource"] = state.MilestoneSource
 	}
 	if state.Backlog != nil {
 		out["backlog"] = *state.Backlog
@@ -457,36 +491,87 @@ func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 	anthropicReady := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")) != ""
 	degraded := []string{}
 
-	scout := capabilityEvidence(capabilityScout, now, 5*time.Minute)
-	scout["enabled"] = true
-	scout["connected"] = false
-	stt := capabilityEvidence(capabilitySTT, now, 5*time.Minute)
-	stt["enabled"] = true
-	stt["connected"] = false
+	roomVoice := capabilityEvidence(capabilityRoomVoice, now, 5*time.Minute)
+	roomVoice["enabled"] = true
+	roomVoice["connected"] = false
+	roomVoice["provider"] = providerOpenAI
+	roomVoice["model"] = realtimeModel()
+	privateVoice := capabilityEvidence(capabilityPrivateVoice, now, 5*time.Minute)
+	privateVoice["enabled"] = true
+	privateVoice["provider"] = providerOpenAI
+	privateVoice["model"] = realtimeModel()
+	meetingSTT := capabilityEvidence(capabilityMeetingSTT, now, 5*time.Minute)
+	meetingSTT["enabled"] = true
+	meetingSTT["connected"] = false
+	meetingSTT["provider"] = providerOpenAI
+	meetingSTT["model"] = transcriptionLaneModel()
+	dictation := capabilityEvidence(capabilityDictation, now, 5*time.Minute)
+	dictation["enabled"] = true
+	dictation["provider"] = providerOpenAI
+	dictation["model"] = dictationTranscriptionModel()
+	typedRouter := capabilityEvidence(capabilityTypedScoutRouter, now, 5*time.Minute)
+	typedRouter["enabled"] = true
+	typedRouter["provider"] = providerOpenAI
+	typedRouter["model"] = scoutRouterModel()
+	typedAnswer := capabilityEvidence(capabilityTypedScoutAnswer, now, 5*time.Minute)
+	typedAnswer["enabled"] = true
+	typedAnswer["provider"] = providerOpenAI
+	typedAnswer["model"] = scoutChatModel()
 	if kanbanApp != nil {
 		kanbanApp.mu.Lock()
-		scout["connected"] = kanbanApp.connected
-		stt["connected"] = kanbanApp.transcriptLane != nil
+		roomVoice["connected"] = kanbanApp.connected
 		kanbanApp.mu.Unlock()
+		meetingSTT["connected"] = kanbanApp.transcriptionLaneConnected()
 	}
 	if roomRows, roomCircuitOpen := roomScoutCapabilityRows(kanbanApp); len(roomRows) > 0 {
-		scout["rooms"] = roomRows
+		roomVoice["rooms"] = roomRows
 		if roomCircuitOpen {
-			scout["circuit"] = "open"
-			scout["retrySuppressed"] = true
+			roomVoice["circuit"] = "open"
+			roomVoice["retrySuppressed"] = true
 		}
 	}
 	if at, ok := latestCapabilityArtifact(meetingMemoryKindTranscript); ok {
-		if _, reported := stt["lastSuccessAt"]; !reported {
-			mergeCapabilityEvidence(stt, capabilityEvidenceFromSuccess(at, now, 5*time.Minute))
+		if _, reported := meetingSTT["lastSuccessAt"]; !reported {
+			mergeCapabilityEvidence(meetingSTT, capabilityEvidenceFromSuccess(at, now, 5*time.Minute))
 		}
 	}
-	for name, snap := range map[string]map[string]any{"scout": scout, "stt": stt} {
+	for name, snap := range map[string]map[string]any{
+		"roomVoice": roomVoice, "privateVoice": privateVoice,
+		"meetingSTT": meetingSTT, "dictation": dictation,
+		"typedScoutRouter": typedRouter, "typedScoutAnswer": typedAnswer,
+	} {
 		markProviderFailure(snap, providerReady)
 		snap["status"] = capabilityStatus(snap, providerReady)
 		if snap["status"] == "degraded" {
 			degraded = append(degraded, name)
 		}
+	}
+	// Backward-compatible aggregates remain while clients adopt the split
+	// contract. They are healthy only when every required child is healthy.
+	scout := map[string]any{
+		"enabled": true, "connected": roomVoice["connected"], "status": "healthy",
+		"lanes": map[string]any{"roomVoice": roomVoice, "privateVoice": privateVoice, "typedRouter": typedRouter, "typedAnswer": typedAnswer},
+	}
+	if roomVoice["status"] != "healthy" || privateVoice["status"] != "healthy" || typedRouter["status"] != "healthy" || typedAnswer["status"] != "healthy" {
+		scout["status"] = "degraded"
+		degraded = append(degraded, capabilityScout)
+	}
+	if circuit, ok := roomVoice["circuit"]; ok {
+		scout["circuit"] = circuit
+	}
+	if rooms, ok := roomVoice["rooms"]; ok {
+		scout["rooms"] = rooms
+	}
+	if retrySuppressed, ok := roomVoice["retrySuppressed"]; ok {
+		scout["retrySuppressed"] = retrySuppressed
+	}
+	stt := map[string]any{
+		"enabled": true, "connected": meetingSTT["connected"], "status": "healthy",
+		"lanes": map[string]any{"meeting": meetingSTT, "dictation": dictation},
+	}
+	if meetingSTT["status"] != "healthy" || dictation["status"] != "healthy" {
+		stt["status"] = "degraded"
+		degraded = append(degraded, capabilitySTT)
 	}
 
 	brainCfg := readinessAgentSnapshot(meetingBrainAgent())
@@ -590,6 +675,12 @@ func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 	snapshot := map[string]any{
 		"scout":               scout,
 		"stt":                 stt,
+		"roomVoice":           roomVoice,
+		"privateVoice":        privateVoice,
+		"meetingSTT":          meetingSTT,
+		"dictation":           dictation,
+		"typedScoutRouter":    typedRouter,
+		"typedScoutAnswer":    typedAnswer,
 		"recap":               recap,
 		"brain":               brain,
 		"ambientWorkers":      ambientWorkers,

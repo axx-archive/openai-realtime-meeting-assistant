@@ -307,6 +307,7 @@ export function usePersonalRealtime(options: {
       void handleToolCall(call, connectionGeneration);
     }
     if (type === 'response.done' && sessionToken && isRecord(event.response)) {
+      void api.realtimeMilestone(sessionToken, 'response_done').catch(() => undefined);
       const usage = event.response.usage;
       if (isRecord(usage)) {
         void api.realtimeUsage(sessionToken, {
@@ -318,8 +319,12 @@ export function usePersonalRealtime(options: {
     }
     if (type === 'error') {
       const providerError = isRecord(event.error) ? String(event.error.message ?? '') : '';
+      if (sessionToken) void api.realtimeMilestone(sessionToken, 'transport_error').catch(() => undefined);
       terminateTransportWithError(connectionGeneration, providerError || 'Scout voice needs attention.');
       return;
+    }
+    if (sessionToken && (type.includes('response.audio') || type.includes('output_audio_buffer.started'))) {
+      void api.realtimeMilestone(sessionToken, 'first_audio').catch(() => undefined);
     }
     setLiveStatus(realtimeStatusForEvent(type, statusRef.current));
   }, [handleToolCall, sessionToken, setLiveStatus, terminateTransportWithError]);
@@ -433,11 +438,15 @@ export function usePersonalRealtime(options: {
         const streamValue = trackEvent.streams?.[0];
         if (streamValue) remoteStreamRef.current = streamValue;
         if (trackEvent.track) trackEvent.track.enabled = true;
+        void api.realtimeMilestone(sessionToken, 'remote_track').catch(() => undefined);
       };
       peer.onconnectionstatechange = () => {
         if (peerRef.current !== peer || generationRef.current !== connectionGeneration) return;
-        if (peer.connectionState === 'connected') setLiveStatus('listening');
-        else if (peer.connectionState === 'failed' || peer.connectionState === 'disconnected') {
+        if (peer.connectionState === 'connected') {
+          void api.realtimeMilestone(sessionToken, 'peer_connected').catch(() => undefined);
+          setLiveStatus('listening');
+        } else if (peer.connectionState === 'failed' || peer.connectionState === 'disconnected') {
+          void api.realtimeMilestone(sessionToken, 'transport_error').catch(() => undefined);
           terminateTransportWithError(connectionGeneration, 'Scout voice connection was interrupted.');
         } else if (peer.connectionState === 'closed') {
           terminateTransportWithError(connectionGeneration, 'Scout voice connection ended.');
@@ -447,6 +456,7 @@ export function usePersonalRealtime(options: {
       dataChannelRef.current = dataChannel;
       dataChannel.onopen = () => {
         if (generationRef.current === connectionGeneration && dataChannelRef.current === dataChannel) {
+          void api.realtimeMilestone(sessionToken, 'data_channel_open').catch(() => undefined);
           setLiveStatus('listening');
         }
       };

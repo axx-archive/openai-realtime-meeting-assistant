@@ -64,7 +64,8 @@ func TestAssistantQueryInstructionsOfferNeverDenyIsKeyGated(t *testing.T) {
 	// Keyed: the pure prohibition is REPLACED by the offer-never-deny protocol
 	// and the capabilities digest.
 	t.Run("keyed offers, never denies", func(t *testing.T) {
-		t.Setenv("ANTHROPIC_API_KEY", "sk-ant-digest-test")
+		t.Setenv("OPENAI_API_KEY", "sk-openai-digest-test")
+		t.Setenv("ANTHROPIC_API_KEY", "")
 		instructions := assistantQueryInstructions()
 		if strings.Contains(instructions, oldProhibition) {
 			t.Error("keyed instructions still carry the pure prohibition — it must be REPLACED by offer-never-deny")
@@ -79,6 +80,7 @@ func TestAssistantQueryInstructionsOfferNeverDenyIsKeyGated(t *testing.T) {
 	// Keyless: no goal loop can run, so today's honest prohibition stays verbatim
 	// and the digest never appears (don't overpromise on a keyless deploy).
 	t.Run("keyless keeps the honest prohibition", func(t *testing.T) {
+		t.Setenv("OPENAI_API_KEY", "")
 		t.Setenv("ANTHROPIC_API_KEY", "")
 		instructions := assistantQueryInstructions()
 		if !strings.Contains(instructions, oldProhibition) {
@@ -195,18 +197,15 @@ func TestScoutGuardFullPackagingDoesNotOverTriggerStudio(t *testing.T) {
 // a packaging_studio proposal (never package_assembly), and neither launches.
 func TestScoutChatFlagshipTwoTurnRegressionFence(t *testing.T) {
 	setupAuthTestEnv(t)
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-router-test")
+	t.Setenv("OPENAI_API_KEY", "openai-router-test")
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "openai-router-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
 
 	// The guard commits before any model turn, so NOTHING model-facing may run.
-	swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+	swapOpenAITextResponder(t, func(context.Context, string, openAITextRequest) (string, error) {
 		t.Fatal("the deterministic guard must short-circuit before the router model turn")
-		return anthropicMessagesResponse{}, nil
-	})
-	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
-		t.Fatal("a committed proposal must not also run the Q&A answer path")
 		return "", nil
 	})
 
@@ -266,10 +265,10 @@ func TestScoutChatFlagshipTwoTurnRegressionFence(t *testing.T) {
 func TestCapabilityQuestionAnswerCarriesOfferNotDenial(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	app.apiKey = "openai-key"
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-answer-test")
+	t.Setenv("ANTHROPIC_API_KEY", "")
 
-	var got anthropicTextRequest
-	swapAnthropicTextResponder(t, func(_ context.Context, _ string, request anthropicTextRequest) (string, error) {
+	var got openAITextRequest
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		got = request
 		return "Yes — that's the Packaging Studio staged run. Want me to set it up?", nil
 	})

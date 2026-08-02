@@ -357,6 +357,14 @@ type kanbanBoardApp struct {
 	// finally skipped instead of re-sent every tick forever.
 	agentFailures   map[string]*ambientAgentFailure
 	chatThreadLocks map[string]*sync.Mutex
+	// scoutReply workers finish atomic home opening turns outside request
+	// contexts. The durable queued/running lifecycle lives on the thread; this
+	// process state is only a bounded wake/lease executor.
+	scoutReplyStartOnce sync.Once
+	scoutReplyMu        sync.Mutex
+	scoutReplyCancel    context.CancelFunc
+	scoutReplyQueue     chan string
+	scoutReplyWG        sync.WaitGroup
 	// agentThreadRunLocks serializes follow-up validate+mark-running per
 	// artifact (agent_thread_followup.go); model calls stay outside.
 	agentThreadRunLocks map[string]*sync.Mutex
@@ -1082,6 +1090,7 @@ func (app *kanbanBoardApp) restartRealtimePeer(reason string) {
 func (app *kanbanBoardApp) Close() error {
 	var closeErr error
 	app.closeOnce.Do(func() {
+		app.stopScoutOpeningReplyWorkers()
 		if roomMixer != nil {
 			roomMixer.removeSink(realtimeMixedAudioSinkKey)
 		}
@@ -1414,7 +1423,7 @@ func (app *kanbanBoardApp) createRealtimeCall(apiKey string, model string, offer
 
 func (app *kanbanBoardApp) createPrivateRealtimeVoiceCall(apiKey string, model string, offerSDP string, userEmail string) (string, error) {
 	warnRealtimeVoiceSessionNoVocab("private")
-	return app.createRealtimeCallWithSession(apiKey, offerSDP, app.privateRealtimeVoiceSessionConfigForUser(model, userEmail))
+	return app.createRealtimeCallWithSessionAndSafetyIdentifier(apiKey, offerSDP, app.privateRealtimeVoiceSessionConfigForUser(model, userEmail), realtimeSafetyIdentifier(userEmail))
 }
 
 // warnRealtimeVoiceSessionNoVocab makes a degraded voice-session transcription
@@ -1437,6 +1446,19 @@ func warnRealtimeVoiceSessionNoVocab(surface string) {
 }
 
 func (app *kanbanBoardApp) createRealtimeCallWithSession(apiKey string, offerSDP string, session map[string]any) (string, error) {
+	return app.createRealtimeCallWithSessionAndSafetyIdentifier(apiKey, offerSDP, session, "")
+}
+
+func realtimeSafetyIdentifier(userEmail string) string {
+	identity := normalizeAccountEmail(userEmail)
+	if identity == "" {
+		return ""
+	}
+	digest := sha256.Sum256([]byte("meetingassist-realtime-safety/v1\x00" + identity))
+	return "usr_" + hex.EncodeToString(digest[:16])
+}
+
+func (app *kanbanBoardApp) createRealtimeCallWithSessionAndSafetyIdentifier(apiKey string, offerSDP string, session map[string]any, safetyIdentifier string) (string, error) {
 	contentType, body, err := buildRealtimeCallRequest(offerSDP, session)
 	if err != nil {
 		return "", err
@@ -1448,6 +1470,9 @@ func (app *kanbanBoardApp) createRealtimeCallWithSession(apiKey string, offerSDP
 	}
 	request.Header.Set("Authorization", "Bearer "+apiKey)
 	request.Header.Set("Content-Type", contentType)
+	if safetyIdentifier = strings.TrimSpace(safetyIdentifier); safetyIdentifier != "" {
+		request.Header.Set("OpenAI-Safety-Identifier", safetyIdentifier)
+	}
 
 	response, err := realtimeHTTPClient.Do(request)
 	if err != nil {
@@ -3048,10 +3073,12 @@ func (app *kanbanBoardApp) handleRealtimeEventForGeneration(mediaGeneration uint
 	switch event.Type {
 	case "session.created", "session.updated":
 		recordCapabilitySuccess(capabilityScout, time.Now().UTC())
+		recordCapabilitySuccess(capabilityRoomVoice, time.Now().UTC())
 		broadcastAssistantEvent("status", "OpenAI Realtime session configured", map[string]any{"eventType": event.Type})
 	case "error":
 		if event.Error != nil {
 			recordCapabilityFailure(capabilityScout, time.Now().UTC(), fmt.Errorf("%s", firstNonEmptyString(event.Error.Code, "realtime_error")))
+			recordCapabilityFailure(capabilityRoomVoice, time.Now().UTC(), fmt.Errorf("%s", firstNonEmptyString(event.Error.Code, "realtime_error")))
 			log.Errorf("OpenAI Realtime error code=%s message=%s", event.Error.Code, event.Error.Message)
 			if event.Error.Code == "session_expired" {
 				broadcastAssistantEvent("status", "OpenAI Realtime session expired; reconnecting", nil)
@@ -3146,8 +3173,10 @@ func (app *kanbanBoardApp) handleRealtimeEventForGeneration(mediaGeneration uint
 			interrupted := isInterruptedRealtimeResponseStatus(event.Response.Status)
 			if interrupted && !strings.EqualFold(strings.TrimSpace(event.Response.Status), "cancelled") {
 				recordCapabilityFailure(capabilityScout, time.Now().UTC(), fmt.Errorf("realtime response %s", strings.TrimSpace(event.Response.Status)))
+				recordCapabilityFailure(capabilityRoomVoice, time.Now().UTC(), fmt.Errorf("realtime response %s", strings.TrimSpace(event.Response.Status)))
 			} else {
 				recordCapabilitySuccess(capabilityScout, time.Now().UTC())
+				recordCapabilitySuccess(capabilityRoomVoice, time.Now().UTC())
 			}
 			for _, outputItem := range event.Response.Output {
 				if outputItem.Type == "function_call" {

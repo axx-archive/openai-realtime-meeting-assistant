@@ -16,3 +16,8 @@ export function buildAuthHeaders(
   if (sessionToken) headers.Authorization = `Bearer ${sessionToken}`;
   return headers;
 }
+
+export function buildIdempotencyHeaders(idempotencyKey: string): Record<string, string> {
+  const key = idempotencyKey.trim();
+  return key ? { 'Idempotency-Key': key } : {};
+}

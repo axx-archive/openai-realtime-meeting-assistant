@@ -879,10 +879,12 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEventForScopeWithBindings(scop
 	switch event.Type {
 	case "session.created", "session.updated":
 		recordCapabilitySuccess(capabilitySTT, time.Now().UTC())
+		recordCapabilitySuccess(capabilityMeetingSTT, time.Now().UTC())
 		broadcastAssistantEvent("status", "OpenAI transcription session configured", map[string]any{"eventType": event.Type})
 	case "error":
 		if event.Error != nil {
 			recordCapabilityFailure(capabilitySTT, time.Now().UTC(), fmt.Errorf("%s", firstNonEmptyString(event.Error.Code, "transcription_error")))
+			recordCapabilityFailure(capabilityMeetingSTT, time.Now().UTC(), fmt.Errorf("%s", firstNonEmptyString(event.Error.Code, "transcription_error")))
 			if event.Error.Code == "session_expired" {
 				log.Warnf("OpenAI transcription session expired: %s", event.Error.Message)
 				broadcastAssistantEvent("status", "Transcript lane session expired; reconnecting", map[string]any{"code": event.Error.Code, "lane": "transcript"})
@@ -909,6 +911,7 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEventForScopeWithBindings(scop
 				break
 			}
 			recordCapabilityFailure(capabilitySTT, time.Now().UTC(), fmt.Errorf("bind committed transcription item: %w", err))
+			recordCapabilityFailure(capabilityMeetingSTT, time.Now().UTC(), fmt.Errorf("bind committed transcription item: %w", err))
 			recordEvalEvent(seatTranscriptionLane, evalKindTranscriptSegment, map[string]any{
 				"status":           "binding_failed",
 				"room_id":          roomID,
@@ -936,6 +939,7 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEventForScopeWithBindings(scop
 			record, err := bindings.Consume(event.ItemID)
 			if err != nil {
 				recordCapabilityFailure(capabilitySTT, time.Now().UTC(), fmt.Errorf("resolve completed transcription item: %w", err))
+				recordCapabilityFailure(capabilityMeetingSTT, time.Now().UTC(), fmt.Errorf("resolve completed transcription item: %w", err))
 				recordEvalEvent(seatTranscriptionLane, evalKindTranscriptSegment, map[string]any{
 					"status":  "unbound_completed",
 					"room_id": roomID,
@@ -948,6 +952,7 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEventForScopeWithBindings(scop
 			audioSeconds = app.popTranscriptionSegmentSecondsForLaneScope(scope)
 		}
 		recordCapabilitySuccess(capabilitySTT, time.Now().UTC())
+		recordCapabilitySuccess(capabilityMeetingSTT, time.Now().UTC())
 		recordEvalEvent(seatTranscriptionLane, evalKindTranscriptSegment, map[string]any{
 			"status":        "completed",
 			"room_id":       roomID,
@@ -967,6 +972,7 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEventForScopeWithBindings(scop
 			record, err := bindings.Consume(event.ItemID)
 			if err != nil {
 				recordCapabilityFailure(capabilitySTT, time.Now().UTC(), fmt.Errorf("resolve failed transcription item: %w", err))
+				recordCapabilityFailure(capabilityMeetingSTT, time.Now().UTC(), fmt.Errorf("resolve failed transcription item: %w", err))
 				recordEvalEvent(seatTranscriptionLane, evalKindTranscriptSegment, map[string]any{
 					"status":  "unbound_failed",
 					"room_id": roomID,
@@ -979,6 +985,7 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEventForScopeWithBindings(scop
 			audioSeconds = app.popTranscriptionSegmentSecondsForLaneScope(scope)
 		}
 		recordCapabilityFailure(capabilitySTT, time.Now().UTC(), fmt.Errorf("transcription segment failed"))
+		recordCapabilityFailure(capabilityMeetingSTT, time.Now().UTC(), fmt.Errorf("transcription segment failed"))
 		// W0-5: a failed segment is speech the brain never heard — this event
 		// series is the raw feed for the >2% drop-off alarm.
 		recordEvalEvent(seatTranscriptionLane, evalKindTranscriptSegment, map[string]any{

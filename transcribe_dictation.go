@@ -163,8 +163,10 @@ func assistantTranscribeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	started := time.Now()
+	recordCapabilityPoll(capabilityDictation, started.UTC())
 	text, err := openAITranscribeAudio(r.Context(), audio, filename, model, prompt)
 	if err != nil {
+		recordCapabilityFailure(capabilityDictation, time.Now().UTC(), err)
 		// Bill the attempt: a failed call still burned latency and may have
 		// burned vendor time, and a silent hole here hides 429 storms from the
 		// rollup alerts.
@@ -185,6 +187,7 @@ func assistantTranscribeHandler(w http.ResponseWriter, r *http.Request) {
 	// lanes so dictation and transcripts never disagree about a name.
 	text = canonicalizeDomainTerms(strings.TrimSpace(text))
 	if text == "" {
+		recordCapabilityFailure(capabilityDictation, time.Now().UTC(), fmt.Errorf("provider returned an empty transcript"))
 		recordLLMUsage(llmUsageEntry{
 			Provider:     providerOpenAI,
 			Model:        model,
@@ -209,6 +212,7 @@ func assistantTranscribeHandler(w http.ResponseWriter, r *http.Request) {
 		WireSuccess:    true,
 		AcceptedOutput: true,
 	})
+	recordCapabilitySuccess(capabilityDictation, time.Now().UTC())
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(dictationTranscriptResponse{

@@ -76,6 +76,9 @@ func TestAssistantRealtimeOfferForwardsTypedMultipartToOpenAI(t *testing.T) {
 		if auth := r.Header.Get("Authorization"); auth != "Bearer test-realtime-key" {
 			t.Errorf("authorization=%q, want bearer test key", auth)
 		}
+		if safety := r.Header.Get("OpenAI-Safety-Identifier"); safety != realtimeSafetyIdentifier("aj@shareability.com") {
+			t.Errorf("safety identifier=%q, want privacy-preserving caller binding", safety)
+		}
 		mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 		if err != nil {
 			t.Errorf("parse content type: %v", err)

@@ -152,7 +152,7 @@ func (app *kanbanBoardApp) resolveAssistantQueryContext(ctx context.Context, que
 // resolveAssistantQueryContextWithAttachments threads the current turn's
 // binary attachment blocks (card 085) into the model call. Requester-less,
 // mirroring resolveAssistantQueryContext — the chat-thread Q&A seam.
-func (app *kanbanBoardApp) resolveAssistantQueryContextWithAttachments(ctx context.Context, query string, history []scoutChatTurn, attachments []json.RawMessage) (assistantQueryResult, error) {
+func (app *kanbanBoardApp) resolveAssistantQueryContextWithAttachments(ctx context.Context, query string, history []scoutChatTurn, attachments []openAIInputContent) (assistantQueryResult, error) {
 	return app.resolveAssistantQueryContextForUserWithAttachments(ctx, "", query, history, attachments)
 }
 
@@ -167,11 +167,11 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForUser(ctx context.Conte
 // resolveAssistantQueryContextForUserWithAttachments is the full-fat resolve:
 // requester attribution plus the current turn's image/document blocks. Every
 // narrower entrypoint delegates here with nil/empty extras.
-func (app *kanbanBoardApp) resolveAssistantQueryContextForUserWithAttachments(ctx context.Context, requester string, query string, history []scoutChatTurn, attachments []json.RawMessage) (assistantQueryResult, error) {
+func (app *kanbanBoardApp) resolveAssistantQueryContextForUserWithAttachments(ctx context.Context, requester string, query string, history []scoutChatTurn, attachments []openAIInputContent) (assistantQueryResult, error) {
 	return app.resolveAssistantQueryContextForPrincipalWithAttachments(ctx, recallPrincipalForEmail(requester), requester, query, history, attachments)
 }
 
-func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachments(ctx context.Context, principal RecallPrincipal, requester string, query string, history []scoutChatTurn, attachments []json.RawMessage) (assistantQueryResult, error) {
+func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachments(ctx context.Context, principal RecallPrincipal, requester string, query string, history []scoutChatTurn, attachments []openAIInputContent) (assistantQueryResult, error) {
 	query = canonicalizeBoardText(query)
 	if query == "" {
 		return assistantQueryResult{}, fmt.Errorf("query is required")
@@ -212,6 +212,9 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachmen
 	answer, modelErr := recallApp.answerAssistantQueryWithModelAttachments(ctx, requester, query, board.Cards, contextEntries, history, attachments)
 	if modelErr != nil {
 		log.Errorf("Failed to answer assistant query with model: %v", modelErr)
+		if assistantModelSuccessRequired(ctx) {
+			return assistantQueryResult{}, modelErr
+		}
 	}
 	if strings.TrimSpace(answer) == "" {
 		// Wave 6: a time-ranged briefing question degrades to the composed
@@ -234,6 +237,23 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachmen
 		matches:     len(matches),
 		contextSize: len(contextEntries),
 	}, nil
+}
+
+type assistantModelSuccessRequiredContextKey struct{}
+
+func withAssistantModelSuccessRequired(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, assistantModelSuccessRequiredContextKey{}, true)
+}
+
+func assistantModelSuccessRequired(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	required, _ := ctx.Value(assistantModelSuccessRequiredContextKey{}).(bool)
+	return required
 }
 
 func ambiguousClarificationAnswer(query string, history []scoutChatTurn) (string, bool) {
@@ -298,8 +318,8 @@ func withAssistantResponseStyle(ctx context.Context, style string) context.Conte
 	return context.WithValue(ctx, assistantResponseStyleContextKey{}, style)
 }
 
-func assistantQueryInstructionsForContext(ctx context.Context) string {
-	instructions := assistantQueryInstructions()
+func assistantQueryInstructionsForContext(ctx context.Context, coreAvailable bool) string {
+	instructions := assistantQueryInstructionsForCoreAvailability(coreAvailable)
 	if ctx == nil {
 		return instructions
 	}
@@ -311,10 +331,10 @@ func assistantQueryInstructionsForContext(ctx context.Context) string {
 }
 
 // answerAssistantQueryWithModelAttachments is answerAssistantQueryWithModel
-// plus the current turn's binary attachment blocks (card 085). Attachments
-// ride the Sonnet path only; the keyless gpt-5.5 fallback ignores them and
-// answers from the text placeholders exactly as before.
-func (app *kanbanBoardApp) answerAssistantQueryWithModelAttachments(ctx context.Context, requester string, query string, cards []kanbanCard, entries []meetingMemoryEntry, history []scoutChatTurn, attachments []json.RawMessage) (string, error) {
+// plus the current turn's Responses-native binary attachment content (card
+// 085). Scout's required availability path remains OpenAI-owned even when an
+// Anthropic key is installed.
+func (app *kanbanBoardApp) answerAssistantQueryWithModelAttachments(ctx context.Context, requester string, query string, cards []kanbanCard, entries []meetingMemoryEntry, history []scoutChatTurn, attachments []openAIInputContent) (string, error) {
 	if app == nil {
 		return "", fmt.Errorf("assistant is unavailable")
 	}
@@ -322,8 +342,7 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModelAttachments(ctx context.
 	app.mu.Lock()
 	apiKey := app.apiKey
 	app.mu.Unlock()
-	anthropicKey := currentAnthropicAPIKey()
-	if strings.TrimSpace(apiKey) == "" && anthropicKey == "" {
+	if strings.TrimSpace(apiKey) == "" {
 		return "", fmt.Errorf("OPENAI_API_KEY is not configured")
 	}
 
@@ -335,46 +354,25 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModelAttachments(ctx context.
 
 	includeBoard := shouldIncludeBoardContextForAssistant(query, history)
 	input := buildAssistantQueryInput(query, cards, entries, app.activeDecisionEntries(decisionContextLimit), app.activeNarrativeEntries(narrativeStorylineContextLimit), history, time.Now(), includeBoard, app.pinnedProfileNotes(requester)...)
-	instructions := assistantQueryInstructionsForContext(ctx)
-	// Sonnet 5 fronts chat whenever an Anthropic key is present (packaging-os
-	// §1 role matrix, Wave 2 item 7); keyless-Anthropic keeps the gpt-5.5 path
-	// below byte-for-byte so keyless deploys degrade exactly as before.
-	// Item Q7 (AJ-approved): the memory study found synthesis is the only stage
-	// where more reasoning parameters consistently helped, so this TYPED chat
-	// seam (private Scout chat, chat threads, /assistant, and artifact-content
-	// drafting) synthesizes at medium on the KEYED Anthropic path. The Effort
-	// field there is self-documenting: the doctrine floor already clamps low->
-	// medium for this seam, so it is a harmless no-op that records the intent.
-	// It is NOT the interactive voice path: a live meeting answers recall through
-	// the answer_memory_question tool (answerMemoryQuestionWithModel), spoken back
-	// in the room (kanban.go realtimeToolRunsAsync "Memory answers block ... up to
-	// 45s"), so that seam stays at effort=low to protect the spoken turn's
-	// latency. The keyless OpenAI fallback below stays at effort=low too (F33):
-	// its 500-token MaxOutputTokens was sized for low, and medium reasoning under
-	// the same cap risks truncating the visible answer — the keyed path already
-	// gets medium via the floor, so the fallback keeps pre-wave behavior.
-	// MaxTokens/Verbosity are unchanged.
-	if anthropicKey != "" {
-		return createAnthropicTextResponse(ctx, anthropicKey, anthropicTextRequest{
-			Model:        chatModel(),
-			Instructions: instructions,
-			Input:        input,
-			Effort:       "medium",
-			MaxTokens:    anthropicChatMaxTokens,
-			Attachments:  attachments,
-		})
-	}
-	return createOpenAITextResponse(ctx, apiKey, openAITextRequest{
-		Model: meetingBrainModel(),
-		// Keyless-fallback twin: same seat as the keyed chat path, provider
-		// openai recorded at the wire seam (W0 item 4).
+	instructions := assistantQueryInstructionsForContext(ctx, strings.TrimSpace(apiKey) != "")
+	recordCapabilityPoll(capabilityTypedScoutAnswer, time.Now().UTC())
+	answer, err := createOpenAITextResponse(ctx, apiKey, openAITextRequest{
+		Model:           scoutChatModel(),
 		Seat:            seatChat,
+		Workflow:        "scout_chat",
 		Instructions:    instructions,
 		Input:           input,
 		ReasoningEffort: "low",
 		Verbosity:       "low",
-		MaxOutputTokens: 500,
+		MaxOutputTokens: 800,
+		Attachments:     attachments,
 	})
+	if err != nil {
+		recordCapabilityFailure(capabilityTypedScoutAnswer, time.Now().UTC(), err)
+		return "", err
+	}
+	recordCapabilitySuccess(capabilityTypedScoutAnswer, time.Now().UTC())
+	return answer, nil
 }
 
 func shouldIncludeBoardContextForAssistant(query string, history []scoutChatTurn) bool {
@@ -1326,6 +1324,10 @@ func grillReadoutLine(score int) string {
 }
 
 func assistantQueryInstructions() string {
+	return assistantQueryInstructionsForCoreAvailability(strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != "")
+}
+
+func assistantQueryInstructionsForCoreAvailability(coreAvailable bool) string {
 	lines := []string{
 		"You are Scout, the Stride meeting assistant.",
 		"Answer using the supplied current Kanban board, memory context, and conversation history only.",
@@ -1338,16 +1340,12 @@ func assistantQueryInstructions() string {
 		"When a conversation history is supplied, resolve follow-up references from it.",
 		"For short ambiguous follow-ups like \"what?\" or \"huh?\", ask one clarification question only.",
 	}
-	// OFFER-NEVER-DENY (Wave A item 1), keyed only. When an Anthropic key is
-	// present this workspace can actually run the goal loop, so we REPLACE the
-	// pure prohibition (which made the answer brain's only safe move denial — the
-	// 2026-07-05 sim's "bigger ask than I can spin up") with the capabilities
-	// digest plus the rule: when the ask maps to a capability, name it and offer
-	// to set it up, never deny. The launch boundary still holds — Scout proposes,
-	// the user taps Run — so the model is told it cannot launch anything itself.
-	// Keyless deploys (no key) cannot run any goal loop, so they keep today's
-	// honest prohibition verbatim and never see the digest (don't overpromise).
-	if currentAnthropicAPIKey() != "" {
+	// OFFER-NEVER-DENY is gated by the required OpenAI core route, never an
+	// optional specialist-provider key. A configured core can answer and route
+	// the proposal, while the explicit confirmation boundary still prevents the
+	// answer model from launching work on its own. Keyless deployments retain
+	// the honest prohibition and do not advertise an unavailable model route.
+	if coreAvailable {
 		lines = append(lines,
 			"You cannot launch anything yourself from this chat answer — but this workspace CAN run every capability listed below as a one-tap confirmed goal loop.",
 			"When a request maps to a capability on that list, or the user asks whether you can do something on it, say yes plainly, name the capability, and offer to set it up; never say that work on this list is beyond this chat, and never deny a capability that is on it.",
@@ -1355,7 +1353,7 @@ func assistantQueryInstructions() string {
 		)
 	} else {
 		lines = append(lines,
-			"Do not claim to run research, design, grill, Codex, browser, SSH, filesystem, or deployment work from this chat answer; those longer goals should be launched as artifact-backed work threads.",
+			"Do not claim to run research, design, grill, Codex, browser, SSH, filesystem, or deployment work from this chat answer; those longer goals should be proposed through an artifact-backed work thread.",
 		)
 	}
 	lines = append(lines, "Keep the answer concise and practical.")
@@ -1585,8 +1583,7 @@ func (app *kanbanBoardApp) answerMemoryQuestionWithModel(query string, entries [
 	app.mu.Lock()
 	apiKey := app.apiKey
 	app.mu.Unlock()
-	anthropicKey := currentAnthropicAPIKey()
-	if strings.TrimSpace(apiKey) == "" && anthropicKey == "" {
+	if strings.TrimSpace(apiKey) == "" {
 		return "", fmt.Errorf("OPENAI_API_KEY is not configured")
 	}
 	if len(entries) == 0 {
@@ -1597,21 +1594,10 @@ func (app *kanbanBoardApp) answerMemoryQuestionWithModel(query string, entries [
 	defer cancel()
 
 	input := buildMemoryQuestionInput(query, entries, time.Now())
-	// Same routing rule as answerAssistantQueryWithModel: Sonnet 5 when an
-	// Anthropic key is present, today's gpt-5.5 path unchanged when keyless.
-	if anthropicKey != "" {
-		return createAnthropicTextResponse(ctx, anthropicKey, anthropicTextRequest{
-			Model:        chatModel(),
-			Instructions: memoryQuestionInstructions(),
-			Input:        input,
-			Effort:       "low",
-			MaxTokens:    anthropicChatMaxTokens,
-		})
-	}
 	return createOpenAITextResponse(ctx, apiKey, openAITextRequest{
-		Model: meetingBrainModel(),
-		// Keyless-fallback twin of the spoken-recall seat (W0 item 4).
+		Model:           scoutChatModel(),
 		Seat:            seatVoiceRecall,
+		Workflow:        "scout_voice_recall",
 		Instructions:    memoryQuestionInstructions(),
 		Input:           input,
 		ReasoningEffort: "low",

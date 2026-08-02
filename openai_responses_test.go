@@ -111,6 +111,52 @@ func TestOpenAIResponsesURLDefaultAndOverride(t *testing.T) {
 	}
 }
 
+func TestCreateOpenAITextResponsePlacesResponsesAttachmentsBeforeText(t *testing.T) {
+	var payload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Write([]byte(`{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"read it"}]}]}`))
+	}))
+	defer server.Close()
+	t.Setenv("OPENAI_RESPONSES_BASE_URL", server.URL)
+
+	_, err := createOpenAITextResponseHTTP(context.Background(), "test-key", openAITextRequest{
+		Model: "gpt-5.6-terra",
+		Input: "what does this say?",
+		Attachments: []openAIInputContent{
+			{Type: "input_image", ImageURL: "data:image/png;base64,cmFzdGVy"},
+			{Type: "input_file", Filename: "brief.pdf", FileData: "data:application/pdf;base64,JVBERg=="},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create response: %v", err)
+	}
+	input, ok := payload["input"].([]any)
+	if !ok || len(input) != 1 {
+		t.Fatalf("input=%#v, want one user message", payload["input"])
+	}
+	message, _ := input[0].(map[string]any)
+	content, _ := message["content"].([]any)
+	if message["role"] != "user" || len(content) != 3 {
+		t.Fatalf("message=%#v, want attachment + attachment + text", message)
+	}
+	image, _ := content[0].(map[string]any)
+	file, _ := content[1].(map[string]any)
+	textBlock, _ := content[2].(map[string]any)
+	if image["type"] != "input_image" || image["image_url"] != "data:image/png;base64,cmFzdGVy" {
+		t.Fatalf("image content=%#v", image)
+	}
+	if file["type"] != "input_file" || file["filename"] != "brief.pdf" || file["file_data"] != "data:application/pdf;base64,JVBERg==" {
+		t.Fatalf("file content=%#v", file)
+	}
+	if textBlock["type"] != "input_text" || textBlock["text"] != "what does this say?" {
+		t.Fatalf("text content=%#v", textBlock)
+	}
+}
+
 func TestCreateOpenAITextResponseDecodesUsageAndRecordsSeatEntry(t *testing.T) {
 	dir := openAIResponsesLedgerDir(t)
 

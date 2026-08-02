@@ -82,6 +82,24 @@ export type ScoutThreadsResponse = {
   threads: ScoutThread[];
 };
 
+export type ScoutReplyState = 'queued' | 'running' | 'completed' | 'failed' | 'canceled';
+
+/**
+ * Durable lifecycle for the server-owned Scout reply placeholder paired with
+ * one user message. Provider/lease internals never cross this public contract.
+ */
+export type ScoutReplyLifecycle = {
+  operationId: string;
+  inReplyTo: string;
+  state: ScoutReplyState;
+  attempt: number;
+  queuedAt?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  retryable?: boolean;
+  errorCode?: string;
+};
+
 export type ScoutMessage = {
   id: string;
   kind?: string;
@@ -98,6 +116,7 @@ export type ScoutMessage = {
   sources?: ScoutAnswerSource[];
   proposal?: Record<string, unknown>;
   choices?: Array<Record<string, unknown>>;
+  reply?: ScoutReplyLifecycle;
   [key: string]: unknown;
 };
 

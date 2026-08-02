@@ -22,6 +22,11 @@ import { StrideCradle } from '../components/StrideCradle';
 import { Waveform } from '../components/Waveform';
 import { useLiveLine } from '../canvas/useLiveLine';
 import { liveLineDisplay } from '../canvas/liveLineDisplay';
+import {
+  homeScoutOpeningAttempt,
+  submitHomeScoutOpening,
+  type HomeScoutOpeningAttempt,
+} from '../canvas/homeScoutOpening';
 import { useDictation } from '../voice/useDictation';
 import { useComposerDictation } from '../voice/useComposerDictation';
 import { useScoutConversation } from '../voice/useScoutConversation';
@@ -34,6 +39,7 @@ import {
   type FallbackVoiceStartAttempt,
 } from '../voice/dictationAudioLifecycle';
 import { audioFocusRuntime } from '../realtime/audioFocusRuntime';
+import { api, BonfireApiError } from '../api/client';
 import { duration, ease, useReduceMotion } from '../theme/motion';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, radius, space, type } from '../theme/tokens';
@@ -257,13 +263,13 @@ export function CanvasScreen() {
     void lease?.release('cancelled');
   }, []);
 
-  const voiceTurn = realtime.enabled ? realtime.turn : conversation.turn;
-  const voiceThinking = realtime.enabled
-    ? realtime.status === 'thinking' || realtime.status === 'acting'
-    : conversation.thinking;
   const voiceError = realtime.enabled ? realtime.error : conversation.error;
 
   const [composerDraft, setComposerDraft] = useState('');
+  const [composerOpening, setComposerOpening] = useState(false);
+  const [composerOpeningError, setComposerOpeningError] = useState<string | null>(null);
+  const composerOpeningRef = useRef(false);
+  const composerOpeningAttemptRef = useRef<HomeScoutOpeningAttempt | null>(null);
   const stopVoiceForComposer = useCallback(async () => {
     fallbackVoiceRequestGenerationRef.current += 1;
     if (realtime.active) await realtime.stop('completed');
@@ -277,15 +283,54 @@ export function CanvasScreen() {
     }
   }, [conversation, realtime, voiceDictation]);
   const submitComposerText = useCallback(async (override?: string) => {
-    const text = String(override ?? composerDraft).trim();
-    if (!text || conversation.thinking) return;
-    await stopVoiceForComposer();
-    setComposerDraft('');
-    conversation.start();
-    await conversation.ask(text);
-  }, [composerDraft, conversation, stopVoiceForComposer]);
+    if (!sessionToken || composerOpeningRef.current) return;
+    const attempt = homeScoutOpeningAttempt(
+      composerOpeningAttemptRef.current,
+      String(override ?? composerDraft),
+    );
+    if (!attempt) return;
+
+    // Pin the recoverable draft and key before teardown or network work. A
+    // failed retry must address the same durable server operation.
+    composerOpeningAttemptRef.current = attempt;
+    composerOpeningRef.current = true;
+    setComposerDraft(attempt.text);
+    setComposerOpening(true);
+    setComposerOpeningError(null);
+
+    const result = await submitHomeScoutOpening(attempt, {
+      stopVoice: stopVoiceForComposer,
+      createThread: (body, idempotencyKey) => api.createScoutThread(
+        sessionToken,
+        body,
+        idempotencyKey,
+      ),
+    });
+    if (result.accepted) {
+      // Acceptance is the only point that consumes the draft/key. The server
+      // has committed the opening turn and reply placeholder, so the native
+      // stack enters the thread without targeting a particular message.
+      composerOpeningAttemptRef.current = null;
+      setComposerDraft('');
+      setComposerOpeningError(null);
+      navigation.navigate('Thread', {
+        threadId: result.thread.threadId,
+        title: result.thread.title,
+      });
+    } else {
+      setComposerOpeningError(
+        result.error instanceof BonfireApiError
+          ? result.error.message
+          : 'Scout could not open that thread. Your message is still here.',
+      );
+    }
+    composerOpeningRef.current = false;
+    setComposerOpening(false);
+  }, [composerDraft, navigation, sessionToken, stopVoiceForComposer]);
   const composerDictation = useComposerDictation({
-    threadId: conversation.threadId ?? undefined,
+    // The home recording belongs to the not-yet-created opening turn, never a
+    // prior fallback voice thread.
+    threadId: undefined,
     onTranscript: ({ text }) => {
       // Mirror the final text into the field for continuity, then use the same
       // private-thread send path as typed input. The hook generation-fences
@@ -300,11 +345,11 @@ export function CanvasScreen() {
   // user navigate twice to reach the thing they were just shown.
   const openLiveTarget = useCallback(() => {
     if (live.threadId) {
-		navigation.navigate('Thread', {
-		  threadId: live.threadId,
-		  title: live.threadTitle ?? '#team',
-		  messageId: live.messageId ?? undefined,
-		});
+      navigation.navigate('Thread', {
+        threadId: live.threadId,
+        title: live.threadTitle ?? '#team',
+        messageId: live.messageId ?? undefined,
+      });
       return;
     }
     if (live.kind === 'rooms') {
@@ -401,19 +446,6 @@ export function CanvasScreen() {
               </Pressable>
             ) : null}
           </View>
-
-          {/* Scout's turn. Text-primary always — we never build an interaction
-              whose output exists only as audio (§9.5). */}
-          {voiceTurn ? (
-            <View style={styles.turn}>
-              {voiceTurn.question ? <Text style={styles.question}>{voiceTurn.question}</Text> : null}
-              {voiceThinking ? (
-                <ActivityIndicator color={colors.ember} style={styles.thinking} />
-              ) : voiceTurn.answer ? (
-                <Text style={styles.answer}>{voiceTurn.answer}</Text>
-              ) : null}
-            </View>
-          ) : null}
 
           {voiceError ? (
             <Text style={styles.error}>{voiceError}</Text>
@@ -521,6 +553,11 @@ export function CanvasScreen() {
             {composerDictation.error}
           </Text>
         ) : null}
+        {composerOpeningError ? (
+          <Text accessibilityLiveRegion="polite" numberOfLines={2} style={styles.composerError}>
+            {composerOpeningError}
+          </Text>
+        ) : null}
         <View style={styles.composerBar}>
           {composerDictation.state === 'listening' || composerDictation.state === 'held' || composerDictation.state === 'transcribing' || composerDictation.state === 'error' ? (
             <>
@@ -574,16 +611,24 @@ export function CanvasScreen() {
                 accessibilityHint="Records a message, then lets you delete or transcribe and send it"
                 accessibilityLabel="Dictate a message"
                 accessibilityRole="button"
+                accessibilityState={{ disabled: composerOpening }}
+                disabled={composerOpening}
                 onPress={() => { void composerDictation.start(); }}
-                style={({ pressed }) => [styles.composerIcon, pressed && styles.composerPressed]}
+                style={({ pressed }) => [styles.composerIcon, composerOpening && styles.composerSendDisabled, pressed && styles.composerPressed]}
               >
                 <SymbolView name="mic.fill" tintColor={colors.ember} size={19} />
               </Pressable>
               <TextInput
                 accessibilityLabel="Message Scout"
                 blurOnSubmit={false}
+                editable={!composerOpening}
                 maxLength={4000}
-                onChangeText={setComposerDraft}
+                onChangeText={(value) => {
+                  setComposerDraft(value);
+                  if (value.trim() !== composerOpeningAttemptRef.current?.text) {
+                    setComposerOpeningError(null);
+                  }
+                }}
                 onFocus={() => { void stopVoiceForComposer(); }}
                 onSubmitEditing={() => { void submitComposerText(); }}
                 placeholder="Message Scout"
@@ -595,12 +640,12 @@ export function CanvasScreen() {
               <Pressable
                 accessibilityLabel="Send message"
                 accessibilityRole="button"
-                accessibilityState={{ disabled: !composerDraft.trim() || conversation.thinking }}
-                disabled={!composerDraft.trim() || conversation.thinking}
+                accessibilityState={{ disabled: !composerDraft.trim() || composerOpening }}
+                disabled={!composerDraft.trim() || composerOpening}
                 onPress={() => { void submitComposerText(); }}
-                style={({ pressed }) => [styles.composerSend, (!composerDraft.trim() || conversation.thinking) && styles.composerSendDisabled, pressed && styles.composerPressed]}
+                style={({ pressed }) => [styles.composerSend, (!composerDraft.trim() || composerOpening) && styles.composerSendDisabled, pressed && styles.composerPressed]}
               >
-                {conversation.thinking ? <ActivityIndicator color={colors.onAccent} size="small" /> : <SymbolView name="arrow.up" tintColor={colors.onAccent} size={18} />}
+                {composerOpening ? <ActivityIndicator color={colors.onAccent} size="small" /> : <SymbolView name="arrow.up" tintColor={colors.onAccent} size={18} />}
               </Pressable>
             </>
           )}
@@ -678,22 +723,6 @@ const styles = StyleSheet.create({
     color: colors.text1,
     fontFamily: 'GoogleSansFlex_500Medium', fontWeight: '500',
   },
-  turn: {
-    alignSelf: 'stretch',
-    gap: space[2],
-    marginTop: space[4],
-  },
-  question: {
-    ...type.bodySm,
-    color: colors.text3,
-    textAlign: 'center',
-  },
-  answer: {
-    ...type.body,
-    color: colors.text1,
-    textAlign: 'center',
-  },
-  thinking: { alignSelf: 'center' },
   error: {
     ...type.bodySm,
     color: colors.danger,

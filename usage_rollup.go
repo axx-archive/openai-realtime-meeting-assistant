@@ -826,6 +826,46 @@ func assistantRealtimeUsageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	recordLLMUsage(entry)
+	// Usage is browser-observed and remains cost telemetry, not provider health
+	// authority. A signed-in client must not be able to manufacture an
+	// accepted-output success timestamp.
+	recordCapabilityMilestoneFrom(capabilityPrivateVoice, "response_done", "client", time.Now().UTC())
+	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// POST /assistant/realtime/milestone carries browser/native transport truth
+// that the server-owned offer cannot observe. It accepts only a closed enum;
+// no client error text, SDP, transcript, or audio is retained.
+func assistantRealtimeMilestoneHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	if userFromRequest(r) == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	payload := struct {
+		Milestone string `json:"milestone"`
+	}{}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read realtime milestone")
+		return
+	}
+	milestone := strings.ToLower(strings.TrimSpace(payload.Milestone))
+	switch milestone {
+	case "peer_connected", "data_channel_open", "remote_track", "first_audio", "response_done":
+		recordCapabilityMilestoneFrom(capabilityPrivateVoice, milestone, "client", time.Now().UTC())
+	case "transport_error":
+		recordCapabilityMilestoneFrom(capabilityPrivateVoice, milestone, "client", time.Now().UTC())
+	default:
+		writeAuthError(w, http.StatusBadRequest, "unknown realtime milestone")
+		return
+	}
 	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
