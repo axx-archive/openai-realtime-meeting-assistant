@@ -36,6 +36,14 @@ This is a deliberate availability trade: Codex-style execution remains unavailab
 
 The required external boundary is still strict: every run gets a fresh container and worktree, a read-only root, and only `/workspace/run` and `/tmp` writable. Production data, broker queue, Docker, PostgreSQL, DR evidence, and company-brain mounts are forbidden. Credentials must be run-bound, scope-limited, and expire within ten minutes. CPU, memory, PID, wall-time, and network-byte ceilings are mandatory. Completion callbacks must be signed and bind the run ID, audience, nonce, and short timestamp window; a durable replay cache must reject nonce reuse before accepting state. Reusable provider keys, canonical database URLs, and DR encryption/signing keys must never be injected.
 
+`go run ./cmd/e10-worker-harness` now exercises those interfaces as a local,
+token-free, no-network contract model. See
+`docs/e10-external-worker-harness.md`. Its receipt proves reducer, fencing,
+quota, kill-switch, and tamper behavior only; it does not change this policy's
+`plan_only`/`external_pending` state or prove an orchestrator, container,
+gateway, broker, durable callback store, or infrastructure quota enforcer is
+installed.
+
 Compose is not an egress allowlist. E9 therefore records `composeEnforced:false`, keeps the token-free allowlist empty, and keeps credential issuance disabled. Default-deny egress, DNS/IP/private-network filtering, an exact provider/source allowlist, and the network-byte ceiling require an external gateway or equivalent independently evidenced control. The repository manifest cannot become activation evidence for those controls.
 
 Before any worker activation, E10 must provide all receipts named in `externalEvidenceRequired`: external orchestrator identity; create/destroy evidence for one container and worktree per run; read-only-root and mount inspection; default-deny gateway tests including IP literals, DNS rebinding/private networks, redirects, and metadata endpoints; short-lived run-bound credential issuance/revocation; CPU/memory/PID/wall/network quota enforcement; signed callback nonce/replay rejection; and proof that neither production nor company-brain volumes are mounted. The activation change must be a separately reviewed contract; do not flip this plan-only manifest to claim success.
