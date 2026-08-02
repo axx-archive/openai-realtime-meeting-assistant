@@ -1653,6 +1653,35 @@ not model quality or migration readiness.
    acceptance, external custody/HA restore, and the 24-hour/ten-sitting soak
    remain separate external gates. This checkpoint does not promote or enable
    any default-off provider route or feature.
+8. The first exact VPS `init-build` for A stopped before maintenance because
+   Chrome Headless Shell 150's checksum-pinned archive no longer contains the
+   obsolete `chrome_sandbox` helper that `Dockerfile.render` tried to chmod.
+   No application service, container, database, volume, migration, firewall,
+   route, or public traffic changed. Node was installed at the exact reviewed
+   Ubuntu package version and the fail-closed build output was retained for
+   diagnosis.
+9. Superseding implementation commit
+   `d8ab3246edbdb53891293ef242039706e209e8b0` removes only that obsolete,
+   already-disabled helper dependency, requires the real headless-shell binary
+   to be executable, and adds a regression assertion forbidding the old path.
+   The active boundary remains non-root namespace sandboxing with no
+   `--no-sandbox`, capability drop, no-new-privileges, read-only filesystem,
+   internal-only network, queue-only mount, and fail-closed runtime canary.
+   Focused normal/race tests, the full root package (380.089 seconds), Node
+   122/122, `go vet`, pack self-check/checksums, diff and secret scans, and an
+   independent security critic all pass. This document is the sole intended
+   change in the direct checkpoint child used for the retried exact release.
+10. iOS Build 29 was built from clean exact SHA
+    `97ff340097253ff3ad98481226f6159c3ce206ae`, before the server-only renderer
+    correction. EAS build `7857b9b2-2de8-4248-b1c6-a50c54f6ca97` is FINISHED;
+    submission `e631f914-4e10-405d-a686-2fb1509b0651` completed; Apple build
+    `6a870589-8448-44fb-99d6-cea2f5a9ebb4` is VALID and non-expired; internal
+    `Team (Expo)` contains Build 29; external `Bonfire` excludes it and retains
+    its exact prior build baseline. The only later implementation changes are
+    `Dockerfile.render` and its Go regression test, and this direct child adds
+    only this plan, so the mobile source/config tree is byte-identical to the
+    TestFlight artifact's commit. This proves build, Apple processing, and
+    internal-group availability, not physical-device acceptance.
 
 **Resume gates — do not skip or merge them:**
 
