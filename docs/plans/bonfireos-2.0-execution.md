@@ -20,7 +20,7 @@ dependencies, authority boundaries, rollback posture, and the next safe action.
 | Remote `axx/main` | `9217dbf7a9f1a96ceed20f174fd2a9894daa29af` | Read-only remote refresh matches local `main`. No E10 or P0 branch is published. |
 | Production | `30eb8891dd74edda` | Live `/healthz` identity on 2026-08-02. This is the retained older release; the sealed canonical repair release has not been activated. |
 | Production health | Traffic-ready, capability-degraded | `/capabilities` reports `trafficReady:true`, `ok:false`; Scout is disconnected/degraded and STT is disconnected/stale since `2026-07-31T18:28:56Z`. Aggregate readiness is not acceptance. |
-| P0 branch | `/tmp/meetingassist-scout-p0`, `codex/scout-p0`, base `9217dbf` | Isolated, dirty, uncommitted implementation. It is not a candidate release and must not be merged or deployed yet. |
+| P0 branch | `/tmp/meetingassist-scout-p0`, `codex/scout-p0`, candidate `13a3ef2ea7bd8031a0717616d11373482a598dcd` on base `9217dbf` | Isolated, committed deterministic candidate. It is not published, provider-qualified, physical-device accepted, merge-approved, or deployable yet. |
 | E10 integration | `/tmp/meetingassist-e10-integration`, `codex/e10-integration`, `f808a0e41361f6a98ca5d1ef6db64a6c464fac2a` | Clean follow-up foundation: worker isolation, qualification registry, and specialist-agent join work. Not ready for `main`. |
 | Specialist repair | `/tmp/meetingassist-e10-specialist`, `codex/e10-specialist`, base `0aa1b090687d7a5d9ed3c10c9d792ee9044a545c` | Nine tracked files contain preserved uncommitted removal of the legacy alternate join path and request-context leakage. |
 | Registry repair | `/tmp/meetingassist-e10-registry`, `codex/e10-registry`, base `1d2f55cfa86e1f155b7b14d06c5928379e2b1ea3` | Seven tracked files plus untracked `meeting_specialist_qualification_bridge.go` preserve signed-evidence binding, expiry, and external ledger-head/CAS work. |
@@ -87,7 +87,7 @@ corpus, rollback, and downstream-replay evidence before activation.
 
 ## 5. Isolated P0 implementation state
 
-The dirty `codex/scout-p0` worktree currently implements or begins:
+The isolated `codex/scout-p0` candidate `13a3ef2e` implements:
 
 - OpenAI Responses ownership of ordinary Scout routing and answers: Terra
   `low` for router/chat, Luna `low` for attachment extraction, strict router
