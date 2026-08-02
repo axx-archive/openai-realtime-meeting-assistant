@@ -6,10 +6,12 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/openai/openai-realtime-meeting-assistant/internal/e10evidence"
 )
 
 const (
-	meetingSpecialistProductSnapshotFormat    = 1
+	meetingSpecialistProductSnapshotFormat    = 2
 	meetingSpecialistProductSnapshotDomain    = "meeting_specialist_product"
 	meetingSpecialistProductGenerationDomain  = "meeting_specialist_product_generation"
 	defaultMeetingSpecialistProductSnapshot   = "stride/meeting-specialists.snapshot.json"
@@ -50,14 +52,16 @@ type meetingSpecialistDurableConsentFence struct {
 }
 
 type meetingSpecialistDurableRecord struct {
-	Invitation       MeetingAgentInvitation             `json:"invitation"`
-	Agent            MeetingSpecialistCandidate         `json:"agent"`
-	PurposeSummary   string                             `json:"purposeSummary,omitempty"`
-	Limits           *MeetingSpecialistApprovalLimits   `json:"limits,omitempty"`
-	Status           string                             `json:"status"`
-	UpdatedAt        time.Time                          `json:"updatedAt"`
-	TerminalEvidence *MeetingSpecialistTerminalEvidence `json:"terminalEvidence,omitempty"`
-	Scope            meetingSpecialistDurableScope      `json:"scope"`
+	Invitation                 MeetingAgentInvitation             `json:"invitation"`
+	Agent                      MeetingSpecialistCandidate         `json:"agent"`
+	PurposeSummary             string                             `json:"purposeSummary,omitempty"`
+	Limits                     *MeetingSpecialistApprovalLimits   `json:"limits,omitempty"`
+	Status                     string                             `json:"status"`
+	UpdatedAt                  time.Time                          `json:"updatedAt"`
+	QualificationSubjectDigest string                             `json:"qualificationSubjectDigest,omitempty"`
+	QualificationResult        *StoredTrustedQualificationResult  `json:"qualificationResult,omitempty"`
+	TerminalEvidence           *MeetingSpecialistTerminalEvidence `json:"terminalEvidence,omitempty"`
+	Scope                      meetingSpecialistDurableScope      `json:"scope"`
 }
 
 type meetingSpecialistSnapshotPayload struct {
@@ -134,20 +138,26 @@ func (product *MeetingSpecialistProduct) restoreLocked() error {
 		return fmt.Errorf("%w: generation read", ErrMeetingSpecialistProductRestore)
 	}
 	payloadDigest, err := STRIDEContractDigest(snapshot.Payload)
-	if err != nil || payloadDigest != snapshot.Digest || snapshot.Payload.Format != meetingSpecialistProductSnapshotFormat || snapshot.Payload.TenantID != product.tenantID || snapshot.Payload.Generation != generation.Payload.Generation || snapshot.Payload.KeyID != config.Authority.KeyID || !verifySTRIDESnapshotMAC(STRIDESnapshotRestorePolicy{Authority: config.Authority, MinimumGeneration: config.MinimumGeneration}, meetingSpecialistProductSnapshotDomain, snapshot.Payload.KeyID, snapshot.Payload.Generation, snapshot.Digest, snapshot.Signature) {
+	legacySnapshot := snapshot.Payload.Format == 1
+	if err != nil || payloadDigest != snapshot.Digest || !legacySnapshot && snapshot.Payload.Format != meetingSpecialistProductSnapshotFormat || snapshot.Payload.TenantID != product.tenantID || snapshot.Payload.Generation != generation.Payload.Generation || snapshot.Payload.KeyID != config.Authority.KeyID || !verifySTRIDESnapshotMAC(STRIDESnapshotRestorePolicy{Authority: config.Authority, MinimumGeneration: config.MinimumGeneration}, meetingSpecialistProductSnapshotDomain, snapshot.Payload.KeyID, snapshot.Payload.Generation, snapshot.Digest, snapshot.Signature) {
 		return ErrMeetingSpecialistProductRestore
 	}
 	generationDigest, err := STRIDEContractDigest(generation.Payload)
-	if err != nil || generationDigest != generation.Digest || generation.Payload.Format != meetingSpecialistProductSnapshotFormat || generation.Payload.TenantID != product.tenantID || generation.Payload.KeyID != config.Authority.KeyID || generation.Payload.SnapshotDigest != snapshot.Digest || !verifySTRIDESnapshotMAC(STRIDESnapshotRestorePolicy{Authority: config.Authority, MinimumGeneration: config.MinimumGeneration}, meetingSpecialistProductGenerationDomain, generation.Payload.KeyID, generation.Payload.Generation, generation.Digest, generation.Signature) {
+	if err != nil || generationDigest != generation.Digest || generation.Payload.Format != snapshot.Payload.Format || generation.Payload.TenantID != product.tenantID || generation.Payload.KeyID != config.Authority.KeyID || generation.Payload.SnapshotDigest != snapshot.Digest || !verifySTRIDESnapshotMAC(STRIDESnapshotRestorePolicy{Authority: config.Authority, MinimumGeneration: config.MinimumGeneration}, meetingSpecialistProductGenerationDomain, generation.Payload.KeyID, generation.Payload.Generation, generation.Digest, generation.Signature) {
 		return ErrMeetingSpecialistProductRestore
 	}
 	restored := make(map[string]meetingSpecialistProductRecord, len(snapshot.Payload.Records))
 	idempotency := map[string]struct{}{}
 	activeSeats := map[string]string{}
 	now := product.now().UTC()
-	expiredOnRestore := false
+	expiredOnRestore := legacySnapshot
 	for _, durable := range snapshot.Payload.Records {
-		if err := validateMeetingSpecialistDurableRecord(product.tenantID, durable); err != nil {
+		if legacySnapshot && durable.TerminalEvidence != nil && durable.QualificationResult == nil && durable.QualificationSubjectDigest == "" {
+			legacyEvidence := cloneMeetingSpecialistTerminalEvidence(durable.TerminalEvidence)
+			legacyEvidence.QualificationLegacyUnbound = true
+			durable.TerminalEvidence = legacyEvidence
+		}
+		if err := validateMeetingSpecialistDurableRecord(product.tenantID, durable, legacySnapshot); err != nil {
 			return err
 		}
 		id := durable.Invitation.Header.ID
@@ -195,7 +205,7 @@ func (product *MeetingSpecialistProduct) restoreLocked() error {
 		if durable.Limits != nil {
 			limits = *durable.Limits
 		}
-		restored[id] = meetingSpecialistProductRecord{Invitation: durable.Invitation, Agent: durable.Agent, PurposeSummary: purpose, Limits: limits, Status: status, UpdatedAt: updatedAt, TerminalEvidence: cloneMeetingSpecialistTerminalEvidence(durable.TerminalEvidence), Scope: productScopeFromDurable(durable.Scope)}
+		restored[id] = meetingSpecialistProductRecord{Invitation: durable.Invitation, Agent: durable.Agent, PurposeSummary: purpose, Limits: limits, Status: status, UpdatedAt: updatedAt, QualificationSubjectDigest: durable.QualificationSubjectDigest, QualificationResult: cloneMeetingSpecialistQualificationResult(durable.QualificationResult), TerminalEvidence: cloneMeetingSpecialistTerminalEvidence(durable.TerminalEvidence), Scope: productScopeFromDurable(durable.Scope)}
 	}
 	product.invitations = restored
 	product.generation = snapshot.Payload.Generation
@@ -228,7 +238,7 @@ func (product *MeetingSpecialistProduct) persistStateLocked(allowDisabled bool) 
 	records := make([]meetingSpecialistDurableRecord, 0, len(product.invitations))
 	for _, record := range product.invitations {
 		limits := record.Limits
-		records = append(records, meetingSpecialistDurableRecord{Invitation: record.Invitation, Agent: record.Agent, PurposeSummary: record.PurposeSummary, Limits: &limits, Status: record.Status, UpdatedAt: record.UpdatedAt, TerminalEvidence: cloneMeetingSpecialistTerminalEvidence(record.TerminalEvidence), Scope: durableMeetingSpecialistScope(record.Scope)})
+		records = append(records, meetingSpecialistDurableRecord{Invitation: record.Invitation, Agent: record.Agent, PurposeSummary: record.PurposeSummary, Limits: &limits, Status: record.Status, UpdatedAt: record.UpdatedAt, QualificationSubjectDigest: record.QualificationSubjectDigest, QualificationResult: cloneMeetingSpecialistQualificationResult(record.QualificationResult), TerminalEvidence: cloneMeetingSpecialistTerminalEvidence(record.TerminalEvidence), Scope: durableMeetingSpecialistScope(record.Scope)})
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].Invitation.Header.ID < records[j].Invitation.Header.ID })
 	payload := meetingSpecialistSnapshotPayload{Format: meetingSpecialistProductSnapshotFormat, TenantID: product.tenantID, Generation: next, KeyID: config.Authority.KeyID, CreatedAt: product.now().UTC(), Records: records}
@@ -260,7 +270,7 @@ func (product *MeetingSpecialistProduct) persistStateLocked(allowDisabled bool) 
 	return nil
 }
 
-func validateMeetingSpecialistDurableRecord(tenantID string, record meetingSpecialistDurableRecord) error {
+func validateMeetingSpecialistDurableRecord(tenantID string, record meetingSpecialistDurableRecord, allowLegacyUnbound bool) error {
 	computed, err := meetingSpecialistInvitationDigest(record.Invitation)
 	if err != nil || record.Invitation.Validate() != nil || computed != record.Invitation.Header.ContentDigest || record.Invitation.Header.TenantID != tenantID || record.Agent.AgentID == "" || record.Agent.Profile.Validate() != nil || record.Agent.Capability.Validate() != nil || record.UpdatedAt.IsZero() || !validMeetingSpecialistStatusDecision(record.Status, record.Invitation.Decision) || !validMeetingSpecialistTerminalEvidence(record.TerminalEvidence) || record.Status == "failed" && (record.TerminalEvidence == nil || record.TerminalEvidence.TerminalReason != "failed") {
 		return ErrMeetingSpecialistProductRestore
@@ -278,6 +288,9 @@ func validateMeetingSpecialistDurableRecord(tenantID string, record meetingSpeci
 		limits = *record.Limits
 	}
 	if !validMeetingSpecialistTerminalEvidenceForLimits(record.TerminalEvidence, limits) {
+		return ErrMeetingSpecialistProductRestore
+	}
+	if !validMeetingSpecialistQualificationResult(record.QualificationResult, record.QualificationSubjectDigest) || record.Status == "joined_session" && record.QualificationResult == nil && !allowLegacyUnbound || record.TerminalEvidence != nil && (record.TerminalEvidence.QualificationSubjectDigest != record.QualificationSubjectDigest || !sameMeetingSpecialistQualificationResult(record.TerminalEvidence.QualificationResult, record.QualificationResult)) {
 		return ErrMeetingSpecialistProductRestore
 	}
 	scope := productScopeFromDurable(record.Scope)
@@ -316,14 +329,36 @@ func validMeetingSpecialistTerminalEvidence(evidence *MeetingSpecialistTerminalE
 		return true
 	}
 	cause := strings.TrimSpace(evidence.Cause)
-	return allowedMeetingAgentTerminalReason(evidence.TerminalReason) && cause != "" && cause == evidence.Cause && len(cause) <= 128 && !evidence.EndedAt.IsZero() && isHexDigest(evidence.TeardownReceiptDigest) && validMeetingSpecialistProviderReceipt(evidence.ProviderReceipt)
+	receipt := evidence.ProviderReceipt
+	legacyUnbound := evidence.QualificationLegacyUnbound && evidence.QualificationResult == nil && evidence.QualificationSubjectDigest == "" && receipt.QualificationSubjectDigest == ""
+	receiptValid := validMeetingSpecialistProviderReceipt(receipt)
+	if legacyUnbound {
+		receiptValid = validMeetingSpecialistProviderReceiptWithoutQualification(receipt)
+	}
+	return allowedMeetingAgentTerminalReason(evidence.TerminalReason) && cause != "" && cause == evidence.Cause && len(cause) <= 128 && !evidence.EndedAt.IsZero() && validMeetingSpecialistQualificationResult(evidence.QualificationResult, evidence.QualificationSubjectDigest) && isHexDigest(evidence.TeardownReceiptDigest) && receiptValid && (receipt == (MeetingSpecialistProviderReceipt{}) || legacyUnbound || receipt.QualificationSubjectDigest == evidence.QualificationSubjectDigest)
+}
+
+func validMeetingSpecialistQualificationResult(result *StoredTrustedQualificationResult, subjectDigest string) bool {
+	if result == nil {
+		return subjectDigest == ""
+	}
+	record := result.Record
+	return !result.ImportedAt.IsZero() && isHexDigest(subjectDigest) && e10evidence.ValidateQualificationImportRecord(record) == nil && record.Lane == "meeting_specialist" && record.Qualified && record.FixtureSHA256 == subjectDigest && record.QualificationSubjectSHA256 == subjectDigest && e10evidence.MeetingSpecialistQualificationFixtureDigest(record.MeetingSpecialistBinding) == subjectDigest
 }
 
 func validMeetingSpecialistProviderReceipt(receipt MeetingSpecialistProviderReceipt) bool {
+	return validMeetingSpecialistProviderReceiptQualificationMode(receipt, true)
+}
+
+func validMeetingSpecialistProviderReceiptWithoutQualification(receipt MeetingSpecialistProviderReceipt) bool {
+	return validMeetingSpecialistProviderReceiptQualificationMode(receipt, false)
+}
+
+func validMeetingSpecialistProviderReceiptQualificationMode(receipt MeetingSpecialistProviderReceipt, requireQualification bool) bool {
 	if receipt == (MeetingSpecialistProviderReceipt{}) {
 		return true
 	}
-	if !isHexDigest(receipt.BindingDigest) || !isHexDigest(receipt.RequestDigest) || !isHexDigest(receipt.EventDigest) || !isHexDigest(receipt.ContractDigest) ||
+	if requireQualification && !isHexDigest(receipt.QualificationSubjectDigest) || !requireQualification && receipt.QualificationSubjectDigest != "" || !isHexDigest(receipt.BindingDigest) || !isHexDigest(receipt.RequestDigest) || !isHexDigest(receipt.EventDigest) || !isHexDigest(receipt.ContractDigest) ||
 		!validOptionalMeetingSpecialistDigest(receipt.SessionIDHash) || !validOptionalMeetingSpecialistDigest(receipt.UsageDigest) ||
 		!validOptionalMeetingSpecialistDigest(receipt.TerminalEventHash) || !validOptionalMeetingSpecialistDigest(receipt.SessionFailureHash) ||
 		strings.TrimSpace(receipt.Model) == "" || strings.TrimSpace(receipt.Model) != receipt.Model || strings.TrimSpace(receipt.ReasoningEffort) == "" || strings.TrimSpace(receipt.ReasoningEffort) != receipt.ReasoningEffort ||

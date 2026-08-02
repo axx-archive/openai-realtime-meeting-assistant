@@ -619,14 +619,11 @@ func TestE9DeterministicFounderGraphThroughProductEndpoints(t *testing.T) {
 	joinCandidate := app.meetingSpecialists.invitations[requested.Invitation.ID].Agent
 	app.meetingSpecialists.mu.Unlock()
 	var fixtureFactoryCalls atomic.Int64
-	productionJoin, _ := productionJoinFixture(time.Now().UTC(), fakeProvider, &fixtureFactoryCalls)
-	productionJoin.qualificationTarget.TenantID = canonicalTenantID()
-	productionJoin.qualificationTarget.SpecialistProfile = joinCandidate.Profile
-	productionJoin.qualificationTarget.SpecialistCapability = joinCandidate.Capability
-	qualification := productionJoin.qualification.(*fakeMeetingSpecialistQualificationAuthority)
-	qualification.status.SubjectDigest, _ = MeetingSpecialistQualificationSubjectDigest(productionJoin.qualificationTarget)
-	providerFactory := productionJoin.providerFactory
-	productionJoin.providerFactory = func(ctx context.Context, launch MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
+	joinNow := time.Now().UTC()
+	qualificationTarget := meetingSpecialistQualificationFixtureForCandidate(canonicalTenantID(), joinCandidate)
+	productionJoin, _ := productionJoinFixtureForQualification(t, joinNow, joinNow.Add(-time.Minute), qualificationTarget, fakeProvider, &fixtureFactoryCalls)
+	providerFactory := productionJoin.qualifiedProvider.create
+	productionJoin.qualifiedProvider.create = func(ctx context.Context, launch MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
 		joinAttempts++
 		if joinAttempts == 1 {
 			return nil, fmt.Errorf("deterministic specialist provider failure")

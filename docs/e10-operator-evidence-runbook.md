@@ -236,12 +236,22 @@ digest, source packet, or trust root fails closed.
 Run `e10-evidence -mode qualification-result` with the canonical result,
 registry, source packet, and all registry/source/result signature and public-key
 files. It emits a canonical `stride.e10.qualification-import-bundle/v1`.
-`OpenTrustedQualificationEvidenceStore` requires the separately approved
-trust-root bytes and digest plus an externally retained, tenant-bound minimum
-ledger anchor. `ImportQualificationBundle` re-verifies every signed byte,
-persists the complete bundle in the locked `0600`, fsynced journal, and returns
-the new head for external compare-and-swap custody. Reload re-verifies every
-trusted event and refuses a changed anchored prefix or a valid-prefix rollback.
+`OpenTrustedQualificationEvidenceStore` requires an operator-provisioned
+`QualificationEvidenceAnchorAuthority`; local sibling arguments cannot assert
+their own trust-root pin or ledger head. The authority must atomically return
+the approved trust-root bytes and pin with the exact tenant-bound ledger head,
+and every head compare-and-swap must also require that same root pin. This
+fences a root rotation racing bundle verification. Each custody call is
+deadline bounded. `ImportQualificationBundle` re-verifies every signed byte, persists
+the complete bundle in the locked `0600`, fsynced journal, and accepts the
+append only after custody advances. A rejected CAS rolls the local append back;
+a lost response is reconciled by rereading the head; an unreadable or third
+state poisons the process pending explicit operator reconciliation. Reload
+re-verifies every trusted event and requires the local journal to equal the
+exact external head, refusing rewrites, stale competing processes, and
+valid-prefix rollback. This repository intentionally contains no production
+local/file implementation of the authority: external custody provisioning is
+a release prerequisite and the feature remains default-off without it.
 The old opaque-capability import path is deliberately unavailable because it
 cannot be re-verified across processes.
 `QualificationEvidenceSeed`, local test

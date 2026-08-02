@@ -177,7 +177,7 @@ func TestMeetingSpecialistEligibilityRequiresExplicitRevisionBoundAssignmentAndS
 	product := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: persistence})
 	bindMeetingSpecialistAuthorityObserver(runtime, product)
 	user := &userAccount{Email: "aj@shareability.com", Name: "AJ"}
-	assignmentProvider := installMeetingSpecialistProductionJoin(product, now)
+	assignmentProvider := installMeetingSpecialistProductionJoin(t, product, now)
 	first, err := product.Request(context.Background(), user, scope.RoomID, agentID, "Pressure-test the launch positioning", "eligibility-first", 5*time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -260,7 +260,7 @@ func TestMeetingSpecialistEligibilityRequiresExplicitRevisionBoundAssignmentAndS
 		t.Fatalf("restored membership did not mint current binding: %+v", candidates)
 	}
 
-	capabilityProvider := installMeetingSpecialistProductionJoin(product, now)
+	capabilityProvider := installMeetingSpecialistProductionJoin(t, product, now)
 	second, err := product.Request(context.Background(), user, scope.RoomID, agentID, "Pressure-test the revised positioning", "eligibility-second", 5*time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -322,7 +322,7 @@ func TestMeetingSpecialistEligibilityRequiresExplicitRevisionBoundAssignmentAndS
 		t.Fatalf("participant churn did not revoke invitation: %+v", status.Invitations)
 	}
 
-	joinedProvider := installMeetingSpecialistProductionJoin(product, now)
+	joinedProvider := installMeetingSpecialistProductionJoin(t, product, now)
 	fourth, err := product.Request(context.Background(), user, scope.RoomID, agentID, "Review the updated participant discussion", "eligibility-fourth", 5*time.Minute)
 	if err != nil {
 		t.Fatal(err)

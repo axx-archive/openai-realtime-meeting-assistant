@@ -6,52 +6,86 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/openai/openai-realtime-meeting-assistant/internal/e10evidence"
 )
 
-type fakeMeetingSpecialistQualificationAuthority struct {
-	mu      sync.Mutex
-	trusted bool
-	status  MeetingSpecialistQualificationStatus
-	err     error
-	calls   int
-}
-
-func (authority *fakeMeetingSpecialistQualificationAuthority) Trusted() bool {
-	authority.mu.Lock()
-	defer authority.mu.Unlock()
-	return authority.trusted
-}
-
-func (authority *fakeMeetingSpecialistQualificationAuthority) Current(_ context.Context, request MeetingSpecialistQualificationRequest) (MeetingSpecialistQualificationStatus, error) {
-	authority.mu.Lock()
-	defer authority.mu.Unlock()
-	authority.calls++
-	return authority.status, authority.err
-}
-
-func meetingSpecialistQualificationFixture(now time.Time) (MeetingSpecialistQualificationRequest, *fakeMeetingSpecialistQualificationAuthority) {
+func meetingSpecialistQualificationFixture() MeetingSpecialistQualificationRequest {
 	candidate := specialistCandidateFixture("mary", "dog-perfect")
-	binding := MeetingSpecialistQualificationRequest{
-		TenantID: "bonfire", ResultID: "specialist-e10-result", ResultDigest: strideTestDigest("1"),
-		TargetID: "specialist-realtime-target", TargetDigest: strideTestDigest("2"), CandidateRelease: strings.Repeat("a", 40),
-		CandidateTreeDigest: strideTestDigest("3"), CandidateImageDigest: strideTestDigest("4"), CandidateConfigDigest: strideTestDigest("5"), CandidateRouteDigest: strideTestDigest("6"),
-		Provider: "openai", ProviderModel: meetingSpecialistRealtimeModel, ProviderRoute: "openai-realtime-websocket", ProviderRouteDigest: strideTestDigest("7"),
-		AccountingMode: MeetingSpecialistRealtimeInputDirectPCM, SpecialistProfile: candidate.Profile, SpecialistCapability: candidate.Capability,
+	binding := e10evidence.MeetingSpecialistQualificationBinding{
+		Provider: meetingSpecialistProviderName, Model: meetingSpecialistRealtimeModel, Voice: defaultRealtimeVoice, RouteDigest: strideTestDigest("6"),
+		AccountingProfileDigest: strideTestDigest("7"), RuntimeProfileDigest: strideTestDigest("8"), CapabilityPolicyDigest: meetingSpecialistCapabilityPolicyDigest(candidate.Profile, candidate.Capability),
 	}
-	subjectDigest, _ := MeetingSpecialistQualificationSubjectDigest(binding)
-	authority := &fakeMeetingSpecialistQualificationAuthority{trusted: true, status: MeetingSpecialistQualificationStatus{SubjectDigest: subjectDigest, Qualified: true, QualifiedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour)}}
-	return binding, authority
+	subjectDigest := e10evidence.MeetingSpecialistQualificationFixtureDigest(binding)
+	return MeetingSpecialistQualificationRequest{
+		TenantID: "bonfire", ResultID: "specialist-e10-result", TargetID: meetingSpecialistQualificationTargetID,
+		EvaluatorConfigDigest: strideTestDigest("1"), EvaluatorResultDigest: strideTestDigest("2"), FixtureDigest: subjectDigest, QualificationSubjectDigest: subjectDigest,
+		Candidate: e10evidence.CandidateBinding{ReleaseCommit: strings.Repeat("a", 40), GitTreeDigest: strideTestDigest("3"), ImageDigest: strideTestDigest("4"), ConfigDigest: strideTestDigest("5"), RouteMapDigest: binding.RouteDigest},
+		Binding:   binding, SpecialistProfile: candidate.Profile, SpecialistCapability: candidate.Capability,
+	}
 }
 
-func productionJoinFixture(now time.Time, provider *fakeMeetingSpecialistProvider, factoryCalls *atomic.Int64) (*MeetingSpecialistProductionJoiner, *fakeMeetingSpecialistAuthority) {
+func meetingSpecialistQualificationFixtureForCandidate(tenantID string, candidate MeetingSpecialistCandidate) MeetingSpecialistQualificationRequest {
+	request := meetingSpecialistQualificationFixture()
+	request.TenantID = tenantID
+	request.SpecialistProfile = candidate.Profile
+	request.SpecialistCapability = candidate.Capability
+	request.Binding.CapabilityPolicyDigest = meetingSpecialistCapabilityPolicyDigest(candidate.Profile, candidate.Capability)
+	subject := e10evidence.MeetingSpecialistQualificationFixtureDigest(request.Binding)
+	request.FixtureDigest = subject
+	request.QualificationSubjectDigest = subject
+	return request
+}
+
+func meetingSpecialistQualificationStore(t *testing.T, request MeetingSpecialistQualificationRequest, now, evaluatedAt time.Time) *QualificationEvidenceStore {
+	t.Helper()
+	fixture := verifiedMeetingSpecialistQualificationBundle(t, request, evaluatedAt)
+	directory := t.TempDir()
+	if err := os.Chmod(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	anchorAuthority := newTestQualificationAnchorAuthority(t, request.TenantID, fixture.rootsRaw)
+	store, err := OpenTrustedQualificationEvidenceStore(filepath.Join(directory, "specialist-qualification.jsonl"), QualificationEvidenceSeed{}, request.TenantID, func() time.Time { return now }, QualificationEvidenceTrustConfig{AnchorAuthority: anchorAuthority})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.ImportQualificationBundle(fixture.bundleRaw); err != nil {
+		t.Fatal(err)
+	}
+	return store
+}
+
+func testMeetingSpecialistQualifiedProviderFactory(t *testing.T, request MeetingSpecialistQualificationRequest, create MeetingSpecialistProviderFactory) *MeetingSpecialistQualifiedProviderFactory {
+	t.Helper()
+	subjectDigest, err := MeetingSpecialistQualificationSubjectDigest(request)
+	if err != nil || create == nil || subjectDigest != request.QualificationSubjectDigest {
+		t.Fatalf("invalid deterministic qualified-provider fixture: subject=%s err=%v", subjectDigest, err)
+	}
+	return &MeetingSpecialistQualifiedProviderFactory{request: request, subjectDigest: subjectDigest, create: create}
+}
+
+func productionJoinFixtureAt(t *testing.T, now, evaluatedAt time.Time, provider *fakeMeetingSpecialistProvider, factoryCalls *atomic.Int64) (*MeetingSpecialistProductionJoiner, *fakeMeetingSpecialistAuthority) {
+	t.Helper()
+	return productionJoinFixtureForQualification(t, now, evaluatedAt, meetingSpecialistQualificationFixture(), provider, factoryCalls)
+}
+
+func productionJoinFixtureForQualification(t *testing.T, now, evaluatedAt time.Time, qualificationTarget MeetingSpecialistQualificationRequest, provider *fakeMeetingSpecialistProvider, factoryCalls *atomic.Int64) (*MeetingSpecialistProductionJoiner, *fakeMeetingSpecialistAuthority) {
+	t.Helper()
 	authority := newFakeMeetingSpecialistAuthority()
-	qualificationTarget, qualification := meetingSpecialistQualificationFixture(now)
+	qualificationStore := meetingSpecialistQualificationStore(t, qualificationTarget, now, evaluatedAt)
+	qualifiedProvider := testMeetingSpecialistQualifiedProviderFactory(t, qualificationTarget, func(_ context.Context, launch MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
+		factoryCalls.Add(1)
+		if launch.Scope.RuntimePrincipal != "production-runtime-mary" || launch.Context.ToolIDs[0] != "meeting-context-read" || launch.Policy.CostBudgetCents != launch.ApprovalLimits.CostBudgetCents {
+			return nil, ErrMeetingSpecialistJoinAssembly
+		}
+		return provider, nil
+	})
 	gates := enabledSpecialistHarnessGates()
 	gates.Tools = true
 	joiner := NewMeetingSpecialistProductionJoiner(MeetingSpecialistProductionJoinConfig{
@@ -85,17 +119,15 @@ func productionJoinFixture(now time.Time, provider *fakeMeetingSpecialistProvide
 			authority.mu.Unlock()
 			return token, nil
 		},
-		ProviderFactory: func(_ context.Context, launch MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
-			factoryCalls.Add(1)
-			if launch.Scope.RuntimePrincipal != "production-runtime-mary" || launch.Context.ToolIDs[0] != "meeting-context-read" || launch.Policy.CostBudgetCents != launch.ApprovalLimits.CostBudgetCents {
-				return nil, ErrMeetingSpecialistJoinAssembly
-			}
-			return provider, nil
-		},
-		PublishAudio:  func(MeetingAgentFloorScope, uint64, []int16) error { return nil },
-		Qualification: qualification, QualificationTarget: qualificationTarget,
+		QualifiedProvider: qualifiedProvider, QualificationStore: qualificationStore,
+		PublishAudio: func(MeetingAgentFloorScope, uint64, []int16) error { return nil },
 	})
 	return joiner, authority
+}
+
+func productionJoinFixture(t *testing.T, now time.Time, provider *fakeMeetingSpecialistProvider, factoryCalls *atomic.Int64) (*MeetingSpecialistProductionJoiner, *fakeMeetingSpecialistAuthority) {
+	t.Helper()
+	return productionJoinFixtureAt(t, now, now.Add(-time.Minute), provider, factoryCalls)
 }
 
 func productionJoinRequestFixture(t *testing.T, now time.Time) MeetingSpecialistJoinRequest {
@@ -118,78 +150,134 @@ func productionJoinRequestFixture(t *testing.T, now time.Time) MeetingSpecialist
 	return MeetingSpecialistJoinRequest{Invitation: record.Invitation, Candidate: record.Agent, Scope: authority.scope, Limits: record.Limits}
 }
 
+func TestNewMeetingSpecialistQualifiedRealtimeFactoryDerivesExactProductionBinding(t *testing.T) {
+	candidate := specialistCandidateFixture("mary", "dog-perfect")
+	config := defaultOffMeetingSpecialistRealtimeConfig()
+	config.Enabled = true
+	config.APIKey = "test-key-never-dialed"
+	config.ReasoningEffort = "low"
+	config.ResolveBrief = func(context.Context, MeetingSpecialistLaunch) (MeetingSpecialistRealtimeBrief, error) {
+		return MeetingSpecialistRealtimeBrief{}, nil
+	}
+	binding := meetingSpecialistQualificationBinding(config, MeetingSpecialistRealtimeInputDirectPCM, candidate.Profile, candidate.Capability)
+	legacyRelativeRouteDigest := workDigest(struct {
+		Schema, Provider, Route, Endpoint, Model, InputFormat, OutputFormat string
+	}{"stride.meeting-specialist-provider-route/v1", meetingSpecialistProviderName, meetingSpecialistProviderRoute, "/v1/realtime?model=" + config.Model, config.Model, "audio/pcm@24000", "audio/pcm@24000"})
+	if binding.RouteDigest == legacyRelativeRouteDigest {
+		t.Fatal("production route binding omitted the dialed endpoint origin")
+	}
+	subject := e10evidence.MeetingSpecialistQualificationFixtureDigest(binding)
+	deployment := MeetingSpecialistQualificationDeployment{
+		TenantID: "bonfire", ResultID: "specialist-e10-result", TargetID: meetingSpecialistQualificationTargetID,
+		EvaluatorConfigDigest: strideTestDigest("1"), EvaluatorResultDigest: strideTestDigest("2"), FixtureDigest: subject,
+		Candidate:      e10evidence.CandidateBinding{ReleaseCommit: strings.Repeat("a", 40), GitTreeDigest: strideTestDigest("3"), ImageDigest: strideTestDigest("4"), ConfigDigest: strideTestDigest("5"), RouteMapDigest: binding.RouteDigest},
+		AccountingMode: MeetingSpecialistRealtimeInputDirectPCM, SpecialistProfile: candidate.Profile, SpecialistCapability: candidate.Capability,
+	}
+	factory, err := NewMeetingSpecialistQualifiedRealtimeFactory(config, deployment)
+	if err != nil || factory == nil || factory.create == nil || factory.subjectDigest != subject || factory.request.Binding != binding || factory.request.Candidate != deployment.Candidate {
+		t.Fatalf("production factory binding=%+v subject=%s err=%v", factory, subject, err)
+	}
+	tampered := deployment
+	tampered.Candidate.RouteMapDigest = strideTestDigest("6")
+	if _, err := NewMeetingSpecialistQualifiedRealtimeFactory(config, tampered); !errors.Is(err, ErrMeetingSpecialistJoinQualification) {
+		t.Fatalf("candidate-to-route mismatch was accepted: %v", err)
+	}
+	config.Model = "other-model"
+	if _, err := NewMeetingSpecialistQualifiedRealtimeFactory(config, deployment); !errors.Is(err, ErrMeetingSpecialistJoinQualification) {
+		t.Fatalf("noncanonical production model was accepted: %v", err)
+	}
+	config.Model = meetingSpecialistRealtimeModel
+	config.InputMode = MeetingSpecialistRealtimeInputBoundedTranscript
+	config.MaxInputTokensPerTurn = 128
+	if _, err := NewMeetingSpecialistQualifiedRealtimeFactory(config, deployment); !errors.Is(err, ErrMeetingSpecialistJoinQualification) {
+		t.Fatalf("accounting mode divergent from the actual config was accepted: %v", err)
+	}
+	config.InputMode = MeetingSpecialistRealtimeInputDirectPCM
+	config.MaxInputTokensPerTurn = 1
+	if _, err := NewMeetingSpecialistQualifiedRealtimeFactory(config, deployment); !errors.Is(err, ErrMeetingSpecialistJoinQualification) {
+		t.Fatalf("invalid direct-PCM accounting was accepted: %v", err)
+	}
+}
+
 func TestMeetingSpecialistProductionJoinRequiresExactCurrentExternalQualificationBeforeAssembly(t *testing.T) {
 	now := time.Date(2026, 7, 30, 17, 0, 0, 0, time.UTC)
 	request := productionJoinRequestFixture(t, now)
-	for _, scenario := range []struct {
+	scenarios := []struct {
 		name   string
-		mutate func(*MeetingSpecialistProductionJoiner, *fakeMeetingSpecialistQualificationAuthority)
+		want   error
+		mutate func(*MeetingSpecialistProductionJoiner)
 	}{
-		{name: "missing authority", mutate: func(joiner *MeetingSpecialistProductionJoiner, _ *fakeMeetingSpecialistQualificationAuthority) {
-			joiner.qualification = nil
+		{name: "missing evidence store", want: ErrMeetingSpecialistJoinQualification, mutate: func(joiner *MeetingSpecialistProductionJoiner) {
+			joiner.qualificationStore = nil
 		}},
-		{name: "untrusted authority", mutate: func(_ *MeetingSpecialistProductionJoiner, authority *fakeMeetingSpecialistQualificationAuthority) {
-			authority.trusted = false
+		{name: "missing sealed provider", want: ErrMeetingSpecialistJoinAssembly, mutate: func(joiner *MeetingSpecialistProductionJoiner) {
+			joiner.qualifiedProvider = nil
 		}},
-		{name: "unqualified", mutate: func(_ *MeetingSpecialistProductionJoiner, authority *fakeMeetingSpecialistQualificationAuthority) {
-			authority.status.Qualified = false
+		{name: "cross result id", want: ErrMeetingSpecialistJoinQualification, mutate: func(joiner *MeetingSpecialistProductionJoiner) {
+			joiner.qualifiedProvider.request.ResultID = "other-result"
 		}},
-		{name: "stale", mutate: func(_ *MeetingSpecialistProductionJoiner, authority *fakeMeetingSpecialistQualificationAuthority) {
-			authority.status.ExpiresAt = now
+		{name: "cross target id", want: ErrMeetingSpecialistJoinQualification, mutate: func(joiner *MeetingSpecialistProductionJoiner) {
+			joiner.qualifiedProvider.request.TargetID = "other-target"
 		}},
-		{name: "cross result id", mutate: func(joiner *MeetingSpecialistProductionJoiner, _ *fakeMeetingSpecialistQualificationAuthority) {
-			joiner.qualificationTarget.ResultID = "other-result"
+		{name: "cross evaluator config", want: ErrMeetingSpecialistJoinQualification, mutate: func(joiner *MeetingSpecialistProductionJoiner) {
+			joiner.qualifiedProvider.request.EvaluatorConfigDigest = strideTestDigest("a")
 		}},
-		{name: "cross result digest", mutate: func(joiner *MeetingSpecialistProductionJoiner, _ *fakeMeetingSpecialistQualificationAuthority) {
-			joiner.qualificationTarget.ResultDigest = strideTestDigest("8")
+		{name: "cross evaluator result", want: ErrMeetingSpecialistJoinQualification, mutate: func(joiner *MeetingSpecialistProductionJoiner) {
+			joiner.qualifiedProvider.request.EvaluatorResultDigest = strideTestDigest("b")
 		}},
-		{name: "cross target id", mutate: func(joiner *MeetingSpecialistProductionJoiner, _ *fakeMeetingSpecialistQualificationAuthority) {
-			joiner.qualificationTarget.TargetID = "other-target"
+		{name: "cross fixture", want: ErrMeetingSpecialistJoinQualification, mutate: func(joiner *MeetingSpecialistProductionJoiner) {
+			joiner.qualifiedProvider.request.FixtureDigest = strideTestDigest("c")
 		}},
-		{name: "cross target digest", mutate: func(joiner *MeetingSpecialistProductionJoiner, _ *fakeMeetingSpecialistQualificationAuthority) {
-			joiner.qualificationTarget.TargetDigest = strideTestDigest("9")
+		{name: "cross subject", want: ErrMeetingSpecialistJoinQualification, mutate: func(joiner *MeetingSpecialistProductionJoiner) {
+			joiner.qualifiedProvider.request.QualificationSubjectDigest = strideTestDigest("d")
 		}},
-		{name: "cross release", mutate: func(joiner *MeetingSpecialistProductionJoiner, _ *fakeMeetingSpecialistQualificationAuthority) {
-			joiner.qualificationTarget.CandidateRelease = strings.Repeat("b", 40)
+		{name: "cross release", want: ErrMeetingSpecialistJoinQualification, mutate: func(joiner *MeetingSpecialistProductionJoiner) {
+			joiner.qualifiedProvider.request.Candidate.ReleaseCommit = strings.Repeat("b", 40)
 		}},
-		{name: "cross tree", mutate: func(joiner *MeetingSpecialistProductionJoiner, _ *fakeMeetingSpecialistQualificationAuthority) {
-			joiner.qualificationTarget.CandidateTreeDigest = strideTestDigest("a")
+		{name: "cross tree", want: ErrMeetingSpecialistJoinQualification, mutate: func(joiner *MeetingSpecialistProductionJoiner) {
+			joiner.qualifiedProvider.request.Candidate.GitTreeDigest = strideTestDigest("e")
 		}},
-		{name: "cross image", mutate: func(joiner *MeetingSpecialistProductionJoiner, _ *fakeMeetingSpecialistQualificationAuthority) {
-			joiner.qualificationTarget.CandidateImageDigest = strideTestDigest("b")
+		{name: "cross image", want: ErrMeetingSpecialistJoinQualification, mutate: func(joiner *MeetingSpecialistProductionJoiner) {
+			joiner.qualifiedProvider.request.Candidate.ImageDigest = strideTestDigest("f")
 		}},
-		{name: "cross config", mutate: func(joiner *MeetingSpecialistProductionJoiner, _ *fakeMeetingSpecialistQualificationAuthority) {
-			joiner.qualificationTarget.CandidateConfigDigest = strideTestDigest("c")
+		{name: "cross config", want: ErrMeetingSpecialistJoinQualification, mutate: func(joiner *MeetingSpecialistProductionJoiner) {
+			joiner.qualifiedProvider.request.Candidate.ConfigDigest = strideTestDigest("0")
 		}},
-		{name: "cross candidate route", mutate: func(joiner *MeetingSpecialistProductionJoiner, _ *fakeMeetingSpecialistQualificationAuthority) {
-			joiner.qualificationTarget.CandidateRouteDigest = strideTestDigest("d")
+		{name: "cross route map", want: ErrMeetingSpecialistJoinQualification, mutate: func(joiner *MeetingSpecialistProductionJoiner) {
+			joiner.qualifiedProvider.request.Candidate.RouteMapDigest = strideTestDigest("1")
 		}},
-		{name: "cross provider", mutate: func(joiner *MeetingSpecialistProductionJoiner, _ *fakeMeetingSpecialistQualificationAuthority) {
-			joiner.qualificationTarget.Provider = "other-provider"
+		{name: "cross provider", want: ErrMeetingSpecialistJoinQualification, mutate: func(joiner *MeetingSpecialistProductionJoiner) {
+			joiner.qualifiedProvider.request.Binding.Provider = "anthropic"
 		}},
-		{name: "cross model", mutate: func(joiner *MeetingSpecialistProductionJoiner, _ *fakeMeetingSpecialistQualificationAuthority) {
-			joiner.qualificationTarget.ProviderModel = "other-model"
+		{name: "cross model", want: ErrMeetingSpecialistJoinQualification, mutate: func(joiner *MeetingSpecialistProductionJoiner) {
+			joiner.qualifiedProvider.request.Binding.Model = "other-model"
 		}},
-		{name: "cross provider route", mutate: func(joiner *MeetingSpecialistProductionJoiner, _ *fakeMeetingSpecialistQualificationAuthority) {
-			joiner.qualificationTarget.ProviderRoute = "other-route"
+		{name: "cross voice", want: ErrMeetingSpecialistJoinQualification, mutate: func(joiner *MeetingSpecialistProductionJoiner) {
+			joiner.qualifiedProvider.request.Binding.Voice = "other-voice"
 		}},
-		{name: "cross provider route digest", mutate: func(joiner *MeetingSpecialistProductionJoiner, _ *fakeMeetingSpecialistQualificationAuthority) {
-			joiner.qualificationTarget.ProviderRouteDigest = strideTestDigest("e")
+		{name: "cross provider route", want: ErrMeetingSpecialistJoinQualification, mutate: func(joiner *MeetingSpecialistProductionJoiner) {
+			joiner.qualifiedProvider.request.Binding.RouteDigest = strideTestDigest("2")
 		}},
-		{name: "cross accounting", mutate: func(joiner *MeetingSpecialistProductionJoiner, _ *fakeMeetingSpecialistQualificationAuthority) {
-			joiner.qualificationTarget.AccountingMode = MeetingSpecialistRealtimeInputBoundedTranscript
+		{name: "cross accounting", want: ErrMeetingSpecialistJoinQualification, mutate: func(joiner *MeetingSpecialistProductionJoiner) {
+			joiner.qualifiedProvider.request.Binding.AccountingProfileDigest = strideTestDigest("3")
 		}},
-		{name: "cross specialist profile", mutate: func(joiner *MeetingSpecialistProductionJoiner, _ *fakeMeetingSpecialistQualificationAuthority) {
-			joiner.qualificationTarget.SpecialistProfile = strideTestRef(STRIDEContractAgentCoreProfile, "other-profile")
+		{name: "cross runtime", want: ErrMeetingSpecialistJoinQualification, mutate: func(joiner *MeetingSpecialistProductionJoiner) {
+			joiner.qualifiedProvider.request.Binding.RuntimeProfileDigest = strideTestDigest("4")
 		}},
-		{name: "cross specialist capability", mutate: func(joiner *MeetingSpecialistProductionJoiner, _ *fakeMeetingSpecialistQualificationAuthority) {
-			joiner.qualificationTarget.SpecialistCapability = strideTestRef(STRIDEContractAgentCapabilityManifest, "other-capability")
+		{name: "cross capability policy", want: ErrMeetingSpecialistJoinQualification, mutate: func(joiner *MeetingSpecialistProductionJoiner) {
+			joiner.qualifiedProvider.request.Binding.CapabilityPolicyDigest = strideTestDigest("5")
 		}},
-	} {
+		{name: "cross specialist profile", want: ErrMeetingSpecialistJoinQualification, mutate: func(joiner *MeetingSpecialistProductionJoiner) {
+			joiner.qualifiedProvider.request.SpecialistProfile = strideTestRef(STRIDEContractAgentCoreProfile, "other-profile")
+		}},
+		{name: "cross specialist capability", want: ErrMeetingSpecialistJoinQualification, mutate: func(joiner *MeetingSpecialistProductionJoiner) {
+			joiner.qualifiedProvider.request.SpecialistCapability = strideTestRef(STRIDEContractAgentCapabilityManifest, "other-capability")
+		}},
+	}
+	for _, scenario := range scenarios {
 		t.Run(scenario.name, func(t *testing.T) {
 			var providerCalls atomic.Int64
-			joiner, _ := productionJoinFixture(now, &fakeMeetingSpecialistProvider{}, &providerCalls)
-			qualification := joiner.qualification.(*fakeMeetingSpecialistQualificationAuthority)
+			joiner, _ := productionJoinFixture(t, now, &fakeMeetingSpecialistProvider{}, &providerCalls)
 			var resolverCalls, minterCalls atomic.Int64
 			resolver := joiner.resolveCurrent
 			joiner.resolveCurrent = func(ctx context.Context, request MeetingSpecialistJoinRequest) (MeetingSpecialistJoinAssembly, error) {
@@ -201,26 +289,73 @@ func TestMeetingSpecialistProductionJoinRequiresExactCurrentExternalQualificatio
 				minterCalls.Add(1)
 				return minter(ctx, request)
 			}
-			scenario.mutate(joiner, qualification)
+			scenario.mutate(joiner)
 			if joiner.Ready() {
 				t.Fatal("product availability remained true without exact current qualification")
 			}
-			if _, err := joiner.Join(context.Background(), request); !errors.Is(err, ErrMeetingSpecialistJoinQualification) {
-				t.Fatalf("join err=%v", err)
+			if _, err := joiner.Join(context.Background(), request); !errors.Is(err, scenario.want) {
+				t.Fatalf("join err=%v, want %v", err, scenario.want)
 			}
 			if resolverCalls.Load() != 0 || minterCalls.Load() != 0 || providerCalls.Load() != 0 {
 				t.Fatalf("qualification failure crossed startup boundary: resolver=%d minter=%d provider=%d", resolverCalls.Load(), minterCalls.Load(), providerCalls.Load())
 			}
 		})
 	}
-}
 
+	t.Run("fixed seven day freshness boundary", func(t *testing.T) {
+		var staleCalls atomic.Int64
+		stale, _ := productionJoinFixtureAt(t, now, now.Add(-meetingSpecialistQualificationMaxAge), &fakeMeetingSpecialistProvider{}, &staleCalls)
+		if stale.Ready() {
+			t.Fatal("qualification at the fixed expiry instant remained ready")
+		}
+		if _, err := stale.Join(context.Background(), request); !errors.Is(err, ErrMeetingSpecialistJoinQualification) || staleCalls.Load() != 0 {
+			t.Fatalf("stale join err=%v providerCalls=%d", err, staleCalls.Load())
+		}
+
+		var validCalls atomic.Int64
+		valid, _ := productionJoinFixtureAt(t, now, now.Add(-meetingSpecialistQualificationMaxAge+10*time.Second), &fakeMeetingSpecialistProvider{}, &validCalls)
+		if !valid.Ready() {
+			t.Fatal("qualification immediately before the fixed expiry boundary was rejected")
+		}
+		runtime, err := valid.Join(context.Background(), request)
+		if err != nil || runtime == nil || validCalls.Load() != 1 {
+			t.Fatalf("pre-boundary join runtime=%v calls=%d err=%v", runtime, validCalls.Load(), err)
+		}
+		_ = runtime.Stop(runtime.lease, "test_cleanup")
+	})
+
+	t.Run("qualification is rechecked after factory and brief latency", func(t *testing.T) {
+		current := now
+		var factoryCalls atomic.Int64
+		provider := &fakeMeetingSpecialistProvider{}
+		joiner, _ := productionJoinFixtureAt(t, now, now.Add(-meetingSpecialistQualificationMaxAge+time.Second), provider, &factoryCalls)
+		joiner.now = func() time.Time { return current }
+		create := joiner.qualifiedProvider.create
+		joiner.qualifiedProvider.create = func(ctx context.Context, launch MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
+			created, createErr := create(ctx, launch)
+			current = now.Add(2 * time.Second)
+			return created, createErr
+		}
+		if _, err := joiner.Join(context.Background(), request); !errors.Is(err, ErrMeetingSpecialistUnauthorized) || factoryCalls.Load() != 1 || provider.closed != 1 {
+			t.Fatalf("factory-latency expiry escaped: calls=%d closed=%d err=%v", factoryCalls.Load(), provider.closed, err)
+		}
+
+		current = now
+		factoryCalls.Store(0)
+		provider = &fakeMeetingSpecialistProvider{onBrief: func() { current = now.Add(2 * time.Second) }}
+		joiner, _ = productionJoinFixtureAt(t, now, now.Add(-meetingSpecialistQualificationMaxAge+time.Second), provider, &factoryCalls)
+		joiner.now = func() time.Time { return current }
+		if _, err := joiner.Join(context.Background(), request); !errors.Is(err, ErrMeetingSpecialistUnauthorized) || factoryCalls.Load() != 1 || provider.closed != 1 {
+			t.Fatalf("brief-latency expiry escaped: calls=%d closed=%d err=%v", factoryCalls.Load(), provider.closed, err)
+		}
+	})
+}
 func TestMeetingSpecialistProductionJoinRequiresApprovalAndBindsServerAuthority(t *testing.T) {
 	now := time.Date(2026, 7, 30, 17, 0, 0, 0, time.UTC)
 	product, _, user := specialistProductFixture(t)
 	provider := &fakeMeetingSpecialistProvider{}
 	var factoryCalls atomic.Int64
-	joiner, _ := productionJoinFixture(now, provider, &factoryCalls)
+	joiner, _ := productionJoinFixture(t, now, provider, &factoryCalls)
 	product.productionJoin = joiner
 
 	requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review positioning", "production-join-1", time.Minute)
@@ -251,7 +386,7 @@ func TestMeetingSpecialistProductionHTTPApprovalHandsRuntimeLifetimeToProduct(t 
 	product, _, _ := specialistProductFixture(t)
 	provider := &fakeMeetingSpecialistProvider{}
 	var factoryCalls atomic.Int64
-	joiner, _ := productionJoinFixture(now, provider, &factoryCalls)
+	joiner, _ := productionJoinFixture(t, now, provider, &factoryCalls)
 	product.productionJoin = joiner
 	previous := kanbanApp
 	kanbanApp = &kanbanBoardApp{meetingSpecialists: product}
@@ -351,7 +486,7 @@ func TestMeetingSpecialistProductionJoinFencesCancellationToolsAndBudgetsBeforeP
 	request := MeetingSpecialistJoinRequest{Invitation: record.Invitation, Candidate: record.Agent, Scope: authority.scope, Limits: record.Limits}
 
 	var factoryCalls atomic.Int64
-	joiner, _ := productionJoinFixture(now, &fakeMeetingSpecialistProvider{}, &factoryCalls)
+	joiner, _ := productionJoinFixture(t, now, &fakeMeetingSpecialistProvider{}, &factoryCalls)
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := joiner.Join(cancelled, request); !errors.Is(err, context.Canceled) || factoryCalls.Load() != 0 {
@@ -386,7 +521,7 @@ func TestMeetingSpecialistProductionJoinFencesCancellationToolsAndBudgetsBeforeP
 		t.Fatalf("over-budget join err=%v factoryCalls=%d", err, factoryCalls.Load())
 	}
 
-	disabled := NewMeetingSpecialistProductionJoiner(MeetingSpecialistProductionJoinConfig{ProviderFactory: joiner.providerFactory})
+	disabled := NewMeetingSpecialistProductionJoiner(MeetingSpecialistProductionJoinConfig{QualifiedProvider: joiner.qualifiedProvider})
 	if _, err := disabled.Join(context.Background(), request); !errors.Is(err, ErrMeetingSpecialistJoinDisabled) || factoryCalls.Load() != 0 {
 		t.Fatalf("default-off join err=%v factoryCalls=%d", err, factoryCalls.Load())
 	}
@@ -402,7 +537,7 @@ func TestMeetingSpecialistProductionJoinRestartRequiresFreshApproval(t *testing.
 	}
 	provider := &fakeMeetingSpecialistProvider{}
 	var factoryCalls atomic.Int64
-	joiner, _ := productionJoinFixture(now, provider, &factoryCalls)
+	joiner, _ := productionJoinFixture(t, now, provider, &factoryCalls)
 	product := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: persistence, ProductionJoin: joiner})
 	requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "production-restart-1", time.Minute)
 	if err != nil {
