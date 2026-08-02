@@ -1763,6 +1763,49 @@ not model quality or migration readiness.
     diff/secret scan, actual VPS Compose `5m0s` normalization, and an
     independent release re-review all pass. Production remains on the restored
     healthy legacy release until the third exact pair passes the full ceremony.
+17. Third exact pair A3/B3 is
+    `64881c0d4496f936ae1a358c5550a0ea1207fe5a` /
+    `8e1b16c3531a93c93ea79914c80fe9e41573f645`. Its protected ceremony
+    completed fresh dual-ingress isolation, all-room quiescence, a new
+    eight-volume cold backup and full restore rehearsal, the confined
+    PDF/JPEG renderer canary, and candidate migration application through
+    version 9. The application then stopped at the canonical parity gate
+    before public reopen. The first isolated clone observation reported 24
+    candidates; after the two deterministic clone starts had applied the
+    ordinary current-board revisions, the same source/canonical boundary
+    reduced reproducibly to exactly seven historical board candidates. No
+    gate was bypassed. The rehearsed cold rollback restored the complete
+    legacy volume/image/migration set, candidate profiles were removed, and
+    public HTTPS, readiness, and TCP TURN were independently rechecked before
+    legacy traffic reopened. Production is therefore healthy legacy, not an
+    A3/B3 release.
+18. The seven-card evidence is deliberately narrow and sanitized. A frozen
+    32-card historical board and the current 25-card board have distinct
+    sealed hashes; the canonical store retains all seven as active historical
+    imports, while the current board omits them. Five are prior legacy repair
+    candidates: three have an unchanged historical Backlog state, while two
+    have a later archived Done state and therefore cannot inherit one uniform
+    source-state assertion. The remaining two are consistently observed as
+    archived Done. There is no board deletion journal, deletion actor, reason,
+    or original deletion timestamp in the captured live, clone, or retained
+    backup evidence. A repair may record only a last-positive observation, the
+    current absence observation, and its own append time; it must not invent a
+    historical deletion fact.
+19. The production append remains blocked on one explicit, manifest-bound
+    human confirmation after a clean clone receipt. The private manifest must
+    bind the sealed source and archive hashes, seven opaque candidate
+    fingerprints, selected source state per candidate, target pre-state,
+    backup and release identities, clone receipt, controlled reconciliation
+    reason, and exact no-extra delta. From a pristine 32-event target, the
+    acceptance rule is exactly two ordinary current-board revisions plus seven
+    controlled absence-backfill tombstones (nine events and nine outbox rows),
+    unchanged 25-card visible board, then zero delta on a second reconcile,
+    restart, and fresh clone repeat. If normalization has already produced the
+    two ordinary revisions, the alternative precondition is exactly 34 plus
+    seven, never a range. Broad release/migration authority does not substitute
+    for this data-history decision. Build 29/TestFlight evidence remains exactly
+    as recorded above; no replacement mobile build is implied by this
+    server-side blocked repair.
 
 **Resume gates — do not skip or merge them:**
 
