@@ -16,28 +16,29 @@ import (
 )
 
 type MeetingSpecialistProviderReceipt struct {
-	BindingDigest        string `json:"bindingDigest"`
-	RequestDigest        string `json:"requestDigest"`
-	SessionIDHash        string `json:"sessionIdHash,omitempty"`
-	Model                string `json:"model"`
-	ReasoningEffort      string `json:"reasoningEffort"`
-	EventDigest          string `json:"eventDigest"`
-	EventCount           int    `json:"eventCount"`
-	UsageDigest          string `json:"usageDigest,omitempty"`
-	UsageStatus          string `json:"usageStatus,omitempty"`
-	TerminalEventHash    string `json:"terminalEventHash,omitempty"`
-	TerminalStatus       string `json:"terminalStatus,omitempty"`
-	SessionFailureHash   string `json:"sessionFailureHash,omitempty"`
-	InputTokens          int64  `json:"inputTokens,omitempty"`
-	OutputTokens         int64  `json:"outputTokens,omitempty"`
-	OutputAudioTokens    int64  `json:"outputAudioTokens,omitempty"`
-	ReconciledCostCent   int64  `json:"reconciledCostCents,omitempty"`
-	InputAudioSamples    int64  `json:"inputAudioSamples,omitempty"`
-	InputSampleLimit     int64  `json:"inputSampleLimit,omitempty"`
-	InputWorstCaseTokens int64  `json:"inputWorstCaseTokensPerTurn,omitempty"`
-	ProtocolSource       string `json:"protocolSource"`
-	ModelSource          string `json:"modelSource"`
-	ContractDigest       string `json:"contractDigest"`
+	BindingDigest        string                             `json:"bindingDigest"`
+	RequestDigest        string                             `json:"requestDigest"`
+	SessionIDHash        string                             `json:"sessionIdHash,omitempty"`
+	Model                string                             `json:"model"`
+	ReasoningEffort      string                             `json:"reasoningEffort"`
+	EventDigest          string                             `json:"eventDigest"`
+	EventCount           int                                `json:"eventCount"`
+	UsageDigest          string                             `json:"usageDigest,omitempty"`
+	UsageStatus          string                             `json:"usageStatus,omitempty"`
+	TerminalEventHash    string                             `json:"terminalEventHash,omitempty"`
+	TerminalStatus       string                             `json:"terminalStatus,omitempty"`
+	SessionFailureHash   string                             `json:"sessionFailureHash,omitempty"`
+	InputTokens          int64                              `json:"inputTokens,omitempty"`
+	OutputTokens         int64                              `json:"outputTokens,omitempty"`
+	OutputAudioTokens    int64                              `json:"outputAudioTokens,omitempty"`
+	ReconciledCostCent   int64                              `json:"reconciledCostCents,omitempty"`
+	InputAudioSamples    int64                              `json:"inputAudioSamples,omitempty"`
+	InputSampleLimit     int64                              `json:"inputSampleLimit,omitempty"`
+	InputWorstCaseTokens int64                              `json:"inputWorstCaseTokensPerTurn,omitempty"`
+	InputMode            MeetingSpecialistRealtimeInputMode `json:"inputMode,omitempty"`
+	ProtocolSource       string                             `json:"protocolSource"`
+	ModelSource          string                             `json:"modelSource"`
+	ContractDigest       string                             `json:"contractDigest"`
 }
 
 type openAIMeetingSpecialistProvider struct {
@@ -89,6 +90,12 @@ func NewMeetingSpecialistRealtimeProviderFactory(config MeetingSpecialistRealtim
 	return func(parent context.Context, launch MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
 		if err := config.validate(launch); err != nil {
 			return nil, err
+		}
+		// Only direct PCM has a qualified wire implementation in this adapter.
+		// Bounded transcript accounting is intentionally usable by admission
+		// planning but cannot silently fall through to an unreviewed transport.
+		if config.InputMode != MeetingSpecialistRealtimeInputDirectPCM {
+			return nil, ErrMeetingSpecialistProviderConfig
 		}
 		invocationConfig := config
 		if launchAudioBytes := launch.Context.AudioBudgetSeconds * meetingSpecialistRealtimeSampleRate * 2; launchAudioBytes < invocationConfig.MaxAudioBytes {
@@ -142,9 +149,11 @@ func NewMeetingSpecialistRealtimeProviderFactory(config MeetingSpecialistRealtim
 			ReasoningEffort        string
 			Voice                  string
 			MaxOutputTokens        int64
+			InputMode              MeetingSpecialistRealtimeInputMode
+			MaxInputTokensPerTurn  int64
 			ProviderEndpoint       string
 			SafetyIdentifierDigest string
-		}{launchWithoutReceipt, config.Model, config.ReasoningEffort, config.Voice, config.MaxOutputTokens, "/v1/realtime?model=" + config.Model, optionalMeetingSpecialistDigest(config.SafetyIdentifier)})
+		}{launchWithoutReceipt, config.Model, config.ReasoningEffort, config.Voice, config.MaxOutputTokens, config.InputMode, config.MaxInputTokensPerTurn, "/v1/realtime?model=" + config.Model, optionalMeetingSpecialistDigest(config.SafetyIdentifier)})
 		contractDigest := workDigest(meetingSpecialistRealtimeContractDeclaration())
 		inputSampleLimit := launch.Policy.AudioBudgetSecond * meetingSpecialistRealtimeSampleRate
 		provider := &openAIMeetingSpecialistProvider{
@@ -152,7 +161,7 @@ func NewMeetingSpecialistRealtimeProviderFactory(config MeetingSpecialistRealtim
 			done: make(chan struct{}), seenEventIDs: map[string]struct{}{}, inputSampleLimit: inputSampleLimit,
 			receipt: MeetingSpecialistProviderReceipt{
 				BindingDigest: binding, Model: config.Model, ReasoningEffort: config.ReasoningEffort, EventDigest: sha256Hex(nil),
-				InputSampleLimit: inputSampleLimit, InputWorstCaseTokens: meetingSpecialistRealtimeContextWindowTokens,
+				InputSampleLimit: inputSampleLimit, InputWorstCaseTokens: meetingSpecialistRealtimeContextWindowTokens, InputMode: config.InputMode,
 				ProtocolSource: meetingSpecialistRealtimeProtocolSource, ModelSource: meetingSpecialistRealtimeModelSource, ContractDigest: contractDigest,
 			},
 		}
@@ -183,11 +192,11 @@ func optionalMeetingSpecialistDigest(value string) string {
 
 func meetingSpecialistRealtimeContractDeclaration() any {
 	return struct {
-		ProtocolSource, ModelSource, Endpoint, Model, InputFormat, OutputFormat string
-		SessionEvents, InputEvents, OutputEvents, CancelEvents                  []string
+		ProtocolSource, ModelSource, Endpoint, Model, InputFormat, OutputFormat, InputAccounting string
+		SessionEvents, InputEvents, OutputEvents, CancelEvents                                   []string
 	}{
 		meetingSpecialistRealtimeProtocolSource, meetingSpecialistRealtimeModelSource,
-		"/v1/realtime?model=gpt-realtime-2.1", meetingSpecialistRealtimeModel, "audio/pcm@24000", "audio/pcm@24000",
+		"/v1/realtime?model=gpt-realtime-2.1", meetingSpecialistRealtimeModel, "audio/pcm@24000", "audio/pcm@24000", "direct_pcm_reserves_full_128k_context",
 		[]string{"session.created", "conversation.created (optional)", "session.updated"},
 		[]string{"input_audio_buffer.append", "input_audio_buffer.commit", "response.create"},
 		[]string{"conversation.item.added", "conversation.item.done", "response.created", "response.output_item.added", "response.content_part.added", "response.output_audio.delta", "response.output_audio.done", "response.output_audio_transcript.delta", "response.output_audio_transcript.done", "response.content_part.done", "response.output_item.done", "response.done", "rate_limits.updated"},
@@ -473,7 +482,11 @@ func (provider *openAIMeetingSpecialistProvider) admitResponseLocked() (int64, i
 	if !ok {
 		return 0, 0, ErrMeetingSpecialistProviderBudget
 	}
-	provider.activeInputLimit = meetingSpecialistRealtimeContextWindowTokens
+	inputTokens, _, ok := meetingSpecialistRealtimeInputReservation(provider.config)
+	if !ok {
+		return 0, 0, ErrMeetingSpecialistProviderBudget
+	}
+	provider.activeInputLimit = inputTokens
 	provider.activeOutputLimit = admittedOutput
 	provider.activeCostLimit = admittedCost
 	return admittedOutput, admittedCost, nil

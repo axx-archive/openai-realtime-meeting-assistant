@@ -169,7 +169,7 @@ func (product *MeetingSpecialistProduct) restoreLocked() error {
 			expiredOnRestore = true
 		} else if legacyMeetingSpecialistCandidate(durable.Agent) && durable.Invitation.Eligibility == nil && meetingSpecialistInvitationRequiresEligibility(meetingSpecialistProductRecord{Invitation: durable.Invitation, Status: status}) {
 			status = "eligibility_revoked"
-		} else if durable.Invitation.Decision == "approved" && (status == "approved_waiting_for_provider_qualification" || status == "joined_test_session") {
+		} else if durable.Invitation.Decision == "approved" && (status == "approved_waiting_for_provider_qualification" || status == "joined_session" || status == "joined_test_session") {
 			status = "approved_reauthorization_required"
 		}
 		if meetingSpecialistInvitationIsActive(meetingSpecialistProductRecord{Invitation: durable.Invitation, Status: status}) {
@@ -288,7 +288,7 @@ func validMeetingSpecialistStatusDecision(status, decision string) bool {
 	switch status {
 	case "awaiting_approval":
 		return decision == "requested"
-	case "approved_waiting_for_provider_qualification", "approved_reauthorization_required", "approved_test_session_failed", "joined_test_session", "failed":
+	case "approved_waiting_for_provider_qualification", "approved_reauthorization_required", "approved_session_failed", "approved_test_session_failed", "joined_session", "joined_test_session", "failed":
 		return decision == "approved"
 	case "eligibility_revoked", "closed":
 		return decision == "requested" || decision == "approved"
@@ -317,8 +317,13 @@ func validMeetingSpecialistProviderReceipt(receipt MeetingSpecialistProviderRece
 		strings.TrimSpace(receipt.Model) == "" || strings.TrimSpace(receipt.Model) != receipt.Model || strings.TrimSpace(receipt.ReasoningEffort) == "" || strings.TrimSpace(receipt.ReasoningEffort) != receipt.ReasoningEffort ||
 		strings.TrimSpace(receipt.ProtocolSource) == "" || strings.TrimSpace(receipt.ProtocolSource) != receipt.ProtocolSource || strings.TrimSpace(receipt.ModelSource) == "" || strings.TrimSpace(receipt.ModelSource) != receipt.ModelSource ||
 		receipt.EventCount < 0 || receipt.InputTokens < 0 || receipt.OutputTokens < 0 || receipt.OutputAudioTokens < 0 || receipt.OutputAudioTokens > receipt.OutputTokens || receipt.ReconciledCostCent < 0 ||
+		!oneOf(string(receipt.InputMode), "", string(MeetingSpecialistRealtimeInputDirectPCM), string(MeetingSpecialistRealtimeInputBoundedTranscript)) || receipt.InputWorstCaseTokens < 0 ||
 		!oneOf(receipt.UsageStatus, "", "reconciled", "usage_unreconciled") || !oneOf(receipt.TerminalStatus, "", "completed", "cancelled", "incomplete", "failed") ||
 		receipt.UsageStatus == "reconciled" && receipt.UsageDigest == "" || receipt.TerminalStatus != "" && receipt.TerminalEventHash == "" {
+		return false
+	}
+	if receipt.InputMode == MeetingSpecialistRealtimeInputDirectPCM && receipt.InputWorstCaseTokens != meetingSpecialistRealtimeContextWindowTokens ||
+		receipt.InputMode == MeetingSpecialistRealtimeInputBoundedTranscript && (receipt.InputWorstCaseTokens <= 0 || receipt.InputWorstCaseTokens > meetingSpecialistRealtimeContextWindowTokens) {
 		return false
 	}
 	return true
