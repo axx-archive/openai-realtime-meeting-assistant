@@ -45,6 +45,7 @@ restore_legacy() {
     test -z "$(docker ps -aq --filter volume=digitalocean_render_queue)"
     docker volume rm digitalocean_render_queue
   fi
+  remove_renderer_security_profiles
 
   local volumes=(
     digitalocean_caddy_config digitalocean_caddy_data digitalocean_canonical_postgres
@@ -114,6 +115,7 @@ restart_untouched_legacy() {
   phase_done legacy-retirement-started && die 'legacy retirement began; use the rehearsed cold restore instead'
   test -f "$BK/private/containers.inspect.json" || die 'original container inventory was not captured'
   test ! -e "$RELEASE_PARENT/.bonfire-release-operation.lock" || die 'release operation lock exists'
+  remove_renderer_security_profiles
   local pgc
   pgc=$(jq -er '.[]|select(.Config.Labels["com.docker.compose.service"]=="canonical-postgres")|.Id' "$BK/private/containers.inspect.json")
   docker start "$pgc" >/dev/null

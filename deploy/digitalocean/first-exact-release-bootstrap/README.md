@@ -21,8 +21,12 @@ operation lock.
   `digitalocean_render_queue` volume.
 - After manual A, exact `verify` must pass every running check and stop only at
   `active release ledger is missing`.
-- Tool activation uses `up -d --no-build --wait --wait-timeout 120`; it does
-  not use `--remove-orphans`. The old `codex-runner` is removed explicitly.
+- Manual A startup uses `up -d --no-build --wait --wait-timeout 300` so a cold
+  application start is not misclassified by the former two-minute bound. It
+  does not use `--remove-orphans`. The old `codex-runner` is removed explicitly.
+- The render runner keeps Chrome's namespace sandbox under an exact,
+  release-bound AppArmor profile and a narrow Docker seccomp policy. The host
+  restriction `kernel.apparmor_restrict_unprivileged_userns=1` stays enabled.
 - The VPS currently needs reviewed Ubuntu Node package
   `18.19.1+dfsg-6ubuntu5`. A candidate change stops the ceremony.
 - The legacy database has migrations 1-7; A/B add 8-9. Returning to legacy
@@ -44,6 +48,11 @@ operation lock.
 - `self-check.sh` / `self-check.mjs` — fail-closed syntax, checksum, and
   repository release-contract checks. Run this before copying the pack.
 - `PACK-SHA256SUMS` — checksums for every other file in this directory.
+
+The exact A/B candidate archives also carry
+`deploy/digitalocean/bonfire-render-runner-v1.apparmor` and
+`deploy/digitalocean/bonfire-render-runner-v1.seccomp.json`. They are release
+inputs rather than mutable operator-pack files.
 
 ## 1. Prepare A and B on the Mac
 
@@ -126,6 +135,25 @@ can publish traffic. The phase also creates one marked `/etc/hosts` loopback
 entry so the retained Node tool can probe the public hostname with correct
 TLS/SNI while public ingress is blocked.
 
+Only after both ingress layers are active, `isolate` installs the identical A/B
+renderer policies as root-owned mode-0644 files at
+`/etc/apparmor.d/bonfire-render-runner-v1` and
+`/etc/docker/seccomp/bonfire-render-runner-v1.json`. It validates the seccomp
+JSON, requires the Ubuntu restricted-user-namespace sysctl to remain `1`, loads
+the AppArmor policy in enforce mode, byte-compares both installed files to the
+sealed release, and records their SHA-256 digests privately. A preexisting path,
+profile drift, permissive sysctl, invalid JSON, or non-enforcing AppArmor state
+stops the ceremony with ingress still blocked.
+
+Every forward command rejects a ceremony that has ever marked
+`public-open-attempted`, `legacy-restored`, or `legacy-reopened`. In addition,
+`retire-legacy`, `bootstrap-a`, and `activate-b` re-prove the live maintenance
+boundary immediately before acting: both persistent and ephemeral ingress
+guards must be exact, `eth0` and the single marked loopback hosts entry must be
+unchanged, the public hostname must resolve first to loopback, the external
+block acknowledgment must exist, and both renderer profiles must still be exact
+and enforcing. Historical phase markers alone never authorize forward motion.
+
 From the Mac or another genuinely outside network:
 
 ```bash
@@ -193,11 +221,18 @@ containers while keeping ingress blocked:
 
 `retire-legacy` removes exactly one stopped `codex-runner`, then removes only
 the already-backed and unreferenced `digitalocean_codex_home` and
-`digitalocean_codex_runner_data`. It never removes `codex_queue`.
+`digitalocean_codex_runner_data`. It never removes `codex_queue`. Before the
+retirement marker or any deletion, it runs exact A's render image in a
+disposable, networkless, read-only, capability-free container under the
+installed AppArmor and seccomp profiles. Chrome must create a non-empty PDF and
+`pdftoppm` must create a non-empty JPEG; the evidence digests are retained. The
+same canary also proves UID/GID 65532, all-zero capability sets,
+`NoNewPrivs: 1`, `Seccomp: 2`, denied outer chroot, denied unapproved namespace
+operations and `setns`, plus the one exact user-namespace probe Chrome needs.
 
 `bootstrap-a` uses the exact candidate Compose project directory, two env
-files, render profile, sanitized environment, `--no-build`, and no orphan
-shortcut. It accepts A only when:
+files, render profile, sanitized environment, `--no-build`, a 300-second cold
+health bound, and no orphan shortcut. It accepts A only when:
 
 - its verifier's sole error is the terminal missing-ledger error;
 - services, networks, volumes, render initializer, and absence of codex-runner
@@ -277,10 +312,19 @@ release operation lock is absent:
 ```
 
 This removes all candidate project containers, removes new `render_queue`,
+then unloads and deletes only the exact release-owned renderer profiles,
 recreates the two legacy volumes from saved driver/options/labels, restores all
 eight cold archives, restores exact legacy image refs/IDs, starts legacy
 PostgreSQL first, proves migrations/counts, then starts the exact legacy
 profiles. It leaves ingress blocked.
+
+Renderer-profile removal is interruption-safe and refuses any running or
+restartable container that references the custom AppArmor profile. It accepts
+only exact loaded files, exact files already unloaded, an owned interrupted
+unlink with exact surviving files, or a fully absent state; drift and
+unexplained partial state stop rollback. `restart-untouched` performs the same
+cleanup before starting any saved legacy container, and cold restore can be
+rerun safely after an interruption.
 
 After reviewing the captured legacy health/degraded baseline:
 

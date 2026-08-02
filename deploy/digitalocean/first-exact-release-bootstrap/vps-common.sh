@@ -18,6 +18,9 @@ PERSISTENT_GUARD_NAME=bonfire-bootstrap-ingress-guard
 PERSISTENT_GUARD_SCRIPT=/usr/local/sbin/bonfire-bootstrap-ingress-guard
 PERSISTENT_GUARD_UNIT=/etc/systemd/system/bonfire-bootstrap-ingress-guard.service
 PERSISTENT_GUARD_DROPIN=/etc/systemd/system/docker.service.d/bonfire-bootstrap-ingress-guard.conf
+RENDERER_APPARMOR_NAME=bonfire-render-runner-v1
+RENDERER_APPARMOR_PATH=/etc/apparmor.d/bonfire-render-runner-v1
+RENDERER_SECCOMP_PATH=/etc/docker/seccomp/bonfire-render-runner-v1.json
 
 die() {
   printf 'bootstrap: %s\n' "$*" >&2
@@ -219,6 +222,31 @@ phase_done() {
   test -f "$(marker_path "$1")"
 }
 
+assert_forward_ceremony_permitted() {
+  local terminal
+  for terminal in public-open-attempted legacy-restored legacy-reopened; do
+    ! phase_done "$terminal" \
+      || die "terminal ceremony state $terminal forbids every forward bootstrap phase"
+  done
+}
+
+assert_forward_maintenance_state() {
+  local wan marker_line
+  assert_forward_ceremony_permitted
+  require_phase isolated
+  require_phase external-block-confirmed
+  wan=$(jq -er '.wanInterface' "$STATE_FILE")
+  test "$wan" = eth0 || die "maintenance WAN interface drifted from eth0 to $wan"
+  assert_persistent_ingress_guard
+  assert_ephemeral_ingress_guard "$wan"
+  marker_line="127.0.0.1 $HOST $HOSTS_MARKER"
+  test "$(grep -Fxc "$marker_line" /etc/hosts)" -eq 1 \
+    || die 'exact maintenance loopback hosts marker is missing or duplicated'
+  getent ahostsv4 "$HOST" | awk 'NR==1{seen=1; exit($1!="127.0.0.1")} END{if(!seen)exit 1}' \
+    || die 'maintenance hostname no longer resolves first to loopback'
+  assert_renderer_security_profiles
+}
+
 release_tool() {
   printf '%s/sealed-candidate/scripts/bonfire-release.mjs\n' "$1"
 }
@@ -241,6 +269,202 @@ release_verify() {
     --base-env "$BASE_ENV" \
     --health-url "https://$HOST/healthz" \
     --ready-url "https://$HOST/readyz"
+}
+
+renderer_apparmor_source() {
+  printf '%s/sealed-candidate/deploy/digitalocean/bonfire-render-runner-v1.apparmor\n' "$1"
+}
+
+renderer_seccomp_source() {
+  printf '%s/sealed-candidate/deploy/digitalocean/bonfire-render-runner-v1.seccomp.json\n' "$1"
+}
+
+assert_renderer_profile_sources() {
+  local a_apparmor a_seccomp b_apparmor b_seccomp source
+  a_apparmor=$(renderer_apparmor_source "$ADIR")
+  a_seccomp=$(renderer_seccomp_source "$ADIR")
+  b_apparmor=$(renderer_apparmor_source "$BDIR")
+  b_seccomp=$(renderer_seccomp_source "$BDIR")
+  for source in "$a_apparmor" "$a_seccomp" "$b_apparmor" "$b_seccomp"; do
+    test -f "$source" && test ! -L "$source" || die "renderer security profile is missing or unsafe: $source"
+  done
+  cmp "$a_apparmor" "$b_apparmor" || die 'A/B renderer AppArmor profiles differ'
+  cmp "$a_seccomp" "$b_seccomp" || die 'A/B renderer seccomp profiles differ'
+  grep -Fx "profile \"$RENDERER_APPARMOR_NAME\" flags=(attach_disconnected,mediate_deleted) {" "$a_apparmor" >/dev/null \
+    || die 'renderer AppArmor profile name or flags changed'
+  grep -Eq '^[[:space:]]*userns,[[:space:]]*$' "$a_apparmor" \
+    || die 'renderer AppArmor profile does not explicitly permit a confined user namespace'
+  jq -e '
+    type=="object" and
+    (.defaultAction | type=="string" and startswith("SCMP_ACT_")) and
+    (.archMap | type=="array" and length>0) and
+    (.syscalls | type=="array" and length>0 and all(.[]; (.names | type=="array" and length>0) and (.action | type=="string")))
+  ' "$a_seccomp" >/dev/null || die 'renderer seccomp profile is not a valid reviewed Docker seccomp policy'
+}
+
+assert_renderer_security_profiles() {
+  local restriction
+  require_commands apparmor_parser cmp grep jq sha256sum stat sysctl
+  assert_renderer_profile_files_exact
+  restriction=$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)
+  test "$restriction" = 1 || die 'kernel.apparmor_restrict_unprivileged_userns must remain 1'
+  grep -Fx "$RENDERER_APPARMOR_NAME (enforce)" /sys/kernel/security/apparmor/profiles >/dev/null \
+    || die 'renderer AppArmor profile is not loaded in enforce mode'
+}
+
+assert_renderer_profile_files_exact() {
+  local source_apparmor source_seccomp
+  require_commands cmp jq stat
+  assert_renderer_profile_sources
+  source_apparmor=$(renderer_apparmor_source "$ADIR")
+  source_seccomp=$(renderer_seccomp_source "$ADIR")
+  test -f "$RENDERER_APPARMOR_PATH" && test ! -L "$RENDERER_APPARMOR_PATH" \
+    || die 'installed renderer AppArmor profile is missing or unsafe'
+  test -f "$RENDERER_SECCOMP_PATH" && test ! -L "$RENDERER_SECCOMP_PATH" \
+    || die 'installed renderer seccomp profile is missing or unsafe'
+  test "$(stat -c %U:%G "$RENDERER_APPARMOR_PATH")" = root:root \
+    && test "$(stat -c %a "$RENDERER_APPARMOR_PATH")" = 644 \
+    || die 'installed renderer AppArmor profile must be root:root 0644'
+  test "$(stat -c %U:%G "$RENDERER_SECCOMP_PATH")" = root:root \
+    && test "$(stat -c %a "$RENDERER_SECCOMP_PATH")" = 644 \
+    || die 'installed renderer seccomp profile must be root:root 0644'
+  cmp "$source_apparmor" "$RENDERER_APPARMOR_PATH" \
+    || die 'installed renderer AppArmor profile differs from exact A/B source'
+  cmp "$source_seccomp" "$RENDERER_SECCOMP_PATH" \
+    || die 'installed renderer seccomp profile differs from exact A/B source'
+  jq -e . "$RENDERER_SECCOMP_PATH" >/dev/null \
+    || die 'installed renderer seccomp profile is not valid JSON'
+}
+
+install_renderer_security_profiles() {
+  local source_apparmor source_seccomp
+  require_commands apparmor_parser install jq sysctl
+  assert_renderer_profile_sources
+  source_apparmor=$(renderer_apparmor_source "$ADIR")
+  source_seccomp=$(renderer_seccomp_source "$ADIR")
+  test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = 1 \
+    || die 'refusing renderer profile install while restricted user namespaces are disabled'
+  apparmor_parser -Q -K "$source_apparmor" \
+    || die 'renderer AppArmor profile failed a no-load parse'
+  install -d -o root -g root -m 755 /etc/docker/seccomp
+  install -o root -g root -m 644 "$source_apparmor" "$RENDERER_APPARMOR_PATH"
+  install -o root -g root -m 644 "$source_seccomp" "$RENDERER_SECCOMP_PATH"
+  apparmor_parser -r -W "$RENDERER_APPARMOR_PATH"
+  assert_renderer_security_profiles
+  {
+    printf 'kernel.apparmor_restrict_unprivileged_userns=%s\n' "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)"
+    sha256sum "$RENDERER_APPARMOR_PATH" "$RENDERER_SECCOMP_PATH"
+    grep -Fx "$RENDERER_APPARMOR_NAME (enforce)" /sys/kernel/security/apparmor/profiles
+  } >"$BK/meta/renderer-security-profiles.txt"
+  chmod 600 "$BK/meta/renderer-security-profiles.txt"
+}
+
+remove_renderer_security_profiles() {
+  local apparmor_exists=false seccomp_exists=false loaded_lines cleanup_started
+  require_commands apparmor_parser docker jq
+  assert_no_renderer_profile_container_users
+  test ! -e "$RENDERER_APPARMOR_PATH" || apparmor_exists=true
+  test ! -e "$RENDERER_SECCOMP_PATH" || seccomp_exists=true
+  loaded_lines=$(grep -F "$RENDERER_APPARMOR_NAME (" /sys/kernel/security/apparmor/profiles 2>/dev/null || true)
+  cleanup_started=$(marker_path renderer-profiles-remove-started)
+
+  if test "$apparmor_exists" = false && test "$seccomp_exists" = false; then
+    test -z "$loaded_lines" || die 'renderer AppArmor profile is loaded without its exact release files'
+    return 0
+  fi
+
+  if test "$apparmor_exists" = true && test "$seccomp_exists" = true; then
+    assert_renderer_profile_files_exact
+  elif test -f "$cleanup_started" && test -z "$loaded_lines"; then
+    # An interruption between the two unlink syscalls is resumable only when
+    # every surviving file is still the exact release-owned regular file.
+    if test "$apparmor_exists" = true; then
+      test -f "$RENDERER_APPARMOR_PATH" && test ! -L "$RENDERER_APPARMOR_PATH" \
+        && test "$(stat -c %U:%G "$RENDERER_APPARMOR_PATH")" = root:root \
+        && test "$(stat -c %a "$RENDERER_APPARMOR_PATH")" = 644 \
+        && cmp "$(renderer_apparmor_source "$ADIR")" "$RENDERER_APPARMOR_PATH" \
+        || die 'interrupted renderer AppArmor cleanup left drifted state'
+    fi
+    if test "$seccomp_exists" = true; then
+      test -f "$RENDERER_SECCOMP_PATH" && test ! -L "$RENDERER_SECCOMP_PATH" \
+        && test "$(stat -c %U:%G "$RENDERER_SECCOMP_PATH")" = root:root \
+        && test "$(stat -c %a "$RENDERER_SECCOMP_PATH")" = 644 \
+        && cmp "$(renderer_seccomp_source "$ADIR")" "$RENDERER_SECCOMP_PATH" \
+        || die 'interrupted renderer seccomp cleanup left drifted state'
+    fi
+  else
+    die 'renderer security profile files are partial or drifted without an owned cleanup transition'
+  fi
+
+  if test -n "$loaded_lines"; then
+    test "$loaded_lines" = "$RENDERER_APPARMOR_NAME (enforce)" \
+      || die 'renderer AppArmor profile is loaded in an unexpected mode or duplicate state'
+    test "$apparmor_exists" = true && test "$seccomp_exists" = true \
+      || die 'renderer AppArmor profile is loaded without both exact release files'
+    apparmor_parser -R "$RENDERER_APPARMOR_PATH"
+  fi
+  ! grep -F "$RENDERER_APPARMOR_NAME (" /sys/kernel/security/apparmor/profiles >/dev/null 2>&1 \
+    || die 'renderer AppArmor profile remained loaded after removal'
+  mark_phase renderer-profiles-remove-started
+  rm -f "$RENDERER_APPARMOR_PATH" "$RENDERER_SECCOMP_PATH"
+  test ! -e "$RENDERER_APPARMOR_PATH" && test ! -e "$RENDERER_SECCOMP_PATH" \
+    || die 'renderer security profile cleanup was incomplete'
+  mark_phase renderer-profiles-removed
+}
+
+assert_no_renderer_profile_container_users() {
+  local ids=()
+  mapfile -t ids < <(docker ps -aq)
+  test "${#ids[@]}" -eq 0 && return 0
+  docker inspect "${ids[@]}" | jq -e --arg profile "$RENDERER_APPARMOR_NAME" '
+    all(.[];
+      ((.AppArmorProfile // "") != $profile) and
+      all((.HostConfig.SecurityOpt // [])[];
+        . != ("apparmor=" + $profile) and . != ("apparmor:" + $profile)))
+  ' >/dev/null || die 'a running or restartable container still uses the renderer AppArmor profile'
+}
+
+renderer_security_canary() {
+  local dir=$1 image output
+  assert_renderer_security_profiles
+  image=$(jq -er '.images.renderRunner.imageId' "$dir/release-receipt.json")
+  output="$BK/meta/renderer-security-canary.txt"
+  docker run --rm --name "bonfire-render-security-canary-$$" \
+    --network none --user 65532:65532 --cap-drop ALL --read-only \
+    --security-opt "apparmor=$RENDERER_APPARMOR_NAME" \
+    --security-opt no-new-privileges:true \
+    --security-opt "seccomp=$RENDERER_SECCOMP_PATH" \
+    --pids-limit 256 --memory 1024m --shm-size 256m \
+    --tmpfs /tmp:rw,nosuid,nodev,noexec,size=512m \
+    --env HOME=/tmp --entrypoint /bin/sh "$image" -eu -c '
+      grep -Eq "^Uid:[[:space:]]+65532[[:space:]]+65532[[:space:]]+65532[[:space:]]+65532$" /proc/self/status
+      grep -Eq "^Gid:[[:space:]]+65532[[:space:]]+65532[[:space:]]+65532[[:space:]]+65532$" /proc/self/status
+      for field in CapInh CapPrm CapEff CapBnd CapAmb; do grep -Eq "^${field}:[[:space:]]+0+$" /proc/self/status; done
+      grep -Eq "^NoNewPrivs:[[:space:]]+1$" /proc/self/status
+      grep -Eq "^Seccomp:[[:space:]]+2$" /proc/self/status
+      ! chroot / /bin/true >/dev/null 2>&1
+      unshare --user /bin/true
+      for flag in --mount --uts --ipc --net --pid --cgroup; do ! unshare "$flag" /bin/true >/dev/null 2>&1; done
+      ! unshare --user --mount /bin/true >/dev/null 2>&1
+      ! nsenter --user=/proc/self/ns/user /bin/true >/dev/null 2>&1
+      work=/tmp/bonfire-render-canary
+      mkdir -p "$work/profile"
+      printf "%s\n" "<!doctype html><meta charset=utf-8><title>Bonfire renderer canary</title><h1>Sandboxed PDF canary</h1>" >"$work/input.html"
+      /opt/chrome-headless-shell/chrome-headless-shell \
+        --headless=new --disable-setuid-sandbox --disable-gpu \
+        --disable-background-networking --disable-component-update \
+        --disable-default-apps --disable-extensions --disable-sync \
+        --metrics-recording-only --no-first-run --proxy-server=127.0.0.1:9 \
+        --proxy-bypass-list=127.0.0.1 --user-data-dir="$work/profile" \
+        --no-pdf-header-footer --virtual-time-budget=15000 \
+        --print-to-pdf="$work/output.pdf" "file://$work/input.html"
+      test -s "$work/output.pdf"
+      pdftoppm -jpeg -singlefile -r 72 "$work/output.pdf" "$work/page"
+      test -s "$work/page.jpg"
+      sha256sum "$work/output.pdf" "$work/page.jpg"
+    ' >"$output"
+  test "$(wc -l <"$output")" -eq 2 || die 'renderer sandbox/PDF canary returned unexpected evidence'
+  chmod 600 "$output"
 }
 
 project_service_id() {
@@ -359,6 +583,7 @@ release_data_gate() {
 }
 
 target_topology_gate() {
+  assert_renderer_security_profiles
   diff -u \
     <(printf '%s\n' caddy canonical-postgres coturn meetingassist render-queue-init render-runner | sort) \
     <(docker ps -a --filter label=com.docker.compose.project=digitalocean \

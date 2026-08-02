@@ -13,7 +13,7 @@ Usage: vps-bootstrap.sh PHASE
 Phases, in order:
   init-build                 install/check Node; build retained A and B
   preflight                  require exact missing-render-volume verify failures
-  isolate                    block public app/TURN ingress; keep SSH untouched
+  isolate                    block public ingress; install exact renderer profiles
   acknowledge-external-block record operator's independent Mac failure proof
   prove-empty                prove every room is empty under member authentication
   backup                     quiesce writers; make complete private cold backup
@@ -133,7 +133,7 @@ phase_preflight() {
 }
 
 phase_isolate() {
-  require_root; require_commands iptables ip6tables curl getent systemctl systemd-analyze; load_state; acquire_operator_lock; require_phase preflight
+  require_root; require_commands iptables ip6tables curl getent systemctl systemd-analyze apparmor_parser sysctl; load_state; acquire_operator_lock; require_phase preflight
   phase_done isolated && die 'maintenance isolation is already installed'
   local wan
   wan=$(ip route get 1.1.1.1 | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -1)
@@ -145,6 +145,10 @@ phase_isolate() {
     ! ip6tables -t mangle -S BONFIRE_BOOTSTRAP_RAW >/dev/null 2>&1 || die 'IPv6 persistent guard chain already exists'
     test ! -e "$PERSISTENT_GUARD_SCRIPT" && test ! -e "$PERSISTENT_GUARD_UNIT" && test ! -e "$PERSISTENT_GUARD_DROPIN" \
       || die 'persistent guard install path already exists'
+    test ! -e "$RENDERER_APPARMOR_PATH" && test ! -e "$RENDERER_SECCOMP_PATH" \
+      || die 'renderer security profile install path already exists'
+    ! grep -F "$RENDERER_APPARMOR_NAME (" /sys/kernel/security/apparmor/profiles >/dev/null 2>&1 \
+      || die 'renderer AppArmor profile name is already loaded without ceremony ownership'
     iptables-save >"$BK/meta/iptables.before"
     ip6tables-save >"$BK/meta/ip6tables.before"
     cp -a /etc/hosts "$BK/meta/hosts.before"
@@ -160,6 +164,7 @@ phase_isolate() {
   local_https "https://$HOST/healthz" >"$BK/meta/isolated-loopback-health.json"
   assert_persistent_ingress_guard
   assert_ephemeral_ingress_guard "$wan"
+  install_renderer_security_profiles
   iptables -S "$IPTABLES_CHAIN" >"$BK/meta/iptables-maintenance-chain.txt"
   ip6tables -S "$IPTABLES_CHAIN" >"$BK/meta/ip6tables-maintenance-chain.txt"
   jq --arg wan "$wan" '. + {wanInterface:$wan}' "$STATE_FILE" >"$STATE_FILE.tmp"
@@ -338,6 +343,9 @@ phase_rehearse() {
 
 phase_retire_legacy() {
   require_root; load_state; acquire_operator_lock; require_phase rehearsed
+  assert_forward_maintenance_state
+  renderer_security_canary "$ADIR"
+  assert_forward_maintenance_state
   mapfile -t orphan < <(docker ps -aq --filter label=com.docker.compose.project=digitalocean \
     --filter label=com.docker.compose.service=codex-runner)
   test "${#orphan[@]}" -eq 1 || die 'expected exactly one archived legacy codex-runner container'
@@ -363,7 +371,7 @@ manual_a_compose_up() {
     env -i PATH="$PATH" HOME=/root BONFIRE_BASE_ENV_FILE="$BASE_ENV" \
       docker compose --project-name digitalocean --project-directory "$(dirname "$compose")" \
       --env-file "$BASE_ENV" --env-file "$ADIR/release.env" --file "$compose" --profile render \
-      up -d --no-build --wait --wait-timeout 120
+      up -d --no-build --wait --wait-timeout 300
   )
 }
 
@@ -380,6 +388,7 @@ phase_bootstrap_a() {
   test ! -e "$RELEASE_PARENT/active-release.json" || die 'ledger appeared before A bootstrap'
   test ! -e "$RELEASE_PARENT/.bonfire-release-operation.lock" || die 'release operation lock appeared before A bootstrap'
   assert_node_matches_release "$ADIR"
+  assert_forward_maintenance_state
   local accepted=false
   if manual_a_compose_up && a_ledgerless_identity_exact &&
      release_data_gate "$ADIR" a && target_topology_gate && wait_for_canonical_parity a; then
@@ -471,6 +480,7 @@ validate_authenticated_smoke_payload() {
 phase_activate_b() {
   require_root; load_state; acquire_operator_lock; require_phase a-accepted
   assert_node_matches_release "$ADIR"; assert_node_matches_release "$BDIR"
+  assert_forward_maintenance_state
   local log="$BK/activate-b.log" rc
   if test -e "$RELEASE_PARENT/active-release.json"; then
     test ! -e "$RELEASE_PARENT/.bonfire-release-operation.lock" || {
@@ -585,13 +595,15 @@ phase_acknowledge_public() {
 
 phase_status() {
   require_root; load_state
-  local wan persistent=inactive ephemeral=inactive hosts=absent
+  local wan persistent=inactive ephemeral=inactive hosts=absent renderer_profiles=absent
   wan=$(jq -r '.wanInterface // empty' "$STATE_FILE")
   "$SCRIPT_DIR/bonfire-bootstrap-ingress-guard.sh" status >/dev/null 2>&1 && persistent=active
   if test -n "$wan" && assert_ephemeral_ingress_guard "$wan" >/dev/null 2>&1; then ephemeral=active; fi
   test -n "$(grep -F "$HOSTS_MARKER" /etc/hosts || true)" && hosts=present
-  printf 'A=%s\nB=%s\nbackup=%s\npersistent-ingress-guard=%s\nephemeral-ingress-guard=%s\nhosts-marker=%s\n' \
-    "$A" "$B" "$BK" "$persistent" "$ephemeral" "$hosts"
+  if (assert_renderer_security_profiles) >/dev/null 2>&1; then renderer_profiles=exact-enforcing; \
+  elif test -e "$RENDERER_APPARMOR_PATH" || test -e "$RENDERER_SECCOMP_PATH"; then renderer_profiles=DRIFTED; fi
+  printf 'A=%s\nB=%s\nbackup=%s\npersistent-ingress-guard=%s\nephemeral-ingress-guard=%s\nhosts-marker=%s\nrenderer-security-profiles=%s\n' \
+    "$A" "$B" "$BK" "$persistent" "$ephemeral" "$hosts" "$renderer_profiles"
   find "$STATE_DIR" -maxdepth 1 -type f -name 'phase-*' -exec basename {} \; | sort
   if test -e "$RELEASE_PARENT/.bonfire-release-operation.lock"; then printf 'release-operation-lock=PRESENT\n'; else printf 'release-operation-lock=absent\n'; fi
   if test -e "$RELEASE_PARENT/active-release.json"; then printf 'active-ledger=PRESENT\n'; else printf 'active-ledger=absent\n'; fi
@@ -601,18 +613,23 @@ if [[ ${BASH_SOURCE[0]} != "$0" ]]; then
   return 0
 fi
 
+run_forward_phase() {
+  assert_forward_ceremony_permitted
+  "$@"
+}
+
 case ${1:-} in
-  init-build) phase_init_build ;;
-  preflight) phase_preflight ;;
-  isolate) phase_isolate ;;
-  acknowledge-external-block) phase_acknowledge_external_block ;;
-  prove-empty) phase_prove_empty ;;
-  backup) phase_backup ;;
-  rehearse) phase_rehearse ;;
-  retire-legacy) phase_retire_legacy ;;
-  bootstrap-a) phase_bootstrap_a ;;
-  activate-b) phase_activate_b ;;
-  reopen) phase_reopen ;;
+  init-build) run_forward_phase phase_init_build ;;
+  preflight) run_forward_phase phase_preflight ;;
+  isolate) run_forward_phase phase_isolate ;;
+  acknowledge-external-block) run_forward_phase phase_acknowledge_external_block ;;
+  prove-empty) run_forward_phase phase_prove_empty ;;
+  backup) run_forward_phase phase_backup ;;
+  rehearse) run_forward_phase phase_rehearse ;;
+  retire-legacy) run_forward_phase phase_retire_legacy ;;
+  bootstrap-a) run_forward_phase phase_bootstrap_a ;;
+  activate-b) run_forward_phase phase_activate_b ;;
+  reopen) run_forward_phase phase_reopen ;;
   acknowledge-public) phase_acknowledge_public ;;
   status) phase_status ;;
   *) usage; exit 2 ;;

@@ -16,7 +16,7 @@ import {
   projectResourceClaimsFromContainers, projectResourceSnapshotSha256, releasePaths, renderedComposeSha256,
   reviewedInventoryDigest, validateBuildInputs, validateCandidateBundleManifest, validatePrepareState,
   validateActiveReleaseLedger, validateProjectResourceBaseline, validateProjectServiceInventory, validateReleaseReceipt, validateReleaseScopePolicy,
-  validateReleaseTransition, validateRenderedComposeConfig, validateReviewedInventory, validateSourceReceipt,
+  validateReleaseTransition, validateRenderedComposeConfig, validateRendererRuntimeConfinement, validateReviewedInventory, validateSourceReceipt,
   verifyArchiveIdentity, verifyCandidateConfig, verifyLabels, verifyProbeRelease,
   verifyExecutingReleaseTool, verifyReleaseEnvironmentFile, verifyRenderRunnerHeartbeat,
   verifyRetainedReleaseActivator, verifyRuntimeEnvironment
@@ -30,6 +30,8 @@ const releaseCommit = '1'.repeat(40)
 const configPaths = [
   '.dockerignore', 'Dockerfile', 'Dockerfile.render', 'go.mod', 'go.sum',
   'deploy/digitalocean/docker-compose.yml', 'deploy/digitalocean/Caddyfile',
+  'deploy/digitalocean/bonfire-render-runner-v1.apparmor',
+  'deploy/digitalocean/bonfire-render-runner-v1.seccomp.json',
   'deploy/digitalocean/release-build-inputs.json', 'deploy/digitalocean/release-scope-policy.json',
   'scripts/bonfire-release.mjs'
 ]
@@ -48,6 +50,13 @@ const buildInputs = {
   buildPackages: ['libopus-dev', 'pkg-config'], runtimePackages: ['ca-certificates', 'curl', 'libopus0'],
   renderRuntimePackages: ['ca-certificates', 'libopus0', 'poppler-utils'],
   chromeHeadlessShellVersion: '150.0.7871.46', chromeHeadlessShellArchiveSha256: digest('d'),
+  rendererSandbox: {
+    apparmorProfile: 'bonfire-render-runner-v1', apparmorAbi: '4.0',
+    seccompProfilePath: '/etc/docker/seccomp/bonfire-render-runner-v1.json',
+    seccompBase: 'github.com/moby/profiles/seccomp/v0.2.3',
+    seccompBaseSha256: '536529b665dd0972c37bfb569f5d4ac8a53592e7b00752bc39ff063ca9864c74',
+    seccompAllowDeltaCount: 5
+  },
   sidecarImages: sidecarRefs, dependencyLocks: ['go.mod', 'go.sum']
 }
 const configFiles = Object.fromEntries(configPaths.map((path, index) => [path, digest((index % 10).toString())]))
@@ -113,6 +122,66 @@ test('render-runner release heartbeat requires fresh exact print and raster evid
     mutate(candidate)
     assert.throws(() => verifyRenderRunnerHeartbeat(candidate, now), undefined, name)
   }
+})
+
+test('renderer sandbox profiles are the exact Docker v0.2.3 base plus five evidenced Chrome 150 allows', async () => {
+  const seccompPath = join(repoRoot, 'deploy/digitalocean/bonfire-render-runner-v1.seccomp.json')
+  const appArmorPath = join(repoRoot, 'deploy/digitalocean/bonfire-render-runner-v1.apparmor')
+  const profile = JSON.parse(await readFile(seccompPath, 'utf8'))
+  const additions = profile.syscalls.splice(-5)
+  assert.equal(profile.syscalls.length, 33)
+  assert.equal(sha256(JSON.stringify(profile)), 'afb4934b023cfceaaec1a9d752ca3f801aaa96eb2e59abe6e7ea16976948e080')
+  assert.deepEqual(additions.map(rule => ({
+    names: rule.names, action: rule.action, args: rule.args || [], arches: rule.includes?.arches
+  })), [
+    { names: ['clone'], action: 'SCMP_ACT_ALLOW', args: [{ index: 0, value: 268435473, op: 'SCMP_CMP_EQ' }], arches: ['amd64'] },
+    { names: ['clone'], action: 'SCMP_ACT_ALLOW', args: [{ index: 0, value: 1879048209, op: 'SCMP_CMP_EQ' }], arches: ['amd64'] },
+    { names: ['clone'], action: 'SCMP_ACT_ALLOW', args: [{ index: 0, value: 536870929, op: 'SCMP_CMP_EQ' }], arches: ['amd64'] },
+    { names: ['unshare'], action: 'SCMP_ACT_ALLOW', args: [{ index: 0, value: 268435456, op: 'SCMP_CMP_EQ' }], arches: ['amd64'] },
+    { names: ['chroot'], action: 'SCMP_ACT_ALLOW', args: [], arches: ['amd64'] }
+  ])
+  assert.equal(additions.some(rule => rule.names.includes('setns') || rule.names.includes('clone3')), false)
+  const clone3 = profile.syscalls.find(rule => rule.names.includes('clone3') && rule.action === 'SCMP_ACT_ERRNO')
+  assert.equal(clone3.errnoRet, 38)
+
+  const appArmor = await readFile(appArmorPath, 'utf8')
+  for (const required of ['profile "bonfire-render-runner-v1"', 'abi <abi/4.0>', 'userns,', 'deny mount', 'deny network alg']) {
+    assert.ok(appArmor.includes(required), required)
+  }
+  for (const forbidden of ['flags=(unconfined)', 'default_allow', 'apparmor=unconfined']) assert.equal(appArmor.includes(forbidden), false)
+})
+
+test('running renderer confinement requires exact profiles, zero capabilities, NNP, seccomp, readonly root, and internal network', () => {
+  const seccomp = { defaultAction: 'SCMP_ACT_ERRNO', syscalls: [{ names: ['read'], action: 'SCMP_ACT_ALLOW' }] }
+  const inspect = {
+    AppArmorProfile: 'bonfire-render-runner-v1',
+    Config: { User: '65532:65532' },
+    HostConfig: {
+      SecurityOpt: ['apparmor=bonfire-render-runner-v1', 'no-new-privileges=true', `seccomp=${JSON.stringify(seccomp)}`],
+      CapDrop: ['ALL'], CapAdd: null, Privileged: false, ReadonlyRootfs: true
+    },
+    NetworkSettings: { Networks: { digitalocean_render_internal: {} } }
+  }
+  const status = [
+    'Uid:\t65532\t65532\t65532\t65532', 'Gid:\t65532\t65532\t65532\t65532',
+    'CapInh:\t0000000000000000', 'CapPrm:\t0000000000000000', 'CapEff:\t0000000000000000',
+    'CapBnd:\t0000000000000000', 'CapAmb:\t0000000000000000', 'NoNewPrivs:\t1', 'Seccomp:\t2'
+  ].join('\n')
+  assert.equal(validateRendererRuntimeConfinement(inspect, status, seccomp), inspect)
+  for (const mutate of [
+    value => { value.AppArmorProfile = 'docker-default' },
+    value => { value.HostConfig.SecurityOpt[2] = 'seccomp=unconfined' },
+    value => { value.HostConfig.CapAdd = ['SYS_ADMIN'] },
+    value => { value.HostConfig.ReadonlyRootfs = false },
+    value => { value.NetworkSettings.Networks.digitalocean_default = {} }
+  ]) {
+    const drift = structuredClone(inspect)
+    mutate(drift)
+    assert.throws(() => validateRendererRuntimeConfinement(drift, status, seccomp))
+  }
+  assert.throws(() => validateRendererRuntimeConfinement(inspect, status.replace('NoNewPrivs:\t1', 'NoNewPrivs:\t0'), seccomp))
+  assert.throws(() => validateRendererRuntimeConfinement(inspect, status.replace('CapBnd:\t0000000000000000', 'CapBnd:\t0000000000200000'), seccomp))
+  assert.throws(() => validateRendererRuntimeConfinement(inspect, status, { ...seccomp, defaultAction: 'SCMP_ACT_ALLOW' }))
 })
 function makeReceipt() {
   const sourceReceiptSha256 = digest('7')
@@ -226,7 +295,8 @@ function renderedComposeConfig(receipt = makeReceipt()) {
           BONFIRE_RENDER_MAX_HTML_BYTES: '8388608', BONFIRE_RENDER_MAX_PDF_BYTES: '67108864'
         },
         volumes: [volume('render_queue', '/app/render-queue')], cap_drop: ['ALL'],
-        security_opt: ['no-new-privileges:true'], read_only: true,
+        security_opt: ['apparmor=bonfire-render-runner-v1', 'no-new-privileges:true',
+          'seccomp=/etc/docker/seccomp/bonfire-render-runner-v1.json'], read_only: true,
         tmpfs: ['/tmp:rw,nosuid,nodev,noexec,size=512m'], shm_size: '256m', pids_limit: 256, mem_limit: '1g',
         networks: { render_internal: null },
         depends_on: { meetingassist: { condition: 'service_healthy', required: true },
@@ -308,6 +378,8 @@ async function fixtureFiles() {
     'index.html': '<!doctype html>\n', 'packaging_deck_chassis.css': 'body{}\n',
     'internal/dr/authority.go': 'package dr\n', 'deploy/digitalocean/docker-compose.yml': 'services: {}\n',
     'deploy/digitalocean/Caddyfile': ':80\n',
+    'deploy/digitalocean/bonfire-render-runner-v1.apparmor': 'profile fixture {}\n',
+    'deploy/digitalocean/bonfire-render-runner-v1.seccomp.json': '{"defaultAction":"SCMP_ACT_ERRNO"}\n',
     'deploy/digitalocean/release-build-inputs.json': `${JSON.stringify(buildInputs, null, 2)}\n`,
     'deploy/digitalocean/release-scope-policy.json': `${JSON.stringify(policy, null, 2)}\n`,
     'scripts/bonfire-release.mjs': await readFile(releaseToolPath, 'utf8'),
@@ -512,6 +584,9 @@ test('source and pinned whole-deployment inputs reject ambiguous identities', ()
   assert.throws(() => validateSourceReceipt({ ...source, configFiles: { ...source.configFiles, Dockerfile: digest('f') } }), /config binding/)
   assert.throws(() => validateBuildInputs({ ...buildInputs, goBuildImage: 'golang:1.26-bookworm' }), /identity/)
   assert.throws(() => validateBuildInputs({ ...buildInputs, sidecarImages: { ...sidecarRefs, caddy: 'caddy:2' } }), /sidecar/)
+  assert.throws(() => validateBuildInputs({ ...buildInputs, rendererSandbox: {
+    ...buildInputs.rendererSandbox, seccompAllowDeltaCount: 6
+  } }), /renderer sandbox/)
 })
 
 test('repository build and Compose wiring consume pinned app, render, and sidecar inputs', async () => {
@@ -710,7 +785,10 @@ test('rendered candidate Compose is an exact singleton topology before mutation'
   assert.throws(() => validate(driftedImage), /image differs from release receipt/)
 
   const normalizedSecuritySpelling = structuredClone(exact)
-  normalizedSecuritySpelling.services['render-runner'].security_opt = ['no-new-privileges=true']
+  normalizedSecuritySpelling.services['render-runner'].security_opt = [
+    'apparmor=bonfire-render-runner-v1', 'no-new-privileges=true',
+    'seccomp=/etc/docker/seccomp/bonfire-render-runner-v1.json'
+  ]
   assert.equal(validate(normalizedSecuritySpelling), normalizedSecuritySpelling)
 })
 

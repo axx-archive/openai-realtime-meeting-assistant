@@ -46,6 +46,14 @@
   ],
   "chromeHeadlessShellVersion": "150.0.7871.46",
   "chromeHeadlessShellArchiveSha256": "0395e5db8d1631d5ed879d4f05fec423425537018fa1d73a58b1ade13288f447",
+  "rendererSandbox": {
+    "apparmorProfile": "bonfire-render-runner-v1",
+    "apparmorAbi": "4.0",
+    "seccompProfilePath": "/etc/docker/seccomp/bonfire-render-runner-v1.json",
+    "seccompBase": "github.com/moby/profiles/seccomp/v0.2.3",
+    "seccompBaseSha256": "536529b665dd0972c37bfb569f5d4ac8a53592e7b00752bc39ff063ca9864c74",
+    "seccompAllowDeltaCount": 5
+  },
   "sidecarImages": {
     "canonicalPostgres": "postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193",
     "coturn": "coturn/coturn@sha256:71c3c990283385567f11794ee692e3a47b66fd9b0bb39e42afbe776e331dd888",

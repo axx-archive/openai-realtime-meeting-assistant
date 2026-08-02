@@ -27,6 +27,17 @@ done
   require_sha256 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
   ! (require_sha256 0123456789abcdef0123456789abcdef01234567) 2>/dev/null
 
+  original_state_dir=$STATE_DIR
+  STATE_DIR=$(mktemp -d)
+  assert_forward_ceremony_permitted
+  for terminal in public-open-attempted legacy-restored legacy-reopened; do
+    : >"$STATE_DIR/phase-$terminal"
+    ! (assert_forward_ceremony_permitted) 2>/dev/null
+    rm "$STATE_DIR/phase-$terminal"
+  done
+  rm -rf "$STATE_DIR"
+  STATE_DIR=$original_state_dir
+
   printf '%s' '{"email":"aj@example.com","name":"AJ"}' | validate_authenticated_smoke_payload auth/me
   ! printf '%s' '{"error":"not signed in"}' | validate_authenticated_smoke_payload auth/me
   printf '%s' '{"ok":true,"rooms":[{"id":"office"}]}' | validate_authenticated_smoke_payload rooms

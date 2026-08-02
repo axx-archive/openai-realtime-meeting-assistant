@@ -31,6 +31,8 @@ const requiredExcludedPrefixes = ['stride-site/', 'data/', 'docs/evidence/']
 const requiredConfigPaths = [
   '.dockerignore', 'Dockerfile', 'Dockerfile.render', 'go.mod', 'go.sum',
   'deploy/digitalocean/docker-compose.yml', 'deploy/digitalocean/Caddyfile',
+  'deploy/digitalocean/bonfire-render-runner-v1.apparmor',
+  'deploy/digitalocean/bonfire-render-runner-v1.seccomp.json',
   'deploy/digitalocean/release-build-inputs.json', scopePolicyPath,
   'scripts/bonfire-release.mjs'
 ]
@@ -58,6 +60,14 @@ const expectedProjectVolumes = {
 }
 const expectedProjectNetworkNames = Object.values(expectedProjectNetworks).map(value => value.name).sort()
 const expectedProjectVolumeNames = Object.values(expectedProjectVolumes).map(value => value.name).sort()
+const rendererAppArmorProfile = 'bonfire-render-runner-v1'
+const rendererSeccompProfile = '/etc/docker/seccomp/bonfire-render-runner-v1.json'
+const rendererSeccompSourcePath = 'deploy/digitalocean/bonfire-render-runner-v1.seccomp.json'
+const rendererSecurityOptions = [
+  `apparmor=${rendererAppArmorProfile}`,
+  'no-new-privileges:true',
+  `seccomp=${rendererSeccompProfile}`
+]
 
 export function computeEnvironmentMarker(value) {
   const fields = [schema, value.releaseCommit, value.gitTreeDigest, value.sourceArchiveSha256,
@@ -192,6 +202,14 @@ export function validateBuildInputs(manifest) {
         manifest[name].some(value => typeof value !== 'string' || value.trim() === '')) {
       throw new Error(`release build-input ${name} is invalid`)
     }
+  }
+  const sandbox = manifest.rendererSandbox || {}
+  if (sandbox.apparmorProfile !== rendererAppArmorProfile || sandbox.apparmorAbi !== '4.0' ||
+      sandbox.seccompProfilePath !== rendererSeccompProfile ||
+      sandbox.seccompBase !== 'github.com/moby/profiles/seccomp/v0.2.3' ||
+      sandbox.seccompBaseSha256 !== '536529b665dd0972c37bfb569f5d4ac8a53592e7b00752bc39ff063ca9864c74' ||
+      sandbox.seccompAllowDeltaCount !== 5) {
+    throw new Error('release renderer sandbox input is not exact')
   }
   const sidecars = manifest.sidecarImages || {}
   if (JSON.stringify(Object.keys(sidecars).sort()) !== JSON.stringify(['caddy', 'canonicalPostgres', 'coturn']) ||
@@ -717,6 +735,58 @@ function exactSecurityOptions(value, expected, label) {
   }
 }
 
+export function validateRendererRuntimeConfinement(inspect, procStatus, expectedSeccompProfile) {
+  if (!inspect || typeof inspect !== 'object' || Array.isArray(inspect)) {
+    throw new Error('running render-runner inspect is invalid')
+  }
+  if (inspect.AppArmorProfile !== rendererAppArmorProfile) {
+    throw new Error('running render-runner AppArmor profile differs from the release policy')
+  }
+  const host = inspect.HostConfig || {}
+  const securityOptions = Array.isArray(host.SecurityOpt) ? host.SecurityOpt : []
+  const normalizedOptions = securityOptions.map(option => /^no-new-privileges(?:=|:)true$/i.test(option)
+    ? 'no-new-privileges:true' : option)
+  if (securityOptions.some(option => typeof option !== 'string') || securityOptions.length !== 3 ||
+      !normalizedOptions.includes(`apparmor=${rendererAppArmorProfile}`) ||
+      !normalizedOptions.includes('no-new-privileges:true')) {
+    throw new Error('running render-runner security options differ from the release policy')
+  }
+  const seccompOptions = normalizedOptions.filter(option => option.startsWith('seccomp='))
+  if (seccompOptions.length !== 1 || seccompOptions[0] === 'seccomp=unconfined' ||
+      !expectedSeccompProfile || typeof expectedSeccompProfile !== 'object' || Array.isArray(expectedSeccompProfile)) {
+    throw new Error('running render-runner seccomp option is not an exact confined profile')
+  }
+  let loadedSeccomp
+  try {
+    loadedSeccomp = JSON.parse(seccompOptions[0].slice('seccomp='.length))
+  } catch {
+    throw new Error('running render-runner seccomp option does not attest the loaded JSON profile')
+  }
+  if (JSON.stringify(loadedSeccomp) !== JSON.stringify(expectedSeccompProfile)) {
+    throw new Error('running render-runner loaded seccomp profile differs from the release input')
+  }
+  exactStringSequence(host.CapDrop, ['ALL'], 'running render-runner dropped capabilities')
+  exactStringSequence(host.CapAdd, [], 'running render-runner added capabilities')
+  if (host.Privileged === true || host.ReadonlyRootfs !== true || String(inspect.Config?.User || '') !== '65532:65532') {
+    throw new Error('running render-runner privilege, filesystem, or user boundary differs from the release policy')
+  }
+  const networkNames = Object.keys(inspect.NetworkSettings?.Networks || {}).sort()
+  if (JSON.stringify(networkNames) !== JSON.stringify(['digitalocean_render_internal'])) {
+    throw new Error('running render-runner network attachment differs from the internal-only release policy')
+  }
+  const status = String(procStatus || '')
+  const exactStatus = (name, pattern) => {
+    const match = new RegExp(`^${name}:\\s*(.+)$`, 'm').exec(status)
+    if (!match || !pattern.test(match[1].trim())) throw new Error(`running render-runner ${name} status is not confined`)
+  }
+  exactStatus('Uid', /^65532\s+65532\s+65532\s+65532$/)
+  exactStatus('Gid', /^65532\s+65532\s+65532\s+65532$/)
+  for (const name of ['CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb']) exactStatus(name, /^0+$/)
+  exactStatus('NoNewPrivs', /^1$/)
+  exactStatus('Seccomp', /^2$/)
+  return inspect
+}
+
 function byteSize(value, label) {
   if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return value
   const match = /^(\d+)(b|k|kb|kib|m|mb|mib|g|gb|gib)?$/i.exec(String(value || '').trim())
@@ -1045,7 +1115,7 @@ export function validateRenderedComposeConfig(config, receipt, suppliedTopology 
     },
     'render-runner': {
       profiles: ['render'], networks: ['render_internal'], networkMode: '', restart: 'unless-stopped', user: '', readOnly: true,
-      capAdd: [], capDrop: ['ALL'], securityOpt: ['no-new-privileges:true'], ports: [], memory: 1024 ** 3,
+      capAdd: [], capDrop: ['ALL'], securityOpt: rendererSecurityOptions, ports: [], memory: 1024 ** 3,
       shm: 256 * 1024 ** 2, pids: 256,
       mounts: [{ type: 'volume', source: 'render_queue', target: '/app/render-queue', readOnly: false }],
       dependencies: { meetingassist: 'service_healthy', 'render-queue-init': 'service_completed_successfully' }, dockerfile: 'Dockerfile.render'
@@ -1596,6 +1666,12 @@ async function verifyRunning(options, printResult = true, {
   if (inspected['render-runner']?.State?.Health?.Status !== 'healthy') {
     throw new Error('render-runner Docker heartbeat health is not healthy')
   }
+  const { stdout: rendererStatusRaw } = await execFileAsync('docker', [
+    'exec', containers['render-runner'], 'cat', '/proc/1/status'
+  ], { maxBuffer: 1 << 20 })
+  const loadedRendererSeccompProfile = parseJSON(await readFile(join(paths.candidateRoot, rendererSeccompSourcePath)),
+    'renderer seccomp release input')
+  validateRendererRuntimeConfinement(inspected['render-runner'], rendererStatusRaw, loadedRendererSeccompProfile)
   const { stdout: renderHeartbeatRaw } = await execFileAsync('docker', [
     'exec', containers['render-runner'], 'cat', '/app/render-queue/heartbeat.json'
   ], { maxBuffer: 1 << 20 })

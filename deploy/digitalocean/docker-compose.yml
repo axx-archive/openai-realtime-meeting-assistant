@@ -155,12 +155,16 @@ services:
     volumes:
       - render_queue:/app/render-queue
     # The Chrome OS sandbox remains enabled under a dedicated non-root user.
-    # Docker's default seccomp policy is retained; activation must prove this
-    # exact image/runtime pairing rather than weakening it to unconfined.
+    # Ubuntu 24.04 requires the release-bound AppArmor userns rule, while the
+    # Docker-default-derived seccomp profile adds only the five exact syscalls
+    # observed for the pinned Chrome 150 namespace sandbox. Activation proves
+    # both profiles and never falls back to an unconfined or no-sandbox mode.
     cap_drop:
       - ALL
     security_opt:
+      - apparmor=bonfire-render-runner-v1
       - no-new-privileges:true
+      - seccomp=/etc/docker/seccomp/bonfire-render-runner-v1.json
     read_only: true
     tmpfs:
       - /tmp:rw,nosuid,nodev,noexec,size=512m
