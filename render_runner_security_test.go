@@ -165,12 +165,15 @@ func TestRenderRunnerDeploymentIsLeastPrivilegeAndHasNoBrainMount(t *testing.T) 
 	for _, required := range []string{
 		"snapshot.debian.org/archive/debian/",
 		"sha256sum -c -",
-		"chmod 0755 /opt/chrome-headless-shell/chrome_sandbox",
+		"test -x /opt/chrome-headless-shell/chrome-headless-shell",
 		"USER 65532:65532",
 	} {
 		if !strings.Contains(dockerfile, required) {
 			t.Errorf("Dockerfile.render missing %q", required)
 		}
+	}
+	if strings.Contains(dockerfile, "/opt/chrome-headless-shell/chrome_sandbox") {
+		t.Error("Dockerfile.render still requires Chrome's removed legacy sandbox helper")
 	}
 	if strings.Contains(dockerfile, "ENTRYPOINT") && !strings.Contains(dockerfile, `ENTRYPOINT ["/app/meetingassist", "-render-runner"]`) {
 		t.Error("Dockerfile.render entrypoint changed unexpectedly")

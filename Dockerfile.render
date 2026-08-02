@@ -93,13 +93,14 @@ COPY --from=build /out/release-build-packages.txt /app/release-build-packages.tx
 COPY --from=chrome-fetch /opt/chrome-headless-shell /opt/chrome-headless-shell
 
 # Untrusted document scripts execute only inside Chrome's non-SUID namespace
-# sandbox under a dedicated account. The setuid helper is deliberately inert:
-# Compose also drops every capability and enables no-new-privileges. The queue
-# directory ownership is re-established by the profile's bounded init service.
-RUN groupadd --system --gid 65532 renderer \
+# sandbox under a dedicated account. Current Chrome Headless Shell archives no
+# longer ship the legacy chrome_sandbox helper; the runner explicitly selects
+# the namespace sandbox and never passes --no-sandbox. Compose also drops every
+# capability and enables no-new-privileges. The queue directory ownership is
+# re-established by the profile's bounded init service.
+RUN test -x /opt/chrome-headless-shell/chrome-headless-shell \
+	&& groupadd --system --gid 65532 renderer \
 	&& useradd --system --uid 65532 --gid 65532 --home-dir /nonexistent --shell /usr/sbin/nologin renderer \
-	&& chown root:root /opt/chrome-headless-shell/chrome_sandbox \
-	&& chmod 0755 /opt/chrome-headless-shell/chrome_sandbox \
 	&& mkdir -p /app/render-queue \
 	&& chown 65532:65532 /app/render-queue \
 	&& chmod 0700 /app/render-queue \
