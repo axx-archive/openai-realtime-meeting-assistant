@@ -146,6 +146,66 @@ func meetingSpecialistRuntimeOwnsLifetime(ctx context.Context) bool {
 	return owned
 }
 
+// meetingSpecialistStartupLifetime keeps provider startup subordinate to the
+// caller until the runtime has completed every authorization and briefing
+// check. Handoff then severs only the caller's cancellation/deadline: context
+// values remain available, while product/session authority becomes the sole
+// owner of the accepted runtime lifetime.
+type meetingSpecialistStartupLifetime struct {
+	mu        sync.Mutex
+	handedOff bool
+	cancel    context.CancelFunc
+	stop      chan struct{}
+	stopOnce  sync.Once
+}
+
+func newMeetingSpecialistStartupLifetime(parent context.Context) (context.Context, *meetingSpecialistStartupLifetime) {
+	ownedParent := context.WithValue(context.WithoutCancel(parent), meetingSpecialistRuntimeLifetimeKey{}, true)
+	ctx, cancel := context.WithCancel(ownedParent)
+	lifetime := &meetingSpecialistStartupLifetime{cancel: cancel, stop: make(chan struct{})}
+	if parent.Done() != nil {
+		go func() {
+			select {
+			case <-parent.Done():
+				lifetime.cancelBeforeHandoff()
+			case <-lifetime.stop:
+			}
+		}()
+	}
+	return ctx, lifetime
+}
+
+func (lifetime *meetingSpecialistStartupLifetime) cancelBeforeHandoff() {
+	if lifetime == nil {
+		return
+	}
+	lifetime.mu.Lock()
+	if !lifetime.handedOff {
+		lifetime.cancel()
+	}
+	lifetime.mu.Unlock()
+}
+
+func (lifetime *meetingSpecialistStartupLifetime) handoff(parent context.Context) error {
+	if lifetime == nil {
+		return context.Canceled
+	}
+	lifetime.mu.Lock()
+	defer lifetime.mu.Unlock()
+	if err := parent.Err(); err != nil {
+		lifetime.cancel()
+		return err
+	}
+	lifetime.handedOff = true
+	return nil
+}
+
+func (lifetime *meetingSpecialistStartupLifetime) stopForwarding() {
+	if lifetime != nil {
+		lifetime.stopOnce.Do(func() { close(lifetime.stop) })
+	}
+}
+
 // MeetingSpecialistCapabilityRequest contains only immutable, server-derived
 // launch facts. The authority resolves current consent, invitation,
 // membership and room-generation state; none of those facts are trusted from
@@ -461,8 +521,9 @@ func (runtime *MeetingSpecialistRuntime) Start(parent context.Context, launch Me
 		runtime.mu.Unlock()
 		return MeetingAgentSessionLease{}, ErrMeetingSpecialistFence
 	}
-	ownedParent := context.WithValue(parent, meetingSpecialistRuntimeLifetimeKey{}, true)
-	ctx, cancel := context.WithCancel(ownedParent)
+	ctx, startupLifetime := newMeetingSpecialistStartupLifetime(parent)
+	defer startupLifetime.stopForwarding()
+	cancel := startupLifetime.cancel
 	runtime.ctx, runtime.cancel, runtime.launch, runtime.authorization, runtime.closed = ctx, cancel, launch, authorization, false
 	runtime.hardExpiresAt, runtime.hardExpiryCause = hardExpiresAt, hardExpiryCause
 	runtime.mu.Unlock()
@@ -532,6 +593,10 @@ func (runtime *MeetingSpecialistRuntime) Start(parent context.Context, launch Me
 	if !admission.current(false) || !runtime.launchStateCurrent(ctx) {
 		abortErr := runtime.abortStart(ctx, cancel, lease, provider, "launch_fenced_after_brief")
 		return MeetingAgentSessionLease{}, errors.Join(ErrMeetingSpecialistFence, abortErr)
+	}
+	if err := startupLifetime.handoff(parent); err != nil {
+		abortErr := runtime.abortStart(ctx, cancel, lease, provider, "startup_request_cancelled")
+		return MeetingAgentSessionLease{}, errors.Join(err, abortErr)
 	}
 	runtime.mu.Lock()
 	if runtime.ctx != ctx || runtime.closed {

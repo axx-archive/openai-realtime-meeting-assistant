@@ -8,9 +8,81 @@ import (
 )
 
 var (
-	ErrMeetingSpecialistJoinDisabled = errors.New("meeting specialist production join is disabled")
-	ErrMeetingSpecialistJoinAssembly = errors.New("meeting specialist production join assembly is invalid")
+	ErrMeetingSpecialistJoinDisabled      = errors.New("meeting specialist production join is disabled")
+	ErrMeetingSpecialistJoinAssembly      = errors.New("meeting specialist production join assembly is invalid")
+	ErrMeetingSpecialistJoinQualification = errors.New("meeting specialist production qualification is not current")
 )
+
+const meetingSpecialistQualificationSubjectSchema = "stride.meeting-specialist-qualification-subject.v1"
+
+// MeetingSpecialistQualificationRequest is the exact immutable candidate that
+// an independently administered E10 authority must have qualified. The local
+// application can bind and compare this request, but cannot qualify itself.
+type MeetingSpecialistQualificationRequest struct {
+	TenantID              string
+	ResultID              string
+	ResultDigest          string
+	TargetID              string
+	TargetDigest          string
+	CandidateRelease      string
+	CandidateTreeDigest   string
+	CandidateImageDigest  string
+	CandidateConfigDigest string
+	CandidateRouteDigest  string
+	Provider              string
+	ProviderModel         string
+	ProviderRoute         string
+	ProviderRouteDigest   string
+	AccountingMode        MeetingSpecialistRealtimeInputMode
+	SpecialistProfile     STRIDEReference
+	SpecialistCapability  STRIDEReference
+}
+
+func (request MeetingSpecialistQualificationRequest) validate() error {
+	if !strideIdentifier(request.TenantID) || !strideIdentifier(request.ResultID) || !isHexDigest(request.ResultDigest) ||
+		!strideIdentifier(request.TargetID) || !isHexDigest(request.TargetDigest) || !releaseCommitPattern.MatchString(request.CandidateRelease) ||
+		!isHexDigest(request.CandidateTreeDigest) || !isHexDigest(request.CandidateImageDigest) || !isHexDigest(request.CandidateConfigDigest) || !isHexDigest(request.CandidateRouteDigest) ||
+		!strideIdentifier(request.Provider) || !strideIdentifier(request.ProviderModel) || !strideIdentifier(request.ProviderRoute) || !isHexDigest(request.ProviderRouteDigest) ||
+		!oneOf(string(request.AccountingMode), string(MeetingSpecialistRealtimeInputDirectPCM), string(MeetingSpecialistRealtimeInputBoundedTranscript)) ||
+		request.SpecialistProfile.Validate() != nil || request.SpecialistProfile.ContractType != STRIDEContractAgentCoreProfile ||
+		request.SpecialistCapability.Validate() != nil || request.SpecialistCapability.ContractType != STRIDEContractAgentCapabilityManifest {
+		return ErrMeetingSpecialistJoinQualification
+	}
+	return nil
+}
+
+// MeetingSpecialistQualificationSubjectDigest is the canonical public binding
+// an external verifier signs and an evidence-store adapter compares. It is
+// derived from every launch-relevant qualification field; callers must never
+// accept a digest supplied alongside an echoed local configuration as proof.
+func MeetingSpecialistQualificationSubjectDigest(request MeetingSpecialistQualificationRequest) (string, error) {
+	if err := request.validate(); err != nil {
+		return "", err
+	}
+	return workDigest(struct {
+		Schema  string
+		Subject MeetingSpecialistQualificationRequest
+	}{Schema: meetingSpecialistQualificationSubjectSchema, Subject: request}), nil
+}
+
+// MeetingSpecialistQualificationStatus is returned by the external trust
+// root. SubjectDigest is the externally verified digest of the canonical
+// request above, not a digest of caller-echoed configuration.
+type MeetingSpecialistQualificationStatus struct {
+	SubjectDigest string
+	Qualified     bool
+	QualifiedAt   time.Time
+	ExpiresAt     time.Time
+}
+
+// MeetingSpecialistQualificationAuthority is intentionally narrower than the
+// local QualificationEvidenceStore, which is structure-only and must never be
+// treated as a provider qualification trust root. The concrete external store
+// adapter is application wiring owned by the release/qualification workstream.
+type MeetingSpecialistQualificationAuthority interface {
+	Trusted() bool
+	Current(context.Context, MeetingSpecialistQualificationRequest) (MeetingSpecialistQualificationStatus, error)
+}
 
 // MeetingSpecialistJoinRequest contains the durable human approval and the
 // current server-authorized meeting/workforce facts. It is never decoded from
@@ -48,6 +120,8 @@ type MeetingSpecialistProductionJoinConfig struct {
 	CapabilityAuthority MeetingSpecialistCapabilityAuthority
 	ProviderFactory     MeetingSpecialistProviderFactory
 	PublishAudio        MeetingSpecialistAudioPublisher
+	Qualification       MeetingSpecialistQualificationAuthority
+	QualificationTarget MeetingSpecialistQualificationRequest
 }
 
 // MeetingSpecialistProductionJoiner is the only product-to-runtime assembly
@@ -63,6 +137,8 @@ type MeetingSpecialistProductionJoiner struct {
 	capabilityAuthority MeetingSpecialistCapabilityAuthority
 	providerFactory     MeetingSpecialistProviderFactory
 	publishAudio        MeetingSpecialistAudioPublisher
+	qualification       MeetingSpecialistQualificationAuthority
+	qualificationTarget MeetingSpecialistQualificationRequest
 }
 
 func NewMeetingSpecialistProductionJoiner(config MeetingSpecialistProductionJoinConfig) *MeetingSpecialistProductionJoiner {
@@ -73,7 +149,7 @@ func NewMeetingSpecialistProductionJoiner(config MeetingSpecialistProductionJoin
 		enabled: config.Enabled, now: config.Now, gates: config.Gates,
 		resolveCurrent: config.ResolveCurrent, mintCapability: config.MintCapability,
 		capabilityAuthority: config.CapabilityAuthority, providerFactory: config.ProviderFactory,
-		publishAudio: config.PublishAudio,
+		publishAudio: config.PublishAudio, qualification: config.Qualification, qualificationTarget: config.QualificationTarget,
 	}
 }
 
@@ -82,18 +158,37 @@ func (joiner *MeetingSpecialistProductionJoiner) Enabled() bool {
 }
 
 func (joiner *MeetingSpecialistProductionJoiner) Ready() bool {
-	if !joiner.Enabled() || !joiner.gates.launchEnabled() || joiner.resolveCurrent == nil || joiner.mintCapability == nil || joiner.capabilityAuthority == nil || joiner.providerFactory == nil || joiner.publishAudio == nil {
-		return false
+	return joiner != nil && joiner.Enabled() && joiner.assemblyReady() && joiner.qualificationCurrent(context.Background(), joiner.qualificationTarget, joiner.now().UTC()) == nil
+}
+
+func (joiner *MeetingSpecialistProductionJoiner) assemblyReady() bool {
+	return joiner != nil && joiner.gates.launchEnabled() && joiner.resolveCurrent != nil && joiner.mintCapability != nil && joiner.capabilityAuthority != nil && joiner.providerFactory != nil && joiner.publishAudio != nil
+}
+
+func (joiner *MeetingSpecialistProductionJoiner) qualificationCurrent(ctx context.Context, request MeetingSpecialistQualificationRequest, now time.Time) error {
+	if joiner == nil || joiner.qualification == nil || !joiner.qualification.Trusted() || request.validate() != nil {
+		return ErrMeetingSpecialistJoinQualification
 	}
-	return true
+	subjectDigest, err := MeetingSpecialistQualificationSubjectDigest(request)
+	if err != nil {
+		return ErrMeetingSpecialistJoinQualification
+	}
+	status, err := joiner.qualification.Current(ctx, request)
+	if err != nil || status.SubjectDigest != subjectDigest || !isHexDigest(status.SubjectDigest) || !status.Qualified || status.QualifiedAt.IsZero() || status.QualifiedAt.After(now) || !status.ExpiresAt.After(now) {
+		return ErrMeetingSpecialistJoinQualification
+	}
+	return nil
 }
 
 func (joiner *MeetingSpecialistProductionJoiner) Join(ctx context.Context, request MeetingSpecialistJoinRequest) (*MeetingSpecialistRuntime, error) {
 	if !joiner.Enabled() {
 		return nil, ErrMeetingSpecialistJoinDisabled
 	}
-	if !joiner.Ready() {
+	if !joiner.assemblyReady() {
 		return nil, ErrMeetingSpecialistJoinAssembly
+	}
+	if joiner.qualification == nil || !joiner.qualification.Trusted() || joiner.qualificationTarget.validate() != nil {
+		return nil, ErrMeetingSpecialistJoinQualification
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -109,6 +204,11 @@ func (joiner *MeetingSpecialistProductionJoiner) Join(ctx context.Context, reque
 		!validMeetingSpecialistCandidateForRoom(request.Candidate, request.Scope.RoomID) ||
 		request.Candidate.AgentID == "" || request.Candidate.Profile != request.Invitation.SpecialistProfile || request.Candidate.Capability != request.Invitation.Capability || request.Candidate.Eligibility == nil || request.Invitation.Eligibility == nil || *request.Candidate.Eligibility != *request.Invitation.Eligibility {
 		return nil, ErrMeetingSpecialistJoinAssembly
+	}
+	qualificationRequest := joiner.qualificationTarget
+	if qualificationRequest.TenantID != request.Scope.TenantID || qualificationRequest.SpecialistProfile != request.Candidate.Profile || qualificationRequest.SpecialistCapability != request.Candidate.Capability ||
+		joiner.qualificationCurrent(ctx, qualificationRequest, now) != nil {
+		return nil, ErrMeetingSpecialistJoinQualification
 	}
 	assembly, err := joiner.resolveCurrent(ctx, request)
 	if err != nil {
@@ -145,6 +245,9 @@ func (joiner *MeetingSpecialistProductionJoiner) Join(ctx context.Context, reque
 		return nil, ErrMeetingSpecialistJoinAssembly
 	}
 	launch.CapabilityReceipt = receipt
+	if err := joiner.qualificationCurrent(ctx, qualificationRequest, joiner.now().UTC()); err != nil {
+		return nil, err
+	}
 	runtime := NewMeetingSpecialistRuntime(joiner.now, joiner.gates, joiner.capabilityAuthority, joiner.providerFactory, joiner.publishAudio)
 	if _, err := runtime.Start(ctx, launch); err != nil {
 		return runtime, err

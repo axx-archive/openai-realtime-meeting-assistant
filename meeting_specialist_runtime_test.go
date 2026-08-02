@@ -185,6 +185,39 @@ func TestMeetingSpecialistRuntimeDefaultOffDoesNotCallFactory(t *testing.T) {
 	}
 }
 
+func TestMeetingSpecialistRuntimeStartupStillFollowsRequestCancellation(t *testing.T) {
+	now := time.Date(2026, 7, 30, 13, 0, 0, 0, time.UTC)
+	authority := newFakeMeetingSpecialistAuthority()
+	providerStartup := make(chan struct{})
+	runtime := NewMeetingSpecialistRuntime(func() time.Time { return now }, enabledSpecialistHarnessGates(), authority, func(ctx context.Context, _ MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
+		close(providerStartup)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}, func(MeetingAgentFloorScope, uint64, []int16) error { return nil })
+	launch := specialistRuntimeLaunchFixture(now)
+	launch.CapabilityReceipt = authority.issue(launch)
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, err := runtime.Start(requestContext, launch)
+		result <- err
+	}()
+	<-providerStartup
+	cancelRequest()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("startup err=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("request cancellation did not stop provider startup")
+	}
+	snapshot := runtime.Snapshot()
+	if snapshot.Session != nil || snapshot.TeardownReceiptDigest == "" {
+		t.Fatalf("cancelled startup was not fenced: %+v", snapshot)
+	}
+}
+
 func TestMeetingSpecialistRuntimeShortestLifetimeAndAutonomousTerminalEvidence(t *testing.T) {
 	base := time.Date(2026, 8, 1, 20, 0, 0, 0, time.UTC)
 	start := func(t *testing.T, now func() time.Time, parent context.Context, mutate func(*MeetingSpecialistLaunch), provider *fakeMeetingSpecialistProvider) (*MeetingSpecialistRuntime, MeetingAgentSessionLease, <-chan MeetingSpecialistTerminalEvidence) {
@@ -234,16 +267,24 @@ func TestMeetingSpecialistRuntimeShortestLifetimeAndAutonomousTerminalEvidence(t
 		}
 	})
 
-	t.Run("parent deadline is a shorter hard expiry", func(t *testing.T) {
+	t.Run("request deadline is detached after successful handoff", func(t *testing.T) {
 		parent, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 		defer cancel()
-		runtime, _, terminal := start(t, func() time.Time { return base }, parent, nil, &fakeMeetingSpecialistProvider{})
-		evidence := await(t, terminal)
-		if evidence.TerminalReason != "expired" || evidence.Cause != "parent_context_deadline" || !isHexDigest(evidence.TeardownReceiptDigest) {
-			t.Fatalf("parent deadline evidence=%+v", evidence)
+		runtime, session, terminal := start(t, func() time.Time { return base }, parent, nil, &fakeMeetingSpecialistProvider{})
+		select {
+		case evidence := <-terminal:
+			t.Fatalf("request deadline terminated accepted runtime: %+v", evidence)
+		case <-time.After(50 * time.Millisecond):
 		}
-		if runtime.Snapshot().Session != nil {
-			t.Fatal("parent deadline left floor authority active")
+		if runtime.Snapshot().Session == nil {
+			t.Fatal("request deadline removed product-owned floor authority")
+		}
+		if err := runtime.Stop(session, "test_complete"); err != nil {
+			t.Fatal(err)
+		}
+		evidence := await(t, terminal)
+		if evidence.TerminalReason != "test_complete" || evidence.Cause != "test_complete" || !isHexDigest(evidence.TeardownReceiptDigest) {
+			t.Fatalf("product-owned cleanup evidence=%+v", evidence)
 		}
 	})
 
