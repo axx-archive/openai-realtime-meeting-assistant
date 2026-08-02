@@ -129,11 +129,14 @@ type meetingSpecialistProviderReceiptSource interface {
 // public terminal reason stays within the floor/product vocabulary, while
 // Cause preserves the exact autonomous runtime or provider failure.
 type MeetingSpecialistTerminalEvidence struct {
-	TerminalReason        string                           `json:"terminalReason"`
-	Cause                 string                           `json:"cause"`
-	EndedAt               time.Time                        `json:"endedAt"`
-	TeardownReceiptDigest string                           `json:"teardownReceiptDigest,omitempty"`
-	ProviderReceipt       MeetingSpecialistProviderReceipt `json:"providerReceipt"`
+	TerminalReason             string                            `json:"terminalReason"`
+	Cause                      string                            `json:"cause"`
+	EndedAt                    time.Time                         `json:"endedAt"`
+	QualificationSubjectDigest string                            `json:"qualificationSubjectDigest,omitempty"`
+	QualificationResult        *StoredTrustedQualificationResult `json:"qualificationResult,omitempty"`
+	QualificationLegacyUnbound bool                              `json:"qualificationLegacyUnbound,omitempty"`
+	TeardownReceiptDigest      string                            `json:"teardownReceiptDigest,omitempty"`
+	ProviderReceipt            MeetingSpecialistProviderReceipt  `json:"providerReceipt"`
 }
 
 type meetingSpecialistRuntimeLifetimeKey struct{}
@@ -148,9 +151,9 @@ func meetingSpecialistRuntimeOwnsLifetime(ctx context.Context) bool {
 
 // meetingSpecialistStartupLifetime keeps provider startup subordinate to the
 // caller until the runtime has completed every authorization and briefing
-// check. Handoff then severs only the caller's cancellation/deadline: context
-// values remain available, while product/session authority becomes the sole
-// owner of the accepted runtime lifetime.
+// check. The runtime context never inherits caller values, deadlines, or
+// cancellation; a narrow bridge forwards cancellation only until handoff,
+// after which product/session authority solely owns the accepted lifetime.
 type meetingSpecialistStartupLifetime struct {
 	mu        sync.Mutex
 	handedOff bool
@@ -253,26 +256,32 @@ type MeetingSpecialistRuntime struct {
 	publish   MeetingSpecialistAudioPublisher
 	authority MeetingSpecialistCapabilityAuthority
 
-	ctx              context.Context
-	cancel           context.CancelFunc
-	launch           MeetingSpecialistLaunch
-	lease            MeetingAgentSessionLease
-	provider         MeetingSpecialistProvider
-	closed           bool
-	teardownReceipt  string
-	teardownErr      error
-	authorization    MeetingSpecialistAuthorization
-	providerReceipt  MeetingSpecialistProviderReceipt
-	epoch            uint64
-	inflight         int
-	starting         bool
-	stopping         bool
-	shutdownTimeout  time.Duration
-	hardExpiresAt    time.Time
-	hardExpiryCause  string
-	terminalObserver func(MeetingSpecialistTerminalEvidence)
-	terminalEvidence MeetingSpecialistTerminalEvidence
-	terminalOnce     sync.Once
+	ctx             context.Context
+	cancel          context.CancelFunc
+	launch          MeetingSpecialistLaunch
+	lease           MeetingAgentSessionLease
+	provider        MeetingSpecialistProvider
+	closed          bool
+	teardownReceipt string
+	teardownErr     error
+	authorization   MeetingSpecialistAuthorization
+	providerReceipt MeetingSpecialistProviderReceipt
+	// qualificationSubjectDigest is set only by the concrete production
+	// joiner. When present, Start accepts only the sealed provider produced by
+	// the factory that captured this exact signed subject.
+	qualificationSubjectDigest string
+	qualificationResult        *StoredTrustedQualificationResult
+	qualificationCurrent       func() error
+	epoch                      uint64
+	inflight                   int
+	starting                   bool
+	stopping                   bool
+	shutdownTimeout            time.Duration
+	hardExpiresAt              time.Time
+	hardExpiryCause            string
+	terminalObserver           func(MeetingSpecialistTerminalEvidence)
+	terminalEvidence           MeetingSpecialistTerminalEvidence
+	terminalOnce               sync.Once
 }
 
 func NewMeetingSpecialistRuntime(now func() time.Time, gates MeetingSpecialistGates, authority MeetingSpecialistCapabilityAuthority, factory MeetingSpecialistProviderFactory, publish MeetingSpecialistAudioPublisher) *MeetingSpecialistRuntime {
@@ -281,6 +290,17 @@ func NewMeetingSpecialistRuntime(now func() time.Time, gates MeetingSpecialistGa
 	}
 	runtime := &MeetingSpecialistRuntime{now: now, gates: gates, floor: NewMeetingAgentFloorController(now), authority: authority, factory: factory, publish: publish, shutdownTimeout: meetingSpecialistRuntimeShutdownTimeout}
 	runtime.cond = sync.NewCond(&runtime.mu)
+	return runtime
+}
+
+func newQualifiedMeetingSpecialistRuntime(now func() time.Time, gates MeetingSpecialistGates, authority MeetingSpecialistCapabilityAuthority, factory *MeetingSpecialistQualifiedProviderFactory, qualification StoredTrustedQualificationResult, qualificationCurrent func() error, publish MeetingSpecialistAudioPublisher) *MeetingSpecialistRuntime {
+	if factory == nil {
+		return NewMeetingSpecialistRuntime(now, gates, authority, nil, publish)
+	}
+	runtime := NewMeetingSpecialistRuntime(now, gates, authority, factory.provider, publish)
+	runtime.qualificationSubjectDigest = factory.subjectDigest
+	runtime.qualificationResult = cloneMeetingSpecialistQualificationResult(&qualification)
+	runtime.qualificationCurrent = qualificationCurrent
 	return runtime
 }
 
@@ -515,6 +535,16 @@ func (runtime *MeetingSpecialistRuntime) Start(parent context.Context, launch Me
 	launch.CapabilityReceipt = ""
 	lifetimeNow := runtime.now().UTC()
 	hardExpiresAt, hardExpiryCause := meetingSpecialistHardLifetime(lifetimeNow, launch, authorization)
+	if runtime.qualificationResult != nil {
+		evaluatedAt, qualificationErr := time.Parse(time.RFC3339Nano, runtime.qualificationResult.Record.EvaluatedAt)
+		qualificationExpiresAt := evaluatedAt.UTC().Add(meetingSpecialistQualificationMaxAge)
+		if qualificationErr != nil || !qualificationExpiresAt.After(lifetimeNow) {
+			return MeetingAgentSessionLease{}, ErrMeetingSpecialistUnauthorized
+		}
+		if qualificationExpiresAt.Before(hardExpiresAt) {
+			hardExpiresAt, hardExpiryCause = qualificationExpiresAt, "qualification_expired"
+		}
+	}
 	if !hardExpiresAt.After(lifetimeNow) {
 		return MeetingAgentSessionLease{}, ErrMeetingSpecialistUnauthorized
 	}
@@ -569,6 +599,14 @@ func (runtime *MeetingSpecialistRuntime) Start(parent context.Context, launch Me
 		}
 		return MeetingAgentSessionLease{}, errors.Join(ErrMeetingSpecialistDisabled, abortErr)
 	}
+	if runtime.qualificationSubjectDigest != "" && validateQualifiedMeetingSpecialistProvider(provider, runtime.qualificationSubjectDigest) != nil {
+		abortErr := runtime.abortStart(ctx, cancel, lease, provider, "provider_qualification_subject_mismatch")
+		return MeetingAgentSessionLease{}, errors.Join(ErrMeetingSpecialistUnauthorized, abortErr)
+	}
+	if runtime.qualificationCurrent != nil && runtime.qualificationCurrent() != nil {
+		abortErr := runtime.abortStart(ctx, cancel, lease, provider, "provider_qualification_expired_after_factory")
+		return MeetingAgentSessionLease{}, errors.Join(ErrMeetingSpecialistUnauthorized, abortErr)
+	}
 	if admission.authority.Current(ctx, authorization, request) != nil {
 		abortErr := runtime.abortStart(ctx, cancel, lease, provider, "authority_changed_after_factory")
 		return MeetingAgentSessionLease{}, errors.Join(ErrMeetingSpecialistUnauthorized, abortErr)
@@ -601,6 +639,10 @@ func (runtime *MeetingSpecialistRuntime) Start(parent context.Context, launch Me
 	if err := provider.Brief(ctx, launch.Context); err != nil {
 		abortErr := runtime.abortStart(ctx, cancel, lease, provider, "brief_failed")
 		return MeetingAgentSessionLease{}, errors.Join(err, abortErr)
+	}
+	if runtime.qualificationCurrent != nil && runtime.qualificationCurrent() != nil {
+		abortErr := runtime.abortStart(ctx, cancel, lease, provider, "provider_qualification_expired_after_brief")
+		return MeetingAgentSessionLease{}, errors.Join(ErrMeetingSpecialistUnauthorized, abortErr)
 	}
 	if admission.authority.Current(ctx, authorization, request) != nil {
 		abortErr := runtime.abortStart(ctx, cancel, lease, provider, "authority_changed_after_brief")
@@ -879,7 +921,7 @@ func (runtime *MeetingSpecialistRuntime) stopWithCause(session MeetingAgentSessi
 	runtime.cond.Broadcast()
 	evidence := MeetingSpecialistTerminalEvidence{
 		TerminalReason: terminalReason, Cause: cause, EndedAt: runtime.now().UTC(),
-		TeardownReceiptDigest: runtime.teardownReceipt, ProviderReceipt: runtime.providerReceipt,
+		QualificationSubjectDigest: runtime.qualificationSubjectDigest, QualificationResult: cloneMeetingSpecialistQualificationResult(runtime.qualificationResult), TeardownReceiptDigest: runtime.teardownReceipt, ProviderReceipt: runtime.providerReceipt,
 	}
 	runtime.mu.Unlock()
 	runtime.dispatchTerminal(evidence)
@@ -942,7 +984,7 @@ func (runtime *MeetingSpecialistRuntime) RevokeGates(reason string) error {
 	runtime.cond.Broadcast()
 	evidence := MeetingSpecialistTerminalEvidence{
 		TerminalReason: reason, Cause: reason, EndedAt: runtime.now().UTC(),
-		TeardownReceiptDigest: runtime.teardownReceipt, ProviderReceipt: runtime.providerReceipt,
+		QualificationSubjectDigest: runtime.qualificationSubjectDigest, QualificationResult: cloneMeetingSpecialistQualificationResult(runtime.qualificationResult), TeardownReceiptDigest: runtime.teardownReceipt, ProviderReceipt: runtime.providerReceipt,
 	}
 	runtime.mu.Unlock()
 	runtime.dispatchTerminal(evidence)

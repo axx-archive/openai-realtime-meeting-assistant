@@ -89,15 +89,17 @@ type MeetingSpecialistProductConfig struct {
 }
 
 type meetingSpecialistProductRecord struct {
-	Invitation       MeetingAgentInvitation             `json:"invitation"`
-	Agent            MeetingSpecialistCandidate         `json:"agent"`
-	PurposeSummary   string                             `json:"purposeSummary"`
-	Limits           MeetingSpecialistApprovalLimits    `json:"limits"`
-	Status           string                             `json:"status"`
-	UpdatedAt        time.Time                          `json:"updatedAt"`
-	TerminalEvidence *MeetingSpecialistTerminalEvidence `json:"terminalEvidence,omitempty"`
-	Scope            meetingSpecialistProductScope      `json:"-"`
-	Runtime          *MeetingSpecialistRuntime          `json:"-"`
+	Invitation                 MeetingAgentInvitation             `json:"invitation"`
+	Agent                      MeetingSpecialistCandidate         `json:"agent"`
+	PurposeSummary             string                             `json:"purposeSummary"`
+	Limits                     MeetingSpecialistApprovalLimits    `json:"limits"`
+	Status                     string                             `json:"status"`
+	UpdatedAt                  time.Time                          `json:"updatedAt"`
+	QualificationSubjectDigest string                             `json:"qualificationSubjectDigest,omitempty"`
+	QualificationResult        *StoredTrustedQualificationResult  `json:"qualificationResult,omitempty"`
+	TerminalEvidence           *MeetingSpecialistTerminalEvidence `json:"terminalEvidence,omitempty"`
+	Scope                      meetingSpecialistProductScope      `json:"-"`
+	Runtime                    *MeetingSpecialistRuntime          `json:"-"`
 }
 
 type MeetingSpecialistProduct struct {
@@ -648,10 +650,15 @@ func (product *MeetingSpecialistProduct) Resolve(ctx context.Context, user *user
 	if joinAttempted {
 		joinFailureReason := "production_join_failed"
 		if joinErr == nil && runtime != nil && runtime.Snapshot().Session != nil {
+			if !validMeetingSpecialistQualificationResult(runtime.qualificationResult, runtime.qualificationSubjectDigest) {
+				joinErr = ErrMeetingSpecialistJoinQualification
+			}
 			// Product scope is checked again after the potentially slow launch.
 			// Runtime capability authority independently performs the same checks
 			// around provider creation and briefing.
-			joinErr = product.authority.ScopeCurrent(ctx, scope)
+			if joinErr == nil {
+				joinErr = product.authority.ScopeCurrent(ctx, scope)
+			}
 			if joinErr == nil {
 				roster, rosterErr := product.authority.EligibleRoster(ctx, scope)
 				if rosterErr != nil || !currentMeetingSpecialistCandidate(roster, record.Agent, record.Invitation) {
@@ -674,6 +681,8 @@ func (product *MeetingSpecialistProduct) Resolve(ctx context.Context, user *user
 				record.Status = "approved_session_failed"
 			} else {
 				record.Runtime = runtime
+				record.QualificationSubjectDigest = runtime.qualificationSubjectDigest
+				record.QualificationResult = cloneMeetingSpecialistQualificationResult(runtime.qualificationResult)
 				record.Status = "joined_session"
 			}
 		}
@@ -714,7 +723,7 @@ func (product *MeetingSpecialistProduct) recordRuntimeTerminal(invitationID stri
 		product.mu.Unlock()
 		return
 	}
-	if !validMeetingSpecialistTerminalEvidenceForLimits(&evidence, record.Limits) {
+	if !validMeetingSpecialistTerminalEvidenceForLimits(&evidence, record.Limits) || evidence.QualificationSubjectDigest != record.QualificationSubjectDigest || !sameMeetingSpecialistQualificationResult(evidence.QualificationResult, record.QualificationResult) {
 		revocations := product.failClosedLocked(ErrMeetingSpecialistProductRestore)
 		product.mu.Unlock()
 		_ = revokeMeetingSpecialistRuntimes(revocations)
@@ -1002,7 +1011,33 @@ func cloneMeetingSpecialistTerminalEvidence(evidence *MeetingSpecialistTerminalE
 		return nil
 	}
 	cloned := *evidence
+	cloned.QualificationResult = cloneMeetingSpecialistQualificationResult(evidence.QualificationResult)
 	return &cloned
+}
+
+func cloneMeetingSpecialistQualificationResult(result *StoredTrustedQualificationResult) *StoredTrustedQualificationResult {
+	if result == nil {
+		return nil
+	}
+	cloned := *result
+	return &cloned
+}
+
+func sameMeetingSpecialistQualificationResult(left, right *StoredTrustedQualificationResult) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
+func sameMeetingSpecialistTerminalEvidence(left, right *MeetingSpecialistTerminalEvidence) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	leftValue, rightValue := *left, *right
+	leftValue.QualificationResult = nil
+	rightValue.QualificationResult = nil
+	return leftValue == rightValue && sameMeetingSpecialistQualificationResult(left.QualificationResult, right.QualificationResult)
 }
 
 func meetingSpecialistInvitationRequiresEligibility(record meetingSpecialistProductRecord) bool {

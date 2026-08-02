@@ -16,29 +16,30 @@ import (
 )
 
 type MeetingSpecialistProviderReceipt struct {
-	BindingDigest        string                             `json:"bindingDigest"`
-	RequestDigest        string                             `json:"requestDigest"`
-	SessionIDHash        string                             `json:"sessionIdHash,omitempty"`
-	Model                string                             `json:"model"`
-	ReasoningEffort      string                             `json:"reasoningEffort"`
-	EventDigest          string                             `json:"eventDigest"`
-	EventCount           int                                `json:"eventCount"`
-	UsageDigest          string                             `json:"usageDigest,omitempty"`
-	UsageStatus          string                             `json:"usageStatus,omitempty"`
-	TerminalEventHash    string                             `json:"terminalEventHash,omitempty"`
-	TerminalStatus       string                             `json:"terminalStatus,omitempty"`
-	SessionFailureHash   string                             `json:"sessionFailureHash,omitempty"`
-	InputTokens          int64                              `json:"inputTokens,omitempty"`
-	OutputTokens         int64                              `json:"outputTokens,omitempty"`
-	OutputAudioTokens    int64                              `json:"outputAudioTokens,omitempty"`
-	ReconciledCostCent   int64                              `json:"reconciledCostCents,omitempty"`
-	InputAudioSamples    int64                              `json:"inputAudioSamples,omitempty"`
-	InputSampleLimit     int64                              `json:"inputSampleLimit,omitempty"`
-	InputWorstCaseTokens int64                              `json:"inputWorstCaseTokensPerTurn,omitempty"`
-	InputMode            MeetingSpecialistRealtimeInputMode `json:"inputMode,omitempty"`
-	ProtocolSource       string                             `json:"protocolSource"`
-	ModelSource          string                             `json:"modelSource"`
-	ContractDigest       string                             `json:"contractDigest"`
+	QualificationSubjectDigest string                             `json:"qualificationSubjectDigest,omitempty"`
+	BindingDigest              string                             `json:"bindingDigest"`
+	RequestDigest              string                             `json:"requestDigest"`
+	SessionIDHash              string                             `json:"sessionIdHash,omitempty"`
+	Model                      string                             `json:"model"`
+	ReasoningEffort            string                             `json:"reasoningEffort"`
+	EventDigest                string                             `json:"eventDigest"`
+	EventCount                 int                                `json:"eventCount"`
+	UsageDigest                string                             `json:"usageDigest,omitempty"`
+	UsageStatus                string                             `json:"usageStatus,omitempty"`
+	TerminalEventHash          string                             `json:"terminalEventHash,omitempty"`
+	TerminalStatus             string                             `json:"terminalStatus,omitempty"`
+	SessionFailureHash         string                             `json:"sessionFailureHash,omitempty"`
+	InputTokens                int64                              `json:"inputTokens,omitempty"`
+	OutputTokens               int64                              `json:"outputTokens,omitempty"`
+	OutputAudioTokens          int64                              `json:"outputAudioTokens,omitempty"`
+	ReconciledCostCent         int64                              `json:"reconciledCostCents,omitempty"`
+	InputAudioSamples          int64                              `json:"inputAudioSamples,omitempty"`
+	InputSampleLimit           int64                              `json:"inputSampleLimit,omitempty"`
+	InputWorstCaseTokens       int64                              `json:"inputWorstCaseTokensPerTurn,omitempty"`
+	InputMode                  MeetingSpecialistRealtimeInputMode `json:"inputMode,omitempty"`
+	ProtocolSource             string                             `json:"protocolSource"`
+	ModelSource                string                             `json:"modelSource"`
+	ContractDigest             string                             `json:"contractDigest"`
 }
 
 type openAIMeetingSpecialistProvider struct {

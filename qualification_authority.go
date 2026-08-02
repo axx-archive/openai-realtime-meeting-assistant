@@ -18,7 +18,10 @@ import (
 	"github.com/openai/openai-realtime-meeting-assistant/internal/e10evidence"
 )
 
-const qualificationLedgerAnchorSchema = "stride.e10.qualification-ledger-anchor/v1"
+const (
+	qualificationLedgerAnchorSchema     = "stride.e10.qualification-ledger-anchor/v1"
+	qualificationAnchorAuthorityTimeout = 5 * time.Second
+)
 
 // QualificationEvidenceStore is deliberately not a provider trust root. Local
 // seed evidence can only produce structure-only candidates. Separately, the
@@ -26,23 +29,27 @@ const qualificationLedgerAnchorSchema = "stride.e10.qualification-ledger-anchor/
 // e10evidence after independent trust-root, registry, source-packet, evaluator,
 // and dual-signature verification; it cannot mint those capabilities itself.
 type QualificationEvidenceStore struct {
-	mu             sync.Mutex
-	ledgerPath     string
-	tenantID       string
-	now            func() time.Time
-	attempts       map[string]StoredProviderAttemptEvidence
-	targets        map[string]StoredTranscriptionEvidenceTarget
-	dictation      map[string]StoredDictationEvidenceBatch
-	consumed       map[string]bool
-	trustedResults map[string]StoredTrustedQualificationResult
-	trustedSources map[string]bool
-	trustedPackets map[string]bool
-	sequence       int64
-	lastDigest     string
-	approvedRoots  e10evidence.ApprovedTrustRoots
-	minimumAnchor  *QualificationLedgerAnchor
-	write          func(*os.File, []byte) (int, error)
-	sync           func(*os.File) error
+	mu                              sync.Mutex
+	ledgerPath                      string
+	tenantID                        string
+	now                             func() time.Time
+	attempts                        map[string]StoredProviderAttemptEvidence
+	targets                         map[string]StoredTranscriptionEvidenceTarget
+	dictation                       map[string]StoredDictationEvidenceBatch
+	consumed                        map[string]bool
+	trustedResults                  map[string]StoredTrustedQualificationResult
+	trustedSources                  map[string]bool
+	trustedPackets                  map[string]bool
+	sequence                        int64
+	lastDigest                      string
+	approvedRoots                   e10evidence.ApprovedTrustRoots
+	approvedTrustRootSHA256         string
+	anchorAuthority                 QualificationEvidenceAnchorAuthority
+	anchorTimeout                   time.Duration
+	exactAnchor                     *QualificationLedgerAnchor
+	authorityReconciliationRequired bool
+	write                           func(*os.File, []byte) (int, error)
+	sync                            func(*os.File) error
 }
 
 // QualificationLedgerAnchor is the externally persisted minimum trusted
@@ -55,14 +62,33 @@ type QualificationLedgerAnchor struct {
 	Digest        string `json:"digest"`
 }
 
-// QualificationEvidenceTrustConfig is required for trusted imports and trusted
-// reloads. Trust-root bytes are accepted only against the independently
-// supplied digest, and MinimumLedgerAnchor must be supplied from external
-// custody (or be the explicit tenant-bound genesis anchor for a new ledger).
-type QualificationEvidenceTrustConfig struct {
+// QualificationEvidenceTrustRootAnchor is returned by external custody. The
+// store never accepts roots and their alleged pin as sibling local arguments.
+type QualificationEvidenceTrustRootAnchor struct {
 	TrustRootsRaw           []byte
 	ApprovedTrustRootSHA256 string
-	MinimumLedgerAnchor     QualificationLedgerAnchor
+}
+
+// QualificationEvidenceAuthorityState is one atomic custody read. The trust
+// root pin and ledger head must come from the same authority revision so a
+// root rotation cannot race evidence verification.
+type QualificationEvidenceAuthorityState struct {
+	TrustRootAnchor QualificationEvidenceTrustRootAnchor
+	LedgerAnchor    QualificationLedgerAnchor
+}
+
+// QualificationEvidenceAnchorAuthority is an external custody boundary. No
+// production local/file implementation exists in this repository. A trusted
+// store cannot open until an operator-provisioned authority supplies both the
+// approved roots and the exact current tenant ledger head, and an import is not
+// accepted until that authority compare-and-swaps the new head.
+type QualificationEvidenceAnchorAuthority interface {
+	QualificationAuthorityState(context.Context, string) (QualificationEvidenceAuthorityState, error)
+	CompareAndSwapQualificationLedgerAnchor(context.Context, string, string, QualificationLedgerAnchor, QualificationLedgerAnchor) error
+}
+
+type QualificationEvidenceTrustConfig struct {
+	AnchorAuthority QualificationEvidenceAnchorAuthority
 }
 
 // StoredProviderAttemptEvidence is locally supplied attempt evidence. Opaque
@@ -110,19 +136,14 @@ func OpenQualificationEvidenceStore(ledgerPath string, seed QualificationEvidenc
 // OpenTrustedQualificationEvidenceStore is the only constructor that enables
 // signed-bundle import or reload. Both independent anchors are mandatory.
 func OpenTrustedQualificationEvidenceStore(ledgerPath string, seed QualificationEvidenceSeed, tenantID string, now func() time.Time, trust QualificationEvidenceTrustConfig) (*QualificationEvidenceStore, error) {
-	approved, err := e10evidence.LoadApprovedTrustRoots(trust.TrustRootsRaw, trust.ApprovedTrustRootSHA256)
-	if err != nil {
-		return nil, fmt.Errorf("qualification evidence approved trust roots: %w", err)
+	if trust.AnchorAuthority == nil {
+		return nil, errors.New("qualification evidence external anchor authority is required")
 	}
-	if err := validateQualificationLedgerAnchor(trust.MinimumLedgerAnchor, tenantID); err != nil {
-		return nil, err
-	}
-	return openQualificationEvidenceStore(ledgerPath, seed, tenantID, now, &qualificationStoreTrust{approvedRoots: approved, minimumAnchor: trust.MinimumLedgerAnchor})
+	return openQualificationEvidenceStore(ledgerPath, seed, tenantID, now, &qualificationStoreTrust{anchorAuthority: trust.AnchorAuthority})
 }
 
 type qualificationStoreTrust struct {
-	approvedRoots e10evidence.ApprovedTrustRoots
-	minimumAnchor QualificationLedgerAnchor
+	anchorAuthority QualificationEvidenceAnchorAuthority
 }
 
 func openQualificationEvidenceStore(ledgerPath string, seed QualificationEvidenceSeed, tenantID string, now func() time.Time, trust *qualificationStoreTrust) (*QualificationEvidenceStore, error) {
@@ -141,15 +162,14 @@ func openQualificationEvidenceStore(ledgerPath string, seed QualificationEvidenc
 		trustedResults: map[string]StoredTrustedQualificationResult{},
 		trustedSources: map[string]bool{},
 		trustedPackets: map[string]bool{},
+		anchorTimeout:  qualificationAnchorAuthorityTimeout,
 		write: func(file *os.File, value []byte) (int, error) {
 			return file.Write(value)
 		},
 		sync: func(file *os.File) error { return file.Sync() },
 	}
 	if trust != nil {
-		anchor := trust.minimumAnchor
-		store.approvedRoots = trust.approvedRoots
-		store.minimumAnchor = &anchor
+		store.anchorAuthority = trust.anchorAuthority
 	}
 	for _, attempt := range cloned.ProviderAttempts {
 		token := attempt.Ref.Receipt
@@ -174,6 +194,11 @@ func openQualificationEvidenceStore(ledgerPath string, seed QualificationEvidenc
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if store.anchorAuthority != nil {
+		if err := store.refreshQualificationAuthorityLocked(context.Background()); err != nil {
+			return nil, err
+		}
+	}
 	file, created, err := store.openLedgerLocked()
 	if err != nil {
 		return nil, err
@@ -203,6 +228,46 @@ func GenesisQualificationLedgerAnchor(tenantID string) (QualificationLedgerAncho
 	return QualificationLedgerAnchor{SchemaVersion: qualificationLedgerAnchorSchema, TenantID: tenantID, Sequence: 0, Digest: qualificationLedgerGenesisDigest(tenantID)}, nil
 }
 
+func (store *QualificationEvidenceStore) refreshQualificationAuthorityLocked(ctx context.Context) error {
+	if store == nil || store.anchorAuthority == nil || store.authorityReconciliationRequired {
+		return errors.New("qualification evidence external anchor authority is unavailable")
+	}
+	authorityCtx, cancelAuthority := store.qualificationAnchorCallContext(ctx)
+	state, err := store.anchorAuthority.QualificationAuthorityState(authorityCtx, store.tenantID)
+	cancelAuthority()
+	if err != nil {
+		return fmt.Errorf("qualification evidence external authority state: %w", err)
+	}
+	return store.applyQualificationAuthorityStateLocked(state)
+}
+
+func (store *QualificationEvidenceStore) applyQualificationAuthorityStateLocked(state QualificationEvidenceAuthorityState) error {
+	trust := state.TrustRootAnchor
+	approved, err := e10evidence.LoadApprovedTrustRoots(trust.TrustRootsRaw, trust.ApprovedTrustRootSHA256)
+	if err != nil {
+		return fmt.Errorf("qualification evidence approved trust roots: %w", err)
+	}
+	anchor := state.LedgerAnchor
+	if err := validateQualificationLedgerAnchor(anchor, store.tenantID); err != nil {
+		return err
+	}
+	store.approvedRoots = approved
+	store.approvedTrustRootSHA256 = trust.ApprovedTrustRootSHA256
+	store.exactAnchor = &anchor
+	return nil
+}
+
+func (store *QualificationEvidenceStore) qualificationAnchorCallContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	timeout := store.anchorTimeout
+	if timeout <= 0 {
+		timeout = qualificationAnchorAuthorityTimeout
+	}
+	return context.WithTimeout(parent, timeout)
+}
+
 // ImportVerifiedQualificationResult deliberately refuses the old in-process
 // capability path: it cannot carry the signed material needed for independent
 // cross-process or restart verification. Use ImportQualificationBundle.
@@ -216,8 +281,21 @@ func (store *QualificationEvidenceStore) ImportVerifiedQualificationResult(verif
 // chain against store-configured approved roots, appends the exact bundle, and
 // returns the new head for external compare-and-swap custody.
 func (store *QualificationEvidenceStore) ImportQualificationBundle(bundleRaw []byte) (StoredTrustedQualificationResult, QualificationLedgerAnchor, error) {
-	if store == nil || store.minimumAnchor == nil {
+	if store == nil || store.anchorAuthority == nil {
 		return StoredTrustedQualificationResult{}, QualificationLedgerAnchor{}, errors.New("trusted qualification import requires external trust-root and ledger anchors")
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	file, _, err := store.openLedgerLocked()
+	if err != nil {
+		return StoredTrustedQualificationResult{}, QualificationLedgerAnchor{}, err
+	}
+	defer closeQualificationLedger(file)
+	if err := store.refreshQualificationAuthorityLocked(context.Background()); err != nil {
+		return StoredTrustedQualificationResult{}, QualificationLedgerAnchor{}, err
+	}
+	if err := store.reloadLedgerLocked(file); err != nil {
+		return StoredTrustedQualificationResult{}, QualificationLedgerAnchor{}, err
 	}
 	_, verified, err := e10evidence.VerifyQualificationImportBundle(bundleRaw, store.approvedRoots)
 	if err != nil {
@@ -228,21 +306,19 @@ func (store *QualificationEvidenceStore) ImportQualificationBundle(bundleRaw []b
 		return StoredTrustedQualificationResult{}, QualificationLedgerAnchor{}, errors.New("trusted qualification result denied")
 	}
 	stored := StoredTrustedQualificationResult{Record: record, ImportedAt: store.now().UTC()}
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	file, _, err := store.openLedgerLocked()
-	if err != nil {
-		return StoredTrustedQualificationResult{}, QualificationLedgerAnchor{}, err
-	}
-	defer closeQualificationLedger(file)
-	if err := store.reloadLedgerLocked(file); err != nil {
-		return StoredTrustedQualificationResult{}, QualificationLedgerAnchor{}, err
-	}
 	if _, exists := store.trustedResults[record.ResultID]; exists || store.trustedSources[record.SourcePacketSHA256] || store.trustedPackets[record.ResultPacketSHA256] {
 		return StoredTrustedQualificationResult{}, QualificationLedgerAnchor{}, errors.New("trusted qualification result or source packet was already imported")
 	}
+	startOffset, err := file.Seek(0, io.SeekEnd)
+	if err != nil {
+		return StoredTrustedQualificationResult{}, QualificationLedgerAnchor{}, err
+	}
+	previousAnchor := store.currentLedgerAnchorLocked()
 	anchor, err := store.appendTrustedResultLocked(file, stored, bundleRaw)
 	if err != nil {
+		return StoredTrustedQualificationResult{}, QualificationLedgerAnchor{}, err
+	}
+	if err := store.commitQualificationAnchorCASLocked(file, startOffset, previousAnchor, anchor); err != nil {
 		return StoredTrustedQualificationResult{}, QualificationLedgerAnchor{}, err
 	}
 	return stored, anchor, nil
@@ -262,6 +338,11 @@ func (store *QualificationEvidenceStore) CurrentQualificationLedgerAnchor() (Qua
 		return QualificationLedgerAnchor{}, err
 	}
 	defer closeQualificationLedger(file)
+	if store.anchorAuthority != nil {
+		if err := store.refreshQualificationAuthorityLocked(context.Background()); err != nil {
+			return QualificationLedgerAnchor{}, err
+		}
+	}
 	if err := store.reloadLedgerLocked(file); err != nil {
 		return QualificationLedgerAnchor{}, err
 	}
@@ -279,11 +360,44 @@ func (store *QualificationEvidenceStore) TrustedQualificationResult(resultID str
 		return StoredTrustedQualificationResult{}, false, err
 	}
 	defer closeQualificationLedger(file)
+	if store.anchorAuthority != nil {
+		if err := store.refreshQualificationAuthorityLocked(context.Background()); err != nil {
+			return StoredTrustedQualificationResult{}, false, err
+		}
+	}
 	if err := store.reloadLedgerLocked(file); err != nil {
 		return StoredTrustedQualificationResult{}, false, err
 	}
 	result, ok := store.trustedResults[strings.TrimSpace(resultID)]
 	return result, ok, nil
+}
+
+// currentMeetingSpecialistQualification is the concrete production adapter
+// from the externally anchored evidence store to the join boundary. It reloads
+// and re-verifies the complete signed bundle before exact comparison; no local
+// interface implementation or echoed configuration can mint eligibility.
+func (store *QualificationEvidenceStore) currentMeetingSpecialistQualification(request MeetingSpecialistQualificationRequest, currentTime func() time.Time) (StoredTrustedQualificationResult, error) {
+	if store == nil || store.anchorAuthority == nil || request.validate() != nil || currentTime == nil {
+		return StoredTrustedQualificationResult{}, ErrMeetingSpecialistJoinQualification
+	}
+	stored, found, err := store.TrustedQualificationResult(request.ResultID)
+	if err != nil || !found {
+		return StoredTrustedQualificationResult{}, ErrMeetingSpecialistJoinQualification
+	}
+	now := currentTime().UTC()
+	if now.IsZero() {
+		return StoredTrustedQualificationResult{}, ErrMeetingSpecialistJoinQualification
+	}
+	record := stored.Record
+	evaluatedAt, evaluatedErr := time.Parse(time.RFC3339Nano, record.EvaluatedAt)
+	if evaluatedErr != nil || evaluatedAt.After(now) || !now.Before(evaluatedAt.Add(meetingSpecialistQualificationMaxAge)) ||
+		record.TenantID != request.TenantID || record.ResultID != request.ResultID || record.TargetID != request.TargetID || record.Lane != "meeting_specialist" || !record.Qualified ||
+		record.EvaluatorConfigSHA256 != request.EvaluatorConfigDigest || record.EvaluatorResultSHA256 != request.EvaluatorResultDigest ||
+		record.FixtureSHA256 != request.FixtureDigest || record.QualificationSubjectSHA256 != request.QualificationSubjectDigest ||
+		record.Candidate != request.Candidate || record.MeetingSpecialistBinding != request.Binding {
+		return StoredTrustedQualificationResult{}, ErrMeetingSpecialistJoinQualification
+	}
+	return stored, nil
 }
 
 func (store *QualificationEvidenceStore) ConsumeProviderAttempt(_ context.Context, ref TranscriptionProviderAttemptRef) (TranscriptionObservation, error) {
@@ -344,6 +458,11 @@ func (store *QualificationEvidenceStore) consumeLocked(kind, token string) error
 		return err
 	}
 	defer closeQualificationLedger(file)
+	if store.anchorAuthority != nil {
+		if err := store.refreshQualificationAuthorityLocked(context.Background()); err != nil {
+			return err
+		}
+	}
 	if err := store.reloadLedgerLocked(file); err != nil {
 		return err
 	}
@@ -415,9 +534,6 @@ func (store *QualificationEvidenceStore) reloadLedgerLocked(file *os.File) error
 		}
 		store.sequence = event.Sequence
 		store.lastDigest = event.Digest
-		if store.minimumAnchor != nil && event.Sequence == store.minimumAnchor.Sequence && event.Digest != store.minimumAnchor.Digest {
-			return errors.New("qualification evidence ledger differs from the externally anchored prefix")
-		}
 		store.consumed[event.Kind+":"+event.TokenDigest] = true
 		if event.TrustedResult != nil {
 			record := event.TrustedResult.Record
@@ -432,8 +548,8 @@ func (store *QualificationEvidenceStore) reloadLedgerLocked(file *os.File) error
 	if err := scanner.Err(); err != nil {
 		return err
 	}
-	if store.minimumAnchor != nil && store.sequence < store.minimumAnchor.Sequence {
-		return errors.New("qualification evidence ledger was rolled back before the externally anchored prefix")
+	if store.exactAnchor != nil && store.currentLedgerAnchorLocked() != *store.exactAnchor {
+		return errors.New("qualification evidence ledger differs from the exact externally anchored head")
 	}
 	return nil
 }
@@ -445,7 +561,7 @@ func (store *QualificationEvidenceStore) validQualificationLedgerPayload(event q
 		}
 		return nil
 	}
-	if store.minimumAnchor == nil || event.TrustedResult == nil || len(event.TrustedBundle) == 0 || event.TrustedResult.ImportedAt.IsZero() || !event.OccurredAt.Equal(event.TrustedResult.ImportedAt) || e10evidence.ValidateQualificationImportRecord(event.TrustedResult.Record) != nil {
+	if store.anchorAuthority == nil || event.TrustedResult == nil || len(event.TrustedBundle) == 0 || event.TrustedResult.ImportedAt.IsZero() || !event.OccurredAt.Equal(event.TrustedResult.ImportedAt) || e10evidence.ValidateQualificationImportRecord(event.TrustedResult.Record) != nil {
 		return errors.New("trusted qualification ledger payload lacks external authority")
 	}
 	_, verified, err := e10evidence.VerifyQualificationImportBundle(event.TrustedBundle, store.approvedRoots)
@@ -461,7 +577,18 @@ func (store *QualificationEvidenceStore) validQualificationLedgerPayload(event q
 
 func (store *QualificationEvidenceStore) appendLedgerEventLocked(file *os.File, kind, tokenDigest string) error {
 	event := qualificationLedgerEvent{Sequence: store.sequence + 1, OccurredAt: store.now().UTC(), Kind: kind, TokenDigest: tokenDigest, PriorDigest: store.lastDigest}
-	return store.appendQualificationEventLocked(file, event)
+	if store.anchorAuthority == nil {
+		return store.appendQualificationEventLocked(file, event)
+	}
+	startOffset, err := file.Seek(0, io.SeekEnd)
+	if err != nil {
+		return err
+	}
+	previousAnchor := store.currentLedgerAnchorLocked()
+	if err := store.appendQualificationEventLocked(file, event); err != nil {
+		return err
+	}
+	return store.commitQualificationAnchorCASLocked(file, startOffset, previousAnchor, store.currentLedgerAnchorLocked())
 }
 
 func (store *QualificationEvidenceStore) appendTrustedResultLocked(file *os.File, result StoredTrustedQualificationResult, bundleRaw []byte) (QualificationLedgerAnchor, error) {
@@ -511,6 +638,39 @@ func (store *QualificationEvidenceStore) appendQualificationEventLocked(file *os
 		store.trustedPackets[record.ResultPacketSHA256] = true
 	}
 	return nil
+}
+
+// commitQualificationAnchorCASLocked resolves an ambiguous CAS response before
+// deciding whether the durable local append may be accepted or rolled back.
+// If custody advanced despite a lost response, the append is accepted. If
+// custody is still at the prior head, the append is truncated and state is
+// reloaded. Any third state or unreadable authority poisons this store instance
+// for explicit operator reconciliation; blindly truncating could otherwise put
+// the local ledger behind an already-advanced external head.
+func (store *QualificationEvidenceStore) commitQualificationAnchorCASLocked(file *os.File, startOffset int64, previousAnchor, nextAnchor QualificationLedgerAnchor) error {
+	casCtx, cancelCAS := store.qualificationAnchorCallContext(nil)
+	casErr := store.anchorAuthority.CompareAndSwapQualificationLedgerAnchor(casCtx, store.tenantID, store.approvedTrustRootSHA256, previousAnchor, nextAnchor)
+	cancelCAS()
+	if casErr == nil {
+		store.exactAnchor = &nextAnchor
+		return nil
+	}
+	observeCtx, cancelObserve := store.qualificationAnchorCallContext(nil)
+	observed, observeErr := store.anchorAuthority.QualificationAuthorityState(observeCtx, store.tenantID)
+	cancelObserve()
+	validObserved := observeErr == nil && validateQualificationLedgerAnchor(observed.LedgerAnchor, store.tenantID) == nil
+	if validObserved && observed.TrustRootAnchor.ApprovedTrustRootSHA256 == store.approvedTrustRootSHA256 && observed.LedgerAnchor == nextAnchor {
+		store.exactAnchor = &nextAnchor
+		return nil
+	}
+	if validObserved && observed.LedgerAnchor == previousAnchor {
+		rollbackErr := rollbackQualificationLedger(file, store.sync, startOffset, casErr)
+		applyErr := store.applyQualificationAuthorityStateLocked(observed)
+		reloadErr := store.reloadLedgerLocked(file)
+		return errors.Join(errors.New("qualification evidence external anchor compare-and-swap failed"), rollbackErr, applyErr, reloadErr)
+	}
+	store.authorityReconciliationRequired = true
+	return errors.Join(errors.New("qualification evidence external anchor state is ambiguous; operator reconciliation is required"), casErr, observeErr)
 }
 
 func rollbackQualificationLedger(file *os.File, syncFile func(*os.File) error, offset int64, cause error) error {

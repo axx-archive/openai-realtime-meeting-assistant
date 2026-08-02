@@ -23,6 +23,85 @@ type qualificationTestClock struct {
 	now time.Time
 }
 
+type testQualificationAnchorAuthority struct {
+	mu                   sync.Mutex
+	tenantID             string
+	trust                QualificationEvidenceTrustRootAnchor
+	head                 QualificationLedgerAnchor
+	failCAS              bool
+	advanceThenLoseReply bool
+	thirdStateOnCAS      bool
+	rotateTrustOnCAS     *QualificationEvidenceTrustRootAnchor
+	blockCalls           bool
+	casAttempts          int
+}
+
+func newTestQualificationAnchorAuthority(t *testing.T, tenantID string, rootsRaw []byte) *testQualificationAnchorAuthority {
+	t.Helper()
+	genesis, err := GenesisQualificationLedgerAnchor(tenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &testQualificationAnchorAuthority{tenantID: tenantID, trust: QualificationEvidenceTrustRootAnchor{TrustRootsRaw: append([]byte(nil), rootsRaw...), ApprovedTrustRootSHA256: e10evidence.RegistryDigest(rootsRaw)}, head: genesis}
+}
+
+func (authority *testQualificationAnchorAuthority) QualificationAuthorityState(ctx context.Context, tenantID string) (QualificationEvidenceAuthorityState, error) {
+	authority.mu.Lock()
+	if tenantID != authority.tenantID {
+		authority.mu.Unlock()
+		return QualificationEvidenceAuthorityState{}, errors.New("cross-tenant authority lookup")
+	}
+	trust := authority.trust
+	head := authority.head
+	blocked := authority.blockCalls
+	authority.mu.Unlock()
+	if blocked {
+		<-ctx.Done()
+		return QualificationEvidenceAuthorityState{}, ctx.Err()
+	}
+	trust.TrustRootsRaw = append([]byte(nil), trust.TrustRootsRaw...)
+	return QualificationEvidenceAuthorityState{TrustRootAnchor: trust, LedgerAnchor: head}, nil
+}
+
+func (authority *testQualificationAnchorAuthority) CompareAndSwapQualificationLedgerAnchor(ctx context.Context, tenantID, expectedTrustRootSHA256 string, previous, next QualificationLedgerAnchor) error {
+	authority.mu.Lock()
+	authority.casAttempts++
+	if authority.rotateTrustOnCAS != nil {
+		authority.trust = *authority.rotateTrustOnCAS
+		authority.trust.TrustRootsRaw = append([]byte(nil), authority.rotateTrustOnCAS.TrustRootsRaw...)
+		authority.rotateTrustOnCAS = nil
+	}
+	if tenantID != authority.tenantID || authority.head != previous || authority.trust.ApprovedTrustRootSHA256 != expectedTrustRootSHA256 {
+		authority.mu.Unlock()
+		return errors.New("qualification anchor compare-and-swap conflict")
+	}
+	if authority.blockCalls {
+		authority.mu.Unlock()
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	if authority.advanceThenLoseReply {
+		authority.advanceThenLoseReply = false
+		authority.head = next
+		authority.mu.Unlock()
+		return errors.New("lost qualification anchor response")
+	}
+	if authority.thirdStateOnCAS {
+		authority.thirdStateOnCAS = false
+		authority.head = QualificationLedgerAnchor{SchemaVersion: qualificationLedgerAnchorSchema, TenantID: authority.tenantID, Sequence: next.Sequence + 7, Digest: workDigest("third-state-anchor")}
+		authority.mu.Unlock()
+		return errors.New("ambiguous qualification anchor response")
+	}
+	if authority.failCAS {
+		authority.failCAS = false
+		authority.mu.Unlock()
+		return errors.New("injected qualification anchor failure")
+	}
+	authority.head = next
+	authority.mu.Unlock()
+	return nil
+}
+
 type qualificationEvidenceStoreHarness struct {
 	authority  *QualificationEvidenceStore
 	clock      *qualificationTestClock
@@ -260,11 +339,8 @@ func TestQualificationEvidenceStoreImportsVerifiedResultDurablyAndFailsClosed(t 
 	}
 	path := filepath.Join(directory, "qualification.jsonl")
 	now := func() time.Time { return time.Now().UTC() }
-	genesis, err := GenesisQualificationLedgerAnchor("tenant-acme")
-	if err != nil {
-		t.Fatal(err)
-	}
-	trust := QualificationEvidenceTrustConfig{TrustRootsRaw: fixture.rootsRaw, ApprovedTrustRootSHA256: e10evidence.RegistryDigest(fixture.rootsRaw), MinimumLedgerAnchor: genesis}
+	anchorAuthority := newTestQualificationAnchorAuthority(t, "tenant-acme", fixture.rootsRaw)
+	trust := QualificationEvidenceTrustConfig{AnchorAuthority: anchorAuthority}
 	store, err := OpenTrustedQualificationEvidenceStore(path, QualificationEvidenceSeed{}, "tenant-acme", now, trust)
 	if err != nil {
 		t.Fatal(err)
@@ -291,9 +367,7 @@ func TestQualificationEvidenceStoreImportsVerifiedResultDurablyAndFailsClosed(t 
 	if _, _, err := store.ImportQualificationBundle(fixture.bundleRaw); err == nil || !strings.Contains(err.Error(), "already imported") {
 		t.Fatalf("same-process replay accepted: %v", err)
 	}
-	restartTrust := trust
-	restartTrust.MinimumLedgerAnchor = anchor
-	restarted, err := OpenTrustedQualificationEvidenceStore(path, QualificationEvidenceSeed{}, "tenant-acme", now, restartTrust)
+	restarted, err := OpenTrustedQualificationEvidenceStore(path, QualificationEvidenceSeed{}, "tenant-acme", now, trust)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,12 +379,7 @@ func TestQualificationEvidenceStoreImportsVerifiedResultDurablyAndFailsClosed(t 
 		t.Fatalf("restart replay accepted: %v", err)
 	}
 	wrongTenantPath := filepath.Join(directory, "wrong-tenant.jsonl")
-	wrongTenantGenesis, err := GenesisQualificationLedgerAnchor("tenant-other")
-	if err != nil {
-		t.Fatal(err)
-	}
-	wrongTenantTrust := trust
-	wrongTenantTrust.MinimumLedgerAnchor = wrongTenantGenesis
+	wrongTenantTrust := QualificationEvidenceTrustConfig{AnchorAuthority: newTestQualificationAnchorAuthority(t, "tenant-other", fixture.rootsRaw)}
 	wrongTenant, err := OpenTrustedQualificationEvidenceStore(wrongTenantPath, QualificationEvidenceSeed{}, "tenant-other", now, wrongTenantTrust)
 	if err != nil {
 		t.Fatal(err)
@@ -338,29 +407,29 @@ func TestQualificationEvidenceStoreImportsVerifiedResultDurablyAndFailsClosed(t 
 	if err := os.WriteFile(rewritePath, append(rewrittenRaw, '\n'), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := OpenTrustedQualificationEvidenceStore(rewritePath, QualificationEvidenceSeed{}, "tenant-acme", now, restartTrust); err == nil || !strings.Contains(err.Error(), "anchored prefix") {
+	if _, err := OpenTrustedQualificationEvidenceStore(rewritePath, QualificationEvidenceSeed{}, "tenant-acme", now, trust); err == nil || !strings.Contains(err.Error(), "exact externally anchored head") {
 		t.Fatalf("same-user rewrite with a recomputed local chain escaped the external anchor: %v", err)
 	}
 	rollbackPath := filepath.Join(directory, "valid-prefix-rollback.jsonl")
 	if err := os.WriteFile(rollbackPath, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := OpenTrustedQualificationEvidenceStore(rollbackPath, QualificationEvidenceSeed{}, "tenant-acme", now, restartTrust); err == nil || !strings.Contains(err.Error(), "rolled back") {
-		t.Fatalf("valid-prefix rollback escaped the external minimum anchor: %v", err)
+	if _, err := OpenTrustedQualificationEvidenceStore(rollbackPath, QualificationEvidenceSeed{}, "tenant-acme", now, trust); err == nil || !strings.Contains(err.Error(), "exact externally anchored head") {
+		t.Fatalf("ledger rollback escaped the exact external anchor: %v", err)
 	}
 	unknownFieldPath := filepath.Join(directory, "unknown-field.jsonl")
 	unknownField := strings.TrimSuffix(strings.TrimSuffix(string(raw), "\n"), "}") + `,"ignored":"forged"}` + "\n"
 	if err := os.WriteFile(unknownFieldPath, []byte(unknownField), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := OpenTrustedQualificationEvidenceStore(unknownFieldPath, QualificationEvidenceSeed{}, "tenant-acme", now, restartTrust); err == nil || !strings.Contains(err.Error(), "integrity") {
+	if _, err := OpenTrustedQualificationEvidenceStore(unknownFieldPath, QualificationEvidenceSeed{}, "tenant-acme", now, trust); err == nil || !strings.Contains(err.Error(), "integrity") {
 		t.Fatalf("unknown-field journal tampering accepted: %v", err)
 	}
 	raw[len(raw)/2] ^= 1
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := OpenTrustedQualificationEvidenceStore(path, QualificationEvidenceSeed{}, "tenant-acme", now, restartTrust); err == nil || !strings.Contains(err.Error(), "integrity") {
+	if _, err := OpenTrustedQualificationEvidenceStore(path, QualificationEvidenceSeed{}, "tenant-acme", now, trust); err == nil || !strings.Contains(err.Error(), "integrity") {
 		t.Fatalf("tampered trusted-result journal accepted: %v", err)
 	}
 	if _, err := store.ImportVerifiedQualificationResult(e10evidence.VerifiedQualificationResult{}); err == nil {
@@ -374,6 +443,118 @@ func TestQualificationEvidenceStoreImportsVerifiedResultDurablyAndFailsClosed(t 
 	if _, _, err := localOnly.ImportQualificationBundle(fixture.bundleRaw); err == nil || !strings.Contains(err.Error(), "external") {
 		t.Fatalf("trusted import without external anchors was accepted: %v", err)
 	}
+}
+
+func TestQualificationEvidenceStoreExternalAnchorCASRecoveryMatrix(t *testing.T) {
+	fixture := verifiedMeetingSTTQualificationBundle(t, "tenant-acme")
+	rotatedFixture := verifiedMeetingSTTQualificationBundle(t, "tenant-acme")
+	now := func() time.Time { return time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC) }
+	open := func(t *testing.T, path string, authority *testQualificationAnchorAuthority) *QualificationEvidenceStore {
+		t.Helper()
+		store, err := OpenTrustedQualificationEvidenceStore(path, QualificationEvidenceSeed{}, "tenant-acme", now, QualificationEvidenceTrustConfig{AnchorAuthority: authority})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return store
+	}
+	privatePath := func(t *testing.T, name string) string {
+		t.Helper()
+		directory := t.TempDir()
+		if err := os.Chmod(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		return filepath.Join(directory, name+".jsonl")
+	}
+
+	t.Run("rejected CAS rolls back and retries safely", func(t *testing.T) {
+		authority := newTestQualificationAnchorAuthority(t, "tenant-acme", fixture.rootsRaw)
+		store := open(t, privatePath(t, "rollback"), authority)
+		authority.failCAS = true
+		if _, _, err := store.ImportQualificationBundle(fixture.bundleRaw); err == nil || !strings.Contains(err.Error(), "compare-and-swap failed") {
+			t.Fatalf("rejected CAS did not fail closed: %v", err)
+		}
+		genesis, _ := GenesisQualificationLedgerAnchor("tenant-acme")
+		if head, err := store.CurrentQualificationLedgerAnchor(); err != nil || head != genesis {
+			t.Fatalf("rejected CAS left a local append: head=%+v err=%v", head, err)
+		}
+		if _, found, err := store.TrustedQualificationResult("meeting-stt-result-001"); err != nil || found {
+			t.Fatalf("rejected CAS exposed a trusted result: found=%v err=%v", found, err)
+		}
+		if _, head, err := store.ImportQualificationBundle(fixture.bundleRaw); err != nil || head.Sequence != 1 {
+			t.Fatalf("safe retry after rollback failed: head=%+v err=%v", head, err)
+		}
+	})
+
+	t.Run("lost response with advanced head is accepted", func(t *testing.T) {
+		authority := newTestQualificationAnchorAuthority(t, "tenant-acme", fixture.rootsRaw)
+		store := open(t, privatePath(t, "lost-response"), authority)
+		authority.advanceThenLoseReply = true
+		imported, head, err := store.ImportQualificationBundle(fixture.bundleRaw)
+		if err != nil || head.Sequence != 1 || authority.head != head {
+			t.Fatalf("advanced custody head was not reconciled: imported=%+v head=%+v authority=%+v err=%v", imported, head, authority.head, err)
+		}
+	})
+
+	t.Run("trust root rotation fences stale verification", func(t *testing.T) {
+		authority := newTestQualificationAnchorAuthority(t, "tenant-acme", fixture.rootsRaw)
+		store := open(t, privatePath(t, "root-rotation"), authority)
+		rotatedTrust := QualificationEvidenceTrustRootAnchor{TrustRootsRaw: append([]byte(nil), rotatedFixture.rootsRaw...), ApprovedTrustRootSHA256: e10evidence.RegistryDigest(rotatedFixture.rootsRaw)}
+		authority.rotateTrustOnCAS = &rotatedTrust
+		if _, _, err := store.ImportQualificationBundle(fixture.bundleRaw); err == nil || !strings.Contains(err.Error(), "compare-and-swap failed") {
+			t.Fatalf("root rotation did not fence stale verification: %v", err)
+		}
+		genesis, _ := GenesisQualificationLedgerAnchor("tenant-acme")
+		if head, err := store.CurrentQualificationLedgerAnchor(); err != nil || head != genesis || store.approvedTrustRootSHA256 != rotatedTrust.ApprovedTrustRootSHA256 {
+			t.Fatalf("rotation rollback did not adopt the atomic authority state: head=%+v root=%s err=%v", head, store.approvedTrustRootSHA256, err)
+		}
+		if _, head, err := store.ImportQualificationBundle(rotatedFixture.bundleRaw); err != nil || head.Sequence != 1 {
+			t.Fatalf("fresh bundle under rotated roots was not accepted: head=%+v err=%v", head, err)
+		}
+	})
+
+	t.Run("third state poisons the process for reconciliation", func(t *testing.T) {
+		authority := newTestQualificationAnchorAuthority(t, "tenant-acme", fixture.rootsRaw)
+		store := open(t, privatePath(t, "third-state"), authority)
+		authority.thirdStateOnCAS = true
+		if _, _, err := store.ImportQualificationBundle(fixture.bundleRaw); err == nil || !strings.Contains(err.Error(), "operator reconciliation") {
+			t.Fatalf("ambiguous third state was not rejected: %v", err)
+		}
+		if !store.authorityReconciliationRequired {
+			t.Fatal("ambiguous third state did not poison the store")
+		}
+		if _, err := store.CurrentQualificationLedgerAnchor(); err == nil || !strings.Contains(err.Error(), "unavailable") {
+			t.Fatalf("poisoned store resumed without reconciliation: %v", err)
+		}
+	})
+
+	t.Run("cross-process stale head cannot append", func(t *testing.T) {
+		authority := newTestQualificationAnchorAuthority(t, "tenant-acme", fixture.rootsRaw)
+		first := open(t, privatePath(t, "process-one"), authority)
+		second := open(t, privatePath(t, "process-two"), authority)
+		if _, _, err := first.ImportQualificationBundle(fixture.bundleRaw); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := second.ImportQualificationBundle(fixture.bundleRaw); err == nil || !strings.Contains(err.Error(), "exact externally anchored head") {
+			t.Fatalf("stale process reached append authority: %v", err)
+		}
+		if authority.casAttempts != 1 {
+			t.Fatalf("stale process attempted CAS: attempts=%d", authority.casAttempts)
+		}
+	})
+
+	t.Run("blocking custody call is bounded", func(t *testing.T) {
+		authority := newTestQualificationAnchorAuthority(t, "tenant-acme", fixture.rootsRaw)
+		store := open(t, privatePath(t, "bounded"), authority)
+		store.anchorTimeout = 20 * time.Millisecond
+		authority.blockCalls = true
+		started := time.Now()
+		if _, err := store.CurrentQualificationLedgerAnchor(); err == nil || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("blocking authority did not reach its deadline: %v", err)
+		}
+		if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+			t.Fatalf("blocking authority exceeded bounded return: %s", elapsed)
+		}
+	})
 }
 
 type qualificationBundleTestFixture struct {
@@ -460,6 +641,84 @@ func verifiedMeetingSTTQualificationBundle(t *testing.T, tenantID string) qualif
 		t.Fatal(err)
 	}
 	bundleRaw, _, err := e10evidence.BuildQualificationImportBundle(tenantID, "corpus", registryRaw, registrySignature, registryPublic, sourceRaw, sourceOperatorSignature, operatorPublic, sourceReviewerSignature, reviewerPublic, resultRaw, resultOperatorSignature, operatorPublic, resultReviewerSignature, reviewerPublic, approved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return qualificationBundleTestFixture{bundleRaw: bundleRaw, rootsRaw: rootsRaw}
+}
+
+func verifiedMeetingSpecialistQualificationBundle(t *testing.T, request MeetingSpecialistQualificationRequest, evaluatedAt time.Time) qualificationBundleTestFixture {
+	t.Helper()
+	registryPublic, registryPrivate, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operatorPublic, operatorPrivate, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewerPublic, reviewerPrivate, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pilotOnePublic, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pilotTwoPublic, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draftRaw, err := os.ReadFile(filepath.Join("deploy", "e10", "target-registry.draft.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var registry e10evidence.TargetRegistry
+	if err := json.Unmarshal(draftRaw, &registry); err != nil {
+		t.Fatal(err)
+	}
+	registry.RegistryID = "e10-specialist-targets-test-001"
+	registry.Signer = e10evidence.RegistrySignerBinding{SignerKeyID: "registry-key-001", SignerIdentityID: "release-owner", SignerPublicKeyFingerprintSHA256: e10evidence.PublicKeyFingerprint(registryPublic)}
+	registry.Candidate = request.Candidate
+	var target e10evidence.EvidenceTarget
+	for index := range registry.Targets {
+		registry.Targets[index].FixtureSHA256 = workDigest("fixture-" + registry.Targets[index].ID)
+		registry.Targets[index].MeasurementRevisionSHA256 = workDigest("measurement-" + registry.Targets[index].ID)
+		if registry.Targets[index].ID == meetingSpecialistQualificationTargetID {
+			registry.Targets[index].FixtureSHA256 = request.QualificationSubjectDigest
+			registry.Targets[index].MeasurementRevisionSHA256 = request.EvaluatorConfigDigest
+			target = registry.Targets[index]
+		}
+	}
+	registryRaw := canonicalE10JSON(t, registry)
+	roots := e10evidence.TrustRoots{SchemaVersion: e10evidence.TrustRootsSchema, TrustRootID: "specialist-qualification-test-roots", PreMeasurementTargetRegistrySHA256: e10evidence.RegistryDigest(registryRaw), ApprovedSigners: []e10evidence.ApprovedSigner{
+		{KeyID: "registry-key-001", IdentityID: "release-owner", Role: "registry_owner", PublicKeyFingerprintSHA256: e10evidence.PublicKeyFingerprint(registryPublic)},
+		{KeyID: "operator-key-001", IdentityID: "evidence-operator", Role: "operator", PublicKeyFingerprintSHA256: e10evidence.PublicKeyFingerprint(operatorPublic)},
+		{KeyID: "reviewer-key-001", IdentityID: "independent-reviewer", Role: "independent_reviewer", PublicKeyFingerprintSHA256: e10evidence.PublicKeyFingerprint(reviewerPublic)},
+		{KeyID: "pilot-key-001", IdentityID: "pilot-reviewer-one", Role: "pilot_reviewer", PublicKeyFingerprintSHA256: e10evidence.PublicKeyFingerprint(pilotOnePublic)},
+		{KeyID: "pilot-key-002", IdentityID: "pilot-reviewer-two", Role: "pilot_reviewer", PublicKeyFingerprintSHA256: e10evidence.PublicKeyFingerprint(pilotTwoPublic)},
+	}}
+	rootsRaw := canonicalE10JSON(t, roots)
+	approved, err := e10evidence.LoadApprovedTrustRoots(rootsRaw, e10evidence.RegistryDigest(rootsRaw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval := e10evidence.DualApprovalBinding{RegistrySHA256: e10evidence.RegistryDigest(registryRaw), OperatorID: "evidence-operator", OperatorKeyID: "operator-key-001", OperatorPublicKeyFingerprintSHA256: e10evidence.PublicKeyFingerprint(operatorPublic), ReviewerID: "independent-reviewer", ReviewerKeyID: "reviewer-key-001", ReviewerPublicKeyFingerprintSHA256: e10evidence.PublicKeyFingerprint(reviewerPublic)}
+	manifest := e10evidence.CorpusManifest{SchemaVersion: e10evidence.CorpusManifestSchema, TenantID: request.TenantID, CorpusID: "meeting-specialist-corpus-001", TargetID: target.ID, FixtureSHA256: request.FixtureDigest, QualificationSubjectSHA256: request.QualificationSubjectDigest, Lane: "meeting_specialist", EvidenceClass: "authorized_real_capture", Candidate: request.Candidate, Approval: approval, MeetingSpecialistBinding: request.Binding}
+	for index := 0; index < 10; index++ {
+		manifest.Clips = append(manifest.Clips, e10evidence.CorpusClip{ClipID: fmt.Sprintf("specialist-clip-%06d", index), AudioSHA256: workDigest(fmt.Sprintf("specialist-audio-%d", index)), ReferenceSHA256: workDigest(fmt.Sprintf("specialist-reference-%d", index)), ConsentReceiptSHA256: workDigest(fmt.Sprintf("specialist-consent-%d", index)), SpeakerIDHash: workDigest(fmt.Sprintf("specialist-speaker-id-%d", index)), SpeakerEvidenceSHA256: workDigest(fmt.Sprintf("specialist-speaker-%d", index)), TrackID: fmt.Sprintf("specialist-track-%06d", index), TrackEvidenceSHA256: workDigest(fmt.Sprintf("specialist-track-%d", index)), DurationMillis: 30_000, Platform: "physical-target-device", SourceOrder: int64(index)})
+	}
+	manifest.Approval.SourceArtifactSetSHA256 = e10evidence.CorpusSourceArtifactSetDigest(manifest.Clips)
+	sourceRaw := canonicalE10JSON(t, manifest)
+	registrySignature := ed25519.Sign(registryPrivate, registryRaw)
+	sourceOperatorSignature := ed25519.Sign(operatorPrivate, sourceRaw)
+	sourceReviewerSignature := ed25519.Sign(reviewerPrivate, sourceRaw)
+	result := e10evidence.QualificationResultPacket{SchemaVersion: e10evidence.QualificationResultSchema, ResultID: request.ResultID, TenantID: request.TenantID, TargetID: target.ID, Lane: "meeting_specialist", EvidenceClass: "dual_signed_evaluator_result", Candidate: request.Candidate, Approval: approval, SourcePacketKind: "corpus", SourcePacketSHA256: e10evidence.RegistryDigest(sourceRaw), QualificationSubjectSHA256: request.QualificationSubjectDigest, EvaluatorConfigSHA256: request.EvaluatorConfigDigest, EvaluatorResultSHA256: request.EvaluatorResultDigest, Qualified: true, EvaluatedAt: evaluatedAt.UTC().Format(time.RFC3339Nano)}
+	result.Approval.SourceArtifactSetSHA256 = e10evidence.QualificationSourceArtifactSetDigest(result.SourcePacketSHA256, result.EvaluatorConfigSHA256, result.EvaluatorResultSHA256)
+	resultRaw := canonicalE10JSON(t, result)
+	resultOperatorSignature := ed25519.Sign(operatorPrivate, resultRaw)
+	resultReviewerSignature := ed25519.Sign(reviewerPrivate, resultRaw)
+	bundleRaw, _, err := e10evidence.BuildQualificationImportBundle(request.TenantID, "corpus", registryRaw, registrySignature, registryPublic, sourceRaw, sourceOperatorSignature, operatorPublic, sourceReviewerSignature, reviewerPublic, resultRaw, resultOperatorSignature, operatorPublic, resultReviewerSignature, reviewerPublic, approved)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -112,10 +112,10 @@ func specialistProductFixture(t *testing.T) (*MeetingSpecialistProduct, *fakeMee
 	return product, authority, &userAccount{Email: "aj@shareability.com", Name: "AJ"}
 }
 
-func installMeetingSpecialistProductionJoin(product *MeetingSpecialistProduct, now time.Time) *fakeMeetingSpecialistProvider {
+func installMeetingSpecialistProductionJoin(t *testing.T, product *MeetingSpecialistProduct, now time.Time) *fakeMeetingSpecialistProvider {
+	t.Helper()
 	provider := &fakeMeetingSpecialistProvider{}
 	var factoryCalls atomic.Int64
-	joiner, _ := productionJoinFixture(now, provider, &factoryCalls)
 	var scope meetingSpecialistProductScope
 	switch authority := product.authority.(type) {
 	case *fakeMeetingSpecialistProductAuthority:
@@ -127,13 +127,11 @@ func installMeetingSpecialistProductionJoin(product *MeetingSpecialistProduct, n
 		scope = authority.scope
 		authority.mu.Unlock()
 	}
+	qualificationTarget := meetingSpecialistQualificationFixture()
 	if roster, err := product.authority.EligibleRoster(context.Background(), scope); err == nil && len(roster) > 0 {
-		joiner.qualificationTarget.TenantID = scope.TenantID
-		joiner.qualificationTarget.SpecialistProfile = roster[0].Profile
-		joiner.qualificationTarget.SpecialistCapability = roster[0].Capability
-		qualification := joiner.qualification.(*fakeMeetingSpecialistQualificationAuthority)
-		qualification.status.SubjectDigest, _ = MeetingSpecialistQualificationSubjectDigest(joiner.qualificationTarget)
+		qualificationTarget = meetingSpecialistQualificationFixtureForCandidate(scope.TenantID, roster[0])
 	}
+	joiner, _ := productionJoinFixtureForQualification(t, now, now.Add(-time.Minute), qualificationTarget, provider, &factoryCalls)
 	product.productionJoin = joiner
 	return provider
 }
@@ -143,23 +141,17 @@ func bindMeetingSpecialistProductionQualification(t *testing.T, product *Meeting
 	product.mu.Lock()
 	record, found := product.invitations[invitationID]
 	product.mu.Unlock()
-	if !found || product.productionJoin == nil {
+	if !found || product.productionJoin == nil || product.productionJoin.qualifiedProvider == nil {
 		t.Fatalf("qualification binding source missing for %s", invitationID)
 	}
-	joiner := product.productionJoin
-	joiner.qualificationTarget.TenantID = record.Scope.TenantID
-	joiner.qualificationTarget.SpecialistProfile = record.Agent.Profile
-	joiner.qualificationTarget.SpecialistCapability = record.Agent.Capability
-	qualification, ok := joiner.qualification.(*fakeMeetingSpecialistQualificationAuthority)
-	if !ok {
-		t.Fatal("test production joiner lacks fake external qualification authority")
+	request := product.productionJoin.qualifiedProvider.request
+	if request.TenantID != record.Scope.TenantID || request.SpecialistProfile != record.Agent.Profile || request.SpecialistCapability != record.Agent.Capability || !product.productionJoin.Ready() {
+		t.Fatalf("production qualification is not bound to invitation %s", invitationID)
 	}
-	qualification.status.SubjectDigest, _ = MeetingSpecialistQualificationSubjectDigest(joiner.qualificationTarget)
 }
-
-func meetingSpecialistProviderReceiptFixture() MeetingSpecialistProviderReceipt {
+func meetingSpecialistProviderReceiptFixture(subjectDigest string) MeetingSpecialistProviderReceipt {
 	return MeetingSpecialistProviderReceipt{
-		BindingDigest: strideTestDigest("1"), RequestDigest: strideTestDigest("2"), SessionIDHash: strideTestDigest("3"),
+		QualificationSubjectDigest: subjectDigest, BindingDigest: strideTestDigest("1"), RequestDigest: strideTestDigest("2"), SessionIDHash: strideTestDigest("3"),
 		Model: "gpt-realtime-2.1", ReasoningEffort: "low", EventDigest: strideTestDigest("4"), EventCount: 3,
 		UsageDigest: strideTestDigest("5"), UsageStatus: "reconciled", TerminalEventHash: strideTestDigest("6"), TerminalStatus: "failed", SessionFailureHash: strideTestDigest("7"),
 		InputTokens: 10, OutputTokens: 20, OutputAudioTokens: 10, ReconciledCostCent: 2,
@@ -363,7 +355,7 @@ func TestMeetingSpecialistProductAuthorityMutationClosesJoinedSessionBeforePoll(
 			product := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: persistence})
 			defer product.Close("test_complete")
 			var factoryCalls atomic.Int64
-			product.productionJoin, _ = productionJoinFixture(now, provider, &factoryCalls)
+			product.productionJoin, _ = productionJoinFixture(t, now, provider, &factoryCalls)
 
 			requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "immediate-revoke-"+strings.ReplaceAll(scenario.name, " ", "-"), time.Minute)
 			if err != nil {
@@ -418,7 +410,7 @@ func TestMeetingSpecialistProductStatusPersistenceFailureStillRevokesDetachedRun
 		Authority: STRIDESnapshotMACAuthority{KeyID: "specialist_status_revoke", Key: []byte("0123456789abcdef0123456789abcdef")}, MinimumGeneration: 1, BootstrapEmpty: true,
 	}
 	product := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: persistence})
-	provider := installMeetingSpecialistProductionJoin(product, now)
+	provider := installMeetingSpecialistProductionJoin(t, product, now)
 	requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "status-persist-failure", time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -505,7 +497,7 @@ func TestMeetingSpecialistProductRequesterNeutralSittingAuthority(t *testing.T) 
 	product, authority, user := specialistProductFixture(t)
 	defer product.Close("test_cleanup")
 	now := time.Date(2026, 7, 30, 17, 0, 0, 0, time.UTC)
-	provider := installMeetingSpecialistProductionJoin(product, now)
+	provider := installMeetingSpecialistProductionJoin(t, product, now)
 	requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "requester-neutral-owner", time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -562,7 +554,7 @@ func TestMeetingSpecialistProductExpirationIsDurableAndReleasesSeat(t *testing.T
 			Authority: STRIDESnapshotMACAuthority{KeyID: "specialist_expiry_live", Key: []byte("0123456789abcdef0123456789abcdef")}, MinimumGeneration: 1, BootstrapEmpty: true,
 		}
 		product := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: persistence})
-		provider := installMeetingSpecialistProductionJoin(product, now)
+		provider := installMeetingSpecialistProductionJoin(t, product, now)
 		requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "expiry-live", time.Minute)
 		if err != nil {
 			t.Fatal(err)
@@ -724,7 +716,7 @@ func TestMeetingSpecialistProductMemberOnlyScopeAndGuestChurn(t *testing.T) {
 	t.Run("guest churn revokes joined runtime", func(t *testing.T) {
 		product, authority, user := specialistProductFixture(t)
 		now := time.Date(2026, 7, 30, 17, 0, 0, 0, time.UTC)
-		provider := installMeetingSpecialistProductionJoin(product, now)
+		provider := installMeetingSpecialistProductionJoin(t, product, now)
 		requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "guest-churn", time.Minute)
 		if err != nil {
 			t.Fatal(err)
@@ -769,7 +761,7 @@ func TestMeetingSpecialistProductFailClosedRevokesUnrelatedJoinedRuntimeBeforeRe
 		Authority: STRIDESnapshotMACAuthority{KeyID: "specialist_fail_closed", Key: []byte("0123456789abcdef0123456789abcdef")}, MinimumGeneration: 1, BootstrapEmpty: true,
 	}
 	product := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: persistence})
-	provider := installMeetingSpecialistProductionJoin(product, now)
+	provider := installMeetingSpecialistProductionJoin(t, product, now)
 	requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "unrelated-fail-closed", time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -851,7 +843,7 @@ func TestMeetingSpecialistProductReconcilesAutonomousRuntimeTerminal(t *testing.
 		Authority: STRIDESnapshotMACAuthority{KeyID: "specialist_runtime_terminal", Key: []byte("0123456789abcdef0123456789abcdef")}, MinimumGeneration: 1, BootstrapEmpty: true,
 	}
 	product := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: persistence})
-	installMeetingSpecialistProductionJoin(product, now)
+	installMeetingSpecialistProductionJoin(t, product, now)
 	requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "runtime-terminal", time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -874,7 +866,7 @@ func TestMeetingSpecialistProductReconcilesAutonomousRuntimeTerminal(t *testing.
 	product.mu.Lock()
 	record := product.invitations[requested.ID]
 	product.mu.Unlock()
-	if record.Runtime != nil || record.Status != "failed" || meetingSpecialistInvitationIsActive(record) || record.TerminalEvidence == nil || record.TerminalEvidence.TerminalReason != "failed" || record.TerminalEvidence.Cause != "failed" || record.TerminalEvidence.EndedAt.IsZero() || record.TerminalEvidence.TeardownReceiptDigest == "" {
+	if record.Runtime != nil || record.Status != "failed" || meetingSpecialistInvitationIsActive(record) || !isHexDigest(record.QualificationSubjectDigest) || record.TerminalEvidence == nil || record.TerminalEvidence.QualificationSubjectDigest != record.QualificationSubjectDigest || record.TerminalEvidence.TerminalReason != "failed" || record.TerminalEvidence.Cause != "failed" || record.TerminalEvidence.EndedAt.IsZero() || record.TerminalEvidence.TeardownReceiptDigest == "" {
 		t.Fatalf("autonomous runtime terminal was not reconciled: %+v", record)
 	}
 	restore := *persistence
@@ -883,7 +875,7 @@ func TestMeetingSpecialistProductReconcilesAutonomousRuntimeTerminal(t *testing.
 	restarted.mu.Lock()
 	restored, restoreHealth := restarted.invitations[requested.ID], restarted.healthErr
 	restarted.mu.Unlock()
-	if restoreHealth != nil || restored.Status != "failed" || restored.TerminalEvidence == nil || restored.TerminalEvidence.TerminalReason != "failed" || restored.TerminalEvidence.TeardownReceiptDigest != record.TerminalEvidence.TeardownReceiptDigest {
+	if restoreHealth != nil || restored.Status != "failed" || restored.QualificationSubjectDigest != record.QualificationSubjectDigest || restored.TerminalEvidence == nil || restored.TerminalEvidence.QualificationSubjectDigest != restored.QualificationSubjectDigest || restored.TerminalEvidence.TerminalReason != "failed" || restored.TerminalEvidence.TeardownReceiptDigest != record.TerminalEvidence.TeardownReceiptDigest {
 		t.Fatalf("autonomous terminal evidence did not survive restart: record=%+v health=%v", restored, restoreHealth)
 	}
 	if next, err := restarted.Request(context.Background(), user, "dog-perfect", "mary", "Try again", "runtime-terminal-next", time.Minute); err != nil || next.ID == requested.ID {
@@ -901,7 +893,7 @@ func TestMeetingSpecialistProductValidatesTerminalEvidenceBeforeDurableWrite(t *
 			Authority: STRIDESnapshotMACAuthority{KeyID: "specialist_terminal_evidence", Key: []byte("0123456789abcdef0123456789abcdef")}, MinimumGeneration: 1, BootstrapEmpty: true,
 		}
 		product := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: persistence})
-		installMeetingSpecialistProductionJoin(product, now)
+		installMeetingSpecialistProductionJoin(t, product, now)
 		requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "terminal-evidence-valid", time.Minute)
 		if err != nil {
 			t.Fatal(err)
@@ -912,12 +904,12 @@ func TestMeetingSpecialistProductValidatesTerminalEvidenceBeforeDurableWrite(t *
 		product.mu.Lock()
 		runtime := product.invitations[requested.ID].Runtime
 		product.mu.Unlock()
-		evidence := MeetingSpecialistTerminalEvidence{TerminalReason: "failed", Cause: "provider_usage_unreconciled", EndedAt: now.Add(time.Second), TeardownReceiptDigest: strideTestDigest("9"), ProviderReceipt: meetingSpecialistProviderReceiptFixture()}
+		evidence := MeetingSpecialistTerminalEvidence{TerminalReason: "failed", Cause: "provider_usage_unreconciled", EndedAt: now.Add(time.Second), QualificationSubjectDigest: runtime.qualificationSubjectDigest, QualificationResult: cloneMeetingSpecialistQualificationResult(runtime.qualificationResult), TeardownReceiptDigest: strideTestDigest("9"), ProviderReceipt: meetingSpecialistProviderReceiptFixture(runtime.qualificationSubjectDigest)}
 		product.recordRuntimeTerminal(requested.ID, runtime, evidence)
 		product.mu.Lock()
 		record, healthErr := product.invitations[requested.ID], product.healthErr
 		product.mu.Unlock()
-		if healthErr != nil || record.Status != "failed" || record.TerminalEvidence == nil || *record.TerminalEvidence != evidence {
+		if healthErr != nil || record.Status != "failed" || !sameMeetingSpecialistTerminalEvidence(record.TerminalEvidence, &evidence) {
 			t.Fatalf("valid terminal evidence was not recorded: record=%+v health=%v", record, healthErr)
 		}
 		restore := *persistence
@@ -926,14 +918,27 @@ func TestMeetingSpecialistProductValidatesTerminalEvidenceBeforeDurableWrite(t *
 		restarted.mu.Lock()
 		restored, restoreHealth := restarted.invitations[requested.ID], restarted.healthErr
 		restarted.mu.Unlock()
-		if restoreHealth != nil || restored.TerminalEvidence == nil || *restored.TerminalEvidence != evidence {
+		if restoreHealth != nil || !sameMeetingSpecialistTerminalEvidence(restored.TerminalEvidence, &evidence) {
 			t.Fatalf("provider receipt did not survive signed restart: record=%+v health=%v", restored, restoreHealth)
+		}
+		product.mu.Lock()
+		tampered := product.invitations[requested.ID]
+		tampered.QualificationSubjectDigest = strideTestDigest("f")
+		product.invitations[requested.ID] = tampered
+		err = product.persistLocked()
+		product.mu.Unlock()
+		if err != nil {
+			t.Fatal(err)
+		}
+		mismatched := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: &restore})
+		if got := mismatched.Status(context.Background(), user, "dog-perfect"); got.Reason != "state_restore_failed" {
+			t.Fatalf("signed session-to-terminal qualification mismatch survived restore: %+v", got)
 		}
 	})
 
 	t.Run("malformed callback fails closed before presentation", func(t *testing.T) {
 		product, _, user := specialistProductFixture(t)
-		installMeetingSpecialistProductionJoin(product, product.now().UTC())
+		installMeetingSpecialistProductionJoin(t, product, product.now().UTC())
 		requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "terminal-evidence-invalid", time.Minute)
 		if err != nil {
 			t.Fatal(err)
@@ -969,13 +974,13 @@ func TestMeetingSpecialistProductValidatesTerminalEvidenceBeforeDurableWrite(t *
 		if _, err := product.Resolve(context.Background(), user, "dog-perfect", requested.ID, requested.Revision, "approved"); err != nil {
 			t.Fatal(err)
 		}
-		malformed := meetingSpecialistProviderReceiptFixture()
-		malformed.EventCount = -1
 		product.mu.Lock()
 		record := product.invitations[requested.ID]
+		malformed := meetingSpecialistProviderReceiptFixture(record.QualificationSubjectDigest)
+		malformed.EventCount = -1
 		record.Runtime = nil
 		record.Status = "failed"
-		record.TerminalEvidence = &MeetingSpecialistTerminalEvidence{TerminalReason: "failed", Cause: "failed", EndedAt: now, TeardownReceiptDigest: strideTestDigest("a"), ProviderReceipt: malformed}
+		record.TerminalEvidence = &MeetingSpecialistTerminalEvidence{TerminalReason: "failed", Cause: "failed", EndedAt: now, QualificationSubjectDigest: record.QualificationSubjectDigest, TeardownReceiptDigest: strideTestDigest("a"), ProviderReceipt: malformed}
 		product.invitations[requested.ID] = record
 		err = product.persistLocked()
 		product.mu.Unlock()
@@ -991,6 +996,93 @@ func TestMeetingSpecialistProductValidatesTerminalEvidenceBeforeDurableWrite(t *
 	})
 }
 
+func TestMeetingSpecialistProductMigratesSignedV1QualificationEvidenceWithoutTrustingIt(t *testing.T) {
+	_, authority, user := specialistProductFixture(t)
+	now := time.Date(2026, 8, 1, 19, 40, 0, 0, time.UTC)
+	dir := t.TempDir()
+	persistence := &MeetingSpecialistProductPersistence{
+		SnapshotPath: filepath.Join(dir, "specialists.snapshot.json"), GenerationPath: filepath.Join(dir, "specialists.generation.json"),
+		Authority: STRIDESnapshotMACAuthority{KeyID: "specialist_v1_migration", Key: []byte("0123456789abcdef0123456789abcdef")}, MinimumGeneration: 1, BootstrapEmpty: true,
+	}
+	product := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: persistence})
+	installMeetingSpecialistProductionJoin(t, product, now)
+	requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "v1-qualification-migration", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := product.Resolve(context.Background(), user, "dog-perfect", requested.ID, requested.Revision, "approved"); err != nil {
+		t.Fatal(err)
+	}
+	product.mu.Lock()
+	runtime := product.invitations[requested.ID].Runtime
+	product.mu.Unlock()
+	evidence := MeetingSpecialistTerminalEvidence{TerminalReason: "failed", Cause: "provider_usage_unreconciled", EndedAt: now.Add(time.Second), QualificationSubjectDigest: runtime.qualificationSubjectDigest, QualificationResult: cloneMeetingSpecialistQualificationResult(runtime.qualificationResult), TeardownReceiptDigest: strideTestDigest("9"), ProviderReceipt: meetingSpecialistProviderReceiptFixture(runtime.qualificationSubjectDigest)}
+	product.recordRuntimeTerminal(requested.ID, runtime, evidence)
+
+	var snapshot meetingSpecialistSnapshotEnvelope
+	if err := readSTRIDERuntimeJSON(persistence.SnapshotPath, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	snapshot.Payload.Format = 1
+	for index := range snapshot.Payload.Records {
+		record := &snapshot.Payload.Records[index]
+		record.QualificationSubjectDigest = ""
+		record.QualificationResult = nil
+		if record.TerminalEvidence != nil {
+			record.TerminalEvidence.QualificationSubjectDigest = ""
+			record.TerminalEvidence.QualificationResult = nil
+			record.TerminalEvidence.QualificationLegacyUnbound = false
+			record.TerminalEvidence.ProviderReceipt.QualificationSubjectDigest = ""
+		}
+	}
+	snapshot.Digest, err = STRIDEContractDigest(snapshot.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot.Signature, err = strideSnapshotMAC(persistence.Authority, meetingSpecialistProductSnapshotDomain, snapshot.Payload.Generation, snapshot.Digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var generation meetingSpecialistGenerationEnvelope
+	if err := readSTRIDERuntimeJSON(persistence.GenerationPath, &generation); err != nil {
+		t.Fatal(err)
+	}
+	generation.Payload.Format = 1
+	generation.Payload.SnapshotDigest = snapshot.Digest
+	generation.Digest, err = STRIDEContractDigest(generation.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generation.Signature, err = strideSnapshotMAC(persistence.Authority, meetingSpecialistProductGenerationDomain, generation.Payload.Generation, generation.Digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSONFileAtomically(persistence.SnapshotPath, "meeting specialist v1 test snapshot", snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSONFileAtomically(persistence.GenerationPath, "meeting specialist v1 test generation", generation); err != nil {
+		t.Fatal(err)
+	}
+
+	restore := *persistence
+	restore.BootstrapEmpty = false
+	restarted := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: &restore})
+	restarted.mu.Lock()
+	restored, healthErr := restarted.invitations[requested.ID], restarted.healthErr
+	restarted.mu.Unlock()
+	if healthErr != nil || restored.Status != "failed" || restored.QualificationResult != nil || restored.QualificationSubjectDigest != "" || restored.TerminalEvidence == nil || !restored.TerminalEvidence.QualificationLegacyUnbound || restored.TerminalEvidence.ProviderReceipt.QualificationSubjectDigest != "" {
+		t.Fatalf("v1 evidence was not preserved as explicitly unbound history: record=%+v health=%v", restored, healthErr)
+	}
+	var upgraded meetingSpecialistSnapshotEnvelope
+	if err := readSTRIDERuntimeJSON(persistence.SnapshotPath, &upgraded); err != nil || upgraded.Payload.Format != meetingSpecialistProductSnapshotFormat {
+		t.Fatalf("v1 snapshot was not durably upgraded: format=%d err=%v", upgraded.Payload.Format, err)
+	}
+	second := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: &restore})
+	if got := second.Status(context.Background(), user, "dog-perfect"); got.Reason == "state_restore_failed" {
+		t.Fatalf("upgraded unbound history failed second restart: %+v", got)
+	}
+}
+
 func TestMeetingSpecialistProductClosePersistsTerminalEvidenceWhileDisabled(t *testing.T) {
 	_, authority, user := specialistProductFixture(t)
 	now := time.Date(2026, 8, 1, 19, 45, 0, 0, time.UTC)
@@ -1000,7 +1092,7 @@ func TestMeetingSpecialistProductClosePersistsTerminalEvidenceWhileDisabled(t *t
 		Authority: STRIDESnapshotMACAuthority{KeyID: "specialist_close_terminal", Key: []byte("0123456789abcdef0123456789abcdef")}, MinimumGeneration: 1, BootstrapEmpty: true,
 	}
 	product := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: persistence})
-	provider := installMeetingSpecialistProductionJoin(product, now)
+	provider := installMeetingSpecialistProductionJoin(t, product, now)
 	requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "close-terminal-evidence", time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -1043,7 +1135,7 @@ func TestMeetingSpecialistProductControlExpiryPersistsClosedLedgerWithoutRestore
 		Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: persistence,
 		ControlCurrent: func() bool { return current.Load() }, ControlCheckInterval: time.Millisecond,
 	})
-	provider := installMeetingSpecialistProductionJoin(product, now)
+	provider := installMeetingSpecialistProductionJoin(t, product, now)
 	requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "persisted-control-expiry", time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -1649,9 +1741,9 @@ func TestMeetingSpecialistHTTPFakeSessionJoinAndFailureStayIsolated(t *testing.T
 			provider := &fakeMeetingSpecialistProvider{}
 			joinShouldFail := scenario.fail
 			var factoryCalls atomic.Int64
-			joiner, _ := productionJoinFixture(now, provider, &factoryCalls)
-			providerFactory := joiner.providerFactory
-			joiner.providerFactory = func(ctx context.Context, launch MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
+			joiner, _ := productionJoinFixture(t, now, provider, &factoryCalls)
+			providerFactory := joiner.qualifiedProvider.create
+			joiner.qualifiedProvider.create = func(ctx context.Context, launch MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
 				if joinShouldFail {
 					return nil, errors.New("deterministic provider failure")
 				}
@@ -1763,9 +1855,9 @@ func TestMeetingSpecialistProductPersistsApprovalBeforeLaunchAndFencesPersistenc
 			joinCalls := 0
 			product := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: productAuthority, Persistence: persistence})
 			var fixtureFactoryCalls atomic.Int64
-			joiner, _ := productionJoinFixture(now, provider, &fixtureFactoryCalls)
-			providerFactory := joiner.providerFactory
-			joiner.providerFactory = func(ctx context.Context, launch MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
+			joiner, _ := productionJoinFixture(t, now, provider, &fixtureFactoryCalls)
+			providerFactory := joiner.qualifiedProvider.create
+			joiner.qualifiedProvider.create = func(ctx context.Context, launch MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
 				joinCalls++
 				var durable meetingSpecialistSnapshotEnvelope
 				if err := readSTRIDERuntimeJSON(persistence.SnapshotPath, &durable); err != nil {
