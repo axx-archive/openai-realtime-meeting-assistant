@@ -546,24 +546,94 @@ wait_for_canonical_parity() {
   canonical_parity "$output"
 }
 
+assert_release_source_archive_binding() {
+  local dir=$1 archive source_receipt release_receipt archive_hash source_receipt_hash
+  archive="$dir/source.tar"
+  source_receipt="$dir/source-receipt.json"
+  release_receipt="$dir/release-receipt.json"
+  for file in "$archive" "$source_receipt" "$release_receipt"; do
+    test -f "$file" && test ! -L "$file" || die "release archive binding input is missing or unsafe: $file"
+  done
+  archive_hash=$(sha256sum "$archive" | awk '{print $1}')
+  source_receipt_hash=$(sha256sum "$source_receipt" | awk '{print $1}')
+  require_sha256 "$archive_hash"
+  require_sha256 "$source_receipt_hash"
+  jq -e --arg archive_hash "$archive_hash" '
+    .schema=="bonfire.release-source.v3" and
+    .sourceArchiveSha256==$archive_hash
+  ' "$source_receipt" >/dev/null || die 'source archive differs from its reviewed source receipt'
+  jq -e --arg source_receipt_hash "$source_receipt_hash" --arg archive_hash "$archive_hash" \
+    --slurpfile source "$source_receipt" '
+      .schema=="bonfire.release-receipt.v3" and
+      .sourceReceiptSha256==$source_receipt_hash and
+      .source==$source[0] and
+      .buildManifest.source==$source[0] and
+      .source.sourceArchiveSha256==$archive_hash
+    ' "$release_receipt" >/dev/null || die 'release receipt does not bind the exact source receipt and archive'
+}
+
+migration_archive_hashes() {
+  local archive=$1 entry verbose path version_name version digest
+  local expected=(
+    migrations/
+    migrations/0001_canonical.sql
+    migrations/0002_approval_repository.sql
+    migrations/0003_purge_ledger.sql
+    migrations/0004_brain_projection_checkpoints.sql
+    migrations/0005_purge_ledger_object_type.sql
+    migrations/0006_brain_projection_work.sql
+    migrations/0007_catch_up_publications.sql
+    migrations/0008_stride_contracts.sql
+    migrations/0009_stride_conversation_ledger.sql
+  )
+  local actual=()
+  tar -tf "$archive" >/dev/null || die 'source archive cannot be listed safely'
+  while IFS= read -r entry; do
+    case "$entry" in
+      /*|./*|../*|*/../*|*/..|*/./*) die "source archive contains unsafe path: $entry" ;;
+    esac
+    if [[ $entry == migrations/* ]]; then actual+=("$entry"); fi
+  done < <(tar -tf "$archive")
+  test "${#actual[@]}" -eq "${#expected[@]}" \
+    || die 'source archive migration inventory count is not exact'
+  cmp <(printf '%s\n' "${expected[@]}" | LC_ALL=C sort) \
+      <(printf '%s\n' "${actual[@]}" | LC_ALL=C sort) \
+    || die 'source archive migration inventory is missing, duplicated, or extra'
+  verbose=$(tar -tvf "$archive" | grep -E ' migrations/$' || true)
+  test "$(printf '%s\n' "$verbose" | sed '/^$/d' | wc -l)" -eq 1 && [[ $verbose == d* ]] \
+    || die 'source archive migrations root is not one exact directory entry'
+  for path in "${expected[@]:1}"; do
+    verbose=$(tar -tvf "$archive" -- "$path")
+    test "$(printf '%s\n' "$verbose" | sed '/^$/d' | wc -l)" -eq 1 && [[ $verbose == -* ]] \
+      || die "source archive migration is not one regular entry: $path"
+    version_name=${path##*/}
+    version=${version_name%%_*}
+    version=$((10#$version))
+    digest=$(tar -xOf "$archive" -- "$path" | sha256sum | awk '{print $1}')
+    require_sha256 "$digest"
+    printf '%s\t%s\n' "$version" "$digest"
+  done
+}
+
+assert_migration_hash_rows() {
+  local archive=$1 database_rows=$2
+  cmp <(migration_archive_hashes "$archive") "$database_rows" \
+    || die 'database migration hashes differ from the exact source archive bytes'
+}
+
 release_data_gate() {
-  local dir=$1 label=$2 pgc versions file name version file_hash db_hash after
+  local dir=$1 label=$2 pgc versions after database_rows
+  assert_release_source_archive_binding "$dir"
   pgc=$(project_service_id canonical-postgres)
   test -n "$pgc" || return 1
   versions=$(docker exec "$pgc" psql -XqAt -U bonfire -d bonfire \
     -c "select string_agg(version::text, ',' order by version) from schema_migrations")
   test "$versions" = '1,2,3,4,5,6,7,8,9' || return 1
-  shopt -s nullglob
-  local files=("$dir"/sealed-candidate/migrations/*.sql)
-  test "${#files[@]}" -eq 9 || return 1
-  for file in "${files[@]}"; do
-    name=$(basename "$file")
-    version=$((10#${name%%_*}))
-    file_hash=$(sha256sum "$file" | awk '{print $1}')
-    db_hash=$(docker exec "$pgc" psql -XqAt -U bonfire -d bonfire \
-      -c "select encode(sha256,'hex') from schema_migrations where version=$version")
-    test "$db_hash" = "$file_hash" || return 1
-  done
+  database_rows="$BK/database-migration-hashes-$label.tsv"
+  docker exec "$pgc" psql -XqAt -F $'\t' -v ON_ERROR_STOP=1 -U bonfire -d bonfire \
+    -c "select version,encode(sha256,'hex') from schema_migrations order by version" >"$database_rows"
+  test "$(wc -l <"$database_rows")" -eq 9 || return 1
+  assert_migration_hash_rows "$dir/source.tar" "$database_rows"
   after="$BK/table-counts-after-$label.tsv"
   pg_counts "$pgc" >"$after"
   awk -F '\t' '

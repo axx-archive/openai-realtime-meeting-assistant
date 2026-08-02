@@ -54,7 +54,11 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 20s
+      # The first exact start applies migrations and rebuilds canonical state
+      # before binding HTTP. Keep Docker in "starting" for the same bounded
+      # five-minute window used by the release bootstrap instead of declaring
+      # the healthy process terminally unhealthy during that one-time work.
+      start_period: 300s
     mem_limit: 1024m
     # Rides both networks: the egress-less render_internal leg exists ONLY so
     # the render sidecar can POST its callback here.

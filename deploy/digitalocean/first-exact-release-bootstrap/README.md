@@ -237,7 +237,11 @@ health bound, and no orphan shortcut. It accepts A only when:
 - its verifier's sole error is the terminal missing-ledger error;
 - services, networks, volumes, render initializer, and absence of codex-runner
   are exact;
-- migrations 1-9 match the candidate files byte-for-byte;
+- `source.tar` is SHA-256-bound to its reviewed source receipt and the release
+  receipt binds that exact source receipt; the archive contains exactly regular
+  migration files 0001-0009 and no extra migration entry; and each database
+  migration hash matches bytes streamed directly from the archive without
+  extraction (the config-only `sealed-candidate` is intentionally not used);
 - no preexisting table disappeared or lost rows;
 - canonical parity becomes completely healthy within ten minutes.
 
@@ -247,6 +251,14 @@ cold rollback command:
 ```bash
 ./vps-rollback-legacy.sh restore
 ```
+
+The Compose wait timeout is not itself a health-start grace period. The
+candidate `meetingassist` healthcheck must also carry the reviewed 300-second
+`start_period`; otherwise its current 20-second start period plus three
+30-second retries can mark a healthy-but-still-migrating first start terminally
+unhealthy before this operator wait expires. That Compose value and the retained
+release tool's exact topology validator must agree before preparing A/B; the
+operator pack never patches a sealed candidate on the VPS.
 
 After A passes:
 

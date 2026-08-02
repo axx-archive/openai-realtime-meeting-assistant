@@ -88,6 +88,12 @@ for (const phase of ['phase_init_build', 'phase_preflight', 'phase_isolate', 'ph
 assert.match(common, /assert_no_renderer_profile_container_users[\s\S]*if test "\$apparmor_exists" = false && test "\$seccomp_exists" = false[\s\S]*if test "\$apparmor_exists" = true && test "\$seccomp_exists" = true[\s\S]*elif test -f "\$cleanup_started" && test -z "\$loaded_lines"/, 'renderer cleanup must reject users and support absent, exact-full, and owned interrupted states')
 assert.match(common, /apparmor_parser -R "\$RENDERER_APPARMOR_PATH"[\s\S]*mark_phase renderer-profiles-remove-started[\s\S]*rm -f "\$RENDERER_APPARMOR_PATH" "\$RENDERER_SECCOMP_PATH"[\s\S]*mark_phase renderer-profiles-removed/, 'renderer cleanup state transitions must be interruption-resumable')
 assert.match(rollback, /restart_untouched_legacy\(\)[\s\S]*remove_renderer_security_profiles[\s\S]*docker start "\$pgc"/, 'untouched rollback must remove profiles before restarting legacy')
+assert.match(common, /assert_release_source_archive_binding "\$dir"/, 'release data gate must bind source.tar to both exact receipts')
+assert.match(common, /migrations\/0001_canonical\.sql[\s\S]*migrations\/0009_stride_conversation_ledger\.sql[\s\S]*tar -tf "\$archive"/, 'migration gate must enumerate the exact 0001 through 0009 archive inventory')
+assert.match(common, /tar -tvf "\$archive" -- "\$path"[\s\S]*\[\[ \$verbose == -\* \]\]/, 'migration gate must require each migration member to be regular')
+assert.match(common, /tar -xOf "\$archive" -- "\$path" \| sha256sum/, 'migration hashes must stream archive bytes without extraction')
+assert.equal(/sealed-candidate\/migrations/.test(common), false, 'migration verification must not read the config-only sealed candidate')
+assert.match(common, /select version,encode\(sha256,'hex'\) from schema_migrations order by version[\s\S]*assert_migration_hash_rows "\$dir\/source\.tar"/, 'database hashes must be compared to exact source archive bytes')
 
 for (const expected of [
   "bonfire-release: Command failed: docker volume inspect digitalocean_render_queue",

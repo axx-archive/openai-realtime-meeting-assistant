@@ -49,6 +49,58 @@ done
   printf '%s' '{"ok":true,"files":[],"folders":[]}' | validate_authenticated_smoke_payload assistant/files
   ! printf '%s' '{}' | validate_authenticated_smoke_payload assistant/files
 
+  migration_fixture=$(mktemp -d)
+  mkdir -p "$migration_fixture/root/migrations" "$migration_fixture/release"
+  migration_names=(
+    0001_canonical.sql
+    0002_approval_repository.sql
+    0003_purge_ledger.sql
+    0004_brain_projection_checkpoints.sql
+    0005_purge_ledger_object_type.sql
+    0006_brain_projection_work.sql
+    0007_catch_up_publications.sql
+    0008_stride_contracts.sql
+    0009_stride_conversation_ledger.sql
+  )
+  for migration in "${migration_names[@]}"; do
+    printf '%s\n' "exact-$migration" >"$migration_fixture/root/migrations/$migration"
+  done
+  tar -cf "$migration_fixture/release/source.tar" -C "$migration_fixture/root" migrations
+  test ! -e "$migration_fixture/release/sealed-candidate"
+  migration_archive_hashes "$migration_fixture/release/source.tar" >"$migration_fixture/exact.tsv"
+  test "$(wc -l <"$migration_fixture/exact.tsv")" -eq 9
+  assert_migration_hash_rows "$migration_fixture/release/source.tar" "$migration_fixture/exact.tsv"
+  cp "$migration_fixture/exact.tsv" "$migration_fixture/wrong.tsv"
+  awk -F '\t' 'BEGIN{OFS="\t"} NR==9{$2="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"} {print}' \
+    "$migration_fixture/exact.tsv" >"$migration_fixture/wrong.tsv"
+  ! (assert_migration_hash_rows "$migration_fixture/release/source.tar" "$migration_fixture/wrong.tsv") >/dev/null 2>&1
+
+  rm "$migration_fixture/root/migrations/0009_stride_conversation_ledger.sql"
+  tar -cf "$migration_fixture/missing.tar" -C "$migration_fixture/root" migrations
+  ! (migration_archive_hashes "$migration_fixture/missing.tar") >/dev/null 2>&1
+  printf '%s\n' exact-0009_stride_conversation_ledger.sql >"$migration_fixture/root/migrations/0009_stride_conversation_ledger.sql"
+  printf '%s\n' exact-extra >"$migration_fixture/root/migrations/0010_extra.sql"
+  tar -cf "$migration_fixture/extra.tar" -C "$migration_fixture/root" migrations
+  ! (migration_archive_hashes "$migration_fixture/extra.tar") >/dev/null 2>&1
+  rm "$migration_fixture/root/migrations/0010_extra.sql"
+  rm "$migration_fixture/root/migrations/0009_stride_conversation_ledger.sql"
+  ln -s 0008_stride_contracts.sql "$migration_fixture/root/migrations/0009_stride_conversation_ledger.sql"
+  tar -cf "$migration_fixture/symlink.tar" -C "$migration_fixture/root" migrations
+  ! (migration_archive_hashes "$migration_fixture/symlink.tar") >/dev/null 2>&1
+
+  archive_hash=$(sha256sum "$migration_fixture/release/source.tar" | awk '{print $1}')
+  jq -n --arg hash "$archive_hash" \
+    '{schema:"bonfire.release-source.v3",releaseCommit:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",sourceArchiveSha256:$hash}' \
+    >"$migration_fixture/release/source-receipt.json"
+  source_receipt_hash=$(sha256sum "$migration_fixture/release/source-receipt.json" | awk '{print $1}')
+  jq -n --arg source_hash "$source_receipt_hash" --slurpfile source "$migration_fixture/release/source-receipt.json" \
+    '{schema:"bonfire.release-receipt.v3",sourceReceiptSha256:$source_hash,source:$source[0],buildManifest:{source:$source[0]}}' \
+    >"$migration_fixture/release/release-receipt.json"
+  assert_release_source_archive_binding "$migration_fixture/release"
+  printf '%s\n' tampered >>"$migration_fixture/release/source.tar"
+  ! (assert_release_source_archive_binding "$migration_fixture/release") 2>/dev/null
+  rm -rf "$migration_fixture"
+
   backup_fixture=$(mktemp -d)
   trap 'rm -rf "$backup_fixture"' EXIT
   mkdir "$backup_fixture/meta"
