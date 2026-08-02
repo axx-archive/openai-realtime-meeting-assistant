@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -320,8 +321,8 @@ func TestMeetingDigestWorkerBadJSONKeepsPriorDigest(t *testing.T) {
 	}
 
 	appendDigestTestBrain(t, app, "brain-2", "m1", "## Overview\nBudget agreed.", nil)
-	if _, err := app.runAmbientAgentOnce(agent, context.Background(), "test-key", responder, 1); err != nil {
-		t.Fatalf("bad-JSON pass must not error: %v", err)
+	if _, err := app.runAmbientAgentOnce(agent, context.Background(), "test-key", responder, 1); !isAmbientAgentHoldError(err) {
+		t.Fatalf("bad-JSON pass error=%v, want a cursor-holding rejection", err)
 	}
 	if len(app.memory.entriesOfKind(meetingMemoryKindMeetingDigest, 0)) != 1 {
 		t.Fatalf("bad JSON must not write a digest generation")
@@ -343,7 +344,7 @@ func TestMeetingDigestWorkerBadJSONKeepsPriorDigest(t *testing.T) {
 	}
 }
 
-func TestMeetingDigestWorkerIdenticalPoisonCircuitSuppressesThenRecovers(t *testing.T) {
+func TestMeetingDigestWorkerIdenticalRejectedOutputOpensBoundedCircuit(t *testing.T) {
 	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
 	meetingDigestPoisonCircuit.Lock()
 	oldCircuit := meetingDigestPoisonCircuit.entries
@@ -372,36 +373,42 @@ func TestMeetingDigestWorkerIdenticalPoisonCircuitSuppressesThenRecovers(t *test
 		} else if request.Input != firstInput {
 			t.Fatalf("retry changed raw poison input; cursor window must be preserved\nfirst=%s\nnext=%s", firstInput, request.Input)
 		}
-		if calls <= meetingDigestPoisonFailureThreshold {
-			return "not json", nil
-		}
-		return `{"meetingId":"x","title":"Recovered","day":"","started":"","ended":"","attendees":[],"topics":[{"t":"preserved fact","anchor":"","at":"","importance":3}],"decisions":[],"actionItems":[],"openQuestions":[],"themes":[],"aliases":[]}`, nil
+		return "not json", nil
 	}
 
 	agent := meetingDigestAgent()
-	// Two poison outputs open the circuit. Three scheduled passes are then
-	// suppressed without wire calls, and the following pass is a recovery probe.
-	passes := meetingDigestPoisonFailureThreshold + meetingDigestPoisonSuppressionPasses + 1
-	for pass := 0; pass < passes; pass++ {
-		if _, err := app.runAmbientAgentOnce(agent, context.Background(), "test-key", responder, 1); err != nil {
-			t.Fatalf("pass %d: %v", pass+1, err)
+	key := ambientAgentKey(agent.name, officeRoomID)
+	for pass := 0; pass < ambientProviderMaxWindowAttempts; pass++ {
+		if _, err := app.invokeAmbientAgentGuarded(agent, context.Background(), "test-key", responder, 1, officeRoomID); !isAmbientAgentHoldError(err) {
+			t.Fatalf("pass %d error=%v, want cursor-holding rejection", pass+1, err)
 		}
+		expireAmbientAgentBackoffForTest(app, key)
 	}
-	if calls != meetingDigestPoisonFailureThreshold+1 {
-		t.Fatalf("wire calls=%d, want two failures plus one recovery probe", calls)
+	if calls != meetingDigestPoisonFailureThreshold {
+		t.Fatalf("wire calls=%d, want %d before identical-output suppression", calls, meetingDigestPoisonFailureThreshold)
 	}
-	digest := app.memory.latestDigestPerMeeting()["meeting-poison-circuit"]
-	if digest.ID == "" || digest.Metadata[meetingDigestCursorMetadataKey] != "brain-poison-circuit" {
-		t.Fatalf("recovery did not advance the preserved cursor exactly once: %+v", digest)
+	app.mu.Lock()
+	failure := app.agentFailures[key]
+	app.mu.Unlock()
+	if failure == nil || !failure.providerOpen || failure.attempts != ambientProviderMaxWindowAttempts {
+		t.Fatalf("digest circuit=%+v, want open after %d rejected passes", failure, ambientProviderMaxWindowAttempts)
 	}
-	if generations := app.memory.entriesOfKind(meetingMemoryKindMeetingDigest, 0); len(generations) != 1 {
-		t.Fatalf("digest generations=%d, want one accepted generation", len(generations))
+	if generations := app.memory.entriesOfKind(meetingMemoryKindMeetingDigest, 0); len(generations) != 0 {
+		t.Fatalf("digest generations=%d, want none from rejected output", len(generations))
 	}
-	if _, err := app.runAmbientAgentOnce(agent, context.Background(), "test-key", responder, 1); err != nil {
-		t.Fatalf("post-recovery cursor pass: %v", err)
+	if baseline := app.ambientAgentBaselineID(key); baseline == "brain-poison-circuit" {
+		t.Fatalf("rejected output advanced the raw cursor to %q", baseline)
 	}
-	if calls != meetingDigestPoisonFailureThreshold+1 {
-		t.Fatalf("accepted cursor did not silence later passes; calls=%d", calls)
+	_, err := app.invokeAmbientAgentGuarded(agent, context.Background(), "test-key", responder, 1, officeRoomID)
+	var circuitErr *ambientAgentCircuitOpenError
+	if !errors.As(err, &circuitErr) || !circuitErr.RestartRequired {
+		t.Fatalf("suppressed pass error=%v, want restart-required circuit", err)
+	}
+	if calls != meetingDigestPoisonFailureThreshold {
+		t.Fatalf("open circuit made an extra wire call; calls=%d", calls)
+	}
+	if deadLetters := app.memory.entriesOfKind(meetingMemoryKindDeadLetter, 0); len(deadLetters) != 0 {
+		t.Fatalf("rejected output created dead letters: %+v", deadLetters)
 	}
 }
 
@@ -426,8 +433,14 @@ func TestMeetingDigestProviderOutageNeverDeadLettersOrAdvances(t *testing.T) {
 		}
 		app.mu.Unlock()
 	}
-	if calls != ambientAgentMaxWindowAttempts+2 {
-		t.Fatalf("provider calls=%d, want repeated capped probes", calls)
+	if calls != ambientProviderMaxWindowAttempts {
+		t.Fatalf("provider calls=%d, want %d bounded probes", calls, ambientProviderMaxWindowAttempts)
+	}
+	app.mu.Lock()
+	failure := app.agentFailures[ambientAgentKey(agent.name, officeRoomID)]
+	app.mu.Unlock()
+	if failure == nil || !failure.providerOpen || failure.attempts != ambientProviderMaxWindowAttempts {
+		t.Fatalf("provider circuit=%+v, want bounded open circuit", failure)
 	}
 	if baseline := app.ambientAgentBaselineID(ambientAgentKey(agent.name, officeRoomID)); baseline == "brain-provider-outage" {
 		t.Fatalf("provider outage advanced baseline to failed input %q", baseline)

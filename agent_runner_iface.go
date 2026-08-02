@@ -155,9 +155,9 @@ func agentJobOrigin(meta map[string]string) map[string]string {
 // back-compat aliases and the keyless fallback. It is a pure function (no app)
 // so the selection matrix is testable without a live board.
 //
-// Default: anthropic_fable when ANTHROPIC_API_KEY is set, else today's worker
-// behavior (openai_text or codex_* per BONFIRE_AGENT_THREAD_WORKER /
-// BONFIRE_CODEX_AGENT_THREADS). Deploys without the key are unchanged.
+// Default: anthropic_fable when ANTHROPIC_API_KEY is set, else the bounded
+// text worker. Legacy Codex env aliases resolve to the stub while E9 keeps the
+// production admission gate compile-time closed.
 func selectedAgentRunnerName() string {
 	explicit := strings.ToLower(strings.TrimSpace(os.Getenv("BONFIRE_AGENT_RUNNER")))
 	switch explicit {
@@ -174,8 +174,14 @@ func selectedAgentRunnerName() string {
 		// degrade to today's worker so the shell stays up.
 		return legacyWorkerRunnerName()
 	case agentRunnerCodexSidecar, "codex", "codex_exec", "sidecar":
+		if !codexExecutionEnabled() {
+			return agentRunnerStub
+		}
 		return agentRunnerCodexSidecar
 	case agentRunnerCodexLocal, "local", "local_exec":
+		if !codexExecutionEnabled() {
+			return agentRunnerStub
+		}
 		return agentRunnerCodexLocal
 	case agentRunnerOpenAIText, "openai", "responses", "text":
 		return agentRunnerOpenAIText
@@ -186,12 +192,14 @@ func selectedAgentRunnerName() string {
 	}
 }
 
-// legacyWorkerRunnerName maps the pre-existing worker envs onto runner names so
-// BONFIRE_AGENT_THREAD_WORKER=codex_exec and BONFIRE_CODEX_AGENT_THREADS keep
-// working without a deploy config change.
+// legacyWorkerRunnerName maps pre-existing worker envs without letting stale
+// Codex settings reactivate the retired executor.
 func legacyWorkerRunnerName() string {
 	switch configuredAgentThreadWorkerMode() {
 	case agentThreadWorkerCodexExec:
+		if !codexExecutionEnabled() {
+			return agentRunnerStub
+		}
 		if configuredCodexRunnerMode() == codexRunnerModeLocalExec {
 			return agentRunnerCodexLocal
 		}
@@ -202,19 +210,28 @@ func legacyWorkerRunnerName() string {
 }
 
 // selectedExecutionRunnerName resolves the execution backend for can-shell /
-// can-edit sub-jobs (Wave 2 wires it to /goal children). Default codex_sidecar,
-// where the sandbox + authority ladder already live.
+// can-edit sub-jobs. Codex selections default to the unavailable stub until a
+// new externally isolated adapter replaces the retired shared runner.
 func selectedExecutionRunnerName() string {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("BONFIRE_EXECUTION_RUNNER"))) {
 	case agentRunnerCodexLocal, "local", "local_exec":
+		if !codexExecutionEnabled() {
+			return agentRunnerStub
+		}
 		return agentRunnerCodexLocal
 	case agentRunnerAnthropicFable, "anthropic", "fable":
 		return agentRunnerAnthropicFable
 	case "none":
 		return agentRunnerStub
 	case "", agentRunnerCodexSidecar, "codex", "sidecar":
+		if !codexExecutionEnabled() {
+			return agentRunnerStub
+		}
 		return agentRunnerCodexSidecar
 	default:
+		if !codexExecutionEnabled() {
+			return agentRunnerStub
+		}
 		return agentRunnerCodexSidecar
 	}
 }
@@ -231,6 +248,7 @@ func (app *kanbanBoardApp) selectAgentRunner(job AgentJob, responder openAITextR
 	if override := resolveAssignedRunnerName(job.thread.Artifact.Metadata["assignedRunner"]); override != "" {
 		name = override
 	}
+	name = admittedAgentRunnerName(name)
 	switch name {
 	case agentRunnerAnthropicFable:
 		return newAnthropicFableRunner(app)
@@ -245,6 +263,16 @@ func (app *kanbanBoardApp) selectAgentRunner(job AgentJob, responder openAITextR
 	}
 }
 
+// admittedAgentRunnerName is the final runner-selection choke point. Legacy
+// env aliases and persisted assignedRunner metadata cannot bypass the E9
+// compile-time closure even if an earlier resolver regresses.
+func admittedAgentRunnerName(name string) string {
+	if (name == agentRunnerCodexSidecar || name == agentRunnerCodexLocal) && !codexExecutionEnabled() {
+		return agentRunnerStub
+	}
+	return name
+}
+
 // resolveAssignedRunnerName validates a per-subtask runner override against the
 // known runner names; an unknown/empty value returns "" so the env-selected
 // default stands. The anthropic path still degrades keyless (an anthropic
@@ -257,8 +285,14 @@ func resolveAssignedRunnerName(value string) string {
 		}
 		return legacyWorkerRunnerName()
 	case agentRunnerCodexSidecar:
+		if !codexExecutionEnabled() {
+			return agentRunnerStub
+		}
 		return agentRunnerCodexSidecar
 	case agentRunnerCodexLocal:
+		if !codexExecutionEnabled() {
+			return agentRunnerStub
+		}
 		return agentRunnerCodexLocal
 	case agentRunnerOpenAIText:
 		return agentRunnerOpenAIText

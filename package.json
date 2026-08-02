@@ -14,7 +14,6 @@
     "test:brand": "node --test scripts/stride-signal-consistency.test.mjs"
   },
   "devDependencies": {
-    "playwright": "1.61.1",
-    "sharp": "0.34.5"
+    "playwright": "1.61.1"
   }
 }

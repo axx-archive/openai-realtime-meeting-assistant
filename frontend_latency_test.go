@@ -592,7 +592,7 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		".tool-rail__avatar[hidden]",
 		"display: none !important;",
 		"const agentToolIds = ['research', 'design', 'grill']",
-		"const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory', 'files']",
+		"const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory', 'files', 'team']",
 		`<span class="tool-rail__slot" hidden>
           <button class="tool-rail__tool" type="button" data-tool="research" aria-label="Research" aria-pressed="false">`,
 		`<span class="tool-rail__slot" hidden>
@@ -2255,6 +2255,65 @@ func TestRealtimeWaveformLaunchersUsePrivateVoiceIslandOutsideRoom(t *testing.T)
 	}
 }
 
+func TestPrivateRealtimeTerminalErrorsFenceAndCloseTransportBeforeErrorUI(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	html := string(rawHTML)
+
+	for _, want := range []string{
+		"terminatePrivateRealtimeVoiceSession(sessionToken, peer, 'voice connection interrupted')",
+		"terminatePrivateRealtimeVoiceSession(sessionToken, peer, 'voice needs attention')",
+		"terminatePrivateRealtimeVoiceSession(sessionToken, peer, 'voice connection ended')",
+		"sessionToken === privateRealtimeVoiceSessionToken && privateRealtimeVoiceDataChannel === dataChannel",
+		"privateRealtimeVoiceDataChannel.onopen = null",
+		"privateRealtimeVoiceDataChannel.onmessage = null",
+		"privateRealtimeVoiceDataChannel.onerror = null",
+		"privateRealtimeVoiceDataChannel.onclose = null",
+		"if (sessionToken !== privateRealtimeVoiceSessionToken) return",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("private Realtime terminal cleanup missing %q", want)
+		}
+	}
+
+	terminal := functionBody(html, "function terminatePrivateRealtimeVoiceSession(sessionToken, peer, message)")
+	if terminal == "" {
+		t.Fatal("private Realtime terminal cleanup helper is missing")
+	}
+	for _, want := range []string{
+		"sessionToken !== privateRealtimeVoiceSessionToken",
+		"privateRealtimeVoicePeer !== peer",
+		"!privateRealtimeVoiceActive()",
+		"closePrivateRealtimeVoiceSession()",
+		"setRealtimeVoiceMode('idle')",
+		"setVoiceIslandState('error'",
+	} {
+		if !strings.Contains(terminal, want) {
+			t.Fatalf("terminal cleanup helper missing %q", want)
+		}
+	}
+	closeIndex := strings.Index(terminal, "closePrivateRealtimeVoiceSession()")
+	errorIndex := strings.Index(terminal, "setVoiceIslandState('error'")
+	if closeIndex < 0 || errorIndex < 0 || closeIndex > errorIndex {
+		t.Fatal("private Realtime must close its peer, channel, processor, and microphone before rendering terminal error UI")
+	}
+
+	closeBody := functionBody(html, "function closePrivateRealtimeVoiceSession()")
+	for _, want := range []string{
+		"privateRealtimeVoiceSessionToken += 1",
+		"privateRealtimeVoiceDataChannel.close()",
+		"privateRealtimeVoicePeer.close()",
+		"privateRealtimeVoiceStream.getTracks().forEach(track => track.stop())",
+		"cleanupAudioProcessor(privateRealtimeVoiceProcessor, { stopOutput: true, stopSource: true })",
+	} {
+		if !strings.Contains(closeBody, want) {
+			t.Fatalf("private Realtime close path missing %q", want)
+		}
+	}
+}
+
 // Frontend wiring guard for the wave-4 audit fixes: mobile composer
 // clearance, channel scope filtering without preview bleed, inline channel
 // creation, notification dismissal, mobile meeting bar, room chat sheet
@@ -2310,8 +2369,6 @@ func TestIndexAuditFixWiring(t *testing.T) {
 	}
 
 	for _, unwanted := range []string{
-		// channel names come from the inline glass row now
-		"window.prompt(",
 		// the static always-on pill is gone from the login card
 		`<span class="pill">not connected</span>`,
 		// button label writes go through the span-aware helper
@@ -2320,6 +2377,23 @@ func TestIndexAuditFixWiring(t *testing.T) {
 		if strings.Contains(html, unwanted) {
 			t.Fatalf("index.html still contains retired audit-fix marker %q", unwanted)
 		}
+	}
+
+	// Channel names come from the inline glass row, not a browser prompt. Other
+	// bounded product surfaces may use their own confirmation UI independently,
+	// so keep this guard scoped to the channel-creation interaction it protects.
+	channelCreateStart := strings.Index(html, "chatNewChannel?.addEventListener('click'")
+	channelCreateEnd := -1
+	if channelCreateStart >= 0 {
+		if relativeEnd := strings.Index(html[channelCreateStart:], "chatDefaultThread?.addEventListener('click'"); relativeEnd >= 0 {
+			channelCreateEnd = channelCreateStart + relativeEnd
+		}
+	}
+	if channelCreateStart < 0 || channelCreateEnd < 0 {
+		t.Fatal("cannot scope inline channel-creation interaction")
+	}
+	if strings.Contains(html[channelCreateStart:channelCreateEnd], "window.prompt(") {
+		t.Fatal("channel creation must remain in the inline glass row, not a browser prompt")
 	}
 
 	// card 070: no scope toggle — both audiences render at once into their own
@@ -2426,7 +2500,7 @@ func TestIndexWakePulseGrillLabelAndChannelDeepLinkWiring(t *testing.T) {
 
 	// nothing may loop under reduced motion: both wake selectors are covered
 	reduced := html[strings.LastIndex(html, "@media (prefers-reduced-motion: reduce)"):]
-	for _, want := range []string{".topbar__mark.is-wake img", ".voice-island.is-wake .bf-wave-bar"} {
+	for _, want := range []string{".topbar__mark.is-wake .topbar__wordmark", ".voice-island.is-wake .bf-wave-bar"} {
 		if !strings.Contains(reduced, want) {
 			t.Fatalf("reduced-motion block missing wake pulse coverage %q", want)
 		}
@@ -2546,7 +2620,7 @@ func TestIndexStrideRenameAndAgentToken(t *testing.T) {
 	for _, key := range []string{
 		`<main id="appShell" data-tool="office">`,
 		`data-tool="office"`,
-		"const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory', 'files']",
+		"const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory', 'files', 'team']",
 	} {
 		if !strings.Contains(html, key) {
 			t.Fatalf("index.html dropped the load-bearing office data-tool key %q", key)

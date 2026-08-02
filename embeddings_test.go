@@ -3,12 +3,16 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -549,6 +553,383 @@ func TestEmbeddingQueryFailureBreaker(t *testing.T) {
 	}
 	if idx.queryFailUntil.Load() != 0 {
 		t.Fatal("a successful embed must close the breaker")
+	}
+}
+
+func TestEmbeddingProviderCircuitPersistsBoundedHalfOpenCanary(t *testing.T) {
+	now := time.Date(2026, time.July, 29, 12, 0, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "provider-circuit.json")
+	circuit := newEmbeddingProviderCircuit(path, 2, 10*time.Second, 40*time.Second)
+	circuit.now = func() time.Time { return now }
+
+	firstPermit, ok := circuit.acquire()
+	if !ok {
+		t.Fatal("closed circuit did not admit first request")
+	}
+	_ = circuit.complete(firstPermit, nil, 1, 1, fmt.Errorf("quota exhausted"))
+	if got := circuit.snapshot(); got.State != embeddingProviderCircuitClosed || got.ConsecutiveFailures != 1 {
+		t.Fatalf("first failure snapshot=%+v, want closed with one failure", got)
+	}
+	secondPermit, ok := circuit.acquire()
+	if !ok {
+		t.Fatal("closed circuit did not admit second request")
+	}
+	_ = circuit.complete(secondPermit, nil, 1, 1, fmt.Errorf("quota exhausted"))
+	if got := circuit.snapshot(); got.State != embeddingProviderCircuitOpen || !got.OpenUntil.Equal(now.Add(10*time.Second)) {
+		t.Fatalf("threshold failure snapshot=%+v, want open through %s", got, now.Add(10*time.Second))
+	}
+	if _, allowed := circuit.acquire(); allowed {
+		t.Fatal("open circuit must block provider traffic")
+	}
+
+	// Loading a fresh circuit proves a restart retains the known outage instead
+	// of silently re-enabling an expensive background loop.
+	reloaded := newEmbeddingProviderCircuit(path, 2, 10*time.Second, 40*time.Second)
+	reloaded.now = func() time.Time { return now }
+	if got := reloaded.snapshot(); got.State != embeddingProviderCircuitOpen || got.ConsecutiveFailures != 2 {
+		t.Fatalf("reloaded snapshot=%+v, want persisted open state", got)
+	}
+	now = now.Add(10 * time.Second)
+	canary, allowed := reloaded.acquire()
+	if !allowed {
+		t.Fatal("cooldown expiry must permit one bounded canary")
+	}
+	if got := reloaded.snapshot(); got.State != embeddingProviderCircuitHalfOpen {
+		t.Fatalf("canary snapshot=%+v, want half_open", got)
+	}
+	if _, allowed := reloaded.acquire(); allowed {
+		t.Fatal("half-open circuit must permit only one in-flight canary")
+	}
+
+	// A failed canary doubles the pause; only a later successful canary closes.
+	_ = reloaded.complete(canary, nil, 1, 1, fmt.Errorf("quota exhausted"))
+	if got := reloaded.snapshot(); got.State != embeddingProviderCircuitOpen || got.Cooldown != 20*time.Second {
+		t.Fatalf("failed canary snapshot=%+v, want reopened 20s cooldown", got)
+	}
+	now = now.Add(20 * time.Second)
+	canary, allowed = reloaded.acquire()
+	if !allowed {
+		t.Fatal("second cooldown expiry must permit the next single canary")
+	}
+	if err := reloaded.complete(canary, [][]float32{{1}}, 1, 1, nil); err != nil {
+		t.Fatalf("complete successful canary: %v", err)
+	}
+	if got := reloaded.snapshot(); got.State != embeddingProviderCircuitClosed || got.ConsecutiveFailures != 0 || !got.OpenUntil.IsZero() {
+		t.Fatalf("successful canary must close/reset circuit, got %+v", got)
+	}
+}
+
+func TestEmbeddingProviderCircuitStopsRepeatedMaintainerFailures(t *testing.T) {
+	now := time.Date(2026, time.July, 29, 12, 0, 0, 0, time.UTC)
+	idx := testIndex(t, 2, nil)
+	idx.providerCircuit = newEmbeddingProviderCircuit(filepath.Join(t.TempDir(), "provider-circuit.json"), 2, time.Minute, 4*time.Minute)
+	idx.providerCircuit.now = func() time.Time { return now }
+	var calls int
+	idx.embedder = func(context.Context, []string) ([][]float32, error) {
+		calls++
+		return nil, &apiRequestFailure{status: "429 Too Many Requests", body: `{"error":{"code":"insufficient_quota"}}`}
+	}
+	entries := []meetingMemoryEntry{{ID: "brain-1", Kind: meetingMemoryKindBrain, Text: "Important durable knowledge", CreatedAt: now}}
+	for pass := 0; pass < 3; pass++ {
+		_, _, _ = idx.reconcile(context.Background(), entries, 1)
+	}
+	if calls != 2 {
+		t.Fatalf("provider called %d times, want 2 before durable circuit blocks third pass", calls)
+	}
+	if got := idx.providerCircuit.snapshot(); got.State != embeddingProviderCircuitOpen || got.LastFailureClass != embeddingProviderFailureQuota {
+		t.Fatalf("circuit snapshot=%+v, want open quota state", got)
+	}
+	if evidence := func() map[string]any {
+		previous := loadedEmbeddingIndex()
+		publishEmbeddingIndex(idx)
+		t.Cleanup(func() { publishEmbeddingIndex(previous) })
+		return embeddingProviderCircuitEvidence()
+	}(); evidence["circuit"] != "open" || evidence["providerFailureClass"] != "quota" {
+		t.Fatalf("health evidence=%v, want open quota receipt", evidence)
+	}
+
+	now = now.Add(time.Minute)
+	idx.embedder = func(context.Context, []string) ([][]float32, error) {
+		calls++
+		return [][]float32{{1, 0}}, nil
+	}
+	if embedded, _, err := idx.reconcile(context.Background(), entries, 1); err != nil || embedded != 1 {
+		t.Fatalf("half-open canary reconcile embedded=%d err=%v, want success", embedded, err)
+	}
+	if calls != 3 || idx.providerCircuit.snapshot().State != embeddingProviderCircuitClosed {
+		t.Fatalf("successful canary calls=%d state=%s, want 3 and closed", calls, idx.providerCircuit.snapshot().State)
+	}
+}
+
+func TestClassifyEmbeddingProviderFailure(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+		want embeddingProviderFailureClass
+	}{
+		{"quota", &apiRequestFailure{status: "429 Too Many Requests", body: "insufficient_quota"}, embeddingProviderFailureQuota},
+		{"rate limit", &apiRequestFailure{status: "429 Too Many Requests", body: "rate_limit_error"}, embeddingProviderFailureRateLimit},
+		{"authentication", &apiRequestFailure{status: "401 Unauthorized", body: "invalid_api_key"}, embeddingProviderFailureAuth},
+		{"model access", &apiRequestFailure{status: "404 Not Found", body: "model_not_found"}, embeddingProviderFailureModelAccess},
+		{"model access before generic 403", &apiRequestFailure{status: "403 Forbidden", body: "You do not have access to model text-embedding-x"}, embeddingProviderFailureModelAccess},
+		{"transient", fmt.Errorf("dial tcp: connection reset"), embeddingProviderFailureTransient},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := classifyEmbeddingProviderFailure(test.err); got != test.want {
+				t.Fatalf("classify=%q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestEmbeddingProviderCircuitRejectsMalformedCompletions(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		vectors [][]float32
+	}{
+		{"wrong count", nil},
+		{"wrong dimensions", [][]float32{{1}}},
+		{"nan", [][]float32{{float32(math.NaN()), 0}}},
+		{"infinity", [][]float32{{float32(math.Inf(1)), 0}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			idx := testIndex(t, 2, func(context.Context, []string) ([][]float32, error) {
+				return test.vectors, nil
+			})
+			idx.providerCircuit = newEmbeddingProviderCircuit(filepath.Join(t.TempDir(), "circuit.json"), 1, time.Minute, time.Hour)
+			if _, err := idx.embedWithProviderCircuit(context.Background(), []string{"input"}); !errors.Is(err, errEmbeddingProviderInvalidVector) {
+				t.Fatalf("malformed completion error=%v, want invalid-vector sentinel", err)
+			}
+			if idx.providerSuccesses.Load() != 0 {
+				t.Fatal("malformed completion must not record provider success")
+			}
+			if got := idx.providerCircuit.snapshot(); got.State != embeddingProviderCircuitOpen || got.LastFailureClass != embeddingProviderFailureTransient {
+				t.Fatalf("malformed completion snapshot=%+v, want open transient failure", got)
+			}
+		})
+	}
+}
+
+func TestEmbeddingProviderLateSuccessCannotCloseNewGeneration(t *testing.T) {
+	circuit := newEmbeddingProviderCircuit(filepath.Join(t.TempDir(), "circuit.json"), 2, time.Minute, time.Hour)
+	first, ok := circuit.acquire()
+	if !ok {
+		t.Fatal("first request not admitted")
+	}
+	second, ok := circuit.acquire()
+	if !ok {
+		t.Fatal("second request not admitted")
+	}
+	lateSuccess, ok := circuit.acquire()
+	if !ok {
+		t.Fatal("concurrent request not admitted")
+	}
+	_ = circuit.complete(first, nil, 1, 2, errors.New("temporary provider failure"))
+	_ = circuit.complete(second, nil, 1, 2, errors.New("quota exhausted"))
+	opened := circuit.snapshot()
+	if opened.State != embeddingProviderCircuitOpen {
+		t.Fatalf("threshold failures state=%s, want open", opened.State)
+	}
+	if err := circuit.complete(lateSuccess, [][]float32{{1, 0}}, 1, 2, nil); !errors.Is(err, errEmbeddingProviderStalePermit) {
+		t.Fatalf("late completion error=%v, want stale permit", err)
+	}
+	if after := circuit.snapshot(); after.State != embeddingProviderCircuitOpen || after.Generation != opened.Generation {
+		t.Fatalf("late success changed open generation: before=%+v after=%+v", opened, after)
+	}
+}
+
+func TestEmbeddingProviderHalfOpenAdmitsExactlyOneConcurrentCanary(t *testing.T) {
+	now := time.Date(2026, time.July, 29, 15, 0, 0, 0, time.UTC)
+	circuit := newEmbeddingProviderCircuit(filepath.Join(t.TempDir(), "circuit.json"), 1, time.Minute, time.Hour)
+	circuit.now = func() time.Time { return now }
+	permit, _ := circuit.acquire()
+	_ = circuit.complete(permit, nil, 1, 2, errors.New("quota exhausted"))
+	now = now.Add(time.Minute)
+
+	const callers = 32
+	var admitted atomic.Int32
+	start := make(chan struct{})
+	done := make(chan struct{}, callers)
+	for i := 0; i < callers; i++ {
+		go func() {
+			<-start
+			if _, ok := circuit.acquire(); ok {
+				admitted.Add(1)
+			}
+			done <- struct{}{}
+		}()
+	}
+	close(start)
+	for i := 0; i < callers; i++ {
+		<-done
+	}
+	if got := admitted.Load(); got != 1 {
+		t.Fatalf("half-open admitted %d canaries, want exactly 1", got)
+	}
+	if circuit.snapshot().State != embeddingProviderCircuitHalfOpen {
+		t.Fatalf("state=%s, want half_open", circuit.snapshot().State)
+	}
+}
+
+func TestEmbeddingProviderCircuitPersistenceFailsClosed(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		setup func(t *testing.T) string
+	}{
+		{
+			name: "corrupt",
+			setup: func(t *testing.T) string {
+				path := filepath.Join(t.TempDir(), "circuit.json")
+				if err := os.WriteFile(path, []byte("not-json"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return path
+			},
+		},
+		{
+			name: "insecure mode",
+			setup: func(t *testing.T) string {
+				path := filepath.Join(t.TempDir(), "circuit.json")
+				if err := os.WriteFile(path, []byte(`{"state":"closed"}`), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(path, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return path
+			},
+		},
+		{
+			name: "symlink",
+			setup: func(t *testing.T) string {
+				dir := t.TempDir()
+				target := filepath.Join(dir, "target")
+				if err := os.WriteFile(target, []byte("target"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(dir, "circuit.json")
+				if err := os.Symlink(target, path); err != nil {
+					t.Fatal(err)
+				}
+				return path
+			},
+		},
+		{
+			name: "unwritable shape",
+			setup: func(t *testing.T) string {
+				parent := filepath.Join(t.TempDir(), "not-a-directory")
+				if err := os.WriteFile(parent, []byte("x"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return filepath.Join(parent, "circuit.json")
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			circuit := newEmbeddingProviderCircuit(test.setup(t), 1, time.Minute, time.Hour)
+			if got := circuit.snapshot(); !got.PersistenceError || got.State != embeddingProviderCircuitOpen {
+				t.Fatalf("snapshot=%+v, want fail-closed persistence error", got)
+			}
+			if _, ok := circuit.acquire(); ok {
+				t.Fatal("persistence error must block provider admission")
+			}
+		})
+	}
+}
+
+func TestEmbeddingProviderCircuitSecureAtomicStateAndHealth(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "circuit.json")
+	circuit := newEmbeddingProviderCircuit(path, 1, time.Minute, time.Hour)
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("state file: %v", err)
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
+		t.Fatalf("state mode=%v, want regular 0600", info.Mode())
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), ".tmp-") {
+			t.Fatalf("atomic persistence left temporary file %q", entry.Name())
+		}
+	}
+
+	permit, _ := circuit.acquire()
+	_ = circuit.complete(permit, nil, 1, 2, errors.New("quota exhausted"))
+	if got := capabilityStatus(map[string]any{"enabled": true, "circuit": "open", "lastSuccessAt": "old"}, true); got != "degraded" {
+		t.Fatalf("open capability status=%q, want degraded", got)
+	}
+	if got := capabilityStatus(map[string]any{"enabled": true, "circuit": "half_open", "lastSuccessAt": "old"}, true); got != "degraded" {
+		t.Fatalf("half-open capability status=%q, want degraded", got)
+	}
+	if got := capabilityStatus(map[string]any{"enabled": true, "circuit": "persistence_error", "lastSuccessAt": "old"}, true); got != "degraded" {
+		t.Fatalf("persistence capability status=%q, want degraded", got)
+	}
+}
+
+func TestEmbeddingMaintainerDoesNotReportHealthSuccessWithoutValidatedProviderCall(t *testing.T) {
+	resetCapabilityRuntimeForTest(t)
+	store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "memory.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := &kanbanBoardApp{memory: store}
+	idx := testIndex(t, 2, func(context.Context, []string) ([][]float32, error) {
+		t.Fatal("empty corpus must not call provider")
+		return nil, nil
+	})
+	if err := app.runEmbeddingMaintainerOnce(idx); err != nil {
+		t.Fatalf("empty pass: %v", err)
+	}
+	if got := capabilityState(capabilityEmbedding); !got.LastSuccess.IsZero() {
+		t.Fatalf("empty pass manufactured health success at %s", got.LastSuccess)
+	}
+
+	store.mu.Lock()
+	store.entries = append(store.entries, meetingMemoryEntry{
+		ID:        "brain-malformed",
+		Kind:      meetingMemoryKindBrain,
+		Text:      "Validated provider response required.",
+		CreatedAt: time.Now().UTC(),
+		Metadata:  map[string]string{"visibility": "organization"},
+	})
+	store.mu.Unlock()
+	idx.embedder = func(context.Context, []string) ([][]float32, error) { return [][]float32{{1}}, nil }
+	if err := app.runEmbeddingMaintainerOnce(idx); !errors.Is(err, errEmbeddingProviderInvalidVector) {
+		t.Fatalf("malformed pass error=%v, want invalid vector", err)
+	}
+	if got := capabilityState(capabilityEmbedding); !got.LastSuccess.IsZero() {
+		t.Fatalf("malformed pass manufactured health success at %s", got.LastSuccess)
+	}
+}
+
+func TestEmbeddingProviderCircuitWriteFailureBecomesFailClosed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "circuit.json")
+	circuit := newEmbeddingProviderCircuit(path, 1, time.Minute, time.Hour)
+	permit, ok := circuit.acquire()
+	if !ok {
+		t.Fatal("initial request not admitted")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = circuit.complete(permit, nil, 1, 2, errors.New("quota exhausted"))
+	if got := circuit.snapshot(); !got.PersistenceError || got.State != embeddingProviderCircuitOpen {
+		t.Fatalf("write failure snapshot=%+v, want persistence_error fail-closed", got)
+	}
+	if _, allowed := circuit.acquire(); allowed {
+		t.Fatal("write failure must block subsequent provider calls")
 	}
 }
 

@@ -17,8 +17,9 @@ package main
 //     reports via renderResearchReportPrintHTML): text-native, no blends —
 //     chromium print-to-pdf DIRECT, no flatten.
 // Both kinds also persist the per-page JPEGs (free from pdftoppm) to the
-// shared volume and reference them in the callback — Wave 5's vision slide
-// juries consume exactly these images.
+// purpose-specific render_queue volume and reference them in the callback —
+// Wave 5's vision slide juries consume exactly these images. The renderer
+// never mounts the company-brain meeting_data volume.
 //
 // Graceful absence mirrors the codex sidecar: when the sidecar (or its
 // chromium/pdftoppm toolchain) is missing, jobs fail with a clear operator
@@ -29,9 +30,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -55,8 +58,12 @@ const (
 
 	defaultRenderRunnerPollInterval = 2 * time.Second
 	defaultRenderRunnerStaleAfter   = 2 * time.Minute
+	defaultRenderCanaryInterval     = time.Minute
+	defaultRenderCanaryFailureRetry = 15 * time.Second
+	defaultRenderCanaryTimeout      = 45 * time.Second
 	defaultRenderExecTimeout        = 3 * time.Minute
 	defaultRenderMaxPDFBytes        = 64 << 20
+	defaultRenderMaxHTMLBytes       = 8 << 20
 )
 
 type renderRunnerJob struct {
@@ -80,12 +87,24 @@ type renderRunnerJobStore struct {
 	dir string
 }
 
+// renderRunnerCanaryResult is deliberately body- and secret-free. The runner
+// emits it only after the exact production pipeline has printed minimal HTML
+// to PDF and rasterized that PDF with pdftoppm inside its current container.
+// Release verification treats this as an acceptance gate, not telemetry.
+type renderRunnerCanaryResult struct {
+	OK        bool
+	CheckedAt time.Time
+	PageCount int
+	PDFBytes  int
+	ErrorCode string
+}
+
 // renderRunnerCallbackPayload is what the sidecar POSTs to
 // /internal/render/jobs/result (handler lands in stage B). The flattened PDF
 // rides base64 in the payload — mirroring how codex results ride in the
-// callback body — AND is persisted to the shared meeting_data volume with
+// callback body — AND is persisted to the dedicated render_queue volume with
 // its path in the payload, so the OS side can pick whichever transport the
-// blob store prefers. Page JPEGs are shared-volume refs only.
+// blob store prefers. Page JPEGs are render-volume refs only.
 type renderRunnerCallbackPayload struct {
 	JobID          string            `json:"job_id"`
 	ArtifactID     string            `json:"artifact_id"`
@@ -103,10 +122,11 @@ type renderRunnerCallbackPayload struct {
 }
 
 type renderExecConfig struct {
-	ChromiumBin string
-	PdftoppmBin string
-	Timeout     time.Duration
-	MaxPDFBytes int64
+	ChromiumBin  string
+	PdftoppmBin  string
+	Timeout      time.Duration
+	MaxPDFBytes  int64
+	MaxHTMLBytes int64
 }
 
 type renderExportPDFResult struct {
@@ -152,10 +172,11 @@ func renderRunnerPollInterval() time.Duration {
 
 func renderExecConfigFromEnv() renderExecConfig {
 	return renderExecConfig{
-		ChromiumBin: getenvDefault("RENDER_CHROMIUM_BIN", "chromium"),
-		PdftoppmBin: getenvDefault("RENDER_PDFTOPPM_BIN", "pdftoppm"),
-		Timeout:     durationEnv("BONFIRE_RENDER_TIMEOUT", defaultRenderExecTimeout, 10*time.Second),
-		MaxPDFBytes: int64(positiveIntEnv("BONFIRE_RENDER_MAX_PDF_BYTES", defaultRenderMaxPDFBytes)),
+		ChromiumBin:  getenvDefault("RENDER_CHROMIUM_BIN", "chromium"),
+		PdftoppmBin:  getenvDefault("RENDER_PDFTOPPM_BIN", "pdftoppm"),
+		Timeout:      durationEnv("BONFIRE_RENDER_TIMEOUT", defaultRenderExecTimeout, 10*time.Second),
+		MaxPDFBytes:  int64(positiveIntEnv("BONFIRE_RENDER_MAX_PDF_BYTES", defaultRenderMaxPDFBytes)),
+		MaxHTMLBytes: int64(positiveIntEnv("BONFIRE_RENDER_MAX_HTML_BYTES", defaultRenderMaxHTMLBytes)),
 	}
 }
 
@@ -287,8 +308,8 @@ func (store *renderRunnerJobStore) jobPath(id string) string {
 	return filepath.Join(store.dir, id+".json")
 }
 
-// renderJobResultsDir is the per-job shared-volume output directory. It lives
-// inside the queue directory (which both containers mount via meeting_data),
+// renderJobResultsDir is the per-job render-volume output directory. It lives
+// inside the queue directory (which both containers mount via render_queue),
 // and claimNext skips directories, so results never masquerade as jobs.
 func renderJobResultsDir(queueDir string, jobID string) string {
 	return filepath.Join(queueDir, strings.TrimSpace(jobID)+"-out")
@@ -313,6 +334,9 @@ func enqueueRenderExportPDFJob(artifactID string, kind string, html string, titl
 	if strings.TrimSpace(html) == "" {
 		return renderRunnerJob{}, fmt.Errorf("artifact HTML body is required for PDF export")
 	}
+	if len(html) > defaultRenderMaxHTMLBytes {
+		return renderRunnerJob{}, fmt.Errorf("artifact HTML body is %d bytes, above the %d-byte render queue limit", len(html), defaultRenderMaxHTMLBytes)
+	}
 	store := newRenderRunnerJobStore(renderRunnerQueuePath())
 	return store.enqueue(renderRunnerJob{
 		Type:       renderJobTypeExportPDF,
@@ -327,19 +351,43 @@ func enqueueRenderExportPDFJob(artifactID string, kind string, html string, titl
 }
 
 // runRenderRunnerLoop is the sidecar entrypoint. Stage B wires the
-// -render-runner flag in main.go to it, mirroring how -codex-runner boots
-// runCodexRunnerLoop.
+// -render-runner flag in main.go to it. The former Codex runner entrypoint is
+// deliberately absent from the E9 candidate.
 func runRenderRunnerLoop(ctx context.Context) error {
 	store := newRenderRunnerJobStore(renderRunnerQueuePath())
 	runnerID := renderRunnerID()
 	pollInterval := renderRunnerPollInterval()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
+	var canary renderRunnerCanaryResult
+	var nextCanary time.Time
 
 	log.Infof("Render runner started id=%s queue=%s poll=%s", runnerID, store.dir, pollInterval)
 	for {
-		if err := writeRenderRunnerHeartbeat(runnerID); err != nil {
+		now := time.Now().UTC()
+		if nextCanary.IsZero() || !now.Before(nextCanary) {
+			var err error
+			canary, err = runRenderRunnerCanary(ctx, renderExecConfigFromEnv())
+			if err != nil {
+				log.Errorf("Render runner canary failed code=%s: %v", canary.ErrorCode, err)
+				nextCanary = time.Now().UTC().Add(defaultRenderCanaryFailureRetry)
+			} else {
+				nextCanary = time.Now().UTC().Add(defaultRenderCanaryInterval)
+			}
+		}
+		if err := writeRenderRunnerHeartbeat(runnerID, canary); err != nil {
 			log.Errorf("Render runner heartbeat failed: %v", err)
+		}
+		// Never claim user work while the exact print/raster pipeline is
+		// unhealthy. This keeps readiness, release acceptance, and work-serving
+		// authority on the same fail-closed fact.
+		if !canary.OK {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-ticker.C:
+			}
+			continue
 		}
 		job, err := store.claimNext(runnerID)
 		if err != nil {
@@ -445,12 +493,81 @@ func processRenderRunnerJob(ctx context.Context, store *renderRunnerJobStore, jo
 	}
 }
 
-// renderPrintCSP is artifactRenderCSP's meta-deliverable subset: the sandbox
-// directive is ignored inside a <meta> policy (per spec), so it is dropped;
-// everything else — no network fetches of any kind, inline style/script only,
-// data: images/media — carries over verbatim. Scripts still run (decks lay
-// themselves out), they just cannot reach anything.
-const renderPrintCSP = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; media-src data:; form-action 'none'"
+// renderPrintCSP is the meta-compatible defense-in-depth subset. The primary
+// policy is delivered as an HTTP response header by startRenderPrintServer;
+// that header can also enforce sandboxing, which browsers ignore in a meta
+// policy. Inline scripts remain available for deck layout, but every fetch,
+// child document, plugin, form, base URL, and embedding path is denied.
+const renderPrintCSP = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; media-src data:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; worker-src 'none'; manifest-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+
+// renderPrintHeaderCSP is served over a fresh loopback-only origin for every
+// render. `sandbox allow-scripts` preserves authored layout scripts while
+// withholding same-origin, forms, popups, downloads, modals, pointer lock,
+// storage, and top-navigation privileges. navigate-to is retained as an
+// additional policy on Chromium versions that implement it.
+const renderPrintHeaderCSP = renderPrintCSP + "; sandbox allow-scripts; navigate-to 'none'"
+
+type renderPrintServer struct {
+	URL   string
+	close func() error
+}
+
+func (server renderPrintServer) Close() error {
+	if server.close == nil {
+		return nil
+	}
+	return server.close()
+}
+
+// startRenderPrintServer removes file:// from the trust boundary entirely.
+// A random, one-document HTTP origin exposes only the provided HTML; local
+// paths, /proc, sibling jobs, directory indexes, and arbitrary loopback URLs
+// are never served. The listener exists only for the duration of one print.
+func startRenderPrintServer(html string) (renderPrintServer, error) {
+	var nonce [24]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return renderPrintServer{}, fmt.Errorf("create render origin nonce: %w", err)
+	}
+	path := "/render/" + base64.RawURLEncoding.EncodeToString(nonce[:])
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		return renderPrintServer{}, fmt.Errorf("start isolated render origin: %w", err)
+	}
+
+	server := &http.Server{
+		ReadHeaderTimeout: 2 * time.Second,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Security-Policy", renderPrintHeaderCSP)
+			w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+			w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), display-capture=(), usb=(), payment=()")
+			w.Header().Set("Referrer-Policy", "no-referrer")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("Cache-Control", "no-store")
+			if r.Method != http.MethodGet || r.URL.Path != path || r.URL.RawQuery != "" {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(html))
+		}),
+	}
+	done := make(chan struct{})
+	go func() {
+		_ = server.Serve(listener)
+		close(done)
+	}()
+
+	return renderPrintServer{
+		URL: "http://" + listener.Addr().String() + path,
+		close: func() error {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			err := server.Shutdown(ctx)
+			<-done
+			return err
+		},
+	}, nil
+}
 
 // injectRenderPrintCSP pins renderPrintCSP into untrusted artifact HTML before
 // chromium prints it, mirroring the header the sandboxed render route sends.
@@ -537,6 +654,12 @@ func executeRenderExportPDF(ctx context.Context, cfg renderExecConfig, job rende
 	if strings.TrimSpace(job.HTML) == "" {
 		return renderExportPDFResult{}, fmt.Errorf("render job %s carries no artifact HTML to print", job.ID)
 	}
+	if cfg.MaxHTMLBytes <= 0 {
+		cfg.MaxHTMLBytes = defaultRenderMaxHTMLBytes
+	}
+	if int64(len(job.HTML)) > cfg.MaxHTMLBytes {
+		return renderExportPDFResult{}, fmt.Errorf("render job %s carries %d HTML bytes, above the %d-byte limit (BONFIRE_RENDER_MAX_HTML_BYTES)", job.ID, len(job.HTML), cfg.MaxHTMLBytes)
+	}
 	chromiumBin, err := resolveRenderBinary("chromium", cfg.ChromiumBin, "RENDER_CHROMIUM_BIN")
 	if err != nil {
 		return renderExportPDFResult{}, err
@@ -561,30 +684,42 @@ func executeRenderExportPDF(ctx context.Context, cfg renderExecConfig, job rende
 	if normalizeRenderJobKind(job.Kind) == renderJobKindDeck {
 		printHTML = injectRenderDeckPrintCSS(printHTML)
 	}
-	htmlPath := filepath.Join(workDir, "artifact.html")
-	if err := os.WriteFile(htmlPath, []byte(injectRenderPrintCSP(printHTML)), 0o644); err != nil {
-		return renderExportPDFResult{}, fmt.Errorf("write artifact HTML: %w", err)
+	printServer, err := startRenderPrintServer(injectRenderPrintCSP(printHTML))
+	if err != nil {
+		return renderExportPDFResult{}, err
 	}
+	defer printServer.Close()
 	layeredPath := filepath.Join(workDir, "layered.pdf")
 
 	// The flatten law's pinned print arguments (spec §4 14b): --headless=new
 	// --no-pdf-header-footer --virtual-time-budget=15000, plus the sandbox
-	// flags headless chromium needs inside the container. The printed page is
-	// untrusted artifact HTML running with --no-sandbox, so it gets the same
-	// zero-network confinement the render route enforces via artifactRenderCSP:
-	// injectRenderPrintCSP pins a meta CSP into the document, and the
-	// blackholed proxy (127.0.0.1:9, the discard port) denies every remote
-	// scheme at the network layer even where a CSP bug would not — file://
-	// loads never touch a proxy, so the local print input is unaffected.
+	// flags headless chromium needs inside the container. Chromium keeps its OS
+	// sandbox: the process runs as a dedicated non-root user and this invocation
+	// deliberately never passes --no-sandbox. The document comes from a fresh
+	// loopback HTTP origin, not file://, so scripts cannot read local files or
+	// /proc. The response-header CSP sandboxes navigation and the blackholed
+	// proxy denies remote schemes underneath the browser policy.
 	chromiumArgs := []string{
 		"--headless=new",
-		"--no-sandbox",
+		// Force the non-SUID namespace sandbox. The container is non-root,
+		// drops every capability, and sets no-new-privileges, so a setuid
+		// helper is intentionally unavailable.
+		"--disable-setuid-sandbox",
 		"--disable-gpu",
+		"--disable-background-networking",
+		"--disable-component-update",
+		"--disable-default-apps",
+		"--disable-extensions",
+		"--disable-sync",
+		"--metrics-recording-only",
+		"--no-first-run",
 		"--proxy-server=127.0.0.1:9",
+		"--proxy-bypass-list=127.0.0.1",
+		"--user-data-dir=" + filepath.Join(workDir, "chrome-profile"),
 		"--no-pdf-header-footer",
 		"--virtual-time-budget=15000",
 		"--print-to-pdf=" + layeredPath,
-		"file://" + htmlPath,
+		printServer.URL,
 	}
 	if _, stderr, err := runRenderExecCommand(ctx, chromiumBin, chromiumArgs, workDir); err != nil {
 		return renderExportPDFResult{}, fmt.Errorf("chromium print-to-pdf failed: %w (stderr: %s)", err, compactAssistantLine(stderr))
@@ -672,6 +807,10 @@ func executeRenderExportPDF(ctx context.Context, cfg renderExecConfig, job rende
 func runRenderExecCommandContext(ctx context.Context, bin string, args []string, dir string) (string, string, error) {
 	command := exec.CommandContext(ctx, bin, args...)
 	command.Dir = dir
+	// Do not let Chromium or pdftoppm inherit the callback bearer token, API
+	// keys, database URLs, or any other container environment. The allowlist is
+	// intentionally static and contains no credentials.
+	command.Env = renderSubprocessEnv(dir)
 	var stdout cappedBuffer
 	var stderr cappedBuffer
 	stdout.Limit = defaultCodexExecMaxOutputBytes
@@ -683,6 +822,17 @@ func runRenderExecCommandContext(ctx context.Context, bin string, args []string,
 		return stdout.String(), stderr.String(), fmt.Errorf("render command timed out or was canceled: %w", ctx.Err())
 	}
 	return stdout.String(), stderr.String(), err
+}
+
+func renderSubprocessEnv(workDir string) []string {
+	return []string{
+		"HOME=" + filepath.Clean(workDir),
+		"TMPDIR=" + filepath.Clean(workDir),
+		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"LANG=C.UTF-8",
+		"LC_ALL=C.UTF-8",
+		"TZ=UTC",
+	}
 }
 
 func renderRunnerCommandEvidence(cfg renderExecConfig, result renderExportPDFResult) string {
@@ -708,17 +858,95 @@ func renderRunnerID() string {
 	return hostname + "-" + strconv.Itoa(os.Getpid())
 }
 
-func writeRenderRunnerHeartbeat(runnerID string) error {
+func renderRunnerCanaryErrorCode(err error) string {
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case strings.Contains(message, "timed out") || strings.Contains(message, "deadline"):
+		return "timeout"
+	case strings.Contains(message, "chromium") && strings.Contains(message, "not found"):
+		return "chromium_missing"
+	case strings.Contains(message, "pdftoppm") && strings.Contains(message, "not found"):
+		return "pdftoppm_missing"
+	case strings.Contains(message, "chromium"):
+		return "chromium_print_failed"
+	case strings.Contains(message, "pdftoppm") || strings.Contains(message, "page image"):
+		return "pdf_raster_failed"
+	case strings.Contains(message, "pdf"):
+		return "pdf_invalid"
+	default:
+		return "pipeline_failed"
+	}
+}
+
+// runRenderRunnerCanary uses executeRenderExportPDF rather than a second
+// approximation of the toolchain. It therefore exercises the same Chromium
+// sandbox arguments, loopback print origin, pdftoppm invocation, output reads,
+// and size limits as a real paper export, under the exact running container's
+// user/capability/seccomp/filesystem/network policy.
+func runRenderRunnerCanary(ctx context.Context, cfg renderExecConfig) (renderRunnerCanaryResult, error) {
+	checkedAt := time.Now().UTC()
+	timeout := defaultRenderCanaryTimeout
+	if cfg.Timeout > 0 && cfg.Timeout < timeout {
+		timeout = cfg.Timeout
+	}
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	root, err := os.MkdirTemp("", "bonfire-render-canary-*")
+	if err != nil {
+		result := renderRunnerCanaryResult{CheckedAt: checkedAt, ErrorCode: "workspace_failed"}
+		return result, fmt.Errorf("create render canary workspace: %w", err)
+	}
+	defer os.RemoveAll(root)
+	result, err := executeRenderExportPDF(runCtx, cfg, renderRunnerJob{
+		ID:         "render-canary",
+		Type:       renderJobTypeExportPDF,
+		ArtifactID: "render-canary",
+		Kind:       renderJobKindPaper,
+		HTML:       "<!doctype html><html><head><meta charset=\"utf-8\"><title>Render canary</title></head><body><main>STRIDE render canary</main></body></html>",
+	}, filepath.Join(root, "results"))
+	if err != nil {
+		canary := renderRunnerCanaryResult{CheckedAt: checkedAt, ErrorCode: renderRunnerCanaryErrorCode(err)}
+		return canary, err
+	}
+	canary := renderRunnerCanaryResult{CheckedAt: checkedAt, PageCount: result.PageCount, PDFBytes: len(result.PDFBytes)}
+	if result.PageCount != 1 || len(result.PageJPEGPaths) != 1 || len(result.PDFBytes) < 5 || !bytes.Equal(result.PDFBytes[:5], []byte("%PDF-")) {
+		canary.ErrorCode = "pdf_invalid"
+		return canary, fmt.Errorf("render canary produced invalid PDF/page outputs")
+	}
+	page, err := os.ReadFile(result.PageJPEGPaths[0])
+	if err != nil || len(page) < 3 || page[0] != 0xff || page[1] != 0xd8 || page[2] != 0xff {
+		canary.ErrorCode = "pdf_raster_failed"
+		return canary, fmt.Errorf("render canary produced no valid JPEG page")
+	}
+	canary.OK = true
+	return canary, nil
+}
+
+func writeRenderRunnerHeartbeat(runnerID string, canary renderRunnerCanaryResult) error {
 	cfg := renderExecConfigFromEnv()
 	_, chromiumErr := resolveRenderBinary("chromium", cfg.ChromiumBin, "RENDER_CHROMIUM_BIN")
 	_, pdftoppmErr := resolveRenderBinary("pdftoppm", cfg.PdftoppmBin, "RENDER_PDFTOPPM_BIN")
+	toolchainOK := chromiumErr == nil && pdftoppmErr == nil
+	canaryOK := canary.OK && !canary.CheckedAt.IsZero() && canary.PageCount == 1 && canary.PDFBytes >= 5
+	if !toolchainOK && canary.ErrorCode == "" {
+		if chromiumErr != nil {
+			canary.ErrorCode = "chromium_missing"
+		} else {
+			canary.ErrorCode = "pdftoppm_missing"
+		}
+	}
 	payload := map[string]any{
-		"ok":         true,
-		"runnerId":   runnerID,
-		"queuePath":  renderRunnerQueuePath(),
-		"chromiumOK": chromiumErr == nil,
-		"pdftoppmOK": pdftoppmErr == nil,
-		"time":       time.Now().UTC().Format(time.RFC3339Nano),
+		"ok":              toolchainOK && canaryOK,
+		"runnerId":        runnerID,
+		"queuePath":       renderRunnerQueuePath(),
+		"chromiumOK":      chromiumErr == nil,
+		"pdftoppmOK":      pdftoppmErr == nil,
+		"canaryOK":        canaryOK,
+		"canaryCheckedAt": canary.CheckedAt.Format(time.RFC3339Nano),
+		"canaryPageCount": canary.PageCount,
+		"canaryPDFBytes":  canary.PDFBytes,
+		"canaryErrorCode": canary.ErrorCode,
+		"time":            time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	return writeJSONFileAtomically(renderRunnerHeartbeatPath(), "render runner heartbeat", payload)
 }
@@ -739,10 +967,15 @@ func readinessRenderRunnerSnapshot() map[string]any {
 		return snapshot
 	}
 	var heartbeat struct {
-		RunnerID   string `json:"runnerId"`
-		ChromiumOK bool   `json:"chromiumOK"`
-		PdftoppmOK bool   `json:"pdftoppmOK"`
-		Time       string `json:"time"`
+		OK              bool   `json:"ok"`
+		RunnerID        string `json:"runnerId"`
+		ChromiumOK      bool   `json:"chromiumOK"`
+		PdftoppmOK      bool   `json:"pdftoppmOK"`
+		CanaryOK        bool   `json:"canaryOK"`
+		CanaryCheckedAt string `json:"canaryCheckedAt"`
+		CanaryPageCount int    `json:"canaryPageCount"`
+		CanaryErrorCode string `json:"canaryErrorCode"`
+		Time            string `json:"time"`
 	}
 	if err := json.Unmarshal(raw, &heartbeat); err != nil {
 		snapshot["heartbeatOK"] = false
@@ -755,12 +988,26 @@ func readinessRenderRunnerSnapshot() map[string]any {
 		snapshot["heartbeatError"] = "invalid_time"
 		return snapshot
 	}
+	canaryCheckedAt, canaryErr := time.Parse(time.RFC3339Nano, heartbeat.CanaryCheckedAt)
+	if canaryErr != nil {
+		snapshot["heartbeatOK"] = false
+		snapshot["heartbeatError"] = "invalid_canary_time"
+		return snapshot
+	}
 	age := time.Since(parsed)
-	snapshot["heartbeatOK"] = age <= defaultRenderRunnerStaleAfter
+	canaryAge := time.Since(canaryCheckedAt)
+	const allowedFutureSkew = 5 * time.Second
+	snapshot["heartbeatOK"] = age >= -allowedFutureSkew && age <= defaultRenderRunnerStaleAfter &&
+		canaryAge >= -allowedFutureSkew && canaryAge <= defaultRenderRunnerStaleAfter &&
+		heartbeat.OK && heartbeat.ChromiumOK && heartbeat.PdftoppmOK && heartbeat.CanaryOK && heartbeat.CanaryPageCount == 1
 	snapshot["heartbeatAgeSeconds"] = int(age.Seconds())
+	snapshot["canaryAgeSeconds"] = int(canaryAge.Seconds())
 	snapshot["runnerId"] = heartbeat.RunnerID
 	snapshot["chromiumOK"] = heartbeat.ChromiumOK
 	snapshot["pdftoppmOK"] = heartbeat.PdftoppmOK
+	snapshot["canaryOK"] = heartbeat.CanaryOK
+	snapshot["canaryPageCount"] = heartbeat.CanaryPageCount
+	snapshot["canaryErrorCode"] = heartbeat.CanaryErrorCode
 	return snapshot
 }
 

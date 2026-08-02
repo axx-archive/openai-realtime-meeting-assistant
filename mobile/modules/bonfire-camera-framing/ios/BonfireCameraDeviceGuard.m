@@ -348,7 +348,7 @@ static NSMutableDictionary<NSString *, AVCaptureDevice *> *lockedDevices;
                     deviceID:deviceID
                       result:[self resultWithOK:NO
                                               code:BFCodeDynamicRatioUnsupported
-                                           message:@"The exact active WebRTC format does not support dynamic 16:9; Stride left the format unchanged."
+                                           message:@"The exact active WebRTC format does not support dynamic 16:9; BonfireOS left the format unchanged."
                                       capabilities:[self capabilitiesForDeviceID:deviceID]]];
     return;
   }

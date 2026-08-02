@@ -121,6 +121,51 @@ func TestOfficeSocketReceivesBroadcastAndTargetedNotifications(t *testing.T) {
 	}
 }
 
+func TestRelationshipMemoryChangedTargetsOnlyTheOwningAccount(t *testing.T) {
+	server := newIsolatedWebsocketServer(t)
+	ajConn := dialIsolatedWebsocket(t, server, "aj@shareability.com")
+	timConn := dialIsolatedWebsocket(t, server, "tim@shareability.com")
+	sendOfficeHello(t, ajConn)
+	sendOfficeHello(t, timConn)
+	// Drain each ordered bootstrap before placing the target/private marker.
+	waitForKanbanEvent(t, ajConn, "codex_proposals", 5*time.Second)
+	waitForKanbanEvent(t, timConn, "codex_proposals", 5*time.Second)
+
+	notifySTRIDERelationshipMemoryChanged("aj@shareability.com", 7, time.Now())
+	broadcastSignedInKanbanEvent("chat_thread", map[string]any{"id": "relationship-marker", "visibility": "public"})
+
+	raw := waitForKanbanEvent(t, ajConn, "relationship_memory_changed", 5*time.Second)
+	if !strings.Contains(string(raw), `"revision":7`) {
+		t.Fatalf("owner received wrong relationship-memory invalidation: %s", raw)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := timConn.SetReadDeadline(deadline); err != nil {
+			t.Fatal(err)
+		}
+		var outer websocketMessage
+		if err := timConn.ReadJSON(&outer); err != nil {
+			t.Fatalf("read non-owner marker: %v", err)
+		}
+		if outer.Event != "kanban" {
+			continue
+		}
+		var inner struct {
+			Event string `json:"event"`
+		}
+		if err := json.Unmarshal([]byte(outer.Data), &inner); err != nil {
+			t.Fatal(err)
+		}
+		if inner.Event == "relationship_memory_changed" {
+			t.Fatal("private relationship-memory invalidation leaked to another account")
+		}
+		if inner.Event == "chat_thread" {
+			break
+		}
+	}
+}
+
 // TestOfficeSocketReceivesOfficeAndUnionFanoutButNotRoomBroadcasts pins the
 // routing contract: union events (chat_thread, memory) reach an office
 // socket, while the room fan-out (broadcastKanbanEvent — signaling
@@ -299,6 +344,38 @@ func TestPrivateChatThreadUpdatesReachOwnerOfficeSocketOnly(t *testing.T) {
 	}
 	if !strings.Contains(string(ajRaw), "marker-thread") {
 		t.Fatalf("aj office socket missed the public marker: %s", ajRaw)
+	}
+}
+
+func TestMemberScopedProjectUpdatesReachExactOfficeSockets(t *testing.T) {
+	server := newIsolatedWebsocketServer(t)
+	ajConn := dialIsolatedWebsocket(t, server, "aj@shareability.com")
+	timConn := dialIsolatedWebsocket(t, server, "tim@shareability.com")
+	caitlynConn := dialIsolatedWebsocket(t, server, "caitlyn@shareability.com")
+	for _, conn := range []*websocket.Conn{ajConn, timConn, caitlynConn} {
+		sendOfficeHello(t, conn)
+		waitForKanbanEvent(t, conn, "codex_proposals", 5*time.Second)
+	}
+
+	thread, _, err := kanbanApp.ensureScoutChatThread("stride-project-live", "aj@shareability.com", "AJ", "Dog Perfect", scoutChatVisibilityPublic, []string{"tim@shareability.com"})
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	message := scoutChatMessageRecord{ID: "project-message-1", Kind: "message", Role: "scout", Text: "member-only update", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	if _, err := kanbanApp.commitScoutChatThreadMessages("aj@shareability.com", thread.ID, message); err != nil {
+		t.Fatalf("commit project message: %v", err)
+	}
+	for label, conn := range map[string]*websocket.Conn{"owner": ajConn, "member": timConn} {
+		raw := waitForKanbanEvent(t, conn, "chat_thread", 5*time.Second)
+		if !strings.Contains(string(raw), thread.ID) || !strings.Contains(string(raw), message.Text) {
+			t.Fatalf("%s missed project update: %s", label, raw)
+		}
+	}
+
+	broadcastSignedInKanbanEvent("chat_thread", map[string]any{"id": "project-update-marker", "visibility": "public"})
+	raw := waitForKanbanEvent(t, caitlynConn, "chat_thread", 5*time.Second)
+	if strings.Contains(string(raw), thread.ID) || !strings.Contains(string(raw), "project-update-marker") {
+		t.Fatalf("project update leaked to nonmember before marker: %s", raw)
 	}
 }
 

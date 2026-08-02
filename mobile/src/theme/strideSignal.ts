@@ -30,8 +30,8 @@
  * being scaled to a hairline.
  *
  * The outline is SAMPLED, not bézier-approximated, and every surface reproduces
- * the same curve and ratios. Artwork uses 160 samples; live instruments use 64
- * so their per-frame path updates stay light.
+ * the same sampling — so there is one mark rather than one mark and a near-copy
+ * of it.
  *
  * ── What the motion is ────────────────────────────────────────────────────
  *
@@ -222,9 +222,9 @@ function sampleLens(width: number, steps: number) {
  *
  * Sampled rather than expressed as béziers on purpose: the sampled curve is the
  * exact shape that was reviewed and approved, and every surface — SVG, Canvas,
- * React Native — reproduces the same formula. A bézier approximation would
- * introduce a second, slightly different mark. `steps` defaults to the artwork
- * tier's 160; the live instrument passes `aperture.steps` (64).
+ * React Native — reproduces the same sampling. A bézier approximation would
+ * introduce a second, slightly different mark. `steps` defaults to the code of
+ * record's 160; the instrument passes `aperture.steps`.
  */
 export function lensPath(width: number, ratio: number, steps = 160): string {
   const peak = peakFor(width, ratio);
@@ -270,6 +270,40 @@ export function aperturePathData(
     const base = peak * profile[index];
     const upper = moves ? base * rippleAt(p, seconds, level, -1) : base;
     const lower = moves ? base * rippleAt(p, seconds, level, 1) : base;
+    top.push(`${index === 0 ? 'M' : 'L'}${xs[index]} ${(-upper).toFixed(2)}`);
+    bottom.push(`L${xs[index]} ${lower.toFixed(2)}`);
+  }
+  return `${top.join(' ')} ${bottom.reverse().join(' ')} Z`;
+}
+
+/**
+ * A nested resonance contour for the live instrument.
+ *
+ * The outer aperture remains the canonical mark. These smaller contours sit
+ * entirely inside it and make the travelling audio response legible instead of
+ * turning the hero into a stock row of equalizer bars. `scale` contracts the
+ * whole contour, including the idle peak, so a quiet microphone cannot make an
+ * inner layer poke through the outer silhouette.
+ */
+export function apertureContourPathData(
+  width: number,
+  amplitude: number,
+  seconds: number,
+  scale: number,
+  phase = 0,
+): string {
+  const steps = aperture.steps;
+  const level = clamp(amplitude, 0, 1);
+  const contourScale = clamp(scale, 0, 1);
+  const peak = peakForAmplitude(width, level) * contourScale;
+  const { xs, profile } = sampleLens(width, steps);
+  const top: string[] = [];
+  const bottom: string[] = [];
+  for (let index = 0; index <= steps; index += 1) {
+    const p = index / steps;
+    const base = peak * profile[index];
+    const upper = base * rippleAt(p, seconds + phase, level, -1);
+    const lower = base * rippleAt(p, seconds + phase, level, 1);
     top.push(`${index === 0 ? 'M' : 'L'}${xs[index]} ${(-upper).toFixed(2)}`);
     bottom.push(`L${xs[index]} ${lower.toFixed(2)}`);
   }

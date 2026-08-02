@@ -29,6 +29,20 @@ func researchProposals(t *testing.T, app *kanbanBoardApp) []meetingMemoryEntry {
 	return out
 }
 
+func TestLegacyResearchSuggestionWorkerIsFencedBySTRIDEWorkOwnership(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.strideRuntime = &STRIDERuntime{config: STRIDERuntimeConfig{ProductPreviewEnabled: true}}
+	calls := 0
+	responder := func(context.Context, string, openAITextRequest) (string, error) {
+		calls++
+		return `{"suggestions":[{"title":"Must not escape","query":"Must not broadcast"}]}`, nil
+	}
+	result, err := app.produceResearchSuggestions(context.Background(), "must-not-be-used", []meetingMemoryEntry{{ID: "brain-legacy-split"}}, responder)
+	if err != nil || result.ID != "" || calls != 0 || len(researchProposals(t, app)) != 0 {
+		t.Fatalf("legacy suggestion escaped STRIDE ownership: result=%+v calls=%d proposals=%d err=%v", result, calls, len(researchProposals(t, app)), err)
+	}
+}
+
 func TestResearchSuggestionWorkerProposesFromDiscussion(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 

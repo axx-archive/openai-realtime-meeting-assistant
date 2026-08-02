@@ -128,7 +128,7 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.6 },
   bulletAuthor: {
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600',
     color: colors.text2,
   },
   bulletText: {

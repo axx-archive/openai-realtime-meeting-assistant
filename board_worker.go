@@ -137,7 +137,7 @@ func (app *kanbanBoardApp) produceMeetingBoardUpdate(ctx context.Context, apiKey
 		// W0 item 6: the strict-JSON parse-failure counter — the designated
 		// gate metric for any board-lane model flip (Terra pin included).
 		recordEvalEvent(seatBoard, evalKindParseFailure, map[string]any{"seat": seatBoard, "model": model})
-		return meetingMemoryEntry{}, err
+		return meetingMemoryEntry{}, &ambientOutputRejection{agent: meetingBoardAgentName, reason: "invalid_structured_output"}
 	}
 	runResult := app.applyMeetingBoardAnalysisForRoom(analysis, roomID)
 

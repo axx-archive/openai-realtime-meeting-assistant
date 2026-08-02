@@ -7,6 +7,7 @@ Native iOS client for **Stride**. Until the coordinated domain cutover, the live
 | **Auth** | Same `/auth/login`, `/auth/me`, `/auth/logout` roster sessions as the browser; login gate matches live wordmark + “Enter your office” |
 | **Rooms** | `GET /rooms` — same room list the web lobby shows |
 | **Chat** | `GET/POST /assistant/chat-threads` + Scout `/assistant/query` |
+| **Scout voice** | Native WebRTC through `/assistant/realtime-offer`; tools and usage stay server-authoritative. Dark until provider qualification enables `EXPO_PUBLIC_NATIVE_REALTIME_VOICE_ENABLED=true` |
 | **Board** | `GET /assistant/board` — same kanban cards |
 | **Full OS** | Authenticated WebView of the **production SPA** so any deeper tool is the live design, not a fork |
 
@@ -35,6 +36,11 @@ EXPO_PUBLIC_API_BASE_URL=http://127.0.0.1:8080 \
 EXPO_PUBLIC_WEB_APP_URL=http://127.0.0.1:8080 \
 npm start
 ```
+
+The Canvas uses the incumbent record/transcribe fallback unless the native
+Realtime build flag is explicitly enabled. Do not enable it in a release build
+until the E10 provider/model, interruption, Bluetooth, and device acceptance
+matrix has passed; leaving the flag unset is the default-off state.
 
 ## Typecheck
 
@@ -68,7 +74,7 @@ In [App Store Connect](https://appstoreconnect.apple.com):
 
 ```bash
 cd mobile
-npx --yes eas-cli@20.1.0 build \
+npx --yes eas-cli@21.4.0 build \
   --platform ios \
   --profile production \
   --non-interactive \
@@ -79,7 +85,7 @@ Record the exact build ID printed by EAS, inspect that artifact, and submit that
 same ID only:
 
 ```bash
-npx --yes eas-cli@20.1.0 submit \
+npx --yes eas-cli@21.4.0 submit \
   --platform ios \
   --profile production \
   --id <exact-build-id> \

@@ -230,6 +230,7 @@ func (app *kanbanBoardApp) participantCanBeActiveSpeakerLocked(state *roomLiveSt
 // shared currentSpeech* markers when completed lands — keeps a rapid speaker
 // handoff from mis-attributing the earlier speaker's text to the later one.
 type attributionWindow struct {
+	segmentID         string
 	startedAt         time.Time
 	stoppedAt         time.Time
 	capture           *transcriptCaptureStamp
@@ -342,6 +343,10 @@ func (app *kanbanBoardApp) freezeAttributionWindowAtCommitForRoomGenerationWithC
 }
 
 func (app *kanbanBoardApp) freezeAttributionWindowAtCommitForScopeWithCaptureAndConsent(scope RoomScoutScope, capture *transcriptCaptureStamp, contributorFences []ConsentFence) {
+	app.freezeAttributionWindowAtCommitForScopeWithSegmentAndConsent(scope, "", capture, contributorFences)
+}
+
+func (app *kanbanBoardApp) freezeAttributionWindowAtCommitForScopeWithSegmentAndConsent(scope RoomScoutScope, segmentID string, capture *transcriptCaptureStamp, contributorFences []ConsentFence) {
 	roomID, generation := normalizeRoomID(scope.RoomID), scope.MediaGeneration
 	if app == nil {
 		return
@@ -363,6 +368,7 @@ func (app *kanbanBoardApp) freezeAttributionWindowAtCommitForScopeWithCaptureAnd
 		startedAt = stoppedAt.Add(-speakerAttributionFallbackSpan)
 	}
 	state.pendingAttributionWindows = append(state.pendingAttributionWindows, attributionWindow{
+		segmentID:         strings.TrimSpace(segmentID),
 		startedAt:         startedAt,
 		stoppedAt:         stoppedAt,
 		capture:           capture,
@@ -395,6 +401,10 @@ func (app *kanbanBoardApp) attributionForCommittedTranscriptForRoom(roomID strin
 }
 
 func (app *kanbanBoardApp) attributionForCommittedTranscriptWithConsentForRoom(roomID string, completedAt time.Time) (string, string, *transcriptCaptureStamp, []ConsentFence) {
+	return app.attributionForCommittedTranscriptWithConsentForRoomSegment(roomID, "", completedAt)
+}
+
+func (app *kanbanBoardApp) attributionForCommittedTranscriptWithConsentForRoomSegment(roomID, segmentID string, completedAt time.Time) (string, string, *transcriptCaptureStamp, []ConsentFence) {
 	if app == nil {
 		return "", "unknown", nil, nil
 	}
@@ -404,13 +414,15 @@ func (app *kanbanBoardApp) attributionForCommittedTranscriptWithConsentForRoom(r
 
 	app.mu.Lock()
 	state := app.roomLiveLocked(roomID)
-	if len(state.pendingAttributionWindows) == 0 {
+	window, found := takePendingAttributionWindowLocked(state, segmentID)
+	if !found {
 		app.mu.Unlock()
+		if strings.TrimSpace(segmentID) != "" {
+			return "", "unknown", nil, nil
+		}
 		speaker, confidence := app.speakerForCompletedTranscriptForRoom(roomID, completedAt)
 		return speaker, confidence, nil, nil
 	}
-	window := state.pendingAttributionWindows[0]
-	state.pendingAttributionWindows = append([]attributionWindow(nil), state.pendingAttributionWindows[1:]...)
 	scores := attributionScoresLocked(state, window.startedAt, window.stoppedAt)
 	app.mu.Unlock()
 
@@ -419,6 +431,10 @@ func (app *kanbanBoardApp) attributionForCommittedTranscriptWithConsentForRoom(r
 }
 
 func (app *kanbanBoardApp) attributionForCommittedTranscriptWithConsentForScope(scope RoomScoutScope, completedAt time.Time) (string, string, *transcriptCaptureStamp, []ConsentFence, bool) {
+	return app.attributionForCommittedTranscriptWithConsentForScopeSegment(scope, "", completedAt)
+}
+
+func (app *kanbanBoardApp) attributionForCommittedTranscriptWithConsentForScopeSegment(scope RoomScoutScope, segmentID string, completedAt time.Time) (string, string, *transcriptCaptureStamp, []ConsentFence, bool) {
 	if app == nil || !scope.valid() {
 		return "", "unknown", nil, nil, false
 	}
@@ -434,12 +450,14 @@ func (app *kanbanBoardApp) attributionForCommittedTranscriptWithConsentForScope(
 	startedAt, stoppedAt := state.currentSpeechStartedAt, state.currentSpeechStoppedAt
 	var capture *transcriptCaptureStamp
 	var fences []ConsentFence
-	if len(state.pendingAttributionWindows) > 0 {
-		window := state.pendingAttributionWindows[0]
-		state.pendingAttributionWindows = append([]attributionWindow(nil), state.pendingAttributionWindows[1:]...)
+	if window, found := takePendingAttributionWindowLocked(state, segmentID); found {
 		startedAt, stoppedAt, capture = window.startedAt, window.stoppedAt, window.capture
 		fences = append([]ConsentFence(nil), window.contributorFences...)
 	} else {
+		if strings.TrimSpace(segmentID) != "" {
+			app.mu.Unlock()
+			return "", "unknown", nil, nil, false
+		}
 		if stoppedAt.IsZero() || (!startedAt.IsZero() && stoppedAt.Before(startedAt)) {
 			stoppedAt = completedAt
 		}
@@ -453,6 +471,29 @@ func (app *kanbanBoardApp) attributionForCommittedTranscriptWithConsentForScope(
 	app.mu.Unlock()
 	speaker, confidence := dominantTranscriptSpeaker(scores)
 	return speaker, confidence, capture, fences, true
+}
+
+func takePendingAttributionWindowLocked(state *roomLiveState, segmentID string) (attributionWindow, bool) {
+	if state == nil || len(state.pendingAttributionWindows) == 0 {
+		return attributionWindow{}, false
+	}
+	index := 0
+	segmentID = strings.TrimSpace(segmentID)
+	if segmentID != "" {
+		index = -1
+		for candidate := range state.pendingAttributionWindows {
+			if state.pendingAttributionWindows[candidate].segmentID == segmentID {
+				index = candidate
+				break
+			}
+		}
+		if index < 0 {
+			return attributionWindow{}, false
+		}
+	}
+	window := state.pendingAttributionWindows[index]
+	state.pendingAttributionWindows = append(state.pendingAttributionWindows[:index:index], state.pendingAttributionWindows[index+1:]...)
+	return window, true
 }
 
 // popPendingAttributionWindow discards the FIFO front without resolving a
@@ -479,14 +520,27 @@ func (app *kanbanBoardApp) popPendingAttributionWindowForRoom(roomID string) {
 }
 
 func (app *kanbanBoardApp) popPendingAttributionWindowForScope(scope RoomScoutScope) {
+	app.popPendingAttributionWindowForScopeSegment(scope, "")
+}
+
+func (app *kanbanBoardApp) popPendingAttributionWindowForScopeSegment(scope RoomScoutScope, segmentID string) {
 	if app == nil || !scope.valid() {
 		return
 	}
 	app.mu.Lock()
 	state := app.roomLiveLocked(scope.RoomID)
-	if state.mediaGen == scope.MediaGeneration && state.mediaActor != nil && state.mediaSittingID == strings.TrimSpace(scope.SittingID) && len(state.pendingAttributionWindows) > 0 {
-		state.pendingAttributionWindows = append([]attributionWindow(nil), state.pendingAttributionWindows[1:]...)
+	if state.mediaGen == scope.MediaGeneration && state.mediaActor != nil && state.mediaSittingID == strings.TrimSpace(scope.SittingID) {
+		_, _ = takePendingAttributionWindowLocked(state, segmentID)
 	}
+	app.mu.Unlock()
+}
+
+func (app *kanbanBoardApp) popPendingAttributionWindowForRoomSegment(roomID, segmentID string) {
+	if app == nil {
+		return
+	}
+	app.mu.Lock()
+	_, _ = takePendingAttributionWindowLocked(app.roomLiveLocked(roomID), segmentID)
 	app.mu.Unlock()
 }
 

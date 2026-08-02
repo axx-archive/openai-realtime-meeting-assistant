@@ -35,5 +35,5 @@ export function ChatAvatar({ name, avatarDataURL, size = 28 }: Props) {
 const styles = StyleSheet.create({
   avatar: { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line2, backgroundColor: colors.surface3 },
   fallback: { alignItems: 'center', justifyContent: 'center' },
-  initial: { fontWeight: '600', color: colors.text2 },
+  initial: { fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', color: colors.text2 },
 });

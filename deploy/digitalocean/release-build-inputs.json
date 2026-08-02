@@ -1,0 +1,58 @@
+{
+  "schema": "bonfire.release-build-inputs.v2",
+  "platform": "linux/amd64",
+  "goVersion": "1.26",
+  "goBuildImage": "golang:1.26-bookworm@sha256:3f6236bd765f898a2a3c2946112b04097814c4529d44534674700cd07b9c6b4c",
+  "runtimeImage": "debian:bookworm-slim@sha256:63a496b5d3b99214b39f5ed70eb71a61e590a77979c79cbee4faf991f8c0783e",
+  "debianSnapshot": "20260720T000000Z",
+  "debianArchive": "http://snapshot.debian.org/archive/debian/20260720T000000Z",
+  "debianSecurityArchive": "http://snapshot.debian.org/archive/debian-security/20260720T000000Z",
+  "buildPackages": [
+    "libopus-dev",
+    "pkg-config"
+  ],
+  "runtimePackages": [
+    "ca-certificates",
+    "curl",
+    "libopus0"
+  ],
+  "renderRuntimePackages": [
+    "ca-certificates",
+    "libopus0",
+    "findutils",
+    "grep",
+    "poppler-utils",
+    "fonts-liberation",
+    "fonts-dejavu-core",
+    "libnss3",
+    "libatk1.0-0",
+    "libatk-bridge2.0-0",
+    "libcups2",
+    "libdrm2",
+    "libxkbcommon0",
+    "libxcomposite1",
+    "libxdamage1",
+    "libxfixes3",
+    "libxrandr2",
+    "libgbm1",
+    "libpango-1.0-0",
+    "libcairo2",
+    "libasound2",
+    "libglib2.0-0",
+    "libx11-6",
+    "libxcb1",
+    "libxext6",
+    "libexpat1"
+  ],
+  "chromeHeadlessShellVersion": "150.0.7871.46",
+  "chromeHeadlessShellArchiveSha256": "0395e5db8d1631d5ed879d4f05fec423425537018fa1d73a58b1ade13288f447",
+  "sidecarImages": {
+    "canonicalPostgres": "postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193",
+    "coturn": "coturn/coturn@sha256:71c3c990283385567f11794ee692e3a47b66fd9b0bb39e42afbe776e331dd888",
+    "caddy": "caddy@sha256:25cdc846626b62d05f6b633b9b40c2c9f6ef89b515dc76133cefd920f7dbe562"
+  },
+  "dependencyLocks": [
+    "go.mod",
+    "go.sum"
+  ]
+}

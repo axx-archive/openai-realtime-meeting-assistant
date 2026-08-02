@@ -618,7 +618,7 @@ func (app *kanbanBoardApp) validatePackageRef(refType string, refID string) erro
 			return fmt.Errorf("channel not found")
 		}
 		thread, decoded := decodeScoutChatThreadEntry(entry)
-		if !decoded || scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
+		if !decoded || !scoutChatThreadIsOrganizationPublic(thread) {
 			return fmt.Errorf("channel not found")
 		}
 	case packageRefTypeDecision:
@@ -1593,7 +1593,7 @@ func (app *kanbanBoardApp) resolvePackageRefTitle(refType string, title string) 
 		winners := 0
 		for _, entry := range app.memory.entriesOfKind(meetingMemoryKindScoutChat, 0) {
 			thread, ok := decodeScoutChatThreadEntry(entry)
-			if !ok || scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
+			if !ok || !scoutChatThreadIsOrganizationPublic(thread) {
 				continue
 			}
 			score := tokenSetJaccard(titleTokens, linkageMatchTokens(thread.Title))
@@ -1895,7 +1895,7 @@ func packageReferenceAuthorized(ctx context.Context, user *userAccount, refType 
 		for index := len(kanbanApp.memory.entries) - 1; index >= 0; index-- {
 			entry := &kanbanApp.memory.entries[index]
 			if entry.Kind == meetingMemoryKindScoutChat && entry.ID == refID {
-				return normalizeScoutChatVisibility(entry.Metadata["visibility"]) == scoutChatVisibilityPublic
+				return normalizeScoutChatVisibility(entry.Metadata["visibility"]) == scoutChatVisibilityPublic && strings.TrimSpace(entry.Metadata["memberEmails"]) == ""
 			}
 		}
 		return false

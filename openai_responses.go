@@ -121,6 +121,23 @@ func (failure *openAIOutputRejection) Error() string {
 	return "OpenAI output rejected: " + failure.reason
 }
 
+func (failure *openAIOutputRejection) providerOutputRejection() {}
+
+// providerOutputRejectionMarker is the provider-neutral counterpart to
+// providerInvocationFailureMarker: a successful wire exchange whose output is
+// incomplete, empty, refused, or structurally unusable. Durable workers must
+// hold their source cursor and open a bounded circuit for these errors; they
+// are never evidence that the raw input itself is poison.
+type providerOutputRejectionMarker interface {
+	error
+	providerOutputRejection()
+}
+
+func isProviderOutputRejection(err error) bool {
+	var failure providerOutputRejectionMarker
+	return errors.As(err, &failure)
+}
+
 func openAIOutputRejectionReason(err error) (string, bool) {
 	var failure *openAIOutputRejection
 	if !errors.As(err, &failure) {
@@ -138,12 +155,27 @@ type openAIProviderFailure struct {
 	err error
 }
 
-func (failure *openAIProviderFailure) Error() string { return failure.err.Error() }
-func (failure *openAIProviderFailure) Unwrap() error { return failure.err }
+func (failure *openAIProviderFailure) Error() string              { return failure.err.Error() }
+func (failure *openAIProviderFailure) Unwrap() error              { return failure.err }
+func (failure *openAIProviderFailure) providerInvocationFailure() {}
 
-func isOpenAIProviderFailure(err error) bool {
-	var failure *openAIProviderFailure
-	return errors.As(err, &failure)
+// providerInvocationFailureMarker is provider-neutral so ambient workers do
+// not accidentally dead-letter durable input merely because their current
+// route changed from OpenAI to Anthropic.
+type providerInvocationFailureMarker interface {
+	error
+	providerInvocationFailure()
+}
+
+func isProviderInvocationFailure(err error) bool {
+	var failure providerInvocationFailureMarker
+	if errors.As(err, &failure) {
+		return true
+	}
+	// Anthropic non-2xx responses already use the shared status-only wrapper.
+	// Classify that existing wire receipt without relying on a provider name.
+	var requestFailure *apiRequestFailure
+	return errors.As(err, &requestFailure)
 }
 
 var createOpenAITextResponse openAITextResponder = createOpenAITextResponseHTTP
@@ -244,7 +276,7 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 		recordLLMUsage(entry)
 	}
 
-	response, err := (&http.Client{Timeout: 45 * time.Second}).Do(httpRequest)
+	response, err := aiProviderHTTPClient(45 * time.Second).Do(httpRequest)
 	if err != nil {
 		wireErr := &openAIProviderFailure{err: fmt.Errorf("create OpenAI response: %w", err)}
 		recordWire(nil, false, false, "transport_error", "", wireErr)

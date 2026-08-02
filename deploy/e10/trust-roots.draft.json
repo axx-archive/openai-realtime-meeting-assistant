@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "stride.e10.trust-roots/v2",
+  "trustRootId": "replace-with-approved-e10-trust-root-id",
+  "preMeasurementTargetRegistrySha256": "REPLACE_WITH_SEPARATELY_APPROVED_PRE_MEASUREMENT_TARGET_REGISTRY_SHA256",
+  "approvedSigners": [
+    {"keyId":"replace-with-registry-owner-key-id","identityId":"replace-with-release-owner-id","role":"registry_owner","publicKeyFingerprintSha256":"REPLACE_WITH_APPROVED_REGISTRY_PUBLIC_KEY_SHA256"},
+    {"keyId":"replace-with-operator-key-id","identityId":"replace-with-evidence-operator-id","role":"operator","publicKeyFingerprintSha256":"REPLACE_WITH_APPROVED_OPERATOR_PUBLIC_KEY_SHA256"},
+    {"keyId":"replace-with-independent-review-key-id","identityId":"replace-with-independent-reviewer-id","role":"independent_reviewer","publicKeyFingerprintSha256":"REPLACE_WITH_APPROVED_REVIEWER_PUBLIC_KEY_SHA256"},
+    {"keyId":"replace-with-pilot-reviewer-one-key-id","identityId":"replace-with-pilot-reviewer-one-id","role":"pilot_reviewer","publicKeyFingerprintSha256":"REPLACE_WITH_APPROVED_PILOT_REVIEWER_ONE_PUBLIC_KEY_SHA256"},
+    {"keyId":"replace-with-pilot-reviewer-two-key-id","identityId":"replace-with-pilot-reviewer-two-id","role":"pilot_reviewer","publicKeyFingerprintSha256":"REPLACE_WITH_APPROVED_PILOT_REVIEWER_TWO_PUBLIC_KEY_SHA256"}
+  ]
+}

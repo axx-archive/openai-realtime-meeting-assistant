@@ -293,8 +293,8 @@ test('the wordmark is the receiving row, never the orange, on every surface', ()
    *
    * Orange is custody of energy. The name is the one thing that never moves, so
    * it takes the row's graphite, and each cut IS that appearance's row — the
-   * wordmark matches the balls in the tile beside it. The three surfaces each
-   * declare it separately, so all three are checked, and each is checked for
+   * wordmark matches the balls in the tile beside it. The four web placements
+   * declare it separately, so all four are checked, and each is checked for
    * the orange creeping back as "more on-brand".
    */
   const ROW_ON_LIGHT = '#54545C';
@@ -304,7 +304,7 @@ test('the wordmark is the receiving row, never the orange, on every surface', ()
   assert.match(html, new RegExp(`--wordmark: ${ROW_ON_LIGHT};`));
   assert.match(html, new RegExp(`--wordmark: ${ROW_ON_DARK};`));
   // Every placement reads the token rather than picking its own colour.
-  assert.equal((html.match(/color: var\(--wordmark\)/g) ?? []).length, 3);
+  assert.equal((html.match(/color: var\(--wordmark\)/g) ?? []).length, 4);
   // Bounded to the rule's own block. An unbounded `[\s\S]*?` here matches the
   // next --ember ANYWHERE later in a 30k-line file and always fails.
   const loginRule = html.slice(html.indexOf('.login-wordmark {'));

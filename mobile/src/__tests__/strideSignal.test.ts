@@ -11,6 +11,7 @@ import {
   TILE_INSET,
   aperture,
   apertureAmplitude,
+  apertureContourPathData,
   aperturePathData,
   lensHalfHeight,
   lensPath,
@@ -192,6 +193,27 @@ test('the ripple only ever CLOSES the aperture', () => {
   // The two edges are offset in phase, so at a given moment they are not the same
   // multiplier. Mirrored edges would read as a tube inflating, not a ripple.
   assert.notEqual(rippleAt(0.3, 0.4, 1, -1), rippleAt(0.3, 0.4, 1, 1));
+});
+
+test('resonance contours stay nested inside the canonical Signal shell', () => {
+  for (const amplitude of [0, aperture.idleFloor, 0.4, 0.75, 1]) {
+    for (let tick = 0; tick < 60; tick += 1) {
+      const seconds = tick / 30;
+      const shell = halfHeights(aperturePathData(WIDTH, amplitude, seconds, true));
+      for (const [scale, phase] of [[0.58, 0.34], [0.19, 0.72]] as const) {
+        const contour = halfHeights(
+          apertureContourPathData(WIDTH, amplitude, seconds, scale, phase),
+        );
+        assert.equal(contour.length, shell.length);
+        for (let index = 0; index < shell.length; index += 1) {
+          assert.ok(
+            contour[index] <= shell[index] + ROUNDING,
+            `scale ${scale} escaped the shell at amplitude ${amplitude}, point ${index}`,
+          );
+        }
+      }
+    }
+  }
 });
 
 test('the 8:1 floor holds at every amplitude, at every ripple phase', () => {

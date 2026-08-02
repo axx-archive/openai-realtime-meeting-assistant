@@ -60,10 +60,10 @@ func TestWorkflowTickerNeverLaunchesDraftProposals(t *testing.T) {
 	}
 }
 
-// A confirmed proposal whose launch never stamped a threadId (the crash gap in
-// resolveCodexProposal) relaunches exactly once past the grace window; the
-// second pass is a no-op once the relaunch stamps the threadId.
-func TestWorkflowTickerRelaunchesConfirmedButUnstamped(t *testing.T) {
+// A confirmed proposal whose launch never stamped a threadId is ambiguous: it
+// may have crashed before the effect or after it. The ticker must never replay
+// it because missing linkage is not proof that no launch occurred.
+func TestWorkflowTickerDoesNotReplayConfirmedButUnstamped(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	launches := stubTickerLaunches(t, nil)
 
@@ -76,7 +76,7 @@ func TestWorkflowTickerRelaunchesConfirmedButUnstamped(t *testing.T) {
 		// threadId intentionally absent — the stamp never landed.
 	})
 
-	// Inside the grace window the ticker leaves it alone.
+	// Fresh ambiguity is equally non-replayable.
 	fresh := "codex-proposal-fresh-confirm"
 	appendTickerProposal(t, app, fresh, map[string]string{
 		"status":           codexProposalStatusConfirmed,
@@ -85,22 +85,17 @@ func TestWorkflowTickerRelaunchesConfirmedButUnstamped(t *testing.T) {
 		"resolvedAt":       time.Now().Add(-30 * time.Second).UTC().Format(time.RFC3339Nano),
 	})
 
-	if got := app.runWorkflowTickerOnce(time.Now()); got != 1 || *launches != 1 {
-		t.Fatalf("first pass launched=%d stub=%d, want exactly the past-grace stuck proposal", got, *launches)
+	if got := app.runWorkflowTickerOnce(time.Now()); got != 0 || *launches != 0 {
+		t.Fatalf("first pass launched=%d stub=%d, want ambiguous proposals fenced", got, *launches)
 	}
 
 	entry, _ := app.memory.entryByKindAndID(meetingMemoryKindCodexProposal, id)
-	if strings.TrimSpace(entry.Metadata["threadId"]) == "" {
-		t.Fatalf("relaunch must stamp a threadId, got metadata=%#v", entry.Metadata)
-	}
-	if entry.Metadata["confirmedBy"] != "Tom" {
-		t.Fatalf("relaunch must preserve the original confirmer, got confirmedBy=%q", entry.Metadata["confirmedBy"])
+	if strings.TrimSpace(entry.Metadata["threadId"]) != "" || entry.Metadata["confirmedBy"] != "Tom" {
+		t.Fatalf("ambiguous proposal was mutated: metadata=%#v", entry.Metadata)
 	}
 
-	// Second pass: the stamped proposal is done, the fresh confirm is still in
-	// grace → no new launch.
-	if got := app.runWorkflowTickerOnce(time.Now()); got != 0 || *launches != 1 {
-		t.Fatalf("second pass launched=%d stub=%d, want no relaunch after the stamp", got, *launches)
+	if got := app.runWorkflowTickerOnce(time.Now()); got != 0 || *launches != 0 {
+		t.Fatalf("second pass launched=%d stub=%d, want replay to remain fenced", got, *launches)
 	}
 }
 
@@ -108,7 +103,7 @@ func TestWorkflowTickerRelaunchesConfirmedButUnstamped(t *testing.T) {
 // proposal_confirmed signal) but whose follow-up threadId stamp write failed
 // non-fatally must NOT be relaunched by the ticker — a second launch would
 // double the agent thread and re-settle the notification. The empty threadId is
-// lost linkage, not the crash gap Case A recovers.
+// ambiguous/lost linkage, never replay authority.
 func TestWorkflowTickerDoesNotRelaunchSettledUnstampedProposal(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	launches := stubTickerLaunches(t, nil)
@@ -172,10 +167,9 @@ func TestWorkflowTickerAutoRunLaneRequiresStandingApproval(t *testing.T) {
 	}
 }
 
-// W0-7/8: a ticker launch records the proposal-lifecycle launched event
-// (path=ticker) plus one workflow-run provenance row per launch shape — Case A
-// carries the original confirmer as approver, Case B the standing approval's
-// grantor. The terminal outcome is the agent-thread runner's row (joined on
+// W0-7/8: a standing-approval ticker launch records the proposal-lifecycle
+// launched event (path=ticker) plus one workflow-run provenance row. Ambiguous
+// confirmed rows never replay. The terminal outcome is the runner's row (joined on
 // thread_id), so the ticker records exactly the launch.
 func TestWorkflowTickerLaunchRecordsProposalAndWorkflowProvenance(t *testing.T) {
 	dir := ledgerTestDir(t)
@@ -206,8 +200,8 @@ func TestWorkflowTickerLaunchRecordsProposalAndWorkflowProvenance(t *testing.T) 
 		"approvalLane":   "auto",
 	})
 
-	if got := app.runWorkflowTickerOnce(time.Now()); got != 2 || *launches != 2 {
-		t.Fatalf("pass launched=%d stub=%d, want both provenance proposals", got, *launches)
+	if got := app.runWorkflowTickerOnce(time.Now()); got != 1 || *launches != 1 {
+		t.Fatalf("pass launched=%d stub=%d, want only the standing-approved proposal", got, *launches)
 	}
 
 	rows := readLedgerLines(t, filepath.Join(dir, "eval-2026-07-11.jsonl"))
@@ -236,26 +230,16 @@ func TestWorkflowTickerLaunchRecordsProposalAndWorkflowProvenance(t *testing.T) 
 		}
 	}
 
-	fieldsA, ok := launchedPaths[caseA]
-	if !ok || fieldsA["path"] != triggerSurfaceTicker || fieldsA["lane"] != codexProposalLaneStandard {
-		t.Fatalf("case-A launched event = %v, want path=ticker lane=standard", fieldsA)
+	if fieldsA := launchedPaths[caseA]; fieldsA != nil {
+		t.Fatalf("ambiguous case-A emitted a launch: %v", fieldsA)
 	}
 	fieldsB, ok := launchedPaths[caseB]
 	if !ok || fieldsB["path"] != triggerSurfaceTicker || fieldsB["lane"] != codexProposalLaneAutoRun {
 		t.Fatalf("case-B launched event = %v, want path=ticker lane=auto_run", fieldsB)
 	}
 
-	runA, ok := runs[caseA]
-	if !ok {
-		t.Fatalf("case-A workflow_run row missing: %v", runs)
-	}
-	if runA["workflow_id"] != "research" || runA["approver"] != "Tom" ||
-		runA["proposer"] != "board_worker" || runA["lane"] != "standard" ||
-		runA["outcome"] != workflowOutcomeLaunched {
-		t.Fatalf("case-A run provenance = %v", runA)
-	}
-	if threadID, _ := runA["thread_id"].(string); strings.TrimSpace(threadID) == "" {
-		t.Fatalf("case-A run must carry the launched thread id: %v", runA)
+	if runA := runs[caseA]; runA != nil {
+		t.Fatalf("ambiguous case-A emitted workflow provenance: %v", runA)
 	}
 	runB, ok := runs[caseB]
 	if !ok {

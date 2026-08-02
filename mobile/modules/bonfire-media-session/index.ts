@@ -13,7 +13,7 @@ const nativeModule = Platform.OS === 'ios'
 const BonfireMediaSession = createMediaSessionClient(nativeModule);
 
 export default BonfireMediaSession;
-export { createMediaSessionClient };
+export { createMediaSessionClient, nextMediaSessionGeneration } from './src/BonfireMediaSession';
 export type {
   MediaSessionClient,
   MeetingAudioRouteSnapshot,

@@ -4,21 +4,20 @@ import { SymbolView } from 'expo-symbols';
 import * as Haptics from 'expo-haptics';
 import { Glass } from '../theme/glass';
 import { duration, ease, useReduceMotion } from '../theme/motion';
-import { DOCK_ROW_BOTTOM_MARGIN, DOCK_ROW_MARGIN } from './dockRowLayout';
-import { colors, hitMin, radius } from '../theme/tokens';
+import { DOCK_ROW_MARGIN } from './dockRowLayout';
+import { colors, hitMin, radius, space } from '../theme/tokens';
 
 /**
  * The chat circle — design §6 of docs/plans/the-table-design.md.
  *
- * One permanent glass circle in the row above the Dock, so the team thread is
+ * One permanent glass circle in the Canvas utility row, so the team thread is
  * always one tap away:
  *
  *     rest    [chat] ................... [nav toggle]
- *     open           [Room][Threads][Live][Work] [x]
+ *     open           [Room][Threads][New][Work] [x]
  *
- * It cannot live ON the Dock: that surface is full-width and tap / hold /
- * drag-up / trailing-keyboard are all spent, and a fifth affordance would
- * collide with gestures the shell design calls load-bearing.
+ * Voice belongs to the central Signal. This row stays independent so navigation
+ * survives a denied microphone or an unavailable model.
  *
  * It is one circle, not five. A tab bar is permanent structure that declares
  * itself the app's spine — which is what made the old shell a dashboard. A
@@ -103,11 +102,10 @@ export function ChatCircle({ clusterOpen, mentioned, onPress }: ChatCircleProps)
 
 const styles = StyleSheet.create({
   wrap: {
-    // Mirrors NavCluster's own insets exactly (marginRight/marginBottom), so
-    // the two ends of the row sit on the same optical margin as the Dock's
-    // pill edge below them. Vertical alignment comes from the parent row.
+    // Mirrors NavCluster's own insets exactly. Vertical alignment comes from
+    // the parent utility row.
     marginLeft: DOCK_ROW_MARGIN,
-    marginBottom: DOCK_ROW_BOTTOM_MARGIN,
+    marginBottom: space[3],
   },
   circle: {
     width: hitMin,

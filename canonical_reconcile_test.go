@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -25,6 +28,98 @@ func canonicalParityACLFromPlan(plan CanonicalImportPlan) canonicalTestParityACL
 		}
 	}
 	return resolver
+}
+
+func TestReconcileCanonicalPlanTreatsExactLegacyBaselineAsVisibleCheckpoint(t *testing.T) {
+	registry, err := NewCanonicalImportPayloadRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := canonicalLegacyBaselineTestEvent(t, registry, "meeting", "meeting-first-observed-v48", 48)
+	store := NewMemoryCanonicalEventStore(registry)
+	if _, err := store.Append(context.Background(), event); err != nil {
+		t.Fatal(err)
+	}
+	stateDigest := eventPayloadStateDigest(event)
+	plan := CanonicalImportPlan{
+		TenantID: event.TenantID,
+		Objects:  []CanonicalImportedObject{{Family: event.AggregateType, ObjectID: event.AggregateID, StateDigest: stateDigest, AggregateVersion: event.AggregateVersion, EventID: event.EventID}},
+		Events:   []CanonicalEvent{event},
+	}
+	report, err := ReconcileCanonicalPlanWithOptions(context.Background(), plan, store, CanonicalReconcileOptions{ACL: canonicalParityACLFromPlan(plan)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Diverged || len(report.Candidates) != 0 || report.Target.Families["meeting"].Count != 1 {
+		t.Fatalf("exact legacy checkpoint was hidden from parity: diverged=%v target=%+v candidates=%+v", report.Diverged, report.Target, report.Candidates)
+	}
+}
+
+func TestReconcileCanonicalPlanStillRejectsNativeHistoryGap(t *testing.T) {
+	registry := testCanonicalRegistry(t)
+	event := canonicalTestEvent(t, registry, uuid.New(), "artifact-native-v2", 2, "native-v2", "private")
+	store := NewMemoryCanonicalEventStore(registry)
+	if _, err := store.Append(context.Background(), event); err != nil {
+		t.Fatal(err)
+	}
+	plan := CanonicalImportPlan{
+		TenantID: event.TenantID,
+		Objects:  []CanonicalImportedObject{{Family: event.AggregateType, ObjectID: event.AggregateID, StateDigest: eventPayloadStateDigest(event), AggregateVersion: event.AggregateVersion, EventID: event.EventID}},
+		Events:   []CanonicalEvent{event},
+	}
+	report, err := ReconcileCanonicalPlanWithOptions(context.Background(), plan, store, CanonicalReconcileOptions{ACL: canonicalParityACLFromPlan(plan)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasGap := false
+	for _, candidate := range report.Candidates {
+		hasGap = hasGap || candidate.Kind == "target_history_gap"
+	}
+	if !report.Diverged || !hasGap {
+		t.Fatalf("native gap was accepted: diverged=%v candidates=%+v", report.Diverged, report.Candidates)
+	}
+}
+
+func TestReconcileCanonicalPlanLegacyCheckpointCannotMaskNativeHistoryGap(t *testing.T) {
+	registry, err := NewCanonicalImportPayloadRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Register("artifact.revised", 1, CanonicalPayloadSchema{Fields: map[string]CanonicalPayloadField{
+		"artifact_id":      {Kind: CanonicalPayloadIdentifier, Required: true},
+		"content_revision": {Kind: CanonicalPayloadRevision, Required: true},
+		"content_sha256":   {Kind: CanonicalPayloadDigest, Required: true},
+		"content_ref":      {Kind: CanonicalPayloadContentRef},
+		"visibility":       {Kind: CanonicalPayloadEnum, Required: true, Enums: []string{"private", "organization"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	native := canonicalTestEvent(t, registry, uuid.New(), "meeting-mixed-history", 1, "meeting-native-v1", "private")
+	native.TenantID = "tenant-a"
+	native.AggregateType = "meeting"
+	checkpoint := canonicalLegacyBaselineTestEvent(t, registry, "meeting", native.AggregateID, 5)
+	store := NewMemoryCanonicalEventStore(registry)
+	for _, event := range []CanonicalEvent{native, checkpoint} {
+		if _, err := store.Append(context.Background(), event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	plan := CanonicalImportPlan{
+		TenantID: checkpoint.TenantID,
+		Objects:  []CanonicalImportedObject{{Family: checkpoint.AggregateType, ObjectID: checkpoint.AggregateID, StateDigest: eventPayloadStateDigest(checkpoint), AggregateVersion: checkpoint.AggregateVersion, EventID: checkpoint.EventID}},
+		Events:   []CanonicalEvent{checkpoint},
+	}
+	report, err := ReconcileCanonicalPlanWithOptions(context.Background(), plan, store, CanonicalReconcileOptions{ACL: canonicalParityACLFromPlan(plan)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasGap := false
+	for _, candidate := range report.Candidates {
+		hasGap = hasGap || candidate.Kind == "target_history_gap"
+	}
+	if !report.Diverged || !hasGap {
+		t.Fatalf("legacy checkpoint masked native history: diverged=%v candidates=%+v", report.Diverged, report.Candidates)
+	}
 }
 
 func TestCanonicalReconcilerReportsMissingWithoutWriting(t *testing.T) {
@@ -114,6 +209,190 @@ func TestCanonicalReconcilerCollapsesContiguousHistoryToCurrentProjection(t *tes
 	}
 	if report.Target.Families["board_card"].Count != report.Source.Families["board_card"].Count {
 		t.Fatalf("history inflated target count: source=%+v target=%+v", report.Source.Families["board_card"], report.Target.Families["board_card"])
+	}
+}
+
+func TestCanonicalReconcilerTreatsExactLegacyRevisionJumpsAsCheckpoints(t *testing.T) {
+	registry, err := NewCanonicalImportPayloadRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewMemoryCanonicalEventStore(registry)
+	baseline := canonicalLegacyBaselineTestEvent(t, registry, "meeting", "meeting-checkpoint", 2)
+	checkpoint := canonicalLegacyBaselineTestEvent(t, registry, "meeting", baseline.AggregateID, 48)
+	for _, event := range []CanonicalEvent{baseline, checkpoint} {
+		if _, err := store.Append(context.Background(), event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stateDigest := eventPayloadStateDigest(checkpoint)
+	source := CanonicalImportPlan{
+		TenantID: checkpoint.TenantID,
+		Objects:  []CanonicalImportedObject{{Family: checkpoint.AggregateType, ObjectID: checkpoint.AggregateID, StateDigest: stateDigest, AggregateVersion: checkpoint.AggregateVersion, EventID: checkpoint.EventID}},
+		Events:   []CanonicalEvent{checkpoint},
+	}
+	report, err := ReconcileCanonicalPlanWithOptions(context.Background(), source, store, CanonicalReconcileOptions{ACL: canonicalParityACLFromPlan(source)})
+	if err != nil || report.Diverged || len(report.Candidates) != 0 {
+		t.Fatalf("legacy checkpoint parity diverged=%v candidates=%+v err=%v", report.Diverged, report.Candidates, err)
+	}
+}
+
+func TestCanonicalReconcilerStillRejectsNativeHistoryGap(t *testing.T) {
+	registry := testCanonicalRegistry(t)
+	store := NewMemoryCanonicalEventStore(registry)
+	first := canonicalTestEvent(t, registry, uuid.New(), "native-gap", 1, "native-gap-1", "private")
+	third := canonicalTestEvent(t, registry, uuid.New(), first.AggregateID, 3, "native-gap-3", "private")
+	for _, event := range []CanonicalEvent{first, third} {
+		if _, err := store.Append(context.Background(), event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	source := CanonicalImportPlan{TenantID: first.TenantID}
+	report, err := ReconcileCanonicalPlanWithOptions(context.Background(), source, store, CanonicalReconcileOptions{ACL: canonicalParityACLFromPlan(source)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, candidate := range report.Candidates {
+		if candidate.Family == third.AggregateType && candidate.ObjectID == third.AggregateID && candidate.Kind == "target_history_gap" && candidate.TargetVersion == 3 {
+			found = true
+		}
+	}
+	if !found || !report.Diverged {
+		t.Fatalf("native history gap was not preserved: %+v", report)
+	}
+}
+
+func TestCanonicalBoardDeleteUndoMustAdvancePastDeletionCheckpoint(t *testing.T) {
+	paths := canonicalImportFixture(t)
+	versionPath := filepath.Join(t.TempDir(), "versions.json")
+	first, registry := buildCanonicalFixturePlan(t, paths, versionPath)
+	store := NewMemoryCanonicalEventStore(registry)
+	if err := first.Apply(context.Background(), store); err != nil {
+		t.Fatal(err)
+	}
+	var originalBoard kanbanBoardState
+	if ok, err := readJSONIfExists(paths.Board, &originalBoard); err != nil || !ok {
+		t.Fatal(err)
+	}
+	var deletedObject CanonicalImportedObject
+	for _, object := range first.Objects {
+		if object.Family == "board_card" && object.ObjectID == "card-a" {
+			deletedObject = object
+			break
+		}
+	}
+	if deletedObject.ObjectID == "" {
+		t.Fatal("fixture board card not imported")
+	}
+	deletedAt := time.Date(2026, 7, 12, 20, 1, 0, 0, time.UTC)
+	record, err := json.Marshal(CanonicalLifecycleJournalRecord{
+		Family: "board_card", ObjectID: deletedObject.ObjectID, StateDigest: deletedObject.StateDigest,
+		At: deletedAt, Reason: "board_card_deleted",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal, err := os.OpenFile(paths.DeletedJournal, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := journal.Write(append(record, '\n')); err != nil {
+		_ = journal.Close()
+		t.Fatal(err)
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatal(err)
+	}
+	deletedBoard := originalBoard
+	deletedBoard.Cards = []kanbanCard{originalBoard.Cards[0]}
+	deletedBoard.UpdatedAt = deletedAt.Add(time.Second).Format(time.RFC3339Nano)
+	writeCanonicalFixtureJSON(t, paths.Board, deletedBoard)
+	deletedPlan, _ := buildCanonicalFixturePlan(t, paths, versionPath)
+	if err := deletedPlan.Apply(context.Background(), store); err != nil {
+		t.Fatal(err)
+	}
+	deletedReport, err := ReconcileCanonicalPlanWithOptions(context.Background(), deletedPlan, store, CanonicalReconcileOptions{ACL: canonicalParityACLFromPlan(deletedPlan)})
+	if err != nil || deletedReport.Diverged {
+		t.Fatalf("delete checkpoint did not reconcile: diverged=%v candidates=%+v err=%v", deletedReport.Diverged, deletedReport.Candidates, err)
+	}
+
+	restoredBoard := originalBoard
+	restoredBoard.UpdatedAt = deletedAt.Add(2 * time.Second).Format(time.RFC3339Nano)
+	for index := range restoredBoard.Cards {
+		if restoredBoard.Cards[index].ID == deletedObject.ObjectID {
+			restoredBoard.Cards[index].RestoredAt = restoredBoard.UpdatedAt
+		}
+	}
+	writeCanonicalFixtureJSON(t, paths.Board, restoredBoard)
+	restoredPlan, _ := buildCanonicalFixturePlan(t, paths, versionPath)
+	if err := restoredPlan.Apply(context.Background(), store); err != nil {
+		t.Fatal(err)
+	}
+	restoredReport, err := ReconcileCanonicalPlanWithOptions(context.Background(), restoredPlan, store, CanonicalReconcileOptions{ACL: canonicalParityACLFromPlan(restoredPlan)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restoredReport.Diverged || len(restoredReport.Candidates) != 0 {
+		t.Fatalf("undo did not advance past deletion checkpoint: candidates=%+v", restoredReport.Candidates)
+	}
+	var restoredObject CanonicalImportedObject
+	for _, object := range restoredPlan.Objects {
+		if object.Family == "board_card" && object.ObjectID == deletedObject.ObjectID {
+			restoredObject = object
+			break
+		}
+	}
+	if restoredObject.AggregateVersion != 3 {
+		t.Fatalf("restored card version=%d, want v3 after v1 live and v2 deletion", restoredObject.AggregateVersion)
+	}
+	secondDeleteAt := deletedAt.Add(3 * time.Second)
+	if err := ensureCanonicalLifecycleJournal(paths.DeletedJournal, CanonicalLifecycleJournalRecord{
+		Family: "board_card", ObjectID: restoredObject.ObjectID, StateDigest: restoredObject.StateDigest,
+		At: secondDeleteAt, Reason: "board_card_deleted_again",
+	}); err != nil {
+		t.Fatalf("journal second delete generation: %v", err)
+	}
+	deletedAgain := restoredBoard
+	deletedAgain.Cards = []kanbanCard{restoredBoard.Cards[0]}
+	deletedAgain.UpdatedAt = secondDeleteAt.Add(time.Second).Format(time.RFC3339Nano)
+	writeCanonicalFixtureJSON(t, paths.Board, deletedAgain)
+	deletedAgainPlan, _ := buildCanonicalFixturePlan(t, paths, versionPath)
+	if err := deletedAgainPlan.Apply(context.Background(), store); err != nil {
+		t.Fatal(err)
+	}
+	deletedAgainReport, err := ReconcileCanonicalPlanWithOptions(context.Background(), deletedAgainPlan, store, CanonicalReconcileOptions{ACL: canonicalParityACLFromPlan(deletedAgainPlan)})
+	if err != nil || deletedAgainReport.Diverged || len(deletedAgainReport.Candidates) != 0 {
+		t.Fatalf("second delete generation did not reconcile: diverged=%v candidates=%+v err=%v", deletedAgainReport.Diverged, deletedAgainReport.Candidates, err)
+	}
+	for _, object := range deletedAgainPlan.Objects {
+		if object.Family == "board_card" && object.ObjectID == deletedObject.ObjectID && object.AggregateVersion != 4 {
+			t.Fatalf("second deletion version=%d, want v4", object.AggregateVersion)
+		}
+	}
+}
+
+func TestCanonicalLifecycleJournalRejectsReusingHistoricalNonLatestDigest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "deleted-objects.jsonl")
+	t1 := time.Date(2026, 7, 29, 1, 0, 0, 0, time.UTC)
+	d1 := strings.Repeat("1", 64)
+	d2 := strings.Repeat("2", 64)
+	for _, record := range []CanonicalLifecycleJournalRecord{
+		{Family: "board_card", ObjectID: "card-a", StateDigest: d1, At: t1, Reason: "first"},
+		{Family: "board_card", ObjectID: "card-a", StateDigest: d2, At: t1.Add(time.Minute), Reason: "second"},
+	} {
+		if err := ensureCanonicalLifecycleJournal(path, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ensureCanonicalLifecycleJournal(path, CanonicalLifecycleJournalRecord{
+		Family: "board_card", ObjectID: "card-a", StateDigest: d1, At: t1.Add(2 * time.Minute), Reason: "stale state returned",
+	}); err == nil {
+		t.Fatal("historical non-latest digest was mistaken for an idempotent retry")
+	}
+	records, err := readCanonicalLifecycleJournal(path)
+	if err != nil || len(records) != 2 {
+		t.Fatalf("journal records=%+v err=%v, want two unchanged generations", records, err)
 	}
 }
 

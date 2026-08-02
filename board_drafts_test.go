@@ -109,6 +109,14 @@ func TestDismissDraftTicketRemovesCardAndSkipsUndo(t *testing.T) {
 	if app.canUndoDelete() {
 		t.Fatal("dismissed drafts must not enter the undo slot")
 	}
+	records, err := boardLifecycleCommittedRecords(filepath.Join(filepath.Dir(meetingMemoryPath()), "deleted-objects.jsonl"))
+	if err != nil || len(records) != 1 ||
+		records[0].Phase != canonicalLifecyclePhaseCommitted ||
+		records[0].OperationID == "" ||
+		records[0].Family != "board_card" || records[0].ObjectID != cardID ||
+		records[0].Reason != "board_draft_dismissed" || !isHexDigest(records[0].StateDigest) {
+		t.Fatalf("dismiss lifecycle journal=%+v err=%v", records, err)
+	}
 
 	// dismissing a normal card fails
 	normal, _, err := app.createTicket(map[string]any{"title": "Real card"})
@@ -117,6 +125,29 @@ func TestDismissDraftTicketRemovesCardAndSkipsUndo(t *testing.T) {
 	}
 	if _, _, err := app.dismissDraftTicket(map[string]any{"card_id": normal["card"].(kanbanCard).ID}); err == nil {
 		t.Fatal("dismissing a non-draft card must error")
+	}
+}
+
+func TestBoardDeletionFailsClosedWhenLifecycleJournalIsUnavailable(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	created, _, err := app.createTicket(map[string]any{"title": "Must survive journal failure"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cardID := created["card"].(kanbanCard).ID
+	blocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocker, []byte("blocked"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(blocker, "memory.jsonl"))
+	if _, changed, err := app.deleteTicket(map[string]any{"card_id": cardID}); err == nil || changed {
+		t.Fatalf("delete with unavailable lifecycle journal changed=%v err=%v", changed, err)
+	}
+	if _, ok := findSnapshotCard(app.snapshotState().Cards, cardID); !ok {
+		t.Fatal("card disappeared despite lifecycle journal failure")
+	}
+	if app.canUndoDelete() {
+		t.Fatal("failed delete populated the undo slot")
 	}
 }
 

@@ -6,13 +6,10 @@ package main
 // call and appends no artifact, it re-scans codex proposals and, for the narrow
 // set that already carry a recorded human approval, drives the SAME confirm
 // bookkeeping the HTTP confirm uses (launchApprovedProposal). Two eligible
-// shapes:
+// shapes historically existed. Confirmed-but-unstamped crash recovery is now
+// retired because absence of a post-launch stamp cannot prove absence of the
+// launch effect. The only remaining launch shape is:
 //
-//   A. a proposal a human already CONFIRMED whose launch never stamped a
-//      threadId — the crash/failure gap between resolveCodexProposal's
-//      persist-before-launch write and its thread-id stamp. Relaunched under
-//      the original confirmer, once, past a short grace so a confirm still
-//      in-flight is never double-launched.
 //   B. an auto_run-lane proposal carrying 069's standing approval
 //      (laneApprovedBy). Inert until 069 writes that metadata: a proposal never
 //      runs without a recorded human approval.
@@ -36,15 +33,9 @@ const (
 	workflowTickerAgentName         = "workflow ticker"
 	defaultWorkflowTickerInterval   = 5 * time.Minute
 	defaultWorkflowTickerMaxPerPass = 2
-	// workflowTickerConfirmGrace is how long a confirmed-but-unstamped proposal
-	// must sit before the ticker relaunches it, so a confirm whose launch/stamp
-	// is still in flight (status persisted, thread not yet stamped) is never
-	// double-launched. Belt-and-suspenders on top of the shared proposalMu.
-	workflowTickerConfirmGrace = 2 * time.Minute
-
 	// triggerSurfaceTicker extends the usage_ledger trigger-surface vocabulary
-	// (W0-8) for the ticker's two launch shapes — Case A crash recovery and
-	// Case B standing approval. Ticker launches are neither a fresh human
+	// (W0-8) for the ticker's standing-approval launch. Ticker launches are
+	// neither a fresh human
 	// surface nor the W4 registry scheduler, so they carry their own tag.
 	triggerSurfaceTicker = "ticker"
 )
@@ -118,6 +109,9 @@ func (app *kanbanBoardApp) startWorkflowTicker() {
 	if app == nil || app.memory == nil || boolEnv("BONFIRE_WORKFLOW_TICKER_DISABLED") {
 		return
 	}
+	if app.legacyCodexProposalsRetired() {
+		return
+	}
 	interval := workflowTickerInterval()
 	if interval <= 0 {
 		return
@@ -169,7 +163,7 @@ func (app *kanbanBoardApp) runWorkflowTickerLoop(interval time.Duration, cancel 
 // proposalMu for the whole pass means a confirm's status persist is visible
 // before the ticker reads it, so the two paths can never double-launch.
 func (app *kanbanBoardApp) runWorkflowTickerOnce(now time.Time) int {
-	if app == nil || app.memory == nil {
+	if app == nil || app.memory == nil || app.legacyCodexProposalsRetired() {
 		return 0
 	}
 
@@ -224,7 +218,10 @@ func (app *kanbanBoardApp) runWorkflowTickerOnce(now time.Time) int {
 // launches: a grill-mode proposal (grill stays manual), an unknown/empty mode,
 // or an external-write-phrase query (which parks at the codex approval gate
 // anyway — this is defense in depth).
-func (app *kanbanBoardApp) workflowTickerEligible(entry meetingMemoryEntry, now time.Time) (string, string, map[string]string, bool) {
+func (app *kanbanBoardApp) workflowTickerEligible(entry meetingMemoryEntry, _ time.Time) (string, string, map[string]string, bool) {
+	if app == nil || app.legacyCodexProposalsRetired() {
+		return "", "", nil, false
+	}
 	mode := normalizeAgentThreadMode(entry.Metadata["mode"])
 	switch mode {
 	case "research", "design", "artifacts", "workflow":
@@ -247,24 +244,10 @@ func (app *kanbanBoardApp) workflowTickerEligible(entry meetingMemoryEntry, now 
 	actorEmail := ""
 	switch {
 	case entry.Metadata["status"] == codexProposalStatusConfirmed && strings.TrimSpace(entry.Metadata["threadId"]) == "":
-		// Case A: a confirmed launch that never stamped a threadId. Skip until
-		// the confirm grace elapses so an in-flight confirm is never re-launched;
-		// a missing/unparseable resolvedAt is treated as not-yet-eligible (safe).
-		resolvedAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(entry.Metadata["resolvedAt"]))
-		if err != nil || now.Sub(resolvedAt) < workflowTickerConfirmGrace {
-			return "", "", nil, false
-		}
-		// The empty threadId is only a MISSED LAUNCH (the genuine crash gap) when
-		// launchApprovedProposal never reached its confirm-signal write. If a
-		// proposal_confirmed signal already exists for this proposal, the launch
-		// DID run and only the follow-up threadId stamp write failed non-fatally
-		// — relaunching would double the agent thread and re-settle the
-		// notification, so treat the empty threadId as lost linkage, not a gap.
-		if app.proposalConfirmSignalRecorded(entry.ID) {
-			return "", "", nil, false
-		}
-		actorName = firstNonEmptyString(strings.TrimSpace(entry.Metadata["confirmedBy"]), workflowTickerAgentName)
-		actorEmail = strings.TrimSpace(entry.Metadata["confirmedByEmail"])
+		// A confirmed row without its thread stamp is ambiguous: the process may
+		// have died before the attempt or after the launch but before every
+		// follow-up stamp. Never infer "not launched" from missing linkage.
+		return "", "", nil, false
 	case entry.Metadata["status"] == codexProposalStatusProposed && proposalLane(entry) == codexProposalLaneAutoRun:
 		// Case B: 069's auto_run lane WITH a recorded standing approval. Empty
 		// laneApprovedBy means no human ever approved it — never launch.
@@ -284,43 +267,14 @@ func (app *kanbanBoardApp) workflowTickerEligible(entry meetingMemoryEntry, now 
 	return actorName, actorEmail, origin, true
 }
 
-// workflowTickerApprover resolves the human whose recorded approval authorizes
-// a ticker launch for the provenance ledger: Case B's standing-approval stamp
-// (laneApprovedBy), else Case A's original confirmer.
+// workflowTickerApprover resolves the human whose recorded standing approval
+// authorizes a ticker launch for the provenance ledger.
 func workflowTickerApprover(entry meetingMemoryEntry) string {
 	return firstNonEmptyString(
 		strings.TrimSpace(entry.Metadata["laneApprovedBy"]),
 		strings.TrimSpace(entry.Metadata["confirmedBy"]),
 		strings.TrimSpace(entry.Metadata["confirmedByEmail"]),
 	)
-}
-
-// proposalConfirmSignalRecorded reports whether launchApprovedProposal has
-// already run a launch for this proposal, detected by the proposal_confirmed
-// signal it records right after a successful launchAgentThreadWithOrigin. This
-// is the discriminator between the two shapes of a confirmed-but-unstamped
-// proposal: the genuine Case-A crash gap (status persisted as confirmed, then a
-// crash BEFORE the launch ever ran, so no confirm signal exists) versus a
-// non-fatal threadId-stamp failure (the launch DID run and recorded its confirm
-// signal, but the follow-up stamp write failed, leaving threadId empty). Only
-// the former is a missed launch the ticker may recover; the latter must never
-// double-launch. Scanned only inside the already-narrow Case-A branch, so the
-// signal walk stays rare.
-func (app *kanbanBoardApp) proposalConfirmSignalRecorded(proposalID string) bool {
-	proposalID = strings.TrimSpace(proposalID)
-	if proposalID == "" || app == nil || app.memory == nil {
-		return false
-	}
-	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindSignal, 0) {
-		record, ok := decodeSignalEntry(entry)
-		if !ok || record.Event != signalEventProposalConfirmed {
-			continue
-		}
-		if strings.TrimSpace(record.Payload["proposalId"]) == proposalID {
-			return true
-		}
-	}
-	return false
 }
 
 // routeProposalOrigin implements the merged 068 delivery rule for a ticker
@@ -353,7 +307,7 @@ func (app *kanbanBoardApp) routeProposalOrigin(entry meetingMemoryEntry, actorNa
 	}
 
 	// (d) no resolvable owner → creator-notification-only (never mint an
-	// owner-less channel). Some relaunches deliver via the bell alone.
+	// owner-less channel). Some standing-approved launches deliver via the bell alone.
 	log.Errorf("Workflow ticker: no routable channel for proposal %s; delivering via notification only", entry.ID)
 	return map[string]string{"originKind": agentThreadOriginTool}
 }
@@ -382,7 +336,7 @@ func (app *kanbanBoardApp) channelForOriginThread(channelID string) (scoutChatTh
 		return scoutChatThreadRecord{}, false
 	}
 	thread, ok := decodeScoutChatThreadEntry(entry)
-	if !ok || thread.ArchivedAt != "" || scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
+	if !ok || thread.ArchivedAt != "" || !scoutChatThreadIsOrganizationPublic(thread) {
 		return scoutChatThreadRecord{}, false
 	}
 	return thread, true
@@ -408,7 +362,7 @@ func (app *kanbanBoardApp) bestMatchPublicChannel(title string, query string) (s
 	secondScore := 0.0
 	for _, entry := range app.memory.snapshot(0) {
 		channel, ok := decodeScoutChatThreadEntry(entry)
-		if !ok || channel.ArchivedAt != "" || scoutChatThreadVisibility(channel) != scoutChatVisibilityPublic {
+		if !ok || channel.ArchivedAt != "" || !scoutChatThreadIsOrganizationPublic(channel) {
 			continue
 		}
 		if strings.TrimSpace(channel.Title) == "" {

@@ -46,6 +46,13 @@ export type CameraFramingOperation = CameraFramingTrackIdentity & {
   generation: number;
 };
 
+export type CameraFramingAdmission = 'confirmed' | 'not-required' | 'unsafe';
+
+type ReleasableCameraTrack = {
+  enabled: boolean;
+  stop(): void;
+};
+
 export function emptyCameraFramingState(): CameraFramingState {
   return {
     checked: false,
@@ -133,6 +140,74 @@ export function cameraFramingStateFromCapabilities(
     // user-triggered operation should put copy in this field.
     message: null,
   };
+}
+
+/**
+ * Decide whether an iOS adaptive-camera track is safe to publish. The native
+ * mutation result is part of the proof: a reported failure cannot be redeemed
+ * by stale-looking dimensions in the same payload.
+ */
+export function adaptiveCameraFramingAdmission(
+  capabilities: CameraFramingCapabilities,
+  expectedDeviceId: string,
+  requestedWideUpright: boolean | null,
+  mutationFailed: boolean,
+): CameraFramingAdmission {
+  if (mutationFailed) return 'unsafe';
+
+  const platform = capabilities.platform.trim().toLowerCase();
+  if (platform !== 'ios') return platform ? 'not-required' : 'unsafe';
+
+  const nativeProofFailed = capabilities.reasonCode === 'native_module_unavailable'
+    || capabilities.reasonCode === 'native_call_failed'
+    || capabilities.reasonCode === 'missing_device_id'
+    || capabilities.reasonCode === 'camera_device_unavailable';
+  const exactActiveCameraIsProven = !nativeProofFailed
+    && expectedDeviceId.trim().length > 0
+    && capabilities.activeWebRTCCameraAvailable
+    && !capabilities.activeWebRTCCameraAmbiguous
+    && capabilities.activeDeviceId === expectedDeviceId
+    && (
+      capabilities.activeDevicePosition === 'front'
+      || capabilities.activeDevicePosition === 'back'
+    )
+    && Boolean(capabilities.activeDeviceType?.trim());
+  if (!exactActiveCameraIsProven) return 'unsafe';
+
+  if (!capabilities.ios26OrNewer) return 'not-required';
+
+  const exactAdaptiveFrontCameraIsSelected = capabilities.activeDevicePosition === 'front'
+    && (
+      capabilities.activeDeviceType === 'AVCaptureDeviceTypeBuiltInUltraWideCamera'
+      || capabilities.activeDeviceType === 'builtInUltraWideCamera'
+    );
+  if (!exactAdaptiveFrontCameraIsSelected) return 'not-required';
+
+  const state = cameraFramingStateFromCapabilities(capabilities, expectedDeviceId);
+  if (
+    requestedWideUpright === null
+    || !state.wideUprightSupported
+    || wideUprightFramingNeedsUpdate(requestedWideUpright, state)
+  ) return 'unsafe';
+
+  return 'confirmed';
+}
+
+/** Remove an unverified camera from the stream before peer installation. */
+export function releaseUnsafeCameraTracks<TTrack extends ReleasableCameraTrack>(stream: {
+  getVideoTracks(): TTrack[];
+  removeTrack(track: TTrack): void;
+}): number {
+  const tracks = [...stream.getVideoTracks()];
+  tracks.forEach((track) => {
+    track.enabled = false;
+    try {
+      stream.removeTrack(track);
+    } finally {
+      track.stop();
+    }
+  });
+  return tracks.length;
 }
 
 export function centerStageControlStatus(state: Pick<

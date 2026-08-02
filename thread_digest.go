@@ -113,7 +113,7 @@ func threadDeposits(messages []scoutChatMessageRecord) threadDepositsResult {
 				host = strings.TrimPrefix(parsed.Host, "www.")
 			}
 			result.Links = append(result.Links, threadDepositLink{
-				URL:       trimmed,
+				URL: trimmed,
 				// The host is what a 90pt chip can actually show; a full URL
 				// truncates to nothing useful.
 				Host:      host,
@@ -327,6 +327,6 @@ func assistantThreadDigestHandler(w http.ResponseWriter, r *http.Request) {
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok":       true,
 		"catchUp":  threadCatchUp(thread.Messages, marker.ReadAt, user.Email, 6),
-		"deposits": threadDeposits(thread.Messages),
+		"deposits": threadDeposits(kanbanApp.projectScoutChatThreadForViewer(user.Email, thread).Messages),
 	})
 }

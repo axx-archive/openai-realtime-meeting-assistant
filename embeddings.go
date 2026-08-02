@@ -38,6 +38,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -107,6 +108,15 @@ const (
 	// OpenAI outage doesn't cost EVERY recall query (including the spoken voice
 	// memory answer) the full embeddingQueryTimeout inline. A success clears it.
 	embeddingQueryFailureCooldown = 60 * time.Second
+
+	// The maintainer is enrichment, not a required dependency. A provider
+	// account failure must therefore become a deliberately bounded, observable
+	// pause rather than an API call every sweep forever. The first three
+	// consecutive failures open the durable breaker; after its cooldown exactly
+	// one half-open canary is allowed. Only that canary succeeding closes it.
+	defaultEmbeddingProviderFailureThreshold = 3
+	defaultEmbeddingProviderCooldown         = time.Hour
+	defaultEmbeddingProviderMaxCooldown      = 24 * time.Hour
 )
 
 // embeddingsOpenAIURL is a package VAR where most wire URLs are consts (the
@@ -139,6 +149,434 @@ var embeddingCorpusKinds = map[string]struct{}{
 // so no test ever calls OpenAI.
 type embeddingFunc func(ctx context.Context, inputs []string) ([][]float32, error)
 
+// embeddingProviderFailureClass is intentionally coarse: it gives operators a
+// useful receipt without persisting or exposing a provider response body.
+type embeddingProviderFailureClass string
+
+const (
+	embeddingProviderFailureTransient   embeddingProviderFailureClass = "transient"
+	embeddingProviderFailureQuota       embeddingProviderFailureClass = "quota"
+	embeddingProviderFailureRateLimit   embeddingProviderFailureClass = "rate_limit"
+	embeddingProviderFailureAuth        embeddingProviderFailureClass = "authentication"
+	embeddingProviderFailureModelAccess embeddingProviderFailureClass = "model_access"
+)
+
+type embeddingProviderCircuitState string
+
+const (
+	embeddingProviderCircuitClosed   embeddingProviderCircuitState = "closed"
+	embeddingProviderCircuitOpen     embeddingProviderCircuitState = "open"
+	embeddingProviderCircuitHalfOpen embeddingProviderCircuitState = "half_open"
+)
+
+var (
+	errEmbeddingProviderCircuitOpen   = errors.New("embedding provider circuit is open")
+	errEmbeddingProviderStalePermit   = errors.New("embedding provider completion is stale")
+	errEmbeddingProviderPersistence   = errors.New("embedding provider circuit persistence is unavailable")
+	errEmbeddingProviderInvalidVector = errors.New("embedding provider returned invalid vectors")
+)
+
+// embeddingProviderCircuit is a tiny durable circuit breaker shared by
+// maintainer and on-demand query embedding. It guards only calls to the
+// provider; lexical recall remains available throughout. State lives beside
+// the embedding sidecar so a process restart cannot silently turn a known
+// quota/auth outage into another backfill burst. It is deliberately a
+// single-writer contract: ensureEmbeddingMaintainerStarted registers exactly
+// one owner in this process, and replicas must not share EMBEDDINGS_PATH.
+type embeddingProviderCircuit struct {
+	mu sync.Mutex
+
+	path             string
+	now              func() time.Time
+	failureThreshold int
+	baseCooldown     time.Duration
+	maxCooldown      time.Duration
+
+	state               embeddingProviderCircuitState
+	consecutiveFailures int
+	lastFailureClass    embeddingProviderFailureClass
+	cooldown            time.Duration
+	openUntil           time.Time
+	generation          uint64
+	requestSequence     uint64
+	halfOpenRequestID   uint64
+	persistenceError    bool
+}
+
+type embeddingProviderCircuitDiskState struct {
+	State               embeddingProviderCircuitState `json:"state"`
+	ConsecutiveFailures int                           `json:"consecutiveFailures"`
+	LastFailureClass    embeddingProviderFailureClass `json:"lastFailureClass,omitempty"`
+	CooldownSeconds     int64                         `json:"cooldownSeconds"`
+	OpenUntil           time.Time                     `json:"openUntil,omitempty"`
+	Generation          uint64                        `json:"generation"`
+}
+
+type embeddingProviderCircuitSnapshot struct {
+	State               embeddingProviderCircuitState
+	ConsecutiveFailures int
+	LastFailureClass    embeddingProviderFailureClass
+	Cooldown            time.Duration
+	OpenUntil           time.Time
+	Generation          uint64
+	PersistenceError    bool
+}
+
+type embeddingProviderPermit struct {
+	generation uint64
+	requestID  uint64
+	halfOpen   bool
+}
+
+func newEmbeddingProviderCircuit(path string, failureThreshold int, baseCooldown, maxCooldown time.Duration) *embeddingProviderCircuit {
+	if failureThreshold < 1 {
+		failureThreshold = defaultEmbeddingProviderFailureThreshold
+	}
+	if baseCooldown <= 0 {
+		baseCooldown = defaultEmbeddingProviderCooldown
+	}
+	if maxCooldown < baseCooldown {
+		maxCooldown = baseCooldown
+	}
+	circuit := &embeddingProviderCircuit{
+		path:             strings.TrimSpace(path),
+		now:              time.Now,
+		failureThreshold: failureThreshold,
+		baseCooldown:     baseCooldown,
+		maxCooldown:      maxCooldown,
+		state:            embeddingProviderCircuitClosed,
+		cooldown:         baseCooldown,
+		generation:       1,
+	}
+	circuit.loadOrInitialize()
+	return circuit
+}
+
+func (c *embeddingProviderCircuit) currentTime() time.Time {
+	if c != nil && c.now != nil {
+		return c.now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+// acquire returns false without contacting the provider while the breaker is
+// open. Once the recorded cooldown expires it permits exactly one canary and
+// publishes half_open; no normal traffic is silently unfenced.
+func (c *embeddingProviderCircuit) acquire() (embeddingProviderPermit, bool) {
+	if c == nil {
+		return embeddingProviderPermit{}, true
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.persistenceError {
+		return embeddingProviderPermit{}, false
+	}
+	now := c.currentTime()
+	switch c.state {
+	case embeddingProviderCircuitClosed:
+		c.requestSequence++
+		return embeddingProviderPermit{generation: c.generation, requestID: c.requestSequence}, true
+	case embeddingProviderCircuitOpen:
+		if now.Before(c.openUntil) {
+			return embeddingProviderPermit{}, false
+		}
+		c.state = embeddingProviderCircuitHalfOpen
+		c.generation++ // invalidate every request admitted before this canary
+		c.requestSequence++
+		c.halfOpenRequestID = c.requestSequence
+		if err := c.persistLocked(); err != nil {
+			c.failPersistenceLocked(err)
+			return embeddingProviderPermit{}, false
+		}
+		return embeddingProviderPermit{generation: c.generation, requestID: c.halfOpenRequestID, halfOpen: true}, true
+	case embeddingProviderCircuitHalfOpen:
+		return embeddingProviderPermit{}, false
+	default:
+		c.failPersistenceLocked(errors.New("invalid circuit state"))
+		return embeddingProviderPermit{}, false
+	}
+}
+
+// complete is the only breaker completion boundary. It validates the complete
+// result before recording success and binds that result to the generation and
+// request permit that admitted it. A late success from an older generation can
+// therefore never close a breaker opened by a newer failure.
+func (c *embeddingProviderCircuit) complete(permit embeddingProviderPermit, vectors [][]float32, expectedCount, dims int, providerErr error) error {
+	if c == nil {
+		if providerErr != nil {
+			return providerErr
+		}
+		return validateEmbeddingVectors(vectors, expectedCount, dims)
+	}
+	completionErr := providerErr
+	if completionErr == nil {
+		completionErr = validateEmbeddingVectors(vectors, expectedCount, dims)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.persistenceError {
+		return errEmbeddingProviderPersistence
+	}
+	if permit.generation != c.generation || (permit.halfOpen && (c.state != embeddingProviderCircuitHalfOpen || permit.requestID != c.halfOpenRequestID)) {
+		return errEmbeddingProviderStalePermit
+	}
+	if completionErr != nil {
+		class := classifyEmbeddingProviderFailure(completionErr)
+		if errors.Is(completionErr, errEmbeddingProviderInvalidVector) {
+			class = embeddingProviderFailureTransient
+		}
+		c.recordFailureLocked(class, permit.halfOpen)
+		return completionErr
+	}
+
+	needsPersist := permit.halfOpen || c.state != embeddingProviderCircuitClosed || c.consecutiveFailures != 0 || c.lastFailureClass != ""
+	c.state = embeddingProviderCircuitClosed
+	c.consecutiveFailures = 0
+	c.lastFailureClass = ""
+	c.cooldown = c.baseCooldown
+	c.openUntil = time.Time{}
+	c.halfOpenRequestID = 0
+	if permit.halfOpen {
+		c.generation++
+	}
+	if needsPersist {
+		if err := c.persistLocked(); err != nil {
+			c.failPersistenceLocked(err)
+			return errEmbeddingProviderPersistence
+		}
+	}
+	return nil
+}
+
+func (c *embeddingProviderCircuit) recordFailureLocked(class embeddingProviderFailureClass, halfOpen bool) {
+	if class == "" {
+		class = embeddingProviderFailureTransient
+	}
+	c.consecutiveFailures++
+	c.lastFailureClass = class
+	now := c.currentTime()
+	// A failed half-open canary reopens immediately and exponentially extends
+	// the pause. In closed state, retain the bounded consecutive-failure floor.
+	if halfOpen || c.consecutiveFailures >= c.failureThreshold {
+		if c.cooldown < c.baseCooldown {
+			c.cooldown = c.baseCooldown
+		}
+		if halfOpen && c.cooldown < c.maxCooldown {
+			c.cooldown *= 2
+			if c.cooldown > c.maxCooldown {
+				c.cooldown = c.maxCooldown
+			}
+		}
+		c.state = embeddingProviderCircuitOpen
+		c.openUntil = now.Add(c.cooldown)
+		c.generation++
+	}
+	c.halfOpenRequestID = 0
+	if err := c.persistLocked(); err != nil {
+		c.failPersistenceLocked(err)
+	}
+}
+
+func (c *embeddingProviderCircuit) snapshot() embeddingProviderCircuitSnapshot {
+	if c == nil {
+		return embeddingProviderCircuitSnapshot{State: embeddingProviderCircuitClosed}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return embeddingProviderCircuitSnapshot{
+		State:               c.state,
+		ConsecutiveFailures: c.consecutiveFailures,
+		LastFailureClass:    c.lastFailureClass,
+		Cooldown:            c.cooldown,
+		OpenUntil:           c.openUntil,
+		Generation:          c.generation,
+		PersistenceError:    c.persistenceError,
+	}
+}
+
+func (c *embeddingProviderCircuit) loadOrInitialize() {
+	if c == nil || c.path == "" {
+		if c != nil {
+			c.failPersistenceLocked(errors.New("state path is empty"))
+		}
+		return
+	}
+	info, err := os.Lstat(c.path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if persistErr := c.persistLocked(); persistErr != nil {
+				c.failPersistenceLocked(persistErr)
+			}
+			return
+		}
+		c.failPersistenceLocked(err)
+		return
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o600 {
+		c.failPersistenceLocked(fmt.Errorf("circuit state must be a regular 0600 file"))
+		return
+	}
+	raw, err := os.ReadFile(c.path)
+	if err != nil {
+		c.failPersistenceLocked(err)
+		return
+	}
+	var disk embeddingProviderCircuitDiskState
+	if err := json.Unmarshal(raw, &disk); err != nil {
+		c.failPersistenceLocked(err)
+		return
+	}
+	if disk.State != embeddingProviderCircuitClosed && disk.State != embeddingProviderCircuitOpen && disk.State != embeddingProviderCircuitHalfOpen {
+		c.failPersistenceLocked(errors.New("invalid persisted circuit state"))
+		return
+	}
+	if disk.ConsecutiveFailures < 0 || disk.CooldownSeconds <= 0 || disk.CooldownSeconds > int64(c.maxCooldown/time.Second) || disk.Generation == 0 {
+		c.failPersistenceLocked(errors.New("invalid persisted circuit fields"))
+		return
+	}
+	c.state = disk.State
+	c.generation = max(c.generation, disk.Generation)
+	if c.state == embeddingProviderCircuitHalfOpen {
+		// A process may have died with the sole canary in flight. Reopen with
+		// the persisted cooldown rather than allowing all post-restart traffic.
+		c.state = embeddingProviderCircuitOpen
+		c.generation++
+	}
+	c.consecutiveFailures = disk.ConsecutiveFailures
+	c.lastFailureClass = disk.LastFailureClass
+	c.cooldown = time.Duration(disk.CooldownSeconds) * time.Second
+	c.openUntil = disk.OpenUntil.UTC()
+	if c.state == embeddingProviderCircuitOpen && c.openUntil.IsZero() {
+		c.failPersistenceLocked(errors.New("open circuit is missing retry time"))
+	}
+}
+
+func (c *embeddingProviderCircuit) persistLocked() error {
+	if c == nil || c.path == "" {
+		return errors.New("state path is empty")
+	}
+	disk := embeddingProviderCircuitDiskState{
+		State:               c.state,
+		ConsecutiveFailures: c.consecutiveFailures,
+		LastFailureClass:    c.lastFailureClass,
+		CooldownSeconds:     int64(c.cooldown / time.Second),
+		OpenUntil:           c.openUntil.UTC(),
+		Generation:          c.generation,
+	}
+	raw, err := json.Marshal(disk)
+	if err != nil {
+		return fmt.Errorf("encode state: %w", err)
+	}
+	dir := filepath.Dir(c.path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create state directory: %w", err)
+	}
+	if info, statErr := os.Lstat(c.path); statErr == nil {
+		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o600 {
+			return errors.New("refusing circuit state target that is not regular 0600")
+		}
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return fmt.Errorf("inspect state target: %w", statErr)
+	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(c.path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temporary state: %w", err)
+	}
+	tmpName := tmp.Name()
+	committed := false
+	defer func() {
+		_ = tmp.Close()
+		if !committed {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if err := tmp.Chmod(0o600); err != nil {
+		return fmt.Errorf("secure temporary state: %w", err)
+	}
+	if _, err := tmp.Write(raw); err != nil {
+		return fmt.Errorf("write temporary state: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("sync temporary state: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temporary state: %w", err)
+	}
+	if err := os.Rename(tmpName, c.path); err != nil {
+		return fmt.Errorf("commit state: %w", err)
+	}
+	committed = true
+	dirHandle, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("open state directory: %w", err)
+	}
+	defer dirHandle.Close()
+	if err := dirHandle.Sync(); err != nil {
+		return fmt.Errorf("sync state directory: %w", err)
+	}
+	return nil
+}
+
+func (c *embeddingProviderCircuit) failPersistenceLocked(err error) {
+	c.persistenceError = true
+	c.state = embeddingProviderCircuitOpen
+	c.openUntil = time.Time{}
+	c.halfOpenRequestID = 0
+	c.generation++
+	log.Warnf("embedding provider circuit: persistence unavailable; fail-closed: %v", err)
+}
+
+func validateEmbeddingVectors(vectors [][]float32, expectedCount, dims int) error {
+	if len(vectors) != expectedCount {
+		return fmt.Errorf("%w: got %d vectors, want %d", errEmbeddingProviderInvalidVector, len(vectors), expectedCount)
+	}
+	for i, vector := range vectors {
+		if len(vector) != dims {
+			return fmt.Errorf("%w: vector %d has %d dimensions, want %d", errEmbeddingProviderInvalidVector, i, len(vector), dims)
+		}
+		for _, value := range vector {
+			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+				return fmt.Errorf("%w: vector %d contains a non-finite value", errEmbeddingProviderInvalidVector, i)
+			}
+		}
+	}
+	return nil
+}
+
+func classifyEmbeddingProviderFailure(err error) embeddingProviderFailureClass {
+	if err == nil {
+		return ""
+	}
+	var failure *apiRequestFailure
+	if errors.As(err, &failure) {
+		body := strings.ToLower(failure.body)
+		status := strings.ToLower(failure.status)
+		switch {
+		case strings.Contains(body, "insufficient_quota") || strings.Contains(body, "current quota") || strings.Contains(body, "billing quota"):
+			return embeddingProviderFailureQuota
+		case strings.Contains(body, "rate_limit") || strings.Contains(body, "rate limit") || strings.Contains(body, "requests per minute"):
+			return embeddingProviderFailureRateLimit
+		case strings.Contains(body, "model_not_found") || strings.Contains(body, "does not exist") || strings.Contains(body, "model access") || strings.Contains(body, "not have access"):
+			return embeddingProviderFailureModelAccess
+		case strings.Contains(status, "401") || strings.Contains(status, "403") || strings.Contains(body, "invalid_api_key") || strings.Contains(body, "incorrect api key") || strings.Contains(body, "authentication"):
+			return embeddingProviderFailureAuth
+		}
+	}
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "quota"):
+		return embeddingProviderFailureQuota
+	case strings.Contains(message, "rate limit") || strings.Contains(message, "rate_limit"):
+		return embeddingProviderFailureRateLimit
+	case strings.Contains(message, "api key") || strings.Contains(message, "authentication") || strings.Contains(message, "unauthorized"):
+		return embeddingProviderFailureAuth
+	case strings.Contains(message, "model") && (strings.Contains(message, "access") || strings.Contains(message, "not found")):
+		return embeddingProviderFailureModelAccess
+	default:
+		return embeddingProviderFailureTransient
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Config (env surface documented in deploy/digitalocean/.env.example)
 // ---------------------------------------------------------------------------
@@ -157,6 +595,34 @@ func embeddingsPath() string {
 	// Sidecar beside the main store, derived exactly like meetingMemoryPath but
 	// NEVER the same file — it never touches the JSONL or its cursors.
 	return filepath.Join(filepath.Dir(meetingMemoryPath()), "embeddings.jsonl")
+}
+
+func embeddingProviderFailureThreshold() int {
+	return positiveIntEnv("EMBEDDINGS_PROVIDER_FAILURE_THRESHOLD", defaultEmbeddingProviderFailureThreshold)
+}
+
+func embeddingProviderCooldown() time.Duration {
+	return embeddingDurationEnv("EMBEDDINGS_PROVIDER_COOLDOWN", defaultEmbeddingProviderCooldown)
+}
+
+func embeddingProviderMaxCooldown() time.Duration {
+	max := embeddingDurationEnv("EMBEDDINGS_PROVIDER_MAX_COOLDOWN", defaultEmbeddingProviderMaxCooldown)
+	if max < embeddingProviderCooldown() {
+		return embeddingProviderCooldown()
+	}
+	return max
+}
+
+func embeddingDurationEnv(name string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil || value < time.Second {
+		return fallback
+	}
+	return value
 }
 
 func embeddingInterval() time.Duration {
@@ -321,16 +787,20 @@ type embeddingIndex struct {
 	// queryFailUntil is the F10 breaker: unixnano before which the inline query
 	// embed is skipped (0 == closed). Set on a failed embed, cleared on success.
 	queryFailUntil atomic.Int64
+
+	providerCircuit   *embeddingProviderCircuit
+	providerSuccesses atomic.Uint64
 }
 
 func newEmbeddingIndex(path string, dims int, model string, embedder embeddingFunc) *embeddingIndex {
 	return &embeddingIndex{
-		dims:       dims,
-		byID:       map[string]int{},
-		path:       path,
-		model:      model,
-		embedder:   embedder,
-		queryCache: map[string][]float32{},
+		dims:            dims,
+		byID:            map[string]int{},
+		path:            path,
+		model:           model,
+		embedder:        embedder,
+		queryCache:      map[string][]float32{},
+		providerCircuit: newEmbeddingProviderCircuit(path+".provider-circuit.json", embeddingProviderFailureThreshold(), embeddingProviderCooldown(), embeddingProviderMaxCooldown()),
 	}
 }
 
@@ -498,16 +968,20 @@ func (idx *embeddingIndex) queryEmbedding(query string) []float32 {
 
 	ctx, cancel := context.WithTimeout(context.Background(), embeddingQueryTimeout)
 	defer cancel()
-	vectors, err := idx.embedder(ctx, []string{query})
-	if err != nil || len(vectors) == 0 || len(vectors[0]) != idx.dims {
-		if err != nil {
-			idx.queryFailUntil.Store(time.Now().Add(embeddingQueryFailureCooldown).UnixNano())
-			recordCapabilityFailure(capabilityEmbedding, time.Now().UTC(), err)
-			log.Warnf("embedding maintainer: query embed failed (semantic lane skipped ~%s): %v", embeddingQueryFailureCooldown, err)
+	vectors, err := idx.embedWithProviderCircuit(ctx, []string{query})
+	if err != nil {
+		if errors.Is(err, errEmbeddingProviderCircuitOpen) {
+			recordEmbeddingCircuitHealth(idx)
+			return nil
 		}
+		idx.queryFailUntil.Store(time.Now().Add(embeddingQueryFailureCooldown).UnixNano())
+		recordCapabilityFailure(capabilityEmbedding, time.Now().UTC(), err)
+		recordEmbeddingCircuitHealth(idx)
+		log.Warnf("embedding maintainer: query embed failed (semantic lane skipped ~%s): %v", embeddingQueryFailureCooldown, err)
 		return nil
 	}
 	idx.queryFailUntil.Store(0) // success closes any open breaker
+	recordEmbeddingCircuitHealth(idx)
 	recordCapabilitySuccess(capabilityEmbedding, time.Now().UTC())
 	vec := vectors[0]
 	idx.queryMu.Lock()
@@ -520,6 +994,64 @@ func (idx *embeddingIndex) queryEmbedding(query string) []float32 {
 	}
 	idx.queryMu.Unlock()
 	return vec
+}
+
+// embedWithProviderCircuit is the sole wire gate for both background backfill
+// and inline semantic query calls. A blocked call has no provider side effect.
+func (idx *embeddingIndex) embedWithProviderCircuit(ctx context.Context, inputs []string) ([][]float32, error) {
+	if idx == nil || idx.embedder == nil {
+		return nil, nil
+	}
+	permit, allowed := idx.providerCircuit.acquire()
+	if !allowed {
+		return nil, errEmbeddingProviderCircuitOpen
+	}
+	vectors, err := idx.embedder(ctx, inputs)
+	if completionErr := idx.providerCircuit.complete(permit, vectors, len(inputs), idx.dims, err); completionErr != nil {
+		return nil, completionErr
+	}
+	idx.providerSuccesses.Add(1)
+	return vectors, err
+}
+
+func recordEmbeddingCircuitHealth(idx *embeddingIndex) {
+	if idx == nil || idx.providerCircuit == nil {
+		return
+	}
+	snap := idx.providerCircuit.snapshot()
+	circuit := string(snap.State)
+	if snap.PersistenceError {
+		circuit = "persistence_error"
+	}
+	recordCapabilityQueue(capabilityEmbedding, 0, 0, circuit)
+}
+
+func embeddingProviderCircuitEvidence() map[string]any {
+	idx := loadedEmbeddingIndex()
+	if idx == nil || idx.providerCircuit == nil {
+		return nil
+	}
+	snap := idx.providerCircuit.snapshot()
+	out := map[string]any{
+		"circuit":             string(snap.State),
+		"consecutiveFailures": snap.ConsecutiveFailures,
+		"generation":          snap.Generation,
+	}
+	if snap.PersistenceError {
+		out["circuit"] = "persistence_error"
+		out["providerCircuitState"] = string(snap.State)
+		out["persistenceError"] = true
+	}
+	if snap.LastFailureClass != "" {
+		out["providerFailureClass"] = string(snap.LastFailureClass)
+	}
+	if snap.State != embeddingProviderCircuitClosed {
+		out["cooldownSeconds"] = int64(snap.Cooldown.Seconds())
+		if !snap.OpenUntil.IsZero() {
+			out["retryAt"] = snap.OpenUntil.UTC().Format(time.RFC3339Nano)
+		}
+	}
+	return out
 }
 
 type embeddingHit struct {
@@ -606,7 +1138,7 @@ func (idx *embeddingIndex) reconcile(ctx context.Context, entries []meetingMemor
 		for i, cand := range batch {
 			texts[i] = cand.text
 		}
-		vectors, embedErr := embedInBatches(ctx, idx.embedder, texts, embeddingAPIBatchSize)
+		vectors, embedErr := embedInBatches(ctx, idx.embedWithProviderCircuit, texts, embeddingAPIBatchSize)
 		if embedErr != nil {
 			// Partial progress (whatever batches succeeded) is still applied
 			// below; the rest retries next pass. Surface the error to the loop
@@ -825,7 +1357,7 @@ func openAIEmbeddingFunc(apiKey string, model string) embeddingFunc {
 			recordLLMUsage(entry)
 		}()
 
-		response, err := (&http.Client{Timeout: embeddingRequestTimeout}).Do(httpRequest)
+		response, err := aiProviderHTTPClient(embeddingRequestTimeout).Do(httpRequest)
 		if err != nil {
 			return nil, fmt.Errorf("create embeddings response: %w", err)
 		}
@@ -1014,13 +1546,28 @@ func (app *kanbanBoardApp) runEmbeddingMaintainerOnce(idx *embeddingIndex) error
 
 	ctx, cancel := context.WithTimeout(context.Background(), embeddingRequestTimeout+15*time.Second)
 	defer cancel()
+	providerSuccessesBefore := idx.providerSuccesses.Load()
 	embedded, dropped, err := idx.reconcile(ctx, entries, embeddingMaxBatch())
 	if embedded > 0 || dropped > 0 {
 		log.Infof("embedding maintainer: embedded %d, dropped %d; index now %d", embedded, dropped, idx.size())
 	}
 	if err != nil {
+		if errors.Is(err, errEmbeddingProviderCircuitOpen) {
+			// The breaker is already represented in capability health. Returning
+			// nil avoids a periodic error log that would recreate the exact noise
+			// loop the circuit is meant to stop.
+			recordEmbeddingCircuitHealth(idx)
+			return nil
+		}
 		recordCapabilityFailure(capabilityEmbedding, time.Now().UTC(), err)
+		recordEmbeddingCircuitHealth(idx)
 		return err
+	}
+	recordEmbeddingCircuitHealth(idx)
+	if idx.providerSuccesses.Load() == providerSuccessesBefore {
+		// Reconciliation can legitimately be a no-op. It proves the worker ran,
+		// but not that the provider or semantic enrichment is healthy.
+		return nil
 	}
 	recordCapabilitySuccess(capabilityEmbedding, time.Now().UTC())
 	return nil

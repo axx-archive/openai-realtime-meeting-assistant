@@ -1,11 +1,9 @@
 /**
  * The unread boundary — design §9 of docs/plans/the-table-design.md.
  *
- * Opening a channel with 80 unread is the everything-channel's defining moment,
- * so it is designed rather than defaulted. iMessage lands you at the bottom,
- * which is right for a five-message thread and wrong for an eighty-message one.
- * Slack's boundary behaviour is correct for volume: land where you stopped
- * reading, show a divider, and hide nothing.
+ * The divider preserves where an unread run began even though threads now open
+ * at the latest message. Scrolling back still shows exactly where new activity
+ * started without changing the familiar bottom-first chat behavior.
  */
 
 export type BoundaryMessage = {

@@ -67,7 +67,74 @@ func TestCodexCallbackBindingAndMonotonicStatusRejectWithoutMutation(t *testing.
 	}
 }
 
+// A runner lease is not merely advisory: a bearer of the long-lived runner
+// token cannot turn a claimed job terminal with the old v1 callback. The
+// sidecar must first durably commit its result under the current fence, then
+// present that generation/token in a v2 callback. This keeps a replayed or
+// out-of-order callback from mutating the artifact/goal ahead of the queue.
+func TestCodexRunnerClaimedCallbackRequiresDurableTerminalFence(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+	queueDir := t.TempDir()
+	t.Setenv("BONFIRE_CODEX_QUEUE_PATH", queueDir)
+	t.Setenv("BONFIRE_RUNNER_TOKEN", "runner-secret")
+
+	store := newCodexRunnerJobStore(queueDir)
+	queued := enqueueRunnerQueueTestJob(t, store, "claimed-callback-fence")
+	artifact, _, _, err := app.createOSArtifactWithIDAndMetadataAcknowledged(queued.ArtifactID, "workflow", "Build", "queued", "tester", map[string]string{
+		"threadId": queued.ThreadID, "runnerJobId": queued.ID, "threadStatus": codexJobStatusQueued,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.claimNext("runner-one")
+	if err != nil || claimed == nil {
+		t.Fatalf("claim job: job=%+v err=%v", claimed, err)
+	}
+	lastBody := ""
+	post := func(payload codexRunnerCallbackPayload) int {
+		body, marshalErr := json.Marshal(payload)
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/internal/codex/jobs/result", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer runner-secret")
+		recorder := httptest.NewRecorder()
+		internalCodexRunnerResultHandler(recorder, req)
+		lastBody = recorder.Body.String()
+		return recorder.Code
+	}
+
+	legacy := signedCodexCallbackPayload("runner-secret", codexRunnerCallbackPayload{
+		JobID: queued.ID, ArtifactID: artifact.ID, ThreadID: queued.ThreadID, Status: codexJobStatusComplete, Text: "must not land",
+	})
+	if got := post(legacy); got != http.StatusConflict {
+		t.Fatalf("v1 terminal callback while claimed status=%d, want conflict", got)
+	}
+	unchanged, _ := app.osArtifactByID(artifact.ID)
+	if unchanged.Metadata["threadStatus"] != codexJobStatusQueued || unchanged.Text != "queued" {
+		t.Fatalf("unfenced callback mutated artifact: %+v", unchanged)
+	}
+
+	claimed.Status = codexJobStatusComplete
+	claimed.CompletedAt = time.Now().UTC()
+	if err := store.update(*claimed); err != nil {
+		t.Fatalf("persist fenced terminal: %v", err)
+	}
+	v2 := codexRunnerCallbackPayload{
+		JobID: queued.ID, ArtifactID: artifact.ID, ThreadID: queued.ThreadID, Status: codexJobStatusComplete, Text: "done",
+		ClaimGeneration: claimed.ClaimGeneration, FencingToken: claimed.FencingToken,
+	}
+	v2.Capability = codexRunnerCallbackCapabilityV2("runner-secret", v2.JobID, v2.ArtifactID, v2.ThreadID, v2.ClaimGeneration, v2.FencingToken)
+	if got := post(v2); got != http.StatusOK {
+		t.Fatalf("durably terminal fenced callback status=%d body=%s, want ok", got, lastBody)
+	}
+}
+
 func TestAgentThreadUsesCodexExecWorkerWhenConfigured(t *testing.T) {
+	enableCodexExecutionForTest(t)
 	app := newIsolatedKanbanBoardApp(t)
 	t.Setenv("BONFIRE_AGENT_THREAD_WORKER", "codex_exec")
 	t.Setenv("BONFIRE_CODEX_RUNNER_MODE", "local_exec")
@@ -114,6 +181,7 @@ func TestAgentThreadUsesCodexExecWorkerWhenConfigured(t *testing.T) {
 }
 
 func TestAgentThreadQueuesCodexSidecarJobByDefault(t *testing.T) {
+	enableCodexExecutionForTest(t)
 	app := newIsolatedKanbanBoardApp(t)
 	queueDir := t.TempDir()
 	t.Setenv("BONFIRE_AGENT_THREAD_WORKER", "codex_exec")
@@ -165,7 +233,51 @@ func TestAgentThreadQueuesCodexSidecarJobByDefault(t *testing.T) {
 	}
 }
 
+func TestCodexRunnerReservedJobIDIsIdempotentAndNeverResetsInFlight(t *testing.T) {
+	store := newCodexRunnerJobStore(t.TempDir())
+	reserved := codexRunnerJob{
+		ID:         "codex-job-reserved-external-write",
+		ArtifactID: "artifact-reserved-external-write",
+		ThreadID:   "thread-reserved-external-write",
+		Mode:       "workflow",
+		Query:      "git push origin main",
+		Authority:  codexJobAuthorityExternalWrite,
+	}
+	first, err := store.enqueue(reserved)
+	if err != nil {
+		t.Fatalf("first reserved enqueue: %v", err)
+	}
+	claimed, err := store.claimNext("runner-one")
+	if err != nil || claimed == nil {
+		t.Fatalf("claim reserved job: job=%+v err=%v", claimed, err)
+	}
+	if claimed.ID != first.ID || claimed.Status != codexJobStatusRunning || claimed.Attempts != 1 {
+		t.Fatalf("claimed job=%+v, want same reserved id running on attempt 1", claimed)
+	}
+
+	retried, err := store.enqueue(reserved)
+	if err != nil {
+		t.Fatalf("idempotent reserved enqueue: %v", err)
+	}
+	if retried.Status != codexJobStatusRunning || retried.Attempts != 1 || retried.RunnerID != "runner-one" {
+		t.Fatalf("idempotent enqueue reset in-flight job: %+v", retried)
+	}
+	conflict := reserved
+	conflict.ArtifactID = "different-artifact"
+	if _, err := store.enqueue(conflict); err == nil {
+		t.Fatal("reserved job id was accepted for a different external action")
+	}
+	entries, err := os.ReadDir(store.dir)
+	if err != nil {
+		t.Fatalf("read queue: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("reserved enqueue wrote %d queue files, want 1", len(entries))
+	}
+}
+
 func TestAgentThreadBlocksExternalWriteBeforeCodexRun(t *testing.T) {
+	enableCodexExecutionForTest(t)
 	app := newIsolatedKanbanBoardApp(t)
 	t.Setenv("BONFIRE_AGENT_THREAD_WORKER", "codex_exec")
 	t.Setenv("BONFIRE_CODEX_QUEUE_PATH", t.TempDir())
@@ -199,6 +311,7 @@ func TestAgentThreadBlocksExternalWriteBeforeCodexRun(t *testing.T) {
 }
 
 func TestAgentThreadBlocksExternalWriteBeforeLocalCodexExec(t *testing.T) {
+	enableCodexExecutionForTest(t)
 	app := newIsolatedKanbanBoardApp(t)
 	t.Setenv("BONFIRE_AGENT_THREAD_WORKER", "codex_exec")
 	t.Setenv("BONFIRE_CODEX_RUNNER_MODE", "local_exec")

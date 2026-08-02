@@ -502,7 +502,51 @@ func blobAuthorized(ctx context.Context, user *userAccount, ref string) bool {
 	for _, thread := range kanbanApp.scoutChatThreadsSnapshot(user.Email, true, 0) {
 		for _, message := range thread.Messages {
 			for _, file := range message.Files {
-				if strings.TrimSpace(file.Ref) == ref {
+				// A visible message snapshot is deliberately not sufficient
+				// authority for a chat attachment. Re-resolve its committed
+				// source handle on every download check so a revoked legacy or
+				// unhealthy source cannot serve bytes from a learned ref.
+				if strings.TrimSpace(file.Ref) == ref && kanbanApp.committedChatAttachmentAuthorized(user.Email, thread.ID, message.ID, file) {
+					return true
+				}
+			}
+			if message.Image != nil && strings.TrimSpace(message.Image.Ref) == ref {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// blobOrganizationVisible proves that a blob is already readable across an
+// organization/public chat destination. It is intentionally narrower than
+// blobAuthorized: private ownership/read access is not permission to smuggle a
+// known ref into a public channel. Fresh composer uploads use their separate
+// uploader-bound pending grant and become destination-owned only on commit.
+func blobOrganizationVisible(ctx context.Context, user *userAccount, ref string) bool {
+	if user == nil || !validBlobRef(ref) || kanbanApp == nil {
+		return false
+	}
+	for _, header := range artifactOwnersForBlob(ref) {
+		if strings.EqualFold(strings.TrimSpace(header.Visibility), "organization") &&
+			artifactHeaderAuthorized(ctx, user, ACLReadContent, header) {
+			return true
+		}
+	}
+	if kanbanApp.memory != nil {
+		for _, file := range kanbanApp.memory.entriesOfKind(meetingMemoryKindFile, 0) {
+			if strings.TrimSpace(file.Metadata["blobRef"]) == ref {
+				return true
+			}
+		}
+	}
+	for _, thread := range kanbanApp.scoutChatThreadsSnapshot(user.Email, true, 0) {
+		if !scoutChatThreadIsOrganizationPublic(thread) {
+			continue
+		}
+		for _, message := range thread.Messages {
+			for _, file := range message.Files {
+				if strings.TrimSpace(file.Ref) == ref && kanbanApp.committedChatAttachmentAuthorized(user.Email, thread.ID, message.ID, file) {
 					return true
 				}
 			}

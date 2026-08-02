@@ -371,8 +371,8 @@ func TestTasteAnalystSkipsWithoutAdvancingOnBadOutput(t *testing.T) {
 
 	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(context.Context, string, anthropicTextRequest) (string, error) {
 		return "Here is my analysis of AJ's taste in prose.", nil
-	}); err != nil {
-		t.Fatalf("non-JSON pass: %v", err)
+	}); err == nil {
+		t.Fatal("non-JSON pass must report a rejected output")
 	}
 	if _, found := app.tasteProfileForUser("AJ"); found {
 		t.Fatal("profile written from non-JSON output")
@@ -380,8 +380,8 @@ func TestTasteAnalystSkipsWithoutAdvancingOnBadOutput(t *testing.T) {
 
 	if err := app.runTasteAnalystOnce(context.Background(), "test-key", func(context.Context, string, anthropicTextRequest) (string, error) {
 		return `{"profile": "## Voice & style\n- Claims with no receipts."}`, nil
-	}); err != nil {
-		t.Fatalf("uncited pass: %v", err)
+	}); err == nil {
+		t.Fatal("uncited pass must report a rejected output")
 	}
 	if _, found := app.tasteProfileForUser("AJ"); found {
 		t.Fatal("profile written without evidence citations")

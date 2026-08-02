@@ -313,9 +313,12 @@ func TestBlobAuthorizationFollowsChatThreadVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	aj := accountStore().findUser("aj@shareability.com")
+	privateReservation := "private-file-reservation"
+	privateFile := reserveTestAttachment(t, kanbanApp, aj, privateThread, scoutChatFileAttachment{Name: "private.pdf", Ref: privateRef}, privateReservation)
 	if _, err := kanbanApp.commitScoutChatThreadMessages(privateThread.OwnerEmail, privateThread.ID, scoutChatMessageRecord{
 		ID: "private-file-message", Kind: "message", Role: "user", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
-		Files: []scoutChatFileAttachment{{Name: "private.pdf", Ref: privateRef, Mime: "application/pdf"}},
+		Files: []scoutChatFileAttachment{privateFile}, attachmentDestinationRevision: scoutChatAttachmentDestinationRevision(privateThread), attachmentReservationID: privateReservation,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -328,9 +331,11 @@ func TestBlobAuthorizationFollowsChatThreadVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	publicReservation := "public-file-reservation"
+	publicFile := reserveTestAttachment(t, kanbanApp, aj, publicThread, scoutChatFileAttachment{Name: "public.pdf", Ref: publicRef}, publicReservation)
 	if _, err := kanbanApp.commitScoutChatThreadMessages(publicThread.OwnerEmail, publicThread.ID, scoutChatMessageRecord{
 		ID: "public-file-message", Kind: "message", Role: "user", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
-		Files: []scoutChatFileAttachment{{Name: "public.pdf", Ref: publicRef, Mime: "application/pdf"}},
+		Files: []scoutChatFileAttachment{publicFile}, attachmentDestinationRevision: scoutChatAttachmentDestinationRevision(publicThread), attachmentReservationID: publicReservation,
 	}); err != nil {
 		t.Fatal(err)
 	}

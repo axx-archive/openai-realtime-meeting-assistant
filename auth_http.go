@@ -119,6 +119,29 @@ func (s *sessionStore) lookupRecord(token string) (sessionRecord, bool) {
 	return record, true
 }
 
+// lookupMemberRecordByHash is the narrow server-authority seam used by native
+// push delivery. Device registrations persist only this SHA-256 key, never the
+// raw bearer token. Unknown session kinds fail closed: Kind="" is the one
+// member-session representation (including legacy member rows), while guest
+// and any future unreviewed session kind are ineligible.
+func (s *sessionStore) lookupMemberRecordByHash(sessionHash string, now time.Time) (sessionRecord, bool) {
+	sessionHash = strings.TrimSpace(sessionHash)
+	if len(sessionHash) != 64 || now.IsZero() {
+		return sessionRecord{}, false
+	}
+	if _, err := hex.DecodeString(sessionHash); err != nil {
+		return sessionRecord{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.sessions[sessionHash]
+	if !ok || record.Kind != "" || normalizeAccountEmail(record.Email) == "" || !now.Before(record.Expires) {
+		return sessionRecord{}, false
+	}
+	record.Email = normalizeAccountEmail(record.Email)
+	return record, true
+}
+
 // createGuest mints a guest session (multi-room §3.2): no account email,
 // Kind=guest, bound to exactly ONE room, 12h TTL. It reuses the session
 // store's persistence and expiry sweep, and is deliberately invisible to
@@ -143,6 +166,11 @@ func (s *sessionStore) createGuest(roomID, guestName string) (string, error) {
 }
 
 func (s *sessionStore) destroy(token string) {
+	// Serialize revocation against native push delivery. A delivery that already
+	// crossed its authority check finishes before destroy returns; every delivery
+	// after this write lock observes the session as absent.
+	devicePushAuthorityMu.Lock()
+	defer devicePushAuthorityMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.sessions, hashResetToken(token))
@@ -151,6 +179,9 @@ func (s *sessionStore) destroy(token string) {
 
 func (s *sessionStore) destroyAllForEmail(email string) {
 	email = normalizeAccountEmail(email)
+	// Password reset/rotation has the same linearization contract as logout.
+	devicePushAuthorityMu.Lock()
+	defer devicePushAuthorityMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for key, record := range s.sessions {
@@ -185,25 +216,75 @@ func userSessionStore() *sessionStore {
 	return store
 }
 
-// sessionTokenFromRequest returns the member session token from the cookie,
-// Authorization: Bearer, or X-Bonfire-Session header. Native clients (Expo)
-// cannot always observe HttpOnly Set-Cookie, so they re-send the token from
-// the login JSON body on subsequent requests.
-func sessionTokenFromRequest(r *http.Request) string {
+type sessionAuthoritySource string
+
+const (
+	sessionAuthorityNone           sessionAuthoritySource = "none"
+	sessionAuthorityCookie         sessionAuthoritySource = "cookie"
+	sessionAuthorityBearer         sessionAuthoritySource = "authorization_bearer"
+	sessionAuthorityExplicitHeader sessionAuthoritySource = "x_bonfire_session"
+)
+
+func sessionCookieToken(r *http.Request) string {
 	if cookie, err := r.Cookie(sessionCookieName); err == nil {
 		if token := strings.TrimSpace(cookie.Value); token != "" {
 			return token
 		}
 	}
+	return ""
+}
+
+func bearerSessionToken(r *http.Request) string {
 	if auth := strings.TrimSpace(r.Header.Get("Authorization")); len(auth) >= 7 && strings.EqualFold(auth[:7], "Bearer ") {
 		if token := strings.TrimSpace(auth[7:]); token != "" {
 			return token
 		}
 	}
+	return ""
+}
+
+func explicitSessionHeaderToken(r *http.Request) string {
 	if token := strings.TrimSpace(r.Header.Get("X-Bonfire-Session")); token != "" {
 		return token
 	}
 	return ""
+}
+
+// sessionAuthorityFromRequest resolves exactly one member-session authority.
+// Reviewed native clients explicitly carry their durable credential, so their
+// Authorization/session header must not be shadowed by an ambient browser
+// cookie. Web requests retain cookie-first behavior for compatibility and to
+// avoid allowing an injected header to silently replace browser authority.
+func sessionAuthorityFromRequest(r *http.Request) (string, sessionAuthoritySource) {
+	if wantsNativeSessionToken(r) {
+		if token := bearerSessionToken(r); token != "" {
+			return token, sessionAuthorityBearer
+		}
+		if token := explicitSessionHeaderToken(r); token != "" {
+			return token, sessionAuthorityExplicitHeader
+		}
+		if token := sessionCookieToken(r); token != "" {
+			return token, sessionAuthorityCookie
+		}
+		return "", sessionAuthorityNone
+	}
+	if token := sessionCookieToken(r); token != "" {
+		return token, sessionAuthorityCookie
+	}
+	if token := bearerSessionToken(r); token != "" {
+		return token, sessionAuthorityBearer
+	}
+	if token := explicitSessionHeaderToken(r); token != "" {
+		return token, sessionAuthorityExplicitHeader
+	}
+	return "", sessionAuthorityNone
+}
+
+// sessionTokenFromRequest returns the single authoritative member session for
+// all auth consumers, including device push registration.
+func sessionTokenFromRequest(r *http.Request) string {
+	token, _ := sessionAuthorityFromRequest(r)
+	return token
 }
 
 // wantsNativeSessionToken is true for native mobile clients that need the
@@ -589,25 +670,45 @@ func handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	// iOS actually revokes the server-side session instead of only clearing the
 	// local Keychain copy and leaving a live 30-day token behind.
 	user := userFromRequest(r)
+	sessionToken, sessionAuthority := sessionAuthorityFromRequest(r)
+	sessionHash := ""
+	if sessionToken != "" {
+		sessionHash = hashResetToken(sessionToken)
+	}
 	payload := struct {
 		DeviceToken string `json:"deviceToken"`
 	}{}
 	if r.Body != nil {
 		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&payload)
 	}
-	if token := sessionTokenFromRequest(r); token != "" {
-		userSessionStore().destroy(token)
+	if sessionToken != "" {
+		userSessionStore().destroy(sessionToken)
 	}
+	deviceBindingRemoved := false
+	deviceCleanupPending := false
 	if user != nil && strings.TrimSpace(payload.DeviceToken) != "" {
-		if err := removeDeviceToken("", user.Email, payload.DeviceToken); err != nil {
-			// Session revocation has already completed. Report cleanup failure so
-			// the client can retry later, but never strand a live 30-day session.
-			writeAuthError(w, http.StatusInternalServerError, "could not unregister device")
-			return
+		if err := removeDeviceTokenBinding(canonicalTenantID(), user.Email, payload.DeviceToken, sessionHash); err != nil {
+			// Session revocation is the privacy boundary and already completed.
+			// Exact-session delivery validation makes this row inert, so cleanup is
+			// best-effort storage hygiene and must not turn a successful logout into
+			// an ambiguous HTTP failure.
+			log.Errorf("Authenticated logout revoked the session but could not remove its inert device binding: %v", err)
+			deviceCleanupPending = true
+		} else {
+			deviceBindingRemoved = true
 		}
 	}
-	setSessionCookie(w, r, "", -1)
-	writeAuthJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	// A native bearer can coexist with a different browser session cookie in a
+	// shared cookie jar. Never erase that unrelated authority. Web logout and a
+	// native logout whose explicit token matches the cookie still clear it.
+	ambientCookie := sessionCookieToken(r)
+	if sessionAuthority == sessionAuthorityCookie || (ambientCookie != "" && ambientCookie == sessionToken) {
+		setSessionCookie(w, r, "", -1)
+	}
+	writeAuthJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "sessionRevoked": true, "deviceBindingRemoved": deviceBindingRemoved, "deviceCleanupPending": deviceCleanupPending,
+		"sessionAuthoritySource": string(sessionAuthority), "sessionAuthorityHash": sessionHash,
+	})
 }
 
 func handleAuthMe(w http.ResponseWriter, r *http.Request) {

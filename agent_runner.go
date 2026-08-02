@@ -18,8 +18,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -59,6 +61,11 @@ const (
 	// dead-letters that head input — advancing the agent's baseline past it — so
 	// a permanently-poison entry can never wedge the cursor and re-send forever.
 	ambientAgentMaxWindowAttempts = 4
+	// ambientProviderMaxWindowAttempts bounds infrastructure/provider retries
+	// without consuming or dead-lettering the source window. At the cap the
+	// per-agent circuit remains open until the worker is explicitly restarted;
+	// a periodic ticker may never turn a provider outage into an endless bill.
+	ambientProviderMaxWindowAttempts = 4
 	// ambientAgentBackoffBase / Cap bound the exponential backoff between retries
 	// of a failing window so a hard-down model does not hot-retry every tick.
 	ambientAgentBackoffBase = 30 * time.Second
@@ -71,9 +78,12 @@ const (
 // cost, and when the next retry may fire. Lives on kanbanBoardApp.agentFailures
 // under app.mu; only the agent's single loop goroutine mutates its own record.
 type ambientAgentFailure struct {
-	windowID     string
-	attempts     int
-	backoffUntil time.Time
+	windowID        string
+	attempts        int
+	backoffUntil    time.Time
+	providerOpen    bool
+	persistenceOpen bool
+	continuityOpen  bool
 }
 
 // ambientAgentHoldError is a recoverable infrastructure/configuration outage.
@@ -89,18 +99,271 @@ func isAmbientAgentHoldError(err error) bool {
 	return errors.As(err, &failure)
 }
 
+type ambientOutputRejection struct {
+	agent  string
+	reason string
+}
+
+func (failure *ambientOutputRejection) Error() string {
+	return fmt.Sprintf("%s output rejected: %s", failure.agent, firstNonEmptyString(failure.reason, "invalid output"))
+}
+
+func (failure *ambientOutputRejection) providerOutputRejection() {}
+
+// ambientHeldWindow is the durable recovery hint for a provider-held source
+// cursor. Raw input and output stay in their existing stores; this sidecar
+// records only the pre-window baseline and head needed to prevent a restart
+// from re-baselining past held work.
+type ambientHeldWindow struct {
+	Agent         string `json:"agent"`
+	RoomID        string `json:"roomId"`
+	WindowID      string `json:"windowId"`
+	BaselineID    string `json:"baselineId,omitempty"`
+	BlockedReason string `json:"blockedReason,omitempty"`
+}
+
+type ambientHeldWindowState struct {
+	Version int                          `json:"version"`
+	Windows map[string]ambientHeldWindow `json:"windows"`
+}
+
+var ambientHeldWindowStateMu sync.Mutex
+
+const ambientContinuityAmbiguous = "durable_cursor_ambiguous"
+
+// ambientHeldWindowStatePersist is an injectable durability seam. Production
+// always uses the fsync'd atomic writer; tests replace it to prove that write,
+// fsync, and post-rename ambiguity all fail closed before provider admission.
+var ambientHeldWindowStatePersist = persistAmbientHeldWindowState
+
+func (app *kanbanBoardApp) ambientHeldWindowPath() string {
+	if app == nil || app.memory == nil || strings.TrimSpace(app.memory.path) == "" {
+		return ""
+	}
+	return app.memory.path + ".ambient-holds.json"
+}
+
+func loadAmbientHeldWindowState(path string) (ambientHeldWindowState, error) {
+	state := ambientHeldWindowState{Version: 1, Windows: map[string]ambientHeldWindow{}}
+	if strings.TrimSpace(path) == "" {
+		return state, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return state, nil
+		}
+		return state, err
+	}
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		return state, nil
+	}
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return ambientHeldWindowState{}, err
+	}
+	if state.Version != 1 {
+		return ambientHeldWindowState{}, fmt.Errorf("unsupported ambient checkpoint version %d", state.Version)
+	}
+	if state.Windows == nil {
+		state.Windows = map[string]ambientHeldWindow{}
+	}
+	return state, nil
+}
+
+func persistAmbientHeldWindowState(path string, state ambientHeldWindowState) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	if state.Version != 1 {
+		return fmt.Errorf("refusing unsupported ambient checkpoint version %d", state.Version)
+	}
+	raw, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeFileAtomicallyDurable(path, append(raw, '\n'), 0o600)
+}
+
+func (app *kanbanBoardApp) ambientHeldWindow(key string) (ambientHeldWindow, bool, error) {
+	window, ok, err := app.ambientScopeCheckpoint(key)
+	if err != nil || !ok || strings.TrimSpace(window.WindowID) == "" {
+		return ambientHeldWindow{}, false, err
+	}
+	return window, true, nil
+}
+
+func (app *kanbanBoardApp) ambientScopeCheckpoint(key string) (ambientHeldWindow, bool, error) {
+	ambientHeldWindowStateMu.Lock()
+	defer ambientHeldWindowStateMu.Unlock()
+	state, err := loadAmbientHeldWindowState(app.ambientHeldWindowPath())
+	if err != nil {
+		return ambientHeldWindow{}, false, err
+	}
+	window, ok := state.Windows[key]
+	return window, ok, nil
+}
+
+func (app *kanbanBoardApp) persistAmbientHeldWindow(agent ambientAgentConfig, headID, roomID string) error {
+	roomID = agent.scopeRoomID(roomID)
+	key := ambientAgentScopeKey(agent, roomID)
+	window := ambientHeldWindow{
+		Agent:      agent.name,
+		RoomID:     roomID,
+		WindowID:   strings.TrimSpace(headID),
+		BaselineID: app.ambientAgentBaselineID(key),
+	}
+	ambientHeldWindowStateMu.Lock()
+	defer ambientHeldWindowStateMu.Unlock()
+	path := app.ambientHeldWindowPath()
+	state, err := loadAmbientHeldWindowState(path)
+	if err != nil {
+		return err
+	}
+	state.Windows[key] = window
+	return ambientHeldWindowStatePersist(path, state)
+}
+
+// ensureAmbientScopeCheckpoint durably anchors the scope's boot baseline even
+// while no provider window is held. A later pre-invocation checkpoint failure
+// can therefore never make a restart infer a newer baseline and skip the raw
+// input that was waiting when durability failed.
+func (app *kanbanBoardApp) ensureAmbientScopeCheckpoint(agent ambientAgentConfig, roomID, baselineID string, blockedReason ...string) (ambientHeldWindow, error) {
+	roomID = agent.scopeRoomID(roomID)
+	key := ambientAgentScopeKey(agent, roomID)
+	ambientHeldWindowStateMu.Lock()
+	defer ambientHeldWindowStateMu.Unlock()
+	path := app.ambientHeldWindowPath()
+	state, err := loadAmbientHeldWindowState(path)
+	if err != nil {
+		return ambientHeldWindow{}, err
+	}
+	checkpoint, ok := state.Windows[key]
+	if !ok {
+		checkpoint = ambientHeldWindow{Agent: agent.name, RoomID: roomID, BaselineID: strings.TrimSpace(baselineID)}
+		if len(blockedReason) > 0 {
+			checkpoint.BlockedReason = strings.TrimSpace(blockedReason[0])
+		}
+		state.Windows[key] = checkpoint
+	}
+	// Rewrite even an existing checkpoint. Besides refreshing the 0600 atomic
+	// envelope, this is the recovery probe that must succeed before an explicit
+	// worker restart may clear a prior persistence-open circuit.
+	if err := ambientHeldWindowStatePersist(path, state); err != nil {
+		return checkpoint, err
+	}
+	return checkpoint, nil
+}
+
+func (app *kanbanBoardApp) clearAmbientHeldWindow(key string) error {
+	ambientHeldWindowStateMu.Lock()
+	defer ambientHeldWindowStateMu.Unlock()
+	path := app.ambientHeldWindowPath()
+	state, err := loadAmbientHeldWindowState(path)
+	if err != nil {
+		return err
+	}
+	window, ok := state.Windows[key]
+	if !ok || strings.TrimSpace(window.WindowID) == "" {
+		return nil
+	}
+	window.WindowID = ""
+	state.Windows[key] = window
+	return ambientHeldWindowStatePersist(path, state)
+}
+
+func (app *kanbanBoardApp) persistAmbientCheckpointBaseline(agent ambientAgentConfig, baselineID, roomID string) error {
+	roomID = agent.scopeRoomID(roomID)
+	key := ambientAgentScopeKey(agent, roomID)
+	ambientHeldWindowStateMu.Lock()
+	defer ambientHeldWindowStateMu.Unlock()
+	path := app.ambientHeldWindowPath()
+	state, err := loadAmbientHeldWindowState(path)
+	if err != nil {
+		return err
+	}
+	state.Windows[key] = ambientHeldWindow{
+		Agent:      agent.name,
+		RoomID:     roomID,
+		BaselineID: strings.TrimSpace(baselineID),
+	}
+	return ambientHeldWindowStatePersist(path, state)
+}
+
+func (app *kanbanBoardApp) bootstrapAmbientContinuity(agent ambientAgentConfig, roomID string) (baselineID, blockedReason string, err error) {
+	key := ambientAgentScopeKey(agent, roomID)
+	checkpoint, ok, err := app.ambientScopeCheckpoint(key)
+	if err != nil {
+		return "", "", err
+	}
+	if ok {
+		return checkpoint.BaselineID, checkpoint.BlockedReason, nil
+	}
+	if boolEnv(agent.backfillEnv) {
+		return "", "", nil
+	}
+	baselineID, _, ambiguous := app.memory.ambientContinuityBaseline(agent, roomID)
+	if ambiguous {
+		return "", ambientContinuityAmbiguous, nil
+	}
+	return baselineID, "", nil
+}
+
+// ambientAgentCircuitOpenError is safe to return to on-demand callers. It
+// carries retry timing without provider payloads and distinguishes a cooling
+// circuit from one requiring an explicit same-worker restart.
+type ambientAgentCircuitOpenError struct {
+	Agent           string
+	RoomID          string
+	RetryAt         time.Time
+	RestartRequired bool
+}
+
+func (failure *ambientAgentCircuitOpenError) Error() string {
+	if failure.RestartRequired {
+		return fmt.Sprintf("%s is paused after repeated failures; retry after the worker is restarted", failure.Agent)
+	}
+	if !failure.RetryAt.IsZero() {
+		return fmt.Sprintf("%s is cooling down until %s", failure.Agent, failure.RetryAt.UTC().Format(time.RFC3339))
+	}
+	return fmt.Sprintf("%s is temporarily unavailable", failure.Agent)
+}
+
+func (failure *ambientAgentCircuitOpenError) retryAfterSeconds(now time.Time) int {
+	if failure == nil || failure.RestartRequired || failure.RetryAt.IsZero() {
+		return 0
+	}
+	remaining := time.Until(failure.RetryAt)
+	if !now.IsZero() {
+		remaining = failure.RetryAt.Sub(now)
+	}
+	if remaining <= 0 {
+		return 1
+	}
+	return max(1, int(math.Ceil(remaining.Seconds())))
+}
+
 type ambientAgentConfig struct {
-	name              string
-	defaultInterval   time.Duration
-	intervalEnv       string // duration override; "0"/"off"/"false"/"disabled" turns the agent off
-	disabledEnv       string // truthy disables the agent
-	backfillEnv       string // truthy consumes history from the start at boot
-	minBatchEnv       string
-	defaultMinBatch   int
-	maxBatchEnv       string
-	defaultMaxBatch   int
-	inputKind         string // memory kind the agent consumes
-	artifactKind      string // memory kind the agent appends
+	name            string
+	defaultInterval time.Duration
+	intervalEnv     string // duration override; "0"/"off"/"false"/"disabled" turns the agent off
+	disabledEnv     string // truthy disables the agent
+	backfillEnv     string // truthy consumes history from the start at boot
+	minBatchEnv     string
+	defaultMinBatch int
+	maxBatchEnv     string
+	defaultMaxBatch int
+	inputKind       string // memory kind the agent consumes
+	artifactKind    string // memory kind the agent appends
+	// healthSuccessAt optionally identifies the durable artifact contract that
+	// proves this worker completed useful work. It is separate from artifactKind
+	// for specialty workers that update a typed os_artifact in place rather than
+	// append a dedicated memory kind.
+	healthSuccessAt func(meetingMemoryEntry) (time.Time, bool)
+	// healthWorkDue reports the specialty worker's actual cadence gate. It keeps
+	// an intentionally old but not-yet-due living artifact healthy while making
+	// genuinely pending work explicit and degraded. Generic ambient workers use
+	// their normal interval freshness instead.
+	healthWorkDue     func(*kanbanBoardApp, time.Time) bool
 	cursorMetadataKey string // artifact metadata key holding the consumed-through input id
 	requestTimeout    time.Duration
 	// nudgeMaxAge overrides defaultAmbientNudgeMaxAge for this agent's A3 nudge
@@ -133,6 +396,79 @@ func (agent ambientAgentConfig) windowRoomID(roomID string) string {
 		return normalizeRoomID(roomID)
 	}
 	return ""
+}
+
+// scopeRoomID is the authority/bookkeeping scope, not necessarily the room
+// that triggered a pass. Room-scoped workers own one circuit/cursor/lock per
+// room; company-global workers own exactly one shared scope even when two
+// named rooms close concurrently.
+func (agent ambientAgentConfig) scopeRoomID(roomID string) string {
+	if agent.roomScoped {
+		return normalizeRoomID(roomID)
+	}
+	return officeRoomID
+}
+
+func ambientAgentScopeKey(agent ambientAgentConfig, roomID string) string {
+	return ambientAgentKey(agent.name, agent.scopeRoomID(roomID))
+}
+
+// ambientContinuityBaseline migrates a pre-sidecar worker from durable truth.
+// A consumed-through artifact is authoritative; no input at all is a provably
+// clean install. Existing raw input without such evidence is ambiguous and
+// must not be silently treated as already consumed.
+func (store *meetingMemoryStore) ambientContinuityBaseline(agent ambientAgentConfig, roomID string) (baselineID string, clean bool, ambiguous bool) {
+	if store == nil {
+		return "", true, false
+	}
+	windowRoomID := agent.windowRoomID(roomID)
+	matchesRoom := func(entry meetingMemoryEntry) bool {
+		return windowRoomID == "" || normalizeRoomID(entry.Metadata["roomId"]) == windowRoomID
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	hasInput := false
+	for _, entry := range store.entries {
+		if entry.Kind == agent.inputKind && !memoryEntryHiddenFromRecall(entry) && matchesRoom(entry) {
+			hasInput = true
+		}
+	}
+	for index := len(store.entries) - 1; index >= 0; index-- {
+		artifact := store.entries[index]
+		if artifact.Kind != agent.artifactKind || memoryEntryHiddenFromRecall(artifact) || !matchesRoom(artifact) {
+			continue
+		}
+		cursorID := strings.TrimSpace(artifact.Metadata[agent.cursorMetadataKey])
+		if cursorID == "" {
+			// Legacy workers used the artifact's own position as the cursor; the
+			// normal window scanner has the same fallback.
+			return artifact.ID, false, false
+		}
+		for _, input := range store.entries {
+			if input.ID == cursorID && input.Kind == agent.inputKind && matchesRoom(input) {
+				return cursorID, false, false
+			}
+		}
+		return "", false, true
+	}
+	if hasInput {
+		// Inputs appended after this store instance booted are provably new work,
+		// not legacy history. A clean first install may therefore anchor at the
+		// empty cursor and consume them even if the worker starts lazily.
+		preBootInputID := store.bootLatestIDs[agent.inputKind]
+		if windowRoomID != "" {
+			preBootInputID = ""
+			if rooms := store.bootLatestRoomIDs[agent.inputKind]; rooms != nil {
+				preBootInputID = rooms[normalizeRoomID(windowRoomID)]
+			}
+		}
+		if strings.TrimSpace(preBootInputID) == "" {
+			return "", true, false
+		}
+		return "", false, true
+	}
+	return "", true, false
 }
 
 // ambientAgentKey is the map key for one agent's per-room bookkeeping
@@ -218,18 +554,14 @@ func (app *kanbanBoardApp) startAmbientAgent(agent ambientAgentConfig, apiKey st
 	if interval <= 0 {
 		return
 	}
+	// Serialize explicit starts/restarts for this worker. The circuit reset below
+	// is legal only after the old supervisor has acknowledged exit.
+	supervisorLock := app.ambientAgentRunLock("supervisor:" + agent.name)
+	supervisorLock.Lock()
+	defer supervisorLock.Unlock()
 
 	cancel := make(chan struct{})
 	done := make(chan struct{})
-	// The startup baseline registers under the OFFICE key (the bare agent
-	// name); named rooms register lazily on first touch via
-	// ensureAmbientAgentRoomBaseline so a room-scoped agent never backfills a
-	// room's pre-boot history (W4 §7.4).
-	baselineID := ""
-	if !boolEnv(agent.backfillEnv) {
-		baselineID = app.memory.latestEntryIDOfKindForRoom(agent.inputKind, agent.windowRoomID(officeRoomID))
-	}
-
 	app.mu.Lock()
 	if app.agentCancels == nil {
 		app.agentCancels = map[string]chan struct{}{}
@@ -237,9 +569,6 @@ func (app *kanbanBoardApp) startAmbientAgent(agent ambientAgentConfig, apiKey st
 	}
 	oldCancel := app.agentCancels[agent.name]
 	oldDone := app.agentDones[agent.name]
-	app.agentCancels[agent.name] = cancel
-	app.agentDones[agent.name] = done
-	app.setAmbientAgentBaselineIDLocked(agent.name, baselineID)
 	app.mu.Unlock()
 
 	if oldCancel != nil {
@@ -249,7 +578,114 @@ func (app *kanbanBoardApp) startAmbientAgent(agent ambientAgentConfig, apiKey st
 		}
 	}
 
+	// Resolve the replacement baseline only after the old loop exits. Its last
+	// in-flight call may have persisted a held-window checkpoint while shutdown
+	// was waiting; reading earlier could rebaseline past that exact window.
+	baselineID, blockedReason, continuityErr := app.bootstrapAmbientContinuity(agent, officeRoomID)
+	if continuityErr != nil {
+		log.Errorf("%s could not read its scope checkpoint; failing safe to replay: %v", agent.name, continuityErr)
+	}
+	checkpoint, checkpointErr := app.ensureAmbientScopeCheckpoint(agent, officeRoomID, baselineID, blockedReason)
+	if checkpointErr != nil {
+		// The baseline that existed before the failed durable write is the only
+		// safe floor. Empty means replay, never skip.
+		baselineID = checkpoint.BaselineID
+		log.Errorf("%s could not durably establish its scope checkpoint; failing closed: %v", agent.name, checkpointErr)
+	} else {
+		baselineID = checkpoint.BaselineID
+	}
+
+	app.mu.Lock()
+	app.agentCancels[agent.name] = cancel
+	app.agentDones[agent.name] = done
+	app.setAmbientAgentBaselineIDLocked(agent.name, baselineID)
+	// An explicit same-worker restart is the only reset for a provider-open
+	// circuit. Prefix deletion covers every room-scoped instance.
+	if checkpointErr == nil && continuityErr == nil && blockedReason == "" {
+		for key := range app.agentFailures {
+			if key == agent.name || strings.HasPrefix(key, agent.name+"@") {
+				delete(app.agentFailures, key)
+			}
+		}
+	}
+	app.mu.Unlock()
+	if checkpointErr != nil {
+		app.recordAmbientAgentCheckpointFailure(agent, "", officeRoomID, checkpointErr)
+	} else if continuityErr != nil {
+		app.recordAmbientAgentCheckpointFailure(agent, "", officeRoomID, continuityErr)
+	} else if blockedReason != "" {
+		app.recordAmbientAgentContinuityFailure(agent, officeRoomID)
+	}
+
 	go app.runAmbientAgentLoop(agent, apiKey, interval, cancel, done)
+}
+
+// replaceSpecialtyAgentSupervisor gives non-generic ambient loops the same
+// restart contract as startAmbientAgent: stop, await old-loop exit, then reset
+// only that worker's circuit and publish the replacement registration.
+
+func (app *kanbanBoardApp) replaceSpecialtyAgentSupervisor(agent ambientAgentConfig, cancel chan struct{}, done chan struct{}, baselineID *string) {
+	name := agent.name
+	supervisorLock := app.ambientAgentRunLock("supervisor:" + name)
+	supervisorLock.Lock()
+	defer supervisorLock.Unlock()
+	app.mu.Lock()
+	if app.agentCancels == nil {
+		app.agentCancels = map[string]chan struct{}{}
+		app.agentDones = map[string]chan struct{}{}
+	}
+	oldCancel := app.agentCancels[name]
+	oldDone := app.agentDones[name]
+	app.mu.Unlock()
+	if oldCancel != nil {
+		close(oldCancel)
+		if oldDone != nil {
+			<-oldDone
+		}
+	}
+	checkpointBaseline, blockedReason := "", ""
+	var continuityErr error
+	if baselineID != nil {
+		checkpointBaseline, blockedReason, continuityErr = app.bootstrapAmbientContinuity(agent, officeRoomID)
+	} else if existing, ok, err := app.ambientScopeCheckpoint(agent.name); err != nil {
+		continuityErr = err
+	} else if ok {
+		checkpointBaseline, blockedReason = existing.BaselineID, existing.BlockedReason
+	}
+	if continuityErr != nil {
+		log.Errorf("%s could not read its scope checkpoint; failing safe to replay: %v", name, continuityErr)
+	}
+	checkpoint, checkpointErr := app.ensureAmbientScopeCheckpoint(agent, officeRoomID, checkpointBaseline, blockedReason)
+	if checkpointErr != nil {
+		checkpointBaseline = checkpoint.BaselineID
+		log.Errorf("%s could not durably establish its scope checkpoint; failing closed: %v", name, checkpointErr)
+	} else {
+		checkpointBaseline = checkpoint.BaselineID
+	}
+	if baselineID != nil {
+		*baselineID = checkpointBaseline
+	}
+	app.mu.Lock()
+	app.agentCancels[name] = cancel
+	app.agentDones[name] = done
+	if baselineID != nil {
+		app.setAmbientAgentBaselineIDLocked(name, *baselineID)
+	}
+	if checkpointErr == nil && continuityErr == nil && blockedReason == "" {
+		for key := range app.agentFailures {
+			if key == name || strings.HasPrefix(key, name+"@") {
+				delete(app.agentFailures, key)
+			}
+		}
+	}
+	app.mu.Unlock()
+	if checkpointErr != nil {
+		app.recordAmbientAgentCheckpointFailure(agent, "", officeRoomID, checkpointErr)
+	} else if continuityErr != nil {
+		app.recordAmbientAgentCheckpointFailure(agent, "", officeRoomID, continuityErr)
+	} else if blockedReason != "" {
+		app.recordAmbientAgentContinuityFailure(agent, officeRoomID)
+	}
 }
 
 func (app *kanbanBoardApp) runAmbientAgentLoop(agent ambientAgentConfig, apiKey string, interval time.Duration, cancel <-chan struct{}, done chan<- struct{}) {
@@ -375,52 +811,156 @@ func (app *kanbanBoardApp) ambientAgentRooms(agent ambientAgentConfig) []string 
 // fireAmbientAgentPass runs one guarded ticker/nudge pass: it peeks the window
 // to key A8 backoff off a stable boundary, honors any active backoff, halves the
 // batch on retries, runs under the per-agent run lock, and records or clears the
-// failure state by the outcome. The archive-flush path deliberately does NOT go
-// through here — a close flush is a one-shot best-effort sweep, not a retrying
-// ticker, so backoff/dead-letter would only get in its way.
+// failure state by the outcome. Close/archive flushes call the same guarded
+// seam directly so no lifecycle boundary can bypass a held provider circuit.
 func (app *kanbanBoardApp) fireAmbientAgentPass(agent ambientAgentConfig, apiKey string, minBatch int, roomID string) {
 	if minBatch < 1 {
 		minBatch = 1
 	}
 	roomID = normalizeRoomID(roomID)
-	key := ambientAgentKey(agent.name, roomID)
 	// §6.5 guests-only deferral: an unattended guest room accumulates input
 	// (transcription continues) but spends no model budget until a member is
-	// present or the close-flush chain runs its one bounded pass (which calls
-	// runAmbientAgentOnceForRoom directly and is not deferred).
+	// present or the close-flush chain runs its one bounded guarded pass.
 	if agent.defersWhenGuestsOnly && app.roomGuestsOnly(roomID) {
 		return
 	}
+	ctx, cancelRequest := context.WithTimeout(context.Background(), agent.requestTimeout)
+	_, err := app.invokeAmbientAgentGuarded(agent, ctx, apiKey, nil, minBatch, roomID)
+	cancelRequest()
+	if err != nil {
+		var circuitErr *ambientAgentCircuitOpenError
+		if errors.As(err, &circuitErr) {
+			return
+		}
+		log.Errorf("%s worker failed: %v", agent.name, err)
+	}
+}
+
+// invokeAmbientAgentGuarded is the single admission/completion seam for
+// scheduled and on-demand ambient work. It never bypasses backoff/open state,
+// and it owns the only classification that may dead-letter or hold a cursor.
+func (app *kanbanBoardApp) invokeAmbientAgentGuarded(agent ambientAgentConfig, ctx context.Context, apiKey string, responder openAITextResponder, minBatch int, roomID string) (meetingMemoryEntry, error) {
+	if app == nil || app.memory == nil {
+		return meetingMemoryEntry{}, nil
+	}
+	if minBatch < 1 {
+		minBatch = 1
+	}
+	roomID = normalizeRoomID(roomID)
+	key := ambientAgentScopeKey(agent, roomID)
+	// Admission, the retry-budget read, provider invocation, and completion
+	// accounting are one scope-serial transaction. Locking only the producer
+	// allowed a burst of callers to pre-admit against the same stale attempt
+	// count and then spend beyond the four-call ceiling one by one.
+	runLock := app.ambientAgentRunLock(key)
+	runLock.Lock()
+	defer runLock.Unlock()
+
 	headID, count, _, ok := app.peekUnconsumedWindow(agent, roomID)
 	if !ok || count < minBatch {
-		// Nothing ready at this floor: drop any stale failure record so a window
-		// that drained (or was dead-lettered) does not keep a phantom backoff.
-		app.clearAmbientAgentFailure(key)
-		return
+		app.mu.Lock()
+		failure := app.agentFailures[key]
+		continuityBlocked := failure != nil && failure.continuityOpen
+		app.mu.Unlock()
+		if continuityBlocked {
+			return meetingMemoryEntry{}, app.ambientAgentCircuitError(agent, headID, roomID)
+		}
+		// Only a genuinely drained window clears obsolete state. A raw held
+		// cursor remains visible to peek and can never reach this branch.
+		if err := app.clearAmbientAgentFailure(key); err != nil {
+			return meetingMemoryEntry{}, &ambientAgentHoldError{err: err}
+		}
+		return meetingMemoryEntry{}, nil
 	}
 	proceed, limit := app.ambientAgentAttemptBudget(agent, headID, roomID)
 	if !proceed {
-		return // still cooling down after a recent failure on this same window
+		return meetingMemoryEntry{}, app.ambientAgentCircuitError(agent, headID, roomID)
 	}
-	ctx, cancelRequest := context.WithTimeout(context.Background(), agent.requestTimeout)
-	_, err := app.runAmbientAgentOnceLimited(agent, ctx, apiKey, nil, minBatch, limit, roomID)
-	cancelRequest()
+	// The held-window checkpoint is durable BEFORE the provider is contacted.
+	// Any persistence fault therefore spends zero provider calls and cannot be
+	// converted by a restart into a newer boot baseline that skips this head.
+	if err := app.persistAmbientHeldWindow(agent, headID, roomID); err != nil {
+		app.recordAmbientAgentCheckpointFailure(agent, headID, roomID, err)
+		return meetingMemoryEntry{}, &ambientAgentHoldError{err: fmt.Errorf("%s held-window persistence unavailable", agent.name)}
+	}
+	entry, err := app.runAmbientAgentOnceLimitedUnlocked(agent, ctx, apiKey, responder, minBatch, limit, roomID)
 	if err != nil {
-		log.Errorf("%s worker failed: %v", agent.name, err)
-		if isAmbientAgentHoldError(err) || isOpenAIProviderFailure(err) {
+		if isAmbientAgentHoldError(err) || isProviderInvocationFailure(err) || isProviderOutputRejection(err) {
 			app.recordAmbientAgentHoldFailure(agent, headID, roomID)
-			return
+		} else {
+			app.recordAmbientAgentFailure(agent, headID, roomID)
 		}
-		app.recordAmbientAgentFailure(agent, headID, roomID)
-		return
+		return entry, err
 	}
-	app.clearAmbientAgentFailure(key)
+	if err := app.clearAmbientAgentFailure(key); err != nil {
+		return entry, &ambientAgentHoldError{err: err}
+	}
+	return entry, nil
+}
+
+func (app *kanbanBoardApp) ambientAgentCircuitError(agent ambientAgentConfig, headID, roomID string) error {
+	key := ambientAgentScopeKey(agent, roomID)
+	app.mu.Lock()
+	failure := app.agentFailures[key]
+	var retryAt time.Time
+	restartRequired := false
+	if failure != nil && (failure.windowID == headID || failure.persistenceOpen || failure.continuityOpen) {
+		retryAt = failure.backoffUntil
+		restartRequired = failure.providerOpen || failure.persistenceOpen || failure.continuityOpen
+	}
+	app.mu.Unlock()
+	return &ambientAgentCircuitOpenError{Agent: agent.name, RoomID: normalizeRoomID(roomID), RetryAt: retryAt, RestartRequired: restartRequired}
+}
+
+func (app *kanbanBoardApp) recordAmbientAgentContinuityFailure(agent ambientAgentConfig, roomID string) {
+	key := ambientAgentScopeKey(agent, roomID)
+	app.mu.Lock()
+	if app.agentFailures == nil {
+		app.agentFailures = map[string]*ambientAgentFailure{}
+	}
+	fail := app.agentFailures[key]
+	if fail == nil {
+		fail = &ambientAgentFailure{}
+		app.agentFailures[key] = fail
+	}
+	fail.continuityOpen = true
+	fail.providerOpen = true
+	fail.backoffUntil = time.Time{}
+	app.mu.Unlock()
+	recordCapabilityFailure(agent.name, time.Now().UTC(), errors.New("durable consumed-through continuity is ambiguous"))
+}
+
+// recordAmbientAgentCheckpointFailure is a fail-closed durability circuit.
+// It is deliberately distinct from provider attempts: persistence faults spend
+// no model budget, never dead-letter, and may be cleared only by a restart (or
+// success path) that first proves the scope checkpoint durable again.
+func (app *kanbanBoardApp) recordAmbientAgentCheckpointFailure(agent ambientAgentConfig, headID, roomID string, err error) {
+	key := ambientAgentScopeKey(agent, roomID)
+	app.recordAmbientCheckpointFailureKey(key, agent.name, headID, err)
+}
+
+func (app *kanbanBoardApp) recordAmbientCheckpointFailureKey(key, agentName, headID string, err error) {
+	app.mu.Lock()
+	if app.agentFailures == nil {
+		app.agentFailures = map[string]*ambientAgentFailure{}
+	}
+	fail := app.agentFailures[key]
+	if fail == nil || (strings.TrimSpace(headID) != "" && fail.windowID != headID) {
+		fail = &ambientAgentFailure{windowID: strings.TrimSpace(headID)}
+		app.agentFailures[key] = fail
+	}
+	fail.persistenceOpen = true
+	fail.providerOpen = true
+	fail.backoffUntil = time.Time{}
+	app.mu.Unlock()
+	recordCapabilityFailure(agentName, time.Now().UTC(), errors.New("held-window checkpoint persistence unavailable"))
+	log.Errorf("%s worker opened its persistence circuit; provider admission is suppressed: %v", key, err)
 }
 
 // recordAmbientAgentHoldFailure arms the same capped retry backoff as a poison
 // failure but never dead-letters and never changes the durable baseline.
 func (app *kanbanBoardApp) recordAmbientAgentHoldFailure(agent ambientAgentConfig, headID string, roomID string) {
-	key := ambientAgentKey(agent.name, roomID)
+	key := ambientAgentScopeKey(agent, roomID)
 	app.mu.Lock()
 	if app.agentFailures == nil {
 		app.agentFailures = map[string]*ambientAgentFailure{}
@@ -430,20 +970,36 @@ func (app *kanbanBoardApp) recordAmbientAgentHoldFailure(agent ambientAgentConfi
 		fail = &ambientAgentFailure{windowID: headID}
 		app.agentFailures[key] = fail
 	}
-	if fail.attempts < 32 {
+	if fail.attempts < ambientProviderMaxWindowAttempts {
 		fail.attempts++
 	}
 	attempt := fail.attempts
-	backoff := ambientAgentBackoffBase
-	for i := 1; i < attempt && backoff < ambientAgentBackoffCap; i++ {
-		backoff *= 2
-		if backoff > ambientAgentBackoffCap {
-			backoff = ambientAgentBackoffCap
+	opened := attempt >= ambientProviderMaxWindowAttempts
+	if opened {
+		fail.providerOpen = true
+		fail.backoffUntil = time.Time{}
+	} else {
+		backoff := ambientAgentBackoffBase
+		for i := 1; i < attempt && backoff < ambientAgentBackoffCap; i++ {
+			backoff *= 2
+			if backoff > ambientAgentBackoffCap {
+				backoff = ambientAgentBackoffCap
+			}
 		}
+		fail.backoffUntil = time.Now().Add(backoff)
 	}
-	fail.backoffUntil = time.Now().Add(backoff)
+	backoffUntil := fail.backoffUntil
 	app.mu.Unlock()
-	log.Warnf("%s worker is holding input %s after recoverable provider failure; cursor remains put for %s", key, headID, backoff)
+	if err := app.persistAmbientHeldWindow(agent, headID, roomID); err != nil {
+		app.recordAmbientAgentCheckpointFailure(agent, headID, roomID, err)
+		log.Errorf("%s could not persist its held-window checkpoint and is fail-closed: %v", key, err)
+		return
+	}
+	if opened {
+		log.Errorf("%s worker opened its provider circuit after %d failures on input %s; cursor remains put until an explicit worker restart", key, attempt, headID)
+		return
+	}
+	log.Warnf("%s worker is holding input %s after recoverable provider failure; cursor remains put until %s", key, headID, backoffUntil.UTC().Format(time.RFC3339))
 }
 
 func (app *kanbanBoardApp) runAmbientAgentOnce(agent ambientAgentConfig, ctx context.Context, apiKey string, responder openAITextResponder, minBatch int) (meetingMemoryEntry, error) {
@@ -476,19 +1032,48 @@ func (app *kanbanBoardApp) runAmbientAgentOnceLimited(agent ambientAgentConfig, 
 	}
 	roomID = normalizeRoomID(roomID)
 
-	// One pass at a time per (agent, room): the cursor only advances when
+	// One pass at a time per effective agent scope: the cursor only advances when
 	// produce appends its artifact at the end of a pass, so overlapping passes
 	// (the ticker loop vs an archive flush, or two concurrent archives) would
 	// consume — and apply — the same input batch twice. Per-room locks mean two
 	// rooms' close flushes neither serialize nor deadlock (W4 §7.4). The
 	// unconsumed window is read after the lock is held, so a waiting pass sees
 	// the cursor the previous pass advanced.
-	runLock := app.ambientAgentRunLock(ambientAgentKey(agent.name, roomID))
+	runLock := app.ambientAgentRunLock(ambientAgentScopeKey(agent, roomID))
 	runLock.Lock()
 	defer runLock.Unlock()
+	return app.runAmbientAgentOnceLimitedUnlocked(agent, ctx, apiKey, responder, minBatch, maxBatch, roomID)
+}
+
+// runAmbientAgentOnceLimitedUnlocked is the provider/body half of a pass. The
+// caller must hold ambientAgentRunLock(ambientAgentScopeKey(...)). The guarded
+// seam keeps that lock across admission and completion; the direct test seams
+// acquire it in runAmbientAgentOnceLimited above.
+func (app *kanbanBoardApp) runAmbientAgentOnceLimitedUnlocked(agent ambientAgentConfig, ctx context.Context, apiKey string, responder openAITextResponder, minBatch int, maxBatch int, roomID string) (meetingMemoryEntry, error) {
+	if app == nil || app.memory == nil {
+		return meetingMemoryEntry{}, nil
+	}
+	if responder == nil {
+		responder = createOpenAITextResponse
+	}
+	if minBatch < 1 {
+		minBatch = 1
+	}
+	if configured := agent.maxBatch(); maxBatch <= 0 || maxBatch > configured {
+		maxBatch = configured
+	}
+	roomID = normalizeRoomID(roomID)
 
 	servicePrincipal := sharedRoomRecallPrincipal(roomID, app.memory.currentMeetingID(roomID))
-	inputs := app.memory.unconsumedEntriesAfterForRoomForPrincipal(agent.inputKind, agent.artifactKind, agent.cursorMetadataKey, maxBatch, app.ambientAgentWindowBaseline(agent, roomID), agent.windowRoomID(roomID), servicePrincipal)
+	baselineID := app.ambientAgentWindowBaseline(agent, roomID)
+	app.mu.Lock()
+	failure := app.agentFailures[ambientAgentScopeKey(agent, roomID)]
+	durabilityBlocked := failure != nil && (failure.persistenceOpen || failure.continuityOpen)
+	app.mu.Unlock()
+	if durabilityBlocked {
+		return meetingMemoryEntry{}, app.ambientAgentCircuitError(agent, "", roomID)
+	}
+	inputs := app.memory.unconsumedEntriesAfterForRoomForPrincipal(agent.inputKind, agent.artifactKind, agent.cursorMetadataKey, maxBatch, baselineID, agent.windowRoomID(roomID), servicePrincipal)
 	inputs = compatibleAmbientScopePrefix(inputs)
 	if len(inputs) < minBatch {
 		return meetingMemoryEntry{}, nil
@@ -518,13 +1103,12 @@ func (app *kanbanBoardApp) ambientAgentWindowBaseline(agent ambientAgentConfig, 
 }
 
 // ensureAmbientAgentRoomBaseline returns the (agent, room) baseline,
-// registering it on first touch: a room-scoped agent meeting a room with
-// pre-boot history baselines at that room's newest input (never backfills); a
-// room born after boot has none and baselines at now. Office registration
-// matches the legacy ensureAmbientAgentBaseline semantics.
+// registering it on first touch. A missing sidecar migrates from the durable
+// consumed-through artifact cursor; raw history with no trustworthy cursor is
+// blocked rather than silently treated as consumed.
 func (app *kanbanBoardApp) ensureAmbientAgentRoomBaseline(agent ambientAgentConfig, roomID string) string {
-	roomID = normalizeRoomID(roomID)
-	key := ambientAgentKey(agent.name, roomID)
+	roomID = agent.scopeRoomID(roomID)
+	key := ambientAgentScopeKey(agent, roomID)
 
 	app.mu.Lock()
 	if baseline, registered := app.agentBaselineIDs[key]; registered {
@@ -533,13 +1117,20 @@ func (app *kanbanBoardApp) ensureAmbientAgentRoomBaseline(agent ambientAgentConf
 	}
 	app.mu.Unlock()
 
-	baseline := ""
-	if !boolEnv(agent.backfillEnv) {
-		if windowRoom := agent.windowRoomID(roomID); windowRoom == "" {
-			// company-global agent: the boot baseline spans every room.
-			baseline = app.memory.bootBaselineIDOfKind(agent.inputKind)
-		} else {
-			baseline = app.memory.bootBaselineIDOfKindForRoom(agent.inputKind, windowRoom)
+	baseline, blockedReason, continuityErr := app.bootstrapAmbientContinuity(agent, roomID)
+	if continuityErr != nil {
+		log.Errorf("%s could not read its scope checkpoint; failing safe to replay: %v", key, continuityErr)
+	}
+	checkpoint, checkpointErr := app.ensureAmbientScopeCheckpoint(agent, roomID, baseline, blockedReason)
+	if checkpointErr != nil {
+		baseline = checkpoint.BaselineID
+		app.recordAmbientAgentCheckpointFailure(agent, "", roomID, checkpointErr)
+	} else {
+		baseline = checkpoint.BaselineID
+		if continuityErr != nil {
+			app.recordAmbientAgentCheckpointFailure(agent, "", roomID, continuityErr)
+		} else if blockedReason != "" {
+			app.recordAmbientAgentContinuityFailure(agent, roomID)
 		}
 	}
 
@@ -679,15 +1270,27 @@ func (app *kanbanBoardApp) ambientAgentAttemptBudget(agent ambientAgentConfig, h
 	full := agent.maxBatch()
 
 	app.mu.Lock()
-	fail := app.agentFailures[ambientAgentKey(agent.name, roomID)]
-	if fail == nil || fail.windowID != headID {
+	fail := app.agentFailures[ambientAgentScopeKey(agent, roomID)]
+	if fail == nil {
+		app.mu.Unlock()
+		return true, full
+	}
+	if fail.persistenceOpen || fail.continuityOpen {
+		app.mu.Unlock()
+		return false, 0
+	}
+	if fail.windowID != headID {
 		app.mu.Unlock()
 		return true, full
 	}
 	attempts := fail.attempts
 	backoffUntil := fail.backoffUntil
+	providerOpen := fail.providerOpen
 	app.mu.Unlock()
 
+	if providerOpen {
+		return false, 0
+	}
 	if time.Now().Before(backoffUntil) {
 		return false, 0
 	}
@@ -711,7 +1314,7 @@ func (app *kanbanBoardApp) ambientAgentAttemptBudget(agent ambientAgentConfig, h
 // so the next pass tries the remainder instead of re-sending the poison window
 // forever. Only the agent's single loop goroutine touches its own record.
 func (app *kanbanBoardApp) recordAmbientAgentFailure(agent ambientAgentConfig, headID string, roomID string) {
-	key := ambientAgentKey(agent.name, roomID)
+	key := ambientAgentScopeKey(agent, roomID)
 	app.mu.Lock()
 	if app.agentFailures == nil {
 		app.agentFailures = map[string]*ambientAgentFailure{}
@@ -736,6 +1339,13 @@ func (app *kanbanBoardApp) recordAmbientAgentFailure(agent ambientAgentConfig, h
 	app.mu.Unlock()
 
 	if deadLetter {
+		// Advancing a poison baseline is itself recovery state. Publish the
+		// durable anchor first; if that write is unavailable, hold the window and
+		// surface a persistence circuit instead of creating a restart-only skip.
+		if err := app.persistAmbientCheckpointBaseline(agent, headID, roomID); err != nil {
+			app.recordAmbientAgentCheckpointFailure(agent, headID, roomID, err)
+			return
+		}
 		// setAmbientAgentBaselineID re-locks app.mu, so it must run after the
 		// unlock above (app.mu is not reentrant).
 		app.setAmbientAgentBaselineID(key, headID)
@@ -787,10 +1397,22 @@ func (app *kanbanBoardApp) appendAmbientDeadLetterTombstone(agent ambientAgentCo
 
 // clearAmbientAgentFailure drops an agent's failure record after a clean pass
 // (or when its window drained), so the next failure starts a fresh backoff.
-func (app *kanbanBoardApp) clearAmbientAgentFailure(name string) {
+func (app *kanbanBoardApp) clearAmbientAgentFailure(name string) error {
+	// Clear the durable held marker before publishing the closed in-memory
+	// circuit. If durability is unavailable the prior marker remains the safe
+	// restart floor and the worker stays fail-closed.
+	if err := app.clearAmbientHeldWindow(name); err != nil {
+		agentName := name
+		if at := strings.Index(agentName, "@"); at >= 0 {
+			agentName = agentName[:at]
+		}
+		app.recordAmbientCheckpointFailureKey(name, agentName, "", err)
+		return fmt.Errorf("%s held-window checkpoint persistence unavailable", name)
+	}
 	app.mu.Lock()
 	delete(app.agentFailures, name)
 	app.mu.Unlock()
+	return nil
 }
 
 // ensureAmbientAgentBaseline registers the startup cursor for an agent whose
@@ -924,10 +1546,15 @@ func (app *kanbanBoardApp) flushAmbientAgentsForCloseWithResponder(seam string, 
 			passTimeout = meetingArchiveFlushPassTimeout
 		}
 		passCtx, cancelPass := context.WithTimeout(ctx, passTimeout)
-		_, err := app.runAmbientAgentOnceForRoom(agent, passCtx, apiKey, responder, 1, roomID)
+		_, err := app.invokeAmbientAgentGuarded(agent, passCtx, apiKey, responder, 1, roomID)
 		cancelPass()
 		if err != nil {
-			log.Errorf("%s %s flush failed: %v", agent.name, seam, err)
+			var circuitErr *ambientAgentCircuitOpenError
+			if errors.As(err, &circuitErr) {
+				log.Warnf("%s %s flush skipped while its bounded retry circuit is open or cooling down", agent.name, seam)
+			} else {
+				log.Errorf("%s %s flush failed: %v", agent.name, seam, err)
+			}
 		}
 	}
 }

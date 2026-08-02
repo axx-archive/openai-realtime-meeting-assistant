@@ -186,6 +186,6 @@ const styles = StyleSheet.create({
   },
   retry: {
     color: colors.accent,
-    fontWeight: '600',
+    fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600',
   },
 });

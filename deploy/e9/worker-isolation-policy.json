@@ -1,0 +1,87 @@
+{
+  "schemaVersion": "stride.e9.worker-isolation/v2",
+  "policyId": "e9-codex-worker-isolation-v2",
+  "mode": "plan_only",
+  "activationDefault": "off",
+  "productionMutation": false,
+  "currentDeployment": {
+    "state": "disabled",
+    "composeRunnerService": "absent",
+    "composeExecutorInstalled": false,
+    "binaryRunnerMode": "absent",
+    "runnerImageTarget": "absent",
+    "inProcessSelection": "compile_time_disabled",
+    "providerCredentialInjection": false,
+    "queueMountedIntoWorker": false,
+    "workspaceMountedIntoWorker": false,
+    "allowedComposeServices": [
+      "meetingassist",
+      "canonical-postgres",
+      "render-queue-init",
+      "render-runner",
+      "coturn",
+      "caddy"
+    ]
+  },
+  "requiredBoundary": {
+    "state": "external_pending",
+    "executor": "external_ephemeral_container_worktree",
+    "ephemeralPerRun": true,
+    "readOnlyRoot": true,
+    "writableMounts": ["/tmp", "/workspace/run"],
+    "deniedMounts": ["/app/data", "/app/codex-queue", "/var/lib/docker", "/run/bonfire-dr", "/var/lib/postgresql"],
+    "egress": {
+      "state": "external_pending",
+      "enforcement": "external_gateway_required",
+      "composeEnforced": false,
+      "defaultDenyRequired": true,
+      "allowedHosts": [],
+      "ipLiteralDeny": true,
+      "privateNetworkDeny": true
+    },
+    "credentials": {
+      "state": "external_pending",
+      "issuance": "disabled",
+      "shortLived": true,
+      "maximumTtlSeconds": 600,
+      "runBound": true,
+      "allowedScopes": ["source:read", "artifact:write", "callback:complete", "provider:invoke"]
+    },
+    "resources": {
+      "cpu": 2,
+      "memoryMiB": 2048,
+      "pids": 128,
+      "wallTimeSeconds": 1800,
+      "networkBytes": 104857600
+    },
+    "callback": {
+      "signed": true,
+      "runIdBound": true,
+      "audienceBound": true,
+      "nonceRequired": true,
+      "maximumSkewSeconds": 120,
+      "replayCache": true
+    },
+    "noCompanyBrainMount": true,
+    "noProductionVolume": true,
+    "environmentDenylist": [
+      "DATABASE_URL",
+      "BONFIRE_CANONICAL_DATABASE_URL",
+      "OPENAI_API_KEY",
+      "ANTHROPIC_API_KEY",
+      "BONFIRE_DR_ENVELOPE_KEY",
+      "BONFIRE_DR_AUTHORITY_PRIVATE_KEY",
+      "BONFIRE_DR_MANIFEST_PRIVATE_KEY"
+    ]
+  },
+  "externalEvidenceRequired": [
+    "external_per_run_orchestrator_identity",
+    "ephemeral_container_lifecycle_receipt",
+    "read_only_root_and_mount_receipt",
+    "default_deny_egress_gateway_receipt",
+    "short_lived_run_bound_credential_receipt",
+    "resource_and_network_quota_receipt",
+    "callback_nonce_replay_receipt",
+    "no_production_mount_receipt"
+  ]
+}

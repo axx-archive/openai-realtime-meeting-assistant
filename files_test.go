@@ -348,17 +348,20 @@ func TestAssistantFilesListsChatAttachmentsWithVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create private thread: %v", err)
 	}
+	aj := accountStore().findUser("aj@shareability.com")
+	privateReservation := "files-private-reservation"
+	privateFile := reserveTestAttachment(t, app, aj, private, scoutChatFileAttachment{Name: "deck.png", Kind: "png", Ref: ref, Text: "derived facts"}, privateReservation)
 	if _, err := app.commitScoutChatThreadMessages("aj@shareability.com", private.ID, scoutChatMessageRecord{
-		ID:          "msg-private-1",
-		Kind:        "message",
-		Role:        "user",
-		Text:        "look at this",
-		CreatedAt:   time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano),
-		AuthorName:  "AJ",
-		AuthorEmail: "aj@shareability.com",
-		Files: []scoutChatFileAttachment{
-			{Name: "deck.png", Kind: "png", Size: 12, Ref: ref, Mime: "image/png", Text: "derived facts"},
-		},
+		ID:                            "msg-private-1",
+		Kind:                          "message",
+		Role:                          "user",
+		Text:                          "look at this",
+		CreatedAt:                     time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano),
+		AuthorName:                    "AJ",
+		AuthorEmail:                   "aj@shareability.com",
+		Files:                         []scoutChatFileAttachment{privateFile},
+		attachmentDestinationRevision: scoutChatAttachmentDestinationRevision(private),
+		attachmentReservationID:       privateReservation,
 	}); err != nil {
 		t.Fatalf("commit private message: %v", err)
 	}
@@ -367,6 +370,13 @@ func TestAssistantFilesListsChatAttachmentsWithVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
+	publicRef, err := putBlob([]byte("%PDF-1.4\npublic fixture"), "application/pdf")
+	if err != nil {
+		t.Fatalf("put public PDF: %v", err)
+	}
+	tom := accountStore().findUser("tom@shareability.com")
+	publicReservation := "files-public-reservation"
+	publicFile := reserveTestAttachment(t, app, tom, channel, scoutChatFileAttachment{Name: "onesheet.pdf", Kind: "pdf", Ref: publicRef}, publicReservation)
 	if _, err := app.commitScoutChatThreadMessages("tom@shareability.com", channel.ID, scoutChatMessageRecord{
 		ID:          "msg-channel-1",
 		Kind:        "message",
@@ -376,10 +386,12 @@ func TestAssistantFilesListsChatAttachmentsWithVisibility(t *testing.T) {
 		AuthorName:  "Tom",
 		AuthorEmail: "tom@shareability.com",
 		Files: []scoutChatFileAttachment{
-			{Name: "onesheet.pdf", Kind: "pdf", Size: 40, Ref: ref, Mime: "application/pdf"},
+			publicFile,
 			// name-only pre-085 chip: no bytes, no text — never listed
 			{Name: "ghost.key", Kind: "key", Size: 9},
 		},
+		attachmentDestinationRevision: scoutChatAttachmentDestinationRevision(channel),
+		attachmentReservationID:       publicReservation,
 	}); err != nil {
 		t.Fatalf("commit channel message: %v", err)
 	}
@@ -419,17 +431,19 @@ func TestAssistantFilesListsChatAttachmentsWithVisibility(t *testing.T) {
 	// The other side of the folded fix: a PUBLIC channel attachment WITH derived
 	// text keeps the company-wide "ingested" badge — only private threads scope
 	// down to "in this chat".
+	notesReservation := "files-notes-reservation"
+	notesFile := reserveTestAttachment(t, app, tom, channel, scoutChatFileAttachment{Name: "notes.pdf", Kind: "pdf", Ref: publicRef, Text: "channel derived facts"}, notesReservation)
 	if _, err := app.commitScoutChatThreadMessages("tom@shareability.com", channel.ID, scoutChatMessageRecord{
-		ID:          "msg-channel-2",
-		Kind:        "message",
-		Role:        "user",
-		Text:        "notes",
-		CreatedAt:   time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano),
-		AuthorName:  "Tom",
-		AuthorEmail: "tom@shareability.com",
-		Files: []scoutChatFileAttachment{
-			{Name: "notes.pdf", Kind: "pdf", Size: 20, Ref: ref, Mime: "application/pdf", Text: "channel derived facts"},
-		},
+		ID:                            "msg-channel-2",
+		Kind:                          "message",
+		Role:                          "user",
+		Text:                          "notes",
+		CreatedAt:                     time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano),
+		AuthorName:                    "Tom",
+		AuthorEmail:                   "tom@shareability.com",
+		Files:                         []scoutChatFileAttachment{notesFile},
+		attachmentDestinationRevision: scoutChatAttachmentDestinationRevision(channel),
+		attachmentReservationID:       notesReservation,
 	}); err != nil {
 		t.Fatalf("commit second channel message: %v", err)
 	}

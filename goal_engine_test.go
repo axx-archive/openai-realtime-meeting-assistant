@@ -159,7 +159,7 @@ func waitForGoalStage(t *testing.T, app *kanbanBoardApp, parentID string, want s
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		if artifact, ok := app.osArtifactByID(parentID); ok {
-			if artifact.Metadata["currentStage"] == want {
+			if goalArtifactReachedStage(artifact, want) {
 				plan, _ := decodeGoalPlan(artifact.Metadata["goalPlan"])
 				return plan
 			}
@@ -169,6 +169,109 @@ func waitForGoalStage(t *testing.T, app *kanbanBoardApp, parentID string, want s
 	artifact, _ := app.osArtifactByID(parentID)
 	t.Fatalf("goal never reached %q; last stage=%q", want, artifact.Metadata["currentStage"])
 	return goalPlan{}
+}
+
+// goalArtifactReachedStage treats the approval state as reached only once its
+// entire user-visible contract is coherent. persist writes those fields
+// atomically; keeping the wait strict ensures a future split-write regression
+// cannot turn into another timing-dependent test (or UI) observation.
+func goalArtifactReachedStage(artifact meetingMemoryEntry, want string) bool {
+	if artifact.Metadata["currentStage"] != want {
+		return false
+	}
+	if want != goalStateApproval {
+		return true
+	}
+	return artifact.Metadata["threadStatus"] == codexJobStatusApprovalRequired &&
+		artifact.Metadata["status"] == codexJobStatusApprovalRequired &&
+		artifact.Metadata["reviewGate"] == "approval_required"
+}
+
+func TestGoalArtifactReachedStageWaitsForCoherentApprovalSurface(t *testing.T) {
+	artifact := meetingMemoryEntry{Metadata: map[string]string{
+		"currentStage": goalStateApproval,
+		"threadStatus": "running",
+		"status":       "running",
+		"reviewGate":   "approval_required",
+	}}
+	if goalArtifactReachedStage(artifact, goalStateApproval) {
+		t.Fatal("an intermediate approval plan with a running thread surface must not satisfy the wait")
+	}
+	artifact.Metadata["threadStatus"] = codexJobStatusApprovalRequired
+	artifact.Metadata["status"] = codexJobStatusApprovalRequired
+	if !goalArtifactReachedStage(artifact, goalStateApproval) {
+		t.Fatal("a fully parked approval artifact must satisfy the wait")
+	}
+	if !goalArtifactReachedStage(meetingMemoryEntry{Metadata: map[string]string{"currentStage": goalStateVerified}}, goalStateVerified) {
+		t.Fatal("non-approval stages must remain keyed only by currentStage")
+	}
+}
+
+func TestGoalPersistPublishesApprovalSurfaceAtomically(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	parent, _, err := app.createOSArtifactWithMetadata("workflow", "Atomic approval", "body", "tester", map[string]string{
+		"mode":         "goal",
+		"threadStatus": "running",
+		"status":       "running",
+		"reviewGate":   "pending",
+	})
+	if err != nil {
+		t.Fatalf("create goal artifact: %v", err)
+	}
+	plan := goalPlan{
+		PlanVersion: goalPlanVersion,
+		GoalID:      parent.ID,
+		Objective:   "Prove one-revision approval publication",
+		State:       goalStateApproval,
+		Gate:        goalGate{Status: "pending"},
+		Checkpoint: &goalProcessCheckpoint{
+			StageID:  "human-checkpoint",
+			Question: "Ship it?",
+		},
+	}
+
+	persisted := newGoalEngine(app).persist(&plan, parent.ID, "body")
+	if !goalArtifactReachedStage(persisted, goalStateApproval) {
+		t.Fatalf("persisted approval surface is incoherent: %v", persisted.Metadata)
+	}
+}
+
+func TestGoalPersistPublishesTerminalSurfaceAtomically(t *testing.T) {
+	tests := []struct {
+		name      string
+		state     string
+		cancelled bool
+		want      string
+	}{
+		{name: "verified", state: goalStateVerified, want: codexJobStatusComplete},
+		{name: "blocked", state: goalStateBlocked, want: "error"},
+		{name: "cancelled", state: goalStateBlocked, cancelled: true, want: codexJobStatusCancelled},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			app := newIsolatedKanbanBoardApp(t)
+			parent, _, err := app.createOSArtifactWithMetadata("workflow", "Terminal surface", "body", "tester", map[string]string{
+				"mode":         "goal",
+				"threadStatus": "running",
+				"status":       "running",
+			})
+			if err != nil {
+				t.Fatalf("create goal artifact: %v", err)
+			}
+			plan := goalPlan{
+				PlanVersion: goalPlanVersion,
+				GoalID:      parent.ID,
+				Objective:   "Publish terminal state once",
+				State:       test.state,
+				Cancelled:   test.cancelled,
+				Gate:        goalGate{Status: "passed"},
+			}
+			persisted := newGoalEngine(app).persist(&plan, parent.ID, "body")
+			if persisted.Metadata["threadStatus"] != test.want || persisted.Metadata["status"] != test.want {
+				t.Fatalf("terminal surface=%q/%q, want %q", persisted.Metadata["threadStatus"], persisted.Metadata["status"], test.want)
+			}
+		})
+	}
 }
 
 // --- Happy path: full state machine -----------------------------------------
@@ -655,6 +758,7 @@ func TestGoalDecomposeRejectsMalformedThenNeedsAttention(t *testing.T) {
 // --- Assignment (pure, re-derivable) ----------------------------------------
 
 func TestAssignGoalRunners(t *testing.T) {
+	enableCodexExecutionForTest(t)
 	t.Setenv("BONFIRE_EXECUTION_RUNNER", "codex_sidecar")
 	plan := &goalPlan{Subtasks: []goalSubtask{
 		{ID: "st-1", Title: "Research the market", Mode: "research"},
@@ -803,14 +907,38 @@ func postCodexCallback(t *testing.T, artifactID string, jobID string, status str
 		t.Fatalf("artifact %s not found", artifactID)
 	}
 	threadID := artifact.Metadata["threadId"]
-	payload := signedCodexCallbackPayload("runner-secret", codexRunnerCallbackPayload{
+	payload := codexRunnerCallbackPayload{
 		JobID:      jobID,
 		ArtifactID: artifactID,
 		ThreadID:   threadID,
 		Status:     status,
 		Text:       "Vision: shipped\n\n## Codex worker evidence\n- Worker: codex exec",
 		Metadata:   map[string]string{"runnerId": "test-runner"},
-	})
+	}
+
+	// Claimed jobs have a fenced lease: a real sidecar durably writes its
+	// terminal result with that exact lease identity *before* it sends the
+	// callback. The helper mirrors that protocol. Unclaimed jobs retain the
+	// legacy callback fixture path used by the pure callback-fold test above.
+	store := newCodexRunnerJobStore(codexRunnerQueuePath())
+	if job, err := store.read(filepath.Base(store.jobPath(jobID))); err == nil && job.ClaimGeneration > 0 {
+		if job.Status == codexJobStatusRunning && codexJobStatusTerminal(status) {
+			job.Status = status
+			job.CompletedAt = time.Now().UTC()
+			if err := store.update(*job); err != nil {
+				t.Fatalf("persist terminal claimed job %s: %v", jobID, err)
+			}
+			job, err = store.read(filepath.Base(store.jobPath(jobID)))
+			if err != nil {
+				t.Fatalf("reload terminal claimed job %s: %v", jobID, err)
+			}
+		}
+		payload.ClaimGeneration = job.ClaimGeneration
+		payload.FencingToken = job.FencingToken
+		payload.Capability = codexRunnerCallbackCapabilityV2("runner-secret", payload.JobID, payload.ArtifactID, payload.ThreadID, payload.ClaimGeneration, payload.FencingToken)
+	} else {
+		payload = signedCodexCallbackPayload("runner-secret", payload)
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("marshal callback: %v", err)
@@ -839,6 +967,7 @@ func countQueueJobs(t *testing.T, dir string) int {
 // the fold hook in the callback advances the parent plan to verified — the
 // regression the reviewer flagged (execution subtasks otherwise strand forever).
 func TestGoalEngineCodexSubtaskFoldsViaCallback(t *testing.T) {
+	enableCodexExecutionForTest(t)
 	app := newIsolatedKanbanBoardApp(t)
 	previousApp := kanbanApp
 	kanbanApp = app
@@ -914,8 +1043,13 @@ func TestGoalEngineCommitPushIsIdempotentAcrossRestart(t *testing.T) {
 		t.Fatalf("after approval queue has %d jobs, want 1", got)
 	}
 	plan := mustGoalPlan(t, app, thread.Artifact.ID)
-	if plan.State != goalStateCommit || plan.Gate.CommitChildID == "" {
-		t.Fatalf("plan not parked at commit_push with a child: state=%q child=%q", plan.State, plan.Gate.CommitChildID)
+	if plan.State != goalStateCommit || plan.Gate.CommitChildID == "" || plan.Gate.CommitJobID == "" {
+		t.Fatalf("plan not parked at commit_push with a durable outbox: state=%q child=%q job=%q", plan.State, plan.Gate.CommitChildID, plan.Gate.CommitJobID)
+	}
+	store := newCodexRunnerJobStore(queueDir)
+	claimed, err := store.claimNext("test-runner")
+	if err != nil || claimed == nil {
+		t.Fatalf("claim reserved commit job: job=%+v err=%v", claimed, err)
 	}
 
 	// Simulate two server restarts while parked at commit_push: neither may
@@ -925,6 +1059,13 @@ func TestGoalEngineCommitPushIsIdempotentAcrossRestart(t *testing.T) {
 	if got := countQueueJobs(t, queueDir); got != 1 {
 		t.Fatalf("after restarts queue has %d jobs, want 1 (no duplicate push)", got)
 	}
+	job, err := store.read(filepath.Base(store.jobPath(plan.Gate.CommitJobID)))
+	if err != nil {
+		t.Fatalf("read reserved commit job: %v", err)
+	}
+	if job.Status != codexJobStatusRunning || job.Attempts != 1 {
+		t.Fatalf("restart rewrote in-flight job: status=%q attempts=%d, want running/1", job.Status, job.Attempts)
+	}
 
 	// The commit callback lands on the commit child and verifies the goal.
 	commitChildID := plan.Gate.CommitChildID
@@ -933,6 +1074,397 @@ func TestGoalEngineCommitPushIsIdempotentAcrossRestart(t *testing.T) {
 	verified := waitForGoalStage(t, app, thread.Artifact.ID, goalStateVerified)
 	if verified.Verification.Verdict != goalReviewPass {
 		t.Fatalf("verification verdict=%q, want pass after commit", verified.Verification.Verdict)
+	}
+}
+
+func TestGoalExternalWriteApprovalPersistFailureQueuesNothing(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	queueDir := t.TempDir()
+	t.Setenv("BONFIRE_CODEX_QUEUE_PATH", queueDir)
+	installFakeResponder(t, goalResponderRoutes{
+		decompose: `{"subtasks":[{"id":"st-1","title":"Prep release notes","mode":"research","authority":"read_only","dependsOn":[]}]}`,
+		gate:      `{"safe":true,"external_write_required":true,"command":"git push origin main","reason":"needs a push"}`,
+	})
+	folds := installAwaitableChildRunner(t, "release notes")
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Ship only after durable approval", CreatedBy: "aj@shareability.com"})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+	waitForGoalStage(t, app, thread.Artifact.ID, goalStateApproval)
+	folds.Wait()
+
+	originalPath := app.memory.path
+	app.memory.path = t.TempDir() // a directory cannot be opened as the JSONL file
+	if err := app.resumeApprovedGoal(thread.Artifact.ID, "aj@shareability.com"); err == nil {
+		t.Fatal("approval succeeded despite a forced durable parent-write failure")
+	}
+	if got := countQueueJobs(t, queueDir); got != 0 {
+		t.Fatalf("persist failure queued %d external-write jobs, want 0", got)
+	}
+	plan := mustGoalPlan(t, app, thread.Artifact.ID)
+	if plan.State != goalStateApproval || plan.Gate.CommitChildID != "" || plan.Gate.CommitJobID != "" {
+		t.Fatalf("failed approval leaked into durable plan: state=%q child=%q job=%q", plan.State, plan.Gate.CommitChildID, plan.Gate.CommitJobID)
+	}
+
+	app.memory.path = originalPath
+	if err := app.resumeApprovedGoal(thread.Artifact.ID, "aj@shareability.com"); err != nil {
+		t.Fatalf("retry after restoring persistence: %v", err)
+	}
+	if got := countQueueJobs(t, queueDir); got != 1 {
+		t.Fatalf("durable retry queued %d jobs, want exactly 1", got)
+	}
+}
+
+func TestGoalCommitReservationCrashResumesExactlyOnce(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	queueDir := t.TempDir()
+	t.Setenv("BONFIRE_CODEX_QUEUE_PATH", queueDir)
+	installFakeResponder(t, goalResponderRoutes{
+		decompose: `{"subtasks":[{"id":"st-1","title":"Prep release notes","mode":"research","authority":"read_only","dependsOn":[]}]}`,
+		gate:      `{"safe":true,"external_write_required":true,"command":"git push origin main","reason":"needs a push"}`,
+	})
+	folds := installAwaitableChildRunner(t, "release notes")
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Resume the exact reserved push", CreatedBy: "aj@shareability.com"})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+	waitForGoalStage(t, app, thread.Artifact.ID, goalStateApproval)
+	folds.Wait()
+
+	plan := mustGoalPlan(t, app, thread.Artifact.ID)
+	plan.Gate.Status = "passed"
+	plan.Gate.ReviewedBy = "AJ"
+	plan.State = goalStateCommit
+	engine := newGoalEngine(app)
+	changed, err := engine.reserveGoalCommitOutbox(&plan, thread.Artifact.ID)
+	if err != nil || !changed {
+		t.Fatalf("reserve commit outbox: changed=%v err=%v", changed, err)
+	}
+	reservedChild, reservedJob := plan.Gate.CommitChildID, plan.Gate.CommitJobID
+	if persisted := engine.persist(&plan, thread.Artifact.ID, ""); persisted.ID == "" {
+		t.Fatal("persist commit reservation failed")
+	}
+	if got := countQueueJobs(t, queueDir); got != 0 {
+		t.Fatalf("reservation-only crash point already queued %d jobs", got)
+	}
+	if _, ok := app.osArtifactByID(reservedChild); ok {
+		t.Fatal("reservation-only crash point already created the commit child")
+	}
+
+	// Process dies here. A fresh app loads the durable reservation and resumes
+	// the one deterministic child/job pair.
+	restarted := newKanbanBoardApp()
+	restarted.reconcileGoalThread(thread.Artifact.ID)
+	restarted.reconcileGoalThread(thread.Artifact.ID)
+	if got := countQueueJobs(t, queueDir); got != 1 {
+		t.Fatalf("restart queued %d jobs, want exactly 1", got)
+	}
+	reloaded := mustGoalPlan(t, restarted, thread.Artifact.ID)
+	if reloaded.Gate.CommitChildID != reservedChild || reloaded.Gate.CommitJobID != reservedJob {
+		t.Fatalf("restart drifted reservation: child=%q/%q job=%q/%q", reloaded.Gate.CommitChildID, reservedChild, reloaded.Gate.CommitJobID, reservedJob)
+	}
+	store := newCodexRunnerJobStore(queueDir)
+	job, err := store.read(reservedJob + ".json")
+	if err != nil {
+		t.Fatalf("read resumed job: %v", err)
+	}
+	if job.ID != reservedJob || job.ArtifactID != reservedChild || job.ThreadID != goalCommitThreadID(&reloaded) {
+		t.Fatalf("resumed job binding drifted: %+v", job)
+	}
+	// A terminal runner result is only authoritative if it comes from an
+	// active durable lease. Claim it first to model the runner that completed
+	// just before its callback connection dropped.
+	claimed, err := store.claimNext("restart-recovery-runner")
+	if err != nil || claimed == nil || claimed.ID != reservedJob {
+		t.Fatalf("claim resumed job: job=%+v err=%v", claimed, err)
+	}
+	claimed.Status = codexJobStatusComplete
+	claimed.CompletedAt = time.Now().UTC()
+	if err := store.update(*claimed); err != nil {
+		t.Fatalf("persist terminal queue result: %v", err)
+	}
+	// A runner may persist its terminal job just before the callback connection
+	// drops. The next boot folds that durable result instead of re-enqueueing.
+	restarted.reconcileGoalThread(thread.Artifact.ID)
+	terminal := mustGoalPlan(t, restarted, thread.Artifact.ID)
+	if terminal.State != goalStateVerified || terminal.Verification.Verdict != goalReviewPass {
+		t.Fatalf("restart did not fold durable terminal queue result: %+v", terminal.Verification)
+	}
+	if got := countQueueJobs(t, queueDir); got != 1 {
+		t.Fatalf("terminal restart queued %d jobs, want 1", got)
+	}
+}
+
+func TestGoalCommitAdoptsLegacyEnqueueBeforeParentStampCrash(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	queueDir := t.TempDir()
+	t.Setenv("BONFIRE_CODEX_QUEUE_PATH", queueDir)
+	installFakeResponder(t, goalResponderRoutes{
+		decompose: `{"subtasks":[{"id":"st-1","title":"Prep release notes","mode":"research","authority":"read_only","dependsOn":[]}]}`,
+		gate:      `{"safe":true,"external_write_required":true,"command":"git push origin main","reason":"needs a push"}`,
+	})
+	folds := installAwaitableChildRunner(t, "release notes")
+
+	thread, err := app.launchGoalThread(goalLaunchSpec{Objective: "Adopt the old crash-window push", CreatedBy: "aj@shareability.com"})
+	if err != nil {
+		t.Fatalf("launchGoalThread: %v", err)
+	}
+	app.runGoalThread(thread.Artifact.ID)
+	waitForGoalStage(t, app, thread.Artifact.ID, goalStateApproval)
+	folds.Wait()
+
+	plan := mustGoalPlan(t, app, thread.Artifact.ID)
+	plan.Gate.Status = "passed"
+	plan.Gate.ReviewedBy = "AJ"
+	plan.State = goalStateCommit
+	if persisted := newGoalEngine(app).persist(&plan, thread.Artifact.ID, ""); persisted.ID == "" {
+		t.Fatal("persist legacy commit state failed")
+	}
+	command := plan.Gate.Command
+	legacyChild, _, err := app.createOSArtifactWithMetadata("workflow", command, buildGoalCommitScaffold(&plan, command), plan.CreatedBy, map[string]string{
+		"mode":          "goal_commit",
+		"goalParentId":  thread.Artifact.ID,
+		"goalSubtaskId": goalCommitSubtaskID,
+		"authority":     codexJobAuthorityExternalWrite,
+	})
+	if err != nil {
+		t.Fatalf("create legacy orphan child: %v", err)
+	}
+	legacyThread := scoutAgentThread{ID: goalCommitThreadID(&plan), Mode: "workflow", Query: command, Artifact: legacyChild}
+	result, err := app.enqueueCodexAgentThreadJob(legacyThread, codexJobAuthorityExternalWrite)
+	if err != nil {
+		t.Fatalf("enqueue legacy orphan job: %v", err)
+	}
+	if current, _ := app.osArtifactByID(legacyChild.ID); current.Metadata["runnerJobId"] != "" {
+		t.Fatalf("legacy crash window unexpectedly stamped runnerJobId=%q", current.Metadata["runnerJobId"])
+	}
+	legacyJobID := result.Metadata["runnerJobId"]
+
+	restarted := newKanbanBoardApp()
+	restarted.reconcileGoalThread(thread.Artifact.ID)
+	restarted.reconcileGoalThread(thread.Artifact.ID)
+	if got := countQueueJobs(t, queueDir); got != 1 {
+		t.Fatalf("legacy crash recovery queued %d jobs, want the original one only", got)
+	}
+	reloaded := mustGoalPlan(t, restarted, thread.Artifact.ID)
+	if reloaded.Gate.CommitChildID != legacyChild.ID || reloaded.Gate.CommitJobID != legacyJobID {
+		t.Fatalf("legacy orphan was not adopted: child=%q/%q job=%q/%q", reloaded.Gate.CommitChildID, legacyChild.ID, reloaded.Gate.CommitJobID, legacyJobID)
+	}
+}
+
+func TestGoalCommitLegacyQueueDiscoveryFailsClosedWhenAmbiguous(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	queueDir := t.TempDir()
+	t.Setenv("BONFIRE_CODEX_QUEUE_PATH", queueDir)
+	parent, _, err := app.createOSArtifactWithMetadata("workflow", "Ambiguous legacy push", "body", "tester", map[string]string{"mode": "goal"})
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	plan := goalPlan{
+		PlanVersion:  goalPlanVersion,
+		GoalID:       "ambiguous-legacy-goal",
+		Objective:    "Ship exactly once",
+		CreatedBy:    "aj@shareability.com",
+		State:        goalStateCommit,
+		Gate:         goalGate{Status: "passed", Command: "git push origin main"},
+		Verification: goalVerification{Verdict: "pending"},
+	}
+	if persisted := newGoalEngine(app).persist(&plan, parent.ID, "body"); persisted.ID == "" {
+		t.Fatal("persist parent commit state")
+	}
+	child, _, err := app.createOSArtifactWithMetadata("workflow", plan.Gate.Command, buildGoalCommitScaffold(&plan, plan.Gate.Command), plan.CreatedBy, map[string]string{
+		"mode":          "goal_commit",
+		"goalParentId":  parent.ID,
+		"goalSubtaskId": goalCommitSubtaskID,
+		"authority":     codexJobAuthorityExternalWrite,
+	})
+	if err != nil {
+		t.Fatalf("create legacy child: %v", err)
+	}
+	binding := codexRunnerJob{
+		ArtifactID: child.ID,
+		ThreadID:   goalCommitThreadID(&plan),
+		Mode:       "workflow",
+		Query:      plan.Gate.Command,
+		Authority:  codexJobAuthorityExternalWrite,
+	}
+	store := newCodexRunnerJobStore(queueDir)
+	for _, id := range []string{"legacy-job-a", "legacy-job-b"} {
+		candidate := binding
+		candidate.ID = id
+		if _, err := store.enqueue(candidate); err != nil {
+			t.Fatalf("enqueue %s: %v", id, err)
+		}
+	}
+
+	restarted := newKanbanBoardApp()
+	restarted.reconcileGoalThread(parent.ID)
+	reloaded := mustGoalPlan(t, restarted, parent.ID)
+	if reloaded.Gate.CommitChildID != "" || reloaded.Gate.CommitJobID != "" || reloaded.CommitGeneration != 0 {
+		t.Fatalf("ambiguous discovery mutated durable parent: generation=%d child=%q job=%q", reloaded.CommitGeneration, reloaded.Gate.CommitChildID, reloaded.Gate.CommitJobID)
+	}
+	if reloaded.State != goalStateBlocked || !strings.Contains(reloaded.Blocker, "operator reconciliation") {
+		t.Fatalf("ambiguous discovery did not land an honest reconciliation block: state=%q blocker=%q", reloaded.State, reloaded.Blocker)
+	}
+	if got := countQueueJobs(t, queueDir); got != 2 {
+		t.Fatalf("ambiguous discovery mutated queue: jobs=%d, want 2", got)
+	}
+	if current, _ := restarted.osArtifactByID(child.ID); current.Metadata["runnerJobId"] != "" {
+		t.Fatalf("ambiguous discovery stamped child job=%q", current.Metadata["runnerJobId"])
+	}
+}
+
+func TestGoalCommitLegacyQueueDiscoveryZeroMatchesRequiresOperatorReconciliation(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	queueDir := t.TempDir()
+	t.Setenv("BONFIRE_CODEX_QUEUE_PATH", queueDir)
+	parent, _, err := app.createOSArtifactWithMetadata("workflow", "Unknown legacy push", "body", "tester", map[string]string{"mode": "goal"})
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	plan := goalPlan{
+		PlanVersion:  goalPlanVersion,
+		GoalID:       "zero-match-legacy-goal",
+		Objective:    "Never guess whether this shipped",
+		CreatedBy:    "aj@shareability.com",
+		State:        goalStateCommit,
+		Gate:         goalGate{Status: "passed", Command: "git push origin main"},
+		Verification: goalVerification{Verdict: "pending"},
+	}
+	if persisted := newGoalEngine(app).persist(&plan, parent.ID, "body"); persisted.ID == "" {
+		t.Fatal("persist parent commit state")
+	}
+	child, _, err := app.createOSArtifactWithMetadata("workflow", plan.Gate.Command, buildGoalCommitScaffold(&plan, plan.Gate.Command), plan.CreatedBy, map[string]string{
+		"mode":          "goal_commit",
+		"goalParentId":  parent.ID,
+		"goalSubtaskId": goalCommitSubtaskID,
+		"authority":     codexJobAuthorityExternalWrite,
+	})
+	if err != nil {
+		t.Fatalf("create legacy child: %v", err)
+	}
+	if got := countQueueJobs(t, queueDir); got != 0 {
+		t.Fatalf("zero-match fixture unexpectedly has %d jobs", got)
+	}
+
+	restarted := newKanbanBoardApp()
+	restarted.reconcileGoalThread(parent.ID)
+	reloaded := mustGoalPlan(t, restarted, parent.ID)
+	if reloaded.Gate.CommitChildID != "" || reloaded.Gate.CommitJobID != "" || reloaded.CommitGeneration != 0 {
+		t.Fatalf("zero-match recovery guessed a durable reservation: generation=%d child=%q job=%q", reloaded.CommitGeneration, reloaded.Gate.CommitChildID, reloaded.Gate.CommitJobID)
+	}
+	if reloaded.State != goalStateBlocked || !strings.Contains(reloaded.Blocker, "operator reconciliation") || !strings.Contains(reloaded.Blocker, "execution state is unknown") {
+		t.Fatalf("zero-match recovery did not land an honest operator block: state=%q blocker=%q", reloaded.State, reloaded.Blocker)
+	}
+	if current, _ := restarted.osArtifactByID(child.ID); current.Metadata["runnerJobId"] != "" || current.Metadata["goalCommitGeneration"] != "" {
+		t.Fatalf("zero-match recovery stamped the child: %v", current.Metadata)
+	}
+	if got := countQueueJobs(t, queueDir); got != 0 {
+		t.Fatalf("zero-match recovery mutated queue: jobs=%d", got)
+	}
+}
+
+func TestGoalCommitLatePriorGenerationCallbackCannotFinishCurrentReship(t *testing.T) {
+	t.Setenv("USAGE_LEDGER_PATH", t.TempDir())
+	app := newIsolatedKanbanBoardApp(t)
+	parent, _, err := app.createOSArtifactWithMetadata("workflow", "Current reship", "body", "tester", map[string]string{"mode": "goal"})
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	plan := goalPlan{
+		PlanVersion:      goalPlanVersion,
+		GoalID:           "late-callback-goal",
+		Objective:        "Ship revision two",
+		CreatedBy:        "aj@shareability.com",
+		State:            goalStateCommit,
+		CommitGeneration: 2,
+		Gate: goalGate{
+			Status:        "passed",
+			CommitChildID: "current-generation-child",
+			CommitJobID:   "current-generation-job",
+		},
+		Verification: goalVerification{Verdict: "pending"},
+	}
+	if persisted := newGoalEngine(app).persist(&plan, parent.ID, "body"); persisted.ID == "" {
+		t.Fatal("persist current generation")
+	}
+	oldChild := meetingMemoryEntry{ID: "old-generation-child", Metadata: map[string]string{
+		"runnerJobId":          "old-generation-job",
+		"goalCommitGeneration": "1",
+	}}
+	app.foldGoalChildCompletion(parent.ID, goalCommitSubtaskID, oldChild, codexJobStatusComplete)
+	afterOld := mustGoalPlan(t, app, parent.ID)
+	if afterOld.State != goalStateCommit || afterOld.Gate.CommitChildID != plan.Gate.CommitChildID || afterOld.Gate.CommitJobID != plan.Gate.CommitJobID || afterOld.Verification.Verdict != "pending" {
+		t.Fatalf("late prior-generation callback terminalized current run: state=%q child=%q job=%q verdict=%q", afterOld.State, afterOld.Gate.CommitChildID, afterOld.Gate.CommitJobID, afterOld.Verification.Verdict)
+	}
+
+	currentChild := meetingMemoryEntry{ID: plan.Gate.CommitChildID, Metadata: map[string]string{
+		"runnerJobId":          plan.Gate.CommitJobID,
+		"goalCommitGeneration": "2",
+	}}
+	app.foldGoalChildCompletion(parent.ID, goalCommitSubtaskID, currentChild, codexJobStatusComplete)
+	afterCurrent := mustGoalPlan(t, app, parent.ID)
+	if afterCurrent.State != goalStateVerified || afterCurrent.Verification.Verdict != goalReviewPass {
+		t.Fatalf("current generation callback did not finish: state=%q verdict=%q", afterCurrent.State, afterCurrent.Verification.Verdict)
+	}
+}
+
+func TestGoalCommitReservationMintsFreshGenerationForFeedbackReship(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	plan := goalPlan{GoalID: "goal-reship", Objective: "Ship revision", State: goalStateCommit, Gate: goalGate{Status: "passed", Command: "git push origin main"}}
+	engine := newGoalEngine(app)
+	if changed, err := engine.reserveGoalCommitOutbox(&plan, "parent-reship"); err != nil || !changed {
+		t.Fatalf("reserve first generation: changed=%v err=%v", changed, err)
+	}
+	firstChild, firstJob := plan.Gate.CommitChildID, plan.Gate.CommitJobID
+	if plan.CommitGeneration != 1 {
+		t.Fatalf("first generation=%d, want 1", plan.CommitGeneration)
+	}
+
+	// reopenGoalForFeedback deliberately resets Gate while preserving the plan's
+	// monotonic generation. The revised push must get a new outbox identity.
+	plan.Gate = goalGate{Status: "passed", Command: "git push origin main"}
+	if changed, err := engine.reserveGoalCommitOutbox(&plan, "parent-reship"); err != nil || !changed {
+		t.Fatalf("reserve feedback generation: changed=%v err=%v", changed, err)
+	}
+	if plan.CommitGeneration != 2 || plan.Gate.CommitChildID == firstChild || plan.Gate.CommitJobID == firstJob {
+		t.Fatalf("feedback reship reused terminal outbox: generation=%d child=%q/%q job=%q/%q", plan.CommitGeneration, plan.Gate.CommitChildID, firstChild, plan.Gate.CommitJobID, firstJob)
+	}
+}
+
+func TestGoalCommitReservationDoesNotAdoptHistoricalLegacyChildOnFeedbackReship(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	parentID := "legacy-verified-parent"
+	legacy, _, err := app.createOSArtifactWithMetadata("workflow", "git push origin main", "old completed push", "tester", map[string]string{
+		"mode":          "goal_commit",
+		"goalParentId":  parentID,
+		"goalSubtaskId": goalCommitSubtaskID,
+		"authority":     codexJobAuthorityExternalWrite,
+		"threadStatus":  codexJobStatusComplete,
+		"runnerJobId":   "legacy-terminal-job",
+	})
+	if err != nil {
+		t.Fatalf("create historical legacy child: %v", err)
+	}
+	plan := goalPlan{
+		GoalID:    "legacy-verified-goal",
+		Objective: "Ship the feedback revision",
+		State:     goalStateCommit,
+		Gate:      goalGate{Status: "passed", Command: "git push origin main"},
+		Verification: goalVerification{
+			Verdict:   goalReviewPass,
+			CheckedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		},
+	}
+	if changed, err := newGoalEngine(app).reserveGoalCommitOutbox(&plan, parentID); err != nil || !changed {
+		t.Fatalf("reserve feedback outbox: changed=%v err=%v", changed, err)
+	}
+	if plan.Gate.CommitChildID == legacy.ID || plan.Gate.CommitJobID == "legacy-terminal-job" {
+		t.Fatalf("feedback reship adopted historical child/job: child=%q job=%q", plan.Gate.CommitChildID, plan.Gate.CommitJobID)
 	}
 }
 

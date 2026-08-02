@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,6 +24,20 @@ const (
 	defaultCodexExecTimeout        = 20 * time.Minute
 	defaultCodexExecMaxOutputBytes = 256 * 1024
 )
+
+const codexExecutionProductionEnabled = false
+
+// codexExecutionTestGate exists only so the legacy queue/callback primitives
+// can retain unit coverage. Production code never writes it: no environment,
+// flag, HTTP route, or Compose setting can activate the retired executor.
+var codexExecutionTestGate atomic.Bool
+
+// codexExecutionEnabled is the compile-time-closed admission gate for every
+// Codex executor selection. An external isolated executor will need a new,
+// separately reviewed adapter rather than reviving this legacy path.
+func codexExecutionEnabled() bool {
+	return codexExecutionProductionEnabled || codexExecutionTestGate.Load()
+}
 
 type codexExecConfig struct {
 	Command        string
@@ -79,6 +94,9 @@ func configuredCodexRunnerMode() string {
 func agentThreadWorkerBoundary(worker string) string {
 	switch worker {
 	case agentThreadWorkerCodexExec:
+		if !codexExecutionEnabled() {
+			return "codex_execution_disabled"
+		}
 		if configuredCodexRunnerMode() == codexRunnerModeLocalExec {
 			return "codex_cli_noninteractive"
 		}
@@ -91,6 +109,9 @@ func agentThreadWorkerBoundary(worker string) string {
 func agentThreadWorkerInstruction() string {
 	switch configuredAgentThreadWorkerMode() {
 	case agentThreadWorkerCodexExec:
+		if !codexExecutionEnabled() {
+			return "Codex execution was requested but is disabled by the server-side E9 admission gate. Treat the work as a handoff until an externally isolated per-run executor is installed and qualified."
+		}
 		return "launch_agent_thread enqueues a job for the sidecar Codex runner with explicit sandbox, approval, and working-directory settings. Realtime stays the fast voice/UI control layer while Codex performs slower research, code, browser/tool, test, or gated workflow work and writes evidence back to the artifact. Commit, push, deploy, SSH, email, APIs, and production mutations require an explicit approval gate."
 	default:
 		return "launch_agent_thread starts the current lightweight Responses worker, which writes a structured goal workflow artifact but cannot run Codex, browser automation, SSH, shell commands, tests, or deploys. Treat external Codex execution as a handoff until BONFIRE_AGENT_THREAD_WORKER=codex_exec is configured."

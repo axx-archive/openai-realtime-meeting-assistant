@@ -21,8 +21,8 @@ func TestModelPriceTableCoversEveryAuditModelID(t *testing.T) {
 		"gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
 		// Realtime voice (2 today; 2.1 + 2.1-mini the flip targets).
 		"gpt-realtime-2", "gpt-realtime-2.1", "gpt-realtime-2.1-mini",
-		// Transcription (whisper fossil today; gpt-4o-transcribe the flip target).
-		"gpt-4o-transcribe", "gpt-realtime-whisper",
+		// Transcription (whisper fossil today; committed and provisional targets).
+		"gpt-4o-transcribe", "gpt-realtime-whisper", "gpt-transcribe", "gpt-live-transcribe",
 		// Non-text lanes.
 		"gpt-image-2", "text-embedding-3-small",
 	}
@@ -69,6 +69,8 @@ func TestEstimateCostUSDPricingMath(t *testing.T) {
 		{"gpt-4o-transcribe 1min", "gpt-4o-transcribe", llmTokenUsage{AudioSeconds: 60}, 0.006},
 		{"gpt-4o-transcribe 2min", "gpt-4o-transcribe", llmTokenUsage{AudioSeconds: 120}, 0.012},
 		{"whisper 1min", "gpt-realtime-whisper", llmTokenUsage{AudioSeconds: 60}, 0.017},
+		{"gpt-transcribe 1min", "gpt-transcribe", llmTokenUsage{AudioSeconds: 60}, 0.0045},
+		{"gpt-live-transcribe 1min", "gpt-live-transcribe", llmTokenUsage{AudioSeconds: 60}, 0.017},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -78,6 +80,50 @@ func TestEstimateCostUSDPricingMath(t *testing.T) {
 			}
 			if !floatClose(got, tc.want) {
 				t.Fatalf("%s: cost = %v, want %v", tc.model, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestOpenAIPriceRefreshAug1 keeps the previously verified July rows intact
+// for historical ledger entries while making the 2026-08-01 official prices
+// the current rows. It also pins source provenance rather than treating a
+// price-table refresh as an undocumented overwrite.
+func TestOpenAIPriceRefreshAug1(t *testing.T) {
+	const M = 1_000_000
+	tests := []struct {
+		name, model string
+		at          time.Time
+		usage       llmTokenUsage
+		want        float64
+		sourceDate  string
+	}{
+		{"terra historic input", "gpt-5.6-terra", july11, llmTokenUsage{InputTokens: M}, 2.50, "2026-07-11"},
+		{"terra refreshed input", "gpt-5.6-terra", openAIPriceRefreshAug1, llmTokenUsage{InputTokens: M}, 2, "2026-08-01"},
+		{"terra refreshed cache write", "gpt-5.6-terra", openAIPriceRefreshAug1, llmTokenUsage{CacheCreationTokens: M}, 2.50, "2026-08-01"},
+		{"terra refreshed output", "gpt-5.6-terra", openAIPriceRefreshAug1, llmTokenUsage{OutputTokens: M}, 12, "2026-08-01"},
+		{"luna historic input", "gpt-5.6-luna", july11, llmTokenUsage{InputTokens: M}, 1, "2026-07-11"},
+		{"luna refreshed input", "gpt-5.6-luna", openAIPriceRefreshAug1, llmTokenUsage{InputTokens: M}, 0.20, "2026-08-01"},
+		{"luna refreshed cache read", "gpt-5.6-luna", openAIPriceRefreshAug1, llmTokenUsage{CachedInputTokens: M}, 0.02, "2026-08-01"},
+		{"luna refreshed cache write", "gpt-5.6-luna", openAIPriceRefreshAug1, llmTokenUsage{CacheCreationTokens: M}, 0.25, "2026-08-01"},
+		{"luna refreshed output", "gpt-5.6-luna", openAIPriceRefreshAug1, llmTokenUsage{OutputTokens: M}, 1.20, "2026-08-01"},
+		{"sol unchanged refreshed output", "gpt-5.6-sol", openAIPriceRefreshAug1, llmTokenUsage{OutputTokens: M}, 30, "2026-08-01"},
+		{"realtime 2.1 unchanged refreshed audio output", "gpt-realtime-2.1", openAIPriceRefreshAug1, llmTokenUsage{AudioOutputTokens: M}, 64, "2026-08-01"},
+		{"gpt-transcribe refreshed minute", "gpt-transcribe", openAIPriceRefreshAug1, llmTokenUsage{AudioSeconds: 60}, 0.0045, "2026-08-01"},
+		{"gpt-live-transcribe refreshed minute", "gpt-live-transcribe", openAIPriceRefreshAug1, llmTokenUsage{AudioSeconds: 60}, 0.017, "2026-08-01"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			row, ok := priceForModel(tc.model, tc.at)
+			if !ok {
+				t.Fatalf("no pricing row for %s", tc.model)
+			}
+			if row.SourceDate != tc.sourceDate {
+				t.Fatalf("source date = %q, want %q", row.SourceDate, tc.sourceDate)
+			}
+			got, priced := estimateCostUSDAt(tc.model, tc.at, tc.usage)
+			if !priced || !floatClose(got, tc.want) {
+				t.Fatalf("cost = (%v, priced=%v), want (%v, true)", got, priced, tc.want)
 			}
 		})
 	}

@@ -26,13 +26,11 @@ func TestOrdinaryTablePostReachesTeammateDeviceWithoutBuzzingAuthor(t *testing.T
 	kanbanApp = newIsolatedKanbanBoardApp(t)
 	t.Cleanup(func() { kanbanApp = previousApp })
 
-	for _, device := range []deviceTokenRecord{
-		{UserEmail: "tim@shareability.com", Token: "ExponentPushToken[tim-phone]", Platform: "ios"},
-		{UserEmail: "aj@shareability.com", Token: "ExponentPushToken[aj-phone]", Platform: "ios"},
+	for _, device := range []struct{ email, token string }{
+		{email: "tim@shareability.com", token: "ExponentPushToken[tim-phone]"},
+		{email: "aj@shareability.com", token: "ExponentPushToken[aj-phone]"},
 	} {
-		if err := upsertDeviceToken(device); err != nil {
-			t.Fatalf("register device: %v", err)
-		}
+		upsertLiveDeviceTokenForTest(t, device.email, device.token)
 	}
 	table, err := kanbanApp.ensureTable("tim@shareability.com")
 	if err != nil {
@@ -112,14 +110,12 @@ func TestTableMentionDeliversOncePerTeammateAndHonorsAmbientMute(t *testing.T) {
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
 	t.Cleanup(func() { kanbanApp = previousApp })
-	for _, device := range []deviceTokenRecord{
-		{UserEmail: "tim@shareability.com", Token: "ExponentPushToken[tim]"},
-		{UserEmail: "aj@shareability.com", Token: "ExponentPushToken[aj]"},
-		{UserEmail: "e@shareability.com", Token: "ExponentPushToken[erick]"},
+	for _, device := range []struct{ email, token string }{
+		{email: "tim@shareability.com", token: "ExponentPushToken[tim]"},
+		{email: "aj@shareability.com", token: "ExponentPushToken[aj]"},
+		{email: "e@shareability.com", token: "ExponentPushToken[erick]"},
 	} {
-		if err := upsertDeviceToken(device); err != nil {
-			t.Fatal(err)
-		}
+		upsertLiveDeviceTokenForTest(t, device.email, device.token)
 	}
 	table, err := kanbanApp.ensureTable("tim@shareability.com")
 	if err != nil {
@@ -177,17 +173,12 @@ func waitFor(t *testing.T, wait *sync.WaitGroup, why string) {
 // formed Expo push to the registered device, carrying the readable body and the
 // thread to open.
 func TestTeammateMessageReachesTheDeviceLane(t *testing.T) {
+	setupAuthTestEnv(t)
 	t.Setenv("DEVICE_PUSH_TOKENS_PATH", filepath.Join(t.TempDir(), "devices.json"))
 	t.Setenv("THREAD_MUTES_PATH", filepath.Join(t.TempDir(), "mutes.json"))
 	t.Setenv("PUSH_SUBSCRIPTIONS_PATH", filepath.Join(t.TempDir(), "push.json"))
 
-	if err := upsertDeviceToken(deviceTokenRecord{
-		UserEmail: "aj@shareability.com",
-		Token:     "ExponentPushToken[aj-phone]",
-		Platform:  "ios",
-	}); err != nil {
-		t.Fatalf("register device: %v", err)
-	}
+	upsertLiveDeviceTokenForTest(t, "aj@shareability.com", "ExponentPushToken[aj-phone]")
 
 	captured, wait := captureExpoPush(t, `{"data":[{"status":"ok","id":"x"}]}`)
 
@@ -224,15 +215,12 @@ func TestTeammateMessageReachesTheDeviceLane(t *testing.T) {
 // A muted thread must not buzz. This is the valve that keeps someone from
 // disabling notifications at the OS level, which is unrecoverable.
 func TestMutedThreadProducesNoPushAtAll(t *testing.T) {
+	setupAuthTestEnv(t)
 	t.Setenv("DEVICE_PUSH_TOKENS_PATH", filepath.Join(t.TempDir(), "devices.json"))
 	t.Setenv("THREAD_MUTES_PATH", filepath.Join(t.TempDir(), "mutes.json"))
 	t.Setenv("PUSH_SUBSCRIPTIONS_PATH", filepath.Join(t.TempDir(), "push.json"))
 
-	if err := upsertDeviceToken(deviceTokenRecord{
-		UserEmail: "aj@shareability.com", Token: "ExponentPushToken[aj]",
-	}); err != nil {
-		t.Fatalf("register: %v", err)
-	}
+	upsertLiveDeviceTokenForTest(t, "aj@shareability.com", "ExponentPushToken[aj]")
 	if err := setThreadMuted("", "aj@shareability.com", "table-1", true); err != nil {
 		t.Fatalf("mute: %v", err)
 	}
@@ -259,15 +247,12 @@ func TestMutedThreadProducesNoPushAtAll(t *testing.T) {
 // Mute silences volume, never a page. A direct mention carries a recipient and
 // must get through regardless.
 func TestMentionPushesThroughAMutedThread(t *testing.T) {
+	setupAuthTestEnv(t)
 	t.Setenv("DEVICE_PUSH_TOKENS_PATH", filepath.Join(t.TempDir(), "devices.json"))
 	t.Setenv("THREAD_MUTES_PATH", filepath.Join(t.TempDir(), "mutes.json"))
 	t.Setenv("PUSH_SUBSCRIPTIONS_PATH", filepath.Join(t.TempDir(), "push.json"))
 
-	if err := upsertDeviceToken(deviceTokenRecord{
-		UserEmail: "aj@shareability.com", Token: "ExponentPushToken[aj]",
-	}); err != nil {
-		t.Fatalf("register: %v", err)
-	}
+	upsertLiveDeviceTokenForTest(t, "aj@shareability.com", "ExponentPushToken[aj]")
 	if err := setThreadMuted("", "aj@shareability.com", "table-1", true); err != nil {
 		t.Fatalf("mute: %v", err)
 	}
@@ -287,17 +272,16 @@ func TestMentionPushesThroughAMutedThread(t *testing.T) {
 
 // A token another account owns must never receive this account's messages.
 func TestPushNeverLeaksToAnotherAccountsDevice(t *testing.T) {
+	setupAuthTestEnv(t)
 	t.Setenv("DEVICE_PUSH_TOKENS_PATH", filepath.Join(t.TempDir(), "devices.json"))
 	t.Setenv("THREAD_MUTES_PATH", filepath.Join(t.TempDir(), "mutes.json"))
 	t.Setenv("PUSH_SUBSCRIPTIONS_PATH", filepath.Join(t.TempDir(), "push.json"))
 
-	for _, row := range []deviceTokenRecord{
-		{UserEmail: "aj@shareability.com", Token: "ExponentPushToken[aj]"},
-		{UserEmail: "tim@shareability.com", Token: "ExponentPushToken[tim]"},
+	for _, row := range []struct{ email, token string }{
+		{email: "aj@shareability.com", token: "ExponentPushToken[aj]"},
+		{email: "tim@shareability.com", token: "ExponentPushToken[tim]"},
 	} {
-		if err := upsertDeviceToken(row); err != nil {
-			t.Fatalf("register: %v", err)
-		}
+		upsertLiveDeviceTokenForTest(t, row.email, row.token)
 	}
 
 	captured, wait := captureExpoPush(t, `{"data":[{"status":"ok","id":"x"}]}`)
@@ -319,15 +303,12 @@ func TestPushNeverLeaksToAnotherAccountsDevice(t *testing.T) {
 // DeviceNotRegistered must actually prune, not just be classified. A dead token
 // that survives is retried forever.
 func TestDeadTokenIsPrunedAfterDelivery(t *testing.T) {
+	setupAuthTestEnv(t)
 	t.Setenv("DEVICE_PUSH_TOKENS_PATH", filepath.Join(t.TempDir(), "devices.json"))
 	t.Setenv("THREAD_MUTES_PATH", filepath.Join(t.TempDir(), "mutes.json"))
 	t.Setenv("PUSH_SUBSCRIPTIONS_PATH", filepath.Join(t.TempDir(), "push.json"))
 
-	if err := upsertDeviceToken(deviceTokenRecord{
-		UserEmail: "aj@shareability.com", Token: "ExponentPushToken[dead]",
-	}); err != nil {
-		t.Fatalf("register: %v", err)
-	}
+	upsertLiveDeviceTokenForTest(t, "aj@shareability.com", "ExponentPushToken[dead]")
 
 	_, wait := captureExpoPush(t,
 		`{"data":[{"status":"error","details":{"error":"DeviceNotRegistered"}}]}`)

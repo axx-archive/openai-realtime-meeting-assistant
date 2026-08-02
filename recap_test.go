@@ -95,6 +95,76 @@ func TestMeetingRecapReturnsExistingBrainEntryWhenNothingNew(t *testing.T) {
 	}
 }
 
+func TestMeetingRecapHonorsOpenBrainCircuitWithoutProviderBypass(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	authority := newAmbientConsentAuthorityForTest(t)
+	grantAmbientConsentForTest(t, app, authority, officeRoomID, "tom@shareability.com")
+	app.mu.Lock()
+	app.apiKey = "test-key"
+	app.mu.Unlock()
+	appendTestTranscript(t, app, "recap-held-transcript", "The launch commitment must remain raw.")
+
+	agent := meetingBrainAgent()
+	headID, _, _, ok := app.peekUnconsumedWindow(agent, officeRoomID)
+	if !ok || headID != "recap-held-transcript" {
+		t.Fatalf("brain head=%q ok=%v, want held transcript", headID, ok)
+	}
+	key := ambientAgentKey(agent.name, officeRoomID)
+	setAmbientAgentFailureForTest(app, key, &ambientAgentFailure{windowID: headID, attempts: ambientProviderMaxWindowAttempts, providerOpen: true})
+
+	originalResponder := createOpenAITextResponse
+	calls := 0
+	createOpenAITextResponse = func(context.Context, string, openAITextRequest) (string, error) {
+		calls++
+		return "", nil
+	}
+	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
+
+	_, _, err := app.meetingRecap(map[string]any{"audience": "room"}, "", officeRoomID)
+	var circuitErr *ambientAgentCircuitOpenError
+	if !errors.As(err, &circuitErr) || !circuitErr.RestartRequired {
+		t.Fatalf("meetingRecap error=%v, want restart-required circuit", err)
+	}
+	if calls != 0 {
+		t.Fatalf("open recap circuit made %d provider calls", calls)
+	}
+	if baseline := app.ambientAgentBaselineID(key); baseline == headID {
+		t.Fatalf("open recap circuit advanced raw cursor to %q", baseline)
+	}
+}
+
+func TestMeetingRecapReportsCoolingCircuitAfterProviderFailure(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	authority := newAmbientConsentAuthorityForTest(t)
+	grantAmbientConsentForTest(t, app, authority, officeRoomID, "tom@shareability.com")
+	app.mu.Lock()
+	app.apiKey = "test-key"
+	app.mu.Unlock()
+	appendTestTranscript(t, app, "recap-provider-failure", "The pricing decision must remain raw.")
+
+	originalResponder := createOpenAITextResponse
+	calls := 0
+	createOpenAITextResponse = func(context.Context, string, openAITextRequest) (string, error) {
+		calls++
+		return "", &openAIProviderFailure{err: errors.New("provider unavailable")}
+	}
+	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
+
+	for attempt := 0; attempt < 2; attempt++ {
+		_, _, err := app.meetingRecap(map[string]any{"audience": "room"}, "", officeRoomID)
+		var circuitErr *ambientAgentCircuitOpenError
+		if !errors.As(err, &circuitErr) || circuitErr.RestartRequired || circuitErr.RetryAt.IsZero() {
+			t.Fatalf("attempt %d error=%v, want cooling circuit with retry time", attempt+1, err)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("immediate recap retry made %d provider calls, want one", calls)
+	}
+	if baseline := app.ambientAgentBaselineID(meetingBrainAgentName); baseline == "recap-provider-failure" {
+		t.Fatalf("provider failure advanced raw cursor to %q", baseline)
+	}
+}
+
 // No transcripts and no brain entries: the tool errors cleanly through the
 // (result, changed, err) path.
 func TestMeetingRecapErrorsWhenNothingCaptured(t *testing.T) {

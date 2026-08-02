@@ -167,6 +167,38 @@ func TestOpenAIRoomScoutTransportRestartsWithoutSharingSessionState(t *testing.T
 	}
 }
 
+func TestRoomScoutReconnectCircuitStopsAfterBoundedFailures(t *testing.T) {
+	var calls atomic.Int64
+	dial := func(context.Context, *openAIRoomScoutTransport, uint64) (roomScoutProviderSession, error) {
+		if calls.Add(1) == 1 {
+			return &fakeRoomScoutProviderSession{}, nil
+		}
+		return nil, errors.New("provider unavailable")
+	}
+	_, _, transport, _ := newScopedRoomScoutTransportTest(t, dial)
+	for attempt := 0; attempt < roomScoutRestartMaxAttempts; attempt++ {
+		transport.mu.Lock()
+		generation := transport.generation
+		transport.mu.Unlock()
+		transport.replaceSession(roomScoutRestartRequest{generation: generation, reason: "bounded failure test"})
+	}
+
+	transport.mu.Lock()
+	failures := transport.restartFailures
+	open := transport.restartCircuitOpen
+	generation := transport.generation
+	transport.mu.Unlock()
+	if failures != roomScoutRestartMaxAttempts || !open {
+		t.Fatalf("restart circuit failures=%d open=%v", failures, open)
+	}
+	before := calls.Load()
+	transport.requestRestart(generation, "must be suppressed")
+	time.Sleep(20 * time.Millisecond)
+	if after := calls.Load(); after != before {
+		t.Fatalf("open restart circuit dialed again: before=%d after=%d", before, after)
+	}
+}
+
 func TestRoomScoutWakeGateAllowsNormalAnswerAndSuppressesBackgroundSpeech(t *testing.T) {
 	provider := &fakeRoomScoutProviderSession{}
 	app, _, transport, _ := newScopedRoomScoutTransportTest(t, func(context.Context, *openAIRoomScoutTransport, uint64) (roomScoutProviderSession, error) {

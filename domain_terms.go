@@ -84,6 +84,9 @@ var meetingDomainVocabulary = []string{
 	"Sol",
 	"BonfireOS",
 	"Bonfire OS",
+	"STRIDE",
+	"Stride",
+	"Dog Perfect",
 }
 
 // recallSynonymGroups is the curated synonym table that powers query

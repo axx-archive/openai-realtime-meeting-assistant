@@ -28,8 +28,8 @@ func TestIndexFilesToolRegistration(t *testing.T) {
 		`data-tool="files" aria-label="Files"`,
 		`<section id="filesTool" class="memory-tool" aria-label="Files">`,
 		// tool registries: routable + full-page treatment
-		`const osToolIds = ['office', 'chat', 'artifacts', ...agentToolIds, 'memory', 'files']`,
-		`const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory', 'files']`,
+		`const osToolIds = ['office', 'chat', 'artifacts', ...agentToolIds, 'memory', 'files', 'team']`,
+		`const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory', 'files', 'team']`,
 		// topbar identity + canon subtitle
 		`files: 'Files'`,
 		"shared materials · readable files feed the brain",

@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -48,6 +51,57 @@ func appendTestTranscript(t *testing.T, app *kanbanBoardApp, id string, text str
 		t.Fatalf("append transcript %s: %v", id, err)
 	} else if !appended {
 		t.Fatalf("transcript %s appended=false, want true", id)
+	}
+}
+
+func expireAmbientAgentBackoffForTest(app *kanbanBoardApp, key string) {
+	app.mu.Lock()
+	if failure := app.agentFailures[key]; failure != nil && !failure.providerOpen {
+		failure.backoffUntil = time.Now().Add(-time.Second)
+	}
+	app.mu.Unlock()
+}
+
+func setAmbientAgentFailureForTest(app *kanbanBoardApp, key string, failure *ambientAgentFailure) {
+	app.mu.Lock()
+	if app.agentFailures == nil {
+		app.agentFailures = map[string]*ambientAgentFailure{}
+	}
+	app.agentFailures[key] = failure
+	app.mu.Unlock()
+}
+
+func newHeldWindowTestAgent(name string, roomScoped bool, observed *[][]string) ambientAgentConfig {
+	artifactKind := "held_window_artifact_" + strings.ReplaceAll(name, " ", "_")
+	return ambientAgentConfig{
+		name: name, defaultInterval: time.Hour,
+		intervalEnv: "HELD_WINDOW_INTERVAL", disabledEnv: "HELD_WINDOW_DISABLED", backfillEnv: "HELD_WINDOW_BACKFILL",
+		minBatchEnv: "HELD_WINDOW_MIN", defaultMinBatch: 1, maxBatchEnv: "HELD_WINDOW_MAX", defaultMaxBatch: 8,
+		inputKind: meetingMemoryKindBrain, artifactKind: artifactKind, cursorMetadataKey: "throughBrainId", requestTimeout: time.Second,
+		roomScoped: roomScoped,
+		produce: func(app *kanbanBoardApp, _ context.Context, _ string, inputs []meetingMemoryEntry, _ openAITextResponder) (meetingMemoryEntry, error) {
+			ids := make([]string, 0, len(inputs))
+			for _, input := range inputs {
+				ids = append(ids, input.ID)
+			}
+			*observed = append(*observed, ids)
+			roomID := ambientWindowRoomID(inputs)
+			entry, _, err := app.memory.appendEntry(artifactKind, durableTimestampID("held-window", time.Now()), "held window consumed", map[string]string{
+				"roomId": roomID, "throughBrainId": inputs[len(inputs)-1].ID,
+			})
+			return entry, err
+		},
+	}
+}
+
+func appendHeldWindowBrain(t *testing.T, app *kanbanBoardApp, id, roomID string) {
+	t.Helper()
+	metadata := map[string]string{"visibility": "organization"}
+	if normalizeRoomID(roomID) != officeRoomID {
+		metadata["roomId"] = normalizeRoomID(roomID)
+	}
+	if _, appended, err := app.memory.appendBrainWriteUp(id, "## Overview\nDurable held input "+id+".", metadata); err != nil || !appended {
+		t.Fatalf("append %s: appended=%v err=%v", id, appended, err)
 	}
 }
 
@@ -299,6 +353,873 @@ func TestAmbientAgentProviderFailureHoldsEveryProducerCursor(t *testing.T) {
 	if deadLetters := app.memory.entriesOfKind(meetingMemoryKindDeadLetter, 0); len(deadLetters) != 0 {
 		t.Fatalf("provider outage dead-lettered non-digest input: %+v", deadLetters)
 	}
+	app.mu.Lock()
+	failure := app.agentFailures[key]
+	app.mu.Unlock()
+	if failure == nil || !failure.providerOpen || failure.attempts != ambientProviderMaxWindowAttempts {
+		t.Fatalf("provider circuit=%+v, want open after %d attempts", failure, ambientProviderMaxWindowAttempts)
+	}
+	if proceed, limit := app.ambientAgentAttemptBudget(agent, "provider-held-transcript", officeRoomID); proceed || limit != 0 {
+		t.Fatalf("open provider circuit budget=%v/%d, want false/0", proceed, limit)
+	}
+	priorApp := kanbanApp
+	kanbanApp = app
+	evidence := ambientCapabilityEvidence(capabilityBrain, agent, time.Now().UTC())
+	kanbanApp = priorApp
+	if evidence["circuit"] != "open" || evidence["retrySuppressed"] != true || evidence["retryAttempts"] != ambientProviderMaxWindowAttempts {
+		t.Fatalf("provider circuit evidence=%v", evidence)
+	}
+}
+
+func TestAmbientRejectedOutputOpensBoundedCircuitForDurableBrainLanes(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	for _, test := range []struct {
+		name  string
+		agent ambientAgentConfig
+	}{
+		{name: "meeting board", agent: meetingBoardAgent()},
+		{name: "research suggestion", agent: researchSuggestionAgent()},
+		{name: "mission intelligence", agent: missionIntelligenceAgent()},
+		{name: "decision ledger", agent: decisionLedgerAgent()},
+		{name: "narrative maintainer", agent: narrativeMaintainerAgent()},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			app := newIsolatedKanbanBoardApp(t)
+			inputID := "brain-rejected-" + strings.ReplaceAll(test.name, " ", "-")
+			if _, appended, err := app.memory.appendBrainWriteUp(inputID, "## Overview\nThis raw company fact must survive rejected model output.", map[string]string{"visibility": "organization"}); err != nil || !appended {
+				t.Fatalf("append brain: appended=%v err=%v", appended, err)
+			}
+
+			calls := 0
+			responder := func(context.Context, string, openAITextRequest) (string, error) {
+				calls++
+				return "not json", nil
+			}
+			key := ambientAgentKey(test.agent.name, officeRoomID)
+			for attempt := 0; attempt < ambientProviderMaxWindowAttempts; attempt++ {
+				_, err := app.invokeAmbientAgentGuarded(test.agent, context.Background(), "test-key", responder, 1, officeRoomID)
+				if !isAmbientAgentHoldError(err) && !isProviderOutputRejection(err) {
+					t.Fatalf("attempt %d error=%v, want provider-output/cursor-holding rejection", attempt+1, err)
+				}
+				expireAmbientAgentBackoffForTest(app, key)
+			}
+			if calls != ambientProviderMaxWindowAttempts {
+				t.Fatalf("wire calls=%d, want %d", calls, ambientProviderMaxWindowAttempts)
+			}
+			app.mu.Lock()
+			failure := app.agentFailures[key]
+			app.mu.Unlock()
+			if failure == nil || !failure.providerOpen || failure.attempts != ambientProviderMaxWindowAttempts {
+				t.Fatalf("circuit=%+v, want bounded open circuit", failure)
+			}
+			if baseline := app.ambientAgentBaselineID(key); baseline == inputID {
+				t.Fatalf("rejected output advanced raw cursor to %q", baseline)
+			}
+			if deadLetters := app.memory.entriesOfKind(meetingMemoryKindDeadLetter, 0); len(deadLetters) != 0 {
+				t.Fatalf("rejected output created dead letters: %+v", deadLetters)
+			}
+			_, err := app.invokeAmbientAgentGuarded(test.agent, context.Background(), "test-key", responder, 1, officeRoomID)
+			var circuitErr *ambientAgentCircuitOpenError
+			if !errors.As(err, &circuitErr) || !circuitErr.RestartRequired {
+				t.Fatalf("open-circuit error=%v, want restart required", err)
+			}
+			if calls != ambientProviderMaxWindowAttempts {
+				t.Fatalf("open circuit made another wire call: %d", calls)
+			}
+		})
+	}
+}
+
+func TestStartAmbientAgentClearsCircuitOnlyAfterPriorSupervisorExits(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("EMBEDDINGS_DISABLED", "true")
+	app := newIsolatedKanbanBoardApp(t)
+	var produced [][]string
+	agent := newTestAmbientAgent(&produced)
+
+	oldCancel := make(chan struct{})
+	oldDone := make(chan struct{})
+	oldCancelObserved := make(chan struct{})
+	releaseOldExit := make(chan struct{})
+	go func() {
+		<-oldCancel
+		close(oldCancelObserved)
+		<-releaseOldExit
+		close(oldDone)
+	}()
+	app.mu.Lock()
+	app.agentCancels = map[string]chan struct{}{}
+	app.agentDones = map[string]chan struct{}{}
+	if app.agentFailures == nil {
+		app.agentFailures = map[string]*ambientAgentFailure{}
+	}
+	app.agentCancels[agent.name] = oldCancel
+	app.agentDones[agent.name] = oldDone
+	app.agentFailures[agent.name] = &ambientAgentFailure{windowID: "held", attempts: ambientProviderMaxWindowAttempts, providerOpen: true}
+	app.mu.Unlock()
+
+	restarted := make(chan struct{})
+	go func() {
+		app.startAmbientAgent(agent, "test-key")
+		close(restarted)
+	}()
+	select {
+	case <-oldCancelObserved:
+	case <-time.After(2 * time.Second):
+		t.Fatal("restart never asked the prior supervisor to exit")
+	}
+
+	app.mu.Lock()
+	stillOpen := app.agentFailures[agent.name]
+	stillOld := app.agentCancels[agent.name] == oldCancel
+	app.mu.Unlock()
+	if stillOpen == nil || !stillOpen.providerOpen || !stillOld {
+		t.Fatalf("restart reset state before old exit: failure=%+v stillOld=%v", stillOpen, stillOld)
+	}
+	select {
+	case <-restarted:
+		t.Fatal("restart returned before the prior supervisor exited")
+	default:
+	}
+
+	close(releaseOldExit)
+	select {
+	case <-restarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("restart did not install the successor after prior exit")
+	}
+	app.mu.Lock()
+	_, stillFailed := app.agentFailures[agent.name]
+	newCancel := app.agentCancels[agent.name]
+	app.mu.Unlock()
+	if stillFailed || newCancel == nil || newCancel == oldCancel {
+		t.Fatalf("successor registration/circuit reset failed: stillFailed=%v newCancel=%p", stillFailed, newCancel)
+	}
+	if err := app.Close(); err != nil {
+		t.Fatalf("close app: %v", err)
+	}
+}
+
+func TestReplaceSpecialtySupervisorClearsCircuitOnlyAfterPriorExit(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	name := tasteAnalystAgentName
+	oldCancel := make(chan struct{})
+	oldDone := make(chan struct{})
+	oldCancelObserved := make(chan struct{})
+	releaseOldExit := make(chan struct{})
+	go func() {
+		<-oldCancel
+		close(oldCancelObserved)
+		<-releaseOldExit
+		close(oldDone)
+	}()
+	app.mu.Lock()
+	app.agentCancels = map[string]chan struct{}{}
+	app.agentDones = map[string]chan struct{}{}
+	if app.agentFailures == nil {
+		app.agentFailures = map[string]*ambientAgentFailure{}
+	}
+	app.agentCancels[name] = oldCancel
+	app.agentDones[name] = oldDone
+	app.agentFailures[name] = &ambientAgentFailure{windowID: "held", attempts: ambientProviderMaxWindowAttempts, providerOpen: true}
+	app.mu.Unlock()
+
+	newCancel := make(chan struct{})
+	newDone := make(chan struct{})
+	restarted := make(chan struct{})
+	go func() {
+		app.replaceSpecialtyAgentSupervisor(ambientAgentConfig{name: name}, newCancel, newDone, nil)
+		close(restarted)
+	}()
+	select {
+	case <-oldCancelObserved:
+	case <-time.After(2 * time.Second):
+		t.Fatal("specialty restart never asked the prior supervisor to exit")
+	}
+	app.mu.Lock()
+	stillOpen := app.agentFailures[name]
+	stillOld := app.agentCancels[name] == oldCancel
+	app.mu.Unlock()
+	if stillOpen == nil || !stillOpen.providerOpen || !stillOld {
+		t.Fatalf("specialty restart reset before old exit: failure=%+v stillOld=%v", stillOpen, stillOld)
+	}
+	close(releaseOldExit)
+	select {
+	case <-restarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("specialty restart did not install successor")
+	}
+	app.mu.Lock()
+	_, stillFailed := app.agentFailures[name]
+	installed := app.agentCancels[name] == newCancel && app.agentDones[name] == newDone
+	app.mu.Unlock()
+	if stillFailed || !installed {
+		t.Fatalf("specialty successor state: stillFailed=%v installed=%v", stillFailed, installed)
+	}
+	close(newCancel)
+	close(newDone)
+}
+
+func TestAmbientHeldWindowSurvivesSameProcessAndProcessRestart(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("EMBEDDINGS_DISABLED", "true")
+	t.Setenv("HELD_WINDOW_INTERVAL", "1h")
+	dir := t.TempDir()
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
+
+	var firstObserved [][]string
+	agent := newHeldWindowTestAgent("held generic restart", false, &firstObserved)
+	app := newKanbanBoardApp()
+	appendHeldWindowBrain(t, app, "held-base", officeRoomID)
+	app.setAmbientAgentBaselineID(agent.name, "held-base")
+	if _, err := app.ensureAmbientScopeCheckpoint(agent, officeRoomID, "held-base"); err != nil {
+		t.Fatalf("seed pre-existing scope checkpoint: %v", err)
+	}
+	app.startAmbientAgent(agent, "test-key")
+	appendHeldWindowBrain(t, app, "held-exact", officeRoomID)
+	app.recordAmbientAgentHoldFailure(agent, "held-exact", officeRoomID)
+
+	held, ok, err := app.ambientHeldWindow(agent.name)
+	if err != nil || !ok || held.WindowID != "held-exact" || held.BaselineID != "held-base" {
+		t.Fatalf("same-process held checkpoint=%+v ok=%v err=%v", held, ok, err)
+	}
+	app.startAmbientAgent(agent, "test-key")
+	if baseline := app.ambientAgentBaselineID(agent.name); baseline != "held-base" {
+		t.Fatalf("same-process restart baseline=%q, want held-base", baseline)
+	}
+	app.mu.Lock()
+	_, circuitStillOpen := app.agentFailures[agent.name]
+	app.mu.Unlock()
+	if circuitStillOpen {
+		t.Fatal("same-process restart did not clear the in-memory circuit")
+	}
+	if _, err := app.invokeAmbientAgentGuarded(agent, context.Background(), "test-key", nil, 1, officeRoomID); err != nil {
+		t.Fatalf("same-process held retry: %v", err)
+	}
+	if len(firstObserved) != 1 || strings.Join(firstObserved[0], ",") != "held-exact" {
+		t.Fatalf("same-process retried windows=%v, want exact held-exact window", firstObserved)
+	}
+	if _, ok, err := app.ambientHeldWindow(agent.name); err != nil || ok {
+		t.Fatalf("same-process checkpoint remained after success: ok=%v err=%v", ok, err)
+	}
+
+	// Hold a second window, then reconstruct the app from the same files to
+	// prove the process boundary preserves the next exact cursor as well.
+	appendHeldWindowBrain(t, app, "held-process", officeRoomID)
+	app.recordAmbientAgentHoldFailure(agent, "held-process", officeRoomID)
+	if err := app.Close(); err != nil {
+		t.Fatalf("close first process: %v", err)
+	}
+
+	var restartedObserved [][]string
+	restartedAgent := newHeldWindowTestAgent(agent.name, false, &restartedObserved)
+	restarted := newKanbanBoardApp()
+	restarted.startAmbientAgent(restartedAgent, "test-key")
+	if baseline := restarted.ambientAgentBaselineID(agent.name); baseline != "held-base" {
+		t.Fatalf("process restart baseline=%q, want held-base", baseline)
+	}
+	if _, err := restarted.invokeAmbientAgentGuarded(restartedAgent, context.Background(), "test-key", nil, 1, officeRoomID); err != nil {
+		t.Fatalf("retry held window: %v", err)
+	}
+	if len(restartedObserved) != 1 || strings.Join(restartedObserved[0], ",") != "held-process" {
+		t.Fatalf("retried windows=%v, want exact held-process window", restartedObserved)
+	}
+	if _, ok, err := restarted.ambientHeldWindow(agent.name); err != nil || ok {
+		t.Fatalf("held checkpoint remained after success: ok=%v err=%v", ok, err)
+	}
+	if err := restarted.Close(); err != nil {
+		t.Fatalf("close restarted process: %v", err)
+	}
+}
+
+func TestAmbientHeldWindowSurvivesNamedRoomLazyBoot(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
+	roomID := "room-held1111"
+	var observed [][]string
+	agent := newHeldWindowTestAgent("held named room", true, &observed)
+	first := newKanbanBoardApp()
+	appendHeldWindowBrain(t, first, "named-base", roomID)
+	key := ambientAgentKey(agent.name, roomID)
+	first.setAmbientAgentBaselineID(key, "named-base")
+	appendHeldWindowBrain(t, first, "named-held", roomID)
+	first.recordAmbientAgentHoldFailure(agent, "named-held", roomID)
+
+	restarted := newKanbanBoardApp()
+	if baseline := restarted.ensureAmbientAgentRoomBaseline(agent, roomID); baseline != "named-base" {
+		t.Fatalf("named-room lazy baseline=%q, want named-base", baseline)
+	}
+	if _, err := restarted.invokeAmbientAgentGuarded(agent, context.Background(), "test-key", nil, 1, roomID); err != nil {
+		t.Fatalf("retry named-room held window: %v", err)
+	}
+	if len(observed) != 1 || strings.Join(observed[0], ",") != "named-held" {
+		t.Fatalf("named-room retried windows=%v, want exact named-held window", observed)
+	}
+	if _, ok, err := restarted.ambientHeldWindow(key); err != nil || ok {
+		t.Fatalf("named-room checkpoint remained after success: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestCloseFlushRejectedBoardOutputOpensBoundedCircuit(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.mu.Lock()
+	app.apiKey = "test-key"
+	app.mu.Unlock()
+	for _, candidate := range closeFlushChain() {
+		if candidate.name != meetingBoardAgentName {
+			t.Setenv(candidate.disabledEnv, "true")
+		}
+	}
+	t.Setenv(meetingBoardAgent().disabledEnv, "false")
+	if _, appended, err := app.memory.appendBrainWriteUp("close-board-held", "## Overview\nBoard work must survive malformed output.", map[string]string{"visibility": "organization"}); err != nil || !appended {
+		t.Fatalf("append brain: appended=%v err=%v", appended, err)
+	}
+
+	calls := 0
+	responder := func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Seat != seatBoard {
+			t.Fatalf("unexpected close-flush seat %q", request.Seat)
+		}
+		calls++
+		return "not json", nil
+	}
+	agent := meetingBoardAgent()
+	key := ambientAgentKey(agent.name, officeRoomID)
+	for attempt := 0; attempt < ambientProviderMaxWindowAttempts; attempt++ {
+		app.flushAmbientAgentsForCloseWithResponder("archive-test", officeRoomID, false, responder)
+		expireAmbientAgentBackoffForTest(app, key)
+	}
+	app.flushAmbientAgentsForCloseWithResponder("archive-test", officeRoomID, false, responder)
+	if calls != ambientProviderMaxWindowAttempts {
+		t.Fatalf("close-flush wire calls=%d, want %d", calls, ambientProviderMaxWindowAttempts)
+	}
+	app.mu.Lock()
+	failure := app.agentFailures[key]
+	app.mu.Unlock()
+	if failure == nil || !failure.providerOpen {
+		t.Fatalf("close-flush board circuit=%+v, want open", failure)
+	}
+	if baseline := app.ambientAgentBaselineID(key); baseline == "close-board-held" {
+		t.Fatalf("close flush advanced held cursor to %q", baseline)
+	}
+	if deadLetters := app.memory.entriesOfKind(meetingMemoryKindDeadLetter, 0); len(deadLetters) != 0 {
+		t.Fatalf("close flush dead-lettered malformed output: %+v", deadLetters)
+	}
+	if updates := app.memory.entriesOfKind(meetingMemoryKindBoardUpdate, 0); len(updates) != 0 {
+		t.Fatalf("close flush persisted malformed board update: %+v", updates)
+	}
+}
+
+func TestGuardedConcurrentProviderFailuresShareAtomicFourCallBudget(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	app := newIsolatedKanbanBoardApp(t)
+	appendHeldWindowBrain(t, app, "concurrent-held", officeRoomID)
+
+	var calls atomic.Int32
+	agent := newHeldWindowTestAgent("atomic provider budget", false, new([][]string))
+	agent.produce = func(_ *kanbanBoardApp, ctx context.Context, apiKey string, _ []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
+		_, err := responder(ctx, apiKey, openAITextRequest{Model: "injected-only"})
+		return meetingMemoryEntry{}, err
+	}
+	responder := func(context.Context, string, openAITextRequest) (string, error) {
+		calls.Add(1)
+		return "", &openAIProviderFailure{err: errors.New("injected provider outage")}
+	}
+	key := ambientAgentScopeKey(agent, officeRoomID)
+	for wave := 0; wave < ambientProviderMaxWindowAttempts; wave++ {
+		var group sync.WaitGroup
+		for caller := 0; caller < 16; caller++ {
+			group.Add(1)
+			go func() {
+				defer group.Done()
+				_, _ = app.invokeAmbientAgentGuarded(agent, context.Background(), "injected-only", responder, 1, officeRoomID)
+			}()
+		}
+		group.Wait()
+		expireAmbientAgentBackoffForTest(app, key)
+	}
+	// A fresh concurrent burst after the fourth completion is fully suppressed.
+	var final sync.WaitGroup
+	for caller := 0; caller < 16; caller++ {
+		final.Add(1)
+		go func() {
+			defer final.Done()
+			_, _ = app.invokeAmbientAgentGuarded(agent, context.Background(), "injected-only", responder, 1, officeRoomID)
+		}()
+	}
+	final.Wait()
+
+	if got := calls.Load(); got != ambientProviderMaxWindowAttempts {
+		t.Fatalf("concurrent provider calls=%d, want exactly bounded %d", got, ambientProviderMaxWindowAttempts)
+	}
+	app.mu.Lock()
+	failure := app.agentFailures[key]
+	app.mu.Unlock()
+	if failure == nil || !failure.providerOpen || failure.attempts != ambientProviderMaxWindowAttempts {
+		t.Fatalf("concurrent circuit=%+v, want bounded open circuit", failure)
+	}
+	if baseline := app.ambientAgentBaselineID(key); baseline == "concurrent-held" {
+		t.Fatalf("concurrent outage advanced held cursor to %q", baseline)
+	}
+	if deadLetters := app.memory.entriesOfKind(meetingMemoryKindDeadLetter, 0); len(deadLetters) != 0 {
+		t.Fatalf("concurrent outage dead-lettered held input: %+v", deadLetters)
+	}
+}
+
+func TestConcurrentNamedRoomCloseSharesGlobalAgentCircuitAndPass(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	app := newIsolatedKanbanBoardApp(t)
+	app.mu.Lock()
+	app.apiKey = "injected-only"
+	app.mu.Unlock()
+	for _, candidate := range closeFlushChain() {
+		if candidate.name != companyDigestAgentName {
+			t.Setenv(candidate.disabledEnv, "true")
+		}
+	}
+	t.Setenv(companyDigestAgent().disabledEnv, "false")
+	t.Setenv(companyDigestAgent().intervalEnv, "1h")
+	t.Setenv(companyDigestAgent().backfillEnv, "true")
+
+	raw, err := json.Marshal(ledgerEventPayload{
+		Op: ledgerOpAdd,
+		Record: ledgerRecord{
+			ID: "ldg-global-close", Entity: ledgerEntityTopic, Title: "Global close circuit",
+			Status: ledgerStatusActive, ValidFrom: time.Now().UTC().Format(time.RFC3339),
+		},
+		At: time.Now().UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if appended, err := app.memory.appendLedgerEvents([]meetingMemoryEntry{{
+		ID: "ledger-global-close", Kind: meetingMemoryKindLedgerEvent, Text: string(raw), CreatedAt: time.Now().UTC(),
+		Metadata: map[string]string{"visibility": "organization"},
+	}}); err != nil || appended != 1 {
+		t.Fatalf("seed ledger input: appended=%d err=%v", appended, err)
+	}
+
+	var calls atomic.Int32
+	responder := func(context.Context, string, openAITextRequest) (string, error) {
+		calls.Add(1)
+		return "", &openAIProviderFailure{err: errors.New("injected global close outage")}
+	}
+	agent := companyDigestAgent()
+	key := ambientAgentScopeKey(agent, officeRoomID)
+	for wave := 0; wave < ambientProviderMaxWindowAttempts; wave++ {
+		var group sync.WaitGroup
+		for _, roomID := range []string{"room-global-a", "room-global-b"} {
+			roomID := roomID
+			group.Add(1)
+			go func() {
+				defer group.Done()
+				app.flushAmbientAgentsForCloseWithResponder("concurrent-close", roomID, false, responder)
+			}()
+		}
+		group.Wait()
+		expireAmbientAgentBackoffForTest(app, key)
+	}
+	app.flushAmbientAgentsForCloseWithResponder("fifth-close", "room-global-c", false, responder)
+
+	if got := calls.Load(); got != ambientProviderMaxWindowAttempts {
+		t.Fatalf("global close provider calls=%d, want %d", got, ambientProviderMaxWindowAttempts)
+	}
+	app.mu.Lock()
+	failure := app.agentFailures[key]
+	_, roomAFailure := app.agentFailures[ambientAgentKey(agent.name, "room-global-a")]
+	_, roomBFailure := app.agentFailures[ambientAgentKey(agent.name, "room-global-b")]
+	app.mu.Unlock()
+	if failure == nil || !failure.providerOpen || roomAFailure || roomBFailure {
+		t.Fatalf("global close scope failure=%+v roomA=%v roomB=%v", failure, roomAFailure, roomBFailure)
+	}
+	if baseline := app.ambientAgentBaselineID(key); baseline == "ledger-global-close" {
+		t.Fatalf("global close advanced held cursor to %q", baseline)
+	}
+	if deadLetters := app.memory.entriesOfKind(meetingMemoryKindDeadLetter, 0); len(deadLetters) != 0 {
+		t.Fatalf("global close dead-lettered held input: %+v", deadLetters)
+	}
+}
+
+func TestAmbientHeldWindowPersistenceFaultsFailClosedAndRestartSafely(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("EMBEDDINGS_DISABLED", "true")
+	t.Setenv("HELD_WINDOW_INTERVAL", "1h")
+	resetCapabilityRuntimeForTest(t)
+	originalPersist := ambientHeldWindowStatePersist
+	t.Cleanup(func() { ambientHeldWindowStatePersist = originalPersist })
+
+	faults := []struct {
+		name string
+		wrap func(string, ambientHeldWindowState) error
+	}{
+		{name: "write", wrap: func(string, ambientHeldWindowState) error { return errors.New("injected write failure") }},
+		{name: "fsync", wrap: func(string, ambientHeldWindowState) error { return errors.New("injected fsync failure") }},
+		{name: "ambiguous rename", wrap: func(path string, state ambientHeldWindowState) error {
+			if err := originalPersist(path, state); err != nil {
+				return err
+			}
+			return fmt.Errorf("%w: injected parent fsync failure", ErrDurableReplaceAmbiguous)
+		}},
+	}
+	for _, fault := range faults {
+		t.Run(fault.name, func(t *testing.T) {
+			ambientHeldWindowStatePersist = originalPersist
+			dir := t.TempDir()
+			t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+			t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
+			var observed [][]string
+			agent := newHeldWindowTestAgent("held persistence "+fault.name, false, &observed)
+			app := newKanbanBoardApp()
+			appendHeldWindowBrain(t, app, "persistence-base", officeRoomID)
+			app.setAmbientAgentBaselineID(agent.name, "persistence-base")
+			if _, err := app.ensureAmbientScopeCheckpoint(agent, officeRoomID, "persistence-base"); err != nil {
+				t.Fatalf("seed durable scope anchor: %v", err)
+			}
+			appendHeldWindowBrain(t, app, "persistence-held", officeRoomID)
+
+			ambientHeldWindowStatePersist = fault.wrap
+			_, err := app.invokeAmbientAgentGuarded(agent, context.Background(), "injected-only", func(context.Context, string, openAITextRequest) (string, error) {
+				t.Fatal("persistence fault reached injected provider")
+				return "", nil
+			}, 1, officeRoomID)
+			if !isAmbientAgentHoldError(err) {
+				t.Fatalf("fault error=%v, want held persistence error", err)
+			}
+			if len(observed) != 0 {
+				t.Fatalf("persistence fault invoked producer: %v", observed)
+			}
+			if baseline := app.ambientAgentBaselineID(agent.name); baseline != "persistence-base" {
+				t.Fatalf("fault advanced baseline=%q, want persistence-base", baseline)
+			}
+			previousApp := kanbanApp
+			kanbanApp = app
+			health := ambientWorkerCapabilitySnapshot(agent, time.Now().UTC(), providerOpenAI, true)
+			kanbanApp = previousApp
+			if health["status"] != "degraded" || health["circuit"] != "persistence_error" || health["persistenceError"] != true {
+				t.Fatalf("persistence health=%v", health)
+			}
+			if deadLetters := app.memory.entriesOfKind(meetingMemoryKindDeadLetter, 0); len(deadLetters) != 0 {
+				t.Fatalf("persistence fault dead-lettered input: %+v", deadLetters)
+			}
+
+			// Simulate a clean process restart after storage recovers. Both a prior
+			// anchor (write/fsync-before-publish) and a visibly published ambiguous
+			// held marker must restore the old baseline and exact input.
+			ambientHeldWindowStatePersist = originalPersist
+			var restartedObserved [][]string
+			restartedAgent := newHeldWindowTestAgent(agent.name, false, &restartedObserved)
+			restarted := newKanbanBoardApp()
+			restarted.startAmbientAgent(restartedAgent, "injected-only")
+			if baseline := restarted.ambientAgentBaselineID(agent.name); baseline != "persistence-base" {
+				t.Fatalf("restart baseline=%q, want persistence-base", baseline)
+			}
+			if _, err := restarted.invokeAmbientAgentGuarded(restartedAgent, context.Background(), "injected-only", func(context.Context, string, openAITextRequest) (string, error) {
+				return "injected", nil
+			}, 1, officeRoomID); err != nil {
+				t.Fatalf("restart retry: %v", err)
+			}
+			if len(restartedObserved) != 1 || strings.Join(restartedObserved[0], ",") != "persistence-held" {
+				t.Fatalf("restart observed=%v, want exact persistence-held", restartedObserved)
+			}
+			if err := restarted.Close(); err != nil {
+				t.Fatalf("close restarted app: %v", err)
+			}
+		})
+	}
+}
+
+func TestNoSidecarMigratesGlobalAndRoomContinuityFromDurableCursor(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("EMBEDDINGS_DISABLED", "true")
+	t.Setenv("HELD_WINDOW_INTERVAL", "1h")
+	for _, test := range []struct {
+		name       string
+		roomID     string
+		roomScoped bool
+	}{
+		{name: "global", roomID: officeRoomID, roomScoped: false},
+		{name: "room scoped", roomID: "room-continuity", roomScoped: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+			t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
+			var observed [][]string
+			agent := newHeldWindowTestAgent("continuity "+test.name, test.roomScoped, &observed)
+			seed := newKanbanBoardApp()
+			appendHeldWindowBrain(t, seed, "continuity-consumed", test.roomID)
+			metadata := map[string]string{"throughBrainId": "continuity-consumed", "visibility": "organization"}
+			if normalizeRoomID(test.roomID) != officeRoomID {
+				metadata["roomId"] = normalizeRoomID(test.roomID)
+			}
+			if _, appended, err := seed.memory.appendEntry(agent.artifactKind, "continuity-artifact", "durable consumed-through cursor", metadata); err != nil || !appended {
+				t.Fatalf("seed durable cursor: appended=%v err=%v", appended, err)
+			}
+			appendHeldWindowBrain(t, seed, "continuity-pending", test.roomID)
+			if _, err := os.Stat(seed.ambientHeldWindowPath()); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("precondition sidecar exists or stat failed: %v", err)
+			}
+
+			restarted := newKanbanBoardApp()
+			restarted.startAmbientAgent(agent, "injected-only")
+			if _, err := restarted.invokeAmbientAgentGuarded(agent, context.Background(), "injected-only", func(context.Context, string, openAITextRequest) (string, error) {
+				return "injected", nil
+			}, 1, test.roomID); err != nil {
+				t.Fatalf("migrated continuity pass: %v", err)
+			}
+			if len(observed) != 1 || strings.Join(observed[0], ",") != "continuity-pending" {
+				t.Fatalf("migrated window=%v, want only pending input", observed)
+			}
+			key := ambientAgentScopeKey(agent, test.roomID)
+			checkpoint, ok, err := restarted.ambientScopeCheckpoint(key)
+			if err != nil || !ok || checkpoint.BaselineID != "continuity-consumed" || checkpoint.BlockedReason != "" {
+				t.Fatalf("migrated checkpoint=%+v ok=%v err=%v", checkpoint, ok, err)
+			}
+			if err := restarted.Close(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestNoSidecarAmbiguousRawContinuityStaysFailClosedAcrossRestart(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("EMBEDDINGS_DISABLED", "true")
+	t.Setenv("HELD_WINDOW_INTERVAL", "1h")
+	dir := t.TempDir()
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
+	agent := newHeldWindowTestAgent("ambiguous continuity", false, new([][]string))
+	seed := newKanbanBoardApp()
+	appendHeldWindowBrain(t, seed, "ambiguous-raw", officeRoomID)
+
+	for restart := 0; restart < 2; restart++ {
+		app := newKanbanBoardApp()
+		app.startAmbientAgent(agent, "injected-only")
+		_, err := app.invokeAmbientAgentGuarded(agent, context.Background(), "injected-only", func(context.Context, string, openAITextRequest) (string, error) {
+			t.Fatal("ambiguous continuity reached provider")
+			return "", nil
+		}, 1, officeRoomID)
+		var circuitErr *ambientAgentCircuitOpenError
+		if !errors.As(err, &circuitErr) || !circuitErr.RestartRequired {
+			t.Fatalf("restart %d error=%v, want fail-closed continuity circuit", restart, err)
+		}
+		if baseline := app.ambientAgentBaselineID(agent.name); baseline == "ambiguous-raw" {
+			t.Fatalf("restart %d silently baselined past raw input", restart)
+		}
+		app.mu.Lock()
+		failure := app.agentFailures[agent.name]
+		app.mu.Unlock()
+		if failure == nil || !failure.continuityOpen {
+			t.Fatalf("restart %d continuity failure=%+v", restart, failure)
+		}
+		if err := app.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestNoSidecarProvablyCleanInstallAcceptsOnlyPostStartWork(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("EMBEDDINGS_DISABLED", "true")
+	t.Setenv("HELD_WINDOW_INTERVAL", "1h")
+	dir := t.TempDir()
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
+	var observed [][]string
+	agent := newHeldWindowTestAgent("clean continuity", false, &observed)
+	app := newKanbanBoardApp()
+	app.startAmbientAgent(agent, "injected-only")
+	app.mu.Lock()
+	failure := app.agentFailures[agent.name]
+	app.mu.Unlock()
+	if failure != nil {
+		t.Fatalf("provably empty install opened circuit: %+v", failure)
+	}
+	appendHeldWindowBrain(t, app, "clean-post-start", officeRoomID)
+	if _, err := app.invokeAmbientAgentGuarded(agent, context.Background(), "injected-only", func(context.Context, string, openAITextRequest) (string, error) {
+		return "injected", nil
+	}, 1, officeRoomID); err != nil {
+		t.Fatalf("clean-install first pass: %v", err)
+	}
+	if len(observed) != 1 || strings.Join(observed[0], ",") != "clean-post-start" {
+		t.Fatalf("clean-install window=%v", observed)
+	}
+	if err := app.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNoSidecarSlopContinuityResumesFromDurablePassCursor(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("SLOP_CLASSIFIER_INTERVAL", "1h")
+	dir := t.TempDir()
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
+	agent := slopClassifierAgent()
+	seed := newKanbanBoardApp()
+	if _, appended, err := seed.memory.appendTranscript("slop-migrated-consumed", "", "Previously classified transcript."); err != nil || !appended {
+		t.Fatalf("seed consumed transcript: appended=%v err=%v", appended, err)
+	}
+	if _, _, err := seed.memory.appendSlopPass("slop-migrated-pass", "prior pass", map[string]string{slopClassifierCursorKey: "slop-migrated-consumed"}); err != nil {
+		t.Fatalf("seed Slop cursor: %v", err)
+	}
+	for index := 0; index < 8; index++ {
+		id := fmt.Sprintf("slop-migrated-pending-%d", index)
+		if _, appended, err := seed.memory.appendTranscript(id, "", fmt.Sprintf("Settled held transcript %d about obsolete office logistics.", index)); err != nil || !appended {
+			t.Fatalf("seed pending transcript: appended=%v err=%v", appended, err)
+		}
+	}
+	seed.memory.mu.Lock()
+	for index := range seed.memory.entries {
+		if strings.HasPrefix(seed.memory.entries[index].ID, "slop-migrated-pending-") {
+			seed.memory.entries[index].CreatedAt = time.Now().UTC().Add(-10 * 24 * time.Hour)
+		}
+	}
+	if err := seed.memory.rewriteLocked(true); err != nil {
+		seed.memory.mu.Unlock()
+		t.Fatalf("persist backdated Slop migration inputs: %v", err)
+	}
+	seed.memory.mu.Unlock()
+
+	restarted := newKanbanBoardApp()
+	restarted.startSlopClassifierWorker("injected-only")
+	if baseline := restarted.ambientAgentBaselineID(agent.name); baseline != "slop-migrated-consumed" {
+		t.Fatalf("Slop migrated baseline=%q", baseline)
+	}
+	calls := 0
+	if err := restarted.runSlopClassifierOnce(agent, context.Background(), "injected-only", func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		calls++
+		if strings.Contains(request.Input, "slop-migrated-consumed") {
+			t.Fatalf("Slop migration re-fed consumed input: %s", request.Input)
+		}
+		return `[]`, nil
+	}, 8); err != nil {
+		t.Fatalf("Slop migrated pass: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("Slop migrated calls=%d, want 1", calls)
+	}
+	if err := restarted.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNoSidecarTasteAndHouseSpecialtiesResumeTheirDurableCursors(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Run("taste profile cursor", func(t *testing.T) {
+		t.Setenv("TASTE_ANALYST_MIN_SIGNALS", "1")
+		dir := t.TempDir()
+		t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+		t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
+		seed := newKanbanBoardApp()
+		consumed := recordTasteTestSignal(t, seed, "AJ", signalEventArtifactEdited, map[string]string{"removedSections": "Intro"})
+		if err := seed.runTasteAnalystOnce(context.Background(), "injected-only", func(context.Context, string, anthropicTextRequest) (string, error) {
+			return tasteTestResponse(t, []string{consumed.ID}, nil), nil
+		}); err != nil {
+			t.Fatalf("seed taste profile: %v", err)
+		}
+		pending := recordTasteTestSignal(t, seed, "AJ", signalEventSurveyOff, map[string]string{"note": "less jargon"})
+		if _, err := os.Stat(seed.ambientHeldWindowPath()); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("Taste sidecar precondition: %v", err)
+		}
+
+		restarted := newKanbanBoardApp()
+		if !tasteAnalystWorkDue(restarted, time.Now().UTC()) {
+			t.Fatal("pending Taste signal was lost across no-sidecar restart")
+		}
+		if err := restarted.runTasteAnalystOnce(context.Background(), "injected-only", func(_ context.Context, _ string, request anthropicTextRequest) (string, error) {
+			ids := tasteWindowIDsFromInput(request.Input)
+			if len(ids) != 1 || ids[0] != pending.ID {
+				t.Fatalf("Taste resumed window=%v, want only %s", ids, pending.ID)
+			}
+			return tasteTestResponse(t, ids, nil), nil
+		}); err != nil {
+			t.Fatalf("resume Taste: %v", err)
+		}
+		profile, ok := restarted.tasteProfileForUser("AJ")
+		if !ok || profile.Metadata[tasteAnalystCursorKey] != pending.ID {
+			t.Fatalf("Taste cursor after resume=%v", profile.Metadata)
+		}
+	})
+
+	t.Run("house style binder cursor", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+		t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
+		seed := newKanbanBoardApp()
+		published := seedHouseStyleSourceArtifact(t, seed)
+		if err := seed.runHouseStyleDistillerOnce(context.Background(), "injected-only", func(context.Context, string, anthropicTextRequest) (string, error) {
+			return houseStyleTestBody(published.ID), nil
+		}); err != nil {
+			t.Fatalf("seed House Style: %v", err)
+		}
+		binder := seedHouseStyleBinderArtifact(t, seed)
+		if _, err := os.Stat(seed.ambientHeldWindowPath()); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("House sidecar precondition: %v", err)
+		}
+
+		restarted := newKanbanBoardApp()
+		if !houseStyleWorkDue(restarted, time.Now().UTC()) {
+			t.Fatal("pending House binder was lost across no-sidecar restart")
+		}
+		if err := restarted.runHouseStyleDistillerOnce(context.Background(), "injected-only", func(_ context.Context, _ string, request anthropicTextRequest) (string, error) {
+			if !strings.Contains(request.Input, binder.ID) {
+				t.Fatalf("House resumed prompt omitted pending binder: %s", request.Input)
+			}
+			return houseStyleTestBody(binder.ID), nil
+		}); err != nil {
+			t.Fatalf("resume House Style: %v", err)
+		}
+		style, ok := restarted.houseStyleArtifact()
+		if !ok || style.Metadata[houseStyleCursorKey] != binder.ID {
+			t.Fatalf("House cursor after resume=%v", style.Metadata)
+		}
+	})
+}
+
+func TestFutureAmbientCheckpointVersionFailsClosedWithoutRewrite(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("EMBEDDINGS_DISABLED", "true")
+	t.Setenv("HELD_WINDOW_INTERVAL", "1h")
+	dir := t.TempDir()
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
+	app := newKanbanBoardApp()
+	agent := newHeldWindowTestAgent("future checkpoint", false, new([][]string))
+	appendHeldWindowBrain(t, app, "future-version-input", officeRoomID)
+	path := app.ambientHeldWindowPath()
+	raw := []byte(`{"version":2,"windows":{}}` + "\n")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	app.startAmbientAgent(agent, "injected-only")
+	_, err := app.invokeAmbientAgentGuarded(agent, context.Background(), "injected-only", func(context.Context, string, openAITextRequest) (string, error) {
+		t.Fatal("future checkpoint version reached provider")
+		return "", nil
+	}, 1, officeRoomID)
+	var circuitErr *ambientAgentCircuitOpenError
+	if !errors.As(err, &circuitErr) || !circuitErr.RestartRequired {
+		t.Fatalf("future-version error=%v, want fail-closed circuit", err)
+	}
+	after, readErr := os.ReadFile(path)
+	if readErr != nil || string(after) != string(raw) {
+		t.Fatalf("future-version checkpoint was rewritten: err=%v raw=%s", readErr, after)
+	}
+	if err := app.Close(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestAmbientAgentRunnerBaselineSkipsHistory(t *testing.T) {
@@ -503,6 +1424,16 @@ func TestArchiveFlushDoesNotConsumePreBootHistory(t *testing.T) {
 	}
 
 	app := newKanbanBoardApp()
+	// This fixture exercises an already-established boot floor. Seed durable
+	// scope anchors for the chain; dedicated continuity tests cover migration
+	// when the sidecar itself is absent.
+	for _, agent := range closeFlushChain() {
+		baseline := app.memory.bootBaselineIDOfKindForRoom(agent.inputKind, agent.windowRoomID(officeRoomID))
+		app.setAmbientAgentBaselineID(ambientAgentScopeKey(agent, officeRoomID), baseline)
+		if _, err := app.ensureAmbientScopeCheckpoint(agent, officeRoomID, baseline); err != nil {
+			t.Fatalf("seed %s scope checkpoint: %v", agent.name, err)
+		}
+	}
 	authority := newAmbientConsentAuthorityForTest(t)
 	grantAmbientConsentForTest(t, app, authority, officeRoomID, "tom@shareability.com")
 	app.mu.Lock()

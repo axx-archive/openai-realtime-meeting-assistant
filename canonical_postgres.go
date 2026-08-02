@@ -191,7 +191,7 @@ func (store *PostgresCanonicalStore) Append(ctx context.Context, event Canonical
 	if existing, found, err := store.findRetry(ctx, event); err != nil {
 		return CanonicalAppendResult{}, err
 	} else if found {
-		notifyProductionBrainProjectionCanonicalEvent(store, event)
+		notifyProductionBrainProjectionCanonicalEvent(store, existing.Event)
 		return existing, nil
 	}
 
@@ -213,6 +213,7 @@ func (store *PostgresCanonicalStore) Append(ctx context.Context, event Canonical
 			if existing, found, retryErr := store.findRetry(ctx, event); retryErr != nil {
 				return CanonicalAppendResult{}, retryErr
 			} else if found {
+				notifyProductionBrainProjectionCanonicalEvent(store, existing.Event)
 				return existing, nil
 			}
 			return CanonicalAppendResult{}, ErrCanonicalAggregateConflict
@@ -280,13 +281,35 @@ func projectCanonicalEvent(ctx context.Context, tx pgx.Tx, event CanonicalEvent,
 		deletedAt = event.OccurredAt
 	}
 	roomID := NormalizeCanonicalRoomID(event.RoomID)
+	expectedProjectionRevision := event.AggregateVersion - 1
 	if event.AggregateVersion != 1 {
-		var objectExists bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM objects WHERE tenant_id=$1 AND object_type=$2 AND object_id=$3)`,
-			event.TenantID, event.AggregateType, event.AggregateID).Scan(&objectExists); err != nil {
+		var currentRevision, lastEventSequence int64
+		err := tx.QueryRow(ctx, `SELECT state_revision,last_event_sequence FROM objects WHERE tenant_id=$1 AND object_type=$2 AND object_id=$3 FOR UPDATE`,
+			event.TenantID, event.AggregateType, event.AggregateID).Scan(&currentRevision, &lastEventSequence)
+		_, legacyCheckpoint := canonicalLegacyImportBaselineInvariant(event)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows) && legacyCheckpoint:
+			expectedProjectionRevision = 0
+		case err != nil:
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrCanonicalProjectionOrder
+			}
 			return fmt.Errorf("check canonical projection predecessor: %w", err)
-		}
-		if !objectExists {
+		case currentRevision == event.AggregateVersion-1:
+			expectedProjectionRevision = currentRevision
+		case legacyCheckpoint && currentRevision < event.AggregateVersion:
+			previous, previousErr := queryCanonicalEvent(ctx, tx, "sequence=$1", lastEventSequence)
+			if previousErr != nil {
+				return fmt.Errorf("load canonical checkpoint predecessor: %w", previousErr)
+			}
+			if _, previousWasLegacyCheckpoint := canonicalLegacyImportBaselineInvariant(previous); !previousWasLegacyCheckpoint {
+				return ErrCanonicalProjectionOrder
+			}
+			// Preserve the exact prior revision in the UPDATE predicate so a
+			// concurrent writer cannot turn this explicit legacy gap into a
+			// stale overwrite.
+			expectedProjectionRevision = currentRevision
+		default:
 			return ErrCanonicalProjectionOrder
 		}
 	}
@@ -302,9 +325,10 @@ func projectCanonicalEvent(ctx context.Context, tx pgx.Tx, event CanonicalEvent,
 		content_sha256=CASE WHEN $5::bigint IS NULL THEN objects.content_sha256 ELSE $10 END,
 		acl_version=EXCLUDED.acl_version,
 		last_event_sequence=EXCLUDED.last_event_sequence, deleted_at=EXCLUDED.deleted_at, retain_until=EXCLUDED.retain_until
-	WHERE objects.state_revision = EXCLUDED.state_revision - 1`,
+	WHERE objects.state_revision = $15`,
 		event.TenantID, event.AggregateType, event.AggregateID, event.AggregateVersion, contentRevision, roomID, event.MeetingID,
-		event.Classification, []byte(event.Payload), contentDigest, event.ACLVersion, sequence, deletedAt, event.RetainUntil)
+		event.Classification, []byte(event.Payload), contentDigest, event.ACLVersion, sequence, deletedAt, event.RetainUntil,
+		expectedProjectionRevision)
 	if err != nil {
 		return fmt.Errorf("project canonical event: %w", err)
 	}
@@ -391,15 +415,11 @@ func (store *PostgresCanonicalStore) findRetry(ctx context.Context, event Canoni
 }
 
 func compareCanonicalRetry(existing, candidate CanonicalEvent) (CanonicalAppendResult, bool, error) {
-	existingFingerprint, err := canonicalEventFingerprint(existing)
+	equal, err := canonicalEventsIdempotentlyEqual(existing, candidate)
 	if err != nil {
 		return CanonicalAppendResult{}, false, err
 	}
-	candidateFingerprint, err := canonicalEventFingerprint(candidate)
-	if err != nil {
-		return CanonicalAppendResult{}, false, err
-	}
-	if existingFingerprint != candidateFingerprint {
+	if !equal {
 		return CanonicalAppendResult{}, false, ErrCanonicalIdempotencyConflict
 	}
 	return CanonicalAppendResult{Event: existing, Existing: true}, true, nil

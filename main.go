@@ -39,7 +39,6 @@ import (
 // nolint
 var (
 	addr               = flag.String("addr", ":3000", "http service address")
-	codexRunnerWorker  = flag.Bool("codex-runner", false, "run the Codex sidecar queue worker")
 	renderRunnerWorker = flag.Bool("render-runner", false, "run the render sidecar queue worker (PDF export)")
 	upgrader           = websocket.Upgrader{
 		CheckOrigin: websocketOriginAllowed,
@@ -813,6 +812,10 @@ func setSubscriberLayerTier(sessionID string, tier layerTier) bool {
 func main() {
 	// Parse the flags passed to program
 	flag.Parse()
+	if err := validateRequiredReleaseIdentity(); err != nil {
+		fmt.Fprintf(os.Stderr, "Release identity startup failed: %v\n", err)
+		os.Exit(2)
+	}
 	if err := initializeRestoreGate(time.Now().UTC()); err != nil {
 		fmt.Fprintf(os.Stderr, "Restore gate startup failed: %v\n", err)
 		os.Exit(2)
@@ -829,13 +832,6 @@ func main() {
 	}
 	_ = canonicalRuntime
 	defer closeCanonicalRuntime()
-
-	if *codexRunnerWorker {
-		if err := runCodexRunnerLoop(context.Background()); err != nil {
-			log.Errorf("Codex runner stopped: %v", err)
-		}
-		return
-	}
 
 	if *renderRunnerWorker {
 		if err := runRenderRunnerLoop(context.Background()); err != nil {
@@ -1004,6 +1000,8 @@ func main() {
 	http.HandleFunc("/api/usage/rollup", usageRollupHandler)
 	http.HandleFunc("/api/consent", consentHandler)
 	http.HandleFunc("/api/admin/brain-projection/backfill", brainProjectionHistoricalBackfillHandler)
+	registerSTRIDERuntimeRoutes(http.DefaultServeMux)
+	registerMeetingSpecialistProductRoutes(http.DefaultServeMux)
 	http.HandleFunc("/internal/codex/jobs/result", internalCodexRunnerResultHandler)
 	// W2A release-only observer: the handler is always registered but returns
 	// 404 unless explicit media-soak mode and its purpose-scoped token are set.
@@ -1143,6 +1141,7 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 		"ok":      true,
 		"service": "meetingassist",
 		"version": serverBuildVersion,
+		"release": currentReleaseIdentity(),
 		"time":    time.Now().UTC().Format(time.RFC3339Nano),
 		// W0-9: effective realtime/transcription lane models + vocab posture +
 		// ledger/alert switches, so a whisper-family fossil pin or a dead
@@ -1186,6 +1185,10 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ready := traffic.ready
+	release := currentReleaseIdentity()
+	if !releaseIdentityAllowsTraffic(release) {
+		ready = false
+	}
 	if restoreGate.enabled && !restoreGate.ready {
 		ready = false
 	}
@@ -1201,6 +1204,11 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 	if admissionAnchorErr != nil {
 		ready = false
 	}
+	boardLifecycle := kanbanApp.boardLifecycleSnapshot()
+	if healthy, _ := boardLifecycle["healthy"].(bool); !healthy {
+		ready = false
+	}
+	strideRuntime := strideRuntimeCapabilitySnapshot(kanbanApp)
 	status := http.StatusOK
 	if !ready {
 		status = http.StatusServiceUnavailable
@@ -1228,13 +1236,21 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 		// room admission, direct WebRTC transport, chat, and video remain ready.
 		degraded = append(degraded, "consent_authority_degraded")
 	}
+	if healthy, _ := boardLifecycle["healthy"].(bool); !healthy {
+		degraded = append(degraded, "board_lifecycle_recovery_required")
+	}
+	if !releaseIdentityAllowsTraffic(release) {
+		degraded = append(degraded, "release_process_identity_unqualified")
+	}
 
 	writeSystemStatusJSON(w, r, status, map[string]any{
 		"ok":           ready,
 		"service":      "meetingassist",
+		"version":      serverBuildVersion,
 		"time":         time.Now().UTC().Format(time.RFC3339Nano),
 		"degraded":     degraded,
 		"capabilities": capabilities,
+		"release":      release,
 		"checks": map[string]any{
 			"restoreGate":      restoreGateSnapshot(),
 			"canonical":        canonical,
@@ -1244,6 +1260,8 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 			"memoryStore":      memoryAvailable,
 			"memoryFile":       memoryCheck,
 			"boardFile":        boardCheck,
+			"boardLifecycle":   boardLifecycle,
+			"strideRuntime":    strideRuntime,
 			"realtime":         realtime,
 			"backup":           readinessBackupSnapshot(),
 			"agents": map[string]any{
@@ -1844,12 +1862,16 @@ func assistantQueryHandler(w http.ResponseWriter, r *http.Request) {
 
 	mode := normalizeOSAssistantMode(payload.Mode)
 	principal := kanbanApp.recallPrincipalForMemberRoom(user.Email, kanbanApp.memberCurrentRoom(user.Email))
-	result, err := kanbanApp.resolveAssistantQueryContextForPrincipalWithAttachments(r.Context(), principal, user.Email, query, scoutChatHistoryFromPayload(payload.History), nil)
+	modelQuery := kanbanApp.prepareSTRIDEPrivateRelationshipModelQuery(user.Email, query)
+	result, err := kanbanApp.resolveAssistantQueryContextForPrincipalWithAttachments(r.Context(), principal, user.Email, modelQuery, scoutChatHistoryFromPayload(payload.History), nil)
 	if err != nil {
 		log.Errorf("Failed to answer OS assistant query for %s: %v", user.Email, err)
 		writeAuthError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// The relationship suffix is server-only prompt data; never echo it back as
+	// the user's visible query or persist it into an artifact.
+	result.query = query
 	result = buildOSAssistantModeAnswer(mode, result, kanbanApp.snapshotState(), kanbanApp.scopedRecallApp(r.Context(), principal).memorySnapshotForClients(12))
 
 	response := map[string]any{
@@ -2268,7 +2290,7 @@ func assistantRealtimeOfferHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	answerSDP, err := kanbanApp.createPrivateRealtimeVoiceCall(apiKey, realtimeModel(), offerSDP)
+	answerSDP, err := kanbanApp.createPrivateRealtimeVoiceCall(apiKey, realtimeModel(), offerSDP, user.Email)
 	if err != nil {
 		log.Errorf("Failed to create private Realtime voice call for %s: %v", user.Email, err)
 		if message, status, ok := openAIAPIRequestUserMessage(err); ok {
@@ -5974,7 +5996,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if err != nil {
 				continue
 			}
-			broadcastSignedInKanbanEvent("chat_typing", payload)
+			if err := deliverScoutChatTypingEvent(kanbanApp, sessionUser, typing.ThreadID, payload); err != nil {
+				continue
+			}
 		case "room_ping":
 			// Client room-liveness heartbeat (mirrors office_ping). The read loop
 			// already refreshed this participant's liveness stamp on this inbound

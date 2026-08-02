@@ -17,9 +17,17 @@ func TestChatMentionNames(t *testing.T) {
 		{"case-insensitive canonicalizes", "ping @tyler and @CAITLYN", []string{"Tyler", "Caitlyn"}},
 		{"dedupes repeat mentions", "@aj @AJ @aj thoughts?", []string{"AJ"}},
 		{"email address is not a mention", "mail aj@shareability.com today", nil},
+		{"email local punctuation is not a mention", "mail first.last+alerts@Tyler.com", nil},
 		{"prefix of a longer word is not a mention", "the @Tylerish account", nil},
+		{"longer handle punctuation is not a mention", "the @Tyler_team and @AJ.dev accounts", nil},
 		{"punctuation ends the name", "@tom, @tim: sync?", []string{"Tom", "Tim"}},
 		{"scout is not a user mention", "@scout summarize this", nil},
+		{"escaped mention is historical text", `don't notify \@Tyler but do notify @AJ`, []string{"AJ"}},
+		{"quoted mention is historical text", `Tim wrote "@Tyler can you look" but @AJ owns it`, []string{"AJ"}},
+		{"curly quoted mention is historical text", "Tim wrote “@Tyler can you look” but @AJ owns it", []string{"AJ"}},
+		{"markdown quote is historical text", "> @Tyler can you look\n@AJ owns it", []string{"AJ"}},
+		{"inline code is not a mention", "Use `@Tyler` in the fixture, then ask @AJ", []string{"AJ"}},
+		{"fenced code is not a mention", "```\n@Tyler fixture\n```\n@AJ owns it", []string{"AJ"}},
 		{"non-roster names skipped", "@zelda and @Joel", []string{"Joel"}},
 		{"bare at sign", "meet @ 3pm", nil},
 		{"start and end of text", "@Erick ping @Tim", []string{"Erick", "Tim"}},
@@ -35,6 +43,57 @@ func TestChatMentionNames(t *testing.T) {
 				t.Fatalf("chatMentionNames(%q)=%v, want %v", tc.text, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestScoutChatMentionParserAdversarialBoundaries(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{"direct lowercase", "@scout catch me up", true},
+		{"direct mixed case", "hey @ScOuT, catch me up", true},
+		{"email domain", "send it to aj@scout.com", false},
+		{"email local punctuation", "send it to ops+alerts@scout.io", false},
+		{"longer underscore handle", "ask @scout_bot", false},
+		{"longer dot handle", "ask @scout.dev", false},
+		{"escaped historical mention", `the literal is \@scout`, false},
+		{"quoted historical mention", `Tim said "@scout catch us up" yesterday`, false},
+		{"curly historical mention", "Tim said “@scout catch us up” yesterday", false},
+		{"markdown historical quote", "> @scout catch us up\nI agree", false},
+		{"inline code", "type `@scout` in the demo", false},
+		{"fenced code", "```text\n@scout\n```", false},
+		{"quoted then direct", `Tim said "@scout old request"; @scout new request`, true},
+		{"quote line then direct", "> @scout old request\n@scout new request", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := scoutChatMentionsScout(tc.text); got != tc.want {
+				t.Fatalf("scoutChatMentionsScout(%q)=%v, want %v", tc.text, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestScoutChatMentionReadsAuthoredTextOnly(t *testing.T) {
+	message := scoutChatMessageRecord{
+		Text: "plain human message",
+		Files: []scoutChatFileAttachment{{
+			Name: "@scout-plan.pdf",
+			Kind: "gif",
+			Text: "derived attachment says @scout launch research",
+			Ref:  "sha256:@scout",
+		}},
+		ReplyTo: &scoutChatReplyRef{Text: "historical @scout request"},
+		Sources: []answerSource{{Quote: "@scout was cited"}},
+	}
+	if scoutChatMessageMentionsScout(message) {
+		t.Fatal("attachment, GIF, reply, and source metadata must not summon Scout")
+	}
+	message.Text = "@scout please inspect the attached plan"
+	if !scoutChatMessageMentionsScout(message) {
+		t.Fatal("a direct authored-text mention should still summon Scout")
 	}
 }
 

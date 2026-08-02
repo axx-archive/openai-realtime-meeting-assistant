@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import type { CameraFramingCapabilities } from '../../modules/bonfire-camera-framing';
 import {
+  adaptiveCameraFramingAdmission,
   cameraFramingStateFromCapabilities,
   cameraFramingRenderRevision,
   centerStageControlStatus,
@@ -12,6 +13,7 @@ import {
   cooperativeCenterStageIntentAfterRefresh,
   explicitFramingIntentAfterResult,
   readLiveCameraTrackIdentity,
+  releaseUnsafeCameraTracks,
   wideFramingRestoreDeviceId,
   wideUprightFramingNeedsUpdate,
   wideUprightIntentAfterTransition,
@@ -213,6 +215,140 @@ describe('camera framing lifecycle', () => {
     assert.equal(wideUprightFramingNeedsUpdate(false, portrait), false);
     assert.equal(wideUprightFramingNeedsUpdate(true, landscape), false);
     assert.equal(wideUprightFramingNeedsUpdate(null, square), false);
+  });
+
+  it('requires affirmative native proof before exempting an iOS camera', () => {
+    const unavailableCapabilities: CameraFramingCapabilities = {
+      ...supportedCapabilities,
+      iosVersion: null,
+      ios26OrNewer: false,
+      deviceSupported: false,
+      operational: false,
+      activeWebRTCCameraAvailable: false,
+      activeDeviceId: null,
+      activeDevicePosition: null,
+      activeDeviceType: null,
+      reasonCode: 'native_module_unavailable',
+    };
+
+    assert.equal(
+      adaptiveCameraFramingAdmission(unavailableCapabilities, 'front-camera', false, false),
+      'unsafe',
+    );
+    assert.equal(
+      adaptiveCameraFramingAdmission({
+        ...supportedCapabilities,
+        reasonCode: 'native_call_failed',
+      }, 'front-camera', true, false),
+      'unsafe',
+    );
+    assert.equal(
+      adaptiveCameraFramingAdmission({
+        ...supportedCapabilities,
+        activeWebRTCCameraAmbiguous: true,
+      }, 'front-camera', true, false),
+      'unsafe',
+    );
+    assert.equal(
+      adaptiveCameraFramingAdmission({
+        ...supportedCapabilities,
+        activeDeviceId: 'different-front-camera',
+      }, 'front-camera', true, false),
+      'unsafe',
+    );
+  });
+
+  it('exempts only cameras proven outside the risky iOS 26 adaptive-front-camera case', () => {
+    const unavailableAndroidCapabilities: CameraFramingCapabilities = {
+      ...supportedCapabilities,
+      platform: 'android',
+      iosVersion: null,
+      ios26OrNewer: false,
+      deviceSupported: false,
+      operational: false,
+      activeWebRTCCameraAvailable: false,
+      activeDeviceId: null,
+      activeDevicePosition: null,
+      activeDeviceType: null,
+      reasonCode: 'native_module_unavailable',
+    };
+
+    assert.equal(
+      adaptiveCameraFramingAdmission(unavailableAndroidCapabilities, 'front-camera', null, false),
+      'not-required',
+    );
+    assert.equal(
+      adaptiveCameraFramingAdmission({
+        ...supportedCapabilities,
+        activeDeviceType: 'AVCaptureDeviceTypeBuiltInWideAngleCamera',
+        reasonCode: 'active_camera_not_front_ultra_wide',
+      }, 'front-camera', null, false),
+      'not-required',
+    );
+    assert.equal(
+      adaptiveCameraFramingAdmission({
+        ...supportedCapabilities,
+        iosVersion: '25.0',
+        ios26OrNewer: false,
+        reasonCode: 'requires_ios_26',
+      }, 'front-camera', null, false),
+      'not-required',
+    );
+  });
+
+  it('rejects adaptive-camera publication after a failed mutation or wrong geometry', () => {
+    const portraitCapabilities = {
+      ...supportedCapabilities,
+      wideUprightFramingEnabled: false,
+      dynamicWidth: 720,
+      dynamicHeight: 1280,
+    };
+    const squareCapabilities = {
+      ...portraitCapabilities,
+      dynamicWidth: 1280,
+      dynamicHeight: 1280,
+    };
+
+    assert.equal(
+      adaptiveCameraFramingAdmission(portraitCapabilities, 'front-camera', false, false),
+      'confirmed',
+    );
+    assert.equal(
+      adaptiveCameraFramingAdmission(portraitCapabilities, 'front-camera', false, true),
+      'unsafe',
+    );
+    assert.equal(
+      adaptiveCameraFramingAdmission(squareCapabilities, 'front-camera', false, false),
+      'unsafe',
+    );
+    assert.equal(
+      adaptiveCameraFramingAdmission(supportedCapabilities, 'front-camera', true, false),
+      'confirmed',
+    );
+  });
+
+  it('removes, disables, and stops an unsafe camera before tracks are signaled', () => {
+    const audioTrack = { kind: 'audio' };
+    const cameraTrack = {
+      kind: 'video',
+      enabled: true,
+      stopped: false,
+      stop() { this.stopped = true; },
+    };
+    let videoTracks = [cameraTrack];
+    const stream = {
+      getVideoTracks: () => videoTracks,
+      removeTrack: (track: typeof cameraTrack) => {
+        videoTracks = videoTracks.filter((candidate) => candidate !== track);
+      },
+      getTracks: () => [audioTrack, ...videoTracks],
+    };
+
+    assert.equal(releaseUnsafeCameraTracks(stream), 1);
+    assert.equal(cameraTrack.enabled, false);
+    assert.equal(cameraTrack.stopped, true);
+    assert.deepEqual(stream.getVideoTracks(), []);
+    assert.deepEqual(stream.getTracks(), [audioTrack]);
   });
 
   it('labels Center Stage on only after the active device confirms it is active', () => {

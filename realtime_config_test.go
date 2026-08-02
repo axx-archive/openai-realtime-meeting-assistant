@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -123,10 +124,11 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 		// Wave 12: private grill is a client-driven session.update swap, private
 		// only. The room grill (start_grill_session/end_grill_session) stays
 		// room-only below.
-		"start_private_grill": true,
-		"end_private_grill":   true,
-		"meeting_recap":       true,
-		"catch_me_up":         true,
+		"start_private_grill":     true,
+		"end_private_grill":       true,
+		"meeting_recap":           true,
+		"catch_me_up":             true,
+		"meeting_interval_recall": true,
 		// Track-2 Wave 6: read-only cross-meeting recall — the private user
 		// owns their own catch-up briefings and drill-downs.
 		"cross_meeting_briefing": true,
@@ -1096,6 +1098,29 @@ func TestRealtimeSessionConfigGatesTranscriptionPromptByModel(t *testing.T) {
 	prompt, ok := transcription["prompt"].(string)
 	if !ok || !strings.Contains(prompt, "Boot Barn") {
 		t.Fatalf("vocabulary prompt missing for gpt-4o-transcribe: %v", transcription["prompt"])
+	}
+
+	// GPT Transcribe replaces singular `language` with plural `languages` and
+	// adds literal keyword hints. Its prompt support does not imply the older
+	// near-field input control is compatible.
+	t.Setenv("OPENAI_REALTIME_TRANSCRIPTION_MODEL", "gpt-transcribe")
+	session = app.sessionConfig("gpt-realtime-2.1")
+	input = session["audio"].(map[string]any)["input"].(map[string]any)
+	if _, present := input["noise_reduction"]; present {
+		t.Fatalf("unqualified near-field control sent to gpt-transcribe: %v", input)
+	}
+	transcription = input["transcription"].(map[string]any)
+	if _, present := transcription["language"]; present {
+		t.Fatalf("legacy singular language sent to gpt-transcribe: %v", transcription)
+	}
+	if languages, ok := transcription["languages"].([]string); !ok || !reflect.DeepEqual(languages, []string{"en"}) {
+		t.Fatalf("modern languages missing for gpt-transcribe: %v", transcription["languages"])
+	}
+	if keywords, ok := transcription["keywords"].([]string); !ok || len(keywords) == 0 {
+		t.Fatalf("modern keywords missing for gpt-transcribe: %v", transcription["keywords"])
+	}
+	if prompt, ok := transcription["prompt"].(string); !ok || !strings.Contains(prompt, "STRIDE") {
+		t.Fatalf("modern prompt missing for gpt-transcribe: %v", transcription["prompt"])
 	}
 }
 

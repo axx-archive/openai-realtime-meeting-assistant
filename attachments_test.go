@@ -58,10 +58,51 @@ func tinyPNG(t *testing.T) []byte {
 	return buffer.Bytes()
 }
 
+func grantTestPendingAttachment(t *testing.T, app *kanbanBoardApp, user *userAccount, destination scoutChatThreadRecord, ref string) scoutChatFileAttachment {
+	t.Helper()
+	meta, err := blobStatForRef(ref)
+	if err != nil {
+		t.Fatalf("stat pending attachment: %v", err)
+	}
+	grant, err := app.grantPendingAttachmentUpload(user, destination, ref, meta)
+	if err != nil {
+		t.Fatalf("grant pending attachment: %v", err)
+	}
+	return scoutChatFileAttachment{Ref: ref, SourceID: grant.SourceID, SourceRevision: grant.SourceRevision}
+}
+
+func reserveTestAttachment(t *testing.T, app *kanbanBoardApp, user *userAccount, destination scoutChatThreadRecord, file scoutChatFileAttachment, reservationID string) scoutChatFileAttachment {
+	t.Helper()
+	meta, err := blobStatForRef(file.Ref)
+	if err != nil {
+		t.Fatalf("stat attachment source: %v", err)
+	}
+	grant, err := app.grantPendingAttachmentUpload(user, destination, file.Ref, meta)
+	if err != nil {
+		t.Fatalf("grant attachment source: %v", err)
+	}
+	file.SourceID = grant.SourceID
+	file.SourceRevision = grant.SourceRevision
+	file.Mime = meta.Mime
+	file.Size = meta.Size
+	if err := app.reservePendingAttachmentUpload(user, destination, file, meta, reservationID); err != nil {
+		t.Fatalf("reserve attachment source: %v", err)
+	}
+	return file
+}
+
 func TestAssistantAttachmentUploadHandlerAuthMimeAndSize(t *testing.T) {
 	setupAuthTestEnv(t)
-	setupIsolatedBlobStore(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
 	t.Setenv("MEETING_ALLOWED_ORIGINS", "")
+	owner := accountStore().findUser("aj@shareability.com")
+	destination, err := kanbanApp.createScoutChatThread(owner.Email, owner.Name, "Attachment test", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create attachment destination: %v", err)
+	}
+	uploadURL := "/assistant/attachments?threadId=" + destination.ID
 
 	pngBytes := tinyPNG(t)
 
@@ -94,7 +135,7 @@ func TestAssistantAttachmentUploadHandlerAuthMimeAndSize(t *testing.T) {
 	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
 	post := func(contentType string, body []byte) *httptest.ResponseRecorder {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodPost, "/assistant/attachments", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, uploadURL, bytes.NewReader(body))
 		if contentType != "" {
 			req.Header.Set("Content-Type", contentType)
 		}
@@ -141,10 +182,12 @@ func TestAssistantAttachmentUploadHandlerAuthMimeAndSize(t *testing.T) {
 		t.Fatalf("upload status=%d body=%s, want 200", recorder.Code, recorder.Body.String())
 	}
 	var payload struct {
-		OK   bool   `json:"ok"`
-		Ref  string `json:"ref"`
-		Mime string `json:"mime"`
-		Size int64  `json:"size"`
+		OK             bool   `json:"ok"`
+		Ref            string `json:"ref"`
+		Mime           string `json:"mime"`
+		Size           int64  `json:"size"`
+		SourceID       string `json:"sourceId"`
+		SourceRevision string `json:"sourceRevision"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode upload response: %v", err)
@@ -159,12 +202,28 @@ func TestAssistantAttachmentUploadHandlerAuthMimeAndSize(t *testing.T) {
 	if !bytes.Equal(stored, pngBytes) || meta.Mime != "image/png" {
 		t.Fatalf("stored=%q mime=%q, want the uploaded bytes with the pinned mime", stored, meta.Mime)
 	}
+	other := accountStore().findUser("tim@shareability.com")
+	file := scoutChatFileAttachment{Ref: payload.Ref, SourceID: payload.SourceID, SourceRevision: payload.SourceRevision}
+	if payload.SourceID == "" || payload.SourceRevision == "" || kanbanApp.reservePendingAttachmentUpload(owner, destination, file, meta, "upload-handler-test") != nil {
+		t.Fatal("successful upload did not mint a destination-bound immutable source grant")
+	}
+	if kanbanApp.reservePendingAttachmentUpload(other, destination, file, meta, "upload-handler-replay") == nil {
+		t.Fatal("consumed upload grant authorized a replay by another user")
+	}
 }
 
 func TestAssistantAttachmentUploadHandlerSupportsNativeMultipartAndSafeMIMEFallbacks(t *testing.T) {
 	setupAuthTestEnv(t)
-	setupIsolatedBlobStore(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
 	t.Setenv("MEETING_ALLOWED_ORIGINS", "")
+	owner := accountStore().findUser("aj@shareability.com")
+	destination, err := kanbanApp.createScoutChatThread(owner.Email, owner.Name, "Native attachment test", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create attachment destination: %v", err)
+	}
+	uploadURL := "/assistant/attachments?threadId=" + destination.ID
 	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
 	pngBytes := tinyPNG(t)
 
@@ -191,7 +250,7 @@ func TestAssistantAttachmentUploadHandlerSupportsNativeMultipartAndSafeMIMEFallb
 		if err := writer.Close(); err != nil {
 			t.Fatalf("close multipart body: %v", err)
 		}
-		request := httptest.NewRequest(http.MethodPost, "/assistant/attachments", &body)
+		request := httptest.NewRequest(http.MethodPost, uploadURL, &body)
 		request.Header.Set("Content-Type", writer.FormDataContentType())
 		for _, cookie := range cookies {
 			request.AddCookie(cookie)
@@ -227,7 +286,7 @@ func TestAssistantAttachmentUploadHandlerSupportsNativeMultipartAndSafeMIMEFallb
 	}
 
 	// Native MIME aliases canonicalize, but only when the bytes match.
-	request := httptest.NewRequest(http.MethodPost, "/assistant/attachments", bytes.NewReader(pngBytes))
+	request := httptest.NewRequest(http.MethodPost, uploadURL, bytes.NewReader(pngBytes))
 	request.Header.Set("Content-Type", "application/octet-stream")
 	for _, cookie := range cookies {
 		request.AddCookie(cookie)
@@ -398,40 +457,209 @@ func TestCreateAnthropicTextResponsePlacesAttachmentsBeforeText(t *testing.T) {
 }
 
 func TestSanitizeScoutChatFilesValidatesBlobRefs(t *testing.T) {
-	setupIsolatedBlobStore(t)
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seed user missing")
+	}
+	thread, err := kanbanApp.createScoutChatThread(user.Email, user.Name, "Scout", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
 
-	pngRef, err := putBlob([]byte("raster"), "image/png")
+	pngRef, err := putBlob(tinyPNG(t), "image/png")
 	if err != nil {
 		t.Fatalf("putBlob png: %v", err)
 	}
+	grantedFile := grantTestPendingAttachment(t, kanbanApp, user, thread, pngRef)
 	htmlRef, err := putBlob([]byte("<script>alert(1)</script>"), "text/html")
 	if err != nil {
 		t.Fatalf("putBlob html: %v", err)
 	}
 
-	cleaned := sanitizeScoutChatFiles([]scoutChatFileAttachment{
+	cleaned, err := kanbanApp.sanitizeScoutChatFiles(context.Background(), user, thread, []scoutChatFileAttachment{
 		// A valid ref keeps the store's pinned mime and NEVER client text —
 		// a ref'd binary's text is the server-derived transcription only.
-		{Name: "shot.png", Kind: "png", Size: 6, Ref: pngRef, Mime: "application/x-spoofed", Text: "attacker-claimed contents"},
-		// Malformed and missing refs drop to plain chips.
-		{Name: "bogus.png", Ref: "zz"},
-		{Name: "gone.png", Ref: strings.Repeat("a", 64)},
-		// A stored blob outside the model-safe allowlist drops its ref too.
-		{Name: "page.html", Ref: htmlRef},
-	})
-	if len(cleaned) != 4 {
-		t.Fatalf("cleaned=%d files, want all four chips kept", len(cleaned))
+		{Name: "shot.png", Kind: "png", Size: 6, Ref: pngRef, Mime: "application/x-spoofed", Text: "attacker-claimed contents", SourceID: grantedFile.SourceID, SourceRevision: grantedFile.SourceRevision},
+	}, "sanitize-valid")
+	if err != nil {
+		t.Fatalf("sanitize valid source: %v", err)
 	}
-	if cleaned[0].Ref != pngRef || cleaned[0].Mime != "image/png" || cleaned[0].Text != "" {
-		t.Fatalf("ref'd file=%+v, want kept ref, pinned image/png mime, stripped client text", cleaned[0])
+	meta, err := blobStatForRef(pngRef)
+	if err != nil {
+		t.Fatalf("stat png: %v", err)
 	}
-	for index := 1; index < 4; index++ {
-		if cleaned[index].Ref != "" || cleaned[index].Mime != "" {
-			t.Fatalf("file %d=%+v, want ref and mime dropped", index, cleaned[index])
+	if cleaned[0].Ref != pngRef || cleaned[0].Mime != "image/png" || cleaned[0].Size != meta.Size || cleaned[0].Text != "" {
+		t.Fatalf("ref'd file=%+v, want kept ref, blob-pinned metadata, stripped client text", cleaned[0])
+	}
+	duplicateFile := grantTestPendingAttachment(t, kanbanApp, user, thread, pngRef)
+	if _, err := kanbanApp.sanitizeScoutChatFiles(context.Background(), user, thread, []scoutChatFileAttachment{duplicateFile, duplicateFile}, "sanitize-duplicate"); err == nil {
+		t.Fatal("duplicate source id was accepted")
+	}
+	for label, candidate := range map[string]scoutChatFileAttachment{
+		"malformed": {Name: "bogus.png", Ref: "zz"},
+		"missing":   {Name: "gone.png", Ref: strings.Repeat("a", 64)},
+		"unsafe":    {Name: "page.html", Ref: htmlRef},
+	} {
+		if _, err := kanbanApp.sanitizeScoutChatFiles(context.Background(), user, thread, []scoutChatFileAttachment{candidate}, "sanitize-"+label); err == nil {
+			t.Fatalf("%s ref downgraded to a name-only chip; want fail closed", label)
 		}
 	}
-	if cleaned[1].Name != "bogus.png" {
-		t.Fatalf("name=%q, want the chip name preserved", cleaned[1].Name)
+	other := accountStore().findUser("tim@shareability.com")
+	if _, err := kanbanApp.sanitizeScoutChatFiles(context.Background(), other, thread, []scoutChatFileAttachment{{Name: "guessed.png", Ref: pngRef}}, "sanitize-guessed"); err == nil {
+		t.Fatal("cross-user guessed ref downgraded to an inert chip instead of failing closed")
+	}
+}
+
+func TestAttachmentSourceHandleBindsRevisionDestinationAudienceExpiryAndOneCommit(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seed user missing")
+	}
+	privateA, err := kanbanApp.createScoutChatThread(user.Email, user.Name, "A", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create private A: %v", err)
+	}
+	privateB, err := kanbanApp.createScoutChatThread(user.Email, user.Name, "B", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create private B: %v", err)
+	}
+	ref, err := putBlob(tinyPNG(t), "image/png")
+	if err != nil {
+		t.Fatalf("put source blob: %v", err)
+	}
+
+	assertDenied := func(label string, destination scoutChatThreadRecord, file scoutChatFileAttachment) {
+		t.Helper()
+		file.Name = label + ".png"
+		file.Text = "stale derived secret"
+		if _, err := kanbanApp.sanitizeScoutChatFiles(context.Background(), user, destination, []scoutChatFileAttachment{file}, "denied-"+label); err == nil {
+			t.Fatalf("%s source downgraded instead of failing closed", label)
+		}
+	}
+
+	wrongRevision := grantTestPendingAttachment(t, kanbanApp, user, privateA, ref)
+	wrongRevision.SourceRevision = "sha256:" + strings.Repeat("0", 64)
+	assertDenied("wrong-revision", privateA, wrongRevision)
+
+	wrongDestination := grantTestPendingAttachment(t, kanbanApp, user, privateA, ref)
+	assertDenied("wrong-destination", privateB, wrongDestination)
+
+	changedRecipients := grantTestPendingAttachment(t, kanbanApp, user, privateA, ref)
+	mutatedAudience := privateA
+	mutatedAudience.Visibility = scoutChatVisibilityPublic
+	assertDenied("changed-audience", mutatedAudience, changedRecipients)
+
+	expired := grantTestPendingAttachment(t, kanbanApp, user, privateA, ref)
+	kanbanApp.pendingAttachmentUploadsMu.Lock()
+	grant := kanbanApp.pendingAttachmentUploads[expired.SourceID]
+	grant.ExpiresAt = time.Now().UTC().Add(-time.Second)
+	kanbanApp.pendingAttachmentUploads[expired.SourceID] = grant
+	kanbanApp.pendingAttachmentUploadsMu.Unlock()
+	assertDenied("expired", privateA, expired)
+
+	revoked := grantTestPendingAttachment(t, kanbanApp, user, privateA, ref)
+	kanbanApp.pendingAttachmentUploadsMu.Lock()
+	delete(kanbanApp.pendingAttachmentUploads, revoked.SourceID)
+	kanbanApp.pendingAttachmentUploadsMu.Unlock()
+	assertDenied("revoked", privateA, revoked)
+
+	oneCommit := grantTestPendingAttachment(t, kanbanApp, user, privateA, ref)
+	accepted, err := kanbanApp.sanitizeScoutChatFiles(context.Background(), user, privateA, []scoutChatFileAttachment{oneCommit}, "one-commit")
+	if err != nil {
+		t.Fatalf("reserve source: %v", err)
+	}
+	if len(accepted) != 1 || accepted[0].Ref != ref || accepted[0].Mime != "image/png" {
+		t.Fatalf("first commit=%+v, want authorized source", accepted)
+	}
+	assertDenied("replay", privateA, oneCommit)
+}
+
+func TestAttachmentDestinationRevisionFenceRejectsAudienceRaceAtCommit(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	user := accountStore().findUser("aj@shareability.com")
+	thread, err := kanbanApp.createScoutChatThread(user.Email, user.Name, "private", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create private thread: %v", err)
+	}
+	ref, err := putBlob(tinyPNG(t), "image/png")
+	if err != nil {
+		t.Fatalf("put source blob: %v", err)
+	}
+	file := grantTestPendingAttachment(t, kanbanApp, user, thread, ref)
+	cleaned, err := kanbanApp.sanitizeScoutChatFiles(context.Background(), user, thread, []scoutChatFileAttachment{file}, "attachment-race-reservation")
+	if err != nil {
+		t.Fatalf("sanitize source: %v", err)
+	}
+	if len(cleaned) != 1 || cleaned[0].Ref != ref {
+		t.Fatalf("preflight source=%+v, want authorized ref", cleaned)
+	}
+	message := scoutChatMessageRecord{
+		ID:                            "attachment-race-message",
+		Kind:                          "message",
+		Role:                          "user",
+		Text:                          "private source",
+		CreatedAt:                     time.Now().UTC().Format(time.RFC3339Nano),
+		AuthorEmail:                   user.Email,
+		Files:                         cleaned,
+		attachmentDestinationRevision: scoutChatAttachmentDestinationRevision(thread),
+		attachmentReservationID:       "attachment-race-reservation",
+	}
+	thread.Visibility = scoutChatVisibilityPublic
+	if err := kanbanApp.saveScoutChatThread(thread); err != nil {
+		t.Fatalf("mutate audience fixture: %v", err)
+	}
+	if _, err := kanbanApp.commitScoutChatThreadMessages(user.Email, thread.ID, message); err == nil || !strings.Contains(err.Error(), "destination changed") {
+		t.Fatalf("commit error=%v, want destination revision rejection", err)
+	}
+	saved, _, err := kanbanApp.scoutChatThreadByID(user.Email, thread.ID)
+	if err != nil {
+		t.Fatalf("reload thread: %v", err)
+	}
+	if len(saved.Messages) != 0 {
+		t.Fatalf("audience-raced attachment committed: %+v", saved.Messages)
+	}
+}
+
+func TestSanitizeScoutChatFilesDoesNotWidenPrivateArtifactIntoPublicChannel(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seed user missing")
+	}
+	private, _, err := kanbanApp.createOSArtifactWithMetadata("research", "private deck", "private", user.Name, map[string]string{
+		"visibility":  scoutChatVisibilityPrivate,
+		"requestedBy": user.Email,
+	})
+	if err != nil {
+		t.Fatalf("create private artifact: %v", err)
+	}
+	ref, err := putBlob(tinyPNG(t), "image/png")
+	if err != nil {
+		t.Fatalf("put private blob: %v", err)
+	}
+	if _, err := kanbanApp.appendArtifactAsset(private.ID, artifactAsset{Ref: ref, Mime: "image/png", Kind: "image"}); err != nil {
+		t.Fatalf("append private asset: %v", err)
+	}
+	publicThread, err := kanbanApp.createScoutChatThread(user.Email, user.Name, "team", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatalf("create public thread: %v", err)
+	}
+	if _, err := kanbanApp.sanitizeScoutChatFiles(context.Background(), user, publicThread, []scoutChatFileAttachment{{Name: "private.png", Ref: ref}}, "private-widen"); err == nil {
+		t.Fatal("private artifact widened into public chat or downgraded to a name-only chip")
 	}
 }
 
@@ -474,9 +702,10 @@ func TestScoutChatAttachmentDerivedTextAndVisionQnA(t *testing.T) {
 	if user == nil {
 		t.Fatal("seed user aj@shareability.com missing")
 	}
+	grantedFile := grantTestPendingAttachment(t, kanbanApp, user, thread, pngRef)
 
 	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "what does this deck say?", []scoutChatFileAttachment{
-		{Name: "deck.png", Kind: "png", Size: 12, Ref: pngRef, Text: "client junk that must be stripped"},
+		{Name: "deck.png", Kind: "png", Size: 12, Ref: pngRef, Text: "client junk that must be stripped", SourceID: grantedFile.SourceID, SourceRevision: grantedFile.SourceRevision},
 	}, "")
 	if err != nil {
 		t.Fatalf("append message: %v", err)
@@ -548,9 +777,10 @@ func TestScoutChatAttachmentKeylessDegradesToNameOnly(t *testing.T) {
 	if user == nil {
 		t.Fatal("seed user aj@shareability.com missing")
 	}
+	grantedFile := grantTestPendingAttachment(t, kanbanApp, user, thread, pngRef)
 
 	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "what does this deck say?", []scoutChatFileAttachment{
-		{Name: "deck.png", Kind: "png", Size: 12, Ref: pngRef},
+		{Name: "deck.png", Kind: "png", Size: 12, Ref: pngRef, SourceID: grantedFile.SourceID, SourceRevision: grantedFile.SourceRevision},
 	}, "")
 	if err != nil {
 		t.Fatalf("append message: %v", err)
@@ -604,13 +834,14 @@ func TestPublicHumanAttachmentCommitsBeforeDeferredDerivation(t *testing.T) {
 		t.Fatalf("create public channel: %v", err)
 	}
 	user := accountStore().findUser("aj@shareability.com")
+	grantedFile := grantTestPendingAttachment(t, kanbanApp, user, thread, ref)
 	type appendResult struct {
 		response map[string]any
 		err      error
 	}
 	result := make(chan appendResult, 1)
 	go func() {
-		response, appendErr := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "latest launch note", []scoutChatFileAttachment{{Name: "launch.png", Ref: ref}}, "")
+		response, appendErr := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "latest launch note", []scoutChatFileAttachment{{Name: "launch.png", Ref: ref, SourceID: grantedFile.SourceID, SourceRevision: grantedFile.SourceRevision}}, "")
 		result <- appendResult{response: response, err: appendErr}
 	}()
 
@@ -688,7 +919,16 @@ func TestDeferredAttachmentEnrichmentDoesNotResurrectDeletedMessage(t *testing.T
 	if err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
-	message := scoutChatMessageRecord{ID: "deferred-delete-message", Kind: "message", Role: "user", Text: "temporary", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), AuthorName: "AJ", AuthorEmail: "aj@shareability.com", Files: []scoutChatFileAttachment{{Name: "delete.png", Ref: ref, Mime: "image/png"}}}
+	user := accountStore().findUser("aj@shareability.com")
+	file := grantTestPendingAttachment(t, app, user, thread, ref)
+	file.Name = "delete.png"
+	file.Mime = "image/png"
+	reservationID := "deferred-delete-reservation"
+	meta, err := blobStatForRef(ref)
+	if err != nil || app.reservePendingAttachmentUpload(user, thread, file, meta, reservationID) != nil {
+		t.Fatalf("reserve deferred source: %v", err)
+	}
+	message := scoutChatMessageRecord{ID: "deferred-delete-message", Kind: "message", Role: "user", Text: "temporary", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), AuthorName: "AJ", AuthorEmail: "aj@shareability.com", Files: []scoutChatFileAttachment{file}, attachmentDestinationRevision: scoutChatAttachmentDestinationRevision(thread), attachmentReservationID: reservationID}
 	if _, err := app.commitScoutChatThreadMessages("aj@shareability.com", thread.ID, message); err != nil {
 		t.Fatalf("commit message: %v", err)
 	}
@@ -724,6 +964,429 @@ func TestDeferredAttachmentEnrichmentDoesNotResurrectDeletedMessage(t *testing.T
 	}
 }
 
+func TestAttachmentSourceAuthoritySurvivesRestartAndReclaimsOrphanReservation(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	user := accountStore().findUser("aj@shareability.com")
+	thread, err := app.createScoutChatThread(user.Email, user.Name, "restart", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	ref, err := putBlob(tinyPNG(t), "image/png")
+	if err != nil {
+		t.Fatalf("put source: %v", err)
+	}
+	file := grantTestPendingAttachment(t, app, user, thread, ref)
+	meta, err := blobStatForRef(ref)
+	if err != nil {
+		t.Fatalf("stat source: %v", err)
+	}
+	if err := app.reservePendingAttachmentUpload(user, thread, file, meta, "request-lost-on-restart"); err != nil {
+		t.Fatalf("reserve before restart: %v", err)
+	}
+
+	restarted := newKanbanBoardApp()
+	reloadedThread, _, err := restarted.scoutChatThreadByID(user.Email, thread.ID)
+	if err != nil {
+		t.Fatalf("reload destination after restart: %v", err)
+	}
+	if err := restarted.reservePendingAttachmentUpload(user, reloadedThread, file, meta, "request-after-restart"); err != nil {
+		t.Fatalf("orphan reservation was not safely reclaimed after restart: %v", err)
+	}
+	message := scoutChatMessageRecord{
+		ID:                            "restart-committed-message",
+		Kind:                          "message",
+		Role:                          "user",
+		Text:                          "durable source",
+		CreatedAt:                     time.Now().UTC().Format(time.RFC3339Nano),
+		AuthorEmail:                   user.Email,
+		Files:                         []scoutChatFileAttachment{file},
+		attachmentDestinationRevision: scoutChatAttachmentDestinationRevision(reloadedThread),
+		attachmentReservationID:       "request-after-restart",
+	}
+	if _, err := restarted.commitScoutChatThreadMessages(user.Email, thread.ID, message); err != nil {
+		t.Fatalf("commit after restart: %v", err)
+	}
+
+	restartedAgain := newKanbanBoardApp()
+	if !restartedAgain.committedChatAttachmentAuthorized(user.Email, thread.ID, message.ID, file) {
+		t.Fatal("committed source authority did not survive restart")
+	}
+	if err := restartedAgain.reservePendingAttachmentUpload(user, reloadedThread, file, meta, "replay-after-commit"); err == nil {
+		t.Fatal("committed source authorized a replay after restart")
+	}
+}
+
+func TestAttachmentCommitFailureReleasesReservationForRetry(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	app := newIsolatedKanbanBoardApp(t)
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	user := accountStore().findUser("aj@shareability.com")
+	thread, err := app.createScoutChatThread(user.Email, user.Name, "save failure", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	ref, err := putBlob(tinyPNG(t), "image/png")
+	if err != nil {
+		t.Fatalf("put source: %v", err)
+	}
+	file := grantTestPendingAttachment(t, app, user, thread, ref)
+	file.Name = "retry.png"
+	originalMemoryPath := app.memory.path
+	app.memory.path = t.TempDir() // rename onto a directory must fail.
+	if _, err := app.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "first try", []scoutChatFileAttachment{file}, ""); err == nil {
+		t.Fatal("save failure unexpectedly succeeded")
+	}
+	app.pendingAttachmentUploadsMu.Lock()
+	stateAfterFailure := app.pendingAttachmentUploads[file.SourceID].State
+	app.pendingAttachmentUploadsMu.Unlock()
+	if stateAfterFailure != attachmentSourcePending {
+		t.Fatalf("source state=%q after save failure, want pending for safe retry", stateAfterFailure)
+	}
+	app.memory.path = originalMemoryPath
+	retryDone := make(chan error, 1)
+	go func() {
+		_, retryErr := app.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "retry", []scoutChatFileAttachment{file}, "")
+		retryDone <- retryErr
+	}()
+	select {
+	case err := <-retryDone:
+		if err != nil {
+			t.Fatalf("retry after save failure: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("successful attachment commit deadlocked during projection/delivery")
+	}
+	app.pendingAttachmentUploadsMu.Lock()
+	stateAfterRetry := app.pendingAttachmentUploads[file.SourceID].State
+	app.pendingAttachmentUploadsMu.Unlock()
+	if stateAfterRetry != attachmentSourceCommitted {
+		t.Fatalf("source state=%q after retry, want committed", stateAfterRetry)
+	}
+}
+
+func TestAttachmentRestartReconcilesChatSavedBeforeAuthorityFinalization(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	user := accountStore().findUser("aj@shareability.com")
+	thread, err := app.createScoutChatThread(user.Email, user.Name, "ambiguous finalize", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	ref, err := putBlob(tinyPNG(t), "image/png")
+	if err != nil {
+		t.Fatalf("put source: %v", err)
+	}
+	file := grantTestPendingAttachment(t, app, user, thread, ref)
+	meta, _ := blobStatForRef(ref)
+	const reservationID = "ambiguous-finalize-reservation"
+	if err := app.reservePendingAttachmentUpload(user, thread, file, meta, reservationID); err != nil {
+		t.Fatalf("reserve source: %v", err)
+	}
+	previousWriter := attachmentSourceStoreWriter
+	failOnce := true
+	attachmentSourceStoreWriter = func(state attachmentSourceStoreState) error {
+		if failOnce {
+			failOnce = false
+			return fmt.Errorf("synthetic authority fsync failure")
+		}
+		return previousWriter(state)
+	}
+	t.Cleanup(func() { attachmentSourceStoreWriter = previousWriter })
+	message := scoutChatMessageRecord{ID: "ambiguous-finalize-message", Kind: "message", Role: "user", Text: "saved first", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), AuthorEmail: user.Email, Files: []scoutChatFileAttachment{file}, attachmentDestinationRevision: scoutChatAttachmentDestinationRevision(thread), attachmentReservationID: reservationID}
+	if _, err := app.commitScoutChatThreadMessages(user.Email, thread.ID, message); err == nil || !strings.Contains(err.Error(), "finalization is ambiguous") {
+		t.Fatalf("commit err=%v, want explicit ambiguous finalization", err)
+	}
+	stored, _, err := app.scoutChatThreadByID(user.Email, thread.ID)
+	if err != nil || scoutChatMessageIndex(stored, message.ID) < 0 {
+		t.Fatalf("chat message was not durably saved before authority failure: err=%v thread=%+v", err, stored)
+	}
+
+	attachmentSourceStoreWriter = previousWriter
+	restarted := newKanbanBoardApp()
+	if !restarted.committedChatAttachmentAuthorized(user.Email, thread.ID, message.ID, file) {
+		t.Fatal("restart did not reconcile the reserved source from the exact committed chat message")
+	}
+}
+
+func TestAttachmentEditPreservesCommittedSourceAndAddsNewAuthorizedSource(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	user := accountStore().findUser("aj@shareability.com")
+	thread, err := app.createScoutChatThread(user.Email, user.Name, "mixed edit", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	firstRef, err := putBlob(tinyPNG(t), "image/png")
+	if err != nil {
+		t.Fatalf("put first source: %v", err)
+	}
+	first := grantTestPendingAttachment(t, app, user, thread, firstRef)
+	first.Name = "first.png"
+	first.Mime = "image/png"
+	firstMeta, _ := blobStatForRef(firstRef)
+	if err := app.reservePendingAttachmentUpload(user, thread, first, firstMeta, "mixed-edit-first"); err != nil {
+		t.Fatalf("reserve first source: %v", err)
+	}
+	message := scoutChatMessageRecord{ID: "mixed-edit-message", Kind: "message", Role: "user", Text: "first", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), AuthorEmail: user.Email, Files: []scoutChatFileAttachment{first}, attachmentDestinationRevision: scoutChatAttachmentDestinationRevision(thread), attachmentReservationID: "mixed-edit-first"}
+	if _, err := app.commitScoutChatThreadMessages(user.Email, thread.ID, message); err != nil {
+		t.Fatalf("commit first source: %v", err)
+	}
+	duplicateText := "duplicate source"
+	if _, _, err := app.editScoutChatThreadMessage(context.Background(), user, thread.ID, message.ID, &duplicateText, &[]scoutChatFileAttachment{first, first}); err == nil || !strings.Contains(err.Error(), "same attachment") {
+		t.Fatalf("duplicate source edit err=%v, want duplicate attachment rejection", err)
+	}
+
+	secondBytes := tinyPNG(t)
+	secondBytes = append(secondBytes, 0) // distinct immutable digest; still valid PNG.
+	secondRef, err := putBlob(secondBytes, "image/png")
+	if err != nil {
+		t.Fatalf("put second source: %v", err)
+	}
+	second := grantTestPendingAttachment(t, app, user, thread, secondRef)
+	second.Name = "second.png"
+	second.Mime = "image/png"
+	updatedText := "two files"
+	type editResult struct {
+		message scoutChatMessageRecord
+		err     error
+	}
+	editDone := make(chan editResult, 1)
+	go func() {
+		_, editedMessage, editErr := app.editScoutChatThreadMessage(context.Background(), user, thread.ID, message.ID, &updatedText, &[]scoutChatFileAttachment{first, second})
+		editDone <- editResult{message: editedMessage, err: editErr}
+	}()
+	var edited scoutChatMessageRecord
+	select {
+	case result := <-editDone:
+		if result.err != nil {
+			t.Fatalf("mixed attachment edit: %v", result.err)
+		}
+		edited = result.message
+	case <-time.After(2 * time.Second):
+		t.Fatal("successful attachment edit deadlocked during projection/delivery")
+	}
+	if len(edited.Files) != 2 || edited.Files[0].SourceID != first.SourceID || edited.Files[1].SourceID != second.SourceID {
+		t.Fatalf("edited files=%+v, want committed first source plus newly authorized second source", edited.Files)
+	}
+	app.pendingAttachmentUploadsMu.Lock()
+	firstState := app.pendingAttachmentUploads[first.SourceID]
+	secondState := app.pendingAttachmentUploads[second.SourceID]
+	app.pendingAttachmentUploadsMu.Unlock()
+	if firstState.State != attachmentSourceCommitted || firstState.CommittedMessageID != message.ID || secondState.State != attachmentSourceCommitted || secondState.CommittedMessageID != message.ID {
+		t.Fatalf("source states after mixed edit first=%+v second=%+v", firstState, secondState)
+	}
+}
+
+func TestAttachmentBlobReadDropsBytesRevokedDuringRead(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	user := accountStore().findUser("aj@shareability.com")
+	thread, err := app.createScoutChatThread(user.Email, user.Name, "revoke read", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	ref, err := putBlob(tinyPNG(t), "image/png")
+	if err != nil {
+		t.Fatalf("put source: %v", err)
+	}
+	file := grantTestPendingAttachment(t, app, user, thread, ref)
+	meta, _ := blobStatForRef(ref)
+	const reservationID = "read-revocation"
+	if err := app.reservePendingAttachmentUpload(user, thread, file, meta, reservationID); err != nil {
+		t.Fatalf("reserve source: %v", err)
+	}
+	previousProbe := attachmentBlobReadAfterProbe
+	attachmentBlobReadAfterProbe = func(sourceID string) {
+		if sourceID == file.SourceID {
+			_ = app.revokeAttachmentSource(sourceID)
+		}
+	}
+	t.Cleanup(func() { attachmentBlobReadAfterProbe = previousProbe })
+	if blocks := app.attachmentContentBlocksAuthorized(user, thread, []scoutChatFileAttachment{file}, reservationID); len(blocks) != 0 {
+		t.Fatalf("revoked source produced %d model blocks", len(blocks))
+	}
+}
+
+func TestAttachmentDerivedTextIsDiscardedWhenRevokedDuringModelRead(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	user := accountStore().findUser("aj@shareability.com")
+	thread, err := app.createScoutChatThread(user.Email, user.Name, "revoke model", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	ref, err := putBlob(tinyPNG(t), "image/png")
+	if err != nil {
+		t.Fatalf("put source: %v", err)
+	}
+	file := grantTestPendingAttachment(t, app, user, thread, ref)
+	file.Name = "private.png"
+	meta, _ := blobStatForRef(ref)
+	const reservationID = "model-revocation"
+	if err := app.reservePendingAttachmentUpload(user, thread, file, meta, reservationID); err != nil {
+		t.Fatalf("reserve source: %v", err)
+	}
+	blocks := app.attachmentContentBlocksAuthorized(user, thread, []scoutChatFileAttachment{file}, reservationID)
+	if len(blocks) != 1 {
+		t.Fatalf("authorized blocks=%d, want 1", len(blocks))
+	}
+	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
+		if err := app.revokeAttachmentSource(file.SourceID); err != nil {
+			t.Errorf("revoke source during provider call: %v", err)
+		}
+		return "confidential derived text", nil
+	})
+	derived := app.deriveAttachmentTextAuthorized(context.Background(), user, thread, []scoutChatFileAttachment{file}, reservationID, blocks)
+	if len(derived) != 1 || strings.TrimSpace(derived[0].Text) != "" {
+		t.Fatalf("revoked model output persisted into attachment: %+v", derived)
+	}
+}
+
+func TestCommittedAttachmentProjectionFailsClosedAcrossReaderSurfaces(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	owner := accountStore().findUser("aj@shareability.com")
+	viewer := accountStore().findUser("tim@shareability.com")
+	if owner == nil || viewer == nil {
+		t.Fatal("seed users missing")
+	}
+	thread, err := app.createScoutChatThread(owner.Email, owner.Name, "projection", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	ref, err := putBlob(tinyPNG(t), "image/png")
+	if err != nil {
+		t.Fatalf("put source: %v", err)
+	}
+	const reservationID = "projection-reservation"
+	file := reserveTestAttachment(t, app, owner, thread, scoutChatFileAttachment{
+		Name: "PRIVATE-ATTACHMENT-CANARY.png",
+		Kind: "png",
+		Ref:  ref,
+	}, reservationID)
+	file.Text = "PRIVATE-DERIVED-TEXT-CANARY"
+	message := scoutChatMessageRecord{
+		ID:                            "projection-message",
+		Kind:                          "message",
+		Role:                          "user",
+		Text:                          "ordinary chat text",
+		CreatedAt:                     time.Now().UTC().Format(time.RFC3339Nano),
+		AuthorName:                    owner.Name,
+		AuthorEmail:                   owner.Email,
+		Files:                         []scoutChatFileAttachment{file},
+		attachmentDestinationRevision: scoutChatAttachmentDestinationRevision(thread),
+		attachmentReservationID:       reservationID,
+	}
+	if _, err := app.commitScoutChatThreadMessages(owner.Email, thread.ID, message); err != nil {
+		t.Fatalf("commit attachment: %v", err)
+	}
+	thread, _, err = app.scoutChatThreadByID(viewer.Email, thread.ID)
+	if err != nil {
+		t.Fatalf("load public thread: %v", err)
+	}
+	if got := app.projectScoutChatThreadForViewer(viewer.Email, thread); len(got.Messages) != 1 || len(got.Messages[0].Files) != 1 {
+		t.Fatalf("healthy projection=%+v, want visible committed attachment", got)
+	}
+
+	assertNoAttachmentLeak := func(label string, value any) {
+		t.Helper()
+		body, marshalErr := json.Marshal(value)
+		if marshalErr != nil {
+			t.Fatalf("%s marshal: %v", label, marshalErr)
+		}
+		for _, secret := range []string{"PRIVATE-ATTACHMENT-CANARY", "PRIVATE-DERIVED-TEXT-CANARY", ref, "image/png"} {
+			if strings.Contains(string(body), secret) {
+				t.Fatalf("%s leaked %q: %s", label, secret, body)
+			}
+		}
+	}
+	assertClosed := func(label string) {
+		t.Helper()
+		projected := app.projectScoutChatThreadForViewer(viewer.Email, thread)
+		if len(projected.Messages) != 1 || len(projected.Messages[0].Files) != 0 {
+			t.Fatalf("%s thread files=%+v, want none", label, projected.Messages)
+		}
+		assertNoAttachmentLeak(label+" thread", projected)
+		files := app.fileRecordsFromThread(viewer.Email, thread)
+		if len(files) != 0 {
+			t.Fatalf("%s Files rows=%+v, want none", label, files)
+		}
+		assertNoAttachmentLeak(label+" Files", files)
+		deposits := threadDeposits(projected.Messages)
+		if len(deposits.Files) != 0 {
+			t.Fatalf("%s deposits=%+v, want no attachment deposit", label, deposits)
+		}
+		assertNoAttachmentLeak(label+" deposits", deposits)
+		history := app.scoutChatHistoryForViewer(viewer.Email, thread)
+		assertNoAttachmentLeak(label+" model history", history)
+		payload := app.scoutChatThreadUpdatePayload(viewer.Email, thread, thread.Messages[0])
+		assertNoAttachmentLeak(label+" event", payload)
+	}
+
+	app.pendingAttachmentUploadsMu.Lock()
+	app.attachmentSourceStoreErr = fmt.Errorf("attachment authority test outage")
+	app.pendingAttachmentUploadsMu.Unlock()
+	assertClosed("unhealthy authority")
+	app.pendingAttachmentUploadsMu.Lock()
+	app.attachmentSourceStoreErr = nil
+	app.pendingAttachmentUploadsMu.Unlock()
+	if err := app.revokeAttachmentSource(file.SourceID); err != nil {
+		t.Fatalf("revoke source: %v", err)
+	}
+	assertClosed("revoked authority")
+}
+
+func TestArtifactBlobDownloadReauthorizesAfterRead(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	app := newIsolatedKanbanBoardApp(t)
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+	user := accountStore().findUser("aj@shareability.com")
+	thread, err := app.createScoutChatThread(user.Email, user.Name, "download race", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	ref, err := putBlob(tinyPNG(t), "image/png")
+	if err != nil {
+		t.Fatalf("put source: %v", err)
+	}
+	file := grantTestPendingAttachment(t, app, user, thread, ref)
+	meta, _ := blobStatForRef(ref)
+	const reservationID = "download-race-reservation"
+	if err := app.reservePendingAttachmentUpload(user, thread, file, meta, reservationID); err != nil {
+		t.Fatalf("reserve source: %v", err)
+	}
+	message := scoutChatMessageRecord{ID: "download-race-message", Kind: "message", Role: "user", Text: "delete me", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), AuthorEmail: user.Email, Files: []scoutChatFileAttachment{file}, attachmentDestinationRevision: scoutChatAttachmentDestinationRevision(thread), attachmentReservationID: reservationID}
+	if _, err := app.commitScoutChatThreadMessages(user.Email, thread.ID, message); err != nil {
+		t.Fatalf("commit attachment: %v", err)
+	}
+	previousProbe := artifactBlobAfterReadProbe
+	artifactBlobAfterReadProbe = func(string) {
+		_, _ = app.deleteScoutChatThreadMessage(user.Email, thread.ID, message.ID)
+	}
+	t.Cleanup(func() { artifactBlobAfterReadProbe = previousProbe })
+	cookies := loginAs(t, user.Email, "B0NFIRE!")
+	request := httptest.NewRequest(http.MethodGet, "/artifacts/blob?ref="+ref, nil)
+	for _, cookie := range cookies {
+		request.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+	artifactBlobHandler(recorder, request)
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("download status=%d body=%q, want 404 after authority was revoked during read", recorder.Code, recorder.Body.String())
+	}
+}
+
 // The admin GC sweep must treat chat-attachment refs as live: a thread's
 // inline image survives while a true orphan is deleted.
 func TestSweepUnreferencedBlobsKeepsChatAttachmentRefs(t *testing.T) {
@@ -743,14 +1406,17 @@ func TestSweepUnreferencedBlobsKeepsChatAttachmentRefs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
+	user := accountStore().findUser("aj@shareability.com")
+	reservationID := "sweep-chat-attachment"
+	chatFile := reserveTestAttachment(t, app, user, thread, scoutChatFileAttachment{Name: "deck.png", Ref: chatRef}, reservationID)
 	if _, err := app.commitScoutChatThreadMessages("aj@shareability.com", thread.ID, scoutChatMessageRecord{
-		ID:   "scout-chat-message-1",
-		Kind: "message",
-		Role: "user",
-		Text: "the deck",
-		Files: []scoutChatFileAttachment{
-			{Name: "deck.png", Ref: chatRef, Mime: "image/png"},
-		},
+		ID:                            "scout-chat-message-1",
+		Kind:                          "message",
+		Role:                          "user",
+		Text:                          "the deck",
+		Files:                         []scoutChatFileAttachment{chatFile},
+		attachmentDestinationRevision: scoutChatAttachmentDestinationRevision(thread),
+		attachmentReservationID:       reservationID,
 	}); err != nil {
 		t.Fatalf("commit message: %v", err)
 	}

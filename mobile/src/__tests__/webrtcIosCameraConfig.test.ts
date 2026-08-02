@@ -190,6 +190,16 @@ describe('iOS WebRTC camera prebuild patch', () => {
       'initial framing must settle before the camera is offered to the SFU',
     );
     assert.match(
+      roomSource,
+      /setWideUprightFramingEnabled\([\s\S]*mutationFailed \|\|= !result\.ok;/,
+      'native ok:false must invalidate pre-signaling framing admission',
+    );
+    assert.match(
+      joinSource,
+      /framingAdmission === 'unsafe'[\s\S]*requestedVideo\.current = false;[\s\S]*releaseUnsafeCameraTracks\(stream\);[\s\S]*connectSocket\(\);/,
+      'a failed or geometrically invalid adaptive camera must be removed before signaling',
+    );
+    assert.match(
       joinSource,
       /catch \(error\) \{[\s\S]*requestedVideo\.current = false;[\s\S]*mediaDevices\.getUserMedia\(\{ audio: true, video: false \}\)/,
       'camera acquisition failure must fall back to a camera-off room join',
@@ -200,7 +210,7 @@ describe('iOS WebRTC camera prebuild patch', () => {
     );
     assert.match(
       roomScreenSource,
-      /accessibilityLabel="Join room with camera and microphone on"[\s\S]*onPress=\{\(\) => joinRoom\(true, true\)\}/,
+      /accessibilityLabel="Join room with camera on and microphone off"[\s\S]*onPress=\{\(\) => joinRoom\(true, false\)\}/,
     );
     assert.match(
       roomSource,

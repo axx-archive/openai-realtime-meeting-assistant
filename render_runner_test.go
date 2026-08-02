@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // writeStubRenderBinary creates a real executable file so resolveRenderBinary
@@ -25,6 +28,19 @@ func writeStubRenderBinary(t *testing.T, dir string, name string) string {
 		t.Fatalf("write stub binary %s: %v", name, err)
 	}
 	return path
+}
+
+func writeHealthyRenderRunnerHeartbeatForTest(t *testing.T, runnerID string) error {
+	t.Helper()
+	binDir := t.TempDir()
+	t.Setenv("RENDER_CHROMIUM_BIN", writeStubRenderBinary(t, binDir, "chromium-heartbeat-stub"))
+	t.Setenv("RENDER_PDFTOPPM_BIN", writeStubRenderBinary(t, binDir, "pdftoppm-heartbeat-stub"))
+	return writeRenderRunnerHeartbeat(runnerID, renderRunnerCanaryResult{
+		OK:        true,
+		CheckedAt: time.Now().UTC(),
+		PageCount: 1,
+		PDFBytes:  128,
+	})
 }
 
 func TestRenderRunnerQueueClaimsLexicallyFirstAndCompletes(t *testing.T) {
@@ -172,25 +188,40 @@ func TestExecuteRenderExportPDFDeckPinsFlattenLawCommands(t *testing.T) {
 	if print.Bin != chromium {
 		t.Fatalf("print bin=%q, want the chromium stub", print.Bin)
 	}
-	// The flatten law's print arguments, pinned exactly and in order — the
-	// blackholed proxy included: untrusted HTML prints with zero egress.
-	layeredPath := strings.TrimPrefix(print.Args[6], "--print-to-pdf=")
-	htmlPath := strings.TrimPrefix(print.Args[7], "file://")
+	// The flatten law's print arguments are pinned in order. Untrusted HTML is
+	// served from an ephemeral loopback HTTP origin (never file://), Chrome's
+	// OS sandbox stays enabled, and all non-loopback traffic is blackholed.
+	layeredPath := strings.TrimPrefix(print.Args[len(print.Args)-2], "--print-to-pdf=")
+	printURL := print.Args[len(print.Args)-1]
 	wantPrintArgs := []string{
 		"--headless=new",
-		"--no-sandbox",
+		"--disable-setuid-sandbox",
 		"--disable-gpu",
+		"--disable-background-networking",
+		"--disable-component-update",
+		"--disable-default-apps",
+		"--disable-extensions",
+		"--disable-sync",
+		"--metrics-recording-only",
+		"--no-first-run",
 		"--proxy-server=127.0.0.1:9",
+		"--proxy-bypass-list=127.0.0.1",
+		"--user-data-dir=" + filepath.Join(print.Dir, "chrome-profile"),
 		"--no-pdf-header-footer",
 		"--virtual-time-budget=15000",
 		"--print-to-pdf=" + layeredPath,
-		"file://" + htmlPath,
+		printURL,
 	}
 	if !reflect.DeepEqual(print.Args, wantPrintArgs) {
 		t.Fatalf("chromium args=%v, want %v", print.Args, wantPrintArgs)
 	}
-	if filepath.Base(layeredPath) != "layered.pdf" || filepath.Base(htmlPath) != "artifact.html" {
-		t.Fatalf("layered=%q html=%q, want layered.pdf and artifact.html", layeredPath, htmlPath)
+	if filepath.Base(layeredPath) != "layered.pdf" || !strings.HasPrefix(printURL, "http://127.0.0.1:") {
+		t.Fatalf("layered=%q printURL=%q, want layered.pdf and an isolated loopback origin", layeredPath, printURL)
+	}
+	for _, arg := range print.Args {
+		if arg == "--no-sandbox" || strings.HasPrefix(arg, "file://") {
+			t.Fatalf("unsafe Chromium argument survived hardening: %q", arg)
+		}
 	}
 	rasterize := (*invocations)[1]
 	if rasterize.Bin != pdftoppm {
@@ -229,10 +260,65 @@ func TestExecuteRenderExportPDFDeckPinsFlattenLawCommands(t *testing.T) {
 	}
 }
 
-// The printed page is untrusted HTML with --no-sandbox, so the injected meta
-// CSP is the render route's zero-network policy: default-src 'none', inline
-// style/script only, data: media — and it must land inside the document head
-// wherever the markup allows.
+func TestRunRenderRunnerCanaryExercisesExactPrintAndRasterPipeline(t *testing.T) {
+	binDir := t.TempDir()
+	chromium := writeStubRenderBinary(t, binDir, "chromium-canary-stub")
+	pdftoppm := writeStubRenderBinary(t, binDir, "pdftoppm-canary-stub")
+	invocations := fakeRenderExec(t, []byte("%PDF-1.7 canary\n%%EOF"), 1)
+
+	result, err := runRenderRunnerCanary(context.Background(), renderExecConfig{
+		ChromiumBin: chromium, PdftoppmBin: pdftoppm, Timeout: time.Minute,
+		MaxPDFBytes: defaultRenderMaxPDFBytes, MaxHTMLBytes: defaultRenderMaxHTMLBytes,
+	})
+	if err != nil || !result.OK || result.PageCount != 1 || result.PDFBytes < 5 || result.ErrorCode != "" {
+		t.Fatalf("canary=%+v err=%v, want a one-page exact-pipeline success", result, err)
+	}
+	if len(*invocations) != 2 || (*invocations)[0].Bin != chromium || (*invocations)[1].Bin != pdftoppm {
+		t.Fatalf("invocations=%+v, want Chromium then pdftoppm", *invocations)
+	}
+	for _, arg := range (*invocations)[0].Args {
+		if arg == "--no-sandbox" || strings.HasPrefix(arg, "file://") {
+			t.Fatalf("canary bypassed production sandbox/origin contract with %q", arg)
+		}
+	}
+}
+
+func TestRunRenderRunnerCanaryFailureCannotProduceHealthyHeartbeat(t *testing.T) {
+	binDir := t.TempDir()
+	chromium := writeStubRenderBinary(t, binDir, "chromium-canary-fail-stub")
+	pdftoppm := writeStubRenderBinary(t, binDir, "pdftoppm-canary-fail-stub")
+	t.Setenv("RENDER_CHROMIUM_BIN", chromium)
+	t.Setenv("RENDER_PDFTOPPM_BIN", pdftoppm)
+	t.Setenv("BONFIRE_RENDER_HEARTBEAT_PATH", filepath.Join(t.TempDir(), "heartbeat.json"))
+	original := runRenderExecCommand
+	t.Cleanup(func() { runRenderExecCommand = original })
+	runRenderExecCommand = func(_ context.Context, _ string, args []string, _ string) (string, string, error) {
+		for _, arg := range args {
+			if strings.HasPrefix(arg, "--print-to-pdf=") {
+				return "", "sandbox unavailable", errors.New("exit status 1")
+			}
+		}
+		return "", "", nil
+	}
+
+	canary, err := runRenderRunnerCanary(context.Background(), renderExecConfig{
+		ChromiumBin: chromium, PdftoppmBin: pdftoppm, Timeout: time.Minute,
+	})
+	if err == nil || canary.OK || canary.ErrorCode != "chromium_print_failed" {
+		t.Fatalf("canary=%+v err=%v, want classified print failure", canary, err)
+	}
+	if err := writeRenderRunnerHeartbeat("failed-canary", canary); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := readinessRenderRunnerSnapshot()
+	if snapshot["heartbeatOK"] != false || snapshot["canaryOK"] != false || snapshot["canaryErrorCode"] != "chromium_print_failed" {
+		t.Fatalf("snapshot=%v, failed canary must fail readiness closed", snapshot)
+	}
+}
+
+// The injected meta CSP is defense in depth for the response-header sandbox:
+// default-src 'none', inline style/script only, data: media — and it must land
+// inside the document head wherever the markup allows.
 func TestInjectRenderPrintCSPPinsZeroNetworkPolicy(t *testing.T) {
 	meta := `<meta http-equiv="Content-Security-Policy" content="` + renderPrintCSP + `">`
 	for _, want := range []string{"default-src 'none'", "script-src 'unsafe-inline'", "img-src data:"} {
@@ -300,17 +386,25 @@ func TestExecuteRenderExportPDFInjectsDeckPaginationBeforePrint(t *testing.T) {
 	chromium := writeStubRenderBinary(t, binDir, "chromium-stub")
 	pdftoppm := writeStubRenderBinary(t, binDir, "pdftoppm-stub")
 
-	// Custom fake: capture the exact HTML handed to chromium via file://.
+	// Custom fake: capture the exact HTML handed to chromium via the ephemeral
+	// loopback origin.
 	var printedHTML string
 	original := runRenderExecCommand
 	t.Cleanup(func() { runRenderExecCommand = original })
 	runRenderExecCommand = func(_ context.Context, _ string, args []string, _ string) (string, string, error) {
 		for _, arg := range args {
 			if strings.HasPrefix(arg, "--print-to-pdf=") {
-				htmlPath := strings.TrimPrefix(args[len(args)-1], "file://")
-				data, err := os.ReadFile(htmlPath)
+				response, err := http.Get(args[len(args)-1])
+				if err != nil {
+					t.Fatalf("fetch printed html: %v", err)
+				}
+				defer response.Body.Close()
+				data, err := io.ReadAll(response.Body)
 				if err != nil {
 					t.Fatalf("read printed html: %v", err)
+				}
+				if !strings.Contains(response.Header.Get("Content-Security-Policy"), "sandbox allow-scripts") {
+					t.Fatalf("print response missing header sandbox: %q", response.Header.Get("Content-Security-Policy"))
 				}
 				printedHTML = string(data)
 				if err := os.WriteFile(strings.TrimPrefix(arg, "--print-to-pdf="), []byte("%PDF-1.7 layered\n%%EOF"), 0o644); err != nil {
@@ -594,7 +688,7 @@ func TestReadinessRenderRunnerSnapshotSurfacesAbsence(t *testing.T) {
 	}
 
 	// After a heartbeat the snapshot reports fresh + toolchain availability.
-	if err := writeRenderRunnerHeartbeat("test-runner"); err != nil {
+	if err := writeHealthyRenderRunnerHeartbeatForTest(t, "test-runner"); err != nil {
 		t.Fatalf("writeRenderRunnerHeartbeat: %v", err)
 	}
 	snapshot = readinessRenderRunnerSnapshot()
@@ -603,6 +697,9 @@ func TestReadinessRenderRunnerSnapshotSurfacesAbsence(t *testing.T) {
 	}
 	if _, ok := snapshot["chromiumOK"]; !ok {
 		t.Fatalf("snapshot=%v, want chromiumOK toolchain signal", snapshot)
+	}
+	if snapshot["canaryOK"] != true || snapshot["canaryPageCount"] != 1 {
+		t.Fatalf("snapshot=%v, want a successful exact-pipeline canary", snapshot)
 	}
 }
 

@@ -164,7 +164,7 @@ func TestResearchReportPrintHTMLMastheadSectionsAndFooter(t *testing.T) {
 func TestArtifactExportPDFMarkdownRoutesToPaperDeckUnchanged(t *testing.T) {
 	_, member := shareLinkTestEnv(t)
 	queueDir := setupRenderSidecarEnv(t)
-	if err := writeRenderRunnerHeartbeat("test-runner"); err != nil {
+	if err := writeHealthyRenderRunnerHeartbeatForTest(t, "test-runner"); err != nil {
 		t.Fatalf("write heartbeat: %v", err)
 	}
 

@@ -97,6 +97,21 @@ func TestIndexThreadNavRendersBothLists(t *testing.T) {
 	}
 }
 
+func TestIndexPrivateEmptyRowWorksWhileAChannelIsSelected(t *testing.T) {
+	html := readIndexForThreadNavSplit(t)
+	for _, want := range []string{
+		"const hasPrivateThread = scoutChatThreads.some(thread => !chatThreadIsChannel(thread))",
+		"if (authedUser && !hasPrivateThread)",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("private empty-state row is missing %q", want)
+		}
+	}
+	if strings.Contains(html, "if (authedUser && !selectedScoutChatThread())") {
+		t.Fatal("a selected public channel must not block creation of the first private Scout thread")
+	}
+}
+
 // The composer destination guard exists, is synced when the active thread is
 // (re)rendered, and names the public audience hot vs the private audience calm.
 func TestIndexComposerDestinationGuard(t *testing.T) {

@@ -2,22 +2,69 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
+
+var errTestAIProviderNetwork = errors.New("external AI-provider network is disabled in Go tests")
+
+type loopbackOnlyAIProviderTestTransport struct {
+	base http.RoundTripper
+}
+
+func (transport loopbackOnlyAIProviderTestTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	if request == nil || request.URL == nil || !testLoopbackHost(request.URL.Hostname()) {
+		target := "<nil>"
+		if request != nil && request.URL != nil {
+			target = request.URL.Scheme + "://" + request.URL.Host
+		}
+		return nil, fmt.Errorf("%w: %s", errTestAIProviderNetwork, target)
+	}
+	return transport.base.RoundTrip(request)
+}
+
+func testLoopbackHost(host string) bool {
+	host = strings.TrimSpace(strings.Trim(host, "[]"))
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func testLoopbackAddress(address string) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(address))
+	if err != nil {
+		host = strings.TrimSpace(address)
+	}
+	return testLoopbackHost(host)
+}
 
 // TestMain defaults USAGE_LEDGER_PATH to a per-run temp directory so tests
 // that exercise recording seams WITHOUT explicit isolation (raw
 // newKanbanBoardApp constructions canonicalizing local board text, direct
 // meetingMemoryStore transcript appends, async embedding maintainers) never
-// write to the repo's data/usage/. Tests that assert ledger contents keep
-// their own per-test isolation via ledgerTestDir/t.Setenv, which overrides
-// this default and restores it afterwards.
+// write to the repo's data/usage/. It also replaces the shared AI-provider
+// HTTP/WebSocket seams with loopback-only delegates. Tests routinely use
+// literal fake API keys to exercise configured code paths; a missed responder
+// seam must fail locally and immediately, never reach OpenAI, Anthropic, or
+// fiscal.ai. This is deliberately NOT a process-wide external-network sandbox:
+// link previews, notifications, SMTP, and other non-AI integrations own their
+// own clients and test seams. Tests that assert ledger contents keep their own
+// per-test isolation via ledgerTestDir/t.Setenv, which overrides this default
+// and restores it afterwards.
 func TestMain(m *testing.M) {
 	os.Exit(func() int {
 		if strings.TrimSpace(os.Getenv("USAGE_LEDGER_PATH")) == "" {
@@ -26,8 +73,65 @@ func TestMain(m *testing.M) {
 				defer os.RemoveAll(dir)
 			}
 		}
+
+		restoreProviderHTTP := sharedAIProviderHTTPTransport.swap(loopbackOnlyAIProviderTestTransport{base: http.DefaultTransport})
+		defer restoreProviderHTTP()
+
+		guardedWebSocketDialer := *websocket.DefaultDialer
+		previousNetDialContext := guardedWebSocketDialer.NetDialContext
+		guardedWebSocketDialer.NetDialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+			if !testLoopbackAddress(address) {
+				return nil, fmt.Errorf("%w: %s", errTestAIProviderNetwork, address)
+			}
+			if previousNetDialContext != nil {
+				return previousNetDialContext(ctx, network, address)
+			}
+			return (&net.Dialer{}).DialContext(ctx, network, address)
+		}
+		restoreProviderWebSocket := swapAIProviderWebSocketDialer(&guardedWebSocketDialer)
+		defer restoreProviderWebSocket()
+
 		return m.Run()
 	}())
+}
+
+func TestSharedAIProviderSeamsDenyNonLoopback(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		client *http.Client
+		url    string
+	}{
+		{name: "openai-responses", client: aiProviderHTTPClient(45 * time.Second), url: "https://api.openai.com/v1/responses"},
+		{name: "openai-realtime-http", client: realtimeHTTPClient, url: "https://api.openai.com/v1/realtime/calls"},
+		{name: "openai-embeddings", client: aiProviderHTTPClient(time.Second), url: "https://api.openai.com/v1/embeddings"},
+		{name: "openai-images", client: aiProviderHTTPClient(120 * time.Second), url: "https://api.openai.com/v1/images/generations"},
+		{name: "openai-dictation", client: dictationHTTPClient, url: "https://api.openai.com/v1/audio/transcriptions"},
+		{name: "anthropic-messages", client: aiProviderHTTPClient(0), url: "https://api.anthropic.com/v1/messages"},
+		{name: "fiscal-mcp", client: aiProviderHTTPClient(fiscalRequestTimeout), url: "https://api.fiscal.ai/mcp"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request, err := http.NewRequest(http.MethodPost, test.url, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = test.client.Do(request)
+			if !errors.Is(err, errTestAIProviderNetwork) {
+				t.Fatalf("external provider request error=%v, want the shared AI-provider network denial", err)
+			}
+		})
+	}
+
+	connection, response, err := aiProviderRealtimeWebSocketDialer().Dial("wss://api.openai.com/v1/realtime", nil)
+	if connection != nil {
+		connection.Close()
+		t.Fatal("external provider WebSocket unexpectedly connected")
+	}
+	if response != nil {
+		response.Body.Close()
+	}
+	if !errors.Is(err, errTestAIProviderNetwork) {
+		t.Fatalf("external provider WebSocket error=%v, want the shared AI-provider network denial", err)
+	}
 }
 
 // ledgerTestDir points the ledger at a temp dir and returns it. Tests always

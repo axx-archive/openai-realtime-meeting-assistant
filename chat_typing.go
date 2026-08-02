@@ -30,3 +30,21 @@ func scoutChatTypingEventPayload(app *kanbanBoardApp, sessionUser *userAccount, 
 		"typing":        typing,
 	}, nil
 }
+
+func deliverScoutChatTypingEvent(app *kanbanBoardApp, sessionUser *userAccount, threadID string, payload map[string]any) error {
+	if app == nil || sessionUser == nil || payload == nil {
+		return fmt.Errorf("typing is unavailable")
+	}
+	thread, _, err := app.scoutChatThreadByID(sessionUser.Email, strings.TrimSpace(threadID))
+	if err != nil || scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic || thread.ArchivedAt != "" {
+		return fmt.Errorf("chat thread is unavailable")
+	}
+	if scoutChatThreadIsOrganizationPublic(thread) {
+		broadcastSignedInKanbanEvent("chat_typing", payload)
+		return nil
+	}
+	for _, member := range scoutChatThreadMemberEmails(thread) {
+		sendKanbanEventToUser(member, "chat_typing", payload)
+	}
+	return nil
+}

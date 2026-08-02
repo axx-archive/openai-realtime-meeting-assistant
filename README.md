@@ -177,11 +177,12 @@ Without a working AI provider, the browser and media room still load, but AI-bac
 | `OPENAI_API_KEY` | Realtime, transcription, embeddings, image, and OpenAI text seats |
 | `OPENAI_REALTIME_MODEL` | Shared-room Realtime model; defaults to the model configured in code |
 | `OPENAI_TRANSCRIPT_MODEL` | Dedicated transcript-lane override |
+| `OPENAI_DICTATION_TRANSCRIPT_MODEL` | Separately qualified composer-dictation override; unset inherits the transcript lane |
 | `OPENAI_BRAIN_MODEL` | Ambient extraction and company-memory model |
 | `ANTHROPIC_API_KEY` | Enables Anthropic-backed orchestration and review seats |
 | `GIPHY_API_KEY` | Enables authenticated chat GIF search and trending results; the key stays server-side |
-| `BONFIRE_AGENT_THREAD_WORKER` | Selects structured text output or sidecar Codex execution |
-| `BONFIRE_CODEX_RUNNER_MODE` | Sidecar queue or local development execution |
+| `BONFIRE_AGENT_THREAD_WORKER` | Selects the structured text worker; `codex_exec` is not supported by the production-style Compose candidate |
+| `BONFIRE_CODEX_RUNNER_MODE` | Legacy development-only runner mode; no production Compose executor is installed |
 | `MEETING_ROOM_MAX_PARTICIPANTS` | Room capacity; defaults to 10 |
 | `MEETING_ALLOWED_ORIGINS` | Allowed browser origins for WebSocket access |
 | `MEETING_STUN_URLS` / `MEETING_TURN_URLS` | ICE connectivity for restrictive networks |
@@ -190,7 +191,7 @@ Without a working AI provider, the browser and media room still load, but AI-bac
 | `USAGE_LEDGER_DISABLED` | Disables usage and evaluation recording |
 | `BONFIRE_PUBLIC_URL` | Canonical production URL for secure links |
 
-Additional model-seat and runner controls are documented alongside their implementations in `usage_ledger.go`, `codex_runner.go`, `agent_runner_anthropic.go`, and `kanban.go`. Operational activation guidance lives in [docs/ops3-fable-activation.md](docs/ops3-fable-activation.md).
+Additional model-seat and runner controls are documented alongside their implementations in `usage_ledger.go`, `codex_runner.go`, `agent_runner_anthropic.go`, and `kanban.go`. The Codex worker remains disabled pending the external isolation receipts in [the E9 operations runbook](docs/e9-operations-runbook.md#worker-isolation-boundary).
 
 ## Development and verification
 

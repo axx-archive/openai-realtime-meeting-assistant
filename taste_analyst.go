@@ -97,6 +97,8 @@ func tasteAnalystAgent() ambientAgentConfig {
 		defaultMaxBatch:   defaultTasteAnalystMaxBatch,
 		inputKind:         meetingMemoryKindSignal,
 		artifactKind:      meetingMemoryKindOSArtifact,
+		healthSuccessAt:   tasteAnalystArtifactSuccessAt,
+		healthWorkDue:     tasteAnalystWorkDue,
 		cursorMetadataKey: tasteAnalystCursorKey,
 		requestTimeout:    tasteAnalystRequestTimeout,
 		// produce is unused: cursors are per-user on each living profile (which
@@ -105,6 +107,50 @@ func tasteAnalystAgent() ambientAgentConfig {
 		// backfillEnv is deliberately absent: signals exist ONLY to be
 		// distilled, so the first pass always reads the whole waiting history.
 	}
+}
+
+func tasteAnalystWorkDue(app *kanbanBoardApp, now time.Time) bool {
+	if app == nil || app.memory == nil {
+		return false
+	}
+	agent := tasteAnalystAgent()
+	for _, userName := range meetingParticipantNames {
+		profile, hasProfile := app.tasteProfileForUser(userName)
+		cursor := ""
+		distilledAt := time.Time{}
+		if hasProfile {
+			cursor = strings.TrimSpace(profile.Metadata[tasteAnalystCursorKey])
+			distilledAt, _ = time.Parse(time.RFC3339Nano, strings.TrimSpace(profile.Metadata[tasteProfileDistilledAtKey]))
+		}
+		window := app.memory.unconsumedSignalsForActor(userName, cursor, agent.maxBatch())
+		oldest := time.Time{}
+		if len(window) > 0 {
+			oldest = window[0].CreatedAt
+		}
+		if tasteAnalystShouldRun(len(window), agent.minBatch(), distilledAt, oldest, now) {
+			return true
+		}
+	}
+	return false
+}
+
+// tasteAnalystArtifactSuccessAt recognizes only the profile shape this worker
+// writes. os_artifact is shared by many workflows, so kind alone is not health
+// evidence for the Taste Analyst. distilledAt is written only after an
+// evidence-cited profile has been persisted.
+func tasteAnalystArtifactSuccessAt(entry meetingMemoryEntry) (time.Time, bool) {
+	if entry.Kind != meetingMemoryKindOSArtifact || entry.Metadata[tasteProfileArtifactTypeKey] != tasteProfileArtifactType {
+		return time.Time{}, false
+	}
+	userName := strings.TrimSpace(entry.Metadata[tasteProfileUserKey])
+	if userName == "" || entry.Metadata["title"] != tasteProfileTitle(userName) {
+		return time.Time{}, false
+	}
+	at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(entry.Metadata[tasteProfileDistilledAtKey]))
+	if err != nil || at.IsZero() {
+		return time.Time{}, false
+	}
+	return at.UTC(), true
 }
 
 // ensureTasteAnalystStarted is the registration seam called from
@@ -140,24 +186,7 @@ func (app *kanbanBoardApp) startTasteAnalystWorker(apiKey string) {
 
 	cancel := make(chan struct{})
 	done := make(chan struct{})
-
-	app.mu.Lock()
-	if app.agentCancels == nil {
-		app.agentCancels = map[string]chan struct{}{}
-		app.agentDones = map[string]chan struct{}{}
-	}
-	oldCancel := app.agentCancels[agent.name]
-	oldDone := app.agentDones[agent.name]
-	app.agentCancels[agent.name] = cancel
-	app.agentDones[agent.name] = done
-	app.mu.Unlock()
-
-	if oldCancel != nil {
-		close(oldCancel)
-		if oldDone != nil {
-			<-oldDone
-		}
-	}
+	app.replaceSpecialtyAgentSupervisor(agent, cancel, done, nil)
 
 	go app.runTasteAnalystLoop(agent, apiKey, interval, cancel, done)
 }
@@ -171,11 +200,28 @@ func (app *kanbanBoardApp) runTasteAnalystLoop(agent ambientAgentConfig, apiKey 
 	for {
 		select {
 		case <-ticker.C:
+			headID := agent.name + ":provider-window"
+			if proceed, _ := app.ambientAgentAttemptBudget(agent, headID, officeRoomID); !proceed {
+				continue
+			}
+			if !tasteAnalystWorkDue(app, time.Now().UTC()) {
+				app.recordSpecialtyCapabilityCompletion(agent, time.Now().UTC(), false)
+				continue
+			}
+			if err := app.persistAmbientHeldWindow(agent, headID, officeRoomID); err != nil {
+				app.recordAmbientAgentCheckpointFailure(agent, headID, officeRoomID, err)
+				continue
+			}
 			// No tick-wide deadline here: runTasteAnalystOnce derives a FRESH
 			// per-user timeout for each roster pass, so one slow distillation
 			// can never exhaust a shared budget and starve the trailing users.
-			if err := app.runTasteAnalystOnce(context.Background(), apiKey, nil); err != nil {
+			persisted, err := app.runTasteAnalystOnceResult(context.Background(), apiKey, nil)
+			if err != nil {
 				log.Errorf("%s worker failed: %v", agent.name, err)
+				recordCapabilityFailure(agent.name, time.Now().UTC(), err)
+				app.recordAmbientAgentHoldFailure(agent, headID, officeRoomID)
+			} else {
+				app.recordSpecialtyCapabilityCompletion(agent, time.Now().UTC(), persisted)
 			}
 		case <-cancel:
 			return
@@ -187,8 +233,13 @@ func (app *kanbanBoardApp) runTasteAnalystLoop(agent ambientAgentConfig, apiKey 
 // serialized by the per-agent run-lock so overlapping ticks never consume the
 // same window twice. One user's failure never starves the rest of the roster.
 func (app *kanbanBoardApp) runTasteAnalystOnce(ctx context.Context, apiKey string, responder anthropicTextResponder) error {
+	_, err := app.runTasteAnalystOnceResult(ctx, apiKey, responder)
+	return err
+}
+
+func (app *kanbanBoardApp) runTasteAnalystOnceResult(ctx context.Context, apiKey string, responder anthropicTextResponder) (bool, error) {
 	if app == nil || app.memory == nil {
-		return nil
+		return false, nil
 	}
 	if responder == nil {
 		responder = createAnthropicTextResponse
@@ -200,14 +251,16 @@ func (app *kanbanBoardApp) runTasteAnalystOnce(ctx context.Context, apiKey strin
 	defer runLock.Unlock()
 
 	var firstErr error
+	persistedAny := false
 	for _, userName := range meetingParticipantNames {
 		// Each user gets their OWN request timeout derived from the caller's
 		// context: a slow early call costs only that user's pass, never the
 		// fixed-order roster tail (the "one user's failure never starves the
 		// rest" contract, made structural).
 		userCtx, cancelUser := context.WithTimeout(ctx, agent.requestTimeout)
-		err := app.runTasteAnalystForUser(agent, userCtx, apiKey, userName, responder, time.Now().UTC())
+		persisted, err := app.runTasteAnalystForUser(agent, userCtx, apiKey, userName, responder, time.Now().UTC())
 		cancelUser()
+		persistedAny = persistedAny || persisted
 		if err != nil {
 			log.Errorf("%s pass for %s failed: %v", agent.name, userName, err)
 			if firstErr == nil {
@@ -215,11 +268,11 @@ func (app *kanbanBoardApp) runTasteAnalystOnce(ctx context.Context, apiKey strin
 			}
 		}
 	}
-	return firstErr
+	return persistedAny, firstErr
 }
 
 // runTasteAnalystForUser runs one gated distillation pass for one user.
-func (app *kanbanBoardApp) runTasteAnalystForUser(agent ambientAgentConfig, ctx context.Context, apiKey string, userName string, responder anthropicTextResponder, now time.Time) error {
+func (app *kanbanBoardApp) runTasteAnalystForUser(agent ambientAgentConfig, ctx context.Context, apiKey string, userName string, responder anthropicTextResponder, now time.Time) (bool, error) {
 	profile, hasProfile := app.tasteProfileForUser(userName)
 	cursor := ""
 	distilledAt := time.Time{}
@@ -236,7 +289,7 @@ func (app *kanbanBoardApp) runTasteAnalystForUser(agent ambientAgentConfig, ctx 
 		oldestSignalAt = window[0].CreatedAt
 	}
 	if !tasteAnalystShouldRun(len(window), agent.minBatch(), distilledAt, oldestSignalAt, now) {
-		return nil
+		return false, nil
 	}
 
 	priorBody := ""
@@ -251,7 +304,7 @@ func (app *kanbanBoardApp) runTasteAnalystForUser(agent ambientAgentConfig, ctx 
 		MaxTokens:    tasteAnalystMaxOutputTokens,
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	parsed, ok := parseTasteAnalystOutput(output)
@@ -259,14 +312,14 @@ func (app *kanbanBoardApp) runTasteAnalystForUser(agent ambientAgentConfig, ctx 
 		// Never advance the cursor on unparseable output: the next pass retries
 		// the same window (the decision-ledger/slop precedent).
 		log.Errorf("%s returned non-JSON output for %s; skipping this pass", tasteAnalystAgentName, userName)
-		return nil
+		return false, fmt.Errorf("%s output rejected: non-JSON or empty profile", tasteAnalystAgentName)
 	}
 	// Evidence discipline is structural, not just prompted: a profile that
 	// cites none of the supplied signal ids has no receipts — skip the pass
 	// (cursor untouched) rather than persist uncited claims.
 	if !tasteProfileCitesWindow(parsed.Profile, window) {
 		log.Errorf("%s profile for %s cited no supplied signal ids; skipping this pass", tasteAnalystAgentName, userName)
-		return nil
+		return false, fmt.Errorf("%s output rejected: no supplied evidence citation", tasteAnalystAgentName)
 	}
 
 	proposals := filterTasteProposals(app, parsed.Proposals, window)
@@ -284,26 +337,32 @@ func (app *kanbanBoardApp) runTasteAnalystForUser(agent ambientAgentConfig, ctx 
 	}
 
 	profileID := ""
+	persisted := false
 	if hasProfile {
 		// UPDATE the living profile in place — never mint a duplicate. The
 		// artifact-model versioning rides updateOSArtifactWithMetadata for free.
-		updated, _, err := app.updateOSArtifactWithMetadata(profile.ID, title, parsed.Profile, scoutParticipantName, metadataUpdates)
+		updated, changed, err := app.updateOSArtifactWithMetadata(profile.ID, title, parsed.Profile, scoutParticipantName, metadataUpdates)
 		if err != nil {
-			return err
+			return false, err
 		}
 		profileID = updated.ID
+		persisted = changed
 	} else {
 		metadataUpdates["title"] = title
 		metadataUpdates[tasteProfileArtifactTypeKey] = tasteProfileArtifactType
 		metadataUpdates[tasteProfileUserKey] = userName
 		created, appended, err := app.createOSArtifactWithMetadata("workflow", title, parsed.Profile, scoutParticipantName, metadataUpdates)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if !appended {
-			return fmt.Errorf("taste profile for %s was not saved", userName)
+			return false, fmt.Errorf("taste profile for %s was not saved", userName)
 		}
 		profileID = created.ID
+		persisted = true
+	}
+	if !persisted {
+		return false, nil
 	}
 
 	// Stamp every consumed signal distilledInto=<profile> in ONE rewrite —
@@ -312,7 +371,7 @@ func (app *kanbanBoardApp) runTasteAnalystForUser(agent ambientAgentConfig, ctx 
 	if err := app.memory.stampSignalsDistilled(memoryEntryIDs(window), profileID, now); err != nil {
 		log.Errorf("%s failed to stamp distilledInto on %d signal(s) for %s: %v", tasteAnalystAgentName, len(window), userName, err)
 	}
-	return nil
+	return true, nil
 }
 
 // tasteAnalystShouldRun is the gate (spec: >= minBatch unconsumed signals OR

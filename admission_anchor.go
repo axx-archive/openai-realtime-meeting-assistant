@@ -338,6 +338,18 @@ func (app *kanbanBoardApp) admitParticipantWithAnchorResult(ctx context.Context,
 	// preserves linearization without holding the global room lock across a
 	// websocket write.
 	drainParticipantAdmissionRetirements(result.retired)
+	changedRooms := map[string]bool{}
+	if result.firstEndpoint {
+		changedRooms[normalizeRoomID(roomID)] = true
+	}
+	for _, retirement := range result.retired {
+		if retirement.roomID != normalizeRoomID(roomID) {
+			changedRooms[retirement.roomID] = true
+		}
+	}
+	for changedRoomID := range changedRooms {
+		app.revokeMeetingSpecialistParticipantAuthority(changedRoomID, "participant_authority_changed")
+	}
 	return result, nil
 }
 
@@ -390,6 +402,9 @@ func (app *kanbanBoardApp) admitGuestWithAnchorResult(ctx context.Context, roomI
 	}
 	app.mu.Unlock()
 	drainParticipantAdmissionRetirements(result.retired)
+	if err == nil && result.firstEndpoint {
+		app.revokeMeetingSpecialistParticipantAuthority(roomID, "participant_authority_changed")
+	}
 	return result, err
 }
 

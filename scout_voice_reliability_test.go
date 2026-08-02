@@ -408,8 +408,12 @@ func TestAnswerMemoryQuestionRunsOffEventLoop(t *testing.T) {
 	for {
 		app.mu.Lock()
 		pending := app.scoutSpokenResponse
+		inFlight := app.scoutToolCallsInFlight
 		app.mu.Unlock()
-		if pending {
+		// scoutSpokenResponse is marked before finishToolCall completes its
+		// SendEvent/broadcast tail. Do not let the test return while that
+		// goroutine can still observe package globals mutated by a later test.
+		if pending && inFlight == 0 {
 			return
 		}
 		if time.Now().After(deadline) {

@@ -31,6 +31,7 @@ export type ScoutThread = {
   title?: string;
   visibility?: string;
   ownerEmail?: string;
+  memberEmails?: string[];
   updatedAt?: string;
   createdAt?: string;
   messageCount?: number;
@@ -127,6 +128,8 @@ export type ScoutFileAttachment = {
   size?: number;
   ref: string;
   mime: string;
+  sourceId?: string;
+  sourceRevision?: string;
 };
 
 export type ScoutThreadDetailResponse = {
@@ -198,6 +201,305 @@ export type BoardState = {
 export type BoardResponse = {
   ok: boolean;
   board: BoardState;
+};
+
+export type StrideRelationshipReference = {
+  contractType: string;
+  id: string;
+  revision: number;
+  digest: string;
+};
+
+export type StrideRelationshipConsent = {
+  subjectPrincipal?: string;
+  revision?: number;
+  enabled?: boolean;
+  allowInferred?: boolean;
+  allowShared?: boolean;
+  updatedAt?: string;
+  updatedBy?: string;
+};
+
+export type StrideRelationshipPreference = {
+  reference: StrideRelationshipReference;
+  preferenceType: string;
+  value: string;
+  scope: 'private' | 'shared' | string;
+  origin: 'explicit' | 'inferred' | string;
+  sourceEventId: string;
+  evidence: StrideRelationshipReference[];
+  confidence: number;
+  expiresAt: string;
+  consentRevision: number;
+  projectionRevision: number;
+  source?: {
+    kind: 'settings' | 'conversation' | 'company_context' | string;
+    label: string;
+    available: boolean;
+    threadId?: string;
+    threadTitle?: string;
+    messageId?: string;
+    occurredAt?: string;
+  };
+  relationship: {
+    firstObserved: string;
+    lastObserved: string;
+    audience: { visibility: string; principals: string[] };
+    reinforcementCount: number;
+    status: string;
+  };
+};
+
+export type StrideRelationshipMemoryResponse = {
+  ok: boolean;
+  providerExecutionFenced: true;
+  mode: 'deterministic_local';
+  revision: number;
+  consent?: StrideRelationshipConsent;
+  preferences?: StrideRelationshipPreference[];
+};
+
+export type StrideRuntimeCapability = {
+  capability: string;
+  state: string;
+  durableState?: boolean;
+  featureEnabled?: boolean;
+  activationFenced?: boolean;
+};
+
+export type StrideRuntimeFeature = {
+  feature: string;
+  enabled: boolean;
+};
+
+export type StrideRuntimeStatusResponse = {
+  ok: boolean;
+  runtime: {
+    state: string;
+    configured: boolean;
+    restored?: boolean;
+    generation?: number;
+    activationFenced: boolean;
+    capabilities?: StrideRuntimeCapability[];
+    features?: StrideRuntimeFeature[];
+  };
+};
+
+export type StrideMeetingSpecialistCandidate = {
+  agentId: string;
+  displayName: string;
+};
+
+export type StrideMeetingSpecialistInvitation = {
+  id: string;
+  revision: number;
+  agentId: string;
+  displayName: string;
+  purposeSummary: string;
+  contextClasses: string[];
+  audience: {
+    visibility: string;
+    principals: string[];
+  };
+  expectedTimeSeconds: number;
+  expectedCostCents: number;
+  hardLimits: {
+    timeBudgetSeconds: number;
+    turnBudget: number;
+    maxFloorLeaseSeconds: number;
+    audioBudgetSeconds: number;
+    tokenBudget: number;
+    costBudgetCents: number;
+  };
+  decision: 'requested' | 'approved' | 'declined' | 'dismissed' | string;
+  status: string;
+  providerSessionStarted: boolean;
+  expiresAt: string;
+  updatedAt: string;
+};
+
+export type StrideMeetingSpecialistStatus = {
+  available: boolean;
+  canInvite: boolean;
+  reason?: string;
+  roomId?: string;
+  sittingId?: string;
+  candidates: StrideMeetingSpecialistCandidate[];
+  invitations: StrideMeetingSpecialistInvitation[];
+};
+
+export type StrideMeetingSpecialistStatusResponse = {
+  ok: boolean;
+  specialists: StrideMeetingSpecialistStatus;
+};
+
+export type StrideTeamSeat = {
+
+  id: string;
+  listingId: string;
+  displayName: string;
+  category: string;
+  status: string;
+  ownerId: string;
+  directThreadId?: string;
+  revision: number;
+  config: {
+    personalityNotes?: string;
+    memberships: string[];
+    perRunBudgetCents: number;
+    dailyBudgetCents: number;
+    proactivity: string;
+  };
+  assignments: Array<{
+    id: string;
+    projectOrChannel: string;
+    role: string;
+    responsibility: string;
+    destination: string;
+    status: string;
+    createdAt: string;
+  }>;
+  updates: Array<{
+    id: string;
+    revision: number;
+    status: string;
+    summary: string;
+    semanticDiff?: {
+      personalityChanged: boolean;
+      membershipsAdded: string[];
+      membershipsRemoved: string[];
+      permissionChanged: boolean;
+      perRunBudgetDeltaCents: number;
+      dailyBudgetDeltaCents: number;
+      costChanged: boolean;
+      proactivityChanged: boolean;
+      runtimeChanged: boolean;
+      runtimeSummary: string;
+      migrationSummary: string;
+      digest: string;
+    };
+  }>;
+  learning: Array<{
+    id: string;
+    subject: string;
+    scope: string;
+    summary: string;
+    status: string;
+    revision: number;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  lifecycle: string[];
+  providerExecutionFenced: boolean;
+  accessRevoked: boolean;
+  [key: string]: unknown;
+};
+
+export type StrideMarketplaceListing = {
+
+  id: string;
+  packageId: string;
+  displayName: string;
+  category: string;
+  outcomeSummary: string;
+  personalitySummary: string;
+  sampleOutputs: string[];
+  capabilities: string[];
+  requiredAccess: string[];
+  accessSummary: string;
+  costBand: string;
+  publisher: string;
+  version: string;
+  provenance: string;
+  visibility: string;
+  updatePolicy: string;
+  memoryPolicy: string;
+  packageDigest: string;
+  receiptStatus: Record<string, boolean>;
+  availability: string;
+  liveAvailable: boolean;
+  providerExecutionFenced: boolean;
+  [key: string]: unknown;
+};
+
+export type StrideWorkSuggestion = {
+  id: string;
+  title: string;
+  outcome: string;
+  sourceThreadId: string;
+  sourceMessageId: string;
+  sourceSnippet: string;
+  recipientIds: string[];
+  revision: number;
+  status: string;
+  destinationMode?: string;
+  destinationThreadId?: string;
+  destinationTitle?: string;
+  runId?: string;
+  artifactHref?: string;
+  brainHref?: string;
+  completionSummary?: string;
+  providerExecutionFenced: boolean;
+  lifecycle: string[];
+};
+
+export type StrideRosterResponse = {
+  ok: boolean;
+  available: boolean;
+  reason?: string;
+  seats: StrideTeamSeat[];
+  recommendations?: unknown[];
+};
+
+export type StrideMarketplaceResponse = {
+  ok: boolean;
+  available: boolean;
+  reason?: string;
+  canManage?: boolean;
+  listings: StrideMarketplaceListing[];
+};
+
+export type StridePrivateAgentTemplateInput = {
+  templateId: string;
+  displayName: string;
+  category: string;
+  outcomeSummary: string;
+  personalitySummary: string;
+  sampleOutputs: string[];
+  requestedCapabilities: string[];
+  requiredAccess: string[];
+  costBand: string;
+  memberships: string[];
+  perRunBudgetCents: number;
+  dailyBudgetCents: number;
+  monthlyBudgetCents: number;
+  concurrency: number;
+  proactivity: 'disabled' | 'quiet';
+};
+
+export type StrideWorkResponse = {
+  ok: boolean;
+  available: boolean;
+  reason?: string;
+  providerExecutionFenced: boolean;
+  suggestions: StrideWorkSuggestion[];
+  runs: Array<Record<string, unknown>>;
+};
+
+export type StrideSeatMutationResponse = {
+  ok: boolean;
+  seat: StrideTeamSeat;
+  replayed?: boolean;
+  scoutIntroductionPosted?: boolean;
+  providerSessionStarted: false;
+};
+
+export type StrideWorkMutationResponse = {
+  ok: boolean;
+  suggestion: StrideWorkSuggestion;
+  providerCalls?: 0;
+  inputTokens?: 0;
+  outputTokens?: 0;
 };
 
 export type BoardCardInput = {

@@ -40,9 +40,13 @@ func main() {
 
 func run(args []string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("command required: secure-manifest-create, secure-preflight, authority-head-advance, or a legacy drill command")
+		return errors.New("command required: envelope-seal, envelope-open, secure-manifest-create, secure-preflight, authority-head-advance, or a legacy drill command")
 	}
 	switch args[0] {
+	case "envelope-seal":
+		return runEnvelopeSeal(args[1:], stdout)
+	case "envelope-open":
+		return runEnvelopeOpen(args[1:], stdout)
 	case "secure-manifest-create":
 		return runSecureManifestCreate(args[1:], stdout)
 	case "secure-preflight":
@@ -66,6 +70,88 @@ func run(args []string, stdout io.Writer) error {
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+type envelopeCommandOutput struct {
+	Operation string                `json:"operation"`
+	Result    dr.EnvelopeFileResult `json:"result"`
+}
+
+func runEnvelopeSeal(args []string, stdout io.Writer) error {
+	set := flag.NewFlagSet("envelope-seal", flag.ContinueOnError)
+	set.SetOutput(io.Discard)
+	inputPath := set.String("in", "", "single opaque capture bundle to encrypt")
+	outputPath := set.String("out", "", "encrypted BFBKUP02 envelope output")
+	purpose := set.String("purpose", "four-volume-capture", "non-sensitive capture purpose")
+	keyEnv := set.String("key-env", "BONFIRE_DR_ENVELOPE_KEY", "environment variable containing the 32-byte key")
+	keyFile := set.String("key-file", "", "no-follow key file containing the 32-byte key")
+	if err := set.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*inputPath) == "" || strings.TrimSpace(*outputPath) == "" {
+		return errors.New("envelope-seal requires --in and --out")
+	}
+	key, err := envelopeKeyFromSource(*keyEnv, *keyFile)
+	if err != nil {
+		return err
+	}
+	result, err := dr.SealEnvelopeFile(key, *inputPath, *outputPath, *purpose, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, envelopeCommandOutput{Operation: "sealed", Result: result})
+}
+
+func runEnvelopeOpen(args []string, stdout io.Writer) error {
+	set := flag.NewFlagSet("envelope-open", flag.ContinueOnError)
+	set.SetOutput(io.Discard)
+	inputPath := set.String("in", "", "encrypted BFBKUP02 or legacy BFBKUP01 envelope")
+	outputPath := set.String("out", "", "verified plaintext output")
+	keyEnv := set.String("key-env", "BONFIRE_DR_ENVELOPE_KEY", "environment variable containing the 32-byte key")
+	keyFile := set.String("key-file", "", "no-follow key file containing the 32-byte key")
+	if err := set.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*inputPath) == "" || strings.TrimSpace(*outputPath) == "" {
+		return errors.New("envelope-open requires --in and --out")
+	}
+	key, err := envelopeKeyFromSource(*keyEnv, *keyFile)
+	if err != nil {
+		return err
+	}
+	result, err := dr.OpenEnvelopeFile(key, *inputPath, *outputPath)
+	if err != nil {
+		return err
+	}
+	return writeJSON(stdout, envelopeCommandOutput{Operation: "opened", Result: result})
+}
+
+func envelopeKeyFromSource(envName, filePath string) ([]byte, error) {
+	envName = strings.TrimSpace(envName)
+	filePath = strings.TrimSpace(filePath)
+	if envName == "" {
+		return nil, errors.New("--key-env is required")
+	}
+	fromEnv := os.Getenv(envName)
+	if filePath != "" && fromEnv != "" {
+		return nil, errors.New("configure exactly one DR envelope key source: --key-env or --key-file")
+	}
+	if filePath != "" {
+		raw, err := dr.ReadFileNoLinks(filePath, 4096)
+		if err != nil {
+			return nil, fmt.Errorf("read DR envelope key file: %w", err)
+		}
+		key, err := dr.ParseEnvelopeKey(raw)
+		if err != nil {
+			return nil, fmt.Errorf("DR envelope key file: %w", err)
+		}
+		return key, nil
+	}
+	key, err := dr.ParseEnvelopeKey([]byte(fromEnv))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", envName, err)
+	}
+	return key, nil
 }
 
 type releaseAttestSpec struct {

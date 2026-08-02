@@ -144,13 +144,14 @@ function RoomsSegment() {
 function WorkSegment() {
   const navigation = useNavigation<DeckNav>();
   const destinations: Array<{
-    route: 'Board' | 'Files' | 'Alerts' | 'Meetings' | 'Memory' | 'Intelligence' | 'Settings';
+    route: 'Board' | 'Files' | 'AgentTeam' | 'Alerts' | 'Meetings' | 'Memory' | 'Intelligence' | 'Settings';
     label: string;
     hint: string;
     icon: SFSymbol;
   }> = [
     { route: 'Board', label: 'Board', hint: 'Cards and decisions', icon: 'rectangle.3.group.fill' },
     { route: 'Files', label: 'Files', hint: 'Documents and artifacts', icon: 'folder.fill' },
+    { route: 'AgentTeam', label: 'Agent team', hint: 'Coworkers and Marketplace', icon: 'person.2.fill' },
     { route: 'Alerts', label: 'Alerts', hint: 'What needs you', icon: 'bell.fill' },
     { route: 'Meetings', label: 'Meetings', hint: 'Recaps and transcripts', icon: 'calendar' },
     { route: 'Memory', label: 'Memory', hint: 'What the company knows', icon: 'brain' },

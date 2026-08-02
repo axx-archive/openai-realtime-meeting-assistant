@@ -447,7 +447,7 @@ func TestArtifactExportPDFSidecarAbsentThenPresent(t *testing.T) {
 	// branded BonfireOS print document (renderResearchReportPrintHTML —
 	// report_print_test.go pins the document itself) and routes it down the
 	// text-native paper path.
-	if err := writeRenderRunnerHeartbeat("test-runner"); err != nil {
+	if err := writeHealthyRenderRunnerHeartbeatForTest(t, "test-runner"); err != nil {
 		t.Fatalf("write heartbeat: %v", err)
 	}
 	markdown := seedShareArtifact(t, "draft", "# not a deck", nil)

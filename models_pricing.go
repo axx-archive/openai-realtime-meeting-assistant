@@ -7,12 +7,14 @@
 // may carry multiple rows with EffectiveFrom boundaries (Sonnet 5's intro
 // price steps up 2026-09-01) and priceForModel picks by the entry timestamp.
 //
-// Sources (2026-07-11): https://developers.openai.com/api/docs/pricing,
+// Sources: the initial 2026-07-11 rows use
+// https://developers.openai.com/api/docs/pricing,
 // https://platform.claude.com/docs/en/about-claude/pricing, and the audited
-// figures in docs/llm-routing-audit-2026-07-11.md (webResearch + configAudit
-// sections). Anthropic cache reads bill 0.1x input, 5-min cache writes 1.25x
-// input; OpenAI cache reads keep the 90% discount everywhere, cache writes
-// bill 1.25x input from GPT-5.6 onward (free before).
+// figures in docs/llm-routing-audit-2026-07-11.md. OpenAI rows effective
+// 2026-08-01 were reverified against the same official OpenAI pricing page.
+// Anthropic cache reads bill 0.1x input, 5-min cache writes 1.25x input;
+// OpenAI cache reads keep the 90% discount everywhere, cache writes bill
+// 1.25x input from GPT-5.6 onward (free before).
 //
 // Consumers: recordLLMUsage (est_cost_usd), the W0 rollup/alert engine, W4
 // boot seat validation, and the Fable cost-awareness prompt. estimateCostUSD
@@ -53,7 +55,7 @@ type modelPrice struct {
 
 	ImageInputPerMTok float64 // gpt-image-2 image-input tier
 
-	PerMinuteUSD float64 // duration-billed lanes (gpt-4o-transcribe, gpt-realtime-whisper)
+	PerMinuteUSD float64 // duration-billed transcription lanes
 
 	// EffectiveFrom dates the row: zero time = since forever. When a model has
 	// several rows, priceForModel picks the latest row whose EffectiveFrom is
@@ -67,6 +69,12 @@ type modelPrice struct {
 // sonnet5StepUpDate: Sonnet 5 intro pricing ($2/$10) expires 2026-08-31; the
 // $3/$15 row takes effect 2026-09-01 UTC (founder decision 5: eat it).
 var sonnet5StepUpDate = time.Date(2026, time.September, 1, 0, 0, 0, 0, time.UTC)
+
+// openAIPriceRefreshAug1 preserves the prior published pricing rows while
+// recording the current official OpenAI price check separately. A zero-date
+// historical row must never be rewritten: ledger entries are priced at their
+// event timestamp.
+var openAIPriceRefreshAug1 = time.Date(2026, time.August, 1, 0, 0, 0, 0, time.UTC)
 
 // modelPriceTable: model id → dated rows (ascending EffectiveFrom). Every seat
 // default and live env dial in the audit inventory has a row here —
@@ -106,14 +114,23 @@ var modelPriceTable = map[string][]modelPrice{
 	"gpt-5.6-sol": {{
 		InputPerMTok: 5, CachedInputPerMTok: 0.50, CacheWritePerMTok: 6.25, OutputPerMTok: 30,
 		SourceDate: "2026-07-11",
+	}, {
+		InputPerMTok: 5, CachedInputPerMTok: 0.50, CacheWritePerMTok: 6.25, OutputPerMTok: 30,
+		EffectiveFrom: openAIPriceRefreshAug1, SourceDate: "2026-08-01",
 	}},
 	"gpt-5.6-terra": {{
 		InputPerMTok: 2.50, CachedInputPerMTok: 0.25, CacheWritePerMTok: 3.125, OutputPerMTok: 15,
 		SourceDate: "2026-07-11",
+	}, {
+		InputPerMTok: 2, CachedInputPerMTok: 0.20, CacheWritePerMTok: 2.50, OutputPerMTok: 12,
+		EffectiveFrom: openAIPriceRefreshAug1, SourceDate: "2026-08-01",
 	}},
 	"gpt-5.6-luna": {{
 		InputPerMTok: 1, CachedInputPerMTok: 0.10, CacheWritePerMTok: 1.25, OutputPerMTok: 6,
 		SourceDate: "2026-07-11",
+	}, {
+		InputPerMTok: 0.20, CachedInputPerMTok: 0.02, CacheWritePerMTok: 0.25, OutputPerMTok: 1.20,
+		EffectiveFrom: openAIPriceRefreshAug1, SourceDate: "2026-08-01",
 	}},
 
 	// ---- OpenAI realtime voice (2 and 2.1 are price-identical) ----
@@ -126,6 +143,10 @@ var modelPriceTable = map[string][]modelPrice{
 		InputPerMTok: 4, CachedInputPerMTok: 0.40, OutputPerMTok: 24,
 		AudioInputPerMTok: 32, CachedAudioInputPerMTok: 0.40, AudioOutputPerMTok: 64,
 		SourceDate: "2026-07-11",
+	}, {
+		InputPerMTok: 4, CachedInputPerMTok: 0.40, OutputPerMTok: 24,
+		AudioInputPerMTok: 32, CachedAudioInputPerMTok: 0.40, AudioOutputPerMTok: 64,
+		EffectiveFrom: openAIPriceRefreshAug1, SourceDate: "2026-08-01",
 	}},
 	"gpt-realtime-2.1-mini": {{
 		InputPerMTok: 0.60, CachedInputPerMTok: 0.06, OutputPerMTok: 2.40,
@@ -136,6 +157,17 @@ var modelPriceTable = map[string][]modelPrice{
 	// ---- STT (duration-billed, per minute of audio) ----
 	"gpt-4o-transcribe":    {{PerMinuteUSD: 0.006, SourceDate: "2026-07-11"}},
 	"gpt-realtime-whisper": {{PerMinuteUSD: 0.017, SourceDate: "2026-07-11"}},
+	// The 2026-08-01 official refresh confirms these rates. Pricing knowledge
+	// removes the missing-price commissioning blocker; live compatibility and
+	// quality qualification remain separate E10 gates.
+	"gpt-transcribe": {
+		{PerMinuteUSD: 0.0045, SourceDate: "2026-07-30"},
+		{PerMinuteUSD: 0.0045, EffectiveFrom: openAIPriceRefreshAug1, SourceDate: "2026-08-01"},
+	},
+	"gpt-live-transcribe": {
+		{PerMinuteUSD: 0.017, SourceDate: "2026-07-30"},
+		{PerMinuteUSD: 0.017, EffectiveFrom: openAIPriceRefreshAug1, SourceDate: "2026-08-01"},
+	},
 
 	// ---- Images ----
 	// gpt-image-2: text in $5 ($1.25 cached), image in $8, image out $30/MTok.

@@ -2,6 +2,7 @@ import React, {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -10,6 +11,7 @@ import React, {
 import { AppState } from 'react-native';
 import { useAuth } from '../auth/AuthContext';
 import { API_BASE_URL, NATIVE_CLIENT_HEADER } from '../config';
+import { audioFocusRuntime } from './audioFocusRuntime';
 import { encodeOfficeCommand, parseOfficeEventEnvelope } from './officeEventProtocol';
 
 type OfficeEventState = {
@@ -20,7 +22,13 @@ type OfficeEventState = {
   send: (event: string, data: unknown) => boolean;
 };
 
+type ScopedOfficeEventState = OfficeEventState & {
+  authScope: string | null;
+};
+
 const unavailableSend = () => false;
+const OFFICE_HEARTBEAT_INTERVAL_MS = 30_000;
+const OFFICE_SILENCE_TIMEOUT_MS = 75_000;
 
 const OfficeEventsContext = createContext<OfficeEventState>({
   event: null,
@@ -29,6 +37,66 @@ const OfficeEventsContext = createContext<OfficeEventState>({
   connected: false,
   send: unavailableSend,
 });
+
+function emptyOfficeEventState(authScope: string | null): ScopedOfficeEventState {
+  return {
+    authScope,
+    event: null,
+    data: null,
+    version: 0,
+    connected: false,
+    send: unavailableSend,
+  };
+}
+
+function officeAuthScope(sessionToken: string | null, email: string | undefined): string | null {
+  const identity = email?.trim().toLowerCase();
+  return sessionToken && identity ? `${identity}\u0000${sessionToken}` : null;
+}
+
+const officeControlRuntime = {
+  sessionToken: null as string | null,
+  live: false,
+  generation: 0,
+};
+
+function closePersonalRealtimeForControlLoss(): void {
+  if (audioFocusRuntime.mode !== 'personal_realtime') return;
+  void audioFocusRuntime.forceClose('forced_close').catch(() => {
+    // The coordinator invalidates the generation before native cleanup.
+  });
+}
+
+function commitOfficeControlSession(sessionToken: string | null): void {
+  if (officeControlRuntime.sessionToken === sessionToken && !officeControlRuntime.live) return;
+  officeControlRuntime.sessionToken = sessionToken;
+  officeControlRuntime.live = false;
+  officeControlRuntime.generation += 1;
+  closePersonalRealtimeForControlLoss();
+}
+
+function markOfficeControlLive(sessionToken: string): void {
+  if (officeControlRuntime.sessionToken !== sessionToken || officeControlRuntime.live) return;
+  officeControlRuntime.live = true;
+  officeControlRuntime.generation += 1;
+}
+
+function markOfficeControlDisconnected(sessionToken: string): void {
+  if (officeControlRuntime.sessionToken !== sessionToken) return;
+  if (officeControlRuntime.live) {
+    officeControlRuntime.live = false;
+    officeControlRuntime.generation += 1;
+  }
+  closePersonalRealtimeForControlLoss();
+}
+
+export function officeControlChannelIsLive(sessionToken: string | null): boolean {
+  return Boolean(
+    sessionToken
+    && officeControlRuntime.sessionToken === sessionToken
+    && officeControlRuntime.live,
+  );
+}
 
 type NativeWebSocketConstructor = new (
   uri: string,
@@ -49,20 +117,30 @@ function officeSocketURL(): string {
  */
 export function OfficeEventsProvider({ children }: PropsWithChildren) {
   const { sessionToken, user } = useAuth();
-  const [state, setState] = useState<OfficeEventState>({
-    event: null,
-    data: null,
-    version: 0,
-    connected: false,
-    send: unavailableSend,
-  });
+  const authScope = officeAuthScope(sessionToken, user?.email);
+  const [state, setState] = useState<ScopedOfficeEventState>(() => emptyOfficeEventState(null));
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
+  const socketScopeRef = useRef<string | null>(null);
+  const currentAuthScopeRef = useRef<string | null>(authScope);
   const attempts = useRef(0);
 
+  useLayoutEffect(() => {
+    currentAuthScopeRef.current = authScope;
+    commitOfficeControlSession(sessionToken);
+  }, [authScope, sessionToken]);
+
   useEffect(() => {
+    const effectScope = authScope;
     let disposed = false;
     let heartbeat: ReturnType<typeof setInterval> | null = null;
+    let lastFrameAt = 0;
+
+    setState((current) => (
+      currentAuthScopeRef.current !== effectScope || current.authScope === effectScope
+        ? current
+        : emptyOfficeEventState(effectScope)
+    ));
 
     const clearReconnect = () => {
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
@@ -70,24 +148,46 @@ export function OfficeEventsProvider({ children }: PropsWithChildren) {
     };
 
     const close = () => {
+      if (sessionToken) markOfficeControlDisconnected(sessionToken);
       clearReconnect();
       if (heartbeat) clearInterval(heartbeat);
       heartbeat = null;
-      const socket = socketRef.current;
-      socketRef.current = null;
+      lastFrameAt = 0;
+      const ownsSocket = socketScopeRef.current === effectScope;
+      const socket = ownsSocket ? socketRef.current : null;
+      if (ownsSocket) {
+        socketRef.current = null;
+        socketScopeRef.current = null;
+      }
       socket?.close();
-      setState((current) => ({ ...current, connected: false }));
+      if (currentAuthScopeRef.current === effectScope) {
+        setState((current) => (
+          currentAuthScopeRef.current !== effectScope
+            ? current
+            : current.authScope === effectScope
+            ? { ...current, connected: false }
+            : emptyOfficeEventState(effectScope)
+        ));
+      }
     };
 
-    if (!sessionToken || !user) {
+    if (!effectScope || !sessionToken) {
       close();
       return close;
     }
 
     const connect = () => {
-      if (disposed || AppState.currentState !== 'active') return;
+      if (
+        disposed
+        || currentAuthScopeRef.current !== effectScope
+        || AppState.currentState !== 'active'
+      ) return;
       const current = socketRef.current;
-      if (current && (current.readyState === WebSocket.OPEN || current.readyState === WebSocket.CONNECTING)) return;
+      if (
+        socketScopeRef.current === effectScope
+        && current
+        && (current.readyState === WebSocket.OPEN || current.readyState === WebSocket.CONNECTING)
+      ) return;
 
       const NativeWebSocket = WebSocket as unknown as NativeWebSocketConstructor;
       const socket = new NativeWebSocket(officeSocketURL(), [], {
@@ -97,40 +197,115 @@ export function OfficeEventsProvider({ children }: PropsWithChildren) {
         },
       });
       socketRef.current = socket;
+      socketScopeRef.current = effectScope;
 
       socket.onopen = () => {
-        if (disposed || socketRef.current !== socket) return;
+        if (
+          disposed
+          || currentAuthScopeRef.current !== effectScope
+          || socketScopeRef.current !== effectScope
+          || socketRef.current !== socket
+        ) return;
         attempts.current = 0;
+        lastFrameAt = Date.now();
         socket.send(JSON.stringify({ event: 'office', data: '{}' }));
-        setState((currentState) => ({ ...currentState, connected: true }));
+        markOfficeControlLive(sessionToken);
+        setState((currentState) => (
+          currentAuthScopeRef.current !== effectScope
+            ? currentState
+            : currentState.authScope === effectScope
+            ? { ...currentState, connected: true }
+            : { ...emptyOfficeEventState(effectScope), connected: true }
+        ));
         if (heartbeat) clearInterval(heartbeat);
         heartbeat = setInterval(() => {
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ event: 'office_ping', data: '{}' }));
+          if (
+            currentAuthScopeRef.current === effectScope
+            && socketScopeRef.current === effectScope
+            && socketRef.current === socket
+            && socket.readyState === WebSocket.OPEN
+          ) {
+            if (lastFrameAt && Date.now() - lastFrameAt > OFFICE_SILENCE_TIMEOUT_MS) {
+              // OPEN can lie after a NAT rebind, sleep, or proxy idle kill.
+              // Fence personal Realtime before asking the stale pipe to close;
+              // onclose owns the reconnect backoff.
+              markOfficeControlDisconnected(sessionToken);
+              socket.close();
+              return;
+            }
+            try {
+              socket.send(JSON.stringify({ event: 'office_ping', data: '{}' }));
+            } catch {
+              markOfficeControlDisconnected(sessionToken);
+              socket.close();
+            }
           }
-        }, 30_000);
+        }, OFFICE_HEARTBEAT_INTERVAL_MS);
       };
 
       socket.onmessage = (message) => {
-        if (disposed || socketRef.current !== socket) return;
+        if (
+          disposed
+          || currentAuthScopeRef.current !== effectScope
+          || socketScopeRef.current !== effectScope
+          || socketRef.current !== socket
+        ) return;
+        // Every frame proves liveness, including the server's top-level
+        // office_pong (which is intentionally not a kanban event).
+        lastFrameAt = Date.now();
         const nested = parseOfficeEventEnvelope(String(message.data));
         if (!nested) return;
-        setState((currentState) => ({
-          ...currentState,
-          event: nested.event,
-          data: nested.data,
-          version: currentState.version + 1,
-          connected: true,
-        }));
+        if (nested.event === 'relationship_memory_changed' && audioFocusRuntime.mode === 'personal_realtime') {
+          // Realtime instructions are immutable for the life of a provider
+          // session. A cross-device correction/revoke therefore closes the
+          // stale session immediately; the next call is minted from the new
+          // authoritative memory projection.
+          void audioFocusRuntime.forceClose('forced_close').catch(() => {
+            // The focus coordinator already fences the generation before
+            // invoking device cleanup, so a callback error cannot revive it.
+          });
+        }
+        setState((currentState) => {
+          if (currentAuthScopeRef.current !== effectScope) return currentState;
+          return {
+            ...(
+              currentState.authScope === effectScope
+                ? currentState
+                : emptyOfficeEventState(effectScope)
+            ),
+            authScope: effectScope,
+            event: nested.event,
+            data: nested.data,
+            version: currentState.authScope === effectScope ? currentState.version + 1 : 1,
+            connected: true,
+          };
+        });
       };
 
-      socket.onerror = () => socket.close();
+      socket.onerror = () => {
+        if (socketScopeRef.current !== effectScope || socketRef.current !== socket) return;
+        markOfficeControlDisconnected(sessionToken);
+        socket.close();
+      };
       socket.onclose = () => {
-        if (socketRef.current === socket) socketRef.current = null;
+        // A closing socket can outlive a background/foreground transition that
+        // already installed a replacement. Only the exact current socket may
+        // revoke control authority or schedule its reconnect.
+        if (socketScopeRef.current !== effectScope || socketRef.current !== socket) return;
+        markOfficeControlDisconnected(sessionToken);
+        socketRef.current = null;
+        socketScopeRef.current = null;
         if (heartbeat) clearInterval(heartbeat);
         heartbeat = null;
-        setState((currentState) => ({ ...currentState, connected: false }));
-        if (disposed) return;
+        lastFrameAt = 0;
+        if (disposed || currentAuthScopeRef.current !== effectScope) return;
+        setState((currentState) => (
+          currentAuthScopeRef.current !== effectScope
+            ? currentState
+            : currentState.authScope === effectScope
+            ? { ...currentState, connected: false }
+            : emptyOfficeEventState(effectScope)
+        ));
         const delay = Math.min(1_000 * 2 ** attempts.current, 30_000);
         attempts.current += 1;
         reconnectTimer.current = setTimeout(connect, delay);
@@ -148,12 +323,19 @@ export function OfficeEventsProvider({ children }: PropsWithChildren) {
       subscription.remove();
       close();
     };
-  }, [sessionToken, user]);
+  }, [authScope, sessionToken]);
 
   const send = React.useCallback((event: string, data: unknown) => {
     const socket = socketRef.current;
+    const currentScope = currentAuthScopeRef.current;
     const encoded = encodeOfficeCommand(event, data);
-    if (!encoded || !socket || socket.readyState !== WebSocket.OPEN) return false;
+    if (
+      !encoded
+      || !currentScope
+      || socketScopeRef.current !== currentScope
+      || !socket
+      || socket.readyState !== WebSocket.OPEN
+    ) return false;
     try {
       socket.send(encoded);
       return true;
@@ -162,7 +344,21 @@ export function OfficeEventsProvider({ children }: PropsWithChildren) {
     }
   }, []);
 
-  const value = useMemo(() => ({ ...state, send }), [send, state]);
+  const value = useMemo<OfficeEventState>(() => {
+    // This guard applies during the render that observes new auth, before the
+    // old effect's cleanup has run. Prior-account event/data is therefore never
+    // exposed through context, even for one committed frame.
+    if (!authScope || state.authScope !== authScope) {
+      return emptyOfficeEventState(null);
+    }
+    return {
+      event: state.event,
+      data: state.data,
+      version: state.version,
+      connected: state.connected,
+      send,
+    };
+  }, [authScope, send, state]);
   return <OfficeEventsContext.Provider value={value}>{children}</OfficeEventsContext.Provider>;
 }
 

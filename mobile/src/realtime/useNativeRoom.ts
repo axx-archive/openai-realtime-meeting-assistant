@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import {
   MediaStream,
   type MediaStreamTrack,
@@ -12,7 +12,9 @@ import {
 import BonfireCameraFraming, {
   type CameraFramingCapabilities,
 } from '../../modules/bonfire-camera-framing';
-import BonfireMediaSession from '../../modules/bonfire-media-session';
+import BonfireMediaSession, {
+  nextMediaSessionGeneration,
+} from '../../modules/bonfire-media-session';
 import { api } from '../api/client';
 import { API_BASE_URL, NATIVE_CLIENT_HEADER } from '../config';
 import {
@@ -101,6 +103,7 @@ import {
   type RoomConversationViewer,
 } from './roomConversation';
 import {
+  adaptiveCameraFramingAdmission,
   cameraFramingStateFromCapabilities,
   cameraFramingTelemetryFromCapabilities,
   createCameraFramingGenerationGuard,
@@ -109,15 +112,31 @@ import {
   emptyCameraFramingState,
   explicitFramingIntentAfterResult,
   readLiveCameraTrackIdentity,
+  releaseUnsafeCameraTracks,
   wideFramingRestoreDeviceId,
   wideUprightFramingNeedsUpdate,
   wideUprightIntentAfterTransition,
+  type CameraFramingAdmission,
   type CameraFramingOperation,
   type CameraFramingState,
   type CameraFramingTrackIdentity,
 } from './cameraFramingLifecycle';
 import { applyNativeCameraSenderPolicy } from './videoSenderPolicy';
 import { correlatedOfferKey } from './signalCorrelation';
+import { audioFocusRuntime } from './audioFocusRuntime';
+import {
+  createNativeRoomTerminalAuthority,
+  drainNativeRoomMediaTeardown,
+  mergeNativeRoomTerminalPresentation,
+  waitForBoundedNativeOperation,
+  waitForNativeRoomTerminalPresentation,
+  type NativeRoomTerminalAuthority,
+  type NativeRoomTerminalSource,
+} from './nativeRoomTerminal';
+import type {
+  AudioFocusLease,
+  AudioFocusTerminalReason,
+} from '../voice/AudioFocusCoordinator';
 
 type RoomLifecycle = 'idle' | 'joining' | 'admitted' | 'connected' | 'reconnecting';
 type ScreenShareStopReason = 'user' | 'ended' | 'cancelled' | 'start-failed' | 'stalled';
@@ -178,6 +197,14 @@ type NativeRoomPeerContext = {
   pendingCandidates: unknown[];
   remoteDescriptionReady: boolean;
 };
+type ActiveNativeRoomTerminalSession = {
+  authority: NativeRoomTerminalAuthority;
+  mediaSessionGeneration: number;
+  focusAdmission: Promise<AudioFocusLease> | null;
+  presentation: Promise<void> | null;
+  presentationKind: 'leave' | 'failure' | 'unmount' | null;
+  terminalMessage: string | null;
+};
 type PendingMicrophonePublicationCommit = {
   isCurrent: () => boolean;
   local: MediaStream;
@@ -190,6 +217,8 @@ const NATIVE_ROOM_CLIENT_VERSION = 'expo-native-9';
 const reconnectDelaysMs = [500, 1_000, 2_000, 4_000, 8_000, 12_000];
 const cameraRecoveryCooldownMs = 8_000;
 const cameraFramingRestoreTimeoutMs = 750;
+const nativeRoomMediaOperationTimeoutMs = 2_500;
+const nativeRoomFramingConfirmationTimeoutMs = 3_000;
 const activeSpeakerStaleMs = 3_000;
 const screenShareStartTimeoutMs = 20_000;
 const screenShareProgressPollMs = 500;
@@ -321,7 +350,7 @@ export function useNativeRoom(
   const microphonePublicationOperationRef = useRef(0);
   const microphonePublicationCommitSequenceRef = useRef(0);
   const pendingMicrophonePublicationCommitRef = useRef<PendingMicrophonePublicationCommit | null>(null);
-  const requestedVideo = useRef(true);
+  const requestedVideo = useRef(false);
   const roomChatOpenRef = useRef(false);
   const conversationViewerRef = useRef<RoomConversationViewer>(viewer);
   conversationViewerRef.current = viewer;
@@ -385,6 +414,12 @@ export function useNativeRoom(
     connectionGenerationGuardRef.current = createNativeRoomConnectionGenerationGuard();
   }
   const joinAttemptGuardRef = useRef<ReturnType<typeof createNativeRoomJoinAttemptGuard> | null>(null);
+  const activeRoomTerminalRef = useRef<ActiveNativeRoomTerminalSession | null>(null);
+  const disposeRoomTerminalMediaRef = useRef<() => Promise<void>>(async () => undefined);
+  const roomDictationFocusRef = useRef<{
+    park: () => boolean | Promise<boolean>;
+    restore: (wasMuted: boolean) => void | Promise<void>;
+  }>({ park: () => true, restore: () => undefined });
   if (!joinAttemptGuardRef.current) {
     joinAttemptGuardRef.current = createNativeRoomJoinAttemptGuard();
   }
@@ -400,6 +435,43 @@ export function useNativeRoom(
   if (!remoteStreamRetirementRef.current) {
     remoteStreamRetirementRef.current = createRemoteStreamRetirementQueue();
   }
+
+  const activateMeetingMedia = useCallback(async (): Promise<boolean> => {
+    const session = activeRoomTerminalRef.current;
+    if (!session || session.authority.isTerminal()) return false;
+    const activation = session.authority.trackActivation(
+      BonfireMediaSession.activateVideoMeeting(session.mediaSessionGeneration),
+    );
+    let snapshot: Awaited<typeof activation> = null;
+    try {
+      snapshot = await waitForBoundedNativeOperation(
+        activation,
+        nativeRoomMediaOperationTimeoutMs,
+        'Room audio routing',
+      );
+    } catch {
+      return false;
+    }
+    return (Platform.OS !== 'ios' || snapshot !== null)
+      && activeRoomTerminalRef.current === session
+      && !session.authority.isTerminal();
+  }, []);
+
+  const reassertMeetingMedia = useCallback((): void => {
+    const session = activeRoomTerminalRef.current;
+    if (!session || session.authority.isTerminal()) return;
+    void activateMeetingMedia().then((active) => {
+      if (
+        active
+        || activeRoomTerminalRef.current !== session
+        || session.authority.isTerminal()
+      ) return;
+      setState((current) => ({
+        ...current,
+        error: 'Room audio routing needs attention. Rejoin if you cannot hear the call.',
+      }));
+    });
+  }, [activateMeetingMedia]);
 
   const sendOnSocket = useCallback((
     socketContext: NativeRoomSocketContext,
@@ -708,11 +780,13 @@ export function useNativeRoom(
     return cameraFramingGenerationGuardRef.current?.isCurrent(operation, currentIdentity) === true;
   }, [currentCameraFramingContext]);
 
-  const refreshCameraFramingInternal = useCallback(async (reapplyExplicitRequests: boolean): Promise<void> => {
+  const refreshCameraFramingInternal = useCallback(async (
+    reapplyExplicitRequests: boolean,
+  ): Promise<CameraFramingAdmission> => {
     const context = currentCameraFramingContext();
     if (!context) {
       resetCameraFraming();
-      return;
+      return 'unsafe';
     }
     const operation = cameraFramingGenerationGuardRef.current!.begin(context.identity);
     cameraFramingCapabilitiesRef.current = null;
@@ -734,7 +808,7 @@ export function useNativeRoom(
       BonfireCameraFraming.getCapabilities(operation.deviceId)
     ));
     recordWideUprightCapability(operation.deviceId, capabilities);
-    if (!cameraFramingOperationIsCurrent(operation)) return;
+    if (!cameraFramingOperationIsCurrent(operation)) return 'unsafe';
 
     let framingState = cameraFramingStateFromCapabilities(capabilities, operation.deviceId);
     if (!reapplyExplicitRequests && requestedCenterStageRef.current !== null) {
@@ -750,10 +824,18 @@ export function useNativeRoom(
     }
     cameraFramingCapabilitiesRef.current = { identity: context.identity, capabilities };
     setState((current) => ({ ...current, cameraFraming: framingState }));
-    if (!reapplyExplicitRequests) return;
+    if (!reapplyExplicitRequests) {
+      return adaptiveCameraFramingAdmission(
+        capabilities,
+        operation.deviceId,
+        requestedWideUprightFramingRef.current,
+        false,
+      );
+    }
 
     const requestedCenterStage = requestedCenterStageRef.current;
     const requestedWideUpright = requestedWideUprightFramingRef.current;
+    let mutationFailed = false;
     const centerStageNeedsUpdate = requestedCenterStage !== null
       && framingState.centerStageSupported
       && framingState.centerStageEnabled !== requestedCenterStage;
@@ -761,7 +843,14 @@ export function useNativeRoom(
       requestedWideUpright,
       framingState,
     );
-    if (!centerStageNeedsUpdate && !wideUprightNeedsUpdate) return;
+    if (!centerStageNeedsUpdate && !wideUprightNeedsUpdate) {
+      return adaptiveCameraFramingAdmission(
+        capabilities,
+        operation.deviceId,
+        requestedWideUpright,
+        mutationFailed,
+      );
+    }
 
     setState((current) => (
       cameraFramingOperationIsCurrent(operation)
@@ -781,7 +870,8 @@ export function useNativeRoom(
         BonfireCameraFraming.setCenterStageEnabled(requestedCenterStage, operation.deviceId)
       ));
       recordWideUprightCapability(operation.deviceId, result.capabilities);
-      if (!cameraFramingOperationIsCurrent(operation)) return;
+      mutationFailed ||= !result.ok;
+      if (!cameraFramingOperationIsCurrent(operation)) return 'unsafe';
       capabilities = result.capabilities;
       framingState = cameraFramingStateFromCapabilities(capabilities, operation.deviceId);
       if (wideUprightNeedsUpdate) {
@@ -808,7 +898,8 @@ export function useNativeRoom(
         BonfireCameraFraming.setWideUprightFramingEnabled(requestedWideUpright, operation.deviceId)
       ));
       recordWideUprightCapability(operation.deviceId, result.capabilities);
-      if (!cameraFramingOperationIsCurrent(operation)) return;
+      mutationFailed ||= !result.ok;
+      if (!cameraFramingOperationIsCurrent(operation)) return 'unsafe';
       // A failed default-wide transition must not leave a cold adaptive
       // camera at its invalid 1:1 ratio. Explicit OFF establishes the
       // validated 9:16 fallback before this track is offered to the SFU.
@@ -817,13 +908,14 @@ export function useNativeRoom(
           BonfireCameraFraming.setWideUprightFramingEnabled(false, operation.deviceId)
         ));
         recordWideUprightCapability(operation.deviceId, result.capabilities);
-        if (!cameraFramingOperationIsCurrent(operation)) return;
+        mutationFailed ||= !result.ok;
+        if (!cameraFramingOperationIsCurrent(operation)) return 'unsafe';
       }
       capabilities = result.capabilities;
       framingState = cameraFramingStateFromCapabilities(capabilities, operation.deviceId);
     }
 
-    if (!cameraFramingOperationIsCurrent(operation)) return;
+    if (!cameraFramingOperationIsCurrent(operation)) return 'unsafe';
     cameraFramingCapabilitiesRef.current = { identity: context.identity, capabilities };
     setState((current) => ({
       ...current,
@@ -834,6 +926,12 @@ export function useNativeRoom(
         message: null,
       },
     }));
+    return adaptiveCameraFramingAdmission(
+      capabilities,
+      operation.deviceId,
+      requestedWideUpright,
+      mutationFailed,
+    );
   }, [
     cameraFramingOperationIsCurrent,
     currentCameraFramingContext,
@@ -1068,8 +1166,7 @@ export function useNativeRoom(
             });
           })();
         if (outcome === 'installed' && attemptIsCurrent()) {
-          await BonfireMediaSession.activateVideoMeeting();
-          if (attemptIsCurrent()) return;
+          if (await activateMeetingMedia() && attemptIsCurrent()) return;
         }
 
         setLocalAudioTracksEnabled([
@@ -1148,6 +1245,7 @@ export function useNativeRoom(
     })();
     return true;
   }, [
+    activateMeetingMedia,
     cancelMicrophonePublicationCommit,
     isCurrentPeerContext,
     localParticipantMediaState,
@@ -1399,7 +1497,7 @@ export function useNativeRoom(
     }
   }, [cancelMicrophonePublicationCommit, resetQualityBaseline, retireRemoteVideoEntry]);
 
-  const disposeMedia = useCallback(() => {
+  const disposeMedia = useCallback(async (): Promise<void> => {
     const wideFramingRestore = restoreWideUprightFraming();
     resetCameraFraming(true);
     joinAttemptGuardRef.current?.cancel();
@@ -1427,52 +1525,102 @@ export function useNativeRoom(
     disposePeer();
     const local = localRef.current;
     localRef.current = null;
-    if (local && !wideFramingRestore) {
-      releaseNativeMediaStream(local);
-    } else if (local && wideFramingRestore) {
-      let released = false;
-      const release = () => {
-        if (released) return;
-        released = true;
-        releaseNativeMediaStream(local);
-      };
-      const timeout = setTimeout(release, cameraFramingRestoreTimeoutMs);
-      void wideFramingRestore.finally(() => {
-        clearTimeout(timeout);
-        release();
+    if (local && wideFramingRestore) {
+      const framingSettled = wideFramingRestore.then(
+        () => undefined,
+        () => undefined,
+      );
+      await new Promise<void>((resolve) => {
+        const timeout = setTimeout(resolve, cameraFramingRestoreTimeoutMs);
+        void framingSettled.then(
+          () => { clearTimeout(timeout); resolve(); },
+        );
       });
+      // Release capture promptly even if AVFoundation is slow, but keep the
+      // room authority until the exact-device restoration has settled so a
+      // late cleanup cannot mutate a replacement room's camera session.
+      releaseNativeMediaStream(local);
+      await framingSettled;
+      return;
     }
+    if (local) releaseNativeMediaStream(local);
   }, [disposePeer, resetCameraFraming, restoreWideUprightFraming]);
+  disposeRoomTerminalMediaRef.current = disposeMedia;
 
-  const leave = useCallback(() => {
-    intentionallyLeaving.current = true;
-    const socketContext = socketContextRef.current;
-    const socket = socketContext?.socket ?? socketRef.current;
-    socketContextRef.current = null;
-    socketRef.current = null;
-    connectionGenerationGuardRef.current?.retireSocket(socketContext?.generation);
-    if (socket && socket.readyState < WebSocket.CLOSING) socket.close(1000, 'left room');
-    disposeMedia();
-    void BonfireMediaSession.deactivateVideoMeeting();
-    roomChatOpenRef.current = false;
-    dispatchConversation({ type: 'reset', roomId });
-    setState(initialState);
-  }, [disposeMedia, roomId]);
+  const terminateRoomSession = useCallback((
+    session: ActiveNativeRoomTerminalSession,
+    reason: AudioFocusTerminalReason,
+    presentationKind: 'leave' | 'failure' | 'unmount',
+    message: string | null,
+    source: NativeRoomTerminalSource = 'owner',
+  ): Promise<void> => {
+    if (activeRoomTerminalRef.current !== session && !session.authority.isTerminal()) {
+      return Promise.resolve();
+    }
+    const presentation = mergeNativeRoomTerminalPresentation(
+      { kind: session.presentationKind, message: session.terminalMessage },
+      { kind: presentationKind, message },
+    );
+    // Navigation suppresses late React publication; admission failure upgrades
+    // a coordinator-initiated leave even if native teardown already began.
+    session.presentationKind = presentation.kind;
+    session.terminalMessage = presentation.message;
+    if (!session.authority.isTerminal()) {
+      intentionallyLeaving.current = true;
+      const socketContext = socketContextRef.current;
+      const socket = socketContext?.socket ?? socketRef.current;
+      socketContextRef.current = null;
+      socketRef.current = null;
+      connectionGenerationGuardRef.current?.retireSocket(socketContext?.generation);
+      if (socket && socket.readyState < WebSocket.CLOSING) {
+        socket.close(message ? 1011 : 1000, message ? 'room error' : 'left room');
+      }
+      roomChatOpenRef.current = false;
+    }
 
-  const fail = useCallback((message: string) => {
-    intentionallyLeaving.current = true;
-    const socketContext = socketContextRef.current;
-    const socket = socketContext?.socket ?? socketRef.current;
-    socketContextRef.current = null;
-    socketRef.current = null;
-    connectionGenerationGuardRef.current?.retireSocket(socketContext?.generation);
-    if (socket && socket.readyState < WebSocket.CLOSING) socket.close(1011, 'room error');
-    disposeMedia();
-    void BonfireMediaSession.deactivateVideoMeeting();
-    roomChatOpenRef.current = false;
-    dispatchConversation({ type: 'reset', roomId });
-    setState({ ...initialState, error: message });
-  }, [disposeMedia, roomId]);
+    const completion = session.authority.terminate(reason, source);
+    if (!session.presentation) {
+      const presentationCompletion = waitForNativeRoomTerminalPresentation(
+        completion,
+        session.focusAdmission,
+        source,
+      );
+      session.presentation = presentationCompletion.then(
+        () => {
+          if (activeRoomTerminalRef.current !== session) return;
+          activeRoomTerminalRef.current = null;
+          if (session.presentationKind === 'unmount') return;
+          dispatchConversation({ type: 'reset', roomId });
+          setState(session.presentationKind === 'failure'
+            ? { ...initialState, error: session.terminalMessage ?? 'The room disconnected.' }
+            : initialState);
+        },
+        () => {
+          if (activeRoomTerminalRef.current !== session) return;
+          activeRoomTerminalRef.current = null;
+          if (session.presentationKind === 'unmount') return;
+          dispatchConversation({ type: 'reset', roomId });
+          setState({
+            ...initialState,
+            error: session.terminalMessage ?? 'The room did not close cleanly. Please try again.',
+          });
+        },
+      );
+    }
+    return completion;
+  }, [roomId]);
+
+  const leave = useCallback((): Promise<void> => {
+    const session = activeRoomTerminalRef.current;
+    if (!session) return Promise.resolve();
+    return terminateRoomSession(session, 'completed', 'leave', null);
+  }, [terminateRoomSession]);
+
+  const fail = useCallback((message: string): Promise<void> => {
+    const session = activeRoomTerminalRef.current;
+    if (!session) return Promise.resolve();
+    return terminateRoomSession(session, 'error', 'failure', message);
+  }, [terminateRoomSession]);
 
   const installPeer = useCallback((
     iceServers: Array<Record<string, unknown>>,
@@ -1539,7 +1687,7 @@ export function useNativeRoom(
         // libwebrtc can switch AVAudioSession back to the receiver when its
         // first remote audio track attaches. Reassert the video-meeting route
         // at the exact lifecycle edge where that native mutation occurs.
-        void BonfireMediaSession.activateVideoMeeting();
+        reassertMeetingMedia();
         return;
       }
       if (track.kind !== 'video') return;
@@ -1846,6 +1994,7 @@ export function useNativeRoom(
         : current
     ));
   }, [
+    reassertMeetingMedia,
     disposePeer,
     isCurrentPeerContext,
     participantCanPublishVideo,
@@ -2393,7 +2542,7 @@ export function useNativeRoom(
       case 'session_replaced':
       case 'access_denied': {
         const message = parseNestedData<unknown>(nested.data, 'The room disconnected.');
-        fail(typeof message === 'string' ? message : 'The room disconnected.');
+        void fail(typeof message === 'string' ? message : 'The room disconnected.');
         break;
       }
       default:
@@ -2531,10 +2680,67 @@ export function useNativeRoom(
     withAudio = true,
     transferExisting = false,
   ) => {
-    if (!sessionToken || state.lifecycle !== 'idle') return;
+    if (!sessionToken || state.lifecycle !== 'idle' || activeRoomTerminalRef.current) return;
     const joinAttempt = joinAttemptGuardRef.current?.begin();
     if (!joinAttempt) return;
-    const joinIsCurrent = () => joinAttemptGuardRef.current?.isCurrent(joinAttempt) === true;
+    const mediaSessionGeneration = nextMediaSessionGeneration();
+    const authority = createNativeRoomTerminalAuthority({
+      teardownNative: (_reason, drainActivations) => drainNativeRoomMediaTeardown({
+        generation: mediaSessionGeneration,
+        disposeMedia: () => disposeRoomTerminalMediaRef.current(),
+        drainActivations,
+        deactivateMediaSession: (generation) => BonfireMediaSession.deactivateVideoMeeting(generation),
+      }),
+    });
+    const roomSession: ActiveNativeRoomTerminalSession = {
+      authority,
+      mediaSessionGeneration,
+      focusAdmission: null,
+      presentation: null,
+      presentationKind: null,
+      terminalMessage: null,
+    };
+    activeRoomTerminalRef.current = roomSession;
+    // Publish the intent before any predecessor teardown can defer focus
+    // admission. Leave/unmount can now cancel a visibly joining room instead of
+    // appearing to do nothing while the global microphone queue is occupied.
+    intentionallyLeaving.current = false;
+    setState((current) => ({ ...current, lifecycle: 'joining', error: null }));
+    const joinIsCurrent = () => (
+      activeRoomTerminalRef.current === roomSession
+      && !authority.isTerminal()
+      && joinAttemptGuardRef.current?.isCurrent(joinAttempt) === true
+    );
+    const focusAdmission = audioFocusRuntime.acquire('meeting_media', {
+      forceClose: (reason) => terminateRoomSession(
+        roomSession,
+        reason,
+        reason === 'error' ? 'failure' : 'leave',
+        reason === 'error' ? 'Could not reserve room audio.' : null,
+        'focus_coordinator',
+      ),
+      parkRoomMute: () => roomDictationFocusRef.current.park(),
+      restoreRoomMute: (wasMuted) => roomDictationFocusRef.current.restore(wasMuted),
+    });
+    roomSession.focusAdmission = focusAdmission;
+    authority.bindFocusAdmission(focusAdmission);
+    let meetingLease: Awaited<typeof focusAdmission>;
+    try {
+      meetingLease = await focusAdmission;
+    } catch (error) {
+      await terminateRoomSession(
+        roomSession,
+        'error',
+        'failure',
+        error instanceof Error ? error.message : 'Could not reserve room audio.',
+      ).catch(() => undefined);
+      return;
+    }
+    authority.bindFocusLease(meetingLease);
+    if (!joinIsCurrent() || !meetingLease.isCurrent()) {
+      await terminateRoomSession(roomSession, 'cancelled', 'leave', null).catch(() => undefined);
+      return;
+    }
     resetCameraFraming(true);
     // Each call starts from the premium composition the user validated:
     // Center Stage off and explicit 9:16 portrait capture. Both controls stay
@@ -2549,7 +2755,6 @@ export function useNativeRoom(
     );
     roomChatOpenRef.current = false;
     dispatchConversation({ type: 'reset', roomId });
-    setState((current) => (joinIsCurrent() ? { ...current, lifecycle: 'joining', error: null } : current));
     try {
       const clientConfigResult = await settleGenerationOperation(
         api.clientConfig(sessionToken),
@@ -2609,20 +2814,50 @@ export function useNativeRoom(
       // while AVAudioSession continues to honor wired and Bluetooth outputs.
       // Apply after WebRTC capture so its audio-session activation cannot
       // silently restore the telephone earpiece route.
-      await BonfireMediaSession.activateVideoMeeting();
+      if (!(await activateMeetingMedia())) {
+        if (!joinIsCurrent()) return;
+        throw new Error('Room audio routing could not be activated. Please try again.');
+      }
       if (!joinIsCurrent()) return;
       // Establish a valid 16:9 wide or 9:16 portrait capture before signaling.
       // Unsupported cameras complete capability discovery without mutation.
-      await refreshCameraFramingInternal(true);
+      let framingAdmission: CameraFramingAdmission = 'unsafe';
+      try {
+        framingAdmission = await waitForBoundedNativeOperation(
+          refreshCameraFramingInternal(true),
+          nativeRoomFramingConfirmationTimeoutMs,
+          'Room camera framing',
+        );
+      } catch {
+        // Camera framing follows the existing camera-acquisition policy: a
+        // failure must not lock the user out of an otherwise healthy room.
+      }
       if (!joinIsCurrent()) return;
+      if (framingAdmission === 'unsafe') {
+        requestedVideo.current = false;
+        releaseUnsafeCameraTracks(stream);
+        resetCameraFraming();
+        setState((current) => (
+          joinIsCurrent()
+            ? {
+                ...current,
+                localStream: stream,
+                cameraOff: true,
+                cameraStarting: false,
+                videoSuspended: false,
+              }
+            : current
+        ));
+      }
       reconnectContextRef.current = { iceServers, passcode, transferExisting };
       reconnectAttemptRef.current = 0;
       connectSocket();
     } catch (err) {
       if (!joinIsCurrent()) return;
-      fail(err instanceof Error ? err.message : 'Could not join this room.');
+      await fail(err instanceof Error ? err.message : 'Could not join this room.').catch(() => undefined);
     }
   }, [
+    activateMeetingMedia,
     connectSocket,
     fail,
     resetCameraFraming,
@@ -2630,6 +2865,7 @@ export function useNativeRoom(
     refreshCameraFramingInternal,
     sessionToken,
     state.lifecycle,
+    terminateRoomSession,
   ]);
 
   const setMuted = useCallback((muted: boolean) => {
@@ -2653,7 +2889,7 @@ export function useNativeRoom(
     }
 
     requestedAudio.current = true;
-    void BonfireMediaSession.activateVideoMeeting();
+    reassertMeetingMedia();
     setLocalAudioTracksEnabled([
       ...liveTracks,
       audioSenderRef.current?.track,
@@ -2698,7 +2934,32 @@ export function useNativeRoom(
       return;
     }
     failMicrophoneStart('unmute could not resolve the fixed audio publication sender');
-  }, [cancelMicrophonePublicationCommit, localParticipantMediaState, recoverNativeMicrophone, send]);
+  }, [
+    reassertMeetingMedia,
+    cancelMicrophonePublicationCommit,
+    localParticipantMediaState,
+    recoverNativeMicrophone,
+    send,
+  ]);
+
+  /**
+   * Private composer dictation is never meeting media. Capture the exact mute
+   * state, fence the outbound track before recorder acquisition, and hand the
+   * value back to the caller/coordinator for exact restoration on every exit.
+   */
+  const parkPrivateDictation = useCallback((): boolean => {
+    const wasMuted = state.muted || state.microphoneStarting;
+    setMuted(true);
+    return wasMuted;
+  }, [setMuted, state.microphoneStarting, state.muted]);
+
+  const restorePrivateDictation = useCallback((wasMuted: boolean) => {
+    setMuted(wasMuted);
+  }, [setMuted]);
+  roomDictationFocusRef.current = {
+    park: parkPrivateDictation,
+    restore: restorePrivateDictation,
+  };
 
   const setCameraOff = useCallback((cameraOff: boolean) => {
     const liveTracks = localRef.current?.getVideoTracks()
@@ -3155,7 +3416,7 @@ export function useNativeRoom(
       // The hook remains mounted on Canvas after Leave. Never reacquire the
       // app-wide audio session unless this hook still owns live room media.
       if (!localRef.current) return;
-      void BonfireMediaSession.activateVideoMeeting();
+      reassertMeetingMedia();
       if (
         requestedAudio.current
         && !localMediaTrackIsPublishing(localRef.current, 'audio')
@@ -3182,6 +3443,7 @@ export function useNativeRoom(
     });
     return () => subscription.remove();
   }, [
+    reassertMeetingMedia,
     cancelMicrophonePublicationCommit,
     recoverNativeCamera,
     recoverNativeMicrophone,
@@ -3190,7 +3452,12 @@ export function useNativeRoom(
     setSystemVideoSuspended,
   ]);
 
-  useEffect(() => () => leave(), [leave]);
+  useEffect(() => () => {
+    const session = activeRoomTerminalRef.current;
+    if (session) {
+      void terminateRoomSession(session, 'cancelled', 'unmount', null).catch(() => undefined);
+    }
+  }, [terminateRoomSession]);
 
   return {
     state,
@@ -3198,6 +3465,8 @@ export function useNativeRoom(
     join,
     leave,
     setMuted,
+    parkPrivateDictation,
+    restorePrivateDictation,
     setCameraOff,
     startScreenShare,
     stopScreenShare,

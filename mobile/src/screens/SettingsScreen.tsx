@@ -17,6 +17,7 @@ import { api, BonfireApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { passkeyErrorMessage } from '../auth/passkeyError';
 import { Screen } from '../components/Screen';
+import { ScoutMemorySettings } from '../components/ScoutMemorySettings';
 import { useShowPreviews } from '../canvas/previewPreference';
 import { prepareAvatarDataURL } from '../profile/prepareAvatar';
 import {
@@ -68,11 +69,12 @@ export function SettingsScreen() {
 
   async function saveProfile(avatarDataURL = user?.avatarDataURL ?? '') {
     if (!sessionToken || !displayName.trim()) return;
+    const requestSessionToken = sessionToken;
     setBusy('profile');
     setError(null);
     try {
-      const identity = await api.updateProfile(sessionToken, displayName.trim(), avatarDataURL);
-      updateIdentity(identity);
+      const identity = await api.updateProfile(requestSessionToken, displayName.trim(), avatarDataURL);
+      updateIdentity(identity, requestSessionToken);
       setDisplayName(identity.name);
       setStatus('Profile updated.');
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -88,6 +90,7 @@ export function SettingsScreen() {
       setError('Add a display name before choosing a profile photo.');
       return;
     }
+    const requestSessionToken = sessionToken;
     setError(null);
     setStatus(null);
     try {
@@ -105,11 +108,11 @@ export function SettingsScreen() {
       const avatarDataURL = await prepareAvatarDataURL(asset.uri, asset.width);
       setAvatarPreview(avatarDataURL);
       const identity = await api.updateProfile(
-        sessionToken,
+        requestSessionToken,
         displayName.trim(),
         avatarDataURL,
       );
-      updateIdentity(identity);
+      updateIdentity(identity, requestSessionToken);
       setDisplayName(identity.name);
       setStatus('Profile photo updated.');
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -253,7 +256,7 @@ export function SettingsScreen() {
           <Text style={styles.primaryText}>{busy === 'profile' ? 'Saving…' : 'Save profile'}</Text>
         </Pressable>
 		<Text style={styles.privacyNote}>
-			Voice dictation is sent securely to Stride for company-aware transcription. The audio file is deleted after transcription or when you cancel or discard it; only text remains.
+			Voice dictation is sent securely to Bonfire for company-aware transcription. The audio file is deleted after transcription or when you cancel or discard it; only text remains.
 		</Text>
       </View>
 
@@ -317,6 +320,8 @@ export function SettingsScreen() {
           <Text style={styles.secondaryText}>{busy === 'passkey' ? 'Waiting…' : 'Add a passkey'}</Text>
         </Pressable>
       </View>
+
+      <ScoutMemorySettings sessionToken={sessionToken} />
 
       <Text style={styles.sectionTitle}>Password</Text>
       <View style={[styles.section, shadow[1]]}>

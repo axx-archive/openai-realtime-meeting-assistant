@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -12,10 +13,35 @@ const (
 	codexProposalStatusProposed  = "proposed"
 	codexProposalStatusConfirmed = "confirmed"
 	codexProposalStatusDismissed = "dismissed"
+	codexProposalLaunchClaimed   = "claimed"
+	codexProposalLaunchStarted   = "started"
+	codexProposalLaunchAmbiguous = "ambiguous"
 	// codexProposalHistoryLimit is how many proposals replay to a newly
 	// admitted participant (pending cards plus recent resolutions).
 	codexProposalHistoryLimit = 20
 )
+
+var ErrLegacyCodexProposalRetired = errors.New("legacy codex proposals are retired while STRIDE Suggested Work is selected")
+
+// legacyCodexProposalsRetired is deliberately keyed to product selection, not
+// runtime health. If the canonical STRIDE product is configured but temporarily
+// unavailable, falling back to an org-wide legacy proposal would bypass its
+// recipient, source, destination, ACL, consent, and revision authority.
+func (app *kanbanBoardApp) legacyCodexProposalsRetired() bool {
+	return app != nil && app.strideRuntime != nil && app.strideRuntime.productPreviewOwnsWorkSuggestions()
+}
+
+// legacyCodexProposalLaunchClaim is stable across process replacement. Legacy
+// proposals have no revision field, so their immutable proposal id is the only
+// safe replay key. A persisted claim permits one launch attempt, never a retry:
+// after process loss the effect is ambiguous and one-or-zero is safer than two.
+func legacyCodexProposalLaunchClaim(proposalID string) string {
+	proposalID = strings.TrimSpace(proposalID)
+	if proposalID == "" {
+		return ""
+	}
+	return "legacy-codex-proposal:" + proposalID
+}
 
 const (
 	codexProposalActionConfirm = "confirm"
@@ -54,6 +80,9 @@ func proposalLane(entry meetingMemoryEntry) string {
 func (app *kanbanBoardApp) proposeCodexTask(args map[string]any, proposedBy string) (map[string]any, bool, error) {
 	if app == nil || app.memory == nil {
 		return nil, false, fmt.Errorf("meeting memory is unavailable")
+	}
+	if app.legacyCodexProposalsRetired() {
+		return nil, false, ErrLegacyCodexProposalRetired
 	}
 	proposedBy = strings.TrimSpace(proposedBy)
 	if proposedBy == "" {
@@ -172,7 +201,7 @@ func codexProposalPayload(entry meetingMemoryEntry) map[string]any {
 		"proposedBy": entry.Metadata["proposedBy"],
 		"createdAt":  entry.CreatedAt.UTC().Format(time.RFC3339Nano),
 	}
-	for _, key := range []string{"confirmedBy", "dismissedBy", "threadId", "threadArtifactId", "resolvedAt", "cardId", "packageId", "approvalLane", "lane", "originThreadId", "laneApprovedBy"} {
+	for _, key := range []string{"confirmedBy", "dismissedBy", "threadId", "threadArtifactId", "resolvedAt", "cardId", "packageId", "approvalLane", "lane", "originThreadId", "laneApprovedBy", "launchClaimId", "launchState"} {
 		if value := strings.TrimSpace(entry.Metadata[key]); value != "" {
 			payload[key] = value
 		}
@@ -184,7 +213,7 @@ func codexProposalPayload(entry meetingMemoryEntry) map[string]any {
 // like codex_proposal broadcast payloads.
 func (app *kanbanBoardApp) codexProposalsSnapshot(limit int) []map[string]any {
 	proposals := []map[string]any{}
-	if app == nil || app.memory == nil {
+	if app == nil || app.memory == nil || app.legacyCodexProposalsRetired() {
 		return proposals
 	}
 	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindCodexProposal, limit) {
@@ -198,7 +227,7 @@ func (app *kanbanBoardApp) codexProposalsSnapshot(limit int) []map[string]any {
 // proposal is gone (or settled before the notification settle stamp existed)
 // must never stay sticky in the bell.
 func (app *kanbanBoardApp) proposalAwaitingAction(proposalID string) bool {
-	if app == nil || app.memory == nil {
+	if app == nil || app.memory == nil || app.legacyCodexProposalsRetired() {
 		return false
 	}
 	entry, ok := app.memory.entryByKindAndID(meetingMemoryKindCodexProposal, proposalID)
@@ -230,6 +259,9 @@ func (app *kanbanBoardApp) resolveCodexProposal(id string, action string, userNa
 	entry, ok := app.memory.entryByKindAndID(meetingMemoryKindCodexProposal, id)
 	if !ok {
 		return nil, false, fmt.Errorf("proposal not found")
+	}
+	if action == codexProposalActionConfirm && app.legacyCodexProposalsRetired() {
+		return nil, false, ErrLegacyCodexProposalRetired
 	}
 	if entry.Metadata["status"] != codexProposalStatusProposed {
 		return codexProposalPayload(entry), false, nil
@@ -282,9 +314,8 @@ func (app *kanbanBoardApp) resolveCodexProposal(id string, action string, userNa
 		if err != nil {
 			return nil, false, err
 		}
-		// W0-7 proposal taxonomy: resolved only after the launch stuck — a
-		// failed launch reverts the proposal to proposed and must not settle
-		// the funnel row.
+		// W0-7 proposal taxonomy: resolved only after the launch stuck. A failed
+		// launch remains claimed/ambiguous and must not emit a false approval.
 		recordProposalEvent(proposalEventResolved, id, map[string]any{
 			"resolution": "approved",
 			"approver":   firstNonEmptyString(strings.TrimSpace(userName), normalizeAccountEmail(userEmail)),
@@ -330,9 +361,10 @@ func (app *kanbanBoardApp) resolveCodexProposal(id string, action string, userNa
 // and is the single seam shared by the HTTP confirm (room origin) and the
 // workflow ticker (068 channel origin). The caller MUST hold app.proposalMu so
 // a concurrent confirm and a ticker pass can never double-launch. It persists
-// the confirmed transition BEFORE launching (a post-launch failure can then
-// only lose linkage, never re-open the proposal for a second launch), reverts
-// to proposed if the launch itself fails, then stamps thread/card/artifact
+// a stable idempotency claim BEFORE launching. Once claimed, a failed or
+// interrupted launch is terminally ambiguous and never re-opened or replayed;
+// this makes a process loss around the launch one-or-zero rather than possibly
+// two. A successful attempt then stamps thread/card/artifact
 // linkage, advances the linked card, captures the confirm signal, and settles
 // the notification + fans the resolution. actorName/actorEmail attribute the
 // launch — a human for the confirm, "workflow ticker · standing approval: X"
@@ -341,13 +373,25 @@ func (app *kanbanBoardApp) launchApprovedProposal(entry meetingMemoryEntry, acto
 	if app == nil || app.memory == nil {
 		return nil, fmt.Errorf("proposals are unavailable")
 	}
+	if app.legacyCodexProposalsRetired() {
+		return nil, ErrLegacyCodexProposalRetired
+	}
 	id := entry.ID
+	claimID := legacyCodexProposalLaunchClaim(id)
+	if claimID == "" {
+		return nil, fmt.Errorf("proposal id is required")
+	}
+	if existingClaim := strings.TrimSpace(entry.Metadata["launchClaimId"]); existingClaim != "" {
+		return nil, fmt.Errorf("legacy proposal launch already claimed: %s", existingClaim)
+	}
 	resolvedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	updated, _, err := app.memory.updateEntryWithMetadata(meetingMemoryKindCodexProposal, id, entry.Text, map[string]string{
 		"status":           codexProposalStatusConfirmed,
 		"confirmedBy":      strings.TrimSpace(actorName),
 		"confirmedByEmail": normalizeAccountEmail(actorEmail),
 		"resolvedAt":       resolvedAt,
+		"launchClaimId":    claimID,
+		"launchState":      codexProposalLaunchClaimed,
 	})
 	if err != nil {
 		return nil, err
@@ -355,13 +399,10 @@ func (app *kanbanBoardApp) launchApprovedProposal(entry meetingMemoryEntry, acto
 
 	thread, err := app.launchAgentThreadWithSpec(entry.Metadata["mode"], entry.Metadata["query"], actorName, origin, agentThreadGoalSpec{Launch: launch})
 	if err != nil {
-		if _, _, revertErr := app.memory.updateEntryWithMetadata(meetingMemoryKindCodexProposal, id, entry.Text, map[string]string{
-			"status":           codexProposalStatusProposed,
-			"confirmedBy":      "",
-			"confirmedByEmail": "",
-			"resolvedAt":       "",
-		}); revertErr != nil {
-			log.Errorf("Failed to revert codex proposal %s after launch error: %v", id, revertErr)
+		if _, _, stampErr := app.memory.updateEntryWithMetadata(meetingMemoryKindCodexProposal, id, entry.Text, map[string]string{
+			"launchState": codexProposalLaunchAmbiguous,
+		}); stampErr != nil {
+			log.Errorf("Failed to stamp ambiguous codex proposal %s after launch error: %v", id, stampErr)
 		}
 		return nil, err
 	}
@@ -372,6 +413,7 @@ func (app *kanbanBoardApp) launchApprovedProposal(entry meetingMemoryEntry, acto
 	threadStamp := map[string]string{
 		"threadId":         thread.ID,
 		"threadArtifactId": thread.Artifact.ID,
+		"launchState":      codexProposalLaunchStarted,
 	}
 	// Board linkage: the propose-time cardId wins; when it is absent, retry the
 	// fuzzy match now (the board worker may have created the card in a later
@@ -539,7 +581,9 @@ func assistantProposalActionHandler(w http.ResponseWriter, r *http.Request) {
 	proposal, launched, err := kanbanApp.resolveCodexProposal(parts[0], payload.Action, user.Name, user.Email)
 	if err != nil {
 		status := http.StatusBadRequest
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, ErrLegacyCodexProposalRetired) {
+			status = http.StatusConflict
+		} else if strings.Contains(err.Error(), "not found") {
 			status = http.StatusNotFound
 		}
 		writeAuthError(w, status, err.Error())

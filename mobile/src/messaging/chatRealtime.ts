@@ -5,6 +5,7 @@ export type ChatThreadEventPayload = {
   title?: string;
   preview?: string;
   visibility?: string;
+  memberEmails?: string[];
   updatedAt?: string;
   message?: ScoutMessage;
   deletedMessageId?: string;

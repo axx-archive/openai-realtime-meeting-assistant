@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Animated, StyleSheet, View, useColorScheme } from 'react-native';
 import {
   NavigationContainer,
@@ -18,6 +18,7 @@ import { RoomScreen } from '../screens/RoomScreen';
 import { CreateRoomScreen } from '../screens/CreateRoomScreen';
 import { ThreadScreen } from '../screens/ThreadScreen';
 import { AlertsScreen } from '../screens/AlertsScreen';
+import { AgentTeamScreen } from '../screens/AgentTeamScreen';
 import {
   FilesScreen,
   IntelligenceScreen,
@@ -56,63 +57,108 @@ const DECK_DETENTS = [0.14, 0.5, 1];
  */
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
+type PendingPushTarget = {
+  target: PushTarget;
+  accountKey: string;
+};
+
+function pushAccountKey(email: string | undefined, sessionToken: string | null): string | null {
+  const normalized = email?.trim().toLowerCase();
+  return normalized && sessionToken ? normalized : null;
+}
+
 export function RootNavigator() {
   const { user, bootstrapping, sessionToken } = useAuth();
+  const accountKey = pushAccountKey(user?.email, sessionToken);
   const dark = useColorScheme() === 'dark';
-	const reduceMotion = useReduceMotion();
-	const launchOpacity = useRef(new Animated.Value(1)).current;
-	const [launchVisible, setLaunchVisible] = useState(true);
-	const [pendingPushTarget, setPendingPushTarget] = useState<PushTarget | null>(null);
+  const reduceMotion = useReduceMotion();
+  const launchOpacity = useRef(new Animated.Value(1)).current;
+  const [launchVisible, setLaunchVisible] = useState(true);
+  const pendingPushTargetRef = useRef<PendingPushTarget | null>(null);
+  const [pendingPushVersion, setPendingPushVersion] = useState(0);
+  const committedPushAccountRef = useRef<string | null>(accountKey);
 
-	useEffect(() => {
-		if (bootstrapping) {
-			launchOpacity.setValue(1);
-			setLaunchVisible(true);
-			return;
-		}
-		if (reduceMotion) {
-			launchOpacity.setValue(0);
-			setLaunchVisible(false);
-			return;
-		}
-		const fade = Animated.timing(launchOpacity, {
-			toValue: 0,
-			duration: duration.slow,
-			easing: ease,
-			useNativeDriver: true,
-		});
-		fade.start(({ finished }) => {
-			if (finished) setLaunchVisible(false);
-		});
-		return () => fade.stop();
-	}, [bootstrapping, launchOpacity, reduceMotion]);
+  useLayoutEffect(() => {
+    if (committedPushAccountRef.current === accountKey) return;
+    committedPushAccountRef.current = accountKey;
+    if (pendingPushTargetRef.current?.accountKey !== accountKey) {
+      pendingPushTargetRef.current = null;
+    }
+  }, [accountKey]);
 
-	const openPushTarget = useCallback((target: PushTarget) => {
-		if (!user || !navigationRef.isReady()) {
-			setPendingPushTarget(target);
-			return;
-		}
-		navigationRef.navigate('Thread', {
-			threadId: target.threadId,
-			title: target.threadName ? `#${target.threadName.replace(/^#/, '')}` : '#team',
-			messageId: target.messageId ?? undefined,
-		});
-		setPendingPushTarget(null);
-	}, [user]);
+  useEffect(() => {
+    if (bootstrapping) {
+      launchOpacity.setValue(1);
+      setLaunchVisible(true);
+      return;
+    }
+    if (reduceMotion) {
+      launchOpacity.setValue(0);
+      setLaunchVisible(false);
+      return;
+    }
+    const fade = Animated.timing(launchOpacity, {
+      toValue: 0,
+      duration: duration.slow,
+      easing: ease,
+      useNativeDriver: true,
+    });
+    fade.start(({ finished }) => {
+      if (finished) setLaunchVisible(false);
+    });
+    return () => fade.stop();
+  }, [bootstrapping, launchOpacity, reduceMotion]);
 
-	const flushPendingPushTarget = useCallback(() => {
-		if (pendingPushTarget) openPushTarget(pendingPushTarget);
-	}, [openPushTarget, pendingPushTarget]);
+  const openPushTarget = useCallback((target: PushTarget) => {
+    // usePushRegistration derives this target from the current account's
+    // authenticated notification projection. Recheck that binding at the
+    // navigation boundary so an in-flight validation cannot cross a switch.
+    if (!accountKey || target.accountKey !== accountKey) {
+      pendingPushTargetRef.current = null;
+      return;
+    }
+    if (!navigationRef.isReady()) {
+      pendingPushTargetRef.current = {
+        target,
+        accountKey,
+      };
+      setPendingPushVersion((version) => version + 1);
+      return;
+    }
+    navigationRef.navigate('Thread', {
+      threadId: target.threadId,
+      title: target.threadName ? `#${target.threadName.replace(/^#/, '')}` : '#team',
+      messageId: target.messageId ?? undefined,
+    });
+    pendingPushTargetRef.current = null;
+  }, [accountKey]);
 
-	useEffect(() => {
-		flushPendingPushTarget();
-	}, [flushPendingPushTarget]);
+  const flushPendingPushTarget = useCallback(() => {
+    const pending = pendingPushTargetRef.current;
+    if (!pending || bootstrapping) return;
+    if (
+      !accountKey
+      || pending.accountKey !== accountKey
+      || pending.target.accountKey !== accountKey
+    ) {
+      pendingPushTargetRef.current = null;
+      return;
+    }
+    if (!navigationRef.isReady()) return;
+    openPushTarget(pending.target);
+  }, [accountKey, bootstrapping, openPushTarget]);
+
+  useEffect(() => {
+    flushPendingPushTarget();
+  }, [flushPendingPushTarget, pendingPushVersion]);
 
   // A notification is a request to see ONE thing, so it opens the THREAD, never
   // the canvas — landing home would make the user navigate twice (§8).
   usePushRegistration({
     sessionToken,
-	onOpenTarget: openPushTarget,
+    accountKey,
+    bootstrapping,
+    onOpenTarget: openPushTarget,
   });
   const navTheme = {
     ...DefaultTheme,
@@ -135,7 +181,7 @@ export function RootNavigator() {
     <View style={styles.root}>
       <NavigationContainer ref={navigationRef} theme={navTheme} onReady={flushPendingPushTarget}>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {user ? (
+        {user && sessionToken ? (
           <>
             <Stack.Screen name="Canvas" component={CanvasScreen} />
             <Stack.Screen
@@ -170,6 +216,7 @@ export function RootNavigator() {
             <Stack.Screen name="Memory" component={MemoryScreen} />
             <Stack.Screen name="Meetings" component={MeetingsScreen} />
             <Stack.Screen name="Files" component={FilesScreen} />
+            <Stack.Screen name="AgentTeam" component={AgentTeamScreen} />
             <Stack.Screen name="Alerts" component={AlertsScreen} />
             <Stack.Screen name="Settings" component={SettingsScreen} />
           </>

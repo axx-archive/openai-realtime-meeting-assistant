@@ -35,9 +35,6 @@ export const NAV_ITEM_GAP = SPACE_2;
 /** Outer inset of both ends of the row, matching the Dock pill's edge. */
 export const DOCK_ROW_MARGIN = SPACE_5;
 
-/** Lift the two corner controls above the device edge as a deliberate band. */
-export const DOCK_ROW_BOTTOM_MARGIN = 32;
-
 /** The standard 44pt tap target both end controls use. */
 export const DOCK_ROW_CONTROL = HIT_MIN;
 

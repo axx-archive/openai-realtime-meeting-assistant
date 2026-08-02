@@ -210,7 +210,7 @@ func createOpenAIImage(ctx context.Context, prompt string, opts openAIImageOptio
 
 	// Image generation is the slowest OpenAI call the OS makes; 120s is the
 	// generous ceiling (the Responses neighbor runs text at 45s).
-	response, err := (&http.Client{Timeout: 120 * time.Second}).Do(httpRequest)
+	response, err := aiProviderHTTPClient(120 * time.Second).Do(httpRequest)
 	if err != nil {
 		return "", "", fmt.Errorf("create OpenAI image: %w", err)
 	}

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,7 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
-	"strconv"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -21,10 +20,9 @@ import (
 // dictation": Apple's is fast, private, and generic — it has never heard of this
 // company, so it writes teammates' names and product names wrong, which is most
 // of what work chat actually contains. This endpoint spends a network round trip
-// to buy correctness on exactly those words, by running the upload through the
-// SAME domain-vocabulary biasing the authoritative meeting transcript lane uses
-// (domain_terms.go), then applying the known-mistranscription corrections on the
-// way out.
+// to buy correctness on exactly those words. The upload uses its own separately
+// qualified route, the same domain vocabulary as the authoritative meeting
+// transcript lane, and the known-mistranscription corrections on the way out.
 //
 // This is the file-at-a-time sibling of transcription_lane.go's streaming
 // WebSocket lane: dictation is a short, complete utterance, so a single
@@ -42,14 +40,46 @@ const (
 )
 
 type dictationTranscriptResponse struct {
-	Text       string `json:"text"`
-	DurationMS int64  `json:"durationMs"`
-	Model      string `json:"model"`
+	Text              string `json:"text"`
+	DurationMS        int64  `json:"durationMs"`
+	DurationEstimated bool   `json:"durationEstimated"`
+	Model             string `json:"model"`
 	// Biased reports whether company-vocabulary biasing actually applied. The
 	// whisper family rejects the prompt parameter, so a whisper pin silently
 	// degrades dictation to generic transcription — surfacing it here means the
 	// client can tell the difference instead of guessing why names are wrong.
 	Biased bool `json:"biased"`
+}
+
+type dictationTranscriptionField struct {
+	Name  string
+	Value string
+}
+
+// Dictation intentionally owns a route independent of the meeting transcript
+// lane. Until E10 explicitly qualifies and sets the new dial, an unset value
+// preserves the incumbent resolved model byte-for-byte.
+func dictationTranscriptionModel() string {
+	if model := strings.TrimSpace(os.Getenv("OPENAI_DICTATION_TRANSCRIPT_MODEL")); model != "" {
+		return model
+	}
+	return transcriptionLaneModel()
+}
+
+func dictationTranscriptionFields(model, prompt string) []dictationTranscriptionField {
+	fields := []dictationTranscriptionField{{Name: "model", Value: model}}
+	if transcriptionModelUsesModernHints(model) {
+		fields = append(fields, dictationTranscriptionField{Name: "languages[]", Value: "en"})
+		for _, keyword := range domainVocabulary() {
+			fields = append(fields, dictationTranscriptionField{Name: "keywords[]", Value: keyword})
+		}
+	} else {
+		fields = append(fields, dictationTranscriptionField{Name: "language", Value: "en"})
+	}
+	if strings.TrimSpace(prompt) != "" {
+		fields = append(fields, dictationTranscriptionField{Name: "prompt", Value: prompt})
+	}
+	return fields
 }
 
 func assistantTranscribeHandler(w http.ResponseWriter, r *http.Request) {
@@ -70,50 +100,48 @@ func assistantTranscribeHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusServiceUnavailable, "dictation is unavailable — OPENAI_API_KEY is not configured")
 		return
 	}
+	release, err := dictationQuotas.acquire(user.Email, time.Now())
+	if err != nil {
+		w.Header().Set("Retry-After", "60")
+		writeAuthError(w, http.StatusTooManyRequests, err.Error())
+		return
+	}
+	defer release()
 
+	// Parse the multipart stream directly. ParseMultipartForm retains form values
+	// in memory and creates its own file before we make the seekable provider
+	// spool, which turns one 25 MB upload into avoidable heap and disk pressure.
 	r.Body = http.MaxBytesReader(w, r.Body, dictationMaxBytes+(1<<20))
-	if err := r.ParseMultipartForm(8 << 20); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeAuthError(w, http.StatusRequestEntityTooLarge, "recording is too long")
-			return
-		}
-		writeAuthError(w, http.StatusBadRequest, "could not read the upload form")
-		return
-	}
-	// ParseMultipartForm spills parts over the in-memory threshold to $TMPDIR
-	// files that are NOT auto-removed; the long-lived VPS exhausts /tmp without
-	// this (same reason files.go does it).
-	defer func() {
-		if r.MultipartForm != nil {
-			r.MultipartForm.RemoveAll()
-		}
-	}()
-
-	part, header, err := r.FormFile("audio")
-	if err != nil {
-		writeAuthError(w, http.StatusBadRequest, "upload form needs an audio field")
-		return
-	}
-	defer part.Close()
-
-	audio, err := io.ReadAll(part)
-	if err != nil {
-		writeAuthError(w, http.StatusBadRequest, "could not read the recording")
-		return
-	}
-	if len(audio) == 0 {
-		writeAuthError(w, http.StatusBadRequest, "the recording is empty")
-		return
-	}
-	if len(audio) > dictationMaxBytes {
+	audio, filename, contextValue, threadID, err := streamDictationUpload(r)
+	var tooLarge *http.MaxBytesError
+	if errors.Is(err, errDictationTooLarge) || errors.As(err, &tooLarge) {
 		writeAuthError(w, http.StatusRequestEntityTooLarge, "recording is too long")
 		return
 	}
+	if err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read the upload form")
+		return
+	}
+	defer audio.Close()
+	defer os.Remove(audio.Name())
 
-	filename := strings.TrimSpace(header.Filename)
+	filename = filepath.Base(strings.TrimSpace(filename))
 	if filename == "" {
 		filename = "dictation.m4a"
+	}
+	seconds, durationEstimated, err := serverDerivedDictationSeconds(audio, filename)
+	if errors.Is(err, errDictationTooLarge) {
+		writeAuthError(w, http.StatusRequestEntityTooLarge, "recording is too long")
+		return
+	}
+	if err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not inspect the recording")
+		return
+	}
+	if err := dictationQuotas.charge(user.Email, time.Now(), seconds); err != nil {
+		w.Header().Set("Retry-After", "3600")
+		writeAuthError(w, http.StatusTooManyRequests, err.Error())
+		return
 	}
 
 	// `context` ("chat" | "board" | "search") is accepted and currently unused:
@@ -121,9 +149,9 @@ func assistantTranscribeHandler(w http.ResponseWriter, r *http.Request) {
 	// client contract is stable when per-surface vocabulary narrowing lands, and
 	// is deliberately NOT wired to a narrower prompt yet — a half-applied bias
 	// would silently make some surfaces transcribe worse than others.
-	_ = r.FormValue("context")
+	_ = contextValue
 
-	model := transcriptionLaneModel()
+	model := dictationTranscriptionModel()
 	// Same gate as the streaming lane: the gpt-4o transcription family accepts a
 	// free-text prompt for vocabulary biasing; the whisper family rejects it live
 	// with "The 'prompt' parameter is not supported for this model". Sending it
@@ -144,7 +172,7 @@ func assistantTranscribeHandler(w http.ResponseWriter, r *http.Request) {
 			Provider:     providerOpenAI,
 			Model:        model,
 			Seat:         seatDictation,
-			AudioSeconds: dictationSeconds(r.FormValue("durationMs")),
+			AudioSeconds: seconds,
 			DurationMS:   time.Since(started).Milliseconds(),
 			Error:        err.Error(),
 		})
@@ -156,88 +184,92 @@ func assistantTranscribeHandler(w http.ResponseWriter, r *http.Request) {
 	// mistranscriptions of this company's terms, fixed the same way in both
 	// lanes so dictation and transcripts never disagree about a name.
 	text = canonicalizeDomainTerms(strings.TrimSpace(text))
+	if text == "" {
+		recordLLMUsage(llmUsageEntry{
+			Provider:     providerOpenAI,
+			Model:        model,
+			Seat:         seatDictation,
+			ThreadID:     strings.TrimSpace(threadID),
+			AudioSeconds: seconds,
+			DurationMS:   time.Since(started).Milliseconds(),
+			WireSuccess:  true,
+			Error:        "provider returned an empty transcript",
+		})
+		writeAuthError(w, http.StatusUnprocessableEntity, "no speech was detected; the recording can be retried")
+		return
+	}
 
-	seconds := dictationSeconds(r.FormValue("durationMs"))
 	recordLLMUsage(llmUsageEntry{
-		Provider:     providerOpenAI,
-		Model:        model,
-		Seat:         seatDictation,
-		ThreadID:     strings.TrimSpace(r.FormValue("threadId")),
-		AudioSeconds: seconds,
-		DurationMS:   time.Since(started).Milliseconds(),
-		WireSuccess:  true,
+		Provider:       providerOpenAI,
+		Model:          model,
+		Seat:           seatDictation,
+		ThreadID:       strings.TrimSpace(threadID),
+		AudioSeconds:   seconds,
+		DurationMS:     time.Since(started).Milliseconds(),
+		WireSuccess:    true,
+		AcceptedOutput: true,
 	})
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(dictationTranscriptResponse{
-		Text:       text,
-		DurationMS: int64(seconds * 1000),
-		Model:      model,
-		Biased:     biased,
+		Text:              text,
+		DurationMS:        int64(seconds * 1000),
+		DurationEstimated: durationEstimated,
+		Model:             model,
+		Biased:            biased,
 	})
-}
-
-// dictationSeconds parses the client-reported recording duration and clamps it
-// to the accepted bound.
-//
-// The duration is client-reported because the gpt-4o transcription family only
-// supports `json`/`text` response formats — `verbose_json`, the field that
-// carries a server-side duration, is whisper-1 only. Decoding m4a server-side to
-// recover it would be a codec dependency for a billing figure. Every caller is
-// an authenticated member of this company's roster and the value is clamped, so
-// the exposure is a member under-reporting their own dictation minutes; that is
-// an acceptable trade for not carrying an audio decoder.
-func dictationSeconds(raw string) float64 {
-	ms, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
-	if err != nil || ms <= 0 {
-		return 0
-	}
-	seconds := ms / 1000
-	if seconds > dictationMaxSeconds {
-		return dictationMaxSeconds
-	}
-	return seconds
 }
 
 // openAITranscribeAudio posts one complete recording to the audio transcriptions
 // endpoint and returns the text. `prompt` carries domain-vocabulary biasing and
 // MUST be empty for models that reject it (see the caller's gate).
-func openAITranscribeAudio(ctx context.Context, audio []byte, filename, model, prompt string) (string, error) {
+func openAITranscribeAudio(ctx context.Context, audio io.ReadSeeker, filename, model, prompt string) (string, error) {
 	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	if apiKey == "" {
 		return "", fmt.Errorf("OPENAI_API_KEY is not configured")
 	}
 
-	body := &bytes.Buffer{}
+	body, err := os.CreateTemp("", "meetingassist-transcription-form-*")
+	if err != nil {
+		return "", fmt.Errorf("create transcription form spool: %w", err)
+	}
+	defer body.Close()
+	defer os.Remove(body.Name())
 	form := multipart.NewWriter(body)
 	filePart, err := form.CreateFormFile("file", filename)
 	if err != nil {
 		return "", fmt.Errorf("build transcription form: %w", err)
 	}
-	if _, err := filePart.Write(audio); err != nil {
+	if _, err := audio.Seek(0, io.SeekStart); err != nil {
+		return "", fmt.Errorf("rewind transcription audio: %w", err)
+	}
+	if _, err := io.Copy(filePart, io.LimitReader(audio, dictationMaxBytes+1)); err != nil {
 		return "", fmt.Errorf("write transcription audio: %w", err)
 	}
-	if err := form.WriteField("model", model); err != nil {
-		return "", fmt.Errorf("write transcription model: %w", err)
-	}
-	if err := form.WriteField("language", "en"); err != nil {
-		return "", fmt.Errorf("write transcription language: %w", err)
-	}
-	if strings.TrimSpace(prompt) != "" {
-		if err := form.WriteField("prompt", prompt); err != nil {
-			return "", fmt.Errorf("write transcription prompt: %w", err)
+	for _, field := range dictationTranscriptionFields(model, prompt) {
+		if err := form.WriteField(field.Name, field.Value); err != nil {
+			return "", fmt.Errorf("write transcription field %s: %w", field.Name, err)
 		}
 	}
 	if err := form.Close(); err != nil {
 		return "", fmt.Errorf("close transcription form: %w", err)
 	}
 
+	contentType := form.FormDataContentType()
+	if _, err := body.Seek(0, io.SeekStart); err != nil {
+		return "", fmt.Errorf("rewind transcription form: %w", err)
+	}
+	info, err := body.Stat()
+	if err != nil {
+		return "", fmt.Errorf("stat transcription form: %w", err)
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/audio/transcriptions", body)
 	if err != nil {
 		return "", fmt.Errorf("build transcription request: %w", err)
 	}
 	request.Header.Set("Authorization", "Bearer "+apiKey)
-	request.Header.Set("Content-Type", form.FormDataContentType())
+	request.Header.Set("Content-Type", contentType)
+	request.ContentLength = info.Size()
 
 	response, err := dictationHTTPClient.Do(request)
 	if err != nil {
@@ -250,7 +282,7 @@ func openAITranscribeAudio(ctx context.Context, audio []byte, filename, model, p
 		return "", fmt.Errorf("read transcription response: %w", err)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return "", fmt.Errorf("transcription failed (%d): %s", response.StatusCode, strings.TrimSpace(string(raw)))
+		return "", apiRequestFailedError("OpenAI transcription failed", response.Status, raw)
 	}
 
 	var decoded struct {
@@ -264,4 +296,4 @@ func openAITranscribeAudio(ctx context.Context, audio []byte, filename, model, p
 
 // A dictation is short and the user is holding their phone waiting for it, so
 // this lane gets a tighter timeout than the long-running agent clients.
-var dictationHTTPClient = &http.Client{Timeout: 90 * time.Second}
+var dictationHTTPClient = aiProviderHTTPClient(90 * time.Second)

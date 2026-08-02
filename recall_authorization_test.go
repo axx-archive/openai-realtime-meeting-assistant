@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +19,17 @@ func setupRecallAuthorizationTest(t *testing.T) (*kanbanBoardApp, meetingMemoryE
 	app := newIsolatedKanbanBoardApp(t)
 	kanbanApp = app
 	artifactObjectAuthorizer = LegacyCompatibleObjectAuthorizer{}
-	t.Cleanup(func() { kanbanApp = previousApp; artifactObjectAuthorizer = previousAuthorizer })
+	t.Cleanup(func() {
+		// Some recall authorization cases open a meeting without participant
+		// occupancy. A boot/idle timer can therefore still be in flight while
+		// cleanup restores the package globals read by broadcastRoomsSnapshot.
+		// Stop-and-wait is a goroutine join; Timer.Stop alone is not.
+		if app.meetings != nil {
+			app.meetings.stopIdleEndsAndWait()
+		}
+		kanbanApp = previousApp
+		artifactObjectAuthorizer = previousAuthorizer
+	})
 	private, _, err := app.createOSArtifactWithMetadata("research", "private canary", "AJ-PRIVATE-LEXICAL-CANARY", "AJ", map[string]string{
 		"visibility": "private", "requestedBy": "aj@shareability.com", "status": "complete",
 	})
@@ -174,7 +185,7 @@ func TestRecallSemanticAllowlistIncludesAuthorizedHistoryOlderThan250(t *testing
 		}
 	}
 	previous := loadedEmbeddingIndex()
-	idx := newEmbeddingIndex("", 2, "test", func(context.Context, []string) ([][]float32, error) {
+	idx := newEmbeddingIndex(filepath.Join(t.TempDir(), "semantic-embeddings.jsonl"), 2, "test", func(context.Context, []string) ([][]float32, error) {
 		return [][]float32{{1, 0}}, nil
 	})
 	idx.rows = []embeddingRow{{id: target.ID, kind: target.Kind, vec: []float32{1, 0}}}

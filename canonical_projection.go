@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"sort"
 	"strings"
@@ -27,12 +28,16 @@ type CanonicalProjectedObject struct {
 }
 
 type CanonicalProjection struct {
-	objects map[string]CanonicalProjectedObject
-	events  map[string]string
+	objects           map[string]CanonicalProjectedObject
+	events            map[string]string
+	legacyCheckpoints map[string]bool
 }
 
 func NewCanonicalProjection() *CanonicalProjection {
-	return &CanonicalProjection{objects: make(map[string]CanonicalProjectedObject), events: make(map[string]string)}
+	return &CanonicalProjection{
+		objects: make(map[string]CanonicalProjectedObject), events: make(map[string]string),
+		legacyCheckpoints: make(map[string]bool),
+	}
 }
 
 func (projection *CanonicalProjection) Apply(event CanonicalEvent) error {
@@ -54,15 +59,29 @@ func (projection *CanonicalProjection) Apply(event CanonicalEvent) error {
 		expected = current.AggregateVersion + 1
 	}
 	if event.AggregateVersion != expected {
-		return ErrCanonicalProjectionOrder
+		_, baseline := canonicalLegacyImportBaselineInvariant(event)
+		if !baseline || (exists && (!projection.legacyCheckpoints[key] || event.AggregateVersion <= current.AggregateVersion)) {
+			return ErrCanonicalProjectionOrder
+		}
+	}
+	deleted := canonicalDeletionEvent(event.EventType)
+	if event.EventType == canonicalLegacyImportEventType {
+		var imported struct {
+			Deleted bool `json:"deleted"`
+		}
+		if err := json.Unmarshal(event.Payload, &imported); err != nil {
+			return err
+		}
+		deleted = imported.Deleted
 	}
 	projection.objects[key] = CanonicalProjectedObject{
 		TenantID: event.TenantID, AggregateType: event.AggregateType, AggregateID: event.AggregateID,
 		AggregateVersion: event.AggregateVersion, EventID: event.EventID.String(), EventType: event.EventType,
 		Classification: event.Classification, RoomID: NormalizeCanonicalRoomID(event.RoomID), MeetingID: event.MeetingID,
 		ACLVersion: event.ACLVersion, ContentRef: event.ContentRef,
-		PayloadSHA256: hex.EncodeToString(event.PayloadSHA256[:]), Deleted: canonicalDeletionEvent(event.EventType),
+		PayloadSHA256: hex.EncodeToString(event.PayloadSHA256[:]), Deleted: deleted,
 	}
+	_, projection.legacyCheckpoints[key] = canonicalLegacyImportBaselineInvariant(event)
 	projection.events[eventKey] = fingerprint
 	return nil
 }

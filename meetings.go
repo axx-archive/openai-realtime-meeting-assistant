@@ -110,6 +110,14 @@ type meetingStore struct {
 	// the fire's occupancy check can never have its meeting closed underneath
 	// it, and room A's fire can never validate against room B's counter.
 	idleGenerations map[string]uint64
+	// idleTimerDones and idleTimerCallbacks make timer teardown joinable.
+	// time.Timer.Stop only tells us whether the callback was prevented; when
+	// it returns false the callback may still be reading app/package state.
+	// Tests that replace those globals must therefore wait for every callback
+	// registered here, rather than treating Stop as a goroutine join.
+	idleTimerDones     map[string]chan struct{}
+	idleTimerCallbacks map[chan struct{}]struct{}
+	idleTimersStopped  bool
 }
 
 func meetingsPath() string {
@@ -605,6 +613,9 @@ func (store *meetingStore) armIdleEnd(roomID string, fire func(generation uint64
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
+	if store.idleTimersStopped {
+		return
+	}
 	roomID = normalizeRoomID(roomID)
 	if store.idleTimers == nil {
 		store.idleTimers = map[string]*time.Timer{}
@@ -612,12 +623,30 @@ func (store *meetingStore) armIdleEnd(roomID string, fire func(generation uint64
 	if store.idleGenerations == nil {
 		store.idleGenerations = map[string]uint64{}
 	}
+	if store.idleTimerDones == nil {
+		store.idleTimerDones = map[string]chan struct{}{}
+	}
+	if store.idleTimerCallbacks == nil {
+		store.idleTimerCallbacks = map[chan struct{}]struct{}{}
+	}
 	if store.idleTimers[roomID] != nil {
-		store.idleTimers[roomID].Stop()
+		if store.idleTimers[roomID].Stop() {
+			store.finishIdleTimerCallbackLocked(store.idleTimerDones[roomID])
+		}
 		store.idleGenerations[roomID]++
 	}
 	generation := store.idleGenerations[roomID]
-	store.idleTimers[roomID] = time.AfterFunc(meetingIdleEndGrace(), func() { fire(generation) })
+	done := make(chan struct{})
+	store.idleTimerDones[roomID] = done
+	store.idleTimerCallbacks[done] = struct{}{}
+	store.idleTimers[roomID] = time.AfterFunc(meetingIdleEndGrace(), func() {
+		defer func() {
+			store.mu.Lock()
+			store.finishIdleTimerCallbackLocked(done)
+			store.mu.Unlock()
+		}()
+		fire(generation)
+	})
 }
 
 // cancelIdleEnd stops the room's pending idle end AND bumps the room's
@@ -636,8 +665,55 @@ func (store *meetingStore) cancelIdleEnd(roomID string) {
 	}
 	store.idleGenerations[roomID]++
 	if store.idleTimers[roomID] != nil {
-		store.idleTimers[roomID].Stop()
+		if store.idleTimers[roomID].Stop() {
+			store.finishIdleTimerCallbackLocked(store.idleTimerDones[roomID])
+		}
 		delete(store.idleTimers, roomID)
+		delete(store.idleTimerDones, roomID)
+	}
+}
+
+// finishIdleTimerCallbackLocked marks one timer callback complete exactly
+// once. The caller holds store.mu. A successfully stopped timer is completed
+// by its stopper; a timer whose callback started is completed by the callback.
+func (store *meetingStore) finishIdleTimerCallbackLocked(done chan struct{}) {
+	if done == nil || store.idleTimerCallbacks == nil {
+		return
+	}
+	if _, ok := store.idleTimerCallbacks[done]; !ok {
+		return
+	}
+	delete(store.idleTimerCallbacks, done)
+	close(done)
+}
+
+// stopIdleEndsAndWait permanently stops this store's idle timers and joins
+// any callback already in flight. Production does not normally close the
+// process in-place, but isolated tests replace package globals that callbacks
+// consult; those replacements are only race-safe after this join returns.
+func (store *meetingStore) stopIdleEndsAndWait() {
+	if store == nil {
+		return
+	}
+
+	store.mu.Lock()
+	store.idleTimersStopped = true
+	for roomID, timer := range store.idleTimers {
+		store.idleGenerations[roomID]++
+		if timer != nil && timer.Stop() {
+			store.finishIdleTimerCallbackLocked(store.idleTimerDones[roomID])
+		}
+		delete(store.idleTimers, roomID)
+		delete(store.idleTimerDones, roomID)
+	}
+	pending := make([]chan struct{}, 0, len(store.idleTimerCallbacks))
+	for done := range store.idleTimerCallbacks {
+		pending = append(pending, done)
+	}
+	store.mu.Unlock()
+
+	for _, done := range pending {
+		<-done
 	}
 }
 
@@ -778,6 +854,9 @@ func (app *kanbanBoardApp) endMeetingForIdle(roomID string, generation uint64) {
 	closed, changed := app.meetings.endMeetingIfIdleGeneration(roomID, record.ID, time.Now().UTC(), generation)
 	if !changed {
 		return
+	}
+	if app.meetingSpecialists != nil {
+		app.meetingSpecialists.CloseScope(roomID, closed.ID, "room_closed")
 	}
 	if roomID == officeRoomID {
 		app.cancelOfficeScoutWorkForSitting(closed.ID)

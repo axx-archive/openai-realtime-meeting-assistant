@@ -142,6 +142,7 @@ func artifactPageImageAssets(entry meetingMemoryEntry) []artifactAsset {
 // exist — false is the studio stage's disclosed-skip signal, never an error.
 func waitForDeckPageImages(app *kanbanBoardApp, deckID string) (meetingMemoryEntry, bool) {
 	deadline := time.Now().Add(slideJuryWaitTimeout())
+	observedDeck := false
 	for {
 		deck, ok := app.osArtifactByID(deckID)
 		if !ok {
@@ -149,6 +150,15 @@ func waitForDeckPageImages(app *kanbanBoardApp, deckID string) (meetingMemoryEnt
 		}
 		if len(artifactPageImageAssets(deck)) > 0 {
 			return deck, true
+		}
+		// Isolated pipeline tests can synchronously emulate the signed callback
+		// only after the stage has observed its own stamped deck. This removes a
+		// scheduler-dependent goroutine race without changing the production
+		// timeout or callback path (the hook is nil outside tests).
+		if !observedDeck && app.slideJuryDeckObserved != nil {
+			observedDeck = true
+			app.slideJuryDeckObserved(deck)
+			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(deck.Metadata["renderStatus"]), renderJobStatusFailed) {
 			return deck, false

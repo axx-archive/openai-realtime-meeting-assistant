@@ -50,7 +50,7 @@ const (
 
 var (
 	realtimeCallsURL   = "https://api.openai.com/v1/realtime/calls"
-	realtimeHTTPClient = &http.Client{Timeout: 30 * time.Second}
+	realtimeHTTPClient = aiProviderHTTPClient(30 * time.Second)
 )
 
 func durableTimestampID(prefix string, at time.Time) string {
@@ -95,6 +95,11 @@ type kanbanCard struct {
 	// the field existed decode as non-drafts (zero value).
 	Draft     bool   `json:"draft,omitempty"`
 	DraftedAt string `json:"draftedAt,omitempty"`
+	// RestoredAt makes an undo a new canonical state revision even when every
+	// visible card field is identical to the pre-deletion state. Without this
+	// generation marker, the durable version map would resolve the old digest
+	// back to v1 and could not advance past the deletion checkpoint.
+	RestoredAt string `json:"restoredAt,omitempty"`
 }
 
 type kanbanBoardState struct {
@@ -150,10 +155,14 @@ type kanbanRealtimeEvent struct {
 	Text       string `json:"text,omitempty"`
 	Delta      string `json:"delta,omitempty"`
 	ItemID     string `json:"item_id,omitempty"`
-	Name       string `json:"name,omitempty"`
-	Arguments  string `json:"arguments,omitempty"`
-	CallID     string `json:"call_id,omitempty"`
-	Error      *struct {
+	// PreviousItemID is the provider's authoritative conversation-chain link
+	// on input_audio_buffer.committed.  The transcription lane deliberately
+	// uses it instead of assuming acknowledgement delivery order.
+	PreviousItemID string `json:"previous_item_id,omitempty"`
+	Name           string `json:"name,omitempty"`
+	Arguments      string `json:"arguments,omitempty"`
+	CallID         string `json:"call_id,omitempty"`
+	Error          *struct {
 		Code    string `json:"code,omitempty"`
 		Message string `json:"message,omitempty"`
 	} `json:"error,omitempty"`
@@ -255,6 +264,13 @@ type kanbanBoardApp struct {
 	updatedAt        time.Time
 	handledCalls     map[string]struct{}
 	memory           *meetingMemoryStore
+	// pendingAttachmentUploads are short-lived server-minted source objects for
+	// composer uploads. A raw content hash is never authority: the uploader must
+	// own a live grant until the blob is durably referenced by an authorized
+	// destination. Guarded independently so large model/chat paths never hold mu.
+	pendingAttachmentUploadsMu sync.Mutex
+	pendingAttachmentUploads   map[string]pendingAttachmentUploadGrant
+	attachmentSourceStoreErr   error
 	// roomLive is the per-room live plane (multi-room W3, room_live.go): each
 	// room's presence maps (participant name -> liveness stamp, endpoint
 	// sessions, media state — the laptop+phone endpoint contract unchanged),
@@ -271,9 +287,17 @@ type kanbanBoardApp struct {
 	// production wires the meeting-memory/canonical ACL adapter at boot.
 	catchUpRecapResolver CatchUpRecapResolver
 	lastDeletedCard      *kanbanCard
-	apiKey               string
-	assistantStatus      string
-	serverRestarting     bool
+	boardLifecycleFrozen bool
+	boardLifecycleErr    error
+	// slideJuryDeckObserved is a test-only deterministic render-callback seam.
+	// Production leaves it nil: page images arrive solely through the signed
+	// render-runner callback. Keeping it on the app (rather than a package
+	// global) lets isolated pipeline tests synchronize one app without changing
+	// another test's wait policy.
+	slideJuryDeckObserved func(meetingMemoryEntry)
+	apiKey                string
+	assistantStatus       string
+	serverRestarting      bool
 
 	model                   string
 	pc                      *webrtc.PeerConnection
@@ -372,7 +396,23 @@ type kanbanBoardApp struct {
 	// model keeps re-emitting) can never wedge the cursor behind a growing
 	// backlog. Guarded by mu.
 	boardWorkerRetriedThroughID string
-	closeOnce                   sync.Once
+	// strideRuntime is the sole app-owned boundary for the token-free E1-E8
+	// domain reducers. It remains disabled unless explicitly configured and
+	// owns its own authenticated local snapshot lifecycle.
+	strideRuntime      *STRIDERuntime
+	meetingSpecialists *MeetingSpecialistProduct
+	// strideCoworker is initialized lazily only after the signed, default-off
+	// coworker_local_fixture product boundary admits a request. It owns the
+	// durable exactly-once file-selection receipts used by Scout's local
+	// coworker preview; ordinary/live chat never touches this state.
+	strideCoworkerMu  sync.Mutex
+	strideCoworker    *STRIDECoworkerProduct
+	strideCoworkerErr error
+	// strideProductMu spans chat-thread creation + signed runtime mutation for
+	// deterministic product actions, preventing stale revisions from leaving
+	// duplicate destination/direct threads.
+	strideProductMu sync.Mutex
+	closeOnce       sync.Once
 }
 
 var initialKanbanBoardCards = []kanbanCard{
@@ -428,6 +468,11 @@ func newKanbanBoardApp() *kanbanBoardApp {
 	updatedAt := time.Now().UTC()
 	loadedBoard := false
 	boardPersistenceHealthy := true
+	boardLifecycleRecoveryErr := recoverBoardLifecycleTransactions(kanbanBoardPath(), boardLifecycleJournalPath())
+	if boardLifecycleRecoveryErr != nil {
+		log.Errorf("Kanban board lifecycle frozen: %v", boardLifecycleRecoveryErr)
+		boardPersistenceHealthy = false
+	}
 	if board, ok, err := loadKanbanBoardState(kanbanBoardPath()); err != nil {
 		log.Errorf("Kanban board persistence disabled: %v", err)
 		boardPersistenceHealthy = false
@@ -440,14 +485,21 @@ func newKanbanBoardApp() *kanbanBoardApp {
 	}
 
 	app := &kanbanBoardApp{
-		cards:            cards,
-		nextCreatedIndex: nextKanbanCardIndex(cards),
-		updatedAt:        updatedAt,
-		handledCalls:     map[string]struct{}{},
-		memory:           memory,
+		cards:                    cards,
+		nextCreatedIndex:         nextKanbanCardIndex(cards),
+		updatedAt:                updatedAt,
+		handledCalls:             map[string]struct{}{},
+		memory:                   memory,
+		pendingAttachmentUploads: map[string]pendingAttachmentUploadGrant{},
 		roomLive: map[string]*roomLiveState{
 			officeRoomID: newRoomLiveState(officeRoomID, updatedAt),
 		},
+		boardLifecycleFrozen: boardLifecycleRecoveryErr != nil,
+		boardLifecycleErr:    boardLifecycleRecoveryErr,
+	}
+	if err := app.initializeAttachmentSourceStore(); err != nil {
+		app.attachmentSourceStoreErr = err
+		log.Errorf("Attachment source authority disabled: %v", err)
 	}
 	app.projectLegacyPackageOwnerMetadataAtBoot()
 	if notifications, err := loadNotificationStoreState(notificationsPath()); err != nil {
@@ -480,6 +532,14 @@ func newKanbanBoardApp() *kanbanBoardApp {
 			log.Errorf("Could not persist normalized Kanban board: %v", err)
 		}
 	}
+	app.strideRuntime, err = initializeSTRIDERuntimeFromEnvironment()
+	if err != nil {
+		// STRIDE is default-off and fail-closed. Its unavailable state must not
+		// take down the existing meeting/board product or imply activation.
+		log.Errorf("STRIDE runtime unavailable: %v", err)
+	}
+	app.meetingSpecialists = initializeMeetingSpecialistProduct(app, app.strideRuntime)
+	app.replaySTRIDETeamChatProjection()
 
 	return app
 }
@@ -1066,6 +1126,14 @@ func (app *kanbanBoardApp) Close() error {
 			}
 		}
 		app.mu.Unlock()
+		// Idle-end callbacks run independently of the media/agent workers and can
+		// execute the full meeting-close chain. Join them before tearing down the
+		// rest of the app so Close is a real lifecycle boundary: after it returns,
+		// no stale meeting callback can observe package state installed by a
+		// successor app (notably in isolated test servers).
+		if app.meetings != nil {
+			app.meetings.stopIdleEndsAndWait()
+		}
 		for roomID, actor := range roomMediaActorOwners {
 			closeRoomMediaActorOwned(roomID, actor)
 		}
@@ -1089,6 +1157,12 @@ func (app *kanbanBoardApp) Close() error {
 		}
 		if peerConnection != nil {
 			closeErr = peerConnection.Close()
+		}
+		if app.strideRuntime != nil {
+			closeErr = errors.Join(closeErr, app.strideRuntime.Close())
+		}
+		if app.meetingSpecialists != nil {
+			app.meetingSpecialists.Close("room_closed")
 		}
 	})
 
@@ -1338,9 +1412,9 @@ func (app *kanbanBoardApp) createRealtimeCall(apiKey string, model string, offer
 	return app.createRealtimeCallWithSession(apiKey, offerSDP, app.sessionConfig(model))
 }
 
-func (app *kanbanBoardApp) createPrivateRealtimeVoiceCall(apiKey string, model string, offerSDP string) (string, error) {
+func (app *kanbanBoardApp) createPrivateRealtimeVoiceCall(apiKey string, model string, offerSDP string, userEmail string) (string, error) {
 	warnRealtimeVoiceSessionNoVocab("private")
-	return app.createRealtimeCallWithSession(apiKey, offerSDP, app.privateRealtimeVoiceSessionConfig(model))
+	return app.createRealtimeCallWithSession(apiKey, offerSDP, app.privateRealtimeVoiceSessionConfigForUser(model, userEmail))
 }
 
 // warnRealtimeVoiceSessionNoVocab makes a degraded voice-session transcription
@@ -1405,13 +1479,19 @@ func (app *kanbanBoardApp) privateRealtimeVoiceSessionConfig(model string) map[s
 	return session
 }
 
+func (app *kanbanBoardApp) privateRealtimeVoiceSessionConfigForUser(model, userEmail string) map[string]any {
+	session := app.privateRealtimeVoiceSessionConfig(model)
+	session["instructions"] = app.prepareSTRIDEPrivateRelationshipModelQuery(userEmail, app.privateRealtimeVoiceSessionInstructions())
+	return session
+}
+
 func (app *kanbanBoardApp) privateRealtimeVoiceSessionInstructions() string {
 	return strings.Join([]string{
 		"# Role and Objective\nYou are Scout, the private Stride voice assistant on the dashboard. This is a one-user Realtime 2 conversation outside the video room. You can act across the whole OS on this user's behalf: navigate, recall, run the board, edit and publish artifacts, notify the team, post as the user, and launch goals.",
 		"# Boundary\nYou act on this one user's behalf — you are NOT the room's shared voice. Do not describe yourself as the shared room Scout, do not say the room can hear you, and do not treat the user as a meeting participant. You MAY update the shared Kanban board on the user's behalf (create, move, update, tag, date, delete, or undo cards) — announce what you changed. External writes (commit, push, deploy, production side effects) stay gated: you never perform them directly, and initiate_goal cannot request them. When you post as the user with start_chat_as_user, the message is always stamped and shown as posted via Scout — disclosure is mandatory and automatic. If the user asks for the live room, use control_app to open the Room surface; do not claim you joined as the shared room voice operator.",
 		"# OS actions\nUse control_app to open office, room, chat, artifacts, research, design, grill, board, memory, or files; pass also_open to open several surfaces at once. Use the board tools (create_ticket, move_ticket, update_ticket, add_tags, add_key_date, remove_key_dates, delete_ticket, undo_delete_ticket) to run the board for the user. Use update_artifact / publish_artifact to edit or publish a saved artifact the user owns. Use launch_agent_thread for a single research, investigate, source, design, grill, pressure-test, or plan request so Chat becomes the live work surface and the finished Markdown is saved as an artifact. Use initiate_goal for a multi-step objective the user wants Scout to plan and drive end to end (\"package the Aurora IP\", \"take this from idea to investor-ready\"). Use create_artifact only when the user asks to save a quick, explicit piece of already-known content. Use answer_memory_question for recall across saved meetings and artifacts. Use read_thread_aloud to fetch and then speak the recent messages of a channel or private thread, an artifact, or the user's notifications. Use organize_files when the user asks to file, sort, or group files or deliverables into a folder on the Files surface; name the folder and pass the file-name fragments to match. Use save_to_files when the user asks to save, keep, or add a finished deliverable (a research report, deck, or goal output) to the Files surface — deliverables no longer appear there automatically, so pass the title fragments to match and optionally a folder to file them under. Use note_for_the_record when the user explicitly wants something remembered in company memory (\"note for the record…\", \"remember that…\", \"put on record that…\"); pass kind=decision for an explicit decision or stated position and it lands as a proposed decision the team can ratify. Use send_notification when the user asks to notify the team, post an alert, or leave a reminder in the notification bell; audience everyone reaches all signed-in users, audience me notifies only this user, and deliver \"after_meeting\" queues it until the meeting is archived when the user says after this meeting, remind. Use propose_codex_task when the user asks to queue, delegate, or staff agent work for later; it only posts a proposal card that a human must confirm before any agent thread launches. Use create_package / attach_to_package / advance_package_stage to manage venture packages — the per-IP mission binders shown in Mission Intelligence. Use do_nothing for unclear speech or requests that require shared-room controls.",
 		"# Channels and posting as the user\nUse post_to_channel when the user says put/post/share that in #channel or tell the team; quote their content faithfully, never embellish. Use start_chat_as_user to START a new channel or private thread and post the user's message into it on their behalf — the post is always disclosed as via Scout. Before posting as the user, read the draft back and get a yes. Use mention to flag one person by name. Use create_channel to make a new public team channel when asked.",
-		"# Meeting recap\nUse meeting_recap with audience \"me\" (or catch_me_up) for catch-me-up requests about the live meeting; it lands in the user's bell and you read the headline aloud. For catch-up SPANNING meetings or days — what did I miss this week, what happened yesterday, catch me up on the last few days — use cross_meeting_briefing instead: it returns a day-by-day briefing of decisions, action items, topics, and open questions across every meeting in the range; read the top decisions and blockers, not every line. Use get_meeting_detail with a meeting_id from a briefing for one past meeting's digest, and pass an anchor id to quote the verbatim exchange.",
+		"# Meeting recap\nUse meeting_interval_recall when someone asks what happened in exactly the last 5 or 30 minutes of their current meeting; it is transcript-first, source-bound, and reports analysis lag or coverage gaps. Use meeting_recap with audience \"me\" (or catch_me_up) for catch-me-up requests about the live meeting; it lands in the user's bell and you read the headline aloud. For catch-up SPANNING meetings or days — what did I miss this week, what happened yesterday, catch me up on the last few days — use cross_meeting_briefing instead: it returns a day-by-day briefing of decisions, action items, topics, and open questions across every meeting in the range; read the top decisions and blockers, not every line. Use get_meeting_detail with a meeting_id from a briefing for one past meeting's digest, and pass an anchor id to quote the verbatim exchange.",
 		"# Private grill\nWhen the user says grill me, pressure-test me, or play investor with me, call start_private_grill (optionally naming a package to ground the question bank) and follow the returned instructions to run the three-act ritual privately — this is one-on-one, never the shared room. Call end_private_grill after you deliver the spoken readiness report; it files the graded scorecard and restores your normal behavior.",
 		fmt.Sprintf("# Board context\nCurrent Kanban board JSON for lightweight recall: %s.", app.boardContextJSON()),
 		fmt.Sprintf("# Domain vocabulary\nUse these exact spellings for names, brands, acronyms, and technical terms: %s.", strings.Join(domainVocabulary(), ", ")),
@@ -1512,24 +1592,25 @@ func (app *kanbanBoardApp) SendEvent(payload any) error {
 
 func (app *kanbanBoardApp) sessionConfig(model string) map[string]any {
 	transcriptionModel := realtimeTranscriptionModel()
-	transcription := map[string]any{
-		"model":    transcriptionModel,
-		"language": "en",
+	transcription := map[string]any{"model": transcriptionModel}
+	if transcriptionModelUsesModernHints(transcriptionModel) {
+		transcription["languages"] = []string{"en"}
+		transcription["keywords"] = domainVocabulary()
+	} else {
+		transcription["language"] = "en"
 	}
 	input := map[string]any{
 		"transcription":  transcription,
 		"turn_detection": realtimeTurnDetectionConfig(),
 	}
-	// W1-12: the domain-vocabulary prompt + near-field noise reduction are
-	// gated by transcription model exactly like transcription_lane.go — the
-	// realtime whisper family rejects both fields live ("The 'prompt'
-	// parameter is not supported for this model"), so sending them
-	// unconditionally would break the whole voice session the way prod broke
-	// on 2026-07-08. A model that rejects the prompt still transcribes, just
-	// without vocabulary biasing — warnRealtimeVoiceSessionNoVocab makes that
-	// degraded state loud at session create.
-	if transcriptionModelAcceptsPrompt(transcriptionModel) {
+	// Near-field support is narrower than modern context support. Keep it on the
+	// already-proven gpt-4o transcription family and do not infer support merely
+	// because a new model accepts prompts. The gpt-transcribe family instead
+	// receives its documented prompt, keywords and plural languages fields.
+	if transcriptionModelAcceptsNearField(transcriptionModel) {
 		input["noise_reduction"] = map[string]any{"type": "near_field"}
+	}
+	if transcriptionModelAcceptsPrompt(transcriptionModel) {
 		transcription["prompt"] = realtimeTranscriptionPrompt()
 	}
 	session := map[string]any{
@@ -1757,6 +1838,7 @@ func usesAdvancedCommandProfile(model string) bool {
 func telemetryLaneSnapshot() map[string]any {
 	laneModel := transcriptionLaneModel()
 	sessionModel := realtimeTranscriptionModel()
+	dictationModel := dictationTranscriptionModel()
 	return map[string]any{
 		"realtime_model":            realtimeModel(),
 		"realtime_reasoning_effort": realtimeReasoningEffort(),
@@ -1764,6 +1846,8 @@ func telemetryLaneSnapshot() map[string]any {
 		"transcription_lane_vocab":  transcriptionModelAcceptsPrompt(laneModel),
 		"voice_transcription_model": sessionModel,
 		"voice_transcription_vocab": transcriptionModelAcceptsPrompt(sessionModel),
+		"dictation_model":           dictationModel,
+		"dictation_vocab":           transcriptionModelAcceptsPrompt(dictationModel),
 		"private_voice_model":       realtimeModel(),
 	}
 }
@@ -1788,6 +1872,15 @@ func validateRealtimeConfig() []string {
 		}
 		if _, priced := priceForModel(lane.model, now); !priced {
 			warnings = append(warnings, fmt.Sprintf("%s model %q has no pricing-table row — likely an env typo", lane.label, lane.model))
+		}
+	}
+	if strings.TrimSpace(os.Getenv("OPENAI_DICTATION_TRANSCRIPT_MODEL")) != "" {
+		model := dictationTranscriptionModel()
+		if !transcriptionModelAcceptsPrompt(model) {
+			warnings = append(warnings, fmt.Sprintf("composer dictation (OPENAI_DICTATION_TRANSCRIPT_MODEL) model %q rejects the domain-vocabulary prompt — transcription fidelity is degraded", model))
+		}
+		if _, priced := priceForModel(model, now); !priced {
+			warnings = append(warnings, fmt.Sprintf("composer dictation (OPENAI_DICTATION_TRANSCRIPT_MODEL) model %q has no pricing-table row — likely an env typo", model))
 		}
 	}
 	if _, priced := priceForModel(realtimeModel(), now); !priced {
@@ -1999,7 +2092,7 @@ func scoutToolShouldSpeak(toolName string, result map[string]any, changed bool, 
 	// tools speak only when they changed something. do_nothing never speaks
 	// on its own — it is the marker that nothing scout-addressed happened.
 	switch toolName {
-	case "answer_memory_question", "cross_meeting_briefing", "get_meeting_detail":
+	case "answer_memory_question", "meeting_interval_recall", "cross_meeting_briefing", "get_meeting_detail":
 		return true
 	case "do_nothing":
 		return false
@@ -2127,7 +2220,7 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 		"# Artifacts, agent threads, and prior meetings\nMeeting transcripts, brain summaries, archives, and OS artifacts are durable memory. Company-OS work should become an artifact when it has a goal, deliverable, status, review gate, or shareable result. If the user asks about prior meetings, artifacts, archives, decisions, transcripts, what was said, what was saved, or any recall question, call answer_memory_question with the user's full question as the query. If the user asks to make or save a quick output, call create_artifact with mode artifacts, research, design, grill, or workflow. If the user asks to kick off research, design work, grill mode, a Codex-style goal loop, a multi-agent loop, or any longer work thread, first state or ask for the vision, then call launch_agent_thread so the artifact is created immediately and the worker can update progress outside the live voice loop. Research, design, grill, and workflow are first-class agent workforce modes; launch_agent_thread is the preferred tool for those longer modes. If the user asks to update, rename, revise, or overwrite a saved artifact and you know its artifact_id, call update_artifact; if you do not know the artifact_id, open artifacts or ask which artifact rather than creating a duplicate. Use publish_artifact only when the user explicitly asks to publish, unpublish, share to dashboard, or remove from dashboard. Latest published artifacts are surfaced on the Office dashboard. " + agentThreadWorkerInstruction(),
 		"# Notifications\nUse send_notification when a user asks you to notify the team, alert everyone, or post a visible reminder to the notification bell. Notifications are durable and reach signed-in users outside the room, so prefer audience everyone from this shared room surface. When the user says \"after this meeting/call, remind…\" or asks for the reminder once the meeting is over, pass deliver \"after_meeting\" so it queues until the meeting is archived. Do not use send_notification for routine acknowledgements or board updates.",
 		"# Channels\nUse post_to_channel when a user says put/post/share that in #channel or tell the team in a channel; quote their content faithfully, never embellish. Use mention to flag one person by name. create_channel makes a new public team channel, but only from a user's private Scout — tell room requesters to create channels from their private Scout or the chat surface.",
-		"# Meeting recap\nUse meeting_recap when someone asks where are we, recap this meeting, or what did I miss in THIS meeting; speak the headline plus 3-5 bullets in under 30 seconds — the full recap is posted to room chat. Use catch_me_up (or meeting_recap with audience me) when one person wants a private catch-up in their notification bell. When the catch-up spans MULTIPLE meetings or days — what did I miss this week, what happened yesterday, catch me up since last week — use cross_meeting_briefing instead: it returns a day-by-day briefing of decisions, action items, topics, and open questions across every meeting in the range; speak the top decisions and blockers only. Use get_meeting_detail with a meeting_id for one past meeting's digest, and pass an anchor id to quote the verbatim exchange.",
+		"# Meeting recap\nUse meeting_interval_recall when someone asks what happened in exactly the last 5 or 30 minutes of the current meeting; speak the bounded evidence-backed result and its coverage caveat. Use meeting_recap when someone asks where are we, recap this meeting, or what did I miss in THIS meeting; speak the headline plus 3-5 bullets in under 30 seconds — the full recap is posted to room chat. Use catch_me_up (or meeting_recap with audience me) when one person wants a private catch-up in their notification bell. When the catch-up spans MULTIPLE meetings or days — what did I miss this week, what happened yesterday, catch me up since last week — use cross_meeting_briefing instead: it returns a day-by-day briefing of decisions, action items, topics, and open questions across every meeting in the range; speak the top decisions and blockers only. Use get_meeting_detail with a meeting_id for one past meeting's digest, and pass an anchor id to quote the verbatim exchange.",
 		"# Grill sessions\nUse start_grill_session when a user says grill us, pressure-test us, or play investor on a topic; you will switch into the named persona and question the room. Use end_grill_session when anyone asks to stop grilling or stand down — a graded report thread is filed automatically.",
 		"# Proposed agent work\nUse propose_codex_task when a user asks you to have someone or an agent take on research, design, grill, planning, or writing work later, such as have someone research comparable exits. It never auto-runs: it posts a proposal card with title, mode, and query that any signed-in user must confirm before the agent thread launches. A separate background workflow ticker may later launch proposals a human has already approved, but proposing itself starts nothing. Prefer launch_agent_thread when the user wants the work started right now in their own chat. Use create_package / attach_to_package / advance_package_stage to manage venture packages — the per-IP mission binders shown in Mission Intelligence; pass package_id on propose_codex_task when the proposed work belongs to a named package.",
 		"# Board tools\nUse only the tools listed in this session. If one utterance changes status, notes, owner, tags, and dates for the same existing card, prefer one update_ticket call with all changed fields. Use undo_delete_ticket when the user asks to undo a deletion or restore the last deleted card. Use add_key_date for a pure date or milestone addition to an existing card. Use remove_key_dates when the user asks to remove, clear, erase, or delete key dates from an existing card; set remove_all=true when they do not name specific date labels. Use update_ticket with replace_key_dates=true when the user gives the exact key dates to keep or asks to replace the whole set. Use move_ticket only for a pure status move. Use add_tags only for a pure tag addition. Use create_ticket only when no existing card captures the work. If one transcript contains multiple unrelated operations, call one tool for each operation. Only say an action completed after the tool result succeeds.",
@@ -2160,7 +2253,7 @@ var orchestratorToolPolicies = map[string]orchestratorToolPolicy{
 	"remove_key_dates": {codexJobAuthorityWorkspaceWrite, "board_write"}, "update_ticket": {codexJobAuthorityWorkspaceWrite, "board_write"},
 	"create_artifact": {codexJobAuthorityWorkspaceWrite, "artifact_write"}, "update_artifact": {codexJobAuthorityWorkspaceWrite, "artifact_write"},
 	"answer_memory_question": {codexJobAuthorityReadOnly, "read"}, "note_for_the_record": {codexJobAuthorityWorkspaceWrite, "memory_write"},
-	"cross_meeting_briefing": {codexJobAuthorityReadOnly, "read"}, "get_meeting_detail": {codexJobAuthorityReadOnly, "read"},
+	"meeting_interval_recall": {codexJobAuthorityReadOnly, "read"}, "cross_meeting_briefing": {codexJobAuthorityReadOnly, "read"}, "get_meeting_detail": {codexJobAuthorityReadOnly, "read"},
 	"create_package": {codexJobAuthorityWorkspaceWrite, "package_write"}, "attach_to_package": {codexJobAuthorityWorkspaceWrite, "package_write"},
 	"advance_package_stage": {codexJobAuthorityWorkspaceWrite, "package_write"}, "send_notification": {codexJobAuthorityWorkspaceWrite, "notification_write"},
 	"do_nothing": {codexJobAuthorityReadOnly, "none"}, "company_financial_snapshot": {codexJobAuthorityReadOnly, "external_read"},
@@ -2219,7 +2312,7 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 		"enum":        []string{"artifacts", "research", "design", "grill", "workflow"},
 	}
 
-	return []map[string]any{
+	tools := []map[string]any{
 		{
 			"type":        "function",
 			"name":        "create_ticket",
@@ -2931,6 +3024,11 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 			},
 		},
 	}
+	// The schema remains present even while the read-only product is fenced so
+	// every Realtime surface has one stable tool contract. The handler performs
+	// the authoritative preview/activation, room, consent and audience checks.
+	tools = append(tools, strideTemporalRecallToolDefinition())
+	return tools
 }
 
 func (app *kanbanBoardApp) handleRealtimeEvent(raw []byte) {
@@ -3269,7 +3367,7 @@ func (app *kanbanBoardApp) handleToolCall(outputItem kanbanRealtimeOutputItem, a
 
 func realtimeToolRunsAsync(name string) bool {
 	switch name {
-	case "answer_memory_question", "create_artifact", "launch_agent_thread", "archive_meeting", "meeting_recap", "catch_me_up", "cross_meeting_briefing", "end_grill_session", "organize_files", "save_to_files":
+	case "answer_memory_question", "create_artifact", "launch_agent_thread", "archive_meeting", "meeting_recap", "catch_me_up", "meeting_interval_recall", "cross_meeting_briefing", "end_grill_session", "organize_files", "save_to_files":
 		// meeting_recap/catch_me_up block on a forced brain pass (up to 60s),
 		// cross_meeting_briefing can block on its map-reduce fallback,
 		// end_grill_session files a report thread, and organize_files /
@@ -3650,6 +3748,20 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 		return app.meetingRecap(args, "", officeRoomID)
 	case "catch_me_up":
 		return app.catchMeUp(args, "", officeRoomID)
+	case "meeting_interval_recall":
+		kind, err := parseSTRIDETemporalWindow(asString(args["window"]))
+		if err != nil {
+			return nil, false, err
+		}
+		scope, err := app.currentSTRIDERoomScope(officeRoomID)
+		if err != nil {
+			return nil, false, err
+		}
+		result, err := app.answerSTRIDETemporalForRoom(context.Background(), scope, kind)
+		if err != nil {
+			return nil, false, err
+		}
+		return result.toolResult(), false, nil
 	case "cross_meeting_briefing":
 		return app.crossMeetingBriefingToolForPrincipal(args, sharedRoomRecallPrincipal(officeRoomID, app.memory.currentMeetingID(officeRoomID)))
 	case "get_meeting_detail":
@@ -3702,6 +3814,19 @@ func (app *kanbanBoardApp) applyToolCallArgsForPrincipal(toolName string, args m
 			return app.catchMeUp(args, requester, roomID)
 		}
 		return app.meetingRecap(args, requester, roomID)
+	case "meeting_interval_recall":
+		if principal.Audience == "guest" || principal.User == nil {
+			return nil, false, ErrSTRIDETemporalProductScope
+		}
+		kind, err := parseSTRIDETemporalWindow(asString(args["window"]))
+		if err != nil {
+			return nil, false, err
+		}
+		result, err := app.answerSTRIDETemporalForMember(context.Background(), principal.User, principal.RoomID, kind)
+		if err != nil {
+			return nil, false, err
+		}
+		return result.toolResult(), false, nil
 	case "cross_meeting_briefing":
 		return app.crossMeetingBriefingToolForPrincipal(args, principal)
 	case "get_meeting_detail":
@@ -3849,7 +3974,7 @@ func privateRealtimeVoiceToolAllowed(toolName string) bool {
 		// Packages, notifications, channels, recap, cross-meeting recall.
 		"create_package", "attach_to_package", "advance_package_stage", "portfolio_health",
 		"send_notification", "post_to_channel", "create_channel",
-		"meeting_recap", "catch_me_up", "cross_meeting_briefing", "get_meeting_detail",
+		"meeting_recap", "catch_me_up", "meeting_interval_recall", "cross_meeting_briefing", "get_meeting_detail",
 		// fiscal.ai grounding — only the typed, spoken-ready pair; fiscal_api_docs
 		// and fiscal_data_query return payloads too heavy for a voice turn.
 		"company_financial_snapshot", "financial_comps",
@@ -3886,7 +4011,7 @@ func (app *kanbanBoardApp) applyPrivateRealtimeVoiceTool(requesterEmail string, 
 	}
 	roomID := app.memberCurrentRoom(requesterEmail)
 	principal := app.recallPrincipalForMemberRoom(requesterEmail, roomID)
-	if toolName == "answer_memory_question" || toolName == "meeting_recap" || toolName == "catch_me_up" || toolName == "cross_meeting_briefing" || toolName == "get_meeting_detail" {
+	if toolName == "answer_memory_question" || toolName == "meeting_recap" || toolName == "catch_me_up" || toolName == "meeting_interval_recall" || toolName == "cross_meeting_briefing" || toolName == "get_meeting_detail" {
 		return app.applyToolCallArgsForPrincipal(toolName, args, principal)
 	}
 	if toolName == "create_artifact" {
@@ -4430,7 +4555,11 @@ func normalizeRealtimeArtifactMode(mode string) string {
 }
 
 func (app *kanbanBoardApp) rememberTranscript(roomID string, event kanbanRealtimeEvent, source string, model string) {
-	app.rememberTranscriptWithScope(roomID, nil, nil, event, source, model)
+	app.rememberTranscriptWithScopeAndSegment(roomID, nil, nil, "", event, source, model)
+}
+
+func (app *kanbanBoardApp) rememberTranscriptForSegment(roomID, segmentID string, event kanbanRealtimeEvent, source string, model string) {
+	app.rememberTranscriptWithScopeAndSegment(roomID, nil, nil, segmentID, event, source, model)
 }
 
 func (app *kanbanBoardApp) rememberTranscriptForGeneration(roomID string, mediaGeneration uint64, event kanbanRealtimeEvent, source string, model string) {
@@ -4444,20 +4573,28 @@ func (app *kanbanBoardApp) rememberTranscriptForGeneration(roomID string, mediaG
 }
 
 func (app *kanbanBoardApp) rememberTranscriptForMediaScope(scope RoomScoutScope, event kanbanRealtimeEvent, source string, model string) {
+	app.rememberTranscriptForMediaScopeSegment(scope, "", event, source, model)
+}
+
+func (app *kanbanBoardApp) rememberTranscriptForMediaScopeSegment(scope RoomScoutScope, segmentID string, event kanbanRealtimeEvent, source string, model string) {
 	if !scope.valid() {
 		return
 	}
-	app.rememberTranscriptWithScope(scope.RoomID, nil, &scope, event, source, model)
+	app.rememberTranscriptWithScopeAndSegment(scope.RoomID, nil, &scope, segmentID, event, source, model)
 }
 
 func (app *kanbanBoardApp) rememberRoomScoutTranscript(scope RoomScoutScope, event kanbanRealtimeEvent, source string, model string) {
 	if !scope.valid() {
 		return
 	}
-	app.rememberTranscriptWithScope(scope.RoomID, &scope, nil, event, source, model)
+	app.rememberTranscriptWithScopeAndSegment(scope.RoomID, &scope, nil, "", event, source, model)
 }
 
 func (app *kanbanBoardApp) rememberTranscriptWithScope(roomID string, expectedScope *RoomScoutScope, expectedMediaScope *RoomScoutScope, event kanbanRealtimeEvent, source string, model string) {
+	app.rememberTranscriptWithScopeAndSegment(roomID, expectedScope, expectedMediaScope, "", event, source, model)
+}
+
+func (app *kanbanBoardApp) rememberTranscriptWithScopeAndSegment(roomID string, expectedScope *RoomScoutScope, expectedMediaScope *RoomScoutScope, segmentID string, event kanbanRealtimeEvent, source string, model string) {
 	if app == nil || app.memory == nil {
 		log.Errorf("Meeting memory unavailable; transcript was not saved")
 		return
@@ -4486,12 +4623,16 @@ func (app *kanbanBoardApp) rememberTranscriptWithScope(roomID string, expectedSc
 		}
 	} else if expectedMediaScope != nil {
 		var current bool
-		speaker, confidence, capture, contributorFences, current = app.attributionForCommittedTranscriptWithConsentForScope(*expectedMediaScope, time.Now().UTC())
+		speaker, confidence, capture, contributorFences, current = app.attributionForCommittedTranscriptWithConsentForScopeSegment(*expectedMediaScope, segmentID, time.Now().UTC())
 		if !current {
 			return
 		}
 	} else {
-		speaker, confidence, capture, contributorFences = app.attributionForCommittedTranscriptWithConsentForRoom(roomID, time.Now().UTC())
+		speaker, confidence, capture, contributorFences = app.attributionForCommittedTranscriptWithConsentForRoomSegment(roomID, segmentID, time.Now().UTC())
+		if strings.TrimSpace(segmentID) != "" && strings.TrimSpace(speaker) == "" {
+			log.Infof("Transcript segment attribution unavailable; transcript was not saved room=%s segment=%s", normalizeRoomID(roomID), segmentID)
+			return
+		}
 	}
 	principal, ok := app.consentPrincipalForTranscriptSpeaker(roomID, speaker)
 	if !ok {
@@ -4603,6 +4744,9 @@ func (app *kanbanBoardApp) rememberTranscriptWithScope(roomID string, expectedSc
 		"consentPolicyVersion":          authority.PolicyVersion,
 		"consentTranscriptionRecordIds": consentAuditRecordIDSet(transcriptionRecordIDs),
 	}
+	if segmentID = strings.TrimSpace(segmentID); segmentID != "" {
+		metadata["segmentId"] = segmentID
+	}
 	if expectedMediaScope != nil {
 		metadata["mediaGeneration"] = strconv.FormatUint(expectedMediaScope.MediaGeneration, 10)
 	} else if expectedScope != nil {
@@ -4667,6 +4811,9 @@ func (app *kanbanBoardApp) rememberTranscriptWithScope(roomID string, expectedSc
 	}
 	if orgStillAllowed {
 		app.nudgeAmbientAgentForRoom(meetingBrainAgentName, roomID)
+		if err := app.projectSTRIDEAuthoritativeTranscript(context.Background(), meeting, entry); err != nil {
+			log.Infof("STRIDE temporal projection unavailable: %v", err)
+		}
 	}
 	// Wake-word presence cue (VISUAL only — no auto-arming): a transcript
 	// naming Scout pulses the brand mark / voice island on room clients.
@@ -4927,7 +5074,7 @@ func visibleMeetingMemoryEntries(entries []meetingMemoryEntry, limit int) []meet
 		// reflections, and cursor stubs stay recall/bookkeeping material: the
 		// briefing surfaces read digests through the range helpers, not this
 		// feed. None of them are timeline entries.
-		if entry.Kind == meetingMemoryKindScoutChat || entry.Kind == meetingMemoryKindCodexProposal || entry.Kind == meetingMemoryKindMissionInsight || entry.Kind == meetingMemoryKindDecision || entry.Kind == meetingMemoryKindDecisionPass || entry.Kind == meetingMemoryKindPackage || entry.Kind == meetingMemoryKindDealRoom || entry.Kind == meetingMemoryKindFile || entry.Kind == meetingMemoryKindReflection || entry.Kind == meetingMemoryKindDayDigestPass || entry.Kind == meetingMemoryKindLedgerEvent || entry.Kind == meetingMemoryKindLedgerPass || entry.Kind == meetingMemoryKindNarrative || entry.Kind == meetingMemoryKindRunLog || isMeetingDigestKind(entry.Kind) {
+		if entry.Kind == meetingMemoryKindScoutChat || entry.Kind == memoryContextKindCompanyConversation || entry.Kind == meetingMemoryKindCodexProposal || entry.Kind == meetingMemoryKindMissionInsight || entry.Kind == meetingMemoryKindDecision || entry.Kind == meetingMemoryKindDecisionPass || entry.Kind == meetingMemoryKindPackage || entry.Kind == meetingMemoryKindDealRoom || entry.Kind == meetingMemoryKindFile || entry.Kind == meetingMemoryKindReflection || entry.Kind == meetingMemoryKindDayDigestPass || entry.Kind == meetingMemoryKindLedgerEvent || entry.Kind == meetingMemoryKindLedgerPass || entry.Kind == meetingMemoryKindNarrative || entry.Kind == meetingMemoryKindRunLog || isMeetingDigestKind(entry.Kind) {
 			continue
 		}
 		visible = append(visible, entry)
@@ -5455,6 +5602,9 @@ func (app *kanbanBoardApp) createTicket(args map[string]any) (map[string]any, bo
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
+	if err := app.recoverBoardLifecycleLocked(); err != nil {
+		return nil, false, err
+	}
 
 	card := kanbanCard{
 		ID:       app.createCardIDLocked(),
@@ -5492,6 +5642,9 @@ func (app *kanbanBoardApp) acceptDraftTicket(args map[string]any) (map[string]an
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
+	if err := app.recoverBoardLifecycleLocked(); err != nil {
+		return nil, false, err
+	}
 
 	card, ok := app.findCardLocked(cardID)
 	if !ok {
@@ -5524,6 +5677,9 @@ func (app *kanbanBoardApp) dismissDraftTicket(args map[string]any) (map[string]a
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
+	if err := app.recoverBoardLifecycleLocked(); err != nil {
+		return nil, false, err
+	}
 
 	index := -1
 	for candidateIndex, card := range app.cards {
@@ -5538,9 +5694,8 @@ func (app *kanbanBoardApp) dismissDraftTicket(args map[string]any) (map[string]a
 	if !app.cards[index].Draft {
 		return nil, false, fmt.Errorf("card %s is not a draft", cardID)
 	}
-	dismissedCard := cloneKanbanCard(app.cards[index])
-	app.cards = append(app.cards[:index], app.cards[index+1:]...)
-	if err := app.touchLocked(); err != nil {
+	dismissedCard, err := app.deleteBoardCardTwoPhaseLocked(cardID, "board_draft_dismissed", false)
+	if err != nil {
 		return nil, false, err
 	}
 
@@ -5565,6 +5720,9 @@ func (app *kanbanBoardApp) moveTicket(args map[string]any) (map[string]any, bool
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
+	if err := app.recoverBoardLifecycleLocked(); err != nil {
+		return nil, false, err
+	}
 
 	card, ok := app.findCardLocked(cardID)
 	if !ok {
@@ -5604,6 +5762,9 @@ func (app *kanbanBoardApp) addTags(args map[string]any) (map[string]any, bool, e
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
+	if err := app.recoverBoardLifecycleLocked(); err != nil {
+		return nil, false, err
+	}
 
 	card, ok := app.findCardLocked(cardID)
 	if !ok {
@@ -5644,6 +5805,9 @@ func (app *kanbanBoardApp) addKeyDate(args map[string]any) (map[string]any, bool
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
+	if err := app.recoverBoardLifecycleLocked(); err != nil {
+		return nil, false, err
+	}
 
 	card, ok := app.findCardLocked(cardID)
 	if !ok {
@@ -5691,6 +5855,9 @@ func (app *kanbanBoardApp) removeKeyDates(args map[string]any) (map[string]any, 
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
+	if err := app.recoverBoardLifecycleLocked(); err != nil {
+		return nil, false, err
+	}
 
 	card, ok := app.findCardLocked(cardID)
 	if !ok {
@@ -5759,6 +5926,9 @@ func (app *kanbanBoardApp) updateTicket(args map[string]any) (map[string]any, bo
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
+	if err := app.recoverBoardLifecycleLocked(); err != nil {
+		return nil, false, err
+	}
 
 	card, ok := app.findCardLocked(cardID)
 	if !ok {
@@ -5868,6 +6038,9 @@ func (app *kanbanBoardApp) updateTicketDetails(args map[string]any) (map[string]
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
+	if err := app.recoverBoardLifecycleLocked(); err != nil {
+		return nil, false, err
+	}
 
 	card, ok := app.findCardLocked(cardID)
 	if !ok {
@@ -5927,6 +6100,9 @@ func (app *kanbanBoardApp) deleteTicket(args map[string]any) (map[string]any, bo
 
 	app.mu.Lock()
 	defer app.mu.Unlock()
+	if err := app.recoverBoardLifecycleLocked(); err != nil {
+		return nil, false, err
+	}
 
 	index := -1
 	for candidateIndex, card := range app.cards {
@@ -5938,10 +6114,8 @@ func (app *kanbanBoardApp) deleteTicket(args map[string]any) (map[string]any, bo
 	if index == -1 {
 		return nil, false, fmt.Errorf("unknown card_id: %s", cardID)
 	}
-	deletedCard := cloneKanbanCard(app.cards[index])
-	app.lastDeletedCard = &deletedCard
-	app.cards = append(app.cards[:index], app.cards[index+1:]...)
-	if err := app.touchLocked(); err != nil {
+	_, err := app.deleteBoardCardTwoPhaseLocked(cardID, "board_card_deleted", true)
+	if err != nil {
 		return nil, false, err
 	}
 
@@ -5955,6 +6129,9 @@ func (app *kanbanBoardApp) deleteTicket(args map[string]any) (map[string]any, bo
 func (app *kanbanBoardApp) restoreLastDeletedTicket() (map[string]any, bool, error) {
 	app.mu.Lock()
 	defer app.mu.Unlock()
+	if err := app.recoverBoardLifecycleLocked(); err != nil {
+		return nil, false, err
+	}
 
 	if app.lastDeletedCard == nil {
 		return nil, false, fmt.Errorf("no deleted ticket to restore")
@@ -5964,6 +6141,7 @@ func (app *kanbanBoardApp) restoreLastDeletedTicket() (map[string]any, bool, err
 	if _, exists := app.findCardLocked(restoredCard.ID); exists {
 		restoredCard.ID = app.createCardIDLocked()
 	}
+	restoredCard.RestoredAt = time.Now().UTC().Format(time.RFC3339Nano)
 	app.cards = append(app.cards, restoredCard)
 	app.lastDeletedCard = nil
 	if err := app.touchLocked(); err != nil {
@@ -6054,9 +6232,13 @@ func (app *kanbanBoardApp) admitParticipantSessionEndpointInRoom(roomID string, 
 	}
 
 	app.mu.Lock()
-	defer app.mu.Unlock()
 	state := app.roomLiveLocked(roomID)
-	return app.admitParticipantSessionEndpointInRoomLocked(state, name, sessionID, endpointID)
+	admitted, firstEndpoint, err = app.admitParticipantSessionEndpointInRoomLocked(state, name, sessionID, endpointID)
+	app.mu.Unlock()
+	if err == nil && firstEndpoint {
+		app.revokeMeetingSpecialistParticipantAuthority(roomID, "participant_authority_changed")
+	}
+	return admitted, firstEndpoint, err
 }
 
 func (app *kanbanBoardApp) validateParticipantAdmissionLocked(state *roomLiveState, name, endpointID string) error {
@@ -6452,6 +6634,7 @@ func (app *kanbanBoardApp) forgetParticipantSessionResultInRoom(roomID string, n
 	delete(state.participantEndpointMedia, name)
 	app.mu.Unlock()
 	drainParticipantAdmissionLeases(retiredLeases)
+	app.revokeMeetingSpecialistParticipantAuthority(roomID, "participant_authority_changed")
 
 	return true, false
 }
@@ -6740,6 +6923,12 @@ func (app *kanbanBoardApp) sweepStaleParticipantSessions() {
 		return
 	}
 	for roomID, reaped := range reapedByRoom {
+		for _, entry := range reaped {
+			if !entry.stillPresent {
+				app.revokeMeetingSpecialistParticipantAuthority(roomID, "participant_authority_changed")
+				break
+			}
+		}
 		for _, entry := range reaped {
 			drainParticipantAdmissionLeases(entry.leases)
 			for _, sessionID := range entry.sessionIDs {
@@ -7246,6 +7435,9 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 		closedRecord := record
 		closedMeeting = &closedRecord
 		closedMeetingChanged = changed
+		if changed && app.meetingSpecialists != nil {
+			app.meetingSpecialists.CloseScope(officeRoomID, record.ID, "room_closed")
+		}
 	}
 
 	email = sendMeetingNotesEmail(email.Recipients, notes)
@@ -7650,16 +7842,17 @@ func cloneKanbanCards(cards []kanbanCard) []kanbanCard {
 
 func cloneKanbanCard(card kanbanCard) kanbanCard {
 	return kanbanCard{
-		ID:        card.ID,
-		Status:    card.Status,
-		Title:     card.Title,
-		Notes:     card.Notes,
-		Owner:     card.Owner,
-		Tags:      append([]string(nil), card.Tags...),
-		DueDate:   card.DueDate,
-		KeyDates:  cloneKanbanKeyDates(card.KeyDates),
-		Draft:     card.Draft,
-		DraftedAt: card.DraftedAt,
+		ID:         card.ID,
+		Status:     card.Status,
+		Title:      card.Title,
+		Notes:      card.Notes,
+		Owner:      card.Owner,
+		Tags:       append([]string(nil), card.Tags...),
+		DueDate:    card.DueDate,
+		KeyDates:   cloneKanbanKeyDates(card.KeyDates),
+		Draft:      card.Draft,
+		DraftedAt:  card.DraftedAt,
+		RestoredAt: card.RestoredAt,
 	}
 }
 

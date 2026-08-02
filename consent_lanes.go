@@ -205,6 +205,7 @@ type ConsentLaneAuthority struct {
 	Now           func() time.Time
 	CaptureCutoff func() (uint64, error)
 	OnWithdrawal  func(ConsentWithdrawalNotice)
+	OnDecision    func(ConsentDecisionNotice)
 
 	mu                sync.RWMutex
 	generations       map[string]uint64
@@ -378,6 +379,17 @@ type ConsentWithdrawalNotice struct {
 	Scope                       ConsentScope
 	RecordID                    string
 	LastAcceptedCaptureSequence uint64
+}
+
+// ConsentDecisionNotice is emitted only after the immutable decision and its
+// generation bump are durable. Unlike the withdrawal-specific notice, it lets
+// dependent approval products invalidate authority on every grant, denial, or
+// withdrawal revision without learning any audio or transcript content.
+type ConsentDecisionNotice struct {
+	Binding     ConsentAdmissionBinding
+	Scope       ConsentScope
+	Disposition ConsentDisposition
+	RecordID    string
 }
 
 func NewConsentLaneAuthority(store ConsentStore, policyVersion string) *ConsentLaneAuthority {
@@ -570,6 +582,9 @@ func (authority *ConsentLaneAuthority) RecordDecision(ctx context.Context, bindi
 			Binding: binding, Scope: scope, RecordID: record.ID,
 			LastAcceptedCaptureSequence: *record.LastAcceptedCaptureSequence,
 		})
+	}
+	if authority.OnDecision != nil {
+		authority.OnDecision(ConsentDecisionNotice{Binding: binding, Scope: scope, Disposition: disposition, RecordID: record.ID})
 	}
 	return cloneConsentRecord(record), nil
 }
@@ -863,6 +878,7 @@ func currentConsentLaneAuthority() *ConsentLaneAuthority {
 		consentAuthorityRuntime.authority = NewConsentLaneAuthority(store, policy)
 		consentAuthorityRuntime.authority.CaptureCutoff = currentConsentCaptureCutoff
 		consentAuthorityRuntime.authority.OnWithdrawal = handleConsentWithdrawal
+		consentAuthorityRuntime.authority.OnDecision = handleConsentDecision
 		consentAuthorityRuntime.canonical = canonical
 		consentAuthorityRuntime.policy = policy
 	}
@@ -885,6 +901,12 @@ var consentWithdrawalRuntime = struct {
 	listeners map[uint64]func(ConsentWithdrawalNotice)
 }{listeners: make(map[uint64]func(ConsentWithdrawalNotice))}
 
+var consentDecisionRuntime = struct {
+	sync.RWMutex
+	nextID    uint64
+	listeners map[uint64]func(ConsentDecisionNotice)
+}{listeners: make(map[uint64]func(ConsentDecisionNotice))}
+
 // handleConsentWithdrawal fans a durable withdrawal out to active provider
 // lanes. Registration is runtime-only: the immutable PostgreSQL record and
 // generation bump remain the authority, while listeners only accelerate
@@ -898,6 +920,18 @@ func handleConsentWithdrawal(notice ConsentWithdrawalNotice) {
 		listeners = append(listeners, listener)
 	}
 	consentWithdrawalRuntime.RUnlock()
+	for _, listener := range listeners {
+		listener(notice)
+	}
+}
+
+func handleConsentDecision(notice ConsentDecisionNotice) {
+	consentDecisionRuntime.RLock()
+	listeners := make([]func(ConsentDecisionNotice), 0, len(consentDecisionRuntime.listeners))
+	for _, listener := range consentDecisionRuntime.listeners {
+		listeners = append(listeners, listener)
+	}
+	consentDecisionRuntime.RUnlock()
 	for _, listener := range listeners {
 		listener(notice)
 	}
@@ -950,5 +984,21 @@ func subscribeConsentWithdrawals(listener func(ConsentWithdrawalNotice)) func() 
 		consentWithdrawalRuntime.Lock()
 		delete(consentWithdrawalRuntime.listeners, id)
 		consentWithdrawalRuntime.Unlock()
+	}
+}
+
+func subscribeConsentDecisions(listener func(ConsentDecisionNotice)) func() {
+	if listener == nil {
+		return func() {}
+	}
+	consentDecisionRuntime.Lock()
+	consentDecisionRuntime.nextID++
+	id := consentDecisionRuntime.nextID
+	consentDecisionRuntime.listeners[id] = listener
+	consentDecisionRuntime.Unlock()
+	return func() {
+		consentDecisionRuntime.Lock()
+		delete(consentDecisionRuntime.listeners, id)
+		consentDecisionRuntime.Unlock()
 	}
 }

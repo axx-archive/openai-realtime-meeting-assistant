@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "stride.e9.contract-drill/v1",
+  "drillId": "e9-token-free-founder-contract-v1",
+  "evidenceClass": "synthetic_only",
+  "clock": "virtual",
+  "providerCalls": false,
+  "productionMutation": false,
+  "trafficShift": "simulated_default_off",
+  "frozenRouteMap": true,
+  "rooms": [
+    {"id": "dog-perfect-room", "tenantId": "org-dog-perfect"},
+    {"id": "founder-room", "tenantId": "org-founder-fixture"}
+  ],
+  "actors": [
+    {"id": "scout", "kind": "coordinator", "capability": "contract_fixture"},
+    {"id": "mary", "kind": "specialist", "capability": "contract_fixture"},
+    {"id": "founder", "kind": "human", "capability": "fixture_authority"},
+    {"id": "reviewer", "kind": "human", "capability": "fixture_review"}
+  ],
+  "declaredCoverage": ["media", "recall", "team", "scout", "suggested_work", "insights_opportunities", "agent_marketplace", "workforce"],
+  "consultations": {"scoutId": "scout", "specialistId": "mary", "roundsPerRoom": 3, "concurrent": true},
+  "soak": {"virtualHours": 24, "sittings": 10},
+  "scenarios": [
+    {"id": "drill-app-loss", "roomId": "dog-perfect-room", "fault": "app_replica_loss", "assertions": ["route_failover_expected", "media_continuity_expected", "traffic_shift_remains_simulated"]},
+    {"id": "drill-consent-withdrawal", "roomId": "dog-perfect-room", "fault": "consent_withdrawal", "assertions": ["specialist_observation_revoked", "no_new_context", "human_call_continues"]},
+    {"id": "drill-control-failover", "roomId": "founder-room", "fault": "control_failover", "assertions": ["route_failover_expected", "no_unauthorized_work", "traffic_shift_remains_simulated"]},
+    {"id": "drill-participant-churn", "roomId": "founder-room", "fault": "participant_churn", "assertions": ["rooms_isolated", "human_call_continues"]},
+    {"id": "drill-quota", "roomId": "dog-perfect-room", "fault": "quota_exhaustion", "assertions": ["specialist_unavailable", "human_call_continues", "no_unbounded_retry"]},
+    {"id": "drill-realtime-disconnect", "roomId": "founder-room", "fault": "realtime_disconnect", "assertions": ["specialist_unavailable", "human_call_continues", "no_cross_room_context"]},
+    {"id": "drill-restore-tamper", "fault": "restore_tamper", "assertions": ["restore_refused", "purge_authority_preserved", "no_service_start"]},
+    {"id": "drill-specialist-kill", "roomId": "dog-perfect-room", "fault": "specialist_kill_switch", "assertions": ["specialist_unavailable", "human_call_continues", "no_new_context"]}
+  ],
+  "workforceSteps": ["discover_mary", "inspect_mary", "trial_mary", "hire_bounded", "direct_message", "add_to_dog_perfect", "scout_select", "scout_introduce", "invite_to_meeting", "approve_one_workrun", "inspect_learning", "correct_learning", "preview_update", "rollback_update", "pause", "offboard", "verify_history_attributable", "verify_new_access_revoked"],
+  "externalPending": ["paid_provider_qualification", "physical_device_acceptance", "production_restore", "live_traffic_shift", "live_24h_soak"]
+}

@@ -115,14 +115,13 @@ func (store *MemoryCanonicalEventStore) Append(_ context.Context, event Canonica
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	fingerprint, err := canonicalEventFingerprint(event)
-	if err != nil {
-		return CanonicalAppendResult{}, err
-	}
 	if index, ok := store.byEvent[event.EventID]; ok {
 		existing := store.events[index]
-		existingFingerprint, _ := canonicalEventFingerprint(existing)
-		if existingFingerprint != fingerprint {
+		equal, compareErr := canonicalEventsIdempotentlyEqual(existing, event)
+		if compareErr != nil {
+			return CanonicalAppendResult{}, compareErr
+		}
+		if !equal {
 			return CanonicalAppendResult{}, ErrCanonicalIdempotencyConflict
 		}
 		return CanonicalAppendResult{Event: cloneCanonicalEvent(existing), Existing: true}, nil
@@ -131,8 +130,11 @@ func (store *MemoryCanonicalEventStore) Append(_ context.Context, event Canonica
 		key := event.TenantID + "\x00" + event.IdempotencyKey
 		if index, ok := store.byIdem[key]; ok {
 			existing := store.events[index]
-			existingFingerprint, _ := canonicalEventFingerprint(existing)
-			if existingFingerprint != fingerprint {
+			equal, compareErr := canonicalEventsIdempotentlyEqual(existing, event)
+			if compareErr != nil {
+				return CanonicalAppendResult{}, compareErr
+			}
+			if !equal {
 				return CanonicalAppendResult{}, ErrCanonicalIdempotencyConflict
 			}
 			return CanonicalAppendResult{Event: cloneCanonicalEvent(existing), Existing: true}, nil
@@ -178,6 +180,119 @@ func canonicalEventFingerprint(event CanonicalEvent) (string, error) {
 	}
 	digest := sha256.Sum256(data)
 	return hex.EncodeToString(digest[:]), nil
+}
+
+// canonicalEventsIdempotentlyEqual owns retry equivalence. Legacy import
+// occurrence time is only a best-effort observation timestamp. Some legacy
+// stores (notably the board) expose one collection-level updatedAt for many
+// independently versioned objects, so an unrelated object update can change
+// that timestamp while the imported object's immutable state, event ID, and
+// payload remain identical. Reusing the original stored occurrence time for
+// this one event family prevents a false conflict without weakening any other
+// field or any native canonical event's timestamp identity.
+func canonicalEventsIdempotentlyEqual(existing, candidate CanonicalEvent) (bool, error) {
+	if canonicalLegacyBoardOccurrenceMayDrift(existing, candidate) {
+		candidate.OccurredAt = existing.OccurredAt
+	}
+	existingFingerprint, err := canonicalEventFingerprint(existing)
+	if err != nil {
+		return false, err
+	}
+	candidateFingerprint, err := canonicalEventFingerprint(candidate)
+	if err != nil {
+		return false, err
+	}
+	return existingFingerprint == candidateFingerprint, nil
+}
+
+func canonicalLegacyBoardOccurrenceMayDrift(existing, candidate CanonicalEvent) bool {
+	if candidate.EventID != existing.EventID || candidate.AggregateID != existing.AggregateID {
+		return false
+	}
+	return canonicalLegacyBoardImportInvariant(existing) && canonicalLegacyBoardImportInvariant(candidate)
+}
+
+type canonicalLegacyImportPayload struct {
+	ObjectID        string `json:"object_id"`
+	SourceKind      string `json:"source_kind"`
+	SourceRevision  int64  `json:"source_revision"`
+	RoomID          string `json:"room_id"`
+	MeetingID       string `json:"meeting_id,omitempty"`
+	Status          string `json:"status"`
+	ContentRevision int64  `json:"content_revision"`
+	ContentSHA256   string `json:"content_sha256"`
+	PayloadSHA256   string `json:"payload_sha256"`
+	ContentRef      string `json:"content_ref"`
+	Deleted         bool   `json:"deleted"`
+}
+
+// canonicalLegacyImportBaselineInvariant proves that an event was emitted by
+// the one-shot legacy importer, including its deterministic source-state
+// identity. A source revision may jump when earlier legacy snapshots were
+// durably versioned but never reached the canonical store. That makes this an
+// explicit migration checkpoint with a visible revision gap, not permission
+// for native event streams to skip predecessors.
+func canonicalLegacyImportBaselineInvariant(event CanonicalEvent) (canonicalLegacyImportPayload, bool) {
+	payload := canonicalLegacyImportPayload{}
+	if event.EventType != canonicalLegacyImportEventType || event.SchemaVersion != 1 ||
+		event.EventID == uuid.Nil || strings.TrimSpace(event.TenantID) == "" ||
+		strings.TrimSpace(event.AggregateType) == "" || strings.TrimSpace(event.AggregateID) == "" || event.AggregateVersion < 1 ||
+		event.Actor != (CanonicalPrincipalRef{Kind: "service", ID: "legacy-import"}) ||
+		event.Classification != "internal" || event.ACLVersion != 1 ||
+		event.CorrelationID != "" || event.CausationID != nil || event.ConsentSnapshotID != nil || event.RetainUntil != nil ||
+		event.RoomID != NormalizeCanonicalRoomID(event.RoomID) || !event.RecordedAt.Equal(event.OccurredAt) {
+		return payload, false
+	}
+	knownFamily := false
+	for _, family := range canonicalLegacyFamilies {
+		if event.AggregateType == family {
+			knownFamily = true
+			break
+		}
+	}
+	if !knownFamily || json.Unmarshal(event.Payload, &payload) != nil ||
+		payload.ObjectID != event.AggregateID || payload.SourceKind != event.AggregateType ||
+		payload.SourceRevision != event.AggregateVersion || payload.RoomID != event.RoomID || payload.MeetingID != event.MeetingID ||
+		strings.TrimSpace(payload.Status) == "" || !isHexDigest(payload.PayloadSHA256) ||
+		payload.ContentRef != event.ContentRef ||
+		(payload.ContentRevision == 0 && payload.ContentSHA256 != "") ||
+		(payload.ContentRevision > 0 && !isHexDigest(payload.ContentSHA256)) {
+		return payload, false
+	}
+	payloadDigest := sha256.Sum256(event.Payload)
+	if payloadDigest != event.PayloadSHA256 {
+		return payload, false
+	}
+	objectKey, err := CanonicalLegacyObjectKey(event.AggregateType, event.AggregateID)
+	if err != nil {
+		return payload, false
+	}
+	expectedEventID, err := CanonicalImportEventID(event.TenantID, event.AggregateType, objectKey, canonicalLegacyImportEventType, payload.PayloadSHA256)
+	if err != nil || event.EventID != expectedEventID || event.IdempotencyKey != "legacy-import/"+expectedEventID.String() {
+		return payload, false
+	}
+	return payload, true
+}
+
+// canonicalLegacyBoardImportInvariant proves that an event could have been
+// emitted by CanonicalImporter for a live board card. Occurrence-time drift is
+// tolerated only after rebuilding every deterministic identity and binding
+// carried by that importer; a merely well-shaped legacy event is insufficient.
+func canonicalLegacyBoardImportInvariant(event CanonicalEvent) bool {
+	payload, ok := canonicalLegacyImportBaselineInvariant(event)
+	if !ok || event.AggregateType != "board_card" || event.MeetingID != "" {
+		return false
+	}
+	if payload.MeetingID != "" ||
+		payload.Status != "unknown" || payload.Deleted || !isHexDigest(payload.PayloadSHA256) ||
+		payload.ContentRevision != 1 || payload.ContentSHA256 != payload.PayloadSHA256 {
+		return false
+	}
+	expectedContentRef := "legacy:board-card:" + event.AggregateID
+	if event.ContentRef != expectedContentRef || payload.ContentRef != expectedContentRef {
+		return false
+	}
+	return true
 }
 
 func cloneCanonicalEvent(event CanonicalEvent) CanonicalEvent {

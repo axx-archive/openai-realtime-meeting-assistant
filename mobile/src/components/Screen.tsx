@@ -177,7 +177,7 @@ const styles = StyleSheet.create({
   retry: {
     marginTop: 8,
     color: colors.accent,
-    fontWeight: '600',
+    fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600',
     fontSize: 14,
   },
 });

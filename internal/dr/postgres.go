@@ -21,7 +21,10 @@ var tenantBearingTables = []string{
 	"approvals", "brain_projection_backfill_requests", "brain_projection_checkpoints",
 	"brain_projection_work", "canonical_events", "catch_up_publications", "consent_records",
 	"jobs", "object_grants", "object_revisions", "objects", "org_memberships", "principals",
-	"purge_ledger", "retention_state", "revision_bodies",
+	"purge_ledger", "retention_state", "revision_bodies", "stride_contract_revisions",
+	"stride_conversation_derived_edges", "stride_conversation_events",
+	"stride_conversation_projection_checkpoints", "stride_registry_revisions",
+	"stride_source_derived_edges",
 }
 
 // canonicalTables is the exhaustive registry for the logical database digest.
@@ -34,6 +37,9 @@ var canonicalTables = []string{
 	"legacy_object_versions", "migration_epochs", "object_grants", "object_revisions",
 	"objects", "org_memberships", "outbox", "principals", "projection_checkpoints",
 	"purge_ledger", "retention_state", "revision_bodies", "schema_migrations",
+	"stride_contract_revisions", "stride_conversation_derived_edges",
+	"stride_conversation_events", "stride_conversation_projection_checkpoints",
+	"stride_feature_switches", "stride_registry_revisions", "stride_source_derived_edges",
 }
 
 type DatabaseState struct {

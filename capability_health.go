@@ -14,6 +14,7 @@ import (
 // that evidence with boot configuration and live in-process state.
 type capabilityRuntimeState struct {
 	LastSuccess time.Time
+	LastPoll    time.Time
 	LastFailure time.Time
 	LastError   string
 	Backlog     *int
@@ -21,13 +22,26 @@ type capabilityRuntimeState struct {
 	Circuit     string
 }
 
+func recordCapabilityPoll(name string, at time.Time) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	capabilityRuntime.Lock()
+	state := capabilityRuntime.states[name]
+	state.LastPoll = at
+	capabilityRuntime.states[name] = state
+	capabilityRuntime.Unlock()
+}
+
 const (
-	capabilityScout     = "scout"
-	capabilitySTT       = "stt"
-	capabilityRecap     = "recap"
-	capabilityBrain     = "brain"
-	capabilityEmbedding = "embeddings"
-	capabilityWorkflows = "workflows"
+	capabilityScout       = "scout"
+	capabilitySTT         = "stt"
+	capabilityRecap       = "recap"
+	capabilityBrain       = "brain"
+	capabilityEmbedding   = "embeddings"
+	capabilityWorkflows   = "workflows"
+	capabilityAttachments = "attachment_authority"
 )
 
 var capabilityRuntime = struct {
@@ -109,6 +123,14 @@ func capabilityEvidence(name string, now time.Time, staleAfter time.Duration) ma
 			out["stale"] = age > staleAfter
 		}
 	}
+	if !state.LastPoll.IsZero() {
+		out["lastPollAt"] = state.LastPoll.UTC().Format(time.RFC3339Nano)
+		age := now.Sub(state.LastPoll)
+		if age < 0 {
+			age = 0
+		}
+		out["pollLagSeconds"] = int64(age.Seconds())
+	}
 	if !state.LastFailure.IsZero() {
 		out["lastFailureAt"] = state.LastFailure.UTC().Format(time.RFC3339Nano)
 	}
@@ -131,7 +153,8 @@ func capabilityStatus(base map[string]any, providerReady bool) string {
 	if enabled, ok := base["enabled"].(bool); ok && !enabled {
 		return "disabled"
 	}
-	if !providerReady || base["lastError"] != nil || base["stale"] == true || base["circuit"] == "open" {
+	circuit, _ := base["circuit"].(string)
+	if !providerReady || base["lastError"] != nil || base["stale"] == true || (circuit != "" && circuit != "closed") {
 		return "degraded"
 	}
 	if connected, reported := base["connected"].(bool); reported && !connected {
@@ -163,15 +186,110 @@ func latestCapabilityArtifact(kind string) (time.Time, bool) {
 	return entries[len(entries)-1].CreatedAt, true
 }
 
+// latestAmbientCapabilityArtifact returns durable success evidence for an
+// ambient worker. Most workers own an append-only memory kind. Specialty
+// workers that update a shared os_artifact instead provide a typed success
+// contract, so an unrelated os_artifact cannot manufacture health.
+func latestAmbientCapabilityArtifactForApp(app *kanbanBoardApp, agent ambientAgentConfig) (time.Time, bool) {
+	if agent.healthSuccessAt == nil {
+		if app == nil || app.memory == nil {
+			return time.Time{}, false
+		}
+		entries := app.memory.entriesOfKind(agent.artifactKind, 1)
+		if len(entries) == 0 {
+			return time.Time{}, false
+		}
+		return entries[len(entries)-1].CreatedAt, true
+	}
+	if app == nil || app.memory == nil {
+		return time.Time{}, false
+	}
+
+	var latest time.Time
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0) {
+		at, ok := agent.healthSuccessAt(entry)
+		if ok && at.After(latest) {
+			latest = at
+		}
+	}
+	return latest, !latest.IsZero()
+}
+
+func latestAmbientCapabilityArtifact(agent ambientAgentConfig) (time.Time, bool) {
+	return latestAmbientCapabilityArtifactForApp(kanbanApp, agent)
+}
+
+// recordSpecialtyCapabilityCompletion separates worker liveness from useful
+// work. A specialty pass can legitimately no-op when its due source disappears
+// after the cadence check. Only a pass that reports a durable write and whose
+// typed artifact can be read back may clear its prior failure and advance the
+// runtime completion marker.
+func (app *kanbanBoardApp) recordSpecialtyCapabilityCompletion(agent ambientAgentConfig, at time.Time, persisted bool) {
+	recordCapabilityPoll(agent.name, at)
+	if !persisted || agent.healthSuccessAt == nil {
+		return
+	}
+	if _, ok := latestAmbientCapabilityArtifactForApp(app, agent); ok {
+		if err := app.clearAmbientAgentFailure(agent.name); err == nil {
+			recordCapabilitySuccess(agent.name, at)
+		}
+	}
+}
+
 // ambientCapabilityEvidence surfaces only state the ambient runner actually
 // owns: persisted output is success evidence; live retry records establish an
 // open circuit. It never fabricates a success timestamp from process startup.
 func ambientCapabilityEvidence(name string, agent ambientAgentConfig, now time.Time) map[string]any {
 	out := capabilityEvidence(name, now, 2*agent.interval())
-	if at, ok := latestCapabilityArtifact(agent.artifactKind); ok {
-		persisted := capabilityEvidenceFromSuccess(at, now, 2*agent.interval())
-		if _, reported := out["lastSuccessAt"]; !reported {
-			mergeCapabilityEvidence(out, persisted)
+	artifactAt, artifactOK := latestAmbientCapabilityArtifact(agent)
+	if agent.healthSuccessAt != nil {
+		// Runtime completion is liveness only for specialty workers. Their
+		// matching typed artifact revision owns lastSuccessAt authoritatively.
+		delete(out, "lastSuccessAt")
+		delete(out, "lagSeconds")
+		delete(out, "stale")
+	}
+	if artifactOK {
+		at := artifactAt
+		staleAfter := 2 * agent.interval()
+		if agent.healthWorkDue != nil {
+			// Specialty artifact freshness follows its product cadence gate, not
+			// its cheap polling interval. An old living profile/style can still be
+			// current when there is no signal/binder/monthly work waiting.
+			staleAfter = 0
+			out["lastArtifactAt"] = at.UTC().Format(time.RFC3339Nano)
+			age := now.Sub(at)
+			if age < 0 {
+				age = 0
+			}
+			out["artifactLagSeconds"] = int64(age.Seconds())
+		}
+		persisted := capabilityEvidenceFromSuccess(at, now, staleAfter)
+		mergeCapabilityEvidence(out, persisted)
+	}
+	if agent.healthSuccessAt != nil {
+		out["typedArtifactPresent"] = artifactOK
+	}
+	if agent.healthWorkDue != nil {
+		due := kanbanApp != nil && agent.healthWorkDue(kanbanApp, now)
+		out["workDue"] = due
+		if due {
+			out["artifactFreshness"] = "work_due"
+			out["stale"] = true
+		} else {
+			out["artifactFreshness"] = "not_due"
+			// Never inherit interval-based staleness for an artifact whose actual
+			// work gate says it is current. Provider/circuit/worker errors remain.
+			delete(out, "stale")
+		}
+		state := capabilityState(name)
+		if !state.LastPoll.IsZero() {
+			out["lastPassAt"] = state.LastPoll.UTC().Format(time.RFC3339Nano)
+			age := now.Sub(state.LastPoll)
+			if age < 0 {
+				age = 0
+			}
+			out["passLagSeconds"] = int64(age.Seconds())
 		}
 	}
 	if kanbanApp == nil {
@@ -189,20 +307,38 @@ func ambientCapabilityEvidence(name string, agent ambientAgentConfig, now time.T
 	kanbanApp.mu.Lock()
 	retries := 0
 	var retryAt time.Time
+	providerOpen := false
+	persistenceOpen := false
+	continuityOpen := false
 	for key, failure := range kanbanApp.agentFailures {
 		if failure == nil || (key != agent.name && !strings.HasPrefix(key, agent.name+"@")) {
 			continue
 		}
 		retries += failure.attempts
+		providerOpen = providerOpen || failure.providerOpen
+		persistenceOpen = persistenceOpen || failure.persistenceOpen
+		continuityOpen = continuityOpen || failure.continuityOpen
 		if failure.backoffUntil.After(retryAt) {
 			retryAt = failure.backoffUntil
 		}
 	}
 	kanbanApp.mu.Unlock()
-	if retries > 0 {
+	if retries > 0 || persistenceOpen || continuityOpen {
 		out["circuit"] = "open"
 		out["retryAttempts"] = retries
-		out["retryAt"] = retryAt.UTC().Format(time.RFC3339Nano)
+		if continuityOpen {
+			out["circuit"] = "continuity_error"
+			out["continuityError"] = true
+			out["retrySuppressed"] = true
+		} else if persistenceOpen {
+			out["circuit"] = "persistence_error"
+			out["persistenceError"] = true
+			out["retrySuppressed"] = true
+		} else if providerOpen {
+			out["retrySuppressed"] = true
+		} else if !retryAt.IsZero() {
+			out["retryAt"] = retryAt.UTC().Format(time.RFC3339Nano)
+		}
 	}
 	return out
 }
@@ -228,8 +364,97 @@ func markProviderFailure(snap map[string]any, providerReady bool) {
 	snap["lastError"] = "OPENAI_API_KEY is not configured"
 }
 
+func markNamedProviderFailure(snap map[string]any, provider string, providerReady bool) {
+	if providerReady || snap["enabled"] != true {
+		return
+	}
+	snap["provider"] = provider
+	snap["lastError"] = strings.ToUpper(provider) + " API key is not configured"
+}
+
+func ambientWorkerCapabilitySnapshot(agent ambientAgentConfig, now time.Time, provider string, providerReady bool) map[string]any {
+	snap := ambientCapabilityEvidence(agent.name, agent, now)
+	for key, value := range readinessAgentSnapshot(agent) {
+		snap[key] = value
+	}
+	snap["provider"] = provider
+	markNamedProviderFailure(snap, provider, providerReady)
+	snap["status"] = capabilityStatus(snap, providerReady)
+	return snap
+}
+
+func ambientWorkersCapabilitySnapshot(now time.Time, openAIReady, anthropicReady bool) map[string]any {
+	workers := map[string]any{}
+	add := func(key string, agent ambientAgentConfig, provider string, ready bool) {
+		workers[key] = ambientWorkerCapabilitySnapshot(agent, now, provider, ready)
+	}
+	add("brain", meetingBrainAgent(), providerOpenAI, openAIReady)
+	add("board", meetingBoardAgent(), providerOpenAI, openAIReady)
+	add("missionIntel", missionIntelligenceAgent(), providerOpenAI, openAIReady)
+	add("decisionLedger", decisionLedgerAgent(), providerOpenAI, openAIReady)
+	if anthropicReady {
+		add("narrative", narrativeMaintainerAgent(), providerAnthropic, true)
+	} else {
+		add("narrative", narrativeMaintainerAgent(), providerOpenAI, openAIReady)
+	}
+	add("meetingDigest", meetingDigestAgent(), providerOpenAI, openAIReady)
+	add("dayDigest", dayDigestAgent(), providerOpenAI, openAIReady)
+	add("entityLedger", entityLedgerAgent(), providerOpenAI, openAIReady)
+	add("companyDigest", companyDigestAgent(), providerOpenAI, openAIReady)
+	add("researchSuggestion", researchSuggestionAgent(), providerOpenAI, openAIReady)
+	add("slopClassifier", slopClassifierAgent(), providerOpenAI, openAIReady)
+	add("tasteAnalyst", tasteAnalystAgent(), providerAnthropic, anthropicReady)
+	add("houseStyle", houseStyleDistillerAgent(), providerAnthropic, anthropicReady)
+	return workers
+}
+
+func roomScoutCapabilityRows(app *kanbanBoardApp) ([]map[string]any, bool) {
+	if app == nil {
+		return nil, false
+	}
+	app.mu.Lock()
+	bundles := make([]*roomRealtimeBundle, 0, len(app.roomLive))
+	for _, room := range app.roomLive {
+		if room != nil && room.realtime != nil {
+			bundles = append(bundles, room.realtime)
+		}
+	}
+	app.mu.Unlock()
+	rows := make([]map[string]any, 0, len(bundles))
+	anyOpen := false
+	for _, bundle := range bundles {
+		runtime := bundle.snapshot()
+		bundle.mu.Lock()
+		transport := bundle.transport
+		bundle.mu.Unlock()
+		row := map[string]any{
+			"roomId":          runtime.Scope.RoomID,
+			"sittingId":       runtime.Scope.SittingID,
+			"mediaGeneration": runtime.Scope.MediaGeneration,
+			"status":          runtime.Status,
+			"circuit":         "closed",
+		}
+		if runtime.LastError != "" {
+			row["lastError"] = runtime.LastError
+		}
+		if providerTransport, ok := transport.(*openAIRoomScoutTransport); ok {
+			provider := providerTransport.providerCircuitSnapshot()
+			row["retryAttempts"] = provider.Failures
+			if provider.Open {
+				row["circuit"] = "open"
+				row["retrySuppressed"] = true
+				anyOpen = true
+			}
+		}
+		rows = append(rows, row)
+	}
+	sort.Slice(rows, func(i, j int) bool { return asString(rows[i]["roomId"]) < asString(rows[j]["roomId"]) })
+	return rows, anyOpen
+}
+
 func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 	providerReady := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != ""
+	anthropicReady := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")) != ""
 	degraded := []string{}
 
 	scout := capabilityEvidence(capabilityScout, now, 5*time.Minute)
@@ -243,6 +468,13 @@ func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 		scout["connected"] = kanbanApp.connected
 		stt["connected"] = kanbanApp.transcriptLane != nil
 		kanbanApp.mu.Unlock()
+	}
+	if roomRows, roomCircuitOpen := roomScoutCapabilityRows(kanbanApp); len(roomRows) > 0 {
+		scout["rooms"] = roomRows
+		if roomCircuitOpen {
+			scout["circuit"] = "open"
+			scout["retrySuppressed"] = true
+		}
 	}
 	if at, ok := latestCapabilityArtifact(meetingMemoryKindTranscript); ok {
 		if _, reported := stt["lastSuccessAt"]; !reported {
@@ -272,6 +504,13 @@ func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 	if brain["status"] == "degraded" {
 		degraded = append(degraded, "brain")
 	}
+	ambientWorkers := ambientWorkersCapabilitySnapshot(now, providerReady, anthropicReady)
+	for key, raw := range ambientWorkers {
+		worker, _ := raw.(map[string]any)
+		if worker["status"] == "degraded" {
+			degraded = append(degraded, "ambient."+key)
+		}
+	}
 	recap := capabilityEvidence(capabilityRecap, now, 2*meetingBrainAgent().interval())
 	recap["enabled"] = brainCfg["enabled"]
 	recap["source"] = "brain"
@@ -289,6 +528,7 @@ func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 	embeddings := capabilityEvidence(capabilityEmbedding, now, 2*embeddingInterval())
 	embeddings["enabled"] = embeddingInterval() > 0 && !boolEnv("EMBEDDINGS_DISABLED")
 	embeddings["model"] = embeddingModel()
+	mergeCapabilityEvidence(embeddings, embeddingProviderCircuitEvidence())
 	markProviderFailure(embeddings, providerReady)
 	embeddings["status"] = capabilityStatus(embeddings, providerReady)
 	if embeddings["status"] == "degraded" {
@@ -311,20 +551,54 @@ func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 		degraded = append(degraded, "workflows")
 	}
 
+	// Attachment authority is intentionally a capability health signal, not a
+	// traffic/readiness prerequisite. A failed source ledger suppresses binary
+	// projections and model reads while ordinary text chat and live media remain
+	// usable. Do not infer health from a successful attachment upload: only the
+	// durable source authority store is the guard being reported here.
+	attachments := map[string]any{"enabled": true}
+	if kanbanApp == nil {
+		attachments["status"] = "degraded"
+		attachments["lastError"] = "application unavailable"
+	} else {
+		kanbanApp.pendingAttachmentUploadsMu.Lock()
+		storeErr := kanbanApp.attachmentSourceStoreErr
+		kanbanApp.pendingAttachmentUploadsMu.Unlock()
+		if storeErr != nil {
+			attachments["status"] = "degraded"
+			attachments["lastError"] = storeErr.Error()
+		} else {
+			attachments["status"] = "healthy"
+		}
+	}
+	if attachments["status"] == "degraded" {
+		degraded = append(degraded, capabilityAttachments)
+	}
+
 	backup := backupCapabilitySnapshot(now)
 	if backup["status"] != "healthy" && backup["status"] != "disabled" {
 		degraded = append(degraded, "backup")
 	}
+	roomRows, roomDegraded := roomOperationalCapabilityRows(kanbanApp, now, providerReady, roomConsentHealth())
+	degraded = append(degraded, roomDegraded...)
+	strideRuntime := strideRuntimeCapabilitySnapshot(kanbanApp)
+	if strideRuntime["status"] == "degraded" {
+		degraded = append(degraded, "stride_runtime_unavailable")
+	}
 	sort.Strings(degraded)
 
 	snapshot := map[string]any{
-		"scout":      scout,
-		"stt":        stt,
-		"recap":      recap,
-		"brain":      brain,
-		"embeddings": embeddings,
-		"workflows":  workflows,
-		"backup":     backup,
+		"scout":               scout,
+		"stt":                 stt,
+		"recap":               recap,
+		"brain":               brain,
+		"ambientWorkers":      ambientWorkers,
+		"embeddings":          embeddings,
+		"workflows":           workflows,
+		"attachmentAuthority": attachments,
+		"backup":              backup,
+		"rooms":               roomRows,
+		"strideRuntime":       strideRuntime,
 	}
 	redactCapabilityErrors(snapshot)
 	return snapshot, degraded
@@ -345,6 +619,10 @@ func redactCapabilityErrors(value any) {
 			}
 		}
 	case []any:
+		for _, child := range typed {
+			redactCapabilityErrors(child)
+		}
+	case []map[string]any:
 		for _, child := range typed {
 			redactCapabilityErrors(child)
 		}

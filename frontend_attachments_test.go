@@ -26,9 +26,11 @@ func TestIndexAttachmentUploadWiring(t *testing.T) {
 	html := readIndexForAttachments(t)
 	for _, want := range []string{
 		// the composer's upload call + ref/mime stamping
-		"fetch('/assistant/attachments', {",
+		"fetch(`/assistant/attachments?threadId=${encodeURIComponent(destinationId)}`, {",
 		"payload.ref = data.ref",
 		"payload.mime = data.mime || type",
+		"payload.sourceId = data.sourceId || ''",
+		"payload.sourceRevision = data.sourceRevision || ''",
 		// the exact model-safe allowlist, mirroring attachments.go
 		"function scoutChatFileUploadable(type)",
 		"['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf'].includes(type)",

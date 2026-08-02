@@ -135,6 +135,9 @@ func (importer *CanonicalImporter) Build(ctx context.Context) (CanonicalImportPl
 		}
 		importer.Registry = registry
 	}
+	if err := recoverBoardLifecycleTransactions(importer.Paths.Board, importer.Paths.DeletedJournal); err != nil {
+		return CanonicalImportPlan{}, fmt.Errorf("recover board lifecycle before canonical plan: %w", err)
+	}
 	objects, err := importer.readLegacyObjects()
 	if err != nil {
 		return CanonicalImportPlan{}, err
@@ -287,7 +290,7 @@ func (plan CanonicalImportPlan) Apply(ctx context.Context, store CanonicalEventS
 	}
 	for _, event := range plan.Events {
 		if _, err := store.Append(ctx, event); err != nil {
-			return err
+			return fmt.Errorf("append canonical import %s/%s v%d event %s: %w", event.AggregateType, event.AggregateID, event.AggregateVersion, event.EventID, err)
 		}
 	}
 	return nil
@@ -368,21 +371,32 @@ func addCanonicalLifecycleDeletionTargets(objects []CanonicalImportedObject, ver
 		known[entry.Family+"\x00"+entry.ObjectKey] = true
 	}
 	current := map[string]int{}
+	latestJournal := map[string]CanonicalImportedObject{}
 	for index, object := range objects {
 		if object.LifecycleFamily == "" {
 			current[object.Family+"\x00"+object.ObjectID] = index
+			continue
+		}
+		if object.LifecycleObjectID == "" || !isHexDigest(object.LifecycleStateDigest) {
+			continue
+		}
+		key := object.LifecycleFamily + "\x00" + object.LifecycleObjectID
+		if prior, exists := latestJournal[key]; !exists || object.OccurredAt.After(prior.OccurredAt) {
+			latestJournal[key] = object
 		}
 	}
 	result := append([]CanonicalImportedObject(nil), objects...)
-	for _, journal := range objects {
-		if journal.LifecycleFamily == "" || journal.LifecycleObjectID == "" || !isHexDigest(journal.LifecycleStateDigest) {
-			continue
-		}
+	journalKeys := make([]string, 0, len(latestJournal))
+	for key := range latestJournal {
+		journalKeys = append(journalKeys, key)
+	}
+	sort.Strings(journalKeys)
+	for _, key := range journalKeys {
+		journal := latestJournal[key]
 		objectKey, err := CanonicalLegacyObjectKey(journal.LifecycleFamily, journal.LifecycleObjectID)
 		if err != nil {
 			return nil, err
 		}
-		key := journal.LifecycleFamily + "\x00" + journal.LifecycleObjectID
 		if liveIndex, exists := current[key]; exists {
 			live := result[liveIndex]
 			if !live.OccurredAt.IsZero() && live.OccurredAt.After(journal.OccurredAt) {
@@ -404,7 +418,6 @@ func addCanonicalLifecycleDeletionTargets(objects []CanonicalImportedObject, ver
 		}
 		deleted.Deleted, deleted.Status, deleted.Visibility = true, "closed", "none"
 		result = append(result, deleted)
-		current[key] = len(result) - 1
 	}
 	return result, nil
 }
@@ -463,7 +476,7 @@ func importMemoryObjects(path string) ([]CanonicalImportedObject, error) {
 				owner := firstNonEmptyString(entry.Metadata["ownerEmail"], entry.Metadata["createdByEmail"], entry.Metadata["createdBy"])
 				object.OwnerPrincipal = canonicalImportOwnerPrincipal(owner)
 				visibility := strings.ToLower(strings.TrimSpace(entry.Metadata["visibility"]))
-				if visibility == "private" || strings.EqualFold(entry.Metadata["private"], "true") || entry.Kind == meetingMemoryKindScoutChat && visibility != scoutChatVisibilityPublic {
+				if visibility == "private" || strings.EqualFold(entry.Metadata["private"], "true") || entry.Kind == meetingMemoryKindScoutChat && (visibility != scoutChatVisibilityPublic || strings.TrimSpace(entry.Metadata["memberEmails"]) != "") {
 					object.Visibility = "private"
 				} else {
 					object.Visibility = "team"
@@ -506,21 +519,29 @@ func importBoardObjects(path string) ([]CanonicalImportedObject, error) {
 	}
 	var objects []CanonicalImportedObject
 	for _, card := range state.Cards {
-		stateDigest, err := digestAny(card)
+		object, err := canonicalBoardCardImportedObject(card, parseImportTime(state.UpdatedAt))
 		if err != nil {
 			return nil, err
 		}
-		object, err := importedObject("board_card", card.ID, map[string]any{"id": card.ID, "state_sha256": stateDigest}, parseImportTime(state.UpdatedAt))
-		if err != nil {
-			return nil, err
-		}
-		object.Status = string(card.Status)
-		object.ContentRevision = 1
-		object.ContentDigest = object.StateDigest
-		object.ContentRef = "legacy:board-card:" + card.ID
 		objects = append(objects, object)
 	}
 	return objects, nil
+}
+
+func canonicalBoardCardImportedObject(card kanbanCard, occurredAt time.Time) (CanonicalImportedObject, error) {
+	stateDigest, err := digestAny(card)
+	if err != nil {
+		return CanonicalImportedObject{}, err
+	}
+	object, err := importedObject("board_card", card.ID, map[string]any{"id": card.ID, "state_sha256": stateDigest}, occurredAt)
+	if err != nil {
+		return CanonicalImportedObject{}, err
+	}
+	object.Status = string(card.Status)
+	object.ContentRevision = 1
+	object.ContentDigest = object.StateDigest
+	object.ContentRef = "legacy:board-card:" + card.ID
+	return object, nil
 }
 
 func importRoomObjects(path string) ([]CanonicalImportedObject, error) {
@@ -793,33 +814,40 @@ func importBlobObjects(dir string) ([]CanonicalImportedObject, error) {
 }
 
 type CanonicalLifecycleJournalRecord struct {
-	Family      string    `json:"family"`
-	ObjectID    string    `json:"object_id"`
-	StateDigest string    `json:"state_sha256"`
-	At          time.Time `json:"at"`
-	Reason      string    `json:"reason"`
+	Family            string    `json:"family"`
+	ObjectID          string    `json:"object_id"`
+	StateDigest       string    `json:"state_sha256"`
+	OperationID       string    `json:"operation_id,omitempty"`
+	Phase             string    `json:"phase,omitempty"`
+	BoardBeforeSHA256 string    `json:"board_before_sha256,omitempty"`
+	BoardAfterSHA256  string    `json:"board_after_sha256,omitempty"`
+	At                time.Time `json:"at"`
+	Reason            string    `json:"reason"`
 }
 
 func importLifecycleJournal(path, family string) ([]CanonicalImportedObject, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, nil
 	}
-	file, err := os.Open(path)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
+	records, err := boardLifecycleCommittedRecords(path)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
 	var objects []CanonicalImportedObject
-	for scanner.Scan() {
-		var record CanonicalLifecycleJournalRecord
-		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
-			return nil, err
+	seenTargets := map[string]bool{}
+	seenDigests := map[string]bool{}
+	for _, record := range records {
+		target := record.Family + ":" + record.ObjectID
+		digestKey := target + "\x00" + record.StateDigest
+		if seenDigests[digestKey] {
+			continue
 		}
-		id := record.Family + ":" + record.ObjectID
+		seenDigests[digestKey] = true
+		id := target
+		if seenTargets[target] {
+			id = target + ":" + record.StateDigest
+		}
+		seenTargets[target] = true
 		object, err := importedObject(family, id, map[string]any{"family": record.Family, "object": record.ObjectID, "state": record.StateDigest, "reason_digest": digestText(record.Reason)}, record.At)
 		if err != nil {
 			return nil, err
@@ -831,7 +859,7 @@ func importLifecycleJournal(path, family string) ([]CanonicalImportedObject, err
 		object.LifecycleStateDigest = record.StateDigest
 		objects = append(objects, object)
 	}
-	return objects, scanner.Err()
+	return objects, nil
 }
 
 func readJSONIfExists(path string, target any) (bool, error) {

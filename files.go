@@ -179,7 +179,8 @@ func fileRecordFromEntry(entry meetingMemoryEntry) assistantFileRecord {
 // (Ref) or ingested text qualify — a pre-085 name-only chip has nothing to
 // list. Derived/extracted Text riding model context IS the brain, so it sets
 // the badge.
-func fileRecordsFromThread(thread scoutChatThreadRecord) []assistantFileRecord {
+func (app *kanbanBoardApp) fileRecordsFromThread(viewerEmail string, thread scoutChatThreadRecord) []assistantFileRecord {
+	thread = app.projectScoutChatThreadForViewer(viewerEmail, thread)
 	var rows []assistantFileRecord
 	// A public-channel attachment's derived text is company-visible recall; a
 	// private thread's text stays scoped to that 1:1, so its badge is honest
@@ -320,7 +321,7 @@ func (app *kanbanBoardApp) assistantFilesForPrincipal(ctx context.Context, viewe
 		rows = append(rows, fileRecordFromEntry(entry))
 	}
 	for _, thread := range app.scoutChatThreadsSnapshot(viewerEmail, true, 0) {
-		rows = append(rows, fileRecordsFromThread(thread)...)
+		rows = append(rows, app.fileRecordsFromThread(viewerEmail, thread)...)
 	}
 	for _, entry := range app.authorizedFileDeliverableCandidates(ctx, viewer, ACLReadContent) {
 		if row, ok := fileDeliverableRecord(entry); ok {

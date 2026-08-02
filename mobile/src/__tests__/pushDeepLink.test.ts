@@ -1,48 +1,70 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parsePushTarget } from '../push/deepLink';
+import { parsePushTarget, resolveAuthorizedPushTarget } from '../push/deepLink';
 
-test('a thread notification resolves to its thread and message', () => {
-  const target = parsePushTarget({ threadId: 't1', messageId: 'm9', threadName: '#team' });
-  assert.deepEqual(target, { threadId: 't1', messageId: 'm9', threadName: '#team' });
+test('an APNs payload yields only an untrusted notification receipt', () => {
+  const candidate = parsePushTarget({
+    notificationId: 'n1',
+    threadId: 'attacker-thread',
+    messageId: 'attacker-message',
+  });
+  assert.deepEqual(candidate, { notificationId: 'n1' });
 });
 
-test('a thread with no message still resolves — the thread is the target', () => {
-  const target = parsePushTarget({ threadId: 't1' });
-  assert.deepEqual(target, { threadId: 't1', messageId: null, threadName: null });
+test('a receipt resolves from the current account authenticated projection', () => {
+  const candidate = parsePushTarget({ notificationId: 'n1' });
+  assert.ok(candidate);
+  const target = resolveAuthorizedPushTarget(candidate, [{
+    id: 'n1',
+    threadId: 't1',
+    messageId: 'm9',
+    threadName: '#team',
+  }], 'AJ@Shareability.com');
+  assert.deepEqual(target, {
+    notificationId: 'n1',
+    accountKey: 'aj@shareability.com',
+    threadId: 't1',
+    messageId: 'm9',
+    threadName: '#team',
+  });
 });
 
-// A notification is a request to see ONE thing. Falling back to the canvas
-// would make the user navigate twice to reach what they were told about.
-test('a payload with no thread yields null rather than a canvas fallback', () => {
-  assert.equal(parsePushTarget({ kind: 'digest' }), null);
+test('a delayed target from account A cannot route under account B', () => {
+  const candidate = parsePushTarget({ notificationId: 'only-a' });
+  assert.ok(candidate);
+  assert.equal(resolveAuthorizedPushTarget(candidate, [{
+    id: 'only-b',
+    threadId: 'b-thread',
+  }], 'b@example.com'), null);
+});
+
+test('an authenticated record with no thread fails closed', () => {
+  const candidate = parsePushTarget({ notificationId: 'digest' });
+  assert.ok(candidate);
+  assert.equal(resolveAuthorizedPushTarget(candidate, [{ id: 'digest', kind: 'digest' }], 'a@example.com'), null);
+});
+
+test('malformed notification ids are rejected rather than coerced', () => {
+  assert.equal(parsePushTarget({ notificationId: 12 }), null);
+  assert.equal(parsePushTarget({ notificationId: null }), null);
+  assert.equal(parsePushTarget({ notificationId: '' }), null);
+  assert.equal(parsePushTarget({ notificationId: '   ' }), null);
   assert.equal(parsePushTarget(null), null);
   assert.equal(parsePushTarget(undefined), null);
-  assert.equal(parsePushTarget('nonsense'), null);
-  assert.equal(parsePushTarget(42), null);
 });
 
-// This data crosses a process boundary from a push service. A non-string id
-// must be rejected, not String()-ed into a route param that fails to resolve.
-test('a non-string threadId is rejected rather than coerced', () => {
-  assert.equal(parsePushTarget({ threadId: 12 }), null);
-  assert.equal(parsePushTarget({ threadId: null }), null);
-  assert.equal(parsePushTarget({ threadId: { id: 'x' } }), null);
-});
-
-test('a blank or whitespace threadId is not a target', () => {
-  assert.equal(parsePushTarget({ threadId: '' }), null);
-  assert.equal(parsePushTarget({ threadId: '   ' }), null);
-});
-
-test('surrounding whitespace is trimmed off ids', () => {
-  const target = parsePushTarget({ threadId: '  t1  ', messageId: ' m9 ' });
-  assert.equal(target?.threadId, 't1');
-  assert.equal(target?.messageId, 'm9');
-});
-
-test('a non-string messageId degrades to null without losing the thread', () => {
-  const target = parsePushTarget({ threadId: 't1', messageId: 99 });
+test('authoritative route fields are validated and normalized', () => {
+  const candidate = parsePushTarget({ notificationId: ' n1 ' });
+  assert.ok(candidate);
+  const target = resolveAuthorizedPushTarget(candidate, [{
+    id: 'n1',
+    threadId: '  t1  ',
+    messageId: 99,
+    threadName: ' team ',
+  }], ' a@example.com ');
+  assert.equal(target?.notificationId, 'n1');
   assert.equal(target?.threadId, 't1');
   assert.equal(target?.messageId, null);
+  assert.equal(target?.threadName, 'team');
+  assert.equal(target?.accountKey, 'a@example.com');
 });

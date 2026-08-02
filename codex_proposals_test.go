@@ -412,21 +412,22 @@ func TestCodexProposalActionEndpoint(t *testing.T) {
 	}
 }
 
-// Confirm persists the settled status BEFORE the agent thread launches: a
-// failed post-launch metadata update can then only lose the thread linkage,
-// never leave the proposal 'proposed' where a retry would double-launch. A
-// failed launch reverts the proposal to proposed so a human can retry.
+// Confirm persists a stable launch claim BEFORE the agent thread launches: a
+// failed post-launch metadata update can then only lose linkage, never leave a
+// replayable proposal where a retry could double-launch.
 func TestCodexProposalConfirmPersistsBeforeLaunch(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 
 	var proposalID string
 	statusAtLaunch := ""
+	claimAtLaunch := ""
 	launches := 0
 	previousRunner := startAgentThreadAsync
 	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {
 		launches++
 		if entry, ok := app.memory.entryByKindAndID(meetingMemoryKindCodexProposal, proposalID); ok {
 			statusAtLaunch = entry.Metadata["status"]
+			claimAtLaunch = entry.Metadata["launchClaimId"]
 		}
 	}
 	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
@@ -451,11 +452,15 @@ func TestCodexProposalConfirmPersistsBeforeLaunch(t *testing.T) {
 	if statusAtLaunch != codexProposalStatusConfirmed {
 		t.Fatalf("proposal status at launch time=%q, want %q persisted before the launch", statusAtLaunch, codexProposalStatusConfirmed)
 	}
+	if claimAtLaunch != legacyCodexProposalLaunchClaim(proposalID) {
+		t.Fatalf("proposal claim at launch time=%q, want stable claim", claimAtLaunch)
+	}
 	if payload["status"] != codexProposalStatusConfirmed || asString(payload["threadArtifactId"]) == "" {
 		t.Fatalf("payload=%#v, want confirmed with thread linkage stamped after launch", payload)
 	}
 
-	// A launch failure reverts the proposal to proposed so confirm can retry.
+	// A launch failure is terminally ambiguous after the claim; it must not be
+	// made replayable because the caller cannot prove that no effect escaped.
 	badID := durableTimestampID("codex-proposal", time.Now())
 	if _, appended, err := app.memory.appendCodexProposal(badID, "Scout proposes a task with no query", map[string]string{
 		"title":      "No query",
@@ -476,8 +481,9 @@ func TestCodexProposalConfirmPersistsBeforeLaunch(t *testing.T) {
 	if !ok {
 		t.Fatalf("bad proposal %s disappeared", badID)
 	}
-	if entry.Metadata["status"] != codexProposalStatusProposed || entry.Metadata["confirmedBy"] != "" {
-		t.Fatalf("metadata=%#v, want the confirm reverted to proposed", entry.Metadata)
+	if entry.Metadata["status"] != codexProposalStatusConfirmed || entry.Metadata["confirmedBy"] != "Tom" ||
+		entry.Metadata["launchClaimId"] != legacyCodexProposalLaunchClaim(badID) || entry.Metadata["launchState"] != codexProposalLaunchAmbiguous {
+		t.Fatalf("metadata=%#v, want a non-replayable ambiguous claim", entry.Metadata)
 	}
 }
 
@@ -721,9 +727,8 @@ func TestCodexProposalNudgePersistsUntilActedOn(t *testing.T) {
 }
 
 // W0-7 proposal taxonomy: a human confirm records resolved{approved, approver}
-// and a dismiss records resolved{dismissed, approver} — and a FAILED launch
-// records nothing (the proposal reverts to proposed, so its funnel row must
-// stay open).
+// and a dismiss records resolved{dismissed, approver} — and a failed launch
+// records no false approved resolution even though its claim stays terminal.
 func TestResolveCodexProposalRecordsResolvedEvents(t *testing.T) {
 	dir := ledgerTestDir(t)
 	fixed := time.Date(2026, time.July, 11, 18, 0, 0, 0, time.UTC)
@@ -780,8 +785,8 @@ func TestResolveCodexProposalRecordsResolvedEvents(t *testing.T) {
 		t.Fatalf("dismiss resolved event = %v, want dismissed by Tyler", dismissed)
 	}
 
-	// A failed launch (empty query never launches) reverts to proposed and
-	// records NO resolved event.
+	// A failed launch (empty query never launches) retains its one-shot claim and
+	// records NO false resolved event.
 	badID := durableTimestampID("codex-proposal", time.Now())
 	if _, appended, err := app.memory.appendCodexProposal(badID, "Scout proposes a task with no query", map[string]string{
 		"title":      "No query",
@@ -796,7 +801,7 @@ func TestResolveCodexProposalRecordsResolvedEvents(t *testing.T) {
 		t.Fatal("confirm of an unlaunchable proposal must error")
 	}
 	if _, present := resolvedEvents()[badID]; present {
-		t.Fatal("a failed launch must not record a resolved event (the funnel row stays open)")
+		t.Fatal("a failed launch must not record a false approved resolution")
 	}
 }
 

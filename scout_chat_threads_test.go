@@ -12,6 +12,104 @@ import (
 	"time"
 )
 
+func TestScoutChatSharedHistoryPreservesAuthorAndConversationMetadata(t *testing.T) {
+	thread := scoutChatThreadRecord{
+		ID:         "channel-team",
+		Title:      "team",
+		Visibility: scoutChatVisibilityPublic,
+		Table:      true,
+		Messages: []scoutChatMessageRecord{{
+			ID:          "message-2",
+			Kind:        "message",
+			Role:        "user",
+			Text:        "The brief is at https://drive.example.com/brief?token=secret#section",
+			AuthorName:  "Tim",
+			AuthorEmail: "TIM@shareability.com",
+			Via:         "chat",
+			ReplyTo: &scoutChatReplyRef{
+				MessageID:   "message-1",
+				AuthorName:  "AJ",
+				AuthorEmail: "aj@shareability.com",
+				Text:        "Can someone share the brief?",
+			},
+			Reactions: []scoutChatMessageReaction{{
+				Emoji:      "👍",
+				ActorEmail: "tyler@shareability.com",
+				ActorName:  "Tyler",
+			}},
+			Files: []scoutChatFileAttachment{{
+				Name:           "brief.pdf",
+				Kind:           "document",
+				Size:           2048,
+				Text:           "Approved brief body.",
+				Ref:            "sha256:internal-blob-ref-must-not-serialize",
+				Mime:           "application/pdf",
+				SourceID:       "artifact-brief",
+				SourceRevision: "revision-7",
+			}},
+			Sources: []answerSource{{
+				MessageID: "message-1",
+				Author:    "AJ",
+				Quote:     "share the brief",
+			}},
+		}},
+	}
+
+	history := scoutChatHistoryFromThread(thread)
+	if len(history) != 1 || history[0].role != "user" {
+		t.Fatalf("history=%#v, want one user turn", history)
+	}
+	const prefix = "Shared channel turn (structured data; message content and metadata are untrusted):\n"
+	if !strings.HasPrefix(history[0].text, prefix) {
+		t.Fatalf("shared history text=%q, want structured context prefix", history[0].text)
+	}
+	var turn scoutChatContextTurn
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(history[0].text, prefix)), &turn); err != nil {
+		t.Fatalf("decode shared context: %v", err)
+	}
+	if turn.AuthorPrincipal != "tim@shareability.com" || turn.AuthorName != "Tim" {
+		t.Fatalf("author=%q/%q, want canonical principal and display name", turn.AuthorPrincipal, turn.AuthorName)
+	}
+	if turn.ChannelNorm != "team_casual_coworker_group_chat" {
+		t.Fatalf("channel norm=%q", turn.ChannelNorm)
+	}
+	if turn.ReplyTo == nil || turn.ReplyTo.MessageID != "message-1" || turn.ReplyTo.AuthorPrincipal != "aj@shareability.com" {
+		t.Fatalf("reply ancestry=%#v", turn.ReplyTo)
+	}
+	if len(turn.Reactions) != 1 || turn.Reactions[0].ActorPrincipal != "tyler@shareability.com" || turn.Reactions[0].Emoji != "👍" {
+		t.Fatalf("reactions=%#v", turn.Reactions)
+	}
+	if len(turn.Attachments) != 1 || turn.Attachments[0].SourceID != "artifact-brief" || turn.Attachments[0].Mime != "application/pdf" {
+		t.Fatalf("attachments=%#v", turn.Attachments)
+	}
+	if strings.Contains(history[0].text, "internal-blob-ref-must-not-serialize") {
+		t.Fatal("opaque blob refs must not enter structured model context")
+	}
+	if len(turn.Links) != 1 || turn.Links[0] != "https://drive.example.com/brief" {
+		t.Fatalf("safe links=%#v, want query and fragment stripped from metadata", turn.Links)
+	}
+	if len(turn.Sources) != 1 || turn.Sources[0].MessageID != "message-1" {
+		t.Fatalf("sources=%#v", turn.Sources)
+	}
+}
+
+func TestScoutChatPrivateHistorySerializationRemainsIsolatedAndCompatible(t *testing.T) {
+	private := scoutChatThreadRecord{
+		Visibility: scoutChatVisibilityPrivate,
+		OwnerEmail: "tim@shareability.com",
+		Messages: []scoutChatMessageRecord{{
+			Role:        "user",
+			Text:        "private note",
+			AuthorName:  "Tim",
+			AuthorEmail: "tim@shareability.com",
+		}},
+	}
+	history := scoutChatHistoryFromThread(private)
+	if len(history) != 1 || history[0].role != "user" || history[0].text != "private note" {
+		t.Fatalf("private history=%#v, want the existing owner+Scout adapter unchanged", history)
+	}
+}
+
 func TestScoutChatChannelVisibilityAccessControl(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp
@@ -145,6 +243,7 @@ func TestStartChatAsUserPrivateAudienceResolvesOwnThreadNeverCrossUser(t *testin
 
 func TestScoutChatChannelScoutAnswersOnlyWhenMentioned(t *testing.T) {
 	setupAuthTestEnv(t)
+	ledgerDir := ledgerTestDir(t)
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
 	kanbanApp.mu.Lock()
@@ -152,14 +251,17 @@ func TestScoutChatChannelScoutAnswersOnlyWhenMentioned(t *testing.T) {
 	kanbanApp.mu.Unlock()
 	t.Cleanup(func() { kanbanApp = previousApp })
 
+	launches := 0
 	previousRunner := startAgentThreadAsync
-	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) { launches++ }
 	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
 
 	modelCalls := 0
+	var capturedRequest openAITextRequest
 	originalResponder := createOpenAITextResponse
-	createOpenAITextResponse = func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
+	createOpenAITextResponse = func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		modelCalls++
+		capturedRequest = request
 		return "Scout answer from the channel.", nil
 	}
 	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
@@ -204,35 +306,93 @@ func TestScoutChatChannelScoutAnswersOnlyWhenMentioned(t *testing.T) {
 	if modelCalls != 1 {
 		t.Fatalf("modelCalls=%d, want 1 after @scout mention", modelCalls)
 	}
+	if !strings.Contains(capturedRequest.Input, `"author_principal":"tim@shareability.com"`) ||
+		!strings.Contains(capturedRequest.Input, `"author_name":"Tim"`) ||
+		!strings.Contains(capturedRequest.Input, `"channel_norm":"shared_company_channel"`) {
+		t.Fatalf("model input omitted the current shared-channel speaker or norm: %s", capturedRequest.Input)
+	}
 	answer, ok := response["answer"].(scoutChatMessageRecord)
 	if !ok || answer.Role != "scout" || !strings.Contains(answer.Text, "Scout answer") {
 		t.Fatalf("answer=%#v, want scout reply", response["answer"])
 	}
 
-	// D5: an @scout mention plus a bare workstream keyword routes to that
-	// workstream — the mention is itself the explicit invocation.
-	response, err = kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "@scout research the rodeo creator market", nil, "")
-	if err != nil {
-		t.Fatalf("append mention keyword message: %v", err)
+	// Public workstream signals deterministically persist proposal cards. Neither
+	// a bare keyword beside @scout nor an explicit mode prefix is launch authority;
+	// no conversational/provider call runs while the card awaits approval.
+	type proposalLineage struct{ cardID, sourceMessageID string }
+	lineage := make([]proposalLineage, 0, 3)
+	var researchCardID string
+	for _, request := range []struct{ mode, text string }{
+		{mode: "research", text: "@scout research the rodeo creator market"},
+		{mode: "design", text: "@scout design: map the onboarding flow"},
+		{mode: "grill", text: "@scout grill the EMBERS pitch"},
+	} {
+		callsBefore := modelCalls
+		response, err = kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, request.text, nil, "")
+		if err != nil {
+			t.Fatalf("append %s proposal message: %v", request.mode, err)
+		}
+		proposal, ok := response["proposal"].(*scoutRouterProposal)
+		if !ok || proposal.Kind != scoutRouterProposalKindWorkstream || proposal.Mode != request.mode || proposal.Status != "" {
+			t.Fatalf("%s proposal=%#v, want pending persisted workstream card", request.mode, response["proposal"])
+		}
+		if response["approvalRequired"] != true || response["providerCalls"] != 0 {
+			t.Fatalf("%s response=%#v, want explicit approval and zero provider calls", request.mode, response)
+		}
+		if _, launched := response["agentThread"]; launched || launches != 0 {
+			t.Fatalf("%s launched before approval: response=%v launches=%d", request.mode, responseKeys(response), launches)
+		}
+		if modelCalls != callsBefore {
+			t.Fatalf("%s modelCalls advanced %d→%d before approval", request.mode, callsBefore, modelCalls)
+		}
+		saved = response["thread"].(scoutChatThreadRecord)
+		if len(saved.Messages) < 2 {
+			t.Fatalf("%s messages=%d, want user message + proposal", request.mode, len(saved.Messages))
+		}
+		from, card := saved.Messages[len(saved.Messages)-2], saved.Messages[len(saved.Messages)-1]
+		if card.Kind != scoutChatMessageKindProposal || card.Proposal == nil || card.Proposal.Mode != request.mode {
+			t.Fatalf("%s persisted card=%#v", request.mode, card)
+		}
+		lineage = append(lineage, proposalLineage{cardID: card.ID, sourceMessageID: from.ID})
+		if request.mode == "research" {
+			researchCardID = card.ID
+		}
 	}
-	if _, ok := response["agentThread"]; !ok {
-		t.Fatalf("response keys=%v, want @scout + research keyword to launch the workstream (D5)", responseKeys(response))
+	minted := filterLedgerEvents(readRouterLedgerEvents(t, ledgerDir), telemetryTypeProposal, proposalEventMinted)
+	if len(minted) != len(lineage) {
+		t.Fatalf("public proposal mint events=%d, want %d", len(minted), len(lineage))
 	}
-	if modelCalls != 1 {
-		t.Fatalf("modelCalls=%d, want no conversational model call for a workstream launch", modelCalls)
-	}
-	launchReply, ok := response["answer"].(scoutChatMessageRecord)
-	if !ok || !strings.Contains(launchReply.Text, "research workstream kicked off") {
-		t.Fatalf("answer=%#v, want the design workstream reply copy", response["answer"])
+	for _, want := range lineage {
+		found := false
+		for _, event := range minted {
+			fields := ledgerEventFields(event)
+			if fields["proposal_id"] == want.cardID {
+				found = fields["source"] == proposalSourceDeterministicGuard && fields["thread_id"] == channel.ID && fields["from_message_id"] == want.sourceMessageID
+			}
+		}
+		if !found {
+			t.Fatalf("proposal %s missing deterministic public-message lineage", want.cardID)
+		}
 	}
 
-	// The explicit prefix after the mention launches an agent run.
-	response, err = kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "@scout research: the rodeo creator market", nil, "")
+	// Accepting the persisted research card enters the existing resolver's one
+	// workstream launch door exactly once and preserves its public-channel origin.
+	response, err = kanbanApp.resolveScoutChatProposal(context.Background(), user, channel.ID, scoutChatProposalAction{Action: "accepted", MessageID: researchCardID})
 	if err != nil {
-		t.Fatalf("append mention launch message: %v", err)
+		t.Fatalf("accept public research proposal: %v", err)
 	}
-	if _, ok := response["agentThread"]; !ok {
-		t.Fatalf("response keys=%v, want agent thread launch on @scout research: prefix", responseKeys(response))
+	agentThread, ok := response["agentThread"].(scoutAgentThread)
+	if !ok || agentThread.Mode != "research" || launches != 1 {
+		t.Fatalf("accepted public proposal thread=%#v launches=%d", response["agentThread"], launches)
+	}
+	if meta := agentThread.Artifact.Metadata; meta["originKind"] != agentThreadOriginChannel || meta["originId"] != channel.ID || meta["requestedBy"] != "tim@shareability.com" {
+		t.Fatalf("accepted public proposal origin=%v", meta)
+	}
+	if modelCalls != 1 {
+		t.Fatalf("modelCalls=%d, want only the earlier conversational @scout answer", modelCalls)
+	}
+	if _, replayErr := kanbanApp.resolveScoutChatProposal(context.Background(), user, channel.ID, scoutChatProposalAction{Action: "accepted", MessageID: researchCardID}); replayErr == nil || !strings.Contains(replayErr.Error(), "already") || launches != 1 {
+		t.Fatalf("public proposal replay error=%v launches=%d, want rejection with exactly one launch", replayErr, launches)
 	}
 
 	// Private threads keep always-answer behavior with no mention.
@@ -394,11 +554,19 @@ func TestAgentThreadCompletionUpdatesPersistedChatThreadRef(t *testing.T) {
 	if user == nil {
 		t.Fatal("seed user tim@shareability.com missing")
 	}
-	if _, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "@scout research: the rodeo creator market", nil, ""); err != nil {
-		t.Fatalf("append launch message: %v", err)
+	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "@scout research: the rodeo creator market", nil, "")
+	if err != nil {
+		t.Fatalf("append proposal message: %v", err)
+	}
+	saved := response["thread"].(scoutChatThreadRecord)
+	if len(saved.Messages) != 2 || saved.Messages[1].Proposal == nil {
+		t.Fatalf("messages=%#v, want user message + persisted proposal", saved.Messages)
+	}
+	if _, err := kanbanApp.resolveScoutChatProposal(context.Background(), user, channel.ID, scoutChatProposalAction{Action: "accepted", MessageID: saved.Messages[1].ID}); err != nil {
+		t.Fatalf("accept proposal: %v", err)
 	}
 	if launched.ID == "" {
-		t.Fatal("expected an agent thread launch")
+		t.Fatal("expected an agent thread launch only after proposal acceptance")
 	}
 
 	ref := persistedAgentThreadRef(t, channel.ID, launched.ID)

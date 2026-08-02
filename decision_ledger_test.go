@@ -170,9 +170,12 @@ func TestProduceDecisionLedgerSkipsUnparseableOutput(t *testing.T) {
 		t.Fatalf("append brain-1: appended=%v err=%v", appended, err)
 	}
 
-	entry := runDecisionLedgerOnceForTest(t, app, func(context.Context, string, openAITextRequest) (string, error) {
+	entry, err := app.runAmbientAgentOnce(decisionLedgerAgent(), context.Background(), "test-key", func(context.Context, string, openAITextRequest) (string, error) {
 		return "Here are the decisions in prose instead.", nil
-	})
+	}, 1)
+	if !isAmbientAgentHoldError(err) {
+		t.Fatalf("unparseable decision output error=%v, want cursor-holding rejection", err)
+	}
 	if entry.ID != "" {
 		t.Fatalf("entry=%v, want nothing persisted for non-JSON output", entry)
 	}

@@ -117,14 +117,27 @@ func ensureCanonicalLifecycleJournal(path string, record CanonicalLifecycleJourn
 	if err != nil {
 		return err
 	}
-	for _, existing := range records {
+	var latest *CanonicalLifecycleJournalRecord
+	historicalDigestMatch := false
+	for index := range records {
+		existing := records[index]
 		if existing.Family != record.Family || existing.ObjectID != record.ObjectID {
 			continue
 		}
-		if existing.StateDigest != record.StateDigest {
-			return fmt.Errorf("conflicting lifecycle journal for %s/%s", record.Family, record.ObjectID)
+		historicalDigestMatch = historicalDigestMatch || existing.StateDigest == record.StateDigest
+		if latest == nil || existing.At.After(latest.At) {
+			copy := existing
+			latest = &copy
 		}
+	}
+	if latest != nil && latest.StateDigest == record.StateDigest {
 		return nil
+	}
+	if historicalDigestMatch {
+		return fmt.Errorf("reused historical lifecycle digest for %s/%s", record.Family, record.ObjectID)
+	}
+	if latest != nil && !record.At.After(latest.At) {
+		return fmt.Errorf("stale lifecycle journal generation for %s/%s", record.Family, record.ObjectID)
 	}
 	encoded, err := json.Marshal(record)
 	if err != nil {

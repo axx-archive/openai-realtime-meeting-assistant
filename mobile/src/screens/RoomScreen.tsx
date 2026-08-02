@@ -26,6 +26,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, BonfireApiError } from '../api/client';
 import type { Room } from '../api/types';
+import type { StrideMeetingSpecialistStatus, StrideMeetingSpecialistInvitation } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { Screen } from '../components/Screen';
 import {
@@ -34,6 +35,7 @@ import {
 } from '../components/RoomConversationSheet';
 import { RoomParticipantsSheet, type RoomParticipantRow } from '../components/RoomParticipantsSheet';
 import { RoomConsentSheet } from '../components/RoomConsentSheet';
+import { RoomSpecialistsSheet } from '../components/RoomSpecialistsSheet';
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
 import { useNativeRoom } from '../realtime/useNativeRoom';
 import {
@@ -548,6 +550,11 @@ export function RoomScreen({ route, navigation }: Props) {
   const [conversationVisible, setConversationVisible] = useState(false);
   const [participantsVisible, setParticipantsVisible] = useState(false);
   const [consentVisible, setConsentVisible] = useState(false);
+  const [specialistsVisible, setSpecialistsVisible] = useState(false);
+  const [specialists, setSpecialists] = useState<StrideMeetingSpecialistStatus | null>(null);
+  const [specialistsLoading, setSpecialistsLoading] = useState(false);
+  const [specialistsPending, setSpecialistsPending] = useState(false);
+  const [specialistsError, setSpecialistsError] = useState<string | null>(null);
   const allowCallNavigationRef = useRef(false);
   const screenCapturePickerRef = useRef<ScreenCapturePickerHandle | null>(null);
   const wideFramingExplainedRef = useRef(false);
@@ -581,6 +588,68 @@ export function RoomScreen({ route, navigation }: Props) {
   useEffect(() => {
     if (office.event === 'rooms' || office.event === 'participants') void load();
   }, [load, office.event, office.version]);
+
+  const loadSpecialists = useCallback(async () => {
+    if (!sessionToken) return;
+    setSpecialistsLoading(true);
+    setSpecialistsError(null);
+    try {
+      const response = await api.meetingSpecialists(sessionToken, route.params.roomId);
+      setSpecialists(response.specialists);
+    } catch (err) {
+      setSpecialistsError(err instanceof BonfireApiError ? err.message : 'Could not load your agent team.');
+    } finally {
+      setSpecialistsLoading(false);
+    }
+  }, [route.params.roomId, sessionToken]);
+
+  function openSpecialists() {
+    setSpecialistsVisible(true);
+    void loadSpecialists();
+  }
+
+  function requestSpecialist(agentId: string, displayName: string) {
+    if (!sessionToken) return;
+    Alert.alert(
+      `Invite ${displayName}?`,
+      'This creates a visible request for this meeting. A person must approve it before the agent can join.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Request',
+          onPress: () => {
+            setSpecialistsPending(true);
+            const key = `native_${Date.now().toString(36)}`;
+            void api.requestMeetingSpecialist(sessionToken, route.params.roomId, agentId, 'Join this meeting as a specialist', key)
+              .then(() => loadSpecialists())
+              .catch((err) => setSpecialistsError(err instanceof BonfireApiError ? err.message : 'Could not request the invitation.'))
+              .finally(() => setSpecialistsPending(false));
+          },
+        },
+      ],
+    );
+  }
+
+  function resolveSpecialist(invitation: StrideMeetingSpecialistInvitation, decision: 'approved' | 'declined' | 'dismissed') {
+    if (!sessionToken) return;
+    const verb = decision === 'approved' ? 'Approve' : decision === 'declined' ? 'Decline' : 'Dismiss';
+    Alert.alert(`${verb} ${invitation.displayName || invitation.agentId}?`, decision === 'approved'
+      ? 'Approval is bound to this exact invitation. Voice joining remains unavailable until provider qualification.'
+      : 'The agent will not join or remain attached to this meeting.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: verb,
+        style: decision === 'approved' ? 'default' : 'destructive',
+        onPress: () => {
+          setSpecialistsPending(true);
+          void api.resolveMeetingSpecialist(sessionToken, route.params.roomId, invitation.id, invitation.revision, decision)
+            .then(() => loadSpecialists())
+            .catch((err) => setSpecialistsError(err instanceof BonfireApiError ? err.message : 'Could not update the invitation.'))
+            .finally(() => setSpecialistsPending(false));
+        },
+      },
+    ]);
+  }
 
   const canManage = Boolean(room?.createdBy && room.createdBy.toLowerCase() === user?.email?.toLowerCase());
   const inNativeRoom = nativeRoom.state.lifecycle !== 'idle' && nativeRoom.state.lifecycle !== 'joining';
@@ -1022,6 +1091,7 @@ export function RoomScreen({ route, navigation }: Props) {
     }
     actions.push(
       { id: 'people', label: 'People in this room', onSelect: () => setParticipantsVisible(true) },
+      { id: 'specialists', label: 'Agent team', onSelect: openSpecialists },
       { id: 'invite', label: 'Invite someone', onSelect: inviteToRoom },
       { id: 'consent', label: 'Data & consent', onSelect: () => setConsentVisible(true) },
       {
@@ -1266,6 +1336,16 @@ export function RoomScreen({ route, navigation }: Props) {
               visible={consentVisible}
             />
           ) : null}
+          <RoomSpecialistsSheet
+            error={specialistsError}
+            loading={specialistsLoading}
+            onClose={() => setSpecialistsVisible(false)}
+            onRequest={requestSpecialist}
+            onResolve={resolveSpecialist}
+            pending={specialistsPending}
+            status={specialists}
+            visible={specialistsVisible}
+          />
         </View>
       </Screen>
     );
@@ -1292,14 +1372,14 @@ export function RoomScreen({ route, navigation }: Props) {
             </View>
             <View style={styles.joinCopy}>
               <Text style={styles.joinTitle}>{room?.live ? `${room.participantCount} here now` : 'Start the conversation'}</Text>
-              <Text style={styles.joinBody}>Your camera and microphone start on. You can switch either off at any time.</Text>
+              <Text style={styles.joinBody}>Join visibly. Your camera starts on and your microphone stays muted.</Text>
             </View>
           </View>
           {nativeRoom.state.lifecycle === 'idle' && !room?.archived ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Join room with camera and microphone on"
-              onPress={() => joinRoom(true, true)}
+              accessibilityLabel="Join room with camera on and microphone off"
+              onPress={() => joinRoom(true, false)}
               style={({ pressed }) => [styles.join, pressed && styles.pressed]}
             >
               <SymbolView name="person.2.fill" tintColor={colors.onAccent} size={18} />
@@ -1405,7 +1485,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.09)',
   },
   videoAvatarCompact: { width: 44, height: 44, borderRadius: 22 },
-  videoAvatarText: { color: '#FFFFFF', fontSize: 27, fontWeight: '600', letterSpacing: -0.6 },
+  videoAvatarText: { color: '#FFFFFF', fontSize: 27, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', letterSpacing: -0.6 },
   videoAvatarTextCompact: { fontSize: 16, letterSpacing: -0.2 },
   cameraOffRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   cameraOffText: { ...type.caption, color: 'rgba(255,255,255,0.55)' },
@@ -1444,7 +1524,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(48,209,88,0.36)',
     backgroundColor: 'rgba(5,5,7,0.76)',
   },
-  screenShareBadgeText: { fontSize: 9, fontWeight: '700', letterSpacing: 0.75, color: '#30D158' },
+  screenShareBadgeText: { fontSize: 9, fontFamily: 'GoogleSansFlex_700Bold', fontWeight: '700', letterSpacing: 0.75, color: '#30D158' },
   localPreview: {
     ...shadow.mark,
     position: 'absolute',
@@ -1478,8 +1558,8 @@ const styles = StyleSheet.create({
     gap: 6,
     backgroundColor: ink[850],
   },
-  localPreviewStartingText: { color: 'rgba(255,255,255,0.76)', fontSize: 9, fontWeight: '600' },
-  localAvatarText: { color: '#FFFFFF', fontSize: 24, fontWeight: '600', letterSpacing: -0.4 },
+  localPreviewStartingText: { color: 'rgba(255,255,255,0.76)', fontSize: 9, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600' },
+  localAvatarText: { color: '#FFFFFF', fontSize: 24, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', letterSpacing: -0.4 },
   localLabelPill: {
     position: 'absolute',
     left: 7,
@@ -1490,7 +1570,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: 'rgba(5,5,7,0.68)',
   },
-  localLabelText: { color: '#FFFFFF', fontSize: 10, fontWeight: '600', lineHeight: 13 },
+  localLabelText: { color: '#FFFFFF', fontSize: 10, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', lineHeight: 13 },
   switchCamera: {
     position: 'absolute',
     top: 6,
@@ -1547,8 +1627,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(7,7,8,0.76)',
   },
   callRoomIdentityPressed: { backgroundColor: 'rgba(7,7,8,0.88)', transform: [{ scale: 0.99 }] },
-  callRoomName: { color: '#FFFFFF', fontSize: 13, fontWeight: '600', lineHeight: 16, letterSpacing: -0.08 },
-  callParticipantCount: { marginTop: 1, color: 'rgba(255,255,255,0.58)', fontSize: 10, fontWeight: '500', lineHeight: 13, fontVariant: ['tabular-nums'] },
+  callRoomName: { color: '#FFFFFF', fontSize: 13, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', lineHeight: 16, letterSpacing: -0.08 },
+  callParticipantCount: { marginTop: 1, color: 'rgba(255,255,255,0.58)', fontSize: 10, fontFamily: 'GoogleSansFlex_500Medium', fontWeight: '500', lineHeight: 13, fontVariant: ['tabular-nums'] },
   callStatusPill: {
     minHeight: 42,
     maxWidth: '48%',
@@ -1564,7 +1644,7 @@ const styles = StyleSheet.create({
   callStatusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#30D158' },
   callStatusDotWarning: { backgroundColor: '#FF9F0A' },
   callStatusDotCritical: { backgroundColor: '#FF6B63' },
-  callStatusText: { flexShrink: 1, color: '#FFFFFF', fontSize: 11, fontWeight: '600', lineHeight: 14 },
+  callStatusText: { flexShrink: 1, color: '#FFFFFF', fontSize: 11, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', lineHeight: 14 },
   callControlDock: {
     ...shadow.mark,
     position: 'absolute',
@@ -1596,7 +1676,7 @@ const styles = StyleSheet.create({
   callControlDanger: { backgroundColor: '#FF453A' },
   callControlDisabled: { opacity: 0.42 },
   callControlPressed: { transform: [{ scale: 0.96 }] },
-  callControlLabel: { color: '#FFFFFF', fontSize: 10, fontWeight: '600', lineHeight: 12 },
+  callControlLabel: { color: '#FFFFFF', fontSize: 10, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', lineHeight: 12 },
   callControlLabelInverted: { color: ink[950] },
   callControlBadge: {
     position: 'absolute',
@@ -1612,7 +1692,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(13,13,16,0.92)',
     backgroundColor: '#FF453A',
   },
-  callControlBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '700', lineHeight: 11 },
+  callControlBadgeText: { color: '#FFFFFF', fontSize: 9, fontFamily: 'GoogleSansFlex_700Bold', fontWeight: '700', lineHeight: 11 },
   pressed: { transform: [{ scale: 0.96 }], opacity: 0.9 },
   sectionTitle: { ...type.label, color: colors.text3, textTransform: 'uppercase', marginTop: space[6], marginBottom: space[3] },
   people: { backgroundColor: colors.surface1, borderRadius: radius.xl, padding: space[4] },

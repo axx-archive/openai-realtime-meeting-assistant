@@ -963,7 +963,7 @@ func TestAssistantThreadsHandlerServesFullArtifactToNonAdminUser(t *testing.T) {
 	}
 }
 
-func TestAssistantChatThreadsPersistMessagesAndAttachments(t *testing.T) {
+func TestAssistantChatThreadsKeepLegacyInlineAttachmentsEphemeral(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
@@ -1024,14 +1024,23 @@ func TestAssistantChatThreadsPersistMessagesAndAttachments(t *testing.T) {
 	if len(messagePayload.Thread.Messages) != 2 {
 		t.Fatalf("messages=%d, want user+scout", len(messagePayload.Thread.Messages))
 	}
-	if got := messagePayload.Thread.Messages[0].Files[0].Name; got != "brief.txt" {
-		t.Fatalf("attachment name=%q, want brief.txt", got)
+	if len(messagePayload.Thread.Messages[0].Files) != 0 {
+		t.Fatalf("legacy inline attachment leaked through viewer projection: %+v", messagePayload.Thread.Messages[0].Files)
 	}
-	if !strings.Contains(capturedInput, "Audience: rodeo creators") {
-		t.Fatalf("model input missing attachment text: %s", capturedInput)
+	if !strings.Contains(capturedInput, "Audience: rodeo creators") || !strings.Contains(capturedInput, "brief.txt") {
+		t.Fatalf("current authenticated prompt omitted submitted inline context: %s", capturedInput)
 	}
 	if messagePayload.Answer.Text != "Use the attached brief as launch context." {
 		t.Fatalf("answer=%q, want responder output", messagePayload.Answer.Text)
+	}
+	rawThread, _, err := kanbanApp.scoutChatThreadByID("aj@shareability.com", createPayload.Thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, turn := range kanbanApp.scoutChatHistoryForViewer("aj@shareability.com", rawThread) {
+		if strings.Contains(turn.text, "Audience: rodeo creators") || strings.Contains(turn.text, "brief.txt") {
+			t.Fatalf("legacy inline attachment survived into later model history: %+v", turn)
+		}
 	}
 
 	listReq := httptest.NewRequest(http.MethodGet, "/assistant/chat-threads", nil)

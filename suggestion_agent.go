@@ -105,17 +105,27 @@ func researchSuggestionAgent() ambientAgentConfig {
 }
 
 func (app *kanbanBoardApp) startResearchSuggestionWorker(apiKey string) {
+	if app != nil && app.strideRuntime != nil && app.strideRuntime.productPreviewOwnsWorkSuggestions() {
+		log.Infof("legacy research suggestion worker fenced: STRIDE Suggested Work owns proactive outcomes")
+		return
+	}
 	app.startAmbientAgent(researchSuggestionAgent(), apiKey)
 }
 
 // runResearchSuggestionOnce runs a single pass with an injectable responder —
 // the test seam mirroring runMeetingBoardOnce.
 func (app *kanbanBoardApp) runResearchSuggestionOnce(ctx context.Context, apiKey string, responder openAITextResponder) (meetingMemoryEntry, error) {
+	if app != nil && app.strideRuntime != nil && app.strideRuntime.productPreviewOwnsWorkSuggestions() {
+		return meetingMemoryEntry{}, nil
+	}
 	agent := researchSuggestionAgent()
 	return app.runAmbientAgentOnce(agent, ctx, apiKey, responder, agent.minBatch())
 }
 
 func (app *kanbanBoardApp) produceResearchSuggestions(ctx context.Context, apiKey string, summaries []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
+	if app != nil && app.strideRuntime != nil && app.strideRuntime.productPreviewOwnsWorkSuggestions() {
+		return meetingMemoryEntry{}, nil
+	}
 	if len(summaries) == 0 {
 		return meetingMemoryEntry{}, nil
 	}
@@ -161,7 +171,7 @@ func (app *kanbanBoardApp) produceResearchSuggestions(ctx context.Context, apiKe
 	if err != nil {
 		// W0 item 6: strict-JSON parse-failure counter for the suggestion lane.
 		recordEvalEvent(seatSuggestion, evalKindParseFailure, map[string]any{"seat": seatSuggestion, "model": model})
-		return meetingMemoryEntry{}, err
+		return meetingMemoryEntry{}, &ambientOutputRejection{agent: researchSuggestionAgentName, reason: "invalid_structured_output"}
 	}
 
 	// W0 item 7 lineage: minted events stamp the brain window that volunteered

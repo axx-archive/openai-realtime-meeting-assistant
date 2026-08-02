@@ -5,7 +5,7 @@ import * as Haptics from 'expo-haptics';
 import { GlassContainer } from 'expo-glass-effect';
 import { Glass, usingLiquidGlass } from '../theme/glass';
 import { duration, ease, easeSpring, useReduceMotion } from '../theme/motion';
-import { DOCK_ROW_BOTTOM_MARGIN, NAV_ITEM_WIDTH, NAV_ITEMS_RIGHT_INSET } from './dockRowLayout';
+import { NAV_ITEM_WIDTH, NAV_ITEMS_RIGHT_INSET } from './dockRowLayout';
 import { colors, hitMin, radius, space, type } from '../theme/tokens';
 
 /**
@@ -77,7 +77,7 @@ export function NavCluster({ open, onToggle, destinations }: NavClusterProps) {
     onToggle();
   }, [onToggle]);
 
-  // The cluster opens sideways along the row above the Dock, not upward as a
+  // The cluster opens sideways along the bottom utility row, not upward as a
   // column: a vertical stack on the right edge overlays the greeting and forces
   // 44pt-wide labels that truncate ("Threa…"). Travelling right-to-left keeps it
   // inside its own band of empty canvas.
@@ -188,12 +188,10 @@ export function NavCluster({ open, onToggle, destinations }: NavClusterProps) {
 
 const styles = StyleSheet.create({
   wrap: {
-    // Sits ABOVE the Dock, right-aligned. Overlaying the Dock clipped its
-    // keyboard control — the silent path must never be covered by the
-    // shortcut that exists for the same reason.
+    // Right-aligned in the Canvas utility row.
     alignSelf: 'flex-end',
     marginRight: space[5],
-    marginBottom: DOCK_ROW_BOTTOM_MARGIN,
+    marginBottom: space[3],
   },
   container: {
     flexDirection: 'row',
@@ -244,7 +242,7 @@ const styles = StyleSheet.create({
     // token truncated it at 44pt.
     fontSize: 10,
     lineHeight: 12,
-    fontWeight: '500',
+    fontFamily: 'GoogleSansFlex_500Medium', fontWeight: '500',
     letterSpacing: 0.3,
     color: colors.text2,
     textAlign: 'center',

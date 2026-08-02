@@ -127,6 +127,6 @@ const styles = StyleSheet.create({
   input: { minHeight: 40, maxHeight: 132, padding: 0, ...type.body, color: colors.text1, textAlignVertical: 'top' },
   inputTransparent: { color: 'transparent' },
   hiddenAt: { color: 'transparent' },
-  mention: { fontWeight: '600', color: colors.info, backgroundColor: colors.infoSoft, textShadowColor: 'rgba(10,132,255,0.24)', textShadowRadius: 5 },
+  mention: { fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', color: colors.info, backgroundColor: colors.infoSoft, textShadowColor: 'rgba(10,132,255,0.24)', textShadowRadius: 5 },
   mentionScout: { color: colors.emberText, backgroundColor: colors.emberSoft, textShadowColor: 'rgba(255,90,25,0.24)' },
 });

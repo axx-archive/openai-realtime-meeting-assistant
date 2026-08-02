@@ -326,7 +326,7 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 		// when keyed, the OpenAI brain model keyless).
 		recordEvalEvent(seatNarrative, evalKindParseFailure, map[string]any{"seat": seatNarrative, "model": model})
 		log.Errorf("%s returned non-JSON output; skipping this pass", narrativeMaintainerAgentName)
-		return meetingMemoryEntry{}, nil
+		return meetingMemoryEntry{}, &ambientAgentHoldError{err: &ambientOutputRejection{agent: narrativeMaintainerAgentName, reason: "non_json"}}
 	}
 
 	firstBrain := inputs[0]

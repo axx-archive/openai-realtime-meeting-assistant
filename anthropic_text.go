@@ -64,6 +64,19 @@ type anthropicTextRequest struct {
 // chat seams are testable with no network.
 type anthropicTextResponder func(context.Context, string, anthropicTextRequest) (string, error)
 
+type anthropicProviderFailure struct{ err error }
+
+func (failure *anthropicProviderFailure) Error() string              { return failure.err.Error() }
+func (failure *anthropicProviderFailure) Unwrap() error              { return failure.err }
+func (failure *anthropicProviderFailure) providerInvocationFailure() {}
+
+type anthropicOutputRejection struct{ reason string }
+
+func (failure *anthropicOutputRejection) Error() string {
+	return "Anthropic output rejected: " + failure.reason
+}
+func (failure *anthropicOutputRejection) providerOutputRejection() {}
+
 var createAnthropicTextResponse anthropicTextResponder = createAnthropicTextResponseHTTP
 
 // createAnthropicTextResponseHTTP folds the text request into one Messages
@@ -114,23 +127,26 @@ func createAnthropicTextResponseHTTP(ctx context.Context, apiKey string, request
 		DisableThinking: true,
 	})
 	if err != nil {
-		return "", err
+		if isProviderInvocationFailure(err) {
+			return "", err
+		}
+		return "", &anthropicProviderFailure{err: err}
 	}
 	// Safety classifiers answer HTTP 200 with stop_reason refusal and empty (or
 	// partial) content — surface it as an error, never as a silent empty answer.
 	if response.StopReason == "refusal" {
-		return "", fmt.Errorf("Anthropic chat request was declined by safety classifiers")
+		return "", &anthropicOutputRejection{reason: "request was declined by safety classifiers"}
 	}
 	// A max_tokens stop means the text was cut off mid-thought. Chat callers can
 	// retry, but the follow-up artifact-rewrite path persists this text as the
 	// COMPLETE artifact body — truncation must be an error, never a silent save.
 	if response.StopReason == "max_tokens" {
-		return "", fmt.Errorf("Anthropic response was cut off (stop_reason=max_tokens); raise the token budget")
+		return "", &anthropicOutputRejection{reason: "max_tokens"}
 	}
 
 	text := extractAnthropicResponseText(response)
 	if text == "" {
-		return "", fmt.Errorf("Anthropic response did not include output text")
+		return "", &anthropicOutputRejection{reason: "response did not include output text"}
 	}
 	return text, nil
 }

@@ -20,6 +20,17 @@ import type {
   GiphySearchResult,
   ChatMentionCandidate,
   ThreadDigestResponse,
+  StrideRuntimeStatusResponse,
+  StrideRosterResponse,
+  StrideMarketplaceResponse,
+  StrideSeatMutationResponse,
+  StrideTeamSeat,
+  StrideWorkMutationResponse,
+  StrideWorkResponse,
+  StrideMeetingSpecialistStatusResponse,
+  StrideMeetingSpecialistInvitation,
+  StridePrivateAgentTemplateInput,
+  StrideRelationshipMemoryResponse,
 } from './types';
 import {
   buildConsentDecision,
@@ -27,13 +38,12 @@ import {
   parseConsentStatus,
 } from './consent';
 import { buildApiUrl, buildAuthHeaders } from './requestHelpers';
+import {
+  fenceUnauthorizedResponse,
+  readTextAfterUnauthorizedFence,
+} from './unauthorizedBoundary';
 
-type UnauthorizedHandler = () => void;
-let unauthorizedHandler: UnauthorizedHandler | null = null;
-
-export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
-  unauthorizedHandler = handler;
-}
+export { setUnauthorizedHandler } from './unauthorizedBoundary';
 
 export class BonfireApiError extends Error {
   status: number;
@@ -51,6 +61,7 @@ type RequestOptions = {
   sessionToken?: string | null;
   signal?: AbortSignal;
   headers?: Record<string, string>;
+  suppressUnauthorizedHandler?: boolean;
 };
 
 async function requestWithResponse<T>(
@@ -75,7 +86,11 @@ async function requestWithResponse<T>(
     signal: options.signal,
   });
 
-  const text = await response.text();
+  const text = await readTextAfterUnauthorizedFence(
+    response,
+    options.sessionToken,
+    options.suppressUnauthorizedHandler,
+  );
   let data: unknown = null;
   if (text) {
     try {
@@ -91,7 +106,6 @@ async function requestWithResponse<T>(
         ? (data as { error: string }).error
         : null) ||
       `Request failed (${response.status})`;
-    if (response.status === 401) unauthorizedHandler?.();
     throw new BonfireApiError(response.status, message);
   }
 
@@ -146,12 +160,22 @@ export const api = {
     return request<Identity>('/auth/me', { sessionToken });
   },
 
-  logout(sessionToken: string, deviceToken?: string | null): Promise<unknown> {
-	return request('/auth/logout', {
-		method: 'POST',
-		body: { deviceToken: deviceToken?.trim() || undefined },
-		sessionToken,
-	});
+  logout(
+    sessionToken: string,
+    deviceToken?: string | null,
+    suppressUnauthorizedHandler = false,
+  ): Promise<{
+    ok: boolean;
+    sessionRevoked: boolean;
+    deviceBindingRemoved: boolean;
+    deviceCleanupPending: boolean;
+  }> {
+    return request('/auth/logout', {
+      method: 'POST',
+      body: { deviceToken: deviceToken?.trim() || undefined },
+      sessionToken,
+      suppressUnauthorizedHandler,
+    });
   },
 
   changePassword(
@@ -227,6 +251,22 @@ export const api = {
     return request<RoomsResponse>('/rooms', { sessionToken });
   },
 
+  meetingSpecialists(sessionToken: string, roomId: string): Promise<StrideMeetingSpecialistStatusResponse> {
+    return request(`/api/stride/v1/meeting-specialists?roomId=${encodeURIComponent(roomId)}`, { sessionToken });
+  },
+
+  requestMeetingSpecialist(sessionToken: string, roomId: string, agentId: string, purpose: string, idempotencyKey: string): Promise<{ ok: boolean; invitation: StrideMeetingSpecialistInvitation; providerSessionStarted: false }> {
+    return request('/api/stride/v1/meeting-specialists/invitations', {
+      method: 'POST', body: { roomId, agentId, purpose, idempotencyKey }, sessionToken,
+    });
+  },
+
+  resolveMeetingSpecialist(sessionToken: string, roomId: string, invitationId: string, revision: number, decision: 'approved' | 'declined' | 'dismissed'): Promise<{ ok: boolean; invitation: StrideMeetingSpecialistInvitation; providerSessionStarted: false }> {
+    return request(`/api/stride/v1/meeting-specialists/invitations/${encodeURIComponent(invitationId)}`, {
+      method: 'POST', body: { roomId, revision, decision }, sessionToken,
+    });
+  },
+
   createRoom(
     sessionToken: string,
     body: { name: string; passcode?: string; guestAccess?: boolean },
@@ -284,6 +324,37 @@ export const api = {
     supportedLayers?: string[];
   }> {
     return request('/client-config', { sessionToken });
+  },
+
+  realtimeOffer(sessionToken: string, sdp: string): Promise<{ ok: boolean; sdp: string }> {
+    return request('/assistant/realtime-offer', {
+      method: 'POST', body: { sdp }, sessionToken,
+    });
+  },
+
+  realtimeTool(
+    sessionToken: string,
+    name: string,
+    argumentsValue: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<{
+    ok?: boolean;
+    result?: Record<string, unknown>;
+    error?: string;
+    actions?: Array<Record<string, unknown>>;
+  }> {
+    return request('/assistant/realtime-tool', {
+      method: 'POST', body: { name, arguments: argumentsValue }, sessionToken, signal,
+    });
+  },
+
+  realtimeUsage(
+    sessionToken: string,
+    payload: { callId: string; model: string; usage: Record<string, unknown> },
+  ): Promise<{ ok: boolean }> {
+    return request('/assistant/realtime/usage', {
+      method: 'POST', body: payload, sessionToken,
+    });
   },
 
   async getConsentStatus(sessionToken: string): Promise<ConsentStatus> {
@@ -375,9 +446,9 @@ export const api = {
       headers: buildAuthHeaders(NATIVE_CLIENT_HEADER, sessionToken),
       body: form,
     });
+    fenceUnauthorizedResponse(response.status, sessionToken);
     const payload = await response.json() as { ok?: boolean; file?: Record<string, unknown>; error?: string };
     if (!response.ok || !payload.file) {
-      if (response.status === 401) unauthorizedHandler?.();
       throw new BonfireApiError(response.status, payload.error || 'File upload failed.');
     }
     return { ok: true, file: payload.file };
@@ -526,11 +597,16 @@ export const api = {
     });
   },
 
-  unregisterPushDevice(sessionToken: string, token: string): Promise<{ ok: boolean }> {
+  unregisterPushDevice(
+    sessionToken: string,
+    token: string,
+    suppressUnauthorizedHandler = false,
+  ): Promise<{ ok: boolean }> {
     return request('/assistant/push/devices', {
       method: 'DELETE',
       body: { token },
       sessionToken,
+      suppressUnauthorizedHandler,
     });
   },
 
@@ -610,6 +686,7 @@ export const api = {
 
   async importGiphy(
     sessionToken: string,
+    threadId: string,
     gif: Pick<GiphySearchResult, 'id' | 'title' | 'mediaUrl'>,
   ): Promise<ScoutFileAttachment> {
     const response = await request<{
@@ -621,9 +698,11 @@ export const api = {
       mime?: string;
       size?: number;
       kind?: string;
+      sourceId?: string;
+      sourceRevision?: string;
     }>('/assistant/giphy/import', {
       method: 'POST',
-      body: { url: gif.mediaUrl, title: gif.title, id: gif.id },
+      body: { url: gif.mediaUrl, title: gif.title, id: gif.id, threadId },
       sessionToken,
     });
     const attachment = response.file ?? response.attachment ?? response;
@@ -636,11 +715,14 @@ export const api = {
       ref: attachment.ref,
       mime: attachment.mime,
       size: attachment.size,
+      sourceId: attachment.sourceId,
+      sourceRevision: attachment.sourceRevision,
     };
   },
 
   async uploadScoutAttachment(
     sessionToken: string,
+    threadId: string,
     file: { uri: string; name: string; mime: string },
   ): Promise<ScoutFileAttachment> {
     const form = new FormData();
@@ -648,14 +730,15 @@ export const api = {
     // not React Native's legacy { uri, name, type } FormData shape. File reads
     // the picker/cache URI directly without a second JS-memory copy.
     form.append('file', new File(file.uri));
-    const response = await fetch(buildApiUrl(API_BASE_URL, '/assistant/attachments'), {
+    const response = await fetch(buildApiUrl(API_BASE_URL, `/assistant/attachments?threadId=${encodeURIComponent(threadId)}`), {
       method: 'POST',
       // Deliberately omit Content-Type so fetch adds the multipart boundary.
       headers: buildAuthHeaders(NATIVE_CLIENT_HEADER, sessionToken),
       body: form,
     });
+    fenceUnauthorizedResponse(response.status, sessionToken);
     const rawPayload = await response.text();
-    let payload: { error?: string; ref?: string; mime?: string; size?: number } = {};
+    let payload: { error?: string; ref?: string; mime?: string; size?: number; sourceId?: string; sourceRevision?: string } = {};
     try {
       payload = rawPayload ? JSON.parse(rawPayload) as typeof payload : {};
     } catch {
@@ -667,7 +750,6 @@ export const api = {
       );
     }
     if (!response.ok || !payload.ref || !payload.mime) {
-      if (response.status === 401) unauthorizedHandler?.();
       throw new BonfireApiError(response.status, payload.error || 'Attachment upload failed.');
     }
     return {
@@ -676,6 +758,8 @@ export const api = {
       ref: payload.ref,
       mime: payload.mime,
       size: payload.size,
+      sourceId: payload.sourceId,
+      sourceRevision: payload.sourceRevision,
     };
   },
 
@@ -704,6 +788,7 @@ export const api = {
       headers: buildAuthHeaders(NATIVE_CLIENT_HEADER, sessionToken),
       body: form,
     });
+    fenceUnauthorizedResponse(response.status, sessionToken);
     const payload = (await response.json().catch(() => ({}))) as {
       error?: string;
       text?: string;
@@ -712,7 +797,6 @@ export const api = {
       biased?: boolean;
     };
     if (!response.ok || typeof payload.text !== 'string') {
-      if (response.status === 401) unauthorizedHandler?.();
       throw new BonfireApiError(response.status, payload.error || 'Could not transcribe that.');
     }
     return {
@@ -744,6 +828,141 @@ export const api = {
       method: 'POST',
       body: { query, mode: 'scout', history },
       sessionToken,
+    });
+  },
+
+  strideStatus(sessionToken: string): Promise<StrideRuntimeStatusResponse> {
+    return request('/api/stride/v1/status', { sessionToken });
+  },
+
+  strideRelationshipMemory(sessionToken: string): Promise<StrideRelationshipMemoryResponse> {
+    return request('/api/stride/v1/coworker/relationships', { sessionToken });
+  },
+
+  strideSetRelationshipConsent(
+    sessionToken: string,
+    body: { action: 'enable' | 'disable'; expectedRevision: number; allowInferred: boolean; allowShared: boolean },
+  ): Promise<StrideRelationshipMemoryResponse> {
+    return request('/api/stride/v1/coworker/relationships/consent', {
+      method: 'POST', body, sessionToken,
+    });
+  },
+
+  strideRememberRelationship(
+    sessionToken: string,
+    body: { expectedRevision: number; preferenceType: string; value: string },
+  ): Promise<StrideRelationshipMemoryResponse> {
+    return request('/api/stride/v1/coworker/relationships/remember', {
+      method: 'POST', body: { action: 'remember', scope: 'private', ...body }, sessionToken,
+    });
+  },
+
+  strideCorrectRelationship(
+    sessionToken: string,
+    body: { expectedRevision: number; relationshipId: string; value: string },
+  ): Promise<StrideRelationshipMemoryResponse> {
+    return request('/api/stride/v1/coworker/relationships/correct', {
+      method: 'POST', body: { action: 'correct', ...body }, sessionToken,
+    });
+  },
+
+  strideForgetRelationship(
+    sessionToken: string,
+    body: { expectedRevision: number; relationshipId: string },
+  ): Promise<StrideRelationshipMemoryResponse> {
+    return request('/api/stride/v1/coworker/relationships/forget', {
+      method: 'POST', body: { action: 'forget', ...body }, sessionToken,
+    });
+  },
+
+  strideRoster(sessionToken: string): Promise<StrideRosterResponse> {
+    return request('/api/stride/v1/roster', { sessionToken });
+  },
+
+  strideMarketplace(sessionToken: string): Promise<StrideMarketplaceResponse> {
+    return request('/api/stride/v1/marketplace', { sessionToken });
+  },
+
+  strideWork(sessionToken: string): Promise<StrideWorkResponse> {
+    return request('/api/stride/v1/work', { sessionToken });
+  },
+
+  strideStartTrial(sessionToken: string, listingId: string): Promise<StrideSeatMutationResponse> {
+    return request(`/api/stride/v1/marketplace/${encodeURIComponent(listingId)}/trial`, {
+      method: 'POST', body: {}, sessionToken,
+    });
+  },
+
+  strideHire(sessionToken: string, listingId: string, revision: number): Promise<StrideSeatMutationResponse> {
+    return request(`/api/stride/v1/marketplace/${encodeURIComponent(listingId)}/hire`, {
+      method: 'POST', body: { revision }, sessionToken,
+    });
+  },
+
+  strideCreatePrivateAgentTemplate(sessionToken: string, body: StridePrivateAgentTemplateInput): Promise<{ ok: boolean; listing: import('./types').StrideMarketplaceListing; created: boolean; organizationPrivate: true; liveAdmissionFenced: true; providerCalls: 0 }> {
+    return request('/api/stride/v1/marketplace/templates', {
+      method: 'POST', body, sessionToken,
+    });
+  },
+
+  strideSeatAction(sessionToken: string, agentId: string, action: 'pause' | 'offboard', revision: number): Promise<StrideSeatMutationResponse> {
+    return request(`/api/stride/v1/roster/${encodeURIComponent(agentId)}/${action}`, {
+      method: 'POST', body: { revision }, sessionToken,
+    });
+  },
+
+  strideAssignAgent(sessionToken: string, agentId: string, body: { revision: number; projectOrChannel: string; role: string; responsibility: string; destination: string }): Promise<StrideSeatMutationResponse> {
+    return request(`/api/stride/v1/roster/${encodeURIComponent(agentId)}/assign`, {
+      method: 'POST', body, sessionToken,
+    });
+  },
+
+  strideProposeAgentUpdate(sessionToken: string, agentId: string, body: { revision: number; summary: string; candidate: StrideTeamSeat['config'] }): Promise<StrideSeatMutationResponse> {
+    return request(`/api/stride/v1/roster/${encodeURIComponent(agentId)}/updates`, {
+      method: 'POST', body, sessionToken,
+    });
+  },
+
+  strideResolveAgentUpdate(sessionToken: string, agentId: string, updateId: string, action: 'approve' | 'rollback', revision: number): Promise<StrideSeatMutationResponse> {
+    return request(`/api/stride/v1/roster/${encodeURIComponent(agentId)}/updates/${encodeURIComponent(updateId)}/${action}`, {
+      method: 'POST', body: { revision }, sessionToken,
+    });
+  },
+
+  strideRecordAgentLearning(sessionToken: string, agentId: string, body: { revision: number; subject: string; scope: string; summary: string }): Promise<StrideSeatMutationResponse> {
+    return request(`/api/stride/v1/roster/${encodeURIComponent(agentId)}/learning`, {
+      method: 'POST', body, sessionToken,
+    });
+  },
+
+  strideResolveAgentLearning(sessionToken: string, agentId: string, learningId: string, action: 'correct' | 'forget', body: { revision: number; summary: string }): Promise<StrideSeatMutationResponse> {
+    return request(`/api/stride/v1/roster/${encodeURIComponent(agentId)}/learning/${encodeURIComponent(learningId)}/${action}`, {
+      method: 'POST', body, sessionToken,
+    });
+  },
+
+  strideExportAgent(sessionToken: string, agentId: string): Promise<{ ok: boolean; export: Record<string, unknown>; providerRuntimeExported: false }> {
+    return request(`/api/stride/v1/roster/${encodeURIComponent(agentId)}/export`, { sessionToken });
+  },
+
+  strideWorkDestination(
+    sessionToken: string,
+    suggestionId: string,
+    body: { revision: number; mode: 'existing' | 'new'; threadId?: string; title?: string },
+  ): Promise<StrideWorkMutationResponse> {
+    return request(`/api/stride/v1/work/suggestions/${encodeURIComponent(suggestionId)}/destination`, {
+      method: 'POST', body, sessionToken,
+    });
+  },
+
+  strideWorkDecision(
+    sessionToken: string,
+    suggestionId: string,
+    action: 'approve' | 'dismiss',
+    body: { revision: number; reason?: string },
+  ): Promise<StrideWorkMutationResponse> {
+    return request(`/api/stride/v1/work/suggestions/${encodeURIComponent(suggestionId)}/${action}`, {
+      method: 'POST', body, sessionToken,
     });
   },
 

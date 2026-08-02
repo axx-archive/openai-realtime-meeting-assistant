@@ -411,6 +411,16 @@ func sweepUnreferencedBlobs(app *kanbanBoardApp) ([]string, error) {
 			}
 		}
 	}
+	// A newly uploaded composer source is intentionally not yet present in a
+	// chat message. Keep pending/reserved bytes alive until commit, expiry, or
+	// explicit revocation; a manual sweep must not race the authorization lane.
+	app.pendingAttachmentUploadsMu.Lock()
+	for _, source := range app.pendingAttachmentUploads {
+		if (source.State == attachmentSourcePending || source.State == attachmentSourceReserved) && source.ExpiresAt.After(time.Now().UTC()) && validBlobRef(source.Ref) {
+			referenced[source.Ref] = struct{}{}
+		}
+	}
+	app.pendingAttachmentUploadsMu.Unlock()
 
 	shards, err := os.ReadDir(blobStoreDir())
 	if err != nil {
@@ -474,6 +484,8 @@ var blobInlineSafeMimes = map[string]bool{
 	"image/webp":      true,
 }
 
+var artifactBlobAfterReadProbe func(string)
+
 // blobDownloadFilename sanitizes the caller-supplied name down to a bare base
 // name with no control characters; empty or degenerate names fall back to the
 // ref itself.
@@ -535,6 +547,17 @@ func artifactBlobHandler(w http.ResponseWriter, r *http.Request) {
 
 	data, meta, err := getBlob(ref)
 	if err != nil {
+		writeAuthError(w, http.StatusNotFound, "blob not found")
+		return
+	}
+	if artifactBlobAfterReadProbe != nil {
+		artifactBlobAfterReadProbe(ref)
+	}
+	// Re-resolve authority after the byte read and before publishing any
+	// headers or body. A concurrent message delete, archive, or ACL revocation
+	// therefore turns the response into the same non-enumerating 404 instead
+	// of leaking bytes authorized only by a stale pre-read snapshot.
+	if !blobAuthorized(r.Context(), user, ref) {
 		writeAuthError(w, http.StatusNotFound, "blob not found")
 		return
 	}

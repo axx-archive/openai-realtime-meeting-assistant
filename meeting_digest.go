@@ -1023,7 +1023,7 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 		if meetingDigestCircuitSuppress(attemptHash) {
 			recordMeetingDigestOutput("circuit_open", "identical_poison_input", attemptHash, group.key, false)
 			log.Errorf("%s circuit suppressed identical rejected input for %s; cursor remains put", meetingDigestAgentName, group.key)
-			return newest, nil
+			return newest, &ambientAgentHoldError{err: &ambientOutputRejection{agent: meetingDigestAgentName, reason: "identical_rejected_output"}}
 		}
 		text, err := responder(ctx, apiKey, openAITextRequest{
 			Model:           model,
@@ -1041,13 +1041,14 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 			},
 		})
 		if err != nil {
-			if isOpenAIProviderFailure(err) {
+			if isProviderInvocationFailure(err) {
 				recordCapabilityFailure(capabilityRecap, time.Now().UTC(), err)
 				return newest, &ambientAgentHoldError{err: err}
 			}
 			if reason, rejected := openAIOutputRejectionReason(err); rejected {
 				meetingDigestCircuitReject(attemptHash)
 				recordMeetingDigestOutput("rejected", reason, attemptHash, group.key, false)
+				return newest, &ambientAgentHoldError{err: &ambientOutputRejection{agent: meetingDigestAgentName, reason: reason}}
 			}
 			return newest, err
 		}
@@ -1060,7 +1061,7 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 			meetingDigestCircuitReject(attemptHash)
 			recordMeetingDigestOutput("rejected", "non_json", attemptHash, group.key, false)
 			log.Errorf("%s returned non-JSON output for %s; keeping the prior digest", meetingDigestAgentName, group.key)
-			return newest, nil
+			return newest, &ambientAgentHoldError{err: &ambientOutputRejection{agent: meetingDigestAgentName, reason: "non_json"}}
 		}
 		// W0 item 6: deterministic structural checks on the model-written digest
 		// (sections present, non-empty) — no LLM judge, one event per check.

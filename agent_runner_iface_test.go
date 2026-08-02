@@ -11,6 +11,7 @@ import (
 // carries.
 func clearAgentRunnerEnv(t *testing.T) {
 	t.Helper()
+	codexExecutionTestGate.Store(false)
 	for _, key := range []string{
 		"ANTHROPIC_API_KEY",
 		"BONFIRE_AGENT_RUNNER",
@@ -18,34 +19,48 @@ func clearAgentRunnerEnv(t *testing.T) {
 		"BONFIRE_AGENT_THREAD_WORKER",
 		"BONFIRE_CODEX_AGENT_THREADS",
 		"BONFIRE_CODEX_RUNNER_MODE",
+		"BONFIRE_CODEX_EXECUTION_ENABLED",
 	} {
 		t.Setenv(key, "")
 	}
 }
 
+func enableCodexExecutionForTest(t *testing.T) {
+	t.Helper()
+	previous := codexExecutionTestGate.Load()
+	codexExecutionTestGate.Store(true)
+	t.Cleanup(func() { codexExecutionTestGate.Store(previous) })
+}
+
 func TestSelectedAgentRunnerNameMatrix(t *testing.T) {
 	cases := []struct {
-		name string
-		env  map[string]string
-		want string
+		name        string
+		env         map[string]string
+		enableCodex bool
+		want        string
 	}{
-		{"default keyless falls back to openai_text", nil, agentRunnerOpenAIText},
-		{"default with anthropic key is orchestrator", map[string]string{"ANTHROPIC_API_KEY": "sk-test"}, agentRunnerAnthropicFable},
-		{"explicit anthropic keyless degrades to openai_text", map[string]string{"BONFIRE_AGENT_RUNNER": "anthropic_fable"}, agentRunnerOpenAIText},
-		{"explicit fable alias with key", map[string]string{"BONFIRE_AGENT_RUNNER": "fable", "ANTHROPIC_API_KEY": "sk-test"}, agentRunnerAnthropicFable},
-		{"explicit openai overrides key", map[string]string{"BONFIRE_AGENT_RUNNER": "openai_text", "ANTHROPIC_API_KEY": "sk-test"}, agentRunnerOpenAIText},
-		{"explicit codex overrides key", map[string]string{"BONFIRE_AGENT_RUNNER": "codex", "ANTHROPIC_API_KEY": "sk-test"}, agentRunnerCodexSidecar},
-		{"explicit stub", map[string]string{"BONFIRE_AGENT_RUNNER": "stub"}, agentRunnerStub},
-		{"back-compat worker=codex_exec", map[string]string{"BONFIRE_AGENT_THREAD_WORKER": "codex_exec"}, agentRunnerCodexSidecar},
-		{"back-compat worker=codex_exec local mode", map[string]string{"BONFIRE_AGENT_THREAD_WORKER": "codex_exec", "BONFIRE_CODEX_RUNNER_MODE": "local"}, agentRunnerCodexLocal},
-		{"back-compat BONFIRE_CODEX_AGENT_THREADS", map[string]string{"BONFIRE_CODEX_AGENT_THREADS": "1"}, agentRunnerCodexSidecar},
-		{"unknown value falls back to legacy worker", map[string]string{"BONFIRE_AGENT_RUNNER": "wat"}, agentRunnerOpenAIText},
+		{"default keyless falls back to openai_text", nil, false, agentRunnerOpenAIText},
+		{"default with anthropic key is orchestrator", map[string]string{"ANTHROPIC_API_KEY": "sk-test"}, false, agentRunnerAnthropicFable},
+		{"explicit anthropic keyless degrades to openai_text", map[string]string{"BONFIRE_AGENT_RUNNER": "anthropic_fable"}, false, agentRunnerOpenAIText},
+		{"explicit fable alias with key", map[string]string{"BONFIRE_AGENT_RUNNER": "fable", "ANTHROPIC_API_KEY": "sk-test"}, false, agentRunnerAnthropicFable},
+		{"explicit openai overrides key", map[string]string{"BONFIRE_AGENT_RUNNER": "openai_text", "ANTHROPIC_API_KEY": "sk-test"}, false, agentRunnerOpenAIText},
+		{"explicit codex is closed", map[string]string{"BONFIRE_AGENT_RUNNER": "codex", "ANTHROPIC_API_KEY": "sk-test"}, false, agentRunnerStub},
+		{"invented environment gate cannot enable Codex", map[string]string{"BONFIRE_AGENT_RUNNER": "codex", "BONFIRE_CODEX_EXECUTION_ENABLED": "true"}, false, agentRunnerStub},
+		{"explicit codex legacy unit gate", map[string]string{"BONFIRE_AGENT_RUNNER": "codex"}, true, agentRunnerCodexSidecar},
+		{"explicit stub", map[string]string{"BONFIRE_AGENT_RUNNER": "stub"}, false, agentRunnerStub},
+		{"back-compat worker is closed", map[string]string{"BONFIRE_AGENT_THREAD_WORKER": "codex_exec"}, false, agentRunnerStub},
+		{"back-compat local mode is closed", map[string]string{"BONFIRE_AGENT_THREAD_WORKER": "codex_exec", "BONFIRE_CODEX_RUNNER_MODE": "local"}, false, agentRunnerStub},
+		{"back-compat boolean is closed", map[string]string{"BONFIRE_CODEX_AGENT_THREADS": "1"}, false, agentRunnerStub},
+		{"unknown value falls back to legacy worker", map[string]string{"BONFIRE_AGENT_RUNNER": "wat"}, false, agentRunnerOpenAIText},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			clearAgentRunnerEnv(t)
 			for key, value := range tc.env {
 				t.Setenv(key, value)
+			}
+			if tc.enableCodex {
+				enableCodexExecutionForTest(t)
 			}
 			if got := selectedAgentRunnerName(); got != tc.want {
 				t.Fatalf("selectedAgentRunnerName()=%q, want %q", got, tc.want)
@@ -56,20 +71,25 @@ func TestSelectedAgentRunnerNameMatrix(t *testing.T) {
 
 func TestSelectedExecutionRunnerNameMatrix(t *testing.T) {
 	cases := []struct {
-		name string
-		env  string
-		want string
+		name        string
+		env         string
+		enableCodex bool
+		want        string
 	}{
-		{"default is codex_sidecar", "", agentRunnerCodexSidecar},
-		{"explicit codex_local", "codex_local", agentRunnerCodexLocal},
-		{"explicit fable", "fable", agentRunnerAnthropicFable},
-		{"none maps to stub", "none", agentRunnerStub},
-		{"unknown falls back to codex_sidecar", "wat", agentRunnerCodexSidecar},
+		{"default is closed", "", false, agentRunnerStub},
+		{"explicit codex local is closed", "codex_local", false, agentRunnerStub},
+		{"explicit fable", "fable", false, agentRunnerAnthropicFable},
+		{"none maps to stub", "none", false, agentRunnerStub},
+		{"unknown is closed", "wat", false, agentRunnerStub},
+		{"legacy unit gate reaches sidecar", "", true, agentRunnerCodexSidecar},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			clearAgentRunnerEnv(t)
 			t.Setenv("BONFIRE_EXECUTION_RUNNER", tc.env)
+			if tc.enableCodex {
+				enableCodexExecutionForTest(t)
+			}
 			if got := selectedExecutionRunnerName(); got != tc.want {
 				t.Fatalf("selectedExecutionRunnerName()=%q, want %q", got, tc.want)
 			}

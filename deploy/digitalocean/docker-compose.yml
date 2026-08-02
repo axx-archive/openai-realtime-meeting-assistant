@@ -10,22 +10,43 @@ services:
         BONFIRE_BUILD_CONFIG_SHA256: ${BONFIRE_BUILD_CONFIG_SHA256:-unqualified}
         BONFIRE_BUILD_TRANSITIVE_INPUTS_SHA256: ${BONFIRE_BUILD_TRANSITIVE_INPUTS_SHA256:-unqualified}
         BONFIRE_SOURCE_ARCHIVE_SHA256: ${BONFIRE_SOURCE_ARCHIVE_SHA256:-unqualified}
+        BONFIRE_BUILD_INPUT_MANIFEST_SHA256: ${BONFIRE_BUILD_INPUT_MANIFEST_SHA256:-unqualified}
     # .env carries every runtime key into the app container, including the
     # OPS-3 Fable activation set (ANTHROPIC_API_KEY, BONFIRE_AGENT_RUNNER,
     # BONFIRE_ORCHESTRATOR_*/BONFIRE_DELIVERABLE_* dials). Do not move those
     # into an `environment:` block here — .env is the single source of truth.
     env_file:
-      - .env
+      - ${BONFIRE_BASE_ENV_FILE:-.env}
     environment:
       BONFIRE_CODEX_QUEUE_PATH: /app/codex-queue/jobs
       BONFIRE_CODEX_HEARTBEAT_PATH: /app/codex-queue/heartbeat.json
+      # The render profile uses a purpose-specific queue volume. It never
+      # receives the company-brain meeting_data volume.
+      BONFIRE_RENDER_QUEUE_PATH: /app/render-queue/jobs
+      BONFIRE_RENDER_HEARTBEAT_PATH: /app/render-queue/heartbeat.json
+      # The release tool emits these into a separate runtime env file. Explicit
+      # interpolation makes that file authoritative over any stale release
+      # values in the long-lived secret-bearing .env.
+      BONFIRE_RELEASE_IDENTITY_REQUIRED: ${BONFIRE_RELEASE_IDENTITY_REQUIRED:-false}
+      BONFIRE_RELEASE_COMMIT: ${BONFIRE_RELEASE_COMMIT:-}
+      BONFIRE_GIT_TREE_DIGEST: ${BONFIRE_GIT_TREE_DIGEST:-}
+      BONFIRE_SOURCE_ARCHIVE_SHA256: ${BONFIRE_SOURCE_ARCHIVE_SHA256:-}
+      BONFIRE_BUILD_TRANSITIVE_INPUTS_SHA256: ${BONFIRE_BUILD_TRANSITIVE_INPUTS_SHA256:-}
+      BONFIRE_BUILD_CONFIG_SHA256: ${BONFIRE_BUILD_CONFIG_SHA256:-}
+      BONFIRE_BUILD_INPUT_MANIFEST_SHA256: ${BONFIRE_BUILD_INPUT_MANIFEST_SHA256:-}
+      BONFIRE_BUILD_MANIFEST_SHA256: ${BONFIRE_BUILD_MANIFEST_SHA256:-}
+      BONFIRE_BINARY_SHA256: ${BONFIRE_BINARY_SHA256:-}
+      BONFIRE_IMAGE_DIGEST: ${BONFIRE_IMAGE_DIGEST:-}
+      BONFIRE_RELEASE_ENVIRONMENT_MARKER: ${BONFIRE_RELEASE_ENVIRONMENT_MARKER:-}
+      BONFIRE_RELEASE_BUNDLE_SHA256: ${BONFIRE_RELEASE_BUNDLE_SHA256:-}
+      BONFIRE_BUILD_VERSION: ${BONFIRE_BUILD_VERSION:-}
     volumes:
       - meeting_data:/app/data
-      # Cost/eval books are isolated into their own volume so the Codex
-      # sidecar can append usage without receiving the company-brain volume.
-      # The mount stays nested under /app/data so normal backups include it.
+      # Cost/eval books stay in a dedicated volume and remain part of normal
+      # backups without widening access to the company-brain volume.
       - usage_ledger:/app/data/usage
       - codex_queue:/app/codex-queue
+      - render_queue:/app/render-queue
     ports:
       - "40000-40100:40000-40100/udp"
     healthcheck:
@@ -49,7 +70,7 @@ services:
   # network and resource-capped for the W1 droplet. W4 may replace
   # this with managed HA PostgreSQL after its separate cost/DR gate.
   canonical-postgres:
-    image: postgres:17-alpine
+    image: ${BONFIRE_POSTGRES_IMAGE:-postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193}
     environment:
       POSTGRES_DB: bonfire
       POSTGRES_USER: bonfire
@@ -78,92 +99,93 @@ services:
     shm_size: 64m
     restart: unless-stopped
 
-  codex-runner:
-    profiles: ["codex"]
+  # One-shot ownership initializer for the dedicated render queue. It receives
+  # no env, secrets, networks, or company data, and exits before HTML runs.
+  render-queue-init:
+    profiles: ["render"]
+    image: ${BONFIRE_RENDER_IMAGE:-meetingassist-render:local}
     build:
       context: ../..
-      dockerfile: Dockerfile
-      target: codex-runner
-    image: meetingassist-codex-runner:codex-0.144.1
-    # Explicit allowlist: this execution sidecar does not inherit app mail,
-    # calendar, Anthropic, fiscal, or other production-service credentials.
-    environment:
-      CODEX_API_KEY: ${CODEX_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      BONFIRE_RUNNER_TOKEN: ${BONFIRE_RUNNER_TOKEN:?BONFIRE_RUNNER_TOKEN is required}
-      BONFIRE_CODEX_MODEL: ${BONFIRE_CODEX_MODEL:?BONFIRE_CODEX_MODEL must be pinned}
-      BONFIRE_CODEX_CWD: /workspace/meetingassist
-      BONFIRE_CODEX_QUEUE_PATH: /app/codex-queue/jobs
-      BONFIRE_CODEX_HEARTBEAT_PATH: /app/codex-queue/heartbeat.json
-      BONFIRE_RUNNER_CALLBACK_URL: http://meetingassist:3000/internal/codex/jobs/result
-      BONFIRE_CODEX_SANDBOX: workspace-write
-      BONFIRE_CODEX_APPROVAL_POLICY: never
-      BONFIRE_CODEX_REASONING_EFFORT: high
-      BONFIRE_CODEX_EXTERNAL_WRITE_ENABLED: ${BONFIRE_CODEX_EXTERNAL_WRITE_ENABLED:-false}
-      BONFIRE_CODEX_EPHEMERAL: "true"
-      USAGE_LEDGER_PATH: /app/usage-ledger
+      dockerfile: Dockerfile.render
+      args:
+        BONFIRE_RELEASE_COMMIT: ${BONFIRE_RELEASE_COMMIT:-unqualified}
+        BONFIRE_GIT_TREE_DIGEST: ${BONFIRE_GIT_TREE_DIGEST:-unqualified}
+        BONFIRE_BUILD_CONFIG_SHA256: ${BONFIRE_BUILD_CONFIG_SHA256:-unqualified}
+        BONFIRE_BUILD_TRANSITIVE_INPUTS_SHA256: ${BONFIRE_BUILD_TRANSITIVE_INPUTS_SHA256:-unqualified}
+        BONFIRE_SOURCE_ARCHIVE_SHA256: ${BONFIRE_SOURCE_ARCHIVE_SHA256:-unqualified}
+        BONFIRE_BUILD_INPUT_MANIFEST_SHA256: ${BONFIRE_BUILD_INPUT_MANIFEST_SHA256:-unqualified}
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-eu", "-c"]
+    command:
+      - install -d -o 65532 -g 65532 -m 0700 /app/render-queue /app/render-queue/jobs
     volumes:
-      - codex_queue:/app/codex-queue
-      - usage_ledger:/app/usage-ledger
-      - ${BONFIRE_CODEX_WORKSPACE_HOST_PATH:-../..}:/workspace/meetingassist
-      - ${BONFIRE_CODEX_WORKSPACE_HOST_PATH:-../..}/.git:/workspace/meetingassist/.git:ro
-      - codex_runner_data:/runner-data
+      - render_queue:/app/render-queue
+    network_mode: none
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+    read_only: true
+    restart: "no"
+
+  render-runner:
+    profiles: ["render"]
+    image: ${BONFIRE_RENDER_IMAGE:-meetingassist-render:local}
+    build:
+      context: ../..
+      dockerfile: Dockerfile.render
+      args:
+        BONFIRE_RELEASE_COMMIT: ${BONFIRE_RELEASE_COMMIT:-unqualified}
+        BONFIRE_GIT_TREE_DIGEST: ${BONFIRE_GIT_TREE_DIGEST:-unqualified}
+        BONFIRE_BUILD_CONFIG_SHA256: ${BONFIRE_BUILD_CONFIG_SHA256:-unqualified}
+        BONFIRE_BUILD_TRANSITIVE_INPUTS_SHA256: ${BONFIRE_BUILD_TRANSITIVE_INPUTS_SHA256:-unqualified}
+        BONFIRE_SOURCE_ARCHIVE_SHA256: ${BONFIRE_SOURCE_ARCHIVE_SHA256:-unqualified}
+        BONFIRE_BUILD_INPUT_MANIFEST_SHA256: ${BONFIRE_BUILD_INPUT_MANIFEST_SHA256:-unqualified}
+    # Explicit callback-only allowlist. In particular, the renderer receives
+    # no OpenAI/Anthropic, database, mail, calendar, storage, or TURN secrets.
+    environment:
+      BONFIRE_RUNNER_TOKEN: ${BONFIRE_RUNNER_TOKEN:?BONFIRE_RUNNER_TOKEN is required}
+      BONFIRE_RENDER_QUEUE_PATH: /app/render-queue/jobs
+      BONFIRE_RENDER_HEARTBEAT_PATH: /app/render-queue/heartbeat.json
+      BONFIRE_RENDER_CALLBACK_URL: http://meetingassist:3000/internal/render/jobs/result
+      BONFIRE_RENDER_TIMEOUT: ${BONFIRE_RENDER_TIMEOUT:-3m}
+      BONFIRE_RENDER_MAX_HTML_BYTES: ${BONFIRE_RENDER_MAX_HTML_BYTES:-8388608}
+      BONFIRE_RENDER_MAX_PDF_BYTES: ${BONFIRE_RENDER_MAX_PDF_BYTES:-67108864}
+    volumes:
+      - render_queue:/app/render-queue
+    # The Chrome OS sandbox remains enabled under a dedicated non-root user.
+    # Docker's default seccomp policy is retained; activation must prove this
+    # exact image/runtime pairing rather than weakening it to unconfined.
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
     read_only: true
     tmpfs:
-      - /tmp:rw,noexec,nosuid,size=256m
+      - /tmp:rw,nosuid,nodev,noexec,size=512m
+    shm_size: 256m
     pids_limit: 256
-    depends_on:
-      meetingassist:
-        condition: service_healthy
-    restart: unless-stopped
-
-  render-runner:
-    profiles: ["render"]
-    build:
-      context: ../..
-      dockerfile: Dockerfile.render
-    # Mirrors the codex-runner sidecar: same .env (BONFIRE_RUNNER_TOKEN is the
-    # shared callback credential), same meeting_data volume so the file-per-job
-    # queue at /app/data/render-jobs and the exported PDFs/page JPEGs are
-    # visible to both containers. The result route below lands in stage B;
-    # until then the profile simply stays off.
-    env_file:
-      - .env
-    environment:
-      BONFIRE_RENDER_QUEUE_PATH: /app/data/render-jobs
-      BONFIRE_RENDER_CALLBACK_URL: http://meetingassist:3000/internal/render/jobs/result
-    volumes:
-      - meeting_data:/app/data
-    # Docker's default seccomp profile SIGTRAPs modern chromium (first live
-    # run, 2026-07-05: every export died "trace/breakpoint trap"). Unconfined
-    # seccomp is the accepted fix for containerized chromium HERE because this
-    # container's blast radius is already bounded by the network isolation
-    # below — no egress, nothing to pivot to but the callback endpoint.
-    security_opt:
-      - seccomp:unconfined
-    # Untrusted artifact HTML executes in this container's chromium with
-    # --no-sandbox, so the container itself is confined to the internal-only
-    # network: it can reach meetingassist:3000 for the callback and NOTHING
-    # else — no internet egress, no coturn, no host metadata services.
+    mem_limit: 1024m
+    # Defense in depth: the renderer can reach only the callback service and
+    # has no route to the Internet, coturn, databases, or host metadata.
     networks:
       - render_internal
     depends_on:
       meetingassist:
         condition: service_healthy
+      render-queue-init:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   coturn:
-    image: coturn/coturn:4.6
+    image: ${BONFIRE_COTURN_IMAGE:-coturn/coturn@sha256:71c3c990283385567f11794ee692e3a47b66fd9b0bb39e42afbe776e331dd888}
     command:
       - -n
       - --log-file=stdout
       - --fingerprint
       - --use-auth-secret
-      - --static-auth-secret=${MEETING_TURN_SECRET:-meetingassist-dev-turn-secret}
+      - --static-auth-secret=${MEETING_TURN_SECRET:?MEETING_TURN_SECRET is required}
       - --realm=${MEETING_TURN_REALM:-thebonfire.xyz}
       - --external-ip=${PION_NAT1TO1_IP:-146.190.171.224}
       - --listening-port=3478
@@ -178,11 +200,11 @@ services:
     restart: unless-stopped
 
   caddy:
-    image: caddy:2
+    image: ${BONFIRE_CADDY_IMAGE:-caddy@sha256:25cdc846626b62d05f6b633b9b40c2c9f6ef89b515dc76133cefd920f7dbe562}
     depends_on:
       - meetingassist
     env_file:
-      - .env
+      - ${BONFIRE_BASE_ENV_FILE:-.env}
     ports:
       - "80:80/tcp"
       - "443:443/tcp"
@@ -206,7 +228,9 @@ volumes:
   codex_queue:
     external: true
     name: digitalocean_codex_queue
-  codex_runner_data:
+  # Purpose-specific queue/results handoff. Never substitute meeting_data:
+  # render jobs contain attacker/agent-authored HTML.
+  render_queue:
   meeting_data:
   usage_ledger:
     external: true

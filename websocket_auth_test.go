@@ -527,12 +527,18 @@ func newIsolatedWebsocketServer(t *testing.T) *httptest.Server {
 	// hijacked websocket has returned and no stale room actor can touch the
 	// next test's isolated peer registry.
 	resetRoomMediaActorsForTest(t)
+	var app *kanbanBoardApp
 	// Registered before connection/server cleanups so it runs after their close
-	// callbacks (but before the actor reset registered above) — guaranteeing
-	// cleanups — guaranteeing the hijacked handler goroutine has fully returned
-	// before this test's isolated globals go out of scope and the next test
-	// (which may swap kanbanApp) begins.
-	t.Cleanup(func() { waitForWebsocketHandlersToDrain(t, 5*time.Second) })
+	// callbacks (but before the actor reset registered above): first join every
+	// hijacked handler, then close the app and join any idle-end callback armed
+	// by the handlers' deferred occupancy cleanup. Only then may the next test
+	// replace package globals such as kanbanApp.
+	t.Cleanup(func() {
+		waitForWebsocketHandlersToDrain(t, 5*time.Second)
+		if app != nil {
+			_ = app.Close()
+		}
+	})
 
 	dir := t.TempDir()
 	t.Setenv("BONFIRE_USERS_PATH", filepath.Join(dir, "users.json"))
@@ -542,7 +548,8 @@ func newIsolatedWebsocketServer(t *testing.T) *httptest.Server {
 	// The websocket handler can outlive httptest.Server.Close after the
 	// connection is hijacked. Leave a non-nil app installed for deferred peer
 	// cleanup callbacks instead of restoring nil under an active goroutine.
-	kanbanApp = newKanbanBoardApp()
+	app = newKanbanBoardApp()
+	kanbanApp = app
 
 	snapshotPeerState(t)
 	listLock.Lock()

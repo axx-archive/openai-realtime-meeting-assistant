@@ -786,7 +786,7 @@ func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey
 		// (mission-intel precedent).
 		recordEvalEvent(seatDecisionLedger, evalKindParseFailure, map[string]any{"seat": seatDecisionLedger, "model": model})
 		log.Errorf("%s returned non-JSON output; skipping this pass", decisionLedgerAgentName)
-		return meetingMemoryEntry{}, nil
+		return meetingMemoryEntry{}, &ambientAgentHoldError{err: &ambientOutputRejection{agent: decisionLedgerAgentName, reason: "non_json"}}
 	}
 
 	firstBrain := inputs[0]

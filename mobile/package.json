@@ -49,6 +49,15 @@
     "tsx": "^4.23.1",
     "typescript": "~5.9.3"
   },
+  "overrides": {
+    "@bacons/xcode": {
+      "@expo/plist": {
+        "@xmldom/xmldom": "0.8.13"
+      }
+    },
+    "brace-expansion": "2.1.4",
+    "uuid": "11.1.1"
+  },
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",

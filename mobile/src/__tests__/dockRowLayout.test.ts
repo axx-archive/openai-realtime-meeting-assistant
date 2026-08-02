@@ -9,7 +9,6 @@ import {
   navItemsSpan,
   NAV_ITEM_WIDTH,
   NAV_ITEM_GAP,
-  DOCK_ROW_BOTTOM_MARGIN,
 } from '../components/dockRowLayout';
 
 /**
@@ -69,8 +68,4 @@ test('the chat circle sits on the same inset as the cluster and the Dock pill', 
   // Symmetry with the cluster's own right margin is what makes the row read as
   // one band rather than two floating controls.
   assert.equal(SE - navItemsSpan(SE, ITEMS).right, 20 + 44 + 20);
-});
-
-test('the corner controls sit in a deliberate band above the safe-area edge', () => {
-  assert.equal(DOCK_ROW_BOTTOM_MARGIN, 32);
 });

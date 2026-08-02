@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -53,14 +54,23 @@ func (app *kanbanBoardApp) meetingRecap(args map[string]any, requesterEmail stri
 
 	// Force THE ROOM's brain pass — exactly the archive-flush machinery. The
 	// per-(agent, room) run lock serializes against the 5-minute ticker and
-	// close flushes; another room's window is never touched (W4 §7.4). A pass
-	// error is logged, not fatal: fall back to the room's last brain entry.
+	// close flushes; another room's window is never touched (W4 §7.4). A clean
+	// no-op falls back to the room's last brain entry, but a failed pass reports
+	// the guarded worker's retry state instead of presenting stale output as a
+	// fresh recap.
 	agent := meetingBrainAgent()
 	app.ensureAmbientAgentRoomBaseline(agent, roomID)
 	ctx, cancel := context.WithTimeout(context.Background(), meetingRecapRequestTimeout)
 	defer cancel()
-	if _, err := app.runAmbientAgentOnceForRoom(agent, ctx, apiKey, nil, 1, roomID); err != nil {
-		log.Errorf("meeting recap brain pass failed: %v", err)
+	if _, err := app.invokeAmbientAgentGuarded(agent, ctx, apiKey, nil, 1, roomID); err != nil {
+		var circuitErr *ambientAgentCircuitOpenError
+		if errors.As(err, &circuitErr) {
+			return nil, false, circuitErr
+		}
+		if headID, _, _, pending := app.peekUnconsumedWindow(agent, roomID); pending {
+			return nil, false, app.ambientAgentCircuitError(agent, headID, roomID)
+		}
+		return nil, false, fmt.Errorf("meeting recap is temporarily unavailable")
 	}
 
 	meetingID := app.memory.currentMeetingID(roomID)

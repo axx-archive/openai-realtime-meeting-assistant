@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 // brainIntakeTranscripts returns every transcript entry the guided intake filed.
@@ -124,6 +125,42 @@ func TestBrainIntakeIngestsContributionsAndAdvances(t *testing.T) {
 	}
 	if !sawAnswer || !sawAttachment {
 		t.Fatalf("intake entries missing answer(%v) or attachment(%v): %#v", sawAnswer, sawAttachment, entries)
+	}
+}
+
+func TestBrainIntakeAttachmentCommitDoesNotDeadlockDelivery(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	app := newIsolatedKanbanBoardApp(t)
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	user := accountStore().findUser("aj@shareability.com")
+	thread, err := app.startBrainIntakeThread(user)
+	if err != nil {
+		t.Fatalf("start intake: %v", err)
+	}
+	ref, err := putBlob(tinyPNG(t), "image/png")
+	if err != nil {
+		t.Fatalf("put source: %v", err)
+	}
+	file := grantTestPendingAttachment(t, app, user, thread, ref)
+	file.Name = "history.png"
+	file.Mime = "image/png"
+
+	done := make(chan error, 1)
+	go func() {
+		_, appendErr := app.appendScoutChatThreadMessage(context.Background(), user, thread.ID, "Company history", []scoutChatFileAttachment{file}, "")
+		done <- appendErr
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("append intake attachment: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("successful brain-intake attachment commit deadlocked during projection/delivery")
 	}
 }
 
@@ -262,5 +299,46 @@ func TestBrainIntakeContributionsSynthesizeIntoBrain(t *testing.T) {
 	}
 	if !strings.Contains(entry.Text, "Adobe launch") {
 		t.Fatalf("brain write-up missing synthesized material: %q", entry.Text)
+	}
+}
+
+func TestCompletedBrainIntakeFlushHonorsOpenBrainCircuit(t *testing.T) {
+	t.Setenv("MEETING_BRAIN_MIN_TRANSCRIPTS", "1")
+	app := newIsolatedKanbanBoardApp(t)
+	authority := newAmbientConsentAuthorityForTest(t)
+	grantAmbientConsentForTest(t, app, authority, officeRoomID, "tom@shareability.com")
+	app.mu.Lock()
+	app.apiKey = "test-key"
+	app.mu.Unlock()
+	appendTestTranscript(t, app, "intake-held-transcript", "The completed intake material must remain raw.")
+
+	agent := meetingBrainAgent()
+	headID, _, _, ok := app.peekUnconsumedWindow(agent, officeRoomID)
+	if !ok || headID != "intake-held-transcript" {
+		t.Fatalf("brain head=%q ok=%v, want held intake transcript", headID, ok)
+	}
+	key := ambientAgentKey(agent.name, officeRoomID)
+	setAmbientAgentFailureForTest(app, key, &ambientAgentFailure{windowID: headID, attempts: ambientProviderMaxWindowAttempts, providerOpen: true})
+
+	originalResponder := createOpenAITextResponse
+	calls := 0
+	createOpenAITextResponse = func(context.Context, string, openAITextRequest) (string, error) {
+		calls++
+		return "", nil
+	}
+	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
+
+	app.flushBrainForIntake()
+	if calls != 0 {
+		t.Fatalf("open intake-flush circuit made %d provider calls", calls)
+	}
+	if baseline := app.ambientAgentBaselineID(key); baseline == headID {
+		t.Fatalf("open intake-flush circuit advanced raw cursor to %q", baseline)
+	}
+	if brains := app.memory.entriesOfKind(meetingMemoryKindBrain, 0); len(brains) != 0 {
+		t.Fatalf("open intake-flush circuit wrote brain entries: %+v", brains)
+	}
+	if deadLetters := app.memory.entriesOfKind(meetingMemoryKindDeadLetter, 0); len(deadLetters) != 0 {
+		t.Fatalf("open intake-flush circuit wrote dead letters: %+v", deadLetters)
 	}
 }

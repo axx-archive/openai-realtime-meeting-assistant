@@ -20,6 +20,8 @@ const (
 	roomScoutProactiveRestartAfter = 55 * time.Minute
 	roomScoutDisconnectedGrace     = 5 * time.Second
 	roomScoutRestartRetryAfter     = 2 * time.Second
+	roomScoutRestartRetryMaxAfter  = 30 * time.Second
+	roomScoutRestartMaxAttempts    = 4
 )
 
 var errRoomScoutProviderUnavailable = errors.New("room Scout provider session is unavailable")
@@ -98,11 +100,13 @@ type openAIRoomScoutTransport struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 
-	mu         sync.Mutex
-	session    roomScoutProviderSession
-	generation uint64
-	closed     bool
-	restarts   chan roomScoutRestartRequest
+	mu                 sync.Mutex
+	session            roomScoutProviderSession
+	generation         uint64
+	closed             bool
+	restarts           chan roomScoutRestartRequest
+	restartFailures    int
+	restartCircuitOpen bool
 
 	voiceMu           sync.Mutex
 	armedUntil        time.Time
@@ -110,6 +114,20 @@ type openAIRoomScoutTransport struct {
 	pendingSpeech     bool
 	pendingSession    roomScoutProviderSession
 	pendingGeneration uint64
+}
+
+type roomScoutProviderCircuitSnapshot struct {
+	Failures int
+	Open     bool
+}
+
+func (transport *openAIRoomScoutTransport) providerCircuitSnapshot() roomScoutProviderCircuitSnapshot {
+	if transport == nil {
+		return roomScoutProviderCircuitSnapshot{}
+	}
+	transport.mu.Lock()
+	defer transport.mu.Unlock()
+	return roomScoutProviderCircuitSnapshot{Failures: transport.restartFailures, Open: transport.restartCircuitOpen}
 }
 
 func newOpenAIRoomScoutTransport(ctx context.Context, app *kanbanBoardApp, apiKey string, scope RoomScoutScope, callbacks RoomScoutCallbacks, dial roomScoutProviderDialer) (*openAIRoomScoutTransport, error) {
@@ -278,7 +296,13 @@ func (transport *openAIRoomScoutTransport) setStatus(generation uint64, status R
 }
 
 func (transport *openAIRoomScoutTransport) requestRestart(generation uint64, reason string) {
-	if !transport.accepts(generation) {
+	if transport == nil || !transport.app.roomScoutScopeCurrent(transport.scope) {
+		return
+	}
+	transport.mu.Lock()
+	accepted := !transport.closed && transport.generation == generation && !transport.restartCircuitOpen
+	transport.mu.Unlock()
+	if !accepted {
 		return
 	}
 	request := roomScoutRestartRequest{generation: generation, reason: strings.TrimSpace(reason)}
@@ -317,7 +341,7 @@ func (transport *openAIRoomScoutTransport) runRestartSupervisor() {
 
 func (transport *openAIRoomScoutTransport) replaceSession(request roomScoutRestartRequest) {
 	transport.mu.Lock()
-	if transport.closed || transport.generation != request.generation {
+	if transport.closed || transport.generation != request.generation || transport.restartCircuitOpen {
 		transport.mu.Unlock()
 		return
 	}
@@ -339,7 +363,27 @@ func (transport *openAIRoomScoutTransport) replaceSession(request roomScoutResta
 	}
 	if err != nil {
 		transport.publish(nextGeneration, "error", map[string]any{"text": "Scout is temporarily unavailable", "error": trimForStorage(err.Error(), 300)})
-		time.AfterFunc(roomScoutRestartRetryAfter, func() {
+		transport.mu.Lock()
+		if transport.closed || transport.generation != nextGeneration {
+			transport.mu.Unlock()
+			return
+		}
+		transport.restartFailures++
+		attempts := transport.restartFailures
+		if attempts >= roomScoutRestartMaxAttempts {
+			transport.restartCircuitOpen = true
+			transport.mu.Unlock()
+			circuitErr := fmt.Errorf("room Scout provider circuit opened after %d failed reconnects", attempts)
+			transport.setStatus(nextGeneration, RoomScoutDegraded, circuitErr)
+			transport.publish(nextGeneration, "error", map[string]any{"text": "Scout voice is unavailable until this room session is restarted", "error": circuitErr.Error()})
+			return
+		}
+		transport.mu.Unlock()
+		delay := roomScoutRestartRetryAfter << (attempts - 1)
+		if delay > roomScoutRestartRetryMaxAfter {
+			delay = roomScoutRestartRetryMaxAfter
+		}
+		time.AfterFunc(delay, func() {
 			transport.requestRestart(nextGeneration, "retry after provider restart failure")
 		})
 		return
@@ -353,6 +397,8 @@ func (transport *openAIRoomScoutTransport) replaceSession(request roomScoutResta
 		return
 	}
 	transport.session = session
+	transport.restartFailures = 0
+	transport.restartCircuitOpen = false
 	transport.mu.Unlock()
 	transport.setStatus(nextGeneration, RoomScoutReady, nil)
 	transport.publish(nextGeneration, "status", map[string]any{"text": "Scout reconnected", "voiceState": "listening"})
@@ -570,7 +616,7 @@ var roomScoutAllowedTools = map[string]bool{
 	"set_recording":          true,
 	"answer_memory_question": true,
 	"portfolio_health":       true, "company_financial_snapshot": true,
-	"financial_comps": true, "meeting_recap": true,
+	"financial_comps": true, "meeting_recap": true, "meeting_interval_recall": true,
 	"cross_meeting_briefing": true, "get_meeting_detail": true,
 	"do_nothing": true,
 }
@@ -755,6 +801,16 @@ func (app *kanbanBoardApp) applyRoomScoutToolArgs(ctx context.Context, scope Roo
 		return app.applyToolCallArgsForPrincipal(toolName, args, principal)
 	case "meeting_recap":
 		return app.meetingRecap(args, "", scope.RoomID)
+	case "meeting_interval_recall":
+		kind, err := parseSTRIDETemporalWindow(asString(args["window"]))
+		if err != nil {
+			return nil, false, err
+		}
+		result, err := app.answerSTRIDETemporalForRoom(ctx, scope, kind)
+		if err != nil {
+			return nil, false, err
+		}
+		return result.toolResult(), false, nil
 	case "set_recording":
 		raw, ok := args["enabled"]
 		if !ok {

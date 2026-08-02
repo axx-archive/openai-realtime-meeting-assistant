@@ -60,11 +60,32 @@ go run ./cmd/bonfire-dr secure-manifest-create \
 
 Manifest creation rejects symlinked or non-regular artifact members, replacement during open, missing/duplicate volumes or tenants, reused role keys, invalid/expired independent evidence, mixed envelope digests, an incomplete capture barrier, or an unsigned release. The operator must still freeze writes and capture the four sources inside the declared barrier; the manifest makes that boundary verifiable but does not itself stop application writers.
 
+### Encrypting the opaque capture bundle
+
+`bonfire-dr envelope-seal` is custody plumbing for the single opaque bundle made from the four already-captured artifacts; it does not create the snapshots, claim immutable storage, or create independent evidence. It writes a `BFBKUP02` AES-256-GCM envelope whose non-sensitive metadata (purpose, plaintext digest, byte count, and seal time) is encrypted and authenticated with the payload. It never prints the key or capture bytes. The output is atomically written with mode `0600`.
+
+Supply exactly one key source: `BONFIRE_DR_ENVELOPE_KEY` (the default) or `--key-file`. A key is exactly 32 raw bytes, 64 hex characters, or standard/raw base64 decoding to 32 bytes; it is never derived from a passphrase. The key file is opened without following symlinks. Use the key's separate-custody reference—not its value—in the independently signed encryption evidence.
+
+```bash
+go run ./cmd/bonfire-dr envelope-seal \
+  --in four-root-capture.tar \
+  --out four-root-capture.bfbkup2 \
+  --purpose four-volume-capture
+```
+
+`envelope-open` authenticates and verifies the metadata digest before it atomically writes a `0600` plaintext output. It can read the old `BFBKUP01` local-backup format for recovery inspection, but legacy objects have no sealed capture metadata and are not a substitute for the secure capture evidence above:
+
+```bash
+go run ./cmd/bonfire-dr envelope-open \
+  --in downloaded-four-root-capture.bfbkup2 \
+  --out verified-four-root-capture.tar
+```
+
 ## Restore drill and readiness gate
 
 1. Keep the restored application stopped and network-isolated.
 2. Download the exact offsite object version named by the manifest. Verify its SHA-256 before decryption.
-3. Restore each artifact into a staging root. Put only its volume, provider snapshot ID, real path, and the exact downloaded encrypted-envelope path in `restore-preflight.json`; the CLI recomputes every byte digest and size itself.
+3. Authenticate and decrypt the exact downloaded envelope with `envelope-open`, then restore each artifact into a staging root. Put only its volume, provider snapshot ID, real path, and the exact downloaded encrypted-envelope path in `restore-preflight.json`; the CLI recomputes every byte digest and size itself.
 4. Point `--database-url` at the isolated restored PostgreSQL. In one read-only repeatable-read snapshot, the CLI enumerates all tenants from every registered tenant-bearing table, hashes every ordered purge row, and recomputes the complete logical database digest. That digest includes the registered table set, every column's ordered schema metadata, schema-migration rows, and every row of every canonical table encoded as canonical JSON and sorted with the PostgreSQL `C` collation. Both the complete-table and tenant-table registries are checked against `information_schema`, and migration tests enforce the same registries. The restored digest must exactly match the capture digest signed into the manifest; a database mutated at any point after capture is not eligible for preflight. Each tenant's purge prefix must also match the signed authority boundary.
 5. Use the exact immutable OCI digest and release attestation named by the manifest. Set `runningBinaryPath` to the binary that the restored image will run.
 6. Generate a fresh random nonce of at least 32 bytes, a unique restore-environment ID, and a receipt expiry no more than one hour after evaluation. Run preflight and persist its body-free receipt:

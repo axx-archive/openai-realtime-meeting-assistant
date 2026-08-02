@@ -18,6 +18,7 @@ export type RootStackParamList = {
   Memory: undefined;
   Meetings: undefined;
   Files: undefined;
+  AgentTeam: undefined;
   Board: undefined;
   Alerts: undefined;
   Settings: undefined;

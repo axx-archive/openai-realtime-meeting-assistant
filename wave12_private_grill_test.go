@@ -513,7 +513,7 @@ func TestIndexHasPrivateGrillMarkers(t *testing.T) {
 
 	// Act II is wired: the struck-question renderer is actually CALLED from the
 	// private realtime event handler on the assistant transcript (not dead code).
-	eventBody := functionBody(html, "function handlePrivateRealtimeVoiceEvent(raw)")
+	eventBody := functionBody(html, "function handlePrivateRealtimeVoiceEvent(raw, sessionToken, peer)")
 	if eventBody == "" {
 		t.Fatal("index.html missing handlePrivateRealtimeVoiceEvent")
 	}

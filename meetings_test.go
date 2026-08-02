@@ -478,6 +478,83 @@ func TestRejoinWithinGraceCancelsIdleEnd(t *testing.T) {
 	}
 }
 
+func TestMeetingIdleTimerShutdownJoinsInFlightCallback(t *testing.T) {
+	t.Setenv("MEETING_IDLE_END_GRACE", "1ms")
+	store := &meetingStore{
+		idleTimers:      map[string]*time.Timer{},
+		idleGenerations: map[string]uint64{},
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	store.armIdleEnd(officeRoomID, func(uint64) {
+		close(started)
+		<-release
+	})
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("idle callback did not start")
+	}
+
+	stopped := make(chan struct{})
+	go func() {
+		store.stopIdleEndsAndWait()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+		t.Fatal("shutdown returned before the in-flight callback completed")
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not join the completed callback")
+	}
+
+	firedAgain := make(chan struct{}, 1)
+	store.armIdleEnd(officeRoomID, func(uint64) { firedAgain <- struct{}{} })
+	select {
+	case <-firedAgain:
+		t.Fatal("a permanently stopped meeting store re-armed an idle timer")
+	case <-time.After(25 * time.Millisecond):
+	}
+}
+
+func TestKanbanBoardAppCloseJoinsIdleMeetingCallbacksBeforeReturn(t *testing.T) {
+	t.Setenv("MEETING_IDLE_END_GRACE", "1ms")
+	app := newIsolatedKanbanBoardApp(t)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	app.meetings.armIdleEnd(officeRoomID, func(uint64) {
+		close(started)
+		<-release
+	})
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("idle callback did not start")
+	}
+
+	closed := make(chan error, 1)
+	go func() { closed <- app.Close() }()
+	select {
+	case err := <-closed:
+		t.Fatalf("Close returned before the idle callback completed: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Close did not join the completed idle callback")
+	}
+}
+
 // A zombie/backgrounded socket that never runs its onclose defer keeps
 // activeParticipantCount() above zero, so the empty-room idle end never arms and
 // the meeting id never rotates (the live ~22h/two-sitting accretion). The

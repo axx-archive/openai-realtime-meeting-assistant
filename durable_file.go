@@ -66,7 +66,7 @@ func writeFileAtomicallyUnfenced(path string, data []byte, perm fs.FileMode, dur
 		return fmt.Errorf("write temp file: %w", err)
 	}
 	if durable {
-		if err := temp.Sync(); err != nil {
+		if err := syncTemporaryFileForAtomicWrite(temp); err != nil {
 			_ = temp.Close()
 			return fmt.Errorf("sync temp file: %w", err)
 		}
@@ -193,3 +193,8 @@ func syncDirectory(path string) error {
 }
 
 var syncDirectoryForAtomicWrite = syncDirectory
+
+// Narrow fault-injection seam for proving that callers never publish an
+// authoritative commit marker when the replacement file itself was not
+// synced. Production delegates directly to os.File.Sync.
+var syncTemporaryFileForAtomicWrite = func(file *os.File) error { return file.Sync() }

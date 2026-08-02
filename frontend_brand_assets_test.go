@@ -87,8 +87,11 @@ func TestStrideBrandAssetContract(t *testing.T) {
 	if !strings.Contains(index, `<link rel="icon" href="/public/favicon.png" type="image/png">`) {
 		t.Fatal("index.html does not use the Stride Signal favicon")
 	}
-	if got := strings.Count(index, `<img src="/public/app-icon.png" alt="">`); got < 2 {
-		t.Fatalf("web rail and sign-in must both use the Stride Signal app icon, got %d references", got)
+	if got := strings.Count(index, `<img src="/public/app-icon.png" alt="">`); got != 1 {
+		t.Fatalf("only the sign-in tile should use the Stride Signal app icon, got %d references", got)
+	}
+	if !strings.Contains(index, `<span class="wordmark topbar__wordmark" aria-hidden="true"></span>`) {
+		t.Fatal("the desktop rail must use the quiet Stride wordmark instead of a second app-icon tile")
 	}
 	for _, legacy := range []string{"bonfireRailLogCutout", "M553 92", "M553 98"} {
 		if strings.Contains(index, legacy) {
@@ -173,7 +176,7 @@ func TestStrideSignalInstrumentContract(t *testing.T) {
 	// lie it exists to avoid.
 	for _, wiring := range []string{
 		"function openStrideSignalTap(stream, role)",
-		"openStrideSignalTap(privateRealtimeVoiceStream, 'human')",
+		"openStrideSignalTap(attempt.stream, 'human')",
 		"openStrideSignalTap(stream, 'scout')",
 		"analyser.getByteTimeDomainData(tap.data)",
 		"startStrideSignalDrive()",

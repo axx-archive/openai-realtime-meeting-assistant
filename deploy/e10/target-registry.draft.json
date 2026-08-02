@@ -1,0 +1,138 @@
+{
+  "schemaVersion": "stride.e10.target-registry/v3",
+  "registryId": "replace-with-final-e10-registry-id",
+  "signer": {
+    "signerKeyId": "replace-with-approved-registry-key-id",
+    "signerIdentityId": "replace-with-approved-release-owner-id",
+    "signerPublicKeyFingerprintSha256": "REPLACE_WITH_APPROVED_REGISTRY_PUBLIC_KEY_SHA256"
+  },
+  "candidate": {
+    "releaseCommit": "REPLACE_WITH_EXACT_RELEASE_COMMIT",
+    "gitTreeDigest": "REPLACE_WITH_EXACT_GIT_TREE_DIGEST",
+    "imageDigest": "REPLACE_WITH_EXACT_APP_IMAGE_DIGEST",
+    "configDigest": "REPLACE_WITH_EXACT_COMPOSE_CADDY_CONFIG_DIGEST",
+    "routeMapDigest": "REPLACE_WITH_EXACT_FINAL_ROUTE_MAP_DIGEST"
+  },
+  "targets": [
+    {
+      "id": "two-three-person-two-hour-rooms", "category": "physical_device_webrtc", "fixtureSha256": "REPLACE_WITH_ROOM_FIXTURE_SHA256", "environment": "physical-release-candidate", "minimumArtifacts": 2, "minimumSampleSize": 3, "measurementRevisionSha256": "REPLACE_WITH_ROOM_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "rollback-on-room-threshold-failure", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"duration_seconds","comparator":"at_least","value":7200,"unit":"seconds"},{"name":"participant_count","comparator":"at_least","value":3,"unit":"count"},{"name":"fatal_media_failures","comparator":"exactly","value":0,"unit":"count"},{"name":"transcript_gap_seconds","comparator":"at_most","value":5,"unit":"seconds"}]
+    },
+    {
+      "id": "gallery-speaker-expanded-screen-share", "category": "physical_device_webrtc", "fixtureSha256": "REPLACE_WITH_LAYOUT_FIXTURE_SHA256", "environment": "physical-release-candidate", "minimumArtifacts": 3, "minimumSampleSize": 4, "measurementRevisionSha256": "REPLACE_WITH_LAYOUT_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "rollback-on-layout-threshold-failure", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"mode_success_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"screen_share_success_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"fatal_failures","comparator":"exactly","value":0,"unit":"count"}]
+    },
+    {
+      "id": "packet-loss-disconnect-rejoin-cleanup", "category": "physical_device_webrtc", "fixtureSha256": "REPLACE_WITH_NETWORK_FAULT_FIXTURE_SHA256", "environment": "physical-release-candidate", "minimumArtifacts": 3, "minimumSampleSize": 10, "measurementRevisionSha256": "REPLACE_WITH_NETWORK_FAULT_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "rollback-on-rejoin-cleanup-failure", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"successful_rejoin_percent","comparator":"at_least","value":99,"unit":"percent"},{"name":"orphan_media_tracks","comparator":"exactly","value":0,"unit":"count"},{"name":"cleanup_p95_seconds","comparator":"at_most","value":10,"unit":"seconds"}]
+    },
+    {
+      "id": "browser-native-mixed-room", "category": "physical_device_webrtc", "fixtureSha256": "REPLACE_WITH_MIXED_CLIENT_FIXTURE_SHA256", "environment": "physical-release-candidate", "minimumArtifacts": 3, "minimumSampleSize": 6, "measurementRevisionSha256": "REPLACE_WITH_MIXED_CLIENT_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "rollback-on-mixed-client-failure", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"join_success_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"cross_client_media_success_percent","comparator":"exactly","value":100,"unit":"percent"}]
+    },
+    {
+      "id": "guest-room-boundary", "category": "physical_device_webrtc", "fixtureSha256": "REPLACE_WITH_GUEST_FIXTURE_SHA256", "environment": "physical-release-candidate", "minimumArtifacts": 3, "minimumSampleSize": 10, "measurementRevisionSha256": "REPLACE_WITH_GUEST_BOUNDARY_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "disable-guest-access-on-boundary-failure", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"authorized_join_success_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"unauthorized_observations","comparator":"exactly","value":0,"unit":"count"}]
+    },
+    {
+      "id": "restrictive-network-turn", "category": "physical_device_webrtc", "fixtureSha256": "REPLACE_WITH_TURN_FIXTURE_SHA256", "environment": "physical-release-candidate", "minimumArtifacts": 3, "minimumSampleSize": 10, "measurementRevisionSha256": "REPLACE_WITH_TURN_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "rollback-on-turn-threshold-failure", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"turn_relay_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"successful_media_flows","comparator":"at_least","value":10,"unit":"count"},{"name":"fatal_media_failures","comparator":"exactly","value":0,"unit":"count"}]
+    },
+    {
+      "id": "bluetooth-audio-route-change", "category": "physical_device_webrtc", "fixtureSha256": "REPLACE_WITH_AUDIO_ROUTE_FIXTURE_SHA256", "environment": "physical-release-candidate", "minimumArtifacts": 2, "minimumSampleSize": 6, "measurementRevisionSha256": "REPLACE_WITH_AUDIO_ROUTE_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "rollback-on-audio-route-failure", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"route_change_success_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"duplicate_audio_tracks","comparator":"exactly","value":0,"unit":"count"}]
+    },
+    {
+      "id": "camera-switch-background-lock", "category": "physical_device_webrtc", "fixtureSha256": "REPLACE_WITH_CAMERA_LIFECYCLE_FIXTURE_SHA256", "environment": "physical-release-candidate", "minimumArtifacts": 3, "minimumSampleSize": 9, "measurementRevisionSha256": "REPLACE_WITH_CAMERA_LIFECYCLE_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "disable-native-video-on-lifecycle-failure", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"lifecycle_recovery_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"stale_track_publications","comparator":"exactly","value":0,"unit":"count"}]
+    },
+    {
+      "id": "multiple-devices-one-account", "category": "physical_device_webrtc", "fixtureSha256": "REPLACE_WITH_MULTI_DEVICE_FIXTURE_SHA256", "environment": "physical-release-candidate", "minimumArtifacts": 2, "minimumSampleSize": 6, "measurementRevisionSha256": "REPLACE_WITH_MULTI_DEVICE_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "rollback-on-device-identity-failure", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"correct_roster_identity_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"cross_device_session_leaks","comparator":"exactly","value":0,"unit":"count"}]
+    },
+    {
+      "id": "induced-ai-failure-human-media", "category": "physical_device_webrtc", "fixtureSha256": "REPLACE_WITH_AI_FAILURE_FIXTURE_SHA256", "environment": "physical-release-candidate", "minimumArtifacts": 3, "minimumSampleSize": 10, "measurementRevisionSha256": "REPLACE_WITH_AI_FAILURE_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "disable-ai-lane-on-media-coupling", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"human_media_continuity_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"human_media_interruptions","comparator":"exactly","value":0,"unit":"count"}]
+    },
+    {
+      "id": "room-media-aggregate", "category": "physical_device_webrtc", "fixtureSha256": "REPLACE_WITH_ROOM_MEDIA_AGGREGATE_FIXTURE_SHA256", "environment": "physical-release-candidate", "minimumArtifacts": 2, "minimumSampleSize": 200, "measurementRevisionSha256": "REPLACE_WITH_ROOM_MEDIA_AGGREGATE_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "rollback-on-room-media-aggregate-breach", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"join_success_percent","comparator":"at_least","value":99.5,"unit":"percent"},{"name":"first_remote_audio_p95_seconds","comparator":"at_most","value":2.5,"unit":"seconds"},{"name":"first_remote_video_p95_seconds","comparator":"at_most","value":3.5,"unit":"seconds"},{"name":"network_loss_recovery_p95_seconds","comparator":"at_most","value":8,"unit":"seconds"},{"name":"concurrent_room_count","comparator":"at_least","value":2,"unit":"count"},{"name":"participants_per_room","comparator":"at_least","value":3,"unit":"count"},{"name":"concurrent_soak_duration_seconds","comparator":"at_least","value":7200,"unit":"seconds"},{"name":"cross_room_events","comparator":"exactly","value":0,"unit":"count"},{"name":"unintended_fatal_disconnects","comparator":"exactly","value":0,"unit":"count"},{"name":"participant_outages_over_five_seconds","comparator":"exactly","value":0,"unit":"count"},{"name":"cpu_p95_percent_of_baseline","comparator":"at_most","value":110,"unit":"percent_of_baseline"},{"name":"rss_p95_percent_of_baseline","comparator":"at_most","value":110,"unit":"percent_of_baseline"},{"name":"post_cycle_rss_drift_percent","comparator":"at_most","value":5,"unit":"percent"},{"name":"join_leave_cycles","comparator":"at_least","value":20,"unit":"count"}]
+    },
+    {
+      "id": "locked-device-push-deep-link", "category": "physical_device_webrtc", "fixtureSha256": "REPLACE_WITH_LOCKED_DEVICE_PUSH_DEEP_LINK_FIXTURE_SHA256", "environment": "physical-release-candidate", "minimumArtifacts": 3, "minimumSampleSize": 100, "measurementRevisionSha256": "REPLACE_WITH_LOCKED_DEVICE_PUSH_DEEP_LINK_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "disable-locked-device-delivery-on-boundary-failure", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"locked_delivery_success_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"authorized_deep_link_success_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"wrong_destination_opens","comparator":"exactly","value":0,"unit":"count"},{"name":"unauthorized_opens","comparator":"exactly","value":0,"unit":"count"},{"name":"lock_screen_private_content_disclosures","comparator":"exactly","value":0,"unit":"count"},{"name":"open_p95_seconds","comparator":"at_most","value":5,"unit":"seconds"}]
+    },
+    {
+      "id": "encrypted-immutable-offsite-custody", "category": "ha_dr", "fixtureSha256": "REPLACE_WITH_CUSTODY_FIXTURE_SHA256", "environment": "independent-offsite-boundary", "minimumArtifacts": 2, "minimumSampleSize": 2, "measurementRevisionSha256": "REPLACE_WITH_CUSTODY_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "halt-backup-promotion-on-custody-failure", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"encrypted_objects_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"immutable_objects_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"offsite_digest_local_manifest_match_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"custody_policy_violations","comparator":"exactly","value":0,"unit":"count"}]
+    },
+    {
+      "id": "independent-key-and-restore-host-custody", "category": "ha_dr", "fixtureSha256": "REPLACE_WITH_KEY_CUSTODY_FIXTURE_SHA256", "environment": "independent-restore-boundary", "minimumArtifacts": 2, "minimumSampleSize": 2, "measurementRevisionSha256": "REPLACE_WITH_KEY_CUSTODY_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "halt-restore-promotion-on-custody-failure", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"independent_key_holders","comparator":"at_least","value":2,"unit":"count"},{"name":"independent_restore_hosts","comparator":"at_least","value":1,"unit":"count"},{"name":"restore_host_production_memberships","comparator":"exactly","value":0,"unit":"count"},{"name":"production_mounts","comparator":"exactly","value":0,"unit":"count"}]
+    },
+    {
+      "id": "signed-authenticated-four-root-restore", "category": "ha_dr", "fixtureSha256": "REPLACE_WITH_RESTORE_FIXTURE_SHA256", "environment": "independent-restore-boundary", "minimumArtifacts": 2, "minimumSampleSize": 2, "measurementRevisionSha256": "REPLACE_WITH_RESTORE_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "reject-restore-on-integrity-or-authority-failure", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"root_count","comparator":"at_least","value":4,"unit":"count"},{"name":"approved_restore_authentications_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"invalid_or_unapproved_restores_accepted","comparator":"exactly","value":0,"unit":"count"},{"name":"snapshot_age_before_mutation_seconds","comparator":"at_most","value":900,"unit":"seconds"},{"name":"rto_seconds","comparator":"at_most","value":3600,"unit":"seconds"},{"name":"restore_attempts_over_3600_seconds","comparator":"exactly","value":0,"unit":"count"},{"name":"canonical_database_manifest_parity_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"canonical_files_blobs_manifest_parity_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"workflow_manifest_parity_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"purge_manifest_parity_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"events_lost_after_snapshot_watermark","comparator":"exactly","value":0,"unit":"count"},{"name":"integrity_failures","comparator":"exactly","value":0,"unit":"count"},{"name":"purge_continuity_percent","comparator":"exactly","value":100,"unit":"percent"}]
+    },
+    {
+      "id": "canonical-data-rpo", "category": "ha_dr", "fixtureSha256": "REPLACE_WITH_CANONICAL_RPO_FIXTURE_SHA256", "environment": "production-ha-drill", "minimumArtifacts": 3, "minimumSampleSize": 3, "measurementRevisionSha256": "REPLACE_WITH_CANONICAL_RPO_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "rollback-on-canonical-rpo-breach", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"rpo_seconds","comparator":"at_most","value":300,"unit":"seconds"},{"name":"rpo_observations_over_300_seconds","comparator":"exactly","value":0,"unit":"count"},{"name":"missing_canonical_events","comparator":"exactly","value":0,"unit":"count"}]
+    },
+    {
+      "id": "control-data-rpo", "category": "ha_dr", "fixtureSha256": "REPLACE_WITH_CONTROL_RPO_FIXTURE_SHA256", "environment": "production-ha-drill", "minimumArtifacts": 3, "minimumSampleSize": 3, "measurementRevisionSha256": "REPLACE_WITH_CONTROL_RPO_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "rollback-on-control-rpo-breach", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"rpo_seconds","comparator":"at_most","value":300,"unit":"seconds"},{"name":"rpo_observations_over_300_seconds","comparator":"exactly","value":0,"unit":"count"},{"name":"missing_control_records","comparator":"exactly","value":0,"unit":"count"}]
+    },
+    {
+      "id": "live-app-control-failover", "category": "ha_dr", "fixtureSha256": "REPLACE_WITH_APP_FAILOVER_FIXTURE_SHA256", "environment": "production-ha-drill", "minimumArtifacts": 3, "minimumSampleSize": 3, "measurementRevisionSha256": "REPLACE_WITH_APP_FAILOVER_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "restore-retained-route-on-failover-breach", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"successful_failovers_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"failover_seconds","comparator":"at_most","value":60,"unit":"seconds"},{"name":"failovers_over_60_seconds","comparator":"exactly","value":0,"unit":"count"},{"name":"control_plane_integrity_failures","comparator":"exactly","value":0,"unit":"count"}]
+    },
+    {
+      "id": "turn-failover-and-session-drain", "category": "ha_dr", "fixtureSha256": "REPLACE_WITH_TURN_FAILOVER_FIXTURE_SHA256", "environment": "production-ha-drill", "minimumArtifacts": 3, "minimumSampleSize": 10, "measurementRevisionSha256": "REPLACE_WITH_TURN_FAILOVER_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "restore-retained-turn-route-on-failure", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"new_session_failover_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"existing_session_drain_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"media_interruption_p95_seconds","comparator":"at_most","value":2,"unit":"seconds"},{"name":"media_interruptions_over_two_seconds","comparator":"exactly","value":0,"unit":"count"},{"name":"cross_tenant_media_leaks","comparator":"exactly","value":0,"unit":"count"}]
+    },
+    {
+      "id": "purge-continuity", "category": "ha_dr", "fixtureSha256": "REPLACE_WITH_PURGE_FIXTURE_SHA256", "environment": "independent-restore-boundary", "minimumArtifacts": 3, "minimumSampleSize": 10, "measurementRevisionSha256": "REPLACE_WITH_PURGE_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "reject-restore-on-purge-authority-loss", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"purged_objects_resurrected","comparator":"exactly","value":0,"unit":"count"},{"name":"purge_authority_continuity_percent","comparator":"exactly","value":100,"unit":"percent"}]
+    },
+    {
+      "id": "retained-release-rollback", "category": "ha_dr", "fixtureSha256": "REPLACE_WITH_ROLLBACK_FIXTURE_SHA256", "environment": "production-ha-drill", "minimumArtifacts": 2, "minimumSampleSize": 2, "measurementRevisionSha256": "REPLACE_WITH_ROLLBACK_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "stop-release-if-retained-rollback-fails", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"rollback_success_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"purge_authority_regressions","comparator":"exactly","value":0,"unit":"count"}]
+    },
+    {
+      "id": "twenty-four-hour-ten-sitting-soak", "category": "ha_dr", "fixtureSha256": "REPLACE_WITH_SOAK_FIXTURE_SHA256", "environment": "production-release-candidate", "minimumArtifacts": 1, "minimumSampleSize": 10, "measurementRevisionSha256": "REPLACE_WITH_SOAK_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "rollback-on-soak-threshold-failure", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"duration_seconds","comparator":"at_least","value":86400,"unit":"seconds"},{"name":"sitting_count","comparator":"at_least","value":10,"unit":"count"},{"name":"fatal_failures","comparator":"exactly","value":0,"unit":"count"},{"name":"safety_gate_failures","comparator":"exactly","value":0,"unit":"count"},{"name":"cross_tenant_leaks","comparator":"exactly","value":0,"unit":"count"}]
+    },
+    {
+      "id": "ephemeral-worker-per-run", "category": "worker_orchestrator", "fixtureSha256": "REPLACE_WITH_EPHEMERAL_WORKER_FIXTURE_SHA256", "environment": "isolated-worker-candidate", "minimumArtifacts": 3, "minimumSampleSize": 10, "measurementRevisionSha256": "REPLACE_WITH_WORKER_ISOLATION_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "disable-external-workers-on-lifecycle-failure", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"ephemeral_run_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"cross_run_state_leaks","comparator":"exactly","value":0,"unit":"count"}]
+    },
+    {
+      "id": "default-deny-egress-enforcement", "category": "worker_orchestrator", "fixtureSha256": "REPLACE_WITH_EGRESS_FIXTURE_SHA256", "environment": "isolated-worker-candidate", "minimumArtifacts": 3, "minimumSampleSize": 20, "measurementRevisionSha256": "REPLACE_WITH_EGRESS_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "disable-external-workers-on-egress-bypass", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"approved_egress_success_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"blocked_unapproved_egress_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"successful_unapproved_egress","comparator":"exactly","value":0,"unit":"count"}]
+    },
+    {
+      "id": "short-lived-run-bound-credentials", "category": "worker_orchestrator", "fixtureSha256": "REPLACE_WITH_CREDENTIAL_FIXTURE_SHA256", "environment": "isolated-worker-candidate", "minimumArtifacts": 3, "minimumSampleSize": 20, "measurementRevisionSha256": "REPLACE_WITH_CREDENTIAL_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "disable-external-workers-on-credential-scope-failure", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"expired_or_cross_run_credentials_accepted","comparator":"exactly","value":0,"unit":"count"},{"name":"run_bound_credentials_percent","comparator":"exactly","value":100,"unit":"percent"}]
+    },
+    {
+      "id": "worker-resource-and-time-caps", "category": "worker_orchestrator", "fixtureSha256": "REPLACE_WITH_RESOURCE_CAP_FIXTURE_SHA256", "environment": "isolated-worker-candidate", "minimumArtifacts": 3, "minimumSampleSize": 20, "measurementRevisionSha256": "REPLACE_WITH_RESOURCE_CAP_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "disable-external-workers-on-cap-bypass", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"cap_enforcement_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"uncapped_runs","comparator":"exactly","value":0,"unit":"count"}]
+    },
+    {
+      "id": "signed-callback-and-replay-fence", "category": "worker_orchestrator", "fixtureSha256": "REPLACE_WITH_CALLBACK_FIXTURE_SHA256", "environment": "isolated-worker-candidate", "minimumArtifacts": 3, "minimumSampleSize": 20, "measurementRevisionSha256": "REPLACE_WITH_CALLBACK_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "disable-external-workers-on-callback-failure", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"valid_signed_callbacks_accepted_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"invalid_callbacks_accepted","comparator":"exactly","value":0,"unit":"count"},{"name":"replayed_callbacks_accepted","comparator":"exactly","value":0,"unit":"count"}]
+    },
+    {
+      "id": "no-production-or-company-brain-mount", "category": "worker_orchestrator", "fixtureSha256": "REPLACE_WITH_MOUNT_ISOLATION_FIXTURE_SHA256", "environment": "isolated-worker-candidate", "minimumArtifacts": 3, "minimumSampleSize": 20, "measurementRevisionSha256": "REPLACE_WITH_MOUNT_ISOLATION_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "disable-external-workers-on-mount-exposure", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"blocked_mount_attempts","comparator":"at_least","value":20,"unit":"count"},{"name":"accessible_forbidden_mounts","comparator":"exactly","value":0,"unit":"count"}]
+    },
+    {
+      "id": "crash-restart-idempotency", "category": "worker_orchestrator", "fixtureSha256": "REPLACE_WITH_CRASH_FIXTURE_SHA256", "environment": "isolated-worker-candidate", "minimumArtifacts": 3, "minimumSampleSize": 20, "measurementRevisionSha256": "REPLACE_WITH_CRASH_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "disable-external-workers-on-idempotency-failure", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"recovered_runs_percent","comparator":"exactly","value":100,"unit":"percent"},{"name":"duplicate_side_effects","comparator":"exactly","value":0,"unit":"count"}]
+    },
+    {
+      "id": "external-write-and-agent-loop-gates", "category": "worker_orchestrator", "fixtureSha256": "REPLACE_WITH_AUTHORITY_GATE_FIXTURE_SHA256", "environment": "isolated-worker-candidate", "minimumArtifacts": 3, "minimumSampleSize": 20, "measurementRevisionSha256": "REPLACE_WITH_AUTHORITY_GATE_MEASUREMENT_CODE_SHA256", "ownerId": "evidence-operator", "independentReviewerId": "independent-reviewer", "rollbackTrigger": "disable-external-workers-on-authority-bypass", "physicalOrProduction": true,
+      "requiredMetrics": [{"name":"unauthorized_external_writes","comparator":"exactly","value":0,"unit":"count"},{"name":"autonomous_agent_loops","comparator":"exactly","value":0,"unit":"count"}]
+    }
+  ]
+}

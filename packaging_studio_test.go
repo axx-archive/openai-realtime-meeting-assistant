@@ -729,7 +729,7 @@ func TestPackagingStudioShipFilesFiveArtifactsAndEnqueuesRenders(t *testing.T) {
 	// A live render sidecar: a fresh heartbeat on the shared volume makes
 	// renderSidecarAvailable() true, so the export jobs enqueue into the fake
 	// file-per-job queue in the temp data dir.
-	if err := writeRenderRunnerHeartbeat("test-render-runner"); err != nil {
+	if err := writeHealthyRenderRunnerHeartbeatForTest(t, "test-render-runner"); err != nil {
 		t.Fatalf("write render heartbeat: %v", err)
 	}
 	if !renderSidecarAvailable() {
@@ -978,7 +978,7 @@ func TestPackagingStudioShipDisclosesSkipWithoutSidecar(t *testing.T) {
 // with NOTHING auto-revised (the founder decides at ship approval).
 func TestPackagingStudioSlideJurySeesRenderedPages(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
-	if err := writeRenderRunnerHeartbeat("test-render-runner"); err != nil {
+	if err := writeHealthyRenderRunnerHeartbeatForTest(t, "test-render-runner"); err != nil {
 		t.Fatalf("write render heartbeat: %v", err)
 	}
 	t.Setenv("BONFIRE_SLIDE_JURY_WAIT", "1s")
@@ -1011,42 +1011,40 @@ func TestPackagingStudioSlideJurySeesRenderedPages(t *testing.T) {
 		}
 	}
 
-	// The simulated sidecar: the moment ship_compile files the deck and stamps
-	// its render job, the page JPEGs land as {kind: image} assets — exactly
-	// what the real callback does via persistRenderPageImageAssets. Both pages
-	// land in ONE metadata write (replaceArtifactAssetsOfKind, the callback's
-	// own seam): waitForDeckPageImages proceeds on the FIRST visible image
-	// asset, so per-page appends would race the jury into seeing page one only.
-	go func() {
-		deadline := time.Now().Add(3 * time.Second)
-		for time.Now().Before(deadline) {
-			for _, artifact := range app.osArtifactsSnapshot(0) {
-				if artifact.Metadata["source"] != "packaging_studio_ship" ||
-					artifact.Metadata["artifactContract"] != packagingStudioDeckContract ||
-					strings.TrimSpace(artifact.Metadata["renderJobId"]) == "" {
-					continue
-				}
-				pages := make([]artifactAsset, 0, 2)
-				for index, page := range [][]byte{[]byte("fake-jpeg-page-one"), []byte("fake-jpeg-page-two")} {
-					ref, err := putBlob(page, "image/jpeg")
-					if err != nil {
-						return
-					}
-					pages = append(pages, artifactAsset{
-						Ref:  ref,
-						Mime: "image/jpeg",
-						Name: fmt.Sprintf("page-%02d.jpg", index+1),
-						Kind: "image",
-					})
-				}
-				_, _ = app.replaceArtifactAssetsOfKind(artifact.ID, "image", pages)
-				return
-			}
-			time.Sleep(5 * time.Millisecond)
+	// The simulated sidecar uses the app-local, test-only observation seam.
+	// It runs synchronously only after slide_jury observes the deck stamped by
+	// ship_compile, then lands BOTH pages in the callback's single metadata
+	// write. This tests the real artifact seam without a scheduler-dependent
+	// polling goroutine that can lose the intentionally short timeout under
+	// -race.
+	pages := make([]artifactAsset, 0, 2)
+	for index, page := range [][]byte{[]byte("fake-jpeg-page-one"), []byte("fake-jpeg-page-two")} {
+		ref, err := putBlob(page, "image/jpeg")
+		if err != nil {
+			t.Fatalf("store simulated rendered page %d: %v", index+1, err)
 		}
-	}()
+		pages = append(pages, artifactAsset{
+			Ref:  ref,
+			Mime: "image/jpeg",
+			Name: fmt.Sprintf("page-%02d.jpg", index+1),
+			Kind: "image",
+		})
+	}
+	var sidecarErr error
+	app.slideJuryDeckObserved = func(deck meetingMemoryEntry) {
+		if deck.Metadata["source"] != "packaging_studio_ship" ||
+			deck.Metadata["artifactContract"] != packagingStudioDeckContract ||
+			strings.TrimSpace(deck.Metadata["renderJobId"]) == "" {
+			sidecarErr = fmt.Errorf("slide jury observed an unstamped/non-studio deck: %v", deck.Metadata)
+			return
+		}
+		_, sidecarErr = app.replaceArtifactAssetsOfKind(deck.ID, "image", pages)
+	}
 
 	parentID, _, parks := driveStudioRunToShipApprovalWithSetup(t, app, "", wrapJuryResponder)
+	if sidecarErr != nil {
+		t.Fatalf("simulated render callback: %v", sidecarErr)
+	}
 	if len(parks) != 4 {
 		t.Fatalf("goal parked %d times (%v), want the four touchpoints — the jury is never a checkpoint", len(parks), parks)
 	}

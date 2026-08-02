@@ -118,7 +118,11 @@ func ReconcileCanonicalPlanWithOptions(ctx context.Context, source CanonicalImpo
 			eventByKey[key] = source.Events[index]
 		}
 		if object.Family == "tombstone" || object.Family == "eviction" {
-			journaled[object.ObjectID] = true
+			if object.LifecycleFamily != "" && object.LifecycleObjectID != "" {
+				journaled[object.LifecycleFamily+":"+object.LifecycleObjectID] = true
+			} else {
+				journaled[object.ObjectID] = true
+			}
 		}
 	}
 	testedPrincipals := append([]string(nil), options.TestedPrincipals...)
@@ -145,11 +149,15 @@ func ReconcileCanonicalPlanWithOptions(ctx context.Context, source CanonicalImpo
 		var current CanonicalEvent
 		for _, event := range history {
 			if event.AggregateVersion != expected {
-				report.Candidates = append(report.Candidates, CanonicalRepairCandidate{Family: event.AggregateType, ObjectID: event.AggregateID, Kind: "target_history_gap", TargetVersion: event.AggregateVersion})
-				break
+				_, legacyCheckpoint := canonicalLegacyImportBaselineInvariant(event)
+				_, currentIsLegacyCheckpoint := canonicalLegacyImportBaselineInvariant(current)
+				if !legacyCheckpoint || (current.EventID != uuid.Nil && (!currentIsLegacyCheckpoint || event.AggregateVersion <= current.AggregateVersion)) {
+					report.Candidates = append(report.Candidates, CanonicalRepairCandidate{Family: event.AggregateType, ObjectID: event.AggregateID, Kind: "target_history_gap", TargetVersion: event.AggregateVersion})
+					break
+				}
 			}
 			current = event
-			expected++
+			expected = event.AggregateVersion + 1
 		}
 		if current.EventID == uuid.Nil {
 			continue

@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -14,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -31,25 +34,32 @@ const (
 
 	defaultCodexRunnerPollInterval = 2 * time.Second
 	defaultCodexRunnerStaleAfter   = 2 * time.Minute
+	defaultCodexRunnerLease        = 30 * time.Second
 )
 
+var errCodexRunnerClaimLost = errors.New("Codex runner claim ownership was lost")
+
 type codexRunnerJob struct {
-	ID             string            `json:"id"`
-	ArtifactID     string            `json:"artifact_id"`
-	ThreadID       string            `json:"thread_id"`
-	Mode           string            `json:"mode"`
-	Query          string            `json:"query"`
-	Prompt         string            `json:"prompt"`
-	Authority      string            `json:"authority"`
-	Status         string            `json:"status"`
-	CreatedAt      time.Time         `json:"created_at"`
-	StartedAt      time.Time         `json:"started_at,omitempty"`
-	CompletedAt    time.Time         `json:"completed_at,omitempty"`
-	Attempts       int               `json:"attempts"`
-	RunnerID       string            `json:"runner_id,omitempty"`
-	Error          string            `json:"error,omitempty"`
-	RunnerEvidence string            `json:"runner_evidence,omitempty"`
-	Metadata       map[string]string `json:"metadata,omitempty"`
+	ID              string            `json:"id"`
+	ArtifactID      string            `json:"artifact_id"`
+	ThreadID        string            `json:"thread_id"`
+	Mode            string            `json:"mode"`
+	Query           string            `json:"query"`
+	Prompt          string            `json:"prompt"`
+	Authority       string            `json:"authority"`
+	Status          string            `json:"status"`
+	CreatedAt       time.Time         `json:"created_at"`
+	StartedAt       time.Time         `json:"started_at,omitempty"`
+	CompletedAt     time.Time         `json:"completed_at,omitempty"`
+	Attempts        int               `json:"attempts"`
+	RunnerID        string            `json:"runner_id,omitempty"`
+	ClaimGeneration uint64            `json:"claim_generation,omitempty"`
+	FencingToken    string            `json:"fencing_token,omitempty"`
+	LeaseExpiresAt  time.Time         `json:"lease_expires_at,omitempty"`
+	HeartbeatAt     time.Time         `json:"heartbeat_at,omitempty"`
+	Error           string            `json:"error,omitempty"`
+	RunnerEvidence  string            `json:"runner_evidence,omitempty"`
+	Metadata        map[string]string `json:"metadata,omitempty"`
 }
 
 type codexRunnerJobStore struct {
@@ -57,15 +67,17 @@ type codexRunnerJobStore struct {
 }
 
 type codexRunnerCallbackPayload struct {
-	JobID          string            `json:"job_id"`
-	ArtifactID     string            `json:"artifact_id"`
-	ThreadID       string            `json:"thread_id,omitempty"`
-	Status         string            `json:"status"`
-	Text           string            `json:"text,omitempty"`
-	Error          string            `json:"error,omitempty"`
-	RunnerEvidence string            `json:"runner_evidence,omitempty"`
-	Metadata       map[string]string `json:"metadata,omitempty"`
-	Capability     string            `json:"capability"`
+	JobID           string            `json:"job_id"`
+	ArtifactID      string            `json:"artifact_id"`
+	ThreadID        string            `json:"thread_id,omitempty"`
+	Status          string            `json:"status"`
+	Text            string            `json:"text,omitempty"`
+	Error           string            `json:"error,omitempty"`
+	RunnerEvidence  string            `json:"runner_evidence,omitempty"`
+	Metadata        map[string]string `json:"metadata,omitempty"`
+	Capability      string            `json:"capability"`
+	ClaimGeneration uint64            `json:"claim_generation,omitempty"`
+	FencingToken    string            `json:"fencing_token,omitempty"`
 }
 
 func codexRunnerQueuePath() string {
@@ -86,6 +98,10 @@ func codexRunnerPollInterval() time.Duration {
 	return durationEnv("BONFIRE_CODEX_RUNNER_POLL_INTERVAL", defaultCodexRunnerPollInterval, 250*time.Millisecond)
 }
 
+func codexRunnerLeaseDuration() time.Duration {
+	return durationEnv("BONFIRE_CODEX_RUNNER_LEASE_DURATION", defaultCodexRunnerLease, time.Second)
+}
+
 func newCodexRunnerJobStore(dir string) *codexRunnerJobStore {
 	return &codexRunnerJobStore{dir: filepath.Clean(strings.TrimSpace(dir))}
 }
@@ -96,6 +112,10 @@ func (store *codexRunnerJobStore) enqueue(job codexRunnerJob) (codexRunnerJob, e
 	}
 	if strings.TrimSpace(job.ID) == "" {
 		job.ID = newCodexRunnerJobID()
+	}
+	job.ID = strings.TrimSpace(job.ID)
+	if job.ID == "." || job.ID == ".." || filepath.Base(job.ID) != job.ID || strings.ContainsAny(job.ID, `/\\`) {
+		return codexRunnerJob{}, fmt.Errorf("invalid Codex runner job id %q", job.ID)
 	}
 	if strings.TrimSpace(job.Status) == "" {
 		job.Status = codexJobStatusQueued
@@ -117,27 +137,95 @@ func (store *codexRunnerJobStore) enqueue(job codexRunnerJob) (codexRunnerJob, e
 	if err := os.MkdirAll(store.dir, 0o755); err != nil {
 		return codexRunnerJob{}, fmt.Errorf("create Codex runner queue: %w", err)
 	}
-	if err := writeJSONFileAtomically(store.jobPath(job.ID), "Codex runner job", job); err != nil {
+	var result codexRunnerJob
+	err := store.withQueueLock(func() error {
+		// An explicitly reserved job ID is a durable outbox key. Retrying the same
+		// binding returns the existing job in-place (including running/terminal
+		// status) and must never overwrite it back to queued. Reusing an ID for a
+		// different artifact/thread/action fails closed.
+		if existing, readErr := store.read(filepath.Base(store.jobPath(job.ID))); readErr == nil {
+			if !sameCodexRunnerJobBinding(*existing, job) {
+				return fmt.Errorf("Codex runner job id %q is already bound to another action", job.ID)
+			}
+			result = *existing
+			return nil
+		} else if !errors.Is(readErr, os.ErrNotExist) {
+			return readErr
+		}
+		if writeErr := writeJSONFileAtomically(store.jobPath(job.ID), "Codex runner job", job); writeErr != nil {
+			return writeErr
+		}
+		result = job
+		return nil
+	})
+	if err != nil {
 		return codexRunnerJob{}, err
 	}
-	return job, nil
+	return result, nil
 }
 
-func (store *codexRunnerJobStore) claimNext(runnerID string) (*codexRunnerJob, error) {
+func (store *codexRunnerJobStore) withQueueLock(fn func() error) (resultErr error) {
+	if store == nil || strings.TrimSpace(store.dir) == "" {
+		return fmt.Errorf("Codex runner queue path is not configured")
+	}
+	if err := os.MkdirAll(store.dir, 0o755); err != nil {
+		return fmt.Errorf("create Codex runner queue: %w", err)
+	}
+	// Keep the durable lock adjacent to the queue rather than inside it. Queue
+	// tooling and legacy tests correctly treat every directory entry as a job;
+	// an out-of-band lock preserves that contract while still naming one lock
+	// per absolute queue path.
+	lock, err := os.OpenFile(store.dir+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return fmt.Errorf("open Codex runner queue lock: %w", err)
+	}
+	defer func() {
+		if closeErr := lock.Close(); closeErr != nil && resultErr == nil {
+			resultErr = fmt.Errorf("close Codex runner queue lock after mutation: %w", closeErr)
+		}
+	}()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("lock Codex runner queue: %w", err)
+	}
+	defer func() {
+		if unlockErr := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); unlockErr != nil && resultErr == nil {
+			// The caller must treat an unlock failure as ambiguous and never begin
+			// work from a claim returned alongside it. A persisted lease will expire
+			// and recover safely even if this process cannot prove lock release.
+			resultErr = fmt.Errorf("Codex runner queue mutation is ambiguous: unlock failed: %w", unlockErr)
+		}
+	}()
+	return fn()
+}
+
+func sameCodexRunnerJobBinding(existing codexRunnerJob, reserved codexRunnerJob) bool {
+	return strings.TrimSpace(existing.ID) == strings.TrimSpace(reserved.ID) &&
+		sameCodexRunnerActionBinding(existing, reserved)
+}
+
+func sameCodexRunnerActionBinding(existing codexRunnerJob, reserved codexRunnerJob) bool {
+	return strings.TrimSpace(existing.ArtifactID) == strings.TrimSpace(reserved.ArtifactID) &&
+		strings.TrimSpace(existing.ThreadID) == strings.TrimSpace(reserved.ThreadID) &&
+		strings.TrimSpace(existing.Mode) == strings.TrimSpace(reserved.Mode) &&
+		strings.TrimSpace(existing.Query) == strings.TrimSpace(reserved.Query) &&
+		normalizeCodexJobAuthority(existing.Authority) == normalizeCodexJobAuthority(reserved.Authority)
+}
+
+// findByActionBinding discovers a legacy random-ID job from the immutable
+// action tuple that was durable in the queue even when the old code crashed
+// before stamping runnerJobId back onto its child artifact.
+func (store *codexRunnerJobStore) findByActionBinding(binding codexRunnerJob) ([]codexRunnerJob, error) {
 	if store == nil || strings.TrimSpace(store.dir) == "" {
 		return nil, fmt.Errorf("Codex runner queue path is not configured")
 	}
 	entries, err := os.ReadDir(store.dir)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("read Codex runner queue: %w", err)
 	}
-	sort.SliceStable(entries, func(i, j int) bool {
-		return entries[i].Name() < entries[j].Name()
-	})
-
+	matches := make([]codexRunnerJob, 0, 1)
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
@@ -146,41 +234,222 @@ func (store *codexRunnerJobStore) claimNext(runnerID string) (*codexRunnerJob, e
 		if err != nil {
 			return nil, err
 		}
-		if job.Status != codexJobStatusQueued {
-			continue
+		if sameCodexRunnerActionBinding(*job, binding) {
+			matches = append(matches, *job)
 		}
-		now := time.Now().UTC()
-		job.Status = codexJobStatusRunning
-		job.StartedAt = now
-		job.Attempts++
-		job.RunnerID = runnerID
-		if job.Metadata == nil {
-			job.Metadata = map[string]string{}
-		}
-		job.Metadata["claimedAt"] = now.Format(time.RFC3339Nano)
-		job.Metadata["runnerId"] = runnerID
-		if err := store.update(*job); err != nil {
-			return nil, err
-		}
-		return job, nil
 	}
+	sort.Slice(matches, func(i, j int) bool { return matches[i].ID < matches[j].ID })
+	return matches, nil
+}
 
-	return nil, nil
+func (store *codexRunnerJobStore) claimNext(runnerID string) (*codexRunnerJob, error) {
+	return store.claimNextAt(runnerID, time.Now().UTC(), codexRunnerLeaseDuration())
+}
+
+func (store *codexRunnerJobStore) claimNextAt(runnerID string, now time.Time, leaseDuration time.Duration) (*codexRunnerJob, error) {
+	if store == nil || strings.TrimSpace(store.dir) == "" {
+		return nil, fmt.Errorf("Codex runner queue path is not configured")
+	}
+	runnerID = strings.TrimSpace(runnerID)
+	if runnerID == "" {
+		return nil, fmt.Errorf("Codex runner id is required")
+	}
+	if leaseDuration <= 0 {
+		return nil, fmt.Errorf("Codex runner lease duration must be positive")
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	} else {
+		now = now.UTC()
+	}
+	var claimed *codexRunnerJob
+	err := store.withQueueLock(func() error {
+		entries, readDirErr := os.ReadDir(store.dir)
+		if readDirErr != nil {
+			if os.IsNotExist(readDirErr) {
+				return nil
+			}
+			return fmt.Errorf("read Codex runner queue: %w", readDirErr)
+		}
+		sort.SliceStable(entries, func(i, j int) bool {
+			return entries[i].Name() < entries[j].Name()
+		})
+
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+				continue
+			}
+			job, readErr := store.read(entry.Name())
+			if readErr != nil {
+				// A malformed or unreadable queue entry makes ordering ambiguous. Stop
+				// instead of skipping it and executing later work out of order.
+				return readErr
+			}
+			recovered := false
+			switch job.Status {
+			case codexJobStatusQueued:
+			case codexJobStatusRunning:
+				if !codexRunnerLeaseExpired(*job, now, leaseDuration) {
+					continue
+				}
+				recovered = true
+			default:
+				continue
+			}
+			fencingToken, tokenErr := newCodexRunnerFencingToken()
+			if tokenErr != nil {
+				return tokenErr
+			}
+			job.Status = codexJobStatusRunning
+			job.StartedAt = now
+			job.Attempts++
+			job.RunnerID = runnerID
+			job.ClaimGeneration++
+			job.FencingToken = fencingToken
+			job.HeartbeatAt = now
+			job.LeaseExpiresAt = now.Add(leaseDuration)
+			job.CompletedAt = time.Time{}
+			job.Error = ""
+			job.RunnerEvidence = ""
+			if job.Metadata == nil {
+				job.Metadata = map[string]string{}
+			}
+			job.Metadata["claimedAt"] = now.Format(time.RFC3339Nano)
+			job.Metadata["heartbeatAt"] = now.Format(time.RFC3339Nano)
+			job.Metadata["leaseExpiresAt"] = job.LeaseExpiresAt.Format(time.RFC3339Nano)
+			job.Metadata["runnerId"] = runnerID
+			job.Metadata["claimGeneration"] = strconv.FormatUint(job.ClaimGeneration, 10)
+			if recovered {
+				job.Metadata["recoveredExpiredClaimAt"] = now.Format(time.RFC3339Nano)
+			}
+			if writeErr := writeJSONFileAtomically(store.jobPath(job.ID), "Codex runner job", *job); writeErr != nil {
+				return writeErr
+			}
+			copy := *job
+			claimed = &copy
+			return nil
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return claimed, nil
 }
 
 func (store *codexRunnerJobStore) update(job codexRunnerJob) error {
+	return store.updateAt(job, time.Now().UTC())
+}
+
+func (store *codexRunnerJobStore) updateAt(job codexRunnerJob, now time.Time) error {
 	if strings.TrimSpace(job.ID) == "" {
 		return fmt.Errorf("Codex runner job id is required")
 	}
 	if !validCodexJobStatus(job.Status) {
 		return fmt.Errorf("invalid Codex runner job status %q", job.Status)
 	}
-	if current, err := store.read(filepath.Base(store.jobPath(job.ID))); err == nil {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	return store.withQueueLock(func() error {
+		current, err := store.read(filepath.Base(store.jobPath(job.ID)))
+		if err != nil {
+			return err
+		}
 		if !codexJobStatusTransitionAllowed(current.Status, job.Status) {
 			return fmt.Errorf("Codex runner job status cannot transition from %s to %s", current.Status, job.Status)
 		}
+		if current.Status == codexJobStatusRunning || job.Status == codexJobStatusRunning || codexJobStatusTerminal(job.Status) {
+			if err := validateCodexRunnerClaimOwnership(*current, job, now.UTC(), current.Status == codexJobStatusRunning); err != nil {
+				return err
+			}
+		}
+		return writeJSONFileAtomically(store.jobPath(job.ID), "Codex runner job", job)
+	})
+}
+
+func (store *codexRunnerJobStore) renewClaim(job codexRunnerJob) (*codexRunnerJob, error) {
+	return store.renewClaimAt(job, time.Now().UTC(), codexRunnerLeaseDuration())
+}
+
+func (store *codexRunnerJobStore) renewClaimAt(job codexRunnerJob, now time.Time, leaseDuration time.Duration) (*codexRunnerJob, error) {
+	if leaseDuration <= 0 {
+		return nil, fmt.Errorf("Codex runner lease duration must be positive")
 	}
-	return writeJSONFileAtomically(store.jobPath(job.ID), "Codex runner job", job)
+	if now.IsZero() {
+		now = time.Now().UTC()
+	} else {
+		now = now.UTC()
+	}
+	var renewed *codexRunnerJob
+	err := store.withQueueLock(func() error {
+		current, readErr := store.read(filepath.Base(store.jobPath(job.ID)))
+		if readErr != nil {
+			return readErr
+		}
+		if current.Status != codexJobStatusRunning {
+			return fmt.Errorf("%w: job %s is %s", errCodexRunnerClaimLost, job.ID, current.Status)
+		}
+		if ownershipErr := validateCodexRunnerClaimOwnership(*current, job, now, true); ownershipErr != nil {
+			return ownershipErr
+		}
+		current.HeartbeatAt = now
+		current.LeaseExpiresAt = now.Add(leaseDuration)
+		if current.Metadata == nil {
+			current.Metadata = map[string]string{}
+		}
+		current.Metadata["heartbeatAt"] = now.Format(time.RFC3339Nano)
+		current.Metadata["leaseExpiresAt"] = current.LeaseExpiresAt.Format(time.RFC3339Nano)
+		if writeErr := writeJSONFileAtomically(store.jobPath(current.ID), "Codex runner job", *current); writeErr != nil {
+			return writeErr
+		}
+		copy := *current
+		renewed = &copy
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return renewed, nil
+}
+
+func validateCodexRunnerClaimOwnership(current codexRunnerJob, proposed codexRunnerJob, now time.Time, requireUnexpired bool) error {
+	if strings.TrimSpace(current.RunnerID) == "" || current.ClaimGeneration == 0 || strings.TrimSpace(current.FencingToken) == "" {
+		return fmt.Errorf("%w: persisted job has no complete lease identity", errCodexRunnerClaimLost)
+	}
+	if strings.TrimSpace(proposed.RunnerID) != strings.TrimSpace(current.RunnerID) ||
+		proposed.ClaimGeneration != current.ClaimGeneration ||
+		subtle.ConstantTimeCompare([]byte(strings.TrimSpace(proposed.FencingToken)), []byte(strings.TrimSpace(current.FencingToken))) != 1 {
+		return fmt.Errorf("%w: stale runner, generation, or fencing token for job %s", errCodexRunnerClaimLost, current.ID)
+	}
+	if requireUnexpired && (current.LeaseExpiresAt.IsZero() || !now.Before(current.LeaseExpiresAt)) {
+		return fmt.Errorf("%w: lease expired for job %s", errCodexRunnerClaimLost, current.ID)
+	}
+	return nil
+}
+
+func codexRunnerLeaseExpired(job codexRunnerJob, now time.Time, fallbackLease time.Duration) bool {
+	if !job.LeaseExpiresAt.IsZero() {
+		return !now.Before(job.LeaseExpiresAt)
+	}
+	// Legacy running records predate explicit leases. Recover them from their
+	// last durable activity instead of leaving them stuck forever.
+	base := job.HeartbeatAt
+	if base.IsZero() {
+		base = job.StartedAt
+	}
+	if base.IsZero() {
+		base = job.CreatedAt
+	}
+	return base.IsZero() || !now.Before(base.Add(fallbackLease))
+}
+
+func newCodexRunnerFencingToken() (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("create Codex runner fencing token: %w", err)
+	}
+	return fmt.Sprintf("v1.%x", raw), nil
 }
 
 func validCodexJobStatus(status string) bool {
@@ -332,11 +601,16 @@ func codexApprovalRequiredResult(thread scoutAgentThread, authority string) agen
 }
 
 func (app *kanbanBoardApp) enqueueCodexAgentThreadJob(thread scoutAgentThread, authority string) (agentThreadWorkerResult, error) {
+	return app.enqueueCodexAgentThreadJobWithID(thread, authority, "")
+}
+
+func (app *kanbanBoardApp) enqueueCodexAgentThreadJobWithID(thread scoutAgentThread, authority string, reservedJobID string) (agentThreadWorkerResult, error) {
 	authority = normalizeCodexJobAuthority(authority)
 	metadata := codexRunnerQueuedMetadata(thread, authority)
 	store := newCodexRunnerJobStore(codexRunnerQueuePath())
 	prompt := app.buildCodexAgentThreadPrompt(thread, time.Now(), authority)
 	job, err := store.enqueue(codexRunnerJob{
+		ID:         strings.TrimSpace(reservedJobID),
 		ArtifactID: thread.Artifact.ID,
 		ThreadID:   thread.ID,
 		Mode:       thread.Mode,
@@ -502,19 +776,21 @@ func processCodexRunnerJob(ctx context.Context, store *codexRunnerJobStore, job 
 		"codexSearch":         strconv.FormatBool(cfg.Search),
 		"startedAt":           firstNonEmptyString(job.StartedAt.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)),
 	}
-	_ = sendCodexRunnerCallback(ctx, codexRunnerCallbackPayload{
-		JobID:      job.ID,
-		ArtifactID: job.ArtifactID,
-		ThreadID:   job.ThreadID,
-		Status:     codexJobStatusRunning,
-		Metadata:   runningMetadata,
-	})
-
 	job.Status = codexJobStatusRunning
 	job.Metadata = mergeStringMaps(job.Metadata, runningMetadata)
 	if err := store.update(job); err != nil {
 		log.Errorf("Codex runner could not persist running job %s: %v", job.ID, err)
+		return
 	}
+	_ = sendCodexRunnerCallback(ctx, codexRunnerCallbackPayload{
+		JobID:           job.ID,
+		ArtifactID:      job.ArtifactID,
+		ThreadID:        job.ThreadID,
+		Status:          codexJobStatusRunning,
+		Metadata:        runningMetadata,
+		ClaimGeneration: job.ClaimGeneration,
+		FencingToken:    job.FencingToken,
+	})
 	if authority == codexJobAuthorityExternalWrite && !boolEnv("BONFIRE_CODEX_EXTERNAL_WRITE_ENABLED") {
 		err := fmt.Errorf("external runner execution is disabled; set BONFIRE_CODEX_EXTERNAL_WRITE_ENABLED only for an approved shipping window")
 		job.Status = codexJobStatusApprovalRequired
@@ -524,14 +800,30 @@ func processCodexRunnerJob(ctx context.Context, store *codexRunnerJobStore, job 
 			"status": codexJobStatusApprovalRequired, "threadStatus": codexJobStatusApprovalRequired,
 			"goalStatus": "approval_required", "reviewGate": "approval_required", "error": err.Error(),
 		})
-		_ = store.update(job)
-		_ = sendCodexRunnerCallback(ctx, codexRunnerCallbackPayload{JobID: job.ID, ArtifactID: job.ArtifactID, ThreadID: job.ThreadID, Status: job.Status, Error: job.Error, Metadata: job.Metadata})
+		if updateErr := store.update(job); updateErr != nil {
+			log.Errorf("Codex runner could not persist approval-required job %s: %v", job.ID, updateErr)
+			return
+		}
+		_ = sendCodexRunnerCallback(ctx, codexRunnerCallbackPayload{
+			JobID: job.ID, ArtifactID: job.ArtifactID, ThreadID: job.ThreadID,
+			Status: job.Status, Error: job.Error, Metadata: job.Metadata,
+			ClaimGeneration: job.ClaimGeneration, FencingToken: job.FencingToken,
+		})
 		return
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
+	stopHeartbeat, heartbeatResult := startCodexRunnerClaimHeartbeat(runCtx, store, job, cancel)
 	result, err := runCodexExecCommand(runCtx, cfg, strings.TrimSpace(job.Prompt))
+	stopHeartbeat()
+	if heartbeatErr := <-heartbeatResult; heartbeatErr != nil {
+		// Once renewal is ambiguous or ownership is lost, this generation has no
+		// authority to persist a terminal state or notify the application. The
+		// winner (or a later lease recovery) is the sole valid completion source.
+		log.Errorf("Codex runner abandoned stale claim for job %s: %v", job.ID, heartbeatErr)
+		return
+	}
 	completedAt := time.Now().UTC()
 	if err != nil {
 		job.Status = codexJobStatusFailed
@@ -550,16 +842,19 @@ func processCodexRunnerJob(ctx context.Context, store *codexRunnerJobStore, job 
 		})
 		if updateErr := store.update(job); updateErr != nil {
 			log.Errorf("Codex runner could not persist failed job %s: %v", job.ID, updateErr)
+			return
 		}
 		_ = sendCodexRunnerCallback(ctx, codexRunnerCallbackPayload{
-			JobID:          job.ID,
-			ArtifactID:     job.ArtifactID,
-			ThreadID:       job.ThreadID,
-			Status:         codexJobStatusFailed,
-			Text:           buildCodexRunnerErrorArtifact(job, err),
-			Error:          err.Error(),
-			RunnerEvidence: job.RunnerEvidence,
-			Metadata:       job.Metadata,
+			JobID:           job.ID,
+			ArtifactID:      job.ArtifactID,
+			ThreadID:        job.ThreadID,
+			Status:          codexJobStatusFailed,
+			Text:            buildCodexRunnerErrorArtifact(job, err),
+			Error:           err.Error(),
+			RunnerEvidence:  job.RunnerEvidence,
+			Metadata:        job.Metadata,
+			ClaimGeneration: job.ClaimGeneration,
+			FencingToken:    job.FencingToken,
 		})
 		return
 	}
@@ -597,19 +892,52 @@ func processCodexRunnerJob(ctx context.Context, store *codexRunnerJobStore, job 
 	}
 	if err := store.update(job); err != nil {
 		log.Errorf("Codex runner could not persist completed job %s: %v", job.ID, err)
+		return
 	}
 
 	if err := sendCodexRunnerCallback(ctx, codexRunnerCallbackPayload{
-		JobID:          job.ID,
-		ArtifactID:     job.ArtifactID,
-		ThreadID:       job.ThreadID,
-		Status:         status,
-		Text:           text,
-		RunnerEvidence: job.RunnerEvidence,
-		Metadata:       job.Metadata,
+		JobID:           job.ID,
+		ArtifactID:      job.ArtifactID,
+		ThreadID:        job.ThreadID,
+		Status:          status,
+		Text:            text,
+		RunnerEvidence:  job.RunnerEvidence,
+		Metadata:        job.Metadata,
+		ClaimGeneration: job.ClaimGeneration,
+		FencingToken:    job.FencingToken,
 	}); err != nil {
 		log.Errorf("Codex runner callback failed for job %s: %v", job.ID, err)
 	}
+}
+
+func startCodexRunnerClaimHeartbeat(ctx context.Context, store *codexRunnerJobStore, job codexRunnerJob, cancelRun context.CancelFunc) (func(), <-chan error) {
+	leaseDuration := codexRunnerLeaseDuration()
+	interval := leaseDuration / 3
+	if interval < 250*time.Millisecond {
+		interval = 250 * time.Millisecond
+	}
+	heartbeatCtx, stop := context.WithCancel(ctx)
+	result := make(chan error, 1)
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeatCtx.Done():
+				result <- nil
+				return
+			case <-ticker.C:
+				renewed, err := store.renewClaim(job)
+				if err != nil {
+					cancelRun()
+					result <- err
+					return
+				}
+				job = *renewed
+			}
+		}
+	}()
+	return stop, result
 }
 
 func buildCodexRunnerErrorArtifact(job codexRunnerJob, err error) string {
@@ -754,7 +1082,11 @@ func sendCodexRunnerCallback(ctx context.Context, payload codexRunnerCallbackPay
 	if token == "" {
 		return fmt.Errorf("BONFIRE_RUNNER_TOKEN is required for Codex runner callbacks")
 	}
-	payload.Capability = codexRunnerCallbackCapability(token, payload.JobID, payload.ArtifactID, payload.ThreadID)
+	if payload.ClaimGeneration > 0 || strings.TrimSpace(payload.FencingToken) != "" {
+		payload.Capability = codexRunnerCallbackCapabilityV2(token, payload.JobID, payload.ArtifactID, payload.ThreadID, payload.ClaimGeneration, payload.FencingToken)
+	} else {
+		payload.Capability = codexRunnerCallbackCapability(token, payload.JobID, payload.ArtifactID, payload.ThreadID)
+	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("encode Codex runner callback: %w", err)
@@ -784,6 +1116,16 @@ func codexRunnerCallbackCapability(token, jobID, artifactID, threadID string) st
 		_, _ = mac.Write([]byte(value))
 	}
 	return fmt.Sprintf("v1.%x", mac.Sum(nil))
+}
+
+func codexRunnerCallbackCapabilityV2(token, jobID, artifactID, threadID string, generation uint64, fencingToken string) string {
+	mac := hmac.New(sha256.New, []byte(strings.TrimSpace(token)))
+	for _, value := range []string{jobID, artifactID, threadID, strconv.FormatUint(generation, 10), fencingToken} {
+		value = strings.TrimSpace(value)
+		_, _ = fmt.Fprintf(mac, "%d:", len(value))
+		_, _ = mac.Write([]byte(value))
+	}
+	return fmt.Sprintf("v2.%x", mac.Sum(nil))
 }
 
 func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
@@ -833,7 +1175,25 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 		writeSystemStatusJSON(w, r, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid runner status"})
 		return
 	}
-	expectedCapability := codexRunnerCallbackCapability(strings.TrimSpace(os.Getenv("BONFIRE_RUNNER_TOKEN")), callbackJobID, artifactID, callbackThreadID)
+	runnerToken := strings.TrimSpace(os.Getenv("BONFIRE_RUNNER_TOKEN"))
+	expectedCapability := codexRunnerCallbackCapability(runnerToken, callbackJobID, artifactID, callbackThreadID)
+	queueStore := newCodexRunnerJobStore(codexRunnerQueuePath())
+	queueJob, queueErr := queueStore.read(filepath.Base(queueStore.jobPath(callbackJobID)))
+	if queueErr == nil && queueJob.ClaimGeneration > 0 {
+		if strings.TrimSpace(queueJob.ArtifactID) != artifactID || strings.TrimSpace(queueJob.ThreadID) != callbackThreadID || strings.TrimSpace(queueJob.Status) != status {
+			writeSystemStatusJSON(w, r, http.StatusConflict, map[string]any{"ok": false, "error": "runner callback does not match the durable claimed job state"})
+			return
+		}
+		if payload.ClaimGeneration != queueJob.ClaimGeneration ||
+			subtle.ConstantTimeCompare([]byte(strings.TrimSpace(payload.FencingToken)), []byte(strings.TrimSpace(queueJob.FencingToken))) != 1 {
+			writeSystemStatusJSON(w, r, http.StatusConflict, map[string]any{"ok": false, "error": "runner callback carries a stale claim"})
+			return
+		}
+		expectedCapability = codexRunnerCallbackCapabilityV2(runnerToken, callbackJobID, artifactID, callbackThreadID, payload.ClaimGeneration, payload.FencingToken)
+	} else if queueErr != nil && !errors.Is(queueErr, os.ErrNotExist) {
+		writeSystemStatusJSON(w, r, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "runner claim could not be verified"})
+		return
+	}
 	if subtle.ConstantTimeCompare([]byte(strings.TrimSpace(payload.Capability)), []byte(expectedCapability)) != 1 {
 		writeSystemStatusJSON(w, r, http.StatusUnauthorized, map[string]any{"ok": false, "error": "runner capability does not match job binding"})
 		return
@@ -1269,7 +1629,7 @@ func (app *kanbanBoardApp) rerunOriginForUser(artifact meetingMemoryEntry, userE
 		if !decoded || thread.ArchivedAt != "" {
 			return origin
 		}
-		if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+		if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic && scoutChatThreadAllowsViewer(thread, userEmail) {
 			origin["originKind"] = agentThreadOriginChannel
 			origin["originId"] = originID
 			return origin

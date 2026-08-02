@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -216,6 +219,128 @@ func TestRunSlopClassifierIdempotent(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("second pass must not re-classify the consumed window; model calls=%d, want 1", calls)
+	}
+}
+
+func TestSlopClassifierProviderCircuitBoundsTickerRetries(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	for i := 0; i < 8; i++ {
+		id := "t-provider-" + string(rune('a'+i))
+		if _, ok, err := app.memory.appendTranscript(id, "", "Settled provider-outage candidate "+string(rune('a'+i))+" about a historical note."); err != nil || !ok {
+			t.Fatalf("append %s: ok=%v err=%v", id, ok, err)
+		}
+		backdateMemoryEntry(app.memory, id, 10*24*time.Hour)
+	}
+	calls := 0
+	responder := func(context.Context, string, openAITextRequest) (string, error) {
+		calls++
+		return "", &openAIProviderFailure{err: errors.New("provider unavailable")}
+	}
+	agent := slopClassifierAgent()
+	for attempt := 0; attempt < ambientProviderMaxWindowAttempts+2; attempt++ {
+		_ = app.runSlopClassifierOnce(agent, context.Background(), "test-key", responder, 8)
+		app.mu.Lock()
+		if failure := app.agentFailures[agent.name]; failure != nil && !failure.providerOpen {
+			failure.backoffUntil = time.Now().Add(-time.Second)
+		}
+		app.mu.Unlock()
+	}
+	if calls != ambientProviderMaxWindowAttempts {
+		t.Fatalf("provider calls=%d, want bounded at %d", calls, ambientProviderMaxWindowAttempts)
+	}
+	app.mu.Lock()
+	failure := app.agentFailures[agent.name]
+	app.mu.Unlock()
+	if failure == nil || !failure.providerOpen {
+		t.Fatalf("provider circuit=%+v, want open", failure)
+	}
+}
+
+func TestSlopHeldWindowSurvivesSameProcessAndProcessRestart(t *testing.T) {
+	t.Setenv("SLOP_CLASSIFIER_INTERVAL", "1h")
+	dir := t.TempDir()
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
+
+	agent := slopClassifierAgent()
+	app := newKanbanBoardApp()
+	if _, appended, err := app.memory.appendTranscript("slop-base", "", "Baseline transcript before the held classification window."); err != nil || !appended {
+		t.Fatalf("append baseline: appended=%v err=%v", appended, err)
+	}
+	app.setAmbientAgentBaselineID(agent.name, "slop-base")
+	if _, err := app.ensureAmbientScopeCheckpoint(agent, officeRoomID, "slop-base"); err != nil {
+		t.Fatalf("seed pre-existing Slop scope checkpoint: %v", err)
+	}
+	app.startSlopClassifierWorker("test-key")
+	heldIDs := make([]string, 0, 8)
+	for index := 0; index < 8; index++ {
+		id := fmt.Sprintf("slop-held-%d", index)
+		heldIDs = append(heldIDs, id)
+		if _, appended, err := app.memory.appendTranscript(id, "", fmt.Sprintf("Settled held transcript %d about obsolete office logistics.", index)); err != nil || !appended {
+			t.Fatalf("append %s: appended=%v err=%v", id, appended, err)
+		}
+	}
+	app.memory.mu.Lock()
+	for index := range app.memory.entries {
+		for _, id := range heldIDs {
+			if app.memory.entries[index].ID == id {
+				app.memory.entries[index].CreatedAt = time.Now().UTC().Add(-10 * 24 * time.Hour)
+			}
+		}
+	}
+	if err := app.memory.rewriteLocked(true); err != nil {
+		app.memory.mu.Unlock()
+		t.Fatalf("persist backdated held inputs: %v", err)
+	}
+	app.memory.mu.Unlock()
+
+	providerWindow := agent.name + ":provider-window"
+	app.recordAmbientAgentHoldFailure(agent, providerWindow, officeRoomID)
+	held, ok, err := app.ambientHeldWindow(agent.name)
+	if err != nil || !ok || held.BaselineID != "slop-base" || held.WindowID != providerWindow {
+		t.Fatalf("slop held checkpoint=%+v ok=%v err=%v", held, ok, err)
+	}
+	app.startSlopClassifierWorker("test-key")
+	if baseline := app.ambientAgentBaselineID(agent.name); baseline != "slop-base" {
+		t.Fatalf("same-process Slop baseline=%q, want slop-base", baseline)
+	}
+	if candidates, _ := app.buildSlopCandidates(agent, time.Now().UTC()); len(candidates) != len(heldIDs) {
+		t.Fatalf("same-process Slop candidates=%d, want %d", len(candidates), len(heldIDs))
+	}
+	if err := app.Close(); err != nil {
+		t.Fatalf("close first process: %v", err)
+	}
+
+	restarted := newKanbanBoardApp()
+	restarted.startSlopClassifierWorker("test-key")
+	if baseline := restarted.ambientAgentBaselineID(agent.name); baseline != "slop-base" {
+		t.Fatalf("process-restart Slop baseline=%q, want slop-base", baseline)
+	}
+	var seenInput string
+	calls := 0
+	if err := restarted.runSlopClassifierOnce(agent, context.Background(), "test-key", func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		calls++
+		seenInput = request.Input
+		return `[]`, nil
+	}, len(heldIDs)); err != nil {
+		t.Fatalf("process-restart Slop retry: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("Slop retry calls=%d, want 1", calls)
+	}
+	for _, id := range heldIDs {
+		if !strings.Contains(seenInput, id) {
+			t.Fatalf("Slop retry input omitted held id %s: %s", id, seenInput)
+		}
+	}
+	if cursor := restarted.newestSlopCursor(); cursor != heldIDs[len(heldIDs)-1] {
+		t.Fatalf("Slop cursor=%q, want %q", cursor, heldIDs[len(heldIDs)-1])
+	}
+	if _, ok, err := restarted.ambientHeldWindow(agent.name); err != nil || ok {
+		t.Fatalf("Slop held checkpoint remained after success: ok=%v err=%v", ok, err)
+	}
+	if err := restarted.Close(); err != nil {
+		t.Fatalf("close restarted process: %v", err)
 	}
 }
 

@@ -637,9 +637,7 @@ func authorizedFileRowForMove(ctx context.Context, user *userAccount, fileID str
 		if entry.Kind != meetingMemoryKindScoutChat || entry.ID != threadID {
 			continue
 		}
-		ownerEmail := normalizeAccountEmail(entry.Metadata["ownerEmail"])
-		visibility := normalizeScoutChatVisibility(entry.Metadata["visibility"])
-		if ownerEmail == "" || ownerEmail != normalizeAccountEmail(user.Email) && visibility != scoutChatVisibilityPublic {
+		if normalizeAccountEmail(entry.Metadata["ownerEmail"]) == "" || !scoutChatThreadMetadataAllowsViewer(entry.Metadata, user.Email) {
 			kanbanApp.memory.mu.Unlock()
 			return assistantFileRecord{}, false
 		}
@@ -668,7 +666,7 @@ func authorizedFileRowForMove(ctx context.Context, user *userAccount, fileID str
 	if !sourceFound {
 		return assistantFileRecord{}, false
 	}
-	for _, row := range fileRecordsFromThread(thread) {
+	for _, row := range kanbanApp.fileRecordsFromThread(user.Email, thread) {
 		if row.ID != fileID {
 			continue
 		}

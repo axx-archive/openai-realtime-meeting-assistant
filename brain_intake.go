@@ -163,7 +163,6 @@ func (app *kanbanBoardApp) seedBrainIntake(ownerEmail string, threadID string) (
 // {"ok":true,"message":userMessage} from the caller.
 func (app *kanbanBoardApp) handleBrainIntakeMessage(user *userAccount, thread scoutChatThreadRecord, userMessage scoutChatMessageRecord, response map[string]any) (map[string]any, error) {
 	currentKey := brainIntakeStepKey(thread.IntakeStep)
-	app.appendBrainIntakeContribution(user, currentKey, userMessage)
 
 	nextStep := thread.IntakeStep + 1
 	complete := brainIntakeIsDone(userMessage.Text) || nextStep >= len(brainIntakeSteps)
@@ -186,6 +185,10 @@ func (app *kanbanBoardApp) handleBrainIntakeMessage(user *userAccount, thread sc
 	if err != nil {
 		return nil, err
 	}
+	// Only project the contribution after the destination-revision-fenced chat
+	// commit. A revoked or audience-changed attachment must not reach memory as
+	// an orphaned blob ref or stale derived-text record.
+	app.appendBrainIntakeContribution(user, currentKey, userMessage)
 	if complete {
 		// Force one brain pass now so the user does not wait the ambient
 		// interval; keyless or with the worker disabled this is a silent no-op
@@ -256,6 +259,21 @@ func (app *kanbanBoardApp) commitBrainIntakeStep(ownerEmail string, threadID str
 	if err != nil {
 		return scoutChatThreadRecord{}, err
 	}
+	for index := range messages {
+		expected := strings.TrimSpace(messages[index].attachmentDestinationRevision)
+		if expected != "" && expected != scoutChatAttachmentDestinationRevision(thread) {
+			return scoutChatThreadRecord{}, fmt.Errorf("chat attachment destination changed; attach the file again")
+		}
+		messages[index].attachmentDestinationRevision = ""
+	}
+	hasAttachmentSources := attachmentMessagesHaveSources(messages)
+	if hasAttachmentSources {
+		app.pendingAttachmentUploadsMu.Lock()
+		if err := app.validateAttachmentMessageSourcesLocked(ownerEmail, thread, messages); err != nil {
+			app.pendingAttachmentUploadsMu.Unlock()
+			return scoutChatThreadRecord{}, err
+		}
+	}
 	thread.Messages = append(thread.Messages, messages...)
 	thread.IntakeStep = nextStep
 	if complete {
@@ -264,7 +282,17 @@ func (app *kanbanBoardApp) commitBrainIntakeStep(ownerEmail string, threadID str
 	thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	thread.Preview = scoutChatThreadPreview(thread)
 	if err := app.saveScoutChatThread(thread); err != nil {
+		if hasAttachmentSources {
+			app.pendingAttachmentUploadsMu.Unlock()
+		}
 		return scoutChatThreadRecord{}, err
+	}
+	if hasAttachmentSources {
+		if err := app.commitAttachmentMessageSourcesLocked(messages); err != nil {
+			app.pendingAttachmentUploadsMu.Unlock()
+			return scoutChatThreadRecord{}, fmt.Errorf("chat saved but attachment authority finalization is ambiguous: %w", err)
+		}
+		app.pendingAttachmentUploadsMu.Unlock()
 	}
 	for _, message := range messages {
 		deliverScoutChatThreadUpdate(thread, message)
@@ -295,7 +323,7 @@ func (app *kanbanBoardApp) flushBrainForIntake() {
 	ctx, cancel := context.WithTimeout(context.Background(), meetingBrainRequestTimeout)
 	defer cancel()
 	app.ensureAmbientAgentBaseline(agent)
-	if _, err := app.runAmbientAgentOnce(agent, ctx, apiKey, nil, 1); err != nil {
+	if _, err := app.invokeAmbientAgentGuarded(agent, ctx, apiKey, nil, 1, officeRoomID); err != nil {
 		log.Errorf("brain intake flush failed: %v", err)
 	}
 }

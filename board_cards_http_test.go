@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -73,18 +74,64 @@ func TestAssistantBoardCardsCRUDAndUndoForSignedInMember(t *testing.T) {
 			t.Fatalf("deleted card still present: %+v", card)
 		}
 	}
+	records, err := boardLifecycleCommittedRecords(filepath.Join(filepath.Dir(meetingMemoryPath()), "deleted-objects.jsonl"))
+	if err != nil || len(records) != 1 ||
+		records[0].Phase != canonicalLifecyclePhaseCommitted ||
+		records[0].OperationID == "" ||
+		records[0].Family != "board_card" || records[0].ObjectID != cardID ||
+		records[0].Reason != "board_card_deleted" || !isHexDigest(records[0].StateDigest) {
+		t.Fatalf("delete lifecycle journal=%+v err=%v", records, err)
+	}
 
 	restored := boardCardRequest(t, http.MethodPost, "/assistant/board/cards/undo", "", cookies)
 	if restored.Code != http.StatusOK {
 		t.Fatalf("undo status=%d body=%s cards=%+v", restored.Code, restored.Body.String(), kanbanApp.snapshotState().Cards)
 	}
 	foundRestored := false
+	firstRestoredAt := ""
 	for _, card := range kanbanApp.snapshotState().Cards {
 		if card.ID == cardID {
 			foundRestored = true
+			if strings.TrimSpace(card.RestoredAt) == "" {
+				t.Fatal("restored card is missing its canonical lifecycle generation")
+			}
+			firstRestoredAt = card.RestoredAt
 		}
 	}
 	if !foundRestored {
 		t.Fatalf("restored card missing: %+v", kanbanApp.snapshotState().Cards)
+	}
+
+	revised := boardCardRequest(t, http.MethodPut, "/assistant/board/cards/"+cardID, `{"title":"Native card restored and revised","status":"In progress","owner":"Tim","notes":"Second lifecycle","tags":["mobile"]}`, cookies)
+	if revised.Code != http.StatusOK {
+		t.Fatalf("post-undo update status=%d body=%s", revised.Code, revised.Body.String())
+	}
+	deletedAgain := boardCardRequest(t, http.MethodDelete, "/assistant/board/cards/"+cardID, "", cookies)
+	if deletedAgain.Code != http.StatusOK {
+		t.Fatalf("second delete status=%d body=%s", deletedAgain.Code, deletedAgain.Body.String())
+	}
+	records, err = boardLifecycleCommittedRecords(filepath.Join(filepath.Dir(meetingMemoryPath()), "deleted-objects.jsonl"))
+	if err != nil || len(records) != 2 ||
+		records[0].Phase != canonicalLifecyclePhaseCommitted ||
+		records[1].Phase != canonicalLifecyclePhaseCommitted ||
+		records[0].StateDigest == records[1].StateDigest ||
+		!records[1].At.After(records[0].At) {
+		t.Fatalf("second delete lifecycle generations=%+v err=%v", records, err)
+	}
+	restoredAgain := boardCardRequest(t, http.MethodPost, "/assistant/board/cards/undo", "", cookies)
+	if restoredAgain.Code != http.StatusOK {
+		t.Fatalf("second undo status=%d body=%s", restoredAgain.Code, restoredAgain.Body.String())
+	}
+	foundRestoredAgain := false
+	for _, card := range kanbanApp.snapshotState().Cards {
+		if card.ID == cardID {
+			foundRestoredAgain = true
+			if card.RestoredAt == firstRestoredAt {
+				t.Fatalf("second undo reused lifecycle generation %q", card.RestoredAt)
+			}
+		}
+	}
+	if !foundRestoredAgain {
+		t.Fatal("second undo did not restore the same card identity")
 	}
 }

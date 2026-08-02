@@ -213,14 +213,14 @@ func TestHouseStyleDistillerSkipsUncitedOutput(t *testing.T) {
 		calls++
 		return "## Banned patterns\n- vibes, cited to nothing", nil
 	}
-	if err := app.runHouseStyleDistillerOnce(context.Background(), "test-key", responder); err != nil {
-		t.Fatalf("uncited pass must skip, not fail: %v", err)
+	if err := app.runHouseStyleDistillerOnce(context.Background(), "test-key", responder); err == nil {
+		t.Fatal("uncited pass must report a rejected output")
 	}
 	if _, ok := app.houseStyleArtifact(); ok {
 		t.Fatal("uncited house style was persisted, want skip")
 	}
-	if err := app.runHouseStyleDistillerOnce(context.Background(), "test-key", responder); err != nil {
-		t.Fatalf("retry pass: %v", err)
+	if err := app.runHouseStyleDistillerOnce(context.Background(), "test-key", responder); err == nil {
+		t.Fatal("retry pass must report a rejected output")
 	}
 	if calls != 2 {
 		t.Fatalf("responder calls=%d, want the skipped pass to retry next tick", calls)

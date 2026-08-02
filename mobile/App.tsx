@@ -42,13 +42,7 @@ export default function App() {
     GeistMono_600SemiBold,
   });
 
-  if (!fontsLoaded && !fontError) {
-    return (
-      <SafeAreaProvider>
-        <LaunchCradle />
-      </SafeAreaProvider>
-    );
-  }
+  if (!fontsLoaded && !fontError) return <LaunchCradle />;
 
   return (
     <SafeAreaProvider>

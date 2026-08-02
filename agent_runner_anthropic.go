@@ -362,7 +362,7 @@ func createAnthropicMessagesResponseHTTP(ctx context.Context, apiKey string, req
 	// successes with full token splits, failures with the error string — a
 	// 429/529 storm costs real latency and must be visible in the books.
 	started := time.Now()
-	response, err := (&http.Client{}).Do(httpRequest)
+	response, err := aiProviderHTTPClient(0).Do(httpRequest)
 	if err != nil {
 		err = fmt.Errorf("call Anthropic messages: %w", err)
 		recordAnthropicWireUsage(request, anthropicMessagesResponse{}, started, err)

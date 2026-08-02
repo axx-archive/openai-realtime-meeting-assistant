@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/gif"
@@ -17,18 +18,34 @@ import (
 func setupGiphyTest(t *testing.T) []*http.Cookie {
 	t.Helper()
 	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
 	t.Setenv("MEETING_ALLOWED_ORIGINS", "")
 	previousEndpoint := giphySearchEndpoint
 	previousTrendingEndpoint := giphyTrendingEndpoint
 	previousClient := giphySearchClient
 	previousImportClient := giphyImportClient
+	previousEnabled := giphyIntegrationEnabled
+	giphyIntegrationEnabled = true
 	t.Cleanup(func() {
+		kanbanApp = previousApp
 		giphySearchEndpoint = previousEndpoint
 		giphyTrendingEndpoint = previousTrendingEndpoint
 		giphySearchClient = previousClient
 		giphyImportClient = previousImportClient
+		giphyIntegrationEnabled = previousEnabled
 	})
 	return loginAs(t, "aj@shareability.com", "B0NFIRE!")
+}
+
+func giphyTestThreadID(t *testing.T) string {
+	t.Helper()
+	user := accountStore().findUser("aj@shareability.com")
+	thread, err := kanbanApp.createScoutChatThread(user.Email, user.Name, "GIF test", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create GIF destination: %v", err)
+	}
+	return thread.ID
 }
 
 type giphyRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -68,6 +85,26 @@ func giphyRequest(t *testing.T, method, path string, cookies []*http.Cookie) *ht
 	recorder := httptest.NewRecorder()
 	assistantGiphySearchHandler(recorder, request)
 	return recorder
+}
+
+func TestAssistantGiphyLaneIsCompileTimeDisabledPendingPrivacyAndProvenance(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	previousEnabled := giphyIntegrationEnabled
+	giphyIntegrationEnabled = false
+	t.Cleanup(func() {
+		kanbanApp = previousApp
+		giphyIntegrationEnabled = previousEnabled
+	})
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	t.Setenv("GIPHY_API_KEY", "server-secret")
+	if recorder := giphyRequest(t, http.MethodGet, "/assistant/giphy/search?q=hello", cookies); recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("disabled search status=%d body=%s, want 503", recorder.Code, recorder.Body.String())
+	}
+	if recorder := giphyImportRequestForTest(t, `{"threadId":"not-used","url":"https://media.giphy.com/media/test/giphy.gif"}`, cookies); recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("disabled import status=%d body=%s, want 503", recorder.Code, recorder.Body.String())
+	}
 }
 
 func TestAssistantGiphySearchHandlerAuthConfigurationAndInputGates(t *testing.T) {
@@ -147,8 +184,8 @@ func TestAssistantGiphySearchHandlerProxiesExactQueryAndProjectsTrustedURLs(t *t
 		if query.Get("rating") != "g" || query.Get("bundle") != "messaging_non_clips" || query.Get("country_code") != "US" {
 			t.Errorf("upstream safety/locality params=%v", query)
 		}
-		if customer := query.Get("customer_id"); customer == "" || strings.Contains(customer, "aj@") {
-			t.Errorf("customer_id=%q, want stable pseudonym", customer)
+		if customer := query.Get("customer_id"); customer != "" {
+			t.Errorf("customer_id=%q, want no user-derived provider identifier", customer)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
@@ -236,6 +273,7 @@ func TestAssistantGiphySearchHandlerHidesUpstreamFailures(t *testing.T) {
 
 func TestAssistantGiphyImportHandlerAuthenticatesBeforeFetchAndRejectsUntrustedURLs(t *testing.T) {
 	cookies := setupGiphyTest(t)
+	threadID := giphyTestThreadID(t)
 	requests := 0
 	giphyImportClient = &http.Client{Transport: giphyRoundTripFunc(func(*http.Request) (*http.Response, error) {
 		requests++
@@ -251,6 +289,7 @@ func TestAssistantGiphyImportHandlerAuthenticatesBeforeFetchAndRejectsUntrustedU
 		`{"url":"https://media.giphy.com/media/ok/not-a-gif.webp"}`,
 		`{"url":"https://giphy.com/gifs/this-is-a-page"}`,
 	} {
+		body = strings.TrimSuffix(body, "}") + fmt.Sprintf(`,"threadId":%q}`, threadID)
 		if recorder := giphyImportRequestForTest(t, body, cookies); recorder.Code != http.StatusBadRequest {
 			t.Fatalf("untrusted body=%s status=%d response=%s, want 400", body, recorder.Code, recorder.Body.String())
 		}
@@ -262,7 +301,7 @@ func TestAssistantGiphyImportHandlerAuthenticatesBeforeFetchAndRejectsUntrustedU
 
 func TestAssistantGiphyImportHandlerStoresValidatedGIF(t *testing.T) {
 	cookies := setupGiphyTest(t)
-	setupIsolatedBlobStore(t)
+	threadID := giphyTestThreadID(t)
 	data := tinyGIF(t)
 	giphyImportClient = &http.Client{Transport: giphyRoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if request.URL.String() != "https://media.giphy.com/media/celebrate/giphy.gif" || request.Header.Get("Accept") != "image/gif" {
@@ -276,7 +315,7 @@ func TestAssistantGiphyImportHandlerStoresValidatedGIF(t *testing.T) {
 		}, nil
 	})}
 
-	recorder := giphyImportRequestForTest(t, `{"url":"https://media.giphy.com/media/celebrate/giphy.gif","title":"Celebration","id":"celebrate"}`, cookies)
+	recorder := giphyImportRequestForTest(t, fmt.Sprintf(`{"url":"https://media.giphy.com/media/celebrate/giphy.gif","title":"Celebration","id":"celebrate","threadId":%q}`, threadID), cookies)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("import status=%d body=%s, want 200", recorder.Code, recorder.Body.String())
 	}
@@ -287,7 +326,7 @@ func TestAssistantGiphyImportHandlerStoresValidatedGIF(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode import response: %v", err)
 	}
-	if !response.OK || response.File.Name != "Celebration.gif" || response.File.Kind != "gif" || response.File.Mime != "image/gif" || response.File.Size != int64(len(data)) || response.File.Ref == "" {
+	if !response.OK || response.File.Name != "Celebration.gif" || response.File.Kind != "gif" || response.File.Mime != "image/gif" || response.File.Size != int64(len(data)) || response.File.Ref == "" || response.File.SourceID == "" || response.File.SourceRevision == "" {
 		t.Fatalf("unexpected import response: %+v", response)
 	}
 	stored, meta, err := getBlob(response.File.Ref)
@@ -298,7 +337,7 @@ func TestAssistantGiphyImportHandlerStoresValidatedGIF(t *testing.T) {
 
 func TestAssistantGiphyImportHandlerRejectsBadUpstreamMedia(t *testing.T) {
 	cookies := setupGiphyTest(t)
-	setupIsolatedBlobStore(t)
+	threadID := giphyTestThreadID(t)
 	for _, test := range []struct {
 		name        string
 		status      int
@@ -314,7 +353,7 @@ func TestAssistantGiphyImportHandlerRejectsBadUpstreamMedia(t *testing.T) {
 			giphyImportClient = &http.Client{Transport: giphyRoundTripFunc(func(request *http.Request) (*http.Response, error) {
 				return &http.Response{StatusCode: test.status, Header: http.Header{"Content-Type": []string{test.contentType}}, Body: io.NopCloser(bytes.NewReader(test.body)), Request: request}, nil
 			})}
-			recorder := giphyImportRequestForTest(t, `{"url":"https://media.giphy.com/media/fixture/giphy.gif"}`, cookies)
+			recorder := giphyImportRequestForTest(t, fmt.Sprintf(`{"url":"https://media.giphy.com/media/fixture/giphy.gif","threadId":%q}`, threadID), cookies)
 			if recorder.Code != test.wantStatus {
 				t.Fatalf("status=%d body=%s, want %d", recorder.Code, recorder.Body.String(), test.wantStatus)
 			}

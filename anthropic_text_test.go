@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -14,6 +15,16 @@ func swapAnthropicMessagesResponder(t *testing.T, responder anthropicMessagesRes
 	original := createAnthropicMessagesResponse
 	createAnthropicMessagesResponse = responder
 	t.Cleanup(func() { createAnthropicMessagesResponse = original })
+}
+
+func TestCreateAnthropicTextResponseMarksWireFailuresProviderNeutral(t *testing.T) {
+	swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
+		return anthropicMessagesResponse{}, errors.New("anthropic transport unavailable")
+	})
+	_, err := createAnthropicTextResponse(context.Background(), "sk-ant-test", anthropicTextRequest{Input: "x"})
+	if err == nil || !isProviderInvocationFailure(err) {
+		t.Fatalf("Anthropic wire error=%v, want provider-neutral invocation marker", err)
+	}
 }
 
 // swapAnthropicTextResponder installs a fake chat text seam (mirrors the
@@ -172,7 +183,7 @@ func TestCreateAnthropicTextResponseGuards(t *testing.T) {
 	swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
 		return anthropicMessagesResponse{StopReason: "refusal"}, nil
 	})
-	if _, err := createAnthropicTextResponse(context.Background(), "sk-ant-test", anthropicTextRequest{Input: "x"}); err == nil || !strings.Contains(err.Error(), "declined") {
+	if _, err := createAnthropicTextResponse(context.Background(), "sk-ant-test", anthropicTextRequest{Input: "x"}); err == nil || !strings.Contains(err.Error(), "declined") || !isProviderOutputRejection(err) {
 		t.Fatalf("refusal err=%v, want declined error", err)
 	}
 
@@ -182,7 +193,7 @@ func TestCreateAnthropicTextResponseGuards(t *testing.T) {
 	swapAnthropicMessagesResponder(t, func(context.Context, string, anthropicMessagesRequest) (anthropicMessagesResponse, error) {
 		return anthropicMessagesResponse{StopReason: "end_turn", Content: []json.RawMessage{thinkingOnly}}, nil
 	})
-	if _, err := createAnthropicTextResponse(context.Background(), "sk-ant-test", anthropicTextRequest{Input: "x"}); err == nil || !strings.Contains(err.Error(), "output text") {
+	if _, err := createAnthropicTextResponse(context.Background(), "sk-ant-test", anthropicTextRequest{Input: "x"}); err == nil || !strings.Contains(err.Error(), "output text") || !isProviderOutputRejection(err) {
 		t.Fatalf("empty-text err=%v, want output-text error", err)
 	}
 
@@ -195,7 +206,7 @@ func TestCreateAnthropicTextResponseGuards(t *testing.T) {
 			Content:    []json.RawMessage{mockAnthropicTextBlock("partial answer that got cut")},
 		}, nil
 	})
-	if _, err := createAnthropicTextResponse(context.Background(), "sk-ant-test", anthropicTextRequest{Input: "x"}); err == nil || !strings.Contains(err.Error(), "max_tokens") {
+	if _, err := createAnthropicTextResponse(context.Background(), "sk-ant-test", anthropicTextRequest{Input: "x"}); err == nil || !strings.Contains(err.Error(), "max_tokens") || !isProviderOutputRejection(err) {
 		t.Fatalf("truncation err=%v, want max_tokens error", err)
 	}
 }

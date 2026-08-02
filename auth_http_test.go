@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -219,13 +220,16 @@ func TestNativeLogoutDestroysBearerSession(t *testing.T) {
 		t.Fatalf("native login token missing: err=%v body=%s", err, loginRec.Body.String())
 	}
 	deviceToken := "ExponentPushToken[logout-device]"
-	if err := upsertDeviceToken(deviceTokenRecord{UserEmail: "aj@shareability.com", Token: deviceToken, Platform: "ios"}); err != nil {
+	if err := upsertDeviceToken(deviceTokenRecord{TenantID: canonicalTenantID(), UserEmail: "aj@shareability.com", Token: deviceToken,
+		Platform: "ios", SessionHash: hashResetToken(login.SessionToken)}); err != nil {
 		t.Fatalf("register device: %v", err)
 	}
 
 	logoutReq := httptest.NewRequest(http.MethodPost, "/auth/logout", strings.NewReader(`{"deviceToken":"`+deviceToken+`"}`))
 	logoutReq.Header.Set("Content-Type", "application/json")
+	logoutReq.Header.Set("X-Bonfire-Client", "expo")
 	logoutReq.Header.Set("Authorization", "Bearer "+login.SessionToken)
+	logoutReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: login.SessionToken})
 	logoutRec := httptest.NewRecorder()
 	authHandler(logoutRec, logoutReq)
 	if logoutRec.Code != http.StatusOK {
@@ -234,6 +238,15 @@ func TestNativeLogoutDestroysBearerSession(t *testing.T) {
 	if tokens := snapshotDeviceTokenStore().Tokens; len(tokens) != 0 {
 		t.Fatalf("device binding survived authenticated logout: %+v", tokens)
 	}
+	clearedMatchingCookie := false
+	for _, cookie := range logoutRec.Result().Cookies() {
+		if cookie.Name == sessionCookieName && (cookie.MaxAge < 0 || cookie.Value == "") {
+			clearedMatchingCookie = true
+		}
+	}
+	if !clearedMatchingCookie {
+		t.Fatal("native logout did not clear its matching ambient session cookie")
+	}
 
 	meReq := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
 	meReq.Header.Set("Authorization", "Bearer "+login.SessionToken)
@@ -241,6 +254,123 @@ func TestNativeLogoutDestroysBearerSession(t *testing.T) {
 	authHandler(meRec, meReq)
 	if meRec.Code != http.StatusUnauthorized {
 		t.Fatalf("bearer session survived native logout: status=%d body=%s", meRec.Code, meRec.Body.String())
+	}
+}
+
+func TestNativeLogoutPrefersBearerOverConflictingAmbientCookie(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("DEVICE_PUSH_TOKENS_PATH", filepath.Join(t.TempDir(), "devices.json"))
+
+	bearerToken, err := userSessionStore().create("aj@shareability.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookieToken, err := userSessionStore().create("tim@shareability.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Preserve the browser contract: without a reviewed native-client marker,
+	// the HttpOnly cookie remains authoritative over an ambient bearer header.
+	webRequest := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	webRequest.AddCookie(&http.Cookie{Name: sessionCookieName, Value: cookieToken})
+	webRequest.Header.Set("Authorization", "Bearer "+bearerToken)
+	webUser := userFromRequest(webRequest)
+	if webUser == nil || webUser.Email != "tim@shareability.com" {
+		t.Fatalf("web authority=%+v, want cookie account", webUser)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
+	request.Header.Set("X-Bonfire-Client", "expo")
+	request.Header.Set("Authorization", "Bearer "+bearerToken)
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: cookieToken})
+	recorder := httptest.NewRecorder()
+	authHandler(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("native logout status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	var receipt struct {
+		OK                     bool   `json:"ok"`
+		SessionRevoked         bool   `json:"sessionRevoked"`
+		SessionAuthoritySource string `json:"sessionAuthoritySource"`
+		SessionAuthorityHash   string `json:"sessionAuthorityHash"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	if !receipt.OK || !receipt.SessionRevoked || receipt.SessionAuthoritySource != string(sessionAuthorityBearer) || receipt.SessionAuthorityHash != hashResetToken(bearerToken) {
+		t.Fatalf("logout receipt=%+v, want exact bearer revocation proof", receipt)
+	}
+	if strings.Contains(recorder.Body.String(), bearerToken) || strings.Contains(recorder.Body.String(), cookieToken) {
+		t.Fatal("logout receipt exposed a raw session token")
+	}
+	if _, ok := userSessionStore().lookup(bearerToken); ok {
+		t.Fatal("selected native bearer session survived logout")
+	}
+	if email, ok := userSessionStore().lookup(cookieToken); !ok || email != "tim@shareability.com" {
+		t.Fatalf("unrelated ambient cookie session was destroyed: email=%q ok=%v", email, ok)
+	}
+	for _, cookie := range recorder.Result().Cookies() {
+		if cookie.Name == sessionCookieName {
+			t.Fatalf("native bearer logout mutated unrelated ambient cookie: %+v", cookie)
+		}
+	}
+
+	stillLive := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	stillLive.AddCookie(&http.Cookie{Name: sessionCookieName, Value: cookieToken})
+	stillLiveRecorder := httptest.NewRecorder()
+	authHandler(stillLiveRecorder, stillLive)
+	if stillLiveRecorder.Code != http.StatusOK || !strings.Contains(stillLiveRecorder.Body.String(), "tim@shareability.com") {
+		t.Fatalf("ambient web session no longer live: status=%d body=%s", stillLiveRecorder.Code, stillLiveRecorder.Body.String())
+	}
+
+	revoked := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	revoked.Header.Set("X-Bonfire-Client", "expo")
+	revoked.Header.Set("Authorization", "Bearer "+bearerToken)
+	revokedRecorder := httptest.NewRecorder()
+	authHandler(revokedRecorder, revoked)
+	if revokedRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("revoked native bearer remained live: status=%d body=%s", revokedRecorder.Code, revokedRecorder.Body.String())
+	}
+}
+
+func TestNativeLogoutReportsRevocationSuccessWhenDeviceCleanupFails(t *testing.T) {
+	setupAuthTestEnv(t)
+	devicePath := filepath.Join(t.TempDir(), "devices.json")
+	t.Setenv("DEVICE_PUSH_TOKENS_PATH", devicePath)
+	sessionToken := upsertLiveDeviceTokenForTest(t, "aj@shareability.com", "ExponentPushToken[cleanup-failure]")
+
+	// Turn the store target itself into a directory after registration so the
+	// exact-binding rewrite fails deterministically without affecting sessions.
+	if err := os.Remove(devicePath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(devicePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/auth/logout", strings.NewReader(`{"deviceToken":"ExponentPushToken[cleanup-failure]"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+sessionToken)
+	recorder := httptest.NewRecorder()
+	authHandler(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("logout status=%d body=%s, session revocation must not become ambiguous", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		OK                   bool `json:"ok"`
+		SessionRevoked       bool `json:"sessionRevoked"`
+		DeviceCleanupPending bool `json:"deviceCleanupPending"`
+		DeviceBindingRemoved bool `json:"deviceBindingRemoved"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.OK || !payload.SessionRevoked || !payload.DeviceCleanupPending || payload.DeviceBindingRemoved {
+		t.Fatalf("logout receipt=%v, want revoked session plus explicit deferred cleanup", payload)
+	}
+	if _, ok := userSessionStore().lookup(sessionToken); ok {
+		t.Fatal("session survived a logout whose device cleanup failed")
 	}
 }
 

@@ -28,6 +28,7 @@ import type { ChatMentionCandidate, GiphySearchResult, ScoutFileAttachment, Scou
 import { useAuth } from '../auth/AuthContext';
 import { MessageBubble } from '../messaging/MessageBubble';
 import { firstUnreadIndex } from '../messaging/unreadBoundary';
+import { buildTimelineMarkers } from '../messaging/timelineMarkers';
 import { CatchUpSheet } from '../messaging/CatchUpSheet';
 import { MessageActionSheet } from '../messaging/MessageActionSheet';
 import { MentionComposerInput } from '../messaging/MentionComposerInput';
@@ -65,16 +66,18 @@ type ThreadRow = {
   showAuthor: boolean;
   showAvatar: boolean;
   avatarDataURL?: string;
+  timelineLabel?: string;
   boundary: boolean;
 };
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
 import { Glass } from '../theme/glass';
 import { Waveform } from '../components/Waveform';
 import { useDictation } from '../voice/useDictation';
+import type { AudioFocusLease } from '../voice/AudioFocusCoordinator';
+import { audioFocusRuntime } from '../realtime/audioFocusRuntime';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, hitMin, radius, space, type } from '../theme/tokens';
 import { useReduceMotion } from '../theme/motion';
-import { readThreadDetailCache, writeThreadDetailCache } from '../messaging/threadCache';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Thread'>;
 const DICTATION_DISCLOSURE_KEY = 'bonfire.dictation.serverDisclosure.v1';
@@ -94,12 +97,9 @@ export function ThreadScreen({ route, navigation }: Props) {
   const { sessionToken, user } = useAuth();
   const office = useOfficeEvents();
   const reduceMotion = useReduceMotion();
-  const cacheScope = String(user?.email ?? '');
-  const cachedThread = readThreadDetailCache(cacheScope, route.params.threadId);
-  const cachedMessages = cachedThread?.thread?.messages ?? cachedThread?.messages ?? [];
-  const [messages, setMessages] = useState<ScoutMessage[]>(cachedMessages);
+  const [messages, setMessages] = useState<ScoutMessage[]>([]);
   const [draft, setDraft] = useState('');
-  const [loading, setLoading] = useState(cachedThread === null);
+  const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<ScoutFileAttachment[]>([]);
@@ -109,12 +109,9 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [actionMessage, setActionMessage] = useState<{ message: ScoutMessage; own: boolean } | null>(null);
   const [previewFile, setPreviewFile] = useState<ScoutFileAttachment | null>(null);
   const [participants, setParticipants] = useState<ChatMentionCandidate[]>([{ name: 'Scout', kind: 'scout' }]);
-  const [threadVisibility, setThreadVisibility] = useState(String(cachedThread?.thread?.visibility ?? 'private'));
-  const [threadOwnerEmail, setThreadOwnerEmail] = useState(String(cachedThread?.thread?.ownerEmail ?? ''));
-  const cachedNotification = String(cachedThread?.notificationLevel ?? (cachedThread?.muted ? 'mentions' : 'all'));
-  const [notificationLevel, setNotificationLevel] = useState<ThreadNotificationLevel>(
-    cachedNotification === 'mentions' || cachedNotification === 'none' ? cachedNotification : 'all',
-  );
+  const [threadVisibility, setThreadVisibility] = useState('private');
+  const [threadOwnerEmail, setThreadOwnerEmail] = useState('');
+  const [notificationLevel, setNotificationLevel] = useState<ThreadNotificationLevel>('all');
   const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
   const [notificationBusy, setNotificationBusy] = useState(false);
   const [attachmentSourceOpen, setAttachmentSourceOpen] = useState(false);
@@ -122,13 +119,11 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [typingParticipants, setTypingParticipants] = useState<TypingParticipant[]>([]);
   const [error, setError] = useState<string | null>(null);
   // null means "not yet loaded" — distinct from "" which means never read.
-  const [readAt, setReadAt] = useState<string | null>(cachedThread ? String(cachedThread.readAt ?? '') : null);
+  const [readAt, setReadAt] = useState<string | null>(null);
   const listRef = useRef<FlashListRef<ThreadRow>>(null);
-  // Starts FALSE. Initialising it true meant opening a thread with 80 unread
-  // and immediately backing out marked all 80 read without the user scrolling
-  // a pixel — exactly the "never mark read on open" failure this is here to
-  // prevent. It is set true only by reaching the bottom, or by the content
-  // being short enough that there is no bottom to reach (below).
+  // Starts false while the thread loads. A normal open flips it true once the
+  // bottom-rendered list is on screen; a targeted message link stays false
+  // until the viewer actually reaches the latest message.
   const atBottomRef = useRef(false);
   const listHeightRef = useRef(0);
 	const lastMarkedMessageIDRef = useRef<string | null>(null);
@@ -139,6 +134,7 @@ export function ThreadScreen({ route, navigation }: Props) {
   const dictationDisclosureOpenRef = useRef(false);
   const dictationTouchStartYRef = useRef<number | null>(null);
   const dictationTouchActiveRef = useRef(false);
+  const dictationFocusLeaseRef = useRef<AudioFocusLease | null>(null);
   const typingExpiryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const typingIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingActiveRef = useRef(false);
@@ -189,28 +185,50 @@ export function ThreadScreen({ route, navigation }: Props) {
   const dictation = useDictation({
     context: 'chat',
     threadId: route.params.threadId,
-    // A transcript lands in the DRAFT, never straight into the thread. Holding
-    // produces text; posting stays an explicit act (§13.5).
-    onTranscript: ({ text }) =>
-      setDraft((previous) => (previous ? `${previous.trimEnd()} ${text}` : text)),
+    // Dictation takes the same ordinary send path as typed text. The hook
+    // generation-fences late results, so this callback runs once per Send.
+    onTranscript: ({ text }) => { void send(text); },
   });
+  const dictationLifecycleRef = useRef({ cancel: dictation.cancel, stop: dictation.stop });
+  dictationLifecycleRef.current = { cancel: dictation.cancel, stop: dictation.stop };
 
 	const beginDictation = useCallback(async () => {
+		const startCapture = async () => {
+			let exactLease: AudioFocusLease | null = null;
+			const lease = await audioFocusRuntime.acquire('composer_dictation', {
+				forceClose: async () => {
+					if (exactLease) {
+						if (dictationFocusLeaseRef.current === exactLease) dictationFocusLeaseRef.current = null;
+						dictation.fenceFocusLease(exactLease);
+					}
+					dictation.cancel();
+					await dictation.stop(); // park the local clip; never send it on takeover.
+				},
+			});
+			exactLease = lease;
+			if (!lease.isCurrent() || !dictationTouchActiveRef.current) {
+				await lease.release('cancelled');
+				return;
+			}
+			dictationFocusLeaseRef.current = lease;
+			const started = await dictation.start(lease);
+			if (!started && dictationFocusLeaseRef.current === lease) dictationFocusLeaseRef.current = null;
+		};
 		if (dictationDisclosureAcceptedRef.current) {
-			if (dictationTouchActiveRef.current) await dictation.start();
+			if (dictationTouchActiveRef.current) await startCapture();
 			return;
 		}
 		const stored = await SecureStore.getItemAsync(DICTATION_DISCLOSURE_KEY).catch(() => null);
 		if (stored === 'accepted') {
 			dictationDisclosureAcceptedRef.current = true;
-			if (dictationTouchActiveRef.current) await dictation.start();
+			if (dictationTouchActiveRef.current) await startCapture();
 			return;
 		}
 		if (dictationDisclosureOpenRef.current) return;
 		dictationDisclosureOpenRef.current = true;
 		Alert.alert(
 			'Voice transcription',
-			'Your voice is sent to Stride to transcribe with your company\'s vocabulary, then the audio is deleted. Only the text stays.',
+			'Your voice is sent to Bonfire to transcribe with your company\'s vocabulary, then the audio is deleted. Only the text stays.',
 			[
 				{ text: 'Not now', style: 'cancel', onPress: () => { dictationDisclosureOpenRef.current = false; } },
 				{
@@ -225,12 +243,21 @@ export function ThreadScreen({ route, navigation }: Props) {
 		);
 	}, [dictation]);
 
+	useEffect(() => () => {
+		dictationTouchActiveRef.current = false;
+		dictationTouchStartYRef.current = null;
+		dictationLifecycleRef.current.cancel();
+		void dictationLifecycleRef.current.stop();
+		const lease = dictationFocusLeaseRef.current;
+		dictationFocusLeaseRef.current = null;
+		void lease?.release('cancelled');
+	}, []);
+
   const load = useCallback(async () => {
     if (!sessionToken) return;
     const generationAtRequest = transcriptGenerationRef.current;
     try {
       const response = await api.scoutThread(sessionToken, route.params.threadId);
-      writeThreadDetailCache(cacheScope, route.params.threadId, response);
       const next = response.thread?.messages ?? response.messages ?? [];
       applyTranscriptSnapshot(generationAtRequest, next);
       setThreadVisibility(String(response.thread?.visibility ?? 'private'));
@@ -248,7 +275,7 @@ export function ThreadScreen({ route, navigation }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [applyTranscriptSnapshot, cacheScope, route.params.threadId, sessionToken]);
+  }, [applyTranscriptSnapshot, route.params.threadId, sessionToken]);
 
   useFocusEffect(useCallback(() => {
     void load();
@@ -296,7 +323,6 @@ export function ThreadScreen({ route, navigation }: Props) {
       const shouldFollow = atBottomRef.current;
       const next = response.thread?.messages ?? response.messages ?? [];
       if (!applyTranscriptSnapshot(generationAtStart, next)) return;
-      writeThreadDetailCache(cacheScope, route.params.threadId, response);
       setThreadVisibility(String(response.thread?.visibility ?? 'private'));
       setThreadOwnerEmail(String(response.thread?.ownerEmail ?? ''));
       if (shouldFollow) requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }));
@@ -304,7 +330,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       // Recovery is intentionally silent; the live transcript remains usable
       // and the next 12-second pass or socket frame can self-heal it.
     }
-  }, [applyTranscriptSnapshot, cacheScope, route.params.threadId, sessionToken]);
+  }, [applyTranscriptSnapshot, route.params.threadId, sessionToken]);
 
   // The socket is the fast path: matching message additions, replacements,
   // and deletions land immediately without waiting on a network round trip.
@@ -441,6 +467,11 @@ export function ThreadScreen({ route, navigation }: Props) {
     [email, messages, readAt],
   );
 
+  const timelineLabels = useMemo(
+    () => buildTimelineMarkers(messages),
+    [messages],
+  );
+
   const rows = useMemo(
     () =>
       messages.map((message, index) => {
@@ -464,34 +495,19 @@ export function ThreadScreen({ route, navigation }: Props) {
           showAuthor,
           showAvatar,
           avatarDataURL: String(message.avatarDataURL ?? knownParticipant?.avatarDataURL ?? '') || undefined,
+          timelineLabel: timelineLabels[index],
           // The divider is part of the row above the first unread message
           // rather than a separate list item, so it cannot desync from it.
           boundary: index === boundary,
         };
       }),
-    [boundary, email, messages, participantByEmail, threadOwnerEmail, threadVisibility],
+    [boundary, email, messages, participantByEmail, threadOwnerEmail, threadVisibility, timelineLabels],
   );
 
   const unreadBelow = boundary >= 0 ? messages.length - boundary : 0;
 
-  useEffect(() => {
-    if (loading || !cacheScope) return;
-    writeThreadDetailCache(cacheScope, route.params.threadId, {
-      thread: {
-        id: route.params.threadId,
-        visibility: threadVisibility,
-        ownerEmail: threadOwnerEmail,
-        messages,
-      },
-      messages,
-      readAt: readAt ?? '',
-      notificationLevel,
-    });
-  }, [cacheScope, loading, messages, notificationLevel, readAt, route.params.threadId, threadOwnerEmail, threadVisibility]);
-
-  // Advance the marker on GENUINE reads only — never on open. Marking eighty
-  // messages read because the screen appeared is how people lose messages they
-  // never saw.
+  // Advance the marker only when the latest message is genuinely on screen.
+  // Normal opens now land there; targeted links to older messages do not.
   const markRead = useCallback(() => {
     if (!sessionToken || messages.length === 0) return;
 	const last = messages[messages.length - 1];
@@ -517,21 +533,24 @@ export function ThreadScreen({ route, navigation }: Props) {
     };
   }, [markRead]);
 
-  async function send() {
-    const text = draft.trim();
-    if (!sessionToken || (!text && pendingFiles.length === 0) || sending || uploading) return;
+  async function send(textOverride?: string) {
+    const text = (textOverride ?? draft).trim();
+    const messageFiles = textOverride === undefined ? pendingFiles : [];
+    if (!sessionToken || (!text && messageFiles.length === 0) || sending || uploading) return;
     stopTyping();
     setSending(true);
     setError(null);
     const generationAtRequest = transcriptGenerationRef.current;
     try {
       const response = editingMessage
-        ? await api.updateScoutMessage(sessionToken, route.params.threadId, String(editingMessage.id), text, pendingFiles)
-        : await api.sendScoutMessage(sessionToken, route.params.threadId, text, pendingFiles, String(replyingTo?.id ?? ''));
-      setDraft('');
-      setPendingFiles([]);
-      setEditingMessage(null);
-      setReplyingTo(null);
+        ? await api.updateScoutMessage(sessionToken, route.params.threadId, String(editingMessage.id), text, messageFiles)
+        : await api.sendScoutMessage(sessionToken, route.params.threadId, text, messageFiles, String(replyingTo?.id ?? ''));
+      if (textOverride === undefined) {
+        setDraft('');
+        setPendingFiles([]);
+        setEditingMessage(null);
+        setReplyingTo(null);
+      }
       applyTranscriptSnapshot(generationAtRequest, response.thread?.messages ?? response.messages ?? []);
       Keyboard.dismiss();
 	  atBottomRef.current = true;
@@ -569,7 +588,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         const chunk = batch.accepted.slice(index, index + maxConcurrentAttachmentUploads);
         outcomes.push(...await Promise.all(chunk.map(async (asset) => {
           try {
-            return { file: await api.uploadScoutAttachment(sessionToken, asset), error: '' };
+            return { file: await api.uploadScoutAttachment(sessionToken, route.params.threadId, asset), error: '' };
           } catch (caught) {
             return {
               file: null,
@@ -655,7 +674,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       // Let the server fetch and validate its own trusted GIPHY URL. Avoiding
       // a device download followed by a second upload makes selection feel
       // immediate and avoids holding the animation twice on mobile data.
-      const attachment = await api.importGiphy(sessionToken, gif);
+      const attachment = await api.importGiphy(sessionToken, route.params.threadId, gif);
       setPendingFiles((current) => [...current, attachment].slice(0, maxMessageAttachments));
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       return true;
@@ -856,8 +875,10 @@ export function ThreadScreen({ route, navigation }: Props) {
             ListFooterComponent={typingParticipants.length > 0 ? (
               <TypingIndicator participants={typingParticipants} />
             ) : null}
-            // Normal opens land at the latest message. A targeted message link
-            // still owns its explicit focus in the effect above.
+            // FlashList lays out from the latest message immediately; onLoad
+            // makes a final non-animated correction after variable-height
+            // bubbles have been measured. Explicit message links override
+            // this in the focused-message effect above.
             onLoad={() => {
               if (route.params.messageId) return;
               atBottomRef.current = true;
@@ -885,6 +906,16 @@ export function ThreadScreen({ route, navigation }: Props) {
             }}
             renderItem={({ item }) => (
               <>
+                {item.timelineLabel ? (
+                  <View style={styles.timelineMarker}>
+                    <Text
+                      accessibilityRole="header"
+                      style={styles.timelineMarkerLabel}
+                    >
+                      {item.timelineLabel}
+                    </Text>
+                  </View>
+                ) : null}
                 {item.boundary ? (
                   <>
                     <View style={styles.boundary}>
@@ -998,10 +1029,12 @@ export function ThreadScreen({ route, navigation }: Props) {
               ))}
             </View>
           ) : null}
-          {listening ? (
+          {listening || dictation.state === 'held' || dictation.state === 'transcribing' ? (
             <View style={styles.listening}>
               <Waveform trace={dictation.trace} listening height={30} scale={0.7} />
-              <Text style={styles.listeningHint}>Release to transcribe · slide up to cancel</Text>
+              <Text style={styles.listeningHint}>
+                {listening ? 'Release to stop · slide up to cancel' : dictation.state === 'held' ? 'Ready to transcribe' : 'Transcribing'}
+              </Text>
             </View>
           ) : (
             <MentionComposerInput
@@ -1014,7 +1047,7 @@ export function ThreadScreen({ route, navigation }: Props) {
               onChangeText={changeDraft}
               onBlur={() => stopTyping()}
               candidates={participants}
-              editable={dictation.state !== 'transcribing'}
+              editable
             />
           )}
 
@@ -1031,8 +1064,9 @@ export function ThreadScreen({ route, navigation }: Props) {
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={listening ? 'Listening' : 'Hold to dictate'}
-			  accessibilityHint="Touch and hold to dictate. While recording, slide your finger up to cancel."
+			  accessibilityLabel={listening ? 'Stop dictation' : 'Hold to dictate'}
+			  accessibilityHint="Touch and hold to dictate. Release to hold the clip, then use Send to transcribe."
+			  disabled={dictation.state !== 'idle'}
 			  onPressIn={(event) => {
 				dictationTouchActiveRef.current = true;
 				dictationTouchStartYRef.current = event.nativeEvent.pageY;
@@ -1045,9 +1079,13 @@ export function ThreadScreen({ route, navigation }: Props) {
 			  onPressOut={() => {
 				dictationTouchActiveRef.current = false;
 				dictationTouchStartYRef.current = null;
-				void dictation.stop();
+				void dictation.stop().finally(() => {
+					const lease = dictationFocusLeaseRef.current;
+					dictationFocusLeaseRef.current = null;
+					void lease?.release('completed');
+				});
 			  }}
-              style={({ pressed }) => [styles.mic, pressed && styles.micPressed]}
+              style={({ pressed }) => [styles.mic, pressed && styles.micPressed, dictation.state !== 'idle' && styles.sendDim]}
             >
               {dictation.state === 'transcribing' ? (
                 <ActivityIndicator color={colors.ember} />
@@ -1060,14 +1098,28 @@ export function ThreadScreen({ route, navigation }: Props) {
               )}
             </Pressable>
 
+            {dictation.state === 'held' || dictation.state === 'error' ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Delete dictated clip"
+                onPress={dictation.delete}
+                style={({ pressed }) => [styles.mic, pressed && styles.micPressed]}
+              >
+                <SymbolView name="xmark" tintColor={colors.text2} size={18} />
+              </Pressable>
+            ) : null}
+
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Send"
-              disabled={(!draft.trim() && pendingFiles.length === 0) || sending || uploading}
-              onPress={() => void send()}
+              accessibilityLabel={dictation.state === 'held' || dictation.state === 'error' ? 'Transcribe and send dictated clip' : 'Send'}
+              disabled={dictation.state === 'transcribing' || (dictation.state !== 'held' && dictation.state !== 'error' && (!draft.trim() && pendingFiles.length === 0 || sending || uploading))}
+              onPress={() => {
+                if (dictation.state === 'held' || dictation.state === 'error') dictation.send();
+                else void send();
+              }}
               style={({ pressed }) => [
                 styles.send,
-                ((!draft.trim() && pendingFiles.length === 0) || sending || uploading || pressed) && styles.sendDim,
+                (dictation.state === 'transcribing' || (dictation.state !== 'held' && dictation.state !== 'error' && ((!draft.trim() && pendingFiles.length === 0) || sending || uploading || pressed))) && styles.sendDim,
               ]}
             >
               {sending ? (
@@ -1130,6 +1182,19 @@ const styles = StyleSheet.create({
 		borderColor: colors.line1,
 	},
   loading: { paddingVertical: space[10] },
+  timelineMarker: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: space[4],
+    paddingTop: space[4],
+    paddingBottom: space[2],
+  },
+  timelineMarkerLabel: {
+    ...type.captionMedium,
+    color: colors.text3,
+    fontVariant: ['tabular-nums'],
+    textAlign: 'center',
+  },
   boundary: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1145,7 +1210,7 @@ const styles = StyleSheet.create({
   },
   boundaryLabel: {
     fontSize: 11,
-    fontWeight: '600',
+    fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600',
     letterSpacing: 0.4,
     color: colors.emberText,
     textTransform: 'uppercase',

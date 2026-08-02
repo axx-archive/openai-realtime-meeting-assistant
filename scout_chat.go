@@ -189,10 +189,10 @@ func (session *scoutChatSession) answer(app *kanbanBoardApp, text string) {
 	session.sendEvent("answer", result.answer)
 }
 
-// scoutChatChannelModePrefixes maps the explicit launch prefixes users type in
-// channels onto agent-thread modes. In a venture studio, "pitch", "brief", and
-// "research" are everyday words, so unmentioned channel chatter never launches
-// anything. Private threads have no keyword lane at all anymore — the
+// scoutChatChannelModePrefixes maps explicit routing prefixes users type in
+// channels onto proposed agent-thread modes. In a venture studio, "pitch",
+// "brief", and "research" are everyday words, so unmentioned channel chatter
+// never proposes anything. Private threads have no keyword lane at all — the
 // propose-confirm router below handles conversational work asks with a card.
 var scoutChatChannelModePrefixes = []struct {
 	prefix string
@@ -204,13 +204,12 @@ var scoutChatChannelModePrefixes = []struct {
 	{prefix: "workflow:", mode: "workflow"},
 }
 
-// scoutChatWorkstreamKeywords are the design workstreams a bare keyword can
-// summon in a channel — but only alongside an explicit @scout mention (D5):
-// the mention is itself the invocation, so the false-positive guard's purpose
-// is preserved while "@scout research …" routes straight to the workstream.
+// scoutChatWorkstreamKeywords are the workstreams a bare keyword can propose in
+// a channel — but only alongside an explicit @scout mention. The mention is a
+// routing signal; a persisted card still requires explicit approval to launch.
 var scoutChatWorkstreamKeywords = []string{"research", "design", "grill"}
 
-// scoutChatThreadModeForChannelText launches a channel agent run on either
+// scoutChatThreadModeForChannelText proposes a channel agent run on either
 // (1) an explicit "mode:" prefix — standalone at the start of the message or
 // immediately after an @scout mention — or (2) an @scout mention combined
 // with a bare workstream keyword (research / design / grill). Bare keywords

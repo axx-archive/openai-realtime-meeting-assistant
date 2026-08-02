@@ -8,7 +8,6 @@ import { useAuth } from '../auth/AuthContext';
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, radius, space, type } from '../theme/tokens';
-import { readThreadListCache, writeThreadListCache } from './threadCache';
 
 /**
  * The Threads segment — design §14.
@@ -43,13 +42,11 @@ function timeAgo(raw: unknown): string {
 }
 
 export function ChannelList() {
-  const { sessionToken, user } = useAuth();
+  const { sessionToken } = useAuth();
   const office = useOfficeEvents();
   const navigation = useNavigation<ChannelNav>();
-  const cacheScope = String(user?.email ?? '');
-  const cachedThreads = readThreadListCache(cacheScope);
-  const [threads, setThreads] = useState<ScoutThread[]>(cachedThreads ?? []);
-  const [loading, setLoading] = useState(cachedThreads === null);
+  const [threads, setThreads] = useState<ScoutThread[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -57,17 +54,13 @@ export function ChannelList() {
     setError(null);
     try {
       const response = await api.scoutThreads(sessionToken);
-      const next = response.threads ?? [];
-      writeThreadListCache(cacheScope, next);
-      setThreads(next);
+      setThreads(response.threads ?? []);
     } catch (err) {
-      if (readThreadListCache(cacheScope) === null) {
-        setError(err instanceof BonfireApiError ? err.message : 'Could not load threads.');
-      }
+      setError(err instanceof BonfireApiError ? err.message : 'Could not load threads.');
     } finally {
       setLoading(false);
     }
-  }, [cacheScope, sessionToken]);
+  }, [sessionToken]);
 
   useFocusEffect(
     useCallback(() => {

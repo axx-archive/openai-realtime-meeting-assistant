@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -221,6 +222,19 @@ func (app *kanbanBoardApp) recallStoreForPrincipal(ctx context.Context, principa
 		filtered.entries = append(filtered.entries, entry)
 		filtered.seen[entry.ID] = struct{}{}
 	}
+	// Public/company chat remains a durable UI-state source. Only this
+	// request-local, ledger-authorized join makes its current message bodies
+	// searchable, keeping private Scout threads out of every recall lane.
+	for _, entry := range app.authorizedSTRIDEConversationEntries(principal) {
+		filtered.entries = append(filtered.entries, entry)
+		filtered.seen[entry.ID] = struct{}{}
+	}
+	sort.SliceStable(filtered.entries, func(i, j int) bool {
+		if !filtered.entries[i].CreatedAt.Equal(filtered.entries[j].CreatedAt) {
+			return filtered.entries[i].CreatedAt.Before(filtered.entries[j].CreatedAt)
+		}
+		return filtered.entries[i].ID < filtered.entries[j].ID
+	})
 	return filtered
 }
 

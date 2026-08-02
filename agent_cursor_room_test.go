@@ -152,8 +152,8 @@ func TestLegacyArtifactsWithoutRoomIDAreOfficeCursors(t *testing.T) {
 	}
 }
 
-// A room with pre-boot history baselines at its newest input on first touch —
-// the agent never backfills it — while entries appended after boot flow.
+// A legacy no-sidecar room migrates from its durable consumed-through brain
+// cursor — never from the newest raw input — while post-cursor entries flow.
 func TestRoomScopedAgentBaselinesAtBootNeverBackfillsRoomHistory(t *testing.T) {
 	first := newIsolatedKanbanBoardApp(t)
 	roomB := "room-bbbb3333"
@@ -161,6 +161,11 @@ func TestRoomScopedAgentBaselinesAtBootNeverBackfillsRoomHistory(t *testing.T) {
 	grantAmbientConsentForTest(t, first, authority, roomB, "tom@shareability.com")
 	appendRoomTestTranscript(t, first, roomB, "roomb-old-1", "Deal room history from a previous boot.")
 	appendRoomTestTranscript(t, first, roomB, "roomb-old-2", "More deal room history from a previous boot.")
+	if _, appended, err := first.memory.appendBrainWriteUp("roomb-old-brain", "## Overview\nLegacy room history already consumed.", map[string]string{
+		"roomId": roomB, "visibility": "organization", "throughTranscriptId": "roomb-old-2",
+	}); err != nil || !appended {
+		t.Fatalf("append legacy room cursor: appended=%v err=%v", appended, err)
+	}
 
 	// Reboot against the same data directory: the entries above are pre-boot.
 	rebooted := newKanbanBoardApp()

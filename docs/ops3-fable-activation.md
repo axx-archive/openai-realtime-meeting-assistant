@@ -3,19 +3,17 @@
 > **STATUS: NOT YET EXECUTED.** This runbook, the `.env.example` block, and the
 > compose/README notes are the *preparation* for OPS-3 — they do not close it.
 > As of 2026-07-05 the live `/opt/meetingassist` env has no `ANTHROPIC_API_KEY`,
-> no `BONFIRE_AGENT_RUNNER` pin, and no `BONFIRE_CODEX_MODEL=gpt-5.5` pin:
-> Fable remains dead code in production and grill scores still run on the
-> unpinned sidecar fallback. Wave 1 item 1 stays OPEN until someone runs
+> no `BONFIRE_AGENT_RUNNER` pin: Fable remains dead code in production. Wave
+> 1 item 1 stays OPEN until someone runs
 > sections 1–3 below against the VPS (env backup, activation block, restart,
 > `/assistant/goal` liveness check) and records the before/after
-> `grep -E 'ANTHROPIC|BONFIRE_AGENT_RUNNER|BONFIRE_CODEX_MODEL' .env` output
+> `grep -E 'ANTHROPIC|BONFIRE_AGENT_RUNNER' .env` output
 > plus the 30-day-retention confirmation here.
 
-Purpose: the moment the founder supplies the live `ANTHROPIC_API_KEY`, flip the
-deployed Bonfire OS from the unpinned Codex fallback to the Fable 5
-orchestrator, pin the sidecar model, and prove it live. Until this ships,
-`launchGoalThread` 503s keyless and every agentic run (goals, grill reports,
-packaging deliverables) falls back to the Codex sidecar on an unpinned model.
+Purpose: the moment the founder supplies the live `ANTHROPIC_API_KEY`, activate
+and prove the Fable 5 orchestrator. This does not activate Codex execution. The
+production-style Compose candidate deliberately has no Codex worker until the
+external isolation gate in `docs/e9-operations-runbook.md` passes.
 
 Prereqs (once, before touching the VPS):
 
@@ -41,7 +39,7 @@ backup_dir="/opt/meetingassist-backups/$(date +%Y%m%d-%H%M%S)-ops3-fable" \
   && mkdir -p "$backup_dir" && cp .env "$backup_dir"/
 
 # Record the before state (should show no ANTHROPIC key yet)
-grep -E 'ANTHROPIC|BONFIRE_AGENT_RUNNER|BONFIRE_CODEX_MODEL|ORCHESTRATOR|DELIVERABLE' .env || true
+grep -E 'ANTHROPIC|BONFIRE_AGENT_RUNNER|ORCHESTRATOR|DELIVERABLE' .env || true
 ```
 
 Append the activation block to `.env` (same names as
@@ -51,18 +49,16 @@ Append the activation block to `.env` (same names as
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...        # the founder's live key
 BONFIRE_AGENT_RUNNER=anthropic_fable
-BONFIRE_CODEX_MODEL=gpt-5.5         # pin the sidecar; unset = CLI default
 
 # Spec dials (packaging-os-analysis-2026-07-05): Fable 5 at effort high
 BONFIRE_ORCHESTRATOR_EFFORT=high
 BONFIRE_DELIVERABLE_EFFORT=high
 ```
 
-Leave the existing `BONFIRE_AGENT_THREAD_WORKER=codex_exec` /
-`BONFIRE_CODEX_RUNNER_MODE=sidecar_queue` lines in place — the explicit
-`BONFIRE_AGENT_RUNNER=anthropic_fable` outranks them for orchestration, and
-the sidecar remains the execution runner for shell/repo subtasks
-(`BONFIRE_EXECUTION_RUNNER` default).
+Do not add `BONFIRE_AGENT_THREAD_WORKER=codex_exec` or
+`BONFIRE_CODEX_RUNNER_MODE=sidecar_queue`. Any stale live values require a
+separately authorized migration; they are not evidence that an isolated
+executor exists.
 
 ## 2. Restart the containers
 
@@ -76,8 +72,7 @@ docker compose ps
 docker compose logs --tail=40 meetingassist
 ```
 
-The compose file passes the whole `.env` into both the `meetingassist` and
-`codex-runner` services via `env_file`, so no compose edit is needed.
+The Compose file passes `.env` into `meetingassist`. It defines no Codex worker.
 
 ## 3. Verify Fable is live
 
@@ -109,17 +104,11 @@ curl -s -o /tmp/goal.json -w '%{http_code}\n' -b /tmp/bonfire.cookies \
 - A launched-then-failed goal with a 400 mentioning the request being invalid
   → re-check the 30-day retention prereq above.
 
-Also confirm the sidecar pin took:
-
-```bash
-docker compose exec codex-runner env | grep BONFIRE_CODEX_MODEL   # gpt-5.5
-```
-
 ## 4. Roll back
 
 Remove the appended lines from `.env` (or restore the backup from
-`/opt/meetingassist-backups/`), then `docker compose up -d`. Keyless deploys
-degrade gracefully to today's worker — nothing else changes.
+`/opt/meetingassist-backups/`), then `docker compose up -d`. This rollback does
+not install or re-enable a Codex worker.
 
 ## 5. Render-runner sidecar (Wave 3 item 14b — PDF export)
 

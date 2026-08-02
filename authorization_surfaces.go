@@ -194,6 +194,7 @@ var authorizationFanoutSurfaces = []AuthorizationSurface{
 	authSurface("ws.out.chat_typing", AuthorizationWebSocketOut, "chat_typing", []string{"chat_thread", "membership"}, []ACLAction{ACLReadMetadata}, []string{"user"}, false, true, AuthorizationCanonicalNeeded),
 	authSurface("ws.out.meeting", AuthorizationWebSocketOut, "meeting", []string{"room", "meeting"}, []ACLAction{ACLReadMetadata, ACLReadContent}, []string{"user", "guest"}, true, true, AuthorizationLegacyGuarded),
 	authSurface("ws.out.notification", AuthorizationWebSocketOut, "notification", []string{"notification"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationLegacyGuarded),
+	authSurface("ws.out.relationship_memory_changed", AuthorizationWebSocketOut, "relationship_memory_changed", []string{"relationship_memory"}, []ACLAction{ACLReadMetadata}, []string{"user"}, false, true, AuthorizationCanonicalEnforced),
 	authSurface("ws.out.proposal", AuthorizationWebSocketOut, "codex_proposal", []string{"proposal", "workflow"}, []ACLAction{ACLReadContent, ACLApprove, ACLExecute}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 }
 

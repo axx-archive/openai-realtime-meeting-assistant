@@ -29,9 +29,19 @@ export const WEB_APP_URL = (
   API_BASE_URL
 ).replace(/\/$/, '');
 
+/**
+ * Native private Realtime is intentionally a build-time qualification gate.
+ * The complete transport can ship dark while provider/model qualification is
+ * still pending; omitting the flag preserves the incumbent dictation fallback
+ * and cannot create surprise provider spend.
+ */
+export const NATIVE_REALTIME_VOICE_ENABLED =
+  process.env.EXPO_PUBLIC_NATIVE_REALTIME_VOICE_ENABLED === 'true';
+
 /** Sent on every request so the server can return native session tokens. */
 export const NATIVE_CLIENT_HEADER = 'expo';
 
 export const SESSION_STORAGE_KEY = 'bonfire.sessionToken.v1';
 export const LAST_NAME_STORAGE_KEY = 'bonfire.lastLoginName.v1';
 export const PUSH_TOKEN_STORAGE_KEY = 'bonfire.expoPushToken.v1';
+export const PUSH_AUTHORITY_STORAGE_KEY = 'bonfire.pushAuthority.v1';

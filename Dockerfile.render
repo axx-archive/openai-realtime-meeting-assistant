@@ -4,11 +4,27 @@
 # the PDF toolchain (chromium for print-to-pdf, poppler-utils for pdftoppm)
 # and fonts so decks rasterize the way they render in the viewer.
 
-FROM golang:1.26-bookworm AS build
+ARG BONFIRE_GO_BUILD_IMAGE=golang:1.26-bookworm@sha256:3f6236bd765f898a2a3c2946112b04097814c4529d44534674700cd07b9c6b4c
+ARG BONFIRE_RUNTIME_IMAGE=debian:bookworm-slim@sha256:63a496b5d3b99214b39f5ed70eb71a61e590a77979c79cbee4faf991f8c0783e
+ARG BONFIRE_DEBIAN_SNAPSHOT=20260720T000000Z
 
-RUN apt-get update \
+FROM ${BONFIRE_GO_BUILD_IMAGE} AS build
+ARG BONFIRE_RELEASE_COMMIT=unqualified
+ARG BONFIRE_GIT_TREE_DIGEST=unqualified
+ARG BONFIRE_BUILD_CONFIG_SHA256=unqualified
+ARG BONFIRE_BUILD_TRANSITIVE_INPUTS_SHA256=unqualified
+ARG BONFIRE_SOURCE_ARCHIVE_SHA256=unqualified
+ARG BONFIRE_BUILD_INPUT_MANIFEST_SHA256=unqualified
+ARG BONFIRE_DEBIAN_SNAPSHOT
+ARG SOURCE_DATE_EPOCH=0
+
+RUN rm -f /etc/apt/sources.list.d/debian.sources \
+	&& printf 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/%s bookworm main\ndeb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/%s bookworm-security main\n' "$BONFIRE_DEBIAN_SNAPSHOT" "$BONFIRE_DEBIAN_SNAPSHOT" > /etc/apt/sources.list \
+	&& apt-get -o Acquire::Check-Valid-Until=false update \
 	&& apt-get install -y --no-install-recommends pkg-config libopus-dev \
-	&& rm -rf /var/lib/apt/lists/*
+	&& rm -rf /var/lib/apt/lists/* \
+	&& mkdir -p /out \
+	&& dpkg-query -W -f='${Package}=${Version}\n' | LC_ALL=C sort > /out/release-build-packages.txt
 
 WORKDIR /src
 
@@ -16,7 +32,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=1 GOOS=linux go build -o /out/meetingassist .
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags "-buildid= -X main.mediaSoakBuildCommit=${BONFIRE_RELEASE_COMMIT} -X main.mediaSoakBuildTreeDigest=${BONFIRE_GIT_TREE_DIGEST} -X main.mediaSoakBuildConfigDigest=${BONFIRE_BUILD_CONFIG_SHA256} -X main.mediaSoakBuildInputsDigest=${BONFIRE_BUILD_TRANSITIVE_INPUTS_SHA256} -X main.mediaSoakBuildSourceArchiveDigest=${BONFIRE_SOURCE_ARCHIVE_SHA256} -X main.releaseEmbeddedBuildInputManifestDigest=${BONFIRE_BUILD_INPUT_MANIFEST_SHA256}" -o /out/meetingassist .
 
 # Debian's own chromium package (150.0.7871.46-1~deb12u1) SIGTRAPs on every
 # headless print in this container no matter the confinement (verified live,
@@ -24,34 +40,87 @@ RUN CGO_ENABLED=1 GOOS=linux go build -o /out/meetingassist .
 # Google's chrome-headless-shell at the SAME version prints fine). So the
 # image ships Chrome for Testing's chrome-headless-shell — the purpose-built
 # print-to-pdf binary — pinned to the version verified in production.
-FROM debian:bookworm-slim AS chrome-fetch
+FROM ${BONFIRE_RUNTIME_IMAGE} AS chrome-fetch
 ARG CHROME_HEADLESS_SHELL_VERSION=150.0.7871.46
-RUN apt-get update \
+ARG CHROME_HEADLESS_SHELL_SHA256=0395e5db8d1631d5ed879d4f05fec423425537018fa1d73a58b1ade13288f447
+ARG BONFIRE_DEBIAN_SNAPSHOT
+RUN rm -f /etc/apt/sources.list.d/debian.sources \
+	&& printf 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/%s bookworm main\ndeb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/%s bookworm-security main\n' "$BONFIRE_DEBIAN_SNAPSHOT" "$BONFIRE_DEBIAN_SNAPSHOT" > /etc/apt/sources.list \
+	&& apt-get -o Acquire::Check-Valid-Until=false update \
 	&& apt-get install -y --no-install-recommends ca-certificates curl unzip \
 	&& rm -rf /var/lib/apt/lists/* \
 	&& curl -fsSLo /tmp/chs.zip "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_HEADLESS_SHELL_VERSION}/linux64/chrome-headless-shell-linux64.zip" \
+	&& echo "${CHROME_HEADLESS_SHELL_SHA256}  /tmp/chs.zip" | sha256sum -c - \
 	&& unzip -q /tmp/chs.zip -d /opt \
 	&& mv /opt/chrome-headless-shell-linux64 /opt/chrome-headless-shell
 
-FROM debian:bookworm-slim AS render-runner
+FROM ${BONFIRE_RUNTIME_IMAGE} AS render-runner
+ARG BONFIRE_RELEASE_COMMIT=unqualified
+ARG BONFIRE_GIT_TREE_DIGEST=unqualified
+ARG BONFIRE_BUILD_CONFIG_SHA256=unqualified
+ARG BONFIRE_BUILD_TRANSITIVE_INPUTS_SHA256=unqualified
+ARG BONFIRE_SOURCE_ARCHIVE_SHA256=unqualified
+ARG BONFIRE_BUILD_INPUT_MANIFEST_SHA256=unqualified
+ARG BONFIRE_DEBIAN_SNAPSHOT
 
-RUN apt-get update \
+LABEL org.opencontainers.image.revision="${BONFIRE_RELEASE_COMMIT}" \
+	  xyz.thebonfire.git-tree-digest="${BONFIRE_GIT_TREE_DIGEST}" \
+	  xyz.thebonfire.config-digest="${BONFIRE_BUILD_CONFIG_SHA256}" \
+	  xyz.thebonfire.transitive-inputs-digest="${BONFIRE_BUILD_TRANSITIVE_INPUTS_SHA256}" \
+	  xyz.thebonfire.source-archive-digest="${BONFIRE_SOURCE_ARCHIVE_SHA256}" \
+	  xyz.thebonfire.build-input-manifest-digest="${BONFIRE_BUILD_INPUT_MANIFEST_SHA256}" \
+	  xyz.thebonfire.attestation="unsigned-external-verification-required"
+
+RUN rm -f /etc/apt/sources.list.d/debian.sources \
+	&& printf 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/%s bookworm main\ndeb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/%s bookworm-security main\n' "$BONFIRE_DEBIAN_SNAPSHOT" "$BONFIRE_DEBIAN_SNAPSHOT" > /etc/apt/sources.list \
+	&& apt-get -o Acquire::Check-Valid-Until=false update \
 	&& apt-get install -y --no-install-recommends \
-		ca-certificates curl libopus0 \
+		ca-certificates libopus0 findutils grep \
 		poppler-utils \
 		fonts-liberation fonts-dejavu-core \
 		libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
 		libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
 		libgbm1 libpango-1.0-0 libcairo2 libasound2 libglib2.0-0 \
 		libx11-6 libxcb1 libxext6 libexpat1 \
-	&& rm -rf /var/lib/apt/lists/*
+	&& rm -rf /var/lib/apt/lists/* \
+	&& mkdir -p /app \
+	&& dpkg-query -W -f='${Package}=${Version}\n' | LC_ALL=C sort > /app/release-runtime-packages.txt
 
 WORKDIR /app
 
 COPY --from=build /out/meetingassist /app/meetingassist
+COPY --from=build /out/release-build-packages.txt /app/release-build-packages.txt
 COPY --from=chrome-fetch /opt/chrome-headless-shell /opt/chrome-headless-shell
+
+# Untrusted document scripts execute only inside Chrome's non-SUID namespace
+# sandbox under a dedicated account. The setuid helper is deliberately inert:
+# Compose also drops every capability and enables no-new-privileges. The queue
+# directory ownership is re-established by the profile's bounded init service.
+RUN groupadd --system --gid 65532 renderer \
+	&& useradd --system --uid 65532 --gid 65532 --home-dir /nonexistent --shell /usr/sbin/nologin renderer \
+	&& chown root:root /opt/chrome-headless-shell/chrome_sandbox \
+	&& chmod 0755 /opt/chrome-headless-shell/chrome_sandbox \
+	&& mkdir -p /app/render-queue \
+	&& chown 65532:65532 /app/render-queue \
+	&& chmod 0700 /app/render-queue \
+	&& chmod 0555 /app/meetingassist
 
 ENV RENDER_CHROMIUM_BIN=/opt/chrome-headless-shell/chrome-headless-shell
 ENV RENDER_PDFTOPPM_BIN=pdftoppm
+
+USER 65532:65532
+
+# The runner writes this non-secret heartbeat every poll. Health requires a
+# fresh file plus the exact HTML-to-PDF-to-JPEG canary emitted by the runner;
+# it does not probe the callback token or expose any secret-bearing environment.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+	CMD test -n "$BONFIRE_RENDER_HEARTBEAT_PATH" \
+	&& test -s "$BONFIRE_RENDER_HEARTBEAT_PATH" \
+	&& test -n "$(find "$BONFIRE_RENDER_HEARTBEAT_PATH" -mmin -2 -print -quit)" \
+	&& grep -q '"ok": true' "$BONFIRE_RENDER_HEARTBEAT_PATH" \
+	&& grep -q '"chromiumOK": true' "$BONFIRE_RENDER_HEARTBEAT_PATH" \
+	&& grep -q '"pdftoppmOK": true' "$BONFIRE_RENDER_HEARTBEAT_PATH" \
+	&& grep -q '"canaryOK": true' "$BONFIRE_RENDER_HEARTBEAT_PATH" \
+	&& grep -q '"canaryPageCount": 1' "$BONFIRE_RENDER_HEARTBEAT_PATH"
 
 ENTRYPOINT ["/app/meetingassist", "-render-runner"]

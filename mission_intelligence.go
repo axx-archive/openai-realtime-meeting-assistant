@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"strconv"
@@ -212,7 +213,7 @@ func (app *kanbanBoardApp) produceMissionInsight(ctx context.Context, apiKey str
 		// next pass (or an on-demand refresh) retries with more input.
 		recordEvalEvent(seatMissionIntel, evalKindParseFailure, map[string]any{"seat": seatMissionIntel, "model": model})
 		log.Errorf("%s returned non-JSON output; skipping this pass", missionIntelAgentName)
-		return meetingMemoryEntry{}, nil
+		return meetingMemoryEntry{}, &ambientAgentHoldError{err: &ambientOutputRejection{agent: missionIntelAgentName, reason: "non_json"}}
 	}
 
 	firstBrain := inputs[0]
@@ -616,7 +617,7 @@ func missionContributions(entries []meetingMemoryEntry, board kanbanBoardState) 
 			if starter != nil {
 				starter.ThreadsStarted++
 			}
-			if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
+			if !scoutChatThreadIsOrganizationPublic(thread) {
 				continue
 			}
 			for _, message := range thread.Messages {
@@ -909,12 +910,31 @@ func assistantMissionRefreshHandler(w http.ResponseWriter, r *http.Request) {
 	kanbanApp.ensureAmbientAgentBaseline(agent)
 	ctx, cancel := context.WithTimeout(r.Context(), missionIntelRefreshTimeout)
 	defer cancel()
-	entry, err := kanbanApp.runAmbientAgentOnce(agent, ctx, apiKey, nil, 1)
+	entry, err := kanbanApp.invokeAmbientAgentGuarded(agent, ctx, apiKey, nil, 1, officeRoomID)
 	if err != nil {
 		// nothing was produced — release the shared cooldown slot so a
 		// transient failure doesn't lock everyone out for five minutes
 		kanbanApp.releaseMissionIntelRefresh(previousRefreshAt, reservedAt)
-		writeAuthError(w, http.StatusBadGateway, err.Error())
+		var circuitErr *ambientAgentCircuitOpenError
+		if !errors.As(err, &circuitErr) && (isAmbientAgentHoldError(err) || isProviderInvocationFailure(err) || isProviderOutputRejection(err)) {
+			if headID, _, _, pending := kanbanApp.peekUnconsumedWindow(agent, officeRoomID); pending {
+				_ = errors.As(kanbanApp.ambientAgentCircuitError(agent, headID, officeRoomID), &circuitErr)
+			}
+		}
+		if circuitErr != nil {
+			if retryAfter := circuitErr.retryAfterSeconds(time.Now()); retryAfter > 0 {
+				w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+			}
+			writeAuthJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"ok":              false,
+				"refreshed":       false,
+				"reason":          "provider_circuit_open",
+				"restartRequired": circuitErr.RestartRequired,
+				"mission":         kanbanApp.missionIntelligenceSnapshot(time.Now()),
+			})
+			return
+		}
+		writeAuthError(w, http.StatusBadGateway, "mission intelligence refresh failed")
 		return
 	}
 

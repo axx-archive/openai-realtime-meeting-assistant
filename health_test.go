@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -47,6 +49,7 @@ func TestReadinessHandlerReportsStorageAndAgentState(t *testing.T) {
 	var payload struct {
 		OK       bool     `json:"ok"`
 		Service  string   `json:"service"`
+		Version  string   `json:"version"`
 		Degraded []string `json:"degraded"`
 		Checks   struct {
 			App              bool           `json:"app"`
@@ -65,6 +68,9 @@ func TestReadinessHandlerReportsStorageAndAgentState(t *testing.T) {
 	}
 	if !payload.OK || payload.Service != "meetingassist" {
 		t.Fatalf("readiness payload=%+v, want ok meetingassist", payload)
+	}
+	if payload.Version != serverBuildVersion {
+		t.Fatalf("readiness version=%q, want running build %q", payload.Version, serverBuildVersion)
 	}
 	if !payload.Checks.App || !payload.Checks.Memory {
 		t.Fatalf("readiness app/memory checks=%+v, want true", payload.Checks)
@@ -98,6 +104,42 @@ func TestReadinessHandlerFailsClosedWhenAdmissionAnchorStoreIsUnavailable(t *tes
 	}
 	if !strings.Contains(recorder.Body.String(), "admission_anchor_store_degraded") || strings.Contains(recorder.Body.String(), ErrAdmissionAnchorStore.Error()) {
 		t.Fatalf("readiness did not expose sanitized admission-anchor degradation: %s", recorder.Body.String())
+	}
+}
+
+func TestReadinessHandlerFailsClosedWhenBoardLifecycleIsFrozen(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.mu.Lock()
+	app.boardLifecycleFrozen = true
+	app.boardLifecycleErr = errors.New("sensitive lifecycle detail")
+	app.mu.Unlock()
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	recorder := httptest.NewRecorder()
+	readinessHandler(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("readiness status=%d body=%s, want 503", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		OK       bool     `json:"ok"`
+		Degraded []string `json:"degraded"`
+		Checks   struct {
+			BoardLifecycle map[string]any `json:"boardLifecycle"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode readiness: %v", err)
+	}
+	if payload.OK || !slices.Contains(payload.Degraded, "board_lifecycle_recovery_required") {
+		t.Fatalf("readiness payload=%+v, want hard board-lifecycle failure", payload)
+	}
+	if payload.Checks.BoardLifecycle["healthy"] != false || payload.Checks.BoardLifecycle["reason"] != "recovery_required" {
+		t.Fatalf("board lifecycle check=%v", payload.Checks.BoardLifecycle)
+	}
+	if strings.Contains(recorder.Body.String(), "sensitive lifecycle detail") {
+		t.Fatalf("readiness leaked internal lifecycle error: %s", recorder.Body.String())
 	}
 }
 

@@ -162,7 +162,7 @@ func fiscalToolCall(ctx context.Context, tool string, arguments map[string]any) 
 	if apiKey == "" {
 		return "", fmt.Errorf("FISCAL_AI_API_KEY is not configured")
 	}
-	client := &http.Client{Timeout: fiscalRequestTimeout}
+	client := aiProviderHTTPClient(fiscalRequestTimeout)
 
 	initHeader, initBody, err := fiscalMCPPost(ctx, client, apiKey, "", fiscalRPCRequest{
 		JSONRPC: "2.0",

@@ -1,0 +1,84 @@
+{
+  "schemaVersion": "stride.e9.readiness/v1",
+  "manifestId": "e9-token-free-readiness-2026-07-30",
+  "mode": "plan_only",
+  "activationDefault": "off",
+  "productionMutation": false,
+  "managedPostgres": {
+    "state": "external_pending",
+    "activationEnabled": false,
+    "minimumNodes": 2,
+    "multiZone": true,
+    "automaticFailover": true,
+    "purgeAuthorityOutsideCluster": true,
+    "requiredEvidence": [
+      "provider_topology_receipt",
+      "provider_failover_receipt",
+      "current_authority_head_pin",
+      "rpo_measurement"
+    ]
+  },
+  "offsiteRecovery": {
+    "state": "external_pending",
+    "activationEnabled": false,
+    "encrypted": true,
+    "immutableObjectLock": true,
+    "crossRegion": true,
+    "separateKmsCustody": true,
+    "separateRestoreHost": true,
+    "restoreHostPublicOnlyKeys": true,
+    "protectedRoots": [
+      "canonical_postgres",
+      "meeting_data",
+      "codex_queue",
+      "usage_ledger"
+    ],
+    "requiredEvidence": [
+      "signed_secure_manifest",
+      "offsite_provider_object_lock_receipt",
+      "independent_kms_custody_receipt",
+      "separate_restore_host_identity",
+      "authenticated_restore_receipt"
+    ]
+  },
+  "availability": {
+    "state": "external_pending",
+    "activationEnabled": false,
+    "trafficShiftDefault": "off",
+    "appReplicas": [
+      {"id": "app-primary", "region": "region-a", "state": "planned"},
+      {"id": "app-standby", "region": "region-b", "state": "planned"}
+    ],
+    "turnReplicas": [
+      {"id": "turn-primary", "region": "region-a", "state": "planned"},
+      {"id": "turn-standby", "region": "region-b", "state": "planned"}
+    ],
+    "healthBasedRouting": true,
+    "sessionDrainRequired": true,
+    "retainPreviousRelease": true,
+    "mediaIndependentFromApp": true,
+    "rollbackCommandRequired": true
+  },
+  "paging": [
+    {"capability": "canonical", "owner": "platform", "runbook": "docs/e9-operations-runbook.md#canonical", "pageOn": ["write_fence_or_reconcile_divergence"], "failMode": "deny_mutation", "aggregateOnly": false},
+    {"capability": "consent", "owner": "privacy", "runbook": "docs/e9-operations-runbook.md#consent", "pageOn": ["authority_unavailable_or_stale"], "failMode": "stop_observation", "aggregateOnly": false},
+    {"capability": "transcript", "owner": "media", "runbook": "docs/e9-operations-runbook.md#transcript", "pageOn": ["segment_gap_or_freshness_breach"], "failMode": "mark_unavailable", "aggregateOnly": false},
+    {"capability": "analysis", "owner": "intelligence", "runbook": "docs/e9-operations-runbook.md#analysis", "pageOn": ["projection_lag_or_failed_source"], "failMode": "mark_stale", "aggregateOnly": false},
+    {"capability": "brain", "owner": "intelligence", "runbook": "docs/e9-operations-runbook.md#brain", "pageOn": ["checkpoint_or_acl_differential"], "failMode": "disable_recall", "aggregateOnly": false},
+    {"capability": "embeddings", "owner": "intelligence", "runbook": "docs/e9-operations-runbook.md#embeddings", "pageOn": ["coverage_or_model_revision_mismatch"], "failMode": "disable_semantic_lane", "aggregateOnly": false},
+    {"capability": "scout", "owner": "product", "runbook": "docs/e9-operations-runbook.md#scout", "pageOn": ["heartbeat_or_room_context_stale"], "failMode": "present_unavailable", "aggregateOnly": false},
+    {"capability": "workflow", "owner": "workflow", "runbook": "docs/e9-operations-runbook.md#workflow", "pageOn": ["approval_or_execution_ambiguity"], "failMode": "block_new_work", "aggregateOnly": false},
+    {"capability": "queue", "owner": "platform", "runbook": "docs/e9-operations-runbook.md#queue", "pageOn": ["depth_age_or_lease_stall"], "failMode": "stop_admission", "aggregateOnly": false},
+    {"capability": "backup", "owner": "sre", "runbook": "docs/e9-operations-runbook.md#backup", "pageOn": ["manifest_custody_or_restore_receipt_failure"], "failMode": "block_release", "aggregateOnly": false},
+    {"capability": "cost", "owner": "finops", "runbook": "docs/e9-operations-runbook.md#cost", "pageOn": ["missing_price_or_ledger_delta"], "failMode": "disable_affected_seat", "aggregateOnly": false}
+  ],
+  "externalEvidenceRequired": [
+    "managed_postgres_provider_failover",
+    "immutable_offsite_current_object",
+    "independent_kms_and_signing_custody",
+    "authenticated_separate_host_restore",
+    "live_app_turn_routing_failover",
+    "physical_device_acceptance",
+    "live_24h_ten_sitting_soak"
+  ]
+}

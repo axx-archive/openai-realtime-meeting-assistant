@@ -182,6 +182,7 @@ func (app *kanbanBoardApp) scoutChatThreadsView(viewerEmail string, includeArchi
 
 	view := make([]map[string]any, 0, len(threads))
 	for _, thread := range threads {
+		thread = app.projectScoutChatThreadForViewer(viewerEmail, thread)
 		encoded, err := json.Marshal(thread)
 		if err != nil {
 			log.Errorf("Failed to encode thread %s for view: %v", thread.ID, err)

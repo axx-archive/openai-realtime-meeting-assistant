@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -81,8 +82,8 @@ func TestPostgresCanonicalMigrationsAreIdempotentAndRefuseDrift(t *testing.T) {
 		t.Fatalf("second migration apply: %v", err)
 	}
 	var count int
-	if err := store.pool.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&count); err != nil || count != 7 {
-		t.Fatalf("migration rows=%d err=%v, want 7", count, err)
+	if err := store.pool.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&count); err != nil || count != 9 {
+		t.Fatalf("migration rows=%d err=%v, want 9", count, err)
 	}
 	if _, err := store.pool.Exec(ctx, "UPDATE schema_migrations SET sha256=decode($1,'hex') WHERE version=1", strings.Repeat("0", 64)); err != nil {
 		t.Fatal(err)
@@ -99,6 +100,68 @@ func TestPostgresCanonicalMigrationsRefuseUnknownFutureVersion(t *testing.T) {
 	}
 	if err := store.ApplyMigrations(ctx); !errors.Is(err, ErrCanonicalUnknownMigration) {
 		t.Fatalf("future migration error=%v, want ErrCanonicalUnknownMigration", err)
+	}
+}
+
+func TestPostgresSTRIDEMigrationsRejectNestedBodiesCredentialsAndMalformedReferences(t *testing.T) {
+	ctx, store, _ := migratedPostgresCanonicalStore(t)
+	for _, test := range []struct {
+		name string
+		doc  string
+		want bool
+	}{
+		{name: "nested api key", doc: `{"metadata":{"api_key":"secret"}}`, want: true},
+		{name: "array nested body", doc: `{"items":[{"body":"full transcript"}]}`, want: true},
+		{name: "mixed case credential", doc: `{"outer":{"Credential":"secret"}}`, want: true},
+		{name: "body free metadata", doc: `{"source":"meeting","counts":{"participants":3}}`, want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var got bool
+			err := store.pool.QueryRow(ctx, `SELECT stride_jsonb_has_forbidden_key($1::jsonb,
+				ARRAY['body','text','audio','secret','token','api_key','authorization','credential','credentials','password','cookie'])`, test.doc).Scan(&got)
+			if err != nil || got != test.want {
+				t.Fatalf("forbidden=%t err=%v, want %t for %s", got, err, test.want, test.doc)
+			}
+		})
+	}
+
+	digest := strings.Repeat("a", 64)
+	valid := fmt.Sprintf(`[{"contractType":"rich_message_part","id":"asset_1","revision":1,"digest":"%s"}]`, digest)
+	invalid := map[string]string{
+		"nested body":      fmt.Sprintf(`[{"contractType":"rich_message_part","id":"asset_1","revision":1,"digest":"%s","metadata":{"body":"transcript"}}]`, digest),
+		"unknown field":    fmt.Sprintf(`[{"contractType":"rich_message_part","id":"asset_1","revision":1,"digest":"%s","label":"x"}]`, digest),
+		"string revision":  fmt.Sprintf(`[{"contractType":"rich_message_part","id":"asset_1","revision":"1","digest":"%s"}]`, digest),
+		"bad digest":       `[{"contractType":"rich_message_part","id":"asset_1","revision":1,"digest":"short"}]`,
+		"unknown contract": fmt.Sprintf(`[{"contractType":"unreviewed_type","id":"asset_1","revision":1,"digest":"%s"}]`, digest),
+		"scalar item":      `["asset_1"]`,
+		"not an array":     `{"contractType":"rich_message_part"}`,
+	}
+	var validResult bool
+	if err := store.pool.QueryRow(ctx, "SELECT stride_structured_refs_are_valid($1::jsonb)", valid).Scan(&validResult); err != nil || !validResult {
+		t.Fatalf("valid structured ref accepted=%t err=%v", validResult, err)
+	}
+	for name, payload := range invalid {
+		t.Run(name, func(t *testing.T) {
+			var got bool
+			if err := store.pool.QueryRow(ctx, "SELECT stride_structured_refs_are_valid($1::jsonb)", payload).Scan(&got); err != nil || got {
+				t.Fatalf("malformed structured ref accepted=%t err=%v payload=%s", got, err, payload)
+			}
+		})
+	}
+	if _, err := store.pool.Exec(ctx, `INSERT INTO stride_contract_revisions (
+		tenant_id,contract_type,contract_id,revision,schema_version,content_digest,acl_version,audience_digest,
+		retention_policy,purge_generation,status,audit,created_at
+	) VALUES ('tenant','test_contract','contract_nested_secret',1,1,decode($1,'hex'),1,decode($1,'hex'),
+		'retain',0,'draft',$2::jsonb,now())`, digest, `{"metadata":{"api_key":"secret"}}`); err == nil {
+		t.Fatal("stride_contract_revisions constraint accepted a nested credential")
+	}
+	if _, err := store.pool.Exec(ctx, `INSERT INTO stride_conversation_events (
+		tenant_id,event_id,event_revision,sequence,schema_version,idempotency_key,source_type,source_id,
+		author_principal,author_name,occurred_at,ingested_at,event_type,content_revision,content_digest,
+		audience_digest,visibility,acl_version,retention_policy,purge_generation,provenance,structured_refs
+	) VALUES ('tenant','event_malformed_ref',1,1,1,'idem_malformed_ref','channel','team','user_1','User',now(),now(),
+		'message',1,decode($1,'hex'),decode($1,'hex'),'channel',1,'retain',0,'client',$2::jsonb)`, digest, invalid["nested body"]); err == nil {
+		t.Fatal("stride_conversation_events constraint accepted a body-bearing structured reference")
 	}
 }
 
@@ -135,6 +198,60 @@ func TestPostgresCanonicalAppendIsTransactionalIdempotentAndConflicted(t *testin
 	events, err := store.Events(ctx)
 	if err != nil || len(events) != 1 || events[0].EventID != event.EventID {
 		t.Fatalf("events=%+v err=%v", events, err)
+	}
+}
+
+func TestPostgresCanonicalLegacyImportRetryIgnoresCollectionTimestampDrift(t *testing.T) {
+	ctx, pool := startDisposableCanonicalPostgres(t)
+	registry, err := NewCanonicalImportPayloadRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewPostgresCanonicalStore(pool, registry)
+	if err := store.ApplyMigrations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	originals := make([]CanonicalEvent, 26)
+	for index := range originals {
+		originals[index] = canonicalLegacyBoardTestEvent(t, registry, fmt.Sprintf("card-%03d", index), false)
+		if _, err := store.Append(ctx, originals[index]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var sequenceBefore, outboxBefore int64
+	if err := store.pool.QueryRow(ctx, "SELECT max(sequence) FROM canonical_events").Scan(&sequenceBefore); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.pool.QueryRow(ctx, "SELECT count(*) FROM outbox").Scan(&outboxBefore); err != nil {
+		t.Fatal(err)
+	}
+	for _, original := range originals {
+		retry := original
+		retry.OccurredAt = retry.OccurredAt.Add(18 * 24 * time.Hour)
+		retry.RecordedAt = retry.RecordedAt.Add(18 * 24 * time.Hour)
+		result, err := store.Append(ctx, retry)
+		if err != nil || !result.Existing || !result.Event.OccurredAt.Equal(original.OccurredAt) {
+			t.Fatalf("legacy retry result=%+v err=%v", result, err)
+		}
+	}
+	for index := 26; index < 165; index++ {
+		missing := canonicalLegacyBoardTestEvent(t, registry, fmt.Sprintf("card-%03d", index), false)
+		if result, err := store.Append(ctx, missing); err != nil || result.Existing {
+			t.Fatalf("new import result=%+v err=%v", result, err)
+		}
+	}
+	var eventCount, objectCount, outboxCount, sequenceAfter int64
+	if err := store.pool.QueryRow(ctx, "SELECT count(*), max(sequence) FROM canonical_events").Scan(&eventCount, &sequenceAfter); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.pool.QueryRow(ctx, "SELECT count(*) FROM objects").Scan(&objectCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.pool.QueryRow(ctx, "SELECT count(*) FROM outbox").Scan(&outboxCount); err != nil {
+		t.Fatal(err)
+	}
+	if sequenceBefore != 26 || outboxBefore != 26 || eventCount != 165 || objectCount != 165 || outboxCount != 165 || sequenceAfter != 165 {
+		t.Fatalf("retry/new counts before=(%d,%d) after=(events:%d objects:%d outbox:%d sequence:%d)", sequenceBefore, outboxBefore, eventCount, objectCount, outboxCount, sequenceAfter)
 	}
 }
 
@@ -283,6 +400,185 @@ func TestPostgresCanonicalRejectsFirstAggregateVersionAboveOneTransactionally(t 
 	for _, table := range []string{"canonical_events", "objects", "outbox"} {
 		var got int
 		if err := store.pool.QueryRow(ctx, "SELECT count(*) FROM "+table).Scan(&got); err != nil || got != 0 {
+			t.Fatalf("%s rows=%d err=%v, want transactional rollback", table, got, err)
+		}
+	}
+}
+
+func TestPostgresCanonicalAcceptsExactLegacyImportAsFirstObservedBaseline(t *testing.T) {
+	ctx, pool := startDisposableCanonicalPostgres(t)
+	registry, err := NewCanonicalImportPayloadRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewPostgresCanonicalStore(pool, registry)
+	if err := store.ApplyMigrations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	event := canonicalLegacyBaselineTestEvent(t, registry, "meeting", "meeting-observed-at-v2", 2)
+	result, err := store.Append(ctx, event)
+	if err != nil || result.Existing {
+		t.Fatalf("legacy baseline append=%+v err=%v", result, err)
+	}
+	var stateRevision int64
+	if err := pool.QueryRow(ctx, `SELECT state_revision FROM objects WHERE tenant_id=$1 AND object_type=$2 AND object_id=$3`,
+		event.TenantID, event.AggregateType, event.AggregateID).Scan(&stateRevision); err != nil {
+		t.Fatal(err)
+	}
+	if stateRevision != 2 {
+		t.Fatalf("legacy baseline state revision=%d, want 2", stateRevision)
+	}
+	checkpoint := canonicalLegacyBaselineTestEvent(t, registry, "meeting", event.AggregateID, 5)
+	if _, err := store.Append(ctx, checkpoint); err != nil {
+		t.Fatalf("legacy checkpoint append: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT state_revision FROM objects WHERE tenant_id=$1 AND object_type=$2 AND object_id=$3`,
+		event.TenantID, event.AggregateType, event.AggregateID).Scan(&stateRevision); err != nil {
+		t.Fatal(err)
+	}
+	if stateRevision != 5 {
+		t.Fatalf("legacy checkpoint state revision=%d, want 5", stateRevision)
+	}
+}
+
+// A legacy checkpoint may bridge missing snapshots only inside a legacy-import
+// history. A caller-controlled Actor field is not authority to jump over a
+// native canonical event for the same aggregate.
+func TestPostgresCanonicalLegacyCheckpointCannotJumpOverNativeHistory(t *testing.T) {
+	ctx, pool := startDisposableCanonicalPostgres(t)
+	registry, err := NewCanonicalImportPayloadRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Register("artifact.revised", 1, CanonicalPayloadSchema{Fields: map[string]CanonicalPayloadField{
+		"artifact_id":      {Kind: CanonicalPayloadIdentifier, Required: true},
+		"content_revision": {Kind: CanonicalPayloadRevision, Required: true},
+		"content_sha256":   {Kind: CanonicalPayloadDigest, Required: true},
+		"content_ref":      {Kind: CanonicalPayloadContentRef},
+		"visibility":       {Kind: CanonicalPayloadEnum, Required: true, Enums: []string{"private", "organization"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	store := NewPostgresCanonicalStore(pool, registry)
+	if err := store.ApplyMigrations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	native := canonicalTestEvent(t, registry, uuid.New(), "meeting-native-history", 1, "native-meeting-v1", "private")
+	native.TenantID = "tenant-a"
+	native.AggregateType = "meeting"
+	if _, err := store.Append(ctx, native); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint := canonicalLegacyBaselineTestEvent(t, registry, "meeting", native.AggregateID, 5)
+	if _, err := store.Append(ctx, checkpoint); !errors.Is(err, ErrCanonicalProjectionOrder) {
+		t.Fatalf("legacy checkpoint over native history error=%v, want ErrCanonicalProjectionOrder", err)
+	}
+	var events, objects, outbox int
+	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM canonical_events), (SELECT count(*) FROM objects), (SELECT count(*) FROM outbox)`).
+		Scan(&events, &objects, &outbox); err != nil {
+		t.Fatal(err)
+	}
+	if events != 1 || objects != 1 || outbox != 1 {
+		t.Fatalf("failed checkpoint was not transactional: events=%d objects=%d outbox=%d", events, objects, outbox)
+	}
+}
+
+func TestPostgresCanonicalConcurrentLegacyCheckpointsCannotRegressProjection(t *testing.T) {
+	ctx, pool := startDisposableCanonicalPostgres(t)
+	registry, err := NewCanonicalImportPayloadRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewPostgresCanonicalStore(pool, registry)
+	if err := store.ApplyMigrations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	baseline := canonicalLegacyBaselineTestEvent(t, registry, "meeting", "meeting-concurrent-checkpoints", 2)
+	if _, err := store.Append(ctx, baseline); err != nil {
+		t.Fatal(err)
+	}
+	checkpoints := []CanonicalEvent{
+		canonicalLegacyBaselineTestEvent(t, registry, "meeting", baseline.AggregateID, 5),
+		canonicalLegacyBaselineTestEvent(t, registry, "meeting", baseline.AggregateID, 8),
+	}
+	entered := make(chan struct{}, len(checkpoints))
+	release := make(chan struct{})
+	store.Failpoint = func(point string) error {
+		if point == "after_event_before_projection" {
+			entered <- struct{}{}
+			<-release
+		}
+		return nil
+	}
+	type appendOutcome struct {
+		index int
+		err   error
+	}
+	outcomes := make(chan appendOutcome, len(checkpoints))
+	var wait sync.WaitGroup
+	for index, event := range checkpoints {
+		wait.Add(1)
+		go func(index int, event CanonicalEvent) {
+			defer wait.Done()
+			_, appendErr := store.Append(ctx, event)
+			outcomes <- appendOutcome{index: index, err: appendErr}
+		}(index, event)
+	}
+	for range checkpoints {
+		<-entered
+	}
+	close(release)
+	wait.Wait()
+	close(outcomes)
+	store.Failpoint = nil
+	failed := map[int]error{}
+	for outcome := range outcomes {
+		if outcome.err != nil {
+			failed[outcome.index] = outcome.err
+		}
+	}
+	// Regardless of which serializable transaction won, replaying the highest
+	// checkpoint must converge the projection at v8 without stale overwrite.
+	if _, err := store.Append(ctx, checkpoints[1]); err != nil {
+		t.Fatalf("retry highest checkpoint after concurrent append: first failures=%v retry=%v", failed, err)
+	}
+	stale, err := store.Append(ctx, checkpoints[0])
+	if err == nil && !stale.Existing {
+		t.Fatal("stale lower checkpoint created a new event")
+	}
+	if err != nil && !errors.Is(err, ErrCanonicalProjectionOrder) && !errors.Is(err, ErrCanonicalAggregateConflict) {
+		t.Fatalf("stale lower checkpoint error=%v, want an idempotent existing result or projection/aggregate conflict", err)
+	}
+	var revision, lastSequence, projectedEventVersion int64
+	if err := pool.QueryRow(ctx, `SELECT o.state_revision,o.last_event_sequence,e.aggregate_version
+		FROM objects o JOIN canonical_events e ON e.sequence=o.last_event_sequence
+		WHERE o.tenant_id=$1 AND o.object_type=$2 AND o.object_id=$3`, baseline.TenantID, baseline.AggregateType, baseline.AggregateID).
+		Scan(&revision, &lastSequence, &projectedEventVersion); err != nil {
+		t.Fatal(err)
+	}
+	if revision != 8 || projectedEventVersion != 8 || lastSequence < 1 {
+		t.Fatalf("concurrent checkpoint projection revision=%d eventVersion=%d sequence=%d, want v8", revision, projectedEventVersion, lastSequence)
+	}
+}
+
+func TestPostgresCanonicalRejectsForgedLegacyBaselineTransactionally(t *testing.T) {
+	ctx, pool := startDisposableCanonicalPostgres(t)
+	registry, err := NewCanonicalImportPayloadRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewPostgresCanonicalStore(pool, registry)
+	if err := store.ApplyMigrations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	event := canonicalLegacyBaselineTestEvent(t, registry, "meeting", "meeting-forged-v2", 2)
+	event.Actor.ID = "canonical-runtime"
+	if _, err := store.Append(ctx, event); !errors.Is(err, ErrCanonicalProjectionOrder) {
+		t.Fatalf("forged legacy baseline error=%v, want ErrCanonicalProjectionOrder", err)
+	}
+	for _, table := range []string{"canonical_events", "objects", "outbox"} {
+		var got int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM "+table).Scan(&got); err != nil || got != 0 {
 			t.Fatalf("%s rows=%d err=%v, want transactional rollback", table, got, err)
 		}
 	}

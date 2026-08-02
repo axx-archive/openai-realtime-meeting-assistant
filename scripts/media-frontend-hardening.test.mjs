@@ -108,6 +108,16 @@ function compileStatefulFunctions(names, dependencies, stateAccessors) {
   return factory(...dependencyNames.map(name => dependencies[name]))
 }
 
+async function waitForCondition(condition, description, timeoutMs = 1000) {
+  const deadline = Date.now() + timeoutMs
+  while (!condition()) {
+    if (Date.now() >= deadline) {
+      throw new Error(`timed out waiting for ${description}`)
+    }
+    await new Promise(resolve => setTimeout(resolve, 0))
+  }
+}
+
 function browserReliabilityGate(userAgent, maxTouchPoints = 0) {
   const declarations = [
     sourceBetween('const safariBrowser =', 'const isIOSDevice ='),
@@ -766,7 +776,7 @@ test('a signal callback queued on an old socket no-ops after chain reset and rep
   const oldPeer = { id: 'old-peer' }
   const replacementPeer = { id: 'replacement-peer' }
   const replacementSocket = { id: 'replacement-socket', readyState: 1, send() {} }
-  const harness = compileStatefulFunctions(['openRoomWebSocket'], {
+  const harness = compileStatefulFunctions(['websocketOfferKey', 'openRoomWebSocket'], {
     window: {
       location: { protocol: 'http:', host: 'localhost:3191' },
       clearInterval() {},
@@ -829,6 +839,7 @@ function signalOfferHarness({ peer, socket, waitForStableSignaling, flushQueuedR
     configureOutboundSenders: async () => {},
     addRemoteIceCandidate: async () => {},
     handleKanbanMessage() {},
+    recordMediaSoakProofEvent() {},
     console: { warn() {} }
   }
   const harness = compileStatefulFunctions(['handleSignal'], dependencies, [
@@ -869,11 +880,12 @@ test('offer handling stops if the socket or peer changes while signaling waits',
     configureOutboundSenders: async () => {},
     addRemoteIceCandidate: async () => {},
     handleKanbanMessage() {},
+    recordMediaSoakProofEvent() {},
     console: { warn() {} }
   }, 'replaceSignalContext: () => { ws = replacementSocket; pc = replacementPeer }')
 
   const handling = harness.handleSignal(offerMessage, { socket, sessionPeer: peer })
-  while (!timers.length) await Promise.resolve()
+  await waitForCondition(() => timers.length > 0, 'signaling retry timer')
   harness.replaceSignalContext()
   timers.shift()()
   await handling
@@ -937,9 +949,8 @@ test('offer handling fences every awaited peer mutation before continuing or sen
     const socket = { readyState: 1, send: () => { sends += 1 } }
     const harness = signalOfferHarness({ peer, socket })
     const handling = harness.handleSignal(offerMessage, { socket, sessionPeer: peer })
-    while (peer[stage.name === 'setRemoteDescription' ? 'remoteCalls' : stage.name === 'createAnswer' ? 'createCalls' : 'localCalls'] === 0) {
-      await Promise.resolve()
-    }
+    const callCountKey = stage.name === 'setRemoteDescription' ? 'remoteCalls' : stage.name === 'createAnswer' ? 'createCalls' : 'localCalls'
+    await waitForCondition(() => peer[callCountKey] > 0, `${stage.name} to begin`)
     harness.replaceSignalContext()
     resolveStage(stage.name === 'createAnswer' ? { type: 'answer', sdp: 'answer' } : undefined)
     await handling
@@ -1139,6 +1150,7 @@ test('repeat ontrack restores participant maps after a healthy same-track early 
     remoteKeysForTile: () => ['track:video-1'],
     iosScreenStageOwnsParticipant: () => false,
     scheduleAuxiliaryVideoPlaybackRepair() {},
+    recordMediaSoakProofEvent() {},
     createRemoteVideoTile() { assert.fail('repeat ontrack must not create a duplicate tile') }
   })
 

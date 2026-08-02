@@ -8,8 +8,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,7 +30,11 @@ const (
 var (
 	giphySearchEndpoint   = "https://api.giphy.com/v1/gifs/search"
 	giphyTrendingEndpoint = "https://api.giphy.com/v1/gifs/trending"
-	giphySearchClient     = &http.Client{
+	// The E0 security floor keeps the provider lane unreachable in production
+	// until E4 ships proxied previews, non-identity telemetry, and durable
+	// provenance. This is intentionally not environment-configurable.
+	giphyIntegrationEnabled = false
+	giphySearchClient       = &http.Client{
 		Timeout: 8 * time.Second,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
@@ -77,19 +79,15 @@ type giphySearchResult struct {
 }
 
 type giphyImportRequest struct {
-	URL   string `json:"url"`
-	Name  string `json:"name,omitempty"`
-	Title string `json:"title,omitempty"`
-	ID    string `json:"id,omitempty"`
+	URL      string `json:"url"`
+	Name     string `json:"name,omitempty"`
+	Title    string `json:"title,omitempty"`
+	ID       string `json:"id,omitempty"`
+	ThreadID string `json:"threadId"`
 }
 
 func giphyAPIKey() string {
 	return strings.TrimSpace(os.Getenv("GIPHY_API_KEY"))
-}
-
-func giphyCustomerID(email string) string {
-	digest := sha256.Sum256([]byte("bonfire-giphy:" + normalizeAccountEmail(email)))
-	return hex.EncodeToString(digest[:16])
 }
 
 func trustedGiphyURL(raw string) string {
@@ -188,7 +186,6 @@ func searchGiphy(ctx context.Context, user *userAccount, query string, limit int
 	values.Set("rating", "g")
 	values.Set("bundle", "messaging_non_clips")
 	values.Set("country_code", "US")
-	values.Set("customer_id", giphyCustomerID(user.Email))
 	if query != "" {
 		values.Set("q", query)
 		values.Set("lang", "en")
@@ -242,6 +239,10 @@ func assistantGiphySearchHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusUnauthorized, "not signed in")
 		return
 	}
+	if !giphyIntegrationEnabled {
+		writeAuthError(w, http.StatusServiceUnavailable, "GIF search is temporarily unavailable")
+		return
+	}
 	if giphyAPIKey() == "" {
 		writeAuthError(w, http.StatusServiceUnavailable, "GIF search is not configured")
 		return
@@ -282,8 +283,17 @@ func assistantGiphyImportHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
 		return
 	}
-	if userFromRequest(r) == nil {
+	user := userFromRequest(r)
+	if user == nil {
 		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "GIF import is unavailable")
+		return
+	}
+	if !giphyIntegrationEnabled {
+		writeAuthError(w, http.StatusServiceUnavailable, "GIF import is temporarily unavailable")
 		return
 	}
 
@@ -301,6 +311,15 @@ func assistantGiphyImportHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		writeAuthError(w, http.StatusBadRequest, "could not read GIF import request")
+		return
+	}
+	destination, _, err := kanbanApp.scoutChatThreadByID(user.Email, strings.TrimSpace(payload.ThreadID))
+	if err != nil {
+		writeScoutChatThreadError(w, err)
+		return
+	}
+	if destination.ArchivedAt != "" {
+		writeAuthError(w, http.StatusConflict, "chat thread is archived")
 		return
 	}
 	mediaURL := trustedGiphyMediaURL(payload.URL)
@@ -358,6 +377,11 @@ func assistantGiphyImportHandler(w http.ResponseWriter, r *http.Request) {
 	} else if !strings.HasSuffix(strings.ToLower(name), ".gif") {
 		name += ".gif"
 	}
-	file := scoutChatFileAttachment{Name: name, Kind: "gif", Size: meta.Size, Ref: ref, Mime: meta.Mime}
+	grant, err := kanbanApp.grantPendingAttachmentUpload(user, destination, ref, meta)
+	if err != nil {
+		writeAuthError(w, http.StatusInternalServerError, "GIF could not be authorized")
+		return
+	}
+	file := scoutChatFileAttachment{Name: name, Kind: "gif", Size: meta.Size, Ref: ref, Mime: meta.Mime, SourceID: grant.SourceID, SourceRevision: grant.SourceRevision}
 	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "file": file})
 }

@@ -1,5 +1,6 @@
-import React, { memo, useCallback, useMemo, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   KeyboardAvoidingView,
@@ -13,7 +14,9 @@ import {
 } from 'react-native';
 import { SymbolView } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Waveform } from './Waveform';
 import { ink, radius, shadow, space, type } from '../theme/tokens';
+import { useComposerDictation } from '../voice/useComposerDictation';
 
 export type RoomConversationMode = 'chat' | 'transcript';
 
@@ -96,16 +99,39 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
   const [draft, setDraft] = useState('');
   const [composerError, setComposerError] = useState<string | null>(null);
 
-  const submitDraft = useCallback(() => {
-    const text = draft.trim();
-    if (!text) return;
+  const sendComposerText = useCallback((candidate: string): boolean => {
+    const text = candidate.trim();
+    if (!text) return false;
     if (!onSendMessage(text)) {
       setComposerError('Messages are unavailable while the call reconnects.');
-      return;
+      return false;
     }
     setDraft('');
     setComposerError(null);
-  }, [draft, onSendMessage]);
+    return true;
+  }, [onSendMessage]);
+
+  const submitDraft = useCallback(() => {
+    void sendComposerText(draft);
+  }, [draft, sendComposerText]);
+
+  const composerDictation = useComposerDictation({
+    onTranscript: ({ text }) => {
+      // Show the committed transcript in the composer before using the same
+      // room-chat transport as typed text. A reconnect failure retains it for
+      // an explicit retry instead of losing the user's spoken message.
+      setDraft(text);
+      void sendComposerText(text);
+    },
+  });
+  const discardDictationRef = useRef(composerDictation.discard);
+  discardDictationRef.current = composerDictation.discard;
+  useEffect(() => {
+    // A hidden sheet has no visible recording indicator or stop control. Never
+    // let capture continue when the modal closes or switches to Transcript.
+    if (visible && mode === 'chat') return;
+    void discardDictationRef.current();
+  }, [mode, visible]);
 
   const deleteMessage = useCallback((id: string) => {
     if (onDeleteMessage(id)) return;
@@ -237,33 +263,102 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
               style={styles.list}
             />
             <View style={[styles.composerShell, { paddingBottom: Math.max(safeArea.bottom, space[3]) }]}>
-              {composerError ? <Text accessibilityLiveRegion="polite" style={styles.composerError}>{composerError}</Text> : null}
+              {composerError || composerDictation.error ? (
+                <Text accessibilityLiveRegion="polite" style={styles.composerError}>
+                  {composerError || composerDictation.error}
+                </Text>
+              ) : null}
               <View style={styles.composer}>
-                <TextInput
-                  accessibilityLabel="Message the room"
-                  maxLength={4000}
-                  multiline
-                  onChangeText={(value) => {
-                    setDraft(value);
-                    if (composerError) setComposerError(null);
-                  }}
-                  onSubmitEditing={submitDraft}
-                  placeholder="Message the room"
-                  placeholderTextColor="rgba(255,255,255,0.38)"
-                  returnKeyType="send"
-                  style={styles.input}
-                  value={draft}
-                />
-                <Pressable
-                  accessibilityLabel="Send message"
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: !draft.trim() }}
-                  disabled={!draft.trim()}
-                  onPress={submitDraft}
-                  style={({ pressed }) => [styles.send, !draft.trim() && styles.sendDisabled, pressed && styles.pressed]}
-                >
-                  <SymbolView name="arrow.up" tintColor={ink[950]} size={16} />
-                </Pressable>
+                {composerDictation.state === 'listening' || composerDictation.state === 'held' || composerDictation.state === 'transcribing' || composerDictation.state === 'error' ? (
+                  <>
+                    <Pressable
+                      accessibilityLabel="Delete dictated message"
+                      accessibilityRole="button"
+                      onPress={() => { void composerDictation.discard(); }}
+                      style={({ pressed }) => [styles.composerIcon, pressed && styles.pressed]}
+                    >
+                      <SymbolView name="xmark" tintColor="rgba(255,255,255,0.66)" size={17} />
+                    </Pressable>
+                    <View style={styles.voiceBody}>
+                      {composerDictation.state === 'transcribing' ? (
+                        <View style={styles.transcribingRow}>
+                          <ActivityIndicator color="rgba(255,255,255,0.66)" size="small" />
+                          <Text accessibilityLiveRegion="polite" style={styles.voiceState}>Transcribing</Text>
+                        </View>
+                      ) : (
+                        <>
+                          <Waveform
+                            color="rgba(255,255,255,0.72)"
+                            height={27}
+                            listening={composerDictation.state === 'listening'}
+                            scale={0.55}
+                            trace={composerDictation.trace}
+                          />
+                          {composerDictation.state === 'held' || composerDictation.state === 'error' ? (
+                            <Text style={styles.voiceState}>Ready to transcribe</Text>
+                          ) : null}
+                        </>
+                      )}
+                    </View>
+                    {composerDictation.state === 'listening' ? (
+                      <Pressable
+                        accessibilityLabel="Stop recording"
+                        accessibilityRole="button"
+                        onPress={() => { void composerDictation.stop(); }}
+                        style={({ pressed }) => [styles.composerIcon, pressed && styles.pressed]}
+                      >
+                        <SymbolView name="stop.fill" tintColor="rgba(255,255,255,0.66)" size={15} />
+                      </Pressable>
+                    ) : null}
+                    <Pressable
+                      accessibilityLabel="Transcribe and send"
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: composerDictation.state === 'transcribing' }}
+                      disabled={composerDictation.state === 'transcribing'}
+                      onPress={() => { void composerDictation.commit(); }}
+                      style={({ pressed }) => [styles.send, composerDictation.state === 'transcribing' && styles.sendDisabled, pressed && styles.pressed]}
+                    >
+                      <SymbolView name="arrow.up" tintColor={ink[950]} size={16} />
+                    </Pressable>
+                  </>
+                ) : (
+                  <>
+                    <Pressable
+                      accessibilityHint="Records a room message, then lets you delete or transcribe and send it"
+                      accessibilityLabel="Dictate a room message"
+                      accessibilityRole="button"
+                      onPress={() => { void composerDictation.start(); }}
+                      style={({ pressed }) => [styles.composerIcon, pressed && styles.pressed]}
+                    >
+                      <SymbolView name="mic.fill" tintColor="#FF5A19" size={18} />
+                    </Pressable>
+                    <TextInput
+                      accessibilityLabel="Message the room"
+                      maxLength={4000}
+                      multiline
+                      onChangeText={(value) => {
+                        setDraft(value);
+                        if (composerError) setComposerError(null);
+                      }}
+                      onSubmitEditing={submitDraft}
+                      placeholder="Message the room"
+                      placeholderTextColor="rgba(255,255,255,0.38)"
+                      returnKeyType="send"
+                      style={styles.input}
+                      value={draft}
+                    />
+                    <Pressable
+                      accessibilityLabel="Send message"
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: !draft.trim() }}
+                      disabled={!draft.trim()}
+                      onPress={submitDraft}
+                      style={({ pressed }) => [styles.send, !draft.trim() && styles.sendDisabled, pressed && styles.pressed]}
+                    >
+                      <SymbolView name="arrow.up" tintColor={ink[950]} size={16} />
+                    </Pressable>
+                  </>
+                )}
               </View>
             </View>
           </>
@@ -344,8 +439,12 @@ const styles = StyleSheet.create({
   transcriptText: { ...type.body, color: 'rgba(255,255,255,0.82)' },
   composerShell: { ...shadow.mark, paddingHorizontal: space[3], paddingTop: space[2], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.09)', backgroundColor: 'rgba(13,13,16,0.96)' },
   composerError: { ...type.caption, marginBottom: space[2], textAlign: 'center', color: '#FF9F0A' },
-  composer: { minHeight: 50, flexDirection: 'row', alignItems: 'flex-end', gap: space[2], paddingLeft: space[3], paddingRight: 5, paddingVertical: 5, borderRadius: 25, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)', backgroundColor: ink[800] },
-  input: { ...type.body, flex: 1, maxHeight: 112, paddingTop: 8, paddingBottom: 7, color: '#FFFFFF' },
+  composer: { minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: space[2], paddingLeft: 5, paddingRight: 5, paddingVertical: 5, borderRadius: 25, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)', backgroundColor: ink[800] },
+  composerIcon: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20 },
+  voiceBody: { flex: 1, minWidth: 0, minHeight: 38, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  transcribingRow: { flexDirection: 'row', alignItems: 'center', gap: space[2] },
+  voiceState: { ...type.caption, color: 'rgba(255,255,255,0.58)' },
+  input: { ...type.body, flex: 1, maxHeight: 112, minHeight: 40, paddingTop: 8, paddingBottom: 7, color: '#FFFFFF' },
   send: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: '#FFFFFF' },
   sendDisabled: { opacity: 0.34 },
   pressed: { opacity: 0.76, transform: [{ scale: 0.96 }] },

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -324,14 +325,65 @@ func TestNarrativeMaintainerSkipsUnparseableOutput(t *testing.T) {
 	if _, appended, err := app.memory.appendBrainWriteUp("brain-1", "## Overview\nSamsung pitch.", nil); err != nil || !appended {
 		t.Fatalf("append brain-1: appended=%v err=%v", appended, err)
 	}
-	entry := runNarrativeMaintainerOnceForTest(t, app, func(context.Context, string, openAITextRequest) (string, error) {
+	entry, err := app.runAmbientAgentOnce(narrativeMaintainerAgent(), context.Background(), "test-key", func(context.Context, string, openAITextRequest) (string, error) {
 		return "not json at all", nil
-	})
+	}, 1)
+	if !isAmbientAgentHoldError(err) {
+		t.Fatalf("unparseable narrative output error=%v, want cursor-holding rejection", err)
+	}
 	if strings.TrimSpace(entry.ID) != "" {
 		t.Fatalf("unparseable output persisted %q, want nothing", entry.ID)
 	}
 	if got := app.memory.entriesOfKind(meetingMemoryKindNarrative, 0); len(got) != 0 {
 		t.Fatalf("narrative entries=%d, want none", len(got))
+	}
+}
+
+func TestNarrativeAnthropicOutageOpensCircuitWithoutAdvancingRawCursor(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
+	app := newIsolatedKanbanBoardApp(t)
+	if _, appended, err := app.memory.appendBrainWriteUp("brain-anthropic-outage", "## Overview\nSamsung pitch must survive.", nil); err != nil || !appended {
+		t.Fatalf("append brain: appended=%v err=%v", appended, err)
+	}
+
+	calls := 0
+	swapAnthropicTextResponder(t, func(context.Context, string, anthropicTextRequest) (string, error) {
+		calls++
+		return "", &anthropicProviderFailure{err: errors.New("anthropic unavailable")}
+	})
+	agent := narrativeMaintainerAgent()
+	key := ambientAgentKey(agent.name, officeRoomID)
+	for attempt := 0; attempt < ambientProviderMaxWindowAttempts+2; attempt++ {
+		_, err := app.invokeAmbientAgentGuarded(agent, context.Background(), "test-openai-key", func(context.Context, string, openAITextRequest) (string, error) {
+			t.Fatal("Anthropic-keyed narrative unexpectedly used OpenAI")
+			return "", nil
+		}, 1, officeRoomID)
+		if attempt < ambientProviderMaxWindowAttempts {
+			if err == nil || !isProviderInvocationFailure(err) {
+				t.Fatalf("attempt %d error=%v, want provider failure", attempt+1, err)
+			}
+		} else {
+			var circuitErr *ambientAgentCircuitOpenError
+			if !errors.As(err, &circuitErr) || !circuitErr.RestartRequired {
+				t.Fatalf("attempt %d error=%v, want restart-required circuit", attempt+1, err)
+			}
+		}
+		expireAmbientAgentBackoffForTest(app, key)
+	}
+	if calls != ambientProviderMaxWindowAttempts {
+		t.Fatalf("Anthropic calls=%d, want %d bounded calls", calls, ambientProviderMaxWindowAttempts)
+	}
+	app.mu.Lock()
+	failure := app.agentFailures[key]
+	app.mu.Unlock()
+	if failure == nil || !failure.providerOpen || failure.attempts != ambientProviderMaxWindowAttempts {
+		t.Fatalf("narrative circuit=%+v, want bounded open circuit", failure)
+	}
+	if baseline := app.ambientAgentBaselineID(key); baseline == "brain-anthropic-outage" {
+		t.Fatalf("Anthropic outage advanced raw cursor to %q", baseline)
+	}
+	if deadLetters := app.memory.entriesOfKind(meetingMemoryKindDeadLetter, 0); len(deadLetters) != 0 {
+		t.Fatalf("Anthropic outage created dead letters: %+v", deadLetters)
 	}
 }
 

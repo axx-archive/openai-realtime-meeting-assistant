@@ -80,11 +80,42 @@ func houseStyleDistillerAgent() ambientAgentConfig {
 		intervalEnv:     "HOUSE_STYLE_INTERVAL",
 		disabledEnv:     "HOUSE_STYLE_DISABLED",
 		requestTimeout:  houseStyleRequestTimeout,
+		healthSuccessAt: houseStyleArtifactSuccessAt,
+		healthWorkDue:   houseStyleWorkDue,
 		// produce and the batch/cursor fields are unused: the cursor is the
 		// binder id on the living style (which updates in place), and the gate
 		// is monthly/on-binder, not batch-sized — the distiller owns its loop,
 		// the taste-analyst precedent.
 	}
+}
+
+func houseStyleWorkDue(app *kanbanBoardApp, now time.Time) bool {
+	if app == nil || app.memory == nil {
+		return false
+	}
+	style, hasStyle := app.houseStyleArtifact()
+	consumedBinderID := ""
+	distilledAt := time.Time{}
+	if hasStyle {
+		consumedBinderID = strings.TrimSpace(style.Metadata[houseStyleCursorKey])
+		distilledAt, _ = time.Parse(time.RFC3339Nano, strings.TrimSpace(style.Metadata[tasteProfileDistilledAtKey]))
+	}
+	sources := app.collectHouseStyleSources()
+	return houseStyleShouldRun(hasStyle, distilledAt, sources.latestBinderID, consumedBinderID, sources.hasMaterial(), now)
+}
+
+// houseStyleArtifactSuccessAt recognizes the single typed document this
+// worker writes. Other os_artifacts are office material, not evidence that the
+// House-Style Distiller successfully produced a cited house style.
+func houseStyleArtifactSuccessAt(entry meetingMemoryEntry) (time.Time, bool) {
+	if entry.Kind != meetingMemoryKindOSArtifact || entry.Metadata[tasteProfileArtifactTypeKey] != houseStyleArtifactType || entry.Metadata["title"] != houseStyleArtifactTitle {
+		return time.Time{}, false
+	}
+	at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(entry.Metadata[tasteProfileDistilledAtKey]))
+	if err != nil || at.IsZero() {
+		return time.Time{}, false
+	}
+	return at.UTC(), true
 }
 
 // ensureHouseStyleDistillerStarted is the registration seam called from
@@ -119,24 +150,7 @@ func (app *kanbanBoardApp) startHouseStyleDistillerWorker(apiKey string) {
 
 	cancel := make(chan struct{})
 	done := make(chan struct{})
-
-	app.mu.Lock()
-	if app.agentCancels == nil {
-		app.agentCancels = map[string]chan struct{}{}
-		app.agentDones = map[string]chan struct{}{}
-	}
-	oldCancel := app.agentCancels[agent.name]
-	oldDone := app.agentDones[agent.name]
-	app.agentCancels[agent.name] = cancel
-	app.agentDones[agent.name] = done
-	app.mu.Unlock()
-
-	if oldCancel != nil {
-		close(oldCancel)
-		if oldDone != nil {
-			<-oldDone
-		}
-	}
+	app.replaceSpecialtyAgentSupervisor(agent, cancel, done, nil)
 
 	go app.runHouseStyleDistillerLoop(agent, apiKey, interval, cancel, done)
 }
@@ -150,10 +164,27 @@ func (app *kanbanBoardApp) runHouseStyleDistillerLoop(agent ambientAgentConfig, 
 	for {
 		select {
 		case <-ticker.C:
+			headID := agent.name + ":provider-window"
+			if proceed, _ := app.ambientAgentAttemptBudget(agent, headID, officeRoomID); !proceed {
+				continue
+			}
+			if !houseStyleWorkDue(app, time.Now().UTC()) {
+				app.recordSpecialtyCapabilityCompletion(agent, time.Now().UTC(), false)
+				continue
+			}
+			if err := app.persistAmbientHeldWindow(agent, headID, officeRoomID); err != nil {
+				app.recordAmbientAgentCheckpointFailure(agent, headID, officeRoomID, err)
+				continue
+			}
 			// runHouseStyleDistillerOnce derives its own request timeout, so
 			// the tick just fires the gated pass.
-			if err := app.runHouseStyleDistillerOnce(context.Background(), apiKey, nil); err != nil {
+			persisted, err := app.runHouseStyleDistillerOnceResult(context.Background(), apiKey, nil)
+			if err != nil {
 				log.Errorf("%s worker failed: %v", agent.name, err)
+				recordCapabilityFailure(agent.name, time.Now().UTC(), err)
+				app.recordAmbientAgentHoldFailure(agent, headID, officeRoomID)
+			} else {
+				app.recordSpecialtyCapabilityCompletion(agent, time.Now().UTC(), persisted)
 			}
 		case <-cancel:
 			return
@@ -164,8 +195,13 @@ func (app *kanbanBoardApp) runHouseStyleDistillerLoop(agent ambientAgentConfig, 
 // runHouseStyleDistillerOnce is one whole gated pass, serialized by the
 // per-agent run-lock so overlapping ticks never distill the same window twice.
 func (app *kanbanBoardApp) runHouseStyleDistillerOnce(ctx context.Context, apiKey string, responder anthropicTextResponder) error {
+	_, err := app.runHouseStyleDistillerOnceResult(ctx, apiKey, responder)
+	return err
+}
+
+func (app *kanbanBoardApp) runHouseStyleDistillerOnceResult(ctx context.Context, apiKey string, responder anthropicTextResponder) (bool, error) {
 	if app == nil || app.memory == nil {
-		return nil
+		return false, nil
 	}
 	if responder == nil {
 		responder = createAnthropicTextResponse
@@ -189,7 +225,7 @@ func (app *kanbanBoardApp) runHouseStyleDistillerOnce(ctx context.Context, apiKe
 
 	sources := app.collectHouseStyleSources()
 	if !houseStyleShouldRun(hasStyle, distilledAt, sources.latestBinderID, consumedBinderID, sources.hasMaterial(), now) {
-		return nil
+		return false, nil
 	}
 
 	priorBody := ""
@@ -206,21 +242,21 @@ func (app *kanbanBoardApp) runHouseStyleDistillerOnce(ctx context.Context, apiKe
 	})
 	cancelRequest()
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	body := strings.TrimSpace(output)
 	if body == "" {
 		// Never advance the cursor on empty output: the next pass retries.
 		log.Errorf("%s returned empty output; skipping this pass", houseStyleAgentName)
-		return nil
+		return false, fmt.Errorf("%s output rejected: empty output", houseStyleAgentName)
 	}
 	// Evidence discipline is structural, not just prompted: a house style that
 	// cites none of the supplied artifact/signal/decision ids has no receipts —
 	// skip the pass (cursor untouched) rather than persist uncited claims.
 	if !houseStyleCitesEvidence(body, sources.evidenceIDs()) {
 		log.Errorf("%s output cited no supplied evidence ids; skipping this pass", houseStyleAgentName)
-		return nil
+		return false, fmt.Errorf("%s output rejected: no supplied evidence citation", houseStyleAgentName)
 	}
 
 	metadataUpdates := map[string]string{
@@ -235,19 +271,19 @@ func (app *kanbanBoardApp) runHouseStyleDistillerOnce(ctx context.Context, apiKe
 	if hasStyle {
 		// UPDATE the living style in place — never mint a duplicate. The
 		// artifact-model versioning rides updateOSArtifactWithMetadata for free.
-		_, _, err := app.updateOSArtifactWithMetadata(style.ID, houseStyleArtifactTitle, body, scoutParticipantName, metadataUpdates)
-		return err
+		_, changed, err := app.updateOSArtifactWithMetadata(style.ID, houseStyleArtifactTitle, body, scoutParticipantName, metadataUpdates)
+		return changed, err
 	}
 	metadataUpdates["title"] = houseStyleArtifactTitle
 	metadataUpdates[tasteProfileArtifactTypeKey] = houseStyleArtifactType
 	_, appended, err := app.createOSArtifactWithMetadata("workflow", houseStyleArtifactTitle, body, scoutParticipantName, metadataUpdates)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !appended {
-		return fmt.Errorf("house style was not saved")
+		return false, fmt.Errorf("house style was not saved")
 	}
-	return nil
+	return true, nil
 }
 
 // houseStyleShouldRun is the gate (spec: monthly OR on package-assembled): no

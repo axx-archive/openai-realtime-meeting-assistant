@@ -93,28 +93,7 @@ func (app *kanbanBoardApp) startSlopClassifierWorker(apiKey string) {
 	cancel := make(chan struct{})
 	done := make(chan struct{})
 	baselineID := ""
-	if !boolEnv(agent.backfillEnv) {
-		baselineID = app.memory.latestEntryIDOfKind(agent.inputKind)
-	}
-
-	app.mu.Lock()
-	if app.agentCancels == nil {
-		app.agentCancels = map[string]chan struct{}{}
-		app.agentDones = map[string]chan struct{}{}
-	}
-	oldCancel := app.agentCancels[agent.name]
-	oldDone := app.agentDones[agent.name]
-	app.agentCancels[agent.name] = cancel
-	app.agentDones[agent.name] = done
-	app.setAmbientAgentBaselineIDLocked(agent.name, baselineID)
-	app.mu.Unlock()
-
-	if oldCancel != nil {
-		close(oldCancel)
-		if oldDone != nil {
-			<-oldDone
-		}
-	}
+	app.replaceSpecialtyAgentSupervisor(agent, cancel, done, &baselineID)
 
 	go app.runSlopClassifierLoop(agent, apiKey, interval, cancel, done)
 }
@@ -177,6 +156,16 @@ func (app *kanbanBoardApp) runSlopClassifierOnce(agent ambientAgentConfig, ctx c
 	if len(candidates) < minBatch {
 		return nil
 	}
+	providerWindow := agent.name + ":provider-window"
+	if proceed, _ := app.ambientAgentAttemptBudget(agent, providerWindow, officeRoomID); !proceed {
+		// The deterministic expiry/compaction sweep above still runs while the
+		// model circuit is open; only provider traffic is suppressed.
+		return nil
+	}
+	if err := app.persistAmbientHeldWindow(agent, providerWindow, officeRoomID); err != nil {
+		app.recordAmbientAgentCheckpointFailure(agent, providerWindow, officeRoomID, err)
+		return &ambientAgentHoldError{err: fmt.Errorf("%s held-window persistence unavailable", agent.name)}
+	}
 
 	model := meetingBrainModel()
 	text, err := responder(ctx, apiKey, openAITextRequest{
@@ -189,6 +178,7 @@ func (app *kanbanBoardApp) runSlopClassifierOnce(agent ambientAgentConfig, ctx c
 		MaxOutputTokens: 1200,
 	})
 	if err != nil {
+		app.recordAmbientAgentHoldFailure(agent, providerWindow, officeRoomID)
 		return err
 	}
 	verdicts, ok := parseSlopClassifierOutput(text)
@@ -197,9 +187,9 @@ func (app *kanbanBoardApp) runSlopClassifierOnce(agent ambientAgentConfig, ctx c
 		// the same window (decision-ledger precedent).
 		recordEvalEvent(seatSlop, evalKindParseFailure, map[string]any{"seat": seatSlop, "model": model})
 		log.Errorf("%s returned non-JSON output; skipping this pass", slopClassifierAgentName)
-		return nil
+		app.recordAmbientAgentHoldFailure(agent, providerWindow, officeRoomID)
+		return fmt.Errorf("%s output rejected: non-JSON output", slopClassifierAgentName)
 	}
-
 	byID := make(map[string]meetingMemoryEntry, len(candidates))
 	for _, candidate := range candidates {
 		byID[candidate.ID] = candidate
@@ -234,6 +224,9 @@ func (app *kanbanBoardApp) runSlopClassifierOnce(agent ambientAgentConfig, ctx c
 	}
 	if _, _, err := app.memory.appendSlopPass(durableTimestampID("slop-pass", time.Now()), passText, passMetadata); err != nil {
 		return err
+	}
+	if err := app.clearAmbientAgentFailure(agent.name); err != nil {
+		return &ambientAgentHoldError{err: err}
 	}
 	if quarantined > 0 || archived > 0 {
 		broadcastAssistantEvent("action", "Scout tidied memory: "+strconv.Itoa(quarantined)+" quarantined, "+strconv.Itoa(archived)+" archived.", map[string]any{"kind": "slop"})

@@ -61,49 +61,21 @@ MEETING_TURN_REALM=<domain>
 MEETING_HOST=<droplet-public-ip>.nip.io
 ```
 
-To let Scout launch real Codex work threads from Realtime 2 or private Chat, enable the sidecar runner. The public `meetingassist` container only enqueues jobs and receives signed callbacks; Codex CLI auth lives in the private `codex-runner` service volume.
+Codex-style server-side execution is disabled in the production-style Compose
+candidate. The former reusable `codex-runner` image/profile was not a qualified
+per-run E9 sandbox: it combined provider credentials with a broad host
+workspace and ordinary network access. Its image target and Compose service
+are removed. Do not recreate them or add
+`BONFIRE_AGENT_THREAD_WORKER=codex_exec` to production.
 
-Prepare a real git checkout for Codex. The deployed `/opt/meetingassist` app copy may be an rsynced snapshot, so prefer a separate checkout such as `/opt/meetingassist-workspace`:
-
-```bash
-git clone <repo-url> /opt/meetingassist-workspace
-cd /opt/meetingassist-workspace
-git checkout main
-```
-
-Then add the runner settings to `.env`:
-
-```bash
-BONFIRE_AGENT_THREAD_WORKER=codex_exec
-BONFIRE_CODEX_RUNNER_MODE=sidecar_queue
-BONFIRE_CODEX_WORKSPACE_HOST_PATH=/opt/meetingassist-workspace
-BONFIRE_CODEX_CWD=/workspace/meetingassist
-BONFIRE_CODEX_QUEUE_PATH=/app/data/codex-runner-jobs
-BONFIRE_RUNNER_TOKEN=<openssl-rand-hex-32>
-BONFIRE_CODEX_SANDBOX=workspace-write
-BONFIRE_CODEX_APPROVAL_POLICY=never
-BONFIRE_CODEX_REASONING_EFFORT=high
-BONFIRE_CODEX_TIMEOUT=20m
-# Only for a deliberately prepared non-git directory, not the normal VPS path:
-# BONFIRE_CODEX_SKIP_GIT_REPO_CHECK=true
-```
-
-Start the sidecar profile:
-
-```bash
-docker compose --profile codex up -d --build
-```
-
-The `codex-runner` service grants `SYS_ADMIN` with unconfined seccomp/AppArmor so the Codex CLI can create its Linux sandbox with `bubblewrap`. Keep that permission scoped to the private runner sidecar; the public `meetingassist` container should not receive Codex auth or these sandbox capabilities.
-
-Populate the private Codex auth volume by running the Codex login command through the runner image:
-
-```bash
-docker compose --profile codex run --rm --entrypoint codex codex-runner login
-docker compose --profile codex exec codex-runner codex --version
-```
-
-Keep this disabled until the runner host is intentionally prepared. Realtime can start `read_only` and `workspace_write` jobs. Commit, push, deploy, SSH, external APIs, email, and production mutations are blocked behind an approval-required artifact until an operator approves or rejects the gate in the Artifacts app.
+The app may retain queued control-plane records, but no local Compose worker
+executes them. Production execution requires a separately reviewed external
+per-run orchestrator, default-deny egress gateway, short-lived credential
+broker, bounded mounts/quotas, signed nonce-replay callback receipts, and its
+own digest-pinned release evidence. See
+`docs/e9-operations-runbook.md#worker-isolation-boundary`. An authorized
+cutover must also inventory and remove any already-running orphan/legacy
+runner container; deleting the service from this file does not stop one.
 
 ### Workflow ticker (card 067)
 
@@ -117,7 +89,7 @@ BONFIRE_WORKFLOW_TICKER_MAX_PER_PASS=2   # max launches per tick
 
 Its live config and last-pass counters appear under `checks.agents.workflowTicker` in `/readyz`.
 
-To activate the Fable 5 orchestrator (goals, grill reports, packaging deliverables) once a live `ANTHROPIC_API_KEY` is available, follow the Anthropic block in `.env.example` and the step-by-step runbook in `docs/ops3-fable-activation.md` (env lines, restart, and the `/assistant/goal` liveness check). Pin `BONFIRE_CODEX_MODEL=gpt-5.5` at the same time so the sidecar never runs on the CLI's default model.
+To activate the Fable 5 orchestrator (goals, grill reports, packaging deliverables) once a live `ANTHROPIC_API_KEY` is available, follow the Anthropic block in `.env.example` and the step-by-step runbook in `docs/ops3-fable-activation.md` (env lines, restart, and the `/assistant/goal` liveness check). This does not activate Codex execution.
 
 For a real domain, set `MEETING_HOST` to the domain after creating an A record that points at the Droplet.
 
@@ -143,14 +115,156 @@ GOOGLE_CALENDAR_REDIRECT_URL=https://$MEETING_HOST/calendar/google/callback
 
 ## Launch
 
-From the repo root on the Droplet:
+### Exact release identity (required before a production rollout)
+
+The live directory is an rsynced application tree, not a Git checkout. Do not
+derive a release identity from `/opt/meetingassist` or from a mutable
+`meetingassist:local` tag. The release tool binds a reviewed clean exact commit
+to an allowlisted source inventory, retained candidate Compose/Caddy
+configuration, pinned build inputs, app and render-runner images,
+digest-pinned Postgres/coturn/Caddy images, embedded binary fields, OCI labels,
+running executables, and both `/healthz` and `/readyz`. The app and render
+images come from the same archive and must contain byte-identical Go binaries.
+The process reports only `processQualified:true` and `qualified:false`:
+receipts remain unsigned local evidence. Independent signing, registry custody,
+off-host verification, and production observation remain separate gates.
+
+On a clean local checkout, fetch remote main and pass its full reviewed SHA. A
+mutable ref such as `axx/main` is deliberately rejected by `prepare`:
+
+```bash
+git fetch --prune axx main
+reviewed_sha="$(git rev-parse axx/main)"
+test -z "$(git status --porcelain --untracked-files=all)"
+test "$(git rev-parse HEAD)" = "$reviewed_sha"
+local_release_dir="/tmp/meetingassist-release-$reviewed_sha"
+mkdir -m 700 "$local_release_dir"
+node scripts/bonfire-release.mjs scope --reviewed-ref "$reviewed_sha"
+node scripts/bonfire-release.mjs prepare \
+  --reviewed-ref "$reviewed_sha" \
+  --archive "$local_release_dir/source.tar" \
+  --source-receipt "$local_release_dir/source-receipt.json"
+ssh root@146.190.171.224 "mkdir -p -m 700 /opt/meetingassist-releases/$reviewed_sha"
+rsync -av "$local_release_dir/source.tar" "$local_release_dir/source-receipt.json" \
+  "root@146.190.171.224:/opt/meetingassist-releases/$reviewed_sha/"
+```
+
+On the VPS, build only the reviewed archive. The build re-extracts it and
+independently recomputes its tree-equivalent, complete inventory, and config
+digests before Docker runs. Base images are digest-pinned and Debian packages
+come from the timestamped snapshot recorded in
+`release-build-inputs.json`. `release.env` and all receipts contain no API keys,
+but they are integrity inputs and must remain root-readable:
+
+```bash
+release_sha=<full-reviewed-commit>
+release_dir="/opt/meetingassist-releases/$release_sha"
+prior_sha=<currently-serving-full-reviewed-commit>
+prior_dir="/opt/meetingassist-releases/$prior_sha"
+mkdir -p -m 700 "$release_dir/tool"
+tar -xf "$release_dir/source.tar" -C "$release_dir/tool" scripts/bonfire-release.mjs
+node "$release_dir/tool/scripts/bonfire-release.mjs" build \
+  --archive "$release_dir/source.tar" \
+  --source-receipt "$release_dir/source-receipt.json" \
+  --image "meetingassist:release-$release_sha" \
+  --render-image "meetingassist-render:release-$release_sha" \
+  --build-manifest "$release_dir/build-manifest.json" \
+  --release-receipt "$release_dir/release-receipt.json" \
+  --runtime-env "$release_dir/release.env"
+node "$prior_dir/sealed-candidate/scripts/bonfire-release.mjs" activate \
+  --release-dir "$release_dir" \
+  --rollback-release-dir "$prior_dir" \
+  --base-env /opt/meetingassist/deploy/digitalocean/.env \
+  --health-url https://thebonfire.xyz/healthz \
+  --ready-url https://thebonfire.xyz/readyz
+```
+
+Activation must be orchestrated by the private, read-only release tool from the
+**currently serving rollback bundle** (`$prior_dir/sealed-candidate/...`), not
+the candidate's newly built tool. It uses the target's sealed-candidate Compose
+and Caddy files, the fixed `digitalocean`
+Compose project, the existing secret-bearing base `.env`, named production
+volumes, and `--no-build`. It first verifies that the complete retained rollback
+bundle is exactly what is serving, rejects unexpected/orphan project
+containers, and verifies both target and rollback image sets before mutation.
+It must not copy secrets into the candidate bundle or switch project names.
+One durable sibling lock serializes baseline verification, Compose mutation,
+post-verification, and the ledger compare-and-swap. After successful probes it
+atomically advances
+`/opt/meetingassist-releases/active-release.json`, retaining exact active and
+previous bundle/image identities. If target verification fails, the tool
+automatically executes the retained rollback bundle's own verified tool,
+restores its exact ledger, and verifies both before returning failure. An
+ambiguous recovery leaves the operation lock in place and requires an explicit
+operator inspection; never delete that lock merely because it is old.
+
+After the container is healthy, verification is mandatory and fail-closed:
+
+```bash
+node "$release_dir/sealed-candidate/scripts/bonfire-release.mjs" verify \
+  --release-dir "$release_dir" \
+  --base-env /opt/meetingassist/deploy/digitalocean/.env \
+  --health-url https://thebonfire.xyz/healthz \
+  --ready-url https://thebonfire.xyz/readyz
+```
+
+The verifier refuses any service image-ID/state, owned OCI-label, app/render
+`/proc/1/exe`, image-file, package inventory, render Chrome/heartbeat, mounted
+Caddy configuration, runtime-environment, health, or readiness mismatch. It
+reports `verified-local-unsigned`, never fully qualified. A local Docker image
+ID is content-addressed but is not a registry signature or an off-host custody
+record.
+
+Keep every versioned release directory and its Docker image until its rollback
+window closes; do not prune them. Before activation, record the currently active
+release SHA and confirm its directory and image still exist. Exact rollback uses
+that retained receipt and image ID, waits for Compose health, and repeats both
+external probes:
+
+```bash
+prior_sha=<previous-full-reviewed-commit>
+prior_dir="/opt/meetingassist-releases/$prior_sha"
+test -r "$prior_dir/release-receipt.json"
+node "$release_dir/sealed-candidate/scripts/bonfire-release.mjs" rollback \
+  --release-dir "$prior_dir" \
+  --rollback-release-dir "$release_dir" \
+  --base-env /opt/meetingassist/deploy/digitalocean/.env \
+  --health-url https://thebonfire.xyz/healthz \
+  --ready-url https://thebonfire.xyz/readyz
+```
+
+If the prior directory or immutable image ID is absent, rollback is blocked; do
+not rebuild an old tag and call it the prior image. The active-release ledger
+must also bind `release_dir` as its exact active release and `prior_dir` as its
+exact previous release. An arbitrary valid sibling cannot be selected as a
+rollback target.
+
+The currently observed legacy VPS image is unqualified and cannot be supplied
+as this rollback bundle. The first exact-release cutover therefore requires a
+separately authorized bootstrap/parallel-environment ceremony that establishes
+and verifies an exact retained baseline before traffic is mutated. There is no
+`--force`, legacy-image, or missing-ledger bypass in this tool.
+
+Use the versioned [first exact-release bootstrap operator pack](./first-exact-release-bootstrap/README.md)
+for that one-time ceremony. It requires reviewed implementation commit **A**
+followed by a docs-only, direct-child release-checkpoint commit **B** at the
+reviewed `axx/main`; do not collapse, reorder, or bypass those two commits.
+
+### Development/demo launch (unqualified)
+
+The legacy convenience command below rebuilds a mutable local tag. It is useful
+for development only and must not be used for a production rollout or after an
+exact release has been installed, because it does not emit or verify a release
+receipt.
+
+From the repo root on a development Droplet:
 
 ```bash
 cd deploy/digitalocean
 # The W1 PostgreSQL volume is external so `docker compose down -v` cannot
 # erase canonical history. This command is idempotent.
 docker volume create digitalocean_canonical_postgres
-docker compose --profile codex up -d --build
+docker compose up -d --build
 ```
 
 W1 runs PostgreSQL as a private, resource-capped shadow target on the existing

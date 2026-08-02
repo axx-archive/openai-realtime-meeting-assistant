@@ -451,6 +451,14 @@ func (app *kanbanBoardApp) createOSArtifactWithMetadata(mode string, query strin
 }
 
 func (app *kanbanBoardApp) createOSArtifactWithMetadataAcknowledged(mode string, query string, answer string, createdBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, []scopedRoomDeliveryAcknowledgement, error) {
+	return app.createOSArtifactWithIDAndMetadataAcknowledged("", mode, query, answer, createdBy, metadataUpdates)
+}
+
+// createOSArtifactWithIDAndMetadataAcknowledged is the deterministic-ID form
+// used by durable outboxes. Regular callers pass through the public helpers
+// above and retain the timestamp ID. A retry with the same ID relies on the
+// memory store's append idempotency and emits no duplicate artifact event.
+func (app *kanbanBoardApp) createOSArtifactWithIDAndMetadataAcknowledged(artifactID string, mode string, query string, answer string, createdBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, []scopedRoomDeliveryAcknowledgement, error) {
 	if app == nil || app.memory == nil {
 		return meetingMemoryEntry{}, false, nil, fmt.Errorf("artifact memory is unavailable")
 	}
@@ -464,7 +472,10 @@ func (app *kanbanBoardApp) createOSArtifactWithMetadataAcknowledged(mode string,
 		return meetingMemoryEntry{}, false, nil, nil
 	}
 
-	artifactID := fmt.Sprintf("os-artifact-%s-%d", mode, time.Now().UnixNano())
+	artifactID = strings.TrimSpace(artifactID)
+	if artifactID == "" {
+		artifactID = fmt.Sprintf("os-artifact-%s-%d", mode, time.Now().UnixNano())
+	}
 	metadata := map[string]string{
 		"mode":      mode,
 		"query":     strings.TrimSpace(query),

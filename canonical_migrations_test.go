@@ -11,8 +11,8 @@ func TestLoadCanonicalMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load migrations: %v", err)
 	}
-	if len(migrations) != 7 {
-		t.Fatalf("migration count = %d, want 7", len(migrations))
+	if len(migrations) != 9 {
+		t.Fatalf("migration count = %d, want 9", len(migrations))
 	}
 	migration := migrations[0]
 	if migration.Version != 1 || migration.Name != "0001_canonical.sql" {
@@ -43,6 +43,26 @@ func TestLoadCanonicalMigrations(t *testing.T) {
 		!strings.Contains(migrations[6].SQL, "authority_sha256") || !strings.Contains(migrations[6].SQL, "retain_until") ||
 		!strings.Contains(migrations[6].SQL, "push_dispatched_at") || !strings.Contains(migrations[6].SQL, "redacted_at") {
 		t.Fatalf("unexpected catch-up publication migration: %+v", migrations[6])
+	}
+	if migrations[7].Version != 8 || migrations[7].Name != "0008_stride_contracts.sql" ||
+		migrations[7].SHA256 != sha256.Sum256([]byte(migrations[7].SQL)) ||
+		!strings.Contains(migrations[7].SQL, "CREATE FUNCTION stride_jsonb_has_forbidden_key") ||
+		strings.Count(migrations[7].SQL, "CHECK (NOT stride_jsonb_has_forbidden_key") != 2 ||
+		!strings.Contains(migrations[7].SQL, "CREATE TABLE stride_contract_revisions") ||
+		!strings.Contains(migrations[7].SQL, "CREATE TABLE stride_registry_revisions") ||
+		!strings.Contains(migrations[7].SQL, "CREATE TABLE stride_feature_switches") ||
+		!strings.Contains(migrations[7].SQL, "CREATE TABLE stride_source_derived_edges") {
+		t.Fatalf("unexpected STRIDE contracts migration: %+v", migrations[7])
+	}
+	if migrations[8].Version != 9 || migrations[8].Name != "0009_stride_conversation_ledger.sql" ||
+		migrations[8].SHA256 != sha256.Sum256([]byte(migrations[8].SQL)) ||
+		!strings.Contains(migrations[8].SQL, "CREATE FUNCTION stride_structured_refs_are_valid") ||
+		!strings.Contains(migrations[8].SQL, "CHECK (stride_structured_refs_are_valid(structured_refs))") ||
+		!strings.Contains(migrations[8].SQL, "CREATE TABLE stride_conversation_events") ||
+		!strings.Contains(migrations[8].SQL, "CREATE TABLE stride_conversation_projection_checkpoints") ||
+		!strings.Contains(migrations[8].SQL, "CREATE TABLE stride_conversation_derived_edges") ||
+		!strings.Contains(migrations[8].SQL, "recall_eligible boolean NOT NULL DEFAULT false CHECK (recall_eligible = false)") {
+		t.Fatalf("unexpected STRIDE conversation ledger migration: %+v", migrations[8])
 	}
 	for _, marker := range []string{
 		"CREATE TABLE canonical_events",

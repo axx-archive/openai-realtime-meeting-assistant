@@ -155,9 +155,12 @@ func TestProduceMissionInsightSkipsUnparseableOutput(t *testing.T) {
 		t.Fatalf("append brain-1: appended=%v err=%v", appended, err)
 	}
 
-	entry := runMissionIntelOnceForTest(t, app, func(context.Context, string, openAITextRequest) (string, error) {
+	entry, err := app.runAmbientAgentOnce(missionIntelligenceAgent(), context.Background(), "test-key", func(context.Context, string, openAITextRequest) (string, error) {
 		return "Sorry, here are some themes in prose instead.", nil
-	})
+	}, 1)
+	if !isAmbientAgentHoldError(err) {
+		t.Fatalf("unparseable mission output error=%v, want cursor-holding rejection", err)
+	}
 	if entry.ID != "" {
 		t.Fatalf("entry=%v, want nothing persisted for non-JSON output", entry)
 	}
@@ -533,9 +536,10 @@ func TestMissionSnapshotLiveParticipantsTrackRoomOccupancy(t *testing.T) {
 	}
 }
 
-// A transient synthesis failure must not burn the shared 5-minute cooldown:
-// the reserved slot is rolled back so the next attempt is admitted.
-func TestAssistantMissionRefreshReleasesCooldownOnFailure(t *testing.T) {
+// A failed manual pass releases the shared 5-minute request cooldown, but it
+// cannot bypass the worker's provider backoff. The immediate retry reports an
+// honest circuit state; after that backoff expires the same raw window runs.
+func TestAssistantMissionRefreshReportsWorkerBackoffAndRetriesAfterExpiry(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)
@@ -553,7 +557,7 @@ func TestAssistantMissionRefreshReleasesCooldownOnFailure(t *testing.T) {
 	failing := true
 	createOpenAITextResponse = func(context.Context, string, openAITextRequest) (string, error) {
 		if failing {
-			return "", errors.New("transient upstream error")
+			return "", &openAIProviderFailure{err: errors.New("transient upstream error")}
 		}
 		return `{"themes":[],"openQuestions":[],"alignments":["Recovered."]}`, nil
 	}
@@ -569,25 +573,42 @@ func TestAssistantMissionRefreshReleasesCooldownOnFailure(t *testing.T) {
 	}
 
 	recorder := postRefresh()
-	if recorder.Code != http.StatusBadGateway {
-		t.Fatalf("failed refresh status=%d body=%s, want 502", recorder.Code, recorder.Body.String())
+	if recorder.Code != http.StatusServiceUnavailable || recorder.Header().Get("Retry-After") == "" {
+		t.Fatalf("failed refresh status=%d retry-after=%q body=%s, want honest 503 retry state", recorder.Code, recorder.Header().Get("Retry-After"), recorder.Body.String())
 	}
 
-	// the failed pass released the slot: an immediate retry is admitted and
-	// succeeds instead of hitting the 429 cooldown
+	// The failed pass released the request-rate slot, so this is admitted to the
+	// guarded worker seam rather than rejected with 429. The worker's own
+	// backoff remains authoritative and is reported without another wire call.
 	failing = false
 	recorder = postRefresh()
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("immediate retry status=%d body=%s, want 503 circuit response", recorder.Code, recorder.Body.String())
+	}
+	if recorder.Header().Get("Retry-After") == "" {
+		t.Fatal("cooling circuit response missing Retry-After")
+	}
+	var circuit struct {
+		Reason          string `json:"reason"`
+		RestartRequired bool   `json:"restartRequired"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &circuit); err != nil {
+		t.Fatalf("decode circuit response: %v", err)
+	}
+	if circuit.Reason != "provider_circuit_open" || circuit.RestartRequired {
+		t.Fatalf("circuit response=%+v, want cooling/non-restart state", circuit)
+	}
+
+	expireAmbientAgentBackoffForTest(kanbanApp, ambientAgentKey(missionIntelAgentName, officeRoomID))
+	recorder = postRefresh()
 	if recorder.Code != http.StatusOK {
-		t.Fatalf("retry refresh status=%d body=%s, want 200 (slot released after failure)", recorder.Code, recorder.Body.String())
+		t.Fatalf("post-backoff retry status=%d body=%s, want 200", recorder.Code, recorder.Body.String())
 	}
 	var retry struct {
 		Refreshed bool `json:"refreshed"`
 	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &retry); err != nil {
-		t.Fatalf("decode retry refresh: %v", err)
-	}
-	if !retry.Refreshed {
-		t.Fatal("refreshed=false, want a successful retry after the released slot")
+	if err := json.Unmarshal(recorder.Body.Bytes(), &retry); err != nil || !retry.Refreshed {
+		t.Fatalf("post-backoff retry=%+v err=%v, want refreshed", retry, err)
 	}
 }
 

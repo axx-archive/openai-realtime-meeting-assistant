@@ -1259,6 +1259,7 @@ func (app *kanbanBoardApp) closeRoomForArchive(roomID string) {
 		seats = append(seats, closedSeat{name: name, sessionIDs: sessionIDs, leases: retiredLeases})
 	}
 	app.mu.Unlock()
+	app.revokeMeetingSpecialistParticipantAuthority(roomID, "participant_authority_changed")
 
 	for _, seat := range seats {
 		drainParticipantAdmissionLeases(seat.leases)
@@ -1276,6 +1277,9 @@ func (app *kanbanBoardApp) closeRoomForArchive(roomID string) {
 	if app.meetings != nil {
 		if record, ok := app.meetings.activeRecord(roomID); ok {
 			if closed, changed := app.meetings.endMeeting(record.ID, time.Now().UTC(), meetingEndedReasonRoomClosed, ""); changed {
+				if app.meetingSpecialists != nil {
+					app.meetingSpecialists.CloseScope(roomID, closed.ID, "room_closed")
+				}
 				app.flushDeferredNotifications("meeting_end")
 				app.flushAmbientAgentsForClose("room-archive", roomID, closed.ListenOnly)
 				if app.memory != nil {

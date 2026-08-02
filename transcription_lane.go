@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -54,6 +55,7 @@ type meetingTranscriptionLane struct {
 	roomID          string
 	sittingID       string
 	mediaGeneration uint64
+	segmentBindings *transcriptionSegmentBindings
 
 	input        chan []int16
 	consentInput chan consentAudioFrame
@@ -131,6 +133,7 @@ func newMeetingTranscriptionLaneForRoomGeneration(app *kanbanBoardApp, apiKey st
 		roomID:             normalizeRoomID(roomID),
 		sittingID:          sittingID,
 		mediaGeneration:    mediaGeneration,
+		segmentBindings:    newTranscriptionSegmentBindings(),
 		input:              make(chan []int16, transcriptionLaneQueueSize),
 		consentInput:       make(chan consentAudioFrame, transcriptionLaneQueueSize),
 		withdrawals:        make(chan ConsentWithdrawalNotice, 8),
@@ -303,7 +306,7 @@ func (lane *meetingTranscriptionLane) run() {
 }
 
 func (lane *meetingTranscriptionLane) runOnce() error {
-	conn, _, err := websocket.DefaultDialer.Dial(transcriptionLaneWebSocketURL(), http.Header{
+	conn, _, err := aiProviderRealtimeWebSocketDialer().Dial(transcriptionLaneWebSocketURL(), http.Header{
 		"Authorization": []string{"Bearer " + lane.apiKey},
 	})
 	if err != nil {
@@ -322,6 +325,7 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 	// terminal event never arrived must not stamp itself onto this session's
 	// first segment.
 	lane.app.resetTranscriptionSegmentSecondsForLaneScope(lane.scope())
+	lane.segmentBindings.Reset()
 	lane.setConnected(true)
 
 	readErr := make(chan error, 1)
@@ -332,7 +336,7 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 				readErr <- err
 				return
 			}
-			if lane.app.handleTranscriptionLaneEventForScope(lane.scope(), raw, lane.transcriptionModel) {
+			if lane.app.handleTranscriptionLaneEventForScopeWithBindings(lane.scope(), raw, lane.transcriptionModel, lane.segmentBindings) {
 				readErr <- errTranscriptionLaneSessionExpired
 				return
 			}
@@ -389,14 +393,15 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 			return nil
 		}
 		capture.OccurredEnd = time.Now().UTC()
+		segmentID := uuid.NewString()
 		pendingAudio = false
 		pendingAudioSamples = 0
 		pendingFences = map[string]ConsentFence{}
 		segmentCapture = nil
 		scope := RoomScoutScope{RoomID: lane.roomID, SittingID: lane.sittingID, MediaGeneration: lane.mediaGeneration}
 		lane.app.noteRealtimeSpeechStoppedForScope(scope)
-		lane.app.freezeAttributionWindowAtCommitForScopeWithCaptureAndConsent(scope, capture, contributorFences)
-		return lane.commitPendingTranscriptionAudio(conn, samples)
+		lane.app.freezeAttributionWindowAtCommitForScopeWithSegmentAndConsent(scope, segmentID, capture, contributorFences)
+		return lane.commitPendingTranscriptionAudio(conn, samples, segmentID)
 	}
 	acceptFrame := func(frame consentAudioFrame) error {
 		if len(frame.fences) == 0 {
@@ -512,7 +517,7 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 	}
 }
 
-func (lane *meetingTranscriptionLane) commitPendingTranscriptionAudio(conn *websocket.Conn, pendingSamples int) error {
+func (lane *meetingTranscriptionLane) commitPendingTranscriptionAudio(conn *websocket.Conn, pendingSamples int, segmentID string) error {
 	paddingSamples := transcriptionLaneCommitPaddingSamples(pendingSamples)
 	if paddingSamples > 0 {
 		if err := lane.writeJSON(conn, map[string]any{
@@ -523,13 +528,18 @@ func (lane *meetingTranscriptionLane) commitPendingTranscriptionAudio(conn *webs
 		}
 	}
 
-	if err := lane.writeJSON(conn, map[string]any{"type": "input_audio_buffer.commit"}); err != nil {
+	committedSamples := pendingSamples + paddingSamples
+	seconds := float64(committedSamples) / float64(transcriptionLaneInputSampleRate)
+	if err := lane.segmentBindings.Commit(segmentID, seconds); err != nil {
+		return fmt.Errorf("register transcription segment: %w", err)
+	}
+	if err := lane.writeJSON(conn, map[string]any{"type": "input_audio_buffer.commit", "event_id": "segment-commit-" + segmentID}); err != nil {
 		return fmt.Errorf("commit transcription audio: %w", err)
 	}
 	// W0-5: the commit is the billing moment on this duration-billed lane —
 	// meter it here (padding included: the API transcribes those samples too),
 	// whether or not the transcription later completes.
-	lane.noteCommittedSegment(pendingSamples + paddingSamples)
+	lane.noteCommittedSegmentUsage(committedSamples)
 	return nil
 }
 
@@ -724,6 +734,17 @@ func (app *kanbanBoardApp) resetTranscriptionSegmentSecondsForLaneScope(scope Ro
 // noteCommittedSegment writes the ledger row for one committed segment and
 // queues its duration for the terminal transcript_segment eval event.
 func (lane *meetingTranscriptionLane) noteCommittedSegment(committedSamples int) {
+	lane.noteCommittedSegmentUsage(committedSamples)
+	if lane == nil || committedSamples <= 0 {
+		return
+	}
+	seconds := float64(committedSamples) / float64(transcriptionLaneInputSampleRate)
+	// Legacy/test callers have no provider-item binding. The live lane uses
+	// segmentBindings and therefore never consumes this FIFO.
+	lane.app.pushTranscriptionSegmentSecondsForLaneScope(lane.scope(), seconds)
+}
+
+func (lane *meetingTranscriptionLane) noteCommittedSegmentUsage(committedSamples int) {
 	if lane == nil || committedSamples <= 0 {
 		return
 	}
@@ -735,7 +756,6 @@ func (lane *meetingTranscriptionLane) noteCommittedSegment(committedSamples int)
 		RoomID:       lane.roomID,
 		AudioSeconds: seconds,
 	})
-	lane.app.pushTranscriptionSegmentSecondsForLaneScope(lane.scope(), seconds)
 }
 
 func (lane *meetingTranscriptionLane) stopping() bool {
@@ -833,6 +853,10 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEventForRoomGeneration(roomID 
 }
 
 func (app *kanbanBoardApp) handleTranscriptionLaneEventForScope(scope RoomScoutScope, raw []byte, model string) bool {
+	return app.handleTranscriptionLaneEventForScopeWithBindings(scope, raw, model, nil)
+}
+
+func (app *kanbanBoardApp) handleTranscriptionLaneEventForScopeWithBindings(scope RoomScoutScope, raw []byte, model string, bindings *transcriptionSegmentBindings) bool {
 	var event kanbanRealtimeEvent
 	if err := json.Unmarshal(raw, &event); err != nil {
 		log.Errorf("Failed to parse OpenAI transcription event: %v", err)
@@ -869,35 +893,109 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEventForScope(scope RoomScoutS
 			// kinds render there); raw message stays in metadata + server logs.
 			broadcastAssistantEvent("status", "transcript lane hit a server error", map[string]any{"code": event.Error.Code, "message": event.Error.Message, "lane": "transcript"})
 		}
+	case "input_audio_buffer.committed":
+		if bindings == nil {
+			break
+		}
+		records, err := bindings.BindCommitted(event.ItemID, event.PreviousItemID)
+		if err != nil {
+			if errors.Is(err, errTranscriptionSegmentBindingDeferred) {
+				recordEvalEvent(seatTranscriptionLane, evalKindTranscriptSegment, map[string]any{
+					"status":           "binding_deferred",
+					"room_id":          roomID,
+					"item_id":          strings.TrimSpace(event.ItemID),
+					"previous_item_id": strings.TrimSpace(event.PreviousItemID),
+				})
+				break
+			}
+			recordCapabilityFailure(capabilitySTT, time.Now().UTC(), fmt.Errorf("bind committed transcription item: %w", err))
+			recordEvalEvent(seatTranscriptionLane, evalKindTranscriptSegment, map[string]any{
+				"status":           "binding_failed",
+				"room_id":          roomID,
+				"item_id":          strings.TrimSpace(event.ItemID),
+				"previous_item_id": strings.TrimSpace(event.PreviousItemID),
+			})
+			// A conflicting/branched provider chain cannot be safely repaired in
+			// place. Fence the connection so its orphaned attribution and metering
+			// state cannot leak into the next session.
+			return true
+		}
+		for _, record := range records {
+			recordEvalEvent(seatTranscriptionLane, evalKindTranscriptSegment, map[string]any{
+				"status":        "bound",
+				"room_id":       roomID,
+				"segment_id":    record.SegmentID,
+				"item_id":       record.ProviderItem,
+				"audio_seconds": record.AudioSeconds,
+			})
+		}
 	case "conversation.item.input_audio_transcription.completed":
+		segmentID := ""
+		audioSeconds := float64(0)
+		if bindings != nil {
+			record, err := bindings.Consume(event.ItemID)
+			if err != nil {
+				recordCapabilityFailure(capabilitySTT, time.Now().UTC(), fmt.Errorf("resolve completed transcription item: %w", err))
+				recordEvalEvent(seatTranscriptionLane, evalKindTranscriptSegment, map[string]any{
+					"status":  "unbound_completed",
+					"room_id": roomID,
+					"item_id": strings.TrimSpace(event.ItemID),
+				})
+				break
+			}
+			segmentID, audioSeconds = record.SegmentID, record.AudioSeconds
+		} else {
+			audioSeconds = app.popTranscriptionSegmentSecondsForLaneScope(scope)
+		}
 		recordCapabilitySuccess(capabilitySTT, time.Now().UTC())
 		recordEvalEvent(seatTranscriptionLane, evalKindTranscriptSegment, map[string]any{
 			"status":        "completed",
 			"room_id":       roomID,
-			"audio_seconds": app.popTranscriptionSegmentSecondsForLaneScope(scope),
+			"segment_id":    segmentID,
+			"item_id":       strings.TrimSpace(event.ItemID),
+			"audio_seconds": audioSeconds,
 		})
 		if mediaGeneration > 0 {
-			app.rememberTranscriptForMediaScope(scope, event, "transcript_lane", model)
+			app.rememberTranscriptForMediaScopeSegment(scope, segmentID, event, "transcript_lane", model)
 		} else {
-			app.rememberTranscript(roomID, event, "transcript_lane", model)
+			app.rememberTranscriptForSegment(roomID, segmentID, event, "transcript_lane", model)
 		}
 	case "conversation.item.input_audio_transcription.failed":
+		segmentID := ""
+		audioSeconds := float64(0)
+		if bindings != nil {
+			record, err := bindings.Consume(event.ItemID)
+			if err != nil {
+				recordCapabilityFailure(capabilitySTT, time.Now().UTC(), fmt.Errorf("resolve failed transcription item: %w", err))
+				recordEvalEvent(seatTranscriptionLane, evalKindTranscriptSegment, map[string]any{
+					"status":  "unbound_failed",
+					"room_id": roomID,
+					"item_id": strings.TrimSpace(event.ItemID),
+				})
+				break
+			}
+			segmentID, audioSeconds = record.SegmentID, record.AudioSeconds
+		} else {
+			audioSeconds = app.popTranscriptionSegmentSecondsForLaneScope(scope)
+		}
 		recordCapabilityFailure(capabilitySTT, time.Now().UTC(), fmt.Errorf("transcription segment failed"))
 		// W0-5: a failed segment is speech the brain never heard — this event
 		// series is the raw feed for the >2% drop-off alarm.
 		recordEvalEvent(seatTranscriptionLane, evalKindTranscriptSegment, map[string]any{
 			"status":        "failed",
 			"room_id":       roomID,
-			"audio_seconds": app.popTranscriptionSegmentSecondsForLaneScope(scope),
+			"segment_id":    segmentID,
+			"item_id":       strings.TrimSpace(event.ItemID),
+			"audio_seconds": audioSeconds,
 		})
 		// A6: a failed segment yields no transcript to persist, but it still had a
 		// window frozen at its commit. Pop it (discard) so the FIFO stays aligned;
 		// otherwise the next .completed inherits this dead turn's boundaries and every
 		// later transcript is attributed one turn late for the rest of the sitting.
 		if mediaGeneration > 0 {
-			app.popPendingAttributionWindowForScope(scope)
+			app.popPendingAttributionWindowForScopeSegment(scope, segmentID)
 		} else {
-			app.popPendingAttributionWindowForRoom(roomID)
+			app.popPendingAttributionWindowForRoomSegment(roomID, segmentID)
 		}
 	case "input_audio_buffer.speech_started":
 		if mediaGeneration > 0 {
@@ -948,22 +1046,35 @@ func transcriptionLaneWebSocketURL() string {
 	return realtimeWebSocketURL + "?" + values.Encode()
 }
 
-// transcriptionModelAcceptsPrompt reports whether the realtime transcription
-// session config may carry a free-text `prompt` for this model. The gpt-4o
-// transcription family accepts it (A4 domain-vocabulary biasing); the realtime
+// transcriptionModelAcceptsPrompt reports whether transcription configuration
+// may carry modern context fields for this model. The gpt-4o transcription
+// family and the current gpt-transcribe families accept a prompt; the realtime
 // whisper model does NOT — sending `prompt` there is rejected live with
 // "The 'prompt' parameter is not supported for this model" and would break the
 // session. So the prompt/near-field config is gated by model rather than sent
 // unconditionally (prod pins OPENAI_TRANSCRIPT_MODEL=gpt-realtime-whisper).
 func transcriptionModelAcceptsPrompt(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	return strings.Contains(model, "gpt-4o") || model == "gpt-transcribe" || model == "gpt-live-transcribe"
+}
+
+func transcriptionModelUsesModernHints(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	return model == "gpt-transcribe" || model == "gpt-live-transcribe"
+}
+
+func transcriptionModelAcceptsNearField(model string) bool {
 	return strings.Contains(strings.ToLower(strings.TrimSpace(model)), "gpt-4o")
 }
 
 func transcriptionLaneSessionConfig(model string) map[string]any {
 	model = strings.TrimSpace(model)
-	transcription := map[string]any{
-		"model":    model,
-		"language": "en",
+	transcription := map[string]any{"model": model}
+	if transcriptionModelUsesModernHints(model) {
+		transcription["languages"] = []string{"en"}
+		transcription["keywords"] = domainVocabulary()
+	} else {
+		transcription["language"] = "en"
 	}
 	input := map[string]any{
 		"format": map[string]any{
@@ -978,8 +1089,10 @@ func transcriptionLaneSessionConfig(model string) map[string]any {
 	// ONLY for models that accept it. Whisper rejects both fields, so it keeps
 	// the plain config it always had (domain-vocab requires switching
 	// OPENAI_TRANSCRIPT_MODEL to gpt-4o-transcribe).
-	if transcriptionModelAcceptsPrompt(model) {
+	if transcriptionModelAcceptsNearField(model) {
 		input["noise_reduction"] = map[string]any{"type": "near_field"}
+	}
+	if transcriptionModelAcceptsPrompt(model) {
 		transcription["prompt"] = realtimeTranscriptionPrompt()
 	}
 	return map[string]any{

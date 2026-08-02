@@ -649,8 +649,16 @@ func (app *kanbanBoardApp) deliverArtifactToOrigin(artifact meetingMemoryEntry, 
 func (app *kanbanBoardApp) broadcastChannelCompletion(artifact meetingMemoryEntry, channel scoutChatThreadRecord) {
 	title := firstNonEmptyString(strings.TrimSpace(artifact.Metadata["title"]), strings.TrimSpace(artifact.Metadata["threadQuery"]), "the report")
 	notifyText := fmt.Sprintf("Scout finished %q — ready in #%s", compactAssistantLine(title), channel.Title)
-	if _, err := app.createNotification("", notificationKindChat, notifyText, "chat", artifact.ID, channel.ID, false); err != nil {
-		log.Errorf("Failed to broadcast channel completion notification for artifact %s: %v", artifact.ID, err)
+	if scoutChatThreadIsOrganizationPublic(channel) {
+		if _, err := app.createNotification("", notificationKindChat, notifyText, "chat", artifact.ID, channel.ID, false); err != nil {
+			log.Errorf("Failed to broadcast channel completion notification for artifact %s: %v", artifact.ID, err)
+		}
+		return
+	}
+	for _, member := range scoutChatThreadMemberEmails(channel) {
+		if _, err := app.createNotification(member, notificationKindChat, notifyText, "chat", artifact.ID, channel.ID, false); err != nil {
+			log.Errorf("Failed to deliver project completion notification for artifact %s to %s: %v", artifact.ID, member, err)
+		}
 	}
 }
 

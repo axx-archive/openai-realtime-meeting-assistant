@@ -15,8 +15,10 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -66,6 +68,8 @@ const (
 // hook routes it to the commit-completion path rather than a real subtask.
 const goalCommitSubtaskID = "__commit_push__"
 
+const evalKindGoalCommitCallbackRejected = "goal_commit_callback_rejected"
+
 const (
 	goalPlanVersion        = 2
 	goalMaxSubtasks        = 6 // six users, one VPS — a plan wanting 40 subtasks is a modeling error
@@ -90,10 +94,14 @@ type goalPlan struct {
 	// as this plan's subtasks, and the definition's budgets override the
 	// engine defaults. Resolved from the same toolTemplate field every door
 	// already posts; a stray id degrades to a plain goal exactly like a tool.
-	ProcessID         string           `json:"processId,omitempty"`
-	State             string           `json:"state"`
-	Subtasks          []goalSubtask    `json:"subtasks"`
-	Gate              goalGate         `json:"gate"`
+	ProcessID string        `json:"processId,omitempty"`
+	State     string        `json:"state"`
+	Subtasks  []goalSubtask `json:"subtasks"`
+	Gate      goalGate      `json:"gate"`
+	// CommitGeneration is monotonic across feedback-driven re-ships. Gate is
+	// reset before a revised external write, but reusing the first run's
+	// deterministic outbox IDs would bind the new action to its terminal job.
+	CommitGeneration  int              `json:"commitGeneration,omitempty"`
 	Report            goalReport       `json:"report"`
 	Verification      goalVerification `json:"verification"`
 	DecomposeAttempts int              `json:"decomposeAttempts,omitempty"`
@@ -229,7 +237,8 @@ type goalGate struct {
 	ApprovalRequired bool   `json:"approvalRequired"`
 	Reason           string `json:"reason,omitempty"`
 	Command          string `json:"command,omitempty"`       // the external_write command the gate recorded
-	CommitChildID    string `json:"commitChildId,omitempty"` // the one external_write sidecar child, for idempotent commit_push
+	CommitChildID    string `json:"commitChildId,omitempty"` // reserved durable outbox child for commit_push
+	CommitJobID      string `json:"commitJobId,omitempty"`   // reserved deterministic queue job for exactly-once enqueue
 }
 
 type goalReport struct {
@@ -1357,6 +1366,24 @@ func (app *kanbanBoardApp) foldGoalChildCompletion(parentID string, subtaskID st
 		if plan.State != goalStateCommit {
 			return
 		}
+		expectedGeneration := strconv.Itoa(plan.CommitGeneration)
+		if strings.TrimSpace(child.ID) != strings.TrimSpace(plan.Gate.CommitChildID) ||
+			strings.TrimSpace(child.Metadata["runnerJobId"]) != strings.TrimSpace(plan.Gate.CommitJobID) ||
+			strings.TrimSpace(child.Metadata["goalCommitGeneration"]) != expectedGeneration {
+			log.Warnf("goal %s ignored stale commit callback child=%s job=%s generation=%s (current child=%s job=%s generation=%s)",
+				parentID, child.ID, child.Metadata["runnerJobId"], child.Metadata["goalCommitGeneration"],
+				plan.Gate.CommitChildID, plan.Gate.CommitJobID, expectedGeneration)
+			recordEvalEvent(seatGoalReview, evalKindGoalCommitCallbackRejected, map[string]any{
+				"goal_id":             plan.GoalID,
+				"callback_child_id":   child.ID,
+				"callback_job_id":     child.Metadata["runnerJobId"],
+				"callback_generation": child.Metadata["goalCommitGeneration"],
+				"current_child_id":    plan.Gate.CommitChildID,
+				"current_job_id":      plan.Gate.CommitJobID,
+				"current_generation":  plan.CommitGeneration,
+			})
+			return
+		}
 		childStatus := subtaskFailed
 		if complete {
 			childStatus = subtaskComplete
@@ -2103,13 +2130,6 @@ func (e *goalEngine) parkProcessCheckpoint(plan *goalPlan, parentID string, st *
 			artifact = current
 		}
 	}
-	if _, _, err := e.app.updateOSArtifactWithMetadata(parentID, "", artifact.Text, scoutParticipantName, map[string]string{
-		"threadStatus": codexJobStatusApprovalRequired,
-		"status":       codexJobStatusApprovalRequired,
-		"reviewGate":   "approval_required",
-	}); err != nil {
-		log.Errorf("goal %s checkpoint metadata failed: %v", parentID, err)
-	}
 	// The park lands in the origin thread as the call-to-action (P0-3): a goal
 	// ref message the client mounts as the full goalcard, choice card included.
 	e.app.postGoalCheckpointMessage(parentID, plan.Checkpoint.Question)
@@ -2221,7 +2241,6 @@ func (e *goalEngine) proceedProcessCheckpoint(plan *goalPlan, parentID string, s
 	if e.conditionalPersistFailed {
 		return fmt.Errorf("goal artifact not found")
 	}
-	e.unparkCheckpointSurface(parentID)
 	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
 	defer cancel()
 	e.drive(ctx, plan, parentID)
@@ -2287,7 +2306,6 @@ func (e *goalEngine) applyProcessCheckpointSendBack(plan *goalPlan, parentID str
 	if e.conditionalPersistFailed {
 		return
 	}
-	e.unparkCheckpointSurface(parentID)
 }
 
 // resetGoalDependents cascade-invalidates a checkpoint send-back: every
@@ -2364,20 +2382,6 @@ func (e *goalEngine) holdProcessCheckpoint(plan *goalPlan, parentID string, held
 	// §2c): artifacts stay filed, actions quieted, share links stay dark.
 	e.app.recordStudioShipResolution(plan, parentID, checkpoint.StageID, manifestStatusHeld, heldBy, false)
 	return nil
-}
-
-// unparkCheckpointSurface flips the approval surface back to running once a
-// checkpoint resolves — the goal is in flight again.
-func (e *goalEngine) unparkCheckpointSurface(parentID string) {
-	if current, ok := e.app.osArtifactByID(parentID); ok {
-		if _, _, err := e.app.updateOSArtifactWithMetadata(parentID, "", current.Text, scoutParticipantName, map[string]string{
-			"threadStatus": "running",
-			"status":       "running",
-			"reviewGate":   "pending",
-		}); err != nil {
-			log.Errorf("goal %s checkpoint resume metadata failed: %v", parentID, err)
-		}
-	}
 }
 
 // checkpointOptionForChoice returns the option a choice lands on: an exact
@@ -3366,8 +3370,6 @@ func (e *goalEngine) reopenGoalForFeedback(plan *goalPlan, parentID string, resu
 	if e.conditionalPersistFailed {
 		return fmt.Errorf("goal artifact not found")
 	}
-	// The card is in flight again (the same flip a checkpoint resume does).
-	e.unparkCheckpointSurface(parentID)
 	return nil
 }
 
@@ -3460,7 +3462,12 @@ func (app *kanbanBoardApp) resumeApprovedGoalWithChoice(parentID string, approve
 	plan.Gate.ReviewedBy = firstNonEmptyString(strings.TrimSpace(approvedBy), "admin")
 	plan.State = goalStateCommit
 
-	engine.persist(&plan, parentID, "")
+	if _, err := engine.reserveGoalCommitOutbox(&plan, parentID); err != nil {
+		return err
+	}
+	if persisted := engine.persist(&plan, parentID, ""); strings.TrimSpace(persisted.ID) == "" || engine.conditionalPersistFailed {
+		return fmt.Errorf("could not durably record external-write approval; nothing was enqueued")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), engine.timeout)
 	defer cancel()
 	engine.drive(ctx, &plan, parentID)
@@ -3473,49 +3480,290 @@ func (app *kanbanBoardApp) resumeApprovedGoalWithChoice(parentID string, approve
 // artifact (not the parent, whose body is the report) carrying goalParentId so
 // the shared codex-callback fold lands the terminal state.
 //
-// Idempotent across restarts: once a commit child exists, this never enqueues a
-// second external_write job. On re-drive it folds the child if it already
-// finished, otherwise waits for the callback — so a parked commit_push cannot
-// fire a duplicate git push/deploy on every boot.
+// Idempotent across restarts: the parent reserves deterministic child + job IDs
+// before this method may create or enqueue anything. Both child creation and
+// queue enqueue are idempotent by those bindings, so a crash between any two
+// phases resumes the same outbox entry rather than issuing another push/deploy.
 func (e *goalEngine) enqueueCommitPush(plan *goalPlan, parentID string) {
-	if existing := strings.TrimSpace(plan.Gate.CommitChildID); existing != "" {
-		if childStatus, terminal := goalChildTerminalStatus(e.app, existing); terminal {
-			e.foldCommitResult(plan, parentID, childStatus)
-		}
-		// Otherwise the commit job is still in flight; wait for its callback.
+	changed, err := e.reserveGoalCommitOutbox(plan, parentID)
+	if err != nil {
+		log.Errorf("goal %s commit_push reservation failed: %v", parentID, err)
+		plan.State = goalStateBlocked
+		plan.Blocker = "external-write recovery requires operator reconciliation: " + err.Error()
+		e.finish(plan, parentID)
 		return
+	}
+	if changed {
+		if persisted := e.persist(plan, parentID, ""); strings.TrimSpace(persisted.ID) == "" || e.conditionalPersistFailed {
+			log.Errorf("goal %s commit_push reservation was not durable; enqueue refused", parentID)
+			return
+		}
 	}
 
 	command := firstNonEmptyString(plan.Gate.Command, plan.Objective)
-	child, _, err := e.app.createOSArtifactWithMetadata("workflow", command, buildGoalCommitScaffold(plan, command), plan.CreatedBy, map[string]string{
-		"mode":          "goal_commit",
-		"goalParentId":  parentID,
-		"goalSubtaskId": goalCommitSubtaskID,
-		"authority":     codexJobAuthorityExternalWrite,
+	child, err := e.ensureGoalCommitChild(plan, parentID, command)
+	if err != nil {
+		log.Errorf("goal %s commit child reservation failed: %v", parentID, err)
+		return
+	}
+	if childStatus, terminal := goalChildTerminalStatus(e.app, child.ID); terminal {
+		e.foldCommitResult(plan, parentID, childStatus)
+		return
+	}
+
+	threadID := goalCommitThreadID(plan)
+	store := newCodexRunnerJobStore(codexRunnerQueuePath())
+	reservedBinding := codexRunnerJob{
+		ID:         plan.Gate.CommitJobID,
+		ArtifactID: child.ID,
+		ThreadID:   threadID,
+		Mode:       "workflow",
+		Query:      command,
+		Authority:  codexJobAuthorityExternalWrite,
+	}
+	bindingStatus := codexJobStatusQueued
+	bindingRunner := "reserved"
+	if existing, readErr := store.read(filepath.Base(store.jobPath(plan.Gate.CommitJobID))); readErr == nil {
+		if !sameCodexRunnerJobBinding(*existing, reservedBinding) {
+			log.Errorf("goal %s commit job reservation is bound to another action", parentID)
+			return
+		}
+		if status, terminal := goalCommitQueueTerminalStatus(existing.Status); terminal {
+			e.foldCommitResult(plan, parentID, status)
+			return
+		}
+		bindingStatus = existing.Status
+		bindingRunner = existing.Status
+	}
+	// Bind the callback identity to the child BEFORE the runnable queue file is
+	// published. A fast sidecar can therefore never complete against an
+	// artifact that does not yet know its reserved job/thread IDs.
+	child, _, err = e.app.updateOSArtifactWithMetadata(child.ID, "", child.Text, scoutParticipantName, map[string]string{
+		"runnerJobId":          plan.Gate.CommitJobID,
+		"threadId":             threadID,
+		"goalCommitJobId":      plan.Gate.CommitJobID,
+		"goalCommitGeneration": strconv.Itoa(plan.CommitGeneration),
+		"status":               bindingStatus,
+		"threadStatus":         bindingStatus,
+		"codexRunner":          bindingRunner,
 	})
 	if err != nil || strings.TrimSpace(child.ID) == "" {
-		e.fail(plan, parentID, "commit/push child artifact failed")
+		log.Errorf("goal %s commit child binding failed: %v", parentID, err)
 		return
 	}
 	thread := scoutAgentThread{
-		ID:       fmt.Sprintf("%s-commit", plan.GoalID),
+		ID:       threadID,
 		Mode:     "workflow",
 		Query:    command,
 		Artifact: child,
 	}
-	result, err := e.app.enqueueCodexAgentThreadJob(thread, codexJobAuthorityExternalWrite)
+	result, err := e.app.enqueueCodexAgentThreadJobWithID(thread, codexJobAuthorityExternalWrite, plan.Gate.CommitJobID)
 	if err != nil {
 		log.Errorf("goal %s commit_push enqueue failed: %v", parentID, err)
-		e.fail(plan, parentID, "commit/push enqueue failed: "+err.Error())
 		return
 	}
-	// Stamp the runner job id onto the child so the callback's expectedJobID
-	// guard matches and lands on this exact artifact.
+
+	if job, readErr := store.read(filepath.Base(store.jobPath(plan.Gate.CommitJobID))); readErr == nil {
+		if status, terminal := goalCommitQueueTerminalStatus(job.Status); terminal {
+			e.foldCommitResult(plan, parentID, status)
+			return
+		}
+		if job.Status == codexJobStatusRunning {
+			result.Metadata["status"] = codexJobStatusRunning
+			result.Metadata["threadStatus"] = codexJobStatusRunning
+			result.Metadata["codexRunner"] = codexJobStatusRunning
+		}
+	}
+	// The callback identity is already durable; this richer queued/running
+	// projection is descriptive and can safely be retried after a crash.
 	if _, _, err := e.app.updateOSArtifactWithMetadata(child.ID, "", child.Text, scoutParticipantName, result.Metadata); err != nil {
 		log.Errorf("goal %s commit child metadata failed: %v", parentID, err)
 	}
-	plan.Gate.CommitChildID = child.ID
-	e.persist(plan, parentID, "")
+}
+
+func goalCommitThreadID(plan *goalPlan) string {
+	return fmt.Sprintf("%s-commit", strings.TrimSpace(plan.GoalID))
+}
+
+func deterministicGoalCommitIDs(plan *goalPlan, parentID string) (string, string) {
+	seed := firstNonEmptyString(strings.TrimSpace(plan.GoalID), strings.TrimSpace(parentID))
+	generation := plan.CommitGeneration
+	if generation < 1 {
+		generation = 1
+	}
+	digest := sha256.Sum256([]byte(fmt.Sprintf("goal-commit-outbox/v1\x00%s\x00%d", seed, generation)))
+	suffix := fmt.Sprintf("%x", digest[:12])
+	return "os-artifact-goal-commit-" + suffix, "codex-job-goal-commit-" + suffix
+}
+
+// reserveGoalCommitOutbox mutates only the in-memory plan. The caller must
+// persist and verify that mutation before creating a child or queue job.
+func (e *goalEngine) reserveGoalCommitOutbox(plan *goalPlan, parentID string) (bool, error) {
+	if plan == nil {
+		return false, fmt.Errorf("goal commit plan is unavailable")
+	}
+	// Reservation is transactional in memory too: discovery failures must not
+	// leak a guessed child/job/generation into a caller that records the honest
+	// operator-reconciliation block.
+	candidate := *plan
+	changed, err := e.reserveGoalCommitOutboxCandidate(&candidate, parentID)
+	if err != nil {
+		return false, err
+	}
+	*plan = candidate
+	return changed, nil
+}
+
+func (e *goalEngine) reserveGoalCommitOutboxCandidate(plan *goalPlan, parentID string) (bool, error) {
+	changed := false
+	if strings.TrimSpace(plan.Gate.CommitChildID) == "" {
+		if orphan, ok, err := e.findLegacyGoalCommitChildForPlan(plan, parentID); err != nil {
+			return false, err
+		} else if ok {
+			plan.CommitGeneration = 1
+			plan.Gate.CommitChildID = orphan.ID
+			if strings.TrimSpace(plan.Gate.CommitJobID) == "" {
+				plan.Gate.CommitJobID = strings.TrimSpace(orphan.Metadata["runnerJobId"])
+				if plan.Gate.CommitJobID == "" {
+					job, found, discoverErr := e.findLegacyGoalCommitQueueJob(plan, orphan)
+					if discoverErr != nil {
+						return false, discoverErr
+					}
+					if !found {
+						return false, fmt.Errorf("legacy commit child %s has no runner job binding and no uniquely matching durable queue job; execution state is unknown", orphan.ID)
+					}
+					plan.Gate.CommitJobID = job.ID
+				}
+			}
+		} else {
+			plan.CommitGeneration++
+			if plan.CommitGeneration < 1 {
+				plan.CommitGeneration = 1
+			}
+			plan.Gate.CommitChildID, _ = deterministicGoalCommitIDs(plan, parentID)
+		}
+		changed = true
+	}
+	if plan.CommitGeneration < 1 {
+		plan.CommitGeneration = 1
+		changed = true
+	}
+	if strings.TrimSpace(plan.Gate.CommitJobID) == "" {
+		_, plan.Gate.CommitJobID = deterministicGoalCommitIDs(plan, parentID)
+		changed = true
+	}
+	return changed, nil
+}
+
+func (e *goalEngine) findLegacyGoalCommitQueueJob(plan *goalPlan, child meetingMemoryEntry) (codexRunnerJob, bool, error) {
+	command := firstNonEmptyString(plan.Gate.Command, plan.Objective)
+	binding := codexRunnerJob{
+		ArtifactID: child.ID,
+		ThreadID:   goalCommitThreadID(plan),
+		Mode:       "workflow",
+		Query:      command,
+		Authority:  codexJobAuthorityExternalWrite,
+	}
+	matches, err := newCodexRunnerJobStore(codexRunnerQueuePath()).findByActionBinding(binding)
+	if err != nil {
+		return codexRunnerJob{}, false, err
+	}
+	switch len(matches) {
+	case 0:
+		return codexRunnerJob{}, false, nil
+	case 1:
+		return matches[0], true, nil
+	default:
+		return codexRunnerJob{}, false, fmt.Errorf("multiple legacy commit jobs are bound to child %s", child.ID)
+	}
+}
+
+// findLegacyGoalCommitChild adopts the single orphan made by the old
+// enqueue-before-parent-stamp ordering. More than one match is ambiguous and
+// freezes rather than choosing an external side effect to replay.
+func (e *goalEngine) findLegacyGoalCommitChildForPlan(plan *goalPlan, parentID string) (meetingMemoryEntry, bool, error) {
+	// Once a generation exists, an empty Gate reservation means a deliberate
+	// feedback re-ship. Prior children are history, not crash orphans.
+	if plan.CommitGeneration > 0 {
+		return meetingMemoryEntry{}, false, nil
+	}
+	// Pre-generation plans that already reached a terminal verification can be
+	// reopened for feedback with Gate reset. Their old terminal commit child is
+	// history too; only an unverified commit-state plan can own an orphan from
+	// the legacy enqueue-before-parent-stamp crash window.
+	if strings.TrimSpace(plan.Verification.CheckedAt) != "" ||
+		(plan.Verification.Verdict != "" && plan.Verification.Verdict != "pending") {
+		return meetingMemoryEntry{}, false, nil
+	}
+	seen := map[string]meetingMemoryEntry{}
+	command := firstNonEmptyString(plan.Gate.Command, plan.Objective)
+	for _, entry := range e.app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0) {
+		if entry.Metadata["goalParentId"] != parentID || entry.Metadata["goalSubtaskId"] != goalCommitSubtaskID || entry.Metadata["authority"] != codexJobAuthorityExternalWrite || entry.Metadata["mode"] != "goal_commit" || entry.Metadata["query"] != strings.TrimSpace(command) {
+			continue
+		}
+		if current, ok := e.app.osArtifactByID(entry.ID); ok {
+			seen[current.ID] = current
+		}
+	}
+	if len(seen) == 0 {
+		return meetingMemoryEntry{}, false, nil
+	}
+	if len(seen) != 1 {
+		return meetingMemoryEntry{}, false, fmt.Errorf("multiple legacy commit children are bound to goal %s", parentID)
+	}
+	for _, entry := range seen {
+		return entry, true, nil
+	}
+	return meetingMemoryEntry{}, false, nil
+}
+
+func (e *goalEngine) ensureGoalCommitChild(plan *goalPlan, parentID string, command string) (meetingMemoryEntry, error) {
+	childID := strings.TrimSpace(plan.Gate.CommitChildID)
+	threadID := goalCommitThreadID(plan)
+	body := buildGoalCommitScaffold(plan, command)
+	child, appended, _, err := e.app.createOSArtifactWithIDAndMetadataAcknowledged(childID, "workflow", command, body, plan.CreatedBy, map[string]string{
+		"mode":                 "goal_commit",
+		"goalParentId":         parentID,
+		"goalSubtaskId":        goalCommitSubtaskID,
+		"authority":            codexJobAuthorityExternalWrite,
+		"runnerJobId":          plan.Gate.CommitJobID,
+		"threadId":             threadID,
+		"goalCommitGeneration": strconv.Itoa(plan.CommitGeneration),
+	})
+	if err != nil {
+		return meetingMemoryEntry{}, err
+	}
+	if !appended {
+		var ok bool
+		child, ok = e.app.osArtifactByID(childID)
+		if !ok {
+			return meetingMemoryEntry{}, fmt.Errorf("reserved commit child %s was not readable", childID)
+		}
+	}
+	if child.ID != childID || child.Metadata["goalParentId"] != parentID || child.Metadata["goalSubtaskId"] != goalCommitSubtaskID || child.Metadata["authority"] != codexJobAuthorityExternalWrite || child.Metadata["query"] != strings.TrimSpace(command) {
+		return meetingMemoryEntry{}, fmt.Errorf("reserved commit child %s is bound to another action", childID)
+	}
+	if stamped := strings.TrimSpace(child.Metadata["runnerJobId"]); stamped != "" && stamped != strings.TrimSpace(plan.Gate.CommitJobID) {
+		return meetingMemoryEntry{}, fmt.Errorf("reserved commit child %s is bound to job %s", childID, stamped)
+	}
+	if stamped := strings.TrimSpace(child.Metadata["threadId"]); stamped != "" && stamped != threadID {
+		return meetingMemoryEntry{}, fmt.Errorf("reserved commit child %s is bound to thread %s", childID, stamped)
+	}
+	if stamped := strings.TrimSpace(child.Metadata["goalCommitGeneration"]); stamped != "" && stamped != strconv.Itoa(plan.CommitGeneration) {
+		return meetingMemoryEntry{}, fmt.Errorf("reserved commit child %s is bound to generation %s", childID, stamped)
+	}
+	return child, nil
+}
+
+func goalCommitQueueTerminalStatus(status string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case codexJobStatusComplete:
+		return subtaskComplete, true
+	case codexJobStatusFailed, codexJobStatusCancelled:
+		return subtaskFailed, true
+	default:
+		return "", false
+	}
 }
 
 // foldCommitResult lands the terminal state once the external_write commit job
@@ -3585,6 +3833,28 @@ func (e *goalEngine) persist(plan *goalPlan, parentID string, body string) meeti
 		"goalStatus":      status,
 		"reviewGate":      gate,
 		"progressPercent": strconv.Itoa(percent),
+	}
+	// Publish the durable engine state and the thread surface in the SAME
+	// artifact revision. A checkpoint used to persist currentStage=approval
+	// first and stamp threadStatus/status in a second write, briefly exposing an
+	// approval plan whose card still said "running" (and the inverse on resume).
+	// The derived surface is part of the state transition, not follow-up
+	// bookkeeping.
+	if plan.State == goalStateApproval {
+		metadata["threadStatus"] = codexJobStatusApprovalRequired
+		metadata["status"] = codexJobStatusApprovalRequired
+	} else if plan.State == goalStateVerified {
+		metadata["threadStatus"] = codexJobStatusComplete
+		metadata["status"] = codexJobStatusComplete
+	} else if plan.State == goalStateBlocked && plan.Cancelled {
+		metadata["threadStatus"] = codexJobStatusCancelled
+		metadata["status"] = codexJobStatusCancelled
+	} else if plan.State == goalStateBlocked {
+		metadata["threadStatus"] = "error"
+		metadata["status"] = "error"
+	} else {
+		metadata["threadStatus"] = "running"
+		metadata["status"] = "running"
 	}
 	// An honest "revising (attempt N of 2)" signal while a re-queued subtask is
 	// back in flight, so the card shows a deliberate revision rather than a
@@ -3699,14 +3969,6 @@ func (e *goalEngine) persistApprovalRequired(plan *goalPlan, parentID string) {
 		if current, ok := e.app.osArtifactByID(parentID); ok {
 			artifact = current
 		}
-	}
-	// Extra keys the approval surface keys off (threadStatus/reviewGate).
-	if _, _, err := e.app.updateOSArtifactWithMetadata(parentID, "", artifact.Text, scoutParticipantName, map[string]string{
-		"threadStatus": codexJobStatusApprovalRequired,
-		"status":       codexJobStatusApprovalRequired,
-		"reviewGate":   "approval_required",
-	}); err != nil {
-		log.Errorf("goal %s approval metadata failed: %v", parentID, err)
 	}
 	e.app.notifyAgentThreadCreator(artifact, notificationKindAgent, agentThreadNotificationText("Goal needs approval to ship", artifact))
 }
