@@ -19,14 +19,14 @@ dependencies, authority boundaries, rollback posture, and the next safe action.
 | Local `main` | `9217dbf7a9f1a96ceed20f174fd2a9894daa29af` | Clean except separately owned untracked `stride-site/`. |
 | Remote `axx/main` | `9217dbf7a9f1a96ceed20f174fd2a9894daa29af` | Read-only remote refresh matches local `main`. No E10 or P0 branch is published. |
 | Production | `30eb8891dd74edda` | Live `/healthz` identity on 2026-08-02. This is the retained older release; the sealed canonical repair release has not been activated. |
-| Production health | Traffic-ready, capability-degraded | `/capabilities` reports `trafficReady:true`, `ok:false`; Scout is disconnected/degraded and STT is disconnected/stale since `2026-07-31T18:28:56Z`. Aggregate readiness is not acceptance. |
-| P0 branch | `/tmp/meetingassist-scout-p0`, `codex/scout-p0`, candidate `13a3ef2ea7bd8031a0717616d11373482a598dcd` on base `9217dbf` | Isolated, committed deterministic candidate. It is not published, provider-qualified, physical-device accepted, merge-approved, or deployable yet. |
+| Production health | Traffic-ready, capability-degraded | `/capabilities` reports `trafficReady:true`, `ok:false`; Scout is disconnected/degraded and STT is disconnected/stale since `2026-07-31T18:28:56Z`. Canonical shadow reconciliation is also unhealthy at dirty high-water `13560` versus reconciled `8532` with an idempotency-key conflict. Aggregate readiness is not acceptance. |
+| P0 branch | `/tmp/meetingassist-scout-p0`, `codex/scout-p0`, checkpoint `78b4d1cae287cc9bab9ab1a1e2ffa6022f8e2ee3` on base `9217dbf` | Isolated, committed deterministic candidate. It is not published, provider-qualified, physical-device accepted, merge-approved, or deployable yet. |
 | E10 integration | `/tmp/meetingassist-e10-integration`, `codex/e10-integration`, candidate `0783a1cf9c45c1e06e95e3b010c7eae055ef723d` on base `9217dbf` | Clean, committed security candidate. Focused normal/race, full repository, vet, diff, and independent critic gates pass. It is not published, externally provisioned, merge-approved, or deployable yet. |
-| Combined release candidate | `/tmp/meetingassist-stride-rc`, `codex/stride-release-candidate`, verified code head `62aafcab5b9824339f5511e54dde212f181171f0` | Fresh isolated composition of the complete E10 chain plus Scout P0. Full Go, focused race, vet, mobile, composition, and independent critic gates pass; `main` has not moved. |
+| Combined release candidate | `/tmp/meetingassist-stride-rc`, `codex/stride-release-candidate`, verified code head `4c56ca53c2025bf012cae7ec75fe3c09e3072db8` | Fresh isolated composition of the complete E10 chain plus Scout P0 and the iOS 26 WebRTC camera crash guard. Full Go, focused race, vet, mobile, native build, composition, and independent code-critic gates pass; `main` has not moved. Physical room gestures remain open. |
 | Specialist repair | `/tmp/meetingassist-e10-specialist`, `codex/e10-specialist`, base `0aa1b090687d7a5d9ed3c10c9d792ee9044a545c` | Nine tracked files contain preserved uncommitted removal of the legacy alternate join path and request-context leakage. |
 | Registry repair | `/tmp/meetingassist-e10-registry`, `codex/e10-registry`, base `1d2f55cfa86e1f155b7b14d06c5928379e2b1ea3` | Seven tracked files plus untracked `meeting_specialist_qualification_bridge.go` preserve signed-evidence binding, expiry, and external ledger-head/CAS work. |
 | Independent E10 verdict | `PASS` | No blocker, major, or minor finding remains in the committed E10 code checkpoint. External authority custody and activation remain separate default-off gates. |
-| TestFlight | Stride 1.0.0 Build 29 | Built from `97ff340097253ff3ad98481226f6159c3ce206ae`; EAS `7857b9b2-2de8-4248-b1c6-a50c54f6ca97` finished, Apple build `6a870589-8448-44fb-99d6-cea2f5a9ebb4` was last verified `VALID`, non-expired, and in internal `Team (Expo)`. External `Bonfire` excludes it. Physical-device acceptance is still open. |
+| TestFlight | Stride 1.0.0 Build 29 | A fresh read-only EAS list confirms Build 29 remains the newest EAS build: `7857b9b2-2de8-4248-b1c6-a50c54f6ca97`, `FINISHED`, from `97ff340097253ff3ad98481226f6159c3ce206ae`. Apple build `6a870589-8448-44fb-99d6-cea2f5a9ebb4` was last verified `VALID`, non-expired, and in internal `Team (Expo)`; external `Bonfire` excludes it. The connected handset now carries a locally signed release candidate over the same bundle ID, not the TestFlight binary. No Apple/TestFlight state changed and physical-device acceptance is still open. |
 
 No new migration, push, deployment, provider qualification, feature activation,
 or TestFlight upload is established by this checkpoint.
@@ -144,6 +144,24 @@ not accepted, and the fake local provider response does not qualify any seat.
 No P0 change is on `main` or production, and no target model is
 provider-qualified by this work.
 
+The intermittent physical-iPhone room crash is now independently localized to
+five recent Build 27 `SIGABRT` reports on WebRTC's
+`org.webrtc.RTCDispatcherCaptureSession` queue. The exact bundled
+`JitsiWebRTC 124.0.2` dSYM resolves the aborting frame to M124's
+`-[RTCCameraVideoCapturer updateVideoDataOutputPixelFormat:]`, where iOS 26's
+adaptive front-camera format rejects the fixed output dimensions. Commit
+`4c56ca5` pins that exact WebRTC binary and installs an iOS 26-only native
+guard before capture: it omits the unsafe fixed-dimension rewrite only for the
+front adaptive 16:9 format, contains any unexpected Objective-C settings
+exception, and emits privacy-safe intervention telemetry. The exact generated
+Expo/CocoaPods graph, simulator workspace, and signed physical-device Release
+build pass; the candidate installs, launches, and remains alive on the
+connected iPhone. Mobile passes 369/369 plus TypeScript, full Go and vet pass,
+focused normal/race telemetry coverage passes, and strict Objective-C
+compilation passes with warnings as errors. Physical join, camera-toggle,
+rotation, leave, outbound-frame, and no-new-crash acceptance remain open and
+cannot be inferred from process survival alone.
+
 The approved home behavior remains:
 
 - large waveform starts live Realtime Scout;
@@ -185,16 +203,17 @@ The final E10 checkpoint passed focused normal and race coverage, `go vet
 with the root package at 392.773 seconds. The independent critic returned
 `PASS`.
 
-The isolated combined code head `62aafca` also passes a clean repository-wide
-`go test ./... -count=1 -timeout 20m` with the root package at 406.350 seconds,
+The isolated combined code head through `4c56ca5` also passes a clean repository-wide
+`go test ./... -count=1 -timeout 20m` with the root package at 398.759 seconds,
 the combined focused race gate (24.274 seconds), `go vet ./...`, E10 internal
 packages, `git diff --check`, mobile dependency resolution and TypeScript, and
-all 368 mobile tests. The independent composition critic returned `PASS` after
+all 369 mobile tests. The independent composition and crash-fix code critics
+returned `PASS` after
 proving the reviewed P0 and E10 files are unchanged in the combined tree, no
 Anthropic core fallback or alternate specialist launch path reappeared, and no
-production activation was wired. Prior desktop/mobile-web/iPhone-simulator
-render receipts remain code-identical because the E10 composition changes no
-reviewed P0 UI file. Physical-device and live-provider acceptance remain open.
+production activation was wired. Prior desktop/mobile-web render receipts
+remain code-identical because the crash repair changes no reviewed P0 UI file.
+Physical-device and live-provider acceptance remain open.
 
 ## 7. Remaining dependency order
 
@@ -260,7 +279,7 @@ user/device owner; it cannot be inferred from simulator or Apple processing.
 
 ## 10. Resume here
 
-Resume in `/tmp/meetingassist-stride-rc` at verified code head `62aafca`. The
+Resume in `/tmp/meetingassist-stride-rc` at verified code head `4c56ca5`. The
 remaining pre-ceremony P0 frontier is live-provider and physical-device
 evidence: verify voice, dictation, and typed Scout as three separate lanes,
 keep target routes default-off until qualification, and do not substitute
