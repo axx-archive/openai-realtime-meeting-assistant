@@ -29,7 +29,7 @@ func TestSerializedReceiptsReverifyEveryOriginalSignedEnvelope(t *testing.T) {
 		t.Fatalf("format-drifted registry receipt accepted: %v", err)
 	}
 	tamperedRegistryReceipt := append([]byte(nil), registryEncoded...)
-	tamperedRegistryReceipt = []byte(strings.Replace(string(tamperedRegistryReceipt), `"itemCount": 33`, `"itemCount": 34`, 1))
+	tamperedRegistryReceipt = []byte(strings.Replace(string(tamperedRegistryReceipt), `"itemCount": 34`, `"itemCount": 35`, 1))
 	if _, err := ReverifyEncodedTargetRegistryReceipt(tamperedRegistryReceipt, registryRaw, registrySignature, fixture.registryPublic, fixture.approved); err == nil || !strings.Contains(err.Error(), "exactly match") {
 		t.Fatalf("tampered registry receipt accepted: %v", err)
 	}

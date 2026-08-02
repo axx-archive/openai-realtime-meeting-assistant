@@ -264,7 +264,7 @@ func TestQualificationResultBridgesSignedSourceRegistryCandidateAndEvaluator(t *
 	packet := QualificationResultPacket{
 		SchemaVersion: QualificationResultSchema, ResultID: "meeting-stt-result-001", TenantID: "tenant-acme", TargetID: manifest.TargetID, Lane: manifest.Lane,
 		EvidenceClass: "dual_signed_evaluator_result", Candidate: manifest.Candidate, Approval: validApproval(fixture, registryRaw),
-		SourcePacketKind: "corpus", SourcePacketSHA256: RegistryDigest(sourceRaw), EvaluatorConfigSHA256: target.MeasurementRevisionSHA256,
+		SourcePacketKind: "corpus", SourcePacketSHA256: RegistryDigest(sourceRaw), QualificationSubjectSHA256: manifest.QualificationSubjectSHA256, EvaluatorConfigSHA256: target.MeasurementRevisionSHA256,
 		EvaluatorResultSHA256: hash("meeting-stt-evaluator-result"), Qualified: true, EvaluatedAt: time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano),
 	}
 	packet.Approval.SourceArtifactSetSHA256 = QualificationSourceArtifactSetDigest(packet.SourcePacketSHA256, packet.EvaluatorConfigSHA256, packet.EvaluatorResultSHA256)
@@ -326,6 +326,126 @@ func TestQualificationResultBridgesSignedSourceRegistryCandidateAndEvaluator(t *
 		resultReviewerSignature, fixture.reviewerPublic, fixture.approved, VerifiedValidationReceipt{},
 	); err == nil {
 		t.Fatal("local result without a verifier-minted source receipt was accepted")
+	}
+	legacyResult := packet
+	legacyResult.SchemaVersion = "stride.e10.qualification-result/v1"
+	legacyResultRaw := mustJSON(t, legacyResult)
+	if _, _, _, err := VerifyQualificationResultReceipt(
+		legacyResultRaw, sourceRaw, registryRaw, registrySignature, fixture.registryPublic,
+		ed25519.Sign(fixture.operatorPrivate, legacyResultRaw), fixture.operatorPublic,
+		ed25519.Sign(fixture.reviewerPrivate, legacyResultRaw), fixture.reviewerPublic, fixture.approved, sourceReceipt,
+	); err == nil {
+		t.Fatal("legacy qualification result schema was accepted after qualification-subject binding became mandatory")
+	}
+}
+
+func TestQualificationImportBundleRoundTripsAndRejectsCrossTenantOrForgedAuthority(t *testing.T) {
+	fixture := newSignerFixture(t)
+	_, registryRaw := signedRegistry(t, fixture)
+	registrySignature := ed25519.Sign(fixture.registryPrivate, registryRaw)
+	manifest := validCorpus("meeting_stt", 120, fixture, registryRaw)
+	sourceRaw := mustJSON(t, manifest)
+	sourceOperatorSignature := ed25519.Sign(fixture.operatorPrivate, sourceRaw)
+	sourceReviewerSignature := ed25519.Sign(fixture.reviewerPrivate, sourceRaw)
+	target := validRegistry(fixture).Targets[targetIndex(validRegistry(fixture).Targets, manifest.TargetID)]
+	result := QualificationResultPacket{
+		SchemaVersion: QualificationResultSchema, ResultID: "bundle-result-001", TenantID: manifest.TenantID, TargetID: manifest.TargetID, Lane: manifest.Lane,
+		EvidenceClass: "dual_signed_evaluator_result", Candidate: manifest.Candidate, Approval: validApproval(fixture, registryRaw), SourcePacketKind: "corpus", SourcePacketSHA256: RegistryDigest(sourceRaw), QualificationSubjectSHA256: manifest.QualificationSubjectSHA256,
+		EvaluatorConfigSHA256: target.MeasurementRevisionSHA256, EvaluatorResultSHA256: hash("bundle-result"), Qualified: true, EvaluatedAt: time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano),
+	}
+	result.Approval.SourceArtifactSetSHA256 = QualificationSourceArtifactSetDigest(result.SourcePacketSHA256, result.EvaluatorConfigSHA256, result.EvaluatorResultSHA256)
+	resultRaw := mustJSON(t, result)
+	resultOperatorSignature := ed25519.Sign(fixture.operatorPrivate, resultRaw)
+	resultReviewerSignature := ed25519.Sign(fixture.reviewerPrivate, resultRaw)
+	bundleRaw, _, err := BuildQualificationImportBundle(manifest.TenantID, "corpus", registryRaw, registrySignature, fixture.registryPublic, sourceRaw, sourceOperatorSignature, fixture.operatorPublic, sourceReviewerSignature, fixture.reviewerPublic, resultRaw, resultOperatorSignature, fixture.operatorPublic, resultReviewerSignature, fixture.reviewerPublic, fixture.approved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, verified, err := VerifyQualificationImportBundle(bundleRaw, fixture.approved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := QualificationImport(verified)
+	if err != nil || bundle.TenantID != manifest.TenantID || record.ResultID != result.ResultID || !record.Qualified {
+		t.Fatalf("bundle round trip lost authority: bundle=%+v record=%+v err=%v", bundle, record, err)
+	}
+
+	crossTenant := bundle
+	crossTenant.TenantID = "tenant-other"
+	if _, _, err := VerifyQualificationImportBundle(mustJSON(t, crossTenant), fixture.approved); err == nil {
+		t.Fatal("cross-tenant bundle was accepted")
+	}
+	roguePublic, roguePrivate := keyPair(t)
+	forged := bundle
+	forged.RegistryAuthority = qualificationSignatureMaterial(ed25519.Sign(roguePrivate, forged.RegistryRaw), roguePublic)
+	if _, _, err := VerifyQualificationImportBundle(mustJSON(t, forged), fixture.approved); err == nil {
+		t.Fatalf("forged registry key was accepted: %v", err)
+	}
+
+	crossTenantSource := manifest
+	crossTenantSource.TenantID = "tenant-other"
+	crossTenantSourceRaw := mustJSON(t, crossTenantSource)
+	if _, _, err := BuildQualificationImportBundle(manifest.TenantID, "corpus", registryRaw, registrySignature, fixture.registryPublic, crossTenantSourceRaw, ed25519.Sign(fixture.operatorPrivate, crossTenantSourceRaw), fixture.operatorPublic, ed25519.Sign(fixture.reviewerPrivate, crossTenantSourceRaw), fixture.reviewerPublic, resultRaw, resultOperatorSignature, fixture.operatorPublic, resultReviewerSignature, fixture.reviewerPublic, fixture.approved); err == nil {
+		t.Fatal("same signers could relabel a source packet across tenants")
+	}
+}
+
+func TestMeetingSpecialistQualificationLaneBindsQualifiedCandidateAndRoute(t *testing.T) {
+	fixture := newSignerFixture(t)
+	registry, registryRaw := signedRegistry(t, fixture)
+	registrySignature := ed25519.Sign(fixture.registryPrivate, registryRaw)
+	manifest := validCorpus("meeting_specialist", 10, fixture, registryRaw)
+	sourceRaw := mustJSON(t, manifest)
+	sourceOperatorSignature := ed25519.Sign(fixture.operatorPrivate, sourceRaw)
+	sourceReviewerSignature := ed25519.Sign(fixture.reviewerPrivate, sourceRaw)
+	_, sourceReceipt, err := VerifyCorpusReceipt(sourceRaw, registryRaw, registrySignature, fixture.registryPublic, sourceOperatorSignature, fixture.operatorPublic, sourceReviewerSignature, fixture.reviewerPublic, fixture.approved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, ok := registryTarget(registry, qualificationTargetForLane("meeting_specialist"))
+	if !ok {
+		t.Fatal("mandatory meeting-specialist target is absent")
+	}
+	result := QualificationResultPacket{
+		SchemaVersion: QualificationResultSchema, ResultID: "meeting-specialist-result-001", TenantID: manifest.TenantID, TargetID: manifest.TargetID, Lane: "meeting_specialist", EvidenceClass: "dual_signed_evaluator_result",
+		Candidate: manifest.Candidate, Approval: validApproval(fixture, registryRaw), SourcePacketKind: "corpus", SourcePacketSHA256: RegistryDigest(sourceRaw), QualificationSubjectSHA256: manifest.QualificationSubjectSHA256, EvaluatorConfigSHA256: target.MeasurementRevisionSHA256,
+		EvaluatorResultSHA256: hash("meeting-specialist-provider-device-result"), Qualified: true, EvaluatedAt: time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano),
+	}
+	result.Approval.SourceArtifactSetSHA256 = QualificationSourceArtifactSetDigest(result.SourcePacketSHA256, result.EvaluatorConfigSHA256, result.EvaluatorResultSHA256)
+	resultRaw := mustJSON(t, result)
+	_, _, verified, err := VerifyQualificationResultReceipt(resultRaw, sourceRaw, registryRaw, registrySignature, fixture.registryPublic, ed25519.Sign(fixture.operatorPrivate, resultRaw), fixture.operatorPublic, ed25519.Sign(fixture.reviewerPrivate, resultRaw), fixture.reviewerPublic, fixture.approved, sourceReceipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := QualificationImport(verified)
+	if err != nil || record.Lane != "meeting_specialist" || !record.Qualified || record.QualificationSubjectSHA256 != MeetingSpecialistQualificationFixtureDigest(manifest.MeetingSpecialistBinding) || record.MeetingSpecialistBinding != manifest.MeetingSpecialistBinding || record.Candidate.RouteMapDigest != manifest.Candidate.RouteMapDigest {
+		t.Fatalf("meeting-specialist qualification binding failed: record=%+v err=%v", record, err)
+	}
+	borrowed := manifest
+	borrowed.MeetingSpecialistBinding.Model = "gpt-realtime-other"
+	borrowedRaw := mustJSON(t, borrowed)
+	if _, _, err := VerifyCorpusReceipt(borrowedRaw, registryRaw, registrySignature, fixture.registryPublic, ed25519.Sign(fixture.operatorPrivate, borrowedRaw), fixture.operatorPublic, ed25519.Sign(fixture.reviewerPrivate, borrowedRaw), fixture.reviewerPublic, fixture.approved); err == nil {
+		t.Fatal("same authorities could borrow qualification fixture A for specialist configuration B")
+	}
+}
+
+func TestIncompatiblePreQualificationSchemasAreRejected(t *testing.T) {
+	fixture := newSignerFixture(t)
+	registry, registryRaw := signedRegistry(t, fixture)
+	legacyRegistry := registry
+	legacyRegistry.SchemaVersion = "stride.e10.target-registry/v3"
+	if err := ValidateTargetRegistry(legacyRegistry); err == nil {
+		t.Fatal("legacy registry schema was accepted after mandatory qualification targets changed semantics")
+	}
+	legacyCorpus := validCorpus("meeting_stt", 120, fixture, registryRaw)
+	legacyCorpus.SchemaVersion = "stride.e10.corpus-manifest/v3"
+	if err := ValidateCorpus(legacyCorpus, registry, RegistryDigest(registryRaw)); err == nil {
+		t.Fatal("legacy tenant-free corpus schema was accepted")
+	}
+	legacyPilots := validPilotPacket(fixture, registryRaw)
+	legacyPilots.SchemaVersion = "stride.e10.io-pilot-packet/v4"
+	if err := ValidatePilotPacket(legacyPilots, registry, RegistryDigest(registryRaw)); err == nil {
+		t.Fatal("legacy tenant-free pilot schema was accepted")
 	}
 }
 
@@ -615,6 +735,7 @@ func TestRequiredTargetInventoryAndEveryFloorAreNonWeakenable(t *testing.T) {
 		"insights-opportunities-real-input-pilots",
 		"live-app-control-failover",
 		"locked-device-push-deep-link",
+		"meeting-specialist-provider-voice-evaluation",
 		"meeting-stt-live-provider-evaluation",
 		"multiple-devices-one-account",
 		"no-production-or-company-brain-mount",
@@ -839,7 +960,18 @@ func validRegistry(fixture signerFixture) TargetRegistry {
 }
 
 func target(id, category string, metrics []MetricThreshold) EvidenceTarget {
-	return EvidenceTarget{ID: id, Category: category, FixtureSHA256: hash("fixture-" + id), Environment: "physical-staging-001", MinimumArtifacts: 1, MinimumSampleSize: 3, MeasurementRevisionSHA256: hash("measurement-" + id), OwnerID: "evidence-operator", IndependentReviewerID: "independent-reviewer", RollbackTrigger: "rollback-on-threshold-failure", PhysicalOrProduction: true, RequiredMetrics: metrics}
+	fixture := hash("fixture-" + id)
+	if id == qualificationTargetForLane("meeting_specialist") {
+		fixture = MeetingSpecialistQualificationFixtureDigest(validMeetingSpecialistQualificationBinding())
+	}
+	return EvidenceTarget{ID: id, Category: category, FixtureSHA256: fixture, Environment: "physical-staging-001", MinimumArtifacts: 1, MinimumSampleSize: 3, MeasurementRevisionSHA256: hash("measurement-" + id), OwnerID: "evidence-operator", IndependentReviewerID: "independent-reviewer", RollbackTrigger: "rollback-on-threshold-failure", PhysicalOrProduction: true, RequiredMetrics: metrics}
+}
+
+func validMeetingSpecialistQualificationBinding() MeetingSpecialistQualificationBinding {
+	return MeetingSpecialistQualificationBinding{
+		Provider: "openai", Model: "gpt-realtime-2.1", Voice: "marin", RouteDigest: validCandidate().RouteMapDigest,
+		AccountingProfileDigest: hash("meeting-specialist-accounting-profile"), RuntimeProfileDigest: hash("meeting-specialist-runtime-profile"), CapabilityPolicyDigest: hash("meeting-specialist-capability-policy"),
+	}
 }
 
 func targetIndex(targets []EvidenceTarget, id string) int {
@@ -876,7 +1008,13 @@ func validApproval(fixture signerFixture, registryRaw []byte) DualApprovalBindin
 
 func validCorpus(lane string, count int, fixture signerFixture, registryRaw []byte) CorpusManifest {
 	targetID := qualificationTargetForLane(lane)
-	manifest := CorpusManifest{SchemaVersion: CorpusManifestSchema, CorpusID: lane + "-001", TargetID: targetID, FixtureSHA256: hash("fixture-" + targetID), Lane: lane, EvidenceClass: "authorized_real_capture", Candidate: validCandidate(), Approval: validApproval(fixture, registryRaw)}
+	fixtureDigest := hash("fixture-" + targetID)
+	meetingBinding := MeetingSpecialistQualificationBinding{}
+	if lane == "meeting_specialist" {
+		meetingBinding = validMeetingSpecialistQualificationBinding()
+		fixtureDigest = MeetingSpecialistQualificationFixtureDigest(meetingBinding)
+	}
+	manifest := CorpusManifest{SchemaVersion: CorpusManifestSchema, TenantID: "tenant-acme", CorpusID: lane + "-001", TargetID: targetID, FixtureSHA256: fixtureDigest, QualificationSubjectSHA256: fixtureDigest, Lane: lane, EvidenceClass: "authorized_real_capture", Candidate: validCandidate(), Approval: validApproval(fixture, registryRaw), MeetingSpecialistBinding: meetingBinding}
 	platforms := []string{"web", "iphone", "ipad"}
 	surfaces := []string{"scout", "private_thread", "team", "project", "in_room"}
 	for index := 0; index < count; index++ {
@@ -895,7 +1033,7 @@ func validCorpus(lane string, count int, fixture signerFixture, registryRaw []by
 
 func validPilotPacket(fixture signerFixture, registryRaw []byte) PilotPacket {
 	targetID := qualificationTargetForLane("insights_opportunities")
-	packet := PilotPacket{SchemaVersion: PilotPacketSchema, PacketID: "io-packet-001", TargetID: targetID, FixtureSHA256: hash("fixture-" + targetID), EvidenceClass: "authorized_real_input_human_review", Candidate: validCandidate(), Approval: validApproval(fixture, registryRaw), ReviewerRoster: []EligiblePilotReviewer{
+	packet := PilotPacket{SchemaVersion: PilotPacketSchema, TenantID: "tenant-acme", PacketID: "io-packet-001", TargetID: targetID, FixtureSHA256: hash("fixture-" + targetID), QualificationSubjectSHA256: hash("fixture-" + targetID), EvidenceClass: "authorized_real_input_human_review", Candidate: validCandidate(), Approval: validApproval(fixture, registryRaw), ReviewerRoster: []EligiblePilotReviewer{
 		{ReviewerID: "reviewer-one", ReviewerKeyID: "pilot-reviewer-key-001", ReviewerPublicKeyFingerprintSHA256: PublicKeyFingerprint(fixture.pilotReviewerOnePublic), EligibilityReceiptDigest: hash("reviewer-one-eligibility")},
 		{ReviewerID: "reviewer-two", ReviewerKeyID: "pilot-reviewer-key-002", ReviewerPublicKeyFingerprintSHA256: PublicKeyFingerprint(fixture.pilotReviewerTwoPublic), EligibilityReceiptDigest: hash("reviewer-two-eligibility")},
 	}}
