@@ -160,7 +160,9 @@ type meetingSpecialistStartupLifetime struct {
 }
 
 func newMeetingSpecialistStartupLifetime(parent context.Context) (context.Context, *meetingSpecialistStartupLifetime) {
-	ownedParent := context.WithValue(context.WithoutCancel(parent), meetingSpecialistRuntimeLifetimeKey{}, true)
+	// The durable runtime inherits no request values, deadlines, or cancellation.
+	// The bridge below forwards cancellation only until successful handoff.
+	ownedParent := context.WithValue(context.Background(), meetingSpecialistRuntimeLifetimeKey{}, true)
 	ctx, cancel := context.WithCancel(ownedParent)
 	lifetime := &meetingSpecialistStartupLifetime{cancel: cancel, stop: make(chan struct{})}
 	if parent.Done() != nil {
@@ -553,6 +555,13 @@ func (runtime *MeetingSpecialistRuntime) Start(parent context.Context, launch Me
 		return MeetingAgentSessionLease{}, errors.Join(ErrMeetingSpecialistDisabled, abortErr)
 	}
 	provider, err := runtime.factory(ctx, launch)
+	if parent.Err() != nil {
+		startupLifetime.cancelBeforeHandoff()
+	}
+	if contextErr := ctx.Err(); contextErr != nil {
+		abortErr := runtime.abortStart(ctx, cancel, lease, provider, "startup_request_cancelled_after_factory")
+		return MeetingAgentSessionLease{}, errors.Join(contextErr, abortErr)
+	}
 	if err != nil || provider == nil {
 		abortErr := runtime.abortStart(ctx, cancel, lease, provider, "provider_factory_failed")
 		if err != nil {
@@ -581,6 +590,13 @@ func (runtime *MeetingSpecialistRuntime) Start(parent context.Context, launch Me
 			abortErr := runtime.abortStart(ctx, cancel, lease, provider, "provider_hook_binding_failed")
 			return MeetingAgentSessionLease{}, errors.Join(err, abortErr)
 		}
+	}
+	if parent.Err() != nil {
+		startupLifetime.cancelBeforeHandoff()
+	}
+	if contextErr := ctx.Err(); contextErr != nil {
+		abortErr := runtime.abortStart(ctx, cancel, lease, provider, "startup_request_cancelled_before_brief")
+		return MeetingAgentSessionLease{}, errors.Join(contextErr, abortErr)
 	}
 	if err := provider.Brief(ctx, launch.Context); err != nil {
 		abortErr := runtime.abortStart(ctx, cancel, lease, provider, "brief_failed")

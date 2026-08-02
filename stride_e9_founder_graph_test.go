@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -583,38 +584,12 @@ func TestE9DeterministicFounderGraphThroughProductEndpoints(t *testing.T) {
 
 	// The real specialist control endpoint now discovers Mary only because the
 	// human-approved hire was projected into the canonical Workforce roster.
-	// The E9 TestJoin seam starts one correctly bound fake runtime and makes the
-	// next attempt fail before session creation; neither path can start a paid
-	// provider or own human media.
+	// A qualified production joiner with fake dependencies is installed only
+	// after the pending-provider surface is proved; it makes the first attempt
+	// fail before session creation and the second join through the sole compiled
+	// approval-to-provider path without starting a paid provider.
 	fakeProvider := &fakeMeetingSpecialistProvider{}
 	joinAttempts := 0
-	app.meetingSpecialists.testJoin = func(ctx context.Context, invitation MeetingAgentInvitation, candidate MeetingSpecialistCandidate, scope meetingSpecialistProductScope, limits MeetingSpecialistApprovalLimits) (*MeetingSpecialistRuntime, error) {
-		joinAttempts++
-		if joinAttempts == 1 {
-			return nil, fmt.Errorf("deterministic specialist provider failure")
-		}
-		authority := newFakeMeetingSpecialistAuthority()
-		runtime := NewMeetingSpecialistRuntime(time.Now, enabledSpecialistHarnessGates(), authority, func(context.Context, MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
-			return fakeProvider, nil
-		}, func(MeetingAgentFloorScope, uint64, []int16) error { return nil })
-		launchNow := time.Now().UTC()
-		launch := specialistRuntimeLaunchFixture(launchNow)
-		launch.Scope.RoomID, launch.Scope.SittingID, launch.Scope.MediaGeneration = scope.RoomID, scope.SittingID, scope.MediaGeneration
-		launch.Scope.InvitationID, launch.Scope.AgentID = invitation.Header.ID, candidate.AgentID
-		launch.Scope.SessionID = "e9-fake-session-" + candidate.AgentID
-		launch.Scope.RuntimePrincipal = "e9-fake-runtime-" + candidate.AgentID
-		launch.Scope.AudioTrackID = "e9-fake-track-" + candidate.AgentID
-		launch.Invitation = invitation
-		launch.Context.Invitation = referenceFromHeader(invitation.Header)
-		launch.Context.AgentProfile = candidate.Profile
-		launch.Context.Audience = invitation.Audience
-		launch.ApprovalLimits = limits
-		launch.CapabilityReceipt = authority.issue(launch)
-		if _, err := runtime.Start(ctx, launch); err != nil {
-			return nil, err
-		}
-		return runtime, nil
-	}
 
 	specialists := e9DecodeFounder[e9FounderSpecialistResponse](t, e9FounderExpect(t, e9FounderRequest(t, mux, http.MethodGet, "/api/stride/v1/meeting-specialists?roomId="+officeRoomID, ajCookies, nil, ""), http.StatusOK))
 	if specialists.Specialists.Available || !specialists.Specialists.CanInvite || specialists.Specialists.Reason != "provider_qualification_pending" || specialists.Specialists.RoomID != officeRoomID || specialists.Specialists.SittingID != sittingID || len(specialists.Specialists.Candidates) != 1 || specialists.Specialists.Candidates[0].AgentID != hired.Seat.ID || specialists.Specialists.Candidates[0].DisplayName != "Mary" {
@@ -640,8 +615,27 @@ func TestE9DeterministicFounderGraphThroughProductEndpoints(t *testing.T) {
 	if staleSpecialistApproval.Code != http.StatusConflict {
 		t.Fatalf("stale specialist approval status=%d body=%s", staleSpecialistApproval.Code, staleSpecialistApproval.Body.String())
 	}
+	app.meetingSpecialists.mu.Lock()
+	joinCandidate := app.meetingSpecialists.invitations[requested.Invitation.ID].Agent
+	app.meetingSpecialists.mu.Unlock()
+	var fixtureFactoryCalls atomic.Int64
+	productionJoin, _ := productionJoinFixture(time.Now().UTC(), fakeProvider, &fixtureFactoryCalls)
+	productionJoin.qualificationTarget.TenantID = canonicalTenantID()
+	productionJoin.qualificationTarget.SpecialistProfile = joinCandidate.Profile
+	productionJoin.qualificationTarget.SpecialistCapability = joinCandidate.Capability
+	qualification := productionJoin.qualification.(*fakeMeetingSpecialistQualificationAuthority)
+	qualification.status.SubjectDigest, _ = MeetingSpecialistQualificationSubjectDigest(productionJoin.qualificationTarget)
+	providerFactory := productionJoin.providerFactory
+	productionJoin.providerFactory = func(ctx context.Context, launch MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
+		joinAttempts++
+		if joinAttempts == 1 {
+			return nil, fmt.Errorf("deterministic specialist provider failure")
+		}
+		return providerFactory(ctx, launch)
+	}
+	app.meetingSpecialists.productionJoin = productionJoin
 	failedJoin := e9DecodeFounder[e9FounderSpecialistResponse](t, e9FounderExpect(t, e9FounderRequest(t, mux, http.MethodPost, "/api/stride/v1/meeting-specialists/invitations/"+requested.Invitation.ID, ajCookies, map[string]any{"roomId": officeRoomID, "revision": requested.Invitation.Revision, "decision": "approved"}, ""), http.StatusOK))
-	if failedJoin.Invitation.Status != "approved_test_session_failed" || failedJoin.ProviderSessionStarted || fakeProvider.briefs != 0 || joinAttempts != 1 {
+	if failedJoin.Invitation.Status != "approved_session_failed" || failedJoin.ProviderSessionStarted || fakeProvider.briefs != 0 || joinAttempts != 1 {
 		t.Fatalf("isolated specialist failure=%+v briefs=%d attempts=%d", failedJoin, fakeProvider.briefs, joinAttempts)
 	}
 	meetingAfterFailure, meetingStillActive := app.meetings.activeRecord(officeRoomID)
@@ -653,7 +647,7 @@ func TestE9DeterministicFounderGraphThroughProductEndpoints(t *testing.T) {
 		"roomId": officeRoomID, "agentId": hired.Seat.ID, "purpose": "Pressure-test Dog Perfect positioning after recovery", "idempotencyKey": "e9-founder-mary-recovery",
 	}, ""), http.StatusOK))
 	joined := e9DecodeFounder[e9FounderSpecialistResponse](t, e9FounderExpect(t, e9FounderRequest(t, mux, http.MethodPost, "/api/stride/v1/meeting-specialists/invitations/"+joinedRequested.Invitation.ID, ajCookies, map[string]any{"roomId": officeRoomID, "revision": joinedRequested.Invitation.Revision, "decision": "approved"}, ""), http.StatusOK))
-	if joined.Invitation.Revision != 2 || joined.Invitation.Status != "joined_test_session" || joined.Invitation.Decision != "approved" || !joined.ProviderSessionStarted || fakeProvider.briefs != 1 || joinAttempts != 2 {
+	if joined.Invitation.Revision != 2 || joined.Invitation.Status != "joined_session" || joined.Invitation.Decision != "approved" || !joined.ProviderSessionStarted || fakeProvider.briefs != 1 || joinAttempts != 2 {
 		t.Fatalf("joined fake specialist=%+v briefs=%d attempts=%d", joined, fakeProvider.briefs, joinAttempts)
 	}
 	app.meetingSpecialists.mu.Lock()
@@ -777,7 +771,7 @@ func TestE9DeterministicFounderGraphThroughProductEndpoints(t *testing.T) {
 			restoredJoined = invitation
 		}
 	}
-	if restoredJoined.Status != "approved_reauthorization_required" || restoredFailed.Status != "approved_test_session_failed" || len(restoredSpecialists.Specialists.Candidates) != 1 || restoredSpecialists.Specialists.Candidates[0].DisplayName != "Mary" {
+	if restoredJoined.Status != "approved_reauthorization_required" || restoredFailed.Status != "approved_session_failed" || len(restoredSpecialists.Specialists.Candidates) != 1 || restoredSpecialists.Specialists.Candidates[0].DisplayName != "Mary" {
 		t.Fatalf("restored specialist control state=%+v", restoredSpecialists.Specialists)
 	}
 	restarted.meetingSpecialists.mu.Lock()

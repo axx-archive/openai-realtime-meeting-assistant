@@ -24,6 +24,36 @@ type fakeMeetingSpecialistProvider struct {
 	receipt     MeetingSpecialistProviderReceipt
 }
 
+type meetingSpecialistRequestValueKey struct{}
+
+type valueInspectingMeetingSpecialistProvider struct {
+	fakeMeetingSpecialistProvider
+	briefValue any
+}
+
+type cancelOnBindMeetingSpecialistProvider struct {
+	fakeMeetingSpecialistProvider
+	cancelRequest  context.CancelFunc
+	runtimeContext context.Context
+}
+
+func (provider *cancelOnBindMeetingSpecialistProvider) BindMeetingSpecialistProviderHooks(hooks MeetingSpecialistProviderHooks) error {
+	provider.mu.Lock()
+	provider.hooks = hooks
+	provider.mu.Unlock()
+	provider.cancelRequest()
+	<-provider.runtimeContext.Done()
+	return nil
+}
+
+func (provider *valueInspectingMeetingSpecialistProvider) Brief(ctx context.Context, _ MeetingSpecialistContextEnvelope) error {
+	provider.mu.Lock()
+	provider.briefs++
+	provider.briefValue = ctx.Value(meetingSpecialistRequestValueKey{})
+	provider.mu.Unlock()
+	return nil
+}
+
 type fakeMeetingSpecialistAuthority struct {
 	mu         sync.Mutex
 	issued     map[string]string
@@ -215,6 +245,97 @@ func TestMeetingSpecialistRuntimeStartupStillFollowsRequestCancellation(t *testi
 	snapshot := runtime.Snapshot()
 	if snapshot.Session != nil || snapshot.TeardownReceiptDigest == "" {
 		t.Fatalf("cancelled startup was not fenced: %+v", snapshot)
+	}
+}
+
+func TestMeetingSpecialistRuntimeHandoffDropsRequestValues(t *testing.T) {
+	now := time.Date(2026, 7, 30, 13, 0, 0, 0, time.UTC)
+	authority := newFakeMeetingSpecialistAuthority()
+	provider := &valueInspectingMeetingSpecialistProvider{}
+	var factoryValue any
+	runtime := NewMeetingSpecialistRuntime(func() time.Time { return now }, enabledSpecialistHarnessGates(), authority, func(ctx context.Context, _ MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
+		factoryValue = ctx.Value(meetingSpecialistRequestValueKey{})
+		return provider, nil
+	}, func(MeetingAgentFloorScope, uint64, []int16) error { return nil })
+	launch := specialistRuntimeLaunchFixture(now)
+	launch.CapabilityReceipt = authority.issue(launch)
+	requestContext := context.WithValue(context.Background(), meetingSpecialistRequestValueKey{}, "request-secret")
+	session, err := runtime.Start(requestContext, launch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider.mu.Lock()
+	briefValue := provider.briefValue
+	provider.mu.Unlock()
+	runtime.mu.Lock()
+	runtimeValue := runtime.ctx.Value(meetingSpecialistRequestValueKey{})
+	ownsLifetime := meetingSpecialistRuntimeOwnsLifetime(runtime.ctx)
+	runtime.mu.Unlock()
+	if factoryValue != nil || briefValue != nil || runtimeValue != nil || !ownsLifetime {
+		t.Fatalf("request values crossed runtime ownership: factory=%v brief=%v runtime=%v ownsLifetime=%v", factoryValue, briefValue, runtimeValue, ownsLifetime)
+	}
+	if err := runtime.Stop(session, "test_complete"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMeetingSpecialistRuntimeRejectsCancellationIgnoringFactoryBeforeBrief(t *testing.T) {
+	now := time.Date(2026, 7, 30, 13, 0, 0, 0, time.UTC)
+	authority := newFakeMeetingSpecialistAuthority()
+	provider := &fakeMeetingSpecialistProvider{}
+	factoryStarted := make(chan struct{})
+	releaseFactory := make(chan struct{})
+	runtime := NewMeetingSpecialistRuntime(func() time.Time { return now }, enabledSpecialistHarnessGates(), authority, func(context.Context, MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
+		close(factoryStarted)
+		<-releaseFactory
+		return provider, nil
+	}, func(MeetingAgentFloorScope, uint64, []int16) error { return nil })
+	launch := specialistRuntimeLaunchFixture(now)
+	launch.CapabilityReceipt = authority.issue(launch)
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, err := runtime.Start(requestContext, launch)
+		result <- err
+	}()
+	<-factoryStarted
+	cancelRequest()
+	close(releaseFactory)
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("startup err=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("context-ignoring factory escaped startup cancellation")
+	}
+	provider.mu.Lock()
+	briefs, closed := provider.briefs, provider.closed
+	provider.mu.Unlock()
+	if briefs != 0 || closed != 1 || runtime.Snapshot().Session != nil {
+		t.Fatalf("cancelled factory reached Brief/runtime: briefs=%d closed=%d snapshot=%+v", briefs, closed, runtime.Snapshot())
+	}
+}
+
+func TestMeetingSpecialistRuntimeRechecksCancellationImmediatelyBeforeBrief(t *testing.T) {
+	now := time.Date(2026, 7, 30, 13, 0, 0, 0, time.UTC)
+	authority := newFakeMeetingSpecialistAuthority()
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	provider := &cancelOnBindMeetingSpecialistProvider{cancelRequest: cancelRequest}
+	runtime := NewMeetingSpecialistRuntime(func() time.Time { return now }, enabledSpecialistHarnessGates(), authority, func(ctx context.Context, _ MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
+		provider.runtimeContext = ctx
+		return provider, nil
+	}, func(MeetingAgentFloorScope, uint64, []int16) error { return nil })
+	launch := specialistRuntimeLaunchFixture(now)
+	launch.CapabilityReceipt = authority.issue(launch)
+	if _, err := runtime.Start(requestContext, launch); !errors.Is(err, context.Canceled) {
+		t.Fatalf("startup err=%v", err)
+	}
+	provider.mu.Lock()
+	briefs, closed := provider.briefs, provider.closed
+	provider.mu.Unlock()
+	if briefs != 0 || closed != 1 || runtime.Snapshot().Session != nil {
+		t.Fatalf("pre-Brief cancellation escaped fence: briefs=%d closed=%d snapshot=%+v", briefs, closed, runtime.Snapshot())
 	}
 }
 
@@ -648,7 +769,7 @@ func TestMeetingSpecialistRuntimeRevokeLinearizesBlockedLaunchProviderPublisherA
 		go func() { _, err := specialist.Start(context.Background(), launch); startResult <- err }()
 		<-entered
 		assertMeetingSpecialistRevokeWaits(t, specialist, release)
-		if err := <-startResult; !errors.Is(err, ErrMeetingSpecialistFence) && !errors.Is(err, ErrMeetingSpecialistUnauthorized) {
+		if err := <-startResult; !errors.Is(err, ErrMeetingSpecialistFence) && !errors.Is(err, ErrMeetingSpecialistUnauthorized) && !errors.Is(err, context.Canceled) {
 			t.Fatalf("start after revoke err=%v", err)
 		}
 		provider.mu.Lock()
@@ -852,7 +973,7 @@ func TestMeetingSpecialistRuntimeRevocationBoundsPermanentlyBlockedWork(t *testi
 		go func() { _, err := runtime.Start(context.Background(), launch); result <- err }()
 		<-entered
 		assertRevoked(t, runtime, release)
-		if err := <-result; !errors.Is(err, ErrMeetingSpecialistFence) && !errors.Is(err, ErrMeetingSpecialistUnauthorized) {
+		if err := <-result; !errors.Is(err, ErrMeetingSpecialistFence) && !errors.Is(err, ErrMeetingSpecialistUnauthorized) && !errors.Is(err, context.Canceled) {
 			t.Fatalf("factory completion after revoke err=%v", err)
 		}
 	})

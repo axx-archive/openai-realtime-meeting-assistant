@@ -427,7 +427,7 @@ func allowedMeetingAgentTerminalReason(reason string) bool {
 	switch reason {
 	case "dismissed", "expired", "failed", "budget_exhausted", "consent_withdrawn", "invitation_revoked", "kill_switch", "room_closed",
 		"agent_authority_changed", "meeting_authority_changed", "participant_authority_changed", "consent_authority_changed", "control_authority_expired",
-		"eligibility_revoked", "guest_participant", "test_join_failed", "post_launch_persistence_failed", "provider_response_failed", "test_cleanup", "test_complete", "concurrent_revoke":
+		"eligibility_revoked", "guest_participant", "post_launch_persistence_failed", "provider_response_failed", "test_cleanup", "test_complete", "concurrent_revoke":
 		return true
 	}
 	return false

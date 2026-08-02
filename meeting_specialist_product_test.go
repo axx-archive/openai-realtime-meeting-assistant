@@ -112,27 +112,49 @@ func specialistProductFixture(t *testing.T) (*MeetingSpecialistProduct, *fakeMee
 	return product, authority, &userAccount{Email: "aj@shareability.com", Name: "AJ"}
 }
 
-func installMeetingSpecialistTestJoin(product *MeetingSpecialistProduct, now time.Time) *fakeMeetingSpecialistProvider {
+func installMeetingSpecialistProductionJoin(product *MeetingSpecialistProduct, now time.Time) *fakeMeetingSpecialistProvider {
 	provider := &fakeMeetingSpecialistProvider{}
-	product.testJoin = func(ctx context.Context, invitation MeetingAgentInvitation, candidate MeetingSpecialistCandidate, scope meetingSpecialistProductScope, limits MeetingSpecialistApprovalLimits) (*MeetingSpecialistRuntime, error) {
-		capabilityAuthority := newFakeMeetingSpecialistAuthority()
-		runtime := NewMeetingSpecialistRuntime(func() time.Time { return now }, enabledSpecialistHarnessGates(), capabilityAuthority, func(context.Context, MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
-			return provider, nil
-		}, func(MeetingAgentFloorScope, uint64, []int16) error { return nil })
-		launch := specialistRuntimeLaunchFixture(now)
-		launch.Scope.RoomID, launch.Scope.SittingID, launch.Scope.MediaGeneration = scope.RoomID, scope.SittingID, scope.MediaGeneration
-		launch.Scope.InvitationID, launch.Scope.AgentID = invitation.Header.ID, candidate.AgentID
-		launch.Scope.SessionID, launch.Scope.RuntimePrincipal, launch.Scope.AudioTrackID = "session-authority-observer", "runtime-authority-observer", "track-authority-observer"
-		launch.Invitation = invitation
-		launch.Context.Invitation = STRIDEReference{ContractType: STRIDEContractMeetingAgentInvitation, ID: invitation.Header.ID, Revision: invitation.Header.Revision, Digest: invitation.Header.ContentDigest}
-		launch.Context.AgentProfile, launch.Context.Audience, launch.ApprovalLimits = candidate.Profile, invitation.Audience, limits
-		launch.CapabilityReceipt = capabilityAuthority.issue(launch)
-		if _, err := runtime.Start(ctx, launch); err != nil {
-			return nil, err
-		}
-		return runtime, nil
+	var factoryCalls atomic.Int64
+	joiner, _ := productionJoinFixture(now, provider, &factoryCalls)
+	var scope meetingSpecialistProductScope
+	switch authority := product.authority.(type) {
+	case *fakeMeetingSpecialistProductAuthority:
+		authority.mu.Lock()
+		scope = authority.scope
+		authority.mu.Unlock()
+	case *canonicalMeetingSpecialistTestAuthority:
+		authority.mu.Lock()
+		scope = authority.scope
+		authority.mu.Unlock()
 	}
+	if roster, err := product.authority.EligibleRoster(context.Background(), scope); err == nil && len(roster) > 0 {
+		joiner.qualificationTarget.TenantID = scope.TenantID
+		joiner.qualificationTarget.SpecialistProfile = roster[0].Profile
+		joiner.qualificationTarget.SpecialistCapability = roster[0].Capability
+		qualification := joiner.qualification.(*fakeMeetingSpecialistQualificationAuthority)
+		qualification.status.SubjectDigest, _ = MeetingSpecialistQualificationSubjectDigest(joiner.qualificationTarget)
+	}
+	product.productionJoin = joiner
 	return provider
+}
+
+func bindMeetingSpecialistProductionQualification(t *testing.T, product *MeetingSpecialistProduct, invitationID string) {
+	t.Helper()
+	product.mu.Lock()
+	record, found := product.invitations[invitationID]
+	product.mu.Unlock()
+	if !found || product.productionJoin == nil {
+		t.Fatalf("qualification binding source missing for %s", invitationID)
+	}
+	joiner := product.productionJoin
+	joiner.qualificationTarget.TenantID = record.Scope.TenantID
+	joiner.qualificationTarget.SpecialistProfile = record.Agent.Profile
+	joiner.qualificationTarget.SpecialistCapability = record.Agent.Capability
+	qualification, ok := joiner.qualification.(*fakeMeetingSpecialistQualificationAuthority)
+	if !ok {
+		t.Fatal("test production joiner lacks fake external qualification authority")
+	}
+	qualification.status.SubjectDigest, _ = MeetingSpecialistQualificationSubjectDigest(joiner.qualificationTarget)
 }
 
 func meetingSpecialistProviderReceiptFixture() MeetingSpecialistProviderReceipt {
@@ -158,8 +180,8 @@ func TestMeetingSpecialistProductApprovalIsRevisionBoundAndProviderFenced(t *tes
 	product.mu.Lock()
 	record := product.invitations[requested.ID]
 	product.mu.Unlock()
-	if record.Runtime == nil || record.Runtime.Snapshot().Session != nil {
-		t.Fatalf("approved record opened a provider-backed session: %+v", record.Runtime)
+	if record.Runtime != nil {
+		t.Fatalf("waiting approval retained a runtime/factory placeholder: %+v", record.Runtime)
 	}
 	if _, err := product.Resolve(context.Background(), user, "dog-perfect", requested.ID, requested.Revision, "dismissed"); !errors.Is(err, ErrMeetingSpecialistProductRevision) {
 		t.Fatalf("stale resolution err=%v", err)
@@ -340,31 +362,15 @@ func TestMeetingSpecialistProductAuthorityMutationClosesJoinedSessionBeforePoll(
 			provider := &fakeMeetingSpecialistProvider{}
 			product := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: persistence})
 			defer product.Close("test_complete")
-			product.testJoin = func(ctx context.Context, invitation MeetingAgentInvitation, candidate MeetingSpecialistCandidate, scope meetingSpecialistProductScope, limits MeetingSpecialistApprovalLimits) (*MeetingSpecialistRuntime, error) {
-				capabilityAuthority := newFakeMeetingSpecialistAuthority()
-				runtime := NewMeetingSpecialistRuntime(func() time.Time { return now }, enabledSpecialistHarnessGates(), capabilityAuthority, func(context.Context, MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
-					return provider, nil
-				}, func(MeetingAgentFloorScope, uint64, []int16) error { return nil })
-				launch := specialistRuntimeLaunchFixture(now)
-				launch.Scope.RoomID, launch.Scope.SittingID, launch.Scope.MediaGeneration = scope.RoomID, scope.SittingID, scope.MediaGeneration
-				launch.Scope.InvitationID, launch.Scope.AgentID = invitation.Header.ID, candidate.AgentID
-				launch.Scope.SessionID, launch.Scope.RuntimePrincipal, launch.Scope.AudioTrackID = "session-immediate", "runtime-immediate", "track-immediate"
-				launch.Invitation = invitation
-				launch.Context.Invitation = STRIDEReference{ContractType: STRIDEContractMeetingAgentInvitation, ID: invitation.Header.ID, Revision: invitation.Header.Revision, Digest: invitation.Header.ContentDigest}
-				launch.Context.AgentProfile, launch.Context.Audience, launch.ApprovalLimits = candidate.Profile, invitation.Audience, limits
-				launch.CapabilityReceipt = capabilityAuthority.issue(launch)
-				if _, err := runtime.Start(ctx, launch); err != nil {
-					return nil, err
-				}
-				return runtime, nil
-			}
+			var factoryCalls atomic.Int64
+			product.productionJoin, _ = productionJoinFixture(now, provider, &factoryCalls)
 
 			requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "immediate-revoke-"+strings.ReplaceAll(scenario.name, " ", "-"), time.Minute)
 			if err != nil {
 				t.Fatal(err)
 			}
 			approved, err := product.Resolve(context.Background(), user, "dog-perfect", requested.ID, requested.Revision, "approved")
-			if err != nil || approved.Status != "joined_test_session" {
+			if err != nil || approved.Status != "joined_session" {
 				t.Fatalf("approval=%+v err=%v", approved, err)
 			}
 			product.mu.Lock()
@@ -386,7 +392,7 @@ func TestMeetingSpecialistProductAuthorityMutationClosesJoinedSessionBeforePoll(
 				t.Fatalf("revocation was not synchronous: closes=%d record=%+v", closed, record)
 			}
 			snapshot := joinedRuntime.Snapshot()
-			if snapshot.Session != nil || snapshot.TeardownReceiptDigest == "" || snapshot.TerminalReason != "session-immediate\x00"+scenario.wantReason {
+			if snapshot.Session != nil || snapshot.TeardownReceiptDigest == "" || snapshot.TerminalReason != "production-session-mary\x00"+scenario.wantReason {
 				t.Fatalf("revocation receipt did not preserve cause: %+v", snapshot)
 			}
 
@@ -412,13 +418,13 @@ func TestMeetingSpecialistProductStatusPersistenceFailureStillRevokesDetachedRun
 		Authority: STRIDESnapshotMACAuthority{KeyID: "specialist_status_revoke", Key: []byte("0123456789abcdef0123456789abcdef")}, MinimumGeneration: 1, BootstrapEmpty: true,
 	}
 	product := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: persistence})
-	provider := installMeetingSpecialistTestJoin(product, now)
+	provider := installMeetingSpecialistProductionJoin(product, now)
 	requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "status-persist-failure", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
 	approved, err := product.Resolve(context.Background(), user, "dog-perfect", requested.ID, requested.Revision, "approved")
-	if err != nil || approved.Status != "joined_test_session" {
+	if err != nil || approved.Status != "joined_session" {
 		t.Fatalf("approval=%+v err=%v", approved, err)
 	}
 	product.mu.Lock()
@@ -499,7 +505,7 @@ func TestMeetingSpecialistProductRequesterNeutralSittingAuthority(t *testing.T) 
 	product, authority, user := specialistProductFixture(t)
 	defer product.Close("test_cleanup")
 	now := time.Date(2026, 7, 30, 17, 0, 0, 0, time.UTC)
-	provider := installMeetingSpecialistTestJoin(product, now)
+	provider := installMeetingSpecialistProductionJoin(product, now)
 	requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "requester-neutral-owner", time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -529,7 +535,7 @@ func TestMeetingSpecialistProductRequesterNeutralSittingAuthority(t *testing.T) 
 	provider.mu.Lock()
 	closed := provider.closed
 	provider.mu.Unlock()
-	if len(status.Invitations) != 1 || record.Runtime != runtime || record.Status != "joined_test_session" || closed != 0 || runtime.Snapshot().Session == nil {
+	if len(status.Invitations) != 1 || record.Runtime != runtime || record.Status != "joined_session" || closed != 0 || runtime.Snapshot().Session == nil {
 		t.Fatalf("second member status revoked owner session: status=%+v record=%+v closes=%d snapshot=%+v", status, record, closed, runtime.Snapshot())
 	}
 	if _, err := product.Request(context.Background(), otherMember, "dog-perfect", "researcher", "Research campaign", "requester-neutral-competitor", time.Minute); !errors.Is(err, ErrMeetingAgentFloorOccupied) {
@@ -541,7 +547,7 @@ func TestMeetingSpecialistProductRequesterNeutralSittingAuthority(t *testing.T) 
 	provider.mu.Lock()
 	closed = provider.closed
 	provider.mu.Unlock()
-	if record.Runtime != runtime || record.Status != "joined_test_session" || closed != 0 {
+	if record.Runtime != runtime || record.Status != "joined_session" || closed != 0 {
 		t.Fatalf("competing member request revoked owner session: record=%+v closes=%d", record, closed)
 	}
 }
@@ -556,7 +562,7 @@ func TestMeetingSpecialistProductExpirationIsDurableAndReleasesSeat(t *testing.T
 			Authority: STRIDESnapshotMACAuthority{KeyID: "specialist_expiry_live", Key: []byte("0123456789abcdef0123456789abcdef")}, MinimumGeneration: 1, BootstrapEmpty: true,
 		}
 		product := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: persistence})
-		provider := installMeetingSpecialistTestJoin(product, now)
+		provider := installMeetingSpecialistProductionJoin(product, now)
 		requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "expiry-live", time.Minute)
 		if err != nil {
 			t.Fatal(err)
@@ -576,7 +582,7 @@ func TestMeetingSpecialistProductExpirationIsDurableAndReleasesSeat(t *testing.T
 		closed := provider.closed
 		provider.mu.Unlock()
 		snapshot := runtime.Snapshot()
-		if len(status.Invitations) != 1 || expired.Status != "expired" || expired.Invitation.Decision != "expired" || expired.Invitation.Header.Revision != requested.Revision+2 || expired.Invitation.DecisionAt == nil || !expired.Invitation.DecisionAt.Equal(now) || expired.Runtime != nil || meetingSpecialistInvitationIsActive(expired) || closed != 1 || snapshot.Session != nil || snapshot.TeardownReceiptDigest == "" || snapshot.TerminalReason != "session-authority-observer\x00expired" || expired.TerminalEvidence == nil || expired.TerminalEvidence.TerminalReason != "expired" || expired.TerminalEvidence.Cause != "expired" || expired.TerminalEvidence.TeardownReceiptDigest != snapshot.TeardownReceiptDigest {
+		if len(status.Invitations) != 1 || expired.Status != "expired" || expired.Invitation.Decision != "expired" || expired.Invitation.Header.Revision != requested.Revision+2 || expired.Invitation.DecisionAt == nil || !expired.Invitation.DecisionAt.Equal(now) || expired.Runtime != nil || meetingSpecialistInvitationIsActive(expired) || closed != 1 || snapshot.Session != nil || snapshot.TeardownReceiptDigest == "" || snapshot.TerminalReason != "production-session-mary\x00expired" || expired.TerminalEvidence == nil || expired.TerminalEvidence.TerminalReason != "expired" || expired.TerminalEvidence.Cause != "expired" || expired.TerminalEvidence.TeardownReceiptDigest != snapshot.TeardownReceiptDigest {
 			t.Fatalf("live expiry was not terminal: status=%+v record=%+v closes=%d snapshot=%+v", status, expired, closed, snapshot)
 		}
 		replayed, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "expiry-live", time.Minute)
@@ -718,13 +724,13 @@ func TestMeetingSpecialistProductMemberOnlyScopeAndGuestChurn(t *testing.T) {
 	t.Run("guest churn revokes joined runtime", func(t *testing.T) {
 		product, authority, user := specialistProductFixture(t)
 		now := time.Date(2026, 7, 30, 17, 0, 0, 0, time.UTC)
-		provider := installMeetingSpecialistTestJoin(product, now)
+		provider := installMeetingSpecialistProductionJoin(product, now)
 		requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "guest-churn", time.Minute)
 		if err != nil {
 			t.Fatal(err)
 		}
 		approved, err := product.Resolve(context.Background(), user, "dog-perfect", requested.ID, requested.Revision, "approved")
-		if err != nil || approved.Status != "joined_test_session" {
+		if err != nil || approved.Status != "joined_session" {
 			t.Fatalf("approval=%+v err=%v", approved, err)
 		}
 		product.mu.Lock()
@@ -748,7 +754,7 @@ func TestMeetingSpecialistProductMemberOnlyScopeAndGuestChurn(t *testing.T) {
 		record := product.invitations[requested.ID]
 		product.mu.Unlock()
 		snapshot := runtime.Snapshot()
-		if status.Reason != "active_member_room_required" || closed != 1 || record.Runtime != nil || record.Status != "eligibility_revoked" || record.TerminalEvidence == nil || record.TerminalEvidence.TerminalReason != "guest_participant" || record.TerminalEvidence.Cause != "guest_participant" || record.TerminalEvidence.TeardownReceiptDigest != snapshot.TeardownReceiptDigest || snapshot.Session != nil || snapshot.TeardownReceiptDigest == "" || snapshot.TerminalReason != "session-authority-observer\x00guest_participant" {
+		if status.Reason != "active_member_room_required" || closed != 1 || record.Runtime != nil || record.Status != "eligibility_revoked" || record.TerminalEvidence == nil || record.TerminalEvidence.TerminalReason != "guest_participant" || record.TerminalEvidence.Cause != "guest_participant" || record.TerminalEvidence.TeardownReceiptDigest != snapshot.TeardownReceiptDigest || snapshot.Session != nil || snapshot.TeardownReceiptDigest == "" || snapshot.TerminalReason != "production-session-mary\x00guest_participant" {
 			t.Fatalf("guest churn status=%+v closes=%d record=%+v snapshot=%+v", status, closed, record, snapshot)
 		}
 	})
@@ -763,7 +769,7 @@ func TestMeetingSpecialistProductFailClosedRevokesUnrelatedJoinedRuntimeBeforeRe
 		Authority: STRIDESnapshotMACAuthority{KeyID: "specialist_fail_closed", Key: []byte("0123456789abcdef0123456789abcdef")}, MinimumGeneration: 1, BootstrapEmpty: true,
 	}
 	product := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: persistence})
-	provider := installMeetingSpecialistTestJoin(product, now)
+	provider := installMeetingSpecialistProductionJoin(product, now)
 	requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "unrelated-fail-closed", time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -845,7 +851,7 @@ func TestMeetingSpecialistProductReconcilesAutonomousRuntimeTerminal(t *testing.
 		Authority: STRIDESnapshotMACAuthority{KeyID: "specialist_runtime_terminal", Key: []byte("0123456789abcdef0123456789abcdef")}, MinimumGeneration: 1, BootstrapEmpty: true,
 	}
 	product := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: persistence})
-	installMeetingSpecialistTestJoin(product, now)
+	installMeetingSpecialistProductionJoin(product, now)
 	requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "runtime-terminal", time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -895,6 +901,7 @@ func TestMeetingSpecialistProductValidatesTerminalEvidenceBeforeDurableWrite(t *
 			Authority: STRIDESnapshotMACAuthority{KeyID: "specialist_terminal_evidence", Key: []byte("0123456789abcdef0123456789abcdef")}, MinimumGeneration: 1, BootstrapEmpty: true,
 		}
 		product := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: persistence})
+		installMeetingSpecialistProductionJoin(product, now)
 		requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "terminal-evidence-valid", time.Minute)
 		if err != nil {
 			t.Fatal(err)
@@ -926,6 +933,7 @@ func TestMeetingSpecialistProductValidatesTerminalEvidenceBeforeDurableWrite(t *
 
 	t.Run("malformed callback fails closed before presentation", func(t *testing.T) {
 		product, _, user := specialistProductFixture(t)
+		installMeetingSpecialistProductionJoin(product, product.now().UTC())
 		requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "terminal-evidence-invalid", time.Minute)
 		if err != nil {
 			t.Fatal(err)
@@ -992,7 +1000,7 @@ func TestMeetingSpecialistProductClosePersistsTerminalEvidenceWhileDisabled(t *t
 		Authority: STRIDESnapshotMACAuthority{KeyID: "specialist_close_terminal", Key: []byte("0123456789abcdef0123456789abcdef")}, MinimumGeneration: 1, BootstrapEmpty: true,
 	}
 	product := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: persistence})
-	provider := installMeetingSpecialistTestJoin(product, now)
+	provider := installMeetingSpecialistProductionJoin(product, now)
 	requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "close-terminal-evidence", time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -1035,7 +1043,7 @@ func TestMeetingSpecialistProductControlExpiryPersistsClosedLedgerWithoutRestore
 		Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: persistence,
 		ControlCurrent: func() bool { return current.Load() }, ControlCheckInterval: time.Millisecond,
 	})
-	provider := installMeetingSpecialistTestJoin(product, now)
+	provider := installMeetingSpecialistProductionJoin(product, now)
 	requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "persisted-control-expiry", time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -1106,7 +1114,7 @@ func TestMeetingSpecialistProductTeardownDoesNotHoldProductMutexWhenProviderClos
 	product.invitations[launch.Invitation.Header.ID] = meetingSpecialistProductRecord{
 		Invitation: launch.Invitation,
 		Agent:      MeetingSpecialistCandidate{AgentID: launch.Scope.AgentID},
-		Status:     "joined_test_session",
+		Status:     "joined_session",
 		Runtime:    runtime,
 		UpdatedAt:  now,
 	}
@@ -1306,6 +1314,60 @@ func TestMeetingSpecialistProductSignedRestartRecoveryAndRollbackFence(t *testin
 	}
 }
 
+func TestMeetingSpecialistProductRestoreNormalizesLegacyTestJoinStates(t *testing.T) {
+	for _, scenario := range []struct {
+		legacy string
+		want   string
+	}{
+		{legacy: "joined_test_session", want: "approved_reauthorization_required"},
+		{legacy: "approved_test_session_failed", want: "approved_session_failed"},
+	} {
+		t.Run(scenario.legacy, func(t *testing.T) {
+			_, authority, user := specialistProductFixture(t)
+			now := time.Date(2026, 7, 30, 17, 0, 0, 0, time.UTC)
+			dir := t.TempDir()
+			persistence := &MeetingSpecialistProductPersistence{
+				SnapshotPath: filepath.Join(dir, "specialists.snapshot.json"), GenerationPath: filepath.Join(dir, "specialists.generation.json"),
+				Authority: STRIDESnapshotMACAuthority{KeyID: "specialist_legacy_state_key", Key: []byte("0123456789abcdef0123456789abcdef")}, MinimumGeneration: 1, BootstrapEmpty: true,
+			}
+			product := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: persistence})
+			requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review campaign", "legacy-state-"+scenario.legacy, time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := product.Resolve(context.Background(), user, "dog-perfect", requested.ID, requested.Revision, "approved"); err != nil {
+				t.Fatal(err)
+			}
+			product.mu.Lock()
+			record := product.invitations[requested.ID]
+			record.Status = scenario.legacy
+			product.invitations[requested.ID] = record
+			err = product.persistLocked()
+			product.mu.Unlock()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			restore := *persistence
+			restore.BootstrapEmpty = false
+			restarted := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: &restore})
+			restarted.mu.Lock()
+			restored, healthErr := restarted.invitations[requested.ID], restarted.healthErr
+			restarted.mu.Unlock()
+			if healthErr != nil || restored.Status != scenario.want || restored.Runtime != nil {
+				t.Fatalf("legacy restore poisoned product: record=%+v health=%v", restored, healthErr)
+			}
+			second := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: &restore})
+			second.mu.Lock()
+			secondRecord, secondHealth := second.invitations[requested.ID], second.healthErr
+			second.mu.Unlock()
+			if secondHealth != nil || secondRecord.Status != scenario.want || secondRecord.Runtime != nil {
+				t.Fatalf("normalized state was not durable: record=%+v health=%v", secondRecord, secondHealth)
+			}
+		})
+	}
+}
+
 func TestMeetingSpecialistProductRestoredApprovalNeedsFreshScopeButRetainsCandidateRevocation(t *testing.T) {
 	_, authority, user := specialistProductFixture(t)
 	dir := t.TempDir()
@@ -1394,7 +1456,7 @@ func TestMeetingSpecialistProductRoomCloseTearsDownExactSittingOnly(t *testing.T
 	product.mu.Lock()
 	before := product.invitations[requested.ID]
 	product.mu.Unlock()
-	if before.Runtime == nil || before.Status != "approved_waiting_for_provider_qualification" {
+	if before.Runtime != nil || before.Status != "approved_waiting_for_provider_qualification" {
 		t.Fatalf("unrelated room closed specialist: %+v", before)
 	}
 	product.CloseScope("dog-perfect", "sitting-1", "room_closed")
@@ -1545,7 +1607,7 @@ func TestMeetingSpecialistProductRechecksShortLivedControlAuthority(t *testing.T
 		t.Fatal(err)
 	}
 	product.mu.Lock()
-	product.invitations[launch.Invitation.Header.ID] = meetingSpecialistProductRecord{Invitation: launch.Invitation, Status: "joined_test_session", Runtime: runtime, UpdatedAt: now}
+	product.invitations[launch.Invitation.Header.ID] = meetingSpecialistProductRecord{Invitation: launch.Invitation, Status: "joined_session", Runtime: runtime, UpdatedAt: now}
 	product.mu.Unlock()
 	current.Store(false)
 	deadline := time.Now().Add(time.Second)
@@ -1579,38 +1641,23 @@ func TestMeetingSpecialistHTTPFakeSessionJoinAndFailureStayIsolated(t *testing.T
 		fail       bool
 		wantStatus string
 	}{
-		{name: "joined", wantStatus: "joined_test_session"},
-		{name: "provider failure isolated", fail: true, wantStatus: "approved_test_session_failed"},
+		{name: "joined", wantStatus: "joined_session"},
+		{name: "provider failure isolated", fail: true, wantStatus: "approved_session_failed"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			product, productAuthority, _ := specialistProductFixture(t)
 			provider := &fakeMeetingSpecialistProvider{}
 			joinShouldFail := scenario.fail
-			product.testJoin = func(ctx context.Context, invitation MeetingAgentInvitation, candidate MeetingSpecialistCandidate, scope meetingSpecialistProductScope, limits MeetingSpecialistApprovalLimits) (*MeetingSpecialistRuntime, error) {
-				capabilityAuthority := newFakeMeetingSpecialistAuthority()
-				runtime := NewMeetingSpecialistRuntime(func() time.Time { return now }, enabledSpecialistHarnessGates(), capabilityAuthority, func(context.Context, MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
-					if joinShouldFail {
-						return nil, errors.New("deterministic provider failure")
-					}
-					return provider, nil
-				}, func(MeetingAgentFloorScope, uint64, []int16) error { return nil })
-				launch := specialistRuntimeLaunchFixture(now)
-				launch.Scope.RoomID, launch.Scope.SittingID, launch.Scope.MediaGeneration = scope.RoomID, scope.SittingID, scope.MediaGeneration
-				launch.Scope.InvitationID, launch.Scope.AgentID = invitation.Header.ID, candidate.AgentID
-				launch.Scope.SessionID = "fake-session-" + candidate.AgentID
-				launch.Scope.RuntimePrincipal = "fake-runtime-" + candidate.AgentID
-				launch.Scope.AudioTrackID = "fake-track-" + candidate.AgentID
-				launch.Invitation = invitation
-				launch.Context.Invitation = STRIDEReference{ContractType: STRIDEContractMeetingAgentInvitation, ID: invitation.Header.ID, Revision: invitation.Header.Revision, Digest: invitation.Header.ContentDigest}
-				launch.Context.AgentProfile = candidate.Profile
-				launch.Context.Audience = invitation.Audience
-				launch.ApprovalLimits = limits
-				launch.CapabilityReceipt = capabilityAuthority.issue(launch)
-				if _, err := runtime.Start(ctx, launch); err != nil {
-					return nil, err
+			var factoryCalls atomic.Int64
+			joiner, _ := productionJoinFixture(now, provider, &factoryCalls)
+			providerFactory := joiner.providerFactory
+			joiner.providerFactory = func(ctx context.Context, launch MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
+				if joinShouldFail {
+					return nil, errors.New("deterministic provider failure")
 				}
-				return runtime, nil
+				return providerFactory(ctx, launch)
 			}
+			product.productionJoin = joiner
 
 			previous := kanbanApp
 			kanbanApp = &kanbanBoardApp{meetingSpecialists: product}
@@ -1684,7 +1731,7 @@ func TestMeetingSpecialistHTTPFakeSessionJoinAndFailureStayIsolated(t *testing.T
 				if err := json.Unmarshal(recovered.Body.Bytes(), &recoveredPayload); err != nil {
 					t.Fatal(err)
 				}
-				if recoveredPayload.Invitation.Status != "joined_test_session" || provider.briefs != 1 {
+				if recoveredPayload.Invitation.Status != "joined_session" || provider.briefs != 1 {
 					t.Fatalf("recovery did not join isolated fake session: invitation=%+v briefs=%d", recoveredPayload.Invitation, provider.briefs)
 				}
 			} else if record.Runtime == nil || record.Runtime.Snapshot().Session == nil || provider.briefs != 1 {
@@ -1715,7 +1762,10 @@ func TestMeetingSpecialistProductPersistsApprovalBeforeLaunchAndFencesPersistenc
 			provider := &fakeMeetingSpecialistProvider{}
 			joinCalls := 0
 			product := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: productAuthority, Persistence: persistence})
-			product.testJoin = func(ctx context.Context, invitation MeetingAgentInvitation, candidate MeetingSpecialistCandidate, scope meetingSpecialistProductScope, limits MeetingSpecialistApprovalLimits) (*MeetingSpecialistRuntime, error) {
+			var fixtureFactoryCalls atomic.Int64
+			joiner, _ := productionJoinFixture(now, provider, &fixtureFactoryCalls)
+			providerFactory := joiner.providerFactory
+			joiner.providerFactory = func(ctx context.Context, launch MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
 				joinCalls++
 				var durable meetingSpecialistSnapshotEnvelope
 				if err := readSTRIDERuntimeJSON(persistence.SnapshotPath, &durable); err != nil {
@@ -1723,31 +1773,16 @@ func TestMeetingSpecialistProductPersistsApprovalBeforeLaunchAndFencesPersistenc
 				}
 				foundApproved := false
 				for _, stored := range durable.Payload.Records {
-					if stored.Invitation.Header.ID == invitation.Header.ID && stored.Invitation.Decision == "approved" && stored.Status == "approved_waiting_for_provider_qualification" {
+					if stored.Invitation.Header.ID == launch.Invitation.Header.ID && stored.Invitation.Decision == "approved" && stored.Status == "approved_waiting_for_provider_qualification" {
 						foundApproved = true
 					}
 				}
 				if !foundApproved {
 					t.Fatalf("provider launch preceded durable approval: %+v", durable.Payload.Records)
 				}
-				authority := newFakeMeetingSpecialistAuthority()
-				runtime := NewMeetingSpecialistRuntime(func() time.Time { return now }, enabledSpecialistHarnessGates(), authority, func(context.Context, MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
-					return provider, nil
-				}, func(MeetingAgentFloorScope, uint64, []int16) error { return nil })
-				launch := specialistRuntimeLaunchFixture(now)
-				launch.Scope.RoomID, launch.Scope.SittingID, launch.Scope.MediaGeneration = scope.RoomID, scope.SittingID, scope.MediaGeneration
-				launch.Scope.InvitationID, launch.Scope.AgentID = invitation.Header.ID, candidate.AgentID
-				launch.Scope.SessionID = "persist-failure-session"
-				launch.Scope.RuntimePrincipal = "persist-failure-runtime"
-				launch.Scope.AudioTrackID = "persist-failure-track"
-				launch.Invitation = invitation
-				launch.Context.Invitation = referenceFromHeader(invitation.Header)
-				launch.Context.AgentProfile = candidate.Profile
-				launch.Context.Audience = invitation.Audience
-				launch.ApprovalLimits = limits
-				launch.CapabilityReceipt = authority.issue(launch)
-				if _, err := runtime.Start(ctx, launch); err != nil {
-					return nil, err
+				createdProvider, err := providerFactory(ctx, launch)
+				if err != nil {
+					return createdProvider, err
 				}
 				if stage == "after_launch" {
 					if err := os.Remove(persistence.GenerationPath); err != nil {
@@ -1757,8 +1792,9 @@ func TestMeetingSpecialistProductPersistsApprovalBeforeLaunchAndFencesPersistenc
 						t.Fatal(err)
 					}
 				}
-				return runtime, nil
+				return createdProvider, nil
 			}
+			product.productionJoin = joiner
 			requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review positioning before launch", "persist-order-"+stage, 5*time.Minute)
 			if err != nil {
 				t.Fatal(err)
