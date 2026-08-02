@@ -27,6 +27,9 @@ export type CameraFramingTelemetry = {
   reasonCode: string | null;
   wideUprightReasonCode: string | null;
   centerStageReasonCode: string | null;
+  webRTCCameraCrashGuardInstalled: boolean;
+  webRTCCameraCrashGuardInterventions: number;
+  webRTCCameraCrashGuardLastReason: string | null;
 };
 
 export type CameraFramingTrackIdentity = {
@@ -240,6 +243,14 @@ export function cameraFramingTelemetryFromCapabilities(
     reasonCode: capabilities.reasonCode,
     wideUprightReasonCode: capabilities.wideUprightReasonCode ?? null,
     centerStageReasonCode: capabilities.centerStageReasonCode ?? null,
+    webRTCCameraCrashGuardInstalled:
+      capabilities.webRTCCameraCrashGuardInstalled === true,
+    webRTCCameraCrashGuardInterventions: Math.max(
+      0,
+      Math.trunc(capabilities.webRTCCameraCrashGuardInterventions ?? 0),
+    ),
+    webRTCCameraCrashGuardLastReason:
+      capabilities.webRTCCameraCrashGuardLastReason ?? null,
   };
 }
 

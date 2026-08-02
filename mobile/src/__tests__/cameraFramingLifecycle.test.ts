@@ -380,6 +380,9 @@ describe('camera framing lifecycle', () => {
       reasonCode: 'active_camera_not_front_ultra_wide',
       wideUprightReasonCode: 'active_format_missing_16x9',
       centerStageReasonCode: 'center_stage_unsupported',
+      webRTCCameraCrashGuardInstalled: true,
+      webRTCCameraCrashGuardInterventions: 3,
+      webRTCCameraCrashGuardLastReason: 'adaptive_front_camera_omitted_fixed_output_dimensions',
     }, 'front-camera');
 
     assert.deepEqual(telemetry, {
@@ -394,6 +397,9 @@ describe('camera framing lifecycle', () => {
       reasonCode: 'active_camera_not_front_ultra_wide',
       wideUprightReasonCode: 'active_format_missing_16x9',
       centerStageReasonCode: 'center_stage_unsupported',
+      webRTCCameraCrashGuardInstalled: true,
+      webRTCCameraCrashGuardInterventions: 3,
+      webRTCCameraCrashGuardLastReason: 'adaptive_front_camera_omitted_fixed_output_dimensions',
     });
     assert.equal(JSON.stringify(telemetry).includes('front-camera'), false);
     assert.deepEqual(Object.keys(telemetry ?? {}).sort(), [
@@ -405,6 +411,9 @@ describe('camera framing lifecycle', () => {
       'dynamicHeight',
       'dynamicWidth',
       'reasonCode',
+      'webRTCCameraCrashGuardInstalled',
+      'webRTCCameraCrashGuardInterventions',
+      'webRTCCameraCrashGuardLastReason',
       'wideUprightEnabled',
       'wideUprightReasonCode',
       'wideUprightSupported',

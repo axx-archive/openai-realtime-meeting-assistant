@@ -260,6 +260,60 @@ describe('iOS WebRTC camera prebuild patch', () => {
     );
   });
 
+  it('guards the M124 fixed-dimension rewrite before iOS 26 can abort the process', () => {
+    const guardSource = fs.readFileSync(
+      path.join(
+        mobileRoot,
+        'modules',
+        'bonfire-camera-framing',
+        'ios',
+        'BonfireWebRTCCameraCrashGuard.m',
+      ),
+      'utf8',
+    );
+    const moduleSource = fs.readFileSync(
+      path.join(
+        mobileRoot,
+        'modules',
+        'bonfire-camera-framing',
+        'ios',
+        'BonfireCameraFramingModule.swift',
+      ),
+      'utf8',
+    );
+    const podspecSource = fs.readFileSync(
+      path.join(
+        mobileRoot,
+        'modules',
+        'bonfire-camera-framing',
+        'ios',
+        'BonfireCameraFraming.podspec',
+      ),
+      'utf8',
+    );
+
+    assert.match(moduleSource, /OnCreate \{[\s\S]*BonfireWebRTCCameraCrashGuard\.install\(\)/);
+    assert.match(podspecSource, /s\.dependency 'JitsiWebRTC', '= 124\.0\.2'/);
+    assert.match(guardSource, /NSSelectorFromString\(@"updateVideoDataOutputPixelFormat:"\)/);
+    assert.match(guardSource, /method_setImplementation\([\s\S]*BFGuardedUpdateVideoDataOutputPixelFormat/);
+    assert.match(
+      guardSource,
+      /adaptiveFrontCamera && adaptiveFormat[\s\S]*return YES;/,
+      'only the iOS 26 adaptive front-camera format may omit fixed output dimensions',
+    );
+    assert.match(
+      guardSource,
+      /adaptive_front_camera_omitted_fixed_output_dimensions"[\s\S]*return;/,
+      'the known M124 rewrite must be skipped before invoking its unsafe implementation',
+    );
+    assert.match(
+      guardSource,
+      /@try \{[\s\S]*BFOriginalUpdatePixelFormat\([\s\S]*@catch \(NSException \*exception\)/,
+      'unexpected iOS 26 output-setting exceptions must remain inside a native boundary',
+    );
+    assert.match(guardSource, /web_rtc_output_settings_exception/);
+  });
+
   it('fails closed if the reviewed adaptive camera selection is changed unexpectedly', () => {
     const sourcePath = resolveWebRTCCameraSource(mobileRoot);
     const patchedSource = patchCenterStageSource(

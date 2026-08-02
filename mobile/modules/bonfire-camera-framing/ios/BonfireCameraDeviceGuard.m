@@ -1,4 +1,5 @@
 #import "BonfireCameraDeviceGuard.h"
+#import "BonfireWebRTCCameraCrashGuard.h"
 
 #import <AVFoundation/AVFoundation.h>
 #import <UIKit/UIKit.h>
@@ -110,6 +111,8 @@ static NSMutableDictionary<NSString *, AVCaptureDevice *> *lockedDevices;
 }
 
 + (NSDictionary<NSString *, id> *)capabilitiesForDeviceID:(NSString *)deviceID {
+  NSDictionary<NSString *, id> *webRTCCameraCrashGuard =
+      [BonfireWebRTCCameraCrashGuard status];
   AVCaptureDevice *device = [self deviceForID:deviceID];
   AVCaptureDevice *frontUltraWide = [self frontUltraWideDevice];
 
@@ -215,6 +218,9 @@ static NSMutableDictionary<NSString *, AVCaptureDevice *> *lockedDevices;
     @"reasonCode" : generalReasonCode ?: (id)NSNull.null,
     @"wideUprightReasonCode" : wideReasonCode ?: (id)NSNull.null,
     @"centerStageReasonCode" : centerStageReasonCode ?: (id)NSNull.null,
+    @"webRTCCameraCrashGuardInstalled" : webRTCCameraCrashGuard[@"installed"],
+    @"webRTCCameraCrashGuardInterventions" : webRTCCameraCrashGuard[@"interventions"],
+    @"webRTCCameraCrashGuardLastReason" : webRTCCameraCrashGuard[@"lastReason"],
   };
 }
 

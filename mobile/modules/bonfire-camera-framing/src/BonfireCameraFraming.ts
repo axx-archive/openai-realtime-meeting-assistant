@@ -39,6 +39,9 @@ export interface CameraFramingCapabilities {
   reasonCode: CameraFramingReasonCode | null;
   wideUprightReasonCode?: CameraFramingReasonCode | null;
   centerStageReasonCode?: CameraFramingReasonCode | null;
+  webRTCCameraCrashGuardInstalled?: boolean;
+  webRTCCameraCrashGuardInterventions?: number;
+  webRTCCameraCrashGuardLastReason?: string | null;
 }
 
 export interface CameraFramingOperationResult {

@@ -111,7 +111,7 @@ func TestClientMediaQualityReportLogsNativeOutboundVideoGeometry(t *testing.T) {
 func TestClientMediaQualityReportLogsSanitizedNativeCameraFraming(t *testing.T) {
 	out := captureStdout(t, func() {
 		logClientMediaQualityReport(
-			`{"cameraFraming":{"activeDeviceType":"builtInUltraWideCamera\nroom_ontrack_start forged=true","activeDeviceId":"private-camera-identifier","centerStageSupported":true,"centerStageEnabled":true,"centerStageActive":false,"wideUprightSupported":true,"wideUprightEnabled":true,"dynamicWidth":1920,"dynamicHeight":1080,"reasonCode":"active_camera_not_front_ultra_wide","wideUprightReasonCode":"active_format_missing_16x9","centerStageReasonCode":"center_stage_unsupported"}}`,
+			`{"cameraFraming":{"activeDeviceType":"builtInUltraWideCamera\nroom_ontrack_start forged=true","activeDeviceId":"private-camera-identifier","centerStageSupported":true,"centerStageEnabled":true,"centerStageActive":false,"wideUprightSupported":true,"wideUprightEnabled":true,"dynamicWidth":1920,"dynamicHeight":1080,"reasonCode":"active_camera_not_front_ultra_wide","wideUprightReasonCode":"active_format_missing_16x9","centerStageReasonCode":"center_stage_unsupported","webRTCCameraCrashGuardInstalled":true,"webRTCCameraCrashGuardInterventions":2,"webRTCCameraCrashGuardLastReason":"adaptive_front_camera_omitted_fixed_output_dimensions"}}`,
 			"AJ", "sess-1")
 	})
 	for _, field := range []string{
@@ -125,6 +125,7 @@ func TestClientMediaQualityReportLogsSanitizedNativeCameraFraming(t *testing.T) 
 		"framingReason=active_camera_not_front_ultra_wide",
 		"wideUprightReason=active_format_missing_16x9",
 		"centerStageReason=center_stage_unsupported",
+		"webRTCCameraGuard=true/2/adaptive_front_camera_omitted_fixed_output_dimensions",
 	} {
 		if !strings.Contains(out, field) {
 			t.Fatalf("native camera framing field %q missing from log: %s", field, out)

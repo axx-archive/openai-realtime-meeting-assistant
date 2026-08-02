@@ -16,6 +16,10 @@ Pod::Spec.new do |s|
   s.swift_version  = '5.9'
 
   s.dependency 'ExpoModulesCore'
+  # The crash boundary below is reviewed against M124's exact Objective-C
+  # selector and output-settings behavior. Fail dependency resolution instead
+  # of silently shipping it against an unreviewed WebRTC binary.
+  s.dependency 'JitsiWebRTC', '= 124.0.2'
 
   s.frameworks = 'AVFoundation', 'UIKit'
   s.source_files = '**/*.{h,m,mm,swift}'

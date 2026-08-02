@@ -4,6 +4,10 @@ public final class BonfireCameraFramingModule: Module {
   public func definition() -> ModuleDefinition {
     Name("BonfireCameraFraming")
 
+    OnCreate {
+      BonfireWebRTCCameraCrashGuard.install()
+    }
+
     AsyncFunction("getCapabilities") { (deviceID: String) in
       return BonfireCameraDeviceGuard.capabilities(deviceID: deviceID)
     }
