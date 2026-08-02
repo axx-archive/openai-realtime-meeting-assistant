@@ -323,6 +323,13 @@ func TestCallbackSignatureReplayFenceAndIdempotency(t *testing.T) {
 	if _, err := controller.CommitCallback(changed); !errors.Is(err, ErrIdempotency) {
 		t.Fatalf("changed idempotency binding error=%v", err)
 	}
+	distinct, err := controller.NewCallback(lease, callbackCredential, "nonce-4", "different-terminal", "failed", digestString("different-terminal"), harnessNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.CommitCallback(distinct); !errors.Is(err, ErrIdempotency) {
+		t.Fatalf("distinct terminal after completion error=%v", err)
+	}
 
 	controller2, lease2, _, callback2 := newCallback(t)
 	controller2.KillWorkflow(lease2.WorkflowID)
@@ -406,5 +413,77 @@ func TestConcurrentCallbackIdempotencyAppliesOnce(t *testing.T) {
 	wait.Wait()
 	if applied.Load() != 1 || duplicates.Load() != attempts-1 {
 		t.Fatalf("applied=%d duplicates=%d", applied.Load(), duplicates.Load())
+	}
+}
+
+func TestConcurrentDistinctTerminalsApplyExactlyOne(t *testing.T) {
+	controller, lease := newTestRun(t, testWorkflow())
+	credential, err := controller.IssueCredential(lease, testWorkflow().CallbackAudience, []string{"callback:complete"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	callbacks := make([]Callback, 32)
+	for index := range callbacks {
+		callback, err := controller.NewCallback(lease, credential, fmt.Sprintf("terminal-nonce-%d", index), fmt.Sprintf("terminal-%d", index), "complete", digestString(fmt.Sprintf("result-%d", index)), harnessNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		callbacks[index] = callback
+	}
+	var applied atomic.Int64
+	var denied atomic.Int64
+	var wait sync.WaitGroup
+	for _, callback := range callbacks {
+		callback := callback
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			result, err := controller.CommitCallback(callback)
+			switch {
+			case err == nil && result.Applied:
+				applied.Add(1)
+			case errors.Is(err, ErrIdempotency):
+				denied.Add(1)
+			default:
+				t.Errorf("distinct terminal result=%+v err=%v", result, err)
+			}
+		}()
+	}
+	wait.Wait()
+	if applied.Load() != 1 || denied.Load() != int64(len(callbacks)-1) {
+		t.Fatalf("applied=%d denied=%d", applied.Load(), denied.Load())
+	}
+}
+
+func TestCallbackNonceStateIsBoundedPerRun(t *testing.T) {
+	controller, lease := newTestRun(t, testWorkflow())
+	credential, err := controller.IssueCredential(lease, testWorkflow().CallbackAudience, []string{"callback:complete"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < maxCallbackNoncesPerRun; index++ {
+		callback, err := controller.NewCallback(lease, credential, fmt.Sprintf("bounded-nonce-%d", index), "complete-1", "complete", digestString("result"), harnessNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := controller.CommitCallback(callback)
+		if err != nil || index == 0 && !result.Applied || index > 0 && !result.Duplicate {
+			t.Fatalf("callback %d result=%+v err=%v", index, result, err)
+		}
+	}
+	overflow, err := controller.NewCallback(lease, credential, "bounded-overflow", "complete-1", "complete", digestString("result"), harnessNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.CommitCallback(overflow); !errors.Is(err, ErrQuota) {
+		t.Fatalf("callback nonce overflow error=%v", err)
+	}
+
+	controller.mu.Lock()
+	state := controller.runs[lease.RunID]
+	gotNonces, gotTerminal := len(state.nonces), state.terminalKey
+	controller.mu.Unlock()
+	if gotNonces != maxCallbackNoncesPerRun || gotTerminal != "complete-1" {
+		t.Fatalf("nonces=%d terminal=%q", gotNonces, gotTerminal)
 	}
 }
