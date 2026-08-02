@@ -368,11 +368,11 @@ func TestScoutChatRouterScenarioPhrasingsRouteToIntendedProposal(t *testing.T) {
 	}
 	for _, scenario := range scenarios {
 		t.Run(scenario.name, func(t *testing.T) {
-		setupAuthTestEnv(t)
-		t.Setenv("OPENAI_API_KEY", "openai-router-test")
-		previousApp := kanbanApp
-		kanbanApp = newIsolatedKanbanBoardApp(t)
-		kanbanApp.apiKey = "openai-router-test"
+			setupAuthTestEnv(t)
+			t.Setenv("OPENAI_API_KEY", "openai-router-test")
+			previousApp := kanbanApp
+			kanbanApp = newIsolatedKanbanBoardApp(t)
+			kanbanApp.apiKey = "openai-router-test"
 			t.Cleanup(func() { kanbanApp = previousApp })
 
 			previousRunner := startAgentThreadAsync
