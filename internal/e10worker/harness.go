@@ -25,8 +25,9 @@ import (
 )
 
 const (
-	ReceiptSchema = "stride.e10.worker-harness-receipt/v1"
-	EvidenceClass = "local_token_free_boundary_harness"
+	ReceiptSchema           = "stride.e10.worker-harness-receipt/v1"
+	EvidenceClass           = "local_token_free_boundary_harness"
+	maxCallbackNoncesPerRun = 64
 )
 
 var (
@@ -195,13 +196,14 @@ type Receipt struct {
 }
 
 type runState struct {
-	lease     RunLease
-	policy    WorkflowPolicy
-	calls     uint64
-	bytes     uint64
-	killed    bool
-	nonces    map[string]struct{}
-	committed map[string]string
+	lease           RunLease
+	policy          WorkflowPolicy
+	calls           uint64
+	bytes           uint64
+	killed          bool
+	nonces          map[string]struct{}
+	terminalKey     string
+	terminalBinding string
 }
 
 // Controller is an in-memory contract implementation. Its mutex makes quota,
@@ -297,7 +299,7 @@ func (c *Controller) Admit(request RunRequest) (RunLease, error) {
 		RunID: request.RunID, WorkflowID: request.WorkflowID, Generation: 1,
 		FencingToken: c.sign(joinFields("fence", request.RunID, request.WorkflowID, "1")), IssuedAt: c.now().UTC(),
 	}
-	c.runs[request.RunID] = &runState{lease: lease, policy: workflow, nonces: map[string]struct{}{}, committed: map[string]string{}}
+	c.runs[request.RunID] = &runState{lease: lease, policy: workflow, nonces: map[string]struct{}{}}
 	return lease, nil
 }
 
@@ -453,15 +455,22 @@ func (c *Controller) CommitCallback(callback Callback) (CommitResult, error) {
 		return CommitResult{}, ErrReplay
 	}
 	binding := callbackBindingDigest(callback)
-	if existing, exists := state.committed[callback.IdempotencyKey]; exists {
-		state.nonces[callback.Nonce] = struct{}{}
-		if subtle.ConstantTimeCompare([]byte(existing), []byte(binding)) != 1 {
+	if state.terminalBinding != "" {
+		if state.terminalKey != callback.IdempotencyKey || subtle.ConstantTimeCompare([]byte(state.terminalBinding), []byte(binding)) != 1 {
 			return CommitResult{}, ErrIdempotency
 		}
+		if len(state.nonces) >= maxCallbackNoncesPerRun {
+			return CommitResult{}, ErrQuota
+		}
+		state.nonces[callback.Nonce] = struct{}{}
 		return CommitResult{Duplicate: true}, nil
 	}
+	if len(state.nonces) >= maxCallbackNoncesPerRun {
+		return CommitResult{}, ErrQuota
+	}
 	state.nonces[callback.Nonce] = struct{}{}
-	state.committed[callback.IdempotencyKey] = binding
+	state.terminalKey = callback.IdempotencyKey
+	state.terminalBinding = binding
 	return CommitResult{Applied: true}, nil
 }
 

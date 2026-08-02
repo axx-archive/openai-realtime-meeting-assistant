@@ -50,9 +50,12 @@ The harness admits a run only when all of the following hold:
    requests cannot over-admit.
 7. Completion callbacks bind run, workflow, audience, nonce, idempotency key,
    generation, fencing token, terminal status, result digest, and timestamp.
-   Signatures are checked before commit; nonce replay is rejected; an exact
-   retry with a fresh nonce is a no-op; changing an idempotency binding fails
-   closed.
+   Signatures are checked before commit; nonce replay is rejected; one logical
+   terminal is allowed per run; an exact retry with a fresh nonce is a no-op;
+   and a different terminal key or binding fails closed. The local replay set
+   is capped at 64 nonces per run, after which further retries fail closed. A
+   production callback path still requires the external durable replay store
+   listed below.
 8. Run, workflow, and global kill switches revoke future credential, gateway,
    and callback authority. Fencing generation changes make old leases stale.
 
@@ -72,7 +75,8 @@ go test -race ./internal/e10worker
 The tests cover the happy path, policy and receipt tamper, forbidden mounts and
 environment, credential signature/scope/audience/expiry, gateway IP/metadata/
 redirect/query/host denial, quota exhaustion, callback signature/skew/fence/
-replay/idempotency, kill switches, and concurrent quota/callback decisions.
+replay/idempotency, one-terminal and nonce caps, kill switches, and concurrent
+quota/callback decisions.
 
 ## Installation gates that remain external
 
