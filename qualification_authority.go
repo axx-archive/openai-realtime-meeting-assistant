@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,25 +14,31 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/openai/openai-realtime-meeting-assistant/internal/e10evidence"
 )
 
-// QualificationEvidenceStore is deliberately not a provider trust root. It
-// protects the integrity and one-use semantics of locally assembled E10
-// evidence, which can produce a structure-only candidate but can never mint a
-// provider- or device-qualified capability.
+// QualificationEvidenceStore is deliberately not a provider trust root. Local
+// seed evidence can only produce structure-only candidates. Separately, the
+// store can durably import opaque qualification capabilities minted by
+// e10evidence after independent trust-root, registry, source-packet, evaluator,
+// and dual-signature verification; it cannot mint those capabilities itself.
 type QualificationEvidenceStore struct {
-	mu         sync.Mutex
-	ledgerPath string
-	tenantID   string
-	now        func() time.Time
-	attempts   map[string]StoredProviderAttemptEvidence
-	targets    map[string]StoredTranscriptionEvidenceTarget
-	dictation  map[string]StoredDictationEvidenceBatch
-	consumed   map[string]bool
-	sequence   int64
-	lastDigest string
-	write      func(*os.File, []byte) (int, error)
-	sync       func(*os.File) error
+	mu             sync.Mutex
+	ledgerPath     string
+	tenantID       string
+	now            func() time.Time
+	attempts       map[string]StoredProviderAttemptEvidence
+	targets        map[string]StoredTranscriptionEvidenceTarget
+	dictation      map[string]StoredDictationEvidenceBatch
+	consumed       map[string]bool
+	trustedResults map[string]StoredTrustedQualificationResult
+	trustedSources map[string]bool
+	trustedPackets map[string]bool
+	sequence       int64
+	lastDigest     string
+	write          func(*os.File, []byte) (int, error)
+	sync           func(*os.File) error
 }
 
 // StoredProviderAttemptEvidence is locally supplied attempt evidence. Opaque
@@ -48,33 +55,45 @@ type QualificationEvidenceSeed struct {
 	DictationBatches     []StoredDictationEvidenceBatch      `json:"dictationBatches"`
 }
 
-type qualificationLedgerEvent struct {
-	Sequence    int64     `json:"sequence"`
-	OccurredAt  time.Time `json:"occurredAt"`
-	Kind        string    `json:"kind"`
-	TokenDigest string    `json:"tokenDigest"`
-	PriorDigest string    `json:"priorDigest,omitempty"`
-	Digest      string    `json:"digest"`
+// StoredTrustedQualificationResult is durable evidence that a separately
+// anchored registry owner, operator, and independent reviewer signed an exact
+// evaluator result over an exact signed source packet. It is not derived from
+// QualificationEvidenceSeed and does not itself enable a route or release.
+type StoredTrustedQualificationResult struct {
+	Record     e10evidence.QualificationImportRecord `json:"record"`
+	ImportedAt time.Time                             `json:"importedAt"`
 }
 
-// OpenQualificationEvidenceStore admits caller-supplied evidence only into a
-// local, structure-only store. There is intentionally no signing key,
-// self-anchored registry, or promotion API here. A future provider-qualified
-// receipt must be verified against an independently administered external
-// trust root in a separate component.
+type qualificationLedgerEvent struct {
+	Sequence      int64                             `json:"sequence"`
+	OccurredAt    time.Time                         `json:"occurredAt"`
+	Kind          string                            `json:"kind"`
+	TokenDigest   string                            `json:"tokenDigest"`
+	PriorDigest   string                            `json:"priorDigest,omitempty"`
+	Digest        string                            `json:"digest"`
+	TrustedResult *StoredTrustedQualificationResult `json:"trustedResult,omitempty"`
+}
+
+// OpenQualificationEvidenceStore admits caller-supplied seed evidence only into
+// the local structure-only maps. There is no signing key or self-anchored
+// registry here; the trusted-result import API accepts only opaque capabilities
+// already verified against independently administered e10evidence trust roots.
 func OpenQualificationEvidenceStore(ledgerPath string, seed QualificationEvidenceSeed, tenantID string, now func() time.Time) (*QualificationEvidenceStore, error) {
 	if strings.TrimSpace(ledgerPath) == "" || !strideIdentifier(tenantID) || now == nil {
 		return nil, errors.New("qualification evidence store configuration is invalid")
 	}
 	cloned := cloneQualificationEvidenceSeed(seed)
 	store := &QualificationEvidenceStore{
-		ledgerPath: ledgerPath,
-		tenantID:   tenantID,
-		now:        now,
-		attempts:   map[string]StoredProviderAttemptEvidence{},
-		targets:    map[string]StoredTranscriptionEvidenceTarget{},
-		dictation:  map[string]StoredDictationEvidenceBatch{},
-		consumed:   map[string]bool{},
+		ledgerPath:     ledgerPath,
+		tenantID:       tenantID,
+		now:            now,
+		attempts:       map[string]StoredProviderAttemptEvidence{},
+		targets:        map[string]StoredTranscriptionEvidenceTarget{},
+		dictation:      map[string]StoredDictationEvidenceBatch{},
+		consumed:       map[string]bool{},
+		trustedResults: map[string]StoredTrustedQualificationResult{},
+		trustedSources: map[string]bool{},
+		trustedPackets: map[string]bool{},
 		write: func(file *os.File, value []byte) (int, error) {
 			return file.Write(value)
 		},
@@ -120,6 +139,57 @@ func OpenQualificationEvidenceStore(ledgerPath string, seed QualificationEvidenc
 		}
 	}
 	return store, nil
+}
+
+// ImportVerifiedQualificationResult is the only trusted-result ingestion
+// path. The e10evidence package must first mint the opaque capability from the
+// anchored registry, exact signed source packet, exact signed result packet,
+// and independently approved trust roots. Import is one-use for both source
+// and result packet and is durable across store instances and restarts.
+func (store *QualificationEvidenceStore) ImportVerifiedQualificationResult(verified e10evidence.VerifiedQualificationResult) (StoredTrustedQualificationResult, error) {
+	if store == nil {
+		return StoredTrustedQualificationResult{}, errors.New("qualification evidence store is absent")
+	}
+	record, err := e10evidence.QualificationImport(verified)
+	if err != nil || record.TenantID != store.tenantID {
+		return StoredTrustedQualificationResult{}, errors.New("trusted qualification result denied")
+	}
+	stored := StoredTrustedQualificationResult{Record: record, ImportedAt: store.now().UTC()}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	file, _, err := store.openLedgerLocked()
+	if err != nil {
+		return StoredTrustedQualificationResult{}, err
+	}
+	defer closeQualificationLedger(file)
+	if err := store.reloadLedgerLocked(file); err != nil {
+		return StoredTrustedQualificationResult{}, err
+	}
+	if _, exists := store.trustedResults[record.ResultID]; exists || store.trustedSources[record.SourcePacketSHA256] || store.trustedPackets[record.ResultPacketSHA256] {
+		return StoredTrustedQualificationResult{}, errors.New("trusted qualification result or source packet was already imported")
+	}
+	if err := store.appendTrustedResultLocked(file, stored); err != nil {
+		return StoredTrustedQualificationResult{}, err
+	}
+	return stored, nil
+}
+
+func (store *QualificationEvidenceStore) TrustedQualificationResult(resultID string) (StoredTrustedQualificationResult, bool, error) {
+	if store == nil {
+		return StoredTrustedQualificationResult{}, false, errors.New("qualification evidence store is absent")
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	file, _, err := store.openLedgerLocked()
+	if err != nil {
+		return StoredTrustedQualificationResult{}, false, err
+	}
+	defer closeQualificationLedger(file)
+	if err := store.reloadLedgerLocked(file); err != nil {
+		return StoredTrustedQualificationResult{}, false, err
+	}
+	result, ok := store.trustedResults[strings.TrimSpace(resultID)]
+	return result, ok, nil
 }
 
 func (store *QualificationEvidenceStore) ConsumeProviderAttempt(_ context.Context, ref TranscriptionProviderAttemptRef) (TranscriptionObservation, error) {
@@ -233,24 +303,57 @@ func (store *QualificationEvidenceStore) reloadLedgerLocked(file *os.File) error
 		return err
 	}
 	store.consumed = map[string]bool{}
+	store.trustedResults = map[string]StoredTrustedQualificationResult{}
+	store.trustedSources = map[string]bool{}
+	store.trustedPackets = map[string]bool{}
 	store.sequence = 0
 	store.lastDigest = ""
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 4096), 1024*1024)
 	for scanner.Scan() {
-		var event qualificationLedgerEvent
-		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil || event.Sequence != store.sequence+1 || event.PriorDigest != store.lastDigest || event.Digest != qualificationLedgerEventDigest(event) || !isHexDigest(event.TokenDigest) || !qualificationEvidenceLedgerKind(event.Kind) {
+		line := append([]byte(nil), scanner.Bytes()...)
+		event, decodeErr := e10evidence.DecodeStrict[qualificationLedgerEvent](line)
+		canonical, marshalErr := json.Marshal(event)
+		if decodeErr != nil || marshalErr != nil || !bytes.Equal(line, canonical) || event.Sequence != store.sequence+1 || event.OccurredAt.IsZero() || event.PriorDigest != store.lastDigest || event.Digest != qualificationLedgerEventDigest(event) || !isHexDigest(event.TokenDigest) || !qualificationEvidenceLedgerKind(event.Kind) || !validQualificationLedgerPayload(event) {
 			return errors.New("qualification evidence ledger integrity failure")
 		}
 		store.sequence = event.Sequence
 		store.lastDigest = event.Digest
 		store.consumed[event.Kind+":"+event.TokenDigest] = true
+		if event.TrustedResult != nil {
+			record := event.TrustedResult.Record
+			if record.TenantID != store.tenantID || store.trustedResults[record.ResultID].Record.ResultID != "" || store.trustedSources[record.SourcePacketSHA256] || store.trustedPackets[record.ResultPacketSHA256] {
+				return errors.New("qualification evidence ledger trusted-result replay or tenant failure")
+			}
+			store.trustedResults[record.ResultID] = *event.TrustedResult
+			store.trustedSources[record.SourcePacketSHA256] = true
+			store.trustedPackets[record.ResultPacketSHA256] = true
+		}
 	}
 	return scanner.Err()
 }
 
+func validQualificationLedgerPayload(event qualificationLedgerEvent) bool {
+	if event.Kind != "trusted_qualification_result" {
+		return event.TrustedResult == nil
+	}
+	if event.TrustedResult == nil || event.TrustedResult.ImportedAt.IsZero() || !event.OccurredAt.Equal(event.TrustedResult.ImportedAt) || e10evidence.ValidateQualificationImportRecord(event.TrustedResult.Record) != nil {
+		return false
+	}
+	return event.TokenDigest == workDigest(event.TrustedResult.Record.ResultPacketSHA256)
+}
+
 func (store *QualificationEvidenceStore) appendLedgerEventLocked(file *os.File, kind, tokenDigest string) error {
 	event := qualificationLedgerEvent{Sequence: store.sequence + 1, OccurredAt: store.now().UTC(), Kind: kind, TokenDigest: tokenDigest, PriorDigest: store.lastDigest}
+	return store.appendQualificationEventLocked(file, event)
+}
+
+func (store *QualificationEvidenceStore) appendTrustedResultLocked(file *os.File, result StoredTrustedQualificationResult) error {
+	event := qualificationLedgerEvent{Sequence: store.sequence + 1, OccurredAt: result.ImportedAt, Kind: "trusted_qualification_result", TokenDigest: workDigest(result.Record.ResultPacketSHA256), PriorDigest: store.lastDigest, TrustedResult: &result}
+	return store.appendQualificationEventLocked(file, event)
+}
+
+func (store *QualificationEvidenceStore) appendQualificationEventLocked(file *os.File, event qualificationLedgerEvent) error {
 	event.Digest = qualificationLedgerEventDigest(event)
 	raw, err := json.Marshal(event)
 	if err != nil {
@@ -281,7 +384,13 @@ func (store *QualificationEvidenceStore) appendLedgerEventLocked(file *os.File, 
 	}
 	store.sequence = event.Sequence
 	store.lastDigest = event.Digest
-	store.consumed[kind+":"+tokenDigest] = true
+	store.consumed[event.Kind+":"+event.TokenDigest] = true
+	if event.TrustedResult != nil {
+		record := event.TrustedResult.Record
+		store.trustedResults[record.ResultID] = *event.TrustedResult
+		store.trustedSources[record.SourcePacketSHA256] = true
+		store.trustedPackets[record.ResultPacketSHA256] = true
+	}
 	return nil
 }
 
@@ -305,7 +414,7 @@ func syncQualificationLedgerDirectory(path string) error {
 }
 
 func qualificationEvidenceLedgerKind(kind string) bool {
-	return kind == "provider_attempt" || kind == "transcription_target" || kind == "dictation_batch"
+	return kind == "provider_attempt" || kind == "transcription_target" || kind == "dictation_batch" || kind == "trusted_qualification_result"
 }
 
 func qualificationLedgerEventDigest(event qualificationLedgerEvent) string {

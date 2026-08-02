@@ -20,12 +20,13 @@ import (
 )
 
 const (
-	TrustRootsSchema     = "stride.e10.trust-roots/v2"
-	TargetRegistrySchema = "stride.e10.target-registry/v3"
-	CorpusManifestSchema = "stride.e10.corpus-manifest/v2"
-	PilotPacketSchema    = "stride.e10.io-pilot-packet/v3"
-	ExternalMatrixSchema = "stride.e10.external-matrix/v3"
-	ValidationSchema     = "stride.e10.capture-validation/v2"
+	TrustRootsSchema          = "stride.e10.trust-roots/v2"
+	TargetRegistrySchema      = "stride.e10.target-registry/v3"
+	CorpusManifestSchema      = "stride.e10.corpus-manifest/v3"
+	PilotPacketSchema         = "stride.e10.io-pilot-packet/v4"
+	QualificationResultSchema = "stride.e10.qualification-result/v1"
+	ExternalMatrixSchema      = "stride.e10.external-matrix/v3"
+	ValidationSchema          = "stride.e10.capture-validation/v2"
 
 	EvidenceClass = "operator_packet_structure_only"
 )
@@ -116,6 +117,8 @@ type MetricThreshold struct {
 type CorpusManifest struct {
 	SchemaVersion string              `json:"schemaVersion"`
 	CorpusID      string              `json:"corpusId"`
+	TargetID      string              `json:"targetId"`
+	FixtureSHA256 string              `json:"fixtureSha256"`
 	Lane          string              `json:"lane"`
 	EvidenceClass string              `json:"evidenceClass"`
 	Candidate     CandidateBinding    `json:"candidate"`
@@ -143,11 +146,65 @@ type CorpusClip struct {
 type PilotPacket struct {
 	SchemaVersion  string                  `json:"schemaVersion"`
 	PacketID       string                  `json:"packetId"`
+	TargetID       string                  `json:"targetId"`
+	FixtureSHA256  string                  `json:"fixtureSha256"`
 	EvidenceClass  string                  `json:"evidenceClass"`
 	Candidate      CandidateBinding        `json:"candidate"`
 	Approval       DualApprovalBinding     `json:"approval"`
 	ReviewerRoster []EligiblePilotReviewer `json:"reviewerRoster"`
 	Pilots         []IOPilot               `json:"pilots"`
+}
+
+// QualificationResultPacket is the independently signed bridge between a
+// preregistered source packet and an evaluator result. Evaluator output remains
+// in the governed evidence store; this packet binds only its exact digest and
+// the immutable evaluator configuration used to produce it.
+type QualificationResultPacket struct {
+	SchemaVersion         string              `json:"schemaVersion"`
+	ResultID              string              `json:"resultId"`
+	TenantID              string              `json:"tenantId"`
+	TargetID              string              `json:"targetId"`
+	Lane                  string              `json:"lane"`
+	EvidenceClass         string              `json:"evidenceClass"`
+	Candidate             CandidateBinding    `json:"candidate"`
+	Approval              DualApprovalBinding `json:"approval"`
+	SourcePacketKind      string              `json:"sourcePacketKind"`
+	SourcePacketSHA256    string              `json:"sourcePacketSha256"`
+	EvaluatorConfigSHA256 string              `json:"evaluatorConfigSha256"`
+	EvaluatorResultSHA256 string              `json:"evaluatorResultSha256"`
+	Qualified             bool                `json:"qualified"`
+	EvaluatedAt           string              `json:"evaluatedAt"`
+}
+
+// QualificationImportRecord is a read-only projection of a package-minted
+// capability. Possessing or constructing this projection does not authorize an
+// import; QualificationEvidenceStore accepts VerifiedQualificationResult.
+type QualificationImportRecord struct {
+	ResultID                 string           `json:"resultId"`
+	TenantID                 string           `json:"tenantId"`
+	TargetID                 string           `json:"targetId"`
+	FixtureSHA256            string           `json:"fixtureSha256"`
+	Lane                     string           `json:"lane"`
+	Qualified                bool             `json:"qualified"`
+	Candidate                CandidateBinding `json:"candidate"`
+	RegistrySHA256           string           `json:"registrySha256"`
+	TrustRootSHA256          string           `json:"trustRootSha256"`
+	SourcePacketKind         string           `json:"sourcePacketKind"`
+	SourcePacketSHA256       string           `json:"sourcePacketSha256"`
+	SourceSignatureSetSHA256 string           `json:"sourceSignatureSetSha256"`
+	ResultPacketSHA256       string           `json:"resultPacketSha256"`
+	ResultSignatureSetSHA256 string           `json:"resultSignatureSetSha256"`
+	EvaluatorConfigSHA256    string           `json:"evaluatorConfigSha256"`
+	EvaluatorResultSHA256    string           `json:"evaluatorResultSha256"`
+	EvaluatedAt              string           `json:"evaluatedAt"`
+}
+
+// VerifiedQualificationResult is opaque. It can only be minted after the
+// registry, source receipt, source bytes, evaluator-result packet, and both
+// detached result signatures have all been verified together.
+type VerifiedQualificationResult struct {
+	record QualificationImportRecord
+	proof  [sha256.Size]byte
 }
 
 type IOPilot struct {
@@ -433,6 +490,12 @@ func metricFloor(name, comparator string, value float64, unit string) MetricThre
 // targets or tighten these values, but cannot omit or weaken any target after
 // measurements exist without a new independently approved design revision.
 var requiredTargetContracts = map[string]requiredTargetContract{
+	"meeting-stt-live-provider-evaluation": requiredTarget("qualification_evaluator", 1, 120,
+		metricFloor("clip_count", "at_least", 120, "count"), metricFloor("duration_seconds", "at_least", 3600, "seconds"), metricFloor("corpus_word_error_rate", "at_most", 10, "percent"), metricFloor("domain_term_accuracy", "at_least", 97, "percent"), metricFloor("numeric_accuracy", "at_least", 98, "percent"), metricFloor("final_latency_p95_seconds", "at_most", 3, "seconds"), metricFloor("integrity_events", "at_least", 10000, "count")),
+	"composer-dictation-target-device-evaluation": requiredTarget("qualification_evaluator", 1, 250,
+		metricFloor("utterance_count", "at_least", 250, "count"), metricFloor("first_attempt_success_percent", "at_least", 99, "percent"), metricFloor("submit_to_post_p95_seconds", "at_most", 3, "seconds"), metricFloor("duplicate_posts", "exactly", 0, "count"), metricFloor("privacy_leaks", "exactly", 0, "count")),
+	"insights-opportunities-real-input-pilots": requiredTarget("qualification_evaluator", 10, 10,
+		metricFloor("pilot_count", "exactly", 10, "count"), metricFloor("accepted_pilots", "at_least", 8, "count"), metricFloor("independent_reviewers", "at_least", 2, "count"), metricFloor("invented_asserted_claims", "exactly", 0, "count"), metricFloor("unauthorized_external_writes", "exactly", 0, "count")),
 	"two-three-person-two-hour-rooms": requiredTarget("physical_device_webrtc", 2, 3,
 		metricFloor("duration_seconds", "at_least", 7200, "seconds"), metricFloor("participant_count", "at_least", 3, "count"), metricFloor("fatal_media_failures", "exactly", 0, "count"), metricFloor("transcript_gap_seconds", "at_most", 5, "seconds")),
 	"gallery-speaker-expanded-screen-share": requiredTarget("physical_device_webrtc", 3, 4,
@@ -510,7 +573,7 @@ func ValidateTargetRegistry(registry TargetRegistry) error {
 	}
 	seen := map[string]bool{}
 	for _, target := range registry.Targets {
-		if !validID(target.ID) || !oneOf(target.Category, "physical_device_webrtc", "ha_dr", "worker_orchestrator") {
+		if !validID(target.ID) || !oneOf(target.Category, "physical_device_webrtc", "ha_dr", "worker_orchestrator", "qualification_evaluator") {
 			return fmt.Errorf("target %q has invalid identity/category", target.ID)
 		}
 		if seen[target.ID] {
@@ -629,7 +692,7 @@ func PublicKeyFingerprint(publicKey []byte) string { return digestBytes(publicKe
 func (approved ApprovedTrustRoots) Digest() string { return approved.rawDigest }
 
 func ValidateCorpus(manifest CorpusManifest, registry TargetRegistry, registrySHA256 string) error {
-	if manifest.SchemaVersion != CorpusManifestSchema || !validID(manifest.CorpusID) {
+	if manifest.SchemaVersion != CorpusManifestSchema || !validID(manifest.CorpusID) || !validID(manifest.TargetID) {
 		return errors.New("corpus schema or identity is invalid")
 	}
 	if !oneOf(manifest.Lane, "meeting_stt", "composer_dictation") || manifest.EvidenceClass != "authorized_real_capture" {
@@ -638,9 +701,16 @@ func ValidateCorpus(manifest CorpusManifest, registry TargetRegistry, registrySH
 	if err := validatePacketBinding(manifest.Candidate, manifest.Approval, registry, registrySHA256); err != nil {
 		return err
 	}
+	target, ok := registryTarget(registry, manifest.TargetID)
+	if !ok || target.Category != "qualification_evaluator" || target.ID != qualificationTargetForLane(manifest.Lane) || manifest.FixtureSHA256 != target.FixtureSHA256 || target.OwnerID != manifest.Approval.OperatorID || target.IndependentReviewerID != manifest.Approval.ReviewerID {
+		return errors.New("corpus is not bound to its preregistered qualification target and accountable signers")
+	}
 	minimum := 120
 	if manifest.Lane == "composer_dictation" {
 		minimum = 250
+	}
+	if target.MinimumSampleSize > minimum {
+		minimum = target.MinimumSampleSize
 	}
 	if len(manifest.Clips) < minimum {
 		return fmt.Errorf("%s corpus requires at least %d clips", manifest.Lane, minimum)
@@ -704,11 +774,15 @@ func ValidateCorpus(manifest CorpusManifest, registry TargetRegistry, registrySH
 }
 
 func ValidatePilotPacket(packet PilotPacket, registry TargetRegistry, registrySHA256 string) error {
-	if packet.SchemaVersion != PilotPacketSchema || !validID(packet.PacketID) || packet.EvidenceClass != "authorized_real_input_human_review" {
+	if packet.SchemaVersion != PilotPacketSchema || !validID(packet.PacketID) || !validID(packet.TargetID) || packet.EvidenceClass != "authorized_real_input_human_review" {
 		return errors.New("I&O pilot packet schema, identity, or evidenceClass is invalid")
 	}
 	if err := validatePacketBinding(packet.Candidate, packet.Approval, registry, registrySHA256); err != nil {
 		return err
+	}
+	target, ok := registryTarget(registry, packet.TargetID)
+	if !ok || target.Category != "qualification_evaluator" || target.ID != qualificationTargetForLane("insights_opportunities") || packet.FixtureSHA256 != target.FixtureSHA256 || target.OwnerID != packet.Approval.OperatorID || target.IndependentReviewerID != packet.Approval.ReviewerID {
+		return errors.New("I&O packet is not bound to its preregistered qualification target and accountable signers")
 	}
 	if len(packet.Pilots) != 10 {
 		return errors.New("I&O packet requires exactly ten pilots")
@@ -767,6 +841,28 @@ func ValidatePilotPacket(packet PilotPacket, registry TargetRegistry, registrySH
 		return errors.New("I&O source artifact-set digest is invalid")
 	}
 	return nil
+}
+
+func qualificationTargetForLane(lane string) string {
+	switch lane {
+	case "meeting_stt":
+		return "meeting-stt-live-provider-evaluation"
+	case "composer_dictation":
+		return "composer-dictation-target-device-evaluation"
+	case "insights_opportunities":
+		return "insights-opportunities-real-input-pilots"
+	default:
+		return ""
+	}
+}
+
+func registryTarget(registry TargetRegistry, targetID string) (EvidenceTarget, bool) {
+	for _, target := range registry.Targets {
+		if target.ID == targetID {
+			return target, true
+		}
+	}
+	return EvidenceTarget{}, false
 }
 
 func verifyPilotReviewSignatures(packet PilotPacket, approved ApprovedTrustRoots) error {
@@ -1142,6 +1238,125 @@ func VerifyPilotReceipt(raw, registryRaw, registrySignature, registryPublicKey, 
 	return packet, mintVerifiedValidationReceipt(receipt), nil
 }
 
+// VerifyQualificationResultReceipt verifies a signed evaluator-result packet
+// against the exact opaque source receipt that was minted for the corpus or
+// I&O packet. It returns a second opaque capability suitable for durable import;
+// neither result JSON nor serialized receipt JSON can substitute for it.
+func VerifyQualificationResultReceipt(raw, sourceRaw, registryRaw, registrySignature, registryPublicKey, operatorSignature, operatorPublicKey, reviewerSignature, reviewerPublicKey []byte, approved ApprovedTrustRoots, source VerifiedValidationReceipt) (QualificationResultPacket, VerifiedValidationReceipt, VerifiedQualificationResult, error) {
+	registry, err := VerifyTargetRegistry(registryRaw, registrySignature, registryPublicKey, approved)
+	if err != nil {
+		return QualificationResultPacket{}, VerifiedValidationReceipt{}, VerifiedQualificationResult{}, err
+	}
+	packet, err := DecodeCanonicalStrict[QualificationResultPacket](raw)
+	if err != nil {
+		return QualificationResultPacket{}, VerifiedValidationReceipt{}, VerifiedQualificationResult{}, err
+	}
+	if err := validateQualificationResultPacket(packet, registry, RegistryDigest(registryRaw), approved.Digest(), sourceRaw, source); err != nil {
+		return QualificationResultPacket{}, VerifiedValidationReceipt{}, VerifiedQualificationResult{}, err
+	}
+	if err := ValidatePacketSignatures(raw, packet.Approval, operatorSignature, operatorPublicKey, reviewerSignature, reviewerPublicKey, approved); err != nil {
+		return QualificationResultPacket{}, VerifiedValidationReceipt{}, VerifiedQualificationResult{}, err
+	}
+	receipt := validationReceipt(raw, packet.Candidate, 1, "qualification_result", "dual_signed_qualification_result_valid", packet.Approval.RegistrySHA256, approved.Digest(), signatureSetDigest(registrySignature, operatorSignature, reviewerSignature))
+	verifiedReceipt := mintVerifiedValidationReceipt(receipt)
+	target, targetFound := registryTarget(registry, packet.TargetID)
+	sourceReceipt, sourceReceiptErr := inspectVerifiedReceipt(source)
+	if !targetFound || sourceReceiptErr != nil {
+		return QualificationResultPacket{}, VerifiedValidationReceipt{}, VerifiedQualificationResult{}, errors.New("verified qualification bindings became unavailable")
+	}
+	record := QualificationImportRecord{
+		ResultID: packet.ResultID, TenantID: packet.TenantID, TargetID: packet.TargetID, FixtureSHA256: target.FixtureSHA256, Lane: packet.Lane, Qualified: packet.Qualified,
+		Candidate: packet.Candidate, RegistrySHA256: receipt.RegistrySHA256, TrustRootSHA256: receipt.TrustRootSHA256,
+		SourcePacketKind: packet.SourcePacketKind, SourcePacketSHA256: packet.SourcePacketSHA256, SourceSignatureSetSHA256: sourceReceipt.SignatureSetSHA256,
+		ResultPacketSHA256: receipt.InputSHA256, ResultSignatureSetSHA256: receipt.SignatureSetSHA256,
+		EvaluatorConfigSHA256: packet.EvaluatorConfigSHA256, EvaluatorResultSHA256: packet.EvaluatorResultSHA256, EvaluatedAt: packet.EvaluatedAt,
+	}
+	return packet, verifiedReceipt, mintVerifiedQualificationResult(record), nil
+}
+
+func validateQualificationResultPacket(packet QualificationResultPacket, registry TargetRegistry, registrySHA256, trustRootSHA256 string, sourceRaw []byte, source VerifiedValidationReceipt) error {
+	if packet.SchemaVersion != QualificationResultSchema || !validID(packet.ResultID) || !validID(packet.TenantID) || !validID(packet.TargetID) || !oneOf(packet.Lane, "meeting_stt", "composer_dictation", "insights_opportunities") || packet.EvidenceClass != "dual_signed_evaluator_result" {
+		return errors.New("qualification result schema, identity, lane, or evidenceClass is invalid")
+	}
+	if err := validatePacketBinding(packet.Candidate, packet.Approval, registry, registrySHA256); err != nil {
+		return err
+	}
+	target, ok := registryTarget(registry, packet.TargetID)
+	if !ok || target.Category != "qualification_evaluator" || target.ID != qualificationTargetForLane(packet.Lane) || target.OwnerID != packet.Approval.OperatorID || target.IndependentReviewerID != packet.Approval.ReviewerID {
+		return errors.New("qualification result is not bound to its preregistered target and accountable signers")
+	}
+	if packet.EvaluatorConfigSHA256 != target.MeasurementRevisionSHA256 {
+		return errors.New("qualification result evaluator configuration drifts from the preregistered measurement revision")
+	}
+	wantSourceKind := "corpus"
+	if packet.Lane == "insights_opportunities" {
+		wantSourceKind = "io_pilots"
+	}
+	sourceReceipt, err := inspectVerifiedReceipt(source)
+	if err != nil || packet.SourcePacketKind != wantSourceKind || sourceReceipt.PacketKind != wantSourceKind || packet.SourcePacketSHA256 != RegistryDigest(sourceRaw) || sourceReceipt.InputSHA256 != packet.SourcePacketSHA256 || sourceReceipt.RegistrySHA256 != registrySHA256 || sourceReceipt.TrustRootSHA256 != trustRootSHA256 || sourceReceipt.Candidate != packet.Candidate {
+		return errors.New("qualification result source receipt, packet bytes, registry, trust root, or candidate binding is invalid")
+	}
+	switch packet.Lane {
+	case "meeting_stt", "composer_dictation":
+		manifest, decodeErr := DecodeCanonicalStrict[CorpusManifest](sourceRaw)
+		if decodeErr != nil || manifest.TargetID != packet.TargetID || manifest.Lane != packet.Lane {
+			return errors.New("qualification result references the wrong signed corpus")
+		}
+	case "insights_opportunities":
+		pilot, decodeErr := DecodeCanonicalStrict[PilotPacket](sourceRaw)
+		if decodeErr != nil || pilot.TargetID != packet.TargetID {
+			return errors.New("qualification result references the wrong signed I&O packet")
+		}
+	}
+	when, timeErr := time.Parse(time.RFC3339Nano, packet.EvaluatedAt)
+	if timeErr != nil || when.After(time.Now().Add(5*time.Minute)) || !validSHA(packet.EvaluatorConfigSHA256) || !validSHA(packet.EvaluatorResultSHA256) {
+		return errors.New("qualification evaluator configuration, result digest, or time is invalid")
+	}
+	if packet.Approval.SourceArtifactSetSHA256 != QualificationSourceArtifactSetDigest(packet.SourcePacketSHA256, packet.EvaluatorConfigSHA256, packet.EvaluatorResultSHA256) {
+		return errors.New("qualification result source artifact-set digest is invalid")
+	}
+	return nil
+}
+
+func inspectVerifiedReceipt(verified VerifiedValidationReceipt) (ValidationReceipt, error) {
+	if _, err := EncodeReceipt(verified); err != nil {
+		return ValidationReceipt{}, err
+	}
+	return verified.receipt, nil
+}
+
+// QualificationImport extracts an immutable record only after rechecking the
+// private proof on the opaque qualification capability.
+func QualificationImport(verified VerifiedQualificationResult) (QualificationImportRecord, error) {
+	expected := verifiedQualificationResultProof(verified.record)
+	if subtle.ConstantTimeCompare(verified.proof[:], expected[:]) != 1 || ValidateQualificationImportRecord(verified.record) != nil {
+		return QualificationImportRecord{}, errors.New("qualification result was not minted by complete signed-source verification")
+	}
+	return verified.record, nil
+}
+
+func mintVerifiedQualificationResult(record QualificationImportRecord) VerifiedQualificationResult {
+	return VerifiedQualificationResult{record: record, proof: verifiedQualificationResultProof(record)}
+}
+
+func verifiedQualificationResultProof(record QualificationImportRecord) [sha256.Size]byte {
+	payload, _ := json.Marshal(record)
+	return sha256.Sum256(append([]byte("stride-e10-verified-qualification-result/v1\x00"), payload...))
+}
+
+func ValidateQualificationImportRecord(record QualificationImportRecord) error {
+	when, err := time.Parse(time.RFC3339Nano, record.EvaluatedAt)
+	if err != nil || when.After(time.Now().Add(5*time.Minute)) || !validID(record.ResultID) || !validID(record.TenantID) || !validID(record.TargetID) || qualificationTargetForLane(record.Lane) != record.TargetID ||
+		!oneOf(record.SourcePacketKind, "corpus", "io_pilots") || !validSHA(record.FixtureSHA256) || !validSHA(record.RegistrySHA256) || !validSHA(record.TrustRootSHA256) || !validSHA(record.SourcePacketSHA256) || !validSHA(record.SourceSignatureSetSHA256) || !validSHA(record.ResultPacketSHA256) || !validSHA(record.ResultSignatureSetSHA256) || !validSHA(record.EvaluatorConfigSHA256) || !validSHA(record.EvaluatorResultSHA256) || validateCandidate(record.Candidate) != nil {
+		return errors.New("qualification import record is invalid")
+	}
+	return nil
+}
+
+func QualificationSourceArtifactSetDigest(sourcePacketSHA256, evaluatorConfigSHA256, evaluatorResultSHA256 string) string {
+	return digestArtifactEntries([]string{"source_packet:" + sourcePacketSHA256, "evaluator_config:" + evaluatorConfigSHA256, "evaluator_result:" + evaluatorResultSHA256})
+}
+
 // VerifyMatrixReceipt performs the complete registry, target, artifact-set,
 // observation, and dual-signature verification before minting a receipt.
 func VerifyMatrixReceipt(raw, registryRaw, registrySignature, registryPublicKey, operatorSignature, operatorPublicKey, reviewerSignature, reviewerPublicKey []byte, approved ApprovedTrustRoots) (ExternalMatrix, VerifiedValidationReceipt, error) {
@@ -1168,10 +1383,11 @@ func RegistryDigest(raw []byte) string { return digestBytes(raw) }
 func EncodeReceipt(verified VerifiedValidationReceipt) ([]byte, error) {
 	receipt := verified.receipt
 	states := map[string]string{
-		"target_registry": "trusted_registry_structure_valid",
-		"corpus":          "dual_signed_corpus_structure_valid",
-		"io_pilots":       "dual_signed_io_packet_structure_valid",
-		"external_matrix": "dual_signed_external_matrix_structure_valid",
+		"target_registry":      "trusted_registry_structure_valid",
+		"corpus":               "dual_signed_corpus_structure_valid",
+		"io_pilots":            "dual_signed_io_packet_structure_valid",
+		"external_matrix":      "dual_signed_external_matrix_structure_valid",
+		"qualification_result": "dual_signed_qualification_result_valid",
 	}
 	if receipt.SchemaVersion != ValidationSchema || receipt.EvidenceClass != EvidenceClass || states[receipt.PacketKind] != receipt.State || !validSHA(receipt.InputSHA256) || !validSHA(receipt.RegistrySHA256) || !validSHA(receipt.TrustRootSHA256) || !validSHA(receipt.SignatureSetSHA256) || receipt.ItemCount < 1 || errString(validateCandidate(receipt.Candidate)) != "" || !sameStrings(receipt.ClaimsExcluded, excludedClaims()) {
 		return nil, errors.New("validation receipt is incomplete or contains an unauthorized class/state/claim set")

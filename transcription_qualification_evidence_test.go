@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +14,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/openai/openai-realtime-meeting-assistant/internal/e10evidence"
 )
 
 type qualificationTestClock struct {
@@ -244,6 +249,171 @@ func TestQualificationEvidenceStoreRejectsInsecurePathsAndCorruption(t *testing.
 			t.Fatal("corrupt ledger accepted")
 		}
 	})
+}
+
+func TestQualificationEvidenceStoreImportsVerifiedResultDurablyAndFailsClosed(t *testing.T) {
+	verified := verifiedMeetingSTTQualificationResult(t, "tenant-acme")
+	directory := t.TempDir()
+	if err := os.Chmod(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, "qualification.jsonl")
+	now := func() time.Time { return time.Now().UTC() }
+	store, err := OpenQualificationEvidenceStore(path, QualificationEvidenceSeed{}, "tenant-acme", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := store.TrustedQualificationResult("meeting-stt-result-001"); err != nil || found {
+		t.Fatalf("trusted result was not default-off: found=%v err=%v", found, err)
+	}
+	realSync := store.sync
+	store.sync = func(*os.File) error { return errors.New("injected trusted-result sync failure") }
+	if _, err := store.ImportVerifiedQualificationResult(verified); err == nil || !strings.Contains(err.Error(), "sync failure") {
+		t.Fatalf("trusted-result sync failure did not fail closed: %v", err)
+	}
+	store.sync = realSync
+	imported, err := store.ImportVerifiedQualificationResult(verified)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !imported.Record.Qualified || imported.Record.Candidate.ConfigDigest == "" || imported.Record.Candidate.RouteMapDigest == "" {
+		t.Fatalf("trusted import lost qualification/candidate binding: %+v", imported)
+	}
+	if _, err := store.ImportVerifiedQualificationResult(verified); err == nil || !strings.Contains(err.Error(), "already imported") {
+		t.Fatalf("same-process replay accepted: %v", err)
+	}
+	restarted, err := OpenQualificationEvidenceStore(path, QualificationEvidenceSeed{}, "tenant-acme", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded, found, err := restarted.TrustedQualificationResult(imported.Record.ResultID)
+	if err != nil || !found || reloaded.Record != imported.Record || !reloaded.ImportedAt.Equal(imported.ImportedAt) {
+		t.Fatalf("trusted result did not survive restart: found=%v result=%+v err=%v", found, reloaded, err)
+	}
+	if _, err := restarted.ImportVerifiedQualificationResult(verified); err == nil || !strings.Contains(err.Error(), "already imported") {
+		t.Fatalf("restart replay accepted: %v", err)
+	}
+	wrongTenantPath := filepath.Join(directory, "wrong-tenant.jsonl")
+	wrongTenant, err := OpenQualificationEvidenceStore(wrongTenantPath, QualificationEvidenceSeed{}, "tenant-other", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wrongTenant.ImportVerifiedQualificationResult(verified); err == nil {
+		t.Fatal("cross-tenant trusted result accepted")
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknownFieldPath := filepath.Join(directory, "unknown-field.jsonl")
+	unknownField := strings.TrimSuffix(strings.TrimSuffix(string(raw), "\n"), "}") + `,"ignored":"forged"}` + "\n"
+	if err := os.WriteFile(unknownFieldPath, []byte(unknownField), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenQualificationEvidenceStore(unknownFieldPath, QualificationEvidenceSeed{}, "tenant-acme", now); err == nil || !strings.Contains(err.Error(), "integrity") {
+		t.Fatalf("unknown-field journal tampering accepted: %v", err)
+	}
+	raw[len(raw)/2] ^= 1
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenQualificationEvidenceStore(path, QualificationEvidenceSeed{}, "tenant-acme", now); err == nil || !strings.Contains(err.Error(), "integrity") {
+		t.Fatalf("tampered trusted-result journal accepted: %v", err)
+	}
+	if _, err := store.ImportVerifiedQualificationResult(e10evidence.VerifiedQualificationResult{}); err == nil {
+		t.Fatal("hand-authored qualification capability accepted")
+	}
+}
+
+func verifiedMeetingSTTQualificationResult(t *testing.T, tenantID string) e10evidence.VerifiedQualificationResult {
+	t.Helper()
+	registryPublic, registryPrivate, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operatorPublic, operatorPrivate, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewerPublic, reviewerPrivate, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pilotOnePublic, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pilotTwoPublic, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draftRaw, err := os.ReadFile(filepath.Join("deploy", "e10", "target-registry.draft.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var registry e10evidence.TargetRegistry
+	if err := json.Unmarshal(draftRaw, &registry); err != nil {
+		t.Fatal(err)
+	}
+	candidate := e10evidence.CandidateBinding{ReleaseCommit: strings.Repeat("a", 40), GitTreeDigest: workDigest("tree"), ImageDigest: workDigest("image"), ConfigDigest: workDigest("config"), RouteMapDigest: workDigest("routes")}
+	registry.RegistryID = "e10-targets-test-001"
+	registry.Signer = e10evidence.RegistrySignerBinding{SignerKeyID: "registry-key-001", SignerIdentityID: "release-owner", SignerPublicKeyFingerprintSHA256: e10evidence.PublicKeyFingerprint(registryPublic)}
+	registry.Candidate = candidate
+	var sttTarget e10evidence.EvidenceTarget
+	for index := range registry.Targets {
+		registry.Targets[index].FixtureSHA256 = workDigest("fixture-" + registry.Targets[index].ID)
+		registry.Targets[index].MeasurementRevisionSHA256 = workDigest("measurement-" + registry.Targets[index].ID)
+		if registry.Targets[index].ID == "meeting-stt-live-provider-evaluation" {
+			sttTarget = registry.Targets[index]
+		}
+	}
+	registryRaw := canonicalE10JSON(t, registry)
+	roots := e10evidence.TrustRoots{SchemaVersion: e10evidence.TrustRootsSchema, TrustRootID: "qualification-test-roots", PreMeasurementTargetRegistrySHA256: e10evidence.RegistryDigest(registryRaw), ApprovedSigners: []e10evidence.ApprovedSigner{
+		{KeyID: "registry-key-001", IdentityID: "release-owner", Role: "registry_owner", PublicKeyFingerprintSHA256: e10evidence.PublicKeyFingerprint(registryPublic)},
+		{KeyID: "operator-key-001", IdentityID: "evidence-operator", Role: "operator", PublicKeyFingerprintSHA256: e10evidence.PublicKeyFingerprint(operatorPublic)},
+		{KeyID: "reviewer-key-001", IdentityID: "independent-reviewer", Role: "independent_reviewer", PublicKeyFingerprintSHA256: e10evidence.PublicKeyFingerprint(reviewerPublic)},
+		{KeyID: "pilot-key-001", IdentityID: "pilot-reviewer-one", Role: "pilot_reviewer", PublicKeyFingerprintSHA256: e10evidence.PublicKeyFingerprint(pilotOnePublic)},
+		{KeyID: "pilot-key-002", IdentityID: "pilot-reviewer-two", Role: "pilot_reviewer", PublicKeyFingerprintSHA256: e10evidence.PublicKeyFingerprint(pilotTwoPublic)},
+	}}
+	rootsRaw := canonicalE10JSON(t, roots)
+	approved, err := e10evidence.LoadApprovedTrustRoots(rootsRaw, e10evidence.RegistryDigest(rootsRaw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval := e10evidence.DualApprovalBinding{RegistrySHA256: e10evidence.RegistryDigest(registryRaw), OperatorID: "evidence-operator", OperatorKeyID: "operator-key-001", OperatorPublicKeyFingerprintSHA256: e10evidence.PublicKeyFingerprint(operatorPublic), ReviewerID: "independent-reviewer", ReviewerKeyID: "reviewer-key-001", ReviewerPublicKeyFingerprintSHA256: e10evidence.PublicKeyFingerprint(reviewerPublic)}
+	manifest := e10evidence.CorpusManifest{SchemaVersion: e10evidence.CorpusManifestSchema, CorpusID: "meeting-stt-corpus-001", TargetID: sttTarget.ID, FixtureSHA256: sttTarget.FixtureSHA256, Lane: "meeting_stt", EvidenceClass: "authorized_real_capture", Candidate: candidate, Approval: approval}
+	for index := 0; index < 120; index++ {
+		manifest.Clips = append(manifest.Clips, e10evidence.CorpusClip{ClipID: fmt.Sprintf("clip-%06d", index), AudioSHA256: workDigest(fmt.Sprintf("audio-%d", index)), ReferenceSHA256: workDigest(fmt.Sprintf("reference-%d", index)), ConsentReceiptSHA256: workDigest(fmt.Sprintf("consent-%d", index)), SpeakerIDHash: workDigest(fmt.Sprintf("speaker-id-%d", index%12)), SpeakerEvidenceSHA256: workDigest(fmt.Sprintf("speaker-%d", index)), TrackID: fmt.Sprintf("track-%06d", index), TrackEvidenceSHA256: workDigest(fmt.Sprintf("track-%d", index)), DurationMillis: 30_000, Platform: "meeting-room", SourceOrder: int64(index)})
+	}
+	manifest.Approval.SourceArtifactSetSHA256 = e10evidence.CorpusSourceArtifactSetDigest(manifest.Clips)
+	sourceRaw := canonicalE10JSON(t, manifest)
+	registrySignature := ed25519.Sign(registryPrivate, registryRaw)
+	_, sourceReceipt, err := e10evidence.VerifyCorpusReceipt(sourceRaw, registryRaw, registrySignature, registryPublic, ed25519.Sign(operatorPrivate, sourceRaw), operatorPublic, ed25519.Sign(reviewerPrivate, sourceRaw), reviewerPublic, approved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := e10evidence.QualificationResultPacket{SchemaVersion: e10evidence.QualificationResultSchema, ResultID: "meeting-stt-result-001", TenantID: tenantID, TargetID: sttTarget.ID, Lane: "meeting_stt", EvidenceClass: "dual_signed_evaluator_result", Candidate: candidate, Approval: approval, SourcePacketKind: "corpus", SourcePacketSHA256: e10evidence.RegistryDigest(sourceRaw), EvaluatorConfigSHA256: sttTarget.MeasurementRevisionSHA256, EvaluatorResultSHA256: workDigest("evaluator-result"), Qualified: true, EvaluatedAt: time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano)}
+	result.Approval.SourceArtifactSetSHA256 = e10evidence.QualificationSourceArtifactSetDigest(result.SourcePacketSHA256, result.EvaluatorConfigSHA256, result.EvaluatorResultSHA256)
+	resultRaw := canonicalE10JSON(t, result)
+	_, _, verified, err := e10evidence.VerifyQualificationResultReceipt(resultRaw, sourceRaw, registryRaw, registrySignature, registryPublic, ed25519.Sign(operatorPrivate, resultRaw), operatorPublic, ed25519.Sign(reviewerPrivate, resultRaw), reviewerPublic, approved, sourceReceipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return verified
+}
+
+func canonicalE10JSON(t *testing.T, value any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := e10evidence.CanonicalizeJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return canonical
 }
 
 func liveTranscriptionQualificationFixture(t *testing.T) (TranscriptionCorpusManifest, []TranscriptionProviderAttemptRef, TranscriptionEvidenceTargetRef, *QualificationEvidenceStore) {

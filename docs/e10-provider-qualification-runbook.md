@@ -79,8 +79,10 @@ and uploaded; the exact reference digest is bound to the request shape.
    local/provider duration, calculated cost, and admission ceilings, but not the
    key, raw project/org/request IDs, audio, reference text, or transcript.
 5. Only after this contract gate passes, run the preregistered authoritative
-   meeting-STT and composer-dictation corpora. A real corpus result—not this
-   synthetic probe—is required for provider qualification.
+   meeting-STT and composer-dictation corpora. Each signed corpus must bind the
+   corresponding immutable `qualification_evaluator` target and fixture in the
+   independently anchored E10 registry. A real corpus result—not this synthetic
+   probe—is required for provider qualification.
 6. Observe the personal/meeting Scout contract on a new
    `gpt-realtime-2.1` server-owned session before its qualification corpus. The
    current harness treats `conversation.created` as optional, accepts documented
@@ -139,3 +141,14 @@ their candidate, project, model, schema, price, fixture, and reference digests
 have been rechecked. Promotion to `provider_qualified` requires the full frozen
 corpus, quality/latency/cost thresholds, independent review where specified,
 and the route-specific rollback evidence in the master plan.
+
+After evaluation, retain the full evaluator output outside the application and
+place its SHA-256 in a dual-signed
+`stride.e10.qualification-result/v1` packet. The packet must bind the original
+opaque source-packet receipt, tenant, registry, candidate tree/image/config/route
+digests, and the exact preregistered evaluator measurement-code digest. Only
+`VerifyQualificationResultReceipt` can mint the opaque capability accepted by
+`QualificationEvidenceStore.ImportVerifiedQualificationResult`; local seed
+data and structure-only evaluator candidates remain ineligible. Import is
+durable and one-use but still does not authorize route activation, deployment,
+release, or launch.
