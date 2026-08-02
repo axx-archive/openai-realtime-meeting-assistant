@@ -39,6 +39,9 @@ MEETING_TRANSCRIPT_LANE_ENABLED=true
 # the only family that accepts the domain-vocabulary prompt. Whisper-family ids
 # (gpt-realtime-whisper) silently disable vocabulary biasing and, before the
 # session-config gate, broke the transcript lane outright. Do not pin whisper.
+# OPENAI_DICTATION_TRANSCRIPT_MODEL: leave unset to use the independent,
+# file-compatible gpt-4o-transcribe default. Set gpt-transcribe only after its
+# bounded provider and trusted-device qualification receipts pass.
 MEETING_ROOM_PASSWORD=<room-passcode>
 MEETING_ROOM_MAX_PARTICIPANTS=10
 MEETING_ALLOWED_ORIGINS=https://<droplet-public-ip>.nip.io

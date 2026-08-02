@@ -58,12 +58,14 @@ type dictationTranscriptionField struct {
 
 // Dictation intentionally owns a route independent of the meeting transcript
 // lane. Until E10 explicitly qualifies and sets the new dial, an unset value
-// preserves the incumbent resolved model byte-for-byte.
+// uses the known-compatible file-transcription default. It must not inherit the
+// live transcript lane: that lane can validly use a Realtime-only model such as
+// gpt-realtime-whisper, which the file endpoint rejects.
 func dictationTranscriptionModel() string {
 	if model := strings.TrimSpace(os.Getenv("OPENAI_DICTATION_TRANSCRIPT_MODEL")); model != "" {
 		return model
 	}
-	return transcriptionLaneModel()
+	return defaultTranscriptionLaneModel
 }
 
 func dictationTranscriptionFields(model, prompt string) []dictationTranscriptionField {

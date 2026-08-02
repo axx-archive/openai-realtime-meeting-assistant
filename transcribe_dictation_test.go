@@ -19,11 +19,11 @@ import (
 	"time"
 )
 
-func TestDictationModelIsIndependentButPreservesIncumbentWhenUnset(t *testing.T) {
+func TestDictationModelDoesNotInheritRealtimeOnlyTranscriptLane(t *testing.T) {
 	t.Setenv("OPENAI_TRANSCRIPT_MODEL", "gpt-realtime-whisper")
 	t.Setenv("OPENAI_DICTATION_TRANSCRIPT_MODEL", "")
-	if got := dictationTranscriptionModel(); got != "gpt-realtime-whisper" {
-		t.Fatalf("unset dictation model=%q, want incumbent transcript lane", got)
+	if got := dictationTranscriptionModel(); got != "gpt-4o-transcribe" {
+		t.Fatalf("unset dictation model=%q, want file-transcription default", got)
 	}
 	t.Setenv("OPENAI_DICTATION_TRANSCRIPT_MODEL", "gpt-transcribe")
 	if got := dictationTranscriptionModel(); got != "gpt-transcribe" {

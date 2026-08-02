@@ -177,7 +177,7 @@ Without a working AI provider, the browser and media room still load, but AI-bac
 | `OPENAI_API_KEY` | Realtime, transcription, embeddings, image, and OpenAI text seats |
 | `OPENAI_REALTIME_MODEL` | Shared-room Realtime model; defaults to the model configured in code |
 | `OPENAI_TRANSCRIPT_MODEL` | Dedicated transcript-lane override |
-| `OPENAI_DICTATION_TRANSCRIPT_MODEL` | Separately qualified composer-dictation override; unset inherits the transcript lane |
+| `OPENAI_DICTATION_TRANSCRIPT_MODEL` | Separately qualified composer-dictation override; unset uses the file-compatible `gpt-4o-transcribe` default |
 | `OPENAI_BRAIN_MODEL` | Ambient extraction and company-memory model |
 | `ANTHROPIC_API_KEY` | Enables Anthropic-backed orchestration and review seats |
 | `GIPHY_API_KEY` | Enables authenticated chat GIF search and trending results; the key stays server-side |
