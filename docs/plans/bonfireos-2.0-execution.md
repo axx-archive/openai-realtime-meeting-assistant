@@ -22,7 +22,7 @@ dependencies, authority boundaries, rollback posture, and the next safe action.
 | Production health | Traffic-ready, capability-degraded | `/capabilities` reports `trafficReady:true`, `ok:false`; Scout is disconnected/degraded and STT is disconnected/stale since `2026-07-31T18:28:56Z`. Canonical shadow reconciliation is also unhealthy at dirty high-water `13560` versus reconciled `8532` with an idempotency-key conflict. Aggregate readiness is not acceptance. |
 | P0 branch | `/tmp/meetingassist-scout-p0`, `codex/scout-p0`, checkpoint `78b4d1cae287cc9bab9ab1a1e2ffa6022f8e2ee3` on base `9217dbf` | Isolated, committed deterministic candidate. It is not published, provider-qualified, physical-device accepted, merge-approved, or deployable yet. |
 | E10 integration | `/tmp/meetingassist-e10-integration`, `codex/e10-integration`, candidate `0783a1cf9c45c1e06e95e3b010c7eae055ef723d` on base `9217dbf` | Clean, committed security candidate. Focused normal/race, full repository, vet, diff, and independent critic gates pass. It is not published, externally provisioned, merge-approved, or deployable yet. |
-| Combined release candidate | `/tmp/meetingassist-stride-rc`, `codex/stride-release-candidate`, verified code head `4c56ca53c2025bf012cae7ec75fe3c09e3072db8` | Fresh isolated composition of the complete E10 chain plus Scout P0 and the iOS 26 WebRTC camera crash guard. Full Go, focused race, vet, mobile, native build, composition, and independent code-critic gates pass; `main` has not moved. Physical room gestures remain open. |
+| Combined release candidate | `/tmp/meetingassist-stride-rc`, `codex/stride-release-candidate`, current code head `b358aa709968658243aff711480149025472a8ab` | Fresh isolated composition of the complete E10 chain plus Scout P0, the iOS 26 WebRTC camera crash guard, and the isolated dictation-route repair. The pre-dictation code head passed full Go, focused race, vet, mobile, native build, composition, and independent code-critic gates; the dictation delta separately passes repeated normal and race coverage. `main` has not moved. Physical room gestures and live Scout acceptance remain open. |
 | Specialist repair | `/tmp/meetingassist-e10-specialist`, `codex/e10-specialist`, base `0aa1b090687d7a5d9ed3c10c9d792ee9044a545c` | Nine tracked files contain preserved uncommitted removal of the legacy alternate join path and request-context leakage. |
 | Registry repair | `/tmp/meetingassist-e10-registry`, `codex/e10-registry`, base `1d2f55cfa86e1f155b7b14d06c5928379e2b1ea3` | Seven tracked files plus untracked `meeting_specialist_qualification_bridge.go` preserve signed-evidence binding, expiry, and external ledger-head/CAS work. |
 | Independent E10 verdict | `PASS` | No blocker, major, or minor finding remains in the committed E10 code checkpoint. External authority custody and activation remain separate default-off gates. |
@@ -53,21 +53,34 @@ or TestFlight upload is established by this checkpoint.
 The incident has three separately gated lanes; one shared cause is not claimed.
 
 1. **Realtime voice to Scout:** production is enabled but disconnected/degraded
-   on `gpt-realtime-2` at `high` reasoning. The target is
-   `gpt-realtime-2.1`, but only after an exact candidate passes the authorized
-   provider contract, quality, cost, lifecycle, and physical-device gates.
-2. **Composer dictation and meeting STT:** production still exposes the legacy
-   `gpt-realtime-whisper` meeting lane and `gpt-4o-transcribe` voice
-   transcription configuration. Meeting STT is disconnected and stale. The
-   target authoritative model is `gpt-transcribe`; dictation and meeting STT
-   remain distinct health and acceptance lanes.
+   on `gpt-realtime-2` at `high` reasoning. The locally signed handset build
+   initially had `EXPO_PUBLIC_NATIVE_REALTIME_VOICE_ENABLED` unset, so the
+   cradle used its legacy record-and-upload loop instead of opening native
+   Realtime. A second locally signed diagnostic build with that gate explicitly
+   enabled is installed and open; a physical spoken-turn result is still
+   required. The target is `gpt-realtime-2.1`, but only after an exact candidate
+   passes the authorized provider contract, quality, cost, lifecycle, and
+   physical-device gates.
+2. **Composer dictation and meeting STT:** the physical iPhone successfully
+   uploaded a server-derived `7.975`-second recording, after which the
+   production usage ledger recorded model `gpt-realtime-whisper` and an exact
+   provider `404 Invalid URL (POST /v1/audio/transcriptions)`. This proves the
+   recorder and upload reached the server and that dictation incorrectly
+   inherited a Realtime-only meeting-lane override. Commit `b358aa7` makes an
+   unset dictation dial use the independently file-compatible
+   `gpt-4o-transcribe` default; the explicit qualified target remains
+   `gpt-transcribe`. The repair passes ten repeated normal runs and three
+   race-enabled runs, but is not deployed. Meeting STT remains a distinct,
+   disconnected/stale health and acceptance lane.
 3. **Typed Scout:** production logged concrete Anthropic HTTP 400
    insufficient-credit failures. Ordinary Scout routing and answers must not
    depend on Anthropic credit or silently fall back across providers.
 
-These observations prove degraded production behavior and one concrete typed
-routing failure. They do not by themselves prove voice quality, dictation
-quality, one common root cause, or qualification of a replacement route.
+These observations prove degraded production behavior, one concrete typed
+routing failure, a distinct handset feature-gate cause for the missing native
+Realtime attempt, and a distinct endpoint/model mismatch for dictation. They
+do not prove voice quality, dictation quality, one common root cause, or
+qualification of a replacement route.
 
 ## 4. Frozen model-seat contract
 
@@ -158,9 +171,12 @@ Expo/CocoaPods graph, simulator workspace, and signed physical-device Release
 build pass; the candidate installs, launches, and remains alive on the
 connected iPhone. Mobile passes 369/369 plus TypeScript, full Go and vet pass,
 focused normal/race telemetry coverage passes, and strict Objective-C
-compilation passes with warnings as errors. Physical join, camera-toggle,
-rotation, leave, outbound-frame, and no-new-crash acceptance remain open and
-cannot be inferred from process survival alone.
+compilation passes with warnings as errors. One physical room pass joined over
+cellular, negotiated srflx/UDP, selected the front ultra-wide camera at
+720x1280 and about 31 fps, emitted 118 outbound frames in the sampled interval,
+left cleanly, kept the app process alive, and produced no new crash report.
+Camera-toggle and rotation gestures were not independently observed, so full
+physical room acceptance remains open.
 
 The approved home behavior remains:
 
@@ -214,6 +230,14 @@ Anthropic core fallback or alternate specialist launch path reappeared, and no
 production activation was wired. Prior desktop/mobile-web render receipts
 remain code-identical because the crash repair changes no reviewed P0 UI file.
 Physical-device and live-provider acceptance remain open.
+
+The subsequent dictation repair `b358aa7` changes only the file-transcription
+model fallback and its operator documentation. It passes all matching
+dictation/transcription tests ten times in normal mode (427.204 seconds) and
+the focused handler/model tests three times under the race detector (26.831
+seconds). It has not been deployed or provider-qualified. A repository-wide
+race run for the preceding combined head is still in progress and must not be
+misreported as exact-head proof for `b358aa7`.
 
 ## 7. Remaining dependency order
 
