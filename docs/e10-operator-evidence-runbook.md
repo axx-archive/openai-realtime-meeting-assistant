@@ -44,7 +44,11 @@ draft at `deploy/e10/trust-roots.draft.json` is a shape-only aid and is not an
 approval record.
 
 The owners then agree on one canonical compact
-`stride.e10.target-registry/v3` JSON file. Each target binds an immutable
+`stride.e10.target-registry/v3` JSON file. The non-weakenable inventory now
+includes `meeting-stt-live-provider-evaluation`,
+`composer-dictation-target-device-evaluation`, and
+`insights-opportunities-real-input-pilots` in addition to the external
+matrices. Each target binds an immutable
 fixture digest, named environment, minimum source-artifact count, minimum
 sample size, exact SHA-256 digest of the measurement code (not a mutable
 revision label), accountable owner, distinct independent
@@ -109,7 +113,7 @@ trigger it again.
 
 ## Consented meeting-STT and dictation corpora
 
-Use `stride.e10.corpus-manifest/v2` with lane `meeting_stt` or
+Use `stride.e10.corpus-manifest/v3` with lane `meeting_stt` or
 `composer_dictation` and evidence class `authorized_real_capture`.
 
 - Meeting STT requires at least 120 non-synthetic clips totaling at least 60
@@ -125,7 +129,8 @@ Use `stride.e10.corpus-manifest/v2` with lane `meeting_stt` or
   exactly-once, cancellation, mic-generation, FPS, privacy, and device
   observations produced by the qualification evaluator.
 
-Every corpus carries the exact signed-registry digest, exact candidate, and a
+Every corpus carries the exact preregistered target ID and fixture digest, exact
+signed-registry digest, exact candidate, and a
 deterministic digest of its typed source-artifact set. A trust-rooted operator
 and a different trust-rooted independent reviewer each sign the same exact
 canonical packet bytes. Neither signature can substitute for the other.
@@ -154,7 +159,7 @@ review, and either invalid signature.
 
 ## Insights & Opportunities pilot packet
 
-Use `stride.e10.io-pilot-packet/v3` with evidence class
+Use `stride.e10.io-pilot-packet/v4` with evidence class
 `authorized_real_input_human_review`. The packet requires exactly ten immutable
 real-input pilots and at least eight accepted outcomes (the fixed 8/10 gate).
 Every pilot has one
@@ -168,6 +173,7 @@ immutable external-effect/write-audit receipt digest. That audit digest is part
 of the source-artifact set, each human review signature, and both packet-level
 signatures; missing or changed audit evidence fails closed.
 
+The packet also binds the exact preregistered I&O target ID and fixture digest.
 The signed reviewer roster binds each reviewer identity, key ID, approved public
 key fingerprint, and unique eligibility-receipt digest. Every pilot carries at
 least two distinct rostered review decisions. Each decision includes its own
@@ -200,6 +206,44 @@ The cryptographic boundary proves that the approved reviewer identities signed
 the exact recorded decisions and eligibility-receipt digests. It does not prove
 that an artifact is useful or that the underlying eligibility record is true;
 the independently governed source store and Critic gate remain authoritative.
+
+## Signed evaluator-result import
+
+Corpus and pilot validation receipts remain structure-only and can never be
+promoted by copying their JSON into the application. After an approved
+evaluator has run over the exact source packet, create one canonical
+`stride.e10.qualification-result/v1` packet with evidence class
+`dual_signed_evaluator_result`. It binds:
+
+- the tenant, lane, result ID, preregistered target, and qualified/not-qualified
+  disposition;
+- the exact source packet kind and SHA-256;
+- the complete candidate binding, including release commit, tree, image,
+  configuration, and route-map digests;
+- the evaluator configuration SHA-256, which must exactly equal the target's
+  preregistered measurement-code digest; and
+- the SHA-256 of the evaluator output retained in the governed evidence store.
+
+The result source-artifact-set digest covers the source packet, evaluator
+configuration, and evaluator output digests. The target owner and distinct
+independent reviewer sign the exact result packet bytes. Call
+`VerifyQualificationResultReceipt` with the anchored registry, the original
+canonical source bytes, the in-process opaque source receipt, and both detached
+result signatures. A copied receipt, hand-built capability, changed target,
+fixture, tenant, candidate/config/route digest, evaluator revision, result
+digest, source packet, or trust root fails closed.
+
+Only the returned opaque `VerifiedQualificationResult` may be passed to
+`QualificationEvidenceStore.ImportVerifiedQualificationResult`. The store
+persists the immutable import record in its existing locked `0600`, fsynced,
+hash-chained journal and rejects reuse of either the source or result packet
+across store instances sharing that journal and across restarts.
+`QualificationEvidenceSeed`, local test
+rows, and the existing structure-only evaluator candidates cannot mint or
+enter this trusted map. Reading a stored result does not enable a route,
+deployment, release, or launch; those remain separate gates. Preserve the
+original packets, evaluator output, signatures, trust-root anchor, and journal
+together as the audit set.
 
 ## Physical-device, real-WebRTC, HA/DR, and worker matrices
 

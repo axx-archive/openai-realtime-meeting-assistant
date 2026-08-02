@@ -188,6 +188,16 @@ func TestMeetingCorpusDurationAndArtifactSetBinding(t *testing.T) {
 	if err := ValidateCorpus(tampered, registry, RegistryDigest(registryRaw)); err == nil || !strings.Contains(err.Error(), "artifact-set") {
 		t.Fatalf("wrong artifact-set digest accepted: %v", err)
 	}
+	tampered = manifest
+	tampered.FixtureSHA256 = hash("post-registration-fixture")
+	if err := ValidateCorpus(tampered, registry, RegistryDigest(registryRaw)); err == nil || !strings.Contains(err.Error(), "preregistered") {
+		t.Fatalf("post-registration corpus fixture accepted: %v", err)
+	}
+	tampered = manifest
+	tampered.TargetID = qualificationTargetForLane("composer_dictation")
+	if err := ValidateCorpus(tampered, registry, RegistryDigest(registryRaw)); err == nil || !strings.Contains(err.Error(), "preregistered") {
+		t.Fatalf("cross-lane corpus target accepted: %v", err)
+	}
 }
 
 func TestComposerDictationCorpusRejectsClipsOverThirtySeconds(t *testing.T) {
@@ -207,6 +217,11 @@ func TestPilotPacketBindsRegistryCandidateArtifactsAndIndependentSignatures(t *t
 	packet := validPilotPacket(fixture, registryRaw)
 	if err := ValidatePilotPacket(packet, registry, RegistryDigest(registryRaw)); err != nil {
 		t.Fatal(err)
+	}
+	wrongFixture := clonePilotPacket(t, packet)
+	wrongFixture.FixtureSHA256 = hash("post-registration-io-fixture")
+	if err := ValidatePilotPacket(wrongFixture, registry, RegistryDigest(registryRaw)); err == nil || !strings.Contains(err.Error(), "preregistered") {
+		t.Fatalf("post-registration I&O fixture accepted: %v", err)
 	}
 	raw := mustJSON(t, packet)
 	operatorSignature := ed25519.Sign(fixture.operatorPrivate, raw)
@@ -228,6 +243,89 @@ func TestPilotPacketBindsRegistryCandidateArtifactsAndIndependentSignatures(t *t
 	duplicate.Approval.SourceArtifactSetSHA256 = PilotSourceArtifactSetDigest(duplicate)
 	if err := ValidatePilotPacket(duplicate, registry, RegistryDigest(registryRaw)); err == nil || !strings.Contains(err.Error(), "duplicate source") {
 		t.Fatalf("duplicate I&O evidence accepted: %v", err)
+	}
+}
+
+func TestQualificationResultBridgesSignedSourceRegistryCandidateAndEvaluator(t *testing.T) {
+	fixture := newSignerFixture(t)
+	registry, registryRaw := signedRegistry(t, fixture)
+	registrySignature := ed25519.Sign(fixture.registryPrivate, registryRaw)
+	manifest := validCorpus("meeting_stt", 120, fixture, registryRaw)
+	sourceRaw := mustJSON(t, manifest)
+	_, sourceReceipt, err := VerifyCorpusReceipt(
+		sourceRaw, registryRaw, registrySignature, fixture.registryPublic,
+		ed25519.Sign(fixture.operatorPrivate, sourceRaw), fixture.operatorPublic,
+		ed25519.Sign(fixture.reviewerPrivate, sourceRaw), fixture.reviewerPublic, fixture.approved,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, _ := registryTarget(registry, manifest.TargetID)
+	packet := QualificationResultPacket{
+		SchemaVersion: QualificationResultSchema, ResultID: "meeting-stt-result-001", TenantID: "tenant-acme", TargetID: manifest.TargetID, Lane: manifest.Lane,
+		EvidenceClass: "dual_signed_evaluator_result", Candidate: manifest.Candidate, Approval: validApproval(fixture, registryRaw),
+		SourcePacketKind: "corpus", SourcePacketSHA256: RegistryDigest(sourceRaw), EvaluatorConfigSHA256: target.MeasurementRevisionSHA256,
+		EvaluatorResultSHA256: hash("meeting-stt-evaluator-result"), Qualified: true, EvaluatedAt: time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano),
+	}
+	packet.Approval.SourceArtifactSetSHA256 = QualificationSourceArtifactSetDigest(packet.SourcePacketSHA256, packet.EvaluatorConfigSHA256, packet.EvaluatorResultSHA256)
+	raw := mustJSON(t, packet)
+	resultOperatorSignature := ed25519.Sign(fixture.operatorPrivate, raw)
+	resultReviewerSignature := ed25519.Sign(fixture.reviewerPrivate, raw)
+	verifiedPacket, resultReceipt, verified, err := VerifyQualificationResultReceipt(
+		raw, sourceRaw, registryRaw, registrySignature, fixture.registryPublic,
+		resultOperatorSignature, fixture.operatorPublic,
+		resultReviewerSignature, fixture.reviewerPublic, fixture.approved, sourceReceipt,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verifiedPacket != packet {
+		t.Fatal("verified qualification packet drifted")
+	}
+	if _, err := EncodeReceipt(resultReceipt); err != nil {
+		t.Fatalf("qualification validation receipt is not encodable: %v", err)
+	}
+	record, err := QualificationImport(verified)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.ResultID != packet.ResultID || record.SourcePacketSHA256 != packet.SourcePacketSHA256 || record.FixtureSHA256 != target.FixtureSHA256 || record.SourceSignatureSetSHA256 == "" || record.ResultSignatureSetSHA256 == "" || record.Candidate.ConfigDigest != packet.Candidate.ConfigDigest || record.Candidate.RouteMapDigest != packet.Candidate.RouteMapDigest || !record.Qualified {
+		t.Fatalf("qualification import lost a signed binding: %+v", record)
+	}
+	if _, err := QualificationImport(VerifiedQualificationResult{}); err == nil {
+		t.Fatal("hand-authored qualification capability was accepted")
+	}
+
+	for name, mutate := range map[string]func(*QualificationResultPacket){
+		"source": func(value *QualificationResultPacket) { value.SourcePacketSHA256 = hash("other-source") },
+		"target": func(value *QualificationResultPacket) {
+			value.TargetID = qualificationTargetForLane("composer_dictation")
+		},
+		"candidate-config": func(value *QualificationResultPacket) { value.Candidate.ConfigDigest = hash("other-config") },
+		"candidate-route":  func(value *QualificationResultPacket) { value.Candidate.RouteMapDigest = hash("other-route") },
+		"evaluator-config": func(value *QualificationResultPacket) { value.EvaluatorConfigSHA256 = hash("other-evaluator") },
+		"evaluator-result": func(value *QualificationResultPacket) { value.EvaluatorResultSHA256 = hash("other-result") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			tampered := packet
+			mutate(&tampered)
+			tampered.Approval.SourceArtifactSetSHA256 = QualificationSourceArtifactSetDigest(tampered.SourcePacketSHA256, tampered.EvaluatorConfigSHA256, tampered.EvaluatorResultSHA256)
+			tamperedRaw := mustJSON(t, tampered)
+			if _, _, _, err := VerifyQualificationResultReceipt(
+				tamperedRaw, sourceRaw, registryRaw, registrySignature, fixture.registryPublic,
+				resultOperatorSignature, fixture.operatorPublic,
+				resultReviewerSignature, fixture.reviewerPublic, fixture.approved, sourceReceipt,
+			); err == nil {
+				t.Fatal("tampered qualification binding was accepted")
+			}
+		})
+	}
+	if _, _, _, err := VerifyQualificationResultReceipt(
+		raw, sourceRaw, registryRaw, registrySignature, fixture.registryPublic,
+		resultOperatorSignature, fixture.operatorPublic,
+		resultReviewerSignature, fixture.reviewerPublic, fixture.approved, VerifiedValidationReceipt{},
+	); err == nil {
+		t.Fatal("local result without a verifier-minted source receipt was accepted")
 	}
 }
 
@@ -503,6 +601,7 @@ func TestRequiredTargetInventoryAndEveryFloorAreNonWeakenable(t *testing.T) {
 		"browser-native-mixed-room",
 		"camera-switch-background-lock",
 		"canonical-data-rpo",
+		"composer-dictation-target-device-evaluation",
 		"control-data-rpo",
 		"crash-restart-idempotency",
 		"default-deny-egress-enforcement",
@@ -513,8 +612,10 @@ func TestRequiredTargetInventoryAndEveryFloorAreNonWeakenable(t *testing.T) {
 		"guest-room-boundary",
 		"independent-key-and-restore-host-custody",
 		"induced-ai-failure-human-media",
+		"insights-opportunities-real-input-pilots",
 		"live-app-control-failover",
 		"locked-device-push-deep-link",
+		"meeting-stt-live-provider-evaluation",
 		"multiple-devices-one-account",
 		"no-production-or-company-brain-mount",
 		"packet-loss-disconnect-rejoin-cleanup",
@@ -774,7 +875,8 @@ func validApproval(fixture signerFixture, registryRaw []byte) DualApprovalBindin
 }
 
 func validCorpus(lane string, count int, fixture signerFixture, registryRaw []byte) CorpusManifest {
-	manifest := CorpusManifest{SchemaVersion: CorpusManifestSchema, CorpusID: lane + "-001", Lane: lane, EvidenceClass: "authorized_real_capture", Candidate: validCandidate(), Approval: validApproval(fixture, registryRaw)}
+	targetID := qualificationTargetForLane(lane)
+	manifest := CorpusManifest{SchemaVersion: CorpusManifestSchema, CorpusID: lane + "-001", TargetID: targetID, FixtureSHA256: hash("fixture-" + targetID), Lane: lane, EvidenceClass: "authorized_real_capture", Candidate: validCandidate(), Approval: validApproval(fixture, registryRaw)}
 	platforms := []string{"web", "iphone", "ipad"}
 	surfaces := []string{"scout", "private_thread", "team", "project", "in_room"}
 	for index := 0; index < count; index++ {
@@ -792,7 +894,8 @@ func validCorpus(lane string, count int, fixture signerFixture, registryRaw []by
 }
 
 func validPilotPacket(fixture signerFixture, registryRaw []byte) PilotPacket {
-	packet := PilotPacket{SchemaVersion: PilotPacketSchema, PacketID: "io-packet-001", EvidenceClass: "authorized_real_input_human_review", Candidate: validCandidate(), Approval: validApproval(fixture, registryRaw), ReviewerRoster: []EligiblePilotReviewer{
+	targetID := qualificationTargetForLane("insights_opportunities")
+	packet := PilotPacket{SchemaVersion: PilotPacketSchema, PacketID: "io-packet-001", TargetID: targetID, FixtureSHA256: hash("fixture-" + targetID), EvidenceClass: "authorized_real_input_human_review", Candidate: validCandidate(), Approval: validApproval(fixture, registryRaw), ReviewerRoster: []EligiblePilotReviewer{
 		{ReviewerID: "reviewer-one", ReviewerKeyID: "pilot-reviewer-key-001", ReviewerPublicKeyFingerprintSHA256: PublicKeyFingerprint(fixture.pilotReviewerOnePublic), EligibilityReceiptDigest: hash("reviewer-one-eligibility")},
 		{ReviewerID: "reviewer-two", ReviewerKeyID: "pilot-reviewer-key-002", ReviewerPublicKeyFingerprintSHA256: PublicKeyFingerprint(fixture.pilotReviewerTwoPublic), EligibilityReceiptDigest: hash("reviewer-two-eligibility")},
 	}}
