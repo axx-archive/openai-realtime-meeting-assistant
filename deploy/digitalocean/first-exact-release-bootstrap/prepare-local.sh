@@ -34,7 +34,6 @@ command -v node >/dev/null || die 'Node is required locally for source preparati
 command -v jq >/dev/null || die 'jq is required'
 command -v shasum >/dev/null || die 'shasum is required'
 test -d "$REPO/.git" || die "$REPO is not the repository root"
-
 git -C "$REPO" fetch --prune "$REMOTE" "$BRANCH"
 remote_main=$(git -C "$REPO" rev-parse "$REMOTE/$BRANCH")
 if test -z "$B"; then B=$remote_main; fi
@@ -98,7 +97,7 @@ test -f "$OUT/operator-pack/PACK-SHA256SUMS" || die 'exact B operator pack was n
 (cd "$OUT/operator-pack" && shasum -a 256 -c PACK-SHA256SUMS >/dev/null)
 operator_pack_sha=$(shasum -a 256 "$OUT/operator-pack/PACK-SHA256SUMS" | awk '{print $1}')
 jq -n \
-  --arg schema 'bonfire.first-exact-bootstrap-plan.v1' \
+  --arg schema 'bonfire.first-exact-bootstrap-plan.v3' \
   --arg implementationCommit "$A" \
   --arg checkpointCommit "$B" \
   --arg remote "$REMOTE" \
@@ -118,7 +117,7 @@ find "$OUT" -type f -exec chmod 600 {} +
 )
 
 printf 'Prepared exact A/B source pack: %s\n' "$OUT"
-printf 'Copy operator-pack/ plus bootstrap-plan.json and each SHA directory from this output only.\n'
+printf 'Copy operator-pack/, bootstrap-plan.json, and each SHA directory from this output only.\n'
 }
 
 if [[ ${BASH_SOURCE[0]} != "$0" ]]; then

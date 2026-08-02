@@ -218,7 +218,7 @@ func ReconcileCanonicalPlanWithOptions(ctx context.Context, source CanonicalImpo
 			continue
 		}
 		journalKey := event.AggregateType + ":" + event.AggregateID
-		report.Candidates = append(report.Candidates, CanonicalRepairCandidate{Family: event.AggregateType, ObjectID: event.AggregateID, Kind: "tombstone_required", StateDigest: eventPayloadStateDigest(event), ConfirmedByJournal: journaled[journalKey]})
+		report.Candidates = append(report.Candidates, CanonicalRepairCandidate{Family: event.AggregateType, ObjectID: event.AggregateID, Kind: "tombstone_required", StateDigest: eventPayloadStateDigest(event), TargetVersion: event.AggregateVersion, ConfirmedByJournal: journaled[journalKey]})
 	}
 	sort.Slice(report.Candidates, func(i, j int) bool {
 		if report.Candidates[i].Family != report.Candidates[j].Family {

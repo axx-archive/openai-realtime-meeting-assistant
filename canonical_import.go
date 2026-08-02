@@ -65,6 +65,10 @@ type CanonicalImportedObject struct {
 	LifecycleFamily      string
 	LifecycleObjectID    string
 	LifecycleStateDigest string
+	// LifecycleOnly records drive the original object's deletion generation but
+	// deliberately do not materialize a second standalone audit object. The
+	// append-only lifecycle journal remains the audit authority.
+	LifecycleOnly bool
 }
 
 type CanonicalImportPlan struct {
@@ -370,11 +374,11 @@ func addCanonicalLifecycleDeletionTargets(objects []CanonicalImportedObject, ver
 	for _, entry := range snapshot.Entries {
 		known[entry.Family+"\x00"+entry.ObjectKey] = true
 	}
-	current := map[string]int{}
+	current := map[string]CanonicalImportedObject{}
 	latestJournal := map[string]CanonicalImportedObject{}
-	for index, object := range objects {
+	for _, object := range objects {
 		if object.LifecycleFamily == "" {
-			current[object.Family+"\x00"+object.ObjectID] = index
+			current[object.Family+"\x00"+object.ObjectID] = object
 			continue
 		}
 		if object.LifecycleObjectID == "" || !isHexDigest(object.LifecycleStateDigest) {
@@ -385,7 +389,12 @@ func addCanonicalLifecycleDeletionTargets(objects []CanonicalImportedObject, ver
 			latestJournal[key] = object
 		}
 	}
-	result := append([]CanonicalImportedObject(nil), objects...)
+	result := make([]CanonicalImportedObject, 0, len(objects))
+	for _, object := range objects {
+		if !object.LifecycleOnly {
+			result = append(result, object)
+		}
+	}
 	journalKeys := make([]string, 0, len(latestJournal))
 	for key := range latestJournal {
 		journalKeys = append(journalKeys, key)
@@ -397,8 +406,7 @@ func addCanonicalLifecycleDeletionTargets(objects []CanonicalImportedObject, ver
 		if err != nil {
 			return nil, err
 		}
-		if liveIndex, exists := current[key]; exists {
-			live := result[liveIndex]
+		if live, exists := current[key]; exists {
 			if !live.OccurredAt.IsZero() && live.OccurredAt.After(journal.OccurredAt) {
 				continue // a later recreation supersedes the older journal
 			}
@@ -823,6 +831,7 @@ type CanonicalLifecycleJournalRecord struct {
 	BoardAfterSHA256  string    `json:"board_after_sha256,omitempty"`
 	At                time.Time `json:"at"`
 	Reason            string    `json:"reason"`
+	EvidenceBasis     string    `json:"evidence_basis,omitempty"`
 }
 
 func importLifecycleJournal(path, family string) ([]CanonicalImportedObject, error) {
@@ -857,9 +866,18 @@ func importLifecycleJournal(path, family string) ([]CanonicalImportedObject, err
 		object.LifecycleFamily = record.Family
 		object.LifecycleObjectID = record.ObjectID
 		object.LifecycleStateDigest = record.StateDigest
+		object.LifecycleOnly = canonicalRepairBackfillLifecycleOnly(record, family)
 		objects = append(objects, object)
 	}
 	return objects, nil
+}
+
+func canonicalRepairBackfillLifecycleOnly(record CanonicalLifecycleJournalRecord, importedFamily string) bool {
+	return importedFamily == "tombstone" && record.Family == "board_card" && strings.TrimSpace(record.ObjectID) != "" &&
+		isHexDigest(record.StateDigest) && record.OperationID == "" && record.Phase == "" && record.BoardBeforeSHA256 == "" && record.BoardAfterSHA256 == "" &&
+		record.Reason == canonicalBoardRepairReason &&
+		(record.EvidenceBasis == "done_archive_absence" || record.EvidenceBasis == "last_positive_source_current_absence") &&
+		!record.At.IsZero() && record.At.Location() == time.UTC
 }
 
 func readJSONIfExists(path string, target any) (bool, error) {

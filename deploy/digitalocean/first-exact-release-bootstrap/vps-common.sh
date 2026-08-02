@@ -21,6 +21,23 @@ PERSISTENT_GUARD_DROPIN=/etc/systemd/system/docker.service.d/bonfire-bootstrap-i
 RENDERER_APPARMOR_NAME=bonfire-render-runner-v1
 RENDERER_APPARMOR_PATH=/etc/apparmor.d/bonfire-render-runner-v1
 RENDERER_SECCOMP_PATH=/etc/docker/seccomp/bonfire-render-runner-v1.json
+REPAIR_CEREMONY_DIR="$STATE_DIR/canonical-repair"
+REPAIR_EVIDENCE_DIR="$REPAIR_CEREMONY_DIR/evidence"
+REPAIR_MANIFEST_PATH="$REPAIR_EVIDENCE_DIR/candidate-manifest.json"
+REPAIR_MANIFEST_STATE="$REPAIR_CEREMONY_DIR/manifest-state.json"
+REPAIR_AUTHORITY_PATH="$REPAIR_CEREMONY_DIR/operator-authority"
+NORMALIZATION_INPUT_PATH="$REPAIR_EVIDENCE_DIR/normalization-input.json"
+NORMALIZATION_RECEIPT_PATH="$REPAIR_EVIDENCE_DIR/normalization-receipt.json"
+REPAIR_OBSERVATION_PATH="$REPAIR_EVIDENCE_DIR/normalized-observation.json"
+CLASSIFIED_EVIDENCE_DESCRIPTOR_PATH="$REPAIR_EVIDENCE_DIR/classified-evidence-descriptor.json"
+CLASSIFIED_TARGET_EVIDENCE_PATH="$REPAIR_EVIDENCE_DIR/classified-target-evidence.json"
+CLONE_QUALIFICATION_PATH="$REPAIR_EVIDENCE_DIR/clone-qualification.json"
+CLONE_QUALIFICATION_DIR="$REPAIR_EVIDENCE_DIR/qualification"
+REPAIR_RUNTIME_DIR_NAME=canonical-repair-runtime
+NORMALIZE_CONTAINER=bonfire-canonical-normalize
+MANIFEST_CONTAINER=bonfire-canonical-manifest
+REPAIR_CONTAINER=bonfire-canonical-repair
+REPAIR_NETWORK=bonfire-canonical-repair-internal
 
 die() {
   printf 'bootstrap: %s\n' "$*" >&2
@@ -46,12 +63,248 @@ require_sha256() {
   [[ ${1:-} =~ ^[0-9a-f]{64}$ ]] || die "invalid SHA-256: ${1:-missing}"
 }
 
+assert_root_private_regular_file() {
+  local path=$1 label=${2:-private file}
+  test -f "$path" && test ! -L "$path" || die "$label must be a regular non-symlink file"
+  test "$(stat -c %U:%G "$path")" = root:root || die "$label must be root-owned"
+  test "$(stat -c %a "$path")" = 600 || die "$label must have exact mode 0600"
+}
+
+private_file_reference_json() {
+  local file=$1 evidence_dir=$2 relative size digest
+  assert_root_private_regular_file "$file" 'sealed private evidence file'
+  [[ $file == "$evidence_dir/"* ]] || die "private evidence file escapes evidence directory: $file"
+  relative=${file#"$evidence_dir/"}
+  test -n "$relative" && [[ $relative != /* && $relative != ../* && $relative != */../* ]] \
+    || die "unsafe private evidence path: $relative"
+  size=$(stat -c %s "$file")
+  digest=$(sha256sum "$file" | awk '{print $1}')
+  require_sha256 "$digest"
+  jq -cn --arg path "$relative" --argjson size "$size" --arg sha256 "$digest" \
+    '{path:$path,size:$size,sha256:$sha256}'
+}
+
+write_self_digest_json() {
+  local source=$1 destination=$2 field=${3:-receiptSha256} digest
+  test -f "$source" && test ! -L "$source" || die 'self-digest JSON source is unsafe'
+  digest=$(jq -cS --arg field "$field" 'del(.[$field])' "$source" | tr -d '\n' | sha256sum | awk '{print $1}')
+  require_sha256 "$digest"
+  jq --arg field "$field" --arg digest "$digest" '.[$field]=$digest' "$source" >"$destination.tmp"
+  chown root:root "$destination.tmp"
+  chmod 600 "$destination.tmp"
+  mv "$destination.tmp" "$destination"
+}
+
+assert_self_digest_json() {
+  local file=$1 field=${2:-receiptSha256} expected actual
+  assert_root_private_regular_file "$file" 'self-digest JSON evidence'
+  expected=$(jq -er --arg field "$field" '.[$field]' "$file")
+  require_sha256 "$expected"
+  actual=$(jq -cS --arg field "$field" 'del(.[$field])' "$file" | tr -d '\n' | sha256sum | awk '{print $1}')
+  test "$actual" = "$expected" || die "self-digest mismatch: $file"
+}
+
+assert_canonical_repair_manifest_binding() {
+  local actual state_manifest
+  assert_root_private_regular_file "$REPAIR_MANIFEST_STATE" 'canonical repair manifest ceremony state'
+  assert_self_digest_json "$REPAIR_MANIFEST_STATE" stateSha256
+  jq -e --arg a "$A" '
+    .schema=="bonfire.canonical-repair-ceremony-state.v1" and
+    .releaseCommit==$a and
+    (.candidateManifestSha256 | type=="string" and test("^[0-9a-f]{64}$")) and
+    (.generatedAt | type=="string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T")) and
+    (.stateSha256 | type=="string" and test("^[0-9a-f]{64}$"))
+  ' "$REPAIR_MANIFEST_STATE" >/dev/null || die 'canonical repair ceremony manifest state is invalid'
+  state_manifest=$(jq -er '.candidateManifestSha256' "$REPAIR_MANIFEST_STATE")
+  require_sha256 "$state_manifest"
+  REPAIR_MANIFEST_SHA=$state_manifest
+  assert_root_private_regular_file "$REPAIR_MANIFEST_PATH" 'canonical repair candidate manifest'
+  jq -e 'type=="object"' "$REPAIR_MANIFEST_PATH" >/dev/null \
+    || die 'canonical repair candidate manifest must contain one JSON object'
+  actual=$(sha256sum "$REPAIR_MANIFEST_PATH" | awk '{print $1}')
+  require_sha256 "$actual"
+  test "$actual" = "$REPAIR_MANIFEST_SHA" \
+    || die 'canonical repair candidate manifest differs from the root-only ceremony binding'
+  jq -e --arg a "$A" '
+    .schema=="bonfire.canonical-board-repair.v2" and .releaseCommit==$a and
+    .tenantId=="bonfire" and .dataDir=="/app/data" and
+    .environment=="production_protected_maintenance" and
+    .evidenceDir=="/run/bonfire-repair/evidence" and (.cloneId|type=="string" and length>0) and
+    .qualificationRun==false and
+    all([.evidenceDescriptor,.backupManifest,.normalizationReceipt,.cloneAuthority,.releaseSourceReceipt,.normalizedObservation][];
+      (.path|type=="string" and length>0) and (.size|type=="number" and .>=0 and floor==.) and
+      (.sha256|type=="string" and test("^[0-9a-f]{64}$"))) and
+    all([.databaseUrlSha256,.databaseSha256,.versionEntriesSha256,.normalizedProofSha256,.importInputSha256][];
+      type=="string" and test("^[0-9a-f]{64}$")) and
+    all([.board,.journalPrefix,.versionMap,.spool][];
+      (.size|type=="number" and .>=0 and floor==.) and (.sha256|type=="string" and test("^[0-9a-f]{64}$"))) and
+    (.candidateSetSha256 | type=="string" and test("^[0-9a-f]{64}$")) and
+    (.terminalCandidateSha256 | type=="string" and test("^[0-9a-f]{64}$")) and
+    (.candidates | type=="array" and length==7 and all(.[];
+      (.objectId|type=="string" and length>0) and (.stateSha256|test("^[0-9a-f]{64}$")) and
+      (.targetVersion|type=="number" and .>=1 and floor==.) and
+      (.priorPrincipals|type=="array" and length>0)))
+  ' "$REPAIR_MANIFEST_PATH" >/dev/null \
+    || die 'canonical repair manifest is not the exact A production-maintenance exact-seven contract'
+}
+
+canonical_repair_authority_text() {
+  printf 'CONFIRM CANONICAL BOARD REPAIR %s\n' "$REPAIR_MANIFEST_SHA"
+}
+
+assert_canonical_repair_authority_marker() {
+  local require_fresh=${1:-true} expected actual now mtime age
+  assert_root_private_regular_file "$REPAIR_AUTHORITY_PATH" 'canonical repair operator authority marker'
+  expected=$(mktemp "$STATE_DIR/authority-expected.XXXXXX")
+  canonical_repair_authority_text >"$expected"
+  chmod 600 "$expected"
+  cmp "$expected" "$REPAIR_AUTHORITY_PATH" \
+    || { rm -f "$expected"; die 'canonical repair authority marker is not the exact manifest-bound confirmation'; }
+  rm -f "$expected"
+  actual=$(sha256sum "$REPAIR_AUTHORITY_PATH" | awk '{print $1}')
+  require_sha256 "$actual"
+  if test "$require_fresh" = true; then
+    now=$(date +%s)
+    mtime=$(stat -c %Y "$REPAIR_AUTHORITY_PATH")
+    age=$((now - mtime))
+    (( age >= 0 && age <= 300 )) || die 'canonical repair authority marker is older than five minutes; reconfirm the exact manifest'
+  fi
+  REPAIR_AUTHORITY_SHA=$actual
+}
+
+create_canonical_repair_authority_marker() {
+  local confirmation expected
+  if test -e "$REPAIR_AUTHORITY_PATH"; then
+    if assert_canonical_repair_authority_marker >/dev/null 2>&1; then
+      mark_phase canonical-repair-authorized
+      return
+    fi
+    rm -f "$REPAIR_AUTHORITY_PATH"
+  fi
+  install -d -o root -g root -m 700 "$REPAIR_CEREMONY_DIR"
+  expected="CONFIRM CANONICAL BOARD REPAIR $REPAIR_MANIFEST_SHA"
+  read -r -p "Type $expected: " confirmation
+  test "$confirmation" = "$expected" || die 'canonical repair authority was not explicitly confirmed for the exact manifest'
+  canonical_repair_authority_text >"$REPAIR_AUTHORITY_PATH.tmp"
+  chown root:root "$REPAIR_AUTHORITY_PATH.tmp"
+  chmod 600 "$REPAIR_AUTHORITY_PATH.tmp"
+  mv "$REPAIR_AUTHORITY_PATH.tmp" "$REPAIR_AUTHORITY_PATH"
+  assert_canonical_repair_authority_marker
+  mark_phase canonical-repair-authorized
+}
+
+canonical_repair_receipt_payload_sha256() {
+  local receipt=$1
+  jq -cS 'del(.receiptSha256)' "$receipt" | tr -d '\n' | sha256sum | awk '{print $1}'
+}
+
+validate_canonical_repair_receipt_payload() {
+  local receipt=$1 expected_release=$2 manifest_sha=$3 authority_sha=$4 manifest_path=${5:-$REPAIR_MANIFEST_PATH} actual_payload_sha
+  actual_payload_sha=$(canonical_repair_receipt_payload_sha256 "$receipt")
+  require_sha256 "$actual_payload_sha"
+  test -f "$manifest_path" && test ! -L "$manifest_path" \
+    || die 'canonical repair receipt-bound manifest must be a regular non-symlink file'
+  test "$(sha256sum "$manifest_path" | awk '{print $1}')" = "$manifest_sha" \
+    || die 'canonical repair receipt validator manifest seal mismatch'
+  jq -e \
+    --arg release "$expected_release" --arg manifest_sha "$manifest_sha" \
+    --arg authority "$authority_sha" --arg payload_sha "$actual_payload_sha" \
+    --arg empty_candidates_sha "$(printf '[]' | sha256sum | awk '{print $1}')" \
+    --slurpfile manifest "$manifest_path" '
+      . as $receipt |
+      def fileSeal:
+        type=="object" and (.size|type=="number" and .>=0 and floor==.) and
+        (.sha256|type=="string" and test("^[0-9a-f]{64}$"));
+      def stateSeal:
+        type=="object" and
+        all([.tenantEventCount,.eventHighWater,.importOutboxCount,.versionEntryCount,.captureSpoolHighWater][];
+          type=="number" and .>=0 and floor==.) and
+        all([.versionEntriesSha256,.databaseSha256,.importInputSha256,.proofSha256,.candidateSha256][];
+          type=="string" and test("^[0-9a-f]{64}$")) and
+        (.candidateCount|type=="number" and .>=0 and floor==.) and
+        (.board|fileSeal) and (.journal|fileSeal) and (.versionMap|fileSeal) and (.spool|fileSeal);
+      .schema=="bonfire.canonical-repair-receipt.v1" and
+      .status=="complete" and
+      .releaseCommit==$release and .version==$release and
+      .tenantId=="bonfire" and
+      .cloneId==$manifest[0].cloneId and .environment==$manifest[0].environment and
+      .qualificationRun==$manifest[0].qualificationRun and
+      .candidateManifestSha256==$manifest_sha and
+      .authorityMarkerSha256==$authority and
+      (.before | type=="object" and
+        (.eventHighWater | type=="number" and .>=0 and floor==.) and
+        (.captureSpoolHighWater | type=="number" and .>=0 and floor==.)) and
+      (.after | type=="object" and
+        (.eventHighWater | type=="number" and .>=0 and floor==.) and
+        (.captureSpoolHighWater | type=="number" and .>=0 and floor==.)) and
+      .after.eventHighWater>=.before.eventHighWater and
+      .after.captureSpoolHighWater==.before.captureSpoolHighWater and
+      (.beforeState|stateSeal) and (.afterState|stateSeal) and
+      .delta=={tenantEvents:7,importOutbox:7,versionEntries:7} and
+      (.afterState.tenantEventCount-.beforeState.tenantEventCount)==7 and
+      (.afterState.eventHighWater-.beforeState.eventHighWater)==7 and
+      (.afterState.importOutboxCount-.beforeState.importOutboxCount)==7 and
+      (.afterState.versionEntryCount-.beforeState.versionEntryCount)==7 and
+      .beforeState.board==.afterState.board and .beforeState.spool==.afterState.spool and
+      .beforeState.captureSpoolHighWater==.afterState.captureSpoolHighWater and
+      .before.eventHighWater==.beforeState.eventHighWater and .after.eventHighWater==.afterState.eventHighWater and
+      .before.captureSpoolHighWater==.beforeState.captureSpoolHighWater and
+      .after.captureSpoolHighWater==.afterState.captureSpoolHighWater and
+      (.candidateCount | type=="number" and .==7 and floor==.) and
+      (.candidateFingerprintSha256 | type=="string" and test("^[0-9a-f]{64}$")) and
+      .candidateFingerprintSha256==.beforeState.candidateSha256 and
+      .candidateFingerprintSha256==$manifest[0].candidateSetSha256 and
+      (.appliedCount | type=="number" and .==$receipt.candidateCount and floor==.) and
+      .firstAppendObserved==true and
+      .zeroCandidates==true and .principalParity==true and .projectionParity==true and .idempotentSecondReplay==true and
+      .beforeState.candidateCount==7 and .afterState.candidateCount==0 and
+      .beforeCandidateSha256==.beforeState.candidateSha256 and
+      .afterCandidateSha256==.afterState.candidateSha256 and
+      .afterCandidateSha256==$empty_candidates_sha and
+      .afterFingerprintSha256==.afterState.proofSha256 and
+      .journalBeforeSha256==.beforeState.journal.sha256 and .journalAfterSha256==.afterState.journal.sha256 and
+      .versionMapBeforeSha256==.beforeState.versionMap.sha256 and .versionMapAfterSha256==.afterState.versionMap.sha256 and
+      .databaseBeforeSha256==.beforeState.databaseSha256 and .databaseAfterSha256==.afterState.databaseSha256 and
+      (.journalAppendedRecords|type=="array" and length==7) and
+      all(.journalAppendedRecords[];
+        .family=="board_card" and (.object_id|type=="string" and length>0) and
+        (.state_sha256|type=="string" and test("^[0-9a-f]{64}$")) and
+        .reason=="legacy_reconciliation_source_absence_backfill_v1" and
+        (.evidence_basis=="done_archive_absence" or .evidence_basis=="last_positive_source_current_absence") and
+        ((.operation_id // "")=="") and ((.phase // "")=="") and
+        ((.board_before_sha256 // "")=="") and ((.board_after_sha256 // "")=="") and
+        (.at|type=="string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T"))) and
+      ([.journalAppendedRecords[] | {objectId:.object_id,stateSha256:.state_sha256,evidenceBasis:.evidence_basis}] ==
+        [$manifest[0].candidates[] | {objectId,stateSha256,evidenceBasis}]) and
+      all([.boardSha256,.journalBeforeSha256,.journalAfterSha256,.versionMapBeforeSha256,
+        .versionMapAfterSha256,.databaseBeforeSha256,.databaseAfterSha256,
+        .beforeCandidateSha256,.afterCandidateSha256,.afterFingerprintSha256,.finalParitySha256][];
+        type=="string" and test("^[0-9a-f]{64}$")) and
+      .databaseBeforeSha256!=.databaseAfterSha256 and
+      (.completedAt | type=="string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T")) and
+      .receiptSha256==$payload_sha
+    ' "$receipt" >/dev/null || die 'canonical repair receipt did not satisfy the exact sealed zero-parity contract'
+}
+
+assert_canonical_repair_receipt() {
+  local receipt=$1
+  assert_root_private_regular_file "$receipt" 'canonical repair receipt'
+  assert_canonical_repair_manifest_binding
+  assert_canonical_repair_authority_marker false
+  validate_canonical_repair_receipt_payload "$receipt" "$A" "$REPAIR_MANIFEST_SHA" "$REPAIR_AUTHORITY_SHA" "$REPAIR_MANIFEST_PATH"
+}
+
 load_plan() {
   require_commands jq sha256sum
   test -f "$PLAN_FILE" || die "missing $PLAN_FILE"
   test ! -L "$PLAN_FILE" || die 'bootstrap plan must not be a symlink'
   test "$(stat -c %U "$PLAN_FILE")" = root || die 'bootstrap plan must be root-owned'
   (( (8#$(stat -c %a "$PLAN_FILE") & 8#022) == 0 )) || die 'bootstrap plan must not be group/world writable'
+  jq -e '
+    .schema=="bonfire.first-exact-bootstrap-plan.v3" and .remote=="axx" and .branch=="main" and
+    (has("canonicalRepairManifestSha256") | not)
+  ' "$PLAN_FILE" >/dev/null \
+    || die 'bootstrap plan schema or reviewed remote/branch binding is invalid'
   A=$(jq -er '.implementationCommit' "$PLAN_FILE")
   B=$(jq -er '.checkpointCommit' "$PLAN_FILE")
   require_full_sha "$A"
@@ -224,9 +477,22 @@ phase_done() {
 
 assert_forward_ceremony_permitted() {
   local terminal
-  for terminal in public-open-attempted legacy-restored legacy-reopened; do
+  for terminal in public-open-attempted ceremony-retired legacy-restored legacy-reopened; do
     ! phase_done "$terminal" \
       || die "terminal ceremony state $terminal forbids every forward bootstrap phase"
+  done
+}
+
+assert_restart_untouched_phase_boundary() {
+  local changed
+  for changed in \
+    canonical-normalization-setup-started canonical-normalization-started canonical-normalization-failed canonical-normalized \
+    canonical-manifest-generation-started canonical-manifest-generation-failed repair-manifest-generated \
+    canonical-repair-authorized legacy-retirement-started legacy-retired \
+    clone-qualification-started clone-qualification-failed clone-qualified \
+    canonical-repair-execution-started canonical-repair-failed canonical-repair-receipted canonical-repaired \
+    a-accepted b-activation-committed b-accepted public-open-attempted ceremony-retired legacy-restored legacy-reopened; do
+    ! phase_done "$changed" || die "production state may have changed at phase $changed; restart-untouched is forbidden and exact cold restore is required"
   done
 }
 
@@ -414,7 +680,7 @@ remove_renderer_security_profiles() {
 
 assert_no_renderer_profile_container_users() {
   local ids=()
-  mapfile -t ids < <(docker ps -aq)
+  mapfile -t ids < <(docker ps -aq --no-trunc)
   test "${#ids[@]}" -eq 0 && return 0
   docker inspect "${ids[@]}" | jq -e --arg profile "$RENDERER_APPARMOR_NAME" '
     all(.[];
@@ -469,7 +735,7 @@ renderer_security_canary() {
 
 project_service_id() {
   local service=$1
-  docker ps -q \
+  docker ps -q --no-trunc \
     --filter label=com.docker.compose.project=digitalocean \
     --filter "label=com.docker.compose.service=$service"
 }
@@ -483,6 +749,114 @@ WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
 ORDER BY schemaname, tablename
 \gexec
 SQL
+}
+
+docker_volume_tree_sha256() {
+  local volume=$1 relative=${2:-.} mount root
+  mount=$(docker volume inspect -f '{{.Mountpoint}}' "$volume")
+  test -d "$mount" || die "missing volume mountpoint for $volume"
+  root="$mount/$relative"
+  test -d "$root" || die "missing required $volume tree: $relative"
+  tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
+    --format=posix --pax-option=delete=atime,delete=ctime \
+    --xattrs --acls --one-file-system -C "$root" -cpf - . | sha256sum | awk '{print $1}'
+}
+
+canonical_repair_database_sha256() {
+  local container=$1
+  docker exec "$container" pg_dump -U bonfire -d bonfire --no-owner --no-acl --format=p \
+    | sed -e '/^\\restrict /d' -e '/^\\unrestrict /d' \
+    | sha256sum | awk '{print $1}'
+}
+
+canonical_repair_database_watermarks() {
+  local container=$1
+  docker exec -i "$container" psql -XqAt -v ON_ERROR_STOP=1 -U bonfire -d bonfire <<'SQL' | jq -cS .
+SELECT jsonb_build_object(
+  'schemaMigrationCount', (SELECT count(*) FROM schema_migrations),
+  'schemaMigrationHighWater', (SELECT COALESCE(max(version),0) FROM schema_migrations),
+  'canonicalEventCount', (SELECT count(*) FROM canonical_events),
+  'canonicalEventHighWater', (SELECT COALESCE(max(sequence),0) FROM canonical_events),
+  'objectCount', (SELECT count(*) FROM objects),
+  'objectLastEventHighWater', (SELECT COALESCE(max(last_event_sequence),0) FROM objects),
+  'outboxCount', (SELECT count(*) FROM outbox),
+  'outboxHighWater', (SELECT COALESCE(max(outbox_id),0) FROM outbox),
+  'outboxPending', (SELECT count(*) FROM outbox WHERE delivered_at IS NULL),
+  'outboxFailed', (SELECT count(*) FROM outbox WHERE last_error_code IS NOT NULL)
+)::text;
+SQL
+}
+
+capture_canonical_repair_fingerprint() {
+  local pgc=$1 output=$2 data_sha codex_sha render_sha usage_sha spool_sha database_sha checkpoint_high_water checkpoint_sha watermarks
+  data_sha=$(docker_volume_tree_sha256 digitalocean_meeting_data)
+  codex_sha=$(docker_volume_tree_sha256 digitalocean_codex_queue)
+  render_sha=$(docker_volume_tree_sha256 digitalocean_render_queue)
+  usage_sha=$(docker_volume_tree_sha256 digitalocean_usage_ledger)
+  spool_sha=$(docker_volume_tree_sha256 digitalocean_meeting_data canonical)
+  database_sha=$(canonical_repair_database_sha256 "$pgc")
+  watermarks=$(canonical_repair_database_watermarks "$pgc")
+  local meeting_mount checkpoint
+  meeting_mount=$(docker volume inspect -f '{{.Mountpoint}}' digitalocean_meeting_data)
+  checkpoint="$meeting_mount/canonical/reconcile-checkpoint.json"
+  test -f "$checkpoint" && test ! -L "$checkpoint" || die 'canonical reconcile checkpoint is missing or unsafe'
+  checkpoint_sha=$(sha256sum "$checkpoint" | awk '{print $1}')
+  checkpoint_high_water=$(jq -er '.highWater | select(type=="number" and .>=0 and floor==.)' "$checkpoint")
+  for digest in "$data_sha" "$codex_sha" "$render_sha" "$usage_sha" "$spool_sha" "$database_sha" "$checkpoint_sha"; do
+    require_sha256 "$digest"
+  done
+  jq -nS \
+    --arg schema 'bonfire.canonical-repair-fingerprint.v1' \
+    --arg dataSha256 "$data_sha" --arg codexQueueSha256 "$codex_sha" \
+    --arg renderQueueSha256 "$render_sha" \
+    --arg usageLedgerSha256 "$usage_sha" --arg canonicalSpoolSha256 "$spool_sha" \
+    --arg databaseSha256 "$database_sha" --arg checkpointSha256 "$checkpoint_sha" \
+    --argjson checkpointHighWater "$checkpoint_high_water" --argjson databaseWatermarks "$watermarks" \
+    '{schema:$schema,dataSha256:$dataSha256,codexQueueSha256:$codexQueueSha256,renderQueueSha256:$renderQueueSha256,usageLedgerSha256:$usageLedgerSha256,canonicalSpoolSha256:$canonicalSpoolSha256,databaseSha256:$databaseSha256,checkpointSha256:$checkpointSha256,checkpointHighWater:$checkpointHighWater,databaseWatermarks:$databaseWatermarks}' \
+    >"$output"
+  chmod 600 "$output"
+}
+
+capture_stable_canonical_repair_fingerprint() {
+  local pgc=$1 output=$2 second="$output.second"
+  capture_canonical_repair_fingerprint "$pgc" "$output"
+  sync
+  capture_canonical_repair_fingerprint "$pgc" "$second"
+  cmp "$output" "$second" || die 'production data, database, spool, or high-water fingerprint was not stable'
+  rm "$second"
+  sha256sum "$output" | awk '{print $1}' >"$output.sha256"
+  chmod 600 "$output.sha256"
+  assert_canonical_repair_fingerprint_file "$output"
+}
+
+assert_canonical_repair_fingerprint_file() {
+  local fingerprint=$1 expected actual
+  assert_root_private_regular_file "$fingerprint" 'canonical repair stable fingerprint'
+  assert_root_private_regular_file "$fingerprint.sha256" 'canonical repair stable fingerprint digest'
+  expected=$(tr -d '[:space:]' <"$fingerprint.sha256")
+  require_sha256 "$expected"
+  actual=$(sha256sum "$fingerprint" | awk '{print $1}')
+  test "$actual" = "$expected" || die 'canonical repair stable fingerprint self-digest mismatch'
+  jq -e '
+    .schema=="bonfire.canonical-repair-fingerprint.v1" and
+    all([.dataSha256,.codexQueueSha256,.renderQueueSha256,.usageLedgerSha256,
+      .canonicalSpoolSha256,.databaseSha256,.checkpointSha256][];
+      type=="string" and test("^[0-9a-f]{64}$")) and
+    (.checkpointHighWater | type=="number" and .>=0 and floor==.) and
+    (.databaseWatermarks | type=="object")
+  ' "$fingerprint" >/dev/null || die 'canonical repair stable fingerprint payload is invalid'
+}
+
+assert_repair_source_volumes_match_rehearsed_backup() {
+  local volume mount
+  (cd "$BK" && sha256sum -c backup-SHA256SUMS >/dev/null) \
+    || die 'rehearsed cold backup checksum validation failed'
+  for volume in digitalocean_meeting_data digitalocean_codex_queue digitalocean_usage_ledger digitalocean_canonical_postgres; do
+    mount=$(docker volume inspect -f '{{.Mountpoint}}' "$volume")
+    test -d "$mount" || die "missing production volume $volume"
+    tar --xattrs --acls --compare -f "$BK/volumes/$volume.tar" -C "$mount" \
+      || die "$volume drifted from the matched rehearsed cold backup before repair"
+  done
 }
 
 canonical_parity() {
@@ -656,7 +1030,7 @@ target_topology_gate() {
   assert_renderer_security_profiles
   diff -u \
     <(printf '%s\n' caddy canonical-postgres coturn meetingassist render-queue-init render-runner | sort) \
-    <(docker ps -a --filter label=com.docker.compose.project=digitalocean \
+    <(docker ps -a --no-trunc --filter label=com.docker.compose.project=digitalocean \
       --format '{{.Label "com.docker.compose.service"}}' | sort -u)
   diff -u \
     <(printf '%s\n' digitalocean_caddy_config digitalocean_caddy_data digitalocean_canonical_postgres \
@@ -665,10 +1039,10 @@ target_topology_gate() {
   diff -u \
     <(printf '%s\n' digitalocean_default digitalocean_render_internal | sort) \
     <(docker network ls --filter label=com.docker.compose.project=digitalocean --format '{{.Name}}' | sort)
-  test -z "$(docker ps -aq --filter label=com.docker.compose.project=digitalocean \
+  test -z "$(docker ps -aq --no-trunc --filter label=com.docker.compose.project=digitalocean \
     --filter label=com.docker.compose.service=codex-runner)"
   local init
-  init=$(docker ps -aq --filter label=com.docker.compose.project=digitalocean \
+  init=$(docker ps -aq --no-trunc --filter label=com.docker.compose.project=digitalocean \
     --filter label=com.docker.compose.service=render-queue-init)
   test -n "$init"
   test "$(docker inspect -f '{{.State.Status}}:{{.State.ExitCode}}' "$init")" = 'exited:0'

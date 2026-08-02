@@ -27,13 +27,106 @@ done
   require_sha256 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
   ! (require_sha256 0123456789abcdef0123456789abcdef01234567) 2>/dev/null
 
+  receipt_fixture=$(mktemp -d)
+  trap 'rm -rf "$receipt_fixture"' EXIT
+  receipt_release=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  receipt_authority=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+  jq -n '
+    {schema:"bonfire.canonical-board-repair.v2",releaseCommit:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     cloneId:"self-check-clone",environment:"isolated_cold_clone",qualificationRun:true,
+     candidateSetSha256:"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     candidates:[range(0;7)|{objectId:("object-"+(.|tostring)),stateSha256:"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",evidenceBasis:"done_archive_absence"}]}
+  ' >"$receipt_fixture/manifest.json"
+  receipt_manifest=$(sha256sum "$receipt_fixture/manifest.json" | awk '{print $1}')
+  write_repair_receipt_fixture() {
+    local output=$1 first=$2 zero=$3 parity=$4 replay=$5
+    local empty_candidates_sha
+    empty_candidates_sha=$(printf '[]' | sha256sum | awk '{print $1}')
+    jq -n \
+      --arg release "$receipt_release" --arg manifest_sha "$receipt_manifest" --arg authority "$receipt_authority" \
+      --arg empty_candidates_sha "$empty_candidates_sha" --slurpfile manifest "$receipt_fixture/manifest.json" \
+      --argjson first "$first" --argjson zero "$zero" \
+      --argjson parity "$parity" --argjson replay "$replay" '
+        def seal($sha): {size:1,sha256:$sha};
+        {schema:"bonfire.canonical-repair-receipt.v1",status:"complete",releaseCommit:$release,version:$release,tenantId:"bonfire",
+         cloneId:"self-check-clone",environment:"isolated_cold_clone",qualificationRun:true,
+         candidateManifestSha256:$manifest_sha,authorityMarkerSha256:$authority,
+         before:{eventHighWater:102,captureSpoolHighWater:100},
+         after:{eventHighWater:109,captureSpoolHighWater:100},
+         beforeState:{tenantEventCount:102,eventHighWater:102,importOutboxCount:50,versionEntryCount:60,
+           versionEntriesSha256:"4444444444444444444444444444444444444444444444444444444444444444",captureSpoolHighWater:100,
+           board:seal("1111111111111111111111111111111111111111111111111111111111111111"),
+           journal:seal("2222222222222222222222222222222222222222222222222222222222222222"),
+           versionMap:seal("4444444444444444444444444444444444444444444444444444444444444444"),
+           spool:seal("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+           databaseSha256:"6666666666666666666666666666666666666666666666666666666666666666",
+           importInputSha256:"abababababababababababababababababababababababababababababababab",
+           proofSha256:"edededededededededededededededededededededededededededededededed",
+           candidateCount:7,candidateSha256:"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},
+         afterState:{tenantEventCount:109,eventHighWater:109,importOutboxCount:57,versionEntryCount:67,
+           versionEntriesSha256:"5555555555555555555555555555555555555555555555555555555555555555",captureSpoolHighWater:100,
+           board:seal("1111111111111111111111111111111111111111111111111111111111111111"),
+           journal:seal("3333333333333333333333333333333333333333333333333333333333333333"),
+           versionMap:seal("5555555555555555555555555555555555555555555555555555555555555555"),
+           spool:seal("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+           databaseSha256:"8888888888888888888888888888888888888888888888888888888888888888",
+           importInputSha256:"abababababababababababababababababababababababababababababababab",
+           proofSha256:"9999999999999999999999999999999999999999999999999999999999999999",
+           candidateCount:0,candidateSha256:$empty_candidates_sha},
+         delta:{tenantEvents:7,importOutbox:7,versionEntries:7},
+         journalAppendedRecords:[$manifest[0].candidates[]|{family:"board_card",object_id:.objectId,state_sha256:.stateSha256,
+           at:"2026-08-02T10:00:00Z",reason:"legacy_reconciliation_source_absence_backfill_v1",evidence_basis:.evidenceBasis}],
+         candidateCount:7,candidateFingerprintSha256:"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+         appliedCount:7,firstAppendObserved:$first,zeroCandidates:$zero,
+         principalParity:$parity,projectionParity:$parity,idempotentSecondReplay:$replay,
+         boardSha256:"1111111111111111111111111111111111111111111111111111111111111111",
+         journalBeforeSha256:"2222222222222222222222222222222222222222222222222222222222222222",
+         journalAfterSha256:"3333333333333333333333333333333333333333333333333333333333333333",
+         versionMapBeforeSha256:"4444444444444444444444444444444444444444444444444444444444444444",
+         versionMapAfterSha256:"5555555555555555555555555555555555555555555555555555555555555555",
+         databaseBeforeSha256:"6666666666666666666666666666666666666666666666666666666666666666",
+         databaseAfterSha256:"8888888888888888888888888888888888888888888888888888888888888888",
+         beforeCandidateSha256:"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+         afterCandidateSha256:$empty_candidates_sha,
+         afterFingerprintSha256:"9999999999999999999999999999999999999999999999999999999999999999",
+         finalParitySha256:"7777777777777777777777777777777777777777777777777777777777777777",
+         completedAt:"2026-08-02T10:00:00Z",receiptSha256:"pending"}
+      ' >"$output"
+    local digest
+    digest=$(canonical_repair_receipt_payload_sha256 "$output")
+    jq --arg digest "$digest" '.receiptSha256=$digest' "$output" >"$output.tmp"
+    mv "$output.tmp" "$output"
+  }
+  write_repair_receipt_fixture "$receipt_fixture/exact.json" true true true true
+  validate_canonical_repair_receipt_payload "$receipt_fixture/exact.json" "$receipt_release" "$receipt_manifest" "$receipt_authority" "$receipt_fixture/manifest.json"
+  ! (validate_canonical_repair_receipt_payload "$receipt_fixture/missing.json" "$receipt_release" "$receipt_manifest" "$receipt_authority" "$receipt_fixture/manifest.json") 2>/dev/null
+  ! (validate_canonical_repair_receipt_payload "$receipt_fixture/exact.json" "$receipt_release" "${receipt_manifest:0:63}e" "$receipt_authority" "$receipt_fixture/manifest.json") 2>/dev/null
+  write_repair_receipt_fixture "$receipt_fixture/drift.json" true true true true
+  jq '.after.captureSpoolHighWater=101' "$receipt_fixture/drift.json" >"$receipt_fixture/drift.tmp" && mv "$receipt_fixture/drift.tmp" "$receipt_fixture/drift.json"
+  ! (validate_canonical_repair_receipt_payload "$receipt_fixture/drift.json" "$receipt_release" "$receipt_manifest" "$receipt_authority" "$receipt_fixture/manifest.json") 2>/dev/null
+  write_repair_receipt_fixture "$receipt_fixture/partial.json" true false false false
+  ! (validate_canonical_repair_receipt_payload "$receipt_fixture/partial.json" "$receipt_release" "$receipt_manifest" "$receipt_authority" "$receipt_fixture/manifest.json") 2>/dev/null
+  printf '%s\n' tamper >>"$receipt_fixture/exact.json"
+  ! (validate_canonical_repair_receipt_payload "$receipt_fixture/exact.json" "$receipt_release" "$receipt_manifest" "$receipt_authority" "$receipt_fixture/manifest.json") 2>/dev/null
+
+  REPAIR_MANIFEST_SHA=$receipt_manifest
+  test "$(canonical_repair_authority_text)" = "CONFIRM CANONICAL BOARD REPAIR $receipt_manifest"
+
   original_state_dir=$STATE_DIR
   STATE_DIR=$(mktemp -d)
   assert_forward_ceremony_permitted
-  for terminal in public-open-attempted legacy-restored legacy-reopened; do
+  for terminal in public-open-attempted ceremony-retired legacy-restored legacy-reopened; do
     : >"$STATE_DIR/phase-$terminal"
     ! (assert_forward_ceremony_permitted) 2>/dev/null
     rm "$STATE_DIR/phase-$terminal"
+  done
+  assert_restart_untouched_phase_boundary
+  for changed in canonical-normalization-setup-started canonical-normalization-started canonical-normalized \
+    canonical-manifest-generation-started repair-manifest-generated legacy-retirement-started \
+    canonical-repair-execution-started canonical-repair-failed canonical-repaired; do
+    : >"$STATE_DIR/phase-$changed"
+    ! (assert_restart_untouched_phase_boundary) 2>/dev/null
+    rm "$STATE_DIR/phase-$changed"
   done
   rm -rf "$STATE_DIR"
   STATE_DIR=$original_state_dir

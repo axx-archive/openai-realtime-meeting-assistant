@@ -27,6 +27,7 @@ restore_legacy() {
   local confirmation
   read -r -p 'Type RESTORE COLD LEGACY SNAPSHOT: ' confirmation
   test "$confirmation" = 'RESTORE COLD LEGACY SNAPSHOT' || die 'legacy restore not confirmed'
+  mark_phase ceremony-retired
   (cd "$BK" && sha256sum -c backup-SHA256SUMS >/dev/null)
 
   cmp "$BASE_ENV" "$BK/private/base.env"
@@ -40,9 +41,20 @@ restore_legacy() {
     install -m 600 "$RELEASE_PARENT/active-release.json" "$BK/private/ledger-before-legacy-restore.json"
     rm "$RELEASE_PARENT/active-release.json"
   fi
-  docker ps -aq --filter label=com.docker.compose.project=digitalocean | xargs -r docker rm -f
+  local owned
+  for owned in "$NORMALIZE_CONTAINER" "$MANIFEST_CONTAINER" "$REPAIR_CONTAINER"; do
+    docker rm -f "$owned" >/dev/null 2>&1 || true
+  done
+  local pgc_before
+  pgc_before=$(project_service_id canonical-postgres)
+  if test -n "$pgc_before"; then
+    docker stop "$pgc_before" >/dev/null 2>&1 || true
+    docker network disconnect "$REPAIR_NETWORK" "$pgc_before" >/dev/null 2>&1 || true
+  fi
+  docker network rm "$REPAIR_NETWORK" >/dev/null 2>&1 || true
+  docker ps -aq --no-trunc --filter label=com.docker.compose.project=digitalocean | xargs -r docker rm -f
   if docker volume inspect digitalocean_render_queue >/dev/null 2>&1; then
-    test -z "$(docker ps -aq --filter volume=digitalocean_render_queue)"
+    test -z "$(docker ps -aq --no-trunc --filter volume=digitalocean_render_queue)"
     docker volume rm digitalocean_render_queue
   fi
   remove_renderer_security_profiles
@@ -94,27 +106,48 @@ restore_legacy() {
 
   diff -u \
     <(printf '%s\n' caddy canonical-postgres codex-runner coturn meetingassist render-runner | sort) \
-    <(docker ps -a --filter label=com.docker.compose.project=digitalocean \
+    <(docker ps -a --no-trunc --filter label=com.docker.compose.project=digitalocean \
       --format '{{.Label "com.docker.compose.service"}}' | sort -u)
   diff -u \
     <(printf '%s\n' "${volumes[@]}" | sort) \
     <(docker volume ls --format '{{.Name}}' | grep '^digitalocean_' | sort)
   while IFS=$'\t' read -r ref image_id; do
-    test -n "$(docker ps -q --filter label=com.docker.compose.project=digitalocean --filter ancestor="$image_id")" || die "restored legacy image is not running: $ref"
+    test -n "$(docker ps -q --no-trunc --filter label=com.docker.compose.project=digitalocean --filter ancestor="$image_id")" || die "restored legacy image is not running: $ref"
   done <"$BK/meta/legacy-image-map.tsv"
   local_https "https://$HOST/healthz" >"$BK/meta/legacy-restored-health.json"
   local_https "https://$HOST/readyz" >"$BK/meta/legacy-restored-ready.json"
   jq -e '.ok==true' "$BK/meta/legacy-restored-health.json" >/dev/null
   jq -e '.ok==true' "$BK/meta/legacy-restored-ready.json" >/dev/null
   mark_phase legacy-restored
-  printf 'Exact cold legacy state is restored. Public ingress remains blocked. Review captured degraded baseline, then run reopen-legacy if authorized.\n'
+  printf 'Exact cold legacy state is restored and this ceremony is terminal. Public ingress remains blocked. Re-run mac-public-probe.sh blocked, then acknowledge-restored-block before reopen.\n'
 }
 
 restart_untouched_legacy() {
   require_root; load_state; acquire_operator_lock
-  phase_done legacy-retirement-started && die 'legacy retirement began; use the rehearsed cold restore instead'
+  assert_restart_untouched_phase_boundary
   test -f "$BK/private/containers.inspect.json" || die 'original container inventory was not captured'
   test ! -e "$RELEASE_PARENT/.bonfire-release-operation.lock" || die 'release operation lock exists'
+  ! docker volume inspect digitalocean_render_queue >/dev/null 2>&1 \
+    || die 'render queue exists, so the topology is no longer untouched; use the rehearsed cold restore'
+  ! docker network inspect "$REPAIR_NETWORK" >/dev/null 2>&1 \
+    || die 'canonical maintenance network exists; use the rehearsed cold restore'
+  local owned
+  for owned in "$NORMALIZE_CONTAINER" "$MANIFEST_CONTAINER" "$REPAIR_CONTAINER"; do
+    ! docker inspect "$owned" >/dev/null 2>&1 \
+      || die "canonical maintenance one-shot exists ($owned); use the rehearsed cold restore"
+  done
+  local sealed_pgc current_pgc sealed_networks current_networks current_pg_ids=()
+  sealed_pgc=$(jq -er '.[]|select(.Config.Labels["com.docker.compose.service"]=="canonical-postgres")|.Id' "$BK/private/containers.inspect.json")
+  mapfile -t current_pg_ids < <(docker ps -aq --no-trunc \
+    --filter label=com.docker.compose.project=digitalocean \
+    --filter label=com.docker.compose.service=canonical-postgres)
+  test "${#current_pg_ids[@]}" -eq 1 || die 'retained PostgreSQL stopped-container inventory is not exact'
+  current_pgc=${current_pg_ids[0]}
+  test "$current_pgc" = "$sealed_pgc" || die 'retained PostgreSQL identity differs from the sealed untouched container'
+  sealed_networks=$(jq -cS '.[]|select(.Config.Labels["com.docker.compose.service"]=="canonical-postgres")|.NetworkSettings.Networks|keys' "$BK/private/containers.inspect.json")
+  current_networks=$(docker inspect "$current_pgc" | jq -cS '.[0].NetworkSettings.Networks|keys')
+  test "$current_networks" = "$sealed_networks" \
+    || die 'retained PostgreSQL network set changed; use the rehearsed cold restore'
   remove_renderer_security_profiles
   local pgc
   pgc=$(jq -er '.[]|select(.Config.Labels["com.docker.compose.service"]=="canonical-postgres")|.Id' "$BK/private/containers.inspect.json")
@@ -130,7 +163,7 @@ restart_untouched_legacy() {
   done < <(jq -r '.[]|select(.Config.Labels["com.docker.compose.service"]!="canonical-postgres")|.Id' "$BK/private/containers.inspect.json")
   while IFS=$'\t' read -r ref image_id; do
     test "$(docker image inspect "$ref" --format '{{.Id}}')" = "$image_id"
-    test -n "$(docker ps -q --filter label=com.docker.compose.project=digitalocean --filter ancestor="$image_id")"
+    test -n "$(docker ps -q --no-trunc --filter label=com.docker.compose.project=digitalocean --filter ancestor="$image_id")"
   done <"$BK/meta/legacy-image-map.tsv"
   local app_ready=false
   for _ in $(seq 1 24); do
@@ -169,7 +202,7 @@ reblock_legacy_maintenance_ingress() {
 }
 
 reopen_legacy() {
-  require_root; load_state; acquire_operator_lock; require_phase legacy-restored
+  require_root; load_state; acquire_operator_lock; require_phase legacy-restored; require_phase restored-external-block-confirmed
   local confirmation wan
   read -r -p 'Type REOPEN RESTORED LEGACY TRAFFIC: ' confirmation
   test "$confirmation" = 'REOPEN RESTORED LEGACY TRAFFIC' || die 'legacy reopen not confirmed'
@@ -196,9 +229,22 @@ reopen_legacy() {
   printf 'Run mac-public-probe.sh legacy from the Mac and complete desktop/mobile acceptance.\n'
 }
 
+acknowledge_restored_block() {
+  require_root; load_state; acquire_operator_lock; require_phase legacy-restored
+  local confirmation
+  read -r -p 'Type RESTORED LEGACY BLOCK CONFIRMED FROM MAC: ' confirmation
+  test "$confirmation" = 'RESTORED LEGACY BLOCK CONFIRMED FROM MAC' || die 'independent restored-legacy block proof was not confirmed'
+  local_https "https://$HOST/healthz" >"$BK/meta/legacy-restored-health-reprobe.json"
+  local_https "https://$HOST/readyz" >"$BK/meta/legacy-restored-ready-reprobe.json"
+  jq -e '.ok==true' "$BK/meta/legacy-restored-health-reprobe.json" >/dev/null
+  jq -e '.ok==true' "$BK/meta/legacy-restored-ready-reprobe.json" >/dev/null
+  mark_phase restored-external-block-confirmed
+}
+
 case ${1:-} in
   restore) restore_legacy ;;
   restart-untouched) restart_untouched_legacy ;;
+  acknowledge-restored-block) acknowledge_restored_block ;;
   reopen-legacy) reopen_legacy ;;
-  *) printf 'Usage: vps-rollback-legacy.sh restart-untouched|restore|reopen-legacy\n' >&2; exit 2 ;;
+  *) printf 'Usage: vps-rollback-legacy.sh restart-untouched|restore|acknowledge-restored-block|reopen-legacy\n' >&2; exit 2 ;;
 esac

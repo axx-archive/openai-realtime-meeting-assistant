@@ -113,7 +113,8 @@ func sameBoardLifecycleOperation(left, right CanonicalLifecycleJournalRecord) bo
 		left.StateDigest == right.StateDigest &&
 		left.BoardBeforeSHA256 == right.BoardBeforeSHA256 &&
 		left.BoardAfterSHA256 == right.BoardAfterSHA256 &&
-		left.Reason == right.Reason
+		left.Reason == right.Reason &&
+		left.EvidenceBasis == right.EvidenceBasis
 }
 
 // classifyLifecycleJournal treats phase-less historical entries as committed.
