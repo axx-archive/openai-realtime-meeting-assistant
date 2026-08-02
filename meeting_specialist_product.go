@@ -1,9 +1,9 @@
 package main
 
 // This file is the product/control-plane boundary for in-meeting specialists.
-// It intentionally stops before provider session creation: E10 must qualify
-// and explicitly wire that transition.  Browser and native clients may only
-// inspect server-derived eligibility and record revision-bound human choices.
+// Browser and native clients may only inspect server-derived eligibility and
+// record revision-bound human choices. The separately configured production
+// joiner owns the post-approval transition; its application default is off.
 
 import (
 	"context"
@@ -55,11 +55,9 @@ type MeetingSpecialistProductAuthority interface {
 	ScopeCurrent(context.Context, meetingSpecialistProductScope) error
 }
 
-// MeetingSpecialistProductTestJoin is a deterministic E9-only seam used by
-// integration tests to prove that approval can hand a correctly-bound launch
-// to MeetingSpecialistRuntime without opening a real provider or audio path.
-// The application initializer never supplies it; E10 must replace this seam
-// with a separately reviewed and provider-qualified server-side adapter.
+// MeetingSpecialistProductTestJoin is the legacy deterministic test seam. New
+// tests and production configuration use MeetingSpecialistProductionJoiner;
+// the application initializer never supplies this compatibility hook.
 type MeetingSpecialistProductTestJoin func(context.Context, MeetingAgentInvitation, MeetingSpecialistCandidate, meetingSpecialistProductScope, MeetingSpecialistApprovalLimits) (*MeetingSpecialistRuntime, error)
 
 // MeetingSpecialistApprovalLimits are the hard, human-visible ceilings bound
@@ -93,6 +91,7 @@ type MeetingSpecialistProductConfig struct {
 	Authority            MeetingSpecialistProductAuthority
 	Persistence          *MeetingSpecialistProductPersistence
 	ProviderFactory      MeetingSpecialistProviderFactory
+	ProductionJoin       *MeetingSpecialistProductionJoiner
 	TestJoin             MeetingSpecialistProductTestJoin
 }
 
@@ -123,6 +122,7 @@ type MeetingSpecialistProduct struct {
 	controlMonitorDone          chan struct{}
 	controlMonitorStopOnce      sync.Once
 	providerFactory             MeetingSpecialistProviderFactory
+	productionJoin              *MeetingSpecialistProductionJoiner
 	testJoin                    MeetingSpecialistProductTestJoin
 	unsubscribeConsentDecisions func()
 }
@@ -187,7 +187,7 @@ func NewMeetingSpecialistProduct(config MeetingSpecialistProductConfig) *Meeting
 		// disabled and carries no credential. Approval cannot activate it.
 		config.ProviderFactory = NewMeetingSpecialistRealtimeProviderFactory(defaultOffMeetingSpecialistRealtimeConfig())
 	}
-	product := &MeetingSpecialistProduct{enabled: config.Enabled, now: config.Now, controlCurrent: config.ControlCurrent, authority: config.Authority, tenantID: config.TenantID, invitations: map[string]meetingSpecialistProductRecord{}, providerFactory: config.ProviderFactory, testJoin: config.TestJoin}
+	product := &MeetingSpecialistProduct{enabled: config.Enabled, now: config.Now, controlCurrent: config.ControlCurrent, authority: config.Authority, tenantID: config.TenantID, invitations: map[string]meetingSpecialistProductRecord{}, providerFactory: config.ProviderFactory, productionJoin: config.ProductionJoin, testJoin: config.TestJoin}
 	product.initializePersistence(config.Persistence)
 	if product.enabled && product.controlCurrent != nil {
 		interval := config.ControlCheckInterval
@@ -381,12 +381,13 @@ func (product *MeetingSpecialistProduct) Status(ctx context.Context, user *userA
 	}
 	sort.Slice(status.Invitations, func(i, j int) bool { return status.Invitations[i].UpdatedAt.Before(status.Invitations[j].UpdatedAt) })
 	// Roster discovery and human approval are usable without a model call. The
-	// joining transition remains visibly unavailable until E10 qualification.
+	// joining transition is available only when every server-side dependency is
+	// explicitly configured.
 	status.CanInvite = len(status.Candidates) > 0
-	status.Available = false
+	status.Available = status.CanInvite && product.productionJoin != nil && product.productionJoin.Ready()
 	if !status.CanInvite {
 		status.Reason = "no_eligible_specialists"
-	} else {
+	} else if !status.Available {
 		status.Reason = "provider_qualification_pending"
 	}
 	return status
@@ -616,7 +617,7 @@ func (product *MeetingSpecialistProduct) Resolve(ctx context.Context, user *user
 		}
 	}
 	requestedDecision := record.Status == "awaiting_approval" && record.Invitation.Decision == "requested"
-	approvedDismissal := decision == "dismissed" && record.Invitation.Decision == "approved" && oneOf(record.Status, "approved_waiting_for_provider_qualification", "approved_reauthorization_required", "joined_test_session")
+	approvedDismissal := decision == "dismissed" && record.Invitation.Decision == "approved" && oneOf(record.Status, "approved_waiting_for_provider_qualification", "approved_reauthorization_required", "joined_session", "joined_test_session")
 	if scope.RequesterPrincipal != record.Invitation.EligibleConfirmer || !requestedDecision && !approvedDismissal {
 		return meetingSpecialistInvitationView{}, ErrMeetingSpecialistProductDecision
 	}
@@ -654,8 +655,21 @@ func (product *MeetingSpecialistProduct) Resolve(ctx context.Context, user *user
 		deferredRevocations = append(deferredRevocations, product.failClosedLocked(err)...)
 		return meetingSpecialistInvitationView{}, ErrMeetingSpecialistProductRestore
 	}
-	if decision == "approved" && product.testJoin != nil {
-		runtime, joinErr := product.testJoin(ctx, record.Invitation, record.Agent, scope, record.Limits)
+	joinAttempted, productionJoin := false, false
+	var runtime *MeetingSpecialistRuntime
+	var joinErr error
+	if decision == "approved" && product.productionJoin != nil && product.productionJoin.Enabled() {
+		joinAttempted, productionJoin = true, true
+		runtime, joinErr = product.productionJoin.Join(ctx, MeetingSpecialistJoinRequest{Invitation: record.Invitation, Candidate: record.Agent, Scope: scope, Limits: record.Limits})
+	} else if decision == "approved" && product.testJoin != nil {
+		joinAttempted = true
+		runtime, joinErr = product.testJoin(ctx, record.Invitation, record.Agent, scope, record.Limits)
+	}
+	if joinAttempted {
+		joinFailureReason := "test_join_failed"
+		if productionJoin {
+			joinFailureReason = "production_join_failed"
+		}
 		if joinErr == nil && runtime != nil && runtime.Snapshot().Session != nil {
 			// Product scope is checked again after the potentially slow launch.
 			// Runtime capability authority independently performs the same checks
@@ -670,20 +684,29 @@ func (product *MeetingSpecialistProduct) Resolve(ctx context.Context, user *user
 		}
 		if joinErr != nil || runtime == nil || runtime.Snapshot().Session == nil {
 			if runtime != nil {
-				deferredRevocations = append(deferredRevocations, newMeetingSpecialistRuntimeRevocation(runtime, "test_join_failed"))
+				deferredRevocations = append(deferredRevocations, newMeetingSpecialistRuntimeRevocation(runtime, joinFailureReason))
 			}
 			record.Runtime = nil
 			record.Status = "approved_test_session_failed"
+			if productionJoin {
+				record.Status = "approved_session_failed"
+			}
 		} else {
 			if !runtime.BindTerminalObserver(func(evidence MeetingSpecialistTerminalEvidence) {
 				product.recordRuntimeTerminal(invitationID, runtime, evidence)
 			}) {
-				deferredRevocations = append(deferredRevocations, newMeetingSpecialistRuntimeRevocation(runtime, "test_join_failed"))
+				deferredRevocations = append(deferredRevocations, newMeetingSpecialistRuntimeRevocation(runtime, joinFailureReason))
 				record.Runtime = nil
 				record.Status = "approved_test_session_failed"
+				if productionJoin {
+					record.Status = "approved_session_failed"
+				}
 			} else {
 				record.Runtime = runtime
 				record.Status = "joined_test_session"
+				if productionJoin {
+					record.Status = "joined_session"
+				}
 			}
 		}
 		record.UpdatedAt = product.now().UTC()
@@ -693,6 +716,9 @@ func (product *MeetingSpecialistProduct) Resolve(ctx context.Context, user *user
 				deferredRevocations = append(deferredRevocations, newMeetingSpecialistRuntimeRevocation(record.Runtime, "post_launch_persistence_failed"))
 				record.Runtime = nil
 				record.Status = "approved_test_session_failed"
+				if productionJoin {
+					record.Status = "approved_session_failed"
+				}
 				product.invitations[invitationID] = record
 			}
 			deferredRevocations = append(deferredRevocations, product.failClosedLocked(err)...)
@@ -954,7 +980,7 @@ func meetingSpecialistInvitationIsActive(record meetingSpecialistProductRecord) 
 	switch record.Status {
 	case "awaiting_approval":
 		return record.Invitation.Decision == "requested"
-	case "approved_waiting_for_provider_qualification", "joined_test_session":
+	case "approved_waiting_for_provider_qualification", "joined_session", "joined_test_session":
 		return record.Invitation.Decision == "approved"
 	default:
 		return false
@@ -1015,7 +1041,7 @@ func cloneMeetingSpecialistTerminalEvidence(evidence *MeetingSpecialistTerminalE
 }
 
 func meetingSpecialistInvitationRequiresEligibility(record meetingSpecialistProductRecord) bool {
-	return oneOf(record.Status, "awaiting_approval", "approved_waiting_for_provider_qualification", "approved_reauthorization_required", "joined_test_session")
+	return oneOf(record.Status, "awaiting_approval", "approved_waiting_for_provider_qualification", "approved_reauthorization_required", "joined_session", "joined_test_session")
 }
 
 // approved_reauthorization_required is already a zero-authority tombstone for
@@ -1024,7 +1050,7 @@ func meetingSpecialistInvitationRequiresEligibility(record meetingSpecialistProd
 // A fresh invitation is required against the current participant and consent
 // scope before a specialist can join again.
 func meetingSpecialistInvitationRequiresCurrentScope(record meetingSpecialistProductRecord) bool {
-	return oneOf(record.Status, "awaiting_approval", "approved_waiting_for_provider_qualification", "joined_test_session")
+	return oneOf(record.Status, "awaiting_approval", "approved_waiting_for_provider_qualification", "joined_session", "joined_test_session")
 }
 
 func (product *MeetingSpecialistProduct) revokeEligibilityLocked(id string, record meetingSpecialistProductRecord, now time.Time) meetingSpecialistRuntimeRevocation {

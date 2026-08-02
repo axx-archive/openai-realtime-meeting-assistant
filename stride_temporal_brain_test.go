@@ -448,6 +448,9 @@ func TestSpecialistContextContainsOnlyExactAuthorizedBodyFreeReferencesAndBudget
 	if assembled.Envelope.Validate() != nil || len(assembled.Envelope.TranscriptRefs) != 1 || len(assembled.Envelope.AnalysisRefs) != 1 || len(assembled.Envelope.BrainRefs) != 1 || len(assembled.Envelope.WorkRefs) != 1 {
 		t.Fatalf("assembled envelope = %+v", assembled)
 	}
+	if !sameMeetingSpecialistAudience(assembled.Envelope.Audience, request.Invitation.Audience) {
+		t.Fatalf("specialist context audience widened or narrowed: got=%+v want=%+v", assembled.Envelope.Audience, request.Invitation.Audience)
+	}
 	withoutEligibility := request
 	withoutEligibility.Invitation.Eligibility = nil
 	if _, err := AssembleMeetingSpecialistContext(withoutEligibility); !errors.Is(err, ErrTemporalBrainInvalid) {

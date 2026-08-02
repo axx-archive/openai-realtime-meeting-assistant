@@ -28,6 +28,19 @@ const (
 	meetingSpecialistRealtimeModelSource         = "https://developers.openai.com/api/docs/models/gpt-realtime-2.1"
 )
 
+type MeetingSpecialistRealtimeInputMode string
+
+const (
+	// Direct PCM cannot be hard-capped in provider input tokens. Admission must
+	// reserve the model's full documented context window for every response.
+	MeetingSpecialistRealtimeInputDirectPCM MeetingSpecialistRealtimeInputMode = "direct_pcm_full_context"
+	// Transcript text is an accounting contract for a future authoritative,
+	// server-fed transcript transport. The declared bound covers all text input
+	// for the next response. This adapter does not dial in this mode until that
+	// transport receives separate protocol qualification.
+	MeetingSpecialistRealtimeInputBoundedTranscript MeetingSpecialistRealtimeInputMode = "bounded_transcript_text"
+)
+
 var (
 	ErrMeetingSpecialistProviderDisabled = errors.New("meeting specialist Realtime provider is disabled")
 	ErrMeetingSpecialistProviderConfig   = errors.New("meeting specialist Realtime provider configuration is invalid")
@@ -43,19 +56,21 @@ var (
 // a disabled instance; a later release must construct an enabled config after
 // its provider, consent, custody, pricing, and rollout gates have passed.
 type MeetingSpecialistRealtimeConfig struct {
-	Enabled          bool
-	APIKey           string
-	SafetyIdentifier string
-	Model            string
-	ReasoningEffort  string
-	Voice            string
-	MaxOutputTokens  int64
-	MaxContextBytes  int
-	MaxEventBytes    int64
-	MaxEvents        int
-	MaxAudioBytes    int64
-	Now              func() time.Time
-	ResolveBrief     MeetingSpecialistRealtimeBriefResolver
+	Enabled               bool
+	APIKey                string
+	SafetyIdentifier      string
+	Model                 string
+	ReasoningEffort       string
+	Voice                 string
+	MaxOutputTokens       int64
+	InputMode             MeetingSpecialistRealtimeInputMode
+	MaxInputTokensPerTurn int64
+	MaxContextBytes       int
+	MaxEventBytes         int64
+	MaxEvents             int
+	MaxAudioBytes         int64
+	Now                   func() time.Time
+	ResolveBrief          MeetingSpecialistRealtimeBriefResolver
 
 	dial meetingSpecialistRealtimeDialer
 }
@@ -88,6 +103,7 @@ func defaultOffMeetingSpecialistRealtimeConfig() MeetingSpecialistRealtimeConfig
 		ReasoningEffort: "high",
 		Voice:           defaultRealtimeVoice,
 		MaxOutputTokens: 256,
+		InputMode:       MeetingSpecialistRealtimeInputDirectPCM,
 		MaxContextBytes: meetingSpecialistRealtimeMaxContextBytes,
 		MaxEventBytes:   meetingSpecialistRealtimeMaxEventBytes,
 		MaxEvents:       meetingSpecialistRealtimeMaxEvents,
@@ -116,6 +132,10 @@ func (config MeetingSpecialistRealtimeConfig) normalized() MeetingSpecialistReal
 	config.Model = strings.TrimSpace(config.Model)
 	config.ReasoningEffort = strings.ToLower(strings.TrimSpace(config.ReasoningEffort))
 	config.Voice = strings.TrimSpace(config.Voice)
+	config.InputMode = MeetingSpecialistRealtimeInputMode(strings.TrimSpace(string(config.InputMode)))
+	if config.InputMode == "" {
+		config.InputMode = MeetingSpecialistRealtimeInputDirectPCM
+	}
 	return config
 }
 
@@ -130,7 +150,8 @@ func (config MeetingSpecialistRealtimeConfig) validate(launch MeetingSpecialistL
 		config.MaxContextBytes <= 0 || config.MaxContextBytes > meetingSpecialistRealtimeMaxContextBytes ||
 		config.MaxEventBytes <= 0 || config.MaxEventBytes > meetingSpecialistRealtimeMaxEventBytes ||
 		config.MaxEvents <= 0 || config.MaxEvents > meetingSpecialistRealtimeMaxEvents ||
-		config.MaxAudioBytes <= 0 || config.MaxAudioBytes > meetingSpecialistRealtimeMaxAudioBytes {
+		config.MaxAudioBytes <= 0 || config.MaxAudioBytes > meetingSpecialistRealtimeMaxAudioBytes ||
+		!validMeetingSpecialistRealtimeInputAccounting(config) {
 		return ErrMeetingSpecialistProviderConfig
 	}
 	if launch.Validate(config.Now().UTC()) != nil {
@@ -144,10 +165,13 @@ func (config MeetingSpecialistRealtimeConfig) validate(launch MeetingSpecialistL
 
 // meetingSpecialistRealtimeResponseAdmission is the single pre-provider
 // token/cost authority used both before dialing and before every response.
-// Past reconciled usage is charged against the cumulative envelopes. The next
-// direct-PCM turn reserves the full documented context window as audio input;
-// no duration-to-token ratio is inferred.
+// Past reconciled usage is charged against the cumulative envelopes. Direct
+// PCM reserves the full documented context window because the provider offers
+// no hard audio-input token cap. Authoritative transcript text instead uses a
+// declared per-turn input bound; the normal 1,500-token approval can therefore
+// admit that mode without weakening any human-visible ceiling.
 func meetingSpecialistRealtimeResponseAdmission(config MeetingSpecialistRealtimeConfig, launch MeetingSpecialistLaunch, usedTokens, usedCostCents int64) (int64, int64, bool) {
+	config = config.normalized()
 	if usedTokens < 0 || usedCostCents < 0 {
 		return 0, 0, false
 	}
@@ -155,8 +179,12 @@ func meetingSpecialistRealtimeResponseAdmission(config MeetingSpecialistRealtime
 	if launch.ApprovalLimits.TokenBudget < tokenLimit {
 		tokenLimit = launch.ApprovalLimits.TokenBudget
 	}
+	inputTokens, audioInput, ok := meetingSpecialistRealtimeInputReservation(config)
+	if !ok {
+		return 0, 0, false
+	}
 	remainingTokens := tokenLimit - usedTokens
-	maxOutput := remainingTokens - meetingSpecialistRealtimeContextWindowTokens
+	maxOutput := remainingTokens - inputTokens
 	if config.MaxOutputTokens < maxOutput {
 		maxOutput = config.MaxOutputTokens
 	}
@@ -175,10 +203,13 @@ func meetingSpecialistRealtimeResponseAdmission(config MeetingSpecialistRealtime
 		return 0, 0, false
 	}
 	costCeiling := func(outputTokens int64) (int64, bool) {
-		costUSD, priced := estimateCostUSDAt(config.Model, config.Now().UTC(), llmTokenUsage{
-			AudioInputTokens:  meetingSpecialistRealtimeContextWindowTokens,
-			AudioOutputTokens: outputTokens,
-		})
+		usage := llmTokenUsage{AudioOutputTokens: outputTokens}
+		if audioInput {
+			usage.AudioInputTokens = inputTokens
+		} else {
+			usage.InputTokens = inputTokens
+		}
+		costUSD, priced := estimateCostUSDAt(config.Model, config.Now().UTC(), usage)
 		if !priced {
 			return 0, false
 		}
@@ -206,4 +237,26 @@ func meetingSpecialistRealtimeResponseAdmission(config MeetingSpecialistRealtime
 		return 0, 0, false
 	}
 	return admittedOutput, admittedCost, true
+}
+
+func validMeetingSpecialistRealtimeInputAccounting(config MeetingSpecialistRealtimeConfig) bool {
+	switch config.InputMode {
+	case MeetingSpecialistRealtimeInputDirectPCM:
+		return config.MaxInputTokensPerTurn == 0
+	case MeetingSpecialistRealtimeInputBoundedTranscript:
+		return config.MaxInputTokensPerTurn > 0 && config.MaxInputTokensPerTurn <= meetingSpecialistRealtimeContextWindowTokens
+	default:
+		return false
+	}
+}
+
+func meetingSpecialistRealtimeInputReservation(config MeetingSpecialistRealtimeConfig) (tokens int64, audio bool, ok bool) {
+	config = config.normalized()
+	if !validMeetingSpecialistRealtimeInputAccounting(config) {
+		return 0, false, false
+	}
+	if config.InputMode == MeetingSpecialistRealtimeInputDirectPCM {
+		return meetingSpecialistRealtimeContextWindowTokens, true, true
+	}
+	return config.MaxInputTokensPerTurn, false, true
 }

@@ -683,7 +683,11 @@ func AssembleMeetingSpecialistContext(request MeetingSpecialistContextRequest) (
 	envelope := MeetingSpecialistContextEnvelope{
 		Header: request.Header, Invitation: referenceFromHeader(request.Invitation.Header), AgentProfile: request.AgentProfile, RuntimeRevision: request.RuntimeRevision, ModelRevision: request.ModelRevision,
 		TranscriptRefs: approvedTranscript, AnalysisRefs: analysis, BrainRefs: brain, WorkRefs: work,
-		Audience: STRIDEAudience{Visibility: "private", Principals: []string{request.Principal.ID}}, RetentionDigest: request.RetentionDigest, PurgeGeneration: request.PurgeGeneration,
+		// Preserve the exact approved invitation audience. The requesting ACL
+		// principal is still used to filter every reference above, but narrowing
+		// the envelope itself to that principal would make a members-only meeting
+		// context impossible to bind to MeetingSpecialistLaunch.
+		Audience: cloneAudience(request.Invitation.Audience), RetentionDigest: request.RetentionDigest, PurgeGeneration: request.PurgeGeneration,
 		TranscriptHighWater: request.Answer.TranscriptHighWater, AnalysisHighWater: request.Answer.AnalysisHighWater,
 		GapsDigest: temporalDigestBytes(gapsRaw), CoverageDigest: coverageDigest, ToolIDs: sortedStrings(request.ToolIDs), ResponseContract: request.ResponseContract, FloorPolicy: request.FloorPolicy,
 		TimeBudgetSeconds: request.TimeBudgetSeconds, TurnBudget: request.TurnBudget, AudioBudgetSeconds: request.AudioBudgetSeconds, TokenBudget: request.TokenBudget, CostBudgetCents: request.CostBudgetCents,

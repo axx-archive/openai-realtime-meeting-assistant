@@ -826,6 +826,39 @@ func TestMeetingSpecialistRealtimeAdmissionCapsCumulativeTokenAndCostEnvelopes(t
 	})
 }
 
+func TestMeetingSpecialistRealtimeAdmissionSeparatesDirectPCMFromBoundedTranscript(t *testing.T) {
+	now := time.Date(2026, 8, 1, 18, 0, 0, 0, time.UTC)
+	launch := specialistRuntimeLaunchFixture(now)
+	config := defaultOffMeetingSpecialistRealtimeConfig().normalized()
+	config.Now = func() time.Time { return now }
+
+	if _, _, ok := meetingSpecialistRealtimeResponseAdmission(config, launch, 0, 0); ok {
+		t.Fatal("ordinary 1,500-token approval admitted unbounded direct PCM")
+	}
+
+	config.InputMode = MeetingSpecialistRealtimeInputBoundedTranscript
+	config.MaxInputTokensPerTurn = 512
+	output, cost, ok := meetingSpecialistRealtimeResponseAdmission(config, launch, 0, 0)
+	if !ok || output != config.MaxOutputTokens || cost <= 0 || cost > launch.ApprovalLimits.CostBudgetCents {
+		t.Fatalf("bounded transcript admission output=%d cost=%d ok=%v", output, cost, ok)
+	}
+
+	// Accounting qualification does not silently qualify a new wire protocol.
+	// The existing Realtime adapter must reject transcript mode before dialing.
+	conn := newRecordedMeetingSpecialistRealtimeConn()
+	providerConfig := specialistRealtimeConfigFixture(now, conn)
+	providerConfig.InputMode = MeetingSpecialistRealtimeInputBoundedTranscript
+	providerConfig.MaxInputTokensPerTurn = 512
+	var dialed atomic.Bool
+	providerConfig.dial = func(context.Context, string, http.Header) (meetingSpecialistRealtimeConn, error) {
+		dialed.Store(true)
+		return conn, nil
+	}
+	if _, err := NewMeetingSpecialistRealtimeProviderFactory(providerConfig)(context.Background(), launch); !errors.Is(err, ErrMeetingSpecialistProviderConfig) || dialed.Load() {
+		t.Fatalf("unqualified transcript transport err=%v dialed=%v", err, dialed.Load())
+	}
+}
+
 func TestMeetingSpecialistRealtimeFailedResponseFencesSynchronously(t *testing.T) {
 	now := time.Date(2026, 8, 1, 18, 0, 0, 0, time.UTC)
 	dir := ledgerTestDir(t)
