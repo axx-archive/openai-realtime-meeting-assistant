@@ -160,6 +160,14 @@ func (product *MeetingSpecialistProduct) restoreLocked() error {
 		idempotency[durable.Invitation.IdempotencyKeyDigest] = struct{}{}
 		status := durable.Status
 		updatedAt := durable.UpdatedAt
+		switch status {
+		case "joined_test_session":
+			status = "approved_reauthorization_required"
+			expiredOnRestore = true
+		case "approved_test_session_failed":
+			status = "approved_session_failed"
+			expiredOnRestore = true
+		}
 		if meetingSpecialistInvitationIsActive(meetingSpecialistProductRecord{Invitation: durable.Invitation, Status: status}) && !now.Before(durable.Invitation.ExpiresAt) {
 			expired, err := expireMeetingSpecialistRecord(meetingSpecialistProductRecord{Invitation: durable.Invitation, Status: status, UpdatedAt: updatedAt}, now)
 			if err != nil {
@@ -169,7 +177,7 @@ func (product *MeetingSpecialistProduct) restoreLocked() error {
 			expiredOnRestore = true
 		} else if legacyMeetingSpecialistCandidate(durable.Agent) && durable.Invitation.Eligibility == nil && meetingSpecialistInvitationRequiresEligibility(meetingSpecialistProductRecord{Invitation: durable.Invitation, Status: status}) {
 			status = "eligibility_revoked"
-		} else if durable.Invitation.Decision == "approved" && (status == "approved_waiting_for_provider_qualification" || status == "joined_session" || status == "joined_test_session") {
+		} else if durable.Invitation.Decision == "approved" && (status == "approved_waiting_for_provider_qualification" || status == "joined_session") {
 			status = "approved_reauthorization_required"
 		}
 		if meetingSpecialistInvitationIsActive(meetingSpecialistProductRecord{Invitation: durable.Invitation, Status: status}) {
@@ -288,7 +296,11 @@ func validMeetingSpecialistStatusDecision(status, decision string) bool {
 	switch status {
 	case "awaiting_approval":
 		return decision == "requested"
-	case "approved_waiting_for_provider_qualification", "approved_reauthorization_required", "approved_session_failed", "approved_test_session_failed", "joined_session", "joined_test_session", "failed":
+	case "approved_waiting_for_provider_qualification", "approved_reauthorization_required", "approved_session_failed", "joined_session", "failed":
+		return decision == "approved"
+	case "joined_test_session", "approved_test_session_failed":
+		// Accepted only as a legacy on-disk input. Restore normalizes these
+		// unreachable test-seam states before exposing or persisting them.
 		return decision == "approved"
 	case "eligibility_revoked", "closed":
 		return decision == "requested" || decision == "approved"

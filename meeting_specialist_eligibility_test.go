@@ -177,13 +177,14 @@ func TestMeetingSpecialistEligibilityRequiresExplicitRevisionBoundAssignmentAndS
 	product := NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{Enabled: true, TenantID: "bonfire", Now: func() time.Time { return now }, Authority: authority, Persistence: persistence})
 	bindMeetingSpecialistAuthorityObserver(runtime, product)
 	user := &userAccount{Email: "aj@shareability.com", Name: "AJ"}
-	assignmentProvider := installMeetingSpecialistTestJoin(product, now)
+	assignmentProvider := installMeetingSpecialistProductionJoin(product, now)
 	first, err := product.Request(context.Background(), user, scope.RoomID, agentID, "Pressure-test the launch positioning", "eligibility-first", 5*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
+	bindMeetingSpecialistProductionQualification(t, product, first.ID)
 	firstApproved, err := product.Resolve(context.Background(), user, scope.RoomID, first.ID, first.Revision, "approved")
-	if err != nil || firstApproved.Status != "joined_test_session" || !firstApproved.ProviderSessionStarted {
+	if err != nil || firstApproved.Status != "joined_session" || !firstApproved.ProviderSessionStarted {
 		t.Fatalf("initial joined specialist=%+v err=%v", firstApproved, err)
 	}
 	product.mu.Lock()
@@ -259,13 +260,14 @@ func TestMeetingSpecialistEligibilityRequiresExplicitRevisionBoundAssignmentAndS
 		t.Fatalf("restored membership did not mint current binding: %+v", candidates)
 	}
 
-	capabilityProvider := installMeetingSpecialistTestJoin(product, now)
+	capabilityProvider := installMeetingSpecialistProductionJoin(product, now)
 	second, err := product.Request(context.Background(), user, scope.RoomID, agentID, "Pressure-test the revised positioning", "eligibility-second", 5*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
+	bindMeetingSpecialistProductionQualification(t, product, second.ID)
 	secondApproved, err := product.Resolve(context.Background(), user, scope.RoomID, second.ID, second.Revision, "approved")
-	if err != nil || secondApproved.Status != "joined_test_session" || !secondApproved.ProviderSessionStarted {
+	if err != nil || secondApproved.Status != "joined_session" || !secondApproved.ProviderSessionStarted {
 		t.Fatalf("capability-bound joined specialist=%+v err=%v", secondApproved, err)
 	}
 	// A current Workforce capability revision is part of the same binding. A
@@ -320,13 +322,14 @@ func TestMeetingSpecialistEligibilityRequiresExplicitRevisionBoundAssignmentAndS
 		t.Fatalf("participant churn did not revoke invitation: %+v", status.Invitations)
 	}
 
-	joinedProvider := installMeetingSpecialistTestJoin(product, now)
+	joinedProvider := installMeetingSpecialistProductionJoin(product, now)
 	fourth, err := product.Request(context.Background(), user, scope.RoomID, agentID, "Review the updated participant discussion", "eligibility-fourth", 5*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
+	bindMeetingSpecialistProductionQualification(t, product, fourth.ID)
 	joined, err := product.Resolve(context.Background(), user, scope.RoomID, fourth.ID, fourth.Revision, "approved")
-	if err != nil || joined.Status != "joined_test_session" || !joined.ProviderSessionStarted {
+	if err != nil || joined.Status != "joined_session" || !joined.ProviderSessionStarted {
 		t.Fatalf("joined specialist=%+v err=%v", joined, err)
 	}
 	if err := runtime.WithProductContext("bonfire", STRIDEProductScopeMarketplace, func(ctx STRIDEProductContext) error {
@@ -381,7 +384,7 @@ func TestMeetingSpecialistEligibilityRequiresExplicitRevisionBoundAssignmentAndS
 		t.Fatalf("offboarded specialist resurrected after restart: %+v", restartedStatus)
 	}
 	for _, invitation := range restartedStatus.Invitations {
-		if invitation.ProviderSessionStarted || invitation.Status == "awaiting_approval" || invitation.Status == "joined_test_session" {
+		if invitation.ProviderSessionStarted || invitation.Status == "awaiting_approval" || invitation.Status == "joined_session" {
 			t.Fatalf("restart resurrected specialist authority: %+v", invitation)
 		}
 	}

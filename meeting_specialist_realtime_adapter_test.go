@@ -1094,7 +1094,7 @@ func TestParseMeetingSpecialistRealtimeUsageClassifiesOptionalPartialFields(t *t
 	}
 }
 
-func TestMeetingSpecialistProductDefaultFactoryCannotActivateOnApproval(t *testing.T) {
+func TestMeetingSpecialistProductApprovalOwnsNoDefaultFactoryOrRuntime(t *testing.T) {
 	product, _, user := specialistProductFixture(t)
 	requested, err := product.Request(context.Background(), user, "dog-perfect", "mary", "Review the launch", "default-factory-request", time.Minute)
 	if err != nil {
@@ -1107,11 +1107,7 @@ func TestMeetingSpecialistProductDefaultFactoryCannotActivateOnApproval(t *testi
 	product.mu.Lock()
 	runtime := product.invitations[requested.ID].Runtime
 	product.mu.Unlock()
-	if approved.ProviderSessionStarted || runtime == nil || runtime.factory == nil || runtime.Snapshot().Session != nil {
-		t.Fatalf("default product factory activated: approved=%+v runtime=%+v", approved, runtime)
-	}
-	launch := specialistRuntimeLaunchFixture(product.now().UTC())
-	if _, err := runtime.factory(context.Background(), launch); !errors.Is(err, ErrMeetingSpecialistProviderDisabled) {
-		t.Fatalf("default product factory err=%v", err)
+	if approved.ProviderSessionStarted || runtime != nil || approved.Status != "approved_waiting_for_provider_qualification" {
+		t.Fatalf("default approval retained factory/runtime authority: approved=%+v runtime=%+v", approved, runtime)
 	}
 }

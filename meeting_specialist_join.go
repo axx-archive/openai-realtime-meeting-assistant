@@ -44,7 +44,7 @@ func (request MeetingSpecialistQualificationRequest) validate() error {
 		!isHexDigest(request.CandidateTreeDigest) || !isHexDigest(request.CandidateImageDigest) || !isHexDigest(request.CandidateConfigDigest) || !isHexDigest(request.CandidateRouteDigest) ||
 		!strideIdentifier(request.Provider) || !strideIdentifier(request.ProviderModel) || !strideIdentifier(request.ProviderRoute) || !isHexDigest(request.ProviderRouteDigest) ||
 		!oneOf(string(request.AccountingMode), string(MeetingSpecialistRealtimeInputDirectPCM), string(MeetingSpecialistRealtimeInputBoundedTranscript)) ||
-		request.SpecialistProfile.Validate() != nil || request.SpecialistProfile.ContractType != STRIDEContractAgentCoreProfile ||
+		request.SpecialistProfile.Validate() != nil || !oneOf(string(request.SpecialistProfile.ContractType), string(STRIDEContractAgentCoreProfile), string(STRIDEContractAgentProfileOverlay)) ||
 		request.SpecialistCapability.Validate() != nil || request.SpecialistCapability.ContractType != STRIDEContractAgentCapabilityManifest {
 		return ErrMeetingSpecialistJoinQualification
 	}
