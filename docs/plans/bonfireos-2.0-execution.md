@@ -21,10 +21,11 @@ dependencies, authority boundaries, rollback posture, and the next safe action.
 | Production | `30eb8891dd74edda` | Live `/healthz` identity on 2026-08-02. This is the retained older release; the sealed canonical repair release has not been activated. |
 | Production health | Traffic-ready, capability-degraded | `/capabilities` reports `trafficReady:true`, `ok:false`; Scout is disconnected/degraded and STT is disconnected/stale since `2026-07-31T18:28:56Z`. Aggregate readiness is not acceptance. |
 | P0 branch | `/tmp/meetingassist-scout-p0`, `codex/scout-p0`, candidate `13a3ef2ea7bd8031a0717616d11373482a598dcd` on base `9217dbf` | Isolated, committed deterministic candidate. It is not published, provider-qualified, physical-device accepted, merge-approved, or deployable yet. |
-| E10 integration | `/tmp/meetingassist-e10-integration`, `codex/e10-integration`, `f808a0e41361f6a98ca5d1ef6db64a6c464fac2a` | Clean follow-up foundation: worker isolation, qualification registry, and specialist-agent join work. Not ready for `main`. |
+| E10 integration | `/tmp/meetingassist-e10-integration`, `codex/e10-integration`, candidate `0783a1cf9c45c1e06e95e3b010c7eae055ef723d` on base `9217dbf` | Clean, committed security candidate. Focused normal/race, full repository, vet, diff, and independent critic gates pass. It is not published, externally provisioned, merge-approved, or deployable yet. |
+| Combined release candidate | `/tmp/meetingassist-stride-rc`, `codex/stride-release-candidate`, verified code head `62aafcab5b9824339f5511e54dde212f181171f0` | Fresh isolated composition of the complete E10 chain plus Scout P0. Full Go, focused race, vet, mobile, composition, and independent critic gates pass; `main` has not moved. |
 | Specialist repair | `/tmp/meetingassist-e10-specialist`, `codex/e10-specialist`, base `0aa1b090687d7a5d9ed3c10c9d792ee9044a545c` | Nine tracked files contain preserved uncommitted removal of the legacy alternate join path and request-context leakage. |
 | Registry repair | `/tmp/meetingassist-e10-registry`, `codex/e10-registry`, base `1d2f55cfa86e1f155b7b14d06c5928379e2b1ea3` | Seven tracked files plus untracked `meeting_specialist_qualification_bridge.go` preserve signed-evidence binding, expiry, and external ledger-head/CAS work. |
-| Independent E10 verdict | `REVISE` | Neither interrupted repair is approved for integration or `main`. |
+| Independent E10 verdict | `PASS` | No blocker, major, or minor finding remains in the committed E10 code checkpoint. External authority custody and activation remain separate default-off gates. |
 | TestFlight | Stride 1.0.0 Build 29 | Built from `97ff340097253ff3ad98481226f6159c3ce206ae`; EAS `7857b9b2-2de8-4248-b1c6-a50c54f6ca97` finished, Apple build `6a870589-8448-44fb-99d6-cea2f5a9ebb4` was last verified `VALID`, non-expired, and in internal `Team (Expo)`. External `Bonfire` excludes it. Physical-device acceptance is still open. |
 
 No new migration, push, deployment, provider qualification, feature activation,
@@ -158,45 +159,59 @@ The approved home behavior remains:
 
 ## 6. E10 convergence state
 
-The integration branch already contains patch-equivalent versions of the clean
-worker, specialist, and first registry commits; do not cherry-pick those commits
-again. When P0 is stable, reconcile from `f808a0e` in this order:
+The interrupted worktrees remain byte-for-byte preserved. Their repairs were
+reconciled semantically onto the integration branch and sealed as `dad0070`
+and `0783a1c`; the originals were not edited, reset, committed, or deleted.
 
-1. Preserve and review both dirty worktrees before rebasing or applying patches.
-2. Apply the specialist dirty repair first; it previously applied cleanly to
-   the integration base.
-3. Integrate the registry repair semantically. Its tracked patch conflicts in
-   `meeting_specialist_realtime_adapter.go` and its snapshot was not a complete
-   compiling unit, so mechanical patch application is not acceptance.
-4. Remove every alternate provider-launch path and finish request-context
-   ownership.
-5. Bind signed evidence to the exact provider, model, voice, config, candidate,
-   and fixed freshness window.
-6. Finish the externally anchored ledger head with compare-and-swap semantics.
-7. Run an independent red-team/critic gate. The current verdict stays
-   `REVISE` until that evidence passes.
+The committed candidate now has one sealed provider-launch path, request-owned
+startup cancellation without request-value leakage, exact signed provider,
+model, voice, full endpoint, accounting, runtime, capability-policy, candidate,
+release/tree/image/config, evaluator, and result binding, plus a fixed seven-day
+expiry that is checked after authority I/O, provider creation, and briefing and
+also bounds the live runtime. The full signed result is carried through runtime,
+product, terminal evidence, signed snapshot, and restart. Snapshot format v2
+migrates valid signed v1 history as explicitly qualification-unbound rather than
+silently trusting it.
+
+Qualification custody atomically supplies the approved trust-root pin and exact
+ledger head; CAS requires that same root revision. Rejected CAS rolls back,
+lost replies reconcile by reread, stale processes fail before append, root
+rotation fences stale verification, third-state ambiguity poisons the process,
+and all custody calls are bounded. No local/file production authority exists:
+external custody provisioning remains a default-off release prerequisite.
+
+The final E10 checkpoint passed focused normal and race coverage, `go vet
+./...`, `git diff --check`, and a clean `go test ./... -count=1 -timeout 20m`
+with the root package at 392.773 seconds. The independent critic returned
+`PASS`.
+
+The isolated combined code head `62aafca` also passes a clean repository-wide
+`go test ./... -count=1 -timeout 20m` with the root package at 406.350 seconds,
+the combined focused race gate (24.274 seconds), `go vet ./...`, E10 internal
+packages, `git diff --check`, mobile dependency resolution and TypeScript, and
+all 368 mobile tests. The independent composition critic returned `PASS` after
+proving the reviewed P0 and E10 files are unchanged in the combined tree, no
+Anthropic core fallback or alternate specialist launch path reappeared, and no
+production activation was wired. Prior desktop/mobile-web/iPhone-simulator
+render receipts remain code-identical because the E10 composition changes no
+reviewed P0 UI file. Physical-device and live-provider acceptance remain open.
 
 ## 7. Remaining dependency order
 
-1. Independently review the isolated Scout P0 branch. Complete the full
-   normal/race/vet and rendered browser/simulator matrix, then reproduce and
-   qualify web/physical-iPhone voice, dictation, and typed Scout as separate
-   lanes before activation.
-2. Reconcile the two interrupted E10 repairs onto `f808a0e`; complete the
-   security convergence and independent red-team pass.
-3. Freeze one candidate and run the complete non-`stride-site` normal, race,
+1. Freeze the isolated combined candidate and run the complete non-`stride-site` normal, race,
    vet, dependency, mobile/TypeScript, simulator, rendered desktop/mobile,
    authority, restart, migration, release-pack, and founder matrix.
-4. Execute the manifest-confirmed canonical repair ceremony. Stop at each human
+2. Execute the manifest-confirmed canonical repair ceremony. Stop at each human
    and parity gate; do not reuse any retired release pair or failed ceremony.
-5. Merge the verified scope, commit and push `main`, run only the reviewed
+3. Merge the verified scope, commit and push `main`, run only the reviewed
    migrations, deploy the exact artifact, and prove public commit/tree/image,
    health, capabilities, Scout, STT, canonical convergence, rollback, and data
    integrity.
-6. Build the resulting mobile release (expected Build 30), submit it to internal
+4. Build the resulting mobile release (expected Build 30), submit it to internal
    TestFlight, verify Apple `VALID` and `Team (Expo)`, then complete physical
    device acceptance. Submission alone is not acceptance.
-7. Finish external E10 evidence: bounded paid-provider qualification, real
+5. Finish external P0/E10 evidence: web and physical-iPhone Realtime/dictation/
+   typed-Scout acceptance, bounded paid-provider qualification, real
    WebRTC/TURN device matrix, ten immutable I&O pilots with two eligible
    reviewers, 24-hour/ten-sitting soak, encrypted immutable offsite backup,
    authenticated restore, HA/DR, and independent anchor custody.
@@ -245,14 +260,16 @@ user/device owner; it cannot be inferred from simulator or Apple processing.
 
 ## 10. Resume here
 
-Resume in `/tmp/meetingassist-scout-p0`. The code, rendered, focused race/vet,
-mobile, and full repository gates are green; freeze this exact isolated
-candidate without changing production routes. The remaining P0 frontier is
-live-provider and physical-device evidence: verify voice, dictation, and typed
-Scout as three separate lanes, keep target routes default-off until
-qualification, and do not substitute simulator/fake-server receipts. Code-level
-P0 convergence may now move to semantic E10 reconciliation on `f808a0e` while
-those external acceptance gates remain explicit.
+Resume in `/tmp/meetingassist-stride-rc` at verified code head `62aafca`. The
+remaining pre-ceremony P0 frontier is live-provider and physical-device
+evidence: verify voice, dictation, and typed Scout as three separate lanes,
+keep target routes default-off until qualification, and do not substitute
+simulator/fake-server receipts. Refresh the physical iPhone connection and
+obtain explicit authority before any paid provider attempt. If those gates
+pass, freeze the exact release manifest and begin the user-assisted canonical
+repair; otherwise remain default-off and preserve this candidate. External
+custody, HA/DR, pilot, soak, and broader device gates remain open even after the
+deterministic matrix passes.
 
 No merge, push, migration, VPS mutation, provider call, TestFlight upload, or
 canonical append belongs before that frontier passes and its separate authority
