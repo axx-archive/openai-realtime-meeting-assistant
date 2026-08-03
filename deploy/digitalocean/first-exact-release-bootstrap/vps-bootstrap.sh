@@ -827,7 +827,7 @@ assert_canonical_normalization_receipt() {
     (.beforeState|stateSeal) and (.afterState|stateSeal) and
     ([ $beforeObservation[0].candidates[] |
        select(.Kind=="missing_event" or .Kind=="state_mismatch") |
-       (.Family+"\u0000"+.ObjectID) ] | unique | length) as $ordinaryDelta and
+       (.Family+"\u0000"+.ObjectID) ] | unique | length) as $ordinaryDelta |
     .delta.tenantEvents==$ordinaryDelta and .delta.importOutbox==$ordinaryDelta and
     (.delta.versionEntries|type=="number" and .>=0 and .<=$ordinaryDelta and floor==.) and
     (.afterState.tenantEventCount-.beforeState.tenantEventCount)==$ordinaryDelta and
