@@ -40,11 +40,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and remain the fallback if this bundle is ever rejected.
       // Regenerate both with `npm run brand:regen` from the repo root.
       icon: './assets/Stride.icon',
-      // Build 29 carries the STRIDE company-brain evolution: resilient native
-      // rooms, distinct Scout/meeting/dictation audio ownership, richer team
-      // and agent surfaces, and sparse conversation timeline markers. Pin the
-      // app and ReplayKit extension to the same release.
-      buildNumber: '29',
+      // Build 30 carries the production Scout recovery and mobile thread
+      // polish: reliable Realtime/dictation ownership, private Scout-thread
+      // handoff, smooth long-thread rendering, copy/edit, and title rename.
+      // Pin the app and ReplayKit extension to the same release.
+      buildNumber: '30',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',
