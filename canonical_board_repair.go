@@ -835,7 +835,7 @@ func (engine *postgresCanonicalBoardRepairEngine) buildPlanReadOnly(ctx context.
 	if err != nil {
 		return CanonicalImportPlan{}, err
 	}
-	journalRaw, err := readOptionalCanonicalLifecycleJournal(paths.DeletedJournal)
+	journalRaw, journalPresent, err := readOptionalCanonicalLifecycleJournalSnapshot(paths.DeletedJournal)
 	if err != nil {
 		return CanonicalImportPlan{}, err
 	}
@@ -850,7 +850,11 @@ func (engine *postgresCanonicalBoardRepairEngine) buildPlanReadOnly(ctx context.
 	paths.Board = filepath.Join(scratch, "kanban-board.json")
 	paths.DeletedJournal = filepath.Join(scratch, "deleted-objects.jsonl")
 	versionPath := filepath.Join(scratch, "object-versions.json")
-	for path, raw := range map[string][]byte{paths.Board: boardRaw, paths.DeletedJournal: journalRaw, versionPath: versionRaw} {
+	snapshots := map[string][]byte{paths.Board: boardRaw, versionPath: versionRaw}
+	if journalPresent {
+		snapshots[paths.DeletedJournal] = journalRaw
+	}
+	for path, raw := range snapshots {
 		if err := os.WriteFile(path, raw, 0o600); err != nil {
 			return CanonicalImportPlan{}, err
 		}
@@ -1889,7 +1893,7 @@ func writeCanonicalBoardRepairObservation(ctx context.Context, outputPath string
 	if err != nil {
 		return err
 	}
-	journalRaw, err := readOptionalCanonicalLifecycleJournal(paths.DeletedJournal)
+	journalRaw, journalPresent, err := readOptionalCanonicalLifecycleJournalSnapshot(paths.DeletedJournal)
 	if err != nil {
 		return err
 	}
@@ -1920,7 +1924,11 @@ func writeCanonicalBoardRepairObservation(ctx context.Context, outputPath string
 	scratchVersion := filepath.Join(scratch, "object-versions.json")
 	scratchSpool := filepath.Join(scratch, "mutation-spool.bcs")
 	scratchUsers := filepath.Join(scratch, "users.json")
-	for path, raw := range map[string][]byte{scratchBoard: boardRaw, scratchJournal: journalRaw, scratchVersion: versionRaw, scratchSpool: spoolRaw, scratchUsers: usersRaw} {
+	snapshots := map[string][]byte{scratchBoard: boardRaw, scratchVersion: versionRaw, scratchSpool: spoolRaw, scratchUsers: usersRaw}
+	if journalPresent {
+		snapshots[scratchJournal] = journalRaw
+	}
+	for path, raw := range snapshots {
 		if err := os.WriteFile(path, raw, 0o600); err != nil {
 			return err
 		}
@@ -2795,17 +2803,22 @@ func readRegularNoSymlink(path string) ([]byte, error) {
 // observation and repair preserve the same meaning while still rejecting any
 // symlink or unsafe parent path. The first authorized append creates the file.
 func readOptionalCanonicalLifecycleJournal(path string) ([]byte, error) {
+	raw, _, err := readOptionalCanonicalLifecycleJournalSnapshot(path)
+	return raw, err
+}
+
+func readOptionalCanonicalLifecycleJournalSnapshot(path string) ([]byte, bool, error) {
 	raw, err := readRegularNoSymlink(path)
 	if err == nil {
-		return raw, nil
+		return raw, true, nil
 	}
 	if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
+		return nil, false, err
 	}
 	if err := rejectSymlinkPathComponents(filepath.Dir(path)); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return []byte{}, nil
+	return []byte{}, false, nil
 }
 
 func readRootOnlyRegularFile(path string) ([]byte, error) {

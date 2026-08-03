@@ -352,9 +352,16 @@ func setupRealCanonicalRepairFixture(t *testing.T) (context.Context, *postgresCa
 func TestReadOptionalCanonicalLifecycleJournalTreatsLegacyAbsenceAsEmpty(t *testing.T) {
 	dir := canonicalRepairTestTempDir(t)
 	path := filepath.Join(dir, "deleted-objects.jsonl")
-	raw, err := readOptionalCanonicalLifecycleJournal(path)
-	if err != nil || len(raw) != 0 {
-		t.Fatalf("missing legacy journal raw=%q err=%v", raw, err)
+	raw, present, err := readOptionalCanonicalLifecycleJournalSnapshot(path)
+	if err != nil || len(raw) != 0 || present {
+		t.Fatalf("missing legacy journal raw=%q present=%v err=%v", raw, present, err)
+	}
+	if err := os.WriteFile(path, []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	raw, present, err = readOptionalCanonicalLifecycleJournalSnapshot(path)
+	if err != nil || len(raw) != 0 || !present {
+		t.Fatalf("existing empty journal raw=%q present=%v err=%v", raw, present, err)
 	}
 	if err := os.WriteFile(path, []byte("record\n"), 0o600); err != nil {
 		t.Fatal(err)
