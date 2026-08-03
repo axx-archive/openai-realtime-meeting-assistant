@@ -208,7 +208,9 @@ credential input in the pack.
 - asserts the exact eight-volume legacy inventory;
 - privately captures the Compose source paths that actually created every
   running predecessor container, seals their hashes, renders them into one
-  self-bound six-service recovery file, and also captures Caddy, `.env`,
+  self-bound six-service recovery file, and accepts a predecessor restored from
+  an earlier sealed recovery file only when its root-private environment is
+  byte-identical to the current live `.env`; it also captures Caddy, `.env`,
   `/opt/meetingassist` excluding its stale `data/`,
   `/opt/meetingassist-workspace`, Docker container/network/image metadata, and
   exact legacy images;

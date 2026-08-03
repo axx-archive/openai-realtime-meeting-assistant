@@ -495,7 +495,10 @@ phase_backup() {
     "$BK/private/containers.inspect.json")
   test "$legacy_project_dir" = /opt/meetingassist/deploy/digitalocean \
     || die 'running predecessor Compose project directory is not exact'
-  test "$legacy_env_file" = "$BASE_ENV" || die 'running predecessor Compose environment file is not exact'
+  [[ $legacy_env_file == /* ]] || die 'running predecessor Compose environment path is not absolute'
+  assert_root_private_regular_file "$legacy_env_file" 'running predecessor Compose environment file'
+  cmp "$legacy_env_file" "$BASE_ENV" >/dev/null \
+    || die 'running predecessor Compose environment differs from the exact live base environment'
   : >"$BK/private/legacy-compose-sources.jsonl"
   IFS=',' read -r -a legacy_paths <<<"$legacy_config_files"
   test "${#legacy_paths[@]}" -ge 1 || die 'running predecessor has no Compose source files'
@@ -517,11 +520,13 @@ phase_backup() {
   chmod 600 "$BK/private/legacy-compose-resolved.yml.tmp"
   mv "$BK/private/legacy-compose-resolved.yml.tmp" "$BK/private/legacy-compose-resolved.yml"
   jq -n --arg projectDirectory "$legacy_project_dir" --arg environmentFile "$legacy_env_file" \
+    --arg environmentFileSha256 "$(sha256sum "$legacy_env_file" | awk '{print $1}')" \
     --arg resolvedComposeSha256 "$(sha256sum "$BK/private/legacy-compose-resolved.yml" | awk '{print $1}')" \
     --arg baseEnvironmentSha256 "$(sha256sum "$BK/private/base.env" | awk '{print $1}')" \
     --slurpfile sources "$BK/private/legacy-compose-sources.jsonl" '
       {schema:"bonfire.legacy-compose-provenance.v1",status:"complete",projectName:"digitalocean",
        projectDirectory:$projectDirectory,environmentFile:$environmentFile,
+       environmentFileSha256:$environmentFileSha256,
        resolvedComposeSha256:$resolvedComposeSha256,baseEnvironmentSha256:$baseEnvironmentSha256,
        sourceConfigFiles:$sources}
     ' >"$BK/private/legacy-compose-provenance.raw"

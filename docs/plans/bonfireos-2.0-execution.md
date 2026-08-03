@@ -54,6 +54,17 @@ passed. One-shot admission now requires PostgreSQL alone before start,
 PostgreSQL plus the one-shot while running, and PostgreSQL alone again after
 exit, while container inspection proves the stopped configured attachment.
 
+The following pair stopped before service shutdown when the next backup saw
+that all six predecessor containers were now truthfully labeled as created by
+the prior sealed recovery Compose/environment paths. The previous validator
+allowed only the original `/opt` environment path. This caused no data or
+container mutation; the untouched predecessor was re-proven and reopened.
+Chained recovery provenance now accepts an absolute root-private environment
+source only when it is byte-identical to the current live base environment,
+then reseals its path and digest into the new backup. This preserves exact
+provenance across any number of proven cold restores without trusting a stale
+or different environment.
+
 ### Build 31 exact-archive correction — 2026-08-02
 
 The first Build 31 A/B attempt (`3f96d0880aa98f8ddb4f280da2d2388402389a5d`

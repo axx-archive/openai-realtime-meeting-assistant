@@ -87,7 +87,8 @@ assert_legacy_compose_recovery_bundle() {
     .schema=="bonfire.legacy-compose-provenance.v1" and .status=="complete" and
     .projectName=="digitalocean" and
     .projectDirectory=="/opt/meetingassist/deploy/digitalocean" and
-    .environmentFile=="/opt/meetingassist/deploy/digitalocean/.env" and
+    (.environmentFile|type=="string" and startswith("/")) and
+    .environmentFileSha256==$env and
     .resolvedComposeSha256==$compose and .baseEnvironmentSha256==$env and
     (.sourceConfigFiles|type=="array" and length>=1 and
       all(.[]; (.path|type=="string" and startswith("/")) and
