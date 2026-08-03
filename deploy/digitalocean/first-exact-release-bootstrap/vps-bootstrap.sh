@@ -1173,6 +1173,24 @@ assert_clone_network_membership() {
   ' >/dev/null || die 'qualification clone network contains an unknown endpoint'
 }
 
+assert_stopped_clone_configured_attachment() {
+  local container=$1 network=$2
+  docker inspect "$container" | jq -e --arg network "$network" '
+    length==1 and .[0].State.Running==false and
+    .[0].HostConfig.NetworkMode==$network and
+    (.[0].NetworkSettings.Networks|keys)==[$network]
+  ' >/dev/null || die 'stopped qualification clone container lost its sole configured network attachment'
+}
+
+assert_clone_network_has_no_active_endpoints() {
+  local network=$1
+  docker network inspect "$network" | jq -e '
+    length==1 and .[0].Internal==true and
+    .[0].Labels["bonfire.bootstrap.role"]=="canonical-repair-clone-qualification" and
+    ((.[0].Containers // {})|length)==0
+  ' >/dev/null || die 'stopped qualification clone network contains an active endpoint'
+}
+
 create_clone_stage_container() {
   local name=$1 role=$2 writable=$3 image=$4 network=$5 pg=$6 meeting=$7 usage=$8 codex=$9 render=${10} command_flag=${11}
   shift 11
@@ -1209,16 +1227,22 @@ create_clone_stage_container() {
       any(.[0].Mounts[];.Type=="bind" and .Source==$runtime and .Destination=="/run/bonfire-repair" and .RW==true) and
       (.[0].Config.Cmd|index($command)!=null)
     ' >/dev/null || die 'qualification clone one-shot confinement, image, mounts, or command drifted'
-  assert_clone_network_membership "$network" "$pg" "$name"
+  # Docker omits a stopped container from network-inspect .Containers. Prove
+  # its configured attachment through container inspect and require the only
+  # active endpoint to remain PostgreSQL until this one-shot starts.
+  assert_stopped_clone_configured_attachment "$name" "$network"
+  assert_clone_network_membership "$network" "$pg"
 }
 
 run_clone_stage_container() {
   local name=$1 pg=$2 network=$3 log=$4 exit_file=$5 exit_code
-  assert_clone_network_membership "$network" "$pg" "$name"
+  assert_stopped_clone_configured_attachment "$name" "$network"
+  assert_clone_network_membership "$network" "$pg"
   docker start "$name" >/dev/null
   assert_clone_network_membership "$network" "$pg" "$name"
   docker wait "$name" >"$exit_file"
-  assert_clone_network_membership "$network" "$pg" "$name"
+  assert_stopped_clone_configured_attachment "$name" "$network"
+  assert_clone_network_membership "$network" "$pg"
   exit_code=$(tr -d '[:space:]' <"$exit_file")
   [[ $exit_code =~ ^[0-9]+$ ]] || die 'qualification clone one-shot returned an invalid exit code'
   docker logs "$name" >"$log" 2>&1 || true
@@ -1353,7 +1377,8 @@ run_repair_clone_qualification() (
     ([.[0].Mounts[]|select(.Type=="volume")|[.Name,.Destination,.RW]])==
       [[$volume,"/var/lib/postgresql/data",true]]
   ' >/dev/null || die 'qualification clone PostgreSQL identity, network, or volume drifted'
-  assert_clone_network_membership "$network" "$pg"
+  assert_stopped_clone_configured_attachment "$pg" "$network"
+  assert_clone_network_has_no_active_endpoints "$network"
   docker start "$pg" >/dev/null
   local ready=false
   for _ in $(seq 1 60); do docker exec "$pg" pg_isready -U bonfire -d bonfire >/dev/null 2>&1 && { ready=true; break; }; sleep 1; done
