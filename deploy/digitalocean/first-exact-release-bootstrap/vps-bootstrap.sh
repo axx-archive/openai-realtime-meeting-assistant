@@ -1369,11 +1369,15 @@ run_repair_clone_qualification() (
   docker create --name "$pg" --label bonfire.bootstrap.role=canonical-repair-clone-qualification \
     --label "bonfire.bootstrap.clone-id=$clone_id" --network "$network" --network-alias canonical-postgres \
     --restart no --security-opt no-new-privileges:true --cap-drop ALL \
+    --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETGID --cap-add SETUID \
     -e POSTGRES_USER=bonfire -e POSTGRES_DB=bonfire -e POSTGRES_HOST_AUTH_METHOD=trust \
     -v "$pg_volume:/var/lib/postgresql/data" "$pg_image" >/dev/null
   docker inspect "$pg" | jq -e --arg image "$pg_image" --arg network "$network" --arg volume "$pg_volume" '
     length==1 and .[0].Image==$image and .[0].HostConfig.NetworkMode==$network and
     (.[0].NetworkSettings.Networks|keys)==[$network] and (.[0].HostConfig.PortBindings//{}|length)==0 and
+    ((.[0].HostConfig.CapDrop//[])|sort)==["ALL"] and
+    ((.[0].HostConfig.CapAdd//[])|sort)==["CHOWN","DAC_OVERRIDE","FOWNER","SETGID","SETUID"] and
+    ((.[0].HostConfig.SecurityOpt//[])|index("no-new-privileges:true")!=null) and
     ([.[0].Mounts[]|select(.Type=="volume")|[.Name,.Destination,.RW]])==
       [[$volume,"/var/lib/postgresql/data",true]]
   ' >/dev/null || die 'qualification clone PostgreSQL identity, network, or volume drifted'

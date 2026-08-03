@@ -327,7 +327,9 @@ byte-compares all eight raw legacy volume archives, restores the PostgreSQL dump
 into a separate fresh PostgreSQL volume, checks migrations/table counts, and
 uses a fresh internal-only Docker network containing exactly that PostgreSQL
 container plus at most one exact-A one-shot. No production mutable volume is
-mounted. Each clone runs the ordinary normalization (an exact event/outbox
+mounted. Clone PostgreSQL drops all capabilities and adds back only the exact
+five needed by the official entrypoint to initialize its fresh private volume;
+the pack verifies that confinement before start. Each clone runs the ordinary normalization (an exact event/outbox
 delta derived from the sealed missing/state-mismatch candidates, an exact
 bounded version-entry delta, exact seven,
 zero-delta second replay), generates an isolated qualification-only manifest,
