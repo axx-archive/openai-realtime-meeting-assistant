@@ -124,6 +124,24 @@ private_file_reference_json() {
     '{path:$path,size:$size,sha256:$sha256}'
 }
 
+canonical_utc_timestamp_value() {
+  local value=$1 prefix fraction
+  [[ $value =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})\.([0-9]{9})Z$ ]] \
+    || die 'UTC timestamp source is not exact nanosecond RFC3339'
+  prefix=${BASH_REMATCH[1]}
+  fraction=${BASH_REMATCH[2]}
+  while [[ $fraction == *0 ]]; do fraction=${fraction%0}; done
+  if test -n "$fraction"; then
+    printf '%s.%sZ\n' "$prefix" "$fraction"
+  else
+    printf '%sZ\n' "$prefix"
+  fi
+}
+
+canonical_utc_now() {
+  canonical_utc_timestamp_value "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)"
+}
+
 write_self_digest_json() {
   local source=$1 destination=$2 field=${3:-receiptSha256} digest
   test -f "$source" && test ! -L "$source" || die 'self-digest JSON source is unsafe'

@@ -26,6 +26,9 @@ done
 
   require_sha256 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
   ! (require_sha256 0123456789abcdef0123456789abcdef01234567) 2>/dev/null
+  test "$(canonical_utc_timestamp_value '2026-08-03T11:59:51.094166300Z')" = '2026-08-03T11:59:51.0941663Z'
+  test "$(canonical_utc_timestamp_value '2026-08-03T11:59:51.000000000Z')" = '2026-08-03T11:59:51Z'
+  ! (canonical_utc_timestamp_value '2026-08-03T11:59:51.123Z') 2>/dev/null
 
   topology_fixture=$(mktemp -d)
   trap 'rm -rf "$topology_fixture"' EXIT

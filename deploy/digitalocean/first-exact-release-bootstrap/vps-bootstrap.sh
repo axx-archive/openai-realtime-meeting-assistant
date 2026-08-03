@@ -631,7 +631,7 @@ phase_rehearse() {
     --arg pgdump "$(sha256sum "$BK/postgres.pgcustom" | awk '{print $1}')" \
     --arg migrations "$(sha256sum "$BK/migrations-before.tsv" | awk '{print $1}')" \
     --arg counts "$(sha256sum "$BK/table-counts-before.tsv" | awk '{print $1}')" \
-    --arg completed "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)" '
+    --arg completed "$(canonical_utc_now)" '
       {schema:"bonfire.cold-clone-rehearsal-receipt.v1",status:"complete",releaseCommit:$a,
        cloneId:$clone,qualificationRun:true,
        backupManifestSha256:$backup,restoredVolumeCount:8,
@@ -1246,6 +1246,7 @@ run_clone_stage_container() {
   exit_code=$(tr -d '[:space:]' <"$exit_file")
   [[ $exit_code =~ ^[0-9]+$ ]] || die 'qualification clone one-shot returned an invalid exit code'
   docker logs "$name" >"$log" 2>&1 || true
+  test "$exit_code" -eq 0 || return "$exit_code"
   chmod 600 "$log" "$exit_file"
   test "$exit_code" -eq 0
 }
@@ -1402,7 +1403,7 @@ run_repair_clone_qualification() (
     --arg pgdump "$(sha256sum "$BK/postgres.pgcustom"|awk '{print $1}')" \
     --arg migrations "$(sha256sum "$BK/migrations-before.tsv"|awk '{print $1}')" \
     --arg counts "$(sha256sum "$BK/table-counts-before.tsv"|awk '{print $1}')" \
-    --arg completed "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)" '
+    --arg completed "$(canonical_utc_now)" '
       {schema:"bonfire.cold-clone-rehearsal-receipt.v1",status:"complete",releaseCommit:$a,
        cloneId:$clone,qualificationRun:true,
        backupManifestSha256:$backup,restoredVolumeCount:8,
@@ -1420,7 +1421,7 @@ run_repair_clone_qualification() (
   jq -n --arg a "$A" --arg clone "$clone_id" \
     --arg backup "$(sha256sum "$REPAIR_EVIDENCE_DIR/backup-SHA256SUMS"|awk '{print $1}')" \
     --arg source "$(sha256sum "$REPAIR_EVIDENCE_DIR/release-source-receipt.json"|awk '{print $1}')" \
-    --arg created "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)" --argjson cold "$cold_ref" '
+    --arg created "$(canonical_utc_now)" --argjson cold "$cold_ref" '
       {schema:"bonfire.canonical-board-repair-clone-run-authority.v1",status:"authorized",releaseCommit:$a,
        cloneId:$clone,qualificationRun:true,backupManifestSha256:$backup,releaseSourceReceiptSha256:$source,
        coldCloneReceipt:$cold,createdAt:$created}
@@ -1651,7 +1652,7 @@ phase_qualify_repair_clones() {
   raw="$CLONE_QUALIFICATION_PATH.raw"
   jq -n --arg a "$A" --arg backup "$(sha256sum "$REPAIR_EVIDENCE_DIR/backup-SHA256SUMS"|awk '{print $1}')" \
     --arg source "$(sha256sum "$REPAIR_EVIDENCE_DIR/release-source-receipt.json"|awk '{print $1}')" \
-    --arg completed "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)" \
+    --arg completed "$(canonical_utc_now)" \
     --arg c1 "$clone_one" --arg c2 "$clone_two" \
     --argjson n1 "$(private_file_reference_json "$run1/normalization-receipt.json" "$REPAIR_EVIDENCE_DIR")" \
     --argjson m1 "$(private_file_reference_json "$run1/candidate-manifest.json" "$REPAIR_EVIDENCE_DIR")" \
