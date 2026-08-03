@@ -1380,7 +1380,7 @@ run_repair_clone_qualification() (
     length==1 and .[0].Image==$image and .[0].HostConfig.NetworkMode==$network and
     (.[0].NetworkSettings.Networks|keys)==[$network] and (.[0].HostConfig.PortBindings//{}|length)==0 and
     ((.[0].HostConfig.CapDrop//[])|sort)==["ALL"] and
-    ((.[0].HostConfig.CapAdd//[])|sort)==["CHOWN","DAC_OVERRIDE","FOWNER","SETGID","SETUID"] and
+    ((.[0].HostConfig.CapAdd//[])|sort)==["CAP_CHOWN","CAP_DAC_OVERRIDE","CAP_FOWNER","CAP_SETGID","CAP_SETUID"] and
     ((.[0].HostConfig.SecurityOpt//[])|index("no-new-privileges:true")!=null) and
     ([.[0].Mounts[]|select(.Type=="volume")|[.Name,.Destination,.RW]])==
       [[$volume,"/var/lib/postgresql/data",true]]
