@@ -19,6 +19,8 @@ export function ChatAvatar({ name, avatarDataURL, size = 28 }: Props) {
         source={{ uri: avatarDataURL }}
         contentFit="cover"
         cachePolicy="memory"
+        enforceEarlyResizing
+        recyclingKey={avatarDataURL}
         style={[styles.avatar, style]}
       />
     );

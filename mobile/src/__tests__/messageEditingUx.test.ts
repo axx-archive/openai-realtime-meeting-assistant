@@ -30,6 +30,17 @@ test('focused drafting uses the native text layer and editing gets a full-height
   assert.match(thread, /\{editingMessage \? \(/);
 });
 
+test('the thread owns one full-message sheet instead of mounting one per recycled bubble', () => {
+  const bubble = source('src', 'messaging', 'MessageBubble.tsx');
+  const thread = source('src', 'screens', 'ThreadScreen.tsx');
+
+  assert.doesNotMatch(bubble, /import \{ LongMessageSheet \}/);
+  assert.doesNotMatch(bubble, /<LongMessageSheet/);
+  assert.match(bubble, /onOpenLongMessage\?\./);
+  assert.match(thread, /<LongMessageSheet/);
+  assert.match(thread, /visible=\{Boolean\(expandedMessage\)\}/);
+});
+
 test('private thread names save inline on Done or blur', () => {
   const list = source('src', 'messaging', 'ChannelList.tsx');
   const thread = source('src', 'screens', 'ThreadScreen.tsx');

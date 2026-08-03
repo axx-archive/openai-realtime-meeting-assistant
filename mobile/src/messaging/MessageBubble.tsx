@@ -1,14 +1,14 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { ActivityIndicator, Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import * as Linking from 'expo-linking';
+import { useMappingHelper } from '@shopify/flash-list';
 
 import type { ScoutFileAttachment, ScoutMessage } from '../api/types';
 import { authenticatedFileHeaders, authenticatedFileUrl } from '../files/fileActions';
 import { colors, radius, shadow, space, type } from '../theme/tokens';
 import { LinkPreviewCard } from './LinkPreviewCard';
-import { LongMessageSheet } from './LongMessageSheet';
 import { ScoutRichText } from './ScoutRichText';
 import { ChatAvatar } from './ChatAvatar';
 import { messageLongPressDelayMs } from './messageGestures';
@@ -34,6 +34,7 @@ export type MessageBubbleProps = {
   onOpenAttachment?: (file: ScoutFileAttachment) => void;
   onToggleReaction?: (message: ScoutMessage, emoji: string, active: boolean) => void;
   onRetryReply?: (message: ScoutMessage) => void;
+  onOpenLongMessage?: (text: string, authorName: string, scout: boolean) => void;
   retryingReply?: boolean;
 };
 
@@ -80,18 +81,20 @@ export const MessageBubble = React.memo(function MessageBubble({
   onOpenAttachment,
   onToggleReaction,
   onRetryReply,
+  onOpenLongMessage,
   retryingReply = false,
 }: MessageBubbleProps) {
   const lifecycle = scoutReplyLifecyclePresentation(message);
   const rawBody = bodyOf(message);
   const body = rawBody || (!lifecycle?.active ? lifecycle?.fallbackText ?? '' : '');
-  const [showFullMessage, setShowFullMessage] = useState(false);
+  const { getMappingKey } = useMappingHelper();
   const files = Array.isArray(message.files) ? message.files : [];
   const scout = isScout(message);
   const replyTo = message.replyTo;
   const viaScout = String(message.postedOnBehalfOf ?? '').trim() !== '';
   const sources = Array.isArray(message.sources) ? message.sources : [];
   const longMessage = body.length > 700 || body.split('\n').length > 12;
+  const authorName = scout ? 'Scout' : own ? 'You' : String(message.authorName ?? 'Someone');
   const inlineBody = longMessage && !scout ? shortenedMessage(body, 560) : body;
   const segments = useMemo(() => parseMessageTextSegments(inlineBody), [inlineBody]);
   const urls = useMemo(() => extractHttpUrls(body), [body]);
@@ -134,7 +137,7 @@ export const MessageBubble = React.memo(function MessageBubble({
           onAccessibilityAction={(event) => {
             if (event.nativeEvent.actionName === 'longpress') onLongPress?.(message, own);
           }}
-          onPress={longMessage ? () => setShowFullMessage(true) : undefined}
+          onPress={longMessage ? () => onOpenLongMessage?.(body, authorName, scout) : undefined}
           onLongPress={() => onLongPress?.(message, own)}
           style={[
             styles.bubble,
@@ -188,11 +191,12 @@ export const MessageBubble = React.memo(function MessageBubble({
           ) : body && !linkOnly ? (
             <Text style={[styles.body, own && styles.bodyOwn]}>
               {segments.map((segment, index) => {
-                if (segment.kind === 'text') return <React.Fragment key={index}>{segment.text}</React.Fragment>;
+                const mappingKey = getMappingKey(`${segment.kind}-${segment.text}`, index);
+                if (segment.kind === 'text') return <React.Fragment key={mappingKey}>{segment.text}</React.Fragment>;
                 if (segment.kind === 'link') {
                   return (
                     <Text
-                      key={index}
+                      key={mappingKey}
                       accessibilityRole="link"
                       onPress={() => void Linking.openURL(segment.url).catch(() => undefined)}
                       style={[styles.link, own && styles.linkOwn]}
@@ -203,7 +207,7 @@ export const MessageBubble = React.memo(function MessageBubble({
                 }
                 return (
                   <Text
-                    key={index}
+                    key={mappingKey}
                     accessibilityLabel={`Mention ${segment.text.replace(/^@/, '')}`}
                     style={[
                       styles.mention,
@@ -237,7 +241,7 @@ export const MessageBubble = React.memo(function MessageBubble({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={scout ? 'Read full Scout response' : 'Read full message'}
-              onPress={() => setShowFullMessage(true)}
+              onPress={() => onOpenLongMessage?.(body, authorName, scout)}
               style={({ pressed }) => [styles.readMore, own && styles.readMoreOwn, pressed && styles.readMorePressed]}
             >
               <Text style={[styles.readMoreText, own && styles.readMoreTextOwn]}>{scout ? 'Read full response' : 'Read full message'}</Text>
@@ -245,12 +249,12 @@ export const MessageBubble = React.memo(function MessageBubble({
             </Pressable>
           ) : null}
 
-          {files.map((file) => {
+          {files.map((file, index) => {
             const imageAttachment = file.mime?.toLowerCase().startsWith('image/');
             const image = imageAttachment && authenticatedFileUrl(file);
             return (
               <Pressable
-                key={`${file.ref}-${file.name}`}
+                key={getMappingKey(`${file.ref}-${file.name}`, index)}
                 accessibilityRole="button"
                 accessibilityLabel={`Open ${file.name}`}
                 onPress={() => onOpenAttachment?.(file)}
@@ -269,6 +273,7 @@ export const MessageBubble = React.memo(function MessageBubble({
                       source={{ uri: image, headers: authenticatedFileHeaders(sessionToken, file.mime) }}
                       cachePolicy="memory-disk"
                       contentFit="cover"
+                      enforceEarlyResizing
                       recyclingKey={file.ref}
                       style={styles.attachmentImage}
                     />
@@ -299,9 +304,9 @@ export const MessageBubble = React.memo(function MessageBubble({
 
         {reactions.length > 0 ? (
           <View style={[styles.reactions, own ? styles.reactionsOwn : styles.reactionsOther]}>
-            {reactions.map((reaction) => (
+            {reactions.map((reaction, index) => (
               <Pressable
-                key={reaction.emoji}
+                key={getMappingKey(reaction.emoji, index)}
                 accessibilityRole="button"
                 accessibilityLabel={`${reaction.emoji}, ${reaction.count} reaction${reaction.count === 1 ? '' : 's'}`}
                 onPress={() => onToggleReaction?.(message, reaction.emoji, !reaction.reactedByViewer)}
@@ -316,9 +321,9 @@ export const MessageBubble = React.memo(function MessageBubble({
 
         {scout && sources.length > 0 ? (
           <View style={styles.sources}>
-            {sources.map((source) => (
+            {sources.map((source, index) => (
               <Pressable
-                key={source.messageId}
+                key={getMappingKey(source.messageId, index)}
                 accessibilityRole="button"
                 accessibilityLabel={`Source: ${source.author || 'a message'} — ${source.quote}`}
                 accessibilityHint="Scrolls to the source message"
@@ -332,13 +337,6 @@ export const MessageBubble = React.memo(function MessageBubble({
           </View>
         ) : null}
       </Animated.View>
-      <LongMessageSheet
-        visible={showFullMessage}
-        text={body}
-        authorName={scout ? 'Scout' : own ? 'You' : String(message.authorName ?? 'Someone')}
-        scout={scout}
-        onClose={() => setShowFullMessage(false)}
-      />
     </View>
   );
 });

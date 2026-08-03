@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import * as Linking from 'expo-linking';
+import { useRecyclingState } from '@shopify/flash-list';
 
 import { api } from '../api/client';
 import type { LinkPreview } from '../api/types';
@@ -50,21 +51,18 @@ type Props = {
 
 export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessionToken, own, seamless = false, onLongPress }: Props) {
   const key = previewCacheKey(url);
-  const [preview, setPreview] = useState<LinkPreview | null | undefined>(() => (
+  const [preview, setPreview] = useRecyclingState<LinkPreview | null | undefined>(() => (
     resolvedPreviewCache.has(key) ? resolvedPreviewCache.get(key) : undefined
-  ));
+  ), [key]);
   useEffect(() => {
     let active = true;
-    if (resolvedPreviewCache.has(key)) {
-      setPreview(resolvedPreviewCache.get(key));
-      return () => { active = false; };
+    if (!resolvedPreviewCache.has(key)) {
+      void previewFor(sessionToken, url).then((value) => {
+        if (active) setPreview(value);
+      });
     }
-    setPreview(undefined);
-    void previewFor(sessionToken, url).then((value) => {
-      if (active) setPreview(value);
-    });
     return () => { active = false; };
-  }, [key, sessionToken, url]);
+  }, [key, sessionToken, setPreview, url]);
 
   const imageSource = useMemo(() => {
     const path = preview?.imageUrl?.trim();
@@ -131,7 +129,7 @@ export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessio
       >
         <View style={styles.postHeader}>
           {imageSource ? (
-            <Image source={imageSource} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`${url}-avatar`} style={styles.avatar} />
+            <Image source={imageSource} cachePolicy="memory-disk" contentFit="cover" enforceEarlyResizing recyclingKey={`${url}-avatar`} style={styles.avatar} />
           ) : (
             <View style={[styles.avatar, styles.avatarFallback]}><Text style={styles.avatarInitial}>{author.slice(0, 1)}</Text></View>
           )}
@@ -174,6 +172,7 @@ export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessio
             source={imageSource}
             cachePolicy="memory-disk"
             contentFit="cover"
+            enforceEarlyResizing
             recyclingKey={url}
             style={StyleSheet.absoluteFill}
           />

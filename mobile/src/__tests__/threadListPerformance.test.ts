@@ -5,6 +5,7 @@ import type { ScoutMessage } from '../api/types';
 import {
   threadRowPresentationEqual,
   threadRowRecycleType,
+  threadMessageContentFamily,
   type ThreadListRow,
 } from '../messaging/threadListPerformance';
 
@@ -49,13 +50,23 @@ test('rerenders a replaced message even when its id is unchanged', () => {
   assert.equal(threadRowPresentationEqual(original, edited), false);
 });
 
-test('separates marker, Scout, own, and teammate recycle pools', () => {
+test('separates marker, author, and content-shape recycle pools', () => {
   const teammate = row();
   const scout = row({ message: { ...teammate.message, role: 'scout' } });
   const own = row({ own: true });
+  const image = row({ message: { ...teammate.message, files: [{ ref: 'asset-1', name: 'photo.png', mime: 'image/png' }] } });
+  const link = row({ message: { ...teammate.message, text: 'https://example.com/story' } });
 
-  assert.equal(threadRowRecycleType(teammate), 'teammate');
-  assert.equal(threadRowRecycleType(scout), 'scout');
-  assert.equal(threadRowRecycleType(own), 'own');
-  assert.equal(threadRowRecycleType({ ...scout, timelineLabel: 'Today' }), 'marker-scout');
+  assert.equal(threadRowRecycleType(teammate), 'teammate-text');
+  assert.equal(threadRowRecycleType(scout), 'scout-rich');
+  assert.equal(threadRowRecycleType(own), 'own-text');
+  assert.equal(threadRowRecycleType(image), 'teammate-image');
+  assert.equal(threadRowRecycleType(link), 'teammate-link');
+  assert.equal(threadRowRecycleType({ ...scout, timelineLabel: 'Today' }), 'marker-scout-rich');
+});
+
+test('classifies long and rich message families before they enter FlashList', () => {
+  assert.equal(threadMessageContentFamily({ ...row().message, text: 'x'.repeat(701) }), 'long');
+  assert.equal(threadMessageContentFamily({ ...row().message, role: 'assistant', text: '**Decision:** Ship it.' }), 'rich');
+  assert.equal(threadMessageContentFamily({ ...row().message, role: 'assistant', text: 'x'.repeat(701) }), 'rich-long');
 });

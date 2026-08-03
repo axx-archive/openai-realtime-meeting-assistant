@@ -11,6 +11,29 @@ export type ThreadListRow = {
   showCatchUp: boolean;
 };
 
+function messageBody(message: ScoutMessage): string {
+  return String(message.text ?? message.content ?? '');
+}
+
+/**
+ * Keep materially different native subtrees out of the same recycle pool.
+ * Image and preview cells retain native image state, while long/rich cells
+ * have substantially different measurement costs from ordinary text.
+ */
+export function threadMessageContentFamily(message: ScoutMessage): string {
+  const files = Array.isArray(message.files) ? message.files : [];
+  if (files.some((file) => String(file.mime ?? '').toLowerCase().startsWith('image/'))) return 'image';
+  if (files.length > 0) return 'file';
+
+  const body = messageBody(message);
+  if (/https?:\/\/[^\s]+/iu.test(body)) return 'link';
+
+  const role = String(message.role ?? '').toLowerCase();
+  const long = body.length > 700 || body.split('\n').length > 12;
+  if (role === 'assistant' || role === 'scout') return long ? 'rich-long' : 'rich';
+  return long ? 'long' : 'text';
+}
+
 /**
  * FlashList reuses native cells most efficiently when materially different
  * message shapes do not share the same recycle pool. Markers add their own
@@ -20,7 +43,8 @@ export type ThreadListRow = {
 export function threadRowRecycleType(row: ThreadListRow): string {
   const role = String(row.message.role ?? '').toLowerCase();
   const family = row.own ? 'own' : role === 'assistant' || role === 'scout' ? 'scout' : 'teammate';
-  return row.timelineLabel || row.boundaryLabel ? `marker-${family}` : family;
+  const marker = row.timelineLabel || row.boundaryLabel ? 'marker-' : '';
+  return `${marker}${family}-${threadMessageContentFamily(row.message)}`;
 }
 
 /**

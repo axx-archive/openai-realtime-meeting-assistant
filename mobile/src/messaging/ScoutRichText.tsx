@@ -1,18 +1,21 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import * as Linking from 'expo-linking';
+import { useMappingHelper } from '@shopify/flash-list';
 
 import { colors, radius, space, type } from '../theme/tokens';
 import { parseScoutMarkdown, truncateScoutBlocks, type ScoutInline } from './scoutRichTextPresentation';
 
 function InlineContent({ inlines }: { inlines: ScoutInline[] }) {
+  const { getMappingKey } = useMappingHelper();
   return (
     <Text>
       {inlines.map((inline, index) => {
+        const mappingKey = getMappingKey(`${inline.kind}-${inline.text}`, index);
         if (inline.kind === 'link' && inline.url) {
           return (
             <Text
-              key={index}
+              key={mappingKey}
               accessibilityRole="link"
               onPress={() => void Linking.openURL(inline.url!).catch(() => undefined)}
               style={styles.link}
@@ -22,15 +25,16 @@ function InlineContent({ inlines }: { inlines: ScoutInline[] }) {
           );
         }
         if (inline.kind === 'mention') {
-          return <Text key={index} style={[styles.mention, inline.scout && styles.mentionScout]}>{inline.text}</Text>;
+          return <Text key={mappingKey} style={[styles.mention, inline.scout && styles.mentionScout]}>{inline.text}</Text>;
         }
-        return <Text key={index} style={inline.kind === 'strong' ? styles.strong : inline.kind === 'emphasis' ? styles.emphasis : inline.kind === 'code' ? styles.inlineCode : undefined}>{inline.text}</Text>;
+        return <Text key={mappingKey} style={inline.kind === 'strong' ? styles.strong : inline.kind === 'emphasis' ? styles.emphasis : inline.kind === 'code' ? styles.inlineCode : undefined}>{inline.text}</Text>;
       })}
     </Text>
   );
 }
 
 export function ScoutRichText({ text, maxCharacters }: { text: string; maxCharacters?: number }) {
+  const { getMappingKey } = useMappingHelper();
   const parsed = React.useMemo(() => parseScoutMarkdown(text), [text]);
   const blocks = React.useMemo(
     () => typeof maxCharacters === 'number' ? truncateScoutBlocks(parsed, maxCharacters).blocks : parsed,
@@ -42,7 +46,7 @@ export function ScoutRichText({ text, maxCharacters }: { text: string; maxCharac
         const content = <InlineContent inlines={block.inlines} />;
         if (block.kind === 'bullet' || block.kind === 'number') {
           return (
-            <View key={index} style={styles.listRow}>
+            <View key={getMappingKey(`${block.kind}-${block.marker ?? ''}`, index)} style={styles.listRow}>
               <Text style={styles.marker}>{block.marker}</Text>
               <Text style={styles.body}>{content}</Text>
             </View>
@@ -50,15 +54,15 @@ export function ScoutRichText({ text, maxCharacters }: { text: string; maxCharac
         }
         if (block.kind === 'quote') {
           return (
-            <View key={index} style={styles.quote}>
+            <View key={getMappingKey(`${block.kind}-${index}`, index)} style={styles.quote}>
               <View style={styles.quoteLine} />
               <Text style={styles.quoteText}>{content}</Text>
             </View>
           );
         }
-        if (block.kind === 'code') return <Text key={index} style={styles.codeBlock}>{content}</Text>;
-        if (block.kind === 'heading') return <Text key={index} style={[styles.heading, Boolean(block.level && block.level > 2) && styles.headingSmall]}>{content}</Text>;
-        return <Text key={index} style={styles.body}>{content}</Text>;
+        if (block.kind === 'code') return <Text key={getMappingKey(`${block.kind}-${index}`, index)} style={styles.codeBlock}>{content}</Text>;
+        if (block.kind === 'heading') return <Text key={getMappingKey(`${block.kind}-${block.level ?? 0}`, index)} style={[styles.heading, Boolean(block.level && block.level > 2) && styles.headingSmall]}>{content}</Text>;
+        return <Text key={getMappingKey(`${block.kind}-${index}`, index)} style={styles.body}>{content}</Text>;
       })}
     </View>
   );

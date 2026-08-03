@@ -32,6 +32,7 @@ import { firstUnreadIndex } from '../messaging/unreadBoundary';
 import { buildTimelineMarkers } from '../messaging/timelineMarkers';
 import { CatchUpSheet } from '../messaging/CatchUpSheet';
 import { MessageActionSheet } from '../messaging/MessageActionSheet';
+import { LongMessageSheet } from '../messaging/LongMessageSheet';
 import { MentionComposerInput } from '../messaging/MentionComposerInput';
 import { AttachmentSourceSheet } from '../messaging/AttachmentSourceSheet';
 import { GifPickerSheet } from '../messaging/GifPickerSheet';
@@ -87,6 +88,7 @@ type ThreadMessageRowProps = {
   onToggleReaction: (message: ScoutMessage, emoji: string, active: boolean) => void;
   onRetryReply: (message: ScoutMessage) => void;
   onOpenCatchUp: () => void;
+  onOpenLongMessage: (text: string, authorName: string, scout: boolean) => void;
 };
 
 const ThreadMessageRow = React.memo(function ThreadMessageRow({
@@ -101,6 +103,7 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
   onToggleReaction,
   onRetryReply,
   onOpenCatchUp,
+  onOpenLongMessage,
 }: ThreadMessageRowProps) {
   return (
     <>
@@ -146,6 +149,7 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
         onLongPress={onLongPress}
         onToggleReaction={onToggleReaction}
         onRetryReply={onRetryReply}
+        onOpenLongMessage={onOpenLongMessage}
         retryingReply={retryingReply}
       />
     </>
@@ -162,6 +166,7 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
   && previous.onToggleReaction === next.onToggleReaction
   && previous.onRetryReply === next.onRetryReply
   && previous.onOpenCatchUp === next.onOpenCatchUp
+  && previous.onOpenLongMessage === next.onOpenLongMessage
 ));
 
 const threadRowKey = (row: ThreadRow) => String(row.message.id);
@@ -194,6 +199,7 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [replyingTo, setReplyingTo] = useState<ScoutMessage | null>(null);
   const [actionMessage, setActionMessage] = useState<{ message: ScoutMessage; own: boolean } | null>(null);
   const [previewFile, setPreviewFile] = useState<ScoutFileAttachment | null>(null);
+  const [expandedMessage, setExpandedMessage] = useState<{ text: string; authorName: string; scout: boolean } | null>(null);
   const [participants, setParticipants] = useState<ChatMentionCandidate[]>([{ name: 'Scout', kind: 'scout' }]);
   const [threadVisibility, setThreadVisibility] = useState('private');
   const [threadOwnerEmail, setThreadOwnerEmail] = useState('');
@@ -871,6 +877,9 @@ export function ThreadScreen({ route, navigation }: Props) {
   const openCatchUp = useCallback(() => {
     setCatchUpOpen(true);
   }, []);
+  const openLongMessage = useCallback((text: string, authorName: string, scout: boolean) => {
+    setExpandedMessage({ text, authorName, scout });
+  }, []);
   const typingFooter = useMemo(
     () => typingParticipants.length > 0
       ? <TypingIndicator participants={typingParticipants} />
@@ -890,12 +899,14 @@ export function ThreadScreen({ route, navigation }: Props) {
       onToggleReaction={toggleReaction}
       onRetryReply={retryScoutReply}
       onOpenCatchUp={openCatchUp}
+      onOpenLongMessage={openLongMessage}
     />
   ), [
     email,
     openAttachment,
     openCatchUp,
     openMessageActions,
+    openLongMessage,
     retryScoutReply,
     retryingReplyID,
     scrollToMessage,
@@ -1004,6 +1015,14 @@ export function ThreadScreen({ route, navigation }: Props) {
         onClose={() => setPreviewFile(null)}
       />
 
+      <LongMessageSheet
+        visible={Boolean(expandedMessage)}
+        text={expandedMessage?.text ?? ''}
+        authorName={expandedMessage?.authorName ?? ''}
+        scout={Boolean(expandedMessage?.scout)}
+        onClose={() => setExpandedMessage(null)}
+      />
+
       <AttachmentSourceSheet
         visible={attachmentSourceOpen}
         onClose={() => setAttachmentSourceOpen(false)}
@@ -1108,6 +1127,7 @@ export function ThreadScreen({ route, navigation }: Props) {
             // bubbles onto the wrong messages as the list grows.
             keyExtractor={threadRowKey}
             getItemType={threadRowRecycleType}
+            maxItemsInRecyclePool={32}
             contentContainerStyle={styles.list}
             keyboardShouldPersistTaps="handled"
             maintainVisibleContentPosition={threadListPosition}
