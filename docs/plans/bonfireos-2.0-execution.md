@@ -32,6 +32,19 @@ No canonical repair, `main` push, migration, canonical release deployment,
 provider qualification, E10 activation, or TestFlight upload is established by
 this checkpoint.
 
+The 2026-08-03 repair attempt passed dual ingress isolation, the independent
+Mac block probe, and the authenticated two-pass all-rooms-empty proof, then
+stopped before any writer shutdown, backup, migration, normalization, or data
+mutation. The backup topology assertion had a jq scoping defect: its
+`all(...)` condition changed the input from the captured container array to a
+service-name string. The exact corrected topology query independently passed
+the live six-service/mount inventory. The recovery-only path then proved the
+original hotfix containers and local health, a second independent blocked
+probe passed, and guarded legacy reopen restored public HTTPS/readiness and TCP
+TURN. That ceremony is terminal and must not be resumed. The candidate fixes
+the validator by capturing the root array and includes an executable exact and
+drifted topology fixture in the operator-pack self-check.
+
 ## 2. Non-negotiable invariants
 
 - Conversation is evidence, not authority. Every approval remains explicit,
@@ -244,15 +257,17 @@ repeated normal and race coverage.
 1. **Complete:** freeze the isolated combined candidate and run the complete
    non-`stride-site` normal/race/vet, mobile/TypeScript/Expo, and rendered
    release-simulator matrix.
-2. **Next:** execute the manifest-confirmed canonical repair ceremony. Stop at each human
-   and parity gate; do not reuse any retired release pair or failed ceremony.
-3. Merge the verified scope, commit and push `main`, run only the reviewed
+2. **Next:** merge the verified scope, commit and push `main`, run only the reviewed
    migrations, deploy the exact artifact, and prove public commit/tree/image,
-   health, capabilities, Scout, STT, canonical convergence, rollback, and data
+   health, capabilities, Scout, STT, rollback, and production-data
    integrity.
-4. Build the resulting mobile release (expected Build 30), submit it to internal
+3. Build the resulting mobile release (expected Build 30), submit it to internal
    TestFlight, verify Apple `VALID` and `Team (Expo)`, then complete physical
    device acceptance. Submission alone is not acceptance.
+4. Prepare a fresh sealed pair containing the corrected operator pack, then
+   execute the manifest-confirmed canonical historical repair as a separate
+   protected operation. Stop at each parity gate and never reuse the retired
+   ceremony.
 5. Finish external P0/E10 evidence: web and physical-iPhone Realtime/dictation/
    typed-Scout acceptance, bounded paid-provider qualification, real
    WebRTC/TURN device matrix, ten immutable I&O pilots with two eligible

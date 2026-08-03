@@ -27,6 +27,27 @@ done
   require_sha256 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
   ! (require_sha256 0123456789abcdef0123456789abcdef01234567) 2>/dev/null
 
+  topology_fixture=$(mktemp -d)
+  trap 'rm -rf "$topology_fixture"' EXIT
+  jq -n '
+    def service($name; $mounts):
+      {Config:{Labels:{"com.docker.compose.service":$name}},Mounts:$mounts};
+    def volume($name; $destination):
+      {Type:"volume",Name:$name,Destination:$destination,RW:true};
+    [
+      service("caddy"; [volume("digitalocean_caddy_config"; "/config"), volume("digitalocean_caddy_data"; "/data")]),
+      service("canonical-postgres"; [volume("digitalocean_canonical_postgres"; "/var/lib/postgresql/data")]),
+      service("codex-runner"; [volume("digitalocean_codex_queue"; "/app/codex-queue"), volume("digitalocean_codex_runner_data"; "/runner-data"), volume("digitalocean_usage_ledger"; "/app/usage-ledger")]),
+      service("coturn"; [volume("anonymous-coturn-data"; "/var/lib/coturn")]),
+      service("meetingassist"; [volume("digitalocean_codex_queue"; "/app/codex-queue"), volume("digitalocean_meeting_data"; "/app/data"), volume("digitalocean_usage_ledger"; "/app/data/usage")]),
+      service("render-runner"; [volume("digitalocean_meeting_data"; "/app/data")])
+    ]
+  ' >"$topology_fixture/exact.json"
+  assert_exact_legacy_container_topology_snapshot "$topology_fixture/exact.json"
+  jq '.[0].Mounts[0].RW=false' "$topology_fixture/exact.json" >"$topology_fixture/drift.json"
+  ! (assert_exact_legacy_container_topology_snapshot "$topology_fixture/drift.json") 2>/dev/null
+  rm -rf "$topology_fixture"
+
   receipt_fixture=$(mktemp -d)
   trap 'rm -rf "$receipt_fixture"' EXIT
   receipt_release=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

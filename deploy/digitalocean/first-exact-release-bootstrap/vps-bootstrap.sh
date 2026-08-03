@@ -421,6 +421,35 @@ assert_release_source_evidence_receipt() {
   ' "$receipt" >/dev/null || die 'release source evidence receipt does not bind exact A and its source archive'
 }
 
+assert_exact_legacy_container_topology_snapshot() {
+  local inspect=$1
+  jq -e '
+    . as $root |
+    def service($name): [$root[] | select(.Config.Labels["com.docker.compose.service"]==$name)];
+    def volumes($name): [service($name)[0].Mounts[] | select(.Type=="volume") | {Name,Destination,RW}] | sort_by(.Destination);
+    ([$root[] | .Config.Labels["com.docker.compose.service"]] | sort) ==
+      (["caddy","canonical-postgres","codex-runner","coturn","meetingassist","render-runner"] | sort) and
+    all(["caddy","canonical-postgres","codex-runner","coturn","meetingassist","render-runner"][];
+      . as $name | [$root[] | select(.Config.Labels["com.docker.compose.service"]==$name)] | length==1) and
+    volumes("caddy")==([
+      {Name:"digitalocean_caddy_config",Destination:"/config",RW:true},
+      {Name:"digitalocean_caddy_data",Destination:"/data",RW:true}]|sort_by(.Destination)) and
+    volumes("canonical-postgres")==[{Name:"digitalocean_canonical_postgres",Destination:"/var/lib/postgresql/data",RW:true}] and
+    volumes("meetingassist")==([
+      {Name:"digitalocean_codex_queue",Destination:"/app/codex-queue",RW:true},
+      {Name:"digitalocean_meeting_data",Destination:"/app/data",RW:true},
+      {Name:"digitalocean_usage_ledger",Destination:"/app/data/usage",RW:true}]|sort_by(.Destination)) and
+    volumes("codex-runner")==([
+      {Name:"digitalocean_codex_queue",Destination:"/app/codex-queue",RW:true},
+      {Name:"digitalocean_codex_runner_data",Destination:"/runner-data",RW:true},
+      {Name:"digitalocean_usage_ledger",Destination:"/app/usage-ledger",RW:true}]|sort_by(.Destination)) and
+    volumes("render-runner")==[{Name:"digitalocean_meeting_data",Destination:"/app/data",RW:true}] and
+    (volumes("coturn") | length==1 and .[0].Destination=="/var/lib/coturn" and .[0].RW==true and
+      (.[0].Name | type=="string" and length>0 and (startswith("digitalocean_")|not)))
+  ' "$inspect" >/dev/null \
+    || die 'legacy service identity or protected-volume mount inventory differs from the exact reviewed six-container topology'
+}
+
 phase_backup() {
   require_root; require_commands docker tar jq sha256sum; load_state; acquire_operator_lock; require_phase rooms-empty
   local volumes=(
@@ -437,30 +466,7 @@ phase_backup() {
   mapfile -t containers < <(docker ps -aq --no-trunc --filter label=com.docker.compose.project=digitalocean)
   test "${#containers[@]}" -eq 6 || die 'legacy project container inventory changed'
   docker inspect "${containers[@]}" >"$BK/private/containers.inspect.json"
-  jq -e '
-    def service($name): [.[] | select(.Config.Labels["com.docker.compose.service"]==$name)];
-    def volumes($name): [service($name)[0].Mounts[] | select(.Type=="volume") | {Name,Destination,RW}] | sort_by(.Destination);
-    ([.[] | .Config.Labels["com.docker.compose.service"]] | sort) ==
-      (["caddy","canonical-postgres","codex-runner","coturn","meetingassist","render-runner"] | sort) and
-    all(["caddy","canonical-postgres","codex-runner","coturn","meetingassist","render-runner"][];
-      service(.) | length==1) and
-    volumes("caddy")==([
-      {Name:"digitalocean_caddy_config",Destination:"/config",RW:true},
-      {Name:"digitalocean_caddy_data",Destination:"/data",RW:true}]|sort_by(.Destination)) and
-    volumes("canonical-postgres")==[{Name:"digitalocean_canonical_postgres",Destination:"/var/lib/postgresql/data",RW:true}] and
-    volumes("meetingassist")==([
-      {Name:"digitalocean_codex_queue",Destination:"/app/codex-queue",RW:true},
-      {Name:"digitalocean_meeting_data",Destination:"/app/data",RW:true},
-      {Name:"digitalocean_usage_ledger",Destination:"/app/data/usage",RW:true}]|sort_by(.Destination)) and
-    volumes("codex-runner")==([
-      {Name:"digitalocean_codex_queue",Destination:"/app/codex-queue",RW:true},
-      {Name:"digitalocean_codex_runner_data",Destination:"/runner-data",RW:true},
-      {Name:"digitalocean_usage_ledger",Destination:"/app/usage-ledger",RW:true}]|sort_by(.Destination)) and
-    volumes("render-runner")==[{Name:"digitalocean_meeting_data",Destination:"/app/data",RW:true}] and
-    (volumes("coturn") | length==1 and .[0].Destination=="/var/lib/coturn" and .[0].RW==true and
-      (.[0].Name | type=="string" and length>0 and (startswith("digitalocean_")|not)))
-  ' "$BK/private/containers.inspect.json" >/dev/null \
-    || die 'legacy service identity or protected-volume mount inventory differs from the exact reviewed six-container topology'
+  assert_exact_legacy_container_topology_snapshot "$BK/private/containers.inspect.json"
   jq -r '.[] | [.Id,.Config.Labels["com.docker.compose.service"],.Image,
     ([.Mounts[]|select(.Type=="volume")|.Name]|sort|join(","))] | @tsv' \
     "$BK/private/containers.inspect.json" | sort >"$BK/meta/legacy-container-authority.tsv"
