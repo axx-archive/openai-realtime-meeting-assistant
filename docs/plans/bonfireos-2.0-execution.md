@@ -65,6 +65,16 @@ then reseals its path and digest into the new backup. This preserves exact
 provenance across any number of proven cold restores without trusting a stale
 or different environment.
 
+The next exact-A read-only observation reached the application and stopped
+because production legitimately had no `deleted-objects.jsonl`: no board
+deletion had ever created the optional lifecycle journal. Runtime import
+semantics already treat that absence as an empty journal. Canonical observation
+and normalization now do the same only for a genuinely absent path with a
+non-symlink private parent; a dangling symlink or any other read error remains
+fatal. Normalization preserves the absent journal, and only the authorized
+repair append creates it. The focused real-PostgreSQL normalization/repair and
+idempotency test passes with this exact legacy starting state.
+
 ### Build 31 exact-archive correction — 2026-08-02
 
 The first Build 31 A/B attempt (`3f96d0880aa98f8ddb4f280da2d2388402389a5d`

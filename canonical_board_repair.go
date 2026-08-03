@@ -834,7 +834,7 @@ func (engine *postgresCanonicalBoardRepairEngine) buildPlanReadOnly(ctx context.
 	if err != nil {
 		return CanonicalImportPlan{}, err
 	}
-	journalRaw, err := os.ReadFile(paths.DeletedJournal)
+	journalRaw, err := readOptionalCanonicalLifecycleJournal(paths.DeletedJournal)
 	if err != nil {
 		return CanonicalImportPlan{}, err
 	}
@@ -873,7 +873,7 @@ func (engine *postgresCanonicalBoardRepairEngine) Observe(ctx context.Context) (
 	if err != nil {
 		return canonicalBoardRepairProof{}, err
 	}
-	journalRaw, err := readRegularNoSymlink(paths.DeletedJournal)
+	journalRaw, err := readOptionalCanonicalLifecycleJournal(paths.DeletedJournal)
 	if err != nil {
 		return canonicalBoardRepairProof{}, err
 	}
@@ -959,7 +959,7 @@ func (engine *postgresCanonicalBoardRepairEngine) Observe(ctx context.Context) (
 		return canonicalBoardRepairProof{}, err
 	}
 	boardAfter, boardErr := readRegularNoSymlink(paths.Board)
-	journalAfter, journalErr := readRegularNoSymlink(paths.DeletedJournal)
+	journalAfter, journalErr := readOptionalCanonicalLifecycleJournal(paths.DeletedJournal)
 	versionAfter, versionErr := readRegularNoSymlink(engine.versions.path)
 	spoolAfter, spoolHighWaterAfter, spoolErr := inspectCanonicalRepairSpoolFromScratch(engine.spoolPath)
 	databaseAfterSHA, databaseErr := canonicalRepairDatabaseFingerprint(ctx, engine.store, engine.manifest.TenantID)
@@ -1704,7 +1704,7 @@ func runCanonicalBoardRepairCLI(ctx context.Context, manifestPath, manifestSHA, 
 	if err := ensureRepairTargetsAbsentFromBoard(boardRaw, manifest.Candidates); err != nil {
 		return err
 	}
-	journalRaw, err := readRegularNoSymlink(journalPath)
+	journalRaw, err := readOptionalCanonicalLifecycleJournal(journalPath)
 	if err != nil {
 		return fmt.Errorf("journal: %w", err)
 	}
@@ -1888,7 +1888,7 @@ func writeCanonicalBoardRepairObservation(ctx context.Context, outputPath string
 	if err != nil {
 		return err
 	}
-	journalRaw, err := readRegularNoSymlink(paths.DeletedJournal)
+	journalRaw, err := readOptionalCanonicalLifecycleJournal(paths.DeletedJournal)
 	if err != nil {
 		return err
 	}
@@ -2745,6 +2745,24 @@ func readRegularNoSymlink(path string) ([]byte, error) {
 		return nil, errors.New("path is not a regular non-symlink file")
 	}
 	return os.ReadFile(path)
+}
+
+// A legacy deployment may not have created the lifecycle journal yet. Runtime
+// import semantics already define that absence as an empty journal; canonical
+// observation and repair preserve the same meaning while still rejecting any
+// symlink or unsafe parent path. The first authorized append creates the file.
+func readOptionalCanonicalLifecycleJournal(path string) ([]byte, error) {
+	raw, err := readRegularNoSymlink(path)
+	if err == nil {
+		return raw, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	if err := rejectSymlinkPathComponents(filepath.Dir(path)); err != nil {
+		return nil, err
+	}
+	return []byte{}, nil
 }
 
 func readRootOnlyRegularFile(path string) ([]byte, error) {

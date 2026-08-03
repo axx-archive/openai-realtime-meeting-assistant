@@ -349,8 +349,36 @@ func setupRealCanonicalRepairFixture(t *testing.T) (context.Context, *postgresCa
 	return ctx, engine, targets, journalBefore
 }
 
+func TestReadOptionalCanonicalLifecycleJournalTreatsLegacyAbsenceAsEmpty(t *testing.T) {
+	dir := canonicalRepairTestTempDir(t)
+	path := filepath.Join(dir, "deleted-objects.jsonl")
+	raw, err := readOptionalCanonicalLifecycleJournal(path)
+	if err != nil || len(raw) != 0 {
+		t.Fatalf("missing legacy journal raw=%q err=%v", raw, err)
+	}
+	if err := os.WriteFile(path, []byte("record\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	raw, err = readOptionalCanonicalLifecycleJournal(path)
+	if err != nil || string(raw) != "record\n" {
+		t.Fatalf("existing journal raw=%q err=%v", raw, err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(dir, "absent-target"), path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readOptionalCanonicalLifecycleJournal(path); err == nil {
+		t.Fatal("dangling journal symlink was accepted as legacy absence")
+	}
+}
+
 func TestCanonicalBoardRepairPostgresNormalizationThenRepairIsCompleteAndIdempotent(t *testing.T) {
 	ctx, engine, targets, journalBefore := setupRealCanonicalRepairFixture(t)
+	if err := os.Remove(engine.journalPath); err != nil {
+		t.Fatal(err)
+	}
 	before, err := engine.Observe(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -366,6 +394,9 @@ func TestCanonicalBoardRepairPostgresNormalizationThenRepairIsCompleteAndIdempot
 	journalAfterNormalization, _ := os.ReadFile(engine.journalPath)
 	if string(journalBefore) != string(journalAfterNormalization) || normalization.LifecycleAppendCount != 0 || normalization.ApplyPasses < 2 {
 		t.Fatalf("normalization touched lifecycle journal receipt=%+v", normalization)
+	}
+	if _, err := os.Lstat(engine.journalPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("normalization created the absent legacy lifecycle journal: %v", err)
 	}
 	normalizedProof, err := engine.Observe(ctx)
 	if err != nil || len(normalizedProof.Candidates) != canonicalBoardRepairExactCount {
@@ -385,6 +416,9 @@ func TestCanonicalBoardRepairPostgresNormalizationThenRepairIsCompleteAndIdempot
 	final, err := engine.Observe(ctx)
 	if err != nil || len(final.Candidates) != 0 || receipt.AfterFingerprintSHA256 != canonicalRepairProofFingerprint(final) || !receipt.IdempotentSecondReplay {
 		t.Fatalf("real final proof=%+v receipt=%+v err=%v", final, receipt, err)
+	}
+	if info, err := os.Lstat(engine.journalPath); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("authorized repair did not create the lifecycle journal: %v", err)
 	}
 }
 
