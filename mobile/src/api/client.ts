@@ -399,6 +399,13 @@ export const api = {
     return request<BoardResponse>('/assistant/board', { sessionToken });
   },
 
+  artifact(sessionToken: string, artifactId: string): Promise<{
+    ok: boolean;
+    artifacts: Array<{ id: string; text?: string; metadata?: Record<string, string> }>;
+  }> {
+    return request(`/artifacts?id=${encodeURIComponent(artifactId)}`, { sessionToken });
+  },
+
   createBoardCard(sessionToken: string, card: BoardCardInput) {
     return request<{ ok: boolean; changed: boolean; card?: import('./types').BoardCard }>(
       '/assistant/board/cards',

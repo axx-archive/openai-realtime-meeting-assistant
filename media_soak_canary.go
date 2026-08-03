@@ -294,10 +294,22 @@ func mediaSoakRecallPrincipal(scope mediaSoakScope) RecallPrincipal {
 }
 
 func validateReturnedMediaSoakCanary(entry meetingMemoryEntry, check *mediaSoakCanaryCheck) error {
+	expectedVisibility := "room_only"
+	// Room chat and recaps enter through recordRoomChatMessageForMeeting. That
+	// boundary deliberately replaces caller-supplied visibility with the
+	// server-owned room policy, so the canary must prove the replacement took
+	// effect instead of expecting its planted "room_only" value to survive.
+	if check.Surface == "chat" || check.Surface == "recap" {
+		if normalizeRoomID(check.Source.RoomID) == officeRoomID {
+			expectedVisibility = "organization"
+		} else {
+			expectedVisibility = "room"
+		}
+	}
 	if entry.ID != check.EntryID || entry.Text == "" || entry.Metadata["mediaSoakCanary"] != "true" || entry.Metadata["mediaSoakSurface"] != check.Surface ||
 		entry.Metadata["mediaSoakToken"] != check.Token || normalizeRoomID(entry.Metadata["roomId"]) != normalizeRoomID(check.Source.RoomID) ||
 		firstNonEmptyString(entry.Metadata["sittingId"], entry.Metadata["meetingId"]) != check.Source.SittingID ||
-		entry.Metadata["mediaGeneration"] != strconv.FormatUint(check.Source.Generation, 10) || entry.Metadata["visibility"] != "room_only" {
+		entry.Metadata["mediaGeneration"] != strconv.FormatUint(check.Source.Generation, 10) || entry.Metadata["visibility"] != expectedVisibility {
 		return errors.New("authorized reader returned a canary with invalid server-owned metadata")
 	}
 	switch check.Surface {

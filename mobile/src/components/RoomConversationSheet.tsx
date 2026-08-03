@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Waveform } from './Waveform';
 import { ink, radius, shadow, space, type } from '../theme/tokens';
 import { useComposerDictation } from '../voice/useComposerDictation';
+import { parseMentions } from '../messaging/mentions';
 
 export type RoomConversationMode = 'chat' | 'transcript';
 
@@ -26,6 +27,9 @@ type ChatItem = {
   text: string;
   createdAt: string;
   authorEmail?: string;
+  agentId?: string;
+  transient?: boolean;
+  error?: boolean;
 };
 
 type TranscriptItem = {
@@ -81,6 +85,30 @@ function transcriptSpeaker(item: TranscriptItem): string {
   return 'Live transcript';
 }
 
+const RoomMessageText = memo(function RoomMessageText({
+  text,
+  own,
+  scout,
+}: {
+  text: string;
+  own: boolean;
+  scout: boolean;
+}) {
+  const segments = useMemo(() => parseMentions(text), [text]);
+  return (
+    <Text selectable style={[styles.messageText, own && styles.messageTextOwn, scout && styles.messageTextScout]}>
+      {segments.map((segment, index) => segment.kind === 'mention' ? (
+        <Text
+          key={`${index}-${segment.text}`}
+          style={segment.scout ? styles.messageMentionScout : styles.messageMention}
+        >
+          {segment.text}
+        </Text>
+      ) : segment.text)}
+    </Text>
+  );
+});
+
 export const RoomConversationSheet = memo(function RoomConversationSheet({
   visible,
   mode,
@@ -96,6 +124,7 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
   const safeArea = useSafeAreaInsets();
   const chatListRef = useRef<FlatList<ChatItem>>(null);
   const transcriptListRef = useRef<FlatList<TranscriptItem>>(null);
+  const composerInputRef = useRef<TextInput>(null);
   const [draft, setDraft] = useState('');
   const [composerError, setComposerError] = useState<string | null>(null);
 
@@ -114,6 +143,16 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
   const submitDraft = useCallback(() => {
     void sendComposerText(draft);
   }, [draft, sendComposerText]);
+
+  const insertScoutMention = useCallback(() => {
+    setDraft((current) => {
+      if (/(^|[^\p{L}\p{N}])@scout(?![\p{L}\p{N}])/iu.test(current)) return current;
+      if (!current) return '@Scout ';
+      return `${current}${/\s$/u.test(current) ? '' : ' '}@Scout `;
+    });
+    setComposerError(null);
+    requestAnimationFrame(() => composerInputRef.current?.focus());
+  }, []);
 
   const composerDictation = useComposerDictation({
     onTranscript: ({ text }) => {
@@ -143,16 +182,17 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
 
   const renderMessage = useCallback(({ item }: { item: ChatItem }) => {
     const own = chatItemIsOwn(item, viewer);
+    const scout = normalizedIdentity(item.agentId) === 'scout';
     return (
-      <View style={[styles.messageRow, own && styles.messageRowOwn]}>
-        <View style={[styles.messageBubble, own && styles.messageBubbleOwn]}>
+      <View style={[styles.messageRow, own && styles.messageRowOwn, scout && styles.messageRowScout]}>
+        <View style={[styles.messageBubble, own && styles.messageBubbleOwn, scout && styles.messageBubbleScout, item.error && styles.messageBubbleError]}>
           <View style={styles.messageMeta}>
-            <Text numberOfLines={1} style={[styles.messageAuthor, own && styles.messageAuthorOwn]}>
-              {own ? 'You' : item.name}
+            <Text numberOfLines={1} style={[styles.messageAuthor, own && styles.messageAuthorOwn, scout && styles.messageAuthorScout]}>
+              {own ? 'You' : scout ? 'Scout' : item.name}
             </Text>
             <Text style={[styles.messageTime, own && styles.messageTimeOwn]}>{timeLabel(item.createdAt)}</Text>
           </View>
-          <Text selectable style={[styles.messageText, own && styles.messageTextOwn]}>{item.text}</Text>
+          <RoomMessageText own={own} scout={scout} text={item.text} />
         </View>
         {own ? (
           <Pressable
@@ -263,6 +303,19 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
               style={styles.list}
             />
             <View style={[styles.composerShell, { paddingBottom: Math.max(safeArea.bottom, space[3]) }]}>
+              {composerDictation.state === 'idle' && !/(^|[^\p{L}\p{N}])@scout(?![\p{L}\p{N}])/iu.test(draft) ? (
+                <Pressable
+                  accessibilityHint="Inserts a Scout mention so Scout answers in the shared room chat"
+                  accessibilityLabel="Ask Scout in room chat"
+                  accessibilityRole="button"
+                  onPress={insertScoutMention}
+                  style={({ pressed }) => [styles.scoutMentionShortcut, pressed && styles.pressed]}
+                >
+                  <SymbolView name="sparkles" tintColor="#FF7A45" size={13} />
+                  <Text style={styles.scoutMentionShortcutLabel}>@Scout</Text>
+                  <Text style={styles.scoutMentionShortcutHint}>ask the room AI</Text>
+                </Pressable>
+              ) : null}
               {composerError || composerDictation.error ? (
                 <Text accessibilityLiveRegion="polite" style={styles.composerError}>
                   {composerError || composerDictation.error}
@@ -333,7 +386,7 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
                       <SymbolView name="mic.fill" tintColor="#FF5A19" size={18} />
                     </Pressable>
                     <TextInput
-                      accessibilityLabel="Message the room"
+                      accessibilityLabel="Message the room or mention Scout"
                       maxLength={4000}
                       multiline
                       onChangeText={(value) => {
@@ -341,8 +394,9 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
                         if (composerError) setComposerError(null);
                       }}
                       onSubmitEditing={submitDraft}
-                      placeholder="Message the room"
+                      placeholder="Message the room or @Scout"
                       placeholderTextColor="rgba(255,255,255,0.38)"
+                      ref={composerInputRef}
                       returnKeyType="send"
                       style={styles.input}
                       value={draft}
@@ -421,15 +475,22 @@ const styles = StyleSheet.create({
   emptyBody: { ...type.bodySm, maxWidth: 280, textAlign: 'center', color: 'rgba(255,255,255,0.48)' },
   messageRow: { maxWidth: '88%', alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
   messageRowOwn: { alignSelf: 'flex-end', flexDirection: 'row-reverse' },
+  messageRowScout: { maxWidth: '94%' },
   messageBubble: { maxWidth: '100%', paddingHorizontal: space[3], paddingVertical: 10, borderRadius: 18, borderBottomLeftRadius: 6, backgroundColor: ink[800] },
   messageBubbleOwn: { borderBottomLeftRadius: 18, borderBottomRightRadius: 6, backgroundColor: '#FFFFFF' },
+  messageBubbleScout: { borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,90,25,0.42)', backgroundColor: 'rgba(255,90,25,0.10)' },
+  messageBubbleError: { borderColor: 'rgba(255,159,10,0.62)' },
   messageMeta: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 },
   messageAuthor: { ...type.captionMedium, flexShrink: 1, color: '#FFFFFF' },
   messageAuthorOwn: { color: ink[950] },
+  messageAuthorScout: { color: '#FF8A5B' },
   messageTime: { fontSize: 10, lineHeight: 13, color: 'rgba(255,255,255,0.38)' },
   messageTimeOwn: { color: 'rgba(9,9,11,0.42)' },
   messageText: { ...type.body, color: 'rgba(255,255,255,0.88)' },
   messageTextOwn: { color: ink[950] },
+  messageTextScout: { color: 'rgba(255,255,255,0.92)' },
+  messageMention: { fontWeight: '600', color: '#82B7FF' },
+  messageMentionScout: { fontWeight: '700', color: '#FF8A5B' },
   deleteMessage: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22 },
   transcriptEntry: { gap: 6, padding: space[4], borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.09)', backgroundColor: ink[850] },
   transcriptMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -438,6 +499,9 @@ const styles = StyleSheet.create({
   transcriptTime: { fontSize: 10, lineHeight: 13, color: 'rgba(255,255,255,0.38)' },
   transcriptText: { ...type.body, color: 'rgba(255,255,255,0.82)' },
   composerShell: { ...shadow.mark, paddingHorizontal: space[3], paddingTop: space[2], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.09)', backgroundColor: 'rgba(13,13,16,0.96)' },
+  scoutMentionShortcut: { minHeight: 34, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: space[2], paddingHorizontal: 11, borderRadius: 17, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,90,25,0.34)', backgroundColor: 'rgba(255,90,25,0.10)' },
+  scoutMentionShortcutLabel: { ...type.captionMedium, color: '#FF8A5B' },
+  scoutMentionShortcutHint: { ...type.caption, color: 'rgba(255,255,255,0.46)' },
   composerError: { ...type.caption, marginBottom: space[2], textAlign: 'center', color: '#FF9F0A' },
   composer: { minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: space[2], paddingLeft: 5, paddingRight: 5, paddingVertical: 5, borderRadius: 25, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)', backgroundColor: ink[800] },
   composerIcon: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20 },

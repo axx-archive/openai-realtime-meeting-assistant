@@ -282,6 +282,12 @@ type kanbanBoardApp struct {
 	// sitting. The roomRealtimeBundle in room_live.go owns and fences it; a nil
 	// factory leaves video/transcription available while Scout is degraded.
 	roomScoutFactory RoomScoutTransportFactory
+	// roomScoutTextLocks serialize explicit @Scout room-chat turns per exact
+	// sitting. Text mentions are independent of the invited Realtime voice
+	// participant, but their answers must still land in authored order and may
+	// never cross a room/sitting/media-generation boundary.
+	roomScoutTextMu    sync.Mutex
+	roomScoutTextLocks map[string]*sync.Mutex
 	// catchUpRecapResolver is the production adapter from the exact temporal
 	// request to the shared W2 retrieval contract. Tests inject it directly;
 	// production wires the meeting-memory/canonical ACL adapter at boot.
@@ -4942,9 +4948,22 @@ func (app *kanbanBoardApp) recordRoomChatMessageForMeeting(roomID string, sender
 	if text == "" {
 		return nil, false
 	}
+	roomID = normalizeRoomID(roomID)
+	// Named-room chat is private to that room+sitting in recall as well as on
+	// the websocket fan-out. The office remains the shared organization room.
+	// Stamp this server-side so neither a browser nor an agent can widen it.
+	metadata := make(map[string]string, len(extraMetadata)+1)
+	for key, value := range extraMetadata {
+		metadata[key] = value
+	}
+	if roomID == officeRoomID {
+		metadata["visibility"] = "organization"
+	} else {
+		metadata["visibility"] = "room"
+	}
 
 	id := durableTimestampID("chat", time.Now())
-	entry, appended, err := app.memory.appendRoomChatTranscriptForMeeting(roomID, id, senderName, text, extraMetadata, expectedMeetingID)
+	entry, appended, err := app.memory.appendRoomChatTranscriptForMeeting(roomID, id, senderName, text, metadata, expectedMeetingID)
 	if err != nil {
 		log.Errorf("Failed to write room chat to meeting memory: %v", err)
 		return nil, false
@@ -4953,9 +4972,9 @@ func (app *kanbanBoardApp) recordRoomChatMessageForMeeting(roomID string, sender
 		return nil, false
 	}
 
-	isBoundedProbe := extraMetadata["mediaSoakCanary"] == "true"
+	isBoundedProbe := metadata["mediaSoakCanary"] == "true"
 	if !isBoundedProbe {
-		broadcastAssistantEvent("transcript", "heard: "+entry.Text, nil)
+		broadcastRoomAssistantTelemetry(roomID, "transcript", "heard: "+entry.Text, nil)
 		if scope, current := app.roomPublicationScope(roomID, entry.Metadata["meetingId"]); current {
 			broadcastScopedRoomKanbanEvent(scope, "memory_transcript", entry)
 		}
@@ -5000,6 +5019,17 @@ func roomChatEventPayload(entry meetingMemoryEntry) map[string]any {
 	// affordance) keys on this, never on the mutable display name.
 	if authorEmail := normalizeAccountEmail(entry.Metadata["authorEmail"]); authorEmail != "" {
 		payload["authorEmail"] = authorEmail
+	}
+	// Server-owned agent attribution is explicit on the wire. Clients never
+	// infer Scout from the display name, which is mutable presentation copy.
+	if agentID := strings.TrimSpace(entry.Metadata["agentId"]); agentID != "" {
+		payload["agentId"] = agentID
+	}
+	if replyTo := strings.TrimSpace(entry.Metadata["replyTo"]); replyTo != "" {
+		payload["replyTo"] = replyTo
+	}
+	if model := strings.TrimSpace(entry.Metadata["model"]); model != "" {
+		payload["model"] = model
 	}
 	return payload
 }

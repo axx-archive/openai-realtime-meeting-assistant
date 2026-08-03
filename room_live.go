@@ -731,10 +731,10 @@ func (l *roomAudioActivityListener) NoteAudioActivity(at time.Time, levels []aud
 	l.app.noteAudioActivityForScope(RoomScoutScope{RoomID: l.roomID, SittingID: l.sittingID, MediaGeneration: l.generation}, at, levels)
 }
 
-// roomLaneAudioSink is a named room's mixer sink (key
-// realtimeMixedAudioSinkKey+":"+roomID): recording-gated lane feed, no
-// Realtime write — the per-room Scout peer is W4, and listen-only rooms never
-// get one.
+// roomLaneAudioSink is a room's consent-gated mixer sink. Transcript recording
+// controls only the transcription lane; an explicitly invited Scout continues
+// to receive the separately authorized model-analysis lane without forcing the
+// meeting transcript to be persisted.
 type roomLaneAudioSink struct {
 	app    *kanbanBoardApp
 	roomID string
@@ -760,11 +760,11 @@ func (s *roomLaneAudioSink) WriteMixedPCMWithConsent(roomPCM []int16, fences []C
 			return nil
 		}
 	}
-	if !s.app.transcriptRecordingActiveInRoom(s.roomID) {
-		return nil
-	}
 	switch s.lane {
 	case ConsentLaneTranscription:
+		if !s.app.transcriptRecordingActiveInRoom(s.roomID) {
+			return nil
+		}
 		s.app.mu.Lock()
 		var transcriptLane *meetingTranscriptionLane
 		if normalizeRoomID(s.roomID) == officeRoomID {

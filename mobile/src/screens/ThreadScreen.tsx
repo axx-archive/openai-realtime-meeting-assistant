@@ -89,6 +89,7 @@ type ThreadMessageRowProps = {
   onRetryReply: (message: ScoutMessage) => void;
   onOpenCatchUp: () => void;
   onOpenLongMessage: (text: string, authorName: string, scout: boolean) => void;
+  onOpenWorkArtifact: (message: ScoutMessage) => void;
 };
 
 const ThreadMessageRow = React.memo(function ThreadMessageRow({
@@ -104,6 +105,7 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
   onRetryReply,
   onOpenCatchUp,
   onOpenLongMessage,
+  onOpenWorkArtifact,
 }: ThreadMessageRowProps) {
   return (
     <>
@@ -150,6 +152,7 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
         onToggleReaction={onToggleReaction}
         onRetryReply={onRetryReply}
         onOpenLongMessage={onOpenLongMessage}
+        onOpenWorkArtifact={onOpenWorkArtifact}
         retryingReply={retryingReply}
       />
     </>
@@ -167,6 +170,7 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
   && previous.onRetryReply === next.onRetryReply
   && previous.onOpenCatchUp === next.onOpenCatchUp
   && previous.onOpenLongMessage === next.onOpenLongMessage
+  && previous.onOpenWorkArtifact === next.onOpenWorkArtifact
 ));
 
 const threadRowKey = (row: ThreadRow) => String(row.message.id);
@@ -880,6 +884,20 @@ export function ThreadScreen({ route, navigation }: Props) {
   const openLongMessage = useCallback((text: string, authorName: string, scout: boolean) => {
     setExpandedMessage({ text, authorName, scout });
   }, []);
+  const openWorkArtifact = useCallback(async (message: ScoutMessage) => {
+    const artifactId = String(message.thread?.artifactId ?? '').trim();
+    if (!sessionToken || !artifactId) return;
+    try {
+      const response = await api.artifact(sessionToken, artifactId);
+      const artifact = response.artifacts[0];
+      const text = String(artifact?.text ?? '').trim();
+      if (!text) throw new Error('The completed report is not available yet.');
+      const title = String(artifact?.metadata?.title ?? message.thread?.query ?? 'Scout deliverable').trim();
+      setExpandedMessage({ text, authorName: title || 'Scout deliverable', scout: true });
+    } catch (caught) {
+      setError(caught instanceof BonfireApiError ? caught.message : caught instanceof Error ? caught.message : 'Could not open that deliverable.');
+    }
+  }, [sessionToken]);
   const typingFooter = useMemo(
     () => typingParticipants.length > 0
       ? <TypingIndicator participants={typingParticipants} />
@@ -900,6 +918,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       onRetryReply={retryScoutReply}
       onOpenCatchUp={openCatchUp}
       onOpenLongMessage={openLongMessage}
+      onOpenWorkArtifact={openWorkArtifact}
     />
   ), [
     email,
@@ -907,6 +926,7 @@ export function ThreadScreen({ route, navigation }: Props) {
     openCatchUp,
     openMessageActions,
     openLongMessage,
+    openWorkArtifact,
     retryScoutReply,
     retryingReplyID,
     scrollToMessage,

@@ -744,6 +744,26 @@ func scoutChatReplyRefFromThread(thread scoutChatThreadRecord, messageID string)
 	return &scoutChatReplyRef{MessageID: message.ID, AuthorName: author, AuthorEmail: normalizeAccountEmail(message.AuthorEmail), Text: text}, nil
 }
 
+func scoutChatReplyTargetsScout(thread scoutChatThreadRecord, messageID string) bool {
+	index := scoutChatMessageIndex(thread, strings.TrimSpace(messageID))
+	if index < 0 {
+		return false
+	}
+	message := thread.Messages[index]
+	role := strings.ToLower(strings.TrimSpace(message.Role))
+	if role != "scout" && role != "assistant" {
+		return false
+	}
+	author := strings.TrimSpace(message.AuthorName)
+	return author == "" || strings.EqualFold(author, scoutParticipantName)
+}
+
+const scoutDirectReplyNoResponseMarker = "<scout_no_response/>"
+
+func scoutDirectReplyResponseStyle(base string) string {
+	return strings.TrimSpace(base) + " This turn directly replies to one of Scout's messages. Read the reply in its thread context. Respond normally when an answer, correction, clarification, or useful follow-up is warranted. If it is only an acknowledgment and adding another message would be noise, return exactly <scout_no_response/> and nothing else."
+}
+
 func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx context.Context, user *userAccount, threadID string, text string, files []scoutChatFileAttachment, followUpArtifactID string, replyToMessageID string, toolTemplate string) (map[string]any, error) {
 	thread, _, err := app.scoutChatThreadByID(user.Email, threadID)
 	if err != nil {
@@ -756,6 +776,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	if err != nil {
 		return nil, err
 	}
+	replyTargetsScout := scoutChatReplyTargetsScout(thread, replyToMessageID)
 
 	now := time.Now().UTC()
 	messageID := fmt.Sprintf("scout-chat-message-%d", now.UnixNano())
@@ -782,7 +803,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		return nil, fmt.Errorf("message text or attachment is required")
 	}
 	coworkerProviderFenced := app.strideAgentDirectThreadProviderFenced(thread.ID)
-	deferAttachmentDerivation := coworkerProviderFenced || shouldDeferScoutChatAttachmentDerivation(thread, text, files, followUpArtifactID, toolTemplate)
+	deferAttachmentDerivation := coworkerProviderFenced || (shouldDeferScoutChatAttachmentDerivation(thread, text, files, followUpArtifactID, toolTemplate) && !replyTargetsScout)
 
 	// Binary attachments (card 085): build the provider-native content once,
 	// then run the bounded derived-text pass BEFORE any commit so file.Text
@@ -874,6 +895,32 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			attachmentCommitted = true
 		}
 		return result, intakeErr
+	}
+
+	// File-dependent asks have a deterministic admission boundary. Seeing a
+	// filename is not the same as reading its contents: before Scout can answer,
+	// propose, or launch anything, resolve the current/recent attachment against
+	// its authorized chat source or the requester's Files catalog.
+	sourceNeed := scoutChatSourceNeed{}
+	explicitScoutEngagement := scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic ||
+		scoutChatMessageMentionsScout(userMessage) || replyTargetsScout ||
+		strings.TrimSpace(followUpArtifactID) != "" || strings.TrimSpace(toolTemplate) != ""
+	if explicitScoutEngagement {
+		sourceNeed = app.scoutChatReadableSourceNeed(ctx, user, thread, userMessage)
+		if sourceNeed.Required && sourceNeed.Missing {
+			assistantMessage := scoutChatMissingSourceResponse(sourceNeed)
+			saved, commitErr := commitUserMessage(userMessage, assistantMessage)
+			if commitErr != nil {
+				return nil, commitErr
+			}
+			log.Infof("Scout work admission requested a readable source: thread=%s message=%s file=%q size=%d", threadID, userMessage.ID, sourceNeed.FileName, sourceNeed.FileSize)
+			response["answer"] = assistantMessage
+			response["thread"] = saved
+			response["dependencyRequired"] = true
+			response["providerCalls"] = 0
+			return response, nil
+		}
+		ctx = withAssistantContextRefs(ctx, sourceNeed.ContextRefs)
 	}
 
 	// A follow-up reply re-runs an existing agent-thread artifact in place
@@ -1025,6 +1072,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		}, agentThreadGoalSpec{
 			Objective:     objective,
 			ToolTemplate:  tool.ID,
+			ContextRefs:   encodeAssistantContextRefs(sourceNeed.ContextRefs),
 			OriginSurface: "chat:" + threadID,
 			RequestedBy:   normalizeAccountEmail(user.Email),
 			Authority:     tool.Authority,
@@ -1058,10 +1106,11 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		return response, nil
 	}
 
-	// Public channels are human-to-human by default: Scout (answers and
-	// agent-mode keyword launches alike) only engages on an explicit @scout
-	// mention. Private threads keep the always-answer behavior.
-	scoutEngaged := scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic || scoutChatMessageMentionsScout(userMessage)
+	// Public channels are human-to-human by default. An authored @scout mention
+	// or a direct reply to a Scout-authored message is explicit engagement; the
+	// latter lets normal long-press Reply continue the conversation without
+	// forcing the user to repeat @Scout. Replies to people remain ordinary chat.
+	scoutEngaged := scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic || scoutChatMessageMentionsScout(userMessage) || replyTargetsScout
 	if !scoutEngaged {
 		saved, err := commitUserMessage(userMessage)
 		if err != nil {
@@ -1134,6 +1183,12 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
 		mode = scoutChatThreadModeForChannelText(text)
 	}
+	// An explicit source-backed review is real work even when the user speaks
+	// naturally instead of typing "research:". It still creates only a proposal;
+	// the persisted confirm remains the single launch door.
+	if mode == "" && sourceNeed.Required && sourceNeed.Work && len(sourceNeed.ContextRefs) > 0 {
+		mode = "research"
+	}
 	if mode != "" {
 		objective := strings.TrimSpace(text)
 		proposal := &scoutRouterProposal{
@@ -1141,6 +1196,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			Mode:        mode,
 			Objective:   objective,
 			Query:       objective,
+			ContextRefs: encodeAssistantContextRefs(sourceNeed.ContextRefs),
 			Lane:        scoutProposalLane(mode, "", ""),
 			WeightLabel: scoutProposalWeightQuickPass,
 			Summary:     "this looks like a quick " + assistantToolLabel(mode) + " pass — confirm and it runs once: " + objective,
@@ -1193,6 +1249,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		}
 		if verdict := app.routeScoutChatTurn(ctx, modelQuery, history); verdict != nil {
 			if proposal := verdict.proposal; proposal != nil {
+				proposal.ContextRefs = encodeAssistantContextRefs(sourceNeed.ContextRefs)
 				proposalMessage := scoutChatMessageRecord{
 					ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
 					Kind:      scoutChatMessageKindProposal,
@@ -1242,7 +1299,11 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	if len(attachmentBlocks) > 0 && !app.attachmentSourcesAuthorizedForRead(user, thread, files, attachmentReservationID) {
 		return nil, fmt.Errorf("attachment authorization changed; attach the file again")
 	}
-	result, err := app.resolveAssistantQueryContextForUserWithAttachments(withAssistantResponseStyle(ctx, scoutChatResponseStyle(thread)), user.Email, modelQuery, history, openAIAttachments)
+	responseStyle := scoutChatResponseStyle(thread)
+	if replyTargetsScout {
+		responseStyle = scoutDirectReplyResponseStyle(responseStyle)
+	}
+	result, err := app.resolveAssistantQueryContextForUserWithAttachments(withAssistantResponseStyle(ctx, responseStyle), user.Email, modelQuery, history, openAIAttachments)
 	if len(attachmentBlocks) > 0 && !app.attachmentSourcesAuthorizedForRead(user, thread, files, attachmentReservationID) {
 		return nil, fmt.Errorf("attachment authorization changed while Scout was reading it; attach the file again")
 	}
@@ -1258,6 +1319,16 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		return nil, err
 	}
 	answer := strings.TrimSpace(result.answer)
+	if replyTargetsScout && answer == scoutDirectReplyNoResponseMarker {
+		saved, commitErr := commitUserMessage(userMessage)
+		if commitErr != nil {
+			return nil, commitErr
+		}
+		response["thread"] = saved
+		response["scoutRead"] = true
+		response["scoutResponded"] = false
+		return response, nil
+	}
 	if answer == "" {
 		answer = "no answer yet"
 	}
@@ -1465,6 +1536,16 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 	if messageID == "" {
 		return nil, fmt.Errorf("proposal message id is required")
 	}
+	// Source-bound work fails before the card is claimed if its exact Files or
+	// chat attachment has disappeared or lost readable content. This keeps the
+	// proposal pending so the user can restore the source and retry.
+	pending, err := app.pendingScoutChatProposal(threadID, user.Email, messageID)
+	if err != nil {
+		return nil, err
+	}
+	if verb == "accepted" && !app.assistantContextRefsReadable(ctx, user, pending.ContextRefs) {
+		return nil, fmt.Errorf("a source file changed or is no longer readable; attach it again before launching")
+	}
 
 	// Atomically flip the still-pending card to its verdict and read back the
 	// stored proposal. A message that carries no proposal, or one already
@@ -1535,14 +1616,20 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 			if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
 				originKind = agentThreadOriginChannel
 			}
+			if !app.assistantContextRefsReadable(ctx, user, proposal.ContextRefs) {
+				return nil, fmt.Errorf("a source file changed or is no longer readable; attach it again before launching")
+			}
 			agentThread, err := app.launchAgentThreadWithSpec(mode, objective, user.Name, map[string]string{
 				"originKind":  originKind,
 				"originId":    threadID,
 				"requestedBy": normalizeAccountEmail(user.Email),
-			}, agentThreadGoalSpec{Launch: launchFunnelLineage{
-				ProposalID: messageID,
-				Path:       "chat_workstream",
-			}})
+			}, agentThreadGoalSpec{
+				ContextRefs: proposal.ContextRefs,
+				Launch: launchFunnelLineage{
+					ProposalID: messageID,
+					Path:       "chat_workstream",
+				},
+			})
 			if err != nil {
 				return nil, err
 			}
@@ -1800,6 +1887,26 @@ func (app *kanbanBoardApp) claimScoutChatChoice(threadID string, viewerEmail str
 		return claimedOption, claimedChoices, nil
 	}
 	return scoutChatChoiceOption{}, scoutChatChoices{}, fmt.Errorf("choice message not found")
+}
+
+func (app *kanbanBoardApp) pendingScoutChatProposal(threadID string, viewerEmail string, messageID string) (scoutRouterProposal, error) {
+	thread, _, err := app.scoutChatThreadByID(viewerEmail, threadID)
+	if err != nil {
+		return scoutRouterProposal{}, err
+	}
+	if thread.ArchivedAt != "" {
+		return scoutRouterProposal{}, fmt.Errorf("chat thread is archived")
+	}
+	for _, message := range thread.Messages {
+		if message.ID != messageID || message.Proposal == nil {
+			continue
+		}
+		if message.Proposal.Status != "" {
+			return scoutRouterProposal{}, fmt.Errorf("proposal was already %s", message.Proposal.Status)
+		}
+		return *message.Proposal, nil
+	}
+	return scoutRouterProposal{}, fmt.Errorf("proposal message not found")
 }
 
 // claimScoutChatProposal atomically resolves one persisted proposal card

@@ -14,13 +14,20 @@ func TestFrontendMeetingSpecialistsUsesRealControlRouteAndHonestDisclosure(t *te
 	html := string(source)
 	for _, want := range []string{
 		`id="roomMoreSpecialists"`,
+		`id="roomScoutQuickAction"`,
 		`id="meetingSpecialistsPanel"`,
+		`/api/rooms/agents/scout`,
 		`/api/stride/v1/meeting-specialists`,
+		`data-room-scout-action=`,
+		`Invite Scout`,
+		`Dismiss Scout`,
+		`Add Scout to this meeting`,
 		`data-specialist-action="request"`,
 		`data-specialist-action="approved"`,
 		`data-specialist-action="declined"`,
 		`data-specialist-action="dismissed"`,
-		`A teammate must approve the exact request before an agent can join`,
+		`employee agents require approval for the exact request`,
+		`Meeting transcription remains independent`,
 		`Provider voice remains visibly fenced`,
 		`Voice joining stays off until provider qualification is complete`,
 		`meetingSpecialistContextLabel(invitation.contextClasses)`,
@@ -57,6 +64,8 @@ func TestFrontendMeetingSpecialistsEscapesEveryRuntimeInterpolation(t *testing.T
 	}
 	renderer := html[start:end]
 	for _, interpolation := range []string{
+		"escapeHtml(scout?.name || 'Scout')",
+		"escapeHtml(scoutState)",
 		"escapeHtml(invitation.displayName || invitation.agentId",
 		"escapeHtml(meetingSpecialistStatusLabel(invitation.status))",
 		"escapeHtml(invitation.id)",
@@ -72,5 +81,39 @@ func TestFrontendMeetingSpecialistsEscapesEveryRuntimeInterpolation(t *testing.T
 		if !strings.Contains(renderer, interpolation) {
 			t.Fatalf("runtime interpolation %q is not escaped", interpolation)
 		}
+	}
+}
+
+func TestFrontendProjectsRoomAgentsAsVisibleCradleParticipants(t *testing.T) {
+	source, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(source)
+	for _, want := range []string{
+		`case 'agent_participants':`,
+		`handleRoomAgentParticipants(message.data)`,
+		`...roomAgentParticipants.map(agent => agent.name)`,
+		`room-agent-cradle`,
+		`is-agent-participant`,
+		`data-voice-state`,
+		`...roomAgentParticipants.map(agent => agent.name.toLowerCase())`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("room agent participant projection is missing %q", want)
+		}
+	}
+}
+
+func TestFrontendDeclaresMeetingSpecialistBusyGuardBeforeBootstrapProjection(t *testing.T) {
+	source, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(source)
+	declaration := strings.Index(html, "let meetingSpecialistsBusy = false")
+	bootstrapUse := strings.Index(html, "meetingSpecialistsBusy || !appShell.classList.contains('is-in-room')")
+	if declaration < 0 || bootstrapUse < 0 || declaration >= bootstrapUse {
+		t.Fatal("meetingSpecialistsBusy must be initialized before authenticated room projection can read it")
 	}
 }

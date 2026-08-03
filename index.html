@@ -3597,7 +3597,8 @@
       }
 
       /* invite is an in-call act — pre-join the bar only offers Enter */
-      #appShell:not(.is-in-room) #inviteToggle {
+      #appShell:not(.is-in-room) #inviteToggle,
+      #appShell:not(.is-in-room) #roomScoutQuickAction {
         display: none;
       }
 
@@ -3648,11 +3649,57 @@
       .controls #screenShare,
       .controls #recordMeeting,
       .controls #archiveMeeting,
+      .controls #roomScoutQuickAction,
       .controls #roomChatToggle,
       .controls #join {
         min-width: 0;
         border-radius: var(--r-full);
         white-space: nowrap;
+      }
+
+      .room-scout-quick {
+        gap: 8px;
+      }
+
+      .controls .room-scout-quick.is-live,
+      .controls .room-scout-quick.is-live:hover:not([disabled]) {
+        border-color: color-mix(in srgb, var(--ember) 44%, transparent);
+        background: color-mix(in srgb, var(--ember) 18%, rgba(255, 255, 255, 0.08));
+        color: #fff;
+      }
+
+      .room-scout-quick__cradle {
+        display: inline-flex;
+        align-items: center;
+        gap: 1px;
+        height: 14px;
+      }
+
+      .room-scout-quick__cradle span {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--ember);
+        box-shadow: 0 0 7px var(--ember-soft);
+        transform-origin: 50% -5px;
+      }
+
+      .room-scout-quick.is-live .room-scout-quick__cradle span:first-child {
+        animation: room-scout-quick-left 1.8s cubic-bezier(0.2, 0, 0, 1) infinite;
+      }
+
+      .room-scout-quick.is-live .room-scout-quick__cradle span:last-child {
+        animation: room-scout-quick-right 1.8s cubic-bezier(0.2, 0, 0, 1) infinite;
+      }
+
+      @keyframes room-scout-quick-left {
+        0%, 55%, 100% { transform: rotate(0deg); }
+        68% { transform: rotate(24deg); }
+      }
+
+      @keyframes room-scout-quick-right {
+        0%, 68%, 100% { transform: rotate(0deg); }
+        82% { transform: rotate(-24deg); }
       }
 
       /* Send notes keeps its word on wide docks; the glyph is phone-only */
@@ -11670,6 +11717,56 @@
         margin: 0 0 var(--sp-2);
       }
 
+      .room-chat__scout-mention {
+        min-width: 62px;
+        height: 32px;
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 10px;
+        border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line-1));
+        border-radius: var(--r-full);
+        background: var(--accent-soft);
+        color: var(--text-1);
+        font: 650 12px/1 var(--font-sans);
+        letter-spacing: -0.01em;
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+
+      .room-chat__scout-mention:hover:not([disabled]) {
+        border-color: color-mix(in srgb, var(--accent) 58%, var(--line-1));
+        background: color-mix(in srgb, var(--accent) 18%, var(--surface-3));
+      }
+
+      .room-chat__scout-mention:active:not([disabled]) {
+        transform: scale(var(--press-scale));
+      }
+
+      .room-chat__scout-mention[disabled] {
+        color: var(--text-disabled);
+        cursor: default;
+      }
+
+      #appShell.is-guest .room-chat__scout-mention {
+        display: none;
+      }
+
+      .room-chat-msg--scout .scout-chat-meta {
+        color: var(--accent);
+        font-weight: 650;
+      }
+
+      .room-chat-msg--scout .scout-chat-text {
+        border-color: color-mix(in srgb, var(--accent) 30%, var(--line-1));
+        background: color-mix(in srgb, var(--accent) 8%, var(--surface-2));
+      }
+
+      .room-chat-msg--scout.is-error .scout-chat-text {
+        border-color: color-mix(in srgb, var(--danger) 42%, var(--line-1));
+      }
+
       /* close-the-loop delivery: a finished-artifact message carries a glass
          chip that opens the report in the intel library */
       .room-chat-artifact-chip {
@@ -16167,6 +16264,21 @@
         border-radius: 18px;
         background: var(--surface-2);
       }
+      .meeting-specialists__row--scout {
+        box-shadow:
+          inset 0 0 0 1px color-mix(in srgb, var(--ember) 36%, transparent),
+          0 10px 28px rgba(0, 0, 0, 0.12);
+      }
+      .meeting-specialists__row--scout .meeting-specialists__name::before {
+        content: "";
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        margin-right: 8px;
+        border-radius: 50%;
+        background: var(--ember);
+        box-shadow: 0 0 0 4px var(--ember-soft);
+      }
       .meeting-specialists__row-head { justify-content: space-between; gap: 12px; }
       .meeting-specialists__name { color: var(--text-1); font: 600 15px/1.25 var(--font-sans); }
       .meeting-specialists__status { color: var(--text-3); font: 500 11px/1.25 var(--font-sans); }
@@ -17542,6 +17654,126 @@
       .hearth-seat.is-placeholder {
         border: 1px dashed var(--line-2);
         box-shadow: none;
+      }
+
+      .hearth-seat.is-agent-participant {
+        --room-agent-color: var(--ember);
+        border: 0;
+        background:
+          radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--room-agent-color) 14%, transparent), transparent 46%),
+          var(--ink-900);
+        cursor: default;
+      }
+
+      .hearth-seat.is-agent-participant::after {
+        box-shadow:
+          inset 0 0 0 1px color-mix(in srgb, var(--room-agent-color) 34%, rgba(255, 255, 255, 0.07)),
+          inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      }
+
+      .room-agent-cradle {
+        --room-agent-ball: clamp(22px, 3vw, 34px);
+        position: relative;
+        z-index: 1;
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        width: min(72%, 280px);
+        height: clamp(74px, 34%, 104px);
+        padding-top: 1px;
+        filter: drop-shadow(0 8px 18px color-mix(in srgb, var(--room-agent-color) 24%, transparent));
+      }
+
+      .room-agent-cradle::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 8%;
+        right: 8%;
+        height: 1px;
+        background: color-mix(in srgb, var(--room-agent-color) 48%, rgba(255, 255, 255, 0.18));
+      }
+
+      .room-agent-cradle__ball {
+        position: relative;
+        width: var(--room-agent-ball);
+        height: 100%;
+        flex: 0 0 var(--room-agent-ball);
+        transform-origin: 50% 0;
+        will-change: transform;
+      }
+
+      .room-agent-cradle__ball::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        bottom: calc(var(--room-agent-ball) - 1px);
+        left: 50%;
+        width: 1px;
+        background: color-mix(in srgb, var(--room-agent-color) 58%, rgba(255, 255, 255, 0.32));
+        transform: translateX(-50%);
+      }
+
+      .room-agent-cradle__ball::after {
+        content: "";
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        width: var(--room-agent-ball);
+        height: var(--room-agent-ball);
+        border-radius: 50%;
+        background: var(--room-agent-color);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.32),
+          inset 0 -5px 10px rgba(0, 0, 0, 0.2),
+          0 5px 14px color-mix(in srgb, var(--room-agent-color) 30%, transparent);
+      }
+
+      .is-agent-participant[data-voice-state="listening"] .room-agent-cradle__ball:first-child,
+      .is-agent-participant[data-voice-state="ready"] .room-agent-cradle__ball:first-child {
+        animation: room-agent-cradle-left 2.8s cubic-bezier(0.2, 0, 0, 1) infinite;
+      }
+
+      .is-agent-participant[data-voice-state="hearing"] .room-agent-cradle__ball:first-child {
+        animation: room-agent-cradle-hearing 1.3s cubic-bezier(0.2, 0, 0, 1) infinite;
+      }
+
+      .is-agent-participant[data-voice-state="thinking"] .room-agent-cradle__ball:nth-child(3)::after {
+        animation: room-agent-cradle-think 900ms cubic-bezier(0.2, 0, 0, 1) infinite alternate;
+      }
+
+      .is-agent-participant[data-voice-state="talking"] .room-agent-cradle__ball:first-child {
+        animation: room-agent-cradle-talk-left 860ms cubic-bezier(0.2, 0, 0, 1) infinite;
+      }
+
+      .is-agent-participant[data-voice-state="talking"] .room-agent-cradle__ball:last-child {
+        animation: room-agent-cradle-talk-right 860ms cubic-bezier(0.2, 0, 0, 1) infinite;
+      }
+
+      @keyframes room-agent-cradle-left {
+        0%, 72%, 100% { transform: rotate(0deg); }
+        82% { transform: rotate(12deg); }
+        91% { transform: rotate(0deg); }
+      }
+
+      @keyframes room-agent-cradle-hearing {
+        0%, 100% { transform: rotate(0deg); }
+        44% { transform: rotate(14deg); }
+      }
+
+      @keyframes room-agent-cradle-think {
+        from { filter: brightness(0.82); transform: scale(0.9); }
+        to { filter: brightness(1.18); transform: scale(1); }
+      }
+
+      @keyframes room-agent-cradle-talk-left {
+        0%, 50%, 100% { transform: rotate(0deg); }
+        25% { transform: rotate(18deg); }
+      }
+
+      @keyframes room-agent-cradle-talk-right {
+        0%, 50%, 100% { transform: rotate(0deg); }
+        75% { transform: rotate(-18deg); }
       }
 
       .hearth-seat .owner-avatar {
@@ -20644,6 +20876,7 @@
            shrink or disappear. */
         #appShell.is-in-room[data-tool="room"] .meeting-bar .controls > #recordMeeting,
         #appShell.is-in-room[data-tool="room"] .meeting-bar .controls > #inviteToggle,
+        #appShell.is-in-room[data-tool="room"] .meeting-bar .controls > #roomScoutQuickAction,
         #appShell.is-in-room[data-tool="room"] .meeting-bar .controls > #archiveMeeting {
           display: none;
         }
@@ -23941,6 +24174,9 @@
            one place the geometry is computed. The hover scale goes too, since a
            held-open pose is not something the visitor can dismiss. */
         .office-launch__cradle { transform: none; transition: none; }
+        .room-agent-cradle__ball,
+        .room-agent-cradle__ball::after,
+        .room-scout-quick__cradle span { animation: none !important; }
         .voice-ledger { animation: none; }
         /* Private grill (Wave 12): keep every act's STATE (tone, color, content),
            drop the MOTION — the scorecard appears assembled with final values,
@@ -24443,7 +24679,8 @@
               <p class="scout-chat-empty">messages here reach everyone in the room and land in meeting memory</p>
             </div>
             <form id="roomChatForm" class="scout-chat-form room-chat__form">
-              <textarea id="roomChatInput" class="scout-chat-input" rows="1" autocomplete="off" placeholder="message the room…" aria-label="Message the room" disabled></textarea>
+              <button id="roomChatScoutMention" class="room-chat__scout-mention" type="button" aria-label="Mention Scout and ask the room AI" title="Ask Scout in room chat" disabled>@Scout</button>
+              <textarea id="roomChatInput" class="scout-chat-input" rows="1" autocomplete="off" placeholder="message the room or @Scout…" aria-label="Message the room or mention Scout" disabled></textarea>
               <button id="roomChatSend" class="scout-chat-send" type="submit" aria-label="Send" title="Send" disabled>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M12 19V5"></path>
@@ -25482,6 +25719,10 @@
             </svg>
             <span class="invite-label">Invite</span>
           </button>
+          <button id="roomScoutQuickAction" class="btn btn--ghost room-scout-quick" type="button" aria-label="Add Scout to this meeting" title="Add Scout">
+            <span class="room-scout-quick__cradle" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></span>
+            <span class="room-scout-quick__label">Add Scout</span>
+          </button>
           <button id="archiveMeeting" class="btn btn--primary" type="button" aria-label="Send notes" title="Send notes" disabled>
             <svg class="archive-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="m22 2-7 20-4-9-9-4Z"></path>
@@ -25531,7 +25772,7 @@
           </div>
           <button id="meetingSpecialistsClose" class="meeting-specialists__close" type="button" aria-label="Close agent team">×</button>
         </header>
-        <p class="meeting-specialists__disclosure">Agents are visible to everyone in the meeting. A teammate must approve the exact request before an agent can join. Agents receive only the authorized meeting context and can be dismissed at any time.</p>
+        <p class="meeting-specialists__disclosure">Agents are visible to everyone in the meeting. A current member can invite Scout once everyone has consented; employee agents require approval for the exact request. Agents receive only the authorized meeting context and can be dismissed at any time.</p>
         <p id="meetingSpecialistsState" class="meeting-specialists__state" role="status" aria-live="polite">Checking your agent team…</p>
         <div id="meetingSpecialistsList" class="meeting-specialists__list"></div>
       </div>
@@ -26353,6 +26594,7 @@
       const roomMoreSpecialistsButton = document.getElementById('roomMoreSpecialists')
       const roomMoreInviteButton = document.getElementById('roomMoreInvite')
       const roomMoreArchiveButton = document.getElementById('roomMoreArchive')
+      const roomScoutQuickActionButton = document.getElementById('roomScoutQuickAction')
       const meetingSpecialistsPanel = document.getElementById('meetingSpecialistsPanel')
       const meetingSpecialistsCloseButton = document.getElementById('meetingSpecialistsClose')
       const meetingSpecialistsState = document.getElementById('meetingSpecialistsState')
@@ -26546,6 +26788,7 @@
       const roomChatForm = document.getElementById('roomChatForm')
       const roomChatInput = document.getElementById('roomChatInput')
       const roomChatSend = document.getElementById('roomChatSend')
+      const roomChatScoutMention = document.getElementById('roomChatScoutMention')
       const roomChatToggle = document.getElementById('roomChatToggle')
       const roomChatUnread = document.getElementById('roomChatUnread')
       const roomRailUnread = document.getElementById('roomRailUnread')
@@ -26777,6 +27020,11 @@
       let localStream
       let roomEntryInProgress = false
       let roomEntryStartedAt = 0
+      // Room participant projection runs during authenticated bootstrap, before
+      // the late meeting-specialist UI cluster is reached. Keep this guard with
+      // the other bootstrap state so syncRoomScoutQuickAction can never hit a
+      // temporal-dead-zone and abort the entire desktop app startup.
+      let meetingSpecialistsBusy = false
       let roomTransferDecisionResolve = null
       let roomTransferRestoreFocusEl = null
       let roomTransferCloseTimer = 0
@@ -26938,6 +27186,7 @@
       let pendingActiveSpeakerName = ''
       let pendingActiveSpeakerSince = 0
       let participantsInRoom = []
+      let roomAgentParticipants = []
       let participantPreview = []
       let roomCapacity = 10
       let occupiedSeats = 0
@@ -27600,6 +27849,13 @@
         setRoomMoreOpen(false)
         openMeetingSpecialists()
       })
+      roomScoutQuickActionButton?.addEventListener('click', () => {
+        if (roomAgentParticipants.some(agent => agent.id === 'scout')) {
+          openMeetingSpecialists()
+          return
+        }
+        setDesktopRoomScout('invite')
+      })
       roomMoreInviteButton?.addEventListener('click', () => {
         setRoomMoreOpen(false)
         if (!guestMode) inviteToggleButton.click()
@@ -27627,6 +27883,11 @@
         }
       })
       meetingSpecialistsList?.addEventListener('click', event => {
+        const scoutButton = event.target.closest?.('button[data-room-scout-action]')
+        if (scoutButton && !scoutButton.disabled) {
+          setDesktopRoomScout(scoutButton.dataset.roomScoutAction)
+          return
+        }
         const button = event.target.closest?.('button[data-specialist-action]')
         if (!button || button.disabled) return
         const action = button.dataset.specialistAction
@@ -28077,6 +28338,7 @@
         }
       })
       roomChatForm.addEventListener('submit', sendRoomChatFromForm)
+      roomChatScoutMention?.addEventListener('click', insertRoomScoutMention)
       roomChatInput.addEventListener('input', resizeRoomChatInput)
       roomChatInput.addEventListener('keydown', event => {
         if (event.isComposing || event.keyCode === 229) {
@@ -42317,6 +42579,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           case 'participants':
             handleParticipants(message.data)
             break
+          case 'agent_participants':
+            handleRoomAgentParticipants(message.data)
+            break
           case 'participant_joined':
             handleParticipantJoined(message.data)
             break
@@ -43223,6 +43488,55 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function handleParticipants(participants) {
         reconcileParticipantsInRoom(applyRoomSnapshot(participants), { announce: true })
+      }
+
+      function normalizeRoomAgentParticipants(data) {
+        let payload = data
+        if (typeof payload === 'string') {
+          try { payload = JSON.parse(payload) } catch { return [] }
+        }
+        if (!Array.isArray(payload)) return []
+        return payload.flatMap(value => {
+          if (!value || typeof value !== 'object') return []
+          const id = String(value.id || '').trim()
+          const name = String(value.name || '').trim()
+          const invitationId = String(value.invitationId || '').trim()
+          if (!id || !name || !invitationId) return []
+          return [{
+            id,
+            name,
+            kind: String(value.kind || 'employee').trim() || 'employee',
+            color: String(value.color || '#FF5A19').trim() || '#FF5A19',
+            status: String(value.status || 'starting').trim() || 'starting',
+            voiceState: String(value.voiceState || 'starting').trim() || 'starting',
+            invitationId,
+            invitedAt: String(value.invitedAt || '').trim(),
+            invitedBy: String(value.invitedBy || '').trim(),
+            model: String(value.model || '').trim(),
+            providerSessionStarted: value.providerSessionStarted === true
+          }]
+        })
+      }
+
+      function roomAgentParticipantByName(name) {
+        const target = String(name || '').trim().toLowerCase()
+        return roomAgentParticipants.find(agent => agent.name.toLowerCase() === target) || null
+      }
+
+      function handleRoomAgentParticipants(data) {
+        const previous = roomAgentParticipants
+        roomAgentParticipants = normalizeRoomAgentParticipants(data)
+        const nextNames = new Set(roomAgentParticipants.map(agent => agent.name.toLowerCase()))
+        for (const agent of previous) {
+          if (nextNames.has(agent.name.toLowerCase())) continue
+          removeParticipantPlaceholder(agent.name)
+          removeRemoteParticipantMediaByName(agent.name)
+        }
+        updateHearthParticipants()
+        syncRoomScoutQuickAction()
+        if (meetingSpecialistsPanel && !meetingSpecialistsPanel.hidden) {
+          renderMeetingSpecialists()
+        }
       }
 
       function reconcileParticipantsInRoom(nextParticipants, options = {}) {
@@ -44456,7 +44770,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function pruneRemoteMediaOutsideRoom() {
-        const activeKeys = new Set(participantsInRoom.map(name => name.toLowerCase()))
+        const activeKeys = new Set([
+          ...participantsInRoom.map(name => name.toLowerCase()),
+          ...roomAgentParticipants.map(agent => agent.name.toLowerCase())
+        ])
         const localName = String(currentParticipantName || '').trim()
         if (localName) {
           activeKeys.add(localName.toLowerCase())
@@ -48643,6 +48960,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const joined = appShell.classList.contains('is-in-room') && ws?.readyState === WebSocket.OPEN
         roomChatInput.disabled = !joined
         roomChatSend.disabled = !joined
+        if (roomChatScoutMention) {
+          roomChatScoutMention.disabled = !joined || guestMode
+        }
         roomChatToggle.disabled = !joined
         if (roomBoardToggleButton) {
           roomBoardToggleButton.disabled = !joined
@@ -48722,12 +49042,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function roomChatMessageNode(message) {
         const own = roomChatMessageIsOwn(message)
+        const scout = String(message?.agentId || '').toLowerCase() === 'scout'
         const item = document.createElement('article')
-        item.className = `scout-chat-msg ${own ? 'scout-chat-msg--user' : 'scout-chat-msg--peer'}`
+        item.className = `scout-chat-msg ${own ? 'scout-chat-msg--user' : scout ? 'scout-chat-msg--scout room-chat-msg--scout' : 'scout-chat-msg--peer'}`
+        if (message?.error === true) {
+          item.classList.add('is-error')
+        }
         item.dataset.messageId = String(message?.id || '')
         const meta = document.createElement('span')
         meta.className = 'scout-chat-meta'
-        const author = own ? 'you' : String(message?.name || 'guest').toLowerCase()
+        const author = own ? 'you' : scout ? 'Scout' : String(message?.name || 'guest').toLowerCase()
         meta.textContent = `${author} · ${scoutChatTimeLabel(message?.createdAt)}`
         // card 073: your own bubble carries the delete control on its meta line
         if (own && message?.id) {
@@ -48735,8 +49059,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         const body = document.createElement('div')
         body.className = 'scout-chat-text'
-        // pasted links become safe anchors — DOM-built, never innerHTML
-        appendChatLinkTextNodes(body, String(message?.text || ''))
+        // Scout answers may use the same safe rich-text vocabulary as private
+        // Scout. Human room messages keep link + mention rendering only.
+        if (scout) {
+          body.classList.add('chat-rich')
+          appendChatRichTextNodes(body, String(message?.text || ''))
+        } else {
+          appendChatMentionTextNodes(body, String(message?.text || ''))
+        }
         item.append(meta, body)
         // Close-the-loop delivery: a completed Scout thread posts its card
         // back to the room; artifactId turns the bubble into a doorway to the
@@ -48859,6 +49189,25 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           roomChatInput.value = ''
           resizeRoomChatInput()
         }
+      }
+
+      function insertRoomScoutMention() {
+        if (!roomChatInput || roomChatInput.disabled || guestMode) {
+          return
+        }
+        const value = roomChatInput.value
+        const start = roomChatInput.selectionStart ?? value.length
+        const end = roomChatInput.selectionEnd ?? start
+        const before = value.slice(0, start)
+        const after = value.slice(end)
+        const leading = before && !/\s$/.test(before) ? ' ' : ''
+        const trailing = after && !/^\s/.test(after) ? ' ' : ''
+        const inserted = `${leading}@Scout ${trailing}`
+        roomChatInput.value = before + inserted + after
+        const caret = before.length + inserted.length
+        roomChatInput.focus()
+        roomChatInput.setSelectionRange(caret, caret)
+        resizeRoomChatInput()
       }
 
       function resizeRoomChatInput() {
@@ -52238,7 +52587,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           currentParticipantName,
           selectedParticipantName(),
           ...participantsInRoom,
-          ...participantPreview
+          ...participantPreview,
+          ...roomAgentParticipants.map(agent => agent.name)
         ])
       }
 
@@ -53095,28 +53445,60 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
         }
         for (const [name, tile] of participantPlaceholders.entries()) {
-          if (!names.includes(name) || remoteStreamsByParticipant.has(name) || name === currentParticipantName) {
+          const agent = roomAgentParticipantByName(name)
+          if (!names.includes(name) || (!agent && remoteStreamsByParticipant.has(name)) || name === currentParticipantName) {
             tile.remove()
             participantPlaceholders.delete(name)
+          } else if (agent) {
+            updateRoomAgentTile(tile, agent)
           }
         }
         for (const name of names) {
-          if (!name || represented.has(name) || remoteStreamsByParticipant.has(name) || name === currentParticipantName) {
+          const agent = roomAgentParticipantByName(name)
+          if (!name || represented.has(name) || (!agent && remoteStreamsByParticipant.has(name)) || name === currentParticipantName) {
             continue
           }
           const tile = document.createElement('div')
-          tile.className = 'video-tile hearth-seat is-placeholder'
           tile.dataset.participant = name
-          const avatar = document.createElement('span')
-          avatar.className = 'owner-avatar'
-          avatar.appendChild(renderIdenticon(name))
-          const label = document.createElement('span')
-          label.className = 'video-label'
-          label.textContent = name
-          tile.append(avatar, renderMediaFlags(), label)
+          if (agent) {
+            tile.className = 'video-tile hearth-seat is-placeholder is-agent-participant'
+            const cradle = document.createElement('span')
+            cradle.className = 'room-agent-cradle'
+            cradle.setAttribute('aria-hidden', 'true')
+            for (let index = 0; index < 5; index += 1) {
+              const ball = document.createElement('span')
+              ball.className = 'room-agent-cradle__ball'
+              cradle.appendChild(ball)
+            }
+            const label = document.createElement('span')
+            label.className = 'video-label'
+            tile.append(cradle, label)
+            updateRoomAgentTile(tile, agent)
+          } else {
+            tile.className = 'video-tile hearth-seat is-placeholder'
+            const avatar = document.createElement('span')
+            avatar.className = 'owner-avatar'
+            avatar.appendChild(renderIdenticon(name))
+            const label = document.createElement('span')
+            label.className = 'video-label'
+            label.textContent = name
+            tile.append(avatar, renderMediaFlags(), label)
+          }
           participantPlaceholders.set(name, tile)
           videoStack.appendChild(tile)
         }
+      }
+
+      function updateRoomAgentTile(tile, agent) {
+        if (!tile || !agent) return
+        const voiceState = String(agent.voiceState || agent.status || 'starting').toLowerCase()
+        tile.style.setProperty('--room-agent-color', agent.color || '#FF5A19')
+        tile.dataset.agentId = agent.id
+        tile.dataset.voiceState = voiceState
+        tile.classList.add('is-agent-participant')
+        tile.setAttribute('aria-label', `${agent.name}, agent participant, ${voiceState}`)
+        const label = tile.querySelector('.video-label')
+        if (label) label.textContent = `${agent.name} · ${voiceState}`
       }
 
       function ensurePinButton(tile, name) {
@@ -59983,6 +60365,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         iceRestartAttempts = 0
         iceRestartRecoveryStartedAt = 0
         participantsInRoom = []
+        roomAgentParticipants = []
         // the sitting's occupancy dies with the seat — a stale occupiedSeats
         // (last in-call presence payload) fed every post-leave surface a
         // phantom "live now · n inside" until the next preview fetch landed
@@ -61143,6 +61526,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           roomMoreArchiveButton.disabled = archiveMeetingButton.disabled
           roomMoreArchiveButton.textContent = archiveMeetingButton.getAttribute('aria-label') || 'Send notes'
         }
+        syncRoomScoutQuickAction()
+      }
+
+      function syncRoomScoutQuickAction() {
+        if (!roomScoutQuickActionButton) return
+        const scout = roomAgentParticipants.find(agent => agent.id === 'scout') || null
+        const label = roomScoutQuickActionButton.querySelector('.room-scout-quick__label')
+        roomScoutQuickActionButton.hidden = Boolean(guestMode)
+        roomScoutQuickActionButton.disabled = meetingSpecialistsBusy || !appShell.classList.contains('is-in-room')
+        roomScoutQuickActionButton.classList.toggle('is-live', Boolean(scout))
+        roomScoutQuickActionButton.setAttribute('aria-label', scout ? 'Open Scout participant controls' : 'Add Scout to this meeting')
+        roomScoutQuickActionButton.title = scout ? 'Scout joined' : 'Add Scout'
+        if (label) label.textContent = scout ? 'Scout joined' : 'Add Scout'
       }
 
       function setRoomMoreOpen(open) {
@@ -61159,7 +61555,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
-      let meetingSpecialistsBusy = false
       let meetingSpecialistsSnapshot = null
       let meetingSpecialistsRestoreFocus = null
 
@@ -61224,13 +61619,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function renderMeetingSpecialists() {
         if (!meetingSpecialistsList) return
         const snapshot = meetingSpecialistsSnapshot
-        if (!snapshot) {
-          meetingSpecialistsList.replaceChildren()
-          return
-        }
-        const invitations = Array.isArray(snapshot.invitations) ? snapshot.invitations : []
-        const candidates = Array.isArray(snapshot.candidates) ? snapshot.candidates : []
+        const invitations = Array.isArray(snapshot?.invitations) ? snapshot.invitations : []
+        const candidates = Array.isArray(snapshot?.candidates) ? snapshot.candidates : []
         const rows = []
+        const scout = roomAgentParticipants.find(agent => agent.id === 'scout') || null
+        const scoutState = scout ? meetingSpecialistStatusLabel(scout.voiceState || scout.status) : 'available'
+        rows.push(`<article class="meeting-specialists__row meeting-specialists__row--scout">
+          <div class="meeting-specialists__row-head"><span class="meeting-specialists__name">${escapeHtml(scout?.name || 'Scout')}</span><span class="meeting-specialists__status">${escapeHtml(scoutState)}</span></div>
+          <p class="meeting-specialists__purpose">Invite Scout as a visible, audible participant.</p>
+          <p class="meeting-specialists__copy">${scout ? 'Scout is visible to everyone in this sitting. Dismissing him leaves meeting transcription running.' : 'Meeting transcription remains independent; Scout hears nothing until invited.'}</p>
+          <div class="meeting-specialists__actions"><button class="meeting-specialists__action ${scout ? '' : 'meeting-specialists__action--primary'}" type="button" data-room-scout-action="${scout ? 'dismiss' : 'invite'}"${meetingSpecialistsBusy ? ' disabled' : ''}>${scout ? 'Dismiss Scout' : 'Invite Scout'}</button></div>
+        </article>`)
         for (const invitation of invitations) {
           const pending = invitation.decision === 'requested'
           const approved = invitation.decision === 'approved'
@@ -61283,15 +61682,25 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       async function loadMeetingSpecialists() {
         setMeetingSpecialistsState('Checking eligibility, consent, and the current meeting…')
-        try {
-          const payload = await meetingSpecialistFetch(`/api/stride/v1/meeting-specialists?roomId=${encodeURIComponent(activeJoin.roomId || 'office')}`)
-          meetingSpecialistsSnapshot = payload.specialists || null
+        const roomId = activeJoin.roomId || 'office'
+        const [scoutResult, specialistsResult] = await Promise.allSettled([
+          meetingSpecialistFetch(`/api/rooms/agents/scout?roomId=${encodeURIComponent(roomId)}`),
+          meetingSpecialistFetch(`/api/stride/v1/meeting-specialists?roomId=${encodeURIComponent(roomId)}`)
+        ])
+        if (scoutResult.status === 'fulfilled') {
+          handleRoomAgentParticipants(scoutResult.value.agents)
+        }
+        meetingSpecialistsSnapshot = specialistsResult.status === 'fulfilled'
+          ? specialistsResult.value.specialists || null
+          : null
+        renderMeetingSpecialists()
+        if (specialistsResult.status === 'fulfilled') {
           setMeetingSpecialistsState(meetingSpecialistReason(meetingSpecialistsSnapshot?.reason))
-          renderMeetingSpecialists()
-        } catch (error) {
-          meetingSpecialistsSnapshot = null
-          renderMeetingSpecialists()
-          setMeetingSpecialistsState(error?.message || 'Agent meeting controls are unavailable.', true)
+        } else if (scoutResult.status === 'fulfilled') {
+          setMeetingSpecialistsState('Scout is available. Specialist eligibility could not be refreshed.', true)
+        } else {
+          const message = scoutResult.reason?.message || specialistsResult.reason?.message || 'Agent meeting controls are unavailable.'
+          setMeetingSpecialistsState(message, true)
         }
       }
 
@@ -61328,6 +61737,30 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           setMeetingSpecialistsState(error?.message || 'The invitation request was not authorized.', true)
         } finally {
           meetingSpecialistsBusy = false
+          renderMeetingSpecialists()
+        }
+      }
+
+      async function setDesktopRoomScout(action) {
+        if (!['invite', 'dismiss'].includes(action) || meetingSpecialistsBusy) return
+        meetingSpecialistsBusy = true
+        syncRoomScoutQuickAction()
+        renderMeetingSpecialists()
+        setMeetingSpecialistsState(action === 'invite' ? 'Inviting Scout…' : 'Dismissing Scout…')
+        try {
+          const payload = await meetingSpecialistFetch('/api/rooms/agents/scout', {
+            roomId: activeJoin.roomId || 'office',
+            action
+          })
+          handleRoomAgentParticipants(payload.agents)
+          setMeetingSpecialistsState(action === 'invite'
+            ? 'Scout is joining as a visible participant.'
+            : 'Scout left. Meeting transcription is unchanged.')
+        } catch (error) {
+          setMeetingSpecialistsState(error?.message || 'Scout could not be updated for this meeting.', true)
+        } finally {
+          meetingSpecialistsBusy = false
+          syncRoomScoutQuickAction()
           renderMeetingSpecialists()
         }
       }

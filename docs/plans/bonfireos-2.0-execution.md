@@ -1,478 +1,248 @@
-# BonfireOS 2.0 — Execution Ledger
+# STRIDE 2.0 / BonfireOS Closeout Ledger
 
-**Canonical design:** [STRIDE Next Evolution Master Plan](./stride-next-evolution-master-plan.md)
+Last reconciled: 2026-08-03
 
-**Checkpoint date:** 2026-08-02
+Canonical design source: `docs/plans/stride-next-evolution-master-plan.md`
 
-**Current wave:** E10, with Scout availability as the P0 safe frontier
+Current objective: ship the latest coherent E0-E10 code to the VPS and the corresponding iOS build to internal TestFlight, while preserving production data and keeping unfinished capabilities safely gated.
 
-**Overall state:** `external_waiting`; production remains on the retained legacy release
+This file is the canonical execution and resume ledger. The master plan remains the authority for architecture and acceptance intent. Older checkpoints are available in Git history and are not repeated here.
 
-This is the durable resume ledger for the approved master plan. The master plan
-owns product and architecture decisions; this file owns current execution truth,
-dependencies, authority boundaries, rollback posture, and the next safe action.
+## Current phase
 
-### Build 31 replacement ceremony — 2026-08-02
+E10 final incident repair and exact release closeout.
 
-The corrected pair (`53e6798e7ffa3f89dfcececb2a0f86b69de7ec54` /
-`5ff4d0a98f45b095041d195f34e1800947cc6776`) passed exact image build,
-preflight, dual ingress isolation, the independent Mac block probe,
-authenticated two-pass room vacancy, the complete cold backup, and the full
-restore rehearsal. It then stopped fail-closed before canonical mutation:
-Docker correctly omitted the stopped retained PostgreSQL container from the
-repair network's active endpoint map, while the operator required it there.
+The current production artifact is healthy enough to serve traffic, but it is not the final intended release. The frozen local Build 32 candidate contains the cross-client Scout participant/audio repair, room-chat `@Scout`, direct Reply-to-Scout behavior, the Country Golf file/work lifecycle repair, and the desktop/mobile cradle startup/render repairs. AJ approved the reconciled ledger on 2026-08-03. The complete deterministic/race/mobile/media matrix and rendered desktop/iOS qualification are green; creation of the exact release SHA, VPS activation, and corresponding TestFlight artifact remain.
 
-Cold rollback restored all eight data volumes with exact migration and table
-count parity, but its launcher then exposed a second defect: it inferred the
-predecessor topology from the now-current `/opt` Compose source instead of the
-Compose source paths that created the six retained predecessor containers.
-The predecessor was manually reopened from its preserved exact two-file
-Compose topology and exact images. Public HTTPS/readiness and TCP TURN pass;
-the restored data, six-service topology, eight-volume inventory, and absence of
-candidate resources were independently rechecked. The failed ceremony and its
-recovery receipt remain sealed and cannot be resumed.
+## State vocabulary
 
-The replacement operator now treats a stopped container's configured network
-attachment separately from active network endpoints, then requires exact sole
-membership after PostgreSQL starts. Backup also captures and hashes the actual
-running Compose source set, seals one resolved six-service recovery file, and
-rollback uses only that sealed file plus the backed-up environment. The pack
-self-check, complete 105-test release/native/brand suite, syntax, and diff
-checks pass. The only remaining close-out path is: seal a fresh A/B pair, run
-the replacement ceremony, verify exact B and Scout/STT on production, then
-build, submit, verify, and physically accept Build 31. Marketplace employee
-agents and external E10/soak/HA evidence remain separate follow-up work.
+- `implemented`: the code and contracts exist.
+- `deterministic_verified`: the implementation passed the applicable deterministic/local suites at its recorded checkpoint.
+- `deployed`: the code is present in the serving artifact.
+- `enabled`: the production feature flag or runtime domain is active.
+- `qualified`: the required provider, evidence, or operational gate has been satisfied.
+- `accepted`: the intended rendered or physical-device behavior has been observed.
 
-The first replacement pair (`2cd5a3e7da2f7d416bc68cde5d18c6c22e567ce5`
-/ `e3fb72719369023536183dbdd6809ab792b9df49`) proved the new rollback bundle
-end to end, but exposed the same Docker stopped-endpoint distinction for a
-newly created canonical observation one-shot. The one-shot never started and
-no canonical append occurred. The exact cold restore then succeeded using only
-the sealed resolved predecessor Compose file, with migration/table parity and
-all six services healthy; the independent block and reopened HTTPS/TURN probes
-passed. One-shot admission now requires PostgreSQL alone before start,
-PostgreSQL plus the one-shot while running, and PostgreSQL alone again after
-exit, while container inspection proves the stopped configured attachment.
+These states are not interchangeable. In particular, most E1-E9 contracts are deployed but deliberately default-off; that is preserved safety, not missing code.
 
-The following pair stopped before service shutdown when the next backup saw
-that all six predecessor containers were now truthfully labeled as created by
-the prior sealed recovery Compose/environment paths. The previous validator
-allowed only the original `/opt` environment path. This caused no data or
-container mutation; the untouched predecessor was re-proven and reopened.
-Chained recovery provenance now accepts an absolute root-private environment
-source only when it is byte-identical to the current live base environment,
-then reseals its path and digest into the new backup. This preserves exact
-provenance across any number of proven cold restores without trusting a stale
-or different environment.
+## Non-negotiable invariants
 
-The next exact-A read-only observation reached the application and stopped
-because production legitimately had no `deleted-objects.jsonl`: no board
-deletion had ever created the optional lifecycle journal. Runtime import
-semantics already treat that absence as an empty journal. Canonical observation
-and normalization now do the same only for a genuinely absent path with a
-non-symlink private parent; a dangling symlink or any other read error remains
-fatal. Normalization preserves the absent journal, and only the authorized
-repair append creates it. The focused real-PostgreSQL normalization/repair and
-idempotency test passes with this exact legacy starting state.
+1. Preserve the Docker volume `digitalocean_meeting_data`; never deploy local or VPS `/opt/meetingassist/data/` as production truth.
+2. Preserve unrelated untracked `stride-site/` work and all unrelated dirty-tree changes.
+3. Do not execute the historical canonical Board repair. AJ has retired it from this release path. Preserve Board data and history; any full Board removal is a separate, explicit migration.
+4. A known Board-only canonical mismatch must not be represented as a Scout, STT, or human-media failure.
+5. Human room audio, video, chat, and transcription must continue if an AI participant or provider fails.
+6. Transcript recording and an explicitly invited Scout model-analysis lane are separate consent-controlled states.
+7. Specialist employee agents remain unavailable by default until their exact provider/model/voice/config evidence is qualified.
+8. No production deploy while a live room is occupied. Drain or wait; do not interrupt a meeting.
+9. Bind every release claim to an exact Git SHA, source archive/image identity, public response, and—on iOS—Apple processing and intended-group evidence.
+10. A local build, EAS `FINISHED`, upload start, deploy start, `READY`, or aggregate health response alone is not release completion.
 
-The subsequent observation proved that its database fingerprint was not
-memory-bounded: PostgreSQL's 256 MB cgroup killed a backend aggregating every
-outbox payload into one JSONB value. PostgreSQL recovered, the one-shot failed,
-and the exact cold restore again matched and reopened production. The outbox
-component is now an ordered row stream whose per-record SHA-256 values feed a
-constant-memory digest; no SQL aggregate or Go payload corpus grows with
-history. Focused normal/race PostgreSQL tests and `go vet` pass, while the
-complete predecessor-plus-absent-journal Go tree remains green at 399.108
-seconds.
+## Current truth
 
-The bounded observation then completed, and receipt sealing exposed a
-strict-mode shell declaration that expanded `output` before the same `local`
-statement initialized it. No normalization append had started. All four
-same-declaration output dependencies across production/clone receipt and
-stable-fingerprint helpers are split into ordered declarations; the pack
-self-check now rejects reintroduction of that pattern, and the complete focused
-release suite passes.
-
-### Build 31 exact-archive correction — 2026-08-02
-
-The first Build 31 A/B attempt (`3f96d0880aa98f8ddb4f280da2d2388402389a5d`
-/ `3bb43aed48c7269b47e0dcd958aadec0fdf5c2fc`) reached only the sealed-image
-build and stopped before maintenance because the allowlisted source archive
-omitted the new production runtime package `internal/e10evidence`. The compiler
-rejected that incomplete artifact. No ingress guard, application shutdown,
-backup, migration, canonical write, volume mutation, or public-route change
-occurred. Production remains open on the restored six-service predecessor
-topology and the failed ceremony state is retained for audit.
-
-The release policy now includes every non-test source file in that package and
-requires `internal/e10evidence/types.go` as an archive sentinel. A regression
-test derives every internal package directly imported by production root Go
-files and requires all of its non-test sources to be release-owned. The focused
-release tests, complete Node/release/native/brand suite, operator-pack
-self-check, `go vet`, `go mod verify`, and diff checks pass. The fresh complete
-Go run also passes with the root package at 390.531 seconds. The correction is
-deterministically verified and ready for a superseding A/B pair.
-
-The remaining dependency order is:
-
-1. seal and push the superseding exact A/B pair, and prove that both archived
-   commits compile on the VPS;
-2. execute the protected canonical ceremony through its hidden roster-password
-   and exact manifest-confirmation gates, then activate exact B and prove public
-   release identity, capabilities, Scout/STT, canonical convergence, rollback,
-   and production-data integrity;
-3. build, submit, verify Apple `VALID` plus internal `Team (Expo)`, and
-   physically accept Build 31 for rich-thread scrolling, room lifecycle,
-   invited Scout speech/transcript attribution, dictation, and typed Scout;
-4. keep marketplace employee-agent activation and the remaining paid-provider,
-   WebRTC breadth, pilot, soak, immutable-backup, HA/DR, and external-anchor
-   evidence as separate post-release gates.
-
-### Build 31 close-out addendum — 2026-08-02
-
-This addendum supersedes the older local/branch rows in §1 until the sealed A/B
-checkpoint assigns its final SHAs:
-
-- local `main` now contains the Apple-tier rich-thread recycling repair, the
-  explicit invited Scout room participant with colored cradle and attributed
-  transcript, and the converged E10 security foundation. `stride-site/` remains
-  separately owned and untracked;
-- remote `axx/main` still points to Build 30's `51e39499da46d13035fd7d51dcb5b773aa6ffcd2`;
-- the production app health endpoint is healthy and traffic-ready on retained exact release
-  `b09e4b2aaa905958cbd25d39876a881f01005243`, advertises
-  `gpt-realtime-2.1`, `gpt-live-transcribe`, `gpt-transcribe`, Terra and Luna,
-  and remains capability-degraded pending the canonical cutover and fresh
-  runtime evidence;
-- EAS Build 30 `e33c1f05-24c2-4df9-a653-e6559629aef6` is the newest finished
-  iOS artifact and the connected iPhone reports app build `30`. Its rich-media
-  scrolling failed physical acceptance; Build 31 is the replacement candidate;
-- the legacy render worker is unhealthy at `254/256` cgroup PIDs after timed-out
-  Chromium children survived their parents. The candidate kills the complete
-  render process group on cancellation and passes focused normal/race tests;
-- deterministic acceptance is the active gate. On success, seal/push A/B, run
-  the user-assisted canonical ceremony, activate exact B, verify public and
-  data integrity, then build/submit/verify and physically accept Build 31;
-- Scout ships in this release. Marketplace employee audio remains default-off
-  until exact signed provider/model/voice/config evidence, fixed-expiry status,
-  and the externally anchored CAS ledger head are qualified and in custody.
-
-## 1. Current verified checkpoint
-
-| Surface | Exact state | Meaning |
+| Surface | Verified state | Consequence |
 |---|---|---|
-| Local `main` | `9217dbf7a9f1a96ceed20f174fd2a9894daa29af` | Clean except separately owned untracked `stride-site/`. |
-| Remote `axx/main` | `9217dbf7a9f1a96ceed20f174fd2a9894daa29af` | Read-only remote refresh matches local `main`. No E10 or P0 branch is published. |
-| Production | `672df6b5f97778c2` | Live `/healthz` identity after the isolated Scout P0 hotfix. Production now advertises `gpt-realtime-2.1`, `gpt-live-transcribe`, and `gpt-transcribe`; the sealed canonical repair release has still not been activated. |
-| Production health | Traffic-ready, capability-degraded | `/capabilities` reports `trafficReady:true`, `ok:false`. Physical on-demand Scout voice and composer dictation succeeded, but the aggregate Scout/STT telemetry remains disconnected/degraded and STT retains the stale `2026-07-31T18:28:56Z` success marker; backup, brain, and recap evidence also remain degraded. Aggregate readiness is not acceptance. |
-| P0 branch | `/tmp/meetingassist-scout-p0`, `codex/scout-p0`, checkpoint `78b4d1cae287cc9bab9ab1a1e2ffa6022f8e2ee3` on base `9217dbf` | Isolated, committed deterministic candidate. It is not published, provider-qualified, physical-device accepted, merge-approved, or deployable yet. |
-| E10 integration | `/tmp/meetingassist-e10-integration`, `codex/e10-integration`, candidate `0783a1cf9c45c1e06e95e3b010c7eae055ef723d` on base `9217dbf` | Clean, committed security candidate. Focused normal/race, full repository, vet, diff, and independent critic gates pass. It is not published, externally provisioned, merge-approved, or deployable yet. |
-| Combined release candidate | `/tmp/meetingassist-stride-rc`, `codex/stride-release-candidate`, code head `294049af92c1458fc7fcd760c8c3d0dde294876c` | Frozen isolated composition of the complete E10 chain, Scout P0, the iOS 26 WebRTC camera crash guard, exact file-dictation routing and Scout vocative correction, private home-thread flow, mobile thread editing/renaming, and long-thread rendering hardening. Full normal/race/vet, 377 mobile tests, TypeScript, Expo Doctor 20/20, release-simulator rendering, and the 240-message `#team` stress pass are green. `main` has not moved. |
-| Specialist repair | `/tmp/meetingassist-e10-specialist`, `codex/e10-specialist`, base `0aa1b090687d7a5d9ed3c10c9d792ee9044a545c` | Ten tracked uncommitted files remain untouched as a superseded partial draft. Their reconciled authority contracts are already present in clean integration and the frozen candidate. |
-| Registry repair | `/tmp/meetingassist-e10-registry`, `codex/e10-registry`, base `1d2f55cfa86e1f155b7b14d06c5928379e2b1ea3` | Eight tracked files plus untracked `meeting_specialist_qualification_bridge.go` remain untouched as a superseded partial draft. Their signed-evidence, expiry, and external ledger-head/CAS contracts are already present in clean integration and the frozen candidate. |
-| Independent E10 verdict | `PASS` | No blocker, major, or minor finding remains in the committed E10 code checkpoint. External authority custody and activation remain separate default-off gates. |
-| TestFlight | Stride 1.0.0 Build 29 | A fresh read-only EAS list confirms Build 29 remains the newest EAS build: `7857b9b2-2de8-4248-b1c6-a50c54f6ca97`, `FINISHED`, from `97ff340097253ff3ad98481226f6159c3ce206ae`. Apple build `6a870589-8448-44fb-99d6-cea2f5a9ebb4` was last verified `VALID`, non-expired, and in internal `Team (Expo)`; external `Bonfire` excludes it. The connected handset now carries a locally signed release candidate over the same bundle ID, not the TestFlight binary. No Apple/TestFlight state changed and physical-device acceptance is still open. |
+| Local `main` | `13b0797f18c495f3e8daa4c2df872ea1548f5926` | Current committed baseline. |
+| Remote `axx/main` | Exact match to local `main` | No committed divergence. |
+| Local working tree | A frozen uncommitted Build 32 candidate contains the room Scout incident repair, web/mobile room `@Scout`, direct Reply-to-Scout engagement, room-scoped chat recall hardening, ACL-bound Files retrieval, missing-file admission, durable work status, and desktop/mobile cradle repairs; unrelated `stride-site/` is untracked | Deterministic and rendered qualification is green. The final SHA does not exist yet. |
+| Public VPS | Serves exact `13b0797f18c495f3e8daa4c2df872ea1548f5926`; `/healthz` and `/readyz` pass; traffic-ready | Current committed baseline is live, but not the final candidate. |
+| Public capabilities | Aggregate degraded; room Realtime and typed Scout lanes have degraded observations; meeting STT remains disconnected/stale; Board canonical shadow has seven historical conflicts | Final verification must refresh each required lane after activation, not hide failures behind aggregate status. |
+| Production models | Realtime `gpt-realtime-2.1`; committed meeting/dictation `gpt-transcribe`; live caption `gpt-live-transcribe`; Scout text on OpenAI Terra with brain/extraction on Luna | The intended core OpenAI availability architecture is configured. Runtime behavior still needs final acceptance. |
+| Runtime activation | STRIDE conversation/brain/registry/marketplace/workforce domains and advanced cohorts remain default-off | Code is deployed; broad production activation is not claimed. |
+| Latest EAS artifact | iOS Build 31, EAS ID `f5403d3d-5167-40d2-a738-f6d95a32d3e9`, `FINISHED`, exact baseline SHA `13b0797...` | Useful checkpoint only; it does not contain the pending fixes. |
+| Apple/TestFlight | Build 31 submission was initiated for `Team (Expo)`; current Apple `VALID` and group availability have not been independently re-established | Do not count Build 31 as the final mobile milestone. |
 
-No canonical repair, `main` push, migration, canonical release deployment,
-provider qualification, E10 activation, or TestFlight upload is established by
-this checkpoint.
+## E0-E10 reconciliation
 
-The 2026-08-03 repair attempt passed dual ingress isolation, the independent
-Mac block probe, and the authenticated two-pass all-rooms-empty proof, then
-stopped before any writer shutdown, backup, migration, normalization, or data
-mutation. The backup topology assertion had a jq scoping defect: its
-`all(...)` condition changed the input from the captured container array to a
-service-name string. The exact corrected topology query independently passed
-the live six-service/mount inventory. The recovery-only path then proved the
-original hotfix containers and local health, a second independent blocked
-probe passed, and guarded legacy reopen restored public HTTPS/readiness and TCP
-TURN. That ceremony is terminal and must not be resumed. The candidate fixes
-the validator by capturing the root array and includes an executable exact and
-drifted topology fixture in the operator-pack self-check.
+| Wave | What is present and previously proven | What remains open | Final-release impact |
+|---|---|---|---|
+| E0 — safety foundation | Release identity, production-data separation, consent lanes, attachment/provider containment, deterministic recovery contracts, and operator controls are implemented. The committed line contains the prior deterministic checkpoint. | Immutable encrypted offsite custody, independent restore proof, external KMS/custody, and final business-policy approvals remain external. Board repair is removed from this release. | Revalidate touched consent/media behavior. External resilience gates remain truthfully unqualified. |
+| E1 — canonical contracts | Conversation/evidence/route/profile/package/listing/team/learning schemas, replay, ACL, purge, and dual-write/shadow infrastructure are implemented and default-off. | Production cohort activation and live convergence evidence remain gated. Seven legacy Board-only shadow conflicts are preserved, not repaired. | Code may ship default-off. Do not claim production activation or canonical convergence for retired Board data. |
+| E2 — media and voice | Realtime, transcription, dictation, floor control, consent-aware media lanes, interruption handling, and model routing are implemented; narrow physical voice/dictation paths have worked during this release cycle. | Current invited-Scout audio lane repair must be finalized. Final iPhone/desktop cross-client, recording-off, interruption, TURN, and longer-session acceptance remain. | Direct blocker for final candidate acceptance. |
+| E3 — temporal brain | Temporal meeting intelligence, recall, provenance, restart fixtures, and ACL-aware retrieval are implemented behind gates. | Live corpus quality, completeness, retention, and production cohort evidence remain. | Ship default-off; run only bounded release smokes. Broader qualification remains external. |
+| E4 — team and rich collaboration | `#team`, rich media, ACL/private-share foundations, collaboration memory, mobile bottom-first threads, long-thread optimization, and desktop/mobile shells are implemented. | Final Apple-tier long-feed physical acceptance, rendered desktop regression check, locked-device/push and provider-specific rich-media gates remain. | `#team` smoothness and desktop cradle rendering are in the final acceptance matrix. |
+| E5 — Scout and specialists | Scout exists across home, private threads, rooms, text, dictation, and explicit Realtime participant flows. Specialist worker/isolation, registry, signed evidence, and agent-join foundations were merged. The local candidate adds the cross-client tile/audio repair, server-owned room-chat `@Scout`, direct Reply-to-Scout engagement, and exact ACL-bound Files/work context. | Verify the candidate: Scout must remain visible to every participant, respond while invited, answer authorized room mentions, suppress acknowledgement-only thread noise, ask for unreadable dependencies, and return approved work through durable status cards. Employee specialists remain default-off pending qualification. | Direct qualification blocker; implementation is locally prepared and focused regressions pass. |
+| E6 — Suggested Work | Durable orchestration, approvals, receipts, budgets, replay, and default-off execution contracts are implemented and deterministically checked. | Live production activation and operating evidence remain. | Ship default-off; no new release work unless regression is found. |
+| E7 — I&O | Immutable workflow/evidence contracts and deterministic fake-stage paths are implemented. | Ten real pilots with two independent reviewers and bounded provider evidence remain. | External qualification, not a blocker to shipping the gated code. |
+| E8 — marketplace/workforce | Registry, listings, qualification, workforce, budgets, isolation, and internal-preview contracts are implemented; specialist launch paths were converged. | Five fully qualified live listings, exact economic/provider evidence, marketplace admission, and employee-agent activation remain. | Ship default-off. Do not advertise Mary or other persistent employee agents as production-ready. |
+| E9 — recovery, security, native | Recovery/HA/security/native harnesses, simulator/loopback matrices, and deterministic operational checks are implemented. | Production HA, measured RPO/RTO, immutable offsite backup, full physical-device/TURN matrix, 24-hour/ten-sitting soak, and external custody remain. | No silent claim of HA/DR or full mobile acceptance. Final release still requires a bounded real-device pass. |
+| E10 — integrate, qualify, release | E0-E9 branches were converged into `main`; the current exact baseline is deployed; Build 31 exists; security convergence and operator-pack repairs are in the committed lineage; the final incident candidate is deterministic-verified and rendered-accepted locally. | Create the exact final commit, deploy and prove it, create Build 32, verify Apple `VALID` plus `Team (Expo)`, and perform the exact-build physical acceptance. Broader qualification items remain in the external queue. | This is the active closeout wave. |
 
-## 2. Non-negotiable invariants
+## What the audit found
 
-- Conversation is evidence, not authority. Every approval remains explicit,
-  revision-bound, attributable, and revocable.
-- Private Scout threads remain owner-only. Retrieval, attachments, citations,
-  artifacts, search/history, and company-brain projection must preserve the
-  same ACL and consent intersection at write, model call, projection, and open.
-- Human chat, video, and meeting media remain usable when any AI lane fails.
-- No silent provider, model, effort, tool-policy, or coverage fallback is
-  allowed. A failed or unqualified lane stays visibly degraded or unavailable.
-- One model, effort, prompt, schema, or tool-policy variable changes per canary.
-- `stride-site/` and unrelated user work stay outside every commit, manifest,
-  sync, migration, and release boundary unless separately authorized.
-- Local or synthetic receipts may be `implemented` or
-  `deterministic_verified`; they are never relabeled `provider_qualified`,
-  physical-device accepted, production-enabled, or launch-accepted.
+No E0-E10 implementation branch was lost: the verified integration/candidate work and the interrupted E10 security repairs are ancestors of current `main`. The old worktrees are historical/superseded evidence, not alternate release roots.
 
-## 3. P0 incident truth
+Four distinctions had become blurred and are now explicit:
 
-The incident has three separately gated lanes; one shared cause is not claimed.
+1. The current public VPS contains the committed E0-E10 baseline, but not the pending room Scout incident repair.
+2. Deployed advanced STRIDE contracts are mostly default-off; they are not broadly production-enabled or externally qualified.
+3. Build 31 is an artifact checkpoint, not the final mobile release and not proof of current Apple availability.
+4. The historical Board canonical repair is not part of closeout. Board data stays intact while Board retirement is designed separately.
 
-1. **Realtime voice to Scout:** production is enabled but disconnected/degraded
-   on `gpt-realtime-2` at `high` reasoning. The locally signed handset build
-   initially had `EXPO_PUBLIC_NATIVE_REALTIME_VOICE_ENABLED` unset, so the
-   cradle used its legacy record-and-upload loop instead of opening native
-   Realtime. A second locally signed diagnostic build with that gate explicitly
-   enabled is installed and open; a physical spoken-turn result is still
-   required. The target is `gpt-realtime-2.1`, but only after an exact candidate
-   passes the authorized provider contract, quality, cost, lifecycle, and
-   physical-device gates.
-2. **Composer dictation and meeting STT:** the physical iPhone successfully
-   uploaded a server-derived `7.975`-second recording, after which the
-   production usage ledger recorded model `gpt-realtime-whisper` and an exact
-   provider `404 Invalid URL (POST /v1/audio/transcriptions)`. This proves the
-   recorder and upload reached the server and that dictation incorrectly
-   inherited a Realtime-only meeting-lane override. Commit `b358aa7` makes an
-   unset dictation dial use the independently file-compatible
-   `gpt-4o-transcribe` default; the explicit qualified target remains
-   `gpt-transcribe`. The repair passes ten repeated normal runs and three
-   race-enabled runs, but is not deployed. Meeting STT remains a distinct,
-   disconnected/stale health and acceptance lane.
-3. **Typed Scout:** production logged concrete Anthropic HTTP 400
-   insufficient-credit failures. Ordinary Scout routing and answers must not
-   depend on Anthropic credit or silently fall back across providers.
+The newly identified product gaps in the requested release scope—server-owned room-chat `@Scout`, implicit engagement when replying directly to Scout, filename-only false promises, Drive/Files visibility, and durable work status—are now implemented in the local candidate alongside the cross-client visibility/audio and desktop cradle repair. Focused regressions pass; the full qualification matrix remains. All other unresolved master-plan items are either final regression/acceptance work or explicitly external qualification/operations work.
 
-These observations prove degraded production behavior, one concrete typed
-routing failure, a distinct handset feature-gate cause for the missing native
-Realtime attempt, and a distinct endpoint/model mismatch for dictation. They
-do not prove voice quality, dictation quality, one common root cause, or
-qualification of a replacement route.
+## Minimal closeout wave map
 
-## 4. Frozen model-seat contract
+### W0 — Freeze and complete the final product candidate
 
-| Seat | Target route | Activation boundary |
-|---|---|---|
-| Personal and meeting Scout voice | `gpt-realtime-2.1` | New-session cohort only after exact contract, audio, interruption, usage/cost, ACL, and physical-device qualification. |
-| Meeting STT | `gpt-transcribe` | Authoritative final transcript gate over the consented corpus; exact item correlation, ordering, fidelity, latency, accounting, and privacy required. |
-| Composer dictation | `gpt-transcribe` | Separate web/iPhone/iPad corpus and exactly-once, recoverable-recording, lifecycle, latency, and UI acceptance required. |
-| Typed Scout router | `gpt-5.6-terra`, `low` | Strict structured route; proposals only, never implicit launch. No Anthropic fallback. |
-| Typed Scout answer and routine `#team` chat | `gpt-5.6-terra`, `low` | Grounded, ACL-safe Responses path with explicit degraded state. |
-| Extraction and projections | `gpt-5.6-luna`, `low` | Bounded structured extraction with evidence and freshness checks. |
-| Goal/work orchestration | `gpt-5.6-sol`, `medium` | Durable approved-work stages; high-value generation may use Sol `high` only under its own receipt. |
-| Independent review | Separate provider/model family when available | Optional independent Anthropic review may remain, but it cannot own Scout availability or become an automatic fallback. |
+Status: implementation complete locally; AJ approved the ledger; focused compile/regressions pass and the full matrix is next.
 
-Model-object access and synthetic contract receipts are not seat qualification.
-Every live route still needs exact project/billing, pricing, accepted-output,
-corpus, rollback, and downstream-replay evidence before activation.
+1. Finish the existing consent-safe room Scout audio repair.
+2. Finish desktop/mobile cross-client Scout participant projection and obvious invite/dismiss controls.
+3. Implement authenticated room-chat `@Scout` as a server-owned, room-scoped response:
+   - ordinary human room chat is unchanged;
+   - the answer uses shared-room ACL context only;
+   - the answer is attributed to Scout and persisted/broadcast like a room message;
+   - text mention does not invite, speak through, or duplicate the Realtime participant;
+   - guest mentions do not spend provider capacity or gain company-brain access;
+   - failure produces a clear transient error without affecting human media.
+4. Add discoverable `@Scout` completion on web and mobile.
+5. Treat a long-press Reply to a Scout-authored channel message as an explicit Scout turn without requiring another `@Scout`; Scout reads the threaded context and suppresses acknowledgement-only noise.
+6. Make Files a first-class Scout source:
+   - resolve only ACL-authorized Drive/chat-file identities;
+   - pin exact readable content into Q&A and an approved worker instead of relying on fuzzy recall;
+   - expose an authorized Files catalog for direct Files questions;
+   - never expose the catalog or file bodies to guests.
+7. For file-dependent work, distinguish a visible filename from readable contents. If the PDF/deck is missing, filename-only, oversized, or stored without ingestion, Scout asks for the exact dependency and states that nothing is running.
+8. A readable, explicit review creates a source-bound proposal. Once approved, one durable thread card shows queued/running/ready and the completed artifact is delivered back into the same thread; explicit save-to-Files policy remains intact.
+9. Freeze scope. Do not add Board retirement, marketplace activation, or broader employee-agent behavior to this release.
 
-## 5. Isolated P0 implementation state
+Exit: one reviewable local candidate diff exists; Go compile, mobile typecheck, exact Files/admission/proposal/running-card regressions, and existing artifact-delivery regressions pass. Full W1 qualification remains.
 
-The isolated `codex/scout-p0` candidate `13a3ef2e` implements:
+### W1 — Deterministic and rendered qualification
 
-- OpenAI Responses ownership of ordinary Scout routing and answers: Terra
-  `low` for router/chat, Luna `low` for attachment extraction, strict router
-  schema, Responses-native image/PDF input, and no automatic Anthropic route for
-  core Scout availability.
-- Separate capability rows and safe milestones for room voice, private voice,
-  meeting STT, dictation, typed Scout router, and typed Scout answer while
-  retaining backward-compatible aggregate fields.
-- Dictation and transcription telemetry/accounting hooks, plus native Realtime
-  transport milestones and explicit failure reporting.
-- The server contract for atomic home opening: one private thread, one opening
-  user message, one durable Scout reply lifecycle placeholder, idempotency and
-  restart-safe background completion, safe failure/retry, lease recovery, and
-  owner-only live delivery.
-- Native home submission stops Realtime, retains the exact draft/idempotency
-  key on failure, clears only after durable acceptance, navigates immediately
-  to the bottom-first Thread route without a historical message target, and no
-  longer renders a question/answer transcript on home.
-- Web home now uses the same atomic private-opening contract and stable retry
-  key. It preserves the opening draft on failure, stops personal Realtime,
-  navigates immediately into the private thread, renders the durable
-  queued/running/failed/canceled lifecycle with accessible live status and
-  retry, and labels ordinary replies only as Scout rather than asserting an
-  unattested provider/model.
-- Web Realtime and composer dictation now share the same audio-focus
-  coordinator in both directions; starting either surface stops/parks the
-  other without discarding a held recording.
+Status: complete for the frozen Build 32 candidate.
 
-The independent backend and UX code-artifact critics now report `PASS`; all
-raised lifecycle, causal-history, telemetry-authority, provider-label,
-touch-target, and mobile-containment findings were repaired. The P0 worktree
-passes the targeted root Go suite, targeted atomic-opening race suite,
-`go vet ./...`, official Responses image/PDF contract tests, web dictation
-coordinator suite (20/20), mobile TypeScript check, and full mobile suite
-(368/368). The first repository-wide run exposed seven real regressions in the
-keyed offer-never-deny prompt and coworker GIF/file exact-once paths. The fixes
-now gate capability offers on OpenAI core availability rather than Anthropic,
-and separate upload/render-safe GIF storage from the narrower model-forwarding
-MIME set. All seven regressions pass focused normal and race coverage. A clean
-`go test ./... -count=1 -timeout 20m` rerun passed every package, including the
-root package in 385.575 seconds; the post-fix `go vet ./...` and
-`git diff --check 9217dbf` gates also pass.
+Run the current-candidate normal/race/vet/mobile/rendered matrix, including:
 
-Rendered local acceptance now covers desktop web at 1280x720, exact mobile web
-at 390x844, and the current native branch in the installed iPhone 17 Pro
-simulator development shell. Web and native both proved transcript-free home,
-atomic navigation, auto-title, a visible running placeholder, and replacement
-by one completed Scout answer against an isolated local fake Responses server.
-The 390px pass also found and repaired a clipped home composer and wrapped phone
-placeholder. These are synthetic/rendering receipts only: the physical iPhone
-is currently visible but offline, live Realtime/dictation/provider quality is
-not accepted, and the fake local provider response does not qualify any seat.
-No P0 change is on `main` or production, and no target model is
-provider-qualified by this work.
+- Go unit/integration/race suites and consent-lane regressions;
+- frontend static/contract suites;
+- mobile typecheck/tests;
+- room-media failure containment;
+- server-scoped `@Scout` mention ACL, stale-sitting, guest, duplicate, provider-failure, and ordinary-chat regressions;
+- direct Reply-to-Scout engagement, reply ancestry, acknowledgement suppression, and ordinary Reply-to-person regressions;
+- filename-only/oversized/stored-only dependency refusal, exact ACL-bound Files retrieval, source freshness at approval, visible worker status, and single completion delivery;
+- desktop/mobile room rendering, obvious Scout control, colored cradle, reduced motion, and no cradle regression;
+- long `#team` rich-feed scroll and edit/copy/title interactions;
+- home Realtime, composer dictation, private Scout-thread creation, and typed Scout reply path;
+- release-tree, migration, data-exclusion, and artifact-integrity checks.
 
-The intermittent physical-iPhone room crash is now independently localized to
-five recent Build 27 `SIGABRT` reports on WebRTC's
-`org.webrtc.RTCDispatcherCaptureSession` queue. The exact bundled
-`JitsiWebRTC 124.0.2` dSYM resolves the aborting frame to M124's
-`-[RTCCameraVideoCapturer updateVideoDataOutputPixelFormat:]`, where iOS 26's
-adaptive front-camera format rejects the fixed output dimensions. Commit
-`4c56ca5` pins that exact WebRTC binary and installs an iOS 26-only native
-guard before capture: it omits the unsafe fixed-dimension rewrite only for the
-front adaptive 16:9 format, contains any unexpected Objective-C settings
-exception, and emits privacy-safe intervention telemetry. The exact generated
-Expo/CocoaPods graph, simulator workspace, and signed physical-device Release
-build pass; the candidate installs, launches, and remains alive on the
-connected iPhone. Mobile passes 369/369 plus TypeScript, full Go and vet pass,
-focused normal/race telemetry coverage passes, and strict Objective-C
-compilation passes with warnings as errors. One physical room pass joined over
-cellular, negotiated srflx/UDP, selected the front ultra-wide camera at
-720x1280 and about 31 fps, emitted 118 outbound frames in the sampled interval,
-left cleanly, kept the app process alive, and produced no new crash report.
-Camera-toggle and rotation gestures were not independently observed, so full
-physical room acceptance remains open.
+Exit: exact candidate SHA is deterministic-verified and rendered QA has no release-blocking finding.
 
-The approved home behavior remains:
+Evidence: the complete normal suite, the full 2,807-test race inventory in four shards, `go vet`, 381/381 mobile tests, TypeScript, Expo Doctor 20/20, the 33-case media harness, the 23-case desktop/brand harness, current-release iOS Simulator rendering, and authenticated Playwright desktop rendering passed. Rendered QA found and repaired two blockers before this status was granted: an adaptive iOS color had been stringified so idle cradle balls vanished, and a desktop bootstrap temporal-dead-zone aborted the authenticated app before cradle/voice startup. The rebuilt iOS candidate shows all five resting balls; authenticated desktop rendering shows all five resting balls plus measured moving orange energy with no page error.
 
-- large waveform starts live Realtime Scout;
-- composer mic is dictation only;
-- typed or dictated send atomically creates a private Scout thread, persists
-  the first message, navigates there, streams the answer, and auto-titles from
-  the opening message;
-- home never becomes a transcript-like chat surface;
-- dictation stops active personal Realtime; personal Realtime or video join
-  stops dictation;
-- dictation exposes recording controls and `Transcribing`; failure preserves a
-  recoverable recording/draft rather than silently losing it.
+### W2 — Bounded physical/live acceptance
 
-## 6. E10 convergence state
+Status: bounded pre-release acceptance complete for the available local/current surfaces; exact Build 32 physical acceptance remains in W4 after the matching VPS is live.
 
-The interrupted worktrees remain byte-for-byte preserved. Their repairs were
-reconciled semantically onto the integration branch and sealed as `dad0070`
-and `0783a1c`; the originals were not edited, reset, committed, or deleted.
+On physical iPhone plus a separate desktop participant, verify:
 
-The committed candidate now has one sealed provider-launch path, request-owned
-startup cancellation without request-value leakage, exact signed provider,
-model, voice, full endpoint, accounting, runtime, capability-policy, candidate,
-release/tree/image/config, evaluator, and result binding, plus a fixed seven-day
-expiry that is checked after authority I/O, provider creation, and briefing and
-also bounds the live runtime. The full signed result is carried through runtime,
-product, terminal evidence, signed snapshot, and restart. Snapshot format v2
-migrates valid signed v1 history as explicitly qualification-unbound rather than
-silently trusting it.
+1. Both clients see Scout join and leave the same sitting.
+2. Scout hears consented room audio and responds when transcript recording is off.
+3. Pausing transcription stops persistence but does not silently disable an invited Scout.
+4. `@Scout` in room chat yields one shared, attributed text answer without audio duplication.
+5. Human audio/video/chat survives Scout/provider failure.
+6. Home Realtime 2.1, composer dictation, private-thread creation, typed response, edit/copy/rename, and auto-title work.
+7. `#team` rich-feed scrolling remains smooth through a long history.
+8. Desktop and mobile Newton cradles render and animate correctly.
 
-Qualification custody atomically supplies the approved trust-root pin and exact
-ledger head; CAS requires that same root revision. Rejected CAS rolls back,
-lost replies reconcile by reread, stale processes fail before append, root
-rotation fences stale verification, third-state ambiguity poisons the process,
-and all custody calls are bounded. No local/file production authority exists:
-external custody provisioning remains a default-off release prerequisite.
+Use bounded live provider calls only. Broad corpora, marketplace, and endurance qualification stay in W5.
 
-The final E10 checkpoint passed focused normal and race coverage, `go vet
-./...`, `git diff --check`, and a clean `go test ./... -count=1 -timeout 20m`
-with the root package at 392.773 seconds. The independent critic returned
-`PASS`.
+Exit: candidate is accepted for release. A fresh stable all-rooms-empty proof is still mandatory immediately before deployment.
 
-The frozen combined code head `294049a` passes clean repository-wide normal
-and race runs: the root package completed in 391.942 seconds normally and
-2846.138 seconds under the race detector, with every command and internal
-package green. `go vet ./...` and `git diff --check` also pass. Mobile has 377
-passing tests, clean TypeScript, Expo Doctor 20/20, a successful release-mode
-iOS simulator build, and a rendered 240-message `#team` stress pass with ten
-consecutive upward-scroll actions and an unchanged visible message set across
-background HTTP reconciliation. The thread uses FlashList recycling types,
-stable row identities/callbacks, row-local unread markers, a memoized typing
-footer, and one timestamp computation per bubble so unrelated composer,
-typing, or reconciliation state does not rerender visible rich messages.
+### W3 — Exact Git and VPS release
 
-Physical Scout voice, dictation, message creation/answering, copy, deep edit,
-and both thread-title rename paths passed on the connected iPhone during the
-P0 session. Final TestFlight Build 30 and physical room-crash acceptance remain
-separate post-deployment gates. The independent E10/composition critic remains
-`PASS`; the later exact qualification-expiry terminal-cause assertion passes
-repeated normal and race coverage.
+Status: pending W2.
 
-## 7. Remaining dependency order
+1. Review the final diff; preserve `stride-site/` and production data boundaries.
+2. Commit and push the exact final candidate to `axx/main`.
+3. Determine migration necessity from the final diff and live migration ledger; run only required migrations.
+4. Back up every replaced VPS file.
+5. Deploy the exact committed source artifact to `/opt/meetingassist`, excluding all `data/` paths.
+6. Rebuild/restart the exact artifact after confirming no live meeting is occupied.
+7. Verify from the public host:
+   - exact release SHA and artifact identity;
+   - `/healthz`, `/readyz`, and traffic readiness;
+   - Realtime 2.1, `gpt-transcribe`, dictation, typed Scout, room Scout, and `@Scout` observations;
+   - consent authority, migration state, data-volume integrity, and no production record loss;
+   - Board-only historical state is reported separately and does not masquerade as a core Scout/STT failure.
 
-1. **Complete:** freeze the isolated combined candidate and run the complete
-   non-`stride-site` normal/race/vet, mobile/TypeScript/Expo, and rendered
-   release-simulator matrix.
-2. **Next:** merge the verified scope, commit and push `main`, run only the reviewed
-   migrations, deploy the exact artifact, and prove public commit/tree/image,
-   health, capabilities, Scout, STT, rollback, and production-data
-   integrity.
-3. Build the resulting mobile release (expected Build 30), submit it to internal
-   TestFlight, verify Apple `VALID` and `Team (Expo)`, then complete physical
-   device acceptance. Submission alone is not acceptance.
-4. Prepare a fresh sealed pair containing the corrected operator pack, then
-   execute the manifest-confirmed canonical historical repair as a separate
-   protected operation. Stop at each parity gate and never reuse the retired
-   ceremony.
-5. Finish external P0/E10 evidence: web and physical-iPhone Realtime/dictation/
-   typed-Scout acceptance, bounded paid-provider qualification, real
-   WebRTC/TURN device matrix, ten immutable I&O pilots with two eligible
-   reviewers, 24-hour/ten-sitting soak, encrypted immutable offsite backup,
-   authenticated restore, HA/DR, and independent anchor custody.
+Exit: the exact intended final build is demonstrably live on the VPS. Report this milestone only then.
 
-Do not merge later gates into earlier ones. A release build cannot waive
-provider, canonical, data, device, restore, or owner evidence.
+### W4 — Corresponding iOS release
 
-## 8. Production data and release provenance
+Status: pending W3.
 
-- Live production state exists only in Docker volume
-  `digitalocean_meeting_data`, mounted at `/app/data`; on the VPS it is
-  `/var/lib/docker/volumes/digitalocean_meeting_data/_data/`.
-- `/opt/meetingassist/data/` and the repo `data/` are stale seed/dev artifacts,
-  not production truth. Every rsync must exclude `data/`.
-- Before replacing VPS files, create a timestamped backup under
-  `/opt/meetingassist-backups`. Before migrations or canonical repair, take and
-  attest the required cold named-volume backup and restore rehearsal.
-- Bind the reviewed commit/tree, source archive, build manifest, image digest,
-  runtime binary, configuration names without secret values, migration hashes,
-  and public release identity. Source-file parity alone is not serving-artifact
-  proof.
-- Preserve the retained rollback release and never restore behind purge or
-  consent authority. Public reopen requires exact canonical/data parity and
-  production observation, not merely HTTP 200.
+1. Set the next unused build number (expected Build 32) on the exact deployed SHA.
+2. Build the production iOS artifact through EAS.
+3. Submit that exact artifact to App Store Connect for internal TestFlight.
+4. Verify Apple reports `VALID`, the build is not expired, and it is available to `Team (Expo)`.
+5. Install/update on the physical iPhone and repeat the bounded release acceptance against the live VPS.
 
-## 9. Operations and authority
+Exit: exact corresponding build is Apple-valid, in the intended internal group, and physically accepted. Report this milestone only then.
 
-Existing shipping authority remains bounded by every documented gate. It does
-not authorize another paid provider call, activation of an unqualified route,
-a hidden fallback, or bypass of canonical, consent, data, device, or release
-evidence. Reconfirm current quota/project/billing and obtain explicit authority
-before any new paid provider attempt.
+### W5 — External E10 qualification and operations
 
-The canonical ceremony requires the user at the shared terminal twice:
+Status: external queue; not hidden, not conflated with W0-W4.
 
-1. enter the hidden roster password without recording it in Git, logs, this
-   ledger, or an agent message;
-2. after the clean clone receipt and private repair manifest are displayed,
-   provide the exact manifest-bound confirmation. Broad migration/deployment
-   approval does not substitute for this data-history decision.
+- provider qualification over the bounded paid corpus;
+- full physical WebRTC/TURN/device/network matrix;
+- ten I&O pilots with two independent reviewers;
+- five fully admitted specialist listings and employee-agent qualification;
+- 24-hour and ten-sitting soak;
+- encrypted immutable offsite backup and restore proof;
+- HA/DR with measured RPO/RTO;
+- external ledger-anchor custody and operational ownership;
+- deliberate, reversible production cohort activation for E1-E9 domains.
 
-If either input is unavailable or any manifest, clone, count, source state,
-backup identity, or no-extra-delta check differs, stop fail-closed and preserve
-the retained production release. Physical iPhone acceptance also requires the
-user/device owner; it cannot be inferred from simulator or Apple processing.
+These items block the claim that all of E10 is broadly production-qualified. They do not block shipping the stable, default-off implementation after W0-W4 pass.
 
-## 10. Resume here
+## Current Wave checklist
 
-Resume in `/tmp/meetingassist-stride-rc` at verified code head `4c56ca5`. The
-remaining pre-ceremony P0 frontier is live-provider and physical-device
-evidence: verify voice, dictation, and typed Scout as three separate lanes,
-keep target routes default-off until qualification, and do not substitute
-simulator/fake-server receipts. Refresh the physical iPhone connection and
-obtain explicit authority before any paid provider attempt. If those gates
-pass, freeze the exact release manifest and begin the user-assisted canonical
-repair; otherwise remain default-off and preserve this candidate. External
-custody, HA/DR, pilot, soak, and broader device gates remain open even after the
-deterministic matrix passes.
+- [x] Re-read the complete E0-E10 master plan.
+- [x] Reconcile master-plan intent against current Git, public VPS, runtime capability, and EAS truth.
+- [x] Confirm interrupted E10 work is present in current `main` lineage.
+- [x] Remove the canonical Board repair ceremony from the release path without deleting Board data.
+- [x] Reduce the closeout to the minimal W0-W4 path and separate external W5 work.
+- [x] Complete W0 implementation and freeze the candidate scope.
+- [x] AJ confirms this ledger is coherent and authorizes the held test/release sequence to resume.
+- [x] Pass focused Go compile, mobile typecheck, Country Golf file admission/Files binding, durable launch-card, and existing origin-delivery regressions.
+- [x] Execute W1 deterministic/race/mobile/media/rendered qualification.
+- [x] Complete bounded pre-release acceptance on current Simulator, authenticated desktop, and the earlier physical incident loop.
+- [ ] Complete exact Build 32 physical/live acceptance after the matching VPS release.
+- [ ] Execute W3 exact VPS release and send verified milestone update.
+- [ ] Execute W4 exact TestFlight release and send verified milestone update.
 
-No merge, push, migration, VPS mutation, provider call, TestFlight upload, or
-canonical append belongs before that frontier passes and its separate authority
-is current.
+## Completed evidence retained
+
+- Current `main` and `axx/main` match at `13b0797f18c495f3e8daa4c2df872ea1548f5926`.
+- The public VPS reports that exact baseline SHA and passes health/readiness/traffic-ready checks.
+- The E10 integration, specialist-isolation, signed-registry, provider-binding, qualification-expiry, external ledger/CAS, operator-pack, and release checkpoint commits are in current `main` ancestry.
+- The frozen candidate passed the complete normal suite, the full 2,807-test race inventory in four shards, `go vet`, 381/381 mobile tests, TypeScript, Expo Doctor 20/20, the 33-case media harness, the 23-case desktop/brand harness, authenticated desktop rendering, and current-release iOS Simulator rendering.
+- EAS produced Build 31 at the exact baseline SHA; it is a superseded checkpoint for this final release.
+
+## Pending dependencies and gates
+
+- A live occupied room is a temporary deploy gate, not a blocker; wait for it to drain.
+- Apple processing and intended-group visibility are external states that must be polled to proof.
+- Physical-device acceptance needs the connected iPhone and a second client, but no additional product decision.
+- Broad paid-provider qualification and long-running external operations remain W5 and are not silently spent or activated during bounded release smokes.
+
+## Authority and operations
+
+- Existing authority covers the bounded implementation, tests, commit/push, required migration, exact VPS deploy, EAS build/submission, and internal TestFlight verification described in W0-W4.
+- Do not request repeated permission for ordinary in-scope steps after that approval.
+- Stop only for a genuinely new consequential product decision, unavailable external credential/state, unexpected production-data risk, or a failing release gate that cannot be safely repaired in scope.
+
+## Risks and decisions
+
+- **Board:** preserve history; no canonical repair; no destructive retirement in this release. A later Board retirement plan may archive UI/routes/data consumers and adjust health classification deliberately.
+- **Capabilities:** aggregate degraded status is diagnostic. Final acceptance is capability-specific and must not relabel a real failure as healthy.
+- **Activation:** default-off STRIDE domains stay default-off until qualified. Shipping code is not permission to activate them.
+- **Scout separation:** transcription persistence, Realtime invited participation, and text `@Scout` are three independent lanes with shared consent/ACL rules and no duplicate output.
+- **Build numbering:** Build 31 is already used. The post-fix final artifact is expected to be Build 32, subject to a fresh read before creation.
+- **Release identity:** the current public SHA is real but will be superseded. Only the post-fix exact SHA and corresponding iOS artifact count as the requested final milestones.
+
+## Resume here
+
+Proceed through W3-W4 against the frozen Build 32 candidate without reopening historical Board repair or unrelated E0-E10 design work. Immediate next action: create and push the exact release SHA, prove every room empty, preserve the live volumes, activate and publicly verify the exact VPS artifact, then build/submit/verify the corresponding internal TestFlight artifact and complete exact-build physical acceptance.

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pion/webrtc/v4"
 )
 
 func consentLaneTestBinding(principalID, roomID, sittingID string) ConsentAdmissionBinding {
@@ -443,6 +445,71 @@ func TestTranscriptionProviderIngressRejectsWithdrawnFence(t *testing.T) {
 	case <-lane.consentInput:
 		t.Fatal("withdrawn fence reached provider queue")
 	case <-time.After(40 * time.Millisecond):
+	}
+}
+
+func TestInvitedScoutReceivesConsentGatedRoomAudioWhenTranscriptRecordingIsOff(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	binding := consentLaneTestBinding("user-1", officeRoomID, "sitting-1")
+	authority := NewConsentLaneAuthority(NewMemoryConsentStore(), "policy-v1")
+	authority.CaptureCutoff = func() (uint64, error) { return 4, nil }
+	installConsentAuthorityForTest(t, authority)
+	for _, scope := range []ConsentScope{ConsentAudioCapture, ConsentTranscription, ConsentModelAnalysis} {
+		grantConsentScope(t, authority, binding, scope)
+	}
+	decision, err := authority.Authorize(context.Background(), binding, ConsentLaneModelAnalysis)
+	if err != nil || !decision.Allowed {
+		t.Fatalf("authorize=%+v err=%v", decision, err)
+	}
+	transcriptionDecision, err := authority.Authorize(context.Background(), binding, ConsentLaneTranscription)
+	if err != nil || !transcriptionDecision.Allowed {
+		t.Fatalf("transcription authorize=%+v err=%v", transcriptionDecision, err)
+	}
+	transcriptLane := &meetingTranscriptionLane{consentInput: make(chan consentAudioFrame, 1)}
+	app.mu.Lock()
+	app.transcriptLane = transcriptLane
+	app.mu.Unlock()
+
+	track, err := webrtc.NewTrackLocalStaticSample(
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus, ClockRate: roomAudioSampleRate, Channels: realtimeAudioChannels},
+		"audio", "scout-input",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoder, err := newOpusEncoder(roomAudioSampleRate, realtimeAudioChannels)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.mu.Lock()
+	app.inputTrack = track
+	app.inputEnc = encoder
+	app.forwardedAudioNotice = false
+	app.mu.Unlock()
+	app.setTranscriptRecording(false, "AJ")
+
+	pcm := make([]int16, roomAudioMixFrameSize)
+	for index := range pcm {
+		pcm[index] = 900
+	}
+	transcriptionSink := &roomLaneAudioSink{app: app, roomID: officeRoomID, lane: ConsentLaneTranscription}
+	if err := transcriptionSink.WriteMixedPCMWithConsent(pcm, []ConsentFence{transcriptionDecision.Fence}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-transcriptLane.consentInput:
+		t.Fatal("transcript recording received audio while persistence was paused")
+	case <-time.After(40 * time.Millisecond):
+	}
+	sink := &roomLaneAudioSink{app: app, roomID: officeRoomID, lane: ConsentLaneModelAnalysis}
+	if err := sink.WriteMixedPCMWithConsent(pcm, []ConsentFence{decision.Fence}); err != nil {
+		t.Fatal(err)
+	}
+	app.mu.Lock()
+	forwarded := app.forwardedAudioNotice
+	app.mu.Unlock()
+	if !forwarded {
+		t.Fatal("consent-approved Scout audio was suppressed by the transcript recording toggle")
 	}
 }
 

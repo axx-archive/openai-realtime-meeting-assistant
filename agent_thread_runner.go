@@ -166,7 +166,7 @@ func (app *kanbanBoardApp) launchAgentThreadWithSpec(mode string, query string, 
 	threadID := fmt.Sprintf("agent-thread-%s-%d", mode, time.Now().UnixNano())
 	worker := configuredAgentThreadWorkerName()
 	requester := firstNonEmptyString(strings.TrimSpace(origin["requestedBy"]), createdBy)
-	content := buildAgentThreadScaffold(mode, query, app.snapshotState(), app.delegatedMemorySnapshot(context.Background(), requester, origin["originRoomId"], 12))
+	content := buildAgentThreadScaffold(mode, query, app.snapshotState(), app.agentThreadMemory(context.Background(), requester, origin["originRoomId"], spec.ContextRefs, 12))
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	metadata := map[string]string{
 		"source":          "scout_thread",
@@ -979,7 +979,7 @@ func (app *kanbanBoardApp) produceAgentThreadArtifact(ctx context.Context, threa
 		Model:           meetingBrainModel(),
 		Seat:            seatAgentThreadText,
 		Instructions:    app.agentThreadInstructionsForThread(thread),
-		Input:           buildAgentThreadInput(thread, app.snapshotState(), app.delegatedMemorySnapshot(ctx, requester, thread.Artifact.Metadata["originRoomId"], 20), time.Now()),
+		Input:           buildAgentThreadInput(thread, app.snapshotState(), app.agentThreadMemory(ctx, requester, thread.Artifact.Metadata["originRoomId"], thread.Artifact.Metadata["contextRefs"], 20), time.Now()),
 		ReasoningEffort: "low",
 		Verbosity:       "medium",
 		MaxOutputTokens: 2600,

@@ -22,6 +22,11 @@ export type RoomChatMessage = Readonly<{
   roomId: string;
   artifactId?: string;
   authorEmail?: string;
+  agentId?: string;
+  replyTo?: string;
+  model?: string;
+  transient?: boolean;
+  error?: boolean;
 }>;
 
 export type RoomTranscriptEntry = Readonly<{
@@ -152,6 +157,9 @@ export function parseRoomChatMessage(payload: unknown): RoomChatMessage | null {
   const roomId = normalizedRoomId(payload.roomId);
   const artifactId = wireIdentifier(payload.artifactId);
   const authorEmail = normalizedEmail(payload.authorEmail);
+  const agentId = wireIdentifier(payload.agentId).toLowerCase();
+  const replyTo = wireIdentifier(payload.replyTo);
+  const model = wireIdentifier(payload.model);
   return {
     id,
     name,
@@ -160,6 +168,11 @@ export function parseRoomChatMessage(payload: unknown): RoomChatMessage | null {
     roomId,
     ...(artifactId ? { artifactId } : {}),
     ...(authorEmail ? { authorEmail } : {}),
+    ...(agentId ? { agentId } : {}),
+    ...(replyTo ? { replyTo } : {}),
+    ...(model ? { model } : {}),
+    ...(payload.transient === true ? { transient: true } : {}),
+    ...(payload.error === true ? { error: true } : {}),
   };
 }
 

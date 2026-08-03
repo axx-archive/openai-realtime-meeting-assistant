@@ -32,8 +32,9 @@ func TestIndexChatLinkifyWiring(t *testing.T) {
 		// the bare-URL pass over plain text + the trail-punctuation peel
 		"function appendChatLinkTextNodes(target, text, appendSegment)",
 		"function appendChatUrlNodes(target, raw)",
-		// room chat bubbles route through it (was body.textContent)
-		"appendChatLinkTextNodes(body, String(message?.text || ''))",
+		// Human room bubbles route through the mention-aware wrapper, which in
+		// turn uses the shared linkifier; Scout room answers use safe rich text.
+		"appendChatMentionTextNodes(body, String(message?.text || ''))",
 		// scout user/peer bubbles: URLs split before the mention pass
 		"appendChatLinkTextNodes(target, text, segment => appendChatMentionSegmentNodes(target, segment))",
 		// scout rich text: the inline pattern gains a bare https?:// alternative

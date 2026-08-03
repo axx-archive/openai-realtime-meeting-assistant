@@ -6436,7 +6436,15 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				continue
 			}
 			payload["roomId"] = connRoomID
-			broadcastScopedRoomKanbanEvent(RoomScoutScope{RoomID: connRoomID, SittingID: participantSittingID, MediaGeneration: participantMediaGeneration.Load()}, "room_chat", payload)
+			messageScope := RoomScoutScope{RoomID: connRoomID, SittingID: participantSittingID, MediaGeneration: participantMediaGeneration.Load()}
+			broadcastScopedRoomKanbanEvent(messageScope, "room_chat", payload)
+			// @Scout is an explicit server-owned text turn for authenticated
+			// members. It is independent of the Realtime invite, never gives a
+			// guest company-brain access, and runs after the human message has
+			// durably landed so every client observes one canonical order.
+			if guest == nil && normalizeAccountEmail(sessionEmail) != "" && scoutChatMentionsScout(chat.Text) {
+				kanbanApp.submitRoomScoutTextMention(messageScope, chat.Text, asString(payload["id"]))
+			}
 		case "room_chat_delete":
 			if !participantAccepted {
 				_ = sendKanbanEvent(c, "access_denied", "enter the room before deleting room chat")

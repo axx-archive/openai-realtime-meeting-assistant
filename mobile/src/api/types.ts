@@ -100,6 +100,14 @@ export type ScoutReplyLifecycle = {
   errorCode?: string;
 };
 
+export type ScoutWorkThreadRef = {
+  id: string;
+  mode: string;
+  query: string;
+  status: string;
+  artifactId?: string;
+};
+
 export type ScoutMessage = {
   id: string;
   kind?: string;
@@ -117,6 +125,7 @@ export type ScoutMessage = {
   proposal?: Record<string, unknown>;
   choices?: Array<Record<string, unknown>>;
   reply?: ScoutReplyLifecycle;
+  thread?: ScoutWorkThreadRef;
   [key: string]: unknown;
 };
 

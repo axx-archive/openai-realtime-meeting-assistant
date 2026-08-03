@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, View, type ColorValue } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import { colors, ember } from '../theme/tokens';
 import { useReduceMotion } from '../theme/motion';
@@ -27,8 +27,8 @@ type Props = {
   listening: boolean;
   source?: StrideCradleSource;
   size?: number;
-  tint?: string;
-  restTint?: string;
+  tint?: ColorValue;
+  restTint?: ColorValue;
 };
 
 type Point = { x: number; y: number };
@@ -40,7 +40,7 @@ function bobPoint(anchorX: number, anchorY: number, length: number, angle: numbe
   };
 }
 
-export function StrideCradle({ trace, listening, source = 'human', size = 391, tint = String(ember[500]), restTint = String(colors.text2) }: Props) {
+export function StrideCradle({ trace, listening, source = 'human', size = 391, tint = ember[500], restTint = colors.text2 }: Props) {
   const reduceMotion = useReduceMotion();
   const width = size * 0.8;
   const height = width * 0.42;

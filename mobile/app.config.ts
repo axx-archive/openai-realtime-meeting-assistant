@@ -40,11 +40,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and remain the fallback if this bundle is ever rejected.
       // Regenerate both with `npm run brand:regen` from the repo root.
       icon: './assets/Stride.icon',
-      // Build 31 carries the Apple-tier rich-thread recycling repair and the
-      // explicit, visible, transcript-attributed Scout room participant on top
-      // of the Build 30 Realtime/dictation and private-thread recovery.
+      // Build 32 carries the final Scout room/text/Files lifecycle repairs,
+      // Apple-tier rich-thread recycling, and the corrected adaptive-color
+      // five-ball cradle on top of the Build 31 checkpoint.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '31',
+      buildNumber: '32',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

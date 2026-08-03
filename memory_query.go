@@ -193,7 +193,7 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachmen
 	recallApp := app.scopedRecallApp(ctx, principal)
 	// Guests are admitted to a live room, not the company board. Their ask bar
 	// can use only the already room/sitting-filtered memory store.
-	if principal.Audience != "guest" && len(attachments) == 0 && !recallApp.queryPrefersArtifactContext(query) {
+	if !assistantBoardShortcutDisabled(ctx) && principal.Audience != "guest" && len(attachments) == 0 && !recallApp.queryPrefersArtifactContext(query) {
 		if answer, matchedCards, ok := app.answerCurrentBoardQuestion(query); ok {
 			return assistantQueryResult{
 				query:        query,
@@ -205,6 +205,11 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachmen
 	}
 
 	matches, contextEntries := recallApp.memoryMatchesAndContext(query)
+	// Files is a first-class Scout source, not just a visual tab. Relevance
+	// search remains useful for broad company recall, but an exact file ref
+	// selected by chat (or an explicit Files/catalog question) is pinned ahead
+	// of the fuzzy lane after the same principal-scoped authorization pass.
+	contextEntries = appendUniqueFileContextEntries(app.assistantFileContextEntries(ctx, principal, query), contextEntries)
 	if recallModelContextProbe != nil {
 		recallModelContextProbe(contextEntries)
 	}
@@ -240,6 +245,26 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachmen
 }
 
 type assistantModelSuccessRequiredContextKey struct{}
+
+type assistantBoardShortcutDisabledContextKey struct{}
+
+// withAssistantBoardShortcutDisabled keeps a request on the current Scout
+// model-and-recall path. A public room @Scout mention is a conversational act,
+// never permission to answer from the legacy Board's deterministic shortcut.
+func withAssistantBoardShortcutDisabled(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, assistantBoardShortcutDisabledContextKey{}, true)
+}
+
+func assistantBoardShortcutDisabled(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	disabled, _ := ctx.Value(assistantBoardShortcutDisabledContextKey{}).(bool)
+	return disabled
+}
 
 func withAssistantModelSuccessRequired(ctx context.Context) context.Context {
 	if ctx == nil {
@@ -352,7 +377,7 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModelAttachments(ctx context.
 	ctx, cancel := context.WithTimeout(ctx, assistantQueryRequestTimeout)
 	defer cancel()
 
-	includeBoard := shouldIncludeBoardContextForAssistant(query, history)
+	includeBoard := !assistantBoardShortcutDisabled(ctx) && shouldIncludeBoardContextForAssistant(query, history)
 	input := buildAssistantQueryInput(query, cards, entries, app.activeDecisionEntries(decisionContextLimit), app.activeNarrativeEntries(narrativeStorylineContextLimit), history, time.Now(), includeBoard, app.pinnedProfileNotes(requester)...)
 	instructions := assistantQueryInstructionsForContext(ctx, strings.TrimSpace(apiKey) != "")
 	recordCapabilityPoll(capabilityTypedScoutAnswer, time.Now().UTC())

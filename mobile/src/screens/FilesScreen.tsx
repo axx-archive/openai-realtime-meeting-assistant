@@ -12,16 +12,21 @@ import {
   type ListRenderItem,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { FilePreviewModal } from '../components/FilePreviewModal';
+import { LongMessageSheet } from '../messaging/LongMessageSheet';
 import { Screen } from '../components/Screen';
 import { isInlinePreviewable, shareOrSaveRemoteFile } from '../files/fileActions';
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
 import { colors, hitMin, radius, shadow, space, type } from '../theme/tokens';
+import type { RootStackParamList } from '../navigation/types';
+
+type Props = NativeStackScreenProps<RootStackParamList, 'Files'>;
 
 type FileRecord = {
   id: string;
@@ -35,6 +40,7 @@ type FileRecord = {
   folderId: string;
   downloadUrl: string;
   previewable: boolean;
+  artifactId: string;
 };
 
 type FolderRecord = {
@@ -78,6 +84,7 @@ function parseFile(value: unknown): FileRecord | null {
     folderId: asString(row.folderId),
     downloadUrl: asString(row.downloadUrl),
     previewable: row.previewable === true,
+    artifactId: asString(row.artifactId),
   };
 }
 
@@ -351,7 +358,7 @@ const FileRow = memo(function FileRow({
   );
 });
 
-export function FilesScreen() {
+export function FilesScreen(_props: Props) {
   const { sessionToken } = useAuth();
   const office = useOfficeEvents();
   const requestVersion = useRef(0);
@@ -364,6 +371,7 @@ export function FilesScreen() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [preview, setPreview] = useState<FileRecord | null>(null);
+  const [artifactPreview, setArtifactPreview] = useState<{ title: string; text: string } | null>(null);
 
   const load = useCallback(
     async (refresh = false) => {
@@ -587,6 +595,27 @@ export function FilesScreen() {
   const openFile = useCallback(
     (file: FileRecord) => {
       if (!sessionToken || busy) return;
+      if (file.artifactId) {
+        void (async () => {
+          setBusy(`open-${file.id}`);
+          setActionError(null);
+          try {
+            const response = await api.artifact(sessionToken, file.artifactId);
+            const artifact = response.artifacts[0];
+            const text = String(artifact?.text ?? '').trim();
+            if (!text) throw new Error('The completed deliverable is not available yet.');
+            setArtifactPreview({
+              title: String(artifact?.metadata?.title ?? file.name).trim() || file.name,
+              text,
+            });
+          } catch (error) {
+            setActionError(errorMessage(error, 'Could not open the deliverable.'));
+          } finally {
+            setBusy(null);
+          }
+        })();
+        return;
+      }
       if (!file.downloadUrl) {
         setActionError('This item does not include downloadable file data yet.');
         return;
@@ -770,6 +799,13 @@ export function FilesScreen() {
         file={preview}
         sessionToken={sessionToken ?? ''}
         onClose={() => setPreview(null)}
+      />
+      <LongMessageSheet
+        visible={Boolean(artifactPreview)}
+        text={artifactPreview?.text ?? ''}
+        authorName={artifactPreview?.title ?? 'Deliverable'}
+        scout
+        onClose={() => setArtifactPreview(null)}
       />
     </Screen>
   );

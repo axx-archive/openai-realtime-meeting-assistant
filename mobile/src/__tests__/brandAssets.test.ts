@@ -115,6 +115,8 @@ test('React Native shell separates the static logo from the live Signal Cradle',
   assert.match(cradle, /apertureAmplitude\(trace, listening\)/);
   assert.match(cradle, /useReduceMotion/);
   assert.match(cradle, /source\?: StrideCradleSource/);
+  assert.match(cradle, /restTint = colors\.text2/);
+  assert.doesNotMatch(cradle, /String\(colors\.text2\)/);
   assert.match(cradle, /draw\(amplitudeRef\.current, true\)/);
   assert.match(cradle, /const isSourceEdge = sourceRef\.current === 'human'/);
   assert.match(cradle, /strideCradleContactWeights\(physics, BALL_COUNT\)/);
