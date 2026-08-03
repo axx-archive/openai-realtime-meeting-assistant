@@ -2178,7 +2178,11 @@ create_canonical_repair_container() {
     --authority-marker /run/bonfire-repair/operator-authority \
     --repair-receipt /run/bonfire-repair/repair-receipt.json >/dev/null
   assert_canonical_repair_container_exact "$image" "$runtime_dir"
-  assert_canonical_repair_network_membership "$(canonical_repair_postgres_id)" "$REPAIR_CONTAINER"
+  # Docker omits the stopped, created repair container from network-inspect
+  # active endpoints. Its exact configured attachment was proved by container
+  # inspect above; run_canonical_stage_container proves both active endpoints
+  # immediately after start and returns to PostgreSQL-only after exit.
+  assert_canonical_repair_network_membership "$(canonical_repair_postgres_id)"
   assert_protected_volume_container_whitelist "$REPAIR_CONTAINER"
 }
 
