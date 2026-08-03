@@ -352,6 +352,25 @@ export type StrideMeetingSpecialistStatusResponse = {
   specialists: StrideMeetingSpecialistStatus;
 };
 
+export type RoomAgentParticipant = {
+  id: string;
+  name: string;
+  kind: 'scout' | 'employee' | string;
+  color: string;
+  status: 'starting' | 'ready' | 'degraded' | 'closed' | string;
+  voiceState: 'starting' | 'listening' | 'hearing' | 'thinking' | 'talking' | 'degraded' | string;
+  invitationId: string;
+  invitedAt: string;
+  invitedBy?: string;
+  model?: string;
+  providerSessionStarted: boolean;
+};
+
+export type RoomAgentsResponse = {
+  ok: boolean;
+  agents: RoomAgentParticipant[];
+};
+
 export type StrideTeamSeat = {
 
   id: string;

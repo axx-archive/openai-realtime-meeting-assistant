@@ -41,7 +41,7 @@ func (app *kanbanBoardApp) roomScoutScopeCurrentLocked(scope RoomScoutScope) boo
 		return false
 	}
 	state := app.roomLiveLocked(scope.RoomID)
-	return state.mediaGen == scope.MediaGeneration && state.realtime != nil && state.realtime.scope.same(scope)
+	return state.scoutInvited && state.mediaGen == scope.MediaGeneration && state.realtime != nil && state.realtime.scope.same(scope)
 }
 
 type RoomScoutStatus string
@@ -606,25 +606,30 @@ func (app *kanbanBoardApp) ensureRoomScoutRuntime(roomID, sittingID string, medi
 	}
 	scope := RoomScoutScope{RoomID: roomID, SittingID: strings.TrimSpace(sittingID), MediaGeneration: mediaGeneration}
 	bundle, err := newRoomRealtimeBundle(scope, func(event string, payload any) {
-		publishRoomScoutAssistantEvent(roomID, event, payload)
+		app.publishRoomScoutParticipantEvent(scope, event, payload)
 	})
 	if err != nil {
 		return
 	}
 	app.mu.Lock()
 	state := app.roomLiveLocked(roomID)
-	if state.mediaGen != mediaGeneration || state.realtime != nil {
+	if !state.scoutInvited || state.mediaGen != mediaGeneration || state.mediaSittingID != strings.TrimSpace(sittingID) || state.realtime != nil {
 		app.mu.Unlock()
 		_ = bundle.close()
 		return
 	}
 	state.realtime = bundle
+	state.scoutRuntimeStatus = RoomScoutStarting
+	state.scoutVoiceState = "starting"
 	factory := app.roomScoutFactory
 	app.mu.Unlock()
 
 	// Provider setup is deliberately outside app.mu and outside the room media
 	// admission path. A slow or failed AI provider cannot delay room access.
-	go bundle.start(factory)
+	go func() {
+		bundle.start(factory)
+		app.syncRoomScoutParticipantStatus(scope, bundle)
+	}()
 }
 
 func (app *kanbanBoardApp) roomScoutSnapshot(roomID string) roomScoutRuntimeSnapshot {

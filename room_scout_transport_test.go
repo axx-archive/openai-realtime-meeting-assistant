@@ -98,6 +98,7 @@ func newScopedRoomScoutTransportTest(t *testing.T, dial roomScoutProviderDialer)
 	state := app.roomLiveLocked(roomID)
 	state.mediaGen = scope.MediaGeneration
 	state.realtime = bundle
+	state.scoutInvited = true
 	app.mu.Unlock()
 	transport, err := newOpenAIRoomScoutTransport(bundle.ctx, app, "test-key", scope, RoomScoutCallbacks{
 		Publish: bundle.publishFenced,
@@ -298,6 +299,7 @@ func TestRoomScoutSideEffectsAndDeliveryStayInOwningRoom(t *testing.T) {
 	stateA, stateB := app.roomLiveLocked(roomA), app.roomLiveLocked(roomB)
 	stateA.mediaGen, stateA.realtime = scopeA.MediaGeneration, bundleA
 	stateB.mediaGen, stateB.realtime = scopeB.MediaGeneration, bundleB
+	stateA.scoutInvited, stateB.scoutInvited = true, true
 	beforeCards := len(app.cards)
 	app.mu.Unlock()
 
@@ -351,6 +353,7 @@ func TestRoomScoutTranscriptCommitRejectsSittingRollover(t *testing.T) {
 	app.mu.Lock()
 	state := app.roomLiveLocked(roomID)
 	state.mediaGen, state.realtime = oldScope.MediaGeneration, oldBundle
+	state.scoutInvited = true
 	app.mu.Unlock()
 	name := participantNameForEmail(email)
 	now := time.Now().UTC()
@@ -389,6 +392,7 @@ func TestRoomScoutTranscriptCommitRejectsSittingRollover(t *testing.T) {
 	app.mu.Lock()
 	state = app.roomLiveLocked(roomID)
 	state.mediaGen, state.realtime = newScope.MediaGeneration, newBundle
+	state.scoutInvited = true
 	app.mu.Unlock()
 	close(blocking.release)
 	select {

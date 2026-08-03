@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type {
+  RoomAgentParticipant,
   StrideMeetingSpecialistInvitation,
   StrideMeetingSpecialistStatus,
 } from '../api/types';
@@ -17,10 +18,12 @@ import { colors, radius, shadow, space, type } from '../theme/tokens';
 
 type Props = {
   error: string | null;
+  agents: RoomAgentParticipant[];
   loading: boolean;
   onClose: () => void;
   onRequest: (agentId: string, displayName: string) => void;
   onResolve: (invitation: StrideMeetingSpecialistInvitation, decision: 'approved' | 'declined' | 'dismissed') => void;
+  onSetScout: (action: 'invite' | 'dismiss') => void;
   pending: boolean;
   status: StrideMeetingSpecialistStatus | null;
   visible: boolean;
@@ -74,22 +77,39 @@ function limitsSummary(invitation: StrideMeetingSpecialistInvitation): string {
   return `${numberLabel(limits?.turnBudget)} turns · ${durationLabel(limits?.audioBudgetSeconds)} audio · ${numberLabel(limits?.tokenBudget)} tokens · ${durationLabel(limits?.maxFloorLeaseSeconds)} max floor`;
 }
 
-export function RoomSpecialistsSheet({ error, loading, onClose, onRequest, onResolve, pending, status, visible }: Props) {
+export function RoomSpecialistsSheet({ agents, error, loading, onClose, onRequest, onResolve, onSetScout, pending, status, visible }: Props) {
   const insets = useSafeAreaInsets();
+  const scout = agents.find((agent) => agent.id === 'scout');
   return (
     <Modal animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet" visible={visible}>
       <View style={[styles.screen, { paddingTop: Math.max(insets.top, space[4]), paddingBottom: Math.max(insets.bottom, space[4]) }]}>
         <View style={styles.header}>
           <View style={styles.headerCopy}>
             <Text style={styles.eyebrow}>YOUR AGENT TEAM</Text>
-            <Text style={styles.title}>Bring a specialist in</Text>
-            <Text style={styles.subtitle}>Everyone sees who is invited. An agent never joins until a person approves the exact invitation.</Text>
+            <Text style={styles.title}>Bring an agent in</Text>
+            <Text style={styles.subtitle}>Agents appear as real, named call participants. Everyone sees who is present and their speech enters the meeting transcript. An employee agent never joins until a person approves the exact invitation.</Text>
           </View>
           <Pressable accessibilityLabel="Close meeting agents" accessibilityRole="button" onPress={onClose} style={({ pressed }) => [styles.close, pressed && styles.pressed]}>
             <Text style={styles.closeText}>Done</Text>
           </Pressable>
         </View>
         <ScrollView contentContainerStyle={styles.content}>
+          <View style={[styles.card, styles.scoutCard, shadow[1]]}>
+            <View style={styles.agentHeading}>
+              <View style={[styles.agentColor, { backgroundColor: scout?.color ?? '#FF6B35' }]} />
+              <View style={styles.agentHeadingCopy}>
+                <Text style={styles.cardTitle}>Scout</Text>
+                <Text style={styles.cardMeta}>{scout ? scout.voiceState : 'Available'}</Text>
+              </View>
+            </View>
+            <Text style={styles.purpose}>Your always-available company agent. Invite Scout when you want him listening and responding as an audible participant.</Text>
+            <Text style={styles.approvalState}>{scout
+              ? 'Scout is visible to everyone in this sitting. Dismissing him leaves meeting transcription running.'
+              : 'Meeting transcription remains independent; Scout hears nothing until invited.'}</Text>
+            <Pressable accessibilityRole="button" disabled={pending} onPress={() => onSetScout(scout ? 'dismiss' : 'invite')} style={({ pressed }) => [scout ? styles.secondary : styles.primary, pressed && styles.pressed]}>
+              <Text style={scout ? styles.secondaryText : styles.primaryText}>{scout ? 'Dismiss Scout' : 'Invite Scout'}</Text>
+            </Pressable>
+          </View>
           {loading ? <View style={styles.loading}><ActivityIndicator color={colors.text1} /><Text style={styles.body}>Checking this meeting…</Text></View> : null}
           {error ? <View style={styles.noticeError}><Text style={styles.noticeTitle}>Couldn’t load agents</Text><Text style={styles.body}>{error}</Text></View> : null}
           {!loading && !error && status ? (
@@ -165,6 +185,10 @@ const styles = StyleSheet.create({
   statusDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: colors.text3, marginTop: 5 },
   body: { ...type.bodySm, color: colors.text2, marginTop: 3 },
   card: { borderRadius: radius.xl, backgroundColor: colors.surface1, padding: space[4], gap: space[3] },
+  scoutCard: { borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,107,53,0.35)' },
+  agentHeading: { flexDirection: 'row', alignItems: 'center', gap: space[3] },
+  agentHeadingCopy: { flex: 1 },
+  agentColor: { width: 12, height: 12, borderRadius: 6 },
   cardTitle: { ...type.headline, color: colors.text1 },
   cardMeta: { ...type.caption, color: colors.text2, textTransform: 'capitalize' },
   purpose: { ...type.bodyMedium, color: colors.text1 },

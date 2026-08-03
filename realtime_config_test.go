@@ -35,9 +35,8 @@ func TestRealtimeSessionConfigUsesGptRealtime2Optimizations(t *testing.T) {
 	audio := session["audio"].(map[string]any)
 	input := audio["input"].(map[string]any)
 	output := audio["output"].(map[string]any)
-	noiseReduction := input["noise_reduction"].(map[string]any)
-	if noiseType := noiseReduction["type"]; noiseType != "near_field" {
-		t.Fatalf("audio.input.noise_reduction.type=%v, want near_field", noiseType)
+	if _, found := input["noise_reduction"]; found {
+		t.Fatalf("gpt-live-transcribe must not inherit unqualified near-field controls: %v", input["noise_reduction"])
 	}
 	if voice := output["voice"]; voice != defaultRealtimeVoice {
 		t.Fatalf("audio.output.voice=%v, want %s", voice, defaultRealtimeVoice)
@@ -51,6 +50,12 @@ func TestRealtimeSessionConfigUsesGptRealtime2Optimizations(t *testing.T) {
 	transcription := input["transcription"].(map[string]any)
 	if model := transcription["model"]; model != defaultRealtimeTranscriptionModel {
 		t.Fatalf("transcription.model=%v, want %s", model, defaultRealtimeTranscriptionModel)
+	}
+	if got, ok := transcription["languages"].([]string); !ok || !reflect.DeepEqual(got, []string{"en"}) {
+		t.Fatalf("transcription.languages=%#v, want modern plural hint", transcription["languages"])
+	}
+	if keywords, ok := transcription["keywords"].([]string); !ok || len(keywords) == 0 {
+		t.Fatalf("transcription keywords missing for gpt-live-transcribe: %#v", transcription["keywords"])
 	}
 	prompt, ok := transcription["prompt"].(string)
 	if !ok || !strings.Contains(prompt, "Boot Barn") || !strings.Contains(prompt, "WebRTC") {

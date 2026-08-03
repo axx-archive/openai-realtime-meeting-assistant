@@ -23,11 +23,10 @@ import (
 const (
 	realtimeWebSocketURL = "wss://api.openai.com/v1/realtime"
 	// A4/E2: the authoritative persisted transcript rides this lane, so its model
-	// must accept the domain-vocabulary prompt. gpt-4o-transcribe demonstrably
-	// honours a free-text transcription prompt (the Scout realtime peer already
-	// uses it that way); the prior gpt-realtime-whisper default carried no
-	// vocabulary bias, which is how proper nouns like "Ball Dogs" got mangled.
-	defaultTranscriptionLaneModel      = "gpt-4o-transcribe"
+	// must accept the domain-vocabulary prompt. GPT Transcribe is the accurate
+	// final-transcript model for committed Realtime turns and supports the
+	// modern prompt, keyword, and plural-language hints.
+	defaultTranscriptionLaneModel      = "gpt-transcribe"
 	transcriptionLaneInputSampleRate   = 24000
 	transcriptionLaneQueueSize         = 256
 	transcriptionLaneWriteTimeout      = 5 * time.Second

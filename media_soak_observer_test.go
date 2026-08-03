@@ -190,6 +190,7 @@ func TestMediaSoakCanaryAdaptersCoverEverySurfaceDirectionAndScrub(t *testing.T)
 		app.mu.Lock()
 		state := app.roomLiveLocked(name)
 		state.mediaGen, state.realtime = generation, bundle
+		state.scoutInvited = true
 		app.mu.Unlock()
 		t.Cleanup(func() { _ = bundle.close() })
 		return value

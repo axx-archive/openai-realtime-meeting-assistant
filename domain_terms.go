@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-const defaultRealtimeTranscriptionModel = "gpt-4o-transcribe"
+const defaultRealtimeTranscriptionModel = "gpt-live-transcribe"
 
 var domainTermCorrections = []struct {
 	pattern *regexp.Regexp

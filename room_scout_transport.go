@@ -684,6 +684,7 @@ func (transport *openAIRoomScoutTransport) handleProviderEvent(session roomScout
 		if !transport.app.transcriptionLaneConnectedForRoom(transport.scope.RoomID) {
 			transport.app.noteRoomScoutSpeechStopped(transport.scope)
 		}
+		transport.publish(generation, "audio", map[string]any{"text": "Scout is thinking", "voiceState": "thinking"})
 	case "input_audio_buffer.committed":
 		contributorFences := transport.app.takeRoomScoutContributorFences(transport.scope)
 		if !transport.app.transcriptionLaneConnectedForRoom(transport.scope.RoomID) {
@@ -693,8 +694,12 @@ func (transport *openAIRoomScoutTransport) handleProviderEvent(session roomScout
 		transport.voiceMu.Lock()
 		transport.responseActive = true
 		transport.voiceMu.Unlock()
+		transport.publish(generation, "audio", map[string]any{"text": "Scout is thinking", "voiceState": "thinking"})
+	case "response.output_audio_transcript.delta":
+		transport.publish(generation, "audio", map[string]any{"text": "Scout is speaking", "voiceState": "talking"})
 	case "response.output_audio_transcript.done", "response.output_text.done":
 		if text := canonicalizeBoardText(firstNonEmptyString(event.Transcript, event.Text)); text != "" {
+			transport.app.rememberRoomAgentTranscript(transport.scope, event, "agent_voice", transport.model, "scout", scoutParticipantName)
 			transport.publish(generation, "answer", map[string]any{"text": text, "voiceState": "talking"})
 		}
 	case "response.output_item.done":
@@ -714,6 +719,7 @@ func (transport *openAIRoomScoutTransport) handleProviderEvent(session roomScout
 				}
 			}
 		}
+		transport.publish(generation, "audio", map[string]any{"text": "Scout is listening", "voiceState": "listening"})
 	}
 }
 

@@ -1066,6 +1066,7 @@ func main() {
 	http.HandleFunc("/api/admin/brain-projection/backfill", brainProjectionHistoricalBackfillHandler)
 	registerSTRIDERuntimeRoutes(http.DefaultServeMux)
 	registerMeetingSpecialistProductRoutes(http.DefaultServeMux)
+	registerRoomAgentRoutes(http.DefaultServeMux)
 	http.HandleFunc("/internal/codex/jobs/result", internalCodexRunnerResultHandler)
 	// W2A release-only observer: the handler is always registered but returns
 	// 404 unless explicit media-soak mode and its purpose-scoped token are set.
@@ -5928,6 +5929,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			if err := sendKanbanEvent(c, "participants", kanbanApp.roomSnapshotForRoom(connRoomID)); err != nil {
 				log.Errorf("Failed to send participant state: %v", err)
+			}
+			if err := sendKanbanEvent(c, "agent_participants", kanbanApp.roomAgentParticipantsSnapshot(connRoomID)); err != nil {
+				log.Errorf("Failed to send agent participant state: %v", err)
 			}
 			if err := sendKanbanEvent(c, "board", kanbanApp.snapshotState()); err != nil {
 				log.Errorf("Failed to send Kanban board state: %v", err)

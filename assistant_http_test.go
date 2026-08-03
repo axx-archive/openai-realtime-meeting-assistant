@@ -122,7 +122,7 @@ func TestAssistantRealtimeOfferForwardsTypedMultipartToOpenAI(t *testing.T) {
 		if parts["session"].contentType != "application/json" {
 			t.Errorf("session content type=%q, want application/json", parts["session"].contentType)
 		}
-		if !strings.Contains(parts["session"].body, `"model":"gpt-realtime-2"`) {
+		if !strings.Contains(parts["session"].body, `"model":"gpt-realtime-2.1"`) {
 			t.Errorf("session body missing realtime model: %s", parts["session"].body)
 		}
 		w.Header().Set("Content-Type", "application/sdp")

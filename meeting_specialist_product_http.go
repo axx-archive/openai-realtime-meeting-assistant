@@ -23,7 +23,11 @@ type appMeetingSpecialistProductAuthority struct {
 // with request-time scope resolution while still closing a joined specialist
 // synchronously before the roster mutation returns to its caller.
 func (app *kanbanBoardApp) revokeMeetingSpecialistParticipantAuthority(roomID, reason string) {
-	if app == nil || app.meetingSpecialists == nil {
+	if app == nil {
+		return
+	}
+	app.revokeRoomScoutParticipantAuthority(roomID, reason)
+	if app.meetingSpecialists == nil {
 		return
 	}
 	_ = app.meetingSpecialists.RevokeScopeAuthority(roomID, "", reason)

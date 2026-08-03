@@ -16,6 +16,8 @@ import BonfireMediaSession, {
   nextMediaSessionGeneration,
 } from '../../modules/bonfire-media-session';
 import { api } from '../api/client';
+import type { RoomAgentParticipant } from '../api/types';
+import { roomAgentParticipantsFromPayload } from './roomAgentParticipants';
 import { API_BASE_URL, NATIVE_CLIENT_HEADER } from '../config';
 import {
   nextZeroOutboundVideoIntervalCount,
@@ -146,6 +148,7 @@ export type NativeRoomState = {
   localStream: MediaStream | null;
   remoteVideoFeeds: Array<{ trackId: string; stream: MediaStream; participant?: string; endpointId?: string; stalled?: boolean }>;
   participants: string[];
+  agentParticipants: RoomAgentParticipant[];
   participantMediaStates: ParticipantMediaStates;
   participantEndpointMediaStates: ParticipantEndpointMediaStates;
   recording: boolean;
@@ -301,6 +304,7 @@ const initialState: NativeRoomState = {
   localStream: null,
   remoteVideoFeeds: [],
   participants: [],
+  agentParticipants: [],
   participantMediaStates: {},
   participantEndpointMediaStates: {},
   recording: true,
@@ -2407,6 +2411,11 @@ export function useNativeRoom(
         });
         break;
       }
+      case 'agent_participants': {
+        const agentParticipants = roomAgentParticipantsFromPayload(nested.data);
+        updateStateForSocket((current) => ({ ...current, agentParticipants }));
+        break;
+      }
       case 'participant_left': {
         const participant = participantNameFromPayload(nested.data);
         if (!participant) break;
@@ -2572,6 +2581,7 @@ export function useNativeRoom(
       ...current,
       lifecycle: 'reconnecting',
       remoteVideoFeeds: [],
+      agentParticipants: [],
       quality: null,
       error: reason || 'Reconnecting to the room…',
     }));

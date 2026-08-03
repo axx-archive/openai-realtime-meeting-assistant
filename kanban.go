@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	defaultRealtimeModel      = "gpt-realtime-2"
+	defaultRealtimeModel      = "gpt-realtime-2.1"
 	defaultReasoningEffort    = "high"
 	defaultRealtimeVADType    = "server_vad"
 	defaultVADEagerness       = "high"
@@ -730,9 +730,9 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 }
 
 // ensureOfficeMedia lazily creates the office's media plane on admission (W4
-// §4.4): the transcription lane on first seat, and the Scout Realtime peer
-// ONLY while the sitting is not listen-only (§7.3's never-started layer).
-// Idempotent per sitting; keyless boots no-op exactly like before.
+// §4.4). The transcription lane is independent. Scout Realtime is started only
+// by an explicit, sitting-scoped invitation through the room-agent control
+// plane; ordinary admission must never silently add an AI participant.
 func (app *kanbanBoardApp) ensureOfficeMedia() uint64 {
 	sittingID := ""
 	if app.memory != nil {
@@ -775,9 +775,6 @@ func (app *kanbanBoardApp) ensureOfficeMedia() uint64 {
 		}
 		app.mu.Unlock()
 	}
-	if !app.sittingListenOnly(officeRoomID) {
-		app.ensureOfficeRealtimePeer(apiKey)
-	}
 	return generation
 }
 
@@ -788,7 +785,8 @@ func (app *kanbanBoardApp) ensureOfficeMedia() uint64 {
 // for an empty room.
 func (app *kanbanBoardApp) ensureOfficeRealtimePeer(apiKey string) {
 	app.mu.Lock()
-	if app.pc != nil || app.realtimeStarting {
+	state := app.roomLiveLocked(officeRoomID)
+	if !state.scoutInvited || state.mediaActor == nil || state.mediaSittingID == "" || app.pc != nil || app.realtimeStarting {
 		app.mu.Unlock()
 		return
 	}
@@ -807,6 +805,7 @@ func (app *kanbanBoardApp) ensureOfficeRealtimePeer(apiKey string) {
 	if err != nil {
 		log.Errorf("Failed to start OpenAI Realtime peer on admission: %v", err)
 		broadcastAssistantEvent("error", "OpenAI Realtime disabled: "+err.Error(), nil)
+		app.updateRoomScoutParticipantState(officeRoomID, RoomScoutDegraded, "degraded", err.Error())
 	}
 }
 
@@ -939,6 +938,7 @@ func (app *kanbanBoardApp) startRealtimePeer(apiKey string, model string, startG
 			log.Errorf("Failed to connect OpenAI Realtime peer: %v", err)
 			broadcastKanbanEvent("status", "OpenAI Realtime disabled: "+err.Error())
 			broadcastAssistantEvent("error", "OpenAI Realtime disabled: "+err.Error(), nil)
+			app.updateRoomScoutParticipantState(officeRoomID, RoomScoutDegraded, "degraded", err.Error())
 			_ = peerConnection.Close()
 			app.mu.Lock()
 			if app.pc == peerConnection {
@@ -959,6 +959,7 @@ func (app *kanbanBoardApp) startRealtimePeer(apiKey string, model string, startG
 			app.mu.Unlock()
 			return
 		}
+		app.updateRoomScoutParticipantState(officeRoomID, RoomScoutReady, "listening", "")
 		app.ensureRoomMixerSink()
 		app.startProactiveRealtimeRestart(peerConnection)
 	}()
@@ -973,6 +974,12 @@ func (app *kanbanBoardApp) handleRealtimePeerConnectionState(peerConnection *web
 	log.Infof("OpenAI Realtime peer state changed: %s", state.String())
 	broadcastKanbanEvent("status", "OpenAI Realtime: "+state.String())
 	broadcastAssistantEvent("status", "OpenAI Realtime: "+state.String(), nil)
+	switch state {
+	case webrtc.PeerConnectionStateConnected:
+		app.updateRoomScoutParticipantState(officeRoomID, RoomScoutReady, "listening", "")
+	case webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateDisconnected:
+		app.updateRoomScoutParticipantState(officeRoomID, RoomScoutDegraded, "degraded", state.String())
+	}
 
 	switch state {
 	case webrtc.PeerConnectionStateFailed:
@@ -1053,7 +1060,7 @@ func (app *kanbanBoardApp) restartRealtimePeer(reason string) {
 			app.realtimeStarting = false
 		}
 		state := app.roomLiveLocked(officeRoomID)
-		retryCurrent = state.mediaActor != nil && app.pc == nil && !app.realtimeStarting
+		retryCurrent = state.mediaActor != nil && state.scoutInvited && app.pc == nil && !app.realtimeStarting
 		apiKey := app.apiKey
 		app.mu.Unlock()
 		if retryCurrent {
@@ -3075,8 +3082,10 @@ func (app *kanbanBoardApp) handleRealtimeEventForGeneration(mediaGeneration uint
 		recordCapabilitySuccess(capabilityScout, time.Now().UTC())
 		recordCapabilitySuccess(capabilityRoomVoice, time.Now().UTC())
 		broadcastAssistantEvent("status", "OpenAI Realtime session configured", map[string]any{"eventType": event.Type})
+		app.updateRoomScoutParticipantState(officeRoomID, RoomScoutReady, "listening", "")
 	case "error":
 		if event.Error != nil {
+			app.updateRoomScoutParticipantState(officeRoomID, RoomScoutDegraded, "degraded", event.Error.Message)
 			recordCapabilityFailure(capabilityScout, time.Now().UTC(), fmt.Errorf("%s", firstNonEmptyString(event.Error.Code, "realtime_error")))
 			recordCapabilityFailure(capabilityRoomVoice, time.Now().UTC(), fmt.Errorf("%s", firstNonEmptyString(event.Error.Code, "realtime_error")))
 			log.Errorf("OpenAI Realtime error code=%s message=%s", event.Error.Code, event.Error.Message)
@@ -3133,11 +3142,13 @@ func (app *kanbanBoardApp) handleRealtimeEventForGeneration(mediaGeneration uint
 			app.noteRealtimeSpeechStartedForRoomGeneration(officeRoomID, mediaGeneration)
 		}
 		broadcastAssistantEvent("audio", "assistant detected speech", map[string]any{"eventType": event.Type, "voiceState": "hearing"})
+		app.updateRoomScoutParticipantState(officeRoomID, RoomScoutReady, "hearing", "")
 	case "input_audio_buffer.speech_stopped":
 		if !app.transcriptionLaneConnected() {
 			app.noteRealtimeSpeechStoppedForRoomGeneration(officeRoomID, mediaGeneration)
 		}
 		broadcastAssistantEvent("audio", "assistant detected silence", map[string]any{"eventType": event.Type, "voiceState": "listening"})
+		app.updateRoomScoutParticipantState(officeRoomID, RoomScoutReady, "thinking", "")
 	case "input_audio_buffer.committed":
 		// A6: when the Scout peer is the persisting session (lane down), freeze the
 		// attribution window at commit so its transcription.completed resolves the
@@ -3150,10 +3161,17 @@ func (app *kanbanBoardApp) handleRealtimeEventForGeneration(mediaGeneration uint
 	case "response.created":
 		app.markRealtimeResponseActive(true)
 		broadcastAssistantEvent("audio", "Scout is thinking", map[string]any{"eventType": event.Type, "voiceState": "thinking"})
+		app.updateRoomScoutParticipantState(officeRoomID, RoomScoutReady, "thinking", "")
+	case "response.output_audio_transcript.delta":
+		app.updateRoomScoutParticipantState(officeRoomID, RoomScoutReady, "talking", "")
 	case "response.output_audio_transcript.done":
 		if text := canonicalizeBoardText(firstNonEmptyString(event.Transcript, event.Text)); text != "" {
+			if scope, current := app.officeRoomScoutScopeForGeneration(mediaGeneration); current {
+				app.rememberRoomAgentTranscript(scope, event, "agent_voice", app.currentRealtimeModel(), "scout", scoutParticipantName)
+			}
 			app.markScoutSpokenResponseDelivered()
 			broadcastAssistantEvent("answer", text, map[string]any{"eventType": event.Type, "voiceState": "talking"})
+			app.updateRoomScoutParticipantState(officeRoomID, RoomScoutReady, "talking", "")
 		}
 	case "response.output_text.done":
 		if text := canonicalizeBoardText(firstNonEmptyString(event.Text, event.Transcript)); text != "" {
@@ -3202,6 +3220,7 @@ func (app *kanbanBoardApp) handleRealtimeEventForGeneration(mediaGeneration uint
 		app.recordRealtimeResponseUsage(event)
 		app.flushScoutSpokenResponseIfPending()
 		broadcastAssistantEvent("audio", "Scout is listening", map[string]any{"eventType": event.Type, "voiceState": "listening"})
+		app.updateRoomScoutParticipantState(officeRoomID, RoomScoutReady, "listening", "")
 	default:
 		if text := strings.TrimSpace(event.Text); text != "" && strings.Contains(event.Type, "text") {
 			broadcastAssistantEvent("answer", text, map[string]any{"eventType": event.Type})

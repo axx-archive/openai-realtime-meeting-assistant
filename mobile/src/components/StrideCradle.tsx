@@ -27,6 +27,8 @@ type Props = {
   listening: boolean;
   source?: StrideCradleSource;
   size?: number;
+  tint?: string;
+  restTint?: string;
 };
 
 type Point = { x: number; y: number };
@@ -38,7 +40,7 @@ function bobPoint(anchorX: number, anchorY: number, length: number, angle: numbe
   };
 }
 
-export function StrideCradle({ trace, listening, source = 'human', size = 391 }: Props) {
+export function StrideCradle({ trace, listening, source = 'human', size = 391, tint = String(ember[500]), restTint = String(colors.text2) }: Props) {
   const reduceMotion = useReduceMotion();
   const width = size * 0.8;
   const height = width * 0.42;
@@ -185,7 +187,7 @@ export function StrideCradle({ trace, listening, source = 'human', size = 391 }:
                 cx={anchorX}
                 cy={restY}
                 r={radius}
-                fill={colors.text2}
+                fill={restTint}
                 opacity={0.5}
               />
               <Circle
@@ -193,7 +195,7 @@ export function StrideCradle({ trace, listening, source = 'human', size = 391 }:
                 cx={anchorX}
                 cy={restY}
                 r={radius * 1.16}
-                fill={ember[500]}
+                fill={tint}
                 opacity={0}
               />
               <Circle
@@ -201,7 +203,7 @@ export function StrideCradle({ trace, listening, source = 'human', size = 391 }:
                 cx={anchorX}
                 cy={restY}
                 r={radius}
-                fill={ember[500]}
+                fill={tint}
                 opacity={0}
               />
             </React.Fragment>
@@ -209,7 +211,7 @@ export function StrideCradle({ trace, listening, source = 'human', size = 391 }:
         </Svg>
       </View>
     ),
-    [anchorY, anchors, height, listening, radius, restY, width],
+    [anchorY, anchors, height, listening, radius, restTint, restY, tint, width],
   );
 }
 

@@ -1077,6 +1077,7 @@ func TestRestartRealtimePeerRolloverRetriggersSuccessorOwner(t *testing.T) {
 		app.mu.Unlock()
 		t.Fatal("successor unexpectedly started before stale restart released")
 	}
+	app.roomLiveLocked(officeRoomID).scoutInvited = true
 	app.apiKey = "test-key"
 	app.mu.Unlock()
 	releaseOnce.Do(func() { close(release) })

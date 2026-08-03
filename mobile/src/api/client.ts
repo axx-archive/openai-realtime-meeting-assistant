@@ -29,6 +29,7 @@ import type {
   StrideWorkResponse,
   StrideMeetingSpecialistStatusResponse,
   StrideMeetingSpecialistInvitation,
+  RoomAgentsResponse,
   StridePrivateAgentTemplateInput,
   StrideRelationshipMemoryResponse,
 } from './types';
@@ -253,6 +254,16 @@ export const api = {
 
   meetingSpecialists(sessionToken: string, roomId: string): Promise<StrideMeetingSpecialistStatusResponse> {
     return request(`/api/stride/v1/meeting-specialists?roomId=${encodeURIComponent(roomId)}`, { sessionToken });
+  },
+
+  roomAgents(sessionToken: string, roomId: string): Promise<RoomAgentsResponse> {
+    return request(`/api/rooms/agents/scout?roomId=${encodeURIComponent(roomId)}`, { sessionToken });
+  },
+
+  setRoomScout(sessionToken: string, roomId: string, action: 'invite' | 'dismiss'): Promise<RoomAgentsResponse> {
+    return request('/api/rooms/agents/scout', {
+      method: 'POST', body: { roomId, action }, sessionToken,
+    });
   },
 
   requestMeetingSpecialist(sessionToken: string, roomId: string, agentId: string, purpose: string, idempotencyKey: string): Promise<{ ok: boolean; invitation: StrideMeetingSpecialistInvitation; providerSessionStarted: false }> {

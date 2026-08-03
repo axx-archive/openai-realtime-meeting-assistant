@@ -156,6 +156,17 @@ type roomLiveState struct {
 	mixer    *audioMixer
 	lane     *meetingTranscriptionLane
 	realtime *roomRealtimeBundle
+	// Scout is a room participant only while this sitting-scoped invitation is
+	// current. Transcription owns a separate lane and never consults these
+	// fields, so dismissing or degrading Scout cannot interrupt capture.
+	scoutInvited          bool
+	scoutInvitationID     string
+	scoutInvitedAt        time.Time
+	scoutInvitedBy        string
+	scoutConsentFences    []ConsentFence
+	scoutRuntimeStatus    RoomScoutStatus
+	scoutVoiceState       string
+	scoutLastStatusReason string
 	// mediaActor is the Pion control-plane owner for exactly this sitting.
 	// Lifecycle code detaches this exact pointer, so an old teardown can never
 	// close a successor sitting's actor in the package registry.
@@ -849,8 +860,6 @@ func (app *kanbanBoardApp) ensureRoomMedia(roomID string) uint64 {
 	state.mediaActor = actorForRoomGeneration(roomID, gen)
 	state.mediaSittingID = sittingID
 	app.mu.Unlock()
-	app.ensureRoomScoutRuntime(roomID, sittingID, gen)
-
 	log.Infof("room_media_started room=%s gen=%d lane=%t", roomID, gen, lane != nil)
 	return gen
 }
@@ -885,6 +894,14 @@ func (app *kanbanBoardApp) teardownRoomMediaAfterIdle(roomID string) {
 	state.mixer = nil
 	state.lane = nil
 	state.realtime = nil
+	state.scoutInvited = false
+	state.scoutInvitationID = ""
+	state.scoutInvitedAt = time.Time{}
+	state.scoutInvitedBy = ""
+	state.scoutConsentFences = nil
+	state.scoutRuntimeStatus = RoomScoutClosed
+	state.scoutVoiceState = ""
+	state.scoutLastStatusReason = ""
 	state.mediaActor = nil
 	state.mediaSittingID = ""
 	state.capTimer = nil
@@ -934,6 +951,14 @@ func (app *kanbanBoardApp) teardownOfficeMediaAfterIdle() {
 	mediaActor := state.mediaActor
 	state.mediaActor = nil
 	state.mediaSittingID = ""
+	state.scoutInvited = false
+	state.scoutInvitationID = ""
+	state.scoutInvitedAt = time.Time{}
+	state.scoutInvitedBy = ""
+	state.scoutConsentFences = nil
+	state.scoutRuntimeStatus = RoomScoutClosed
+	state.scoutVoiceState = ""
+	state.scoutLastStatusReason = ""
 	state.audioActivity = nil
 	state.currentSpeechStartedAt = time.Time{}
 	state.currentSpeechStoppedAt = time.Time{}

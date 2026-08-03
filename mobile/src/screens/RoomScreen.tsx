@@ -25,7 +25,7 @@ import { RTCView, ScreenCapturePickerView } from 'react-native-webrtc';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, BonfireApiError } from '../api/client';
-import type { Room } from '../api/types';
+import type { Room, RoomAgentParticipant } from '../api/types';
 import type { StrideMeetingSpecialistStatus, StrideMeetingSpecialistInvitation } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { Screen } from '../components/Screen';
@@ -36,6 +36,7 @@ import {
 import { RoomParticipantsSheet, type RoomParticipantRow } from '../components/RoomParticipantsSheet';
 import { RoomConsentSheet } from '../components/RoomConsentSheet';
 import { RoomSpecialistsSheet } from '../components/RoomSpecialistsSheet';
+import { StrideCradle } from '../components/StrideCradle';
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
 import { useNativeRoom } from '../realtime/useNativeRoom';
 import {
@@ -74,7 +75,7 @@ type InCallActionDescriptor = {
   disabled?: boolean;
 };
 
-type CallParticipant = PresentedVideoParticipant;
+type CallParticipant = PresentedVideoParticipant & { agent?: RoomAgentParticipant };
 
 const remotePIPOptions = {
   enabled: true,
@@ -87,6 +88,26 @@ function participantInitials(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);
   if (!words.length) return '?';
   return words.slice(0, 2).map((word) => word[0]?.toUpperCase()).join('');
+}
+
+function agentCradleTrace(voiceState: string): readonly number[] {
+  switch (voiceState) {
+    case 'talking': return [0.82, 0.94, 0.74, 0.9, 0.78, 0.96, 0.72, 0.88];
+    case 'hearing': return [0.46, 0.62, 0.52, 0.68, 0.5, 0.64, 0.48, 0.6];
+    case 'thinking': return [0.24, 0.32, 0.27, 0.36, 0.25, 0.34, 0.28, 0.31];
+    default: return [0, 0, 0, 0, 0, 0, 0, 0];
+  }
+}
+
+function agentVoiceLabel(agent: RoomAgentParticipant): string {
+  if (agent.status === 'degraded' || agent.voiceState === 'degraded') return 'Connection interrupted';
+  switch (agent.voiceState) {
+    case 'talking': return 'Speaking';
+    case 'hearing': return 'Listening to the room';
+    case 'thinking': return 'Thinking';
+    case 'listening': return 'Ready';
+    default: return 'Joining';
+  }
 }
 
 /** Isolated child keeps hook order stable while the call surface opts in. */
@@ -161,7 +182,9 @@ const CallVideoTile = memo(function CallVideoTile({
           ? 'Unpins this person and resumes following the active speaker'
           : 'Pins this person to the main stage'
         : undefined}
-      accessibilityLabel={`${name}${active ? ', speaking' : ''}, ${participantVideoAccessibilityStatus(participant)}`}
+      accessibilityLabel={participant.agent
+        ? `${name}, agent participant, ${agentVoiceLabel(participant.agent)}`
+        : `${name}${active ? ', speaking' : ''}, ${participantVideoAccessibilityStatus(participant)}`}
       accessibilityRole={onPress ? 'button' : undefined}
       disabled={!onPress}
       onLayout={fit === 'contain' ? handleLayout : undefined}
@@ -174,7 +197,19 @@ const CallVideoTile = memo(function CallVideoTile({
         pressed && styles.callVideoTilePressed,
       ]}
     >
-      {streamURL ? (
+      {participant.agent ? (
+        <View style={styles.agentVideoFeed}>
+          <View style={[styles.agentAura, { backgroundColor: participant.agent.color }]} />
+          <StrideCradle
+            listening={['hearing', 'thinking', 'talking'].includes(participant.agent.voiceState)}
+            size={compact ? 136 : primary ? 360 : 260}
+            source="agent"
+            tint={participant.agent.color}
+            trace={agentCradleTrace(participant.agent.voiceState)}
+          />
+          {!compact ? <Text style={styles.agentVoiceState}>{agentVoiceLabel(participant.agent)}</Text> : null}
+        </View>
+      ) : streamURL ? (
         <RTCView
           iosPIP={pictureInPicture && !mirror ? remotePIPOptions : undefined}
           mirror={mirror}
@@ -209,7 +244,7 @@ const CallVideoTile = memo(function CallVideoTile({
       >
         {pinned ? <SymbolView name="pin.fill" tintColor="#FFFFFF" size={compact ? 9 : 10} /> : active ? <View style={styles.speakerDot} /> : null}
         <Text numberOfLines={1} style={[styles.callVideoLabelText, compact && styles.callVideoLabelTextCompact]}>
-          {participant.screenSharing ? `${name} · Sharing` : pinned ? `${name} · Pinned` : name}
+          {participant.agent ? `${name} · Agent` : participant.screenSharing ? `${name} · Sharing` : pinned ? `${name} · Pinned` : name}
         </Text>
       </View>
       {participant.screenSharing && !compact ? (
@@ -552,6 +587,7 @@ export function RoomScreen({ route, navigation }: Props) {
   const [consentVisible, setConsentVisible] = useState(false);
   const [specialistsVisible, setSpecialistsVisible] = useState(false);
   const [specialists, setSpecialists] = useState<StrideMeetingSpecialistStatus | null>(null);
+  const [agentControlSnapshot, setAgentControlSnapshot] = useState<RoomAgentParticipant[]>([]);
   const [specialistsLoading, setSpecialistsLoading] = useState(false);
   const [specialistsPending, setSpecialistsPending] = useState(false);
   const [specialistsError, setSpecialistsError] = useState<string | null>(null);
@@ -593,14 +629,20 @@ export function RoomScreen({ route, navigation }: Props) {
     if (!sessionToken) return;
     setSpecialistsLoading(true);
     setSpecialistsError(null);
-    try {
-      const response = await api.meetingSpecialists(sessionToken, route.params.roomId);
-      setSpecialists(response.specialists);
-    } catch (err) {
-      setSpecialistsError(err instanceof BonfireApiError ? err.message : 'Could not load your agent team.');
-    } finally {
-      setSpecialistsLoading(false);
+    const [specialistResult, agentResult] = await Promise.allSettled([
+      api.meetingSpecialists(sessionToken, route.params.roomId),
+      api.roomAgents(sessionToken, route.params.roomId),
+    ]);
+    if (specialistResult.status === 'fulfilled') setSpecialists(specialistResult.value.specialists);
+    if (agentResult.status === 'fulfilled') setAgentControlSnapshot(agentResult.value.agents);
+    if (specialistResult.status === 'rejected') {
+      const err = specialistResult.reason;
+      setSpecialistsError(err instanceof BonfireApiError ? err.message : 'Could not load your employee agents.');
+    } else if (agentResult.status === 'rejected') {
+      const err = agentResult.reason;
+      setSpecialistsError(err instanceof BonfireApiError ? err.message : 'Could not load Scout.');
     }
+    setSpecialistsLoading(false);
   }, [route.params.roomId, sessionToken]);
 
   function openSpecialists() {
@@ -649,6 +691,31 @@ export function RoomScreen({ route, navigation }: Props) {
         },
       },
     ]);
+  }
+
+  function setRoomScout(action: 'invite' | 'dismiss') {
+    if (!sessionToken) return;
+    const inviting = action === 'invite';
+    Alert.alert(
+      inviting ? 'Invite Scout to this call?' : 'Dismiss Scout?',
+      inviting
+        ? 'Scout will become a visible, audible participant for this sitting. Everyone in the room must have the required consent, and Scout’s speech will be attributed in the transcript.'
+        : 'Scout will leave immediately. Meeting transcription will keep running.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: inviting ? 'Invite' : 'Dismiss',
+          style: inviting ? 'default' : 'destructive',
+          onPress: () => {
+            setSpecialistsPending(true);
+            void api.setRoomScout(sessionToken, route.params.roomId, action)
+              .then((response) => setAgentControlSnapshot(response.agents))
+              .catch((err) => setSpecialistsError(err instanceof BonfireApiError ? err.message : 'Could not update Scout.'))
+              .finally(() => setSpecialistsPending(false));
+          },
+        },
+      ],
+    );
   }
 
   const canManage = Boolean(room?.createdBy && room.createdBy.toLowerCase() === user?.email?.toLowerCase());
@@ -728,7 +795,7 @@ export function RoomScreen({ route, navigation }: Props) {
   );
   const callParticipants = useMemo<CallParticipant[]>(() => {
     const rawRoster = inNativeRoom ? nativeRoom.state.participants : participants;
-    return presentRemoteVideoParticipants({
+    const people = presentRemoteVideoParticipants({
       activeSpeaker,
       endpointMediaStates: nativeRoom.state.participantEndpointMediaStates,
       feeds: remoteFeeds.map((feed) => ({
@@ -741,12 +808,25 @@ export function RoomScreen({ route, navigation }: Props) {
       mediaStates: nativeRoom.state.participantMediaStates,
       roster: rawRoster,
     });
+    const agents = nativeRoom.state.agentParticipants.map((agent): CallParticipant => ({
+      key: `agent:${agent.id}:${agent.invitationId}`,
+      name: agent.name,
+      active: agent.voiceState === 'talking',
+      micMuted: false,
+      screenSharing: false,
+      // The synthetic video feed is rendered by CallVideoTile. Keeping this
+      // true lets the existing active-speaker focus rule promote the agent.
+      videoOff: true,
+      agent,
+    }));
+    return [...people, ...agents];
   }, [
     activeSpeaker,
     inNativeRoom,
     nativeRoom.state.participantEndpointMediaStates,
     nativeRoom.state.participantMediaStates,
     nativeRoom.state.participants,
+    nativeRoom.state.agentParticipants,
     participants,
     remoteFeeds,
     user?.email,
@@ -771,7 +851,7 @@ export function RoomScreen({ route, navigation }: Props) {
   }, [callParticipants, pinnedParticipantKey]);
   const liveParticipantCount = Math.max(
     1,
-    inNativeRoom ? nativeRoom.state.participants.length : participants.length,
+    (inNativeRoom ? nativeRoom.state.participants.length : participants.length) + nativeRoom.state.agentParticipants.length,
   );
   const participantRows = useMemo<RoomParticipantRow[]>(() => [
     {
@@ -1337,11 +1417,13 @@ export function RoomScreen({ route, navigation }: Props) {
             />
           ) : null}
           <RoomSpecialistsSheet
+            agents={inNativeRoom ? nativeRoom.state.agentParticipants : agentControlSnapshot}
             error={specialistsError}
             loading={specialistsLoading}
             onClose={() => setSpecialistsVisible(false)}
             onRequest={requestSpecialist}
             onResolve={resolveSpecialist}
+            onSetScout={setRoomScout}
             pending={specialistsPending}
             status={specialists}
             visible={specialistsVisible}
@@ -1473,6 +1555,31 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: space[3],
     backgroundColor: ink[850],
+  },
+  agentVideoFeed: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space[2],
+    backgroundColor: ink[900],
+  },
+  agentAura: {
+    position: 'absolute',
+    width: 280,
+    height: 280,
+    borderRadius: 140,
+    opacity: 0.1,
+    transform: [{ scaleX: 1.45 }],
+  },
+  agentVoiceState: {
+    ...type.label,
+    color: 'rgba(255,255,255,0.58)',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
   },
   videoAvatar: {
     width: 82,

@@ -926,6 +926,11 @@ func handleConsentWithdrawal(notice ConsentWithdrawalNotice) {
 }
 
 func handleConsentDecision(notice ConsentDecisionNotice) {
+	if notice.Scope == ConsentAudioCapture || notice.Scope == ConsentTranscription || notice.Scope == ConsentModelAnalysis {
+		if app := kanbanApp; app != nil {
+			app.revokeRoomScoutParticipantAuthority(notice.Binding.RoomID, "consent_authority_changed")
+		}
+	}
 	consentDecisionRuntime.RLock()
 	listeners := make([]func(ConsentDecisionNotice), 0, len(consentDecisionRuntime.listeners))
 	for _, listener := range consentDecisionRuntime.listeners {

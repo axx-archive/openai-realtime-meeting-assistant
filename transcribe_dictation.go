@@ -38,6 +38,9 @@ const (
 	// 25MB is the OpenAI audio upload cap. m4a at the client's recording
 	// bitrate reaches ~10 minutes well inside it.
 	dictationMaxBytes = 25 << 20
+	// Composer dictation is a completed-file request. Keep its default separate
+	// from the live meeting lane, whose model is Realtime-only.
+	defaultDictationTranscriptionModel = "gpt-transcribe"
 )
 
 var (
@@ -76,7 +79,7 @@ func dictationTranscriptionModel() string {
 	if model := strings.TrimSpace(os.Getenv("OPENAI_DICTATION_TRANSCRIPT_MODEL")); model != "" {
 		return model
 	}
-	return defaultTranscriptionLaneModel
+	return defaultDictationTranscriptionModel
 }
 
 func dictationTranscriptionFields(model, prompt string) []dictationTranscriptionField {

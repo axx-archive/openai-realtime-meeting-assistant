@@ -77,8 +77,8 @@ func TestTranscriptionLaneSessionConfigBiasesDomainVocabulary(t *testing.T) {
 
 func TestDefaultTranscriptionLaneModelAcceptsPrompt(t *testing.T) {
 	// A4/E2: the default persisted model must be one that honours the prompt.
-	if defaultTranscriptionLaneModel != "gpt-4o-transcribe" {
-		t.Fatalf("defaultTranscriptionLaneModel=%q, want gpt-4o-transcribe (prompt-capable)", defaultTranscriptionLaneModel)
+	if defaultTranscriptionLaneModel != "gpt-transcribe" {
+		t.Fatalf("defaultTranscriptionLaneModel=%q, want gpt-transcribe (committed-turn and prompt-capable)", defaultTranscriptionLaneModel)
 	}
 }
 
