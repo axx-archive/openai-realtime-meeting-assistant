@@ -19,12 +19,13 @@ type Props = {
   reactions: ScoutMessageReaction[];
   onClose: () => void;
   onReact: (emoji: string) => void;
+  onCopy: () => void;
   onReply: () => void;
   onEdit: () => void;
   onDelete: () => void;
 };
 
-export function MessageActionSheet({ visible, own, snippet, reactions, onClose, onReact, onReply, onEdit, onDelete }: Props) {
+export function MessageActionSheet({ visible, own, snippet, reactions, onClose, onReact, onCopy, onReply, onEdit, onDelete }: Props) {
   const reduced = useReduceMotion();
   const progress = useRef(new Animated.Value(0)).current;
   const visibleReactions = useMemo(() => reactions.slice(0, 12), [reactions]);
@@ -128,6 +129,15 @@ export function MessageActionSheet({ visible, own, snippet, reactions, onClose, 
             },
           ]}
           >
+              {snippet.trim() ? (
+                <>
+                  <Pressable accessibilityRole="button" accessibilityLabel="Copy message" onPress={onCopy} style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}>
+                    <SymbolView name="doc.on.doc" tintColor={colors.text1} size={18} />
+                    <Text style={styles.actionText}>Copy message</Text>
+                  </Pressable>
+                  <View style={styles.rule} />
+                </>
+              ) : null}
               <Pressable accessibilityRole="button" accessibilityLabel="Reply to message" onPress={onReply} style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}>
                 <SymbolView name="arrowshape.turn.up.left" tintColor={colors.text1} size={18} />
                 <Text style={styles.actionText}>Reply</Text>

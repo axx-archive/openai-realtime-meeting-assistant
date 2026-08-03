@@ -780,7 +780,7 @@ export const api = {
   async transcribeDictation(
     sessionToken: string,
     recording: { uri: string; durationMs: number },
-    options: { context?: 'chat' | 'board' | 'search'; threadId?: string } = {},
+    options: { context?: 'scout' | 'chat' | 'board' | 'search'; threadId?: string } = {},
   ): Promise<{ text: string; durationMs: number; model: string; biased: boolean }> {
     const form = new FormData();
     // Use the same SDK 57 File-backed multipart path as chat attachments.

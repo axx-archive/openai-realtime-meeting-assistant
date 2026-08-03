@@ -328,6 +328,7 @@ export function CanvasScreen() {
     setComposerOpening(false);
   }, [composerDraft, navigation, sessionToken, stopVoiceForComposer]);
   const composerDictation = useComposerDictation({
+    context: 'scout',
     // The home recording belongs to the not-yet-created opening turn, never a
     // prior fallback voice thread.
     threadId: undefined,

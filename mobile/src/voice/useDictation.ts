@@ -103,7 +103,7 @@ export function hasUsableDictationTranscript(text: string): boolean {
 }
 
 export type UseDictationOptions = {
-  context?: 'chat' | 'board' | 'search';
+  context?: 'scout' | 'chat' | 'board' | 'search';
   threadId?: string;
   onTranscript: (result: DictationResult) => void;
   /**

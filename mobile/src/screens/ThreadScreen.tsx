@@ -10,10 +10,10 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
@@ -22,6 +22,7 @@ import { SymbolView } from 'expo-symbols';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Linking from 'expo-linking';
+import * as Clipboard from 'expo-clipboard';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { api, BonfireApiError } from '../api/client';
 import type { ChatMentionCandidate, GiphySearchResult, ScoutFileAttachment, ScoutMessage, ThreadDigestResponse } from '../api/types';
@@ -59,28 +60,112 @@ import {
   shouldBeginTimestampReveal,
   timestampRevealProgress,
 } from '../messaging/messageGestures';
-
-type ThreadRow = {
-  message: ScoutMessage;
-  own: boolean;
-  showAuthor: boolean;
-  showAvatar: boolean;
-  avatarDataURL?: string;
-  timelineLabel?: string;
-  boundary: boolean;
-};
+import {
+  threadRowPresentationEqual,
+  threadRowRecycleType,
+  type ThreadListRow as ThreadRow,
+} from '../messaging/threadListPerformance';
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
 import { Glass } from '../theme/glass';
 import { Waveform } from '../components/Waveform';
-import { useDictation } from '../voice/useDictation';
-import type { AudioFocusLease } from '../voice/AudioFocusCoordinator';
-import { audioFocusRuntime } from '../realtime/audioFocusRuntime';
+import { useComposerDictation } from '../voice/useComposerDictation';
 import type { RootStackParamList } from '../navigation/types';
-import { colors, hitMin, radius, space, type } from '../theme/tokens';
+import { colors, hitMin, radius, shadow, space, type } from '../theme/tokens';
 import { useReduceMotion } from '../theme/motion';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Thread'>;
-const DICTATION_DISCLOSURE_KEY = 'bonfire.dictation.serverDisclosure.v1';
+
+type ThreadMessageRowProps = {
+  item: ThreadRow;
+  sessionToken: string;
+  viewerEmail: string;
+  timestampReveal: Animated.Value;
+  retryingReply: boolean;
+  onOpenSource: (messageId: string) => void;
+  onOpenAttachment: (file: ScoutFileAttachment) => void;
+  onLongPress: (message: ScoutMessage, own: boolean) => void;
+  onToggleReaction: (message: ScoutMessage, emoji: string, active: boolean) => void;
+  onRetryReply: (message: ScoutMessage) => void;
+  onOpenCatchUp: () => void;
+};
+
+const ThreadMessageRow = React.memo(function ThreadMessageRow({
+  item,
+  sessionToken,
+  viewerEmail,
+  timestampReveal,
+  retryingReply,
+  onOpenSource,
+  onOpenAttachment,
+  onLongPress,
+  onToggleReaction,
+  onRetryReply,
+  onOpenCatchUp,
+}: ThreadMessageRowProps) {
+  return (
+    <>
+      {item.timelineLabel ? (
+        <View style={styles.timelineMarker}>
+          <Text accessibilityRole="header" style={styles.timelineMarkerLabel}>
+            {item.timelineLabel}
+          </Text>
+        </View>
+      ) : null}
+      {item.boundaryLabel ? (
+        <>
+          <View style={styles.boundary}>
+            <View style={styles.boundaryRule} />
+            <Text style={styles.boundaryLabel}>{item.boundaryLabel}</Text>
+            <View style={styles.boundaryRule} />
+          </View>
+          {item.showCatchUp ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Catch me up"
+              onPress={onOpenCatchUp}
+              style={({ pressed }) => [styles.catchUp, pressed && styles.pressedRow]}
+            >
+              <SymbolView name="text.line.first.and.arrowtriangle.forward" tintColor={colors.emberText} size={14} />
+              <Text style={styles.catchUpText}>Catch me up</Text>
+            </Pressable>
+          ) : null}
+        </>
+      ) : null}
+      <MessageBubble
+        message={item.message}
+        own={item.own}
+        showAuthor={item.showAuthor}
+        showAvatar={item.showAvatar}
+        avatarDataURL={item.avatarDataURL}
+        sessionToken={sessionToken}
+        viewerEmail={viewerEmail}
+        timestampReveal={timestampReveal}
+        onOpenSource={onOpenSource}
+        onOpenReplySource={onOpenSource}
+        onOpenAttachment={onOpenAttachment}
+        onLongPress={onLongPress}
+        onToggleReaction={onToggleReaction}
+        onRetryReply={onRetryReply}
+        retryingReply={retryingReply}
+      />
+    </>
+  );
+}, (previous, next) => (
+  threadRowPresentationEqual(previous.item, next.item)
+  && previous.sessionToken === next.sessionToken
+  && previous.viewerEmail === next.viewerEmail
+  && previous.timestampReveal === next.timestampReveal
+  && previous.retryingReply === next.retryingReply
+  && previous.onOpenSource === next.onOpenSource
+  && previous.onOpenAttachment === next.onOpenAttachment
+  && previous.onLongPress === next.onLongPress
+  && previous.onToggleReaction === next.onToggleReaction
+  && previous.onRetryReply === next.onRetryReply
+  && previous.onOpenCatchUp === next.onOpenCatchUp
+));
+
+const threadRowKey = (row: ThreadRow) => String(row.message.id);
+const threadListPosition = { disabled: true, startRenderingFromBottom: true } as const;
 
 /**
  * A thread — design §14.
@@ -97,6 +182,7 @@ export function ThreadScreen({ route, navigation }: Props) {
   const { sessionToken, user } = useAuth();
   const office = useOfficeEvents();
   const reduceMotion = useReduceMotion();
+  const insets = useSafeAreaInsets();
   const [messages, setMessages] = useState<ScoutMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
@@ -111,6 +197,9 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [participants, setParticipants] = useState<ChatMentionCandidate[]>([{ name: 'Scout', kind: 'scout' }]);
   const [threadVisibility, setThreadVisibility] = useState('private');
   const [threadOwnerEmail, setThreadOwnerEmail] = useState('');
+  const [threadTitle, setThreadTitle] = useState(route.params.title);
+  const [editingThreadTitle, setEditingThreadTitle] = useState(false);
+  const [threadTitleDraft, setThreadTitleDraft] = useState(route.params.title);
   const [notificationLevel, setNotificationLevel] = useState<ThreadNotificationLevel>('all');
   const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
   const [notificationBusy, setNotificationBusy] = useState(false);
@@ -122,6 +211,8 @@ export function ThreadScreen({ route, navigation }: Props) {
   // null means "not yet loaded" — distinct from "" which means never read.
   const [readAt, setReadAt] = useState<string | null>(null);
   const listRef = useRef<FlashListRef<ThreadRow>>(null);
+  const messagesRef = useRef<ScoutMessage[]>([]);
+  messagesRef.current = messages;
   // Starts false while the thread loads. A normal open flips it true once the
   // bottom-rendered list is on screen; a targeted message link stays false
   // until the viewer actually reaches the latest message.
@@ -131,15 +222,11 @@ export function ThreadScreen({ route, navigation }: Props) {
 	const markingMessageIDRef = useRef<string | null>(null);
   const [digest, setDigest] = useState<ThreadDigestResponse | null>(null);
   const [catchUpOpen, setCatchUpOpen] = useState(false);
-  const dictationDisclosureAcceptedRef = useRef(false);
-  const dictationDisclosureOpenRef = useRef(false);
-  const dictationTouchStartYRef = useRef<number | null>(null);
-  const dictationTouchActiveRef = useRef(false);
-  const dictationFocusLeaseRef = useRef<AudioFocusLease | null>(null);
   const typingExpiryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const typingIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingActiveRef = useRef(false);
   const typingLastSignalAtRef = useRef(0);
+  const threadTitleRenameInFlightRef = useRef(false);
   const transcriptGenerationRef = useRef(0);
   const transcriptEventJournalRef = useRef<SequencedChatThreadEvent[]>([]);
   const applyTranscriptSnapshot = useCallback((generationAtRequest: number, next: ScoutMessage[]) => {
@@ -177,82 +264,19 @@ export function ThreadScreen({ route, navigation }: Props) {
   // real messages, so both need to be able to land on one.
   const scrollToMessage = useCallback(
     (messageId: string) => {
-      const index = messages.findIndex((message) => String(message.id) === messageId);
+      const index = messagesRef.current.findIndex((message) => String(message.id) === messageId);
       if (index >= 0) listRef.current?.scrollToIndex({ index, animated: true });
     },
-    [messages],
+    [],
   );
 
-  const dictation = useDictation({
-    context: 'chat',
+  const dictation = useComposerDictation({
+    context: threadVisibility === 'private' ? 'scout' : 'chat',
     threadId: route.params.threadId,
     // Dictation takes the same ordinary send path as typed text. The hook
     // generation-fences late results, so this callback runs once per Send.
     onTranscript: ({ text }) => { void send(text); },
   });
-  const dictationLifecycleRef = useRef({ cancel: dictation.cancel, stop: dictation.stop });
-  dictationLifecycleRef.current = { cancel: dictation.cancel, stop: dictation.stop };
-
-	const beginDictation = useCallback(async () => {
-		const startCapture = async () => {
-			let exactLease: AudioFocusLease | null = null;
-			const lease = await audioFocusRuntime.acquire('composer_dictation', {
-				forceClose: async () => {
-					if (exactLease) {
-						if (dictationFocusLeaseRef.current === exactLease) dictationFocusLeaseRef.current = null;
-						dictation.fenceFocusLease(exactLease);
-					}
-					dictation.cancel();
-					await dictation.stop(); // park the local clip; never send it on takeover.
-				},
-			});
-			exactLease = lease;
-			if (!lease.isCurrent() || !dictationTouchActiveRef.current) {
-				await lease.release('cancelled');
-				return;
-			}
-			dictationFocusLeaseRef.current = lease;
-			const started = await dictation.start(lease);
-			if (!started && dictationFocusLeaseRef.current === lease) dictationFocusLeaseRef.current = null;
-		};
-		if (dictationDisclosureAcceptedRef.current) {
-			if (dictationTouchActiveRef.current) await startCapture();
-			return;
-		}
-		const stored = await SecureStore.getItemAsync(DICTATION_DISCLOSURE_KEY).catch(() => null);
-		if (stored === 'accepted') {
-			dictationDisclosureAcceptedRef.current = true;
-			if (dictationTouchActiveRef.current) await startCapture();
-			return;
-		}
-		if (dictationDisclosureOpenRef.current) return;
-		dictationDisclosureOpenRef.current = true;
-		Alert.alert(
-			'Voice transcription',
-			'Your voice is sent to Bonfire to transcribe with your company\'s vocabulary, then the audio is deleted. Only the text stays.',
-			[
-				{ text: 'Not now', style: 'cancel', onPress: () => { dictationDisclosureOpenRef.current = false; } },
-				{
-					text: 'I understand',
-					onPress: () => {
-						dictationDisclosureOpenRef.current = false;
-						dictationDisclosureAcceptedRef.current = true;
-						void SecureStore.setItemAsync(DICTATION_DISCLOSURE_KEY, 'accepted');
-					},
-				},
-			],
-		);
-	}, [dictation]);
-
-	useEffect(() => () => {
-		dictationTouchActiveRef.current = false;
-		dictationTouchStartYRef.current = null;
-		dictationLifecycleRef.current.cancel();
-		void dictationLifecycleRef.current.stop();
-		const lease = dictationFocusLeaseRef.current;
-		dictationFocusLeaseRef.current = null;
-		void lease?.release('cancelled');
-	}, []);
 
   const load = useCallback(async () => {
     if (!sessionToken) return;
@@ -490,6 +514,8 @@ export function ThreadScreen({ route, navigation }: Props) {
           !previous ||
           previous.role !== message.role ||
           previous.authorEmail !== message.authorEmail;
+        const isBoundary = index === boundary;
+        const unreadCount = isBoundary ? messages.length - boundary : 0;
         return {
           message,
           own,
@@ -499,19 +525,20 @@ export function ThreadScreen({ route, navigation }: Props) {
           timelineLabel: timelineLabels[index],
           // The divider is part of the row above the first unread message
           // rather than a separate list item, so it cannot desync from it.
-          boundary: index === boundary,
+          boundaryLabel: isBoundary
+            ? `${unreadCount} new ${unreadCount === 1 ? 'message' : 'messages'}`
+            : undefined,
+          showCatchUp: isBoundary && Boolean(digest?.catchUp?.bullets?.length),
         };
       }),
-    [boundary, email, messages, participantByEmail, threadOwnerEmail, threadVisibility, timelineLabels],
+    [boundary, digest?.catchUp?.bullets?.length, email, messages, participantByEmail, threadOwnerEmail, threadVisibility, timelineLabels],
   );
-
-  const unreadBelow = boundary >= 0 ? messages.length - boundary : 0;
 
   // Advance the marker only when the latest message is genuinely on screen.
   // Normal opens now land there; targeted links to older messages do not.
   const markRead = useCallback(() => {
-    if (!sessionToken || messages.length === 0) return;
-	const last = messages[messages.length - 1];
+    if (!sessionToken || messagesRef.current.length === 0) return;
+	const last = messagesRef.current[messagesRef.current.length - 1];
 	if (!last?.id) return;
 	const messageID = String(last.id);
 	if (lastMarkedMessageIDRef.current === messageID || markingMessageIDRef.current === messageID) return;
@@ -524,8 +551,8 @@ export function ThreadScreen({ route, navigation }: Props) {
 		})
 		.finally(() => {
 			if (markingMessageIDRef.current === messageID) markingMessageIDRef.current = null;
-		});
-  }, [messages, route.params.threadId, sessionToken]);
+	});
+  }, [route.params.threadId, sessionToken]);
 
   // Leaving the thread while at the bottom counts as having read it.
   useEffect(() => {
@@ -737,6 +764,15 @@ export function ThreadScreen({ route, navigation }: Props) {
     void Haptics.selectionAsync();
   }
 
+  function copyMessage(message: ScoutMessage) {
+    const text = String(message.text ?? message.content ?? '');
+    setActionMessage(null);
+    if (!text.trim()) return;
+    void Clipboard.setStringAsync(text).then(() => {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }).catch(() => setError('Message could not be copied.'));
+  }
+
   function cancelReply() {
     setReplyingTo(null);
   }
@@ -791,10 +827,90 @@ export function ThreadScreen({ route, navigation }: Props) {
     }
   }
 
+  function beginThreadTitleRename() {
+    if (loading || threadVisibility !== 'private') return;
+    setThreadTitleDraft(threadTitle);
+    setEditingThreadTitle(true);
+    void Haptics.selectionAsync();
+  }
+
+  async function commitThreadTitleRename() {
+    if (!sessionToken || !editingThreadTitle || threadTitleRenameInFlightRef.current) return;
+    const title = threadTitleDraft.replace(/\s+/g, ' ').trim();
+    if (!title) {
+      setError('A thread name cannot be empty.');
+      return;
+    }
+    if (title === threadTitle.trim()) {
+      setEditingThreadTitle(false);
+      return;
+    }
+
+    threadTitleRenameInFlightRef.current = true;
+    try {
+      await api.updateScoutThread(sessionToken, route.params.threadId, { title });
+      setThreadTitle(title);
+      setEditingThreadTitle(false);
+      navigation.setParams({ title });
+      Keyboard.dismiss();
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (caught) {
+      setError(caught instanceof BonfireApiError ? caught.message : 'Could not rename that thread.');
+    } finally {
+      threadTitleRenameInFlightRef.current = false;
+    }
+  }
+
+  const openMessageActions = useCallback((message: ScoutMessage, own: boolean) => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setActionMessage({ message, own });
+  }, []);
+  const openAttachment = useCallback((file: ScoutFileAttachment) => {
+    setPreviewFile(file);
+  }, []);
+  const openCatchUp = useCallback(() => {
+    setCatchUpOpen(true);
+  }, []);
+  const typingFooter = useMemo(
+    () => typingParticipants.length > 0
+      ? <TypingIndicator participants={typingParticipants} />
+      : null,
+    [typingParticipants],
+  );
+  const renderThreadRow = useCallback(({ item }: { item: ThreadRow }) => (
+    <ThreadMessageRow
+      item={item}
+      sessionToken={sessionToken ?? ''}
+      viewerEmail={email}
+      timestampReveal={timestampReveal}
+      retryingReply={retryingReplyID === String(item.message.id)}
+      onOpenSource={scrollToMessage}
+      onOpenAttachment={openAttachment}
+      onLongPress={openMessageActions}
+      onToggleReaction={toggleReaction}
+      onRetryReply={retryScoutReply}
+      onOpenCatchUp={openCatchUp}
+    />
+  ), [
+    email,
+    openAttachment,
+    openCatchUp,
+    openMessageActions,
+    retryScoutReply,
+    retryingReplyID,
+    scrollToMessage,
+    sessionToken,
+    timestampReveal,
+    toggleReaction,
+  ]);
+
   const listening = dictation.state === 'listening';
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
+    <SafeAreaView
+      style={[styles.safe, { paddingTop: insets.top }]}
+      edges={['left', 'right', 'bottom']}
+    >
       <View style={styles.header}>
         <Pressable
           accessibilityRole="button"
@@ -805,9 +921,50 @@ export function ThreadScreen({ route, navigation }: Props) {
         >
           <SymbolView name="chevron.left" tintColor={colors.text1} size={19} />
         </Pressable>
-        <Text style={styles.title} numberOfLines={1}>
-          {route.params.title}
-        </Text>
+        {editingThreadTitle ? (
+          <TextInput
+            accessibilityLabel="Edit thread name"
+            autoFocus
+            editable={!threadTitleRenameInFlightRef.current}
+            enterKeyHint="done"
+            onBlur={() => { void commitThreadTitleRename(); }}
+            onChangeText={setThreadTitleDraft}
+            onSubmitEditing={() => { void commitThreadTitleRename(); }}
+            returnKeyType="done"
+            selectTextOnFocus
+            selectionColor={colors.info}
+            submitBehavior="blurAndSubmit"
+            style={styles.titleInput}
+            value={threadTitleDraft}
+          />
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={threadTitle}
+            accessibilityHint={threadVisibility === 'private' && !loading ? 'Touch and hold to rename this thread' : undefined}
+            accessibilityActions={threadVisibility === 'private' && !loading ? [{ name: 'longpress', label: 'Rename thread' }] : undefined}
+            disabled={loading || threadVisibility !== 'private'}
+            onAccessibilityAction={(event) => {
+              if (event.nativeEvent.actionName === 'longpress') beginThreadTitleRename();
+            }}
+            onLongPress={beginThreadTitleRename}
+            style={styles.titlePressable}
+          >
+            <Text style={styles.title} numberOfLines={1}>
+              {threadTitle}
+            </Text>
+            <View style={styles.titleMetaRow}>
+              <SymbolView
+                name={threadVisibility === 'private' ? 'lock.fill' : 'number'}
+                tintColor={colors.text3}
+                size={9}
+              />
+              <Text style={styles.titleMeta} numberOfLines={1}>
+                {threadVisibility === 'private' ? 'Private · Hold to rename' : 'Channel'}
+              </Text>
+            </View>
+          </Pressable>
+        )}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Notifications: ${notificationLevel}`}
@@ -874,6 +1031,7 @@ export function ThreadScreen({ route, navigation }: Props) {
             .find((reaction) => reaction.emoji === emoji);
           void toggleReaction(actionMessage.message, emoji, !current?.reactedByViewer);
         }}
+        onCopy={() => { if (actionMessage) copyMessage(actionMessage.message); }}
         onReply={() => { if (actionMessage) beginReply(actionMessage.message); }}
         onEdit={() => { if (actionMessage) beginEdit(actionMessage.message); }}
         onDelete={() => { if (actionMessage) confirmDelete(actionMessage.message); }}
@@ -884,22 +1042,76 @@ export function ThreadScreen({ route, navigation }: Props) {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={8}
       >
-        <View style={styles.fill} {...timestampPan.panHandlers}>
-          {loading ? (
-            <ActivityIndicator color={colors.accent} style={styles.loading} />
-          ) : (
-            <FlashList
+        {editingMessage ? (
+          <View style={styles.messageEditor}>
+            <View style={styles.messageEditorHeader}>
+              <View style={styles.editingCopy}>
+                <Text style={styles.messageEditorEyebrow}>Edit message</Text>
+                <Text style={styles.messageEditorTitle}>Make your changes</Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Cancel editing"
+                onPress={cancelEdit}
+                style={({ pressed }) => [styles.messageEditorClose, pressed && styles.headerActionPressed]}
+              >
+                <SymbolView name="xmark" tintColor={colors.text2} size={15} />
+              </Pressable>
+            </View>
+            <TextInput
+              accessibilityLabel="Message text"
+              autoFocus
+              multiline
+              onChangeText={changeDraft}
+              scrollEnabled
+              selectionColor={colors.info}
+              style={styles.messageEditorInput}
+              textAlignVertical="top"
+              value={draft}
+            />
+            <View style={styles.messageEditorActions}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Cancel editing"
+                onPress={cancelEdit}
+                style={({ pressed }) => [styles.messageEditorSecondary, pressed && styles.headerActionPressed]}
+              >
+                <Text style={styles.messageEditorSecondaryText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Save edited message"
+                disabled={sending || (!draft.trim() && pendingFiles.length === 0)}
+                onPress={() => { void send(); }}
+                style={({ pressed }) => [
+                  styles.messageEditorPrimary,
+                  (pressed || sending || (!draft.trim() && pendingFiles.length === 0)) && styles.sendDim,
+                ]}
+              >
+                {sending ? (
+                  <ActivityIndicator color={colors.onAccent} />
+                ) : (
+                  <Text style={styles.messageEditorPrimaryText}>Save</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.fill} {...timestampPan.panHandlers}>
+            {loading ? (
+              <ActivityIndicator color={colors.accent} style={styles.loading} />
+            ) : (
+              <FlashList
             ref={listRef}
             data={rows}
             // Stable identity on the message id. Index keys would recycle
             // bubbles onto the wrong messages as the list grows.
-            keyExtractor={(row) => String(row.message.id)}
+            keyExtractor={threadRowKey}
+            getItemType={threadRowRecycleType}
             contentContainerStyle={styles.list}
             keyboardShouldPersistTaps="handled"
-            maintainVisibleContentPosition={{ disabled: true, startRenderingFromBottom: true }}
-            ListFooterComponent={typingParticipants.length > 0 ? (
-              <TypingIndicator participants={typingParticipants} />
-            ) : null}
+            maintainVisibleContentPosition={threadListPosition}
+            ListFooterComponent={typingFooter}
             // FlashList lays out from the latest message immediately; onLoad
             // makes a final non-animated correction after variable-height
             // bubbles have been measured. Explicit message links override
@@ -929,67 +1141,11 @@ export function ThreadScreen({ route, navigation }: Props) {
                 markRead();
               }
             }}
-            renderItem={({ item }) => (
-              <>
-                {item.timelineLabel ? (
-                  <View style={styles.timelineMarker}>
-                    <Text
-                      accessibilityRole="header"
-                      style={styles.timelineMarkerLabel}
-                    >
-                      {item.timelineLabel}
-                    </Text>
-                  </View>
-                ) : null}
-                {item.boundary ? (
-                  <>
-                    <View style={styles.boundary}>
-                      <View style={styles.boundaryRule} />
-                      <Text style={styles.boundaryLabel}>
-                        {unreadBelow} new {unreadBelow === 1 ? 'message' : 'messages'}
-                      </Text>
-                      <View style={styles.boundaryRule} />
-                    </View>
-                    {/* The catch-up lives ON the boundary, which is the exact
-                        moment the question "what did I miss?" is asked. */}
-                    {digest?.catchUp?.bullets?.length ? (
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Catch me up"
-                        onPress={() => setCatchUpOpen(true)}
-                        style={({ pressed }) => [styles.catchUp, pressed && styles.pressedRow]}
-                      >
-                        <SymbolView name="text.line.first.and.arrowtriangle.forward" tintColor={colors.emberText} size={14} />
-                        <Text style={styles.catchUpText}>Catch me up</Text>
-                      </Pressable>
-                    ) : null}
-                  </>
-                ) : null}
-                <MessageBubble
-                  message={item.message}
-                  own={item.own}
-                  showAuthor={item.showAuthor}
-                  showAvatar={item.showAvatar}
-                  avatarDataURL={item.avatarDataURL}
-                  sessionToken={sessionToken ?? ''}
-                  viewerEmail={email}
-                  timestampReveal={timestampReveal}
-                  onOpenSource={scrollToMessage}
-                  onOpenReplySource={scrollToMessage}
-                  onOpenAttachment={setPreviewFile}
-                  onLongPress={(message, own) => {
-                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                    setActionMessage({ message, own });
-                  }}
-                  onToggleReaction={(message, emoji, active) => void toggleReaction(message, emoji, active)}
-                  onRetryReply={(message) => { void retryScoutReply(message); }}
-                  retryingReply={retryingReplyID === String(item.message.id)}
-                />
-              </>
+            renderItem={renderThreadRow}
+              />
             )}
-            />
-          )}
-        </View>
+          </View>
+        )}
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {dictation.error ? (
@@ -1001,19 +1157,7 @@ export function ThreadScreen({ route, navigation }: Props) {
           </View>
         ) : null}
 
-        {editingMessage ? (
-          <View style={styles.editingBar}>
-            <View style={styles.editingCopy}>
-              <Text style={styles.editingTitle}>Editing message</Text>
-              <Text style={styles.editingHint} numberOfLines={1}>Send replaces it in the same spot</Text>
-            </View>
-            <Pressable accessibilityRole="button" accessibilityLabel="Cancel editing" onPress={cancelEdit} style={({ pressed }) => [styles.editingCancel, pressed && styles.headerActionPressed]}>
-              <SymbolView name="xmark" tintColor={colors.text2} size={14} />
-            </Pressable>
-          </View>
-        ) : null}
-
-        {replyingTo ? (
+        {!editingMessage && replyingTo ? (
           <View style={styles.replyingBar}>
             <View style={styles.replyingMark} />
             <View style={styles.editingCopy}>
@@ -1028,7 +1172,7 @@ export function ThreadScreen({ route, navigation }: Props) {
           </View>
         ) : null}
 
-        <Glass radius={radius.xl} style={styles.composer}>
+        {!editingMessage ? <Glass radius={radius.xl} style={styles.composer}>
           {pendingFiles.length > 0 || stagingFiles.length > 0 || uploading ? (
             <View style={styles.pendingFiles}>
               {stagingFiles.map((file) => (
@@ -1058,17 +1202,17 @@ export function ThreadScreen({ route, navigation }: Props) {
           ) : null}
           {listening || dictation.state === 'held' || dictation.state === 'transcribing' ? (
             <View style={styles.listening}>
-              <Waveform trace={dictation.trace} listening height={30} scale={0.7} />
+              <Waveform trace={dictation.trace} listening={listening} height={30} scale={0.7} />
               <Text style={styles.listeningHint}>
-                {listening ? 'Release to stop · slide up to cancel' : dictation.state === 'held' ? 'Ready to transcribe' : 'Transcribing'}
+                {listening ? 'Recording · tap stop when finished' : dictation.state === 'held' ? 'Ready to transcribe' : 'Transcribing'}
               </Text>
             </View>
           ) : (
             <MentionComposerInput
               placeholder={
-                route.params.title.length > 22
-                  ? `Message ${route.params.title.slice(0, 21).trimEnd()}…`
-                  : `Message ${route.params.title}`
+                threadTitle.length > 22
+                  ? `Message ${threadTitle.slice(0, 21).trimEnd()}…`
+                  : `Message ${threadTitle}`
               }
               value={draft}
               onChangeText={changeDraft}
@@ -1091,34 +1235,24 @@ export function ThreadScreen({ route, navigation }: Props) {
             </Pressable>
             <Pressable
               accessibilityRole="button"
-			  accessibilityLabel={listening ? 'Stop dictation' : 'Hold to dictate'}
-			  accessibilityHint="Touch and hold to dictate. Release to hold the clip, then use Send to transcribe."
-			  disabled={dictation.state !== 'idle'}
-			  onPressIn={(event) => {
-				dictationTouchActiveRef.current = true;
-				dictationTouchStartYRef.current = event.nativeEvent.pageY;
-				void beginDictation();
-			  }}
-			  onPressMove={(event) => {
-				const startY = dictationTouchStartYRef.current;
-				if (startY !== null && event.nativeEvent.pageY < startY - 44) dictation.cancel();
-			  }}
-			  onPressOut={() => {
-				dictationTouchActiveRef.current = false;
-				dictationTouchStartYRef.current = null;
-				void dictation.stop().finally(() => {
-					const lease = dictationFocusLeaseRef.current;
-					dictationFocusLeaseRef.current = null;
-					void lease?.release('completed');
-				});
-			  }}
-              style={({ pressed }) => [styles.mic, pressed && styles.micPressed, dictation.state !== 'idle' && styles.sendDim]}
+              accessibilityLabel={listening ? 'Stop dictation' : 'Dictate a message'}
+              accessibilityHint={listening ? 'Stops recording and keeps the clip for review.' : 'Starts a recorded message for transcription.'}
+              disabled={dictation.state !== 'idle' && !listening}
+              onPress={() => {
+                if (listening) void dictation.stop();
+                else void dictation.start();
+              }}
+              style={({ pressed }) => [
+                styles.mic,
+                pressed && styles.micPressed,
+                dictation.state !== 'idle' && !listening && styles.sendDim,
+              ]}
             >
               {dictation.state === 'transcribing' ? (
                 <ActivityIndicator color={colors.ember} />
               ) : (
                 <SymbolView
-                  name={listening ? 'waveform' : 'mic.fill'}
+                  name={listening ? 'stop.fill' : 'mic.fill'}
                   tintColor={listening ? colors.ember : colors.text2}
                   size={20}
                 />
@@ -1156,7 +1290,7 @@ export function ThreadScreen({ route, navigation }: Props) {
               )}
             </Pressable>
           </View>
-        </Glass>
+        </Glass> : null}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -1168,35 +1302,58 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space[3],
-    paddingHorizontal: space[4],
-    paddingBottom: space[3],
+    gap: space[2],
+    minHeight: 58,
+    paddingHorizontal: space[3],
+    paddingBottom: space[2],
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line1,
   },
   back: {
-    width: 42,
-    height: 42,
-    borderRadius: 15,
+    width: hitMin,
+    height: hitMin,
+    borderRadius: radius.full,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.surface1,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.line1,
+    backgroundColor: 'transparent',
   },
   headerAction: {
     width: hitMin,
     height: hitMin,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: radius.md,
-    backgroundColor: colors.surface1,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.line1,
+    borderRadius: radius.full,
+    backgroundColor: 'transparent',
   },
   headerActionPressed: { opacity: 0.72, transform: [{ scale: 0.96 }] },
   title: {
-    ...type.title2,
+    ...type.headline,
+    color: colors.text1,
+    maxWidth: '100%',
+    textAlign: 'center',
+  },
+  titlePressable: {
+    flex: 1,
+    minHeight: hitMin,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: space[1],
+  },
+  titleMetaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, maxWidth: '100%' },
+  titleMeta: { ...type.caption, color: colors.text3, fontSize: 11, lineHeight: 14 },
+  titleInput: {
+    ...type.headline,
     color: colors.text1,
     flex: 1,
+    minHeight: hitMin,
+    paddingHorizontal: space[2],
+    paddingVertical: 0,
+    borderRadius: radius.sm,
+    borderCurve: 'continuous',
+    backgroundColor: colors.surface1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.info,
+    textAlign: 'center',
   },
 	mute: {
 		width: 42,
@@ -1256,18 +1413,42 @@ const styles = StyleSheet.create({
     paddingBottom: space[2],
     gap: space[2],
   },
-  editingBar: {
-    minHeight: 48,
-    flexDirection: 'row',
-    alignItems: 'center',
+  messageEditor: {
+    ...shadow[2],
+    flex: 1,
+    minHeight: 220,
+    marginHorizontal: space[4],
+    marginTop: space[3],
+    marginBottom: space[2],
+    padding: space[3],
     gap: space[3],
-    marginHorizontal: space[5],
-    paddingHorizontal: space[3],
-    borderLeftWidth: 3,
-    borderLeftColor: colors.info,
+    borderRadius: radius.xl,
+    borderCurve: 'continuous',
+    backgroundColor: colors.surface1,
   },
+  messageEditorHeader: { minHeight: hitMin, flexDirection: 'row', alignItems: 'center', gap: space[3] },
+  messageEditorEyebrow: { ...type.captionMedium, color: colors.info, textTransform: 'uppercase', letterSpacing: 0.4 },
+  messageEditorTitle: { ...type.headline, color: colors.text1 },
+  messageEditorClose: { width: hitMin, height: hitMin, alignItems: 'center', justifyContent: 'center', borderRadius: radius.full, backgroundColor: colors.surface3 },
+  messageEditorInput: {
+    ...type.body,
+    flex: 1,
+    minHeight: 132,
+    paddingHorizontal: space[3],
+    paddingVertical: space[3],
+    borderRadius: radius.md,
+    borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.line2,
+    backgroundColor: colors.surface3,
+    color: colors.text1,
+  },
+  messageEditorActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: space[2] },
+  messageEditorSecondary: { minWidth: 92, minHeight: hitMin, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space[4], borderRadius: radius.md, backgroundColor: colors.surface3 },
+  messageEditorSecondaryText: { ...type.button, color: colors.text1 },
+  messageEditorPrimary: { minWidth: 92, minHeight: hitMin, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space[4], borderRadius: radius.md, backgroundColor: colors.accent },
+  messageEditorPrimaryText: { ...type.button, color: colors.onAccent },
   editingCopy: { flex: 1 },
-  editingTitle: { ...type.captionMedium, color: colors.info },
   editingHint: { ...type.caption, color: colors.text2 },
   editingCancel: { width: hitMin, height: hitMin, alignItems: 'center', justifyContent: 'center', borderRadius: radius.full },
   replyingBar: {

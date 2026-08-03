@@ -12,14 +12,10 @@ const source = (...parts: string[]) => fs.readFileSync(path.join(mobileRoot, ...
 test('thread dictation holds locally, then uses the normal message send path once', () => {
   const thread = source('src', 'screens', 'ThreadScreen.tsx');
   assert.match(thread, /onTranscript: \(\{ text \}\) => \{ void send\(text\); \}/);
-  assert.match(thread, /audioFocusRuntime\.acquire\('composer_dictation'/);
-  assert.match(thread, /if \(!lease\.isCurrent\(\) \|\| !dictationTouchActiveRef\.current\)/);
-  assert.match(thread, /const started = await dictation\.start\(lease\)/);
-  assert.ok(
-    thread.indexOf('if (!lease.isCurrent() || !dictationTouchActiveRef.current)') < thread.indexOf('dictation.start(lease)'),
-    'thread dictation must reject a stale pending lease before native capture',
-  );
-  assert.match(thread, /await dictation\.stop\(\);\s*\/\/ park the local clip/);
+  assert.match(thread, /useComposerDictation/);
+  assert.match(thread, /accessibilityLabel=\{listening \? 'Stop dictation' : 'Dictate a message'\}/);
+  assert.match(thread, /if \(listening\) void dictation\.stop\(\);\s*else void dictation\.start\(\);/);
+  assert.doesNotMatch(thread, /onPressIn|dictationTouchActiveRef/);
   assert.match(thread, /Ready to transcribe/);
   assert.match(thread, /Transcribe and send dictated clip/);
   assert.match(thread, /dictation\.delete/);
@@ -133,6 +129,8 @@ test('room chat has the same explicit record, delete, transcribe and send lifecy
   assert.match(controller, /dictation\.fenceFocusLease\(exactLease\)/);
   assert.match(controller, /finally \{\s*await releaseExact\(exactLease, 'completed'\)/);
   assert.match(controller, /await dictation\.commit\(\)/);
+  assert.match(controller, /return new Promise<boolean>\(\(resolve\) =>/);
+  assert.match(controller, /'I understand', onPress: \(\) => settle\(true\)/);
 
   const composerStart = controller.slice(
     controller.indexOf('const start = useCallback'),
@@ -158,15 +156,8 @@ test('room chat has the same explicit record, delete, transcribe and send lifecy
   assert.match(capture, /Recording saved, but meeting audio could not be restored cleanly/);
 
   const thread = source('src', 'screens', 'ThreadScreen.tsx');
-  const pendingLeaseGuard = thread.indexOf("if (!lease.isCurrent() || !dictationTouchActiveRef.current)");
-  assert.ok(pendingLeaseGuard > thread.indexOf("await audioFocusRuntime.acquire('composer_dictation'"));
-  assert.ok(pendingLeaseGuard < thread.indexOf('dictation.start(lease)'));
-  const unmount = thread.slice(thread.indexOf('useEffect(() => () => {', thread.indexOf('const beginDictation')));
-  assert.match(unmount, /dictationTouchActiveRef\.current = false;/);
-  assert.ok(
-    unmount.indexOf('dictationTouchActiveRef.current = false') < unmount.indexOf('dictationLifecycleRef.current.cancel()'),
-    'unmount fences a pending touch before async recorder teardown',
-  );
+  assert.match(thread, /useComposerDictation/);
+  assert.doesNotMatch(thread, /onPressIn|dictationTouchActiveRef/);
 });
 
 test('thread unmount during deferred focus acquisition releases the lease without starting capture', async () => {

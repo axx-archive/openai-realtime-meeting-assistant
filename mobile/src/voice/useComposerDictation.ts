@@ -8,6 +8,7 @@ import { useDictation, type DictationResult } from './useDictation';
 const DICTATION_DISCLOSURE_KEY = 'bonfire.dictation.serverDisclosure.v1';
 
 type Options = {
+  context?: 'scout' | 'chat';
   threadId?: string;
   onTranscript: (result: DictationResult) => void;
 };
@@ -17,9 +18,9 @@ type Options = {
  * Acquiring composer focus hangs up personal Realtime or temporarily parks the
  * meeting microphone. Releasing it restores the room's exact prior mute state.
  */
-export function useComposerDictation({ threadId, onTranscript }: Options) {
+export function useComposerDictation({ context = 'chat', threadId, onTranscript }: Options) {
   const leaseRef = useRef<AudioFocusLease | null>(null);
-  const dictation = useDictation({ context: 'chat', threadId, onTranscript });
+  const dictation = useDictation({ context, threadId, onTranscript });
   const mountedRef = useRef(true);
   const captureRequestGenerationRef = useRef(0);
   const startingRef = useRef(false);
@@ -51,22 +52,28 @@ export function useComposerDictation({ threadId, onTranscript }: Options) {
     }
     if (disclosureOpenRef.current) return false;
     disclosureOpenRef.current = true;
-    Alert.alert(
-      'Voice transcription',
-      'Your voice is sent to STRIDE to transcribe with your company vocabulary, then the audio is deleted. Only the text stays.',
-      [
-        { text: 'Not now', style: 'cancel', onPress: () => { disclosureOpenRef.current = false; } },
-        {
-          text: 'I understand',
-          onPress: () => {
-            disclosureOpenRef.current = false;
-            disclosureAcceptedRef.current = true;
-            void SecureStore.setItemAsync(DICTATION_DISCLOSURE_KEY, 'accepted');
-          },
-        },
-      ],
-    );
-    return false;
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      const settle = (accepted: boolean) => {
+        if (settled) return;
+        settled = true;
+        disclosureOpenRef.current = false;
+        if (accepted) {
+          disclosureAcceptedRef.current = true;
+          void SecureStore.setItemAsync(DICTATION_DISCLOSURE_KEY, 'accepted');
+        }
+        resolve(accepted);
+      };
+      Alert.alert(
+        'Voice transcription',
+        'Your voice is sent to STRIDE to transcribe with your company vocabulary, then the audio is deleted. Only the text stays.',
+        [
+          { text: 'Not now', style: 'cancel', onPress: () => settle(false) },
+          { text: 'I understand', onPress: () => settle(true) },
+        ],
+        { cancelable: true, onDismiss: () => settle(false) },
+      );
+    });
   }, []);
 
   const start = useCallback(async () => {

@@ -12,8 +12,9 @@ const source = readFileSync(
 test('threads render from the latest message and finalize at the bottom after layout', () => {
   assert.match(
     source,
-    /maintainVisibleContentPosition=\{\{ disabled: true, startRenderingFromBottom: true \}\}/,
+    /const threadListPosition = \{ disabled: true, startRenderingFromBottom: true \} as const;/,
   );
+  assert.match(source, /maintainVisibleContentPosition=\{threadListPosition\}/);
   assert.match(source, /onLoad=\{\(\) => \{[\s\S]*scrollToEnd\(\{ animated: false \}\)[\s\S]*markRead\(\)/);
   assert.doesNotMatch(source, /initialScrollIndex=\{boundary/);
 });

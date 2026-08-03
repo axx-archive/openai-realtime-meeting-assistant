@@ -198,7 +198,18 @@ export function RootNavigator() {
                 animation: 'slide_from_bottom',
               }}
             />
-            <Stack.Screen name="Thread" component={ThreadScreen} />
+            <Stack.Screen
+              name="Thread"
+              component={ThreadScreen}
+              options={{
+                // Threads are working surfaces, never another sheet stacked on
+                // top of the Deck sheet. Full-screen presentation removes the
+                // rounded-sheet cap and dimmed strip visible when entering a
+                // thread from the Threads segment.
+                presentation: 'fullScreenModal',
+                animation: 'simple_push',
+              }}
+            />
             {/* A call is not a sheet — joining a room takes the full screen. */}
             <Stack.Screen name="Room" component={RoomScreen} />
             <Stack.Screen

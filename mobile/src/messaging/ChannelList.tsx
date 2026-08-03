@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { api, BonfireApiError } from '../api/client';
@@ -48,6 +49,11 @@ export function ChannelList() {
   const [threads, setThreads] = useState<ScoutThread[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editingThreadID, setEditingThreadID] = useState<string | null>(null);
+  const [titleDraft, setTitleDraft] = useState('');
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const renameInFlightRef = useRef<string | null>(null);
+  const longPressedThreadRef = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     if (!sessionToken) return;
@@ -72,6 +78,49 @@ export function ChannelList() {
     if (office.event === 'chat_thread') void load();
   }, [load, office.event, office.version]);
 
+  const beginRename = useCallback((thread: ScoutThread) => {
+    if (thread.visibility === 'public') return;
+    longPressedThreadRef.current = String(thread.id);
+    setRenameError(null);
+    setEditingThreadID(String(thread.id));
+    setTitleDraft(String(thread.title || thread.preview || 'Thread').trim());
+    void Haptics.selectionAsync();
+  }, []);
+
+  const commitRename = useCallback(async (thread: ScoutThread) => {
+    const threadID = String(thread.id);
+    if (!sessionToken || editingThreadID !== threadID || renameInFlightRef.current === threadID) return;
+    const title = titleDraft.replace(/\s+/g, ' ').trim();
+    if (!title) {
+      setRenameError('A thread name cannot be empty.');
+      return;
+    }
+    if (title === String(thread.title || '').trim()) {
+      setEditingThreadID(null);
+      setTitleDraft('');
+      return;
+    }
+
+    renameInFlightRef.current = threadID;
+    setRenameError(null);
+    try {
+      const response = await api.updateScoutThread(sessionToken, threadID, { title });
+      setThreads((current) => current.map((candidate) => (
+        String(candidate.id) === threadID
+          ? { ...candidate, ...(response.thread ?? {}), title }
+          : candidate
+      )));
+      setEditingThreadID(null);
+      setTitleDraft('');
+      Keyboard.dismiss();
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      setRenameError(err instanceof BonfireApiError ? err.message : 'Could not rename that thread.');
+    } finally {
+      if (renameInFlightRef.current === threadID) renameInFlightRef.current = null;
+    }
+  }, [editingThreadID, sessionToken, titleDraft]);
+
   if (loading) {
     return <ActivityIndicator color={colors.accent} style={styles.loading} />;
   }
@@ -91,26 +140,57 @@ export function ChannelList() {
 
   return (
     <View>
+      {renameError ? <Text accessibilityRole="alert" style={styles.renameError}>{renameError}</Text> : null}
       {threads.map((thread) => {
         const body = preview(thread);
 		const unread = Math.max(0, Number(thread.unreadCount ?? 0));
+        const threadID = String(thread.id);
+        const editing = editingThreadID === threadID;
         return (
           <Pressable
-            key={String(thread.id)}
+            key={threadID}
             accessibilityRole="button"
             accessibilityLabel={channelName(thread)}
-            onPress={() =>
+            accessibilityHint={thread.visibility === 'public' ? undefined : 'Touch and hold to rename this thread'}
+            onLongPress={thread.visibility === 'public' ? undefined : () => beginRename(thread)}
+            onPress={() => {
+              if (longPressedThreadRef.current === threadID) {
+                longPressedThreadRef.current = null;
+                return;
+              }
+              if (editing) {
+                Keyboard.dismiss();
+                return;
+              }
               navigation.navigate('Thread', {
-                threadId: String(thread.id),
+                threadId: threadID,
                 title: channelName(thread),
               })
-            }
+            }}
             style={({ pressed }) => [styles.row, pressed && styles.pressed]}
           >
             <View style={styles.rowText}>
-              <Text style={styles.name} numberOfLines={1}>
-                {channelName(thread)}
-              </Text>
+              {editing ? (
+                <TextInput
+                  accessibilityLabel="Edit thread name"
+                  autoFocus
+                  editable={renameInFlightRef.current !== threadID}
+                  enterKeyHint="done"
+                  onBlur={() => { void commitRename(thread); }}
+                  onChangeText={setTitleDraft}
+                  onSubmitEditing={() => { void commitRename(thread); }}
+                  returnKeyType="done"
+                  selectTextOnFocus
+                  selectionColor={colors.info}
+                  submitBehavior="blurAndSubmit"
+                  style={styles.nameInput}
+                  value={titleDraft}
+                />
+              ) : (
+                <Text style={styles.name} numberOfLines={1}>
+                  {channelName(thread)}
+                </Text>
+              )}
               {body ? (
                 <Text style={styles.preview} numberOfLines={1}>
                   {body}
@@ -148,6 +228,16 @@ const styles = StyleSheet.create({
     ...type.bodyMedium,
     color: colors.text1,
   },
+  nameInput: {
+    ...type.bodyMedium,
+    minHeight: 34,
+    paddingHorizontal: space[2],
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+    borderCurve: 'continuous',
+    color: colors.text1,
+    backgroundColor: colors.surface1,
+  },
   preview: {
     ...type.caption,
     color: colors.text2,
@@ -177,4 +267,5 @@ const styles = StyleSheet.create({
   errorBox: { padding: space[4], gap: space[2] },
   error: { ...type.bodySm, color: colors.danger },
   retry: { ...type.button, color: colors.ember },
+  renameError: { ...type.caption, color: colors.danger, paddingHorizontal: space[4], paddingBottom: space[2] },
 });

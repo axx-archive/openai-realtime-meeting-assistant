@@ -6,7 +6,11 @@ import { SymbolView } from 'expo-symbols';
 import type { ChatMentionCandidate } from '../api/types';
 import { colors, radius, space, type } from '../theme/tokens';
 import { activeMentionQuery, completeMention } from './messagePresentation';
-import { compactComposerHeight, composerHeight } from './composerMeasurement';
+import {
+  compactComposerHeight,
+  composerHeight,
+  expandedComposerMaxHeight,
+} from './composerMeasurement';
 import { useReduceMotion } from '../theme/motion';
 
 type Props = {
@@ -16,6 +20,7 @@ type Props = {
   candidates: ChatMentionCandidate[];
   placeholder: string;
   editable: boolean;
+  maxHeight?: number;
 };
 
 type DraftSegment = { text: string; mention?: ChatMentionCandidate };
@@ -36,10 +41,19 @@ function draftSegments(value: string, candidates: ChatMentionCandidate[]): Draft
   return result;
 }
 
-export function MentionComposerInput({ value, onChangeText, onBlur, candidates, placeholder, editable }: Props) {
+export function MentionComposerInput({
+  value,
+  onChangeText,
+  onBlur,
+  candidates,
+  placeholder,
+  editable,
+  maxHeight = expandedComposerMaxHeight,
+}: Props) {
   const reduceMotion = useReduceMotion();
   const shimmer = useRef(new Animated.Value(1)).current;
   const [measuredHeight, setMeasuredHeight] = useState(compactComposerHeight);
+  const [focused, setFocused] = useState(false);
   const active = useMemo(() => activeMentionQuery(value), [value]);
   const suggestions = useMemo(() => {
     if (!active) return [];
@@ -47,10 +61,15 @@ export function MentionComposerInput({ value, onChangeText, onBlur, candidates, 
     return candidates.filter((candidate) => candidate.name.toLowerCase().startsWith(query)).slice(0, 5);
   }, [active, candidates]);
   const segments = useMemo(() => draftSegments(value, candidates), [candidates, value]);
+  const showMentionOverlay = !focused && segments.some((segment) => Boolean(segment.mention));
 
   useEffect(() => {
     if (!value) setMeasuredHeight(compactComposerHeight);
   }, [value]);
+
+  useEffect(() => {
+    setMeasuredHeight((current) => Math.max(compactComposerHeight, Math.min(maxHeight, current)));
+  }, [maxHeight]);
 
   function select(candidate: ChatMentionCandidate) {
     onChangeText(completeMention(value, candidate.name));
@@ -81,8 +100,8 @@ export function MentionComposerInput({ value, onChangeText, onBlur, candidates, 
           ))}
         </View>
       ) : null}
-      <View style={[styles.frame, { height: measuredHeight }]}>
-        {value ? (
+      <View style={[styles.frame, { height: measuredHeight, maxHeight }]}>
+        {showMentionOverlay ? (
           <Animated.Text pointerEvents="none" style={[styles.overlay, { opacity: shimmer }]}>
             {segments.map((segment, index) => segment.mention ? (
               <Text key={index}>
@@ -99,14 +118,18 @@ export function MentionComposerInput({ value, onChangeText, onBlur, candidates, 
           selectionColor={colors.info}
           value={value}
           onChangeText={onChangeText}
-          onBlur={onBlur}
+          onFocus={() => setFocused(true)}
+          onBlur={() => {
+            setFocused(false);
+            onBlur?.();
+          }}
           onContentSizeChange={(event) => {
-            setMeasuredHeight(composerHeight(value, event.nativeEvent.contentSize.height));
+            setMeasuredHeight(composerHeight(value, event.nativeEvent.contentSize.height, maxHeight));
           }}
           multiline
           editable={editable}
-          scrollEnabled={measuredHeight >= 132}
-          style={[styles.input, { height: measuredHeight }, value ? styles.inputTransparent : null]}
+          scrollEnabled={measuredHeight >= maxHeight}
+          style={[styles.input, { height: measuredHeight, maxHeight }, showMentionOverlay ? styles.inputTransparent : null]}
         />
       </View>
     </View>

@@ -103,6 +103,7 @@ export const MessageBubble = React.memo(function MessageBubble({
     () => groupMessageReactions(message.reactions, viewerEmail),
     [message.reactions, viewerEmail],
   );
+  const timeLabel = useMemo(() => timeOf(message), [message.createdAt]);
   const translated = useMemo(() => ({
     transform: [{ translateX: timestampReveal.interpolate({ inputRange: [0, 1], outputRange: [0, -68] }) }],
   }), [timestampReveal]);
@@ -114,7 +115,7 @@ export const MessageBubble = React.memo(function MessageBubble({
     <View style={[styles.row, own && styles.rowOwn, showAuthor && styles.rowNewAuthor, reactions.length > 0 && styles.rowWithReactions]}>
       <Animated.View pointerEvents="none" style={[styles.timestampWrap, timestampOpacity]}>
         {message.editedAt ? <Text style={styles.editedLabel}>Edited</Text> : null}
-        <Text style={styles.time}>{timeOf(message)}</Text>
+        <Text style={styles.time}>{timeLabel}</Text>
       </Animated.View>
       {!own && !scout ? (
         <View style={styles.avatarSlot}>
@@ -126,9 +127,13 @@ export const MessageBubble = React.memo(function MessageBubble({
       <Animated.View style={[styles.stack, own && styles.stackOwn, translated]}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${own ? 'You' : String(message.authorName ?? (scout ? 'Scout' : 'Someone'))}: ${body || lifecycle?.label || `${files.length} attachment${files.length === 1 ? '' : 's'}`}. ${message.editedAt ? 'Edited. ' : ''}${timeOf(message)}`}
+          accessibilityLabel={`${own ? 'You' : String(message.authorName ?? (scout ? 'Scout' : 'Someone'))}: ${body || lifecycle?.label || `${files.length} attachment${files.length === 1 ? '' : 's'}`}. ${message.editedAt ? 'Edited. ' : ''}${timeLabel}`}
           accessibilityHint={longMessage ? 'Opens the full message. Touch and hold for message actions' : 'Touch and hold for message actions'}
+          accessibilityActions={[{ name: 'longpress', label: 'Show message actions' }]}
           delayLongPress={messageLongPressDelayMs}
+          onAccessibilityAction={(event) => {
+            if (event.nativeEvent.actionName === 'longpress') onLongPress?.(message, own);
+          }}
           onPress={longMessage ? () => setShowFullMessage(true) : undefined}
           onLongPress={() => onLongPress?.(message, own)}
           style={[
