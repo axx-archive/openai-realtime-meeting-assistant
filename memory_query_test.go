@@ -10,6 +10,13 @@ import (
 	"time"
 )
 
+func TestScoutDictationUsesConversationContract(t *testing.T) {
+	instructions := strings.ToLower(assistantQueryInstructions())
+	if !strings.Contains(instructions, "typed and dictated messages identically") || !strings.Contains(instructions, "never reply with a transport receipt") {
+		t.Fatalf("Scout instructions do not bind dictation to the normal conversation contract: %q", instructions)
+	}
+}
+
 func TestContextEntriesForQueryIncludesMentionedParticipantsAndYesterday(t *testing.T) {
 	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
 	store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "memory.jsonl"))
@@ -212,11 +219,39 @@ func TestIsCurrentBoardQueryWordBoundary(t *testing.T) {
 		{"do you know what happened?", false},
 		{"is this widely known?", false},
 		{"tell me about the startup pitch", false},
+		{"what is your current opinion on the team and company vision?", false},
+		{"what is the current date?", false},
 	}
 	for _, tc := range cases {
 		if got := isCurrentBoardQuery(tc.query); got != tc.want {
 			t.Fatalf("isCurrentBoardQuery(%q) = %v, want %v", tc.query, got, tc.want)
 		}
+	}
+}
+
+func TestAssistantQueryDoesNotMistakeCompanyVisionForBoardCard(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "openai-key"
+	if _, changed, err := app.createTicket(map[string]any{
+		"title":  "Define onboarding flow for feeding Shareability history into the brain",
+		"notes":  "Guided Feed the brain onboarding intake for the team and company history.",
+		"status": "Done",
+	}); err != nil || !changed {
+		t.Fatalf("seed unrelated card changed=%v err=%v", changed, err)
+	}
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Workflow != "scout_chat" {
+			t.Fatalf("workflow=%q, want Scout synthesis", request.Workflow)
+		}
+		return "The team appears aligned on the core vision, with some healthy disagreement on sequencing.", nil
+	})
+	query := "Hey Scout, what is your current opinion on the team? Are we united or in disagreement, and what is the current vision of the company as a whole?"
+	result, err := app.resolveAssistantQueryContextForUser(context.Background(), "aj@shareability.com", query, nil)
+	if err != nil {
+		t.Fatalf("resolve vision question: %v", err)
+	}
+	if result.source != "assistant" || !strings.Contains(result.answer, "aligned on the core vision") {
+		t.Fatalf("result=%+v, want company-brain synthesis rather than a board card", result)
 	}
 }
 

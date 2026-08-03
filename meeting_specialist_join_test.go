@@ -324,6 +324,38 @@ func TestMeetingSpecialistProductionJoinRequiresExactCurrentExternalQualificatio
 		_ = runtime.Stop(runtime.lease, "test_cleanup")
 	})
 
+	t.Run("live qualification expiry preserves its exact terminal cause", func(t *testing.T) {
+		provider := &fakeMeetingSpecialistProvider{receipt: MeetingSpecialistProviderReceipt{
+			BindingDigest: strideTestDigest("e"), TerminalStatus: "completed",
+		}}
+		var factoryCalls atomic.Int64
+		joiner, _ := productionJoinFixtureAt(
+			t,
+			now,
+			now.Add(-meetingSpecialistQualificationMaxAge+250*time.Millisecond),
+			provider,
+			&factoryCalls,
+		)
+		runtime, err := joiner.Join(context.Background(), request)
+		if err != nil || runtime == nil || factoryCalls.Load() != 1 {
+			t.Fatalf("short-lived qualified join runtime=%v calls=%d err=%v", runtime, factoryCalls.Load(), err)
+		}
+		terminal := make(chan MeetingSpecialistTerminalEvidence, 1)
+		if !runtime.BindTerminalObserver(func(evidence MeetingSpecialistTerminalEvidence) { terminal <- evidence }) {
+			t.Fatal("bind qualification-expiry terminal observer")
+		}
+		select {
+		case evidence := <-terminal:
+			if evidence.TerminalReason != "expired" || evidence.Cause != "qualification_expired" ||
+				!isHexDigest(evidence.TeardownReceiptDigest) || evidence.ProviderReceipt.BindingDigest != provider.receipt.BindingDigest ||
+				evidence.ProviderReceipt.QualificationSubjectDigest != evidence.QualificationSubjectDigest || runtime.Snapshot().Session != nil {
+				t.Fatalf("qualification expiry evidence=%+v snapshot=%+v", evidence, runtime.Snapshot())
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("live qualification expiry did not emit terminal evidence")
+		}
+	})
+
 	t.Run("qualification is rechecked after factory and brief latency", func(t *testing.T) {
 		current := now
 		var factoryCalls atomic.Int64

@@ -176,9 +176,12 @@ Without a working AI provider, the browser and media room still load, but AI-bac
 |---|---|
 | `OPENAI_API_KEY` | Realtime, transcription, embeddings, image, and OpenAI text seats |
 | `OPENAI_REALTIME_MODEL` | Shared-room Realtime model; defaults to the model configured in code |
+| `OPENAI_REALTIME_TRANSCRIPTION_MODEL` | Live Realtime-session input transcription; production target is `gpt-live-transcribe` |
 | `OPENAI_TRANSCRIPT_MODEL` | Dedicated transcript-lane override |
-| `OPENAI_DICTATION_TRANSCRIPT_MODEL` | Separately qualified composer-dictation override; unset uses the file-compatible `gpt-4o-transcribe` default |
+| `OPENAI_DICTATION_TRANSCRIPT_MODEL` | Independent completed-file composer-dictation model; production target is `gpt-transcribe` |
 | `OPENAI_BRAIN_MODEL` | Ambient extraction and company-memory model |
+| `OPENAI_BOARD_MODEL` | Board analysis model; production target is `gpt-5.6-terra` |
+| `OPENAI_SUGGESTION_MODEL` | Lightweight suggestion extraction model; production target is `gpt-5.6-luna` |
 | `ANTHROPIC_API_KEY` | Enables Anthropic-backed orchestration and review seats |
 | `GIPHY_API_KEY` | Enables authenticated chat GIF search and trending results; the key stays server-side |
 | `BONFIRE_AGENT_THREAD_WORKER` | Selects the structured text worker; `codex_exec` is not supported by the production-style Compose candidate |

@@ -1339,6 +1339,7 @@ func assistantQueryInstructionsForCoreAvailability(coreAvailable bool) string {
 		"If the context does not answer the question, say what you could not find instead of guessing.",
 		"When a conversation history is supplied, resolve follow-up references from it.",
 		"For short ambiguous follow-ups like \"what?\" or \"huh?\", ask one clarification question only.",
+		"Treat typed and dictated messages identically: never reply with a transport receipt such as \"transcription received\". Respond to the meaning of the message; if the user is explicitly testing transcription without another request, confirm naturally that the words came through clearly and offer a useful next step.",
 	}
 	// OFFER-NEVER-DENY is gated by the required OpenAI core route, never an
 	// optional specialist-provider key. A configured core can answer and route
@@ -2332,6 +2333,13 @@ func (app *kanbanBoardApp) answerCurrentBoardQuestion(query string) (string, int
 	if len(board.Cards) == 0 {
 		return "", 0, false
 	}
+	// The board is an explicit data surface, not a lexical catch-all. Ordinary
+	// strategy language such as "current opinion", "team", or "company vision"
+	// must reach Scout's synthesis model even if those common words also appear
+	// in a card's notes. A full card title or id remains a strong direct link.
+	if !isCurrentBoardQuery(query) && !queryNamesBoardCard(query, board.Cards) {
+		return "", 0, false
+	}
 
 	matches := rankBoardCardsForQuery(query, board.Cards)
 	if len(matches) == 0 || matches[0].Score < 35 {
@@ -2367,6 +2375,21 @@ func (app *kanbanBoardApp) answerCurrentBoardQuestion(query string) (string, int
 	}
 
 	return formatBoardCardAnswer(matches[0].Card), 1, true
+}
+
+func queryNamesBoardCard(query string, cards []kanbanCard) bool {
+	queryCompact := compactSearchText(query)
+	for _, card := range cards {
+		if id := compactSearchText(card.ID); len(id) >= 6 && strings.Contains(queryCompact, id) {
+			return true
+		}
+		titleTokens := uniqueMemoryTokens(card.Title)
+		titleCompact := compactSearchText(card.Title)
+		if len(titleTokens) >= 2 && len(titleCompact) >= 8 && strings.Contains(queryCompact, titleCompact) {
+			return true
+		}
+	}
+	return false
 }
 
 type rankedBoardCard struct {
@@ -2465,9 +2488,9 @@ func compactSearchText(value string) string {
 // 4-char stem floor ("owns"/"owned"/"currently") are listed explicitly so the
 // common "who owns X" / "currently" phrasings keep routing.
 var currentBoardQueryMarkers = buildStemmedMarkerSet(
-	"current", "currently", "status", "owner", "own", "owns", "owned", "assigned",
+	"status", "owner", "own", "owns", "owned", "assigned",
 	"blocked", "done", "progress", "backlog", "board", "card", "ticket", "notes",
-	"tags", "date", "due", "deadline", "milestone", "now",
+	"tags", "task", "due", "deadline", "milestone",
 )
 
 func buildStemmedMarkerSet(markers ...string) map[string]struct{} {

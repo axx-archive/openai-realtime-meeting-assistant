@@ -31,17 +31,13 @@ Edit `.env`:
 
 ```bash
 OPENAI_API_KEY=sk-proj-...
-OPENAI_REALTIME_MODEL=gpt-realtime-2
+OPENAI_REALTIME_MODEL=gpt-realtime-2.1
 OPENAI_REALTIME_REASONING_EFFORT=high
 OPENAI_REALTIME_VAD_TYPE=server_vad
+OPENAI_REALTIME_TRANSCRIPTION_MODEL=gpt-live-transcribe
 MEETING_TRANSCRIPT_LANE_ENABLED=true
-# OPENAI_TRANSCRIPT_MODEL: leave unset — the code default is gpt-4o-transcribe,
-# the only family that accepts the domain-vocabulary prompt. Whisper-family ids
-# (gpt-realtime-whisper) silently disable vocabulary biasing and, before the
-# session-config gate, broke the transcript lane outright. Do not pin whisper.
-# OPENAI_DICTATION_TRANSCRIPT_MODEL: leave unset to use the independent,
-# file-compatible gpt-4o-transcribe default. Set gpt-transcribe only after its
-# bounded provider and trusted-device qualification receipts pass.
+OPENAI_TRANSCRIPT_MODEL=gpt-transcribe
+OPENAI_DICTATION_TRANSCRIPT_MODEL=gpt-transcribe
 MEETING_ROOM_PASSWORD=<room-passcode>
 MEETING_ROOM_MAX_PARTICIPANTS=10
 MEETING_ALLOWED_ORIGINS=https://<droplet-public-ip>.nip.io
@@ -51,7 +47,12 @@ BONFIRE_CANONICAL_DATABASE_URL=postgres://bonfire:<same-password>@canonical-post
 BONFIRE_CANONICAL_TENANT_ID=bonfire
 BONFIRE_CANONICAL_MODE=shadow
 MEETING_BRAIN_INTERVAL=5m
-OPENAI_BRAIN_MODEL=gpt-5.5
+OPENAI_BRAIN_MODEL=gpt-5.6-luna
+OPENAI_BOARD_MODEL=gpt-5.6-terra
+OPENAI_SUGGESTION_MODEL=gpt-5.6-luna
+OPENAI_SCOUT_ROUTER_MODEL=gpt-5.6-terra
+OPENAI_SCOUT_CHAT_MODEL=gpt-5.6-terra
+OPENAI_SCOUT_EXTRACTION_MODEL=gpt-5.6-luna
 MEETING_BRAIN_BACKFILL=false
 MEETING_TIME_ZONE=America/Los_Angeles
 PION_NAT1TO1_IP=<droplet-public-ip>

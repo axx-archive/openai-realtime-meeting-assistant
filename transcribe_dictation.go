@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -37,6 +38,16 @@ const (
 	// 25MB is the OpenAI audio upload cap. m4a at the client's recording
 	// bitrate reaches ~10 minutes well inside it.
 	dictationMaxBytes = 25 << 20
+)
+
+var (
+	// Dictation in a private Scout composer has one useful bit of surface
+	// context the general meeting transcript does not: a leading greeting is
+	// almost certainly addressing the assistant. Keep the repair deliberately
+	// narrow so a teammate genuinely named Scott is never rewritten in ordinary
+	// chat, meetings, or mid-sentence prose.
+	leadingScoutGreetingPattern   = regexp.MustCompile(`(?i)^(\s*(?:hey|hi|hello)\s+)scott\b`)
+	leadingScoutPunctuatedPattern = regexp.MustCompile(`(?i)^(\s*)scott(\s*[,!?:;])`)
 )
 
 type dictationTranscriptResponse struct {
@@ -82,6 +93,28 @@ func dictationTranscriptionFields(model, prompt string) []dictationTranscription
 		fields = append(fields, dictationTranscriptionField{Name: "prompt", Value: prompt})
 	}
 	return fields
+}
+
+func scoutDictationContext(contextValue string) bool {
+	return strings.EqualFold(strings.TrimSpace(contextValue), "scout")
+}
+
+func dictationTranscriptionPrompt(contextValue string) string {
+	prompt := realtimeTranscriptionPrompt()
+	if scoutDictationContext(contextValue) {
+		prompt += " Scout is the assistant's name. When the speaker addresses Scout, spell the name Scout, never Scott."
+	}
+	return prompt
+}
+
+func canonicalizeScoutDictationVocative(value, contextValue string) string {
+	if !scoutDictationContext(contextValue) {
+		return value
+	}
+	if leadingScoutGreetingPattern.MatchString(value) {
+		return leadingScoutGreetingPattern.ReplaceAllString(value, "${1}Scout")
+	}
+	return leadingScoutPunctuatedPattern.ReplaceAllString(value, "${1}Scout${2}")
 }
 
 func assistantTranscribeHandler(w http.ResponseWriter, r *http.Request) {
@@ -146,13 +179,6 @@ func assistantTranscribeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// `context` ("chat" | "board" | "search") is accepted and currently unused:
-	// every dictation gets the full company vocabulary. It is carried now so the
-	// client contract is stable when per-surface vocabulary narrowing lands, and
-	// is deliberately NOT wired to a narrower prompt yet — a half-applied bias
-	// would silently make some surfaces transcribe worse than others.
-	_ = contextValue
-
 	model := dictationTranscriptionModel()
 	// Same gate as the streaming lane: the gpt-4o transcription family accepts a
 	// free-text prompt for vocabulary biasing; the whisper family rejects it live
@@ -161,7 +187,7 @@ func assistantTranscribeHandler(w http.ResponseWriter, r *http.Request) {
 	biased := transcriptionModelAcceptsPrompt(model)
 	prompt := ""
 	if biased {
-		prompt = realtimeTranscriptionPrompt()
+		prompt = dictationTranscriptionPrompt(contextValue)
 	}
 
 	started := time.Now()
@@ -188,6 +214,7 @@ func assistantTranscribeHandler(w http.ResponseWriter, r *http.Request) {
 	// mistranscriptions of this company's terms, fixed the same way in both
 	// lanes so dictation and transcripts never disagree about a name.
 	text = canonicalizeDomainTerms(strings.TrimSpace(text))
+	text = canonicalizeScoutDictationVocative(text, contextValue)
 	if text == "" {
 		recordCapabilityFailure(capabilityDictation, time.Now().UTC(), fmt.Errorf("provider returned an empty transcript"))
 		recordLLMUsage(llmUsageEntry{

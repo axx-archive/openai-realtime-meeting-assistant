@@ -44,6 +44,37 @@ func TestDictationTranscriptionFieldsAreCapabilityAware(t *testing.T) {
 	}
 }
 
+func TestScoutDictationVocativeCorrectionIsExactAndContextOwned(t *testing.T) {
+	cases := []struct {
+		name    string
+		context string
+		input   string
+		want    string
+	}{
+		{name: "greeting with punctuation", context: "scout", input: "Hey Scott, I have a quick question.", want: "Hey Scout, I have a quick question."},
+		{name: "greeting without punctuation", context: "SCOUT", input: "Hi Scott can you summarize this?", want: "Hi Scout can you summarize this?"},
+		{name: "leading punctuated name", context: " scout ", input: "Scott, what changed?", want: "Scout, what changed?"},
+		{name: "genuine person sentence", context: "scout", input: "Scott is joining the room at noon.", want: "Scott is joining the room at noon."},
+		{name: "mid sentence person", context: "scout", input: "I asked Scott to join the room.", want: "I asked Scott to join the room."},
+		{name: "ordinary team chat", context: "chat", input: "Hey Scott, I have a quick question.", want: "Hey Scott, I have a quick question."},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if got := canonicalizeScoutDictationVocative(test.input, test.context); got != test.want {
+				t.Fatalf("canonicalizeScoutDictationVocative(%q, %q)=%q, want %q", test.input, test.context, got, test.want)
+			}
+		})
+	}
+
+	scoutPrompt := dictationTranscriptionPrompt("scout")
+	if !strings.Contains(scoutPrompt, "Scout is the assistant's name") || !strings.Contains(scoutPrompt, "never Scott") {
+		t.Fatalf("Scout prompt is missing exact name guidance: %q", scoutPrompt)
+	}
+	if ordinaryPrompt := dictationTranscriptionPrompt("chat"); strings.Contains(ordinaryPrompt, "never Scott") {
+		t.Fatalf("ordinary dictation inherited Scout-only name guidance: %q", ordinaryPrompt)
+	}
+}
+
 func TestCommittedTurnTranscriptionConfigUsesModernHintsWithoutInventedNoiseControl(t *testing.T) {
 	config := transcriptionLaneSessionConfig("gpt-transcribe")
 	session := config["session"].(map[string]any)

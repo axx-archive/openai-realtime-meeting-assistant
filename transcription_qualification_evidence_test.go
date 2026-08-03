@@ -980,9 +980,11 @@ func TestTranscriptionEvidenceEnforcesPreregisteredCorpusStatisticsAndHonestBoun
 
 func TestTranscriptionEvidenceRequiresCompleteE10CoverageAndZeroSilenceInsertions(t *testing.T) {
 	requiredTags := []string{"company_name", "numbers", "accent", "code_switching", "short_phrase", "crosstalk", "noise", "silence", "speaker_attribution"}
+	baseManifest, baseEvidence, baseThresholds := preregisteredTranscriptionEvidence(t)
 	for _, missingTag := range requiredTags {
 		t.Run("missing "+missingTag, func(t *testing.T) {
-			manifest, evidence, thresholds := preregisteredTranscriptionEvidence(t)
+			manifest, evidence, thresholds := baseManifest, baseEvidence, baseThresholds
+			evidence.Observations = append([]TranscriptionObservation(nil), baseEvidence.Observations...)
 			cases := append([]TranscriptionCorpusCase(nil), manifest.Cases...)
 			for index := range cases {
 				cases[index].Tags = append([]string(nil), cases[index].Tags...)
@@ -1016,7 +1018,8 @@ func TestTranscriptionEvidenceRequiresCompleteE10CoverageAndZeroSilenceInsertion
 		})
 	}
 
-	manifest, evidence, thresholds := preregisteredTranscriptionEvidence(t)
+	manifest, evidence, thresholds := baseManifest, baseEvidence, baseThresholds
+	evidence.Observations = append([]TranscriptionObservation(nil), baseEvidence.Observations...)
 	for index := range evidence.Observations {
 		if isTranscriptionSilenceCase(manifest.Cases[index]) {
 			evidence.Observations[index].OutputText = "hallucinated words"
