@@ -85,6 +85,14 @@ history. Focused normal/race PostgreSQL tests and `go vet` pass, while the
 complete predecessor-plus-absent-journal Go tree remains green at 399.108
 seconds.
 
+The bounded observation then completed, and receipt sealing exposed a
+strict-mode shell declaration that expanded `output` before the same `local`
+statement initialized it. No normalization append had started. All four
+same-declaration output dependencies across production/clone receipt and
+stable-fingerprint helpers are split into ordered declarations; the pack
+self-check now rejects reintroduction of that pattern, and the complete focused
+release suite passes.
+
 ### Build 31 exact-archive correction — 2026-08-02
 
 The first Build 31 A/B attempt (`3f96d0880aa98f8ddb4f280da2d2388402389a5d`

@@ -858,7 +858,8 @@ capture_canonical_repair_fingerprint() {
 }
 
 capture_stable_canonical_repair_fingerprint() {
-  local pgc=$1 output=$2 second="$output.second"
+  local pgc=$1 output=$2
+  local second="$output.second"
   capture_canonical_repair_fingerprint "$pgc" "$output"
   sync
   capture_canonical_repair_fingerprint "$pgc" "$second"

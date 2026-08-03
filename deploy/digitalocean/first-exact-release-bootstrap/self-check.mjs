@@ -51,6 +51,7 @@ const shellSources = [prepare, common, bootstrap, rollback].join('\n')
 assert.equal(shellSources.includes('--remove-orphans'), false, 'bootstrap scripts must not remove ambiguous orphans')
 assert.equal(shellSources.includes('--no-sandbox'), false, 'operator pack must not disable Chrome sandboxing')
 assert.equal(shellSources.includes('seccomp=unconfined'), false, 'operator pack must not disable Docker seccomp confinement')
+assert.equal(/local[^\n]*\boutput=[^\n]*\$output/.test(shellSources), false, 'strict-mode shell must not reference output in the same local declaration that initializes it')
 
 for (const flag of [
   'observe-canonical-repair', 'repair-observation', 'normalize-canonical',

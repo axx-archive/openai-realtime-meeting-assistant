@@ -738,7 +738,8 @@ assert_canonical_observation() {
 }
 
 write_normalization_fence_receipt() {
-  local observation=$1 output=$2 inventory="$REPAIR_EVIDENCE_DIR/protected-container-fence.json" raw="$output.raw"
+  local observation=$1 output=$2
+  local inventory="$REPAIR_EVIDENCE_DIR/protected-container-fence.json" raw="$output.raw"
   assert_forward_maintenance_state
   assert_no_canonical_repair_writers
   docker ps -a --no-trunc --format '{{json .}}' | jq -sS . >"$inventory.tmp"
@@ -758,7 +759,8 @@ write_normalization_fence_receipt() {
 }
 
 write_normalization_input() {
-  local observation=$1 fence=$2 authority=$3 output=$4 raw="$output.raw"
+  local observation=$1 fence=$2 authority=$3 output=$4
+  local raw="$output.raw"
   local backup_ref fence_ref authority_ref observation_ref
   backup_ref=$(private_file_reference_json "$REPAIR_EVIDENCE_DIR/backup-SHA256SUMS" "$REPAIR_EVIDENCE_DIR")
   fence_ref=$(private_file_reference_json "$fence" "$REPAIR_EVIDENCE_DIR")
@@ -1248,7 +1250,8 @@ write_clone_normalization_input() {
 }
 
 write_clone_run_descriptor() {
-  local run_dir=$1 clone_id=$2 normalization=$3 authority=$4 observation=$5 output=$6 raw="$output.raw"
+  local run_dir=$1 clone_id=$2 normalization=$3 authority=$4 observation=$5 output=$6
+  local raw="$output.raw"
   local backup_ref normalization_ref authority_ref source_ref observation_ref
   backup_ref=$(private_file_reference_json "$REPAIR_EVIDENCE_DIR/backup-SHA256SUMS" "$REPAIR_EVIDENCE_DIR")
   normalization_ref=$(private_file_reference_json "$normalization" "$REPAIR_EVIDENCE_DIR")
