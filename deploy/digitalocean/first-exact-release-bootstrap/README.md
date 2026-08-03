@@ -206,9 +206,12 @@ credential input in the pack.
 `backup` then:
 
 - asserts the exact eight-volume legacy inventory;
-- privately captures Compose, Caddy, `.env`, `/opt/meetingassist` excluding its
-  stale `data/`, `/opt/meetingassist-workspace`, Docker container/network/image
-  metadata, and exact legacy images;
+- privately captures the Compose source paths that actually created every
+  running predecessor container, seals their hashes, renders them into one
+  self-bound six-service recovery file, and also captures Caddy, `.env`,
+  `/opt/meetingassist` excluding its stale `data/`,
+  `/opt/meetingassist-workspace`, Docker container/network/image metadata, and
+  exact legacy images;
 - stops all app/runner/edge writers while retaining PostgreSQL long enough for
   `pg_dump`;
 - records archive-list validation, migrations 1-7 and every non-system table
@@ -524,8 +527,10 @@ one-shots and their internal network, removes candidate project containers and
 new `render_queue`, then unloads/deletes only the exact release-owned profiles,
 recreates the two legacy volumes from saved driver/options/labels, restores all
 eight cold archives, restores exact legacy image refs/IDs, starts legacy
-PostgreSQL first, proves migrations/counts, then starts the exact legacy
-profiles. It leaves ingress blocked.
+PostgreSQL first, proves migrations/counts, then starts the exact predecessor
+from the sealed resolved Compose recovery file. It never infers recovery
+topology from the mutable current `/opt/meetingassist` Compose source. It leaves
+ingress blocked.
 
 Renderer-profile removal is interruption-safe and refuses any running or
 restartable container that references the custom AppArmor profile. It accepts

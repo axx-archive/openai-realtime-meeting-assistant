@@ -364,6 +364,7 @@ assert_backup_checksum_manifest_semantic() {
       ./postgres.pgcustom ./postgres.list ./migrations-before.tsv ./table-counts-before.tsv \
       ./private/volumes.inspect.json ./private/containers.inspect.json \
       ./private/base.env ./private/legacy-docker-compose.yml ./private/legacy-Caddyfile \
+      ./private/legacy-compose-resolved.yml ./private/legacy-compose-provenance.json \
       ./private/opt-meetingassist.tar ./private/opt-meetingassist-workspace.tar \
       ./images/legacy-images.tar ./meta/legacy-image-map.tsv ./meta/networks.inspect.json \
       ./meta/legacy-container-authority.tsv ./meta/expected-volumes ./meta/actual-volumes
@@ -484,6 +485,49 @@ phase_backup() {
   install -m 600 "$BASE_ENV" "$BK/private/base.env"
   install -m 600 /opt/meetingassist/deploy/digitalocean/docker-compose.yml "$BK/private/legacy-docker-compose.yml"
   install -m 600 /opt/meetingassist/deploy/digitalocean/Caddyfile "$BK/private/legacy-Caddyfile"
+  local legacy_config_files legacy_project_dir legacy_env_file legacy_path legacy_sha
+  local legacy_compose_args=()
+  legacy_config_files=$(jq -er '[.[]|.Config.Labels["com.docker.compose.project.config_files"]]|unique|select(length==1)|.[0]' \
+    "$BK/private/containers.inspect.json")
+  legacy_project_dir=$(jq -er '[.[]|.Config.Labels["com.docker.compose.project.working_dir"]]|unique|select(length==1)|.[0]' \
+    "$BK/private/containers.inspect.json")
+  legacy_env_file=$(jq -er '[.[]|.Config.Labels["com.docker.compose.project.environment_file"]]|unique|select(length==1)|.[0]' \
+    "$BK/private/containers.inspect.json")
+  test "$legacy_project_dir" = /opt/meetingassist/deploy/digitalocean \
+    || die 'running predecessor Compose project directory is not exact'
+  test "$legacy_env_file" = "$BASE_ENV" || die 'running predecessor Compose environment file is not exact'
+  : >"$BK/private/legacy-compose-sources.jsonl"
+  IFS=',' read -r -a legacy_paths <<<"$legacy_config_files"
+  test "${#legacy_paths[@]}" -ge 1 || die 'running predecessor has no Compose source files'
+  for legacy_path in "${legacy_paths[@]}"; do
+    [[ $legacy_path == /* ]] || die 'running predecessor Compose source path is not absolute'
+    test -f "$legacy_path" && test ! -L "$legacy_path" \
+      || die 'running predecessor Compose source is not a regular file'
+    legacy_sha=$(sha256sum "$legacy_path" | awk '{print $1}')
+    require_sha256 "$legacy_sha"
+    jq -cn --arg path "$legacy_path" --arg sha256 "$legacy_sha" '{path:$path,sha256:$sha256}' \
+      >>"$BK/private/legacy-compose-sources.jsonl"
+    legacy_compose_args+=(--file "$legacy_path")
+  done
+  BONFIRE_BASE_ENV_FILE="$BASE_ENV" docker compose \
+    --project-name digitalocean --project-directory "$legacy_project_dir" \
+    --env-file "$legacy_env_file" "${legacy_compose_args[@]}" \
+    --profile codex --profile render config >"$BK/private/legacy-compose-resolved.yml.tmp"
+  chown root:root "$BK/private/legacy-compose-resolved.yml.tmp"
+  chmod 600 "$BK/private/legacy-compose-resolved.yml.tmp"
+  mv "$BK/private/legacy-compose-resolved.yml.tmp" "$BK/private/legacy-compose-resolved.yml"
+  jq -n --arg projectDirectory "$legacy_project_dir" --arg environmentFile "$legacy_env_file" \
+    --arg resolvedComposeSha256 "$(sha256sum "$BK/private/legacy-compose-resolved.yml" | awk '{print $1}')" \
+    --arg baseEnvironmentSha256 "$(sha256sum "$BK/private/base.env" | awk '{print $1}')" \
+    --slurpfile sources "$BK/private/legacy-compose-sources.jsonl" '
+      {schema:"bonfire.legacy-compose-provenance.v1",status:"complete",projectName:"digitalocean",
+       projectDirectory:$projectDirectory,environmentFile:$environmentFile,
+       resolvedComposeSha256:$resolvedComposeSha256,baseEnvironmentSha256:$baseEnvironmentSha256,
+       sourceConfigFiles:$sources}
+    ' >"$BK/private/legacy-compose-provenance.raw"
+  write_self_digest_json "$BK/private/legacy-compose-provenance.raw" "$BK/private/legacy-compose-provenance.json"
+  rm "$BK/private/legacy-compose-provenance.raw" "$BK/private/legacy-compose-sources.jsonl"
+  assert_legacy_compose_recovery_bundle
   tar --xattrs --acls --numeric-owner --one-file-system --exclude='meetingassist/data' \
     -C /opt -cpf "$BK/private/opt-meetingassist.tar" meetingassist
   tar --xattrs --acls --numeric-owner --one-file-system \
@@ -1952,7 +1996,15 @@ ensure_canonical_repair_network() {
     (.[0].NetworkSettings.Networks | keys)==[$network] and
     (.[0].HostConfig.PortBindings // {} | length)==0
   ' >/dev/null || die 'retained canonical PostgreSQL is not isolated to the sole internal ceremony network'
-  assert_canonical_repair_network_membership "$pgc"
+  # Docker does not publish a stopped container in network-inspect .Containers.
+  # At this boundary container inspect proves the sole configured attachment;
+  # the network itself must have no active endpoints. Full endpoint membership
+  # is checked immediately after PostgreSQL starts.
+  docker network inspect "$REPAIR_NETWORK" | jq -e '
+    length==1 and .[0].Internal==true and
+    .[0].Labels["bonfire.bootstrap.role"]=="canonical-repair" and
+    ((.[0].Containers // {})|length)==0
+  ' >/dev/null || die 'stopped canonical PostgreSQL network has an unexpected active endpoint'
 }
 
 assert_canonical_repair_network_membership() {

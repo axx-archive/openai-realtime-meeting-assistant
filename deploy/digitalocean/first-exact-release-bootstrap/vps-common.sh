@@ -70,6 +70,45 @@ assert_root_private_regular_file() {
   test "$(stat -c %a "$path")" = 600 || die "$label must have exact mode 0600"
 }
 
+assert_legacy_compose_recovery_bundle() {
+  local compose="$BK/private/legacy-compose-resolved.yml"
+  local provenance="$BK/private/legacy-compose-provenance.json"
+  local config_json compose_sha env_sha project_dir
+  assert_root_private_regular_file "$compose" 'resolved legacy Compose recovery file'
+  assert_root_private_regular_file "$provenance" 'legacy Compose provenance receipt'
+  assert_root_private_regular_file "$BK/private/base.env" 'legacy base environment backup'
+  assert_self_digest_json "$provenance"
+  compose_sha=$(sha256sum "$compose" | awk '{print $1}')
+  env_sha=$(sha256sum "$BK/private/base.env" | awk '{print $1}')
+  project_dir=$(jq -er '.projectDirectory' "$provenance")
+  test "$project_dir" = /opt/meetingassist/deploy/digitalocean \
+    || die 'legacy Compose recovery project directory drifted'
+  jq -e --arg compose "$compose_sha" --arg env "$env_sha" '
+    .schema=="bonfire.legacy-compose-provenance.v1" and .status=="complete" and
+    .projectName=="digitalocean" and
+    .projectDirectory=="/opt/meetingassist/deploy/digitalocean" and
+    .environmentFile=="/opt/meetingassist/deploy/digitalocean/.env" and
+    .resolvedComposeSha256==$compose and .baseEnvironmentSha256==$env and
+    (.sourceConfigFiles|type=="array" and length>=1 and
+      all(.[]; (.path|type=="string" and startswith("/")) and
+        (.sha256|type=="string" and test("^[0-9a-f]{64}$"))))
+  ' "$provenance" >/dev/null || die 'legacy Compose provenance receipt is invalid'
+  config_json=$(mktemp "$STATE_DIR/legacy-compose-config.XXXXXX")
+  BONFIRE_BASE_ENV_FILE="$BK/private/base.env" docker compose \
+    --project-name digitalocean --project-directory "$project_dir" \
+    --env-file "$BK/private/base.env" --file "$compose" \
+    --profile codex --profile render config --format json >"$config_json"
+  jq -e '
+    (.services|keys|sort)==
+      (["caddy","canonical-postgres","codex-runner","coturn","meetingassist","render-runner"]|sort) and
+    ((.services|has("render-queue-init"))|not) and
+    ((.volumes|keys|sort)==
+      (["caddy_config","caddy_data","canonical_postgres","codex_queue",
+        "codex_runner_data","meeting_data","usage_ledger"]|sort))
+  ' "$config_json" >/dev/null || { rm -f "$config_json"; die 'resolved legacy Compose recovery topology is not exact'; }
+  rm -f "$config_json"
+}
+
 private_file_reference_json() {
   local file=$1 evidence_dir=$2 relative size digest
   assert_root_private_regular_file "$file" 'sealed private evidence file'

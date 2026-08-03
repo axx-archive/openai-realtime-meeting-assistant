@@ -12,6 +12,37 @@ This is the durable resume ledger for the approved master plan. The master plan
 owns product and architecture decisions; this file owns current execution truth,
 dependencies, authority boundaries, rollback posture, and the next safe action.
 
+### Build 31 replacement ceremony — 2026-08-02
+
+The corrected pair (`53e6798e7ffa3f89dfcececb2a0f86b69de7ec54` /
+`5ff4d0a98f45b095041d195f34e1800947cc6776`) passed exact image build,
+preflight, dual ingress isolation, the independent Mac block probe,
+authenticated two-pass room vacancy, the complete cold backup, and the full
+restore rehearsal. It then stopped fail-closed before canonical mutation:
+Docker correctly omitted the stopped retained PostgreSQL container from the
+repair network's active endpoint map, while the operator required it there.
+
+Cold rollback restored all eight data volumes with exact migration and table
+count parity, but its launcher then exposed a second defect: it inferred the
+predecessor topology from the now-current `/opt` Compose source instead of the
+Compose source paths that created the six retained predecessor containers.
+The predecessor was manually reopened from its preserved exact two-file
+Compose topology and exact images. Public HTTPS/readiness and TCP TURN pass;
+the restored data, six-service topology, eight-volume inventory, and absence of
+candidate resources were independently rechecked. The failed ceremony and its
+recovery receipt remain sealed and cannot be resumed.
+
+The replacement operator now treats a stopped container's configured network
+attachment separately from active network endpoints, then requires exact sole
+membership after PostgreSQL starts. Backup also captures and hashes the actual
+running Compose source set, seals one resolved six-service recovery file, and
+rollback uses only that sealed file plus the backed-up environment. The pack
+self-check, complete 105-test release/native/brand suite, syntax, and diff
+checks pass. The only remaining close-out path is: seal a fresh A/B pair, run
+the replacement ceremony, verify exact B and Scout/STT on production, then
+build, submit, verify, and physically accept Build 31. Marketplace employee
+agents and external E10/soak/HA evidence remain separate follow-up work.
+
 ### Build 31 exact-archive correction — 2026-08-02
 
 The first Build 31 A/B attempt (`3f96d0880aa98f8ddb4f280da2d2388402389a5d`

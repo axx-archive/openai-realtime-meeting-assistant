@@ -29,6 +29,7 @@ restore_legacy() {
   test "$confirmation" = 'RESTORE COLD LEGACY SNAPSHOT' || die 'legacy restore not confirmed'
   mark_phase ceremony-retired
   (cd "$BK" && sha256sum -c backup-SHA256SUMS >/dev/null)
+  assert_legacy_compose_recovery_bundle
 
   cmp "$BASE_ENV" "$BK/private/base.env"
   cmp /opt/meetingassist/deploy/digitalocean/docker-compose.yml "$BK/private/legacy-docker-compose.yml"
@@ -80,14 +81,14 @@ restore_legacy() {
     test "$(docker image inspect "$ref" --format '{{.Id}}')" = "$image_id" || die "legacy image ref changed: $ref"
   done <"$BK/meta/legacy-image-map.tsv"
 
-  local compose=/opt/meetingassist/deploy/digitalocean/docker-compose.yml
+  local compose="$BK/private/legacy-compose-resolved.yml"
   local compose_dir
-  compose_dir=$(dirname "$compose")
+  compose_dir=$(jq -er '.projectDirectory' "$BK/private/legacy-compose-provenance.json")
   (
     cd "$compose_dir"
-    BONFIRE_BASE_ENV_FILE="$BASE_ENV" docker compose \
+    BONFIRE_BASE_ENV_FILE="$BK/private/base.env" docker compose \
       --project-name digitalocean --project-directory "$compose_dir" \
-      --env-file "$BASE_ENV" --file "$compose" --profile codex --profile render \
+      --env-file "$BK/private/base.env" --file "$compose" --profile codex --profile render \
       up -d --no-build --wait --wait-timeout 120 canonical-postgres
   )
   local pgc
@@ -98,9 +99,9 @@ restore_legacy() {
   pg_counts "$pgc" | cmp "$BK/table-counts-before.tsv" -
   (
     cd "$compose_dir"
-    BONFIRE_BASE_ENV_FILE="$BASE_ENV" docker compose \
+    BONFIRE_BASE_ENV_FILE="$BK/private/base.env" docker compose \
       --project-name digitalocean --project-directory "$compose_dir" \
-      --env-file "$BASE_ENV" --file "$compose" --profile codex --profile render \
+      --env-file "$BK/private/base.env" --file "$compose" --profile codex --profile render \
       up -d --no-build --wait --wait-timeout 120
   )
 
