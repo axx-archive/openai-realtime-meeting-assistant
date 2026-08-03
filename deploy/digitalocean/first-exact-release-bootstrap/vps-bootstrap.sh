@@ -1766,7 +1766,7 @@ assert_semantic_target_evidence_records() {
         .schema=="bonfire.canonical-board-repair-evidence-record.v1" and
         .role==$role and .objectId==$object and .present==$present and
         (.observedAt|type=="string" and test("Z$")) and
-        (.sourceArtifact|type=="object" and (.sourceArtifact.path|type=="string" and length>0) and
+        ((.sourceArtifact|type)=="object" and (.sourceArtifact.path|type=="string" and length>0) and
           (.sourceArtifact.size|type=="number" and .>=0 and floor==.) and
           (.sourceArtifact.sha256|type=="string" and test("^[0-9a-f]{64}$"))) and
         (if $present then

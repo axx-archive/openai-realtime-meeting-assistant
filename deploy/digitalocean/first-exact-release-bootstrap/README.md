@@ -279,10 +279,12 @@ exactly seven terminal board-tombstone candidates with principal/projection
 parity, and prove a full zero-delta second replay. Its root-only self-digested
 receipt and a fresh observation must agree on the complete resulting state.
 The receipt must bind its full before-state to the sealed observation and prove
-exactly `+2` tenant events, `+2` import-outbox rows and `+2` version entries,
-with unchanged visible board, lifecycle journal, capture spool, and import
-inputs. It does not assume the historical pre-normalization candidate count;
-the fresh observation is authoritative. The after-state must be exact seven.
+the exact tenant-event/import-outbox delta derived from the unique sealed
+missing/state-mismatch candidates plus the exact version-entry growth bounded
+by that count, with unchanged visible board, lifecycle journal, capture spool,
+and import inputs. It does not assume the historical pre-normalization candidate
+count; the fresh observation is authoritative. The after-state must be exact
+seven.
 
 There is no cross-process normalization resume. The durable setup marker is
 written before any repair runtime, schema, observation, authority, or input
