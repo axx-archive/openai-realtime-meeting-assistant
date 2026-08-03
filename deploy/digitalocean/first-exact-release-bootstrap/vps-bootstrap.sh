@@ -1326,10 +1326,14 @@ assert_clone_restart_observation() {
 
 run_repair_clone_qualification() (
   set -Eeuo pipefail
-  local run_number=$1 clone_id token run_rel run_dir network pg stage image pg_image original short volume mount
+  local run_number clone_id token run_rel run_dir network pg stage image pg_image original short volume mount
   local meeting usage codex render pg_volume before_obs normalization_input normalization_receipt normalized_obs
   local cold_receipt clone_authority descriptor manifest manifest_sha repair_authority repair_receipt repair_sha
   local restart_before restart_after restart_receipt receipt_sha field
+  run_number=$1
+  clone_id=$2
+  [[ $clone_id =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
+    || die 'qualification clone ID is not an exact lowercase UUID'
   token="q${run_number}-$(tr -d - < /proc/sys/kernel/random/uuid | cut -c1-12)"
   run_rel="qualification/run-$run_number"; run_dir="$REPAIR_EVIDENCE_DIR/$run_rel"
   network="bonfire-repair-$token"; pg="bonfire-repair-pg-$token"; stage="bonfire-repair-stage-$token"
