@@ -258,7 +258,10 @@ internal-only network. Every protected-volume mounter must be either an exact
 container ID, image, service and mount set sealed by the six-container backup,
 or the named one-shot. Unknown mounters, extra PostgreSQL networks, published
 ports and provider/public egress are rejected. Codex and render queues are
-mounted at their normal queue and heartbeat paths.
+mounted at their normal queue and heartbeat paths. Docker container inspection
+proves the sole configured network while a container is stopped; active network
+membership must contain only PostgreSQL before/after a one-shot and exactly
+PostgreSQL plus that one-shot while it is running.
 
 Exact A writes a root-only read-only observation. The pack then creates a
 self-digested fence receipt and a noninteractive normalization marker bound to

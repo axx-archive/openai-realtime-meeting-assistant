@@ -663,9 +663,11 @@ assert_canonical_stage_container_exact() {
       any(.[0].Mounts[]; .Type=="bind" and .Source==$runtime and .Destination=="/run/bonfire-repair" and .RW==true) and
       (.[0].Config.Cmd | index($command_flag) != null)
     ' >/dev/null || die "$role container confinement, mounts, queues, or exact command drifted"
-  docker network inspect "$REPAIR_NETWORK" | jq -e --arg id "$(docker inspect -f '{{.Id}}' "$name")" \
-    '.[0].Internal==true and (.[0].Containers | has($id))' >/dev/null \
-    || die "$role container is not attached only to the internal ceremony network"
+  # The created container is stopped, so Docker omits it from network-inspect
+  # active endpoints. Container inspect above proves its sole configured
+  # network; exact active membership is checked across the start/run/stop
+  # lifecycle below.
+  assert_canonical_repair_network_membership "$(canonical_repair_postgres_id)"
 }
 
 create_canonical_stage_container() {
@@ -694,17 +696,17 @@ create_canonical_stage_container() {
   else
     assert_canonical_stage_container_exact "$name" "$image" "$role" "$command_flag" false
   fi
-  assert_canonical_repair_network_membership "$(canonical_repair_postgres_id)" "$name"
+  assert_canonical_repair_network_membership "$(canonical_repair_postgres_id)"
   assert_protected_volume_container_whitelist "$name"
 }
 
 run_canonical_stage_container() {
   local name=$1 log=$2 exit_file=$3 exit_code
-  assert_canonical_repair_network_membership "$(canonical_repair_postgres_id)" "$name"
+  assert_canonical_repair_network_membership "$(canonical_repair_postgres_id)"
   docker start "$name" >/dev/null
   assert_canonical_repair_network_membership "$(canonical_repair_postgres_id)" "$name"
   docker wait "$name" >"$exit_file"
-  assert_canonical_repair_network_membership "$(canonical_repair_postgres_id)" "$name"
+  assert_canonical_repair_network_membership "$(canonical_repair_postgres_id)"
   exit_code=$(tr -d '[:space:]' <"$exit_file")
   [[ $exit_code =~ ^[0-9]+$ ]] || die "$name returned an invalid exit code"
   docker logs "$name" >"$log" 2>&1 || true

@@ -43,6 +43,17 @@ the replacement ceremony, verify exact B and Scout/STT on production, then
 build, submit, verify, and physically accept Build 31. Marketplace employee
 agents and external E10/soak/HA evidence remain separate follow-up work.
 
+The first replacement pair (`2cd5a3e7da2f7d416bc68cde5d18c6c22e567ce5`
+/ `e3fb72719369023536183dbdd6809ab792b9df49`) proved the new rollback bundle
+end to end, but exposed the same Docker stopped-endpoint distinction for a
+newly created canonical observation one-shot. The one-shot never started and
+no canonical append occurred. The exact cold restore then succeeded using only
+the sealed resolved predecessor Compose file, with migration/table parity and
+all six services healthy; the independent block and reopened HTTPS/TURN probes
+passed. One-shot admission now requires PostgreSQL alone before start,
+PostgreSQL plus the one-shot while running, and PostgreSQL alone again after
+exit, while container inspection proves the stopped configured attachment.
+
 ### Build 31 exact-archive correction — 2026-08-02
 
 The first Build 31 A/B attempt (`3f96d0880aa98f8ddb4f280da2d2388402389a5d`
