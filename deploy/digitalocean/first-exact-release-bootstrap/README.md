@@ -323,7 +323,8 @@ byte-compares all eight raw legacy volume archives, restores the PostgreSQL dump
 into a separate fresh PostgreSQL volume, checks migrations/table counts, and
 uses a fresh internal-only Docker network containing exactly that PostgreSQL
 container plus at most one exact-A one-shot. No production mutable volume is
-mounted. Each clone runs the ordinary normalization (`+2/+2/+2`, exact seven,
+mounted. Each clone runs the ordinary normalization (an exact balanced delta
+derived from the sealed missing/state-mismatch candidates, exact seven,
 zero-delta second replay), generates an isolated qualification-only manifest,
 runs the repair (`+7/+7/+7`, unchanged board/spool, exact seven-record journal
 suffix, zero candidates), restarts PostgreSQL, and has exact A revalidate the

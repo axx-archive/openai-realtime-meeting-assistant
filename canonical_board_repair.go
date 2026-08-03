@@ -431,6 +431,10 @@ func (run canonicalBoardNormalizationRun) execute(ctx context.Context) (canonica
 	if err != nil {
 		return canonicalBoardNormalizationReceipt{}, err
 	}
+	expectedDelta, err := canonicalExpectedOrdinaryNormalizationDelta(before.Candidates)
+	if err != nil {
+		return canonicalBoardNormalizationReceipt{}, err
+	}
 	journalBefore := before.Journal
 	var converged canonicalBoardRepairProof
 	convergencePasses := 0
@@ -483,7 +487,7 @@ func (run canonicalBoardNormalizationRun) execute(ctx context.Context) (canonica
 		AfterCandidateCount: len(second.Candidates), AfterCandidateSHA256: afterCandidateSHA,
 		ApplyPasses: convergencePasses + 1, LifecycleAppendCount: 0,
 		BeforeState: beforeState, AfterState: afterState,
-		Delta:         canonicalBoardRepairCountDelta{TenantEvents: 2, ImportOutbox: 2, VersionEntries: 2},
+		Delta:         expectedDelta,
 		JournalBefore: journalBefore, JournalAfter: second.Journal,
 		BoardAfter: second.Board, VersionMapAfter: second.VersionMap, VersionEntriesSHA256: second.VersionEntriesSHA256,
 		SpoolAfter: second.Spool, DatabaseAfterSHA256: second.DatabaseSHA256, EventHighWater: second.EventHighWater, TenantEventCount: second.EventCount,
@@ -589,8 +593,13 @@ func canonicalRepairStateFromProof(proof canonicalBoardRepairProof) (canonicalBo
 }
 
 func validateCanonicalNormalizationTransition(before, after canonicalBoardRepairProof) error {
-	if after.EventCount-before.EventCount != 2 || after.OutboxCount-before.OutboxCount != 2 || after.VersionEntryCount-before.VersionEntryCount != 2 {
-		return errors.New("ordinary normalization must append exactly two tenant events, import outbox rows, and version entries")
+	expected, err := canonicalExpectedOrdinaryNormalizationDelta(before.Candidates)
+	if err != nil {
+		return err
+	}
+	if after.EventCount-before.EventCount != expected.TenantEvents || after.EventHighWater-before.EventHighWater != expected.TenantEvents ||
+		after.OutboxCount-before.OutboxCount != expected.ImportOutbox || after.VersionEntryCount-before.VersionEntryCount != expected.VersionEntries {
+		return fmt.Errorf("ordinary normalization delta does not match the sealed candidate plan: want %+v", expected)
 	}
 	if before.Board != after.Board || before.Journal != after.Journal || before.Spool != after.Spool || before.SpoolHighWater != after.SpoolHighWater {
 		return errors.New("ordinary normalization changed visible board, lifecycle journal, or capture spool")
@@ -599,6 +608,29 @@ func validateCanonicalNormalizationTransition(before, after canonicalBoardRepair
 		return errors.New("ordinary normalization changed sealed import inputs")
 	}
 	return nil
+}
+
+func canonicalExpectedOrdinaryNormalizationDelta(candidates []CanonicalRepairCandidate) (canonicalBoardRepairCountDelta, error) {
+	objects := map[string]struct{}{}
+	for _, candidate := range candidates {
+		switch candidate.Kind {
+		case "missing_event", "state_mismatch":
+			key := candidate.Family + "\x00" + candidate.ObjectID
+			if strings.TrimSpace(candidate.Family) == "" || strings.TrimSpace(candidate.ObjectID) == "" {
+				return canonicalBoardRepairCountDelta{}, errors.New("ordinary normalization candidate identity is incomplete")
+			}
+			objects[key] = struct{}{}
+		case "tombstone_required", "principal_missing_access", "principal_extra_access":
+			// These candidates do not append ordinary import events. The exact
+			// seven authorized board tombstones remain for the repair phase.
+		case "target_history_gap":
+			return canonicalBoardRepairCountDelta{}, errors.New("ordinary normalization cannot repair a canonical target history gap")
+		default:
+			return canonicalBoardRepairCountDelta{}, fmt.Errorf("unknown ordinary normalization candidate kind %q", candidate.Kind)
+		}
+	}
+	count := len(objects)
+	return canonicalBoardRepairCountDelta{TenantEvents: int64(count), ImportOutbox: int64(count), VersionEntries: count}, nil
 }
 
 func validateCanonicalRepairTransition(before, after canonicalBoardRepairProof, targets []canonicalBoardRepairTarget) error {
@@ -653,11 +685,13 @@ func validateCanonicalNormalizationReceiptContract(receipt canonicalBoardNormali
 	if err := validateCanonicalRepairStateSeal(receipt.AfterState); err != nil {
 		return err
 	}
-	if receipt.Delta != (canonicalBoardRepairCountDelta{TenantEvents: 2, ImportOutbox: 2, VersionEntries: 2}) ||
-		receipt.AfterState.TenantEventCount-receipt.BeforeState.TenantEventCount != 2 ||
-		receipt.AfterState.ImportOutboxCount-receipt.BeforeState.ImportOutboxCount != 2 ||
-		receipt.AfterState.VersionEntryCount-receipt.BeforeState.VersionEntryCount != 2 {
-		return errors.New("normalization receipt does not prove exact +2/+2/+2 counts")
+	if receipt.Delta.TenantEvents < 0 || receipt.Delta.ImportOutbox < 0 || receipt.Delta.VersionEntries < 0 ||
+		receipt.Delta.ImportOutbox != receipt.Delta.TenantEvents || int64(receipt.Delta.VersionEntries) != receipt.Delta.TenantEvents ||
+		receipt.AfterState.TenantEventCount-receipt.BeforeState.TenantEventCount != receipt.Delta.TenantEvents ||
+		receipt.AfterState.EventHighWater-receipt.BeforeState.EventHighWater != receipt.Delta.TenantEvents ||
+		receipt.AfterState.ImportOutboxCount-receipt.BeforeState.ImportOutboxCount != receipt.Delta.ImportOutbox ||
+		receipt.AfterState.VersionEntryCount-receipt.BeforeState.VersionEntryCount != receipt.Delta.VersionEntries {
+		return errors.New("normalization receipt delta is not exact, balanced, and self-consistent")
 	}
 	if receipt.BeforeState.Board != receipt.AfterState.Board || receipt.BeforeState.Journal != receipt.AfterState.Journal ||
 		receipt.BeforeState.Spool != receipt.AfterState.Spool || receipt.BeforeState.CaptureSpoolHighWater != receipt.AfterState.CaptureSpoolHighWater ||
@@ -1293,7 +1327,7 @@ func runCanonicalBoardNormalizationCLI(ctx context.Context, inputPath, inputSHA,
 		if observeErr != nil {
 			return observeErr
 		}
-		return validateExistingCanonicalBoardNormalizationReceipt(existing, input, strings.ToLower(inputSHA), canonicalRepairProofFingerprint(proof))
+		return validateExistingCanonicalBoardNormalizationReceipt(existing, input, strings.ToLower(inputSHA), canonicalRepairProofFingerprint(proof), beforeObservation.Candidates)
 	}
 	proof, err := engine.Observe(ctx)
 	if err != nil {
@@ -1312,6 +1346,9 @@ func runCanonicalBoardNormalizationCLI(ctx context.Context, inputPath, inputSHA,
 	receipt.BeforeObservationSHA256, receipt.CompletedAt = input.BeforeObservation.SHA256, time.Now().UTC()
 	if err := validateCanonicalNormalizationReceiptContract(receipt); err != nil {
 		return fmt.Errorf("normalization completed without an exact receipt contract; cold restore required: %w", err)
+	}
+	if err := validateCanonicalNormalizationReceiptExpectedDelta(receipt, beforeObservation.Candidates); err != nil {
+		return fmt.Errorf("normalization completed with a delta outside the sealed observation; cold restore required: %w", err)
 	}
 	if err := writeCanonicalBoardNormalizationReceipt(receiptPath, &receipt); err != nil {
 		return fmt.Errorf("normalization completed but receipt seal failed; cold restore required: %w", err)
@@ -1352,8 +1389,11 @@ func validateCanonicalBoardNormalizationInput(input canonicalBoardNormalizationI
 	return nil
 }
 
-func validateExistingCanonicalBoardNormalizationReceipt(receipt canonicalBoardNormalizationReceipt, input canonicalBoardNormalizationInput, inputSHA, liveFingerprint string) error {
+func validateExistingCanonicalBoardNormalizationReceipt(receipt canonicalBoardNormalizationReceipt, input canonicalBoardNormalizationInput, inputSHA, liveFingerprint string, beforeCandidates []CanonicalRepairCandidate) error {
 	if err := validateCanonicalNormalizationReceiptContract(receipt); err != nil {
+		return err
+	}
+	if err := validateCanonicalNormalizationReceiptExpectedDelta(receipt, beforeCandidates); err != nil {
 		return err
 	}
 	if receipt.Schema != canonicalBoardNormalizationReceiptSchema || receipt.Status != "complete" || receipt.ReleaseCommit != input.ReleaseCommit ||
@@ -1365,6 +1405,17 @@ func validateExistingCanonicalBoardNormalizationReceipt(receipt canonicalBoardNo
 		receipt.LifecycleAppendCount != 0 || receipt.JournalBefore != receipt.JournalAfter || !receipt.ExactTerminalSeven || !receipt.PrincipalParity ||
 		!receipt.ProjectionReplayValid || !receipt.FullZeroDeltaSecondReplay || receipt.CompletedAt.IsZero() {
 		return errors.New("existing normalization receipt is incomplete or does not match live normalized state")
+	}
+	return nil
+}
+
+func validateCanonicalNormalizationReceiptExpectedDelta(receipt canonicalBoardNormalizationReceipt, beforeCandidates []CanonicalRepairCandidate) error {
+	expected, err := canonicalExpectedOrdinaryNormalizationDelta(beforeCandidates)
+	if err != nil {
+		return err
+	}
+	if receipt.Delta != expected {
+		return fmt.Errorf("normalization receipt delta %+v does not match sealed candidates %+v", receipt.Delta, expected)
 	}
 	return nil
 }

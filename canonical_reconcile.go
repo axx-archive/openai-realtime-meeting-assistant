@@ -57,6 +57,14 @@ type CanonicalReconcileOptions struct {
 	TestedPrincipals []string
 }
 
+// Queue files are a current work index, not the authority for deleting durable
+// job history. A completed job may leave the queue while its canonical event,
+// grants, and outcome remain intentionally retained. Current queue entries must
+// still exist in canonical state with exact state and ACL parity.
+func canonicalRetainsTargetWithoutSource(family string) bool {
+	return family == "queue_job"
+}
+
 func BuildCanonicalParitySnapshot(objects []CanonicalImportedObject) CanonicalParitySnapshot {
 	snapshot := CanonicalParitySnapshot{Families: map[string]CanonicalParitySet{}, Principals: map[string]map[string]CanonicalParitySet{}}
 	byFamily := map[string][]CanonicalImportedObject{}
@@ -217,6 +225,9 @@ func ReconcileCanonicalPlanWithOptions(ctx context.Context, source CanonicalImpo
 		if _, ok := sourceByKey[key]; ok {
 			continue
 		}
+		if canonicalRetainsTargetWithoutSource(event.AggregateType) {
+			continue
+		}
 		journalKey := event.AggregateType + ":" + event.AggregateID
 		report.Candidates = append(report.Candidates, CanonicalRepairCandidate{Family: event.AggregateType, ObjectID: event.AggregateID, Kind: "tombstone_required", StateDigest: eventPayloadStateDigest(event), TargetVersion: event.AggregateVersion, ConfirmedByJournal: journaled[journalKey]})
 	}
@@ -232,7 +243,7 @@ func ReconcileCanonicalPlanWithOptions(ctx context.Context, source CanonicalImpo
 		}
 		return report.Candidates[i].Principal < report.Candidates[j].Principal
 	})
-	report.Diverged = len(report.Candidates) > 0 || !report.PrincipalParityProven || !paritySnapshotsEqual(report.Source, report.Target)
+	report.Diverged = len(report.Candidates) > 0 || !report.PrincipalParityProven || !paritySnapshotsCompatible(report.Source, report.Target)
 	return report, nil
 }
 
@@ -247,26 +258,70 @@ func eventPayloadStateDigest(event CanonicalEvent) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func paritySnapshotsEqual(left, right CanonicalParitySnapshot) bool {
-	if len(left.Families) != len(right.Families) || len(left.Principals) != len(right.Principals) {
-		return false
-	}
+func paritySnapshotsCompatible(left, right CanonicalParitySnapshot) bool {
 	for family, leftSet := range left.Families {
 		rightSet, ok := right.Families[family]
-		if !ok || leftSet.Count != rightSet.Count || leftSet.Checksum != rightSet.Checksum {
+		if !ok {
+			return false
+		}
+		if canonicalRetainsTargetWithoutSource(family) {
+			if !canonicalParityIDsSubset(leftSet.IDs, rightSet.IDs) {
+				return false
+			}
+		} else if leftSet.Count != rightSet.Count || leftSet.Checksum != rightSet.Checksum {
+			return false
+		}
+	}
+	for family := range right.Families {
+		if _, ok := left.Families[family]; !ok && !canonicalRetainsTargetWithoutSource(family) {
 			return false
 		}
 	}
 	for principal, leftFamilies := range left.Principals {
 		rightFamilies, ok := right.Principals[principal]
-		if !ok || len(leftFamilies) != len(rightFamilies) {
+		if !ok {
 			return false
 		}
 		for family, leftSet := range leftFamilies {
 			rightSet, ok := rightFamilies[family]
-			if !ok || leftSet.Count != rightSet.Count || leftSet.Checksum != rightSet.Checksum {
+			if !ok {
 				return false
 			}
+			if canonicalRetainsTargetWithoutSource(family) {
+				if !canonicalParityIDsSubset(leftSet.IDs, rightSet.IDs) {
+					return false
+				}
+			} else if leftSet.Count != rightSet.Count || leftSet.Checksum != rightSet.Checksum {
+				return false
+			}
+		}
+		for family := range rightFamilies {
+			if _, ok := leftFamilies[family]; !ok && !canonicalRetainsTargetWithoutSource(family) {
+				return false
+			}
+		}
+	}
+	for principal, rightFamilies := range right.Principals {
+		if _, ok := left.Principals[principal]; ok {
+			continue
+		}
+		for family := range rightFamilies {
+			if !canonicalRetainsTargetWithoutSource(family) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func canonicalParityIDsSubset(left, right []string) bool {
+	rightIDs := make(map[string]struct{}, len(right))
+	for _, id := range right {
+		rightIDs[id] = struct{}{}
+	}
+	for _, id := range left {
+		if _, ok := rightIDs[id]; !ok {
+			return false
 		}
 	}
 	return true

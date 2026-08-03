@@ -138,7 +138,11 @@ func TestCanonicalBoardNormalizationConvergesWithoutLifecycleAppendAndFullSecond
 		terminal = append(terminal, repairCandidate(target))
 	}
 	beforeCandidates := append([]CanonicalRepairCandidate(nil), terminal...)
-	beforeCandidates = append(beforeCandidates, CanonicalRepairCandidate{Family: "board_card", ObjectID: targets[0].ObjectID, Kind: "principal_missing_access", Principal: "user:member@example.com"})
+	beforeCandidates = append(beforeCandidates,
+		CanonicalRepairCandidate{Family: "memory", ObjectID: "ordinary-missing-1", Kind: "missing_event"},
+		CanonicalRepairCandidate{Family: "notification", ObjectID: "ordinary-missing-2", Kind: "missing_event"},
+		CanonicalRepairCandidate{Family: "board_card", ObjectID: targets[0].ObjectID, Kind: "principal_missing_access", Principal: "user:member@example.com"},
+	)
 	before := repairProof(beforeCandidates, 100)
 	converged := repairProof(terminal, 102)
 	input := canonicalBoardNormalizationInput{BeforeFingerprintSHA256: canonicalRepairProofFingerprint(before), MaxApplyPasses: 3}
@@ -158,7 +162,12 @@ func TestCanonicalBoardNormalizationRefusesChangedStartAndSecondReplayDrift(t *t
 	for _, target := range targets {
 		terminal = append(terminal, repairCandidate(target))
 	}
-	before := repairProof(terminal, 100)
+	beforeCandidates := append([]CanonicalRepairCandidate(nil), terminal...)
+	beforeCandidates = append(beforeCandidates,
+		CanonicalRepairCandidate{Family: "memory", ObjectID: "ordinary-missing-1", Kind: "missing_event"},
+		CanonicalRepairCandidate{Family: "notification", ObjectID: "ordinary-missing-2", Kind: "state_mismatch"},
+	)
+	before := repairProof(beforeCandidates, 100)
 	changed := before
 	changed.DatabaseSHA256 = strings.Repeat("6", 64)
 	engine := &fakeCanonicalBoardRepairEngine{proofs: []canonicalBoardRepairProof{before}}
@@ -876,7 +885,10 @@ func TestCanonicalRepairExactDeltaAndTimestampContractsRejectNearMisses(t *testi
 	if err := validateCanonicalRepairTransition(before, stale, targets); err == nil {
 		t.Fatal("repair accepted a journal append before observed absence")
 	}
-	normalBefore := repairProof(append(candidates, CanonicalRepairCandidate{Family: "memory", ObjectID: "extra", Kind: "missing_event"}), 50)
+	normalBefore := repairProof(append(candidates,
+		CanonicalRepairCandidate{Family: "memory", ObjectID: "extra-1", Kind: "missing_event"},
+		CanonicalRepairCandidate{Family: "notification", ObjectID: "extra-2", Kind: "state_mismatch"},
+	), 50)
 	normalAfter := repairProof(candidates, 52)
 	if err := validateCanonicalNormalizationTransition(normalBefore, normalAfter); err != nil {
 		t.Fatal(err)

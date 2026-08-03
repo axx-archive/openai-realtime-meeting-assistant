@@ -145,6 +145,40 @@ func TestCanonicalReconcilerReportsMissingWithoutWriting(t *testing.T) {
 	}
 }
 
+func TestCanonicalReconcilerRetainsHistoricalQueueJobsAbsentFromWorkIndex(t *testing.T) {
+	paths := canonicalImportFixture(t)
+	plan, registry := buildCanonicalFixturePlan(t, paths, filepath.Join(t.TempDir(), "versions.json"))
+	store := NewMemoryCanonicalEventStore(registry)
+	if err := plan.Apply(context.Background(), store); err != nil {
+		t.Fatal(err)
+	}
+	active := plan
+	active.Objects = nil
+	active.Events = nil
+	removed := 0
+	for index, object := range plan.Objects {
+		if object.Family == "queue_job" {
+			removed++
+			continue
+		}
+		active.Objects = append(active.Objects, object)
+		active.Events = append(active.Events, plan.Events[index])
+	}
+	if removed == 0 {
+		t.Fatal("fixture did not contain a queue job")
+	}
+	report, err := ReconcileCanonicalPlanWithOptions(context.Background(), active, store, CanonicalReconcileOptions{ACL: canonicalParityACLFromPlan(active)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Diverged || len(report.Candidates) != 0 {
+		t.Fatalf("completed queue history was treated as a source-authorized deletion: diverged=%v candidates=%+v", report.Diverged, report.Candidates)
+	}
+	if report.Target.Families["queue_job"].Count != removed || report.Source.Families["queue_job"].Count != 0 {
+		t.Fatalf("queue history/current-index distinction was not preserved: source=%+v target=%+v", report.Source.Families["queue_job"], report.Target.Families["queue_job"])
+	}
+}
+
 func TestCanonicalReconcilerTargetVisibilityComesFromACLResolver(t *testing.T) {
 	paths := canonicalImportFixture(t)
 	plan, registry := buildCanonicalFixturePlan(t, paths, filepath.Join(t.TempDir(), "versions.json"))

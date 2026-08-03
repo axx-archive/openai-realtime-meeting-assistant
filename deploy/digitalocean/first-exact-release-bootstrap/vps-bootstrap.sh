@@ -816,11 +816,14 @@ assert_canonical_normalization_receipt() {
     .afterCandidateCount==7 and (.afterCandidateSha256|test("^[0-9a-f]{64}$")) and
     (.applyPasses|type=="number" and .>=2 and .<=9 and floor==.) and .lifecycleAppendCount==0 and
     (.beforeState|stateSeal) and (.afterState|stateSeal) and
-    .delta=={tenantEvents:2,importOutbox:2,versionEntries:2} and
-    (.afterState.tenantEventCount-.beforeState.tenantEventCount)==2 and
-    (.afterState.eventHighWater-.beforeState.eventHighWater)==2 and
-    (.afterState.importOutboxCount-.beforeState.importOutboxCount)==2 and
-    (.afterState.versionEntryCount-.beforeState.versionEntryCount)==2 and
+    ([ $beforeObservation[0].candidates[] |
+       select(.Kind=="missing_event" or .Kind=="state_mismatch") |
+       (.Family+"\u0000"+.ObjectID) ] | unique | length) as $ordinaryDelta and
+    .delta=={tenantEvents:$ordinaryDelta,importOutbox:$ordinaryDelta,versionEntries:$ordinaryDelta} and
+    (.afterState.tenantEventCount-.beforeState.tenantEventCount)==$ordinaryDelta and
+    (.afterState.eventHighWater-.beforeState.eventHighWater)==$ordinaryDelta and
+    (.afterState.importOutboxCount-.beforeState.importOutboxCount)==$ordinaryDelta and
+    (.afterState.versionEntryCount-.beforeState.versionEntryCount)==$ordinaryDelta and
     .beforeState.board==.afterState.board and .beforeState.journal==.afterState.journal and
     .beforeState.spool==.afterState.spool and
     .beforeState.captureSpoolHighWater==.afterState.captureSpoolHighWater and
