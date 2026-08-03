@@ -245,6 +245,8 @@ assert.match(bootstrap, /exited zero without an authoritative exact receipt; std
 assert.match(bootstrap, /capture_stable_canonical_repair_fingerprint[\s\S]*canonical-repair-execution-started[\s\S]*capture_stable_canonical_repair_fingerprint/, 'repair must record stable full pre/post fingerprints around execution')
 assert.match(bootstrap, /revalidate_completed_canonical_repair\(\) \([\s\S]*completed-revalidation-before-fingerprint[\s\S]*create_canonical_repair_container[\s\S]*capture_stable_canonical_repair_fingerprint "\$pgc" "\$current_after"/, 'completed repair resume must invoke exact A and prove unchanged live post-state')
 assert.match(common, /docker_volume_tree_sha256 digitalocean_render_queue[\s\S]*renderQueueSha256/, 'stable repair fingerprints must include the complete render queue volume')
+assert.match(common, /canonical_repair_checkpoint_high_water\(\)[\s\S]*\.high_water/, 'stable repair fingerprints must parse the persisted snake_case checkpoint high-water field')
+assert.doesNotMatch(common, /jq -er '\.highWater[^']*' "\$checkpoint"/, 'repair fingerprints must not parse projected camelCase status from the persisted checkpoint')
 assert.match(bootstrap, /\.environment=="production_protected_maintenance"[\s\S]*\.candidateFingerprintSha256==\$manifest\[0\]\.candidateSetSha256[\s\S]*\.candidateCount==7/, 'accepted receipt must reproduce the private exact-seven production candidate fingerprint')
 assert.match(bootstrap, /legacy service identity or protected-volume mount inventory differs[\s\S]*legacy-container-authority\.tsv/, 'backup must bind exact legacy services, IDs, images, and protected mounts')
 for (const exactMount of [

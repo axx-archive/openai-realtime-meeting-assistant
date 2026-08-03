@@ -860,7 +860,7 @@ capture_canonical_repair_fingerprint() {
   checkpoint="$meeting_mount/canonical/reconcile-checkpoint.json"
   test -f "$checkpoint" && test ! -L "$checkpoint" || die 'canonical reconcile checkpoint is missing or unsafe'
   checkpoint_sha=$(sha256sum "$checkpoint" | awk '{print $1}')
-  checkpoint_high_water=$(jq -er '.highWater | select(type=="number" and .>=0 and floor==.)' "$checkpoint")
+  checkpoint_high_water=$(canonical_repair_checkpoint_high_water "$checkpoint")
   for digest in "$data_sha" "$codex_sha" "$render_sha" "$usage_sha" "$spool_sha" "$database_sha" "$checkpoint_sha"; do
     require_sha256 "$digest"
   done
@@ -874,6 +874,14 @@ capture_canonical_repair_fingerprint() {
     '{schema:$schema,dataSha256:$dataSha256,codexQueueSha256:$codexQueueSha256,renderQueueSha256:$renderQueueSha256,usageLedgerSha256:$usageLedgerSha256,canonicalSpoolSha256:$canonicalSpoolSha256,databaseSha256:$databaseSha256,checkpointSha256:$checkpointSha256,checkpointHighWater:$checkpointHighWater,databaseWatermarks:$databaseWatermarks}' \
     >"$output"
   chmod 600 "$output"
+}
+
+canonical_repair_checkpoint_high_water() {
+  local checkpoint=$1
+  # canonicalReconcileCheckpoint is the persisted data contract. Its JSON
+  # field is snake_case; the camelCase spelling belongs only to projected
+  # runtime status and must never be used to parse the protected checkpoint.
+  jq -er '.high_water | select(type=="number" and .>=0 and floor==.)' "$checkpoint"
 }
 
 capture_stable_canonical_repair_fingerprint() {

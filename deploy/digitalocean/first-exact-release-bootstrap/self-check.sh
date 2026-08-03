@@ -30,6 +30,13 @@ done
   test "$(canonical_utc_timestamp_value '2026-08-03T11:59:51.000000000Z')" = '2026-08-03T11:59:51Z'
   ! (canonical_utc_timestamp_value '2026-08-03T11:59:51.123Z') 2>/dev/null
 
+  checkpoint_fixture=$(mktemp -d)
+  printf '%s\n' '{"format":1,"high_water":8532}' >"$checkpoint_fixture/exact.json"
+  test "$(canonical_repair_checkpoint_high_water "$checkpoint_fixture/exact.json")" -eq 8532
+  printf '%s\n' '{"format":1,"highWater":8532}' >"$checkpoint_fixture/camel-status-shape.json"
+  ! (canonical_repair_checkpoint_high_water "$checkpoint_fixture/camel-status-shape.json") 2>/dev/null
+  rm -rf "$checkpoint_fixture"
+
   topology_fixture=$(mktemp -d)
   trap 'rm -rf "$topology_fixture"' EXIT
   jq -n '
