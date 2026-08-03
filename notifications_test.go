@@ -372,6 +372,25 @@ func TestWebsocketTargetedNotificationScopedToRecipientSession(t *testing.T) {
 	writeNativeWebsocketEvent(t, tylerConn, "participant", map[string]any{})
 	waitForKanbanEvent(t, tylerConn, "access_granted", 5*time.Second)
 	writeNativeWebsocketEvent(t, tylerConn, "media_ready", map[string]any{})
+	joinDeadline := time.Now().Add(5 * time.Second)
+	for {
+		listLock.RLock()
+		joined := false
+		for _, peer := range peerConnections {
+			if peer.sessionEmail == "tyler@shareability.com" {
+				joined = true
+				break
+			}
+		}
+		listLock.RUnlock()
+		if joined {
+			break
+		}
+		if time.Now().After(joinDeadline) {
+			t.Fatal("Tyler's media_ready never entered the broadcast pool")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	targeted, err := kanbanApp.createNotification("tom@shareability.com", "task", "just for Tom", "", "", "", false)
 	if err != nil {

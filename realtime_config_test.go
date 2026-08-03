@@ -1219,16 +1219,16 @@ func TestTelemetryLaneSnapshotReportsLaneModels(t *testing.T) {
 	t.Setenv("OPENAI_REALTIME_TRANSCRIPTION_MODEL", "")
 
 	snapshot := telemetryLaneSnapshot()
-	if snapshot["realtime_model"] != "gpt-realtime-2" || snapshot["realtime_reasoning_effort"] != "high" {
+	if snapshot["realtime_model"] != "gpt-realtime-2.1" || snapshot["realtime_reasoning_effort"] != "high" {
 		t.Fatalf("realtime config wrong: %v", snapshot)
 	}
 	if snapshot["transcription_lane_model"] != "gpt-realtime-whisper" || snapshot["transcription_lane_vocab"] != false {
 		t.Fatalf("whisper lane must report vocab OFF: %v", snapshot)
 	}
-	if snapshot["voice_transcription_model"] != "gpt-4o-transcribe" || snapshot["voice_transcription_vocab"] != true {
+	if snapshot["voice_transcription_model"] != "gpt-live-transcribe" || snapshot["voice_transcription_vocab"] != true {
 		t.Fatalf("voice transcription lane wrong: %v", snapshot)
 	}
-	if snapshot["private_voice_model"] != "gpt-realtime-2" {
+	if snapshot["private_voice_model"] != "gpt-realtime-2.1" {
 		t.Fatalf("private voice model should mirror the shared dial today: %v", snapshot)
 	}
 }
@@ -1263,7 +1263,7 @@ func TestRealtimeResponseDoneRecordsVoiceRoomUsage(t *testing.T) {
 		t.Fatalf("expected 1 usage row, got %d", len(rows))
 	}
 	row := rows[0]
-	if row["seat"] != seatVoiceRoom || row["provider"] != providerOpenAI || row["model"] != "gpt-realtime-2" {
+	if row["seat"] != seatVoiceRoom || row["provider"] != providerOpenAI || row["model"] != "gpt-realtime-2.1" {
 		t.Fatalf("wrong identity fields: %v", row)
 	}
 	if row["room_id"] != officeRoomID {
@@ -1280,7 +1280,7 @@ func TestRealtimeResponseDoneRecordsVoiceRoomUsage(t *testing.T) {
 		t.Fatalf("output split wrong: %v", row)
 	}
 	if _, present := row["price_missing"]; present {
-		t.Fatalf("gpt-realtime-2 should be priced: %v", row)
+		t.Fatalf("gpt-realtime-2.1 should be priced: %v", row)
 	}
 
 	// A turn without usage records nothing — no invented numbers.
@@ -1314,7 +1314,7 @@ func TestVoicePeerTranscriptionSegmentsFeedLedgerAndFunnel(t *testing.T) {
 		t.Fatalf("expected 1 usage row, got %d", len(usageRows))
 	}
 	row := usageRows[0]
-	if row["seat"] != seatTranscriptionSession || row["model"] != "gpt-4o-transcribe" {
+	if row["seat"] != seatTranscriptionSession || row["model"] != "gpt-live-transcribe" {
 		t.Fatalf("wrong transcription usage identity: %v", row)
 	}
 	if row["input_tokens"].(float64) != 12 || row["audio_input_tokens"].(float64) != 400 || row["output_tokens"].(float64) != 30 {

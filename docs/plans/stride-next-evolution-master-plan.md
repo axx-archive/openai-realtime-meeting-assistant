@@ -1,20 +1,17 @@
 # STRIDE Next Evolution — Master Architecture and Execution Ledger
 
-**Status:** Active within E10 release integration. E1-E9 are
-`deterministic_verified` on a local, default-off candidate within their stated
-evidence classes; the final additive cross-surface/work-routing/relationship
-memory and chat-polish slice is passing its fresh local qualification matrix.
-Quota was confirmed and the recorded paid-call authorizations were consumed:
-bounded access and file-transcription checks passed, one synthetic Realtime
-`gpt-transcribe` committed-turn contract passed, and the separately authorized
-Scout retry failed closed after partial generation. No lane is
-`provider_qualified`. The user has now explicitly authorized the reviewed
-schema migrations, Git integration to `axx/main`, exact-release VPS cutover,
-and the next iOS TestFlight build after local gates pass. That release authority
-does not authorize another provider call, enable a still-unqualified model or
-agent route, waive consent/custody or human-approval boundaries, rename the
-repository/application, or relabel missing real-corpus, physical-device, HA,
-or independent-custody evidence as complete.
+**Status:** Active Build 31 close-out. The Scout voice, dictation, typed-thread,
+long-thread performance, explicit invited-room-participant, and E10 security
+foundations are integrated on local `main`. The user has explicitly authorized
+the reviewed Git push, exact-release VPS cutover, required migrations, and the
+next internal TestFlight build after the deterministic gates pass. Scout may be
+invited as a visible, attributed room participant only under current room,
+media-generation, audience, and unanimous capture/transcription/model-analysis
+consent. Meeting transcription remains independent and cannot silently invite
+Scout. Marketplace employee audio remains default-off until an exact signed
+provider/model/voice/config qualification and external anchor are available.
+Release authority does not waive canonical-repair confirmation, consent,
+custody, physical-device, HA/DR, pilot, soak, or independent evidence gates.
 
 **Date:** 2026-07-28
 
@@ -37,6 +34,49 @@ or independent-custody evidence as complete.
 External reference, adopted selectively rather than introduced as a runtime dependency: [Block Buzz at audited commit `90e058e`](https://github.com/block/buzz/tree/90e058ebf68137e048a409aec6616519379ff726). STRIDE adopts the useful separation of portable persona definition, runtime identity, and team membership; it does not adopt Buzz's collaboration substrate, permission defaults, prompt-only delegation, or agent-authored memory as organizational truth.
 
 Older model recommendations are historical baselines, not current authority. The current official model references for this plan are [GPT-5.6](https://developers.openai.com/api/docs/guides/latest-model.md), [GPT-Realtime-2.1](https://developers.openai.com/api/docs/models/gpt-realtime-2.1), [GPT Transcribe](https://developers.openai.com/api/docs/models/gpt-transcribe), and [GPT Live Transcribe](https://developers.openai.com/api/docs/models/gpt-live-transcribe).
+
+### Active Build 31 release checkpoint — 2026-08-02
+
+- The mobile rich-media feed now uses content-family recycle pools, one
+  thread-owned long-message sheet, recycling-safe preview state, stable nested
+  mapping keys, early image resizing, and a bounded recycle pool. The 264-item
+  simulator stress fixture with large images and link previews scrolls without
+  swaps, blank cells, jumps, or crashes; final acceptance must be repeated on
+  the physical Build 31 binary.
+- Scout no longer launches automatically when a human enters room media. An
+  active member explicitly invites or dismisses him from Agent Team. His
+  colored Newton's-cradle tile is a first-class stage participant, reflects
+  listening/thinking/talking/degraded state, and his provider output is stored
+  once as durable transcript speech attributed to Scout rather than re-entering
+  STT as human audio.
+- Room transcription and invited agents are separate lanes. Transcription may
+  run for a fully consented sitting while Scout is absent. Inviting Scout also
+  requires an unchanged audience and every participant's audio-capture,
+  transcription, and model-analysis consent; any relevant authority change
+  synchronously revokes the invitation.
+- The core availability route is OpenAI: `gpt-realtime-2.1` for Scout voice,
+  `gpt-live-transcribe` for low-latency Realtime deltas, `gpt-transcribe` for
+  composer dictation and authoritative committed meeting turns,
+  `gpt-5.6-terra` for typed Scout/routing, and `gpt-5.6-luna` for bounded
+  extraction. `gpt-5.6-sol` remains the orchestration and independent-review
+  seat at an explicitly selected reasoning level.
+- The E10 convergence removes alternate specialist launch paths, owns request
+  context at one boundary, binds signed provider/model/voice/config evidence,
+  fixes qualification expiry, and fences the externally anchored ledger head
+  with compare-and-swap semantics. Deterministic code convergence is not a paid
+  provider qualification or employee-agent activation receipt.
+- Render subprocesses now run in a dedicated process group and cancellation
+  kills the full Chromium tree. This closes the legacy canary-timeout leak that
+  exhausted the production render worker's PID budget and is a release-health
+  prerequisite rather than a product-surface expansion.
+- Remaining release order is intentionally short: finish the combined normal,
+  race, vet, mobile and rendered gates; create the sealed A/B checkpoint; run
+  the manifest-confirmed canonical ceremony; activate and verify exact B on the
+  VPS without touching the production data volume; build/submit/verify Build
+  31; then complete physical rich-feed, room lifecycle, Scout invitation,
+  dictation, and typed-thread acceptance. External employee qualification,
+  real WebRTC/TURN breadth, ten reviewed pilots, the 24-hour/ten-sitting soak,
+  immutable offsite backup, HA/DR, and anchor custody remain separate gates.
 
 ### Active execution checkpoint — 2026-07-29 through 2026-08-01
 

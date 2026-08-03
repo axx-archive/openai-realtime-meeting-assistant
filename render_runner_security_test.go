@@ -8,8 +8,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestRenderPrintServerConfinesMaliciousDocumentToOpaqueHTTPOrigin(t *testing.T) {
@@ -119,6 +122,40 @@ func TestRenderSubprocessDoesNotInheritContainerSecrets(t *testing.T) {
 		if !strings.Contains(stdout, required) {
 			t.Errorf("minimal render subprocess environment missing %q: %s", required, stdout)
 		}
+	}
+}
+
+func TestRenderSubprocessTimeoutKillsTheEntireProcessGroup(t *testing.T) {
+	workDir := t.TempDir()
+	pidPath := filepath.Join(workDir, "child.pid")
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+
+	_, _, err := runRenderExecCommandContext(ctx, "/bin/sh", []string{"-c", "sleep 30 & child=$!; echo $child > child.pid; wait"}, workDir)
+	if err == nil || !strings.Contains(err.Error(), "timed out or was canceled") {
+		t.Fatalf("timeout error=%v", err)
+	}
+	raw, err := os.ReadFile(pidPath)
+	if err != nil {
+		t.Fatalf("read child pid: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || pid <= 0 {
+		t.Fatalf("child pid=%q err=%v", raw, err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		err = syscall.Kill(pid, 0)
+		if err == syscall.ESRCH {
+			break
+		}
+		if err != nil {
+			t.Fatalf("probe child process %d: %v", pid, err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("render timeout left child process %d alive", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

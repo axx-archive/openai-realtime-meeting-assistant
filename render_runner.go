@@ -42,6 +42,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -807,6 +808,24 @@ func executeRenderExportPDF(ctx context.Context, cfg renderExecConfig, job rende
 func runRenderExecCommandContext(ctx context.Context, bin string, args []string, dir string) (string, string, error) {
 	command := exec.CommandContext(ctx, bin, args...)
 	command.Dir = dir
+	// Chromium owns a process tree. Killing only the browser parent on timeout
+	// leaves its zygote/renderer children behind until the container exhausts
+	// its PID budget. Give every render invocation a fresh process group and
+	// make context cancellation terminate that entire group.
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	command.Cancel = func() error {
+		if command.Process == nil {
+			return nil
+		}
+		if err := syscall.Kill(-command.Process.Pid, syscall.SIGKILL); err != nil {
+			if err == syscall.ESRCH {
+				return os.ErrProcessDone
+			}
+			return err
+		}
+		return nil
+	}
+	command.WaitDelay = 2 * time.Second
 	// Do not let Chromium or pdftoppm inherit the callback bearer token, API
 	// keys, database URLs, or any other container environment. The allowlist is
 	// intentionally static and contains no credentials.

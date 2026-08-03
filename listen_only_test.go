@@ -450,17 +450,21 @@ func TestOfficeRealtimeIsLazyAndNeverStartsForListenOnly(t *testing.T) {
 		t.Fatalf("listen-only office admission created a realtime peer (dials=%d)", dials.Load())
 	}
 
-	// Full mode again: the first admission creates the peer and dials.
+	// Returning the room to full mode still does not invite Scout. Room media
+	// and meeting transcription are independent from the agent invitation.
 	if err := appRoomStore().revokeGuestLink(officeRoomID, linkID.ID); err != nil {
 		t.Fatalf("revoke office link: %v", err)
 	}
 	app.ensureRoomMedia(officeRoomID)
-	deadline := time.Now().Add(20 * time.Second)
-	for dials.Load() == 0 && time.Now().Before(deadline) {
-		time.Sleep(25 * time.Millisecond)
+	if dials.Load() != 0 {
+		t.Fatalf("full-mode office admission silently dialed Scout (dials=%d)", dials.Load())
 	}
-	if dials.Load() == 0 {
-		t.Fatal("full-mode office admission never dialed the realtime API")
+
+	// Give any accidental asynchronous auto-start a chance to surface. Explicit
+	// invitation behavior is covered by the room-agent authority tests.
+	time.Sleep(250 * time.Millisecond)
+	if dials.Load() != 0 {
+		t.Fatalf("full-mode office admission asynchronously dialed Scout (dials=%d)", dials.Load())
 	}
 }
 

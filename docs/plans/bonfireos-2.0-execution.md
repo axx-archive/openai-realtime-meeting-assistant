@@ -12,6 +12,34 @@ This is the durable resume ledger for the approved master plan. The master plan
 owns product and architecture decisions; this file owns current execution truth,
 dependencies, authority boundaries, rollback posture, and the next safe action.
 
+### Build 31 close-out addendum — 2026-08-02
+
+This addendum supersedes the older local/branch rows in §1 until the sealed A/B
+checkpoint assigns its final SHAs:
+
+- local `main` now contains the Apple-tier rich-thread recycling repair, the
+  explicit invited Scout room participant with colored cradle and attributed
+  transcript, and the converged E10 security foundation. `stride-site/` remains
+  separately owned and untracked;
+- remote `axx/main` still points to Build 30's `51e39499da46d13035fd7d51dcb5b773aa6ffcd2`;
+- the production app health endpoint is healthy and traffic-ready on retained exact release
+  `b09e4b2aaa905958cbd25d39876a881f01005243`, advertises
+  `gpt-realtime-2.1`, `gpt-live-transcribe`, `gpt-transcribe`, Terra and Luna,
+  and remains capability-degraded pending the canonical cutover and fresh
+  runtime evidence;
+- EAS Build 30 `e33c1f05-24c2-4df9-a653-e6559629aef6` is the newest finished
+  iOS artifact and the connected iPhone reports app build `30`. Its rich-media
+  scrolling failed physical acceptance; Build 31 is the replacement candidate;
+- the legacy render worker is unhealthy at `254/256` cgroup PIDs after timed-out
+  Chromium children survived their parents. The candidate kills the complete
+  render process group on cancellation and passes focused normal/race tests;
+- deterministic acceptance is the active gate. On success, seal/push A/B, run
+  the user-assisted canonical ceremony, activate exact B, verify public and
+  data integrity, then build/submit/verify and physically accept Build 31;
+- Scout ships in this release. Marketplace employee audio remains default-off
+  until exact signed provider/model/voice/config evidence, fixed-expiry status,
+  and the externally anchored CAS ledger head are qualified and in custody.
+
 ## 1. Current verified checkpoint
 
 | Surface | Exact state | Meaning |
