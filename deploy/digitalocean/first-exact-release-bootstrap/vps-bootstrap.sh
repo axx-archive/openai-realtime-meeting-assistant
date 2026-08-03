@@ -60,17 +60,26 @@ phase_start_next_ceremony() {
   test "$(stat -c %U:%G "$STATE_DIR")" = root:root && test "$(stat -c %a "$STATE_DIR")" = 700 \
     || die 'prior ceremony state directory is not exact root-private state'
   acquire_operator_lock
-  local old_a old_b old_bk archive_stamp archive_root archive_manifest archive_sha confirmation
+  local old_a old_b old_bk archive_stamp archive_root archive_manifest archive_sha confirmation prior_terminal_state unexpected_phases
   old_a=$(jq -er '.implementationCommit|select(type=="string" and test("^[0-9a-f]{40}$"))' "$STATE_FILE")
   old_b=$(jq -er '.checkpointCommit|select(type=="string" and test("^[0-9a-f]{40}$"))' "$STATE_FILE")
   old_bk=$(jq -er '.backupDir|select(type=="string" and startswith("/opt/meetingassist-backups/") and endswith("-first-exact-bootstrap"))' "$STATE_FILE")
   test "$old_a" != "$A" || test "$old_b" != "$B" || die 'next-ceremony rollover requires a different reviewed A/B pair'
   test -d "$old_bk" && test ! -L "$old_bk" && test "$(stat -c %U:%G "$old_bk")" = root:root && test "$(stat -c %a "$old_bk")" = 700 \
     || die 'prior ceremony backup is missing or not exact root-private state'
-  test -f "$STATE_DIR/phase-legacy-restored" && test -f "$STATE_DIR/phase-legacy-reopened" \
-    || die 'prior ceremony is not the exact restored-and-reopened terminal state'
-  test -f "$STATE_DIR/phase-public-open-attempted" \
-    || die 'prior restored legacy reopen lacks its irreversible public-open boundary marker'
+  if test -f "$STATE_DIR/phase-legacy-restored" && test -f "$STATE_DIR/phase-legacy-reopened"; then
+    test -f "$STATE_DIR/phase-public-open-attempted" \
+      || die 'prior restored legacy reopen lacks its irreversible public-open boundary marker'
+    prior_terminal_state=legacy_restored_and_reopened
+  elif test -f "$STATE_DIR/phase-built" && test -f "$STATE_DIR/phase-preflight"; then
+    unexpected_phases=$(find "$STATE_DIR" -maxdepth 1 -type f -name 'phase-*' \
+      ! -name phase-built ! -name phase-preflight -print -quit)
+    test -z "$unexpected_phases" \
+      || die 'prior pre-maintenance ceremony contains a post-preflight phase and cannot roll over'
+    prior_terminal_state=premaintenance_preflight_only
+  else
+    die 'prior ceremony is neither exact restored/reopened nor exact pre-maintenance preflight-only state'
+  fi
   test -z "$(find "$STATE_DIR" -type l -print -quit)" || die 'prior ceremony state contains a symlink'
   while IFS= read -r path; do
     test "$(stat -c %U:%G "$path")" = root:root && test "$(stat -c %a "$path")" = 700 \
@@ -128,10 +137,10 @@ phase_start_next_ceremony() {
   (cd "$archive_root" && sha256sum -c state-SHA256SUMS >/dev/null)
   archive_sha=$(sha256sum "$archive_manifest"|awk '{print $1}')
   jq -n --arg oldA "$old_a" --arg oldB "$old_b" --arg newA "$A" --arg newB "$B" \
-    --arg archive "$archive_sha" --arg completed "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+    --arg archive "$archive_sha" --arg terminal "$prior_terminal_state" --arg completed "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
       {schema:"bonfire.prior-ceremony-rollover.v1",status:"complete",priorImplementationCommit:$oldA,
        priorCheckpointCommit:$oldB,nextImplementationCommit:$newA,nextCheckpointCommit:$newB,
-       terminalState:"legacy_restored_and_reopened",stateArchiveManifestSha256:$archive,completedAt:$completed}
+       terminalState:$terminal,stateArchiveManifestSha256:$archive,completedAt:$completed}
     ' >"$archive_root/rollover-receipt.raw"
   write_self_digest_json "$archive_root/rollover-receipt.raw" "$archive_root/rollover-receipt.json"
   rm "$archive_root/rollover-receipt.raw"

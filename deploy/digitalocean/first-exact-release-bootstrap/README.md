@@ -112,8 +112,12 @@ do not overwrite or remove it. A new reviewed A/B plan must first run:
 ./vps-bootstrap.sh start-next-ceremony
 ```
 
-This path accepts only an exact prior `legacy-restored` plus
-`legacy-reopened` terminal state with the public-open boundary recorded. It
+This path accepts either an exact prior `legacy-restored` plus
+`legacy-reopened` terminal state with the public-open boundary recorded, or a
+strictly pre-maintenance state containing only successful build and preflight
+markers. The latter path is allowed only while the predecessor is still the
+unchanged, public, healthy six-service topology and no isolation, backup,
+normalization, repair, guard, network, render volume, or release ledger exists. It
 requires no release ledger/lock, guard, repair network/one-shot, render queue,
 profile, or maintenance hosts entry; requires the exact six restored legacy
 services running and healthy; and requires the literal new A/B confirmation.
