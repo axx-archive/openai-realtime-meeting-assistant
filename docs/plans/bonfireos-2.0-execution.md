@@ -18,18 +18,19 @@ dependencies, authority boundaries, rollback posture, and the next safe action.
 |---|---|---|
 | Local `main` | `9217dbf7a9f1a96ceed20f174fd2a9894daa29af` | Clean except separately owned untracked `stride-site/`. |
 | Remote `axx/main` | `9217dbf7a9f1a96ceed20f174fd2a9894daa29af` | Read-only remote refresh matches local `main`. No E10 or P0 branch is published. |
-| Production | `30eb8891dd74edda` | Live `/healthz` identity on 2026-08-02. This is the retained older release; the sealed canonical repair release has not been activated. |
-| Production health | Traffic-ready, capability-degraded | `/capabilities` reports `trafficReady:true`, `ok:false`; Scout is disconnected/degraded and STT is disconnected/stale since `2026-07-31T18:28:56Z`. Canonical shadow reconciliation is also unhealthy at dirty high-water `13560` versus reconciled `8532` with an idempotency-key conflict. Aggregate readiness is not acceptance. |
+| Production | `672df6b5f97778c2` | Live `/healthz` identity after the isolated Scout P0 hotfix. Production now advertises `gpt-realtime-2.1`, `gpt-live-transcribe`, and `gpt-transcribe`; the sealed canonical repair release has still not been activated. |
+| Production health | Traffic-ready, capability-degraded | `/capabilities` reports `trafficReady:true`, `ok:false`. Physical on-demand Scout voice and composer dictation succeeded, but the aggregate Scout/STT telemetry remains disconnected/degraded and STT retains the stale `2026-07-31T18:28:56Z` success marker; backup, brain, and recap evidence also remain degraded. Aggregate readiness is not acceptance. |
 | P0 branch | `/tmp/meetingassist-scout-p0`, `codex/scout-p0`, checkpoint `78b4d1cae287cc9bab9ab1a1e2ffa6022f8e2ee3` on base `9217dbf` | Isolated, committed deterministic candidate. It is not published, provider-qualified, physical-device accepted, merge-approved, or deployable yet. |
 | E10 integration | `/tmp/meetingassist-e10-integration`, `codex/e10-integration`, candidate `0783a1cf9c45c1e06e95e3b010c7eae055ef723d` on base `9217dbf` | Clean, committed security candidate. Focused normal/race, full repository, vet, diff, and independent critic gates pass. It is not published, externally provisioned, merge-approved, or deployable yet. |
-| Combined release candidate | `/tmp/meetingassist-stride-rc`, `codex/stride-release-candidate`, current code head `b358aa709968658243aff711480149025472a8ab` | Fresh isolated composition of the complete E10 chain plus Scout P0, the iOS 26 WebRTC camera crash guard, and the isolated dictation-route repair. The pre-dictation code head passed full Go, focused race, vet, mobile, native build, composition, and independent code-critic gates; the dictation delta separately passes repeated normal and race coverage. `main` has not moved. Physical room gestures and live Scout acceptance remain open. |
-| Specialist repair | `/tmp/meetingassist-e10-specialist`, `codex/e10-specialist`, base `0aa1b090687d7a5d9ed3c10c9d792ee9044a545c` | Nine tracked files contain preserved uncommitted removal of the legacy alternate join path and request-context leakage. |
-| Registry repair | `/tmp/meetingassist-e10-registry`, `codex/e10-registry`, base `1d2f55cfa86e1f155b7b14d06c5928379e2b1ea3` | Seven tracked files plus untracked `meeting_specialist_qualification_bridge.go` preserve signed-evidence binding, expiry, and external ledger-head/CAS work. |
+| Combined release candidate | `/tmp/meetingassist-stride-rc`, `codex/stride-release-candidate`, code head `294049af92c1458fc7fcd760c8c3d0dde294876c` | Frozen isolated composition of the complete E10 chain, Scout P0, the iOS 26 WebRTC camera crash guard, exact file-dictation routing and Scout vocative correction, private home-thread flow, mobile thread editing/renaming, and long-thread rendering hardening. Full normal/race/vet, 377 mobile tests, TypeScript, Expo Doctor 20/20, release-simulator rendering, and the 240-message `#team` stress pass are green. `main` has not moved. |
+| Specialist repair | `/tmp/meetingassist-e10-specialist`, `codex/e10-specialist`, base `0aa1b090687d7a5d9ed3c10c9d792ee9044a545c` | Ten tracked uncommitted files remain untouched as a superseded partial draft. Their reconciled authority contracts are already present in clean integration and the frozen candidate. |
+| Registry repair | `/tmp/meetingassist-e10-registry`, `codex/e10-registry`, base `1d2f55cfa86e1f155b7b14d06c5928379e2b1ea3` | Eight tracked files plus untracked `meeting_specialist_qualification_bridge.go` remain untouched as a superseded partial draft. Their signed-evidence, expiry, and external ledger-head/CAS contracts are already present in clean integration and the frozen candidate. |
 | Independent E10 verdict | `PASS` | No blocker, major, or minor finding remains in the committed E10 code checkpoint. External authority custody and activation remain separate default-off gates. |
 | TestFlight | Stride 1.0.0 Build 29 | A fresh read-only EAS list confirms Build 29 remains the newest EAS build: `7857b9b2-2de8-4248-b1c6-a50c54f6ca97`, `FINISHED`, from `97ff340097253ff3ad98481226f6159c3ce206ae`. Apple build `6a870589-8448-44fb-99d6-cea2f5a9ebb4` was last verified `VALID`, non-expired, and in internal `Team (Expo)`; external `Bonfire` excludes it. The connected handset now carries a locally signed release candidate over the same bundle ID, not the TestFlight binary. No Apple/TestFlight state changed and physical-device acceptance is still open. |
 
-No new migration, push, deployment, provider qualification, feature activation,
-or TestFlight upload is established by this checkpoint.
+No canonical repair, `main` push, migration, canonical release deployment,
+provider qualification, E10 activation, or TestFlight upload is established by
+this checkpoint.
 
 ## 2. Non-negotiable invariants
 
@@ -219,32 +220,31 @@ The final E10 checkpoint passed focused normal and race coverage, `go vet
 with the root package at 392.773 seconds. The independent critic returned
 `PASS`.
 
-The isolated combined code head through `4c56ca5` also passes a clean repository-wide
-`go test ./... -count=1 -timeout 20m` with the root package at 398.759 seconds,
-the combined focused race gate (24.274 seconds), `go vet ./...`, E10 internal
-packages, `git diff --check`, mobile dependency resolution and TypeScript, and
-all 369 mobile tests. The independent composition and crash-fix code critics
-returned `PASS` after
-proving the reviewed P0 and E10 files are unchanged in the combined tree, no
-Anthropic core fallback or alternate specialist launch path reappeared, and no
-production activation was wired. Prior desktop/mobile-web render receipts
-remain code-identical because the crash repair changes no reviewed P0 UI file.
-Physical-device and live-provider acceptance remain open.
+The frozen combined code head `294049a` passes clean repository-wide normal
+and race runs: the root package completed in 391.942 seconds normally and
+2846.138 seconds under the race detector, with every command and internal
+package green. `go vet ./...` and `git diff --check` also pass. Mobile has 377
+passing tests, clean TypeScript, Expo Doctor 20/20, a successful release-mode
+iOS simulator build, and a rendered 240-message `#team` stress pass with ten
+consecutive upward-scroll actions and an unchanged visible message set across
+background HTTP reconciliation. The thread uses FlashList recycling types,
+stable row identities/callbacks, row-local unread markers, a memoized typing
+footer, and one timestamp computation per bubble so unrelated composer,
+typing, or reconciliation state does not rerender visible rich messages.
 
-The subsequent dictation repair `b358aa7` changes only the file-transcription
-model fallback and its operator documentation. It passes all matching
-dictation/transcription tests ten times in normal mode (427.204 seconds) and
-the focused handler/model tests three times under the race detector (26.831
-seconds). It has not been deployed or provider-qualified. A repository-wide
-race run for the preceding combined head is still in progress and must not be
-misreported as exact-head proof for `b358aa7`.
+Physical Scout voice, dictation, message creation/answering, copy, deep edit,
+and both thread-title rename paths passed on the connected iPhone during the
+P0 session. Final TestFlight Build 30 and physical room-crash acceptance remain
+separate post-deployment gates. The independent E10/composition critic remains
+`PASS`; the later exact qualification-expiry terminal-cause assertion passes
+repeated normal and race coverage.
 
 ## 7. Remaining dependency order
 
-1. Freeze the isolated combined candidate and run the complete non-`stride-site` normal, race,
-   vet, dependency, mobile/TypeScript, simulator, rendered desktop/mobile,
-   authority, restart, migration, release-pack, and founder matrix.
-2. Execute the manifest-confirmed canonical repair ceremony. Stop at each human
+1. **Complete:** freeze the isolated combined candidate and run the complete
+   non-`stride-site` normal/race/vet, mobile/TypeScript/Expo, and rendered
+   release-simulator matrix.
+2. **Next:** execute the manifest-confirmed canonical repair ceremony. Stop at each human
    and parity gate; do not reuse any retired release pair or failed ceremony.
 3. Merge the verified scope, commit and push `main`, run only the reviewed
    migrations, deploy the exact artifact, and prove public commit/tree/image,
