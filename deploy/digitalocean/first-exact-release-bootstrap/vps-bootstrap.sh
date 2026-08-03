@@ -828,11 +828,12 @@ assert_canonical_normalization_receipt() {
     ([ $beforeObservation[0].candidates[] |
        select(.Kind=="missing_event" or .Kind=="state_mismatch") |
        (.Family+"\u0000"+.ObjectID) ] | unique | length) as $ordinaryDelta and
-    .delta=={tenantEvents:$ordinaryDelta,importOutbox:$ordinaryDelta,versionEntries:$ordinaryDelta} and
+    .delta.tenantEvents==$ordinaryDelta and .delta.importOutbox==$ordinaryDelta and
+    (.delta.versionEntries|type=="number" and .>=0 and .<=$ordinaryDelta and floor==.) and
     (.afterState.tenantEventCount-.beforeState.tenantEventCount)==$ordinaryDelta and
     (.afterState.eventHighWater-.beforeState.eventHighWater)==$ordinaryDelta and
     (.afterState.importOutboxCount-.beforeState.importOutboxCount)==$ordinaryDelta and
-    (.afterState.versionEntryCount-.beforeState.versionEntryCount)==$ordinaryDelta and
+    (.afterState.versionEntryCount-.beforeState.versionEntryCount)==.delta.versionEntries and
     .beforeState.board==.afterState.board and .beforeState.journal==.afterState.journal and
     .beforeState.spool==.afterState.spool and
     .beforeState.captureSpoolHighWater==.afterState.captureSpoolHighWater and

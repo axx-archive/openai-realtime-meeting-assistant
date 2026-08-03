@@ -431,8 +431,7 @@ func (run canonicalBoardNormalizationRun) execute(ctx context.Context) (canonica
 	if err != nil {
 		return canonicalBoardNormalizationReceipt{}, err
 	}
-	expectedDelta, err := canonicalExpectedOrdinaryNormalizationDelta(before.Candidates)
-	if err != nil {
+	if _, err := canonicalExpectedOrdinaryNormalizationDelta(before.Candidates); err != nil {
 		return canonicalBoardNormalizationReceipt{}, err
 	}
 	journalBefore := before.Journal
@@ -487,7 +486,11 @@ func (run canonicalBoardNormalizationRun) execute(ctx context.Context) (canonica
 		AfterCandidateCount: len(second.Candidates), AfterCandidateSHA256: afterCandidateSHA,
 		ApplyPasses: convergencePasses + 1, LifecycleAppendCount: 0,
 		BeforeState: beforeState, AfterState: afterState,
-		Delta:         expectedDelta,
+		Delta: canonicalBoardRepairCountDelta{
+			TenantEvents:   second.EventCount - before.EventCount,
+			ImportOutbox:   second.OutboxCount - before.OutboxCount,
+			VersionEntries: second.VersionEntryCount - before.VersionEntryCount,
+		},
 		JournalBefore: journalBefore, JournalAfter: second.Journal,
 		BoardAfter: second.Board, VersionMapAfter: second.VersionMap, VersionEntriesSHA256: second.VersionEntriesSHA256,
 		SpoolAfter: second.Spool, DatabaseAfterSHA256: second.DatabaseSHA256, EventHighWater: second.EventHighWater, TenantEventCount: second.EventCount,
@@ -597,9 +600,14 @@ func validateCanonicalNormalizationTransition(before, after canonicalBoardRepair
 	if err != nil {
 		return err
 	}
-	if after.EventCount-before.EventCount != expected.TenantEvents || after.EventHighWater-before.EventHighWater != expected.TenantEvents ||
-		after.OutboxCount-before.OutboxCount != expected.ImportOutbox || after.VersionEntryCount-before.VersionEntryCount != expected.VersionEntries {
-		return fmt.Errorf("ordinary normalization delta does not match the sealed candidate plan: want %+v", expected)
+	actual := canonicalBoardRepairCountDelta{
+		TenantEvents:   after.EventCount - before.EventCount,
+		ImportOutbox:   after.OutboxCount - before.OutboxCount,
+		VersionEntries: after.VersionEntryCount - before.VersionEntryCount,
+	}
+	if actual.TenantEvents != expected.TenantEvents || after.EventHighWater-before.EventHighWater != expected.TenantEvents ||
+		actual.ImportOutbox != expected.ImportOutbox || actual.VersionEntries < 0 || actual.VersionEntries > expected.VersionEntries {
+		return fmt.Errorf("ordinary normalization delta does not match the sealed candidate plan: actual %+v, expected event/outbox %+v with version entries in [0,%d]", actual, expected, expected.VersionEntries)
 	}
 	if before.Board != after.Board || before.Journal != after.Journal || before.Spool != after.Spool || before.SpoolHighWater != after.SpoolHighWater {
 		return errors.New("ordinary normalization changed visible board, lifecycle journal, or capture spool")
@@ -686,12 +694,12 @@ func validateCanonicalNormalizationReceiptContract(receipt canonicalBoardNormali
 		return err
 	}
 	if receipt.Delta.TenantEvents < 0 || receipt.Delta.ImportOutbox < 0 || receipt.Delta.VersionEntries < 0 ||
-		receipt.Delta.ImportOutbox != receipt.Delta.TenantEvents || int64(receipt.Delta.VersionEntries) != receipt.Delta.TenantEvents ||
+		receipt.Delta.ImportOutbox != receipt.Delta.TenantEvents || int64(receipt.Delta.VersionEntries) > receipt.Delta.TenantEvents ||
 		receipt.AfterState.TenantEventCount-receipt.BeforeState.TenantEventCount != receipt.Delta.TenantEvents ||
 		receipt.AfterState.EventHighWater-receipt.BeforeState.EventHighWater != receipt.Delta.TenantEvents ||
 		receipt.AfterState.ImportOutboxCount-receipt.BeforeState.ImportOutboxCount != receipt.Delta.ImportOutbox ||
 		receipt.AfterState.VersionEntryCount-receipt.BeforeState.VersionEntryCount != receipt.Delta.VersionEntries {
-		return errors.New("normalization receipt delta is not exact, balanced, and self-consistent")
+		return errors.New("normalization receipt delta is not exact, bounded, and self-consistent")
 	}
 	if receipt.BeforeState.Board != receipt.AfterState.Board || receipt.BeforeState.Journal != receipt.AfterState.Journal ||
 		receipt.BeforeState.Spool != receipt.AfterState.Spool || receipt.BeforeState.CaptureSpoolHighWater != receipt.AfterState.CaptureSpoolHighWater ||
@@ -1414,8 +1422,9 @@ func validateCanonicalNormalizationReceiptExpectedDelta(receipt canonicalBoardNo
 	if err != nil {
 		return err
 	}
-	if receipt.Delta != expected {
-		return fmt.Errorf("normalization receipt delta %+v does not match sealed candidates %+v", receipt.Delta, expected)
+	if receipt.Delta.TenantEvents != expected.TenantEvents || receipt.Delta.ImportOutbox != expected.ImportOutbox ||
+		receipt.Delta.VersionEntries < 0 || receipt.Delta.VersionEntries > expected.VersionEntries {
+		return fmt.Errorf("normalization receipt delta %+v does not match sealed event/outbox candidates %+v or bounded version entries", receipt.Delta, expected)
 	}
 	return nil
 }

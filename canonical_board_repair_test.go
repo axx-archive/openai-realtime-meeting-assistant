@@ -145,6 +145,11 @@ func TestCanonicalBoardNormalizationConvergesWithoutLifecycleAppendAndFullSecond
 	)
 	before := repairProof(beforeCandidates, 100)
 	converged := repairProof(terminal, 102)
+	// One of the normalized objects can already have a durable version entry
+	// even though its event/outbox record is missing. The receipt must record
+	// the exact version-map growth without requiring it to equal event growth.
+	converged.VersionEntryCount = before.VersionEntryCount + 1
+	converged.VersionEntriesSHA256 = strings.Repeat("7", 64)
 	input := canonicalBoardNormalizationInput{BeforeFingerprintSHA256: canonicalRepairProofFingerprint(before), MaxApplyPasses: 3}
 	engine := &fakeCanonicalBoardRepairEngine{proofs: []canonicalBoardRepairProof{before, converged, converged}}
 	receipt, err := (canonicalBoardNormalizationRun{input: input, engine: engine}).execute(context.Background())
@@ -153,6 +158,9 @@ func TestCanonicalBoardNormalizationConvergesWithoutLifecycleAppendAndFullSecond
 	}
 	if engine.appendCount != 0 || engine.applyCount != 2 || receipt.ApplyPasses != 2 || receipt.LifecycleAppendCount != 0 || !receipt.ExactTerminalSeven || !receipt.FullZeroDeltaSecondReplay || receipt.JournalBefore != receipt.JournalAfter {
 		t.Fatalf("normalization outcome engine=%+v receipt=%+v", engine, receipt)
+	}
+	if receipt.Delta != (canonicalBoardRepairCountDelta{TenantEvents: 2, ImportOutbox: 2, VersionEntries: 1}) {
+		t.Fatalf("normalization recorded wrong exact bounded delta: %+v", receipt.Delta)
 	}
 }
 
