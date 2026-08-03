@@ -75,6 +75,16 @@ fatal. Normalization preserves the absent journal, and only the authorized
 repair append creates it. The focused real-PostgreSQL normalization/repair and
 idempotency test passes with this exact legacy starting state.
 
+The subsequent observation proved that its database fingerprint was not
+memory-bounded: PostgreSQL's 256 MB cgroup killed a backend aggregating every
+outbox payload into one JSONB value. PostgreSQL recovered, the one-shot failed,
+and the exact cold restore again matched and reopened production. The outbox
+component is now an ordered row stream whose per-record SHA-256 values feed a
+constant-memory digest; no SQL aggregate or Go payload corpus grows with
+history. Focused normal/race PostgreSQL tests and `go vet` pass, while the
+complete predecessor-plus-absent-journal Go tree remains green at 399.108
+seconds.
+
 ### Build 31 exact-archive correction — 2026-08-02
 
 The first Build 31 A/B attempt (`3f96d0880aa98f8ddb4f280da2d2388402389a5d`

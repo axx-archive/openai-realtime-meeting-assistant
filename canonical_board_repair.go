@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -2647,7 +2648,7 @@ func ensureRepairTargetsAbsentFromBoard(raw []byte, targets []canonicalBoardRepa
 }
 
 func canonicalRepairDatabaseFingerprint(ctx context.Context, store *PostgresCanonicalStore, tenantID string) (string, error) {
-	var databaseName, serverVersion, migrations, objects, grants, outbox string
+	var databaseName, serverVersion, migrations, objects, grants string
 	err := store.pool.QueryRow(ctx, `SELECT current_database(), current_setting('server_version_num'),
 		COALESCE((SELECT jsonb_agg(jsonb_build_object('version',version,'sha256',encode(sha256,'hex')) ORDER BY version)::text FROM schema_migrations),'[]')`).
 		Scan(&databaseName, &serverVersion, &migrations)
@@ -2667,9 +2668,8 @@ func canonicalRepairDatabaseFingerprint(ctx context.Context, store *PostgresCano
 		FROM object_grants WHERE tenant_id=$1) q`, tenantID).Scan(&grants); err != nil {
 		return "", err
 	}
-	if err := store.pool.QueryRow(ctx, `SELECT COALESCE(jsonb_agg(to_jsonb(q) ORDER BY q.event_id)::text,'[]') FROM (
-		SELECT e.event_id::text,o.topic,o.payload,(o.delivered_at IS NOT NULL) AS delivered,o.attempts,o.last_error_code
-		FROM outbox o JOIN canonical_events e ON e.event_id=o.event_id WHERE e.tenant_id=$1) q`, tenantID).Scan(&outbox); err != nil {
+	outboxSHA, err := canonicalRepairOutboxFingerprint(ctx, store, tenantID)
+	if err != nil {
 		return "", err
 	}
 	events, err := store.Events(ctx)
@@ -2692,9 +2692,52 @@ func canonicalRepairDatabaseFingerprint(ctx context.Context, store *PostgresCano
 	// grants, outbox semantics, migrations, and database ABI remain bound.
 	raw, err := canonicalJSON(map[string]any{
 		"database": databaseName, "server_version": serverVersion, "migrations": migrations, "tenant": tenantID,
-		"event_fingerprints": eventFingerprints, "objects": objects, "grants": grants, "outbox": outbox,
+		"event_fingerprints": eventFingerprints, "objects": objects, "grants": grants, "outbox_sha256": outboxSHA,
 	})
 	return sha256Hex(raw), err
+}
+
+func canonicalRepairOutboxFingerprint(ctx context.Context, store *PostgresCanonicalStore, tenantID string) (string, error) {
+	rows, err := store.pool.Query(ctx, `SELECT e.event_id::text,o.topic,o.payload::text,
+		(o.delivered_at IS NOT NULL) AS delivered,o.attempts,o.last_error_code
+		FROM outbox o JOIN canonical_events e ON e.event_id=o.event_id
+		WHERE e.tenant_id=$1 ORDER BY e.event_id::text`, tenantID)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	hasher := sha256.New()
+	for rows.Next() {
+		var eventID, topic, payload string
+		var delivered bool
+		var attempts int
+		var lastErrorCode *string
+		if err := rows.Scan(&eventID, &topic, &payload, &delivered, &attempts, &lastErrorCode); err != nil {
+			return "", err
+		}
+		if !json.Valid([]byte(payload)) {
+			return "", errors.New("canonical outbox payload is not valid JSON")
+		}
+		record, err := canonicalJSON(struct {
+			EventID       string          `json:"event_id"`
+			Topic         string          `json:"topic"`
+			Payload       json.RawMessage `json:"payload"`
+			Delivered     bool            `json:"delivered"`
+			Attempts      int             `json:"attempts"`
+			LastErrorCode *string         `json:"last_error_code"`
+		}{eventID, topic, json.RawMessage(payload), delivered, attempts, lastErrorCode})
+		if err != nil {
+			return "", err
+		}
+		recordSHA := sha256.Sum256(record)
+		if _, err := hasher.Write(recordSHA[:]); err != nil {
+			return "", err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 func repairMemberPrincipals(path string) ([]string, error) {
