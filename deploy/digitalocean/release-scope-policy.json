@@ -15,6 +15,12 @@
       "excludeSuffix": "_test.go"
     },
     {
+      "kind": "prefixSuffix",
+      "prefix": "internal/e10evidence/",
+      "suffix": ".go",
+      "excludeSuffix": "_test.go"
+    },
+    {
       "kind": "prefix",
       "prefix": "migrations/"
     },
@@ -89,6 +95,7 @@
     "index.html",
     "packaging_deck_chassis.css",
     "internal/dr/authority.go",
+    "internal/e10evidence/types.go",
     "deploy/digitalocean/docker-compose.yml",
     "deploy/digitalocean/Caddyfile",
     "deploy/digitalocean/bonfire-render-runner-v1.apparmor",

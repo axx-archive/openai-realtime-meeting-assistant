@@ -37,6 +37,12 @@ Older model recommendations are historical baselines, not current authority. The
 
 ### Active Build 31 release checkpoint — 2026-08-02
 
+- The first sealed Build 31 A/B archive stopped at image compilation, before
+  maintenance or any production mutation, because release scope omitted the
+  newly imported `internal/e10evidence` package. The scope now includes its
+  non-test Go sources, requires an exact package sentinel, and has a regression
+  test that inventories every internal package imported by production root Go
+  files. The failed pair is superseded and cannot be resumed or relabeled.
 - The mobile rich-media feed now uses content-family recycle pools, one
   thread-owned long-message sheet, recycling-safe preview state, stable nested
   mapping keys, early image resizing, and a bounded recycle pool. The 264-item

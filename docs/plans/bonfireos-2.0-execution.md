@@ -12,6 +12,41 @@ This is the durable resume ledger for the approved master plan. The master plan
 owns product and architecture decisions; this file owns current execution truth,
 dependencies, authority boundaries, rollback posture, and the next safe action.
 
+### Build 31 exact-archive correction — 2026-08-02
+
+The first Build 31 A/B attempt (`3f96d0880aa98f8ddb4f280da2d2388402389a5d`
+/ `3bb43aed48c7269b47e0dcd958aadec0fdf5c2fc`) reached only the sealed-image
+build and stopped before maintenance because the allowlisted source archive
+omitted the new production runtime package `internal/e10evidence`. The compiler
+rejected that incomplete artifact. No ingress guard, application shutdown,
+backup, migration, canonical write, volume mutation, or public-route change
+occurred. Production remains open on the restored six-service predecessor
+topology and the failed ceremony state is retained for audit.
+
+The release policy now includes every non-test source file in that package and
+requires `internal/e10evidence/types.go` as an archive sentinel. A regression
+test derives every internal package directly imported by production root Go
+files and requires all of its non-test sources to be release-owned. The focused
+release tests, complete Node/release/native/brand suite, operator-pack
+self-check, `go vet`, `go mod verify`, and diff checks pass. The fresh complete
+Go run also passes with the root package at 390.531 seconds. The correction is
+deterministically verified and ready for a superseding A/B pair.
+
+The remaining dependency order is:
+
+1. seal and push the superseding exact A/B pair, and prove that both archived
+   commits compile on the VPS;
+2. execute the protected canonical ceremony through its hidden roster-password
+   and exact manifest-confirmation gates, then activate exact B and prove public
+   release identity, capabilities, Scout/STT, canonical convergence, rollback,
+   and production-data integrity;
+3. build, submit, verify Apple `VALID` plus internal `Team (Expo)`, and
+   physically accept Build 31 for rich-thread scrolling, room lifecycle,
+   invited Scout speech/transcript attribution, dictation, and typed Scout;
+4. keep marketplace employee-agent activation and the remaining paid-provider,
+   WebRTC breadth, pilot, soak, immutable-backup, HA/DR, and external-anchor
+   evidence as separate post-release gates.
+
 ### Build 31 close-out addendum — 2026-08-02
 
 This addendum supersedes the older local/branch rows in §1 until the sealed A/B

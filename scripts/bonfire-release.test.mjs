@@ -376,7 +376,8 @@ async function fixtureFiles() {
     '.dockerignore': '.git\ndata/\n', Dockerfile: 'FROM scratch\n', 'Dockerfile.render': 'FROM scratch\n',
     'go.mod': 'module example.test/release\n\ngo 1.26\n', 'go.sum': '', 'main.go': 'package main\nfunc main() {}\n',
     'index.html': '<!doctype html>\n', 'packaging_deck_chassis.css': 'body{}\n',
-    'internal/dr/authority.go': 'package dr\n', 'deploy/digitalocean/docker-compose.yml': 'services: {}\n',
+    'internal/dr/authority.go': 'package dr\n', 'internal/e10evidence/types.go': 'package e10evidence\n',
+    'deploy/digitalocean/docker-compose.yml': 'services: {}\n',
     'deploy/digitalocean/Caddyfile': ':80\n',
     'deploy/digitalocean/bonfire-render-runner-v1.apparmor': 'profile fixture {}\n',
     'deploy/digitalocean/bonfire-render-runner-v1.seccomp.json': '{"defaultAction":"SCMP_ACT_ERRNO"}\n',
@@ -457,11 +458,33 @@ test('scope policy is allowlisted, excludes product/evidence/data trees, and nev
   assert.equal(releasePathOwned('main.go', policy), true)
   assert.equal(releasePathOwned('main_test.go', policy), false)
   assert.equal(releasePathOwned('internal/dr/envelope.go', policy), true)
+  assert.equal(releasePathOwned('internal/e10evidence/receipt.go', policy), true)
+  assert.equal(releasePathOwned('internal/e10evidence/receipt_test.go', policy), false)
   for (const path of ['stride-site/app/page.tsx', 'data/kanban-board.json', 'docs/evidence/e10/provider.jsonl', 'mobile/App.tsx', 'scripts/random.mjs']) {
     assert.equal(releasePathOwned(path, policy), false, path)
   }
   const releaseTool = await readFile(releaseToolPath, 'utf8')
   assert.doesNotMatch(releaseTool, /git[^\n]*\badd\b/)
+})
+
+test('scope owns every internal package imported by production root files', async () => {
+  const policy = validateReleaseScopePolicy(JSON.parse(await readFile(join(repoRoot, 'deploy/digitalocean/release-scope-policy.json'), 'utf8')))
+  const rootFiles = (await readdir(repoRoot)).filter(name => name.endsWith('.go') && !name.endsWith('_test.go'))
+  const packagePaths = new Set()
+  const importPattern = /"github\.com\/openai\/openai-realtime-meeting-assistant\/(internal\/[^"/]+)"/g
+  for (const name of rootFiles) {
+    const body = await readFile(join(repoRoot, name), 'utf8')
+    for (const match of body.matchAll(importPattern)) packagePaths.add(match[1])
+  }
+  assert.ok(packagePaths.size > 0)
+  for (const packagePath of packagePaths) {
+    const sources = (await readdir(join(repoRoot, packagePath))).filter(name => name.endsWith('.go') && !name.endsWith('_test.go'))
+    assert.ok(sources.length > 0, `${packagePath} has no production Go source`)
+    for (const name of sources) {
+      const path = `${packagePath}/${name}`
+      assert.equal(releasePathOwned(path, policy), true, `release scope omits runtime source ${path}`)
+    }
+  }
 })
 
 test('reviewed inventory rejects nested gitlinks and has an exact stable digest', async () => {
