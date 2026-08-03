@@ -292,8 +292,9 @@ validate_canonical_repair_receipt_payload() {
       .after.captureSpoolHighWater==.afterState.captureSpoolHighWater and
       (.candidateCount | type=="number" and .==7 and floor==.) and
       (.candidateFingerprintSha256 | type=="string" and test("^[0-9a-f]{64}$")) and
-      .candidateFingerprintSha256==.beforeState.candidateSha256 and
       .candidateFingerprintSha256==$manifest[0].candidateSetSha256 and
+      .beforeCandidateSha256==.beforeState.candidateSha256 and
+      .beforeCandidateSha256==$manifest[0].terminalCandidateSha256 and
       (.appliedCount | type=="number" and .==$receipt.candidateCount and floor==.) and
       .firstAppendObserved==true and
       .zeroCandidates==true and .principalParity==true and .projectionParity==true and .idempotentSecondReplay==true and

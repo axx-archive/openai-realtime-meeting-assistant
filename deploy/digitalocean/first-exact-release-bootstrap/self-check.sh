@@ -56,6 +56,7 @@ done
     {schema:"bonfire.canonical-board-repair.v2",releaseCommit:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
      cloneId:"self-check-clone",environment:"isolated_cold_clone",qualificationRun:true,
      candidateSetSha256:"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+     terminalCandidateSha256:"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
      candidates:[range(0;7)|{objectId:("object-"+(.|tostring)),stateSha256:"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",evidenceBasis:"done_archive_absence"}]}
   ' >"$receipt_fixture/manifest.json"
   receipt_manifest=$(sha256sum "$receipt_fixture/manifest.json" | awk '{print $1}')
@@ -83,7 +84,7 @@ done
            databaseSha256:"6666666666666666666666666666666666666666666666666666666666666666",
            importInputSha256:"abababababababababababababababababababababababababababababababab",
            proofSha256:"edededededededededededededededededededededededededededededededed",
-           candidateCount:7,candidateSha256:"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},
+           candidateCount:7,candidateSha256:"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"},
          afterState:{tenantEventCount:109,eventHighWater:109,importOutboxCount:57,versionEntryCount:67,
            versionEntriesSha256:"5555555555555555555555555555555555555555555555555555555555555555",captureSpoolHighWater:100,
            board:seal("1111111111111111111111111111111111111111111111111111111111111111"),
@@ -107,7 +108,7 @@ done
          versionMapAfterSha256:"5555555555555555555555555555555555555555555555555555555555555555",
          databaseBeforeSha256:"6666666666666666666666666666666666666666666666666666666666666666",
          databaseAfterSha256:"8888888888888888888888888888888888888888888888888888888888888888",
-         beforeCandidateSha256:"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+         beforeCandidateSha256:"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
          afterCandidateSha256:$empty_candidates_sha,
          afterFingerprintSha256:"9999999999999999999999999999999999999999999999999999999999999999",
          finalParitySha256:"7777777777777777777777777777777777777777777777777777777777777777",
