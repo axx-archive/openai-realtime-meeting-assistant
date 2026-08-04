@@ -837,10 +837,37 @@ func runRenderExecCommandContext(ctx context.Context, bin string, args []string,
 	command.Stdout = &stdout
 	command.Stderr = &stderr
 	err := command.Run()
+	// The render runner is PID 1 in its purpose-built container. Chromium's
+	// sandbox can leave exited zygote grandchildren behind after the direct
+	// browser process has been waited. Linux reparents those descendants to PID
+	// 1, so reap them without blocking after every serialized invocation. If we
+	// do not, two defunct processes per print eventually consume the sidecar's
+	// 256-PID cgroup and make every later export fail with EAGAIN.
+	reapExitedRenderDescendants(os.Getpid() == 1, syscall.Wait4)
 	if ctx.Err() != nil {
 		return stdout.String(), stderr.String(), fmt.Errorf("render command timed out or was canceled: %w", ctx.Err())
 	}
 	return stdout.String(), stderr.String(), err
+}
+
+type renderWait4Func func(int, *syscall.WaitStatus, int, *syscall.Rusage) (int, error)
+
+func reapExitedRenderDescendants(pidOne bool, wait4 renderWait4Func) int {
+	if !pidOne || wait4 == nil {
+		return 0
+	}
+	reaped := 0
+	for {
+		pid, err := wait4(-1, nil, syscall.WNOHANG, nil)
+		if pid > 0 {
+			reaped++
+			continue
+		}
+		if err == syscall.EINTR {
+			continue
+		}
+		return reaped
+	}
 }
 
 func renderSubprocessEnv(workDir string) []string {

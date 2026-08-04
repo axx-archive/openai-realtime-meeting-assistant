@@ -159,6 +159,33 @@ func TestRenderSubprocessTimeoutKillsTheEntireProcessGroup(t *testing.T) {
 	}
 }
 
+func TestRenderPIDOneReapsEveryExitedChromiumDescendantWithoutBlocking(t *testing.T) {
+	responses := []struct {
+		pid int
+		err error
+	}{{pid: 41}, {pid: 42}, {err: syscall.EINTR}, {err: syscall.ECHILD}}
+	calls := 0
+	reaped := reapExitedRenderDescendants(true, func(pid int, status *syscall.WaitStatus, options int, usage *syscall.Rusage) (int, error) {
+		if pid != -1 || status != nil || options != syscall.WNOHANG || usage != nil {
+			t.Fatalf("wait4 args pid=%d status=%v options=%d usage=%v", pid, status, options, usage)
+		}
+		response := responses[calls]
+		calls++
+		return response.pid, response.err
+	})
+	if reaped != 2 || calls != len(responses) {
+		t.Fatalf("reaped=%d calls=%d, want 2/%d", reaped, calls, len(responses))
+	}
+
+	calledOutsidePIDOne := false
+	if got := reapExitedRenderDescendants(false, func(int, *syscall.WaitStatus, int, *syscall.Rusage) (int, error) {
+		calledOutsidePIDOne = true
+		return 0, nil
+	}); got != 0 || calledOutsidePIDOne {
+		t.Fatalf("non-PID-one reap=%d called=%t, want inert", got, calledOutsidePIDOne)
+	}
+}
+
 func TestRenderRunnerDeploymentIsLeastPrivilegeAndHasNoBrainMount(t *testing.T) {
 	composePath := filepath.Join("deploy", "digitalocean", "docker-compose.yml")
 	raw, err := os.ReadFile(composePath)
@@ -190,7 +217,6 @@ func TestRenderRunnerDeploymentIsLeastPrivilegeAndHasNoBrainMount(t *testing.T) 
 		"seccomp=/etc/docker/seccomp/bonfire-render-runner-v1.json",
 		"read_only: true",
 		"pids_limit:",
-		"init: true",
 		"render_internal",
 	} {
 		if !strings.Contains(render, required) {

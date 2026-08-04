@@ -175,10 +175,6 @@ services:
     shm_size: 256m
     pids_limit: 256
     mem_limit: 1024m
-    # Chrome's sandbox may leave short-lived grandchildren after the direct
-    # print process exits. A real PID 1 reaps those descendants so the bounded
-    # renderer cannot fill its PID cgroup with defunct processes over time.
-    init: true
     # Defense in depth: the renderer can reach only the callback service and
     # has no route to the Internet, coturn, databases, or host metadata.
     networks:
