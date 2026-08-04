@@ -127,6 +127,12 @@ func TestOpenAIRoomScoutTransportRestartsWithoutSharingSessionState(t *testing.T
 		return session, nil
 	}
 	_, _, transport, _ := newScopedRoomScoutTransportTest(t, dial)
+	transport.mu.Lock()
+	persistentTrack := transport.outputTrack
+	transport.mu.Unlock()
+	if persistentTrack == nil {
+		t.Fatal("room-lifetime Scout audio publication was not registered")
+	}
 	if err := transport.WriteMixedPCM(context.Background(), make([]int16, roomAudioMixFrameSize)); err != nil {
 		t.Fatal(err)
 	}
@@ -150,6 +156,21 @@ func TestOpenAIRoomScoutTransportRestartsWithoutSharingSessionState(t *testing.T
 	mu.Unlock()
 	if !first.closed.Load() {
 		t.Fatal("expired provider session was not closed")
+	}
+	transport.mu.Lock()
+	if transport.outputTrack != persistentTrack {
+		transport.mu.Unlock()
+		t.Fatal("provider restart replaced the room-lifetime Scout audio publication")
+	}
+	transport.mu.Unlock()
+	if err := transport.writeOutputPacket([]byte{0xF8, 0xFF, 0xFE}, true); err != nil {
+		t.Fatalf("write persistent Scout packet: %v", err)
+	}
+	transport.outputMu.Lock()
+	packetCount := transport.outputCount
+	transport.outputMu.Unlock()
+	if packetCount == 0 {
+		t.Fatal("persistent Scout publication did not forward audio")
 	}
 	if transport.publish(1, "answer", map[string]any{"text": "stale"}) {
 		t.Fatal("replaced provider generation published a stale callback")
@@ -517,6 +538,31 @@ func TestOpenAIRoomScoutTransportConcurrentRestartAndClose(t *testing.T) {
 	}
 	if transport.publish(1, "answer", map[string]any{"text": "stale"}) {
 		t.Fatal("closed transport accepted callback")
+	}
+}
+
+func TestRoomScoutTranscriptionOwnershipIsBoundToExactProviderItem(t *testing.T) {
+	transport := &openAIRoomScoutTransport{}
+	transport.rememberTranscriptionOwnership("item-source", true)
+	transport.rememberTranscriptionOwnership("item-fallback", false)
+	if owned, found := transport.takeTranscriptionOwnership("item-fallback"); !found || owned {
+		t.Fatalf("fallback decision=(%t,%t)", owned, found)
+	}
+	if owned, found := transport.takeTranscriptionOwnership("item-source"); !found || !owned {
+		t.Fatalf("source decision=(%t,%t)", owned, found)
+	}
+	if _, found := transport.takeTranscriptionOwnership("item-source"); found {
+		t.Fatal("provider item ownership was reusable")
+	}
+	if roomScoutFallbackOwnsTranscription(false, false) {
+		t.Fatal("unassigned provider terminal event failed open as fallback-owned")
+	}
+	if !roomScoutFallbackOwnsTranscription(false, true) || roomScoutFallbackOwnsTranscription(true, true) {
+		t.Fatal("explicit source/fallback ownership was not enforced")
+	}
+	transport.rememberTranscriptionOwnership("", true)
+	if owned, found := transport.takeTranscriptionOwnership(""); !found || !owned {
+		t.Fatalf("fifo source decision=(%t,%t)", owned, found)
 	}
 }
 

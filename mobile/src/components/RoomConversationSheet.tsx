@@ -5,6 +5,8 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Modal,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Platform,
   Pressable,
   StyleSheet,
@@ -18,6 +20,10 @@ import { Waveform } from './Waveform';
 import { ink, radius, shadow, space, type } from '../theme/tokens';
 import { useComposerDictation } from '../voice/useComposerDictation';
 import { parseMentions } from '../messaging/mentions';
+import {
+  nextThreadScrollInteraction,
+  shouldFollowThreadTail,
+} from '../messaging/threadListPerformance';
 
 export type RoomConversationMode = 'chat' | 'transcript';
 
@@ -28,6 +34,8 @@ type ChatItem = {
   createdAt: string;
   authorEmail?: string;
   agentId?: string;
+  followThroughId?: string;
+  followThroughStatus?: 'queued' | 'delivering' | 'delivered' | 'awaiting_input';
   transient?: boolean;
   error?: boolean;
 };
@@ -85,6 +93,88 @@ function transcriptSpeaker(item: TranscriptItem): string {
   return 'Live transcript';
 }
 
+const conversationMomentumGraceMs = 200;
+
+function useConversationTailFollow<T>(
+  listRef: React.RefObject<FlatList<T> | null>,
+  active: boolean,
+) {
+  const atBottomRef = useRef(false);
+  const interactingRef = useRef(false);
+  const initialTailRef = useRef(true);
+  const layoutHeightRef = useRef(0);
+  const momentumGraceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearMomentumGrace = useCallback(() => {
+    if (momentumGraceRef.current) clearTimeout(momentumGraceRef.current);
+    momentumGraceRef.current = null;
+  }, []);
+
+  const settle = useCallback((offset: number, content: number, layout: number) => {
+    clearMomentumGrace();
+    interactingRef.current = false;
+    atBottomRef.current = offset + layout >= content - 48;
+  }, [clearMomentumGrace]);
+
+  useEffect(() => {
+    if (active) {
+      initialTailRef.current = true;
+      atBottomRef.current = false;
+      interactingRef.current = false;
+    }
+    return clearMomentumGrace;
+  }, [active, clearMomentumGrace]);
+
+  return {
+    onLayout: (event: { nativeEvent: { layout: { height: number } } }) => {
+      layoutHeightRef.current = event.nativeEvent.layout.height;
+    },
+    onContentSizeChange: (_width: number, height: number) => {
+      const initial = initialTailRef.current;
+      const follow = initial || shouldFollowThreadTail(atBottomRef.current, interactingRef.current);
+      if (layoutHeightRef.current > 0 && height <= layoutHeightRef.current) {
+        atBottomRef.current = true;
+      }
+      if (!follow) return;
+      initialTailRef.current = false;
+      atBottomRef.current = true;
+      requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }));
+    },
+    onScroll: (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (interactingRef.current) return;
+      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+      atBottomRef.current = contentOffset.y + layoutMeasurement.height >= contentSize.height - 48;
+    },
+    onScrollBeginDrag: () => {
+      clearMomentumGrace();
+      interactingRef.current = nextThreadScrollInteraction(interactingRef.current, 'drag-begin');
+      atBottomRef.current = false;
+    },
+    onScrollEndDrag: (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, contentSize, layoutMeasurement, velocity } = event.nativeEvent;
+      const remainsInteracting = nextThreadScrollInteraction(interactingRef.current, 'drag-end', velocity?.y);
+      interactingRef.current = remainsInteracting;
+      if (!remainsInteracting) {
+        settle(contentOffset.y, contentSize.height, layoutMeasurement.height);
+        return;
+      }
+      clearMomentumGrace();
+      momentumGraceRef.current = setTimeout(() => {
+        settle(contentOffset.y, contentSize.height, layoutMeasurement.height);
+      }, conversationMomentumGraceMs);
+    },
+    onMomentumScrollBegin: () => {
+      clearMomentumGrace();
+      interactingRef.current = nextThreadScrollInteraction(interactingRef.current, 'momentum-begin');
+    },
+    onMomentumScrollEnd: (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+      interactingRef.current = nextThreadScrollInteraction(interactingRef.current, 'momentum-end');
+      settle(contentOffset.y, contentSize.height, layoutMeasurement.height);
+    },
+  };
+}
+
 const RoomMessageText = memo(function RoomMessageText({
   text,
   own,
@@ -124,6 +214,8 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
   const safeArea = useSafeAreaInsets();
   const chatListRef = useRef<FlatList<ChatItem>>(null);
   const transcriptListRef = useRef<FlatList<TranscriptItem>>(null);
+  const chatTail = useConversationTailFollow(chatListRef, visible && mode === 'chat');
+  const transcriptTail = useConversationTailFollow(transcriptListRef, visible && mode === 'transcript');
   const composerInputRef = useRef<TextInput>(null);
   const [draft, setDraft] = useState('');
   const [composerError, setComposerError] = useState<string | null>(null);
@@ -193,6 +285,11 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
             <Text style={[styles.messageTime, own && styles.messageTimeOwn]}>{timeLabel(item.createdAt)}</Text>
           </View>
           <RoomMessageText own={own} scout={scout} text={item.text} />
+          {item.followThroughId && item.followThroughStatus ? (
+            <Text style={styles.followThroughStatus}>
+              {item.followThroughStatus === 'awaiting_input' ? 'Needs a destination' : 'Scheduled work'}
+            </Text>
+          ) : null}
         </View>
         {own ? (
           <Pressable
@@ -297,9 +394,16 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
               keyExtractor={(item) => item.id}
               keyboardDismissMode="interactive"
               keyboardShouldPersistTaps="handled"
-              onContentSizeChange={() => chatListRef.current?.scrollToEnd({ animated: true })}
+              onContentSizeChange={chatTail.onContentSizeChange}
+              onLayout={chatTail.onLayout}
+              onMomentumScrollBegin={chatTail.onMomentumScrollBegin}
+              onMomentumScrollEnd={chatTail.onMomentumScrollEnd}
+              onScroll={chatTail.onScroll}
+              onScrollBeginDrag={chatTail.onScrollBeginDrag}
+              onScrollEndDrag={chatTail.onScrollEndDrag}
               ref={chatListRef}
               renderItem={renderMessage}
+              scrollEventThrottle={100}
               style={styles.list}
             />
             <View style={[styles.composerShell, { paddingBottom: Math.max(safeArea.bottom, space[3]) }]}>
@@ -422,9 +526,16 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
             contentContainerStyle={[styles.listContent, !transcriptEntries.length && styles.emptyListContent, { paddingBottom: Math.max(safeArea.bottom, space[5]) }]}
             data={transcriptEntries}
             keyExtractor={(item) => item.id}
-            onContentSizeChange={() => transcriptListRef.current?.scrollToEnd({ animated: true })}
+            onContentSizeChange={transcriptTail.onContentSizeChange}
+            onLayout={transcriptTail.onLayout}
+            onMomentumScrollBegin={transcriptTail.onMomentumScrollBegin}
+            onMomentumScrollEnd={transcriptTail.onMomentumScrollEnd}
+            onScroll={transcriptTail.onScroll}
+            onScrollBeginDrag={transcriptTail.onScrollBeginDrag}
+            onScrollEndDrag={transcriptTail.onScrollEndDrag}
             ref={transcriptListRef}
             renderItem={renderTranscriptEntry}
+            scrollEventThrottle={100}
             style={styles.list}
           />
         )}
@@ -483,6 +594,7 @@ const styles = StyleSheet.create({
   messageText: { ...type.body, color: 'rgba(255,255,255,0.88)' },
   messageTextOwn: { color: ink[950] },
   messageTextScout: { color: 'rgba(255,255,255,0.92)' },
+  followThroughStatus: { ...type.captionMedium, marginTop: 7, color: '#FF8A5B' },
   messageMention: { fontWeight: '600', color: '#82B7FF' },
   messageMentionScout: { fontWeight: '700', color: '#FF8A5B' },
   deleteMessage: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22 },

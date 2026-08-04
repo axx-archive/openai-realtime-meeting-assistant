@@ -6443,7 +6443,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			// guest company-brain access, and runs after the human message has
 			// durably landed so every client observes one canonical order.
 			if guest == nil && normalizeAccountEmail(sessionEmail) != "" && scoutChatMentionsScout(chat.Text) {
-				kanbanApp.submitRoomScoutTextMention(messageScope, chat.Text, asString(payload["id"]))
+				kanbanApp.submitRoomScoutTextMention(messageScope, chat.Text, asString(payload["id"]), sessionEmail, currentParticipantName())
 			}
 		case "room_chat_delete":
 			if !participantAccepted {

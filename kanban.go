@@ -288,6 +288,14 @@ type kanbanBoardApp struct {
 	// never cross a room/sitting/media-generation boundary.
 	roomScoutTextMu    sync.Mutex
 	roomScoutTextLocks map[string]*sync.Mutex
+	// roomFollowThrough is the durable, sitting-scoped outbox behind any room
+	// promise to deliver a recap after the call. It is intentionally separate
+	// from global deferred notifications: a different meeting ending must never
+	// flush this room's work, and delivery is acknowledged only after the exact
+	// destination message is committed.
+	roomFollowThroughMu       sync.Mutex
+	roomFollowThrough         []roomFollowThroughRecord
+	roomFollowThroughStoreErr error
 	// catchUpRecapResolver is the production adapter from the exact temporal
 	// request to the shared W2 retrieval contract. Tests inject it directly;
 	// production wires the meeting-memory/canonical ACL adapter at boot.
@@ -305,31 +313,32 @@ type kanbanBoardApp struct {
 	assistantStatus       string
 	serverRestarting      bool
 
-	model                   string
-	pc                      *webrtc.PeerConnection
-	events                  *webrtc.DataChannel
-	inputTrack              *webrtc.TrackLocalStaticSample
-	inputEnc                *opusEncoder
-	connected               bool
-	forwardedAudioNotice    bool
-	realtimeResponseActive  bool
-	voiceControlActive      bool
-	voiceControlUpdatedAt   time.Time
-	voiceControlUpdatedBy   string
-	scoutVoiceArmedAt       time.Time
-	scoutVoiceArmedUntil    time.Time
-	scoutSpokenResponse     bool
-	scoutSpokenResponseSent bool
-	scoutLastToolResultAt   time.Time
-	scoutLastToolResultName string
-	scoutToolCallsInFlight  int
-	officeWorkEpoch         uint64
-	officeWorkSittingID     string
-	officeWorkCtx           context.Context
-	officeWorkCancel        context.CancelFunc
-	officeWorkInFlight      map[uint64]int
-	officeWorkCond          *sync.Cond
-	officeWorkCommitMu      sync.Mutex
+	model                          string
+	pc                             *webrtc.PeerConnection
+	events                         *webrtc.DataChannel
+	inputTrack                     *webrtc.TrackLocalStaticSample
+	inputEnc                       *opusEncoder
+	connected                      bool
+	forwardedAudioNotice           bool
+	realtimeResponseActive         bool
+	realtimeResponseRecordingEpoch uint64
+	voiceControlActive             bool
+	voiceControlUpdatedAt          time.Time
+	voiceControlUpdatedBy          string
+	scoutVoiceArmedAt              time.Time
+	scoutVoiceArmedUntil           time.Time
+	scoutSpokenResponse            bool
+	scoutSpokenResponseSent        bool
+	scoutLastToolResultAt          time.Time
+	scoutLastToolResultName        string
+	scoutToolCallsInFlight         int
+	officeWorkEpoch                uint64
+	officeWorkSittingID            string
+	officeWorkCtx                  context.Context
+	officeWorkCancel               context.CancelFunc
+	officeWorkInFlight             map[uint64]int
+	officeWorkCond                 *sync.Cond
+	officeWorkCommitMu             sync.Mutex
 	// officeToolBeforeCommit is a test-only barrier for the final room-consent
 	// conditional commit. Production leaves it nil.
 	officeToolBeforeCommit   func()
@@ -521,6 +530,12 @@ func newKanbanBoardApp() *kanbanBoardApp {
 	} else {
 		app.notifications = notifications
 	}
+	if followThrough, err := loadRoomFollowThroughStore(roomFollowThroughPath()); err != nil {
+		app.roomFollowThroughStoreErr = err
+		log.Errorf("Room follow-through persistence disabled: %v", err)
+	} else {
+		app.roomFollowThrough = followThrough
+	}
 	if meetings, err := loadMeetingStore(meetingsPath()); err != nil {
 		log.Errorf("Meeting record persistence disabled: %v", err)
 	} else {
@@ -533,6 +548,7 @@ func newKanbanBoardApp() *kanbanBoardApp {
 	// matches the memory store's resumed id), or re-arm the idle timer when
 	// the same in-flight meeting survived the restart.
 	app.reconcileMeetingRecordsAtBoot()
+	app.resumeRoomFollowThroughAtBoot()
 	// One-time, idempotent Files backfill (kanban-card-110): stamp every
 	// pre-gate-qualifying deliverable savedToFiles=true so introducing the
 	// explicit-save gate never disappears content the team already relies on.
@@ -2207,7 +2223,16 @@ func (app *kanbanBoardApp) markScoutSpokenResponseDelivered() {
 func (app *kanbanBoardApp) markRealtimeResponseActive(active bool) {
 	app.mu.Lock()
 	app.realtimeResponseActive = active
+	if active {
+		app.realtimeResponseRecordingEpoch = app.roomLiveLocked(officeRoomID).recordingEpoch
+	}
 	app.mu.Unlock()
+}
+
+func (app *kanbanBoardApp) realtimeResponseEpoch() uint64 {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	return app.realtimeResponseRecordingEpoch
 }
 
 func (app *kanbanBoardApp) isRealtimeResponseActive() bool {
@@ -3173,7 +3198,7 @@ func (app *kanbanBoardApp) handleRealtimeEventForGeneration(mediaGeneration uint
 	case "response.output_audio_transcript.done":
 		if text := canonicalizeBoardText(firstNonEmptyString(event.Transcript, event.Text)); text != "" {
 			if scope, current := app.officeRoomScoutScopeForGeneration(mediaGeneration); current {
-				app.rememberRoomAgentTranscript(scope, event, "agent_voice", app.currentRealtimeModel(), "scout", scoutParticipantName)
+				app.rememberRoomAgentTranscriptForEpoch(scope, event, "agent_voice", app.currentRealtimeModel(), "scout", scoutParticipantName, app.realtimeResponseEpoch())
 			}
 			app.markScoutSpokenResponseDelivered()
 			broadcastAssistantEvent("answer", text, map[string]any{"eventType": event.Type, "voiceState": "talking"})
@@ -4649,12 +4674,32 @@ func (app *kanbanBoardApp) rememberTranscriptWithScope(roomID string, expectedSc
 }
 
 func (app *kanbanBoardApp) rememberTranscriptWithScopeAndSegment(roomID string, expectedScope *RoomScoutScope, expectedMediaScope *RoomScoutScope, segmentID string, event kanbanRealtimeEvent, source string, model string) {
+	app.rememberTranscriptWithScopeAndSegmentAndSource(roomID, expectedScope, expectedMediaScope, segmentID, event, source, model, nil)
+}
+
+func (app *kanbanBoardApp) rememberTranscriptForKnownSource(scope RoomScoutScope, segmentID string, event kanbanRealtimeEvent, source string, model string, known sourceTranscriptRecord) {
+	if !scope.valid() {
+		return
+	}
+	app.rememberTranscriptWithScopeAndSegmentAndSource(scope.RoomID, nil, &scope, segmentID, event, source, model, &known)
+}
+
+func (app *kanbanBoardApp) rememberTranscriptWithScopeAndSegmentAndSource(roomID string, expectedScope *RoomScoutScope, expectedMediaScope *RoomScoutScope, segmentID string, event kanbanRealtimeEvent, source string, model string, known *sourceTranscriptRecord) {
 	if app == nil || app.memory == nil {
 		log.Errorf("Meeting memory unavailable; transcript was not saved")
 		return
 	}
-	if !app.transcriptRecordingActiveInRoom(roomID) {
+	app.mu.Lock()
+	recordingState := app.roomLiveLocked(roomID)
+	recordingEnabled := recordingState.recordingEnabled
+	recordingEpoch := recordingState.recordingEpoch
+	app.mu.Unlock()
+	if !recordingEnabled {
 		log.Infof("Transcript recording disabled; transcript was not saved")
+		return
+	}
+	if known != nil && (known.RecordingEpoch == 0 || known.RecordingEpoch != recordingEpoch) {
+		log.Infof("Transcript recording epoch changed; transcript was not saved room=%s source_track=%s", normalizeRoomID(roomID), known.TrackKey)
 		return
 	}
 	if expectedMediaScope != nil && !app.roomMediaScopeCurrent(*expectedMediaScope) {
@@ -4668,7 +4713,16 @@ func (app *kanbanBoardApp) rememberTranscriptWithScopeAndSegment(roomID string, 
 	var speaker, confidence string
 	var capture *transcriptCaptureStamp
 	var contributorFences []ConsentFence
-	if expectedScope != nil {
+	if known != nil {
+		speaker = canonicalRoomParticipantName(known.Speaker)
+		confidence = "source_bound"
+		capture = known.Capture
+		contributorFences = []ConsentFence{known.Fence}
+		if speaker == "" || capture == nil || known.Fence.lane != ConsentLaneTranscription {
+			log.Infof("Transcript source binding invalid; transcript was not saved room=%s source_track=%s", normalizeRoomID(roomID), known.TrackKey)
+			return
+		}
+	} else if expectedScope != nil {
 		var current bool
 		speaker, confidence, capture, contributorFences, current = app.attributionForRoomScoutScopeWithConsent(*expectedScope, time.Now().UTC())
 		if !current {
@@ -4801,6 +4855,10 @@ func (app *kanbanBoardApp) rememberTranscriptWithScopeAndSegment(roomID string, 
 	if segmentID = strings.TrimSpace(segmentID); segmentID != "" {
 		metadata["segmentId"] = segmentID
 	}
+	if known != nil {
+		metadata["sourceTrackId"] = known.TrackKey
+		metadata["recordingEpoch"] = strconv.FormatUint(known.RecordingEpoch, 10)
+	}
 	if expectedMediaScope != nil {
 		metadata["mediaGeneration"] = strconv.FormatUint(expectedMediaScope.MediaGeneration, 10)
 	} else if expectedScope != nil {
@@ -4830,6 +4888,9 @@ func (app *kanbanBoardApp) rememberTranscriptWithScopeAndSegment(roomID string, 
 			if expectedMediaScope != nil {
 				state := app.roomLiveLocked(roomID)
 				if state.mediaGen != expectedMediaScope.MediaGeneration || state.mediaActor == nil || state.mediaSittingID != strings.TrimSpace(expectedMediaScope.SittingID) {
+					return ErrRoomScoutFence
+				}
+				if known != nil && state.recordingEpoch != known.RecordingEpoch {
 					return ErrRoomScoutFence
 				}
 			}
@@ -5030,6 +5091,11 @@ func roomChatEventPayload(entry meetingMemoryEntry) map[string]any {
 	}
 	if model := strings.TrimSpace(entry.Metadata["model"]); model != "" {
 		payload["model"] = model
+	}
+	if followThroughID := strings.TrimSpace(entry.Metadata["followThroughId"]); followThroughID != "" {
+		payload["followThroughId"] = followThroughID
+		payload["followThroughStatus"] = firstNonEmptyString(strings.TrimSpace(entry.Metadata["followThroughStatus"]), roomFollowThroughQueued)
+		payload["destinationThreadId"] = strings.TrimSpace(entry.Metadata["destinationThreadId"])
 	}
 	return payload
 }
@@ -7323,6 +7389,15 @@ func (app *kanbanBoardApp) transcriptRecordingActiveInRoom(roomID string) bool {
 	return app.roomLiveLocked(roomID).recordingEnabled
 }
 
+func (app *kanbanBoardApp) recordingEpochForRoom(roomID string) uint64 {
+	if app == nil {
+		return 0
+	}
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	return app.roomLiveLocked(roomID).recordingEpoch
+}
+
 func (app *kanbanBoardApp) setTranscriptRecording(enabled bool, updatedBy string) map[string]any {
 	return app.setTranscriptRecordingInRoom(officeRoomID, enabled, updatedBy)
 }
@@ -7335,13 +7410,26 @@ func (app *kanbanBoardApp) setTranscriptRecordingInRoom(roomID string, enabled b
 	}
 
 	app.mu.Lock()
-	defer app.mu.Unlock()
 	state := app.roomLiveLocked(roomID)
+	var lane *meetingTranscriptionLane
+	changed := false
+	epoch := state.recordingEpoch
 
 	if state.recordingEnabled != enabled || state.recordingUpdatedAt.IsZero() {
+		changed = true
 		state.recordingEnabled = enabled
 		state.recordingUpdatedAt = time.Now().UTC()
 		state.recordingUpdatedBy = updatedBy
+		state.recordingEpoch++
+		if state.recordingEpoch == 0 {
+			state.recordingEpoch = 1
+		}
+		epoch = state.recordingEpoch
+		if state.id == officeRoomID {
+			lane = app.transcriptLane
+		} else {
+			lane = state.lane
+		}
 		// A6: freeze runs at every commit but the pop (rememberTranscript ->
 		// speakerForCommittedTranscript) is skipped while recording is off. Clear the
 		// FIFO on any recording toggle so a window frozen across the boundary cannot
@@ -7363,8 +7451,14 @@ func (app *kanbanBoardApp) setTranscriptRecordingInRoom(roomID string, enabled b
 		app.scoutLastToolResultAt = time.Time{}
 		app.scoutLastToolResultName = ""
 	}
-
-	return app.roomSnapshotLockedForRoom(state, configuredMeetingRoomCapacity())
+	snapshot := app.roomSnapshotLockedForRoom(state, configuredMeetingRoomCapacity())
+	app.mu.Unlock()
+	if changed && lane != nil {
+		// Synchronous discard is the Record boundary: queued PCM, pending
+		// commits, and provider callbacks from the prior epoch cannot cross it.
+		lane.resetSourcesForRecordingEpoch(epoch)
+	}
+	return snapshot
 }
 
 func roomRecordingAnnouncementText(recording roomRecordingState) string {
@@ -7569,6 +7663,7 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 		// "after_meeting" before the id rotates (idempotent — the idle-end
 		// seam may already have flushed).
 		app.flushDeferredNotifications("archive")
+		app.flushRoomFollowThroughForMeeting(officeRoomID, meetingID, "archive")
 		// the archive closes the current meeting; the next entry starts a new
 		// one. Conditional: a racing admission that already rotated and minted
 		// a successor id must not have it cleared by this stale close.

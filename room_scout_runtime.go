@@ -526,6 +526,21 @@ func (app *kanbanBoardApp) freezeRoomScoutAttributionWithConsent(scope RoomScout
 	return true
 }
 
+func (app *kanbanBoardApp) discardRoomScoutCurrentAttribution(scope RoomScoutScope) bool {
+	if app == nil {
+		return false
+	}
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	if !app.roomScoutScopeCurrentLocked(scope) {
+		return false
+	}
+	state := app.roomLiveLocked(scope.RoomID)
+	state.currentSpeechStartedAt = time.Time{}
+	state.currentSpeechStoppedAt = time.Time{}
+	return true
+}
+
 func (app *kanbanBoardApp) takeRoomScoutContributorFences(scope RoomScoutScope) []ConsentFence {
 	if app == nil {
 		return nil

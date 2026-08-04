@@ -74,7 +74,7 @@ type InCallActionDescriptor = {
   disabled?: boolean;
 };
 
-type CallParticipant = PresentedVideoParticipant & { agent?: RoomAgentParticipant };
+type CallParticipant = PresentedVideoParticipant;
 
 const remotePIPOptions = {
   enabled: true,
@@ -172,9 +172,7 @@ const CallVideoTile = memo(function CallVideoTile({
           ? 'Unpins this person and resumes following the active speaker'
           : 'Pins this person to the main stage'
         : undefined}
-      accessibilityLabel={participant.agent
-        ? `${name}, agent participant, ${agentVoiceLabel(participant.agent)}`
-        : `${name}${active ? ', speaking' : ''}, ${participantVideoAccessibilityStatus(participant)}`}
+      accessibilityLabel={`${name}${active ? ', speaking' : ''}, ${participantVideoAccessibilityStatus(participant)}`}
       accessibilityRole={onPress ? 'button' : undefined}
       disabled={!onPress}
       onLayout={fit === 'contain' ? handleLayout : undefined}
@@ -187,17 +185,7 @@ const CallVideoTile = memo(function CallVideoTile({
         pressed && styles.callVideoTilePressed,
       ]}
     >
-      {participant.agent ? (
-        <View style={styles.agentVideoFeed}>
-          <View style={[styles.agentAura, { backgroundColor: participant.agent.color }]} />
-          <AgentSpeakingWaveform
-            color={participant.agent.color}
-            compact={compact}
-            speaking={participant.agent.voiceState === 'talking'}
-          />
-          {!compact ? <Text style={styles.agentVoiceState}>{agentVoiceLabel(participant.agent)}</Text> : null}
-        </View>
-      ) : streamURL ? (
+      {streamURL ? (
         <RTCView
           iosPIP={pictureInPicture && !mirror ? remotePIPOptions : undefined}
           mirror={mirror}
@@ -232,7 +220,7 @@ const CallVideoTile = memo(function CallVideoTile({
       >
         {pinned ? <SymbolView name="pin.fill" tintColor="#FFFFFF" size={compact ? 9 : 10} /> : active ? <View style={styles.speakerDot} /> : null}
         <Text numberOfLines={1} style={[styles.callVideoLabelText, compact && styles.callVideoLabelTextCompact]}>
-          {participant.agent ? `${name} · Agent` : participant.screenSharing ? `${name} · Sharing` : pinned ? `${name} · Pinned` : name}
+          {participant.screenSharing ? `${name} · Sharing` : pinned ? `${name} · Pinned` : name}
         </Text>
       </View>
       {participant.screenSharing && !compact ? (
@@ -242,6 +230,52 @@ const CallVideoTile = memo(function CallVideoTile({
         </View>
       ) : null}
     </Pressable>
+  );
+});
+
+const RoomAgentBench = memo(function RoomAgentBench({
+  agents,
+  bottom,
+}: {
+  agents: RoomAgentParticipant[];
+  bottom: number;
+}) {
+  const renderAgent = useCallback(({ item }: { item: RoomAgentParticipant }) => {
+    const speaking = item.voiceState === 'talking';
+    return (
+      <View
+        accessible
+        accessibilityLabel={`${item.name}, agent in the room, ${agentVoiceLabel(item)}`}
+        style={[styles.agentBenchMember, speaking && styles.agentBenchMemberSpeaking]}
+      >
+        <View style={styles.agentBenchIdentity}>
+          <View style={[styles.agentBenchDot, { backgroundColor: item.color }]} />
+          <View style={styles.agentBenchCopy}>
+            <Text numberOfLines={1} style={styles.agentBenchName}>{item.name}</Text>
+            <Text numberOfLines={1} style={[styles.agentBenchState, speaking && { color: item.color }]}>{agentVoiceLabel(item)}</Text>
+          </View>
+        </View>
+        <AgentSpeakingWaveform color={item.color} mini speaking={speaking} />
+      </View>
+    );
+  }, []);
+
+  if (!agents.length) return null;
+  return (
+    <View style={[styles.agentBench, { bottom }]}>
+      <View style={styles.agentBenchHeading}>
+        <SymbolView name="waveform" tintColor="rgba(255,255,255,0.68)" size={12} />
+        <Text style={styles.agentBenchLabel}>AGENTS IN THE ROOM</Text>
+      </View>
+      <FlatList
+        contentContainerStyle={styles.agentBenchList}
+        data={agents}
+        horizontal
+        keyExtractor={(agent) => `${agent.id}:${agent.invitationId}`}
+        renderItem={renderAgent}
+        showsHorizontalScrollIndicator={false}
+      />
+    </View>
   );
 });
 
@@ -404,6 +438,7 @@ type CallLayoutProps = {
   localCameraFramingRevision: string;
   landscape: boolean;
   bottomInset: number;
+  agentBenchVisible: boolean;
   onSwitchCamera?: () => void;
   onSelectParticipant: (participant: CallParticipant) => void;
 };
@@ -424,6 +459,7 @@ const CallLayout = memo(function CallLayout({
   localCameraFramingRevision,
   landscape,
   bottomInset,
+  agentBenchVisible,
   onSwitchCamera,
   onSelectParticipant,
 }: CallLayoutProps) {
@@ -437,7 +473,7 @@ const CallLayout = memo(function CallLayout({
     screenSharing: localScreenSharing,
     videoOff: localScreenSharing ? false : localCameraOff,
   }), [localCameraFramingRevision, localCameraOff, localScreenShareTrackId, localScreenShareURL, localScreenSharing, localStreamURL, localVideoTrackId, localVideoVisible]);
-  const dockClearance = bottomInset + 96;
+  const dockClearance = bottomInset + 96 + (agentBenchVisible ? 70 : 0);
   const [stageSlotDimensions, setStageSlotDimensions] = useState<VideoDimensions | null>(null);
   const [stageVideoMeasurement, setStageVideoMeasurement] = useState<(VideoDimensions & { identity: string }) | null>(null);
   const stageParticipant = participants[0];
@@ -795,25 +831,13 @@ export function RoomScreen({ route, navigation }: Props) {
       mediaStates: nativeRoom.state.participantMediaStates,
       roster: rawRoster,
     });
-    const agents = nativeRoom.state.agentParticipants.map((agent): CallParticipant => ({
-      key: `agent:${agent.id}:${agent.invitationId}`,
-      name: agent.name,
-      active: agent.voiceState === 'talking',
-      micMuted: false,
-      screenSharing: false,
-      // The synthetic video feed is rendered by CallVideoTile. Keeping this
-      // true lets the existing active-speaker focus rule promote the agent.
-      videoOff: true,
-      agent,
-    }));
-    return [...people, ...agents];
+    return people;
   }, [
     activeSpeaker,
     inNativeRoom,
     nativeRoom.state.participantEndpointMediaStates,
     nativeRoom.state.participantMediaStates,
     nativeRoom.state.participants,
-    nativeRoom.state.agentParticipants,
     participants,
     remoteFeeds,
     user?.email,
@@ -1260,6 +1284,7 @@ export function RoomScreen({ route, navigation }: Props) {
         <View style={styles.callSurface}>
           {hasVisibleCallVideo ? <LiveVideoWakeLock /> : null}
           <CallLayout
+            agentBenchVisible={nativeRoom.state.agentParticipants.length > 0}
             bottomInset={bottomInset}
             landscape={window.width > window.height}
             localCameraOff={nativeRoom.state.cameraOff}
@@ -1278,6 +1303,10 @@ export function RoomScreen({ route, navigation }: Props) {
             pictureInPictureParticipantKey={pictureInPictureParticipantKey}
             pinnedParticipantKey={pinnedParticipantKey}
           />
+          <RoomAgentBench
+            agents={nativeRoom.state.agentParticipants}
+            bottom={bottomInset + 82}
+          />
           {Platform.OS === 'ios' ? (
             <View pointerEvents="none" style={styles.screenCapturePicker}>
               <ScreenCapturePickerView ref={screenCapturePickerRef} />
@@ -1288,7 +1317,7 @@ export function RoomScreen({ route, navigation }: Props) {
             <View style={styles.callRoomPill}>
               <Pressable
                 accessibilityHint="Shows participants, devices, and media status"
-                accessibilityLabel={`View ${liveParticipantCount} people in ${room?.name ?? route.params.title}`}
+                accessibilityLabel={`View ${liveParticipantCount} participants in ${room?.name ?? route.params.title}`}
                 accessibilityRole="button"
                 onPress={() => setParticipantsVisible(true)}
                 style={({ pressed }) => [styles.callRoomIdentity, pressed && styles.callRoomIdentityPressed]}
@@ -1318,7 +1347,7 @@ export function RoomScreen({ route, navigation }: Props) {
               twice as two separate "You" tiles. */}
           {callParticipants.length === 1 ? (
             <LocalPreview
-              bottom={bottomInset + 96}
+              bottom={bottomInset + 96 + (nativeRoom.state.agentParticipants.length > 0 ? 70 : 0)}
               cameraOff={nativeRoom.state.cameraOff}
               framingRevision={localCameraFramingRevision}
               name={user?.name ?? 'You'}
@@ -1535,30 +1564,65 @@ const styles = StyleSheet.create({
     gap: space[3],
     backgroundColor: ink[850],
   },
-  agentVideoFeed: {
+  agentBench: {
     position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
+    left: space[3],
+    right: space[3],
+    zIndex: 25,
+    minHeight: 60,
+    paddingTop: 7,
+    paddingBottom: 7,
+    borderRadius: 24,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.10)',
+    backgroundColor: 'rgba(13,13,16,0.88)',
+  },
+  agentBenchHeading: {
+    height: 14,
+    paddingHorizontal: space[3],
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: space[2],
-    backgroundColor: ink[900],
+    gap: 6,
   },
-  agentAura: {
-    position: 'absolute',
-    width: 280,
-    height: 280,
-    borderRadius: 140,
-    opacity: 0.1,
-    transform: [{ scaleX: 1.45 }],
+  agentBenchLabel: {
+    color: 'rgba(255,255,255,0.52)',
+    fontSize: 9,
+    fontFamily: 'GoogleSansFlex_600SemiBold',
+    fontWeight: '600',
+    lineHeight: 11,
+    letterSpacing: 0.72,
   },
-  agentVoiceState: {
-    ...type.label,
-    color: 'rgba(255,255,255,0.58)',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
+  agentBenchList: { gap: 6, paddingHorizontal: 6, paddingTop: 5 },
+  agentBenchMember: {
+    minWidth: 156,
+    height: 34,
+    paddingLeft: 10,
+    paddingRight: 8,
+    borderRadius: 17,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+  },
+  agentBenchMemberSpeaking: { backgroundColor: 'rgba(255,255,255,0.11)' },
+  agentBenchIdentity: { minWidth: 0, flex: 1, flexDirection: 'row', alignItems: 'center', gap: 7 },
+  agentBenchDot: { width: 7, height: 7, borderRadius: 3.5 },
+  agentBenchCopy: { minWidth: 0, flex: 1 },
+  agentBenchName: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontFamily: 'GoogleSansFlex_600SemiBold',
+    fontWeight: '600',
+    lineHeight: 13,
+  },
+  agentBenchState: {
+    marginTop: 1,
+    color: 'rgba(255,255,255,0.50)',
+    fontSize: 9,
+    fontFamily: 'GoogleSansFlex_500Medium',
+    fontWeight: '500',
+    lineHeight: 10,
   },
   videoAvatar: {
     width: 82,

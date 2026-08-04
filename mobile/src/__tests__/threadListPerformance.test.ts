@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
 
 import type { ScoutMessage } from '../api/types';
@@ -107,4 +109,15 @@ test('scroll interaction stays fenced from drag through momentum settlement', ()
     true,
     'missing native velocity stays fenced until the caller grace timer settles it',
   );
+});
+
+test('in-room chat and transcript use the same non-jittery tail-follow contract', () => {
+  const source = fs.readFileSync(
+    path.resolve(import.meta.dirname, '..', 'components', 'RoomConversationSheet.tsx'),
+    'utf8',
+  );
+  assert.match(source, /useConversationTailFollow\(chatListRef, visible && mode === 'chat'\)/);
+  assert.match(source, /useConversationTailFollow\(transcriptListRef, visible && mode === 'transcript'\)/);
+  assert.match(source, /shouldFollowThreadTail\(atBottomRef\.current, interactingRef\.current\)/);
+  assert.doesNotMatch(source, /scrollToEnd\(\{ animated: true \}\)/);
 });

@@ -12,6 +12,7 @@ const REST_PROFILE = [
 type Props = {
   color: ColorValue;
   compact?: boolean;
+  mini?: boolean;
   speaking: boolean;
 };
 
@@ -24,6 +25,7 @@ type Props = {
 export const AgentSpeakingWaveform = memo(function AgentSpeakingWaveform({
   color,
   compact = false,
+  mini = false,
   speaking,
 }: Props) {
   const reduceMotion = useReduceMotion();
@@ -51,9 +53,9 @@ export const AgentSpeakingWaveform = memo(function AgentSpeakingWaveform({
     return () => loop.stop();
   }, [phase, reduceMotion, speaking]);
 
-  const height = compact ? 34 : 72;
-  const width = compact ? 2 : 3;
-  const gap = compact ? 2 : 4;
+  const height = mini ? 24 : compact ? 34 : 72;
+  const width = mini ? 1.5 : compact ? 2 : 3;
+  const gap = mini ? 1 : compact ? 2 : 4;
   return (
     <View
       accessibilityElementsHidden

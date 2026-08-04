@@ -40,10 +40,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and remain the fallback if this bundle is ever rejected.
       // Regenerate both with `npm run brand:regen` from the repo root.
       icon: './assets/Stride.icon',
-      // Build 34 activates the production Scout cradle and repairs Apple-tier
-      // rich-thread scroll anchoring on top of the exact live Build 33 baseline.
-      // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '34',
+      // Build 35 adds stable multi-human room Scout audio, source-bound meeting
+      // transcription, durable follow-through, and shared smooth tail-follow
+      // on top of the accepted Build 34 cradle baseline. Pin the app and
+      // ReplayKit extension to the same release.
+      buildNumber: '35',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

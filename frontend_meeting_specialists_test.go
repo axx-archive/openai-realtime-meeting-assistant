@@ -84,7 +84,7 @@ func TestFrontendMeetingSpecialistsEscapesEveryRuntimeInterpolation(t *testing.T
 	}
 }
 
-func TestFrontendProjectsRoomAgentsAsVisibleWaveformParticipants(t *testing.T) {
+func TestFrontendProjectsRoomAgentsAsWaveformBenchOutsideHumanVideoGrid(t *testing.T) {
 	source, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatal(err)
@@ -93,9 +93,12 @@ func TestFrontendProjectsRoomAgentsAsVisibleWaveformParticipants(t *testing.T) {
 	for _, want := range []string{
 		`case 'agent_participants':`,
 		`handleRoomAgentParticipants(message.data)`,
+		`id="roomAgentBench"`,
+		`function renderRoomAgentBench()`,
+		`room-agent-bench__member`,
+		`Agents in the room`,
 		`...roomAgentParticipants.map(agent => agent.name)`,
 		`room-agent-waveform`,
-		`is-agent-participant`,
 		`data-voice-state`,
 		`...roomAgentParticipants.map(agent => agent.name.toLowerCase())`,
 	} {
@@ -103,8 +106,10 @@ func TestFrontendProjectsRoomAgentsAsVisibleWaveformParticipants(t *testing.T) {
 			t.Fatalf("room agent participant projection is missing %q", want)
 		}
 	}
-	if strings.Contains(html, `room-agent-cradle`) {
-		t.Fatal("room participants must not duplicate the home-screen Signal Cradle")
+	for _, forbidden := range []string{`room-agent-cradle`, `is-agent-participant`} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("room agents must not occupy camera tiles or duplicate the home cradle: found %q", forbidden)
+		}
 	}
 }
 

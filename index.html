@@ -17714,42 +17714,120 @@
         box-shadow: none;
       }
 
-      .hearth-seat.is-agent-participant {
+      /* Agents are audible collaborators, not pretend camera feeds. The bench
+         reserves a compact strip beneath the human video grid and gives each
+         invited personality a stable color plus an honest live state. */
+      .room-agent-bench {
+        position: relative;
+        z-index: 6;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: min(100%, 720px);
+        min-height: 56px;
+        margin: 10px auto 0;
+        padding: 7px 9px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.11);
+        border-radius: 18px;
+        background: rgba(17, 17, 20, 0.76);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 10px 26px rgba(0, 0, 0, 0.24);
+        backdrop-filter: blur(18px) saturate(1.08);
+        -webkit-backdrop-filter: blur(18px) saturate(1.08);
+        scrollbar-width: none;
+      }
+
+      .room-agent-bench[hidden] {
+        display: none;
+      }
+
+      .room-agent-bench::-webkit-scrollbar {
+        display: none;
+      }
+
+      .room-agent-bench__heading {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 6px;
+        padding: 0 5px;
+        color: rgba(255, 255, 255, 0.58);
+        font: 650 9px/1 var(--font-sans);
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+
+      .room-agent-bench__heading-dot,
+      .room-agent-bench__dot {
+        width: 6px;
+        height: 6px;
+        flex: none;
+        border-radius: var(--r-full);
+        background: currentColor;
+      }
+
+      .room-agent-bench__member {
         --room-agent-color: var(--ember);
-        border: 0;
-        background:
-          radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--room-agent-color) 14%, transparent), transparent 46%),
-          var(--ink-900);
-        cursor: default;
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 7px;
+        min-width: 176px;
+        height: 42px;
+        padding: 5px 9px;
+        border: 1px solid color-mix(in srgb, var(--room-agent-color) 30%, rgba(255, 255, 255, 0.08));
+        border-radius: 13px;
+        background: color-mix(in srgb, var(--room-agent-color) 8%, rgba(255, 255, 255, 0.05));
+        color: var(--room-agent-color);
       }
 
-      .hearth-seat.is-agent-participant::after {
-        box-shadow:
-          inset 0 0 0 1px color-mix(in srgb, var(--room-agent-color) 34%, rgba(255, 255, 255, 0.07)),
-          inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      .room-agent-bench__copy {
+        min-width: 0;
       }
 
-      /* A room participant gets a voice signature, not a second copy of the
-         home-screen Signal Cradle. Every invited agent owns a stable color;
-         only genuine talking animates. The 21 bars animate on transform and
-         opacity, so a long call never pays layout work per frame. */
+      .room-agent-bench__name,
+      .room-agent-bench__state {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .room-agent-bench__name {
+        color: #fff;
+        font: 650 11.5px/1.1 var(--font-sans);
+      }
+
+      .room-agent-bench__state {
+        margin-top: 3px;
+        color: rgba(255, 255, 255, 0.56);
+        font: 500 9.5px/1 var(--font-sans);
+      }
+
+      .room-agent-bench__member[data-voice-state="talking"] .room-agent-bench__state {
+        color: var(--room-agent-color);
+      }
+
+      /* Every invited agent owns a stable 21-bar voice signature. Only real
+         speech animates; listening and thinking remain legible but calm. */
       .room-agent-waveform {
         position: relative;
-        z-index: 1;
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: clamp(2px, 0.34vw, 4px);
-        width: min(78%, 310px);
-        height: clamp(54px, 28%, 88px);
+        gap: 1px;
+        width: 44px;
+        height: 22px;
         color: var(--room-agent-color);
-        filter: drop-shadow(0 8px 18px color-mix(in srgb, currentColor 24%, transparent));
+        filter: drop-shadow(0 3px 7px color-mix(in srgb, currentColor 20%, transparent));
       }
 
       .room-agent-waveform__bar {
-        width: clamp(2px, 0.34vw, 4px);
+        width: 1px;
         height: 100%;
-        flex: 0 0 clamp(2px, 0.34vw, 4px);
+        flex: 0 0 1px;
         border-radius: var(--r-full);
         background: currentColor;
         opacity: 0.58;
@@ -17758,15 +17836,15 @@
         will-change: transform, opacity;
       }
 
-      .is-agent-participant[data-voice-state="hearing"] .room-agent-waveform__bar {
+      .room-agent-bench__member[data-voice-state="hearing"] .room-agent-waveform__bar {
         opacity: 0.78;
       }
 
-      .is-agent-participant[data-voice-state="thinking"] .room-agent-waveform {
+      .room-agent-bench__member[data-voice-state="thinking"] .room-agent-waveform {
         opacity: 0.72;
       }
 
-      .is-agent-participant[data-voice-state="talking"] .room-agent-waveform__bar {
+      .room-agent-bench__member[data-voice-state="talking"] .room-agent-waveform__bar {
         animation: room-agent-waveform-talk 1120ms linear infinite;
         animation-delay: var(--agent-wave-delay);
         opacity: 1;
@@ -17776,6 +17854,12 @@
         0%, 100% { transform: scaleY(var(--agent-wave-rest)); opacity: 0.76; }
         32% { transform: scaleY(var(--agent-wave-peak)); opacity: 1; }
         64% { transform: scaleY(var(--agent-wave-mid)); opacity: 0.88; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .room-agent-waveform__bar {
+          animation: none !important;
+        }
       }
 
       .hearth-seat .owner-avatar {
@@ -24893,6 +24977,7 @@
                   <span id="localVideoLabel" class="video-label">you</span>
                 </div>
               </div>
+              <div id="roomAgentBench" class="room-agent-bench" aria-label="Agents in the room" hidden></div>
             </div>
           </div>
         </section>
@@ -26645,6 +26730,7 @@
       const localTileAvatar = document.getElementById('localTileAvatar')
       const localVideoLabel = document.getElementById('localVideoLabel')
       const videoStack = document.getElementById('videoStack')
+      const roomAgentBench = document.getElementById('roomAgentBench')
       const waitingParticipants = document.getElementById('waitingParticipants')
       const participantAvatarStack = document.getElementById('participantAvatarStack')
       const toastRegion = document.getElementById('toastRegion')
@@ -43518,11 +43604,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         })
       }
 
-      function roomAgentParticipantByName(name) {
-        const target = String(name || '').trim().toLowerCase()
-        return roomAgentParticipants.find(agent => agent.name.toLowerCase() === target) || null
-      }
-
       function handleRoomAgentParticipants(data) {
         const previous = roomAgentParticipants
         roomAgentParticipants = normalizeRoomAgentParticipants(data)
@@ -43945,7 +44026,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function pruneStaleUnidentifiedAudioMonitors(reason = '') {
-        const expectedNames = participantsInRoom.filter(name => name && !isCurrentParticipantName(name))
+        const expectedNames = expectedRemoteAudioParticipantNames()
         if (expectedNames.length === 0) {
           return false
         }
@@ -43987,6 +44068,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function expectedRemoteParticipantNames() {
         return participantsInRoom.filter(name => name && !isCurrentParticipantName(name))
+      }
+
+      function expectedRemoteAudioParticipantNames() {
+        return normalizeParticipantList([
+          ...participantsInRoom,
+          ...roomAgentParticipants.map(agent => agent.name)
+        ]).filter(name => name && !isCurrentParticipantName(name))
       }
 
       function remoteTileName(tile) {
@@ -44253,6 +44341,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function remoteMediaHealthSnapshot() {
         const expectedNames = expectedRemoteParticipantNames()
+        const expectedAudioNames = expectedRemoteAudioParticipantNames()
         const videoCounts = remoteVideoTileCountsByName()
         const audioCounts = remoteAudioMonitorCountsByName()
         const placeholderVideoTiles = remoteTiles().filter(tile => remoteTileName(tile) === 'participant').length
@@ -44273,6 +44362,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         return {
           expectedRemoteParticipants: expectedNames.length,
+          expectedRemoteAudioParticipants: expectedAudioNames.length,
           remoteVideoTiles: remoteTiles().length,
           remoteAudioMonitors: audioMonitorsForRemoteParticipants.length,
           placeholderVideoTiles,
@@ -44286,8 +44376,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           remoteAudioLevels: audioSignal.levels,
           missingVideoNames: expectedNames.filter(name => (videoCounts.get(name.toLowerCase()) || 0) === 0),
           duplicateVideoNames: expectedNames.filter(name => (videoCounts.get(name.toLowerCase()) || 0) > 1),
-          missingAudioNames: expectedNames.filter(name => (audioCounts.get(name.toLowerCase()) || 0) === 0),
-          duplicateAudioNames: expectedNames.filter(name => (audioCounts.get(name.toLowerCase()) || 0) > 1),
+          missingAudioNames: expectedAudioNames.filter(name => (audioCounts.get(name.toLowerCase()) || 0) === 0),
+          duplicateAudioNames: expectedAudioNames.filter(name => (audioCounts.get(name.toLowerCase()) || 0) > 1),
           stalledVideoNames
         }
       }
@@ -52673,7 +52763,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           currentParticipantName,
           selectedParticipantName(),
           ...participantsInRoom,
-          ...participantPreview,
+          ...participantPreview
+        ])
+      }
+
+      function roomOccupantNames() {
+        return normalizeParticipantList([
+          ...participantNamesForRoom(),
           ...roomAgentParticipants.map(agent => agent.name)
         ])
       }
@@ -52690,7 +52786,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       // server roster counts (the local identity/selection must not inflate
       // it), and the 'the room' placeholder never renders as a person.
       function boardOccupantNames() {
-        const names = visibleParticipantNames().filter(name => name && name !== 'the room')
+        const names = roomOccupantNames().filter(name => name && name !== 'the room')
         if (appShell.classList.contains('is-in-room')) {
           return names
         }
@@ -53481,6 +53577,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           localTile.dataset.participant = currentParticipantName || selectedParticipantName()
         }
 
+        renderRoomAgentBench()
         syncParticipantPlaceholders()
         applyVideoTileOrder()
         updateRoomGridMetrics()
@@ -53531,68 +53628,98 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
         }
         for (const [name, tile] of participantPlaceholders.entries()) {
-          const agent = roomAgentParticipantByName(name)
-          if (!names.includes(name) || (!agent && remoteStreamsByParticipant.has(name)) || name === currentParticipantName) {
+          if (!names.includes(name) || remoteStreamsByParticipant.has(name) || name === currentParticipantName) {
             tile.remove()
             participantPlaceholders.delete(name)
-          } else if (agent) {
-            updateRoomAgentTile(tile, agent)
           }
         }
         for (const name of names) {
-          const agent = roomAgentParticipantByName(name)
-          if (!name || represented.has(name) || (!agent && remoteStreamsByParticipant.has(name)) || name === currentParticipantName) {
+          if (!name || represented.has(name) || remoteStreamsByParticipant.has(name) || name === currentParticipantName) {
             continue
           }
           const tile = document.createElement('div')
           tile.dataset.participant = name
-          if (agent) {
-            tile.className = 'video-tile hearth-seat is-placeholder is-agent-participant'
-            const waveform = document.createElement('span')
-            waveform.className = 'room-agent-waveform'
-            waveform.setAttribute('aria-hidden', 'true')
-            const restProfile = [.18,.28,.22,.42,.31,.56,.38,.72,.48,.86,.58,.78,.46,.68,.36,.54,.29,.43,.2,.31,.17]
-            for (let index = 0; index < restProfile.length; index += 1) {
-              const bar = document.createElement('span')
-              const phase = index * 1.17
-              const peak = Math.min(1, .52 + .48 * (.5 + .5 * Math.sin(phase)))
-              const mid = Math.min(.82, .26 + .56 * (.5 + .5 * Math.cos(phase * .73)))
-              bar.className = 'room-agent-waveform__bar'
-              bar.style.setProperty('--agent-wave-rest', String(restProfile[index]))
-              bar.style.setProperty('--agent-wave-peak', String(peak))
-              bar.style.setProperty('--agent-wave-mid', String(mid))
-              bar.style.setProperty('--agent-wave-delay', `${-index * 53}ms`)
-              waveform.appendChild(bar)
-            }
-            const label = document.createElement('span')
-            label.className = 'video-label'
-            tile.append(waveform, label)
-            updateRoomAgentTile(tile, agent)
-          } else {
-            tile.className = 'video-tile hearth-seat is-placeholder'
-            const avatar = document.createElement('span')
-            avatar.className = 'owner-avatar'
-            avatar.appendChild(renderIdenticon(name))
-            const label = document.createElement('span')
-            label.className = 'video-label'
-            label.textContent = name
-            tile.append(avatar, renderMediaFlags(), label)
-          }
+          tile.className = 'video-tile hearth-seat is-placeholder'
+          const avatar = document.createElement('span')
+          avatar.className = 'owner-avatar'
+          avatar.appendChild(renderIdenticon(name))
+          const label = document.createElement('span')
+          label.className = 'video-label'
+          label.textContent = name
+          tile.append(avatar, renderMediaFlags(), label)
           participantPlaceholders.set(name, tile)
           videoStack.appendChild(tile)
         }
       }
 
-      function updateRoomAgentTile(tile, agent) {
-        if (!tile || !agent) return
-        const voiceState = String(agent.voiceState || agent.status || 'starting').toLowerCase()
-        tile.style.setProperty('--room-agent-color', agent.color || '#FF5A19')
-        tile.dataset.agentId = agent.id
-        tile.dataset.voiceState = voiceState
-        tile.classList.add('is-agent-participant')
-        tile.setAttribute('aria-label', `${agent.name}, agent participant, ${voiceState}`)
-        const label = tile.querySelector('.video-label')
-        if (label) label.textContent = `${agent.name} · ${voiceState}`
+      function roomAgentVoiceLabel(agent) {
+        const voiceState = String(agent?.voiceState || agent?.status || 'starting').toLowerCase()
+        if (voiceState === 'degraded') return 'Connection interrupted'
+        if (voiceState === 'talking') return 'Speaking'
+        if (voiceState === 'hearing') return 'Listening to the room'
+        if (voiceState === 'thinking') return 'Thinking'
+        if (voiceState === 'listening') return 'Ready'
+        return 'Joining'
+      }
+
+      function renderRoomAgentWaveform() {
+        const waveform = document.createElement('span')
+        waveform.className = 'room-agent-waveform'
+        waveform.setAttribute('aria-hidden', 'true')
+        const restProfile = [.18,.28,.22,.42,.31,.56,.38,.72,.48,.86,.58,.78,.46,.68,.36,.54,.29,.43,.2,.31,.17]
+        for (let index = 0; index < restProfile.length; index += 1) {
+          const bar = document.createElement('span')
+          const phase = index * 1.17
+          const peak = Math.min(1, .52 + .48 * (.5 + .5 * Math.sin(phase)))
+          const mid = Math.min(.82, .26 + .56 * (.5 + .5 * Math.cos(phase * .73)))
+          bar.className = 'room-agent-waveform__bar'
+          bar.style.setProperty('--agent-wave-rest', String(restProfile[index]))
+          bar.style.setProperty('--agent-wave-peak', String(peak))
+          bar.style.setProperty('--agent-wave-mid', String(mid))
+          bar.style.setProperty('--agent-wave-delay', `${-index * 53}ms`)
+          waveform.appendChild(bar)
+        }
+        return waveform
+      }
+
+      function renderRoomAgentBench() {
+        if (!roomAgentBench) return
+        roomAgentBench.hidden = roomAgentParticipants.length === 0
+        if (roomAgentBench.hidden) {
+          roomAgentBench.replaceChildren()
+          return
+        }
+        const heading = document.createElement('span')
+        heading.className = 'room-agent-bench__heading'
+        const headingDot = document.createElement('span')
+        headingDot.className = 'room-agent-bench__heading-dot'
+        headingDot.setAttribute('aria-hidden', 'true')
+        heading.append(headingDot, document.createTextNode('Agents in the room'))
+        const members = roomAgentParticipants.map(agent => {
+          const voiceState = String(agent.voiceState || agent.status || 'starting').toLowerCase()
+          const label = roomAgentVoiceLabel(agent)
+          const member = document.createElement('span')
+          member.className = 'room-agent-bench__member'
+          member.dataset.agentId = agent.id
+          member.dataset.voiceState = voiceState
+          member.style.setProperty('--room-agent-color', agent.color || '#FF5A19')
+          member.setAttribute('aria-label', `${agent.name}, agent in the room, ${label}`)
+          const dot = document.createElement('span')
+          dot.className = 'room-agent-bench__dot'
+          dot.setAttribute('aria-hidden', 'true')
+          const copy = document.createElement('span')
+          copy.className = 'room-agent-bench__copy'
+          const name = document.createElement('span')
+          name.className = 'room-agent-bench__name'
+          name.textContent = agent.name
+          const state = document.createElement('span')
+          state.className = 'room-agent-bench__state'
+          state.textContent = label
+          copy.append(name, state)
+          member.append(dot, copy, renderRoomAgentWaveform())
+          return member
+        })
+        roomAgentBench.replaceChildren(heading, ...members)
       }
 
       function ensurePinButton(tile, name) {
@@ -55151,7 +55278,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function inferredRemoteParticipantName() {
-        const remoteNames = participantNamesForRoom().filter(name => name && name !== currentParticipantName)
+        const remoteNames = roomOccupantNames().filter(name => name && name !== currentParticipantName)
         return remoteNames.length === 1 ? remoteNames[0] : ''
       }
 

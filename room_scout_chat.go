@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const roomScoutTextResponseStyle = "Answer as Scout inside a shared live meeting room. Respond directly to the message that mentioned you, addressing the room rather than a private user. Use only the authorized shared-room and organization context supplied to you. Never imply access to private chats or private user profiles. Be concise unless the room asks for depth, and say when evidence is insufficient."
+const roomScoutTextResponseStyle = "Answer as Scout inside a shared live meeting room. Respond directly to the message that mentioned you, addressing the room rather than a private user. Use only the authorized shared-room and organization context supplied to you. Never imply access to private chats or private user profiles. Be concise unless the room asks for depth, and say when evidence is insufficient. This answer lane cannot schedule or perform future actions. Never say you will do, post, send, schedule, or finish something later; state that no work is running and ask for an immediately answerable request instead."
 
 // roomScoutTextLock returns one stable FIFO mutex for an exact room sitting.
 // The map is intentionally process-lifetime: removing a lock while a queued
@@ -45,20 +45,46 @@ func (app *kanbanBoardApp) roomScoutTextScopeCurrent(scope RoomScoutScope) bool 
 // submitRoomScoutTextMention starts one server-owned room answer after the
 // human message has durably landed and been broadcast. The websocket read loop
 // never waits on a model call, and ordinary room chat never touches this path.
-func (app *kanbanBoardApp) submitRoomScoutTextMention(scope RoomScoutScope, question, replyTo string) {
+func (app *kanbanBoardApp) submitRoomScoutTextMention(scope RoomScoutScope, question, replyTo, requesterEmail, requesterName string) {
 	question = normalizeRoomChatText(question)
 	if app == nil || !scope.valid() || question == "" || !scoutChatMentionsScout(question) {
 		return
 	}
-	go app.runRoomScoutTextMention(scope, question, strings.TrimSpace(replyTo))
+	replyTo = strings.TrimSpace(replyTo)
+	requesterEmail = normalizeAccountEmail(requesterEmail)
+	requesterName = canonicalRoomActorName(requesterName)
+	if _, requested := parseRoomRecapFollowThrough(question); requested {
+		// The room message is already durable at this seam. Persist the job and
+		// deterministic delivery id before acknowledging it to the room; unlike a
+		// model answer this bounded ledger write must not be lost in a goroutine
+		// crash window.
+		app.runRoomScoutTextMention(scope, question, replyTo, requesterEmail, requesterName)
+		return
+	}
+	go app.runRoomScoutTextMention(scope, question, replyTo, requesterEmail, requesterName)
 }
 
-func (app *kanbanBoardApp) runRoomScoutTextMention(scope RoomScoutScope, question, replyTo string) {
+func (app *kanbanBoardApp) runRoomScoutTextMention(scope RoomScoutScope, question, replyTo, requesterEmail, requesterName string) {
 	lock := app.roomScoutTextLock(scope)
 	lock.Lock()
 	defer lock.Unlock()
 
 	if !app.roomScoutTextScopeCurrent(scope) {
+		return
+	}
+	if destination, requested := parseRoomRecapFollowThrough(question); requested {
+		record, err := app.scheduleRoomRecapFollowThrough(scope, replyTo, question, requesterEmail, requesterName, destination)
+		if err != nil {
+			answer := "I couldn't schedule that, so nothing is running. " + trimForStorage(err.Error(), 220) + "."
+			if destination == "" || roomFollowThroughIsMissingInput(err) && strings.Contains(strings.ToLower(err.Error()), "name") {
+				answer = "Which exact channel should receive the recap? Nothing is scheduled until you name it."
+			}
+			app.publishRoomScoutTextAnswer(scope, replyTo, answer, nil)
+			return
+		}
+		app.publishRoomScoutTextAnswer(scope, replyTo,
+			fmt.Sprintf("Scheduled. I'll post this meeting's recap in #%s after this sitting ends. Receipt: %s.", record.DestinationTitle, record.ID),
+			map[string]string{"followThroughId": record.ID, "followThroughStatus": record.Status, "destinationThreadId": record.DestinationThreadID})
 		return
 	}
 	principal := sharedRoomRecallPrincipal(scope.RoomID, scope.SittingID)
@@ -81,13 +107,24 @@ func (app *kanbanBoardApp) runRoomScoutTextMention(scope RoomScoutScope, questio
 	if !app.roomScoutTextScopeCurrent(scope) {
 		return
 	}
-	payload, ok := app.recordRoomChatMessageForMeeting(scope.RoomID, scoutParticipantName, answer, map[string]string{
+	app.publishRoomScoutTextAnswer(scope, replyTo, answer, nil)
+}
+
+func (app *kanbanBoardApp) publishRoomScoutTextAnswer(scope RoomScoutScope, replyTo, answer string, extraMetadata map[string]string) {
+	if !app.roomScoutTextScopeCurrent(scope) {
+		return
+	}
+	metadata := map[string]string{
 		"speaker":  scoutParticipantName,
 		"agentId":  "scout",
 		"replyTo":  replyTo,
 		"provider": "openai",
 		"model":    scoutChatModel(),
-	}, scope.SittingID)
+	}
+	for key, value := range extraMetadata {
+		metadata[key] = value
+	}
+	payload, ok := app.recordRoomChatMessageForMeeting(scope.RoomID, scoutParticipantName, answer, metadata, scope.SittingID)
 	if !ok || !app.roomScoutTextScopeCurrent(scope) {
 		return
 	}

@@ -25,6 +25,9 @@ export type RoomChatMessage = Readonly<{
   agentId?: string;
   replyTo?: string;
   model?: string;
+  followThroughId?: string;
+  followThroughStatus?: 'queued' | 'delivering' | 'delivered' | 'awaiting_input';
+  destinationThreadId?: string;
   transient?: boolean;
   error?: boolean;
 }>;
@@ -160,6 +163,12 @@ export function parseRoomChatMessage(payload: unknown): RoomChatMessage | null {
   const agentId = wireIdentifier(payload.agentId).toLowerCase();
   const replyTo = wireIdentifier(payload.replyTo);
   const model = wireIdentifier(payload.model);
+  const followThroughId = wireIdentifier(payload.followThroughId);
+  const rawFollowThroughStatus = wireIdentifier(payload.followThroughStatus);
+  const followThroughStatus = ['queued', 'delivering', 'delivered', 'awaiting_input'].includes(rawFollowThroughStatus)
+    ? rawFollowThroughStatus as RoomChatMessage['followThroughStatus']
+    : undefined;
+  const destinationThreadId = wireIdentifier(payload.destinationThreadId);
   return {
     id,
     name,
@@ -171,6 +180,8 @@ export function parseRoomChatMessage(payload: unknown): RoomChatMessage | null {
     ...(agentId ? { agentId } : {}),
     ...(replyTo ? { replyTo } : {}),
     ...(model ? { model } : {}),
+    ...(followThroughId && followThroughStatus ? { followThroughId, followThroughStatus } : {}),
+    ...(followThroughId && destinationThreadId ? { destinationThreadId } : {}),
     ...(payload.transient === true ? { transient: true } : {}),
     ...(payload.error === true ? { error: true } : {}),
   };

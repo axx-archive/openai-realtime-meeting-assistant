@@ -47,6 +47,15 @@ type consentMixedAudioSink interface {
 	WriteMixedPCMWithConsent([]int16, []ConsentFence) error
 }
 
+// consentSourceAudioSink is the identity-preserving transcription seam. The
+// mixer still emits one combined room signal to Scout/model analysis, but the
+// authoritative transcript receives each admitted publication independently
+// so overlapping speakers can never be collapsed into a guessed identity.
+type consentSourceAudioSink interface {
+	WriteSourcePCMWithConsent(trackKey string, participantName string, pcm []int16, fence ConsentFence) error
+	RemoveSource(trackKey string)
+}
+
 type audioMixerSink struct {
 	sink      mixedAudioSink
 	lane      ConsentLane
@@ -273,6 +282,7 @@ func (mixer *audioMixer) run() {
 				continue
 			}
 			if input.remove {
+				mixer.removeSourceFromSinks(input.trackKey)
 				delete(sources, input.trackKey)
 				continue
 			}
@@ -339,6 +349,19 @@ func (mixer *audioMixer) run() {
 				mixer.notifyAudioActivity(time.Now().UTC(), activeLevels)
 			}
 			for key, sinkConfig := range mixer.snapshotSinks() {
+				if sourceSink, ok := sinkConfig.sink.(consentSourceAudioSink); ok && sinkConfig.lane == ConsentLaneTranscription {
+					for _, activity := range activities {
+						frame := activity.laneFrames[sinkConfig.lane]
+						fence, fenced := activity.laneFences[sinkConfig.lane]
+						if len(frame) < roomAudioMixFrameSize || !fenced || sinkConfig.authority == nil || sinkConfig.authority.ValidateFenceLocal(fence) != nil {
+							continue
+						}
+						if err := sourceSink.WriteSourcePCMWithConsent(activity.trackKey, activity.participantName, frame, fence); err != nil {
+							log.Errorf("Failed to write source audio sink=%s track=%s: %v", key, activity.trackKey, err)
+						}
+					}
+					continue
+				}
 				sinkPCM, fences := mixedPCM, []ConsentFence(nil)
 				if sinkConfig.lane != "" {
 					sinkPCM, fences = mixConsentLaneFrame(activities, sinkConfig.lane, sinkConfig.authority)
@@ -356,6 +379,14 @@ func (mixer *audioMixer) run() {
 					log.Errorf("Failed to write mixed audio sink=%s: %v", key, err)
 				}
 			}
+		}
+	}
+}
+
+func (mixer *audioMixer) removeSourceFromSinks(trackKey string) {
+	for _, sinkConfig := range mixer.snapshotSinks() {
+		if sourceSink, ok := sinkConfig.sink.(consentSourceAudioSink); ok {
+			sourceSink.RemoveSource(trackKey)
 		}
 	}
 }

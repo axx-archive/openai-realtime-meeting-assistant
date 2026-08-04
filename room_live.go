@@ -137,6 +137,10 @@ type roomLiveState struct {
 	recordingEnabled   bool
 	recordingUpdatedAt time.Time
 	recordingUpdatedBy string
+	// recordingEpoch is a hard capture boundary. Every on/off transition bumps
+	// it so provider callbacks from audio buffered before the transition cannot
+	// persist into the next recording interval.
+	recordingEpoch uint64
 
 	// speaker attribution + active speaker, fed by THIS room's mixer activity
 	// listener (roomAudioActivityListener).
@@ -292,6 +296,7 @@ func newRoomLiveState(roomID string, now time.Time) *roomLiveState {
 		guestSeats:                 map[string]string{},
 		recordingEnabled:           true,
 		recordingUpdatedAt:         now,
+		recordingEpoch:             1,
 		chatBuckets:                map[string]*guestChatBucket{},
 		mediaStateBuckets:          map[string]*guestChatBucket{},
 		telemetryBuckets:           map[string]*guestChatBucket{},
@@ -790,6 +795,50 @@ func (s *roomLaneAudioSink) WriteMixedPCMWithConsent(roomPCM []int16, fences []C
 	return nil
 }
 
+func (s *roomLaneAudioSink) WriteSourcePCMWithConsent(trackKey string, participantName string, roomPCM []int16, fence ConsentFence) error {
+	if s == nil || s.app == nil || s.lane != ConsentLaneTranscription || len(roomPCM) == 0 || pcmIsZero(roomPCM) {
+		return nil
+	}
+	if fence.lane != ConsentLaneTranscription || currentConsentLaneAuthority().ValidateIngressFence(fence) != nil {
+		return nil
+	}
+	s.app.mu.Lock()
+	state := s.app.roomLiveLocked(s.roomID)
+	if !state.recordingEnabled {
+		s.app.mu.Unlock()
+		return nil
+	}
+	epoch := state.recordingEpoch
+	var transcriptLane *meetingTranscriptionLane
+	if normalizeRoomID(s.roomID) == officeRoomID {
+		transcriptLane = s.app.transcriptLane
+	} else {
+		transcriptLane = state.lane
+	}
+	s.app.mu.Unlock()
+	if transcriptLane != nil {
+		transcriptLane.enqueueSourceWithConsent(trackKey, participantName, roomPCM, fence, epoch)
+	}
+	return nil
+}
+
+func (s *roomLaneAudioSink) RemoveSource(trackKey string) {
+	if s == nil || s.app == nil || s.lane != ConsentLaneTranscription {
+		return
+	}
+	s.app.mu.Lock()
+	var transcriptLane *meetingTranscriptionLane
+	if normalizeRoomID(s.roomID) == officeRoomID {
+		transcriptLane = s.app.transcriptLane
+	} else {
+		transcriptLane = s.app.roomLiveLocked(s.roomID).lane
+	}
+	s.app.mu.Unlock()
+	if transcriptLane != nil {
+		transcriptLane.removeSource(trackKey)
+	}
+}
+
 // roomMixerFor returns the mixer that room audio should decode into: the
 // boot-started global for the office, the lazy per-room mixer otherwise (nil
 // while the room has no media — frames from a join racing a teardown are
@@ -840,7 +889,7 @@ func (app *kanbanBoardApp) ensureRoomMedia(roomID string) uint64 {
 	apiKey := app.apiKey
 	var lane *meetingTranscriptionLane
 	if strings.TrimSpace(apiKey) != "" && transcriptionLaneEnabled() {
-		lane = newMeetingTranscriptionLaneForRoomGeneration(app, apiKey, transcriptionLaneModel(), roomID, gen)
+		lane = newMeetingTranscriptionSourceManagerForRoomGeneration(app, apiKey, transcriptionLaneModel(), roomID, gen)
 		// Started before it becomes observable through state.lane, so a
 		// racing teardown can never close() a lane whose run loop (the one
 		// that signals done) has not launched yet.
@@ -1307,6 +1356,7 @@ func (app *kanbanBoardApp) closeRoomForArchive(roomID string) {
 				}
 				app.flushDeferredNotifications("meeting_end")
 				app.flushAmbientAgentsForClose("room-archive", roomID, closed.ListenOnly)
+				app.flushRoomFollowThroughForMeeting(roomID, closed.ID, "room_archive")
 				if app.memory != nil {
 					app.memory.rotateMeetingIDIfCurrent(roomID, closed.ID)
 				}

@@ -45,9 +45,10 @@ func TestExplicitScoutInviteProjectsParticipantAndAttributesProviderSpeech(t *te
 		t.Fatalf("Scout projection=%+v", participants)
 	}
 	scope := RoomScoutScope{RoomID: officeRoomID, SittingID: sittingID, MediaGeneration: generation}
-	app.rememberRoomAgentTranscript(scope, kanbanRealtimeEvent{
+	epoch := app.recordingEpochForRoom(officeRoomID)
+	app.rememberRoomAgentTranscriptForEpoch(scope, kanbanRealtimeEvent{
 		EventID: "scout-agent-output-1", Transcript: "I can join as an attributed participant.",
-	}, "agent_voice", "gpt-realtime-test", "scout", scoutParticipantName)
+	}, "agent_voice", "gpt-realtime-test", "scout", scoutParticipantName, epoch)
 	entries := app.memory.snapshot(0)
 	if len(entries) != 1 {
 		t.Fatalf("agent transcript entries=%d want 1: %+v", len(entries), entries)
@@ -55,6 +56,14 @@ func TestExplicitScoutInviteProjectsParticipantAndAttributesProviderSpeech(t *te
 	entry := entries[0]
 	if entry.Metadata["speaker"] != scoutParticipantName || entry.Metadata["speakerKind"] != "agent" || entry.Metadata["agentId"] != "scout" || entry.Metadata["mediaGeneration"] != strconv.FormatUint(generation, 10) || !strings.HasPrefix(entry.Text, scoutParticipantName+": ") {
 		t.Fatalf("agent transcript attribution=%+v", entry)
+	}
+	app.setTranscriptRecordingInRoom(officeRoomID, false, "AJ")
+	app.setTranscriptRecordingInRoom(officeRoomID, true, "AJ")
+	app.rememberRoomAgentTranscriptForEpoch(scope, kanbanRealtimeEvent{
+		EventID: "scout-agent-output-stale", Transcript: "This response belonged to the prior recording epoch.",
+	}, "agent_voice", "gpt-realtime-test", "scout", scoutParticipantName, epoch)
+	if got := len(app.memory.snapshot(0)); got != 1 {
+		t.Fatalf("stale agent transcript crossed the recording boundary: entries=%d", got)
 	}
 	if got := app.dismissRoomScout(officeRoomID, sittingID, "test_complete"); len(got) != 0 || len(app.roomAgentParticipantsSnapshot(officeRoomID)) != 0 {
 		t.Fatalf("dismiss left agent participant got=%+v snapshot=%+v", got, app.roomAgentParticipantsSnapshot(officeRoomID))

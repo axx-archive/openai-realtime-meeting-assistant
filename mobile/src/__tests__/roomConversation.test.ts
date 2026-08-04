@@ -103,6 +103,22 @@ describe('native room conversation', () => {
     assert.equal(parseMemoryTranscriptEntry({ ...transcript('no-time'), createdAt: null }), null);
   });
 
+  it('preserves server-owned durable follow-through receipts for visible work state', () => {
+    const parsed = parseRoomChatMessage(chat('chat-follow-through', {
+      agentId: 'scout',
+      followThroughId: 'room-follow-through-123',
+      followThroughStatus: 'queued',
+      destinationThreadId: 'thread-ball-dogs',
+    }));
+    assert.equal(parsed?.followThroughId, 'room-follow-through-123');
+    assert.equal(parsed?.followThroughStatus, 'queued');
+    assert.equal(parsed?.destinationThreadId, 'thread-ball-dogs');
+    assert.equal(parseRoomChatMessage(chat('chat-invalid-follow-through', {
+      followThroughId: 'room-follow-through-123',
+      followThroughStatus: 'invented',
+    }))?.followThroughId, undefined);
+  });
+
   it('treats a valid room_chat_history array as authoritative, deduped, room-scoped, and bounded', () => {
     let state = createRoomConversationState('the-office');
     state = roomConversationReducer(state, {

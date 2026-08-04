@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 )
@@ -107,13 +108,26 @@ type openAIRoomScoutTransport struct {
 	restarts           chan roomScoutRestartRequest
 	restartFailures    int
 	restartCircuitOpen bool
+	// outputTrack is one stable SFU publication for the full room invitation.
+	// Provider response tracks are intentionally short-lived; publishing each
+	// one directly made subscribers renegotiate after Scout had already begun
+	// speaking and removed the receiver again at the end of every answer.
+	outputTrack *webrtc.TrackLocalStaticRTP
+	outputMu    sync.Mutex
+	outputSeq   uint16
+	outputTS    uint32
+	outputCount uint64
+	lastSpeech  time.Time
 
-	voiceMu           sync.Mutex
-	armedUntil        time.Time
-	responseActive    bool
-	pendingSpeech     bool
-	pendingSession    roomScoutProviderSession
-	pendingGeneration uint64
+	voiceMu                sync.Mutex
+	armedUntil             time.Time
+	responseActive         bool
+	responseRecordingEpoch uint64
+	pendingSpeech          bool
+	pendingSession         roomScoutProviderSession
+	pendingGeneration      uint64
+	transcriptionOwnership map[string]bool
+	transcriptionFIFO      []bool
 }
 
 type roomScoutProviderCircuitSnapshot struct {
@@ -148,21 +162,35 @@ func newOpenAIRoomScoutTransport(ctx context.Context, app *kanbanBoardApp, apiKe
 	transport := &openAIRoomScoutTransport{
 		app: app, scope: scope, callbacks: callbacks, apiKey: apiKey, model: realtimeModel(), dial: dial,
 		ctx: transportCtx, cancel: cancel, done: make(chan struct{}), restarts: make(chan roomScoutRestartRequest, 1),
-		generation: 1,
+		generation: 1, transcriptionOwnership: make(map[string]bool),
 	}
-
-	session, err := dial(transportCtx, transport, 1)
+	outputTrack, err := addPersistentRoomScoutOutputTrack(scope)
 	if err != nil {
 		cancel()
 		return nil, err
 	}
+	transport.outputTrack = outputTrack
+	broadcastRoomKanbanEvent(scope.RoomID, "participant_track", map[string]any{
+		"name": scoutParticipantName, "kind": "audio", "trackId": outputTrack.ID(),
+		"sourceTrackId": outputTrack.ID(), "streamId": outputTrack.StreamID(), "roomId": scope.RoomID,
+	})
+	requestRoomMediaCommandForGeneration(scope.RoomID, scope.MediaGeneration, roomMediaCommandTrack)
+
+	session, err := dial(transportCtx, transport, 1)
+	if err != nil {
+		cancel()
+		removeTrack(outputTrack)
+		return nil, err
+	}
 	if session == nil {
 		cancel()
+		removeTrack(outputTrack)
 		return nil, fmt.Errorf("%w: dialer returned no session", errRoomScoutProviderUnavailable)
 	}
 	transport.mu.Lock()
 	transport.session = session
 	transport.mu.Unlock()
+	go transport.runOutputKeepalive()
 	go transport.runRestartSupervisor()
 	transport.publish(1, "status", map[string]any{"text": "Scout connected", "voiceState": "listening"})
 	return transport, nil
@@ -258,12 +286,17 @@ func (transport *openAIRoomScoutTransport) Close() error {
 	transport.generation++ // synchronously fence every old provider callback
 	session := transport.session
 	transport.session = nil
+	outputTrack := transport.outputTrack
+	transport.outputTrack = nil
 	transport.cancel()
 	transport.mu.Unlock()
 	transport.resetVoiceState()
 	var err error
 	if session != nil {
 		err = session.Close()
+	}
+	if outputTrack != nil {
+		removeTrack(outputTrack)
 	}
 	select {
 	case <-transport.done:
@@ -652,6 +685,7 @@ func (app *kanbanBoardApp) roomScoutSessionInstructions(scope RoomScoutScope) st
 		"Tools omitted from this session are intentionally unavailable because their current implementation is office-global or user-private. Do not claim those actions completed.",
 		"# Invited-participant turn taking",
 		"You are a visible participant, not a wake-word utility. For a clear question or request directed to Scout, a request for your perspective, or a natural follow-up after you spoke, call answer_room_question unless a more specific listed tool is needed. Scout or Scott may appear anywhere in the turn and no exact phrase is required. For side conversation between people, background speech, silence, filler, or a turn not directed to you, call do_nothing and remain silent. Prefer staying quiet over interrupting.",
+		"Never promise future work unless the tool result contains a durable receipt for it. If a requested future action is unavailable, say no work is scheduled and direct the participant to @Scout in room chat with the exact destination channel.",
 	}, " ")
 }
 
@@ -678,11 +712,11 @@ func (transport *openAIRoomScoutTransport) handleProviderEvent(session roomScout
 	case "conversation.item.input_audio_transcription.completed":
 		transport.app.recordRoomScoutTranscriptionUsage(transport.scope.RoomID, event)
 		transport.noteVoiceTranscript(event.Transcript)
-		if !transport.app.transcriptionLaneConnectedForRoom(transport.scope.RoomID) {
+		if sourceOwned, found := transport.takeTranscriptionOwnership(event.ItemID); roomScoutFallbackOwnsTranscription(sourceOwned, found) {
 			transport.app.rememberRoomScoutTranscript(transport.scope, event, "scout_realtime", transport.model)
 		}
 	case "conversation.item.input_audio_transcription.failed":
-		if !transport.app.transcriptionLaneConnectedForRoom(transport.scope.RoomID) {
+		if sourceOwned, found := transport.takeTranscriptionOwnership(event.ItemID); roomScoutFallbackOwnsTranscription(sourceOwned, found) {
 			transport.app.popRoomScoutAttribution(transport.scope)
 		}
 	case "conversation.item.input_audio_transcription.delta":
@@ -690,30 +724,34 @@ func (transport *openAIRoomScoutTransport) handleProviderEvent(session roomScout
 			transport.publish(generation, "transcript", map[string]any{"text": "hearing: " + text, "eventType": event.Type})
 		}
 	case "input_audio_buffer.speech_started":
-		if !transport.app.transcriptionLaneConnectedForRoom(transport.scope.RoomID) {
-			transport.app.noteRoomScoutSpeechStarted(transport.scope)
-		}
+		transport.app.noteRoomScoutSpeechStarted(transport.scope)
 		transport.publish(generation, "audio", map[string]any{"text": "Scout detected speech", "voiceState": "hearing"})
 	case "input_audio_buffer.speech_stopped":
-		if !transport.app.transcriptionLaneConnectedForRoom(transport.scope.RoomID) {
-			transport.app.noteRoomScoutSpeechStopped(transport.scope)
-		}
+		transport.app.noteRoomScoutSpeechStopped(transport.scope)
 		transport.publish(generation, "audio", map[string]any{"text": "Scout is thinking", "voiceState": "thinking"})
 	case "input_audio_buffer.committed":
 		contributorFences := transport.app.takeRoomScoutContributorFences(transport.scope)
-		if !transport.app.transcriptionLaneConnectedForRoom(transport.scope.RoomID) {
+		sourceOwned := transport.app.claimTranscriptionSourceTurnForRoom(transport.scope.RoomID)
+		transport.rememberTranscriptionOwnership(event.ItemID, sourceOwned)
+		if sourceOwned {
+			transport.app.discardRoomScoutCurrentAttribution(transport.scope)
+		} else {
 			transport.app.freezeRoomScoutAttributionWithConsent(transport.scope, contributorFences)
 		}
 	case "response.created":
 		transport.voiceMu.Lock()
 		transport.responseActive = true
+		transport.responseRecordingEpoch = transport.app.recordingEpochForRoom(transport.scope.RoomID)
 		transport.voiceMu.Unlock()
 		transport.publish(generation, "audio", map[string]any{"text": "Scout is thinking", "voiceState": "thinking"})
 	case "response.output_audio_transcript.delta":
 		transport.publish(generation, "audio", map[string]any{"text": "Scout is speaking", "voiceState": "talking"})
 	case "response.output_audio_transcript.done", "response.output_text.done":
 		if text := canonicalizeBoardText(firstNonEmptyString(event.Transcript, event.Text)); text != "" {
-			transport.app.rememberRoomAgentTranscript(transport.scope, event, "agent_voice", transport.model, "scout", scoutParticipantName)
+			transport.voiceMu.Lock()
+			epoch := transport.responseRecordingEpoch
+			transport.voiceMu.Unlock()
+			transport.app.rememberRoomAgentTranscriptForEpoch(transport.scope, event, "agent_voice", transport.model, "scout", scoutParticipantName, epoch)
 			transport.publish(generation, "answer", map[string]any{"text": text, "voiceState": "talking"})
 		}
 	case "response.output_item.done":
@@ -897,7 +935,48 @@ func (transport *openAIRoomScoutTransport) resetVoiceState() {
 	transport.pendingSpeech = false
 	transport.pendingSession = nil
 	transport.pendingGeneration = 0
+	transport.transcriptionOwnership = make(map[string]bool)
+	transport.transcriptionFIFO = nil
 	transport.voiceMu.Unlock()
+}
+
+func (transport *openAIRoomScoutTransport) rememberTranscriptionOwnership(itemID string, sourceOwned bool) {
+	if transport == nil {
+		return
+	}
+	transport.voiceMu.Lock()
+	defer transport.voiceMu.Unlock()
+	if itemID = strings.TrimSpace(itemID); itemID != "" {
+		if transport.transcriptionOwnership == nil {
+			transport.transcriptionOwnership = make(map[string]bool)
+		}
+		transport.transcriptionOwnership[itemID] = sourceOwned
+		return
+	}
+	transport.transcriptionFIFO = append(transport.transcriptionFIFO, sourceOwned)
+}
+
+func (transport *openAIRoomScoutTransport) takeTranscriptionOwnership(itemID string) (bool, bool) {
+	if transport == nil {
+		return false, false
+	}
+	transport.voiceMu.Lock()
+	defer transport.voiceMu.Unlock()
+	if itemID = strings.TrimSpace(itemID); itemID != "" {
+		owned, ok := transport.transcriptionOwnership[itemID]
+		delete(transport.transcriptionOwnership, itemID)
+		return owned, ok
+	}
+	if len(transport.transcriptionFIFO) == 0 {
+		return false, false
+	}
+	owned := transport.transcriptionFIFO[0]
+	transport.transcriptionFIFO = append([]bool(nil), transport.transcriptionFIFO[1:]...)
+	return owned, true
+}
+
+func roomScoutFallbackOwnsTranscription(sourceOwned, found bool) bool {
+	return found && !sourceOwned
 }
 
 func (transport *openAIRoomScoutTransport) voiceArmed() bool {
@@ -979,6 +1058,7 @@ func roomScoutSpokenResponseInstructions() string {
 		"Speak to the room as Scout, a visible invited participant.",
 		"Answer the participant's current question or request naturally and directly using the conversation and tool result.",
 		"No wake phrase is required and you must not mention one.",
+		"Never promise future work unless the tool result contains a durable receipt. If no receipt exists, say no work is scheduled.",
 		"Do not call another tool in this continuation.",
 		"Keep routine answers concise; ask one clear follow-up only when essential.",
 	}, " ")
@@ -993,6 +1073,19 @@ func (app *kanbanBoardApp) transcriptionLaneConnectedForRoom(roomID string) bool
 	lane := app.roomLiveLocked(roomID).lane
 	app.mu.Unlock()
 	return lane != nil && lane.isConnected()
+}
+
+func (app *kanbanBoardApp) claimTranscriptionSourceTurnForRoom(roomID string) bool {
+	roomID = normalizeRoomID(roomID)
+	app.mu.Lock()
+	var lane *meetingTranscriptionLane
+	if roomID == officeRoomID {
+		lane = app.transcriptLane
+	} else {
+		lane = app.roomLiveLocked(roomID).lane
+	}
+	app.mu.Unlock()
+	return lane != nil && lane.claimSourceTurnOwnership()
 }
 
 func (app *kanbanBoardApp) recordRoomScoutResponseUsage(roomID, model string, event kanbanRealtimeEvent) {
@@ -1016,23 +1109,12 @@ func (transport *openAIRoomScoutTransport) forwardOutputTrack(ctx context.Contex
 	if track == nil || track.Kind() != webrtc.RTPCodecTypeAudio || !transport.accepts(generation) {
 		return
 	}
-	trackLocal, err := addRoomScoutOutputTrack(transport.scope, generation, track)
-	if err != nil {
-		transport.publish(generation, "error", map[string]any{"text": "Scout output audio unavailable"})
+	transport.mu.Lock()
+	trackLocal := transport.outputTrack
+	transport.mu.Unlock()
+	if trackLocal == nil {
 		return
 	}
-	defer removeTrack(trackLocal)
-	// Registration and logging are intentionally outside the transport lock.
-	// Revalidate before publishing the track: a room teardown or provider
-	// replacement racing registration must leave no stale participant event.
-	if !transport.accepts(generation) {
-		return
-	}
-	broadcastRoomKanbanEvent(transport.scope.RoomID, "participant_track", map[string]any{
-		"name": scoutParticipantName, "kind": track.Kind().String(), "trackId": trackLocal.ID(),
-		"sourceTrackId": track.ID(), "streamId": track.StreamID(), "roomId": transport.scope.RoomID,
-	})
-	requestRoomMediaCommandForGeneration(transport.scope.RoomID, transport.scope.MediaGeneration, roomMediaCommandTrack)
 	transport.publish(generation, "audio", map[string]any{"text": "Scout voice connected", "trackId": trackLocal.ID()})
 	for {
 		packet, _, err := track.ReadRTP()
@@ -1049,20 +1131,25 @@ func (transport *openAIRoomScoutTransport) forwardOutputTrack(ctx context.Contex
 			return
 		default:
 		}
-		packet.Extension = false
-		packet.Extensions = nil
-		if err := trackLocal.WriteRTP(packet); err != nil {
+		if err := transport.writeOutputPacket(packet.Payload, true); err != nil {
 			return
 		}
 	}
 }
 
-func addRoomScoutOutputTrack(scope RoomScoutScope, providerGeneration uint64, track *webrtc.TrackRemote) (*webrtc.TrackLocalStaticRTP, error) {
-	if track == nil || !scope.valid() {
+// addPersistentRoomScoutOutputTrack registers one Opus publication for the
+// entire invitation. A bounded silence keepalive binds it into every current
+// subscriber before the first provider response and keeps the same receiver
+// alive across answers and provider restarts.
+func addPersistentRoomScoutOutputTrack(scope RoomScoutScope) (*webrtc.TrackLocalStaticRTP, error) {
+	if !scope.valid() {
 		return nil, ErrRoomScoutFence
 	}
-	trackID := fmt.Sprintf("scout:%s:%d:%d:%s", scope.RoomID, scope.MediaGeneration, providerGeneration, forwardedRemoteTrackID(track))
-	trackLocal, err := webrtc.NewTrackLocalStaticRTP(track.Codec().RTPCodecCapability, trackID, track.StreamID())
+	trackID := fmt.Sprintf("scout:%s:%d:audio", scope.RoomID, scope.MediaGeneration)
+	streamID := fmt.Sprintf("scout:%s", scope.RoomID)
+	trackLocal, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{
+		MimeType: webrtc.MimeTypeOpus, ClockRate: roomAudioSampleRate, Channels: realtimeAudioChannels,
+	}, trackID, streamID)
 	if err != nil {
 		return nil, err
 	}
@@ -1093,15 +1180,64 @@ func addRoomScoutOutputTrack(scope RoomScoutScope, providerGeneration uint64, tr
 	}
 	trackLocals[trackID] = trackLocal
 	trackParticipants[trackID] = scoutParticipantName
-	trackParticipantSessions[trackID] = fmt.Sprintf("scout:%s:%d", scope.SittingID, providerGeneration)
+	trackParticipantSessions[trackID] = fmt.Sprintf("scout:%s", scope.SittingID)
 	trackRooms[trackID] = scope.RoomID
-	trackSourceIDs[trackID] = track.ID()
-	trackLayerRIDs[trackID] = track.RID()
-	trackLayerGroups[trackID] = fmt.Sprintf("scout:%s:%s:%d", scope.RoomID, scope.SittingID, providerGeneration)
+	trackSourceIDs[trackID] = trackID
+	trackLayerRIDs[trackID] = ""
+	trackLayerGroups[trackID] = fmt.Sprintf("scout:%s:%s", scope.RoomID, scope.SittingID)
 	trackMediaOwners[trackID] = trackMediaOwner{track: trackLocal, generation: scope.MediaGeneration, sittingID: scope.SittingID}
 	totalTracks, audioTracks, videoTracks := forwardedTrackCountsLocked()
 	listLock.Unlock()
-	log.Infof("room_scout_track_added room=%s sitting=%s media_gen=%d provider_gen=%d track_id=%s total_tracks=%d audio_tracks=%d video_tracks=%d",
-		scope.RoomID, scope.SittingID, scope.MediaGeneration, providerGeneration, trackID, totalTracks, audioTracks, videoTracks)
+	log.Infof("room_scout_track_added room=%s sitting=%s media_gen=%d track_id=%s persistent=true total_tracks=%d audio_tracks=%d video_tracks=%d",
+		scope.RoomID, scope.SittingID, scope.MediaGeneration, trackID, totalTracks, audioTracks, videoTracks)
 	return trackLocal, nil
+}
+
+func (transport *openAIRoomScoutTransport) writeOutputPacket(payload []byte, speech bool) error {
+	if transport == nil || len(payload) == 0 {
+		return nil
+	}
+	transport.outputMu.Lock()
+	defer transport.outputMu.Unlock()
+	transport.mu.Lock()
+	track := transport.outputTrack
+	closed := transport.closed
+	transport.mu.Unlock()
+	if closed || track == nil {
+		return ErrRoomScoutClosed
+	}
+	transport.outputSeq++
+	transport.outputTS += uint32(roomAudioMixFrameSize)
+	packet := &rtp.Packet{Header: rtp.Header{
+		Version: 2, SequenceNumber: transport.outputSeq, Timestamp: transport.outputTS,
+	}, Payload: append([]byte(nil), payload...)}
+	if err := track.WriteRTP(packet); err != nil && !errors.Is(err, io.ErrClosedPipe) {
+		return err
+	}
+	transport.outputCount++
+	if speech {
+		transport.lastSpeech = time.Now()
+	}
+	return nil
+}
+
+func (transport *openAIRoomScoutTransport) runOutputKeepalive() {
+	// RFC 6716's canonical 20 ms Opus silence packet. Sending it only when no
+	// provider packet arrived in the preceding two frames pre-binds the stable
+	// receiver without doubling packet rate during speech.
+	ticker := time.NewTicker(roomAudioMixInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-transport.ctx.Done():
+			return
+		case now := <-ticker.C:
+			transport.outputMu.Lock()
+			quiet := transport.lastSpeech.IsZero() || now.Sub(transport.lastSpeech) >= 2*roomAudioMixInterval
+			transport.outputMu.Unlock()
+			if quiet {
+				_ = transport.writeOutputPacket([]byte{0xF8, 0xFF, 0xFE}, false)
+			}
+		}
+	}
 }

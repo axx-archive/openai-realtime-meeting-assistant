@@ -408,6 +408,12 @@ export function useNativeRoom(
   const hasParticipantSnapshotRef = useRef(false);
   const departedParticipantsRef = useRef<Set<string>>(new Set());
   const retiredRemoteTrackIdsRef = useRef<Set<string>>(new Set());
+  // Audio-only participants (Scout today, future meeting agents later) do not
+  // have an RTCView to retain their MediaStream. Keep one native wrapper alive
+  // for every remote audio track so iOS cannot collect the receiver between
+  // ontrack and playback. Human A/V streams previously survived incidentally
+  // through their video feed; an agent's audio-only stream did not.
+  const remoteAudioStreamsRef = useRef<Map<string, MediaStream>>(new Map());
   const remoteVideoTracksRef = useRef<Map<string, RemoteVideoTrackEntry>>(new Map());
   const remoteVideoProgressRef = useRef<Map<string, RemoteVideoProgressState>>(new Map());
   const remoteVideoRecoveryRef = useRef<RemoteVideoRecoveryState>(createRemoteVideoRecoveryState());
@@ -1465,6 +1471,10 @@ export function useNativeRoom(
     microphoneRecoveryGuardRef.current?.retire();
     disconnectedIceRestartControllerRef.current?.cancel();
     remoteVideoMuteControllerRef.current?.cancelAll();
+    for (const stream of remoteAudioStreamsRef.current.values()) {
+      stream.release();
+    }
+    remoteAudioStreamsRef.current = new Map();
     const retiredRemoteEntries = [...remoteVideoTracksRef.current.values()];
     retiredRemoteEntries.forEach(retireRemoteVideoEntry);
     remoteVideoTracksRef.current = new Map();
@@ -1688,6 +1698,18 @@ export function useNativeRoom(
       const track = event.track;
       if (!track) return;
       if (track.kind === 'audio') {
+        const previous = remoteAudioStreamsRef.current.get(track.id);
+        if (previous) previous.release();
+        // Own a dedicated wrapper instead of relying on event.streams[0], which
+        // is not retained anywhere for an audio-only participant.
+        const remoteAudioStream = new MediaStream([track]);
+        remoteAudioStreamsRef.current.set(track.id, remoteAudioStream);
+        track.onended = () => {
+          const retained = remoteAudioStreamsRef.current.get(track.id);
+          if (retained !== remoteAudioStream) return;
+          remoteAudioStreamsRef.current.delete(track.id);
+          retained.release();
+        };
         // libwebrtc can switch AVAudioSession back to the receiver when its
         // first remote audio track attaches. Reassert the video-meeting route
         // at the exact lifecycle edge where that native mutation occurs.
@@ -2472,7 +2494,12 @@ export function useNativeRoom(
       case 'participant_track': {
         const metadata = parseNestedData<ParticipantTrackMetadata>(nested.data, {});
         const participant = String(metadata.name ?? '').trim();
-        if (!participantCanPublishVideo(participant)) break;
+        // Human roster admission constrains video tiles. Audio metadata also
+        // names invited agents, which deliberately live in agent_participants
+        // rather than the human roster; rejecting it here made Scout's dynamic
+        // receiver permanently anonymous on iOS.
+        if (String(metadata.kind ?? '').trim().toLowerCase() === 'video'
+          && !participantCanPublishVideo(participant)) break;
         for (const trackId of [metadata.trackId, metadata.sourceTrackId]) {
           const normalizedTrackId = String(trackId ?? '').trim();
           if (normalizedTrackId) retiredRemoteTrackIdsRef.current.delete(normalizedTrackId);

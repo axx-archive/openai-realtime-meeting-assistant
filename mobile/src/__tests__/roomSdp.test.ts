@@ -212,4 +212,15 @@ describe('native room offer planning', () => {
       /audioTransceiver\.currentDirection !== 'sendonly'[\s\S]*audioTransceiver\.direction = 'sendonly';[\s\S]*send\('request_participant_tracks'/,
     );
   });
+
+  it('retains and accepts audio-only agent receivers on iOS', () => {
+    const roomSource = fs.readFileSync(
+      path.resolve(import.meta.dirname, '..', 'realtime', 'useNativeRoom.ts'),
+      'utf8',
+    );
+    assert.match(roomSource, /remoteAudioStreamsRef = useRef<Map<string, MediaStream>>/);
+    assert.match(roomSource, /const remoteAudioStream = new MediaStream\(\[track\]\);[\s\S]*remoteAudioStreamsRef\.current\.set\(track\.id, remoteAudioStream\)/);
+    assert.match(roomSource, /metadata\.kind[\s\S]*=== 'video'[\s\S]*!participantCanPublishVideo\(participant\)/);
+    assert.doesNotMatch(roomSource, /if \(!participantCanPublishVideo\(participant\)\) break;/);
+  });
 });

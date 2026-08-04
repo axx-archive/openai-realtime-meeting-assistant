@@ -471,6 +471,10 @@ func roomScoutControlHandler(w http.ResponseWriter, r *http.Request) {
 // agent-to-agent audio loops. The invitation's complete human audience fences
 // remain the authority for the derived output.
 func (app *kanbanBoardApp) rememberRoomAgentTranscript(scope RoomScoutScope, event kanbanRealtimeEvent, source, model, agentID, speaker string) {
+	app.rememberRoomAgentTranscriptForEpoch(scope, event, source, model, agentID, speaker, 0)
+}
+
+func (app *kanbanBoardApp) rememberRoomAgentTranscriptForEpoch(scope RoomScoutScope, event kanbanRealtimeEvent, source, model, agentID, speaker string, expectedRecordingEpoch uint64) {
 	text := canonicalizeBoardText(firstNonEmptyString(event.Transcript, event.Text))
 	if app == nil || app.memory == nil || text == "" || !app.transcriptRecordingActiveInRoom(scope.RoomID) {
 		return
@@ -481,6 +485,10 @@ func (app *kanbanBoardApp) rememberRoomAgentTranscript(scope RoomScoutScope, eve
 		return
 	}
 	state := app.roomLiveLocked(scope.RoomID)
+	if expectedRecordingEpoch != 0 && state.recordingEpoch != expectedRecordingEpoch {
+		app.mu.Unlock()
+		return
+	}
 	fences := append([]ConsentFence(nil), state.scoutConsentFences...)
 	invitationID := state.scoutInvitationID
 	app.mu.Unlock()
@@ -505,6 +513,9 @@ func (app *kanbanBoardApp) rememberRoomAgentTranscript(scope RoomScoutScope, eve
 		app.mu.Lock()
 		defer app.mu.Unlock()
 		if !app.roomScoutInvitationCurrentLocked(scope) || app.roomLiveLocked(scope.RoomID).scoutInvitationID != invitationID {
+			return ErrRoomScoutFence
+		}
+		if expectedRecordingEpoch != 0 && app.roomLiveLocked(scope.RoomID).recordingEpoch != expectedRecordingEpoch {
 			return ErrRoomScoutFence
 		}
 		var appendErr error

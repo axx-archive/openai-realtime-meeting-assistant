@@ -879,6 +879,7 @@ func (app *kanbanBoardApp) endMeetingForIdle(roomID string, generation uint64) {
 	// per-(agent, room) locks) and carries the sitting's listen-only latch so
 	// the board stage is skipped for a guest-exposed sitting (§7.3).
 	app.flushAmbientAgentsForClose("idle-end", roomID, closed.ListenOnly)
+	app.flushRoomFollowThroughForMeeting(roomID, closed.ID, "meeting_end")
 	if app.memory != nil {
 		app.memory.rotateMeetingIDIfCurrent(roomID, closed.ID)
 	}

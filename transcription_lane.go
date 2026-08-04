@@ -55,6 +55,19 @@ type meetingTranscriptionLane struct {
 	sittingID       string
 	mediaGeneration uint64
 	segmentBindings *transcriptionSegmentBindings
+	// sourceManager owns one provider lane per admitted WebRTC audio
+	// publication. Child lanes carry fixedSource, making speaker identity a
+	// capture property rather than an inference from the mixed waveform.
+	sourceManager          bool
+	fixedSource            *sourceTranscriptIdentity
+	sourceBindings         *sourceTranscriptBindings
+	sourceMu               sync.Mutex
+	sourceLanes            map[string]*meetingTranscriptionLane
+	sourceRetireTimers     map[string]*time.Timer
+	sourceRetireGeneration map[string]uint64
+	sourceAcceptedForTurn  bool
+	recordingEpoch         uint64
+	discardOnClose         bool
 
 	input        chan []int16
 	consentInput chan consentAudioFrame
@@ -82,12 +95,72 @@ type consentAudioFrame struct {
 	fences []ConsentFence
 }
 
+type sourceTranscriptIdentity struct {
+	TrackKey       string
+	Speaker        string
+	Fence          ConsentFence
+	RecordingEpoch uint64
+}
+
+type sourceTranscriptRecord struct {
+	sourceTranscriptIdentity
+	Capture *transcriptCaptureStamp
+}
+
+type sourceTranscriptBindings struct {
+	mu      sync.Mutex
+	records map[string]sourceTranscriptRecord
+}
+
+func newSourceTranscriptBindings() *sourceTranscriptBindings {
+	return &sourceTranscriptBindings{records: make(map[string]sourceTranscriptRecord)}
+}
+
+func (bindings *sourceTranscriptBindings) Put(segmentID string, record sourceTranscriptRecord) {
+	if bindings == nil || strings.TrimSpace(segmentID) == "" {
+		return
+	}
+	bindings.mu.Lock()
+	bindings.records[strings.TrimSpace(segmentID)] = record
+	bindings.mu.Unlock()
+}
+
+func (bindings *sourceTranscriptBindings) Consume(segmentID string) (sourceTranscriptRecord, bool) {
+	if bindings == nil {
+		return sourceTranscriptRecord{}, false
+	}
+	segmentID = strings.TrimSpace(segmentID)
+	bindings.mu.Lock()
+	record, ok := bindings.records[segmentID]
+	delete(bindings.records, segmentID)
+	bindings.mu.Unlock()
+	return record, ok
+}
+
+func (bindings *sourceTranscriptBindings) Reset() {
+	if bindings == nil {
+		return
+	}
+	bindings.mu.Lock()
+	bindings.records = make(map[string]sourceTranscriptRecord)
+	bindings.mu.Unlock()
+}
+
+func (bindings *sourceTranscriptBindings) Len() int {
+	if bindings == nil {
+		return 0
+	}
+	bindings.mu.Lock()
+	defer bindings.mu.Unlock()
+	return len(bindings.records)
+}
+
 func (app *kanbanBoardApp) startTranscriptionLane(apiKey string, mediaGeneration uint64, startToken uint64) {
 	if app == nil || strings.TrimSpace(apiKey) == "" || !transcriptionLaneEnabled() {
 		return
 	}
 
-	lane := newMeetingTranscriptionLaneForRoomGeneration(app, apiKey, transcriptionLaneModel(), officeRoomID, mediaGeneration)
+	lane := newMeetingTranscriptionSourceManagerForRoomGeneration(app, apiKey, transcriptionLaneModel(), officeRoomID, mediaGeneration)
 	if officeTranscriptionBeforePublishProbe != nil {
 		officeTranscriptionBeforePublishProbe()
 	}
@@ -141,7 +214,23 @@ func newMeetingTranscriptionLaneForRoomGeneration(app *kanbanBoardApp, apiKey st
 	}
 }
 
+func newMeetingTranscriptionSourceManagerForRoomGeneration(app *kanbanBoardApp, apiKey string, transcriptionModel string, roomID string, mediaGeneration uint64) *meetingTranscriptionLane {
+	lane := newMeetingTranscriptionLaneForRoomGeneration(app, apiKey, transcriptionModel, roomID, mediaGeneration)
+	lane.sourceManager = true
+	lane.sourceLanes = make(map[string]*meetingTranscriptionLane)
+	lane.sourceRetireTimers = make(map[string]*time.Timer)
+	lane.sourceRetireGeneration = make(map[string]uint64)
+	return lane
+}
+
 func (lane *meetingTranscriptionLane) start() {
+	if lane.sourceManager {
+		go func() {
+			<-lane.stop
+			close(lane.done)
+		}()
+		return
+	}
 	lane.unsubscribeWithdrawal = subscribeConsentWithdrawals(lane.noteWithdrawal)
 	go lane.run()
 }
@@ -154,10 +243,197 @@ func (lane *meetingTranscriptionLane) close() {
 	lane.closeOnce.Do(func() {
 		close(lane.stop)
 		<-lane.done
+		if lane.sourceManager {
+			lane.closeSourceLanes(true)
+		}
 		if lane.unsubscribeWithdrawal != nil {
 			lane.unsubscribeWithdrawal()
 		}
 	})
+}
+
+func (lane *meetingTranscriptionLane) closeSourceLanes(commitPending bool) {
+	if lane == nil || !lane.sourceManager {
+		return
+	}
+	lane.sourceMu.Lock()
+	children := make([]*meetingTranscriptionLane, 0, len(lane.sourceLanes))
+	for _, timer := range lane.sourceRetireTimers {
+		timer.Stop()
+	}
+	for _, child := range lane.sourceLanes {
+		child.discardOnClose = !commitPending
+		children = append(children, child)
+	}
+	lane.sourceLanes = make(map[string]*meetingTranscriptionLane)
+	lane.sourceRetireTimers = make(map[string]*time.Timer)
+	lane.sourceRetireGeneration = make(map[string]uint64)
+	lane.sourceAcceptedForTurn = false
+	lane.sourceMu.Unlock()
+	for _, child := range children {
+		child.close()
+	}
+}
+
+func (lane *meetingTranscriptionLane) resetSourcesForRecordingEpoch(epoch uint64) {
+	if lane == nil || !lane.sourceManager || epoch == 0 {
+		return
+	}
+	lane.sourceMu.Lock()
+	// Recording epochs only advance. A frame that captured the room's prior
+	// epoch before Record toggled must never roll the manager backwards after
+	// the synchronous reset has fenced it.
+	if lane.recordingEpoch >= epoch {
+		lane.sourceMu.Unlock()
+		return
+	}
+	lane.recordingEpoch = epoch
+	children := make([]*meetingTranscriptionLane, 0, len(lane.sourceLanes))
+	for _, timer := range lane.sourceRetireTimers {
+		timer.Stop()
+	}
+	for _, child := range lane.sourceLanes {
+		child.discardOnClose = true
+		children = append(children, child)
+	}
+	lane.sourceLanes = make(map[string]*meetingTranscriptionLane)
+	lane.sourceRetireTimers = make(map[string]*time.Timer)
+	lane.sourceRetireGeneration = make(map[string]uint64)
+	lane.sourceAcceptedForTurn = false
+	lane.sourceMu.Unlock()
+	for _, child := range children {
+		child.close()
+	}
+}
+
+func (lane *meetingTranscriptionLane) enqueueSourceWithConsent(trackKey, participantName string, roomPCM []int16, fence ConsentFence, epoch uint64) bool {
+	if lane == nil || !lane.sourceManager || strings.TrimSpace(trackKey) == "" || strings.TrimSpace(participantName) == "" || len(roomPCM) == 0 || epoch == 0 {
+		return false
+	}
+	trackKey = strings.TrimSpace(trackKey)
+	participantName = canonicalRoomParticipantName(participantName)
+	if participantName == "" {
+		return false
+	}
+	lane.sourceMu.Lock()
+	if lane.recordingEpoch > epoch {
+		lane.sourceMu.Unlock()
+		return false
+	}
+	if lane.recordingEpoch < epoch {
+		lane.sourceMu.Unlock()
+		lane.resetSourcesForRecordingEpoch(epoch)
+		lane.sourceMu.Lock()
+		if lane.recordingEpoch != epoch {
+			lane.sourceMu.Unlock()
+			return false
+		}
+	}
+	lane.recordingEpoch = epoch
+	if timer := lane.sourceRetireTimers[trackKey]; timer != nil {
+		timer.Stop()
+		delete(lane.sourceRetireTimers, trackKey)
+	}
+	lane.sourceRetireGeneration[trackKey]++
+	child := lane.sourceLanes[trackKey]
+	if child != nil && (child.fixedSource == nil || child.fixedSource.Speaker != participantName || !sameConsentFenceVersion(child.fixedSource.Fence, fence) || child.recordingEpoch != epoch) {
+		delete(lane.sourceLanes, trackKey)
+		child.discardOnClose = true
+		lane.sourceMu.Unlock()
+		child.close()
+		lane.sourceMu.Lock()
+		child = nil
+	}
+	if child == nil {
+		child = newMeetingTranscriptionLaneForRoomGeneration(lane.app, lane.apiKey, lane.transcriptionModel, lane.roomID, lane.mediaGeneration)
+		child.sittingID = lane.sittingID
+		child.recordingEpoch = epoch
+		child.fixedSource = &sourceTranscriptIdentity{TrackKey: trackKey, Speaker: participantName, Fence: fence, RecordingEpoch: epoch}
+		child.sourceBindings = newSourceTranscriptBindings()
+		child.start()
+		lane.sourceLanes[trackKey] = child
+	}
+	lane.sourceMu.Unlock()
+	accepted := child.enqueueWithConsent(roomPCM, []ConsentFence{fence})
+	if accepted {
+		lane.sourceMu.Lock()
+		if lane.recordingEpoch == epoch && lane.sourceLanes[trackKey] == child {
+			lane.sourceAcceptedForTurn = true
+		}
+		lane.sourceMu.Unlock()
+	}
+	return accepted
+}
+
+func (lane *meetingTranscriptionLane) removeSource(trackKey string) {
+	if lane == nil || !lane.sourceManager || strings.TrimSpace(trackKey) == "" {
+		return
+	}
+	trackKey = strings.TrimSpace(trackKey)
+	lane.sourceMu.Lock()
+	child := lane.sourceLanes[trackKey]
+	if child == nil {
+		lane.sourceMu.Unlock()
+		return
+	}
+	if timer := lane.sourceRetireTimers[trackKey]; timer != nil {
+		timer.Stop()
+	}
+	lane.sourceRetireGeneration[trackKey]++
+	generation := lane.sourceRetireGeneration[trackKey]
+	deadline := time.Now().Add(transcriptionSourceRetireMax)
+	lane.sourceRetireTimers[trackKey] = time.AfterFunc(transcriptionSourceRetireInitial, func() {
+		lane.checkSourceRetirement(trackKey, child, generation, deadline)
+	})
+	lane.sourceMu.Unlock()
+}
+
+const (
+	transcriptionSourceRetireInitial = 2 * time.Second
+	transcriptionSourceRetirePoll    = 500 * time.Millisecond
+	transcriptionSourceRetireMax     = 30 * time.Second
+)
+
+// claimSourceTurnOwnership binds one mixed Realtime input turn to the
+// identity-preserving source lanes if at least one exact source frame was
+// accepted since the prior provider commit. This is intentionally independent
+// of transient websocket connection state: a turn has one persistence owner,
+// so the mixed fallback can never race a later source-bound completion.
+func (lane *meetingTranscriptionLane) claimSourceTurnOwnership() bool {
+	if lane == nil || !lane.sourceManager {
+		return false
+	}
+	lane.sourceMu.Lock()
+	owned := lane.sourceAcceptedForTurn
+	lane.sourceAcceptedForTurn = false
+	lane.sourceMu.Unlock()
+	return owned
+}
+
+func (lane *meetingTranscriptionLane) checkSourceRetirement(trackKey string, child *meetingTranscriptionLane, generation uint64, deadline time.Time) {
+	if lane == nil || child == nil {
+		return
+	}
+	lane.sourceMu.Lock()
+	if lane.sourceLanes[trackKey] != child || lane.sourceRetireGeneration[trackKey] != generation {
+		lane.sourceMu.Unlock()
+		return
+	}
+	drained := child.isConnected() && len(child.consentInput) == 0 && child.sourceBindings.Len() == 0
+	expired := !time.Now().Before(deadline)
+	if !drained && !expired {
+		lane.sourceRetireTimers[trackKey] = time.AfterFunc(transcriptionSourceRetirePoll, func() {
+			lane.checkSourceRetirement(trackKey, child, generation, deadline)
+		})
+		lane.sourceMu.Unlock()
+		return
+	}
+	delete(lane.sourceLanes, trackKey)
+	delete(lane.sourceRetireTimers, trackKey)
+	delete(lane.sourceRetireGeneration, trackKey)
+	child.discardOnClose = expired && !drained
+	lane.sourceMu.Unlock()
+	child.close()
 }
 
 func (lane *meetingTranscriptionLane) enqueueWithConsent(roomPCM []int16, fences []ConsentFence) bool {
@@ -207,6 +483,20 @@ func (lane *meetingTranscriptionLane) enqueue(roomPCM []int16) bool {
 
 func (lane *meetingTranscriptionLane) isConnected() bool {
 	if lane == nil {
+		return false
+	}
+	if lane.sourceManager {
+		lane.sourceMu.Lock()
+		children := make([]*meetingTranscriptionLane, 0, len(lane.sourceLanes))
+		for _, child := range lane.sourceLanes {
+			children = append(children, child)
+		}
+		lane.sourceMu.Unlock()
+		for _, child := range children {
+			if child.isConnected() {
+				return true
+			}
+		}
 		return false
 	}
 
@@ -325,6 +615,9 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 	// first segment.
 	lane.app.resetTranscriptionSegmentSecondsForLaneScope(lane.scope())
 	lane.segmentBindings.Reset()
+	if lane.sourceBindings != nil {
+		lane.sourceBindings.Reset()
+	}
 	lane.setConnected(true)
 
 	readErr := make(chan error, 1)
@@ -335,7 +628,7 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 				readErr <- err
 				return
 			}
-			if lane.app.handleTranscriptionLaneEventForScopeWithBindings(lane.scope(), raw, lane.transcriptionModel, lane.segmentBindings) {
+			if lane.app.handleTranscriptionLaneEventForScopeWithSourceBindings(lane.scope(), raw, lane.transcriptionModel, lane.segmentBindings, lane.sourceBindings) {
 				readErr <- errTranscriptionLaneSessionExpired
 				return
 			}
@@ -399,7 +692,14 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 		segmentCapture = nil
 		scope := RoomScoutScope{RoomID: lane.roomID, SittingID: lane.sittingID, MediaGeneration: lane.mediaGeneration}
 		lane.app.noteRealtimeSpeechStoppedForScope(scope)
-		lane.app.freezeAttributionWindowAtCommitForScopeWithSegmentAndConsent(scope, segmentID, capture, contributorFences)
+		if lane.fixedSource != nil && lane.sourceBindings != nil {
+			lane.sourceBindings.Put(segmentID, sourceTranscriptRecord{
+				sourceTranscriptIdentity: *lane.fixedSource,
+				Capture:                  capture,
+			})
+		} else {
+			lane.app.freezeAttributionWindowAtCommitForScopeWithSegmentAndConsent(scope, segmentID, capture, contributorFences)
+		}
 		return lane.commitPendingTranscriptionAudio(conn, samples, segmentID)
 	}
 	acceptFrame := func(frame consentAudioFrame) error {
@@ -429,7 +729,7 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 		if len(audio) == 0 {
 			return nil
 		}
-		if pendingAudio && pendingAudioSamples >= transcriptionLaneMinCommitSamples {
+		if lane.fixedSource == nil && pendingAudio && pendingAudioSamples >= transcriptionLaneMinCommitSamples {
 			if speaker := lane.app.activeSpeakerNameForSegmentationForRoom(lane.roomID); speaker != "" && segmentSpeaker != "" && speaker != segmentSpeaker {
 				stopTranscriptionTimer(commitTimer)
 				if err := commitPending(); err != nil {
@@ -464,8 +764,10 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 	for {
 		select {
 		case <-lane.stop:
-			if pendingAudio {
+			if pendingAudio && !lane.discardOnClose {
 				_ = commitPending()
+			} else if pendingAudio {
+				clearPending(true)
 			}
 			_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""), time.Now().Add(time.Second))
 			return nil
@@ -856,6 +1158,10 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEventForScope(scope RoomScoutS
 }
 
 func (app *kanbanBoardApp) handleTranscriptionLaneEventForScopeWithBindings(scope RoomScoutScope, raw []byte, model string, bindings *transcriptionSegmentBindings) bool {
+	return app.handleTranscriptionLaneEventForScopeWithSourceBindings(scope, raw, model, bindings, nil)
+}
+
+func (app *kanbanBoardApp) handleTranscriptionLaneEventForScopeWithSourceBindings(scope RoomScoutScope, raw []byte, model string, bindings *transcriptionSegmentBindings, sourceBindings *sourceTranscriptBindings) bool {
 	var event kanbanRealtimeEvent
 	if err := json.Unmarshal(raw, &event); err != nil {
 		log.Errorf("Failed to parse OpenAI transcription event: %v", err)
@@ -959,7 +1265,17 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEventForScopeWithBindings(scop
 			"item_id":       strings.TrimSpace(event.ItemID),
 			"audio_seconds": audioSeconds,
 		})
-		if mediaGeneration > 0 {
+		if sourceBindings != nil {
+			sourceRecord, ok := sourceBindings.Consume(segmentID)
+			if !ok {
+				recordCapabilityFailure(capabilityMeetingSTT, time.Now().UTC(), fmt.Errorf("source-bound transcription identity unavailable"))
+				recordEvalEvent(seatTranscriptionLane, evalKindTranscriptSegment, map[string]any{
+					"status": "source_identity_unavailable", "room_id": roomID, "segment_id": segmentID,
+				})
+				break
+			}
+			app.rememberTranscriptForKnownSource(scope, segmentID, event, "transcript_lane", model, sourceRecord)
+		} else if mediaGeneration > 0 {
 			app.rememberTranscriptForMediaScopeSegment(scope, segmentID, event, "transcript_lane", model)
 		} else {
 			app.rememberTranscriptForSegment(roomID, segmentID, event, "transcript_lane", model)
@@ -998,7 +1314,9 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEventForScopeWithBindings(scop
 		// window frozen at its commit. Pop it (discard) so the FIFO stays aligned;
 		// otherwise the next .completed inherits this dead turn's boundaries and every
 		// later transcript is attributed one turn late for the rest of the sitting.
-		if mediaGeneration > 0 {
+		if sourceBindings != nil {
+			_, _ = sourceBindings.Consume(segmentID)
+		} else if mediaGeneration > 0 {
 			app.popPendingAttributionWindowForScopeSegment(scope, segmentID)
 		} else {
 			app.popPendingAttributionWindowForRoomSegment(roomID, segmentID)
