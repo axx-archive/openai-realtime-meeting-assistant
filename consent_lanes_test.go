@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,8 +17,9 @@ import (
 )
 
 func consentLaneTestBinding(principalID, roomID, sittingID string) ConsentAdmissionBinding {
+	digest := sha256.Sum256([]byte(principalID))
 	return ConsentAdmissionBinding{
-		TenantID: "tenant-1", PrincipalKind: ACLPrincipalUser, PrincipalID: principalID,
+		TenantID: "tenant-1", PrincipalKind: ACLPrincipalGuest, PrincipalID: fmt.Sprintf("%x", digest[:]),
 		RoomID: roomID, SittingID: sittingID, AnchorID: "anchor-1",
 	}
 }
@@ -54,8 +56,10 @@ func enableFullTranscriptConsentForTest(t *testing.T, app *kanbanBoardApp, princ
 	if err != nil {
 		t.Fatalf("resolve transcript consent binding: %v", err)
 	}
-	for _, scope := range []ConsentScope{ConsentAudioCapture, ConsentTranscription, ConsentModelAnalysis, ConsentOrgMemory} {
-		grantConsentScope(t, authority, binding, scope)
+	if binding.PrincipalKind == ACLPrincipalGuest {
+		for _, scope := range []ConsentScope{ConsentAudioCapture, ConsentTranscription, ConsentModelAnalysis, ConsentOrgMemory} {
+			grantConsentScope(t, authority, binding, scope)
+		}
 	}
 	return authority
 }
@@ -90,8 +94,10 @@ func grantAmbientConsentForTest(t *testing.T, app *kanbanBoardApp, authority *Co
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, scope := range []ConsentScope{ConsentAudioCapture, ConsentTranscription, ConsentModelAnalysis, ConsentOrgMemory} {
-			grantConsentScope(t, authority, binding, scope)
+		if binding.PrincipalKind == ACLPrincipalGuest {
+			for _, scope := range []ConsentScope{ConsentAudioCapture, ConsentTranscription, ConsentModelAnalysis, ConsentOrgMemory} {
+				grantConsentScope(t, authority, binding, scope)
+			}
 		}
 	}
 	return sittingID
@@ -133,12 +139,18 @@ func TestConsentLanesKeepTransportSeparateAndEnforceDependencies(t *testing.T) {
 
 	store := NewMemoryConsentStore()
 	authority := NewConsentLaneAuthority(store, "policy-v1")
+	if decision, err := authority.Authorize(context.Background(), binding, ConsentLaneOrgMemory); err != nil || !decision.Allowed {
+		t.Fatalf("default guest policy decision=%+v err=%v, want allowed", decision, err)
+	}
 	grantConsentScope(t, authority, binding, ConsentOrgMemory)
+	if _, err := authority.RecordDecision(context.Background(), binding, ConsentTranscription, ConsentDenied); err != nil {
+		t.Fatal(err)
+	}
 	decision, err := authority.Authorize(context.Background(), binding, ConsentLaneOrgMemory)
 	if err != nil || decision.Allowed {
-		t.Fatalf("later-only org grant decision=%+v err=%v, want denied", decision, err)
+		t.Fatalf("explicit dependency denial decision=%+v err=%v, want denied", decision, err)
 	}
-	wantMissing := []ConsentScope{ConsentAudioCapture, ConsentModelAnalysis, ConsentTranscription}
+	wantMissing := []ConsentScope{ConsentTranscription}
 	for _, scope := range wantMissing {
 		found := false
 		for _, missing := range decision.MissingScopes {
@@ -148,11 +160,9 @@ func TestConsentLanesKeepTransportSeparateAndEnforceDependencies(t *testing.T) {
 			t.Fatalf("missing scopes=%v, want dependency %s", decision.MissingScopes, scope)
 		}
 	}
-	grantConsentScope(t, authority, binding, ConsentAudioCapture)
 	grantConsentScope(t, authority, binding, ConsentTranscription)
-	grantConsentScope(t, authority, binding, ConsentModelAnalysis)
 	if decision, err := authority.Authorize(context.Background(), binding, ConsentLaneOrgMemory); err != nil || !decision.Allowed {
-		t.Fatalf("complete chain decision=%+v err=%v", decision, err)
+		t.Fatalf("restored default chain decision=%+v err=%v", decision, err)
 	}
 }
 
@@ -228,33 +238,35 @@ func TestCommitWithFencesUsesStableMultiContributorLockOrder(t *testing.T) {
 	}
 }
 
-func TestConsentDecisionSurvivesAuthorityRestartAndNeverCrossesScope(t *testing.T) {
+func TestExplicitGuestDecisionSurvivesAuthorityRestartAndNeverCrossesScope(t *testing.T) {
 	store := NewMemoryConsentStore()
 	binding := consentLaneTestBinding("user-1", "room-1", "sitting-1")
 	first := NewConsentLaneAuthority(store, "policy-v1")
-	grantConsentScope(t, first, binding, ConsentAudioCapture)
+	if _, err := first.RecordDecision(context.Background(), binding, ConsentAudioCapture, ConsentDenied); err != nil {
+		t.Fatal(err)
+	}
 
 	restarted := NewConsentLaneAuthority(store, "policy-v1")
-	if decision, err := restarted.Authorize(context.Background(), binding, ConsentLaneAudioCapture); err != nil || !decision.Allowed {
-		t.Fatalf("restart decision=%+v err=%v", decision, err)
+	if decision, err := restarted.Authorize(context.Background(), binding, ConsentLaneAudioCapture); err != nil || decision.Allowed {
+		t.Fatalf("restart decision=%+v err=%v, want durable denial", decision, err)
 	}
 	mutations := []ConsentAdmissionBinding{
-		func() ConsentAdmissionBinding { value := binding; value.PrincipalID = "user-2"; return value }(),
+		consentLaneTestBinding("user-2", "room-1", "sitting-1"),
 		func() ConsentAdmissionBinding { value := binding; value.RoomID = "room-2"; return value }(),
 		func() ConsentAdmissionBinding { value := binding; value.SittingID = "sitting-2"; return value }(),
 	}
 	for index, mutated := range mutations {
-		if decision, err := restarted.Authorize(context.Background(), mutated, ConsentLaneAudioCapture); err != nil || decision.Allowed {
-			t.Fatalf("mutation %d decision=%+v err=%v, inherited another admission", index, decision, err)
+		if decision, err := restarted.Authorize(context.Background(), mutated, ConsentLaneAudioCapture); err != nil || !decision.Allowed {
+			t.Fatalf("mutation %d decision=%+v err=%v, inherited another admission's denial", index, decision, err)
 		}
 	}
 	wrongPolicy := NewConsentLaneAuthority(store, "policy-v2")
-	if decision, err := wrongPolicy.Authorize(context.Background(), binding, ConsentLaneAudioCapture); err != nil || decision.Allowed {
-		t.Fatalf("later policy decision=%+v err=%v, inherited old policy", decision, err)
+	if decision, err := wrongPolicy.Authorize(context.Background(), binding, ConsentLaneAudioCapture); err != nil || !decision.Allowed {
+		t.Fatalf("later policy decision=%+v err=%v, inherited old policy denial", decision, err)
 	}
 }
 
-func TestConsentHTTPDerivesAdmissionAndRejectsSelfAttestedFields(t *testing.T) {
+func TestConsentHTTPDerivesInternalPolicyAndRejectsMutableOrSelfAttestedChoices(t *testing.T) {
 	setupAuthTestEnv(t)
 	app := newIsolatedKanbanBoardApp(t)
 	previousApp := kanbanApp
@@ -293,18 +305,11 @@ func TestConsentHTTPDerivesAdmissionAndRejectsSelfAttestedFields(t *testing.T) {
 		t.Fatalf("self-attested request persisted records=%d", len(store.records))
 	}
 	recorder := post(`{"scope":"audio_capture","disposition":"granted"}`)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("grant status=%d body=%s", recorder.Code, recorder.Body.String())
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("internal mutable choice status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	if len(store.records) != 1 {
-		t.Fatalf("records=%d want=1", len(store.records))
-	}
-	persisted := store.records[0]
-	if persisted.PrincipalID != "aj@shareability.com" || persisted.RoomID != officeRoomID || persisted.SittingID != sittingID || persisted.PolicyVersion != "policy-v1" || persisted.EvidenceKind != "server_authenticated_choice" {
-		t.Fatalf("server-derived record=%+v", persisted)
-	}
-	if persisted.EvidenceRef == "" || persisted.RecordedAt.IsZero() {
-		t.Fatalf("missing server evidence=%+v", persisted)
+	if len(store.records) != 0 {
+		t.Fatalf("internal policy request persisted records=%d", len(store.records))
 	}
 
 	get := httptest.NewRequest(http.MethodGet, "/api/consent", nil)
@@ -320,11 +325,16 @@ func TestConsentHTTPDerivesAdmissionAndRejectsSelfAttestedFields(t *testing.T) {
 	if err := json.Unmarshal(getRecorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if !response.Lanes[ConsentLaneAudioTransport].Allowed || !response.Lanes[ConsentLaneAudioCapture].Allowed || response.Lanes[ConsentLaneTranscription].Allowed {
+	if !response.Lanes[ConsentLaneAudioTransport].Allowed || !response.Lanes[ConsentLaneAudioCapture].Allowed || !response.Lanes[ConsentLaneTranscription].Allowed || !response.Lanes[ConsentLaneModelAnalysis].Allowed || !response.Lanes[ConsentLaneOrgMemory].Allowed {
 		t.Fatalf("lane response=%+v", response.Lanes)
 	}
-	if response.Scopes[ConsentAudioCapture] != ConsentGranted {
-		t.Fatalf("scope response=%+v, want explicit audio_capture grant", response.Scopes)
+	if !response.PolicyManaged || response.ChoicesMutable {
+		t.Fatalf("internal policy flags managed=%t mutable=%t", response.PolicyManaged, response.ChoicesMutable)
+	}
+	for _, scope := range []ConsentScope{ConsentAudioCapture, ConsentTranscription, ConsentModelAnalysis, ConsentOrgMemory} {
+		if response.Scopes[scope] != ConsentGranted {
+			t.Fatalf("scope response=%+v, want default policy grant for %s", response.Scopes, scope)
+		}
 	}
 }
 
@@ -375,7 +385,11 @@ func TestConsentCommitAndWithdrawalCannotInterleave(t *testing.T) {
 func TestConsentMixerUsesExactFrameAndPurgesWithdrawalBuffer(t *testing.T) {
 	binding := consentLaneTestBinding("user-1", "room-1", "sitting-1")
 	authority := NewConsentLaneAuthority(NewMemoryConsentStore(), "policy-v1")
-	fence := ConsentFence{binding: binding, lane: ConsentLaneTranscription, policy: "policy-v1", issuedAt: time.Now().UTC()}
+	decision, err := authority.Authorize(context.Background(), binding, ConsentLaneTranscription)
+	if err != nil || !decision.Allowed {
+		t.Fatalf("authorize=%+v err=%v", decision, err)
+	}
+	fence := decision.Fence
 	source := &audioSource{
 		trackKey: "track-1", participantName: "AJ",
 		buffer:      make([]int16, roomAudioMixFrameSize),
@@ -571,7 +585,7 @@ func TestConsentHTTPRejectsUnauthenticatedPrincipalBeforeStoreAccess(t *testing.
 	}
 }
 
-func TestRememberTranscriptChecksDurableConsentAtTheCommitSeam(t *testing.T) {
+func TestRememberInternalTranscriptUsesRulesOfRoadAtTheCommitSeam(t *testing.T) {
 	setupAuthTestEnv(t)
 	app := newIsolatedKanbanBoardApp(t)
 	sittingID := app.prepareMeetingSittingID(officeRoomID)
@@ -582,50 +596,25 @@ func TestRememberTranscriptChecksDurableConsentAtTheCommitSeam(t *testing.T) {
 	if got := app.noteMeetingAdmissionForSitting(officeRoomID, name, sittingID); got != sittingID {
 		t.Fatalf("opened sitting=%q want=%q", got, sittingID)
 	}
-	binding, err := app.consentBindingForPrincipal(context.Background(), memberAdmissionPrincipal("aj@shareability.com"), officeRoomID, sittingID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	store := NewMemoryConsentStore()
 	authority := NewConsentLaneAuthority(store, "policy-v1")
-	nextRecordAt := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
-	authority.Now = func() time.Time {
-		nextRecordAt = nextRecordAt.Add(time.Second)
-		return nextRecordAt
-	}
 	authority.CaptureCutoff = func() (uint64, error) { return 19, nil }
 	installConsentAuthorityForTest(t, authority)
 
 	attributeNextTranscriptForTest(app, officeRoomID, name)
-	app.rememberTranscript(officeRoomID, kanbanRealtimeEvent{EventID: "commit-denied", Transcript: "must not persist before consent"}, "transcript_lane", "test-model")
-	if entries := app.memorySnapshot(10); len(entries) != 0 {
-		t.Fatalf("pre-consent entries=%d want=0", len(entries))
-	}
-	grantConsentScope(t, authority, binding, ConsentAudioCapture)
-	grantConsentScope(t, authority, binding, ConsentTranscription)
-	attributeNextTranscriptForTest(app, officeRoomID, name)
-	app.rememberTranscript(officeRoomID, kanbanRealtimeEvent{EventID: "commit-allowed", Transcript: "transcription only is allowed"}, "transcript_lane", "test-model")
+	app.rememberTranscript(officeRoomID, kanbanRealtimeEvent{EventID: "commit-policy-allowed", Transcript: "internal transcription follows the rules of the road"}, "transcript_lane", "test-model")
 	entries := app.memorySnapshot(10)
 	if len(entries) != 1 {
-		t.Fatalf("authorized entries=%d want=1", len(entries))
+		t.Fatalf("policy-authorized entries=%d want=1", len(entries))
 	}
 	if entries[0].Metadata["consentTranscriptionRecordIds"] == "" || entries[0].Metadata["consentPolicyVersion"] != "policy-v1" {
 		t.Fatalf("audit metadata=%v", entries[0].Metadata)
 	}
-	if entries[0].Metadata["consentModelAnalysisRecordIds"] != "" || entries[0].Metadata["consentOrgMemoryRecordIds"] != "" {
-		t.Fatalf("later lanes were self-attested by a transcription grant: %v", entries[0].Metadata)
+	if entries[0].Metadata["consentModelAnalysisRecordIds"] == "" || entries[0].Metadata["consentOrgMemoryRecordIds"] == "" {
+		t.Fatalf("policy-managed downstream lanes are missing from commit evidence: %v", entries[0].Metadata)
 	}
-	if _, err := authority.RecordDecision(context.Background(), binding, ConsentAudioCapture, ConsentWithdrawn); err != nil {
-		t.Fatal(err)
-	}
-	attributeNextTranscriptForTest(app, officeRoomID, name)
-	app.rememberTranscript(officeRoomID, kanbanRealtimeEvent{EventID: "commit-withdrawn", Transcript: "must not persist after withdrawal"}, "transcript_lane", "test-model")
-	if entries := app.memorySnapshot(10); len(entries) != 1 {
-		t.Fatalf("post-withdraw entries=%d want=1", len(entries))
-	}
-	grantConsentScope(t, authority, binding, ConsentAudioCapture)
 	// No frozen attribution window means there is no speaker principal. Even
-	// with valid room consent, unknown audio is discarded rather than assigned
+	// under the internal policy, unknown audio is discarded rather than assigned
 	// to whichever participant happens to be present.
 	app.mu.Lock()
 	state := app.roomLiveLocked(officeRoomID)
@@ -650,22 +639,24 @@ func TestMixedTranscriptRequiresOrgMemoryConsentFromEveryContributor(t *testing.
 	installConsentAuthorityForTest(t, authority)
 
 	type contributor struct {
-		email string
-		name  string
+		sessionKey string
+		name       string
 	}
 	contributors := []contributor{
-		{email: "aj@shareability.com", name: participantNameForEmail("aj@shareability.com")},
-		{email: "tyler@shareability.com", name: participantNameForEmail("tyler@shareability.com")},
+		{sessionKey: strings.Repeat("a", 64), name: "AJ"},
+		{sessionKey: strings.Repeat("b", 64), name: "Tyler"},
 	}
 	bindings := make([]ConsentAdmissionBinding, 0, len(contributors))
 	for index, contributor := range contributors {
-		if _, _, err := app.admitParticipantWithAnchor(context.Background(), roomID, contributor.name, fmt.Sprintf("mixed-session-%d", index), fmt.Sprintf("mixed-endpoint-%d", index), sittingID, memberAdmissionPrincipal(contributor.email)); err != nil {
+		display, _, err := app.admitGuestWithAnchor(context.Background(), roomID, contributor.sessionKey, contributor.name, fmt.Sprintf("mixed-session-%d", index), sittingID)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if got := app.noteMeetingAdmissionForSitting(roomID, contributor.name, sittingID); got != sittingID {
+		contributors[index].name = display
+		if got := app.noteMeetingAdmissionForSitting(roomID, display, sittingID); got != sittingID {
 			t.Fatalf("sitting=%q want=%q", got, sittingID)
 		}
-		binding, err := app.consentBindingForPrincipal(context.Background(), memberAdmissionPrincipal(contributor.email), roomID, sittingID)
+		binding, err := app.consentBindingForPrincipal(context.Background(), guestAdmissionPrincipal(contributor.sessionKey), roomID, sittingID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -674,9 +665,12 @@ func TestMixedTranscriptRequiresOrgMemoryConsentFromEveryContributor(t *testing.
 			grantConsentScope(t, authority, binding, scope)
 		}
 	}
-	// Only the dominant speaker grants organization memory. The quieter second
-	// speaker still contributed samples and therefore retains veto authority.
+	// The quieter second guest explicitly opts out of organization memory. That
+	// decision overrides the default-allow baseline and retains veto authority.
 	grantConsentScope(t, authority, bindings[0], ConsentOrgMemory)
+	if _, err := authority.RecordDecision(context.Background(), bindings[1], ConsentOrgMemory, ConsentDenied); err != nil {
+		t.Fatal(err)
+	}
 	fences := make([]ConsentFence, 0, len(bindings))
 	for _, binding := range bindings {
 		decision, err := authority.Authorize(context.Background(), binding, ConsentLaneTranscription)

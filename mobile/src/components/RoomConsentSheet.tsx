@@ -137,7 +137,7 @@ export const RoomConsentSheet = memo(function RoomConsentSheet({
     scope: ConsentScope,
     disposition: ConsentDisposition,
   ) => {
-    if (pending || !status?.storeAvailable) return;
+    if (pending || !status?.storeAvailable || !status.choicesMutable) return;
     const version = ++requestVersion.current;
     setPending({ scope, disposition });
     setError(null);
@@ -151,7 +151,7 @@ export const RoomConsentSheet = memo(function RoomConsentSheet({
     } finally {
       if (requestVersion.current === version) setPending(null);
     }
-  }, [pending, sessionToken, status?.storeAvailable]);
+  }, [pending, sessionToken, status?.choicesMutable, status?.storeAvailable]);
 
   const close = useCallback(() => {
     if (!pending) onClose();
@@ -261,7 +261,7 @@ export const RoomConsentSheet = memo(function RoomConsentSheet({
                   const effective = status.lanes[choice.scope]?.allowed === true;
                   const offDisposition: ConsentDisposition = disposition === 'granted' ? 'withdrawn' : 'denied';
                   const savingThis = pending?.scope === choice.scope;
-                  const controlsDisabled = !status.storeAvailable || Boolean(pending);
+                  const controlsDisabled = !status.storeAvailable || !status.choicesMutable || Boolean(pending);
                   const offSelected = disposition === 'denied' || disposition === 'withdrawn';
                   return (
                     <View key={choice.scope} style={styles.choiceCard}>
@@ -349,7 +349,9 @@ export const RoomConsentSheet = memo(function RoomConsentSheet({
             ) : null}
 
             <Text style={styles.footnote}>
-              Choices apply only to this room sitting. A future sitting asks again.
+              {status?.policyManaged
+                ? 'Internal employee use follows your company rules of the road. External guests control their own choices for each sitting.'
+                : 'Choices apply only to this room sitting. A future sitting asks again.'}
             </Text>
           </ScrollView>
         </View>

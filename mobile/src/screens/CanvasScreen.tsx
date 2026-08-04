@@ -27,18 +27,9 @@ import {
   submitHomeScoutOpening,
   type HomeScoutOpeningAttempt,
 } from '../canvas/homeScoutOpening';
-import { useDictation } from '../voice/useDictation';
 import { useComposerDictation } from '../voice/useComposerDictation';
-import { useScoutConversation } from '../voice/useScoutConversation';
 import { usePersonalRealtime } from '../realtime/usePersonalRealtime';
-import { officeControlChannelIsLive } from '../realtime/OfficeEventsContext';
 import { useAuth } from '../auth/AuthContext';
-import type { AudioFocusLease } from '../voice/AudioFocusCoordinator';
-import {
-  runFallbackVoiceStartSingleflight,
-  type FallbackVoiceStartAttempt,
-} from '../voice/dictationAudioLifecycle';
-import { audioFocusRuntime } from '../realtime/audioFocusRuntime';
 import { api, BonfireApiError } from '../api/client';
 import { duration, ease, useReduceMotion } from '../theme/motion';
 import type { RootStackParamList } from '../navigation/types';
@@ -86,7 +77,6 @@ export function CanvasScreen() {
   const reduceMotion = useReduceMotion();
   const live = useLiveLine();
   const lineDisplay = liveLineDisplay(live);
-  const conversation = useScoutConversation();
   const handleRealtimeActions = useCallback((actions: Array<Record<string, unknown>>) => {
     for (const action of actions) {
       const actionType = String(action.type ?? '').trim();
@@ -106,164 +96,23 @@ export function CanvasScreen() {
   }, [navigation]);
   const realtime = usePersonalRealtime({ onActions: handleRealtimeActions });
   const [navOpen, setNavOpen] = useState(false);
-  const fallbackVoiceLeaseRef = useRef<AudioFocusLease | null>(null);
-  const fallbackVoiceRequestGenerationRef = useRef(0);
-  const fallbackVoiceStartAttemptRef = useRef<FallbackVoiceStartAttempt<AudioFocusLease> | null>(null);
-
-  // Keyless fallback for the live Scout control. On the canvas a transcript is
-  // a question, so it feeds the conversation loop rather than the composer.
-  const voiceDictation = useDictation({
-    context: 'chat',
-    threadId: conversation.threadId ?? undefined,
-    onTranscript: ({ text }) => {
-      void conversation.ask(text);
-    },
-    // Dark-launch fallback only. Once native Realtime is qualified and enabled,
-    // the Canvas never routes through file dictation; composer microphones keep
-    // their distinct bounded record → review → transcribe lifecycle.
-    legacyUploadOnStop: true,
-  });
-  const fallbackVoiceLifecycleRef = useRef({
-    end: conversation.end,
-    cancel: voiceDictation.cancel,
-    stop: voiceDictation.stop,
-  });
-  fallbackVoiceLifecycleRef.current = {
-    end: conversation.end,
-    cancel: voiceDictation.cancel,
-    stop: voiceDictation.stop,
-  };
-
-  const listening = realtime.enabled ? realtime.active : voiceDictation.state === 'listening';
-
-  const startFallbackVoiceCapture = useCallback(async (
-    requestGeneration: number,
-    lease: AudioFocusLease,
-  ): Promise<boolean> => runFallbackVoiceStartSingleflight(
-    fallbackVoiceStartAttemptRef,
-    requestGeneration,
-    lease,
-    async () => {
-      if (
-        requestGeneration !== fallbackVoiceRequestGenerationRef.current
-        || fallbackVoiceLeaseRef.current !== lease
-        || !lease.isCurrent()
-        || !officeControlChannelIsLive(sessionToken)
-      ) return false;
-
-      const started = await voiceDictation.start();
-      if (
-        started
-        && requestGeneration === fallbackVoiceRequestGenerationRef.current
-        && fallbackVoiceLeaseRef.current === lease
-        && lease.isCurrent()
-        && officeControlChannelIsLive(sessionToken)
-      ) return true;
-
-      // Hang-up, takeover, or unmount may land while native permission/prepare/
-      // record is suspended. Drain that exact start before its lease can leave.
-      voiceDictation.cancel();
-      await voiceDictation.stop();
-      if (fallbackVoiceLeaseRef.current === lease) {
-        fallbackVoiceLeaseRef.current = null;
-        conversation.end();
-        await lease.release(
-          requestGeneration === fallbackVoiceRequestGenerationRef.current ? 'error' : 'cancelled',
-        );
-      }
-      return false;
-    },
-  ), [conversation, sessionToken, voiceDictation]);
+  const listening = realtime.active;
 
   const handleTap = useCallback(async () => {
-    const requestGeneration = ++fallbackVoiceRequestGenerationRef.current;
-    if (realtime.enabled) {
-      if (realtime.active) {
-        await realtime.stop('completed');
-      } else {
-        if (realtime.status === 'error') await realtime.stop('cancelled');
-        await realtime.start();
-      }
-      return;
+    // The cradle has one stable meaning: a full-duplex Realtime Scout call.
+    // Dictation is available only from composer microphones below.
+    if (!realtime.enabled) return;
+    if (realtime.active) {
+      await realtime.stop('completed');
+    } else {
+      if (realtime.status === 'error') await realtime.stop('cancelled');
+      await realtime.start();
     }
-    // Three cases, and the middle one is what makes this a LOOP rather than a
-    // one-shot: ending a turn does NOT end the conversation.
-    if (listening) {
-      // Turn over — transcribe and ask. The loop stays open, and the re-arm
-      // effect below puts the mic back up once Scout has answered.
-      await voiceDictation.stop();
-      return;
-    }
-    if (conversation.open) {
-      voiceDictation.cancel();
-      conversation.end();
-      await voiceDictation.stop();
-      const lease = fallbackVoiceLeaseRef.current;
-      fallbackVoiceLeaseRef.current = null;
-      await lease?.release('completed');
-      return;
-    }
-    if (!sessionToken || !officeControlChannelIsLive(sessionToken)) return;
-    let exactLease: AudioFocusLease | null = null;
-    const lease = await audioFocusRuntime.acquire('personal_realtime', {
-      forceClose: async () => {
-        fallbackVoiceRequestGenerationRef.current += 1;
-        if (fallbackVoiceLeaseRef.current === exactLease) fallbackVoiceLeaseRef.current = null;
-        conversation.end();
-        voiceDictation.cancel();
-        await voiceDictation.stop();
-      },
-    });
-    exactLease = lease;
-    if (
-      requestGeneration !== fallbackVoiceRequestGenerationRef.current
-      || !lease.isCurrent()
-      || !officeControlChannelIsLive(sessionToken)
-    ) {
-      await lease.release('cancelled');
-      return;
-    }
-    fallbackVoiceLeaseRef.current = lease;
-    conversation.start();
-    await startFallbackVoiceCapture(requestGeneration, lease);
-  }, [conversation, listening, realtime, sessionToken, startFallbackVoiceCapture, voiceDictation]);
+  }, [realtime]);
 
-  // The re-arm. This is the difference between "tap to dictate a question" and
-  // "tap to have a conversation": once the answer lands, the mic comes back up
-  // on its own so you can just keep talking (§5).
-  const answered = Boolean(conversation.turn?.answer) && !conversation.thinking;
-  useEffect(() => {
-    if (realtime.enabled || !conversation.open || !answered) return;
-    if (voiceDictation.state !== 'idle') return;
-    const requestGeneration = fallbackVoiceRequestGenerationRef.current;
-    const lease = fallbackVoiceLeaseRef.current;
-    if (!sessionToken || !lease?.isCurrent() || !officeControlChannelIsLive(sessionToken)) return;
-    void startFallbackVoiceCapture(requestGeneration, lease);
-    // The guarded start callback is stable per state; re-running on every render would
-    // restart the recorder mid-turn.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [answered, conversation.open, realtime.enabled, sessionToken, startFallbackVoiceCapture, voiceDictation.state]);
-
-  useEffect(() => {
-    if (!voiceDictation.permissionDenied) return;
-    fallbackVoiceRequestGenerationRef.current += 1;
-    conversation.end();
-    const lease = fallbackVoiceLeaseRef.current;
-    fallbackVoiceLeaseRef.current = null;
-    void lease?.release('cancelled');
-  }, [conversation, voiceDictation.permissionDenied]);
-
-  useEffect(() => () => {
-    fallbackVoiceRequestGenerationRef.current += 1;
-    fallbackVoiceLifecycleRef.current.end();
-    fallbackVoiceLifecycleRef.current.cancel();
-    void fallbackVoiceLifecycleRef.current.stop();
-    const lease = fallbackVoiceLeaseRef.current;
-    fallbackVoiceLeaseRef.current = null;
-    void lease?.release('cancelled');
-  }, []);
-
-  const voiceError = realtime.enabled ? realtime.error : conversation.error;
+  const voiceError = realtime.enabled
+    ? realtime.error
+    : 'Live Scout is unavailable in this build. Composer dictation remains available from the mic.';
 
   const [composerDraft, setComposerDraft] = useState('');
   const [composerOpening, setComposerOpening] = useState(false);
@@ -271,17 +120,8 @@ export function CanvasScreen() {
   const composerOpeningRef = useRef(false);
   const composerOpeningAttemptRef = useRef<HomeScoutOpeningAttempt | null>(null);
   const stopVoiceForComposer = useCallback(async () => {
-    fallbackVoiceRequestGenerationRef.current += 1;
     if (realtime.active) await realtime.stop('completed');
-    if (!realtime.enabled && conversation.open) {
-      conversation.end();
-      voiceDictation.cancel();
-      await voiceDictation.stop();
-      const lease = fallbackVoiceLeaseRef.current;
-      fallbackVoiceLeaseRef.current = null;
-      await lease?.release('completed');
-    }
-  }, [conversation, realtime, voiceDictation]);
+  }, [realtime]);
   const submitComposerText = useCallback(async (override?: string) => {
     if (!sessionToken || composerOpeningRef.current) return;
     const attempt = homeScoutOpeningAttempt(
@@ -408,9 +248,9 @@ export function CanvasScreen() {
             style={({ pressed }) => [canvasCradleComposition.wave, pressed && styles.wavePressed]}
           >
             <StrideCradle
-              trace={realtime.enabled ? realtime.trace : voiceDictation.trace}
+              trace={realtime.trace}
               listening={listening}
-              source={realtime.enabled && realtime.status === 'talking' ? 'agent' : 'human'}
+              source={realtime.status === 'talking' ? 'agent' : 'human'}
             />
           </Pressable>
 
@@ -450,28 +290,6 @@ export function CanvasScreen() {
 
           {voiceError ? (
             <Text style={styles.error}>{voiceError}</Text>
-          ) : null}
-
-          {!realtime.enabled && voiceDictation.error ? (
-            <View style={styles.dictationError}>
-              <Text style={styles.error}>{voiceDictation.error}</Text>
-              <View style={styles.errorActions}>
-                {/* The recording is retained, so retry re-sends the same audio
-                    rather than asking the user to say it again (§11). */}
-                <Pressable onPress={voiceDictation.retry} accessibilityRole="button">
-                  <Text style={styles.errorAction}>Retry</Text>
-                </Pressable>
-                <Pressable onPress={voiceDictation.dismissError} accessibilityRole="button">
-                  <Text style={styles.errorActionMuted}>Discard</Text>
-                </Pressable>
-              </View>
-            </View>
-          ) : null}
-
-          {!realtime.enabled && voiceDictation.permissionDenied ? (
-            <Text style={styles.error}>
-              Microphone access is off. Open Threads from the shortcuts to type.
-            </Text>
           ) : null}
 
         <View style={canvasCradleComposition.skyBelow} />
@@ -579,22 +397,16 @@ export function CanvasScreen() {
                 ) : (
                   <>
                     <Waveform trace={composerDictation.trace} listening={composerDictation.state === 'listening'} height={28} scale={0.58} />
-                    {composerDictation.state === 'held' || composerDictation.state === 'error' ? (
-                      <Text style={styles.composerStateText}>Ready to transcribe</Text>
-                    ) : null}
+                    <Text style={styles.composerStateText}>
+                      {composerDictation.state === 'listening'
+                        ? 'Recording · send when finished'
+                        : composerDictation.state === 'error'
+                          ? 'Recording saved · try send again'
+                          : 'Ready to send'}
+                    </Text>
                   </>
                 )}
               </View>
-              {composerDictation.state === 'listening' ? (
-                <Pressable
-                  accessibilityLabel="Stop recording"
-                  accessibilityRole="button"
-                  onPress={() => { void composerDictation.stop(); }}
-                  style={({ pressed }) => [styles.composerIcon, pressed && styles.composerPressed]}
-                >
-                  <SymbolView name="stop.fill" tintColor={colors.text2} size={16} />
-                </Pressable>
-              ) : null}
               <Pressable
                 accessibilityLabel="Transcribe and send"
                 accessibilityRole="button"
@@ -609,7 +421,7 @@ export function CanvasScreen() {
           ) : (
             <>
               <Pressable
-                accessibilityHint="Records a message, then lets you delete or transcribe and send it"
+                accessibilityHint="Starts dictation. Press Send once when you are finished to transcribe and open the Scout chat."
                 accessibilityLabel="Dictate a message"
                 accessibilityRole="button"
                 accessibilityState={{ disabled: composerOpening }}

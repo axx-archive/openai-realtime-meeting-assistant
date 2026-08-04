@@ -35,6 +35,7 @@ var (
 	ErrConsentAdmissionInvalid     = errors.New("invalid consent admission binding")
 	ErrConsentUnauthenticated      = errors.New("consent principal is unauthenticated")
 	ErrConsentFenceStale           = errors.New("consent fence is stale")
+	ErrConsentManagedByPolicy      = errors.New("consent is managed by internal policy")
 )
 
 // ConsentAdmissionBinding is created from server-owned admission state. The
@@ -229,11 +230,7 @@ func (authority *ConsentLaneAuthority) AuthorizeIngress(ctx context.Context, bin
 	if err := authority.Health(ctx); err != nil {
 		return nil, err
 	}
-	decision, err := authority.Store.Effective(ctx, ConsentQuery{
-		TenantID: binding.TenantID, PrincipalKind: binding.PrincipalKind, PrincipalID: binding.PrincipalID,
-		RoomID: binding.RoomID, SittingID: binding.SittingID, PolicyVersion: authority.PolicyVersion,
-		Scopes: []ConsentScope{ConsentOrgMemory},
-	})
+	decision, err := authority.effectiveDecision(ctx, binding, []ConsentScope{ConsentOrgMemory})
 	if err != nil {
 		return nil, fmt.Errorf("%w: effective ingress decision: %v", ErrConsentAuthorityUnavailable, err)
 	}
@@ -269,6 +266,73 @@ func (authority *ConsentLaneAuthority) AuthorizeIngress(ctx context.Context, bin
 		result[lane] = laneDecision
 	}
 	return result, nil
+}
+
+// effectiveDecision is the single policy seam for every server-side lane.
+// Employees operate under the authenticated company's rules of the road and
+// cannot toggle the policy per call. External guests begin from the same
+// default-allow baseline, but their explicit durable denial or withdrawal
+// overrides it for the sitting.
+func (authority *ConsentLaneAuthority) effectiveDecision(ctx context.Context, binding ConsentAdmissionBinding, scopes []ConsentScope) (ConsentDecision, error) {
+	if err := authority.Health(ctx); err != nil {
+		return ConsentDecision{}, err
+	}
+	query := ConsentQuery{
+		TenantID: binding.TenantID, PrincipalKind: binding.PrincipalKind, PrincipalID: binding.PrincipalID,
+		RoomID: binding.RoomID, SittingID: binding.SittingID, PolicyVersion: authority.PolicyVersion,
+		Scopes: scopes,
+	}
+	required, err := normalizeConsentQuery(query)
+	if err != nil {
+		return ConsentDecision{}, err
+	}
+	if binding.PrincipalKind == ACLPrincipalGuest {
+		query.Scopes = required
+		decision, err := authority.Store.Effective(ctx, query)
+		if err != nil {
+			return ConsentDecision{}, fmt.Errorf("%w: effective decision: %v", ErrConsentAuthorityUnavailable, err)
+		}
+		if decision.RecordIDs == nil {
+			decision.RecordIDs = make(map[ConsentScope]string, len(required))
+		}
+		if decision.Dispositions == nil {
+			decision.Dispositions = make(map[ConsentScope]ConsentDisposition, len(required))
+		}
+		decision.Allowed = true
+		decision.MissingScopes = nil
+		for _, scope := range required {
+			disposition, explicit := decision.Dispositions[scope]
+			if !explicit {
+				decision.Dispositions[scope] = ConsentGranted
+				decision.RecordIDs[scope] = authority.policyDecisionRecordID(binding, scope, "guest-default")
+				continue
+			}
+			if disposition != ConsentGranted {
+				decision.Allowed = false
+				decision.MissingScopes = append(decision.MissingScopes, scope)
+			}
+		}
+		return decision, nil
+	}
+	decision := ConsentDecision{
+		Allowed:      true,
+		RecordIDs:    make(map[ConsentScope]string, len(required)),
+		Dispositions: make(map[ConsentScope]ConsentDisposition, len(required)),
+	}
+	for _, scope := range required {
+		// A deterministic UUID keeps the evidence shape compatible with explicit
+		// records while binding it to the exact tenant, policy and admission.
+		decision.RecordIDs[scope] = authority.policyDecisionRecordID(binding, scope, "internal-rules-of-road")
+		decision.Dispositions[scope] = ConsentGranted
+	}
+	return decision, nil
+}
+
+func (authority *ConsentLaneAuthority) policyDecisionRecordID(binding ConsentAdmissionBinding, scope ConsentScope, source string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(strings.Join([]string{
+		"stride-consent-policy", source, binding.TenantID, authority.PolicyVersion,
+		string(binding.PrincipalKind), binding.PrincipalID, binding.RoomID, binding.SittingID, binding.AnchorID, string(scope),
+	}, "\x00"))).String()
 }
 
 type consentAudioIngressGate struct {
@@ -429,13 +493,9 @@ func (authority *ConsentLaneAuthority) Authorize(ctx context.Context, binding Co
 	if err := authority.Health(ctx); err != nil {
 		return ConsentLaneDecision{Lane: lane}, err
 	}
-	decision, err := authority.Store.Effective(ctx, ConsentQuery{
-		TenantID: binding.TenantID, PrincipalKind: binding.PrincipalKind, PrincipalID: binding.PrincipalID,
-		RoomID: binding.RoomID, SittingID: binding.SittingID, PolicyVersion: authority.PolicyVersion,
-		Scopes: scopes,
-	})
+	decision, err := authority.effectiveDecision(ctx, binding, scopes)
 	if err != nil {
-		return ConsentLaneDecision{Lane: lane}, fmt.Errorf("%w: effective decision: %v", ErrConsentAuthorityUnavailable, err)
+		return ConsentLaneDecision{Lane: lane}, err
 	}
 	generation := authority.generation(binding)
 	fence := ConsentFence{
@@ -563,6 +623,9 @@ func (authority *ConsentLaneAuthority) RecordDecision(ctx context.Context, bindi
 	}
 	if !validConsentScope(scope) || !validConsentDisposition(disposition) {
 		return ConsentRecord{}, ErrConsentInvalid
+	}
+	if binding.PrincipalKind == ACLPrincipalUser {
+		return ConsentRecord{}, ErrConsentManagedByPolicy
 	}
 	if err := authority.Health(ctx); err != nil {
 		return ConsentRecord{}, err
@@ -770,7 +833,10 @@ func consentLaneScopes(lane ConsentLane) ([]ConsentScope, bool) {
 func (authority *ConsentLaneAuthority) generation(binding ConsentAdmissionBinding) uint64 {
 	authority.mu.RLock()
 	defer authority.mu.RUnlock()
-	return authority.generations[consentBindingKey(binding)]
+	// Generation zero means "no authority" everywhere a fence is serialized.
+	// The policy baseline is generation one; every explicit guest decision bumps
+	// the stored counter and therefore invalidates every earlier fence.
+	return authority.generations[consentBindingKey(binding)] + 1
 }
 
 func (authority *ConsentLaneAuthority) bumpGeneration(binding ConsentAdmissionBinding) {

@@ -28,6 +28,8 @@ type consentStatusResponse struct {
 	SittingID             string                              `json:"sittingId"`
 	GuestPolicyListenOnly bool                                `json:"guestPolicyListenOnly"`
 	StoreAvailable        bool                                `json:"storeAvailable"`
+	ChoicesMutable        bool                                `json:"choicesMutable"`
+	PolicyManaged         bool                                `json:"policyManaged"`
 	Lanes                 map[ConsentLane]consentLaneStatus   `json:"lanes"`
 	Scopes                map[ConsentScope]ConsentDisposition `json:"scopes"`
 }
@@ -70,7 +72,9 @@ func consentHandler(w http.ResponseWriter, r *http.Request) {
 		record, err := authority.RecordDecision(r.Context(), binding, request.Scope, request.Disposition)
 		if err != nil {
 			status := http.StatusBadRequest
-			if errors.Is(err, ErrConsentAuthorityUnavailable) || errors.Is(err, ErrCanonicalStoreUnhealthy) {
+			if errors.Is(err, ErrConsentManagedByPolicy) {
+				status = http.StatusForbidden
+			} else if errors.Is(err, ErrConsentAuthorityUnavailable) || errors.Is(err, ErrCanonicalStoreUnhealthy) {
 				status = http.StatusServiceUnavailable
 			}
 			writeAuthError(w, status, "consent decision could not be persisted")
@@ -102,6 +106,8 @@ func (app *kanbanBoardApp) consentStatus(ctx context.Context, authority *Consent
 		RoomID: binding.RoomID, SittingID: binding.SittingID,
 		GuestPolicyListenOnly: binding.GuestPolicyListenOnly,
 		StoreAvailable:        authority.Health(ctx) == nil,
+		ChoicesMutable:        binding.PrincipalKind == ACLPrincipalGuest,
+		PolicyManaged:         binding.PrincipalKind == ACLPrincipalUser,
 		Lanes:                 make(map[ConsentLane]consentLaneStatus),
 		Scopes:                make(map[ConsentScope]ConsentDisposition),
 	}

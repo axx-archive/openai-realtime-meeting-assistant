@@ -17729,131 +17729,53 @@
           inset 0 1px 0 rgba(255, 255, 255, 0.05);
       }
 
-      .room-agent-cradle {
-        --room-agent-ball: clamp(22px, 3vw, 34px);
+      /* A room participant gets a voice signature, not a second copy of the
+         home-screen Signal Cradle. Every invited agent owns a stable color;
+         only genuine talking animates. The 21 bars animate on transform and
+         opacity, so a long call never pays layout work per frame. */
+      .room-agent-waveform {
         position: relative;
         z-index: 1;
         display: flex;
-        align-items: flex-start;
+        align-items: center;
         justify-content: center;
-        width: min(72%, 280px);
-        height: clamp(74px, 34%, 104px);
-        padding-top: 1px;
-        filter: drop-shadow(0 8px 18px color-mix(in srgb, var(--room-agent-color) 24%, transparent));
+        gap: clamp(2px, 0.34vw, 4px);
+        width: min(78%, 310px);
+        height: clamp(54px, 28%, 88px);
+        color: var(--room-agent-color);
+        filter: drop-shadow(0 8px 18px color-mix(in srgb, currentColor 24%, transparent));
       }
 
-      .room-agent-cradle::before {
-        content: "";
-        position: absolute;
-        top: 0;
-        left: 8%;
-        right: 8%;
-        height: 1px;
-        background: color-mix(in srgb, var(--room-agent-color) 48%, rgba(255, 255, 255, 0.18));
-      }
-
-      .room-agent-cradle__ball {
-        position: relative;
-        width: var(--room-agent-ball);
+      .room-agent-waveform__bar {
+        width: clamp(2px, 0.34vw, 4px);
         height: 100%;
-        flex: 0 0 var(--room-agent-ball);
-        transform-origin: 50% 0;
-        will-change: transform;
+        flex: 0 0 clamp(2px, 0.34vw, 4px);
+        border-radius: var(--r-full);
+        background: currentColor;
+        opacity: 0.58;
+        transform: scaleY(var(--agent-wave-rest));
+        transform-origin: 50% 50%;
+        will-change: transform, opacity;
       }
 
-      .room-agent-cradle__ball::before {
-        content: "";
-        position: absolute;
-        top: 0;
-        bottom: calc(var(--room-agent-ball) - 1px);
-        left: 50%;
-        width: 1px;
-        background: color-mix(in srgb, var(--room-agent-color) 58%, rgba(255, 255, 255, 0.32));
-        transform: translateX(-50%);
+      .is-agent-participant[data-voice-state="hearing"] .room-agent-waveform__bar {
+        opacity: 0.78;
       }
 
-      .room-agent-cradle__ball::after {
-        content: "";
-        position: absolute;
-        right: 0;
-        bottom: 0;
-        width: var(--room-agent-ball);
-        height: var(--room-agent-ball);
-        border-radius: 50%;
-        background: var(--room-agent-color);
-        box-shadow:
-          inset 0 1px 0 rgba(255, 255, 255, 0.32),
-          inset 0 -5px 10px rgba(0, 0, 0, 0.2),
-          0 5px 14px color-mix(in srgb, var(--room-agent-color) 30%, transparent);
+      .is-agent-participant[data-voice-state="thinking"] .room-agent-waveform {
+        opacity: 0.72;
       }
 
-      .is-agent-participant[data-voice-state="listening"] .room-agent-cradle__ball:first-child,
-      .is-agent-participant[data-voice-state="ready"] .room-agent-cradle__ball:first-child {
-        animation: room-agent-cradle-left 2.8s cubic-bezier(0.2, 0, 0, 1) infinite;
+      .is-agent-participant[data-voice-state="talking"] .room-agent-waveform__bar {
+        animation: room-agent-waveform-talk 1120ms linear infinite;
+        animation-delay: var(--agent-wave-delay);
+        opacity: 1;
       }
 
-      /* The struck edge answers — a cradle with no energy transfer is just a
-         metronome. Human edge (left) initiates; agent edge (right) receives. */
-      .is-agent-participant[data-voice-state="listening"] .room-agent-cradle__ball:last-child,
-      .is-agent-participant[data-voice-state="ready"] .room-agent-cradle__ball:last-child {
-        animation: room-agent-cradle-left-response 2.8s cubic-bezier(0.2, 0, 0, 1) infinite;
-      }
-
-      .is-agent-participant[data-voice-state="hearing"] .room-agent-cradle__ball:first-child {
-        animation: room-agent-cradle-hearing 1.3s cubic-bezier(0.2, 0, 0, 1) infinite;
-      }
-
-      .is-agent-participant[data-voice-state="hearing"] .room-agent-cradle__ball:last-child {
-        animation: room-agent-cradle-hearing-response 1.3s cubic-bezier(0.2, 0, 0, 1) infinite;
-      }
-
-      .is-agent-participant[data-voice-state="thinking"] .room-agent-cradle__ball:nth-child(3)::after {
-        animation: room-agent-cradle-think 900ms cubic-bezier(0.2, 0, 0, 1) infinite alternate;
-      }
-
-      .is-agent-participant[data-voice-state="talking"] .room-agent-cradle__ball:first-child {
-        animation: room-agent-cradle-talk-left 860ms cubic-bezier(0.2, 0, 0, 1) infinite;
-      }
-
-      .is-agent-participant[data-voice-state="talking"] .room-agent-cradle__ball:last-child {
-        animation: room-agent-cradle-talk-right 860ms cubic-bezier(0.2, 0, 0, 1) infinite;
-      }
-
-      @keyframes room-agent-cradle-left {
-        0%, 64%, 82%, 100% { transform: rotate(0deg); }
-        73% { transform: rotate(12deg); animation-timing-function: cubic-bezier(1, 0, 0.8, 1); }
-      }
-
-      @keyframes room-agent-cradle-left-response {
-        0%, 82%, 100% { transform: rotate(0deg); }
-        91% { transform: rotate(-12deg); animation-timing-function: cubic-bezier(1, 0, 0.8, 1); }
-      }
-
-      @keyframes room-agent-cradle-hearing {
-        0%, 50%, 100% { transform: rotate(0deg); }
-        25% { transform: rotate(14deg); animation-timing-function: cubic-bezier(1, 0, 0.8, 1); }
-      }
-
-      @keyframes room-agent-cradle-hearing-response {
-        0%, 50%, 100% { transform: rotate(0deg); }
-        75% { transform: rotate(-14deg); animation-timing-function: cubic-bezier(1, 0, 0.8, 1); }
-      }
-
-      @keyframes room-agent-cradle-think {
-        from { filter: brightness(0.82); transform: scale(0.9); }
-        to { filter: brightness(1.18); transform: scale(1); }
-      }
-
-      /* Talking: the AGENT edge (right) leads and the human edge answers —
-         phase order mirrors who is speaking, per canon §2. */
-      @keyframes room-agent-cradle-talk-left {
-        0%, 50%, 100% { transform: rotate(0deg); }
-        75% { transform: rotate(18deg); animation-timing-function: cubic-bezier(1, 0, 0.8, 1); }
-      }
-
-      @keyframes room-agent-cradle-talk-right {
-        0%, 50%, 100% { transform: rotate(0deg); }
-        25% { transform: rotate(-18deg); animation-timing-function: cubic-bezier(1, 0, 0.8, 1); }
+      @keyframes room-agent-waveform-talk {
+        0%, 100% { transform: scaleY(var(--agent-wave-rest)); opacity: 0.76; }
+        32% { transform: scaleY(var(--agent-wave-peak)); opacity: 1; }
+        64% { transform: scaleY(var(--agent-wave-mid)); opacity: 0.88; }
       }
 
       .hearth-seat .owner-avatar {
@@ -24249,8 +24171,7 @@
            one place the geometry is computed. The hover scale goes too, since a
            held-open pose is not something the visitor can dismiss. */
         .office-launch__cradle { transform: none; transition: none; }
-        .room-agent-cradle__ball,
-        .room-agent-cradle__ball::after,
+        .room-agent-waveform__bar,
         .room-scout-quick__cradle span { animation: none !important; }
         .voice-ledger { animation: none; }
         /* Private grill (Wave 12): keep every act's STATE (tone, color, content),
@@ -25768,7 +25689,7 @@
             </svg>
             <span class="audio-settings-label">audio</span>
           </button>
-          <button id="consentToggle" class="btn btn--ghost consent-toggle" type="button" aria-label="Microphone data choices" aria-expanded="false" title="Microphone data choices" disabled>
+          <button id="consentToggle" class="btn btn--ghost consent-toggle" type="button" aria-label="Microphone data choices" aria-expanded="false" title="Microphone data choices" hidden disabled>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path><path d="M9 12l2 2 4-4"></path></svg>
           </button>
           <button id="roomChatToggle" class="btn btn--ghost room-chat-toggle" type="button" aria-label="Open room chat" aria-pressed="false" title="Room chat" disabled>
@@ -25832,7 +25753,7 @@
           <div><h2 id="consentTitle">your microphone data.</h2><p id="consentPolicy">choices for this room sitting.</p></div>
           <button id="consentClose" class="consent-panel__close" type="button" aria-label="Close microphone data choices">×</button>
         </header>
-        <p class="consent-panel__disclosure">Direct room audio, video, and chat continue when these are off. These choices control the server copy of your microphone and what may be derived from it for this sitting.</p>
+        <p class="consent-panel__disclosure">External guests control the server copy of their microphone and what may be derived from it for this sitting. Internal employees follow the company rules of the road.</p>
         <div id="consentLanes" class="consent-panel__lanes"></div>
         <p id="consentStatus" class="consent-panel__status" role="status" aria-live="polite"></p>
       </section>
@@ -25846,7 +25767,7 @@
           </div>
           <button id="meetingSpecialistsClose" class="meeting-specialists__close" type="button" aria-label="Close agent team">×</button>
         </header>
-        <p class="meeting-specialists__disclosure">Agents are visible to everyone in the meeting. A current member can invite Scout once everyone has consented; employee agents require approval for the exact request. Agents receive only the authorized meeting context and can be dismissed at any time.</p>
+        <p class="meeting-specialists__disclosure">Agents are visible to everyone in the meeting. Internal employees follow the company rules of the road; external guests keep explicit data choices. Employee agents still require approval for the exact request and can be dismissed at any time.</p>
         <p id="meetingSpecialistsState" class="meeting-specialists__state" role="status" aria-live="polite">Checking your agent team…</p>
         <div id="meetingSpecialistsList" class="meeting-specialists__list"></div>
       </div>
@@ -45043,8 +44964,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         try {
           await beginMediaSession({ voiceOnly, reuseLocalMedia: reconnectingSignal })
           setRoomView(true)
-          consentToggleButton.disabled = false
-          loadConsentStatus({ openIfMissing: !reconnectingSignal })
+          consentToggleButton.hidden = !guestMode
+          consentToggleButton.disabled = !guestMode
+          loadConsentStatus({ openIfMissing: guestMode && !reconnectingSignal })
           setRoomEntryInProgress(false)
           if (!reconnectingSignal) {
             // room-chat unread accumulated outside the room (via the office
@@ -45100,7 +45022,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function setConsentPanelOpen(open) {
-        const visible = Boolean(open && appShell.classList.contains('is-in-room'))
+        const visible = Boolean(open && guestMode && appShell.classList.contains('is-in-room'))
         consentPanel.hidden = !visible
         consentToggleButton?.setAttribute('aria-expanded', String(visible))
       }
@@ -45108,6 +45030,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function renderConsentStatus() {
         consentLanes.replaceChildren()
         const available = Boolean(consentSnapshot?.storeAvailable)
+        const mutable = Boolean(consentSnapshot?.choicesMutable)
         consentPolicy.textContent = consentSnapshot?.policyVersion
           ? `this room sitting · policy ${consentSnapshot.policyVersion}`
           : 'choices for this room sitting.'
@@ -45129,13 +45052,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           allow.type = 'button'
           allow.textContent = 'allow'
           allow.setAttribute('aria-pressed', String(disposition === 'granted'))
-          allow.disabled = !available || Boolean(consentChoicePending)
+          allow.disabled = !available || !mutable || Boolean(consentChoicePending)
           allow.addEventListener('click', () => saveConsentChoice(scope, 'granted'))
           const off = document.createElement('button')
           off.type = 'button'
           off.textContent = 'off'
           off.setAttribute('aria-pressed', String(disposition === 'denied' || disposition === 'withdrawn'))
-          off.disabled = !available || Boolean(consentChoicePending)
+          off.disabled = !available || !mutable || Boolean(consentChoicePending)
           off.addEventListener('click', () => saveConsentChoice(scope, disposition === 'granted' ? 'withdrawn' : 'denied'))
           choices.append(allow, off)
           row.append(copy, choices)
@@ -45144,6 +45067,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!available) {
           consentStatus.dataset.kind = 'error'
           consentStatus.textContent = 'Choices are unavailable, so server capture and AI use stay off. Your direct room media continues.'
+        } else if (consentSnapshot?.policyManaged) {
+          consentStatus.dataset.kind = ''
+          consentStatus.textContent = 'Internal employee use follows the company rules of the road. External guests control their own choices.'
         } else if (consentChoicePending) {
           consentStatus.dataset.kind = ''
           consentStatus.textContent = 'saving your choice…'
@@ -45163,7 +45089,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           consentSnapshot = await response.json()
           renderConsentStatus()
           const missing = consentScopeInfo.some(([scope]) => !consentSnapshot?.scopes?.[scope])
-          if (openIfMissing && missing) setConsentPanelOpen(true)
+          if (openIfMissing && consentSnapshot?.choicesMutable && missing) setConsentPanelOpen(true)
         } catch (error) {
           consentSnapshot = { storeAvailable: false, scopes: {} }
           renderConsentStatus()
@@ -45172,7 +45098,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       async function saveConsentChoice(scope, disposition) {
-        if (consentChoicePending) return
+        if (consentChoicePending || !consentSnapshot?.choicesMutable) return
         consentChoicePending = scope
         renderConsentStatus()
         try {
@@ -53622,17 +53548,25 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           tile.dataset.participant = name
           if (agent) {
             tile.className = 'video-tile hearth-seat is-placeholder is-agent-participant'
-            const cradle = document.createElement('span')
-            cradle.className = 'room-agent-cradle'
-            cradle.setAttribute('aria-hidden', 'true')
-            for (let index = 0; index < 5; index += 1) {
-              const ball = document.createElement('span')
-              ball.className = 'room-agent-cradle__ball'
-              cradle.appendChild(ball)
+            const waveform = document.createElement('span')
+            waveform.className = 'room-agent-waveform'
+            waveform.setAttribute('aria-hidden', 'true')
+            const restProfile = [.18,.28,.22,.42,.31,.56,.38,.72,.48,.86,.58,.78,.46,.68,.36,.54,.29,.43,.2,.31,.17]
+            for (let index = 0; index < restProfile.length; index += 1) {
+              const bar = document.createElement('span')
+              const phase = index * 1.17
+              const peak = Math.min(1, .52 + .48 * (.5 + .5 * Math.sin(phase)))
+              const mid = Math.min(.82, .26 + .56 * (.5 + .5 * Math.cos(phase * .73)))
+              bar.className = 'room-agent-waveform__bar'
+              bar.style.setProperty('--agent-wave-rest', String(restProfile[index]))
+              bar.style.setProperty('--agent-wave-peak', String(peak))
+              bar.style.setProperty('--agent-wave-mid', String(mid))
+              bar.style.setProperty('--agent-wave-delay', `${-index * 53}ms`)
+              waveform.appendChild(bar)
             }
             const label = document.createElement('span')
             label.className = 'video-label'
-            tile.append(cradle, label)
+            tile.append(waveform, label)
             updateRoomAgentTile(tile, agent)
           } else {
             tile.className = 'video-tile hearth-seat is-placeholder'
@@ -60425,6 +60359,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         screenShareButton.disabled = true
         recordMeetingButton.disabled = true
         consentToggleButton.disabled = true
+        consentToggleButton.hidden = true
         setConsentPanelOpen(false)
         closeMeetingSpecialists()
         consentSnapshot = null

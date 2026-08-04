@@ -1,4 +1,5 @@
-/* STRIDE composer dictation: bounded recording is local until an explicit Send.
+/* STRIDE composer dictation: bounded recording is local until Send, which
+ * stops capture, transcribes, and submits in one action.
  * This file deliberately contains no provider/model configuration. The app
  * injects an authenticated server adapter, keeping credentials server-side. */
 (function (root) {
@@ -144,11 +145,13 @@
           .stride-dictation-composer { position: relative; }
           .stride-dictation-composer--nested { display: flex; align-items: flex-end; gap: 6px; width: 100%; min-width: 0; }
           .stride-dictation-composer--nested > .stride-dictation-input { flex: 1 1 auto; min-width: 0; }
-          .stride-dictation-mic, .stride-dictation-action { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; min-width: 44px; height: 44px; border: 0; border-radius: 999px; background: transparent; color: inherit; font: 600 11px/1 system-ui; cursor: pointer; }
+          .stride-dictation-mic, .stride-dictation-action { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; min-width: 44px; height: 44px; border: 0; border-radius: 999px; background: transparent; color: inherit; font: 600 11px/1 system-ui; cursor: pointer; transition: transform 140ms cubic-bezier(.2,0,0,1), opacity 140ms cubic-bezier(.2,0,0,1), background-color 140ms cubic-bezier(.2,0,0,1); }
           .stride-dictation-action[hidden], .stride-dictation-wave[hidden] { display: none !important; }
           .stride-dictation-mic:hover, .stride-dictation-action:hover { background: rgba(255,255,255,.09); }
+          .stride-dictation-mic:active:not([disabled]), .stride-dictation-action:active:not([disabled]) { transform: scale(.96); }
           .stride-dictation-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
           .stride-dictation-composer:not([data-dictation-state="idle"]) > :not(.stride-dictation-mic):not(.stride-dictation-status):not(.stride-dictation-wave):not(.stride-dictation-action) { display: none !important; }
+          .stride-dictation-composer[data-dictation-state="recording"] > .stride-dictation-mic,
           .stride-dictation-composer[data-dictation-state="held"] > .stride-dictation-mic,
           .stride-dictation-composer[data-dictation-state="transcribing"] > .stride-dictation-mic { display: none; }
           .stride-dictation-composer[data-dictation-state="recording"] { box-shadow: 0 0 0 1px rgba(255,91,25,.65), 0 0 22px rgba(255,91,25,.18); }
@@ -199,9 +202,9 @@
       this.sendButton.innerHTML = dictationIcon('send')
       this.sendButton.setAttribute('aria-label', 'Transcribe and send dictated clip')
       this.sendButton.title = 'Transcribe and send'
-      this.button.addEventListener('click', () => this.state === 'recording' ? this.stop() : this.start())
+      this.button.addEventListener('click', () => this.start())
       this.deleteButton.addEventListener('click', () => this.discard())
-      this.sendButton.addEventListener('click', () => this.send())
+      this.sendButton.addEventListener('click', () => this.commit())
       this.host.insertBefore(this.button, this.input.nextSibling)
       this.host.insertBefore(this.status, this.button.nextSibling)
       this.host.insertBefore(this.wave, this.status.nextSibling)
@@ -214,9 +217,9 @@
       const state = this.state
       this.host.dataset.dictationState = state
       this.button.disabled = Boolean(this.input.disabled) || state === 'held' || state === 'transcribing'
-      this.button.innerHTML = dictationIcon(state === 'recording' ? 'stop' : 'mic')
-      this.button.setAttribute('aria-label', state === 'recording' ? 'Stop dictation recording' : 'Dictate message')
-      this.button.title = state === 'recording' ? 'Stop recording' : 'Dictate'
+      this.button.innerHTML = dictationIcon('mic')
+      this.button.setAttribute('aria-label', 'Dictate message')
+      this.button.title = 'Dictate'
       this.status.textContent = state === 'recording'
         ? 'Recording'
         : state === 'held'
@@ -225,8 +228,8 @@
             ? 'Transcribing'
             : this.errorMessage
       this.wave.hidden = state !== 'recording' && state !== 'held'
-      this.deleteButton.hidden = state !== 'held' && state !== 'transcribing'
-      this.sendButton.hidden = state !== 'held'
+      this.deleteButton.hidden = state !== 'recording' && state !== 'held' && state !== 'transcribing'
+      this.sendButton.hidden = state !== 'recording' && state !== 'held'
     }
     async start() {
       if (this.state !== 'idle' || this.startAttempt || this.input.disabled || !navigator.mediaDevices?.getUserMedia || !root.MediaRecorder) return
@@ -429,6 +432,11 @@
         this.errorMessage = 'Could not transcribe that. Your recording is saved; try again.'
         this.render()
       }
+    }
+    /** One intent from the arrow: stop capture if needed, then transcribe/send. */
+    async commit() {
+      if (this.state === 'recording') await this.stop()
+      if (this.state === 'held') await this.send()
     }
     async cleanupCapture() {
       const failures = []

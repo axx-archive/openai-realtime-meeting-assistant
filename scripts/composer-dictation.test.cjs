@@ -20,14 +20,25 @@ function extractFunction(source, signature) {
   throw new Error(`unterminated ${signature}`)
 }
 
-test('dictation remains local through Stop and only Send enters transcribing', () => {
+test('one Send advances an active recording through held into transcribing', async () => {
   let state = 'idle'
   state = nextDictationState(state, 'record')
   assert.equal(state, 'recording')
-  state = nextDictationState(state, 'stop')
-  assert.equal(state, 'held')
-  state = nextDictationState(state, 'send')
-  assert.equal(state, 'transcribing')
+  const { ComposerDictationController } = window.StrideComposerDictation
+  const controller = Object.create(ComposerDictationController.prototype)
+  const transitions = []
+  controller.state = state
+  controller.stop = async () => {
+    controller.state = nextDictationState(controller.state, 'stop')
+    transitions.push(controller.state)
+  }
+  controller.send = async () => {
+    controller.state = nextDictationState(controller.state, 'send')
+    transitions.push(controller.state)
+  }
+  await controller.commit()
+  assert.deepEqual(transitions, ['held', 'transcribing'])
+  assert.equal(controller.state, 'transcribing')
   assert.equal(nextDictationState('held', 'complete'), 'held')
 })
 

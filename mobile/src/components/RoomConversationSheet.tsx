@@ -347,22 +347,16 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
                             scale={0.55}
                             trace={composerDictation.trace}
                           />
-                          {composerDictation.state === 'held' || composerDictation.state === 'error' ? (
-                            <Text style={styles.voiceState}>Ready to transcribe</Text>
-                          ) : null}
+                          <Text style={styles.voiceState}>
+                            {composerDictation.state === 'listening'
+                              ? 'Recording · send when finished'
+                              : composerDictation.state === 'error'
+                                ? 'Recording saved · try send again'
+                                : 'Ready to send'}
+                          </Text>
                         </>
                       )}
                     </View>
-                    {composerDictation.state === 'listening' ? (
-                      <Pressable
-                        accessibilityLabel="Stop recording"
-                        accessibilityRole="button"
-                        onPress={() => { void composerDictation.stop(); }}
-                        style={({ pressed }) => [styles.composerIcon, pressed && styles.pressed]}
-                      >
-                        <SymbolView name="stop.fill" tintColor="rgba(255,255,255,0.66)" size={15} />
-                      </Pressable>
-                    ) : null}
                     <Pressable
                       accessibilityLabel="Transcribe and send"
                       accessibilityRole="button"
@@ -377,7 +371,7 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
                 ) : (
                   <>
                     <Pressable
-                      accessibilityHint="Records a room message, then lets you delete or transcribe and send it"
+                      accessibilityHint="Starts dictation. Press Send once when you are finished to transcribe and post it to the room."
                       accessibilityLabel="Dictate a room message"
                       accessibilityRole="button"
                       onPress={() => { void composerDictation.start(); }}

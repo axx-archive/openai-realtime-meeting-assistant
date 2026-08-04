@@ -266,11 +266,8 @@ test('OfficeEvents is the fail-closed control plane for every personal Realtime 
   assert.match(toolAdmission, /toolAbortController\.signal\.aborted/);
   assert.match(toolAdmission, /api\.realtimeTool\([\s\S]*toolAbortController\.signal/);
   assert.match(realtime, /toolAbortController\?\.abort\(\)/);
-  assert.match(canvas, /!sessionToken \|\| !officeControlChannelIsLive\(sessionToken\)/);
-  assert.ok(
-    canvas.indexOf('!sessionToken || !officeControlChannelIsLive(sessionToken)')
-      < canvas.indexOf("audioFocusRuntime.acquire('personal_realtime'"),
-  );
+  assert.match(canvas, /usePersonalRealtime\(\{ onActions: handleRealtimeActions \}\)/);
+  assert.doesNotMatch(canvas, /fallbackVoice|audioFocusRuntime\.acquire\('personal_realtime'/);
   assert.doesNotMatch(source('src', 'voice', 'useComposerDictation.ts'), /officeControlChannelIsLive/);
   assert.doesNotMatch(source('src', 'realtime', 'useNativeRoom.ts'), /officeControlChannelIsLive/);
 });

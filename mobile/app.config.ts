@@ -44,7 +44,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // Apple-tier rich-thread recycling, and the corrected adaptive-color
       // five-ball cradle on top of the Build 31 checkpoint.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '32',
+      buildNumber: '33',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

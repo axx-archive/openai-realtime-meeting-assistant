@@ -677,7 +677,7 @@ func TestE9DeterministicFounderGraphThroughProductEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{"useDictation", "useComposerDictation", "stopVoiceForComposer", "audioFocusRuntime.acquire('personal_realtime'", "composerDictation.commit()"} {
+	for _, required := range []string{"usePersonalRealtime", "useComposerDictation", "stopVoiceForComposer", "The cradle has one stable meaning", "composerDictation.commit()"} {
 		if !bytes.Contains(canvasSource, []byte(required)) {
 			t.Fatalf("mobile Canvas composer source is missing %q", required)
 		}

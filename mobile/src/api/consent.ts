@@ -117,6 +117,8 @@ export function parseConsentStatus(value: unknown): ConsentStatus {
     sittingId: nonEmptyString(raw.sittingId, 'consent.sittingId'),
     guestPolicyListenOnly: boolean(raw.guestPolicyListenOnly, 'consent.guestPolicyListenOnly'),
     storeAvailable: boolean(raw.storeAvailable, 'consent.storeAvailable'),
+    choicesMutable: boolean(raw.choicesMutable, 'consent.choicesMutable'),
+    policyManaged: boolean(raw.policyManaged, 'consent.policyManaged'),
     lanes,
     scopes,
   };

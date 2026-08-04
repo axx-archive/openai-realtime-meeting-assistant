@@ -26,7 +26,7 @@ func TestFrontendMeetingSpecialistsUsesRealControlRouteAndHonestDisclosure(t *te
 		`data-specialist-action="approved"`,
 		`data-specialist-action="declined"`,
 		`data-specialist-action="dismissed"`,
-		`employee agents require approval for the exact request`,
+		`Employee agents still require approval for the exact request`,
 		`Meeting transcription remains independent`,
 		`Provider voice remains visibly fenced`,
 		`Voice joining stays off until provider qualification is complete`,
@@ -84,7 +84,7 @@ func TestFrontendMeetingSpecialistsEscapesEveryRuntimeInterpolation(t *testing.T
 	}
 }
 
-func TestFrontendProjectsRoomAgentsAsVisibleCradleParticipants(t *testing.T) {
+func TestFrontendProjectsRoomAgentsAsVisibleWaveformParticipants(t *testing.T) {
 	source, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +94,7 @@ func TestFrontendProjectsRoomAgentsAsVisibleCradleParticipants(t *testing.T) {
 		`case 'agent_participants':`,
 		`handleRoomAgentParticipants(message.data)`,
 		`...roomAgentParticipants.map(agent => agent.name)`,
-		`room-agent-cradle`,
+		`room-agent-waveform`,
 		`is-agent-participant`,
 		`data-voice-state`,
 		`...roomAgentParticipants.map(agent => agent.name.toLowerCase())`,
@@ -102,6 +102,9 @@ func TestFrontendProjectsRoomAgentsAsVisibleCradleParticipants(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Fatalf("room agent participant projection is missing %q", want)
 		}
+	}
+	if strings.Contains(html, `room-agent-cradle`) {
+		t.Fatal("room participants must not duplicate the home-screen Signal Cradle")
 	}
 }
 

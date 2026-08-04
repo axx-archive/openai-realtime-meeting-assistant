@@ -595,6 +595,8 @@ export type ConsentStatus = {
   sittingId: string;
   guestPolicyListenOnly: boolean;
   storeAvailable: boolean;
+  choicesMutable: boolean;
+  policyManaged: boolean;
   lanes: Record<ConsentLane, ConsentLaneStatus>;
   scopes: Partial<Record<ConsentScope, ConsentDisposition>>;
 };

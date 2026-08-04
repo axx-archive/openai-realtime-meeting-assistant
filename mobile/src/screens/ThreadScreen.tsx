@@ -936,6 +936,8 @@ export function ThreadScreen({ route, navigation }: Props) {
   ]);
 
   const listening = dictation.state === 'listening';
+  const dictationActive = dictation.state !== 'idle';
+  const dictationCanCommit = listening || dictation.state === 'held' || dictation.state === 'error';
 
   return (
     <SafeAreaView
@@ -1240,11 +1242,17 @@ export function ThreadScreen({ route, navigation }: Props) {
               ))}
             </View>
           ) : null}
-          {listening || dictation.state === 'held' || dictation.state === 'transcribing' ? (
+          {dictationActive ? (
             <View style={styles.listening}>
               <Waveform trace={dictation.trace} listening={listening} height={30} scale={0.7} />
               <Text style={styles.listeningHint}>
-                {listening ? 'Recording · tap stop when finished' : dictation.state === 'held' ? 'Ready to transcribe' : 'Transcribing'}
+                {listening
+                  ? 'Recording · send when finished'
+                  : dictation.state === 'held'
+                    ? 'Ready to send'
+                    : dictation.state === 'error'
+                      ? 'Recording saved · try send again'
+                      : 'Transcribing'}
               </Text>
             </View>
           ) : (
@@ -1266,44 +1274,30 @@ export function ThreadScreen({ route, navigation }: Props) {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Add attachment"
-              accessibilityState={{ disabled: uploading || pendingFiles.length >= maxMessageAttachments }}
-              disabled={uploading || pendingFiles.length >= maxMessageAttachments}
+              accessibilityState={{ disabled: dictationActive || uploading || pendingFiles.length >= maxMessageAttachments }}
+              disabled={dictationActive || uploading || pendingFiles.length >= maxMessageAttachments}
               onPress={() => setAttachmentSourceOpen(true)}
-              style={({ pressed }) => [styles.mic, pressed && styles.micPressed, (uploading || pendingFiles.length >= maxMessageAttachments) && styles.sendDim]}
+              style={({ pressed }) => [styles.mic, pressed && styles.micPressed, (dictationActive || uploading || pendingFiles.length >= maxMessageAttachments) && styles.sendDim]}
             >
               <SymbolView name="plus" tintColor={colors.text2} size={20} />
             </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={listening ? 'Stop dictation' : 'Dictate a message'}
-              accessibilityHint={listening ? 'Stops recording and keeps the clip for review.' : 'Starts a recorded message for transcription.'}
-              disabled={dictation.state !== 'idle' && !listening}
-              onPress={() => {
-                if (listening) void dictation.stop();
-                else void dictation.start();
-              }}
-              style={({ pressed }) => [
-                styles.mic,
-                pressed && styles.micPressed,
-                dictation.state !== 'idle' && !listening && styles.sendDim,
-              ]}
-            >
-              {dictation.state === 'transcribing' ? (
-                <ActivityIndicator color={colors.ember} />
-              ) : (
-                <SymbolView
-                  name={listening ? 'stop.fill' : 'mic.fill'}
-                  tintColor={listening ? colors.ember : colors.text2}
-                  size={20}
-                />
-              )}
-            </Pressable>
+            {!dictationActive ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Dictate a message"
+                accessibilityHint="Starts dictation. Press Send once when you are finished to transcribe and post it."
+                onPress={() => { void dictation.start(); }}
+                style={({ pressed }) => [styles.mic, pressed && styles.micPressed]}
+              >
+                <SymbolView name="mic.fill" tintColor={colors.text2} size={20} />
+              </Pressable>
+            ) : null}
 
-            {dictation.state === 'held' || dictation.state === 'error' ? (
+            {dictationCanCommit ? (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Delete dictated clip"
-                onPress={dictation.delete}
+                onPress={() => { void dictation.discard(); }}
                 style={({ pressed }) => [styles.mic, pressed && styles.micPressed]}
               >
                 <SymbolView name="xmark" tintColor={colors.text2} size={18} />
@@ -1312,15 +1306,15 @@ export function ThreadScreen({ route, navigation }: Props) {
 
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={dictation.state === 'held' || dictation.state === 'error' ? 'Transcribe and send dictated clip' : 'Send'}
-              disabled={dictation.state === 'transcribing' || (dictation.state !== 'held' && dictation.state !== 'error' && (!draft.trim() && pendingFiles.length === 0 || sending || uploading))}
+              accessibilityLabel={dictationCanCommit ? 'Transcribe and send dictated clip' : 'Send'}
+              disabled={dictation.state === 'transcribing' || (!dictationCanCommit && ((!draft.trim() && pendingFiles.length === 0) || sending || uploading))}
               onPress={() => {
-                if (dictation.state === 'held' || dictation.state === 'error') dictation.send();
+                if (dictationCanCommit) void dictation.commit();
                 else void send();
               }}
               style={({ pressed }) => [
                 styles.send,
-                (dictation.state === 'transcribing' || (dictation.state !== 'held' && dictation.state !== 'error' && ((!draft.trim() && pendingFiles.length === 0) || sending || uploading || pressed))) && styles.sendDim,
+                (dictation.state === 'transcribing' || (!dictationCanCommit && (((!draft.trim() && pendingFiles.length === 0) || sending || uploading) || pressed))) && styles.sendDim,
               ]}
             >
               {sending ? (

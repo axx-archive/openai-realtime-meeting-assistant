@@ -97,13 +97,13 @@ test('React Native shell separates the static logo from the live Signal Cradle',
   assert.match(component, /export function StrideLogo/);
 
   // The hero Signal is both identity and the real-amplitude talk control. Its
-  // trace can come from native Realtime or the explicit keyless fallback, but
-  // the Canvas must still render exactly one live cradle and no static lockup.
+  // The Canvas must render exactly one live cradle, driven only by native
+  // Realtime, and no static lockup or dictation fallback.
   const canvas = text('src/screens/CanvasScreen.tsx');
   assert.equal(canvas.match(/<StrideCradle\b/g)?.length, 1);
-  assert.match(canvas, /trace=\{realtime\.enabled \? realtime\.trace : voiceDictation\.trace\}/);
+  assert.match(canvas, /trace=\{realtime\.trace\}/);
   assert.match(canvas, /listening=\{listening\}/);
-  assert.match(canvas, /source=\{realtime\.enabled && realtime\.status === 'talking' \? 'agent' : 'human'\}/);
+  assert.match(canvas, /source=\{realtime\.status === 'talking' \? 'agent' : 'human'\}/);
   assert.doesNotMatch(canvas, /<StrideLogo\b/);
   assert.doesNotMatch(canvas, /styles\.glow|rgba\(255,90,25,0\.035\)/);
   assert.doesNotMatch(canvas, />SCOUT<|<Dock/);

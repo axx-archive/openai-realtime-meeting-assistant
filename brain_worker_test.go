@@ -25,13 +25,6 @@ func authorizeBrainWorkerTest(t *testing.T, app *kanbanBoardApp) *ConsentLaneAut
 		if got := app.noteMeetingAdmissionForSitting(officeRoomID, name, sittingID); got != sittingID {
 			t.Fatalf("sitting=%q want=%q", got, sittingID)
 		}
-		binding, err := app.consentBindingForPrincipal(context.Background(), memberAdmissionPrincipal(email), officeRoomID, sittingID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, scope := range []ConsentScope{ConsentAudioCapture, ConsentTranscription, ConsentModelAnalysis, ConsentOrgMemory} {
-			grantConsentScope(t, authority, binding, scope)
-		}
 	}
 	return authority
 }
@@ -44,12 +37,24 @@ func TestMeetingBrainWithdrawalDuringBlockedProviderProducesNoArtifact(t *testin
 	defer app.Close()
 	authority := authorizeBrainWorkerTest(t, app)
 	authority.OnWithdrawal = handleConsentWithdrawal
-	if _, appended, err := app.memory.appendAttributedTranscript("blocked-provider-source", "", "Tom", "dominant", "A source that must not survive withdrawal."); err != nil || !appended {
+	sittingID := app.memory.currentMeetingID(officeRoomID)
+	guestKey := strings.Repeat("c", 64)
+	guestName, _, err := app.admitGuestWithAnchor(context.Background(), officeRoomID, guestKey, "Tom", "brain-withdrawal-guest", sittingID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := app.noteMeetingAdmissionForSitting(officeRoomID, guestName, sittingID); got != sittingID {
+		t.Fatalf("guest sitting=%q want=%q", got, sittingID)
+	}
+	if _, appended, err := app.memory.appendAttributedTranscript("blocked-provider-source", "", guestName, "dominant", "A source that must not survive withdrawal."); err != nil || !appended {
 		t.Fatalf("append source appended=%t err=%v", appended, err)
 	}
 	source := app.memorySnapshot(10)[0]
-	sittingID := app.memory.currentMeetingID(officeRoomID)
-	binding, err := app.consentBindingForPrincipal(context.Background(), memberAdmissionPrincipal("tom@shareability.com"), officeRoomID, sittingID)
+	source.Metadata["consentPrincipalKind"] = "guest"
+	source.Metadata["consentPrincipalId"] = guestKey
+	source.Metadata["roomId"] = officeRoomID
+	source.Metadata["meetingId"] = sittingID
+	binding, err := app.consentBindingForPrincipal(context.Background(), guestAdmissionPrincipal(guestKey), officeRoomID, sittingID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,20 +245,28 @@ func TestMeetingBrainProviderInputOmitsWithdrawnTranscript(t *testing.T) {
 	app := newKanbanBoardApp()
 	authority := authorizeBrainWorkerTest(t, app)
 	sittingID := app.memory.currentMeetingID(officeRoomID)
-	binding, err := app.consentBindingForPrincipal(context.Background(), memberAdmissionPrincipal("tyler@shareability.com"), officeRoomID, sittingID)
+	guestKey := strings.Repeat("d", 64)
+	guestName, _, err := app.admitGuestWithAnchor(context.Background(), officeRoomID, guestKey, "Tyler", "brain-provider-guest", sittingID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := app.noteMeetingAdmissionForSitting(officeRoomID, guestName, sittingID); got != sittingID {
+		t.Fatalf("guest sitting=%q want=%q", got, sittingID)
+	}
+	binding, err := app.consentBindingForPrincipal(context.Background(), guestAdmissionPrincipal(guestKey), officeRoomID, sittingID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := authority.RecordDecision(context.Background(), binding, ConsentOrgMemory, ConsentWithdrawn); err != nil {
 		t.Fatal(err)
 	}
-	if _, appended, err := app.memory.appendAttributedTranscript("withdrawn-tyler-leading", "", "Tyler", "dominant", "Secret leading detail."); err != nil || !appended {
+	if _, appended, err := app.memory.appendAttributedTranscript("withdrawn-tyler-leading", "", guestName, "dominant", "Secret leading detail."); err != nil || !appended {
 		t.Fatal(err)
 	}
 	if _, appended, err := app.memory.appendAttributedTranscript("allowed-tom", "", "Tom", "dominant", "Allowed launch detail."); err != nil || !appended {
 		t.Fatal(err)
 	}
-	if _, appended, err := app.memory.appendAttributedTranscript("withdrawn-tyler-trailing", "", "Tyler", "dominant", "Secret trailing detail."); err != nil || !appended {
+	if _, appended, err := app.memory.appendAttributedTranscript("withdrawn-tyler-trailing", "", guestName, "dominant", "Secret trailing detail."); err != nil || !appended {
 		t.Fatal(err)
 	}
 

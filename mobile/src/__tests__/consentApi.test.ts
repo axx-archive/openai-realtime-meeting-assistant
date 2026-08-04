@@ -15,6 +15,8 @@ const status = {
   sittingId: 'meeting-123',
   guestPolicyListenOnly: false,
   storeAvailable: true,
+  choicesMutable: false,
+  policyManaged: true,
   lanes: {
     audio_transport: { allowed: true, recordIds: {} },
     audio_capture: { allowed: true, recordIds: { audio_capture: 'record-audio' } },

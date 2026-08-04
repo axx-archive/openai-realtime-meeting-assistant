@@ -89,24 +89,14 @@ func TestSTRIDEProductMeetingSuggestionHTTPUsesCurrentConsentedMemberSet(t *test
 			t.Fatalf("open sitting for %s=%q want=%q", email, got, sittingID)
 		}
 	}
-	grantMeetingSuggestedWorkConsent(t, app, consent, officeRoomID, sittingID, memberAdmissionPrincipal("aj@shareability.com"),
-		ConsentAudioCapture, ConsentTranscription, ConsentModelAnalysis, ConsentOrgMemory)
-	// Tim is genuinely current and anchored, but his model-analysis consent is
-	// absent. One participant's missing consent must fail the whole suggestion.
-	grantMeetingSuggestedWorkConsent(t, app, consent, officeRoomID, sittingID, memberAdmissionPrincipal("tim@shareability.com"),
-		ConsentAudioCapture, ConsentTranscription)
+	// Authenticated employees inherit every consent lane from the internal
+	// rules-of-the-road policy; no per-sitting permission ceremony is required.
 	mediaGeneration := app.ensureRoomMedia(officeRoomID)
 	if mediaGeneration == 0 || !app.roomMediaGenerationCurrent(officeRoomID, mediaGeneration) || app.activeParticipantCount(officeRoomID) != 2 {
 		t.Fatalf("current meeting scope generation=%d participants=%d", mediaGeneration, app.activeParticipantCount(officeRoomID))
 	}
 
 	endpoint := strideRuntimeAPIBase + "work/suggestions/from-meeting"
-	missingConsent := strideMeetingSuggestedWorkRequest(t, mux, http.MethodPost, endpoint, ajCookies, map[string]any{"roomId": officeRoomID}, "")
-	if missingConsent.Code != http.StatusForbidden {
-		t.Fatalf("missing participant consent status=%d body=%s", missingConsent.Code, missingConsent.Body.String())
-	}
-	assertMeetingSuggestedWorkCount(t, mux, ajCookies, 0)
-
 	// Tenant, recipient, sitting, and evidence authority are never accepted
 	// from the client. They are derived only after member authentication.
 	unauthenticated := strideMeetingSuggestedWorkRequest(t, mux, http.MethodPost, endpoint, nil, map[string]any{"roomId": officeRoomID}, "")
@@ -136,8 +126,6 @@ func TestSTRIDEProductMeetingSuggestionHTTPUsesCurrentConsentedMemberSet(t *test
 		t.Fatalf("non-participant suggestion status=%d body=%s", nonParticipantCreate.Code, nonParticipantCreate.Body.String())
 	}
 
-	grantMeetingSuggestedWorkConsent(t, app, consent, officeRoomID, sittingID, memberAdmissionPrincipal("tim@shareability.com"),
-		ConsentModelAnalysis, ConsentOrgMemory)
 	meeting, active := app.meetings.activeRecord(officeRoomID)
 	if !active || meeting.ID != sittingID {
 		t.Fatalf("active meeting=%+v active=%t", meeting, active)

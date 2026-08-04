@@ -13,48 +13,22 @@ test('thread dictation holds locally, then uses the normal message send path onc
   const thread = source('src', 'screens', 'ThreadScreen.tsx');
   assert.match(thread, /onTranscript: \(\{ text \}\) => \{ void send\(text\); \}/);
   assert.match(thread, /useComposerDictation/);
-  assert.match(thread, /accessibilityLabel=\{listening \? 'Stop dictation' : 'Dictate a message'\}/);
-  assert.match(thread, /if \(listening\) void dictation\.stop\(\);\s*else void dictation\.start\(\);/);
+  assert.match(thread, /accessibilityLabel="Dictate a message"/);
+  assert.match(thread, /if \(dictationCanCommit\) void dictation\.commit\(\);/);
   assert.doesNotMatch(thread, /onPressIn|dictationTouchActiveRef/);
-  assert.match(thread, /Ready to transcribe/);
+  assert.match(thread, /Recording · send when finished/);
   assert.match(thread, /Transcribe and send dictated clip/);
-  assert.match(thread, /dictation\.delete/);
-  assert.match(thread, /dictation\.send\(\)/);
+  assert.match(thread, /dictation\.discard\(\)/);
+  assert.doesNotMatch(thread, /Stop dictation/);
 });
 
 test('Canvas keeps live Scout and recorded composer dictation distinct', () => {
   const canvas = source('src', 'screens', 'CanvasScreen.tsx');
   assert.match(canvas, /usePersonalRealtime/);
   assert.match(canvas, /realtime\.enabled/);
-  assert.match(canvas, /legacyUploadOnStop: true/);
-  assert.match(canvas, /const requestGeneration = \+\+fallbackVoiceRequestGenerationRef\.current/);
-  assert.match(
-    canvas,
-    /requestGeneration !== fallbackVoiceRequestGenerationRef\.current[\s\S]*\|\| !lease\.isCurrent\(\)[\s\S]*\|\| !officeControlChannelIsLive\(sessionToken\)/,
-  );
-  assert.match(canvas, /void startFallbackVoiceCapture\(requestGeneration, lease\)/);
-  assert.doesNotMatch(canvas, /void voiceDictation\.start\(\)/);
-  const closeFallback = canvas.slice(
-    canvas.indexOf('if (conversation.open) {'),
-    canvas.indexOf("let exactLease: AudioFocusLease | null = null;"),
-  );
-  assert.ok(closeFallback.indexOf('voiceDictation.cancel()') < closeFallback.indexOf('await voiceDictation.stop()'));
-  assert.ok(closeFallback.indexOf('await voiceDictation.stop()') < closeFallback.indexOf("lease?.release('completed')"));
-  assert.match(canvas, /useEffect\(\(\) => \(\) => \{\s*fallbackVoiceRequestGenerationRef\.current \+= 1/);
-  const guardedFallbackStart = canvas.slice(
-    canvas.indexOf('const startFallbackVoiceCapture = useCallback'),
-    canvas.indexOf('const handleTap = useCallback'),
-  );
-  assert.ok(
-    guardedFallbackStart.indexOf('requestGeneration !== fallbackVoiceRequestGenerationRef.current')
-      < guardedFallbackStart.indexOf('voiceDictation.start()'),
-    'fallback Scout voice must reject a stale generation before native capture',
-  );
-  assert.ok(
-    guardedFallbackStart.indexOf('fallbackVoiceLeaseRef.current !== lease')
-      < guardedFallbackStart.indexOf('voiceDictation.start()'),
-    'fallback Scout voice must own the exact lease before native capture',
-  );
+  assert.match(canvas, /The cradle has one stable meaning: a full-duplex Realtime Scout call/);
+  assert.match(canvas, /if \(!realtime\.enabled\) return;/);
+  assert.doesNotMatch(canvas, /legacyUploadOnStop|fallbackVoice|voiceDictation/);
   const realtime = source('src', 'realtime', 'usePersonalRealtime.ts');
   assert.match(realtime, /audioFocusRuntime\.acquire\('personal_realtime'/);
   assert.match(realtime, /api\.realtimeOffer\(sessionToken, localSDP\)/);
@@ -117,9 +91,9 @@ test('room chat has the same explicit record, delete, transcribe and send lifecy
   assert.match(sheet, /useComposerDictation/);
   assert.match(sheet, /accessibilityLabel="Dictate a room message"/);
   assert.match(sheet, /accessibilityLabel="Delete dictated message"/);
-  assert.match(sheet, /accessibilityLabel="Stop recording"/);
   assert.match(sheet, /accessibilityLabel="Transcribe and send"/);
   assert.match(sheet, /composerDictation\.commit\(\)/);
+  assert.doesNotMatch(sheet, /accessibilityLabel="Stop recording"/);
   assert.match(sheet, /sendComposerText\(text\)/);
   assert.match(sheet, /if \(visible && mode === 'chat'\) return;/);
   assert.match(sheet, /discardDictationRef\.current\(\)/);
@@ -129,21 +103,18 @@ test('room chat has the same explicit record, delete, transcribe and send lifecy
   assert.match(controller, /dictation\.fenceFocusLease\(exactLease\)/);
   assert.match(controller, /finally \{\s*await releaseExact\(exactLease, 'completed'\)/);
   assert.match(controller, /await dictation\.commit\(\)/);
-  assert.match(controller, /return new Promise<boolean>\(\(resolve\) =>/);
-  assert.match(controller, /'I understand', onPress: \(\) => settle\(true\)/);
+  assert.doesNotMatch(controller, /Alert|SecureStore|disclosureAllowsCapture/);
 
   const composerStart = controller.slice(
     controller.indexOf('const start = useCallback'),
     controller.indexOf('const stop = useCallback'),
   );
-  const disclosureAwait = composerStart.indexOf('await disclosureAllowsCapture()');
   const focusAwait = composerStart.indexOf("await audioFocusRuntime.acquire('composer_dictation'");
   const generationChecks = [...composerStart.matchAll(/captureRequestGenerationRef\.current !== requestGeneration/g)]
     .map((match) => match.index ?? -1);
-  assert.equal(generationChecks.length, 2);
-  assert.ok(disclosureAwait < generationChecks[0], 'surface generation is checked after disclosure lookup');
-  assert.ok(focusAwait < generationChecks[1], 'surface generation is checked after focus acquisition');
-  assert.ok(generationChecks[1] < composerStart.indexOf('dictation.start(lease)'));
+  assert.equal(generationChecks.length, 1);
+  assert.ok(focusAwait < generationChecks[0], 'surface generation is checked after focus acquisition');
+  assert.ok(generationChecks[0] < composerStart.indexOf('dictation.start(lease)'));
   const staleLeaseCheck = composerStart.indexOf('|| !lease.isCurrent()');
   assert.ok(focusAwait < staleLeaseCheck && staleLeaseCheck < composerStart.indexOf('dictation.start(lease)'));
   assert.match(composerStart, /await lease\.release\('cancelled'\);\s*return;/);

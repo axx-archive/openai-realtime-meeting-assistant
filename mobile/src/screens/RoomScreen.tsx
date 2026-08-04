@@ -34,9 +34,8 @@ import {
   type RoomConversationMode,
 } from '../components/RoomConversationSheet';
 import { RoomParticipantsSheet, type RoomParticipantRow } from '../components/RoomParticipantsSheet';
-import { RoomConsentSheet } from '../components/RoomConsentSheet';
+import { AgentSpeakingWaveform } from '../components/AgentSpeakingWaveform';
 import { RoomSpecialistsSheet } from '../components/RoomSpecialistsSheet';
-import { StrideCradle } from '../components/StrideCradle';
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
 import { useNativeRoom } from '../realtime/useNativeRoom';
 import {
@@ -88,15 +87,6 @@ function participantInitials(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);
   if (!words.length) return '?';
   return words.slice(0, 2).map((word) => word[0]?.toUpperCase()).join('');
-}
-
-function agentCradleTrace(voiceState: string): readonly number[] {
-  switch (voiceState) {
-    case 'talking': return [0.82, 0.94, 0.74, 0.9, 0.78, 0.96, 0.72, 0.88];
-    case 'hearing': return [0.46, 0.62, 0.52, 0.68, 0.5, 0.64, 0.48, 0.6];
-    case 'thinking': return [0.24, 0.32, 0.27, 0.36, 0.25, 0.34, 0.28, 0.31];
-    default: return [0, 0, 0, 0, 0, 0, 0, 0];
-  }
 }
 
 function agentVoiceLabel(agent: RoomAgentParticipant): string {
@@ -200,12 +190,10 @@ const CallVideoTile = memo(function CallVideoTile({
       {participant.agent ? (
         <View style={styles.agentVideoFeed}>
           <View style={[styles.agentAura, { backgroundColor: participant.agent.color }]} />
-          <StrideCradle
-            listening={['hearing', 'thinking', 'talking'].includes(participant.agent.voiceState)}
-            size={compact ? 136 : primary ? 360 : 260}
-            source="agent"
-            tint={participant.agent.color}
-            trace={agentCradleTrace(participant.agent.voiceState)}
+          <AgentSpeakingWaveform
+            color={participant.agent.color}
+            compact={compact}
+            speaking={participant.agent.voiceState === 'talking'}
           />
           {!compact ? <Text style={styles.agentVoiceState}>{agentVoiceLabel(participant.agent)}</Text> : null}
         </View>
@@ -584,7 +572,6 @@ export function RoomScreen({ route, navigation }: Props) {
   const [conversationMode, setConversationMode] = useState<RoomConversationMode>('chat');
   const [conversationVisible, setConversationVisible] = useState(false);
   const [participantsVisible, setParticipantsVisible] = useState(false);
-  const [consentVisible, setConsentVisible] = useState(false);
   const [specialistsVisible, setSpecialistsVisible] = useState(false);
   const [specialists, setSpecialists] = useState<StrideMeetingSpecialistStatus | null>(null);
   const [agentControlSnapshot, setAgentControlSnapshot] = useState<RoomAgentParticipant[]>([]);
@@ -699,7 +686,7 @@ export function RoomScreen({ route, navigation }: Props) {
     Alert.alert(
       inviting ? 'Invite Scout to this call?' : 'Dismiss Scout?',
       inviting
-        ? 'Scout will become a visible, audible participant for this sitting. Everyone in the room must have the required consent, and Scout’s speech will be attributed in the transcript.'
+        ? 'Scout will become a visible, audible participant for this sitting. Internal employees follow the company rules of the road; external guests keep their own data choices. Scout’s speech is attributed in the transcript.'
         : 'Scout will leave immediately. Meeting transcription will keep running.',
       [
         { text: 'Cancel', style: 'cancel' },
@@ -1173,7 +1160,6 @@ export function RoomScreen({ route, navigation }: Props) {
       { id: 'people', label: 'People in this room', onSelect: () => setParticipantsVisible(true) },
       { id: 'specialists', label: 'Agent team', onSelect: openSpecialists },
       { id: 'invite', label: 'Invite someone', onSelect: inviteToRoom },
-      { id: 'consent', label: 'Data & consent', onSelect: () => setConsentVisible(true) },
       {
         id: 'workspace',
         label: 'Open advanced workspace',
@@ -1409,13 +1395,6 @@ export function RoomScreen({ route, navigation }: Props) {
             roomName={room?.name ?? route.params.title}
             visible={participantsVisible}
           />
-          {sessionToken ? (
-            <RoomConsentSheet
-              onClose={() => setConsentVisible(false)}
-              sessionToken={sessionToken}
-              visible={consentVisible}
-            />
-          ) : null}
           <RoomSpecialistsSheet
             agents={inNativeRoom ? nativeRoom.state.agentParticipants : agentControlSnapshot}
             error={specialistsError}

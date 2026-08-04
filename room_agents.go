@@ -71,7 +71,9 @@ func sameCanonicalParticipants(left, right []string) bool {
 
 // resolveRoomScoutControlScope binds an invite to the current member room,
 // sitting, media generation, exact audience and all three required consent
-// lanes. A guest, audience change or listen-only sitting fails closed.
+// lanes. Employees inherit the rules-of-the-road policy; external guests must
+// have made explicit choices. An audience change or listen-only sitting fails
+// closed.
 func (app *kanbanBoardApp) resolveRoomScoutControlScope(ctx context.Context, user *userAccount, requestedRoomID string, requireConsent bool) (roomScoutControlScope, error) {
 	if app == nil || user == nil || app.meetings == nil {
 		return roomScoutControlScope{}, ErrRoomAgentControlScope
@@ -105,10 +107,10 @@ func (app *kanbanBoardApp) resolveRoomScoutControlScope(ctx context.Context, use
 	requesterPresent := false
 	for _, name := range participants {
 		principal, admitted := app.consentPrincipalForTranscriptSpeaker(roomID, name)
-		if !admitted || principal.Kind != string(ACLPrincipalUser) {
+		if !admitted || (principal.Kind != string(ACLPrincipalUser) && principal.Kind != string(ACLPrincipalGuest)) {
 			return roomScoutControlScope{}, ErrRoomAgentControlScope
 		}
-		if normalizeAccountEmail(principal.ID) == normalizeAccountEmail(user.Email) {
+		if principal.Kind == string(ACLPrincipalUser) && normalizeAccountEmail(principal.ID) == normalizeAccountEmail(user.Email) {
 			requesterPresent = true
 		}
 		if !requireConsent {

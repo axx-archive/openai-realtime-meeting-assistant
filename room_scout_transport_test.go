@@ -200,7 +200,7 @@ func TestRoomScoutReconnectCircuitStopsAfterBoundedFailures(t *testing.T) {
 	}
 }
 
-func TestRoomScoutWakeGateAllowsNormalAnswerAndSuppressesBackgroundSpeech(t *testing.T) {
+func TestRoomScoutSemanticTurnTakingAnswersRequestsAndSuppressesBackgroundSpeech(t *testing.T) {
 	provider := &fakeRoomScoutProviderSession{}
 	app, _, transport, _ := newScopedRoomScoutTransportTest(t, func(context.Context, *openAIRoomScoutTransport, uint64) (roomScoutProviderSession, error) {
 		return provider, nil
@@ -218,14 +218,15 @@ func TestRoomScoutWakeGateAllowsNormalAnswerAndSuppressesBackgroundSpeech(t *tes
 		t.Fatal("background speech triggered an unprompted Scout response")
 	}
 
-	// A normal addressed question takes the same tool-first path, then gets an
+	// A clear question takes the same tool-first path without requiring a magic
+	// wake phrase, then gets an
 	// explicit tool_choice=none continuation that can answer aloud once. The
 	// continuation waits for the function-call response.done seam, avoiding the
 	// provider's "active response in progress" rejection.
-	transport.noteVoiceTranscript("Hey Scout, what can you do?")
+	transport.noteVoiceTranscript("What would you recommend we do next?")
 	transport.handleProviderEvent(provider, 1, []byte(`{"type":"response.created"}`))
 	transport.handleProviderToolCall(provider, 1, kanbanRealtimeOutputItem{
-		Type: "function_call", Name: "do_nothing", CallID: "addressed-1", Arguments: `{"reason":"answer the capability question"}`,
+		Type: "function_call", Name: "answer_room_question", CallID: "question-1", Arguments: `{"request":"Recommend the next step"}`,
 	}, false)
 	waitForRoomScoutEventCount(t, provider, 2)
 	if hasRoomScoutEvent(provider, "response.create") {
@@ -336,8 +337,16 @@ func TestRoomScoutTranscriptCommitRejectsSittingRollover(t *testing.T) {
 	app := newW2ATestApp(t)
 	defer app.Close()
 	roomID := "room-rollover11"
-	email := "aj@shareability.com"
-	oldSitting := admitMemberWithTranscriptConsentForTest(t, app, roomID, email)
+	guestKey := strings.Repeat("d", 64)
+	oldSitting := app.prepareMeetingSittingID(roomID)
+	name, _, err := app.admitGuestWithAnchor(context.Background(), roomID, guestKey, "AJ", "rollover-guest-endpoint", oldSitting)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := app.noteMeetingAdmissionForSitting(roomID, name, oldSitting); got != oldSitting {
+		t.Fatalf("open guest sitting=%q want=%q", got, oldSitting)
+	}
+	enableFullTranscriptConsentForTest(t, app, guestAdmissionPrincipal(guestKey), roomID, oldSitting)
 	authority := currentConsentLaneAuthority()
 	blocking := &blockingEffectiveConsentStore{
 		base: authority.Store, entered: make(chan struct{}), release: make(chan struct{}),
@@ -355,7 +364,6 @@ func TestRoomScoutTranscriptCommitRejectsSittingRollover(t *testing.T) {
 	state.mediaGen, state.realtime = oldScope.MediaGeneration, oldBundle
 	state.scoutInvited = true
 	app.mu.Unlock()
-	name := participantNameForEmail(email)
 	now := time.Now().UTC()
 	app.noteAudioActivityForRoom(roomID, now, []audioActivityLevel{{TrackKey: "rollover-track", ParticipantName: name, RMS: 900}})
 	if !app.noteRoomScoutSpeechStarted(oldScope) || !app.noteRoomScoutSpeechStopped(oldScope) || !app.freezeRoomScoutAttribution(oldScope) {

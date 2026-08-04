@@ -338,7 +338,7 @@ func TestMeetingSpecialistProductAuthorityMutationClosesJoinedSessionBeforePoll(
 			consent := NewConsentLaneAuthority(NewMemoryConsentStore(), "consent-policy-v1")
 			consent.OnDecision = handleConsentDecision
 			_, err := consent.RecordDecision(context.Background(), ConsentAdmissionBinding{
-				TenantID: "bonfire", PrincipalKind: ACLPrincipalUser, PrincipalID: "aj@shareability.com", RoomID: "dog-perfect", SittingID: "sitting-1", AnchorID: "admission-1",
+				TenantID: "bonfire", PrincipalKind: ACLPrincipalGuest, PrincipalID: strings.Repeat("a", 64), RoomID: "dog-perfect", SittingID: "sitting-1", AnchorID: "admission-1",
 			}, ConsentAudioCapture, ConsentGranted)
 			return err
 		}},
