@@ -21,6 +21,8 @@ function messageBody(message: ScoutMessage): string {
  * have substantially different measurement costs from ordinary text.
  */
 export function threadMessageContentFamily(message: ScoutMessage): string {
+  if (String(message.kind ?? '').toLowerCase() === 'thread' && message.thread) return 'work-thread';
+
   const files = Array.isArray(message.files) ? message.files : [];
   if (files.some((file) => String(file.mime ?? '').toLowerCase().startsWith('image/'))) return 'image';
   if (files.length > 0) return 'file';
@@ -32,6 +34,33 @@ export function threadMessageContentFamily(message: ScoutMessage): string {
   const long = body.length > 700 || body.split('\n').length > 12;
   if (role === 'assistant' || role === 'scout') return long ? 'rich-long' : 'rich';
   return long ? 'long' : 'text';
+}
+
+/** Live updates follow the tail only while the viewer has not taken control. */
+export function shouldFollowThreadTail(atBottom: boolean, userInteracting: boolean): boolean {
+  return atBottom && !userInteracting;
+}
+
+export type ThreadScrollInteractionEvent =
+  | 'drag-begin'
+  | 'drag-end'
+  | 'momentum-begin'
+  | 'momentum-end';
+
+/**
+ * Keep live tail-follow fenced across the small native gap between a drag
+ * ending and momentum beginning. A missing velocity is treated conservatively
+ * and released by the caller's short fallback timer if momentum never starts.
+ */
+export function nextThreadScrollInteraction(
+  _current: boolean,
+  event: ThreadScrollInteractionEvent,
+  velocityY?: number,
+): boolean {
+  if (event === 'drag-begin' || event === 'momentum-begin') return true;
+  if (event === 'momentum-end') return false;
+  if (!Number.isFinite(velocityY)) return true;
+  return Math.abs(velocityY ?? 0) > 0.01 ? true : false;
 }
 
 /**

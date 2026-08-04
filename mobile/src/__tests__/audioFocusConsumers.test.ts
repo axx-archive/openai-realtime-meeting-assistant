@@ -84,6 +84,14 @@ test('Canvas keeps live Scout and recorded composer dictation distinct', () => {
   assert.match(canvas, /submitComposerText\(text\)/);
   const config = source('src', 'config.ts');
   assert.match(config, /EXPO_PUBLIC_NATIVE_REALTIME_VOICE_ENABLED === 'true'/);
+  const eas = JSON.parse(source('eas.json')) as {
+    build?: { production?: { env?: Record<string, string> } };
+  };
+  assert.equal(
+    eas.build?.production?.env?.EXPO_PUBLIC_NATIVE_REALTIME_VOICE_ENABLED,
+    'true',
+    'the production release profile must compile the core Scout cradle on',
+  );
 });
 
 test('room chat has the same explicit record, delete, transcribe and send lifecycle', () => {

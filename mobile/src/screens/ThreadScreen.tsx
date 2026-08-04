@@ -62,6 +62,8 @@ import {
   timestampRevealProgress,
 } from '../messaging/messageGestures';
 import {
+  nextThreadScrollInteraction,
+  shouldFollowThreadTail,
   threadRowPresentationEqual,
   threadRowRecycleType,
   type ThreadListRow as ThreadRow,
@@ -174,7 +176,11 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
 ));
 
 const threadRowKey = (row: ThreadRow) => String(row.message.id);
-const threadListPosition = { disabled: true, startRenderingFromBottom: true } as const;
+const threadMomentumGraceMs = 200;
+// FlashList's native scroll anchor must remain enabled. Older heterogeneous
+// rows are measured as the viewer scrolls upward; disabling the anchor exposes
+// those size corrections as visible jumps.
+const threadListPosition = { startRenderingFromBottom: true } as const;
 
 /**
  * A thread — design §14.
@@ -227,6 +233,8 @@ export function ThreadScreen({ route, navigation }: Props) {
   // bottom-rendered list is on screen; a targeted message link stays false
   // until the viewer actually reaches the latest message.
   const atBottomRef = useRef(false);
+  const threadScrollInteractionRef = useRef(false);
+  const threadMomentumGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const listHeightRef = useRef(0);
 	const lastMarkedMessageIDRef = useRef<string | null>(null);
 	const markingMessageIDRef = useRef<string | null>(null);
@@ -355,7 +363,10 @@ export function ThreadScreen({ route, navigation }: Props) {
     try {
       const response = await api.scoutThread(sessionToken, route.params.threadId);
       if (generationAtStart !== transcriptGenerationRef.current) return;
-      const shouldFollow = atBottomRef.current;
+      const shouldFollow = shouldFollowThreadTail(
+        atBottomRef.current,
+        threadScrollInteractionRef.current,
+      );
       const next = response.thread?.messages ?? response.messages ?? [];
       if (!applyTranscriptSnapshot(generationAtStart, next)) return;
       setThreadVisibility(String(response.thread?.visibility ?? 'private'));
@@ -379,7 +390,10 @@ export function ThreadScreen({ route, navigation }: Props) {
       ...transcriptEventJournalRef.current,
       { generation, payload },
     ].slice(-maxChatThreadEventJournal);
-    const shouldFollow = atBottomRef.current;
+    const shouldFollow = shouldFollowThreadTail(
+      atBottomRef.current,
+      threadScrollInteractionRef.current,
+    );
     setMessages((current) => applyChatThreadEvent(current, route.params.threadId, payload));
     if (payload?.visibility) setThreadVisibility(String(payload.visibility));
     const authorEmail = String(payload?.message?.authorEmail ?? '').trim().toLowerCase();
@@ -490,7 +504,10 @@ export function ThreadScreen({ route, navigation }: Props) {
   }, [office.connected, stopTyping]);
 
   useEffect(() => {
-    if (typingParticipants.length > 0 && atBottomRef.current) {
+    if (
+      typingParticipants.length > 0
+      && shouldFollowThreadTail(atBottomRef.current, threadScrollInteractionRef.current)
+    ) {
       requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }));
     }
   }, [typingParticipants.length]);
@@ -563,6 +580,22 @@ export function ThreadScreen({ route, navigation }: Props) {
 			if (markingMessageIDRef.current === messageID) markingMessageIDRef.current = null;
 	});
   }, [route.params.threadId, sessionToken]);
+
+  const clearThreadMomentumGrace = useCallback(() => {
+    if (threadMomentumGraceTimerRef.current) {
+      clearTimeout(threadMomentumGraceTimerRef.current);
+      threadMomentumGraceTimerRef.current = null;
+    }
+  }, []);
+
+  const settleThreadScroll = useCallback((offsetY: number, contentHeight: number, viewportHeight: number) => {
+    clearThreadMomentumGrace();
+    threadScrollInteractionRef.current = false;
+    atBottomRef.current = offsetY + viewportHeight >= contentHeight - 48;
+    if (atBottomRef.current) markRead();
+  }, [clearThreadMomentumGrace, markRead]);
+
+  useEffect(() => () => clearThreadMomentumGrace(), [clearThreadMomentumGrace]);
 
   // Leaving the thread while at the bottom counts as having read it.
   useEffect(() => {
@@ -1166,9 +1199,57 @@ export function ThreadScreen({ route, navigation }: Props) {
             }}
             onScroll={(event) => {
               const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-              atBottomRef.current =
-                contentOffset.y + layoutMeasurement.height >= contentSize.height - 48;
-              if (atBottomRef.current) markRead();
+              if (!threadScrollInteractionRef.current) {
+                atBottomRef.current =
+                  contentOffset.y + layoutMeasurement.height >= contentSize.height - 48;
+                if (atBottomRef.current) markRead();
+              }
+            }}
+            onScrollBeginDrag={() => {
+              // Human upward intent wins before any socket, typing, or
+              // reconciliation update can sample the previous tail state.
+              clearThreadMomentumGrace();
+              threadScrollInteractionRef.current = nextThreadScrollInteraction(
+                threadScrollInteractionRef.current,
+                'drag-begin',
+              );
+              atBottomRef.current = false;
+            }}
+            onMomentumScrollBegin={() => {
+              clearThreadMomentumGrace();
+              threadScrollInteractionRef.current = nextThreadScrollInteraction(
+                threadScrollInteractionRef.current,
+                'momentum-begin',
+              );
+            }}
+            onScrollEndDrag={(event) => {
+              const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+              const velocityY = event.nativeEvent.velocity?.y;
+              const remainsInteracting = nextThreadScrollInteraction(
+                threadScrollInteractionRef.current,
+                'drag-end',
+                velocityY,
+              );
+              threadScrollInteractionRef.current = remainsInteracting;
+              if (!remainsInteracting) {
+                settleThreadScroll(contentOffset.y, contentSize.height, layoutMeasurement.height);
+                return;
+              }
+              // Native momentum begins immediately when it exists. The timer
+              // releases a low/no-momentum drag whose velocity was unavailable
+              // without exposing the drag-to-momentum callback gap.
+              clearThreadMomentumGrace();
+              threadMomentumGraceTimerRef.current = setTimeout(() => {
+                settleThreadScroll(contentOffset.y, contentSize.height, layoutMeasurement.height);
+              }, threadMomentumGraceMs);
+            }}
+            onMomentumScrollEnd={(event) => {
+              const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+              threadScrollInteractionRef.current = nextThreadScrollInteraction(
+                threadScrollInteractionRef.current,
+                'momentum-end',
+              );
+              settleThreadScroll(contentOffset.y, contentSize.height, layoutMeasurement.height);
             }}
             scrollEventThrottle={200}
             onLayout={(event) => {
