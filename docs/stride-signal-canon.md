@@ -116,6 +116,13 @@ fallback decides it is on a machine that does not have the font.
   | light / putty | `#54545C` | 4.4:1 |
   | dark / ink | `#77777D` | 4.9:1 |
 
+  While Scout is actively listening (or has just heard its name), the shell's
+  wordmark may shift from the ground's graphite to the ground's
+  **full-contrast foreground** — ink on the light ground, near-white on the
+  dark one. Presence is expressed as *value*, never as hue; no state ever
+  re-colors the name beyond this shift. (2026-08-03; supersedes an earlier
+  green `--live` cue that violated the rule above.)
+
   The orange it replaced measured **1.83:1** on putty, so this is more legible
   as well as more correct. An earlier pass shipped it orange and then black;
   both are superseded.
@@ -265,21 +272,36 @@ Renditions: `Default`, `Dark`, `TintedLight`, `TintedDark`, `ClearLight`,
 
 ## 4. Light mode is grounded on putty
 
-Ratified by AJ 2026-07-31. Light mode uses the same `#CFC5B7` the icon's light
+Ratified by AJ 2026-07-31. Light mode uses the putty family the icon's light
 appearance is built on, so the tile on the home screen and the app behind it are
 one material.
+
+**Desktop softening, 2026-08-03 (AJ: "the putty seems a bit too intense as the
+light mode").** A phone shows the ground in slivers between cards; a desktop
+shows it as a wall, and the wall read heavy. The desktop ramp slides up ONE
+step: the field is putty softened to `#DDD4C6` (`STRIDE_PUTTY_SOFT` in
+`scripts/stride-strike-geometry.mjs`), and ratified putty `#CFC5B7` stays in
+the desktop system as the well. Brand assets (Strike tile, icons, splash) and
+native keep `#CFC5B7` as their field — the logo did not move, the room got
+better lighting.
 
 The ramp keeps the old relationship exactly — **panels lift OFF the ground,
 wells sink UNDER it** — which is why no screen had to be re-thought, only
 re-measured. The token family is still called `paper`: the role did not change,
 only the stock.
 
-| Token | Value | Role |
-|---|---|---|
-| `--paper-0` | `#EDE8DF` | panels, cards |
-| `--paper-50` | `#CFC5B7` | the ground |
-| `--paper-100` | `#C2B7A7` | wells — **the worst case for text** |
-| `--paper-200` | `#B2A695` | deepest well |
+| Token | Desktop | Native | Role |
+|---|---|---|---|
+| `--paper-0` | `#F2EDE4` | `#EDE8DF` | panels, cards |
+| `--paper-50` | `#DDD4C6` | `#CFC5B7` | the ground |
+| `--paper-100` | `#CFC5B7` | `#C2B7A7` | wells — **the worst case for text** |
+| `--paper-200` | `#C2B7A7` | `#B2A695` | deepest well |
+
+Desktop ladder re-solved 2026-08-03 (all AA): text-1 10.7 / text-2 7.7 /
+text-3 5.5 on the ground; text-1 9.2 / text-2 6.8 / text-3 5.0 on the well;
+ember-text 6.1 ground / 5.3 well / 4.5 deep well; wordmark 5.1; focus ring 3.4
+on the well. The negative pins hold: raw ember 2.1 and `#B83A18` 3.9 both stay
+below AA on the softened ground.
 
 **The ink is a warm dark grey, not black.** `#26231E`. Near-black on warm putty
 reads as a printing error — the two sit on opposite sides of neutral and the eye

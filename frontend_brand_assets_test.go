@@ -144,6 +144,9 @@ func TestStrideSignalInstrumentContract(t *testing.T) {
 		"state.rightVelocity = 0",
 		"state.leftVelocity = -outgoing",
 		"updateStrideCradle(strideSignalLevel, performance.now() / 1000)",
+		// SVG rotate() mirrors the physics convention horizontally; the render
+		// step must negate the angle or the edge masses swing INTO the row.
+		"rotate(${-angle * 180 / Math.PI}",
 	} {
 		if !strings.Contains(index, wiring) {
 			t.Fatalf("the Signal Cradle motion contract is not wired: missing %q", wiring)

@@ -5,8 +5,8 @@
   "description": "Stride — your voice-first company OS. Talk, decide, and keep work moving.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#CFC5B7",
-  "theme_color": "#CFC5B7",
+  "background_color": "#DDD4C6",
+  "theme_color": "#DDD4C6",
   "icons": [
     {
       "src": "/public/icon-192.png",

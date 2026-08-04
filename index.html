@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-    <meta name="theme-color" content="#CFC5B7">
+    <meta name="theme-color" content="#DDD4C6">
     <meta name="application-name" content="Stride">
     <meta name="apple-mobile-web-app-title" content="Stride">
     <!-- iOS home-screen install (card 089): launching standalone is a hard
@@ -44,7 +44,7 @@
         }
         if (theme === 'dark') document.documentElement.dataset.theme = 'dark'
         const meta = document.querySelector('meta[name="theme-color"]')
-        if (meta) meta.setAttribute('content', theme === 'dark' ? '#000000' : '#CFC5B7')
+        if (meta) meta.setAttribute('content', theme === 'dark' ? '#000000' : '#DDD4C6')
       })()
     </script>
     <style>
@@ -97,9 +97,8 @@
         --ink-400: #6E6E7A;
         --ink-300: #9A9AA4;
 
-        /* paper — cool neutral lights */
         /* paper — WARM PUTTY, not white.
-           Light mode is grounded on the same #CFC5B7 the app icon's light
+           Light mode is grounded in the putty family the app icon's light
            appearance is built on, so the tile in the dock and the app behind it
            are one material. The names stay `paper` because the role did not
            change: this is still the stock the ink is printed on, it is just a
@@ -107,10 +106,16 @@
            lift OFF the ground, wells sink UNDER it — so nothing in the shell
            had to be re-thought, only re-measured.
            Every value below is solved, not picked; see the ink ladder. */
-        --paper-0: #EDE8DF;   /* panels, cards — the ground lifted toward warm white */
-        --paper-50: #CFC5B7;  /* the ground. Stride Putty, exactly as ratified */
-        --paper-100: #C2B7A7; /* inputs, wells, hover fills — the worst case for text */
-        --paper-200: #B2A695; /* deepest well */
+        /* Desktop softening (founder call 2026-08-03): a phone shows putty in
+           slivers; a desktop shows it as a wall, and the wall read heavy. The
+           whole ramp slides up ONE step — the field lightens, and ratified
+           Stride Putty #CFC5B7 stays in the system as the well, so every
+           surface still sits on the same stock. Brand assets (Strike tile,
+           icons, splash) and mobile keep putty as their field. */
+        --paper-0: #F2EDE4;   /* panels, cards — the ground lifted toward warm white */
+        --paper-50: #DDD4C6;  /* the ground — putty softened one step for large fields */
+        --paper-100: #CFC5B7; /* inputs, wells, hover fills — Stride Putty, as ratified */
+        --paper-200: #C2B7A7; /* deepest well */
 
         /* signal — live/speaking green. The loudest color in the system. */
         --signal-400: #5CE08A;
@@ -150,21 +155,21 @@
         /* ink ladder — every step clears WCAG AA (4.5:1) against the worst-case
            surface (--surface-3). Hierarchy comes from size and weight, not from
            fading text past the point of legibility. Alphas solved against real
-           painted backgrounds; do not lower without re-measuring. All three
-           figures below are on ONE basis — --surface-3 = #C2B7A7, the worst-case
-           light surface: text-1 7.9:1 · text-2 6.1:1 · text-3 4.6:1
+           painted backgrounds; do not lower without re-measuring. Re-solved
+           2026-08-03 for the softened ramp — on --surface-3 = #CFC5B7:
+           text-1 9.2:1 · text-2 6.8:1 · text-3 5.0:1 (canon §4 desktop ladder).
 
            THE INK IS A WARM DARK GREY, NOT BLACK. Near-black on a warm putty
            ground reads as a printing error — the two are on different sides of
            neutral and the eye sees the mismatch before it sees the words. This
-           is the "putty / dark grey" pairing, and the ladder was re-solved from
-           scratch for it: the ground's luminance fell from 0.90 to 0.57, so
-           every alpha that used to clear AA had to move. Nothing here was
-           carried over.
+           is the "putty / dark grey" pairing, and the ladder was solved from
+           scratch for it and re-run for the 2026-08-03 softening. Nothing here
+           was carried over.
 
-           The margins are thinner than they were on paper, because a darker
-           ground leaves less room. text-3 sits at 4.59:1 — nine hundredths over
-           the floor. Do not lower these without re-running the solve. */
+           The tight step lives one layer down now: on --paper-200 (#C2B7A7,
+           the deepest well — the old worst case) text-3 still clears by nine
+           hundredths at 4.59:1. Do not lower these without re-running the
+           solve. */
         --text-1: #26231E;
         --text-2: rgba(38, 35, 30, 0.87);
         --text-3: rgba(38, 35, 30, 0.75);
@@ -183,8 +188,8 @@
         /* focus ring for wrappers that own their own :focus-within signal.
            --accent-soft is a 6% fill tint — as a ring it measured 1.13:1 and
            was effectively invisible. A ring must clear SC 1.4.11 (3:1). On the
-           putty ground 0.52 no longer reaches it, so this is re-solved to 0.60,
-           which measures 3.23:1 on --surface-3 (the worst-case light surface).
+           putty ground 0.52 no longer reached it, so this is re-solved to 0.60,
+           which measures 3.45:1 on --surface-3 (worst case, 2026-08-03 ramp).
            Fill tints keep --accent-soft. */
         --ring: rgba(38, 35, 30, 0.60);
         --on-accent: #FFFDF8;
@@ -210,11 +215,11 @@
         --on-ember: #1A0A05;
         /* Ember for TEXT AND GLYPHS on the light ground. Not a second brand
            colour — the same signal at a luminance that can be read.
-           Stride Orange itself measures 1.83:1 on the putty ground; it was
-           already only 2.87:1 on the old white paper, and a darker ground makes
-           it worse. #86290F measures 5.27:1 on the ground, 4.55:1 on the
-           worst-case well, and 4.80:1 on an --ember-soft chip — the tight one
-           is the well, so darkening the well or lightening this breaks AA.
+           Stride Orange itself measures ~2:1 on the light ground; it was
+           already only 2.87:1 on the old white paper, and a warm ground makes
+           it worse. On the 2026-08-03 ramp #86290F measures 6.1:1 on the
+           ground, 5.3:1 on the well, and 4.55:1 on --paper-200 (the deep well,
+           the tight one) — darkening the wells or lightening this breaks AA.
            FILLS keep --ember: chips, glows and the CTA carry no text and have
            no contrast requirement, and dulling them would cost the brand for no
            accessibility gain. */
@@ -236,7 +241,8 @@
            picked for the tile's own field, so the two do not always coincide
            (the sign-in shows the dark tile on putty). Ground is what decides
            legibility, so ground is what decides this.
-           4.4:1 on the putty ground; the orange it replaces measured 1.83:1,
+           5.1:1 on the softened desktop ground (4.4:1 on brand putty, where
+           native still sits); the orange it replaces measured 1.83:1 there,
            so this is also simply more legible. */
         --wordmark: #54545C;
 
@@ -606,7 +612,6 @@
 
       /* ---------- Tool rail (the OS's left edge — flat 60px column, design canon) ---------- */
       .tool-rail {
-        grid-area: rail;
         position: fixed;
         inset: 0 auto 0 0;
         z-index: 90;
@@ -634,6 +639,8 @@
         width: auto;
         justify-content: center;
       }
+      /* .tool-rail__avatar has no markup left; the selector survives because
+         frontend_latency_test.go pins ".tool-rail__avatar[hidden]". */
       .tool-rail__slot[hidden],
       .tool-rail__theme[hidden],
       .tool-rail__avatar[hidden] {
@@ -807,21 +814,22 @@
         flex: 1;
       }
 
-      /* theme toggle — moon offers dark, sun offers light (36px, radius 11 — design canon) */
+      /* theme toggle — moon offers dark, sun offers light. Same 38px box and
+         radius as every other rail control; one geometry for the whole rail. */
       .tool-rail__theme {
         position: relative;
         display: inline-flex;
         align-items: center;
         justify-content: center;
         margin-top: 0;
-        width: 36px;
-        height: 36px;
+        width: 38px;
+        height: 38px;
         padding: 0;
         align-self: center;
         border: none;
         background: transparent;
         color: var(--text-3);
-        border-radius: 11px;
+        border-radius: var(--r-md);
         transition:
           background var(--dur-fast) var(--ease),
           color var(--dur-fast) var(--ease);
@@ -842,7 +850,7 @@
         background: var(--surface-3);
         color: var(--text-1);
       }
-      /* the circle keeps its 36px visual weight; the transparent overlay
+      /* the control keeps its 38px visual weight; the transparent overlay
          raises the hit target toward the rail's 44px minimum */
       .tool-rail__theme::before {
         content: '';
@@ -851,8 +859,8 @@
         border-radius: inherit;
       }
       .tool-rail__theme svg {
-        width: 16px;
-        height: 16px;
+        width: 17px;
+        height: 17px;
         position: absolute;
         top: 50%;
         left: 50%;
@@ -911,43 +919,6 @@
         color: var(--text-1);
       }
 
-      .tool-rail__avatar {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 40px;
-        height: 40px;
-        flex: none;
-        margin-top: 6px;
-        padding: 0;
-        border-radius: var(--r-full);
-        background: var(--surface-3);
-        border: 1px solid var(--line-1);
-        font: 500 13px/1 var(--font-sans);
-        color: var(--text-2);
-        text-transform: uppercase;
-        user-select: none;
-        cursor: pointer;
-        transition:
-          background var(--dur-fast) var(--ease),
-          color var(--dur-fast) var(--ease);
-      }
-      .tool-rail__avatar:hover {
-        background: var(--accent-soft);
-        color: var(--text-1);
-      }
-      .tool-rail__avatar:active {
-        transform: scale(var(--press-scale));
-      }
-
-      .tool-rail__signout {
-        margin-top: 6px;
-      }
-
-      .mobile-tool-launcher {
-        display: none;
-      }
-
       /* ---------- Header (52px hairline bar — design canon) ---------- */
       .topbar {
         grid-area: topbar;
@@ -959,7 +930,9 @@
         gap: 12px;
         height: 52px;
         min-height: var(--shell-topbar-height);
-        padding: 0 20px;
+        /* 16px matches the workspace's --sp-4 padding, so the heading and the
+           content below it sit on the same left edge. */
+        padding: 0 16px;
         border: 0;
         border-radius: 0;
         background: transparent;
@@ -987,30 +960,34 @@
         position: relative;
         align-items: center;
         justify-content: center;
-        width: 42px;
+        width: 44px;
         height: 38px;
         flex: 0 0 auto;
-        margin-bottom: 12px;
+        margin-bottom: 14px;
         overflow: visible;
         color: var(--wordmark);
         transition: opacity var(--dur-med) var(--ease);
       }
       .topbar__wordmark {
-        width: 42px;
+        width: 44px;
         color: inherit;
         transition:
           color var(--dur-med) var(--ease),
           opacity var(--dur-med) var(--ease),
           transform var(--dur-med) var(--ease);
       }
+      /* Canon §1a: the wordmark holds ONE graphite per ground — state never
+         re-colors the name. Listening shifts it to the ground's full-contrast
+         foreground (--text-1: ink on light, near-white on dark) — presence as
+         VALUE, never hue; live/green belongs to the cradle and the pills. */
       .topbar__mark.is-listening {
-        color: var(--live);
+        color: var(--text-1);
       }
       /* wake-word presence cue — Scout heard its name; one breathe cycle,
          a separate class so it never fights setConnectionState's
          is-listening ownership */
       .topbar__mark.is-wake {
-        color: var(--live);
+        color: var(--text-1);
       }
       .topbar__mark.is-wake .topbar__wordmark {
         animation: bf-breathe var(--dur-breathe) var(--ease) 1;
@@ -1019,8 +996,9 @@
         animation: bf-breathe var(--dur-breathe) var(--ease) 1;
       }
       /* recognition handshake — the mark acknowledges with a MONOCHROME breath
-         (scale + opacity), never a hue. Presence/live still reads green via
-         .is-listening; the flare itself stays ink. */
+         (scale + opacity), never a hue. Presence shifts the graphite to the
+         ground's full-contrast foreground via .is-listening/.is-wake (value,
+         never hue); the flare itself carries no color either. */
       .topbar__mark.is-hot-ember .topbar__wordmark {
         animation: mark-recognize 1.6s var(--ease) 1;
       }
@@ -1051,6 +1029,14 @@
         overflow: hidden;
         text-overflow: ellipsis;
         min-width: 0;
+      }
+
+      /* The office is the brand's home: the rail already carries the wordmark,
+         so the header must not repeat the name as type beside it. The date
+         subtitle and status carry the bar; every other tool keeps its title.
+         (Mirrors the chat tool's heading suppression in the E4 slice.) */
+      #appShell[data-tool="office"] .topbar__heading {
+        display: none;
       }
 
       /* live pill — the meeting rides along on every other tab; tap → room */
@@ -1190,44 +1176,6 @@
         display: none;
       }
 
-      .topbar__account {
-        position: relative;
-        flex: none;
-        z-index: 90;
-      }
-
-      .topbar__account[hidden] {
-        display: none !important;
-      }
-
-      .topbar__account-button {
-        display: inline-flex;
-        align-items: center;
-        gap: 10px;
-        min-width: 0;
-        max-width: min(220px, 26vw);
-        min-height: 40px;
-        padding: 4px 10px 4px 5px;
-        border: 1px solid var(--line-1);
-        border-radius: var(--r-full);
-        background: var(--surface-3);
-        color: var(--text-1);
-        transition:
-          background var(--dur-fast) var(--ease),
-          border-color var(--dur-fast) var(--ease),
-          transform var(--dur-fast) var(--ease);
-      }
-
-      .topbar__account-button:hover,
-      .topbar__account-button[aria-expanded="true"] {
-        background: var(--surface-2);
-        border-color: var(--line-2);
-      }
-
-      .topbar__account-button:active {
-        transform: scale(var(--press-scale));
-      }
-
       .topbar__avatar,
       .account-menu__avatar {
         position: relative;
@@ -1270,12 +1218,6 @@
         display: none;
       }
 
-      .topbar__account-copy {
-        display: block;
-        min-width: 0;
-        text-align: right;
-      }
-
       .topbar__account-name,
       .account-menu__name {
         min-width: 0;
@@ -1295,16 +1237,6 @@
         color: var(--text-3);
         font: var(--type-label);
         letter-spacing: var(--track-label);
-      }
-
-      .topbar__account-chevron {
-        flex: 0 0 auto;
-        color: var(--text-3);
-        transition: transform var(--dur-fast) var(--ease);
-      }
-
-      .topbar__account-button[aria-expanded="true"] .topbar__account-chevron {
-        transform: rotate(180deg);
       }
 
       #appShell:has(#accountMenuButton[aria-expanded="true"]) .topbar {
@@ -3692,14 +3624,16 @@
         animation: room-scout-quick-right 1.8s cubic-bezier(0.2, 0, 0, 1) infinite;
       }
 
+      /* Cradle physics in miniature: equal half-swings, ease-out to the apex,
+         ease-in back to contact, and never two balls in flight at once. */
       @keyframes room-scout-quick-left {
-        0%, 55%, 100% { transform: rotate(0deg); }
-        68% { transform: rotate(24deg); }
+        0%, 50%, 76%, 100% { transform: rotate(0deg); }
+        63% { transform: rotate(24deg); animation-timing-function: cubic-bezier(1, 0, 0.8, 1); }
       }
 
       @keyframes room-scout-quick-right {
-        0%, 68%, 100% { transform: rotate(0deg); }
-        82% { transform: rotate(-24deg); }
+        0%, 76%, 100% { transform: rotate(0deg); }
+        88% { transform: rotate(-24deg); animation-timing-function: cubic-bezier(1, 0, 0.8, 1); }
       }
 
       /* Send notes keeps its word on wide docks; the glyph is phone-only */
@@ -8407,18 +8341,6 @@
         border-radius: 9px;
       }
 
-      /* scope footer — pinned under the rows (design §7.1, copy verbatim) */
-      .chat-threads__foot {
-        flex: none;
-        margin: auto 0 0;
-        padding: 13px 16px;
-        border-top: 1px solid var(--line-1);
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
-        color: var(--text-3);
-        text-wrap: pretty;
-      }
-
       /* inline channel naming — replaces window.prompt. Enter creates,
          Escape cancels; a flat field inside the sidebar's panel glass. */
       .chat-channel-create {
@@ -8499,10 +8421,10 @@
 	      .chat-thread-item {
 	        display: flex;
 	        align-items: flex-start;
-	        gap: 12px;
+	        gap: 10px;
         width: 100%;
         text-align: left;
-        padding: 12px 14px;
+        padding: 9px 12px;
         background: transparent;
         border: 1px solid transparent;
         border-radius: var(--r-md);
@@ -8539,18 +8461,20 @@
         background: var(--accent-soft);
       }
 
-      /* kit ThreadItem leading tile — 32px round surface-3 icon */
+      /* ThreadItem leading glyph — a quiet inline mark, not a chip. The row's
+         hierarchy is carried by type (bold-on-unread), so the glyph recedes
+         (professionalism calibration vs Buzz/Slack, 2026-08-03). */
       .chat-thread-item__icon {
         flex: none;
-        width: 32px;
-        height: 32px;
+        width: 26px;
+        height: 26px;
         border-radius: var(--r-full);
-        background: var(--surface-3);
-        border: 1px solid var(--line-1);
+        background: transparent;
+        border: 0;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        color: var(--text-2);
+        color: var(--text-3);
         margin-top: 1px;
       }
 
@@ -8558,7 +8482,12 @@
         flex: 1;
         min-width: 0;
         display: grid;
-        gap: 3px;
+        gap: 2px;
+      }
+
+      /* unread = weight, the convention every professional messenger shares */
+      .chat-thread-item:has(.chat-thread-item__unread-dot) .chat-thread-item__title {
+        font-weight: 700;
       }
 
       .chat-thread-item__row {
@@ -8776,7 +8705,7 @@
          their narration line at 12px */
       .scout-chat-thread > .scout-chat-msg:not(.is-followup) { margin-top: 18px; }
       .scout-chat-thread > .scout-chat-system { margin-top: 22px; }
-      .scout-chat-thread > .scout-chat-daybreak { margin-top: 22px; }
+      .scout-chat-thread > .scout-chat-daybreak { margin-top: 26px; }
       .scout-chat-thread > .goalcard,
       .scout-chat-thread > .runlog,
       .scout-chat-thread > .scout-chat-research,
@@ -8784,25 +8713,22 @@
       .scout-chat-thread > .returncard { margin-top: 6px; }
       .scout-chat-thread > :first-child { margin-top: 0; }
 
-      /* sheet 2f/3a date divider — "sunday · jul 5" between hairlines */
+      /* sheet 2f/3a time marker — "sunday · jul 5" as a quiet centered
+         caption. No hairlines: the air above it is the divider (mobile's
+         timelineMarkers treatment). */
       .scout-chat-daybreak {
         align-self: stretch;
         display: flex;
         align-items: center;
+        justify-content: center;
         gap: 14px;
-      }
-      .scout-chat-daybreak::before,
-      .scout-chat-daybreak::after {
-        content: "";
-        flex: 1;
-        height: 1px;
-        background: var(--line-1);
       }
       .scout-chat-daybreak__label {
         font: var(--type-label);
         letter-spacing: var(--track-label);
         color: var(--text-3);
         white-space: nowrap;
+        font-variant-numeric: tabular-nums;
       }
 
       /* the PiP docks bottom-right (design geometry) — the feed keeps its
@@ -9576,7 +9502,12 @@
         justify-content: flex-end;
       }
 
+      /* hidden outside the chat tool: the room rail's column anatomy has no
+         gutter for a disc */
       .scout-chat-msg__avatar {
+        display: none;
+      }
+      #chatTool .scout-chat-msg__avatar {
         width: 22px;
         height: 22px;
         flex: none;
@@ -9638,6 +9569,28 @@
         white-space: nowrap;
       }
 
+      /* Timestamp discipline (mobile parity): times rest silent and reveal on
+         the row's hover/focus — the sparse timeline markers carry orientation.
+         Reserved layout is untouched (opacity only), so nothing shifts.
+         EXCEPTION: an on-your-behalf message keeps its attribution visible —
+         "via Scout" is a disclosure requirement, not decoration. */
+      @media (hover: hover) and (pointer: fine) {
+        #chatTool .scout-chat-msg__idtime,
+        #chatTool .scout-chat-msg__author-time,
+        #chatTool .scout-chat-msg__meta:not(:has(.scout-chat-msg__via)) {
+          opacity: 0;
+          transition: opacity var(--dur-fast) var(--ease);
+        }
+        #chatTool .scout-chat-msg:hover .scout-chat-msg__idtime,
+        #chatTool .scout-chat-msg:focus-within .scout-chat-msg__idtime,
+        #chatTool .scout-chat-msg:hover .scout-chat-msg__author-time,
+        #chatTool .scout-chat-msg:focus-within .scout-chat-msg__author-time,
+        #chatTool .scout-chat-msg:hover .scout-chat-msg__meta,
+        #chatTool .scout-chat-msg:focus-within .scout-chat-msg__meta {
+          opacity: 1;
+        }
+      }
+
       /* disclosure: a message Scout posted on the user's behalf reads
          "via Scout" on the attribution line — visible, never hidden. The
          sheet's perfection pass retires the ember chip: settled provenance
@@ -9692,6 +9645,29 @@
         font-size: 0.92em;
       }
 
+      /* fenced code block — the machine voice on its own well (mobile's
+         ScoutRichText code treatment) */
+      .chat-rich__code {
+        margin: 0;
+        padding: 10px 12px;
+        border-radius: var(--r-md);
+        background: var(--surface-3);
+        overflow-x: auto;
+      }
+      .chat-rich__code code {
+        display: block;
+        padding: 0;
+        border-radius: 0;
+        background: transparent;
+        white-space: pre;
+        line-height: 1.5;
+      }
+
+      /* list markers carry the ember accent (mobile's marker-gutter port) */
+      .chat-rich li::marker {
+        color: var(--ember-text);
+      }
+
       /* pasted links in every chat bubble — room chat and plain scout
          bubbles included — inherit the voice's ink so they read in both
          themes; anywhere-wrap keeps long URLs inside the bubble */
@@ -9719,7 +9695,7 @@
 
       .chat-rich__quote {
         padding-left: 12px;
-        border-left: 2px solid var(--line-2);
+        border-left: 2px solid color-mix(in srgb, var(--ember) 55%, var(--line-2));
         color: var(--text-2);
       }
 
@@ -9735,10 +9711,13 @@
         border-radius: 18px 6px 6px 18px;
       }
 
+      /* Scout wears the same bubble as everyone — with an ember hairline for
+         identity (ported from mobile's ratified bubbleScout). The agent is a
+         participant, not a different species of UI. */
       .scout-chat-msg--scout .scout-chat-text {
         background: var(--surface-2);
         color: var(--text-1);
-        border: 1px solid var(--line-1);
+        border: 1px solid color-mix(in srgb, var(--ember) 34%, var(--line-1));
         border-radius: 18px 18px 18px 6px;
       }
       .scout-chat-msg--scout.is-followup .scout-chat-text,
@@ -10088,16 +10067,27 @@
         border-bottom: 1px solid var(--line-1);
       }
 
+      /* mobile's workHead port: the workstream's mark sits in an ember-soft
+         well. At rest the glyph holds emberText; while the run is live it
+         earns the full ember — working-NOW is exactly what ember is for. */
       .scout-chat-research__icon {
         width: 30px;
         height: 30px;
         flex: none;
         border-radius: var(--r-md);
-        background: var(--accent);
-        color: var(--on-accent);
+        background: var(--ember-soft);
+        color: var(--ember-text);
         display: inline-flex;
         align-items: center;
         justify-content: center;
+      }
+      .scout-chat-research[data-state="queued"] .scout-chat-research__icon,
+      .scout-chat-research[data-state="running"] .scout-chat-research__icon {
+        color: var(--ember);
+      }
+      .scout-chat-research[data-state="queued"] .scout-chat-research__fill,
+      .scout-chat-research[data-state="running"] .scout-chat-research__fill {
+        background: var(--ember);
       }
 
       .scout-chat-research__titles {
@@ -10874,10 +10864,10 @@
         }
 
         #chatTool .chat-threads__search {
-          height: 40px;
+          height: 34px;
           margin: 0 8px 12px;
           border-color: transparent;
-          border-radius: 14px;
+          border-radius: 12px;
           box-shadow:
             0 0 0 1px rgba(0, 0, 0, 0.06),
             0 1px 2px -1px rgba(0, 0, 0, 0.06),
@@ -10904,9 +10894,9 @@
 	        }
 
         #chatTool .chat-thread-item {
-          min-height: 64px;
+          min-height: 56px;
           border-color: transparent;
-          border-radius: 16px;
+          border-radius: 14px;
           transition-property: background-color, box-shadow, transform;
           transition-duration: var(--dur-fast);
           transition-timing-function: var(--ease);
@@ -11204,13 +11194,72 @@
           box-shadow: 0 0 0 1px var(--line-2);
         }
 
+        /* Reactions tuck onto the bubble's bottom corner as compact glass
+           chips (mobile's overlapping tapback treatment, adapted in-flow so
+           peer author rows never collide). The 40px recipe above still
+           governs sources and hover actions. */
+        #chatTool .desktop-chat-reactions {
+          margin-top: -12px;
+          padding: 0 8px;
+          position: relative;
+          z-index: 2;
+        }
+        #chatTool .desktop-chat-reactions button {
+          min-width: 0;
+          min-height: 28px;
+          height: 28px;
+          padding: 0 9px;
+          background: var(--glass-chrome);
+          -webkit-backdrop-filter: var(--glass-blur-chrome);
+          backdrop-filter: var(--glass-blur-chrome);
+          box-shadow:
+            var(--glass-highlight),
+            0 0 0 1px var(--glass-border),
+            0 4px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        /* The hover toolbar FLOATS over the row instead of reserving a blank
+           40px band under every bubble — half the feed's dead vertical space
+           was this invisible row. Glass pill at the row's top edge, revealed
+           on hover/focus exactly as before. */
+        #chatTool .scout-chat-msg {
+          position: relative;
+        }
         #chatTool .desktop-chat-actions {
+          position: absolute;
+          top: -18px;
+          right: 0;
+          z-index: 3;
+          flex-wrap: nowrap;
+          gap: 2px;
+          padding: 3px;
+          border-radius: var(--r-full);
+          background: var(--glass-chrome);
+          -webkit-backdrop-filter: var(--glass-blur-chrome);
+          backdrop-filter: var(--glass-blur-chrome);
+          box-shadow:
+            var(--glass-highlight),
+            0 0 0 1px var(--glass-border),
+            0 8px 20px rgba(0, 0, 0, 0.12);
           opacity: 0;
           pointer-events: none;
           transform: translateY(3px);
           transition-property: opacity, transform;
           transition-duration: var(--dur-fast);
           transition-timing-function: var(--ease);
+        }
+        #chatTool .scout-chat-msg--scout .desktop-chat-actions,
+        #chatTool .scout-chat-msg--peer .desktop-chat-actions,
+        #chatTool .scout-chat-msg--error .desktop-chat-actions {
+          right: auto;
+          left: 31px;
+        }
+        #chatTool .desktop-chat-actions button {
+          min-width: 32px;
+          min-height: 32px;
+          padding: 0 8px;
+          background: transparent;
+          box-shadow: none;
         }
 
         #chatTool .scout-chat-msg:hover .desktop-chat-actions,
@@ -11220,12 +11269,15 @@
           transform: translateY(0);
         }
 
+        /* the unread boundary speaks in ember — debt the reader owes the room.
+           Mobile-parity: mirrors the shipped Table boundary (unreadBoundary +
+           ThreadScreen: ember hairline / "n new messages" / ember hairline). */
         #chatTool .desktop-chat-unread {
           display: flex;
           align-items: center;
           gap: 12px;
           margin-block: 20px 8px;
-          color: var(--text-1);
+          color: var(--ember-text);
           font: var(--type-label);
           letter-spacing: var(--track-label);
         }
@@ -11235,7 +11287,7 @@
           content: "";
           flex: 1;
           height: 1px;
-          background: color-mix(in srgb, var(--accent) 38%, var(--line-1));
+          background: color-mix(in srgb, var(--ember) 44%, var(--line-1));
         }
 
         #chatTool .desktop-chat-link-preview {
@@ -11354,6 +11406,12 @@
         #chatTool .desktop-chat-link-preview.is-text-only {
           min-height: 96px;
           grid-template-columns: 1fr;
+        }
+
+        /* seamless: a message that IS a link renders as the card alone —
+           the raw-URL bubble yields once the preview has taken its place */
+        #chatTool .scout-chat-msg__stack.desktop-chat-stack--link-only .scout-chat-text {
+          display: none;
         }
 
         #chatTool .scout-chat-files {
@@ -17734,8 +17792,19 @@
         animation: room-agent-cradle-left 2.8s cubic-bezier(0.2, 0, 0, 1) infinite;
       }
 
+      /* The struck edge answers — a cradle with no energy transfer is just a
+         metronome. Human edge (left) initiates; agent edge (right) receives. */
+      .is-agent-participant[data-voice-state="listening"] .room-agent-cradle__ball:last-child,
+      .is-agent-participant[data-voice-state="ready"] .room-agent-cradle__ball:last-child {
+        animation: room-agent-cradle-left-response 2.8s cubic-bezier(0.2, 0, 0, 1) infinite;
+      }
+
       .is-agent-participant[data-voice-state="hearing"] .room-agent-cradle__ball:first-child {
         animation: room-agent-cradle-hearing 1.3s cubic-bezier(0.2, 0, 0, 1) infinite;
+      }
+
+      .is-agent-participant[data-voice-state="hearing"] .room-agent-cradle__ball:last-child {
+        animation: room-agent-cradle-hearing-response 1.3s cubic-bezier(0.2, 0, 0, 1) infinite;
       }
 
       .is-agent-participant[data-voice-state="thinking"] .room-agent-cradle__ball:nth-child(3)::after {
@@ -17751,14 +17820,23 @@
       }
 
       @keyframes room-agent-cradle-left {
-        0%, 72%, 100% { transform: rotate(0deg); }
-        82% { transform: rotate(12deg); }
-        91% { transform: rotate(0deg); }
+        0%, 64%, 82%, 100% { transform: rotate(0deg); }
+        73% { transform: rotate(12deg); animation-timing-function: cubic-bezier(1, 0, 0.8, 1); }
+      }
+
+      @keyframes room-agent-cradle-left-response {
+        0%, 82%, 100% { transform: rotate(0deg); }
+        91% { transform: rotate(-12deg); animation-timing-function: cubic-bezier(1, 0, 0.8, 1); }
       }
 
       @keyframes room-agent-cradle-hearing {
-        0%, 100% { transform: rotate(0deg); }
-        44% { transform: rotate(14deg); }
+        0%, 50%, 100% { transform: rotate(0deg); }
+        25% { transform: rotate(14deg); animation-timing-function: cubic-bezier(1, 0, 0.8, 1); }
+      }
+
+      @keyframes room-agent-cradle-hearing-response {
+        0%, 50%, 100% { transform: rotate(0deg); }
+        75% { transform: rotate(-14deg); animation-timing-function: cubic-bezier(1, 0, 0.8, 1); }
       }
 
       @keyframes room-agent-cradle-think {
@@ -17766,14 +17844,16 @@
         to { filter: brightness(1.18); transform: scale(1); }
       }
 
+      /* Talking: the AGENT edge (right) leads and the human edge answers —
+         phase order mirrors who is speaking, per canon §2. */
       @keyframes room-agent-cradle-talk-left {
         0%, 50%, 100% { transform: rotate(0deg); }
-        25% { transform: rotate(18deg); }
+        75% { transform: rotate(18deg); animation-timing-function: cubic-bezier(1, 0, 0.8, 1); }
       }
 
       @keyframes room-agent-cradle-talk-right {
         0%, 50%, 100% { transform: rotate(0deg); }
-        75% { transform: rotate(-18deg); }
+        25% { transform: rotate(-18deg); animation-timing-function: cubic-bezier(1, 0, 0.8, 1); }
       }
 
       .hearth-seat .owner-avatar {
@@ -20158,10 +20238,6 @@
           padding-bottom: calc(max(16px, env(safe-area-inset-bottom)) + 96px);
         }
 
-        .mobile-tool-launcher {
-          display: none;
-        }
-
         /* the floating glass tab bar — 5 icons, --glass-chrome recipe
            (design mobile §3) */
         #appShell.is-authed[data-tool="office"] .tool-rail,
@@ -20231,7 +20307,7 @@
           color: var(--on-accent);
         }
 
-        /* the brand flame belongs to the desktop rail; the phone island
+        /* the wordmark belongs to the desktop rail; the phone island
            stays tools-only until the mobile header wave lands */
         .tool-rail .topbar__mark {
           display: none;
@@ -21499,11 +21575,6 @@
           background: var(--surface-2);
         }
 
-        .chat-threads__foot {
-          margin: 14px 0 12px;
-          text-align: center;
-        }
-
         /* convo screen */
         #chatTool .chat-conversation {
           flex: 1;
@@ -21929,7 +22000,6 @@
         .card-detail-edit-button,
         .board-collapse,
         .device-select,
-        .topbar__account-button,
         .scout-activity summary {
           min-height: var(--hit-min);
         }
@@ -22886,6 +22956,11 @@
         font: var(--type-label);
         letter-spacing: var(--track-label);
         color: var(--text-2);
+      }
+      /* a run log with a live entry is working-NOW: the kicker earns ember
+         alongside the breathing node */
+      .runlog:has(.runlog__entry[data-live="1"]) .runlog__kicker {
+        color: var(--ember-text);
       }
       .runlog__count {
         font: var(--type-numeric);
@@ -24958,7 +25033,6 @@
               </span>
             </button>
             <div id="chatAgentThreads" class="chat-agent-threads" aria-label="Chat threads"></div>
-            <p id="chatThreadsFoot" class="chat-threads__foot">private stays with you and Scout · channels reach the office</p>
           </aside>
           <div id="scoutPrivatePane" class="chat-conversation">
             <div class="chat-convo-head">
@@ -26435,7 +26509,7 @@
         } else {
           delete document.documentElement.dataset.theme
         }
-        if (themeColorMeta) themeColorMeta.setAttribute('content', next === 'dark' ? '#000000' : '#CFC5B7')
+        if (themeColorMeta) themeColorMeta.setAttribute('content', next === 'dark' ? '#000000' : '#DDD4C6')
         return next
       }
       function applyTheme(theme) {
@@ -26774,7 +26848,6 @@
 	      const chatPrivateLabel = document.getElementById('chatPrivateLabel')
 	      const chatChannelCreate = document.getElementById('chatChannelCreate')
 	      const chatChannelName = document.getElementById('chatChannelName')
-	      const chatThreadsFoot = document.getElementById('chatThreadsFoot')
 	      const chatConvoTitle = document.getElementById('chatConvoTitle')
 	      const chatConvoRename = document.getElementById('chatConvoRename')
 	      const chatConvoRenameInput = document.getElementById('chatConvoRenameInput')
@@ -35548,11 +35621,14 @@
 
          Between contacts, the two edge masses integrate the nonlinear pendulum
          equation under gravity. At contact, equal-mass momentum transfer stops
-         the incoming edge and launches only the opposite edge. Four centre
+         the incoming edge and launches only the opposite edge. Three centre
          masses stay fixed. A short light impulse represents the Hertzian contact
          wave that happens much faster than a display frame. Audio is an external
          force only at impact, while restitution and damping keep the motion from
          reading as impossible perpetual motion. */
+      /* Deliberately NOT unified with native's idleFloor (0.14): desktop reads
+         RMS off an AnalyserNode, native reads expo-audio metering — different
+         lanes, different ballistics (see mobile/src/theme/strideSignal.ts). */
       const STRIDE_SIGNAL_FLOOR = 0.16
       // RMS that reads as a full stride. Conversational speech into a laptop
       // mic lands around 0.04–0.14, so 0.2 keeps the top of the range reachable
@@ -35799,7 +35875,10 @@
               : index === balls.length - 1
                 ? physics.rightAngle
                 : 0
-          group.setAttribute('transform', `rotate(${angle * 180 / Math.PI} ${anchor} 18)`)
+          /* SVG rotate(a) about the pivot moves the bob to x = anchor − arm·sin(a),
+             the mirror of the physics convention (bobPoint: x = anchor + sin(θ)·L).
+             Negate so the edges swing OUT of the row, matching mobile. */
+          group.setAttribute('transform', `rotate(${-angle * 180 / Math.PI} ${anchor} 18)`)
           const ball = group.querySelector('.office-launch__ball')
           const energyBall = group.querySelector('.office-launch__energy')
           if (ball) {
@@ -49309,7 +49388,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const time = document.getElementById('chatThreadTime')
 	        const preview = document.getElementById('chatThreadPreview')
         if (preview) {
-          preview.textContent = text
+          preview.textContent = chatPreviewPlainText(text)
         }
 	        if (time) {
 	          time.hidden = !ts
@@ -49338,8 +49417,25 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return chatThreadTitleIsPlaceholder(thread) ? 'new thread' : String(thread.title)
 	      }
 
+	      /* previews are one line of PLAIN text — markdown that renders in the
+	         feed reads as syntax garbage in the rail ("**Pro Shop sees…"), so
+	         the tokens are scrubbed, never rendered */
+	      function chatPreviewPlainText(value) {
+	        return String(value || '')
+	          .replace(/```[\w-]*\n?/g, '')
+	          .replace(/`([^`\n]+)`/g, '$1')
+	          .replace(/\*\*([^*\n]+)\*\*/g, '$1')
+	          .replace(/~~([^~\n]+)~~/g, '$1')
+	          .replace(/(^|\s)[*_]([^*_\n]+)[*_](?=\s|[.,;:!?]|$)/g, '$1$2')
+	          .replace(/\[([^\]\n]{1,140})\]\((?:https?:\/\/[^\s)]+)\)/g, '$1')
+	          .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+	          .replace(/^\s*>\s*/gm, '')
+	          .replace(/\s+/g, ' ')
+	          .trim()
+	      }
+
 	      function chatThreadDisplayPreview(thread) {
-	        const preview = String(thread?.preview || '').trim()
+	        const preview = chatPreviewPlainText(thread?.preview)
 	        if (!chatThreadIsChannel(thread) && (!preview || preview === 'new chat thread')) {
 	          return 'scout names it after your first message'
 	        }
@@ -49677,6 +49773,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      var runlogMarkerGoalId = ''
 	      var feedPrevMsgKey = ''
 	      var feedPrevMsgDay = ''
+	      var feedPrevMsgTs = 0
 	      var scoutChatReplyTarget = null
 	      // var + lazy init: boot can call renderActiveScoutThread before this
 	      // late chat section executes, matching the render-pass vars above.
@@ -49687,6 +49784,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        runlogMarkerGoalId = ''
 	        feedPrevMsgKey = ''
 	        feedPrevMsgDay = ''
+	        feedPrevMsgTs = 0
 	      }
 
 	      function desktopChatUnreadBoundaryNode() {
@@ -49841,9 +49939,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        scoutChatThread.querySelectorAll('.scout-chat-empty, .scout-chat-brain-chip, .scout-starters').forEach(function (n) { n.remove() })
 	        resetScoutFeedRenderPass()
 	        let unreadBoundaryMounted = false
-	        messages.forEach(message => {
+	        messages.forEach((message, messageIndex) => {
 	          if (!unreadBoundaryMounted && priorSeenAt && String(message?.createdAt || '') > priorSeenAt) {
-	            appendScoutChatNode(desktopChatUnreadBoundaryNode())
+	            const boundary = desktopChatUnreadBoundaryNode()
+	            // the boundary names its debt — "n new messages", not a bare
+	            // word. Machine records (run-log stages, proposals, manifests)
+	            // are not messages and must not inflate the count; thread-kind
+	            // records DO count — a workstream landing is real catch-up debt.
+	            const remaining = messages.slice(messageIndex).filter(record =>
+	              !['artifact', 'proposal', 'manifest'].includes(String(record?.kind || ''))
+	            ).length
+	            boundary.textContent = remaining === 1 ? '1 new message' : `${remaining} new messages`
+	            appendScoutChatNode(boundary)
 	            unreadBoundaryMounted = true
 	          }
 	          appendScoutChatNode(scoutChatMessageRecordNode(message))
@@ -49941,18 +50048,30 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (recordKind !== 'artifact') {
 	          runlogOpen = null
 	        }
-	        // sheet 2f/3a date dividers — a committed message on a new calendar
-	        // day opens "sunday · jul 5" between hairlines before it lands
+	        // sheet 2f/3a time markers, sparse (mobile's timelineMarkers rule):
+	        // a new calendar day opens "sunday · jul 5 · 14:02"; a return after
+	        // an hour or more inside the same day opens a bare "14:02". Either
+	        // marker also ends the current follow-up run — a conversation
+	        // resumed after an hour is a new turn, not a continuation.
 	        const dayLabel = scoutChatDayLabel(message?.createdAt)
-	        if (dayLabel && dayLabel !== feedPrevMsgDay) {
+	        const msgTs = Date.parse(String(message?.createdAt || '')) || 0
+	        const hourGap = Boolean(feedPrevMsgTs && msgTs && msgTs - feedPrevMsgTs >= 3600000)
+	        if (dayLabel && (dayLabel !== feedPrevMsgDay || hourGap)) {
+	          const timeLabel = msgTs
+	            ? new Date(msgTs).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+	            : ''
+	          const markerLabel = dayLabel !== feedPrevMsgDay
+	            ? (timeLabel ? `${dayLabel} · ${timeLabel}` : dayLabel)
+	            : timeLabel
 	          feedPrevMsgDay = dayLabel
 	          feedPrevMsgKey = ''
 	          const daybreak = document.createElement('div')
 	          daybreak.className = 'scout-chat-daybreak'
 	          daybreak.setAttribute('role', 'separator')
-	          daybreak.appendChild(bfEl('span', 'scout-chat-daybreak__label', dayLabel))
+	          daybreak.appendChild(bfEl('span', 'scout-chat-daybreak__label', markerLabel))
 	          appendScoutChatNode(daybreak)
 	        }
+	        if (msgTs) feedPrevMsgTs = msgTs
 	        if (recordKind === 'proposal' && message.proposal) {
 	          runlogMarkerGoalId = ''
 	          feedPrevMsgKey = ''
@@ -50209,6 +50328,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          return
 	        }
 	        desktopChatPreviewCache = desktopChatPreviewCache || new Map()
+	        // seamless mode (mobile's LinkPreviewCard): when the message IS the
+	        // link, the card replaces the bubble instead of following it —
+	        // pasting a URL should read as sharing a page, not as prose
+	        if (String(text || '').trim() === url) {
+	          stack.classList.add('desktop-chat-stack--link-only')
+	        }
 	        const card = document.createElement('a')
 	        card.className = 'desktop-chat-link-preview is-loading'
 	        card.href = url
@@ -51049,6 +51174,27 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             continue
           }
 
+          // fenced code — ``` opens a literal block; everything to the
+          // closing fence (or EOF) stays verbatim in the machine voice
+          const fence = /^\s*```[\w-]*\s*$/.exec(line)
+          if (fence) {
+            flushParagraph()
+            const codeLines = []
+            index += 1
+            while (index < lines.length && !/^\s*```\s*$/.test(lines[index])) {
+              codeLines.push(lines[index])
+              index += 1
+            }
+            index += 1
+            const pre = document.createElement('pre')
+            pre.className = 'chat-rich__code'
+            const codeEl = document.createElement('code')
+            codeEl.textContent = codeLines.join('\n')
+            pre.appendChild(codeEl)
+            container.appendChild(pre)
+            continue
+          }
+
           const heading = /^\s{0,3}#{1,6}\s+(.+?)\s*$/.exec(line)
           if (heading) {
             flushParagraph()
@@ -51220,6 +51366,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         const stack = document.createElement('div')
         stack.className = 'scout-chat-msg__stack'
+
+        // a teammate's run is anchored by an initials disc in the gutter
+        // (mobile's ChatAvatar); follow-up rows keep the gutter but hide the
+        // disc, so bubbles in a run stay column-aligned. Chat tool only —
+        // the room rail's column anatomy hides it.
+        if (kind === 'peer') {
+          const avatar = document.createElement('span')
+          avatar.className = 'scout-chat-msg__avatar'
+          avatar.setAttribute('aria-hidden', 'true')
+          avatar.textContent = chatPeerInitials(label)
+          item.appendChild(avatar)
+        }
 
         const agentSender = kind === 'scout' || kind === 'error'
         if (agentSender) {
@@ -51636,6 +51794,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const stageIndex = done ? scoutChatThreadStages.length - 1 : approvalRequired || rejected || error ? 4 : queued ? 0 : 3
         const active = queued || running
 
+        // card-level state hook — the head's ember treatment keys off it
+        card.dataset.state = value
         const pill = card.querySelector('[data-research-pill]')
         const statusText = card.querySelector('[data-research-status]')
         const agents = card.querySelector('[data-research-agents]')

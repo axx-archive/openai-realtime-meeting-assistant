@@ -60,8 +60,13 @@ export const STRIDE_INK = '#050505';
 export const STRIDE_GRAPHITE = '#5E5E66';
 /** The receiving row on a light ground, and on dark where Apple wants lift. */
 export const STRIDE_GRAPHITE_LIGHT = '#77777D';
-/** Warm Putty — the light appearance's ground, and light mode's ground. */
+/** Warm Putty — the light appearance's ground; native light mode's ground,
+ *  and the desktop light mode's WELL (see STRIDE_PUTTY_SOFT below). */
 export const STRIDE_PUTTY = '#CFC5B7';
+/** Putty softened one step — the DESKTOP app's light field (founder call
+ *  2026-08-03: a phone shows putty in slivers, a desktop shows it as a wall).
+ *  Brand assets and native keep STRIDE_PUTTY; desktop keeps it as the well. */
+export const STRIDE_PUTTY_SOFT = '#DDD4C6';
 
 export const CANVAS = 1024;
 

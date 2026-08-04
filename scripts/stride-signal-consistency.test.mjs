@@ -49,6 +49,7 @@ import {
   CUT,
   ROW_AXIS,
   STRIDE_PUTTY,
+  STRIDE_PUTTY_SOFT,
   STRIKE_LIFT,
   massesFor,
   radiusFor,
@@ -203,18 +204,20 @@ test('every ground that is declared rather than painted is the same putty', () =
   assert.equal(APPEARANCES.light.field, STRIDE_PUTTY);
 
   const manifest = JSON.parse(read('public/manifest.webmanifest'));
-  assert.equal(manifest.background_color, STRIDE_PUTTY);
-  assert.equal(manifest.theme_color, STRIDE_PUTTY);
+  // The web app's chrome follows the DESKTOP ground (softened putty), not the
+  // brand tile's field — the PWA splash is the app booting, not the logo.
+  assert.equal(manifest.background_color, STRIDE_PUTTY_SOFT);
+  assert.equal(manifest.theme_color, STRIDE_PUTTY_SOFT);
   // …and the manifest's icons must be the generated ones, not hand-added paths.
   for (const icon of manifest.icons) {
     assert.match(icon.src, /^\/public\/(icon-192|icon-512|icon-maskable-512|app-icon)\.png$/, icon.src);
   }
 
   const html = read('index.html');
-  assert.match(html, new RegExp(`<meta name="theme-color" content="${STRIDE_PUTTY}">`));
+  assert.match(html, new RegExp(`<meta name="theme-color" content="${STRIDE_PUTTY_SOFT}">`));
   // The boot script and the theme toggle both rewrite it; all copies must agree.
   assert.equal(
-    (html.match(new RegExp(`'${STRIDE_PUTTY}'`, 'g')) ?? []).length,
+    (html.match(new RegExp(`'${STRIDE_PUTTY_SOFT}'`, 'g')) ?? []).length,
     2,
     'both theme-color writers must carry the same ground',
   );
@@ -275,9 +278,12 @@ test('no retired ink survives inside a data: URI', () => {
 });
 
 test('the light theme is grounded on the putty, in both token copies', () => {
-  // The desktop declares the ramp and native mirrors it. They have to agree, or
-  // the phone and the browser are two different products in light mode.
-  assert.match(read('index.html'), new RegExp(`--paper-50: ${STRIDE_PUTTY};`));
+  /* The desktop field is putty softened ONE step (2026-08-03): a phone shows
+     the ground in slivers between cards, a desktop shows it as a wall. Putty
+     itself must survive in the desktop system as the well, or the two surfaces
+     stop being the same material. Native keeps putty as its field. */
+  assert.match(read('index.html'), new RegExp(`--paper-50: ${STRIDE_PUTTY_SOFT};`));
+  assert.match(read('index.html'), new RegExp(`--paper-100: ${STRIDE_PUTTY};`));
   assert.match(read('mobile/src/theme/tokens.ts'), new RegExp(`50: '${STRIDE_PUTTY}'`));
   // The ink is a warm dark grey, not black — near-black on warm putty reads as
   // a printing error.
