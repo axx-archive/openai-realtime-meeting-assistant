@@ -2020,7 +2020,7 @@ export function composeCommandPrefix(baseEnv, runtimeEnv, candidateCompose, proj
 
 export function composeActivationArgs(baseEnv, runtimeEnv, candidateCompose, projectName = 'digitalocean') {
   return [...composeCommandPrefix(baseEnv, runtimeEnv, candidateCompose, projectName),
-    'up', '-d', '--no-build', '--wait', '--wait-timeout', '120']
+    'up', '-d', '--no-build', '--wait', '--wait-timeout', '360']
 }
 
 // Only deliberate Docker transport values survive. The one added interpolation

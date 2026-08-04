@@ -1295,7 +1295,7 @@ test('activation and rollback pin candidate Compose, project, render profile, an
   assert.ok(args.includes('--project-name'))
   assert.ok(args.includes('digitalocean'))
   assert.ok(args.includes('render'))
-  assert.deepEqual(args.slice(-6), ['up', '-d', '--no-build', '--wait', '--wait-timeout', '120'])
+  assert.deepEqual(args.slice(-6), ['up', '-d', '--no-build', '--wait', '--wait-timeout', '360'])
   assert.equal(args.includes('--build'), false)
   assert.throws(() => composeActivationArgs('/tmp/base.env', '/tmp/release.env', candidate, 'attacker'), /preserve named volumes/)
 })
