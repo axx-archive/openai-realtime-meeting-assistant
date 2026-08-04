@@ -1089,11 +1089,11 @@ export function validateRenderedComposeConfig(config, receipt, suppliedTopology 
   }
   const allowedServiceFields = new Set(['image', 'build', 'environment', 'env_file', 'volumes', 'ports', 'healthcheck',
     'mem_limit', 'networks', 'depends_on', 'restart', 'command', 'shm_size', 'profiles', 'user', 'entrypoint',
-    'network_mode', 'cap_drop', 'cap_add', 'read_only', 'security_opt', 'tmpfs', 'pids_limit', 'deploy', 'scale'])
+    'network_mode', 'cap_drop', 'cap_add', 'read_only', 'security_opt', 'tmpfs', 'pids_limit', 'init', 'deploy', 'scale'])
   const servicePolicy = {
     meetingassist: {
       profiles: [], networks: ['default', 'render_internal'], networkMode: '', restart: 'unless-stopped', user: '', readOnly: false,
-      capAdd: [], capDrop: [], securityOpt: [], ports: ['40000-40100:40000-40100/udp'], memory: 1024 ** 3, shm: null, pids: null,
+      capAdd: [], capDrop: [], securityOpt: [], ports: ['40000-40100:40000-40100/udp'], memory: 1024 ** 3, shm: null, pids: null, init: false,
       mounts: [
         { type: 'volume', source: 'meeting_data', target: '/app/data', readOnly: false },
         { type: 'volume', source: 'usage_ledger', target: '/app/data/usage', readOnly: false },
@@ -1103,31 +1103,31 @@ export function validateRenderedComposeConfig(config, receipt, suppliedTopology 
     },
     'canonical-postgres': {
       profiles: [], networks: ['default'], networkMode: '', restart: 'unless-stopped', user: '', readOnly: false,
-      capAdd: [], capDrop: [], securityOpt: [], ports: [], memory: 256 * 1024 ** 2, shm: 64 * 1024 ** 2, pids: null,
+      capAdd: [], capDrop: [], securityOpt: [], ports: [], memory: 256 * 1024 ** 2, shm: 64 * 1024 ** 2, pids: null, init: false,
       mounts: [{ type: 'volume', source: 'canonical_postgres', target: '/var/lib/postgresql/data', readOnly: false }],
       dependencies: {}, dockerfile: ''
     },
     'render-queue-init': {
       profiles: ['render'], networks: [], networkMode: 'none', restart: 'no', user: '0:0', readOnly: true,
-      capAdd: ['CHOWN', 'DAC_OVERRIDE'], capDrop: ['ALL'], securityOpt: [], ports: [], memory: null, shm: null, pids: null,
+      capAdd: ['CHOWN', 'DAC_OVERRIDE'], capDrop: ['ALL'], securityOpt: [], ports: [], memory: null, shm: null, pids: null, init: false,
       mounts: [{ type: 'volume', source: 'render_queue', target: '/app/render-queue', readOnly: false }],
       dependencies: {}, dockerfile: 'Dockerfile.render'
     },
     'render-runner': {
       profiles: ['render'], networks: ['render_internal'], networkMode: '', restart: 'unless-stopped', user: '', readOnly: true,
       capAdd: [], capDrop: ['ALL'], securityOpt: rendererSecurityOptions, ports: [], memory: 1024 ** 3,
-      shm: 256 * 1024 ** 2, pids: 256,
+      shm: 256 * 1024 ** 2, pids: 256, init: true,
       mounts: [{ type: 'volume', source: 'render_queue', target: '/app/render-queue', readOnly: false }],
       dependencies: { meetingassist: 'service_healthy', 'render-queue-init': 'service_completed_successfully' }, dockerfile: 'Dockerfile.render'
     },
     coturn: {
       profiles: [], networks: ['default'], networkMode: '', restart: 'unless-stopped', user: '', readOnly: false,
       capAdd: [], capDrop: [], securityOpt: [], ports: ['3478:3478/tcp', '3478:3478/udp', '49160-49200:49160-49200/udp'],
-      memory: null, shm: null, pids: null, mounts: [], dependencies: {}, dockerfile: ''
+      memory: null, shm: null, pids: null, init: false, mounts: [], dependencies: {}, dockerfile: ''
     },
     caddy: {
       profiles: [], networks: ['default'], networkMode: '', restart: 'unless-stopped', user: '', readOnly: false,
-      capAdd: [], capDrop: [], securityOpt: [], ports: ['80:80/tcp', '443:443/tcp'], memory: null, shm: null, pids: null,
+      capAdd: [], capDrop: [], securityOpt: [], ports: ['80:80/tcp', '443:443/tcp'], memory: null, shm: null, pids: null, init: false,
       mounts: [
         { type: 'bind', source: topology.candidateCaddyfile, target: '/etc/caddy/Caddyfile', readOnly: true },
         { type: 'volume', source: 'caddy_data', target: '/data', readOnly: false },
@@ -1170,6 +1170,9 @@ export function validateRenderedComposeConfig(config, receipt, suppliedTopology 
     exactByteSize(service.shm_size, policy.shm, `rendered candidate Compose service ${serviceName} shared-memory limit`)
     if (policy.pids === null ? service.pids_limit !== undefined && service.pids_limit !== null : service.pids_limit !== policy.pids) {
       throw new Error(`rendered candidate Compose service ${serviceName} PID limit differs from the approved topology`)
+    }
+    if (Boolean(service.init) !== policy.init) {
+      throw new Error(`rendered candidate Compose service ${serviceName} init policy differs from the approved topology`)
     }
     validateDependencies(serviceName, service.depends_on, policy.dependencies)
     validateBuild(serviceName, service.build, receipt, topology.candidateRoot, policy.dockerfile)

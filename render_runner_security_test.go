@@ -190,6 +190,7 @@ func TestRenderRunnerDeploymentIsLeastPrivilegeAndHasNoBrainMount(t *testing.T) 
 		"seccomp=/etc/docker/seccomp/bonfire-render-runner-v1.json",
 		"read_only: true",
 		"pids_limit:",
+		"init: true",
 		"render_internal",
 	} {
 		if !strings.Contains(render, required) {

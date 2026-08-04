@@ -297,7 +297,7 @@ function renderedComposeConfig(receipt = makeReceipt()) {
         volumes: [volume('render_queue', '/app/render-queue')], cap_drop: ['ALL'],
         security_opt: ['apparmor=bonfire-render-runner-v1', 'no-new-privileges:true',
           'seccomp=/etc/docker/seccomp/bonfire-render-runner-v1.json'], read_only: true,
-        tmpfs: ['/tmp:rw,nosuid,nodev,noexec,size=512m'], shm_size: '256m', pids_limit: 256, mem_limit: '1g',
+        tmpfs: ['/tmp:rw,nosuid,nodev,noexec,size=512m'], shm_size: '256m', pids_limit: 256, mem_limit: '1g', init: true,
         networks: { render_internal: null },
         depends_on: { meetingassist: { condition: 'service_healthy', required: true },
           'render-queue-init': { condition: 'service_completed_successfully', required: true } }, restart: 'unless-stopped'
@@ -853,6 +853,7 @@ test('rendered candidate Compose rejects security, storage, network, port, and l
   reject(config => { config.services['render-queue-init'].network_mode = 'host' }, /network mode/)
   reject(config => { config.services['render-queue-init'].cap_add.push('SYS_ADMIN') }, /added capabilities/)
   reject(config => { config.services['render-runner'].tmpfs[0] = '/tmp:rw,rw,nosuid,nodev,noexec,size=512m' }, /tmpfs differs/)
+  reject(config => { config.services['render-runner'].init = false }, /init policy/)
   for (const [field, value] of Object.entries({
     pid: 'host', ipc: 'host', uts: 'host', userns_mode: 'host', devices: ['/dev/kvm:/dev/kvm'],
     volumes_from: ['meetingassist'], provider: { type: 'unreviewed' }, post_start: [{ command: 'true' }]
