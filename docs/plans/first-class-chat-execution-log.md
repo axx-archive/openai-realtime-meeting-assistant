@@ -10,7 +10,7 @@ Branch: `codex/country-golf-stride`
 
 Status: `shipped_product_candidate`
 
-- Implementation commit `0129b7648151177723eebac11260b80aa20b366c`
+- Implementation commit `9d73be4957e8005e7ebbf950b1d956b8e427943f`
   is live from the sealed committed tree on the VPS. Git push is deferred.
 - Chat now has responsive desktop/mobile layout, a resizable channel rail,
   dual-use activity/comments context, rich link/media previews, adaptive mobile
@@ -19,6 +19,9 @@ Status: `shipped_product_candidate`
   Interrupted or ambiguous reply sends retain the draft and provide a precise
   recovery instruction, and long pending-attachment names/metadata are clipped
   with ellipsis inside a fixed chip instead of escaping the composer.
+- Plain replies in direct-agent side threads persist as replies and never launch
+  a new work run unless the user explicitly attaches an artifact follow-up or
+  chooses a tool/process control.
 - Scout and Colton use distinct first-person identities. Scout can delegate a
   research run to Colton with an attributable handoff; Marvin remains a reviewed
   Marketplace candidate rather than an active employee.
