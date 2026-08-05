@@ -40,11 +40,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and remain the fallback if this bundle is ever rejected.
       // Regenerate both with `npm run brand:regen` from the repo root.
       icon: './assets/Stride.icon',
-      // Build 35 adds stable multi-human room Scout audio, source-bound meeting
-      // transcription, durable follow-through, and shared smooth tail-follow
-      // on top of the accepted Build 34 cradle baseline. Pin the app and
-      // ReplayKit extension to the same release.
-      buildNumber: '35',
+      // Build 36 carries the Country+Golf chat/work/memory baseline: adaptive
+      // composer growth, shared rich media, distinct per-human relationship
+      // memory, and the stable multi-human room/Scout fixes first distributed
+      // in Build 35. Pin the app and ReplayKit extension to the same release.
+      buildNumber: '36',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

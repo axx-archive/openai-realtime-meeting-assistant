@@ -899,6 +899,78 @@ func (app *kanbanBoardApp) attachmentSourcesAuthorizedForRead(user *userAccount,
 	return true
 }
 
+// followUpAttachmentSourceAuthorized accepts the two exact authority states a
+// queued artifact follow-up can observe: its triggering chat message may still
+// hold the request's reservation, or it may already have committed that same
+// source into the same destination. The current authenticated human must own
+// the source in either state. This is intentionally narrower than ordinary
+// committed-chat reads: a teammate can read a file posted in a shared channel,
+// but cannot smuggle somebody else's attachment into their own provider run.
+func (app *kanbanBoardApp) followUpAttachmentSourceAuthorized(user *userAccount, destination scoutChatThreadRecord, file scoutChatFileAttachment, reservationID string) bool {
+	if app == nil || user == nil || strings.TrimSpace(file.SourceID) == "" || strings.TrimSpace(file.Ref) == "" {
+		return false
+	}
+	email := normalizeAccountEmail(user.Email)
+	app.pendingAttachmentUploadsMu.Lock()
+	grant, ok := app.pendingAttachmentUploads[strings.TrimSpace(file.SourceID)]
+	storeHealthy := app.attachmentSourceStoreErr == nil
+	app.pendingAttachmentUploadsMu.Unlock()
+	if !storeHealthy || !ok || grant.OwnerEmail != email || grant.SourceRevision != strings.TrimSpace(file.SourceRevision) ||
+		grant.Ref != strings.TrimSpace(file.Ref) || grant.DestinationID != strings.TrimSpace(destination.ID) ||
+		grant.DestinationRevision != scoutChatAttachmentDestinationRevision(destination) {
+		return false
+	}
+	switch grant.State {
+	case attachmentSourceReserved:
+		if grant.ReservationID != strings.TrimSpace(reservationID) || !grant.ExpiresAt.After(time.Now().UTC()) {
+			return false
+		}
+	case attachmentSourceCommitted:
+		if strings.TrimSpace(grant.CommittedMessageID) == "" ||
+			!app.committedChatAttachmentAuthorized(email, destination.ID, grant.CommittedMessageID, file) {
+			return false
+		}
+	default:
+		return false
+	}
+	meta, err := blobStatForRef(grant.Ref)
+	return err == nil && attachmentSourceRevision(grant.Ref, meta) == grant.SourceRevision &&
+		strings.ToLower(strings.TrimSpace(meta.Mime)) == grant.Mime && meta.Size == grant.Size
+}
+
+func (app *kanbanBoardApp) followUpAttachmentSourcesAuthorized(user *userAccount, destination scoutChatThreadRecord, files []scoutChatFileAttachment, reservationID string) bool {
+	for _, file := range files {
+		if strings.TrimSpace(file.Ref) == "" {
+			continue
+		}
+		if !app.followUpAttachmentSourceAuthorized(user, destination, file, reservationID) {
+			return false
+		}
+	}
+	return true
+}
+
+// followUpAttachmentContentBlocksAuthorized performs the same exact-source
+// check before and after each blob read. The async follow-up worker calls this
+// only after re-resolving the current requester and destination immediately at
+// provider admission; no launch-time byte block is retained as authority.
+func (app *kanbanBoardApp) followUpAttachmentContentBlocksAuthorized(user *userAccount, destination scoutChatThreadRecord, files []scoutChatFileAttachment, reservationID string) []json.RawMessage {
+	return attachmentContentBlocksWithReader(files, func(file scoutChatFileAttachment) ([]byte, blobMeta, bool) {
+		if !app.followUpAttachmentSourceAuthorized(user, destination, file, reservationID) {
+			return nil, blobMeta{}, false
+		}
+		data, meta, err := getBlob(strings.TrimSpace(file.Ref))
+		if attachmentBlobReadAfterProbe != nil {
+			attachmentBlobReadAfterProbe(strings.TrimSpace(file.SourceID))
+		}
+		if err != nil || attachmentSourceRevision(strings.TrimSpace(file.Ref), meta) != strings.TrimSpace(file.SourceRevision) ||
+			!app.followUpAttachmentSourceAuthorized(user, destination, file, reservationID) {
+			return nil, blobMeta{}, false
+		}
+		return data, meta, true
+	})
+}
+
 // attachmentContentBlocksAuthorized reauthorizes the exact durable source
 // record immediately before and after every blob read. Bytes from a source
 // revoked, expired, or rebound during I/O are discarded before they can reach

@@ -227,11 +227,14 @@ func directResearchRequestNeedsInput(text string, files []scoutChatFileAttachmen
 		return false
 	}
 	ignored := map[string]bool{
-		"a": true, "about": true, "agent": true, "and": true, "can": true, "colton": true, "could": true,
-		"deep": true, "do": true, "for": true, "hello": true, "help": true, "hey": true, "hi": true, "i": true,
-		"into": true, "it": true, "look": true, "marvin": true, "me": true, "on": true, "please": true, "research": true,
-		"scout": true, "some": true, "something": true, "that": true, "the": true, "this": true, "to": true, "up": true,
-		"want": true, "with": true, "would": true, "you": true,
+		"a": true, "about": true, "agent": true, "analyze": true, "and": true, "best": true, "brief": true,
+		"can": true, "colton": true, "could": true, "create": true, "decision": true, "deep": true, "deliver": true,
+		"do": true, "find": true, "for": true, "give": true, "hello": true, "help": true, "hey": true, "hi": true,
+		"i": true, "into": true, "investigate": true, "it": true, "launch": true, "look": true, "make": true,
+		"marvin": true, "me": true, "on": true, "our": true, "partner": true, "partners": true, "please": true,
+		"recommend": true, "recommendation": true, "report": true, "research": true, "scout": true, "some": true,
+		"something": true, "that": true, "the": true, "this": true, "to": true, "up": true, "want": true,
+		"with": true, "would": true, "write": true, "you": true,
 	}
 	informative := 0
 	for _, token := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
@@ -920,18 +923,14 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// but only when a follow-up artifact explicitly selects that path. An
 	// installed Anthropic key must not make an ordinary Scout turn reread the
 	// attachments. Keyless deploys keep name-only chips.
-	var attachmentBlocks []json.RawMessage
 	var openAIAttachments []openAIInputContent
 	if !deferAttachmentDerivation {
 		if app.currentOpenAIAPIKey() != "" {
 			openAIAttachments = app.openAIAttachmentContentAuthorized(user, thread, files, attachmentReservationID)
 			files = app.deriveAttachmentTextAuthorized(ctx, user, thread, files, attachmentReservationID, openAIAttachments)
 		}
-		if strings.TrimSpace(followUpArtifactID) != "" && currentAnthropicAPIKey() != "" {
-			attachmentBlocks = app.attachmentContentBlocksAuthorized(user, thread, files, attachmentReservationID)
-		}
 	}
-	if (len(openAIAttachments) > 0 || len(attachmentBlocks) > 0) && !app.attachmentSourcesAuthorizedForRead(user, thread, files, attachmentReservationID) {
+	if len(openAIAttachments) > 0 && !app.attachmentSourcesAuthorizedForRead(user, thread, files, attachmentReservationID) {
 		return nil, fmt.Errorf("attachment authorization changed; attach the file again")
 	}
 
@@ -1129,13 +1128,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		// Unattached channel messages posted after the last run become worker
 		// context alongside the explicit reply.
 		teamReplies := scoutChatRepliesSince(thread, completedAt)
-		if len(attachmentBlocks) > 0 && !app.attachmentSourcesAuthorizedForRead(user, thread, files, attachmentReservationID) {
-			return nil, fmt.Errorf("attachment authorization changed; attach the file again")
-		}
-		agentThread, err := app.dispatchAuthorizedArtifactFollowUpWithAttachments(ctx, user, artifact, text, user.Name, teamReplies, attachmentBlocks)
-		if len(attachmentBlocks) > 0 && !app.attachmentSourcesAuthorizedForRead(user, thread, files, attachmentReservationID) {
-			return nil, fmt.Errorf("attachment authorization changed while the workstream was reading it; attach the file again")
-		}
+		agentThread, err := app.dispatchAuthorizedArtifactFollowUpWithAttachments(ctx, user, artifact, text, user.Name, teamReplies, thread, files, attachmentReservationID)
 		if err != nil {
 			// The reply is a real team answer even when the run cannot launch
 			// (e.g. a second teammate answering while a follow-up is already in
@@ -1437,9 +1430,6 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// through the choice route, which at most ARMS a proposal card. Keyless
 	// deploys skip the turn inside routeScoutChatTurn and keep plain Q&A.
 	if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
-		if len(attachmentBlocks) > 0 && !app.attachmentSourcesAuthorizedForRead(user, thread, files, attachmentReservationID) {
-			return nil, fmt.Errorf("attachment authorization changed; attach the file again")
-		}
 		if verdict := app.routeScoutChatTurn(ctx, modelQuery, history); verdict != nil {
 			if proposal := verdict.proposal; proposal != nil {
 				proposal.ContextRefs = encodeAssistantContextRefs(sourceNeed.ContextRefs)
@@ -1489,17 +1479,11 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		modelQuery = app.prepareSTRIDEPrivateRelationshipModelQuery(user.Email, modelQuery)
 	}
 
-	if len(attachmentBlocks) > 0 && !app.attachmentSourcesAuthorizedForRead(user, thread, files, attachmentReservationID) {
-		return nil, fmt.Errorf("attachment authorization changed; attach the file again")
-	}
 	responseStyle := scoutChatResponseStyle(thread)
 	if replyTargetsScout {
 		responseStyle = scoutDirectReplyResponseStyle(responseStyle)
 	}
 	result, err := app.resolveAssistantQueryContextForUserWithAttachments(withAssistantResponseStyle(ctx, responseStyle), user.Email, modelQuery, history, openAIAttachments)
-	if len(attachmentBlocks) > 0 && !app.attachmentSourcesAuthorizedForRead(user, thread, files, attachmentReservationID) {
-		return nil, fmt.Errorf("attachment authorization changed while Scout was reading it; attach the file again")
-	}
 	if err != nil {
 		errorMessage := scoutChatMessageRecord{
 			ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),

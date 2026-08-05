@@ -52,19 +52,25 @@ var agentThreadFollowUpStatusKeys = []string{"status", "threadStatus", "goalStat
 // agentThreadFollowUpRun carries one armed follow-up from launch to the async
 // worker, including the pre-run metadata snapshots the error path restores.
 type agentThreadFollowUpRun struct {
-	thread      scoutAgentThread
-	artifactID  string
-	runID       string
-	version     int
-	requestedBy string
-	input       string
-	prevMeta    map[string]string
-	prevStatus  map[string]string
-	// attachments carries the triggering reply's binary content blocks
-	// (card 085) into the Sonnet request — the reply's image/PDF is exactly
-	// the context the re-run was asked to incorporate. The keyless OpenAI
-	// path ignores them (the text placeholders in input still describe them).
-	attachments []json.RawMessage
+	thread         scoutAgentThread
+	artifactID     string
+	runID          string
+	version        int
+	requestedBy    string
+	requesterEmail string
+	input          string
+	prevMeta       map[string]string
+	prevStatus     map[string]string
+	// attachmentScope carries only typed source identity and destination
+	// bindings. The async worker reauthorizes them and reads bytes immediately
+	// before the provider call; launch-time raw blocks are never bearer grants.
+	attachmentScope *agentThreadFollowUpAttachmentScope
+}
+
+type agentThreadFollowUpAttachmentScope struct {
+	destinationID string
+	reservationID string
+	files         []scoutChatFileAttachment
 }
 
 // startAgentThreadFollowUpAsync is the test seam mirroring
@@ -114,11 +120,9 @@ func (app *kanbanBoardApp) dispatchArtifactFollowUp(artifactID string, replyText
 	return app.dispatchArtifactFollowUpWithAttachments(artifactID, replyText, requestedBy, teamReplies, nil)
 }
 
-// dispatchArtifactFollowUpWithAttachments is dispatchArtifactFollowUp plus the
-// triggering reply's binary attachment blocks (card 085). Attachments ride the
-// agent-thread (scout_thread) route so the worker sees the dropped image/PDF;
-// the goal-resume route carries the text revision note exactly as before.
-func (app *kanbanBoardApp) dispatchArtifactFollowUpWithAttachments(artifactID string, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord, attachments []json.RawMessage) (scoutAgentThread, error) {
+// dispatchArtifactFollowUpWithAttachments is the internal typed-source route.
+// The goal-resume route carries the text revision note exactly as before.
+func (app *kanbanBoardApp) dispatchArtifactFollowUpWithAttachments(artifactID string, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord, attachmentScope *agentThreadFollowUpAttachmentScope) (scoutAgentThread, error) {
 	if app == nil || app.memory == nil {
 		return scoutAgentThread{}, fmt.Errorf("assistant is unavailable")
 	}
@@ -134,12 +138,12 @@ func (app *kanbanBoardApp) dispatchArtifactFollowUpWithAttachments(artifactID st
 		return scoutAgentThread{}, err
 	}
 	if artifact.Metadata["source"] == "scout_thread" {
-		return app.launchAgentThreadFollowUpWithAuthorizedSnapshot(artifact, replyText, requestedBy, teamReplies, attachments)
+		return app.launchAgentThreadFollowUpWithAuthorizedSnapshot(artifact, replyText, requestedBy, teamReplies, attachmentScope)
 	}
 	return app.resumeGoalWithFeedback(artifactGoalParentID(artifact), requestedBy, replyText, artifact.ID)
 }
 
-func (app *kanbanBoardApp) dispatchAuthorizedArtifactFollowUpWithAttachments(ctx context.Context, user *userAccount, artifact meetingMemoryEntry, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord, attachments []json.RawMessage) (scoutAgentThread, error) {
+func (app *kanbanBoardApp) dispatchAuthorizedArtifactFollowUpWithAttachments(ctx context.Context, user *userAccount, artifact meetingMemoryEntry, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord, destination scoutChatThreadRecord, files []scoutChatFileAttachment, reservationID string) (scoutAgentThread, error) {
 	artifact, ok := app.revalidateArtifactSnapshot(artifact)
 	if !ok {
 		return scoutAgentThread{}, fmt.Errorf("that report is unavailable")
@@ -148,7 +152,19 @@ func (app *kanbanBoardApp) dispatchAuthorizedArtifactFollowUpWithAttachments(ctx
 		if err := app.artifactFollowUpRouteError(artifact); err != nil {
 			return scoutAgentThread{}, err
 		}
-		return app.launchAgentThreadFollowUpWithAuthorizedSnapshot(artifact, replyText, requestedBy, teamReplies, attachments)
+		requesterEmail := ""
+		if user != nil {
+			requesterEmail = normalizeAccountEmail(user.Email)
+		}
+		var attachmentScope *agentThreadFollowUpAttachmentScope
+		if len(files) > 0 {
+			attachmentScope = &agentThreadFollowUpAttachmentScope{
+				destinationID: strings.TrimSpace(destination.ID),
+				reservationID: strings.TrimSpace(reservationID),
+				files:         append([]scoutChatFileAttachment(nil), files...),
+			}
+		}
+		return app.launchAgentThreadFollowUpWithAuthorizedSnapshot(artifact, replyText, firstNonEmptyString(requesterEmail, requestedBy), teamReplies, attachmentScope)
 	}
 	parentID := artifactGoalParentID(artifact)
 	if parentID == "" {
@@ -211,17 +227,17 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUp(artifactID string, replyTex
 }
 
 // launchAgentThreadFollowUpWithAttachments is launchAgentThreadFollowUp plus
-// the triggering reply's binary attachment blocks (card 085) for the worker
-// request. Existing entrypoints delegate with nil.
-func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAttachments(artifactID string, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord, attachments []json.RawMessage) (scoutAgentThread, error) {
+// the triggering reply's typed source scope. Existing entrypoints delegate
+// with nil.
+func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAttachments(artifactID string, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord, attachmentScope *agentThreadFollowUpAttachmentScope) (scoutAgentThread, error) {
 	artifact, ok := app.osArtifactByID(strings.TrimSpace(artifactID))
 	if !ok {
 		return scoutAgentThread{}, fmt.Errorf("that report is unavailable")
 	}
-	return app.launchAgentThreadFollowUpWithAuthorizedSnapshot(artifact, replyText, requestedBy, teamReplies, attachments)
+	return app.launchAgentThreadFollowUpWithAuthorizedSnapshot(artifact, replyText, requestedBy, teamReplies, attachmentScope)
 }
 
-func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAuthorizedSnapshot(expected meetingMemoryEntry, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord, attachments []json.RawMessage) (scoutAgentThread, error) {
+func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAuthorizedSnapshot(expected meetingMemoryEntry, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord, attachmentScope *agentThreadFollowUpAttachmentScope) (scoutAgentThread, error) {
 	if app == nil || app.memory == nil {
 		return scoutAgentThread{}, fmt.Errorf("assistant is unavailable")
 	}
@@ -240,6 +256,18 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAuthorizedSnapshot(expec
 	}
 	if artifact.Metadata["source"] != "scout_thread" {
 		return scoutAgentThread{}, fmt.Errorf("follow-ups only run on agent thread reports")
+	}
+	requesterAccount, requesterOK := authenticatedRequester(requestedBy)
+	if !requesterOK {
+		return scoutAgentThread{}, fmt.Errorf("the authenticated requester is unavailable; sign in again and retry")
+	}
+	requesterEmail := normalizeAccountEmail(requesterAccount.Email)
+	requestedByName := firstNonEmptyString(participantNameForAccount(requesterAccount), canonicalRoomActorName(requestedBy), strings.TrimSpace(requestedBy))
+	if attachmentScope != nil && len(attachmentScope.files) > 0 {
+		destination, _, destinationErr := app.scoutChatThreadByID(requesterEmail, attachmentScope.destinationID)
+		if destinationErr != nil || !app.followUpAttachmentSourcesAuthorized(requesterAccount, destination, attachmentScope.files, attachmentScope.reservationID) {
+			return scoutAgentThread{}, fmt.Errorf("attachment authorization changed; attach the file again")
+		}
 	}
 	mode := normalizeAgentThreadMode(firstNonEmptyString(artifact.Metadata["mode"], artifact.Kind))
 	if mode == "" {
@@ -261,6 +289,18 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAuthorizedSnapshot(expec
 	// The ORIGINAL threadId keeps ref rewrites flipping the existing chat
 	// cards; the fresh runID only records this run.
 	threadID := firstNonEmptyString(strings.TrimSpace(artifact.Metadata["threadId"]), runID)
+	query := firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["title"])
+	thread := scoutAgentThread{ID: threadID, Mode: mode, Query: query, Status: "running", Artifact: artifact}
+	// Follow-ups are new provider admissions, not authority inherited from v1.
+	// Resolve the current named seat before the visible running transition; the
+	// worker repeats this fence immediately before its provider call.
+	reauthorizedThread, err := app.reauthorizeAgentThreadProfile(agentThreadFollowUpThreadForRequester(thread, requesterEmail))
+	if err != nil {
+		return scoutAgentThread{}, err
+	}
+	thread = reauthorizedThread
+	artifact = thread.Artifact
+	writer := agentThreadArtifactWriter(thread, agentThreadWorkerResult{})
 
 	prevMeta := make(map[string]string, len(artifact.Metadata))
 	for key, value := range artifact.Metadata {
@@ -272,11 +312,10 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAuthorizedSnapshot(expec
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	requestedByName := firstNonEmptyString(canonicalRoomActorName(requestedBy), strings.TrimSpace(requestedBy))
 	// Mark running WITHOUT touching text or title: a failed follow-up must be
 	// able to restore the prior good state untouched.
 	expectedHeader := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact))
-	updated, matched, err := app.memory.updateOSArtifactWithMetadataIfHeaderMatches(expectedHeader, artifact.ID, "", artifact.Text, scoutParticipantName, map[string]string{
+	runningMetadata := map[string]string{
 		"status":            "running",
 		"threadStatus":      "running",
 		"goalStatus":        "running",
@@ -288,7 +327,16 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAuthorizedSnapshot(expec
 		"followUpBy":        requestedByName,
 		"followUpStartedAt": now,
 		"followUpError":     "",
-	})
+	}
+	for _, key := range agentThreadProfileMetadataKeys {
+		if value := strings.TrimSpace(thread.Artifact.Metadata[key]); value != "" {
+			runningMetadata[key] = value
+		}
+	}
+	if value := strings.TrimSpace(thread.Artifact.Metadata["agentReauthorizedAt"]); value != "" {
+		runningMetadata["agentReauthorizedAt"] = value
+	}
+	updated, matched, err := app.memory.updateOSArtifactWithMetadataIfHeaderMatches(expectedHeader, artifact.ID, "", artifact.Text, writer, runningMetadata)
 	if err != nil {
 		if !matched {
 			return scoutAgentThread{}, fmt.Errorf("that report is unavailable")
@@ -299,23 +347,16 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAuthorizedSnapshot(expec
 		return scoutAgentThread{}, fmt.Errorf("that report is unavailable")
 	}
 
-	query := firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["title"])
 	actions := app.osAssistantActions(query, mode, updated)
-	thread := scoutAgentThread{
-		ID:       threadID,
-		Mode:     mode,
-		Query:    query,
-		Status:   "running",
-		Artifact: updated,
-		Actions:  actions,
-	}
-	requester := firstNonEmptyString(updated.Metadata["requestedBy"], requestedByName)
-	principal, principalOK := app.agentThreadRecallPrincipal(requester, updated.Metadata)
+	thread.Artifact = updated
+	thread.Actions = actions
+	workerThread := agentThreadFollowUpThreadForRequester(thread, requesterEmail)
+	principal, principalOK := app.agentThreadRecallPrincipal(requesterEmail, workerThread.Artifact.Metadata)
 	var memory []meetingMemoryEntry
 	if principalOK {
 		memory = app.memorySnapshotForPrincipal(context.Background(), principal, 12)
 	}
-	input := buildAgentThreadFollowUpInput(thread, artifact, nextVersion, replyText, teamReplies, app.snapshotState(), memory, time.Now())
+	input := buildAgentThreadFollowUpInput(workerThread, artifact, nextVersion, replyText, teamReplies, app.snapshotState(), memory, time.Now())
 
 	// Signal capture (signals.go): asking for a re-run means v(N) missed — a
 	// negative signal whose payload carries WHAT was asked for. Log-and-continue.
@@ -334,17 +375,32 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAuthorizedSnapshot(expec
 	app.updateScoutChatThreadRefs(thread.ID, "running", updated.ID)
 
 	startAgentThreadFollowUpAsync(app, agentThreadFollowUpRun{
-		thread:      thread,
-		artifactID:  artifact.ID,
-		runID:       runID,
-		version:     nextVersion,
-		requestedBy: requestedByName,
-		input:       input,
-		prevMeta:    prevMeta,
-		prevStatus:  prevStatus,
-		attachments: attachments,
+		thread:          workerThread,
+		artifactID:      artifact.ID,
+		runID:           runID,
+		version:         nextVersion,
+		requestedBy:     requestedByName,
+		requesterEmail:  requesterEmail,
+		input:           input,
+		prevMeta:        prevMeta,
+		prevStatus:      prevStatus,
+		attachmentScope: attachmentScope,
 	})
 	return thread, nil
+}
+
+// agentThreadFollowUpThreadForRequester overrides requester identity only on
+// the in-memory provider-admission copy. The durable artifact keeps v1's
+// requestedBy authorship provenance, while every v2+ run resolves Files,
+// relationship memory, and destination audience for the human acting now.
+func agentThreadFollowUpThreadForRequester(thread scoutAgentThread, requesterEmail string) scoutAgentThread {
+	metadata := make(map[string]string, len(thread.Artifact.Metadata)+1)
+	for key, value := range thread.Artifact.Metadata {
+		metadata[key] = value
+	}
+	metadata["requestedBy"] = normalizeAccountEmail(requesterEmail)
+	thread.Artifact.Metadata = metadata
+	return thread
 }
 
 func (app *kanbanBoardApp) runAgentThreadFollowUp(run agentThreadFollowUpRun) {
@@ -365,6 +421,36 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponder(run agentThreadFo
 	worker := agentThreadWorkerOpenAI
 	workerBoundary := "responses_artifact_writer"
 	output, err := func() (string, error) {
+		// A v2+ run must re-prove the same identity, source, requester, and
+		// destination contracts as v1. This refreshes approved learning and
+		// rejects a paused seat or revoked File before either provider sees data.
+		freshThread, authErr := app.reauthorizeAgentThreadProfile(run.thread)
+		if authErr != nil {
+			return "", authErr
+		}
+		if _, authErr = app.agentThreadProviderContext(ctx, freshThread); authErr != nil {
+			return "", authErr
+		}
+		run.thread = freshThread
+		instructions := app.agentThreadFollowUpInstructionsForThread(run.thread, run.version)
+		var providerAttachments []json.RawMessage
+		if run.attachmentScope != nil && len(run.attachmentScope.files) > 0 {
+			requester := accountStore().findUser(run.requesterEmail)
+			if requester == nil {
+				return "", fmt.Errorf("attachment authorization changed; sign in again and attach the file")
+			}
+			destination, _, destinationErr := app.scoutChatThreadByID(run.requesterEmail, run.attachmentScope.destinationID)
+			if destinationErr != nil || !app.followUpAttachmentSourcesAuthorized(requester, destination, run.attachmentScope.files, run.attachmentScope.reservationID) {
+				return "", fmt.Errorf("attachment authorization changed before the workstream could read it; attach the file again")
+			}
+			// Construct provider bytes only after the provider-time authority
+			// check. The reader rechecks each source around I/O, then the final
+			// fence below catches revocation or audience changes during the read.
+			providerAttachments = app.followUpAttachmentContentBlocksAuthorized(requester, destination, run.attachmentScope.files, run.attachmentScope.reservationID)
+			if !app.followUpAttachmentSourcesAuthorized(requester, destination, run.attachmentScope.files, run.attachmentScope.reservationID) {
+				return "", fmt.Errorf("attachment authorization changed before the workstream could read it; attach the file again")
+			}
+		}
 		var raw string
 		var responderErr error
 		// Sonnet 5 fronts follow-ups whenever an Anthropic key is present
@@ -375,11 +461,11 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponder(run agentThreadFo
 			workerBoundary = "anthropic_messages_artifact_writer"
 			raw, responderErr = createAnthropicTextResponse(ctx, anthropicKey, anthropicTextRequest{
 				Model:        chatModel(),
-				Instructions: agentThreadFollowUpInstructions(run.thread.Mode, run.version),
+				Instructions: instructions,
 				Input:        run.input,
 				Effort:       "low",
 				MaxTokens:    anthropicFollowUpMaxTokens,
-				Attachments:  run.attachments,
+				Attachments:  providerAttachments,
 			})
 		} else {
 			apiKey := app.currentOpenAIAPIKey()
@@ -391,7 +477,7 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponder(run agentThreadFo
 				// Keyless-fallback twin: same seat as the keyed follow-up
 				// path, provider openai recorded at the wire seam (W0 item 4).
 				Seat:            seatFollowup,
-				Instructions:    agentThreadFollowUpInstructions(run.thread.Mode, run.version),
+				Instructions:    instructions,
 				Input:           run.input,
 				ReasoningEffort: "low",
 				Verbosity:       "medium",
@@ -403,7 +489,7 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponder(run agentThreadFo
 		}
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
-			return "", fmt.Errorf("Scout follow-up produced no artifact text")
+			return "", fmt.Errorf("%s follow-up produced no artifact text", agentThreadArtifactWriter(run.thread, agentThreadWorkerResult{}))
 		}
 		return raw, nil
 	}()
@@ -424,7 +510,7 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponder(run agentThreadFo
 			metadata[key] = value
 		}
 		metadata["followUpError"] = err.Error()
-		artifact, _, updateErr := app.updateOSArtifactWithMetadata(run.artifactID, "", prev.Text, scoutParticipantName, metadata)
+		artifact, _, updateErr := app.updateOSArtifactWithMetadata(run.artifactID, "", prev.Text, agentThreadArtifactWriter(run.thread, agentThreadWorkerResult{}), metadata)
 		if updateErr != nil {
 			log.Errorf("Failed to restore follow-up artifact %s: %v", run.artifactID, updateErr)
 			return
@@ -460,10 +546,18 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponder(run agentThreadFo
 		"workerBoundary":  workerBoundary,
 		"followUpError":   "",
 	}
+	for _, key := range agentThreadProfileMetadataKeys {
+		if value := strings.TrimSpace(run.thread.Artifact.Metadata[key]); value != "" {
+			metadata[key] = value
+		}
+	}
+	if value := strings.TrimSpace(run.thread.Artifact.Metadata["agentReauthorizedAt"]); value != "" {
+		metadata["agentReauthorizedAt"] = value
+	}
 	stampReadinessMetadata(prev, run.thread.Mode, output, metadata)
 	appendThreadRunLog(prev, metadata, run.runID, run.version, run.requestedBy)
 
-	artifact, _, updateErr := app.updateOSArtifactWithMetadata(run.artifactID, "", newText, scoutParticipantName, metadata)
+	artifact, _, updateErr := app.updateOSArtifactWithMetadata(run.artifactID, "", newText, agentThreadArtifactWriter(run.thread, agentThreadWorkerResult{}), metadata)
 	if updateErr != nil {
 		log.Errorf("Failed to update follow-up artifact %s: %v", run.artifactID, updateErr)
 		broadcastAssistantEvent("error", "Scout follow-up could not update its artifact", map[string]any{
@@ -473,6 +567,14 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponder(run agentThreadFo
 		})
 		return
 	}
+	// A follow-up is its own attributable terminal run. Give the ledger and
+	// pending-learning seam the fresh run id while keeping the stable thread id
+	// for the UI card and origin delivery below.
+	terminalRun := run.thread
+	terminalRun.ID = run.runID
+	terminalRun.Status = "complete"
+	terminalRun.Artifact = artifact
+	app.appendAgentRunLogEntry(terminalRun, artifact, "complete", output)
 
 	message := assistantToolLabel(run.thread.Mode) + " follow-up complete"
 	actions := app.osAssistantActions(run.thread.Query, run.thread.Mode, artifact)
@@ -537,6 +639,17 @@ func agentThreadFollowUpInstructions(mode string, version int) string {
 		lines = append(lines, "Re-score honestly: the READINESS line must reflect the answers actually given, not effort. If an objection was resolved, name it; if dodged, keep the score flat and say why.")
 	}
 	return strings.Join(lines, "\n")
+}
+
+// agentThreadFollowUpInstructionsForThread preserves the initial-run contract:
+// one neutral workflow base, exactly one named coworker identity, and the
+// authenticated requester's surface-specific relationship-memory lane.
+func (app *kanbanBoardApp) agentThreadFollowUpInstructionsForThread(thread scoutAgentThread, version int) string {
+	identityContext := strings.TrimSpace(strings.Join([]string{
+		agentThreadPersonaInstruction(thread.Artifact.Metadata),
+		app.agentThreadRequesterRelationshipInstruction(thread),
+	}, "\n\n"))
+	return strings.TrimSpace(agentThreadFollowUpInstructions(thread.Mode, version) + "\n\n" + identityContext)
 }
 
 // buildAgentThreadFollowUpInput mirrors buildAgentThreadInput and adds the

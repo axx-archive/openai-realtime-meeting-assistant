@@ -132,6 +132,129 @@ func TestDirectResearchCoworkerRequestsMissingInputWithoutLaunchingProvider(t *t
 	}
 }
 
+func TestDirectResearchRequestNeedsMaterialTopicAndScope(t *testing.T) {
+	for _, vague := range []string{
+		"Hey Colton",
+		"Research the best launch partner and deliver the decision brief.",
+		"Please investigate this and recommend what to do.",
+	} {
+		if !directResearchRequestNeedsInput(vague, nil, nil) {
+			t.Errorf("vague request %q launched without a material topic", vague)
+		}
+	}
+	for _, ready := range []string{
+		"Research the Country+Golf membership growth strategy using primary sources",
+		"Compare Otter and Granola for a 50-person company",
+	} {
+		if directResearchRequestNeedsInput(ready, nil, nil) {
+			t.Errorf("bounded request %q was incorrectly blocked", ready)
+		}
+	}
+	if directResearchRequestNeedsInput("Research this", []scoutChatFileAttachment{{Name: "venture-brief.pdf"}}, nil) {
+		t.Error("an attached source should satisfy the material-input gate")
+	}
+	if directResearchRequestNeedsInput("Research this", nil, []string{"chat-file:brief"}) {
+		t.Error("an authorized source ref should satisfy the material-input gate")
+	}
+}
+
+func TestDirectColtonFollowUpKeepsIdentityRelationshipLaneAndLearningLineage(t *testing.T) {
+	fixture := newSTRIDEProjectAuthorityFixture(t)
+	directThreadID := strideProductAgentDirectThreadPrefix + "colton_followup_contract_test"
+	hired := hireResearchAgentForBridgeTest(t, fixture, "colton-research", directThreadID)
+	profile, ok := fixture.app.strideAgentDirectThreadContext(directThreadID)
+	if !ok {
+		t.Fatal("missing current Colton profile")
+	}
+	metadata := agentThreadGoalSpecForProfile(profile, "").metadata()
+	for key, value := range map[string]string{
+		"source":        "scout_thread",
+		"threadId":      "agent-thread-research-colton-followup",
+		"threadQuery":   "Research Country+Golf membership growth",
+		"requestedBy":   fixture.user.Email,
+		"createdBy":     fixture.user.Name,
+		"originKind":    agentThreadOriginPrivateThread,
+		"originId":      directThreadID,
+		"status":        "complete",
+		"threadStatus":  "complete",
+		"goalStatus":    "verified",
+		"threadVersion": "1",
+		"completedAt":   time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano),
+	} {
+		metadata[key] = value
+	}
+	artifact, _, err := fixture.app.createOSArtifactWithMetadata("research", "Country+Golf membership growth", "# Research brief\n\nInitial result.", hired.DisplayName, metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.app.apiKey = "test-openai-key"
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	var captured openAITextRequest
+	var followUpRunID string
+	previousAsync := startAgentThreadFollowUpAsync
+	startAgentThreadFollowUpAsync = func(runApp *kanbanBoardApp, run agentThreadFollowUpRun) {
+		followUpRunID = run.runID
+		runApp.runAgentThreadFollowUpWithResponder(run, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+			captured = request
+			return "# Research brief\n\nWhat changed in v2: I tightened the recommendation around AJ's decision.\n\nVerified follow-up.", nil
+		})
+	}
+	t.Cleanup(func() { startAgentThreadFollowUpAsync = previousAsync })
+
+	if _, err := fixture.app.launchAgentThreadFollowUp(artifact.ID, "tighten the recommendation for my decision", fixture.user.Name, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"delivering this work as Colton",
+		"Speak in first person",
+		"Authenticated requester:",
+		"private one-to-one work surface",
+	} {
+		if !strings.Contains(captured.Instructions, want) {
+			t.Fatalf("follow-up prompt missing %q:\n%s", want, captured.Instructions)
+		}
+	}
+	if strings.Contains(captured.Instructions, "You are Scout") {
+		t.Fatalf("follow-up prompt restored Scout as a second speaking identity:\n%s", captured.Instructions)
+	}
+	stored, ok := fixture.app.osArtifactByID(artifact.ID)
+	if !ok || stored.Metadata["updatedBy"] != "Colton" || stored.Metadata["threadVersion"] != "2" || stored.Metadata["status"] != "complete" {
+		t.Fatalf("stored follow-up=%+v", stored)
+	}
+	if followUpRunID == "" || stored.Metadata["latestThreadRun"] != followUpRunID {
+		t.Fatalf("follow-up run lineage=%q metadata=%q", followUpRunID, stored.Metadata["latestThreadRun"])
+	}
+	runLogged := false
+	for _, entry := range fixture.app.memory.entriesOfKind(meetingMemoryKindRunLog, 50) {
+		if entry.Kind == "run_log" && entry.ID == "run-log-"+followUpRunID && entry.Metadata["artifactId"] == artifact.ID {
+			runLogged = true
+		}
+	}
+	if !runLogged {
+		t.Fatalf("follow-up run %q has no durable run ledger", followUpRunID)
+	}
+	var current STRIDEProductTeamAgent
+	err = fixture.runtime.WithProductContext(canonicalTenantID(), STRIDEProductScopeMarketplace, func(ctx STRIDEProductContext) error {
+		var found bool
+		current, found = ctx.Product.agentRecord(hired.ID)
+		if !found {
+			return ErrSTRIDEProductUnknown
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(current.Learning) != 1 {
+		t.Fatalf("learning=%+v, want one pending follow-up candidate", current.Learning)
+	}
+	learning := current.Learning[0]
+	if learning.Status != "pending" || learning.Origin != "completed_work" || learning.RunID != followUpRunID || learning.ArtifactID != artifact.ID || learning.SourceThreadID != directThreadID {
+		t.Fatalf("follow-up learning lineage=%+v", learning)
+	}
+}
+
 func TestAgentProfileIsReauthorizedAndCorrectedLearningReachesProviderPrompt(t *testing.T) {
 	fixture := newSTRIDEProjectAuthorityFixture(t)
 	directThreadID := strideProductAgentDirectThreadPrefix + "colton_reauthorize_test"

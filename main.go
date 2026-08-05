@@ -2218,7 +2218,7 @@ func assistantThreadFollowUpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	thread, err := kanbanApp.dispatchAuthorizedArtifactFollowUpWithAttachments(r.Context(), user, artifact, payload.Text, user.Name, nil, nil)
+	thread, err := kanbanApp.dispatchAuthorizedArtifactFollowUpWithAttachments(r.Context(), user, artifact, payload.Text, user.Name, nil, scoutChatThreadRecord{}, nil, "")
 	if err != nil {
 		writeAuthError(w, http.StatusBadRequest, err.Error())
 		return

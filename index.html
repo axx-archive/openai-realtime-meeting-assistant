@@ -48834,6 +48834,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         commit_push: 'Committing', verified: 'Verified'
       }
 
+      // The durable runner uses the full E0-E10 stage vocabulary while the
+      // visual rail keeps shorter stable ids. Normalize once so a completed
+      // runner stage can never fall through to an unrelated status label.
+      const goalStageAlias = {
+        identify_and_set_goal: 'identify_goal',
+        decompose_work: 'decompose',
+        assign_right_agent: 'assign',
+        coordinate_dependencies: 'coordinate',
+        review_against_original_goal: 'review_against_goal',
+        report_only_what_matters: 'report'
+      }
+
+      function normalizedGoalStage(value) {
+        const stage = String(value || '').trim()
+        return goalStageAlias[stage] || stage
+      }
+
       function isGoalArtifact(artifact) {
         const m = artifact?.metadata || {}
         return Boolean(m.goalPlan) || Boolean(m.goalId) || String(m.mode || '') === 'goal' || Boolean(m.goalStatus)
@@ -48846,10 +48863,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function goalStageIndex(currentStage, pct) {
-        const idx = goalStageDefs.findIndex(([stage]) => stage === currentStage)
+        const normalizedStage = normalizedGoalStage(currentStage)
+        const idx = goalStageDefs.findIndex(([stage]) => stage === normalizedStage)
         if (idx >= 0) return idx
-        if (currentStage === 'approval_required') return 6
-        if (currentStage === 'commit_push' || currentStage === 'verified') return goalStageDefs.length
+        if (normalizedStage === 'approval_required') return 6
+        if (normalizedStage === 'commit_push' || normalizedStage === 'verified') return goalStageDefs.length
         const value = Number(pct)
         if (Number.isFinite(value)) return Math.max(0, Math.min(goalStageDefs.length - 1, Math.floor(value / 100 * goalStageDefs.length)))
         return 0
@@ -48867,7 +48885,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // (the synthesized artifact has no reviewGate/currentStage), so all
         // three shapes must resolve to the parked terminal
         const planState = String(plan?.state || '').toLowerCase()
-        if (['complete', 'completed', 'published', 'verified', 'done'].includes(status) || ['complete', 'completed', 'verified', 'done'].includes(goalStatus) || stage === 'verified') return 'complete'
+        const statusIsRunning = ['running', 'queued', 'accepted'].includes(status)
+        if (['complete', 'completed', 'published', 'verified', 'done'].includes(status) || (!statusIsRunning && ['complete', 'completed', 'verified', 'done'].includes(goalStatus)) || stage === 'verified') return 'complete'
         // a human stopped it — quieter than failure (sheet 2d cancelled):
         // the plan's flag survives restarts; metadata mirrors it for
         // consumers holding only the artifact row
@@ -49186,7 +49205,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const detail = (state === 'gate' && pendingCheckpoint)
           ? String(pendingCheckpoint.question || '')
           : (state === 'running' && revisionNote) ? revisionNote : (running?.title || plan?.report?.headline || '')
-        const label = goalStageLabel[currentStage] || goalStageLabel[Object.keys(goalStageLabel)[currentIndex]] || 'Working'
+        const normalizedStage = normalizedGoalStage(currentStage)
+        const indexedStage = (goalStageDefs[Math.min(currentIndex, goalStageDefs.length - 1)] || [])[0]
+        const label = state === 'complete'
+          ? 'Delivered'
+          : state === 'cancelled'
+            ? 'Stopped'
+            : state === 'error'
+              ? 'Needs attention'
+              : goalStageLabel[normalizedStage] || goalStageLabel[indexedStage] || 'Working'
         const nextText = detail ? `${label} · ${detail}` : label
         if (stageLine && stageLine.textContent !== nextText) {
           stageLine.classList.add('is-swapping')

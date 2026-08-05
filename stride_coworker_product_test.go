@@ -558,6 +558,114 @@ func TestSTRIDECoworkerSettingsCanCreateCorrectAndForgetPrivateMemoryWithoutPubl
 	}
 }
 
+func TestAgentThreadFollowUpUsesCurrentCoworkerRelationshipLaneAcrossSharedAndRoomSurfaces(t *testing.T) {
+	fixture := newSTRIDECoworkerTestFixture(t)
+	fixture.runtime.mu.Lock()
+	fixture.runtime.config.RelationshipMemoryEnabled = true
+	fixture.runtime.mu.Unlock()
+	fixture.app.apiKey = "test-openai-key"
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	tim := accountStore().findUser("tim@shareability.com")
+	if tim == nil {
+		t.Fatal("seed user Tim missing")
+	}
+	timCookies := loginAs(t, tim.Email, "B0NFIRE!")
+	mux := http.NewServeMux()
+	registerSTRIDERuntimeRoutes(mux)
+	post := func(cookies []*http.Cookie, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		for _, cookie := range cookies {
+			req.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		mux.ServeHTTP(recorder, req)
+		return recorder
+	}
+	for label, cookies := range map[string][]*http.Cookie{"AJ": fixture.cookies, "Tim": timCookies} {
+		response := post(cookies, strideRuntimeAPIBase+"coworker/relationships/consent", `{"action":"enable","expectedRevision":0,"allowInferred":false,"allowShared":true}`)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s consent status=%d body=%s", label, response.Code, response.Body.String())
+		}
+	}
+
+	ajSource := fixture.commitUserMessage(t, "followup-aj-shared-source", "@scout remember AJ CHANNEL STYLE")
+	timSource := scoutChatMessageRecord{
+		ID: "followup-tim-shared-source", Kind: "message", Role: "user", Text: "@scout remember TIM CHANNEL STYLE",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), AuthorName: tim.Name, AuthorEmail: tim.Email,
+	}
+	if _, err := fixture.app.commitScoutChatThreadMessages(tim.Email, fixture.table.ID, timSource); err != nil {
+		t.Fatal(err)
+	}
+	ajRemember := post(fixture.cookies, strideRuntimeAPIBase+"coworker/relationships/remember", fmt.Sprintf(`{"action":"remember","expectedRevision":1,"threadId":%q,"sourceMessageId":%q,"preferenceType":"response_length","value":"AJ CHANNEL STYLE","scope":"shared"}`, fixture.table.ID, ajSource.ID))
+	if ajRemember.Code != http.StatusCreated {
+		t.Fatalf("AJ remember status=%d body=%s", ajRemember.Code, ajRemember.Body.String())
+	}
+	timRemember := post(timCookies, strideRuntimeAPIBase+"coworker/relationships/remember", fmt.Sprintf(`{"action":"remember","expectedRevision":1,"threadId":%q,"sourceMessageId":%q,"preferenceType":"response_length","value":"TIM CHANNEL STYLE","scope":"shared"}`, fixture.table.ID, timSource.ID))
+	if timRemember.Code != http.StatusCreated {
+		t.Fatalf("Tim shared remember status=%d body=%s", timRemember.Code, timRemember.Body.String())
+	}
+	timPrivate := post(timCookies, strideRuntimeAPIBase+"coworker/relationships/remember", `{"action":"remember","expectedRevision":2,"preferenceType":"feedback_style","value":"TIM PRIVATE STYLE","scope":"private"}`)
+	if timPrivate.Code != http.StatusCreated {
+		t.Fatalf("Tim private remember status=%d body=%s", timPrivate.Code, timPrivate.Body.String())
+	}
+
+	artifact, _, err := fixture.app.createOSArtifactWithMetadata("research", "Shared research", "# Initial report", fixture.user.Name, map[string]string{
+		"source": "scout_thread", "threadId": "agent-thread-current-human", "threadQuery": "Shared research",
+		"requestedBy": fixture.user.Email, "createdBy": fixture.user.Email, "originKind": agentThreadOriginChannel, "originId": fixture.table.ID,
+		"status": "complete", "threadStatus": "complete", "goalStatus": "verified", "threadVersion": "1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var captured openAITextRequest
+	previousAsync := startAgentThreadFollowUpAsync
+	startAgentThreadFollowUpAsync = func(runApp *kanbanBoardApp, run agentThreadFollowUpRun) {
+		runApp.runAgentThreadFollowUpWithResponder(run, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+			captured = request
+			return "# Revised report\n\nI incorporated Tim's direction.", nil
+		})
+	}
+	t.Cleanup(func() { startAgentThreadFollowUpAsync = previousAsync })
+
+	if _, err := fixture.app.dispatchAuthorizedArtifactFollowUpWithAttachments(context.Background(), tim, artifact, "tighten this for the channel", tim.Name, nil, fixture.table, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Authenticated requester: Tim", "TIM CHANNEL STYLE", "shared channel " + fixture.table.ID} {
+		if !strings.Contains(captured.Instructions, want) {
+			t.Fatalf("current-human channel instruction missing %q:\n%s", want, captured.Instructions)
+		}
+	}
+	for _, forbidden := range []string{"AJ CHANNEL STYLE", "TIM PRIVATE STYLE", "STRIDE private relationship context"} {
+		if strings.Contains(captured.Instructions, forbidden) {
+			t.Fatalf("channel follow-up leaked %q:\n%s", forbidden, captured.Instructions)
+		}
+	}
+	stored, ok := fixture.app.osArtifactByID(artifact.ID)
+	if !ok || stored.Metadata["requestedBy"] != fixture.user.Email || stored.Metadata["followUpBy"] != "Tim" {
+		t.Fatalf("durable authorship/follow-up provenance=%+v", stored.Metadata)
+	}
+
+	roomMetadata := map[string]string{
+		"requestedBy": fixture.user.Email, "originKind": agentThreadOriginRoom,
+		"originRoomId": officeRoomID, "originMeetingId": "meeting-current-human", "agentName": "Colton",
+	}
+	roomThread := agentThreadFollowUpThreadForRequester(scoutAgentThread{Mode: "research", Artifact: meetingMemoryEntry{Metadata: roomMetadata}}, tim.Email)
+	roomInstructions := fixture.app.agentThreadFollowUpInstructionsForThread(roomThread, 3)
+	for _, want := range []string{"Authenticated requester: Tim", "shared meeting meeting-current-human", "speaker-attributed meeting/company evidence"} {
+		if !strings.Contains(roomInstructions, want) {
+			t.Fatalf("current-human room instruction missing %q:\n%s", want, roomInstructions)
+		}
+	}
+	for _, forbidden := range []string{"TIM PRIVATE STYLE", "TIM CHANNEL STYLE", "STRIDE private relationship context"} {
+		if strings.Contains(roomInstructions, forbidden) {
+			t.Fatalf("room follow-up leaked %q:\n%s", forbidden, roomInstructions)
+		}
+	}
+}
+
 func TestSTRIDECoworkerRelationshipUsesAdvancingServerClockForMutationAndExpiry(t *testing.T) {
 	fixture := newSTRIDECoworkerTestFixture(t)
 	fixture.runtime.mu.Lock()

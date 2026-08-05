@@ -730,6 +730,161 @@ func TestAssistantThreadFollowUpEndpoint(t *testing.T) {
 	}
 }
 
+func TestSharedFollowUpRejectsOriginalRequestersPrivateFileForCurrentCoworker(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "test-openai-key"
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	aj := accountStore().findUser("aj@shareability.com")
+	tim := accountStore().findUser("tim@shareability.com")
+	if aj == nil || tim == nil {
+		t.Fatal("seed users missing")
+	}
+	channel, _, err := app.ensureScoutChatThread("followup-current-human-channel", aj.Email, aj.Name, "Current human", scoutChatVisibilityPublic, []string{tim.Email})
+	if err != nil {
+		t.Fatal(err)
+	}
+	private, _, err := app.memory.appendEntry(meetingMemoryKindFile, "followup-aj-private-file", "AJ-ONLY-SOURCE-CANARY", map[string]string{
+		"name": "AJ private source.txt", "origin": "files", "brainStatus": fileBrainStatusIngested,
+		"visibility": "private", "ownerEmail": aj.Email, "tenantId": canonicalArtifactTenantID(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, _, err := app.createOSArtifactWithMetadata("research", "Shared research", "# Initial report", aj.Name, map[string]string{
+		"source": "scout_thread", "threadId": "agent-thread-current-human-source", "threadQuery": "Shared research",
+		"requestedBy": aj.Email, "createdBy": aj.Email, "originKind": agentThreadOriginChannel, "originId": channel.ID,
+		"contextRefs": encodeAssistantContextRefs([]string{assistantFileContextRef(private.ID)}),
+		"status":      "complete", "threadStatus": "complete", "goalStatus": "verified", "threadVersion": "1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var capturedRun agentThreadFollowUpRun
+	previousAsync := startAgentThreadFollowUpAsync
+	startAgentThreadFollowUpAsync = func(_ *kanbanBoardApp, run agentThreadFollowUpRun) { capturedRun = run }
+	t.Cleanup(func() { startAgentThreadFollowUpAsync = previousAsync })
+
+	if _, err := app.dispatchAuthorizedArtifactFollowUpWithAttachments(context.Background(), tim, artifact, "tighten this", tim.Name, nil, channel, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	providerCalls := 0
+	app.runAgentThreadFollowUpWithResponder(capturedRun, func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
+		providerCalls++
+		return "provider must not run", nil
+	})
+	if providerCalls != 0 {
+		t.Fatalf("provider calls=%d, want zero after current-human source reauthorization", providerCalls)
+	}
+	stored, ok := app.osArtifactByID(artifact.ID)
+	if !ok || !strings.Contains(stored.Metadata["followUpError"], "referenced File") || strings.Contains(stored.Text, "provider must not run") {
+		t.Fatalf("source-denied follow-up=%+v", stored)
+	}
+}
+
+func TestFollowUpAttachmentRevokedBeforeProviderMakesZeroCalls(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "test-openai-key"
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seed user missing")
+	}
+	destination, err := app.createScoutChatThread(user.Email, user.Name, "Revoked follow-up", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := putBlob(tinyPNG(t), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const reservationID = "followup-provider-admission-revocation"
+	file := reserveTestAttachment(t, app, user, destination, scoutChatFileAttachment{Name: "decision.png", Kind: "png", Ref: ref}, reservationID)
+	artifact, _, err := app.createOSArtifactWithMetadata("research", "Review the decision image", "# Initial report", user.Name, map[string]string{
+		"source": "scout_thread", "threadId": "agent-thread-revoked-attachment", "threadQuery": "Review the decision image",
+		"requestedBy": user.Email, "createdBy": user.Email, "originKind": agentThreadOriginPrivateThread, "originId": destination.ID,
+		"status": "complete", "threadStatus": "complete", "goalStatus": "verified", "threadVersion": "1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var capturedRun agentThreadFollowUpRun
+	previousAsync := startAgentThreadFollowUpAsync
+	startAgentThreadFollowUpAsync = func(_ *kanbanBoardApp, run agentThreadFollowUpRun) { capturedRun = run }
+	t.Cleanup(func() { startAgentThreadFollowUpAsync = previousAsync })
+
+	if _, err := app.dispatchAuthorizedArtifactFollowUpWithAttachments(context.Background(), user, artifact, "use this image", user.Name, nil, destination, []scoutChatFileAttachment{file}, reservationID); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.revokeAttachmentSource(file.SourceID); err != nil {
+		t.Fatal(err)
+	}
+	providerCalls := 0
+	app.runAgentThreadFollowUpWithResponder(capturedRun, func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
+		providerCalls++
+		return "provider must not run", nil
+	})
+	if providerCalls != 0 {
+		t.Fatalf("provider calls=%d, want zero after source revocation", providerCalls)
+	}
+	stored, ok := app.osArtifactByID(artifact.ID)
+	if !ok || !strings.Contains(stored.Metadata["followUpError"], "attachment authorization changed") || stored.Text != artifact.Text {
+		t.Fatalf("revoked attachment follow-up=%+v", stored)
+	}
+}
+
+func TestFollowUpAttachmentCommittedBeforeAsyncWorkerStillAuthorizes(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+	app.apiKey = "test-openai-key"
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	user := accountStore().findUser("aj@shareability.com")
+	destination, err := app.createScoutChatThread(user.Email, user.Name, "Committed follow-up", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := putBlob(tinyPNG(t), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := grantTestPendingAttachment(t, app, user, destination, ref)
+	file.Name, file.Kind = "decision.png", "png"
+	artifact, _, err := app.createOSArtifactWithMetadata("research", "Review the decision image", "# Initial report", user.Name, map[string]string{
+		"source": "scout_thread", "threadId": "agent-thread-committed-attachment", "threadQuery": "Review the decision image",
+		"requestedBy": user.Email, "createdBy": user.Email, "originKind": agentThreadOriginPrivateThread, "originId": destination.ID,
+		"status": "complete", "threadStatus": "complete", "goalStatus": "verified", "threadVersion": "1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var capturedRun agentThreadFollowUpRun
+	previousAsync := startAgentThreadFollowUpAsync
+	startAgentThreadFollowUpAsync = func(_ *kanbanBoardApp, run agentThreadFollowUpRun) { capturedRun = run }
+	t.Cleanup(func() { startAgentThreadFollowUpAsync = previousAsync })
+	if _, err := app.appendScoutChatThreadMessage(context.Background(), user, destination.ID, "use this image", []scoutChatFileAttachment{file}, artifact.ID); err != nil {
+		t.Fatal(err)
+	}
+	app.pendingAttachmentUploadsMu.Lock()
+	grant := app.pendingAttachmentUploads[file.SourceID]
+	app.pendingAttachmentUploadsMu.Unlock()
+	if grant.State != attachmentSourceCommitted || grant.CommittedMessageID == "" {
+		t.Fatalf("follow-up source was not committed before worker: %+v", grant)
+	}
+	providerCalls := 0
+	app.runAgentThreadFollowUpWithResponder(capturedRun, func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
+		providerCalls++
+		return "# Revised report\n\nI used the authorized attachment.", nil
+	})
+	stored, ok := app.osArtifactByID(artifact.ID)
+	if providerCalls != 1 || !ok || stored.Metadata["status"] != "complete" || !strings.Contains(stored.Text, "authorized attachment") {
+		t.Fatalf("committed attachment follow-up calls=%d stored=%+v", providerCalls, stored)
+	}
+}
+
 // Wave 6 Gate B: a follow-up on a GOAL deliverable (here the goal card itself,
 // dropped into a fresh public channel while the goal is parked at its
 // checkpoint) routes to the goal engine as a feedback-driven send-back — the
