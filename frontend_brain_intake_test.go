@@ -70,7 +70,7 @@ func TestIndexBrainIntakePlaceholderIsGuided(t *testing.T) {
 	}
 	// The other two placeholders survive (the private copy is the topline-polish
 	// wave's "tap + to run a task" line the intake branch layers onto).
-	if !strings.Contains(body, "message the thread — @scout to ask") || !strings.Contains(body, "`ask ${directAgent || 'Scout'}, or tap + to run a task`") {
+	if !strings.Contains(body, "message the thread") || strings.Contains(body, "message the thread — @scout to ask") || !strings.Contains(body, "`ask ${directAgent || 'Scout'}, or tap + to run a task`") {
 		t.Fatal("scoutChatDefaultPlaceholder dropped an existing placeholder")
 	}
 }

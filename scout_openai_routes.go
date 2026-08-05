@@ -85,7 +85,7 @@ func scoutRouterJSONSchema() *openAIJSONSchema {
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"route":          map[string]any{"type": "string", "enum": []string{"inline", "tool_run", "workstream", "goal_run", "image", "choices"}},
+				"route":          map[string]any{"type": "string", "enum": []string{"inline", "app_action", "tool_run", "workstream", "goal_run", "image", "choices"}},
 				"tool_id":        stringField(),
 				"mode":           map[string]any{"type": "string", "enum": []string{"", "research", "design", "grill", "workflow"}},
 				"objective":      stringField(),
@@ -126,11 +126,15 @@ func scoutRouterInstructions() string {
 	}
 	return scoutRouterSystemPrompt() + strings.Join([]string{
 		"",
+		"Native Stride app actions (for route=app_action):",
+		scoutNativeActionInstructions(),
+		"",
 		"Registry routes (tool_id must be one exact id from this list):",
 		strings.Join(registry, "\n"),
 		"",
 		"Return the strict JSON route object, not prose and not a function call.",
 		"route=inline for Tier 0; leave every other field empty and arrays empty.",
+		"route=app_action for a native Stride operation; set tool_id to one exact native action id and fields to its named arguments. Never use this route for research, a deliverable, or a goal.",
 		"route=tool_run for a registry tool; set tool_id, objective, package_id when known, and fields as key/value pairs.",
 		"route=workstream for a bounded pass; set mode and objective.",
 		"route=goal_run for a multi-step goal; set objective, package_id when known, and authority_hint to read_only or workspace_write.",
@@ -158,6 +162,12 @@ func scoutRouterVerdictFromOpenAI(output openAIScoutRouterOutput, query string) 
 	switch strings.ToLower(strings.TrimSpace(output.Route)) {
 	case "inline":
 		return nil, nil
+	case "app_action":
+		action, err := scoutNativeActionFromRouter(output)
+		if err != nil {
+			return nil, err
+		}
+		return &scoutRouterVerdict{action: action, source: proposalSourceChatRouter}, nil
 	case "tool_run":
 		proposal := scoutRouterProposalForToolID(output.ToolID, output.Objective, query)
 		if proposal == nil {

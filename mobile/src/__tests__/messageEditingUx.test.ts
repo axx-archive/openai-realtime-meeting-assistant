@@ -30,6 +30,22 @@ test('focused drafting uses the native text layer and editing gets a full-height
   assert.match(thread, /\{editingMessage \? \(/);
 });
 
+test('public channels expose an explicit Scout mention shortcut that inserts and focuses without sending', () => {
+  const composer = source('src', 'messaging', 'MentionComposerInput.tsx');
+  const thread = source('src', 'screens', 'ThreadScreen.tsx');
+
+  assert.match(composer, /export type MentionComposerInputHandle/);
+  assert.match(composer, /focus: \(\) => textInputRef\.current\?\.focus\(\)/);
+  assert.match(thread, /threadVisibility === 'public'/);
+  assert.match(thread, /accessibilityLabel="Ask Scout in this channel"/);
+  assert.match(thread, /changeDraft\(next\)/);
+  assert.match(thread, /composerInputRef\.current\?\.focus\(\)/);
+  const start = thread.indexOf('const insertScoutMention = useCallback');
+  const end = thread.indexOf('useEffect(() => () => stopTyping()', start);
+  assert.ok(start >= 0 && end > start);
+  assert.doesNotMatch(thread.slice(start, end), /\bsend\(/);
+});
+
 test('threaded replies expose owned edit and delete actions without relying on a hidden long press', () => {
   const detail = source('src', 'messaging', 'ThreadDetailSheet.tsx');
   const thread = source('src', 'screens', 'ThreadScreen.tsx');

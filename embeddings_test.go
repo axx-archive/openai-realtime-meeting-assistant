@@ -112,7 +112,7 @@ func TestEmbeddingEligibilityAllowlistAndPrivacyPin(t *testing.T) {
 	eligible := []string{
 		meetingMemoryKindBrain, meetingMemoryKindMeetingDigest, meetingMemoryKindDayDigest,
 		meetingMemoryKindCompanyDigest, meetingMemoryKindNarrative, meetingMemoryKindDecision,
-		meetingMemoryKindReflection, meetingMemoryKindRunLog, meetingMemoryKindNote,
+		meetingMemoryKindReflection, meetingMemoryKindRunLog, meetingMemoryKindNote, meetingMemoryKindFile,
 	}
 	for _, kind := range eligible {
 		entry := meetingMemoryEntry{ID: "e-" + kind, Kind: kind, Text: "Some consolidated knowledge about pricing."}
@@ -147,6 +147,24 @@ func TestEmbeddingEligibilityAllowlistAndPrivacyPin(t *testing.T) {
 	running := meetingMemoryEntry{ID: "art-2", Kind: meetingMemoryKindOSArtifact, Text: "…", Metadata: map[string]string{"threadStatus": "running"}}
 	if embeddingEligible(running) {
 		t.Fatal("a running artifact scaffold must not be embeddable")
+	}
+}
+
+func TestReadableDriveFileEntersSemanticCorpusWithoutEmbeddingChatThreads(t *testing.T) {
+	spy := &spyEmbedder{inner: conceptEmbedder(4)}
+	idx := testIndex(t, 4, spy.fn())
+	entries := []meetingMemoryEntry{
+		{ID: "file-1", Kind: meetingMemoryKindFile, Text: "Ball Dogs distribution plan for the hallyu market.", Metadata: map[string]string{"brainStatus": fileBrainStatusIngested}},
+		{ID: "chat-1", Kind: meetingMemoryKindScoutChat, Text: "private hallyu conversation"},
+	}
+	if _, _, err := idx.reconcile(context.Background(), entries, 100); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if !indexHasID(idx, "file-1") {
+		t.Fatal("readable Drive file was not semantically indexed")
+	}
+	if indexHasID(idx, "chat-1") {
+		t.Fatal("chat thread leaked into the semantic corpus")
 	}
 }
 

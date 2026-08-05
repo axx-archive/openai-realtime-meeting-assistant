@@ -163,6 +163,14 @@ func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 		// Deliberate-write path (memory study 2.1): file an author-certain note
 		// into company memory; the private user owns filing their own notes.
 		"note_for_the_record": true,
+		// Requester-bound Chat and Drive controls are private-user actions. They
+		// are appended only to this session and never leak into shared room voice.
+		"archive_channel":    true,
+		"rename_channel":     true,
+		"create_file_folder": true,
+		"rename_file_folder": true,
+		"delete_file_folder": true,
+		"delete_file":        true,
 	}
 	for _, tool := range tools {
 		name, _ := tool["name"].(string)

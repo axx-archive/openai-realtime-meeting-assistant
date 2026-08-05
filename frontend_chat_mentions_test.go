@@ -93,3 +93,32 @@ func TestIndexMentionHighlightInMessageRenderer(t *testing.T) {
 		t.Fatal("appendChatMentionTextNodes must never touch innerHTML")
 	}
 }
+
+func TestIndexPublicChannelHasVisibleScoutMentionShortcut(t *testing.T) {
+	html := readIndexForChatMentions(t)
+	for _, want := range []string{
+		`id="scoutChatScoutMention"`,
+		`>@Scout</button>`,
+		"scoutChatScoutMention?.addEventListener('click', insertChannelScoutMention)",
+		"function insertChannelScoutMention()",
+		"!chatThreadIsChannel(selectedScoutChatThread())",
+		"scoutChatScoutMention.hidden = !isChannel",
+		"scoutChatInput.focus()",
+		"scoutChatInput.setSelectionRange(caret, caret)",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing public-channel Scout shortcut hook %q", want)
+		}
+	}
+	start := strings.Index(html, "function insertChannelScoutMention()")
+	end := strings.Index(html[start:], "function resizeRoomChatInput()")
+	if start < 0 || end < 0 {
+		t.Fatal("cannot scope channel Scout mention insertion")
+	}
+	if strings.Contains(html[start:start+end], "sendScoutChatFromForm") || strings.Contains(html[start:start+end], ".submit(") {
+		t.Fatal("Scout mention shortcut must insert and focus without sending")
+	}
+	if strings.Contains(html, "message the thread — @scout to ask") {
+		t.Fatal("the visible @Scout shortcut must not be duplicated by instructional placeholder copy")
+	}
+}

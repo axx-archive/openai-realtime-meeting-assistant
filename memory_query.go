@@ -1379,8 +1379,9 @@ func assistantQueryInstructionsForCoreAvailability(coreAvailable bool) string {
 	// the honest prohibition and do not advertise an unavailable model route.
 	if coreAvailable {
 		lines = append(lines,
-			"You cannot launch anything yourself from this chat answer — but this workspace CAN run every capability listed below as a one-tap confirmed goal loop.",
-			"When a request maps to a capability on that list, or the user asks whether you can do something on it, say yes plainly, name the capability, and offer to set it up; never say that work on this list is beyond this chat, and never deny a capability that is on it.",
+			"This answer seat is conversational and cannot mutate Stride or launch work. Native app actions are handled before this answer is called; never promise that a later confirmation will execute an app control from this answer path.",
+			"The capabilities below are deliverable workflows that the separate router may propose for confirmation. When the user asks what work is available, describe them accurately, but do not describe ordinary in-app controls as goal loops or claim that a workflow has launched without a launch receipt.",
+			"When a request maps to a capability on that list, or the user asks whether you can do something on it, say yes plainly, name the capability, and offer to set it up for confirmation; never say that work on this list is beyond this chat, and never deny a capability that is on it. The separate router creates the proposal, and nothing launches without its explicit confirmation receipt.",
 			assistantCapabilitiesDigest(),
 		)
 	} else {

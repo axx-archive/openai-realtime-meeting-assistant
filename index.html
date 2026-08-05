@@ -1064,8 +1064,8 @@
 
       .topbar__organization-label {
         color: var(--text-3);
-        font: 600 8.5px/1.1 var(--font-sans);
-        letter-spacing: 0.095em;
+        font: 600 9.5px/1.1 var(--font-sans);
+        letter-spacing: 0.08em;
         text-transform: uppercase;
       }
 
@@ -1084,7 +1084,7 @@
       }
 
       .topbar__heading {
-        font: 600 14.5px var(--font-sans);
+        font: 600 13px/1.2 var(--font-sans);
         letter-spacing: -0.01em;
         color: var(--text-1);
         white-space: nowrap;
@@ -1098,9 +1098,9 @@
       /* Mono is the machine voice — timestamps, counts, tags, status. This is
          descriptive prose and appears on every screen, so it reads as sans. */
       .topbar__subtitle {
-        font: var(--type-caption);
-        letter-spacing: var(--track-text);
-        color: var(--text-2);
+        font: 600 9.5px/1.1 var(--font-sans);
+        letter-spacing: 0.02em;
+        color: var(--text-3);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -1200,55 +1200,9 @@
         max-width: 100%;
       }
 
-      .topbar__copy-link {
-        display: inline-flex;
-        align-items: center;
-        gap: var(--sp-2);
-        height: 32px;
-        padding: 0 12px;
-        border: 1px solid transparent;
-        border-radius: var(--r-md);
-        background: transparent;
-        color: var(--text-2);
-        font: var(--type-caption-medium);
-        letter-spacing: var(--track-text);
-        white-space: nowrap;
-        transition:
-          background var(--dur-fast) var(--ease),
-          color var(--dur-fast) var(--ease);
-      }
-      .topbar__copy-link:hover {
-        background: var(--surface-3);
-        color: var(--text-1);
-      }
-      .topbar__copy-link:active {
-        transform: scale(var(--press-scale));
-      }
-      .topbar__copy-link svg {
-        flex: none;
-      }
-      #appShell:not(.is-in-room) .topbar__copy-link {
-        display: none;
-      }
-      /* kit TopBar for Chat/Memory passes no actions — only the status pill */
-      #appShell[data-tool="chat"] .topbar__copy-link,
-      #appShell[data-tool="memory"] .topbar__copy-link,
-      #appShell[data-tool="files"] .topbar__copy-link,
-      #appShell[data-tool="artifacts"] .topbar__copy-link {
-        display: none;
-      }
-
-      /* in-call room identity — quiet lowercase mono in the old copy-link
-         slot; the stage meta keeps the meeting title/clock */
-      .topbar__room-name {
-        flex: none;
-        color: var(--text-3);
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
-        text-transform: lowercase;
-        white-space: nowrap;
-      }
-      #appShell:not(.is-in-room) .topbar__room-name {
+      /* The room carries connection and recording state in its meeting dock.
+         Keep the header to identity only instead of repeating that state. */
+      #appShell[data-tool="room"] #statusPill {
         display: none;
       }
 
@@ -1801,6 +1755,13 @@
       .video-tile.is-video-stalled video,
       .video-tile.is-stage-video-owned video {
         opacity: 0;
+      }
+
+      /* Camera-off people remain audible in the room presence bar; their
+         parked media element stays mounted for instant camera recovery but
+         never consumes a black gallery seat. */
+      .video-tile.is-audio-only-presence {
+        display: none;
       }
 
       .tile-avatar .owner-avatar {
@@ -13698,30 +13659,31 @@
       }
 
       .room-chat__scout-mention {
-        min-width: 62px;
-        height: 32px;
+        min-width: 72px;
+        height: 40px;
         flex: none;
         display: inline-flex;
         align-items: center;
         justify-content: center;
         padding: 0 10px;
-        border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line-1));
+        border: 0;
         border-radius: var(--r-full);
         background: var(--accent-soft);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent);
         color: var(--text-1);
         font: 650 12px/1 var(--font-sans);
         letter-spacing: -0.01em;
         cursor: pointer;
-        transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+        transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
       }
 
       .room-chat__scout-mention:hover:not([disabled]) {
-        border-color: color-mix(in srgb, var(--accent) 58%, var(--line-1));
         background: color-mix(in srgb, var(--accent) 18%, var(--surface-3));
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 58%, transparent);
       }
 
       .room-chat__scout-mention:active:not([disabled]) {
-        transform: scale(var(--press-scale));
+        transform: scale(0.96);
       }
 
       .room-chat__scout-mention[disabled] {
@@ -19986,15 +19948,6 @@
         display: inline-flex;
       }
 
-      #appShell:not(.is-in-room) #topbarBoard {
-        display: none;
-      }
-
-      .topbar__copy-link[disabled] {
-        opacity: 0.4;
-        cursor: not-allowed;
-      }
-
       .stage-segmented button:hover,
       .stage-tool:hover:not([disabled]) {
         color: var(--text-1);
@@ -20293,10 +20246,10 @@
         box-shadow: none;
       }
 
-      /* Agents are audible collaborators, not pretend camera feeds. The bench
-         reserves a compact strip beneath the human video grid and gives each
-         invited personality a stable color plus an honest live state. */
-      .room-agent-bench {
+      /* Audio presence is compact and honest: camera-on people keep video
+         seats; camera-off people and agents share this voice bar instead of
+         pretending to be black camera feeds. Agents are ember, humans silver. */
+      .room-presence-bar {
         position: relative;
         z-index: 6;
         display: flex;
@@ -20317,29 +20270,15 @@
         scrollbar-width: none;
       }
 
-      .room-agent-bench[hidden] {
+      .room-presence-bar[hidden] {
         display: none;
       }
 
-      .room-agent-bench::-webkit-scrollbar {
+      .room-presence-bar::-webkit-scrollbar {
         display: none;
       }
 
-      .room-agent-bench__heading {
-        display: flex;
-        flex: none;
-        align-items: center;
-        gap: 6px;
-        padding: 0 5px;
-        color: rgba(255, 255, 255, 0.58);
-        font: 650 9px/1 var(--font-sans);
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        white-space: nowrap;
-      }
-
-      .room-agent-bench__heading-dot,
-      .room-agent-bench__dot {
+      .room-presence-bar__dot {
         width: 6px;
         height: 6px;
         flex: none;
@@ -20347,8 +20286,8 @@
         background: currentColor;
       }
 
-      .room-agent-bench__member {
-        --room-agent-color: var(--ember);
+      .room-presence-bar__member {
+        --room-presence-color: var(--ember);
         display: grid;
         grid-template-columns: auto minmax(0, 1fr) auto;
         align-items: center;
@@ -20356,42 +20295,46 @@
         min-width: 176px;
         height: 42px;
         padding: 5px 9px;
-        border: 1px solid color-mix(in srgb, var(--room-agent-color) 30%, rgba(255, 255, 255, 0.08));
+        border: 1px solid color-mix(in srgb, var(--room-presence-color) 30%, rgba(255, 255, 255, 0.08));
         border-radius: 13px;
-        background: color-mix(in srgb, var(--room-agent-color) 8%, rgba(255, 255, 255, 0.05));
-        color: var(--room-agent-color);
+        background: color-mix(in srgb, var(--room-presence-color) 8%, rgba(255, 255, 255, 0.05));
+        color: var(--room-presence-color);
       }
 
-      .room-agent-bench__copy {
+      .room-presence-bar__member[data-person-type="human"] {
+        min-width: 164px;
+      }
+
+      .room-presence-bar__copy {
         min-width: 0;
       }
 
-      .room-agent-bench__name,
-      .room-agent-bench__state {
+      .room-presence-bar__name,
+      .room-presence-bar__state {
         display: block;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
 
-      .room-agent-bench__name {
+      .room-presence-bar__name {
         color: #fff;
         font: 650 11.5px/1.1 var(--font-sans);
       }
 
-      .room-agent-bench__state {
+      .room-presence-bar__state {
         margin-top: 3px;
         color: rgba(255, 255, 255, 0.56);
         font: 500 9.5px/1 var(--font-sans);
       }
 
-      .room-agent-bench__member[data-voice-state="talking"] .room-agent-bench__state {
-        color: var(--room-agent-color);
+      .room-presence-bar__member[data-voice-state="talking"] .room-presence-bar__state {
+        color: var(--room-presence-color);
       }
 
-      /* Every invited agent owns a stable 21-bar voice signature. Only real
-         speech animates; listening and thinking remain legible but calm. */
-      .room-agent-waveform {
+      /* Every audio participant owns a stable 21-bar voice signature. Only
+         real speech animates; idle, muted, listening, and thinking stay calm. */
+      .room-presence-waveform {
         position: relative;
         display: flex;
         align-items: center;
@@ -20399,11 +20342,11 @@
         gap: 1px;
         width: 44px;
         height: 22px;
-        color: var(--room-agent-color);
+        color: var(--room-presence-color);
         filter: drop-shadow(0 3px 7px color-mix(in srgb, currentColor 20%, transparent));
       }
 
-      .room-agent-waveform__bar {
+      .room-presence-waveform__bar {
         width: 1px;
         height: 100%;
         flex: 0 0 1px;
@@ -20415,28 +20358,28 @@
         will-change: transform, opacity;
       }
 
-      .room-agent-bench__member[data-voice-state="hearing"] .room-agent-waveform__bar {
+      .room-presence-bar__member[data-voice-state="hearing"] .room-presence-waveform__bar {
         opacity: 0.78;
       }
 
-      .room-agent-bench__member[data-voice-state="thinking"] .room-agent-waveform {
+      .room-presence-bar__member[data-voice-state="thinking"] .room-presence-waveform {
         opacity: 0.72;
       }
 
-      .room-agent-bench__member[data-voice-state="talking"] .room-agent-waveform__bar {
-        animation: room-agent-waveform-talk 1120ms linear infinite;
+      .room-presence-bar__member[data-voice-state="talking"] .room-presence-waveform__bar {
+        animation: room-presence-waveform-talk 1120ms linear infinite;
         animation-delay: var(--agent-wave-delay);
         opacity: 1;
       }
 
-      @keyframes room-agent-waveform-talk {
+      @keyframes room-presence-waveform-talk {
         0%, 100% { transform: scaleY(var(--agent-wave-rest)); opacity: 0.76; }
         32% { transform: scaleY(var(--agent-wave-peak)); opacity: 1; }
         64% { transform: scaleY(var(--agent-wave-mid)); opacity: 0.88; }
       }
 
       @media (prefers-reduced-motion: reduce) {
-        .room-agent-waveform__bar {
+        .room-presence-waveform__bar {
           animation: none !important;
         }
       }
@@ -22799,8 +22742,6 @@
 
         /* extra id weight — the authed topbar re-shows its pill at (1-3-1) */
         .topbar__meta,
-        #appShell #topbarBoard,
-        #appShell #topbarRoomName,
         #appShell #statusPill {
           display: none;
         }
@@ -26511,14 +26452,12 @@
 
       /* #14 copy-link confirm — the label swaps to "copied ✓"; the link glyph
          cross-fades down as the check reads in the text. No bounce. */
-      .topbar__copy-link svg,
       .deal-room__copy svg {
         transition:
           opacity var(--dur-fast) var(--ease),
           transform var(--dur-fast) var(--ease),
           filter var(--dur-fast) var(--ease);
       }
-      .topbar__copy-link.is-copied svg,
       .deal-room__copy.is-copied svg {
         opacity: 0;
         transform: scale(0.55);
@@ -26637,7 +26576,6 @@
       #appShell.is-authed[data-tool="team"] .scout-rail,
       #appShell.is-authed[data-tool="team"] .board-rail,
       #appShell.is-authed[data-tool="team"] .meeting-bar { display: none !important; }
-      #appShell[data-tool="team"] .topbar__copy-link,
       #appShell[data-tool="team"] .stage-toolbar,
       #appShell[data-tool="team"] .topbar__meta > :not(#topbarToolMeta) { display: none !important; }
       #appShell.is-authed[data-tool="team"] .workspace {
@@ -27032,7 +26970,7 @@
            one place the geometry is computed. The hover scale goes too, since a
            held-open pose is not something the visitor can dismiss. */
         .office-launch__cradle { transform: none; transition: none; }
-        .room-agent-waveform__bar,
+        .room-presence-waveform__bar,
         .room-scout-quick__cradle span { animation: none !important; }
         .voice-ledger { animation: none; }
         /* Private grill (Wave 12): keep every act's STATE (tone, color, content),
@@ -27256,14 +27194,6 @@
             <span id="topbarMobileAvatarInitials">TC</span>
           </span>
         </button>
-        <button id="topbarBoard" class="topbar__copy-link" type="button" disabled>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="M9 3v18"></path><path d="M15 3v18"></path></svg>
-          Board
-        </button>
-        <!-- the copy-link slot names the ROOM in-call (meeting identity stays
-             on the stage meta); link sharing moved to the meeting bar's
-             Invite popover -->
-        <span id="topbarRoomName" class="topbar__room-name"></span>
         <span id="statusPill" class="pill pill--idle" role="status" aria-live="polite">
           <span class="pill__dot"></span>
           <span id="statusText">not connected</span>
@@ -27768,7 +27698,7 @@
                   <span id="localVideoLabel" class="video-label">you</span>
                 </div>
               </div>
-              <div id="roomAgentBench" class="room-agent-bench" aria-label="Agents in the room" hidden></div>
+              <div id="roomPresenceBar" class="room-presence-bar" aria-label="Audio presence in the room" hidden></div>
             </div>
           </div>
         </section>
@@ -27900,6 +27830,7 @@
                   <path d="M4 7a2 2 0 0 1 2-2h3l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"></path>
                 </svg>
               </button>
+              <button id="scoutChatScoutMention" class="room-chat__scout-mention" type="button" aria-label="Mention Scout in this channel" title="Ask Scout in this channel" hidden disabled>@Scout</button>
               <textarea id="scoutChatInput" class="scout-chat-input" rows="1" autocomplete="off" placeholder="ask Scout about any meeting" aria-label="Message Scout privately" disabled></textarea>
               <button id="scoutChatSend" class="scout-chat-send" type="submit" aria-label="Send" title="Send" disabled>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -29540,7 +29471,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const boardPreview = document.getElementById('boardPreview')
       const boardPreviewState = document.getElementById('boardPreviewState')
       const expandBoardButton = document.getElementById('expandBoard')
-      const topbarBoardButton = document.getElementById('topbarBoard')
       const collapseBoardButton = document.getElementById('collapseBoard')
       const boardHuddle = document.getElementById('boardHuddle')
       const boardVideoStrip = document.getElementById('boardVideoStrip')
@@ -29624,7 +29554,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const videoLookBatteryNote = document.getElementById('videoLookBatteryNote')
       const screenShareButton = document.getElementById('screenShare')
       const inviteToggleButton = document.getElementById('inviteToggle')
-      const topbarRoomNameEl = document.getElementById('topbarRoomName')
       const recordMeetingButton = document.getElementById('recordMeeting')
       const recordMeetingLabel = recordMeetingButton.querySelector('.record-label')
       const archiveMeetingButton = document.getElementById('archiveMeeting')
@@ -29690,7 +29619,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const localTileAvatar = document.getElementById('localTileAvatar')
       const localVideoLabel = document.getElementById('localVideoLabel')
       const videoStack = document.getElementById('videoStack')
-      const roomAgentBench = document.getElementById('roomAgentBench')
+      const roomPresenceBar = document.getElementById('roomPresenceBar')
       const waitingParticipants = document.getElementById('waitingParticipants')
       const participantAvatarStack = document.getElementById('participantAvatarStack')
       const toastRegion = document.getElementById('toastRegion')
@@ -29808,6 +29737,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      const scoutChatPendingFiles = document.getElementById('scoutChatPendingFiles')
 	      const scoutFollowUpTargetEl = document.getElementById('scoutFollowUpTarget')
 	      const scoutChatDestination = document.getElementById('scoutChatDestination')
+	      const scoutChatScoutMention = document.getElementById('scoutChatScoutMention')
 	      const scoutChatInput = document.getElementById('scoutChatInput')
 	      const scoutChatSend = document.getElementById('scoutChatSend')
 	      const scoutChatToolsBtn = document.getElementById('scoutChatToolsBtn')
@@ -31195,7 +31125,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
       newCardButton.addEventListener('click', () => showCardEditor())
       undoDeleteButton.addEventListener('click', undoDeleteTicket)
       expandBoardButton.addEventListener('click', () => setBoardExpanded(true))
-      topbarBoardButton.addEventListener('click', () => setBoardExpanded(!appShell.classList.contains('is-board-expanded')))
       // header live pill → back to the room
       topbarLivePill?.addEventListener('click', () => setActiveTool('room'))
       // mobile header (design §1): back chevron leaves the intel sub-screen,
@@ -31443,6 +31372,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       })
       roomChatForm.addEventListener('submit', sendRoomChatFromForm)
       roomChatScoutMention?.addEventListener('click', insertRoomScoutMention)
+      scoutChatScoutMention?.addEventListener('click', insertChannelScoutMention)
       roomChatInput.addEventListener('input', resizeRoomChatInput)
       roomChatInput.addEventListener('keydown', event => {
         if (event.isComposing || event.keyCode === 229) {
@@ -40831,7 +40761,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       }
 
       function stageParticipantDisplayName() {
-        const names = visibleParticipantNames()
+        const names = videoParticipantNames()
         if (pinnedSpeakerName && names.includes(pinnedSpeakerName)) {
           return pinnedSpeakerName
         }
@@ -40850,7 +40780,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
       }
 
       function updateRoomGridMetrics() {
-        const count = Array.from(videoStack.querySelectorAll(':scope > .video-tile:not(.video-drag-slot)')).length
+        const count = Array.from(videoStack.querySelectorAll(':scope > .video-tile:not(.video-drag-slot)'))
+          .filter(tile => !tile.hidden).length
         hearthStage.dataset.participantCount = String(count)
         hearthStage.style.setProperty('--mobile-strip-count', String(Math.max(1, count - 1)))
         hearthStage.dataset.gridSize = count <= 1
@@ -40871,7 +40802,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       }
 
       function defaultStageParticipantName() {
-        const names = visibleParticipantNames().filter(name => name && name !== 'the room')
+        const names = videoParticipantNames().filter(name => name && name !== 'the room')
         if (currentParticipantName && names.includes(currentParticipantName)) {
           return currentParticipantName
         }
@@ -40883,7 +40814,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       }
 
       function reconcileStageLayoutState() {
-        if (pinnedSpeakerName && !visibleParticipantNames().includes(pinnedSpeakerName)) {
+        if (pinnedSpeakerName && !videoParticipantNames().includes(pinnedSpeakerName)) {
           pinnedSpeakerName = ''
         }
         const layout = currentRoomLayout()
@@ -44649,14 +44580,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             ? `in room · ${Math.max(1, occupiedSeats, participantsInRoom.length)}`
             : 'waiting room'
         }
-        // in-call the topbar names the ROOM (meeting identity stays on the
-        // stage meta) — activeJoinRoomRecord() with the office fallback
-        if (topbarRoomNameEl) {
-          topbarRoomNameEl.textContent = roomMediaActive()
-            ? (String(activeJoinRoomRecord()?.name || '').toLowerCase() || 'the office')
-            : ''
-        }
-
         // stage chrome — the room carries its own meeting · timer + occupancy
         if (stageMeetingLabel) {
           const project = (topbarProjectEl?.textContent || '').trim().toLowerCase() || 'the room'
@@ -48686,6 +48609,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (scoutChatDeliverables) {
 	          scoutChatDeliverables.disabled = !Boolean(authedUser)
 	        }
+	        if (scoutChatScoutMention) {
+	          scoutChatScoutMention.disabled = !available
+	        }
 	        scoutChatHint.hidden = available
 	        if (!available) {
 	          scoutChatHint.textContent = 'sign in to ask Scout'
@@ -49156,6 +49082,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	                })
 	              }
 	            }
+	            if (Array.isArray(payload.actions)) {
+	              handleOSAssistantActions(payload.actions)
+	            }
 	            // A bare "mode:" prefix without @scout posts as a plain channel
 	            // message — say so instead of silently doing nothing.
 	            if (isChannel && !scoutEngaged && channelPrefixMode) {
@@ -49339,7 +49268,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        const directAgent = scoutChatDirectAgentName(thread)
 	        return chatThreadIsChannel(thread)
-	          ? (isPhone ? 'message…' : 'message the thread — @scout to ask')
+	          ? (isPhone ? 'message…' : 'message the thread')
 	          : (isPhone ? 'ask…' : `ask ${directAgent || 'Scout'}, or tap + to run a task`)
 	      }
 
@@ -49372,6 +49301,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          ? `→ #${title} · everyone in the office`
 	          : `→ ${privateTarget} · private to you`
 	        scoutChatDestination.hidden = false
+	        if (scoutChatScoutMention) {
+	          scoutChatScoutMention.hidden = !isChannel
+	          scoutChatScoutMention.disabled = !isChannel || Boolean(scoutChatInput?.disabled)
+	        }
 	        if (scoutChatInput) {
 	          scoutChatInput.setAttribute('aria-label', isChannel
 	            ? `Message #${title} — everyone in the office`
@@ -52767,6 +52700,25 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         roomChatInput.setSelectionRange(caret, caret)
         resizeRoomChatInput()
       }
+
+	      function insertChannelScoutMention() {
+	        if (!scoutChatInput || scoutChatInput.disabled || !chatThreadIsChannel(selectedScoutChatThread())) {
+	          return
+	        }
+	        const value = scoutChatInput.value
+	        const start = scoutChatInput.selectionStart ?? value.length
+	        const end = scoutChatInput.selectionEnd ?? start
+	        const before = value.slice(0, start)
+	        const after = value.slice(end)
+	        const leading = before && !/\s$/.test(before) ? ' ' : ''
+	        const trailing = after && !/^\s/.test(after) ? ' ' : ''
+	        const inserted = `${leading}@Scout ${trailing}`
+	        scoutChatInput.value = before + inserted + after
+	        const caret = before.length + inserted.length
+	        scoutChatInput.focus()
+	        scoutChatInput.setSelectionRange(caret, caret)
+	        resizeScoutChatInput()
+	      }
 
       function resizeRoomChatInput() {
         if (!roomChatInput.value) {
@@ -57201,6 +57153,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         ])
       }
 
+      function participantUsesAudioPresence(name) {
+        const participantName = String(name || '').trim()
+        if (!participantName || participantName === 'the room' || !appShell.classList.contains('is-in-room')) {
+          return false
+        }
+        const state = participantMediaState(participantName)
+        return Boolean(state.cameraOff && !state.screenSharing)
+      }
+
+      function roomAudioOnlyHumanNames() {
+        return participantNamesForRoom().filter(participantUsesAudioPresence)
+      }
+
+      function videoParticipantNames() {
+        return visibleParticipantNames().filter(name => !participantUsesAudioPresence(name))
+      }
+
       function roomOccupantNames() {
         return normalizeParticipantList([
           ...participantNamesForRoom(),
@@ -57952,6 +57921,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
          runs from updateHearthParticipants before this cluster initializes.) */
       function syncMobileRoomHero(speakerName) {
         const tiles = Array.from(videoStack.querySelectorAll(':scope > .video-tile:not(.video-drag-slot)'))
+          .filter(tile => !tile.hidden)
         if (!tiles.length) {
           mobileRoomHeroName = ''
           return
@@ -58011,18 +57981,21 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           localTile.dataset.participant = currentParticipantName || selectedParticipantName()
         }
 
-        renderRoomAgentBench()
+        renderRoomPresenceBar()
         syncParticipantPlaceholders()
         applyVideoTileOrder()
-        updateRoomGridMetrics()
         for (const tile of videoStack.querySelectorAll('.video-tile:not(.video-drag-slot)')) {
           const name = tile.dataset.participant || ''
+          const audioOnly = participantUsesAudioPresence(name)
+          tile.hidden = audioOnly
+          tile.classList.toggle('is-audio-only-presence', audioOnly)
           tile.classList.toggle('is-active-speaker', Boolean(activeSpeakerAudible && name && name === activeSpeaker))
           tile.classList.toggle('is-on-stage', Boolean(name && name === stageParticipant && stageParticipantVisible))
           ensureVideoTileReorderControl(tile, name)
           ensurePinButton(tile, name)
           applyParticipantMediaStateToTile(tile, name)
         }
+        updateRoomGridMetrics()
         scheduleActiveSpeakerRingDecay(activeSpeakerAudible)
         syncMobileRoomHero(stageParticipant || (activeSpeakerAudible ? activeSpeaker : ''))
 
@@ -58062,13 +58035,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
         }
         for (const [name, tile] of participantPlaceholders.entries()) {
-          if (!names.includes(name) || remoteStreamsByParticipant.has(name) || name === currentParticipantName) {
+          if (!names.includes(name) || remoteStreamsByParticipant.has(name) || name === currentParticipantName || participantUsesAudioPresence(name)) {
             tile.remove()
             participantPlaceholders.delete(name)
           }
         }
         for (const name of names) {
-          if (!name || represented.has(name) || remoteStreamsByParticipant.has(name) || name === currentParticipantName) {
+          if (!name || represented.has(name) || remoteStreamsByParticipant.has(name) || name === currentParticipantName || participantUsesAudioPresence(name)) {
             continue
           }
           const tile = document.createElement('div')
@@ -58096,9 +58069,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return 'Joining'
       }
 
-      function renderRoomAgentWaveform() {
+      function renderRoomPresenceWaveform() {
         const waveform = document.createElement('span')
-        waveform.className = 'room-agent-waveform'
+        waveform.className = 'room-presence-waveform'
         waveform.setAttribute('aria-hidden', 'true')
         const restProfile = [.18,.28,.22,.42,.31,.56,.38,.72,.48,.86,.58,.78,.46,.68,.36,.54,.29,.43,.2,.31,.17]
         for (let index = 0; index < restProfile.length; index += 1) {
@@ -58106,7 +58079,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const phase = index * 1.17
           const peak = Math.min(1, .52 + .48 * (.5 + .5 * Math.sin(phase)))
           const mid = Math.min(.82, .26 + .56 * (.5 + .5 * Math.cos(phase * .73)))
-          bar.className = 'room-agent-waveform__bar'
+          bar.className = 'room-presence-waveform__bar'
           bar.style.setProperty('--agent-wave-rest', String(restProfile[index]))
           bar.style.setProperty('--agent-wave-peak', String(peak))
           bar.style.setProperty('--agent-wave-mid', String(mid))
@@ -58116,44 +58089,68 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return waveform
       }
 
-      function renderRoomAgentBench() {
-        if (!roomAgentBench) return
-        roomAgentBench.hidden = roomAgentParticipants.length === 0
-        if (roomAgentBench.hidden) {
-          roomAgentBench.replaceChildren()
+      function renderRoomPresenceBar() {
+        if (!roomPresenceBar) return
+        const audioOnlyHumans = roomAudioOnlyHumanNames()
+        roomPresenceBar.hidden = audioOnlyHumans.length === 0 && roomAgentParticipants.length === 0
+        if (roomPresenceBar.hidden) {
+          roomPresenceBar.replaceChildren()
           return
         }
-        const heading = document.createElement('span')
-        heading.className = 'room-agent-bench__heading'
-        const headingDot = document.createElement('span')
-        headingDot.className = 'room-agent-bench__heading-dot'
-        headingDot.setAttribute('aria-hidden', 'true')
-        heading.append(headingDot, document.createTextNode('Agents in the room'))
-        const members = roomAgentParticipants.map(agent => {
+        const humanMembers = audioOnlyHumans.map(participantName => {
+          const media = participantMediaState(participantName)
+          const talking = participantIsAudiblyLive(participantName)
+          const voiceState = talking ? 'talking' : (media.micMuted ? 'muted' : 'idle')
+          const label = talking ? 'Speaking' : (media.micMuted ? 'Muted' : 'Camera off')
+          const member = document.createElement('span')
+          member.className = 'room-presence-bar__member'
+          member.dataset.personType = 'human'
+          member.dataset.participant = participantName
+          member.dataset.voiceState = voiceState
+          member.style.setProperty('--room-presence-color', '#C8C6C3')
+          member.setAttribute('aria-label', `${participantName}, person in the room, ${label}`)
+          const dot = document.createElement('span')
+          dot.className = 'room-presence-bar__dot'
+          dot.setAttribute('aria-hidden', 'true')
+          const copy = document.createElement('span')
+          copy.className = 'room-presence-bar__copy'
+          const name = document.createElement('span')
+          name.className = 'room-presence-bar__name'
+          name.textContent = participantName
+          const state = document.createElement('span')
+          state.className = 'room-presence-bar__state'
+          state.textContent = label
+          copy.append(name, state)
+          member.append(dot, copy, renderRoomPresenceWaveform())
+          return member
+        })
+        const agentMembers = roomAgentParticipants.map(agent => {
           const voiceState = String(agent.voiceState || agent.status || 'starting').toLowerCase()
           const label = roomAgentVoiceLabel(agent)
           const member = document.createElement('span')
-          member.className = 'room-agent-bench__member'
+          member.className = 'room-presence-bar__member'
+          member.dataset.personType = 'agent'
           member.dataset.agentId = agent.id
           member.dataset.voiceState = voiceState
-          member.style.setProperty('--room-agent-color', agent.color || '#FF5A19')
+          member.style.setProperty('--room-presence-color', '#FF5A19')
           member.setAttribute('aria-label', `${agent.name}, agent in the room, ${label}`)
           const dot = document.createElement('span')
-          dot.className = 'room-agent-bench__dot'
+          dot.className = 'room-presence-bar__dot'
           dot.setAttribute('aria-hidden', 'true')
           const copy = document.createElement('span')
-          copy.className = 'room-agent-bench__copy'
+          copy.className = 'room-presence-bar__copy'
           const name = document.createElement('span')
-          name.className = 'room-agent-bench__name'
+          name.className = 'room-presence-bar__name'
           name.textContent = agent.name
           const state = document.createElement('span')
-          state.className = 'room-agent-bench__state'
+          state.className = 'room-presence-bar__state'
           state.textContent = label
           copy.append(name, state)
-          member.append(dot, copy, renderRoomAgentWaveform())
+          member.append(dot, copy, renderRoomPresenceWaveform())
           return member
         })
-        roomAgentBench.replaceChildren(heading, ...members)
+        roomPresenceBar.setAttribute('aria-label', `${humanMembers.length + agentMembers.length} audio participant${humanMembers.length + agentMembers.length === 1 ? '' : 's'} in the room`)
+        roomPresenceBar.replaceChildren(...humanMembers, ...agentMembers)
       }
 
       function ensurePinButton(tile, name) {
@@ -62061,18 +62058,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const status = String(file?.brainStatus || '')
         if (status === 'ingested') {
           badge.className = 'files-badge files-badge--ingested'
-          badge.setAttribute('aria-label', 'Semantic indexing complete')
-          badge.title = 'Readable text was added to permission-scoped semantic recall automatically'
+          badge.setAttribute('aria-label', 'Recall ready')
+          badge.title = 'Readable text is available to permission-scoped recall'
         } else if (status === 'thread') {
           // private-thread attachment: scout read it for that chat, but the text
           // never entered company-wide recall
           badge.className = 'files-badge files-badge--thread'
-          badge.setAttribute('aria-label', 'Semantic indexing complete in source chat')
+          badge.setAttribute('aria-label', 'Recall ready in source chat')
           badge.title = 'Readable text is available only inside its source conversation'
         } else {
           badge.className = 'files-badge'
-          badge.setAttribute('aria-label', 'Semantic indexing pending')
-          badge.title = 'Semantic indexing has not completed yet'
+          badge.setAttribute('aria-label', 'Text scan incomplete')
+          badge.title = 'Readable text has not been extracted yet'
         }
         return badge
       }
@@ -62250,12 +62247,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const brain = bfEl('div', 'drive-detail__brain')
         brain.appendChild(bfEl('span', 'drive-detail__brain-dot'))
         const brainCopy = bfEl('div')
-        const brainTitle = status === 'ingested' ? 'Semantic indexing complete' : status === 'thread' ? 'Indexed in this chat' : 'Semantic indexing pending'
+        const brainTitle = status === 'ingested' ? 'Recall ready' : status === 'thread' ? 'Recall ready in this chat' : 'Text scan incomplete'
         const brainText = status === 'ingested'
-          ? 'Readable text was added automatically. Scout and authorized agents can retrieve relevant passages with this file’s source permissions.'
+          ? 'Readable text was added automatically. Scout and authorized agents can retrieve relevant passages with this file’s source permissions, including semantic matches.'
           : status === 'thread'
             ? 'Readable text is available automatically inside the authorized conversation and stays behind that ACL.'
-            : 'This file is stored safely; semantic extraction has not completed yet.'
+            : 'This file is stored safely, but readable text has not been extracted for recall.'
         brainCopy.append(bfEl('b', '', brainTitle), bfEl('p', '', brainText))
         brain.appendChild(brainCopy)
 
@@ -65472,7 +65469,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         newCardButton.disabled = !authedUser
         undoDeleteButton.disabled = !canEditBoard || !canUndoDelete
         expandBoardButton.disabled = !isBoardReady
-        topbarBoardButton.disabled = !isBoardReady
         boardState.textContent = isBoardReady
           ? `${cards.length} card${cards.length === 1 ? '' : 's'}`
           : 'waiting room'
@@ -66566,12 +66562,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!roomScoutQuickActionButton) return
         const scout = roomAgentParticipants.find(agent => agent.id === 'scout') || null
         const label = roomScoutQuickActionButton.querySelector('.room-scout-quick__label')
+        const buttonCopy = meetingSpecialistsBusy
+          ? (scout ? 'Removing Scout…' : 'Adding Scout…')
+          : (scout ? 'Scout joined' : 'Add Scout')
         roomScoutQuickActionButton.hidden = Boolean(guestMode)
         roomScoutQuickActionButton.disabled = meetingSpecialistsBusy || !appShell.classList.contains('is-in-room')
         roomScoutQuickActionButton.classList.toggle('is-live', Boolean(scout))
         roomScoutQuickActionButton.setAttribute('aria-label', scout ? 'Open Scout participant controls' : 'Add Scout to this meeting')
-        roomScoutQuickActionButton.title = scout ? 'Scout joined' : 'Add Scout'
-        if (label) label.textContent = scout ? 'Scout joined' : 'Add Scout'
+        roomScoutQuickActionButton.title = buttonCopy
+        if (label) label.textContent = buttonCopy
       }
 
       function setRoomMoreOpen(open) {
@@ -66780,6 +66779,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         syncRoomScoutQuickAction()
         renderMeetingSpecialists()
         setMeetingSpecialistsState(action === 'invite' ? 'Inviting Scout…' : 'Dismissing Scout…')
+        showToast({ text: action === 'invite' ? 'adding Scout to the room…' : 'removing Scout from the room…', kind: 'note' })
         try {
           const payload = await meetingSpecialistFetch('/api/rooms/agents/scout', {
             roomId: activeJoin.roomId || 'office',
@@ -66789,8 +66789,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           setMeetingSpecialistsState(action === 'invite'
             ? 'Scout is joining as a visible participant.'
             : 'Scout left. Meeting transcription is unchanged.')
+          showToast({ text: action === 'invite' ? 'Scout joined the room' : 'Scout left the room', kind: 'done' })
         } catch (error) {
-          setMeetingSpecialistsState(error?.message || 'Scout could not be updated for this meeting.', true)
+          const message = error?.message || 'Scout could not be updated for this meeting.'
+          setMeetingSpecialistsState(message, true)
+          showToast({ text: message, kind: 'error' })
         } finally {
           meetingSpecialistsBusy = false
           syncRoomScoutQuickAction()

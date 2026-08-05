@@ -136,20 +136,21 @@ func TestIndexInviteMintGatedBehindOfficeConfirm(t *testing.T) {
 	}
 }
 
-// The topbar's copy-link slot is retired for the ROOM's name (recon-11 —
-// the room name appeared nowhere in-call): activeJoinRoomRecord()?.name with
-// the office fallback, lowercase, only while seated.
-func TestIndexInviteTopbarRoomNameReplacesCopyLink(t *testing.T) {
+// Room identity belongs once in the left context block. The right side must
+// not repeat Board, the room name, or the old copy-link action.
+func TestIndexInviteTopbarAvoidsDuplicateRoomActions(t *testing.T) {
 	html := readIndexHTMLForInvite(t)
 
 	if strings.Contains(html, `id="copyRoomLink"`) {
 		t.Error("the topbar #copyRoomLink button is retired — link sharing lives in the Invite popover")
 	}
-	if !strings.Contains(html, `id="topbarRoomName"`) {
-		t.Error("the topbar must carry the #topbarRoomName slot")
+	for _, retired := range []string{`id="topbarRoomName"`, `id="topbarBoard"`} {
+		if strings.Contains(html, retired) {
+			t.Errorf("the room topbar must not repeat retired right-side control %s", retired)
+		}
 	}
-	if !strings.Contains(html, "String(activeJoinRoomRecord()?.name || '').toLowerCase() || 'the office'") {
-		t.Error("the topbar room name must source activeJoinRoomRecord()?.name with the `the office` fallback")
+	if !strings.Contains(html, "activeJoinRoomRecord()?.name || guestSession?.roomName") {
+		t.Error("the left room subtitle must source the seated room name")
 	}
 	// the copy logic itself survives (canonical /?room= URL) as the Invite
 	// popover's teammates row
@@ -165,24 +166,20 @@ func TestIndexInviteTopbarRoomNameReplacesCopyLink(t *testing.T) {
 	}
 }
 
-// Exactly one `the room is listening` pill: the topbar status pill keeps the
-// label; the floating stage caption duplicate is gone (recon-11 dedupe).
-func TestIndexInviteSingleListeningPill(t *testing.T) {
+// Recording state lives in the meeting dock. The room header must not repeat
+// it as a listening pill or subtitle.
+func TestIndexInviteRoomHeaderDoesNotRepeatListeningState(t *testing.T) {
 	html := readIndexHTMLForInvite(t)
 
 	if strings.Contains(html, "scoutCaptionPill") || strings.Contains(html, "scout-caption") {
 		t.Error("the floating stage caption pill must be fully retired (markup, CSS, and JS)")
 	}
-	// the topbar pill keeps the one honest label
-	labelBody := functionBody(html, "function roomListeningLabel()")
-	if !strings.Contains(labelBody, "'the room is listening'") {
-		t.Error("the topbar status pill must keep the `the room is listening` label")
+	if !strings.Contains(html, `#appShell[data-tool="room"] #statusPill`) {
+		t.Error("the generic connection pill must be hidden on the room tool")
 	}
-	if got := strings.Count(html, "'the room is listening'"); got != 1 {
-		t.Errorf("the `the room is listening` pill label must exist exactly once, found %d", got)
+	if !strings.Contains(html, `id="recordMeeting"`) {
+		t.Error("the meeting dock must retain the recording control that owns room listening state")
 	}
-	// gate-fix: the LEFT subtitle slot must not mirror the RIGHT status pill —
-	// in-call the desktop subtitle names the ROOM, never the listening state
 	subtitleBody := functionBody(html, "function toolSubtitle(tool)")
 	if subtitleBody == "" {
 		t.Fatal("could not extract toolSubtitle body")

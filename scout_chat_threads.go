@@ -1374,6 +1374,57 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		return richResponse, richErr
 	}
 
+	modelQuery := scoutChatMessageModelText(userMessage)
+	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+		modelQuery = scoutChatContextTurnModelText(scoutChatContextTurnFromMessage(thread, userMessage))
+	}
+
+	// Native Stride actions outrank every work route. The same principal-bound
+	// router serves private Scout and explicit @Scout/direct-reply turns in
+	// channels; public human conversation still bypasses this function above.
+	// Only the execution receipt earns completion language—ordinary app controls
+	// never become a Codex proposal, goal, or worker artifact.
+	var routedVerdict *scoutRouterVerdict
+	if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic || (scoutEngaged && scoutMessageMayRequestNativeAction(text)) {
+		routedVerdict = app.routeScoutChatTurn(ctx, modelQuery, history)
+	}
+	if routedVerdict != nil && routedVerdict.action != nil {
+		result, changed, actionErr := app.executeScoutNativeAction(ctx, user, *routedVerdict.action)
+		answerText := ""
+		if actionErr != nil {
+			answerText = "I couldn't do that: " + actionErr.Error() + "."
+		} else {
+			answerText = strings.TrimSpace(asString(result["summary"]))
+			if answerText == "" {
+				answerText = "Done."
+			}
+		}
+		assistantMessage := scoutChatMessageRecord{
+			ID:         fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+			Kind:       "message",
+			Role:       "scout",
+			AuthorName: scoutParticipantName,
+			Text:       answerText,
+			CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+		}
+		saved, commitErr := commitUserMessage(userMessage, assistantMessage)
+		if commitErr != nil {
+			return nil, commitErr
+		}
+		response["answer"] = assistantMessage
+		response["thread"] = saved
+		response["nativeAction"] = map[string]any{"id": routedVerdict.action.ToolID, "ok": actionErr == nil, "receipt": result}
+		if result != nil {
+			response["actions"] = result["actions"]
+		}
+		if changed {
+			broadcastSignedInKanbanEvent("board", app.snapshotState())
+			broadcastSignedInKanbanEvent("undo_available", app.canUndoDelete())
+			app.refreshRealtimeBoardContext(routedVerdict.action.ToolID)
+		}
+		return response, nil
+	}
+
 	// A public @scout turn that asks for the first supported durable outcome is
 	// a proposal, never execution. The message must land first: the normal chat
 	// commit projects its server-stamped author, audience, and source revision
@@ -1417,10 +1468,6 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		return response, nil
 	}
 
-	modelQuery := scoutChatMessageModelText(userMessage)
-	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
-		modelQuery = scoutChatContextTurnModelText(scoutChatContextTurnFromMessage(thread, userMessage))
-	}
 	// Public-channel workstream keywords are deterministic routing signals, not
 	// launch authority. They persist the same proposal card the private router
 	// uses; the card's accept route remains the one workstream launch door.
@@ -1491,7 +1538,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// through the choice route, which at most ARMS a proposal card. Keyless
 	// deploys skip the turn inside routeScoutChatTurn and keep plain Q&A.
 	if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
-		if verdict := app.routeScoutChatTurn(ctx, modelQuery, history); verdict != nil {
+		if verdict := routedVerdict; verdict != nil {
 			if proposal := verdict.proposal; proposal != nil {
 				proposal.ContextRefs = encodeAssistantContextRefs(sourceNeed.ContextRefs)
 				proposalMessage := scoutChatMessageRecord{

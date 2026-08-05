@@ -323,6 +323,7 @@ const (
 	// are computable from the eval ledger alone.
 	routerVerdictProposedTool       = "proposed_tool"
 	routerVerdictChoicePills        = "choice_pills"
+	routerVerdictNativeAction       = "native_action"
 	routerVerdictInline             = "inline"
 	routerVerdictDeterministicGuard = "deterministic_guard"
 	routerVerdictConfirmed          = "confirmed"
@@ -335,7 +336,7 @@ const (
 // time, not a turn, so it must never inflate "turns".
 func isRouterRoutingVerdict(verdict string) bool {
 	switch verdict {
-	case routerVerdictProposedTool, routerVerdictChoicePills, routerVerdictInline, routerVerdictDeterministicGuard:
+	case routerVerdictProposedTool, routerVerdictChoicePills, routerVerdictNativeAction, routerVerdictInline, routerVerdictDeterministicGuard:
 		return true
 	default:
 		return false
@@ -423,6 +424,9 @@ type scoutChatChoices struct {
 type scoutRouterVerdict struct {
 	proposal *scoutRouterProposal
 	choices  *scoutChatChoices
+	// action is a native, principal-bound Stride operation. It executes before
+	// any work proposal is considered and can never launch an agent thread.
+	action *scoutNativeAction
 	// source is the provenance stamp (usage_ledger.go proposalSource*
 	// constant) the chat thread's proposal_minted event records:
 	// deterministic_guard when the pre-router guard committed the card,
@@ -436,7 +440,8 @@ type scoutRouterVerdict struct {
 func scoutRouterSystemPrompt() string {
 	lines := []string{
 		"You are the routing brain for Scout's typed chat at Bonfire, a packaging studio.",
-		"Classify the newest message into exactly one of three tiers.",
+		"Classify the newest message into exactly one route.",
+		"Native app action — app_action: ALWAYS wins when the authenticated user is asking Scout to operate Stride itself: navigate, change the Board, create/rename/archive a channel, post a message, create/rename/delete a Drive folder, delete or organize a Drive file, or change another supported in-app control. An app action is not research, a deliverable, a workstream, or a goal, even when it takes several implementation steps. Use the conversation history to resolve short confirmations such as 'yes', 'do it', or 'remove it' against Scout's immediately preceding native-action discussion.",
 		"Tier 0 — answer inline: the heavily-biased default. Questions, recall, opinions, clarifications, and discussion are ALWAYS Tier 0 — 'what did we decide about the market?' is a question, not a research run. For Tier 0, call NO tool.",
 		"Tier 1 — propose_workstream: a bounded 'go do one thing' ask (research / design / grill / workflow) that does not match a registry tool.",
 		"Tier 2 — propose_tool_run: the ask matches a registry tool's contract — the user wants a deliverable someone will read (a brief, a one-pager, a scorecard, a memo).",
@@ -460,7 +465,7 @@ func scoutRouterSystemPrompt() string {
 		)
 	}
 	lines = append(lines,
-		"When the user corrects a prior proposal or answer by naming a different tool or process ('no, the full Packaging Studio staged run'), the correction IS the work ask — propose that named id confidently; a correction is never Tier 0, re-route it.",
+		"When the user corrects a prior proposal or answer by naming a different tool, process, or in-app target, re-route the corrected intent. A correction naming a Stride control or object is app_action, not a workstream.",
 		"A proposal or a question card is only ever a suggestion the user must act on; you can never launch anything. Propose at most one thing.",
 		"When in doubt, answer inline. An agent that under-routes is trusted; one that over-launches is muted.",
 	)
@@ -817,6 +822,10 @@ func (app *kanbanBoardApp) routeScoutChatTurn(ctx context.Context, text string, 
 	recordCapabilitySuccess(capabilityTypedScoutRouter, time.Now().UTC())
 	if verdict != nil && verdict.choices != nil {
 		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{"verdict": routerVerdictChoicePills})
+		return verdict
+	}
+	if verdict != nil && verdict.action != nil {
+		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{"verdict": routerVerdictNativeAction, "action": verdict.action.ToolID})
 		return verdict
 	}
 	if verdict != nil && verdict.proposal != nil {

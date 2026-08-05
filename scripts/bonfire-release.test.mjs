@@ -10,7 +10,7 @@ import test from 'node:test'
 
 import {
   acquireReleaseOperationLock, composeActivationArgs, computeBundleSha256, computeEnvironmentMarker, environmentValues,
-  executeReleaseTransaction, inspectExtractedArchive, releaseComposeEnvironment, releaseEnvironmentValues, releasePathOwned,
+  executeReleaseTransaction, inspectExtractedArchive, releaseActivationProgress, releaseComposeEnvironment, releaseEnvironmentValues, releasePathOwned,
   loadRetainedRollbackTool, restoreReleaseBundleAfterFailedActivation,
   planRollbackProjectCleanup, planRollbackProjectResourceCleanup, projectContainerSnapshotSha256,
   projectResourceClaimsFromContainers, projectResourceSnapshotSha256, releasePaths, renderedComposeSha256,
@@ -1298,6 +1298,16 @@ test('activation and rollback pin candidate Compose, project, render profile, an
   assert.deepEqual(args.slice(-6), ['up', '-d', '--no-build', '--wait', '--wait-timeout', '360'])
   assert.equal(args.includes('--build'), false)
   assert.throws(() => composeActivationArgs('/tmp/base.env', '/tmp/release.env', candidate, 'attacker'), /preserve named volumes/)
+})
+
+test('activation progress identifies the candidate and elapsed bounded wait', () => {
+  assert.deepEqual(releaseActivationProgress(releaseCommit, 'waiting_for_ready', 1_000, 17_900), {
+    schema: 'bonfire.release-activation-progress.v1',
+    phase: 'candidate_startup',
+    state: 'waiting_for_ready',
+    releaseCommit,
+    elapsedSeconds: 16
+  })
 })
 
 test('activation refuses to mutate without an exact retained rollback bundle', async () => {

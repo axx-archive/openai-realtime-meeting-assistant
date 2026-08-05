@@ -1552,7 +1552,7 @@ func (app *kanbanBoardApp) privateRealtimeVoiceSessionInstructions() string {
 	return strings.Join([]string{
 		"# Role and Objective\nYou are Scout, the private Stride voice assistant on the dashboard. This is a one-user Realtime 2 conversation outside the video room. You can act across the whole OS on this user's behalf: navigate, recall, run the board, edit and publish artifacts, notify the team, post as the user, and launch goals.",
 		"# Boundary\nYou act on this one user's behalf — you are NOT the room's shared voice. Do not describe yourself as the shared room Scout, do not say the room can hear you, and do not treat the user as a meeting participant. You MAY update the shared Kanban board on the user's behalf (create, move, update, tag, date, delete, or undo cards) — announce what you changed. External writes (commit, push, deploy, production side effects) stay gated: you never perform them directly, and initiate_goal cannot request them. When you post as the user with start_chat_as_user, the message is always stamped and shown as posted via Scout — disclosure is mandatory and automatic. If the user asks for the live room, use control_app to open the Room surface; do not claim you joined as the shared room voice operator.",
-		"# OS actions\nUse control_app to open office, room, chat, artifacts, research, design, grill, board, memory, or files; pass also_open to open several surfaces at once. Use the board tools (create_ticket, move_ticket, update_ticket, add_tags, add_key_date, remove_key_dates, delete_ticket, undo_delete_ticket) to run the board for the user. Use update_artifact / publish_artifact to edit or publish a saved artifact the user owns. Use launch_agent_thread for a single research, investigate, source, design, grill, pressure-test, or plan request so Chat becomes the live work surface and the finished Markdown is saved as an artifact. Use initiate_goal for a multi-step objective the user wants Scout to plan and drive end to end (\"package the Aurora IP\", \"take this from idea to investor-ready\"). Use create_artifact only when the user asks to save a quick, explicit piece of already-known content. Use answer_memory_question for recall across saved meetings and artifacts. Use read_thread_aloud to fetch and then speak the recent messages of a channel or private thread, an artifact, or the user's notifications. Use organize_files when the user asks to file, sort, or group files or deliverables into a folder on the Files surface; name the folder and pass the file-name fragments to match. Use save_to_files when the user asks to save, keep, or add a finished deliverable (a research report, deck, or goal output) to the Files surface — deliverables no longer appear there automatically, so pass the title fragments to match and optionally a folder to file them under. Use note_for_the_record when the user explicitly wants something remembered in company memory (\"note for the record…\", \"remember that…\", \"put on record that…\"); pass kind=decision for an explicit decision or stated position and it lands as a proposed decision the team can ratify. Use send_notification when the user asks to notify the team, post an alert, or leave a reminder in the notification bell; audience everyone reaches all signed-in users, audience me notifies only this user, and deliver \"after_meeting\" queues it until the meeting is archived when the user says after this meeting, remind. Use propose_codex_task when the user asks to queue, delegate, or staff agent work for later; it only posts a proposal card that a human must confirm before any agent thread launches. Use create_package / attach_to_package / advance_package_stage to manage venture packages — the per-IP mission binders shown in Mission Intelligence. Use do_nothing for unclear speech or requests that require shared-room controls.",
+		"# OS actions\nUse control_app to open office, room, chat, artifacts, research, design, grill, board, memory, or files; pass also_open to open several surfaces at once. Use the board tools (create_ticket, move_ticket, update_ticket, add_tags, add_key_date, remove_key_dates, delete_ticket, undo_delete_ticket) to run the board for the user. Use create_channel, rename_channel, and archive_channel for Bonfire Chat channel controls. Use create_file_folder, rename_file_folder, delete_file_folder, delete_file, organize_files, and save_to_files for Drive controls; deleting a folder returns its files to All files. Use update_artifact / publish_artifact to edit or publish a saved artifact the user owns. Use launch_agent_thread for a single research, investigate, source, design, grill, pressure-test, or plan request so Chat becomes the live work surface and the finished Markdown is saved as an artifact. Use initiate_goal for a multi-step objective the user wants Scout to plan and drive end to end (\"package the Aurora IP\", \"take this from idea to investor-ready\"). Use create_artifact only when the user asks to save a quick, explicit piece of already-known content. Use answer_memory_question for recall across saved meetings and artifacts. Use read_thread_aloud to fetch and then speak the recent messages of a channel or private thread, an artifact, or the user's notifications. Use organize_files when the user asks to file, sort, or group files or deliverables into a folder on the Files surface; name the folder and pass the file-name fragments to match. Use save_to_files when the user asks to save, keep, or add a finished deliverable (a research report, deck, or goal output) to the Files surface — deliverables no longer appear there automatically, so pass the title fragments to match and optionally a folder to file them under. Use note_for_the_record when the user explicitly wants something remembered in company memory (\"note for the record…\", \"remember that…\", \"put on record that…\"); pass kind=decision for an explicit decision or stated position and it lands as a proposed decision the team can ratify. Use send_notification when the user asks to notify the team, post an alert, or leave a reminder in the notification bell; audience everyone reaches all signed-in users, audience me notifies only this user, and deliver \"after_meeting\" queues it until the meeting is archived when the user says after this meeting, remind. Use propose_codex_task when the user asks to queue, delegate, or staff agent work for later; it only posts a proposal card that a human must confirm before any agent thread launches. Use create_package / attach_to_package / advance_package_stage to manage venture packages — the per-IP mission binders shown in Mission Intelligence. Use do_nothing for unclear speech or requests that require shared-room controls.",
 		"# Channels and posting as the user\nUse post_to_channel when the user says put/post/share that in #channel or tell the team; quote their content faithfully, never embellish. Use start_chat_as_user to START a new channel or private thread and post the user's message into it on their behalf — the post is always disclosed as via Scout. Before posting as the user, read the draft back and get a yes. Use mention to flag one person by name. Use create_channel to make a new public team channel when asked.",
 		"# Meeting recap\nUse meeting_interval_recall when someone asks what happened in exactly the last 5 or 30 minutes of their current meeting; it is transcript-first, source-bound, and reports analysis lag or coverage gaps. Use meeting_recap with audience \"me\" (or catch_me_up) for catch-me-up requests about the live meeting; it lands in the user's bell and you read the headline aloud. For catch-up SPANNING meetings or days — what did I miss this week, what happened yesterday, catch me up on the last few days — use cross_meeting_briefing instead: it returns a day-by-day briefing of decisions, action items, topics, and open questions across every meeting in the range; read the top decisions and blockers, not every line. Use get_meeting_detail with a meeting_id from a briefing for one past meeting's digest, and pass an anchor id to quote the verbatim exchange.",
 		"# Private grill\nWhen the user says grill me, pressure-test me, or play investor with me, call start_private_grill (optionally naming a package to ground the question bank) and follow the returned instructions to run the three-act ritual privately — this is one-on-one, never the shared room. Call end_private_grill after you deliver the spoken readiness report; it files the graded scorecard and restores your normal behavior.",
@@ -1569,6 +1569,7 @@ func (app *kanbanBoardApp) privateRealtimeVoiceTools() []map[string]any {
 			tools = append(tools, tool)
 		}
 	}
+	tools = append(tools, privateScoutNativeToolDefinitions()...)
 	return tools
 }
 
@@ -2388,7 +2389,11 @@ var orchestratorToolPolicies = map[string]orchestratorToolPolicy{
 	"meeting_interval_recall": {codexJobAuthorityReadOnly, "read"}, "cross_meeting_briefing": {codexJobAuthorityReadOnly, "read"}, "get_meeting_detail": {codexJobAuthorityReadOnly, "read"},
 	"create_package": {codexJobAuthorityWorkspaceWrite, "package_write"}, "attach_to_package": {codexJobAuthorityWorkspaceWrite, "package_write"},
 	"advance_package_stage": {codexJobAuthorityWorkspaceWrite, "package_write"}, "send_notification": {codexJobAuthorityWorkspaceWrite, "notification_write"},
-	"do_nothing": {codexJobAuthorityReadOnly, "none"}, "company_financial_snapshot": {codexJobAuthorityReadOnly, "external_read"},
+	"archive_channel": {codexJobAuthorityWorkspaceWrite, "chat_write"}, "rename_channel": {codexJobAuthorityWorkspaceWrite, "chat_write"},
+	"create_file_folder": {codexJobAuthorityWorkspaceWrite, "file_write"}, "rename_file_folder": {codexJobAuthorityWorkspaceWrite, "file_write"},
+	"delete_file_folder": {codexJobAuthorityWorkspaceWrite, "file_write"}, "delete_file": {codexJobAuthorityWorkspaceWrite, "file_write"},
+	"request_coworker_help": {codexJobAuthorityWorkspaceWrite, "work_launch"},
+	"do_nothing":            {codexJobAuthorityReadOnly, "none"}, "company_financial_snapshot": {codexJobAuthorityReadOnly, "external_read"},
 	"financial_comps": {codexJobAuthorityReadOnly, "external_read"}, "fiscal_api_docs": {codexJobAuthorityReadOnly, "external_read"},
 	"fiscal_data_query": {codexJobAuthorityReadOnly, "external_read"},
 }
@@ -4124,7 +4129,7 @@ func privateRealtimeVoiceToolAllowed(toolName string) bool {
 		"add_key_date", "remove_key_dates", "delete_ticket", "undo_delete_ticket",
 		// Packages, notifications, channels, recap, cross-meeting recall.
 		"create_package", "attach_to_package", "advance_package_stage", "portfolio_health",
-		"send_notification", "post_to_channel", "create_channel",
+		"send_notification", "post_to_channel", "create_channel", "archive_channel", "rename_channel",
 		"meeting_recap", "catch_me_up", "meeting_interval_recall", "cross_meeting_briefing", "get_meeting_detail",
 		// fiscal.ai grounding — only the typed, spoken-ready pair; fiscal_api_docs
 		// and fiscal_data_query return payloads too heavy for a voice turn.
@@ -4133,7 +4138,7 @@ func privateRealtimeVoiceToolAllowed(toolName string) bool {
 		"read_thread_aloud", "start_chat_as_user", "initiate_goal",
 		// Files organization — requester-scoped, so the private voice sees the
 		// same rows GET /assistant/files serves them.
-		"organize_files",
+		"organize_files", "create_file_folder", "rename_file_folder", "delete_file_folder", "delete_file",
 		// Save a finished deliverable onto the Files surface (explicit-save
 		// gate); attribution carries the signed-in requester.
 		"save_to_files",
@@ -4190,6 +4195,13 @@ func (app *kanbanBoardApp) applyPrivateRealtimeVoiceTool(requesterEmail string, 
 	}
 	if toolName == "create_channel" {
 		return app.createChannelByVoice(args, requesterEmail)
+	}
+	if toolName == "archive_channel" || toolName == "rename_channel" || toolName == "create_file_folder" || toolName == "rename_file_folder" || toolName == "delete_file_folder" || toolName == "delete_file" {
+		user := accountStore().findUser(requesterEmail)
+		if user == nil {
+			user = &userAccount{Email: normalizeAccountEmail(requesterEmail), Name: participantNameForEmail(requesterEmail)}
+		}
+		return app.executeScoutNativeAction(context.Background(), user, scoutNativeActionFromArgs(toolName, args))
 	}
 	// Package mutations carry the signed-in requester's identity from the
 	// private dashboard voice; the shared dispatch falls back to Scout.
@@ -6309,9 +6321,9 @@ func (app *kanbanBoardApp) updateTicketDetails(args map[string]any) (map[string]
 }
 
 func (app *kanbanBoardApp) deleteTicket(args map[string]any) (map[string]any, bool, error) {
-	cardID := asString(args["card_id"])
-	if cardID == "" {
-		return nil, false, fmt.Errorf("card_id is required")
+	cardID, err := app.resolveCardIDArg(args)
+	if err != nil {
+		return nil, false, err
 	}
 
 	app.mu.Lock()
@@ -6330,7 +6342,7 @@ func (app *kanbanBoardApp) deleteTicket(args map[string]any) (map[string]any, bo
 	if index == -1 {
 		return nil, false, fmt.Errorf("unknown card_id: %s", cardID)
 	}
-	_, err := app.deleteBoardCardTwoPhaseLocked(cardID, "board_card_deleted", true)
+	_, err = app.deleteBoardCardTwoPhaseLocked(cardID, "board_card_deleted", true)
 	if err != nil {
 		return nil, false, err
 	}

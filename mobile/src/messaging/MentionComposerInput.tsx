@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { SymbolView } from 'expo-symbols';
@@ -23,6 +23,10 @@ type Props = {
   maxHeight?: number;
 };
 
+export type MentionComposerInputHandle = {
+  focus: () => void;
+};
+
 type DraftSegment = { text: string; mention?: ChatMentionCandidate };
 
 function draftSegments(value: string, candidates: ChatMentionCandidate[]): DraftSegment[] {
@@ -41,7 +45,7 @@ function draftSegments(value: string, candidates: ChatMentionCandidate[]): Draft
   return result;
 }
 
-export function MentionComposerInput({
+export const MentionComposerInput = forwardRef<MentionComposerInputHandle, Props>(function MentionComposerInput({
   value,
   onChangeText,
   onBlur,
@@ -49,10 +53,11 @@ export function MentionComposerInput({
   placeholder,
   editable,
   maxHeight = expandedComposerMaxHeight,
-}: Props) {
+}, ref) {
   const reduceMotion = useReduceMotion();
   const shimmer = useRef(new Animated.Value(1)).current;
   const valueRef = useRef(value);
+	const textInputRef = useRef<TextInput>(null);
   const inputWidthRef = useRef(0);
   const nativeContentHeightRef = useRef(compactComposerHeight);
   const [measuredHeight, setMeasuredHeight] = useState(compactComposerHeight);
@@ -67,6 +72,10 @@ export function MentionComposerInput({
   const showMentionOverlay = !focused && segments.some((segment) => Boolean(segment.mention));
 
   valueRef.current = value;
+
+	useImperativeHandle(ref, () => ({
+		focus: () => textInputRef.current?.focus(),
+	}), []);
 
   useEffect(() => {
     if (!value) {
@@ -120,6 +129,7 @@ export function MentionComposerInput({
           </Animated.Text>
         ) : null}
         <TextInput
+		  ref={textInputRef}
           accessibilityLabel="Message"
           placeholder={placeholder}
           placeholderTextColor={colors.text3}
@@ -152,7 +162,7 @@ export function MentionComposerInput({
       </View>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   suggestions: { gap: 3, marginBottom: space[2], padding: 4, borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line2, backgroundColor: colors.surface1 },

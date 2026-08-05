@@ -2023,6 +2023,13 @@ export function composeActivationArgs(baseEnv, runtimeEnv, candidateCompose, pro
     'up', '-d', '--no-build', '--wait', '--wait-timeout', '360']
 }
 
+export function releaseActivationProgress(releaseCommit, state, startedAt, now = Date.now()) {
+  return {
+    schema: 'bonfire.release-activation-progress.v1', phase: 'candidate_startup', state,
+    releaseCommit: String(releaseCommit || 'unknown'), elapsedSeconds: Math.max(0, Math.floor((now - startedAt) / 1000))
+  }
+}
+
 // Only deliberate Docker transport values survive. The one added interpolation
 // value points Compose at the existing secret-bearing base env without copying
 // it into the retained candidate bundle.
@@ -2079,9 +2086,22 @@ async function verifyReleaseImages(receipt) {
 }
 
 async function applyReleaseBundle(options, bundle) {
-  await execFileAsync('docker', composeActivationArgs(options.baseEnv, bundle.paths.runtimeEnv, bundle.paths.candidateCompose, options.projectName), {
-    cwd: dirname(bundle.paths.candidateCompose), env: releaseComposeEnvironment(process.env, options.baseEnv), maxBuffer: 32 << 20
-  })
+  const startedAt = Date.now()
+  const releaseCommit = bundle.source?.releaseCommit || 'unknown'
+  const progress = state => process.stderr.write(`${JSON.stringify(releaseActivationProgress(releaseCommit, state, startedAt))}\n`)
+  progress('starting')
+  const heartbeat = setInterval(() => progress('waiting_for_ready'), 15_000)
+  try {
+    await execFileAsync('docker', composeActivationArgs(options.baseEnv, bundle.paths.runtimeEnv, bundle.paths.candidateCompose, options.projectName), {
+      cwd: dirname(bundle.paths.candidateCompose), env: releaseComposeEnvironment(process.env, options.baseEnv), maxBuffer: 32 << 20
+    })
+    progress('ready')
+  } catch (error) {
+    progress('failed')
+    throw error
+  } finally {
+    clearInterval(heartbeat)
+  }
 }
 
 async function assertActiveReleaseLedgerUnchanged(releaseDir, expected) {

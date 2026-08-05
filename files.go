@@ -548,35 +548,7 @@ func assistantFileDelete(w http.ResponseWriter, r *http.Request, user *userAccou
 		writeAuthError(w, http.StatusBadRequest, errFileFolderFileID.Error())
 		return
 	}
-	row, writable := authorizedFileRowForMove(r.Context(), user, payload.FileID)
-	if row.ID == "" || !writable {
-		writeAuthError(w, http.StatusNotFound, "file not found")
-		return
-	}
-
-	mode := "deleted"
-	var err error
-	switch row.Origin {
-	case "deliverable":
-		artifact, ok := authorizedArtifactForActions(r.Context(), user, row.ArtifactID, ACLReadContent, ACLWrite)
-		if !ok {
-			writeAuthError(w, http.StatusNotFound, "file not found")
-			return
-		}
-		header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact))
-		_, _, err = kanbanApp.memory.updateOSArtifactMetadataIfHeaderMatches(header, artifact.ID, map[string]string{
-			"savedToFiles": "false",
-		})
-		mode = "removed_from_drive"
-	case "chat":
-		err = kanbanApp.deleteChatAttachmentFromDrive(user, payload.FileID)
-	default:
-		var deleted bool
-		_, deleted, err = kanbanApp.memory.deleteEntryByID(payload.FileID)
-		if err == nil && !deleted {
-			err = errFileSaveNotFound
-		}
-	}
+	mode, err := kanbanApp.deleteAssistantFileForUser(r.Context(), user, payload.FileID)
 	if err != nil {
 		if errors.Is(err, errFileSaveNotFound) || strings.Contains(err.Error(), "not found") {
 			writeAuthError(w, http.StatusNotFound, "file not found")
@@ -586,13 +558,51 @@ func assistantFileDelete(w http.ResponseWriter, r *http.Request, user *userAccou
 		writeAuthError(w, http.StatusInternalServerError, "could not delete the file")
 		return
 	}
+	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": mode})
+}
+
+// deleteAssistantFileForUser is the source-aware Drive deletion domain seam
+// shared by the HTTP control and Scout native actions. It reauthorizes the
+// stable file id at execution time and reports whether the underlying source
+// was deleted or only its Drive projection was removed.
+func (app *kanbanBoardApp) deleteAssistantFileForUser(ctx context.Context, user *userAccount, fileID string) (string, error) {
+	row, writable := authorizedFileRowForMove(ctx, user, fileID)
+	if row.ID == "" || !writable {
+		return "", errFileSaveNotFound
+	}
+
+	mode := "deleted"
+	var err error
+	switch row.Origin {
+	case "deliverable":
+		artifact, ok := authorizedArtifactForActions(ctx, user, row.ArtifactID, ACLReadContent, ACLWrite)
+		if !ok {
+			return "", errFileSaveNotFound
+		}
+		header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact))
+		_, _, err = app.memory.updateOSArtifactMetadataIfHeaderMatches(header, artifact.ID, map[string]string{
+			"savedToFiles": "false",
+		})
+		mode = "removed_from_drive"
+	case "chat":
+		err = app.deleteChatAttachmentFromDrive(user, fileID)
+	default:
+		var deleted bool
+		_, deleted, err = app.memory.deleteEntryByID(fileID)
+		if err == nil && !deleted {
+			err = errFileSaveNotFound
+		}
+	}
+	if err != nil {
+		return "", err
+	}
 	// Folder assignments are projections. A persistence failure here can only
 	// leave a harmless dangling id, so it must not resurrect the removed source.
-	if err := moveFileToFolder(payload.FileID, ""); err != nil {
-		log.Errorf("Clear deleted Drive file folder assignment %s failed: %v", payload.FileID, err)
+	if err := moveFileToFolder(fileID, ""); err != nil {
+		log.Errorf("Clear deleted Drive file folder assignment %s failed: %v", fileID, err)
 	}
-	broadcastSignedInKanbanEvent("file", map[string]any{"kind": "deleted", "fileId": payload.FileID})
-	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": mode})
+	broadcastSignedInKanbanEvent("file", map[string]any{"kind": "deleted", "fileId": fileID})
+	return mode, nil
 }
 
 func (app *kanbanBoardApp) deleteChatAttachmentFromDrive(user *userAccount, fileID string) error {

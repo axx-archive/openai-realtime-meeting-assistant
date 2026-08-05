@@ -141,6 +141,7 @@ var embeddingCorpusKinds = map[string]struct{}{
 	meetingMemoryKindReflection:    {},
 	meetingMemoryKindRunLog:        {},
 	meetingMemoryKindNote:          {},
+	meetingMemoryKindFile:          {}, // readable direct Drive uploads, permission-scoped at retrieval
 	meetingMemoryKindOSArtifact:    {}, // title + excerpt ONLY, never the full body
 }
 

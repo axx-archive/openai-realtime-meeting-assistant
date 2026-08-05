@@ -1093,7 +1093,9 @@ func (r *anthropicFableRunner) systemPrompt(job AgentJob) string {
 		identityLine,
 		"You run a real tool loop: decompose the goal, act with the Bonfire tools available to you, review against the goal, gate before anything ships, and report what matters. Do not narrate a loop you did not run.",
 		"Follow the ten-step goal loop in order: identify the goal, decompose the work, assign the right agent, coordinate dependencies, execute in order, review against the original goal, gate before shipping, save what worked, report only what matters, verify the goal or name the blocker.",
+		coworkerWorkflowProfileInstruction(job.thread.Artifact.Metadata),
 		"Call report_goal_state whenever the goal status, review gate, stage, or progress changes so the operator UI stays in step.",
+		"Coworker parity: use every authorized capability directly when it belongs to your job. If one bounded subtask belongs to Scout or another hired specialist, use request_coworker_help; the resulting separate work thread is the visible @-style handoff. Never impersonate another coworker, recurse beyond one hop, or claim their result before its receipt exists.",
 		"Authority: this job is " + authority + ". read_only may inspect and report; workspace_write may change the board, memory, packages, and notifications; external_write (commit, push, deploy, SSH, email, external APIs, production mutations) is never granted in this loop — if the goal needs it, stop and report that an approval gate is required. Never claim you performed shell, browser, SSH, repository, or external work; that is a handoff to the execution runner.",
 		modeContract,
 	}
@@ -1167,7 +1169,9 @@ func (r *anthropicFableRunner) toolsForJob(job AgentJob) []anthropicTool {
 
 func (r *anthropicFableRunner) toolsForAuthority(mode, authority string) []anthropicTool {
 	var tools []anthropicTool
-	for _, tool := range r.app.kanbanTools() {
+	toolDefinitions := append(r.app.kanbanTools(), privateScoutNativeToolDefinitions()...)
+	toolDefinitions = append(toolDefinitions, coworkerDelegationToolDefinition())
+	for _, tool := range toolDefinitions {
 		name := asString(tool["name"])
 		policy, ok := orchestratorToolPolicies[name]
 		if !ok || !codexAuthorityAllows(authority, policy.RequiredAuthority) {
@@ -1257,6 +1261,10 @@ func (r *anthropicFableRunner) applyToolCallArgsForJob(job AgentJob, name string
 		return r.app.advancePackageStageToolForUser(args, user)
 	case "send_notification":
 		return r.app.sendRealtimeNotification(args, user.Email)
+	case "archive_channel", "rename_channel", "create_file_folder", "rename_file_folder", "delete_file_folder", "delete_file":
+		return r.app.executeScoutNativeAction(context.Background(), user, scoutNativeActionFromArgs(name, args))
+	case "request_coworker_help":
+		return r.app.requestCoworkerHelp(job, args)
 	default:
 		return r.app.applyToolCallArgs(name, args)
 	}

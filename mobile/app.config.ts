@@ -40,11 +40,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and remain the fallback if this bundle is ever rejected.
       // Regenerate both with `npm run brand:regen` from the repo root.
       icon: './assets/Stride.icon',
-      // Build 38 adds first-class root-owned reply conversations on desktop and
-      // native mobile, native reply/activity sheets, adaptive threaded reply
-      // composition, and the polished compact reaction treatment.
+      // Build 40 fixes first-reply composition on mobile and adds the explicit
+      // room-chat Scout affordance shipped with the coworker/recall release.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '39',
+      buildNumber: '40',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

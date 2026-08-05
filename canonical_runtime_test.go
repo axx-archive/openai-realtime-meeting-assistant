@@ -378,6 +378,45 @@ func TestCanonicalRuntimeReconcileLoopAutomaticallyRecoversFromOutage(t *testing
 	t.Fatalf("automatic retry did not recover: %+v", canonicalRuntimeSnapshot())
 }
 
+func TestCanonicalReconcileRetryBacksOffOperatorRepairDivergence(t *testing.T) {
+	if delay := canonicalReconcileRetryDelay(1, canonicalParityDivergenceError{Candidates: 25}); delay != 10*time.Minute {
+		t.Fatalf("parity retry delay=%s, want operator-safe interval", delay)
+	}
+	if delay := canonicalReconcileRetryDelay(1, errors.New("temporary database outage")); delay < 250*time.Millisecond || delay > time.Second {
+		t.Fatalf("transient retry delay=%s, want short exponential recovery", delay)
+	}
+}
+
+func TestCanonicalShadowInitialReconcileRunsAfterServingGate(t *testing.T) {
+	canonicalRuntimeTestEnv(t, "shadow")
+	runtime, err := initializeCanonicalRuntime(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := []byte(`{"id":"shadow-boot","kind":"note","text":"defer","createdAt":"2026-01-01T00:00:00Z"}` + "\n")
+	if err := writeFileAtomicallyForCanonicalMode(meetingMemoryPath(), entry, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	blocked := &blockingEventsCanonicalEventStore{
+		inner:   NewMemoryCanonicalEventStore(runtime.registry),
+		entered: make(chan struct{}, 1),
+	}
+	runtime.events = blocked
+	started := time.Now()
+	runtime.startInitialShadowReconcile()
+	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
+		t.Fatalf("shadow serving gate blocked for %s", elapsed)
+	}
+	select {
+	case <-blocked.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("deferred shadow reconcile never started")
+	}
+	if snapshot := canonicalRuntimeSnapshot(); snapshot.DirtyHighWater != runtime.spoolHighWater() {
+		t.Fatalf("shadow reconcile lost the startup high-water: %+v", snapshot)
+	}
+}
+
 func TestCanonicalRuntimeShutdownCancelsStalledReconcile(t *testing.T) {
 	canonicalRuntimeTestEnv(t, "shadow")
 	runtime, err := initializeCanonicalRuntime(context.Background())

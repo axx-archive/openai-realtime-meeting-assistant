@@ -66,9 +66,9 @@ func TestIndexFilesSurfaceDataLayer(t *testing.T) {
 		"memoryDayBucket(file?.createdAt)",
 		"files-badge files-badge--ingested",
 		// three-state brain badge: company recall / private-thread only / bytes
-		"badge.setAttribute('aria-label', 'Semantic indexing complete')",
-		"badge.setAttribute('aria-label', 'Semantic indexing complete in source chat')",
-		"badge.setAttribute('aria-label', 'Semantic indexing pending')",
+		"badge.setAttribute('aria-label', 'Recall ready')",
+		"badge.setAttribute('aria-label', 'Recall ready in source chat')",
+		"badge.setAttribute('aria-label', 'Text scan incomplete')",
 		"files-badge files-badge--thread",
 		"selectScoutChatThread(file.originThreadId)",
 		// upload door: hidden multi input, multipart POST, 64MB client cap
@@ -186,8 +186,8 @@ func TestIndexDriveDetailsAreContextualAndIndexStateIsOnlyADot(t *testing.T) {
 		`filesDetails.hidden = true`,
 		`filesDetails.parentElement?.classList.add('is-details-open')`,
 		`filesDetails.parentElement?.classList.remove('is-details-open')`,
-		`badge.setAttribute('aria-label', 'Semantic indexing complete')`,
-		`badge.setAttribute('aria-label', 'Semantic indexing pending')`,
+		`badge.setAttribute('aria-label', 'Recall ready')`,
+		`badge.setAttribute('aria-label', 'Text scan incomplete')`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing contextual Drive detail contract %q", want)

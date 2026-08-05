@@ -84,7 +84,7 @@ func TestFrontendMeetingSpecialistsEscapesEveryRuntimeInterpolation(t *testing.T
 	}
 }
 
-func TestFrontendProjectsRoomAgentsAsWaveformBenchOutsideHumanVideoGrid(t *testing.T) {
+func TestFrontendProjectsAgentsAndCameraOffHumansIntoAudioPresenceBar(t *testing.T) {
 	source, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatal(err)
@@ -93,12 +93,20 @@ func TestFrontendProjectsRoomAgentsAsWaveformBenchOutsideHumanVideoGrid(t *testi
 	for _, want := range []string{
 		`case 'agent_participants':`,
 		`handleRoomAgentParticipants(message.data)`,
-		`id="roomAgentBench"`,
-		`function renderRoomAgentBench()`,
-		`room-agent-bench__member`,
-		`Agents in the room`,
+		`id="roomPresenceBar"`,
+		`function renderRoomPresenceBar()`,
+		`room-presence-bar__member`,
+		`function participantUsesAudioPresence(name)`,
+		`state.cameraOff && !state.screenSharing`,
+		`tile.hidden = audioOnly`,
+		`tile.classList.toggle('is-audio-only-presence', audioOnly)`,
+		`.filter(tile => !tile.hidden).length`,
+		`member.dataset.personType = 'human'`,
+		`member.style.setProperty('--room-presence-color', '#C8C6C3')`,
+		`member.dataset.personType = 'agent'`,
+		`member.style.setProperty('--room-presence-color', '#FF5A19')`,
 		`...roomAgentParticipants.map(agent => agent.name)`,
-		`room-agent-waveform`,
+		`room-presence-waveform`,
 		`data-voice-state`,
 		`...roomAgentParticipants.map(agent => agent.name.toLowerCase())`,
 	} {
@@ -106,7 +114,7 @@ func TestFrontendProjectsRoomAgentsAsWaveformBenchOutsideHumanVideoGrid(t *testi
 			t.Fatalf("room agent participant projection is missing %q", want)
 		}
 	}
-	for _, forbidden := range []string{`room-agent-cradle`, `is-agent-participant`} {
+	for _, forbidden := range []string{`room-agent-cradle`, `is-agent-participant`, `id="roomAgentBench"`, `Agents in the room`} {
 		if strings.Contains(html, forbidden) {
 			t.Fatalf("room agents must not occupy camera tiles or duplicate the home cradle: found %q", forbidden)
 		}
@@ -123,5 +131,23 @@ func TestFrontendDeclaresMeetingSpecialistBusyGuardBeforeBootstrapProjection(t *
 	bootstrapUse := strings.Index(html, "meetingSpecialistsBusy || !appShell.classList.contains('is-in-room')")
 	if declaration < 0 || bootstrapUse < 0 || declaration >= bootstrapUse {
 		t.Fatal("meetingSpecialistsBusy must be initialized before authenticated room projection can read it")
+	}
+}
+
+func TestFrontendScoutQuickActionAlwaysShowsProgressAndOutcome(t *testing.T) {
+	source, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(source)
+	for _, want := range []string{
+		`? (scout ? 'Removing Scout…' : 'Adding Scout…')`,
+		`'adding Scout to the room…'`,
+		`'Scout joined the room'`,
+		`showToast({ text: message, kind: 'error' })`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("Scout quick action is missing visible feedback %q", want)
+		}
 	}
 }

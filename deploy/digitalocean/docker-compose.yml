@@ -54,10 +54,10 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      # The first exact start applies migrations and rebuilds canonical state
-      # before binding HTTP. Keep Docker in "starting" for the same bounded
-      # five-minute window used by the release bootstrap instead of declaring
-      # the healthy process terminally unhealthy during that one-time work.
+      # Required-mode starts may apply migrations and prove canonical parity
+      # before binding HTTP. Shadow-mode parity is deferred behind the serving
+      # gate, but retain the bounded window for required-mode recovery rather
+      # than declaring that healthy process terminally unhealthy mid-proof.
       start_period: 300s
     mem_limit: 1024m
     # Rides both networks: the egress-less render_internal leg exists ONLY so

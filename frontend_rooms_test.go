@@ -1142,8 +1142,8 @@ func TestIndexRoomsLobbyCanonPasscodeToast(t *testing.T) {
 	}
 }
 
-// Canon join button copy: `join` → `joining…` (the topbar pill keeps
-// `connecting…` → `the room is listening`), `try again` after a media failure.
+// Canon join button copy: `join` → `joining…`, then `try again` after a media
+// failure. In-call connection/recording state lives in the meeting dock.
 func TestIndexRoomsLobbyCanonJoinLabel(t *testing.T) {
 	html := readIndexHTMLForRooms(t)
 

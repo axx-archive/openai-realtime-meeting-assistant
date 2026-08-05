@@ -34,7 +34,7 @@ import { CatchUpSheet } from '../messaging/CatchUpSheet';
 import { MessageActionSheet } from '../messaging/MessageActionSheet';
 import { LongMessageSheet } from '../messaging/LongMessageSheet';
 import { ThreadDetailSheet } from '../messaging/ThreadDetailSheet';
-import { MentionComposerInput } from '../messaging/MentionComposerInput';
+import { MentionComposerInput, type MentionComposerInputHandle } from '../messaging/MentionComposerInput';
 import { AttachmentSourceSheet } from '../messaging/AttachmentSourceSheet';
 import { GifPickerSheet } from '../messaging/GifPickerSheet';
 import {
@@ -254,6 +254,7 @@ export function ThreadScreen({ route, navigation }: Props) {
   // null means "not yet loaded" — distinct from "" which means never read.
   const [readAt, setReadAt] = useState<string | null>(null);
   const listRef = useRef<FlashListRef<ThreadRow>>(null);
+  const composerInputRef = useRef<MentionComposerInputHandle>(null);
   const messagesRef = useRef<ScoutMessage[]>([]);
   messagesRef.current = messages;
   const replyTopology = useMemo(() => buildThreadReplyTopology(messages), [messages]);
@@ -570,6 +571,34 @@ export function ThreadScreen({ route, navigation }: Props) {
     typingIdleTimerRef.current = setTimeout(() => stopTyping(), 2_800);
   }, [editingMessage, office.send, route.params.threadId, sessionToken, stopTyping, threadVisibility]);
 
+	const applyScoutActions = useCallback((raw: unknown) => {
+		if (!Array.isArray(raw)) return;
+		for (const candidate of raw) {
+			if (!candidate || typeof candidate !== 'object') continue;
+			const action = candidate as Record<string, unknown>;
+			if (String(action.type ?? '').trim() !== 'open_tool') continue;
+			const tool = String(action.tool ?? '').trim();
+			if (tool === 'chat') navigation.navigate('Deck', { segment: 'threads' });
+			else if (['workflow', 'research', 'design', 'grill'].includes(tool)) navigation.navigate('Deck', { segment: 'work' });
+			else if (tool === 'board') navigation.navigate('Board');
+			else if (tool === 'artifacts' || tool === 'files') navigation.navigate('Files');
+			else if (tool === 'memory') navigation.navigate('Memory');
+			else if (tool === 'notifications' || tool === 'alerts') navigation.navigate('Alerts');
+			else if (tool === 'settings') navigation.navigate('Settings');
+		}
+	}, [navigation]);
+
+	const insertScoutMention = useCallback(() => {
+		if (threadVisibility !== 'public' || editingMessage) return;
+		const next = /(^|[^\p{L}\p{N}])@scout(?![\p{L}\p{N}])/iu.test(draft)
+			? draft
+			: draft
+				? `${draft}${/\s$/u.test(draft) ? '' : ' '}@Scout `
+				: '@Scout ';
+		changeDraft(next);
+		requestAnimationFrame(() => composerInputRef.current?.focus());
+	}, [changeDraft, draft, editingMessage, threadVisibility]);
+
   useEffect(() => () => stopTyping(), [stopTyping]);
 
   useEffect(() => {
@@ -701,6 +730,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         setEditingMessage(null);
       }
       applyTranscriptSnapshot(generationAtRequest, response.thread?.messages ?? response.messages ?? []);
+	  applyScoutActions(response.actions);
       Keyboard.dismiss();
 	  atBottomRef.current = true;
 	  requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }));
@@ -727,6 +757,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         rootID,
       );
       applyTranscriptSnapshot(generationAtRequest, response.thread?.messages ?? response.messages ?? []);
+	  applyScoutActions(response.actions);
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       return true;
     } catch (caught) {
@@ -735,7 +766,7 @@ export function ThreadScreen({ route, navigation }: Props) {
     } finally {
       setThreadReplySending(false);
     }
-  }, [applyTranscriptSnapshot, route.params.threadId, sessionToken, threadContextRootID, threadReplySending]);
+  }, [applyScoutActions, applyTranscriptSnapshot, route.params.threadId, sessionToken, threadContextRootID, threadReplySending]);
 
   const retryScoutReply = useCallback(async (message: ScoutMessage) => {
     const replyID = String(message.id ?? '').trim();
@@ -1496,7 +1527,21 @@ export function ThreadScreen({ route, navigation }: Props) {
               </Text>
             </View>
           ) : (
+            <>
+              {threadVisibility === 'public' && !/(^|[^\p{L}\p{N}])@scout(?![\p{L}\p{N}])/iu.test(draft) ? (
+                <Pressable
+                  accessibilityHint="Inserts a Scout mention without sending"
+                  accessibilityLabel="Ask Scout in this channel"
+                  accessibilityRole="button"
+                  onPress={insertScoutMention}
+                  style={({ pressed }) => [styles.scoutMentionShortcut, pressed && styles.scoutMentionShortcutPressed]}
+                >
+                  <SymbolView name="sparkles" tintColor={colors.emberText} size={13} />
+                  <Text style={styles.scoutMentionShortcutLabel}>@Scout</Text>
+                </Pressable>
+              ) : null}
             <MentionComposerInput
+              ref={composerInputRef}
               placeholder={
                 threadTitle.length > 22
                   ? `Message ${threadTitle.slice(0, 21).trimEnd()}…`
@@ -1508,6 +1553,7 @@ export function ThreadScreen({ route, navigation }: Props) {
               candidates={participants}
               editable
             />
+            </>
           )}
 
           <View style={styles.composerActions}>
@@ -1772,6 +1818,9 @@ const styles = StyleSheet.create({
     ...type.caption,
     color: colors.emberText,
   },
+  scoutMentionShortcut: { minHeight: hitMin, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: space[2], paddingHorizontal: 13, borderRadius: hitMin / 2, backgroundColor: colors.emberSoft },
+  scoutMentionShortcutPressed: { opacity: 0.86, transform: [{ scale: 0.96 }] },
+  scoutMentionShortcutLabel: { ...type.captionMedium, color: colors.emberText },
   composerActions: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -17,7 +17,7 @@ import {
 import { SymbolView } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Waveform } from './Waveform';
-import { ink, radius, shadow, space, type } from '../theme/tokens';
+import { hitMin, ink, radius, shadow, space, type } from '../theme/tokens';
 import { useComposerDictation } from '../voice/useComposerDictation';
 import { parseMentions } from '../messaging/mentions';
 import {
@@ -417,7 +417,6 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
                 >
                   <SymbolView name="sparkles" tintColor="#FF7A45" size={13} />
                   <Text style={styles.scoutMentionShortcutLabel}>@Scout</Text>
-                  <Text style={styles.scoutMentionShortcutHint}>ask the room AI</Text>
                 </Pressable>
               ) : null}
               {composerError || composerDictation.error ? (
@@ -605,9 +604,8 @@ const styles = StyleSheet.create({
   transcriptTime: { fontSize: 10, lineHeight: 13, color: 'rgba(255,255,255,0.38)' },
   transcriptText: { ...type.body, color: 'rgba(255,255,255,0.82)' },
   composerShell: { ...shadow.mark, paddingHorizontal: space[3], paddingTop: space[2], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.09)', backgroundColor: 'rgba(13,13,16,0.96)' },
-  scoutMentionShortcut: { minHeight: 34, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: space[2], paddingHorizontal: 11, borderRadius: 17, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,90,25,0.34)', backgroundColor: 'rgba(255,90,25,0.10)' },
+  scoutMentionShortcut: { minHeight: hitMin, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: space[2], paddingHorizontal: 13, borderRadius: hitMin / 2, backgroundColor: 'rgba(255,90,25,0.10)' },
   scoutMentionShortcutLabel: { ...type.captionMedium, color: '#FF8A5B' },
-  scoutMentionShortcutHint: { ...type.caption, color: 'rgba(255,255,255,0.46)' },
   composerError: { ...type.caption, marginBottom: space[2], textAlign: 'center', color: '#FF9F0A' },
   composer: { minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: space[2], paddingLeft: 5, paddingRight: 5, paddingVertical: 5, borderRadius: 25, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)', backgroundColor: ink[800] },
   composerIcon: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20 },

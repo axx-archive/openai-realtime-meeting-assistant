@@ -147,6 +147,7 @@ func ensureCanonicalLifecycleJournal(path string, record CanonicalLifecycleJourn
 }
 
 func initializeCanonicalRuntime(ctx context.Context) (*CanonicalRuntime, error) {
+	started := time.Now()
 	modeText, err := canonicalModeFromEnvironment()
 	if err != nil {
 		return nil, err
@@ -159,6 +160,7 @@ func initializeCanonicalRuntime(ctx context.Context) (*CanonicalRuntime, error) 
 		setCanonicalRuntime(runtime)
 		return runtime, nil
 	}
+	canonicalStartupProgress(mode, "capture_recovery", started, "begin")
 
 	runtime.root = filepath.Join(dataDir, "canonical")
 	if err := os.MkdirAll(runtime.root, 0o700); err != nil {
@@ -212,6 +214,7 @@ func initializeCanonicalRuntime(ctx context.Context) (*CanonicalRuntime, error) 
 	// A missing/corrupt/mismatched checkpoint is not trusted. Boot continues
 	// into the full importer/PG parity reconciliation below and rewrites it.
 	_, _ = runtime.loadReconcileCheckpoint()
+	canonicalStartupProgress(mode, "capture_recovery", started, "complete")
 
 	databaseURL := strings.TrimSpace(os.Getenv("BONFIRE_CANONICAL_DATABASE_URL"))
 	if databaseURL != "" {
@@ -237,10 +240,35 @@ func initializeCanonicalRuntime(ctx context.Context) (*CanonicalRuntime, error) 
 	} else {
 		runtime.markFailure(errors.New("canonical PostgreSQL is not configured"))
 	}
+	canonicalStartupProgress(mode, "database", started, "complete")
+
+	// Shadow canonical state is an observed projection, never the serving
+	// authority. Its full legacy scan and parity pass can take minutes on a
+	// mature volume, so it must not hold the public HTTP listener hostage. The
+	// durable mutation fence and PostgreSQL migrations are already established
+	// above; schedule the same full reconcile in the background and expose its
+	// truthful progress/degradation through /readyz. Required mode retains the
+	// blocking boot proof below.
+	if mode == CanonicalModeShadow {
+		if runtime.events != nil {
+			runtime.startInitialShadowReconcile()
+		} else if _, buildErr := runtime.buildLegacyPlan(ctx); buildErr != nil {
+			// Preserve source-integrity diagnostics when shadow PostgreSQL is
+			// absent. Production has an event store and takes the asynchronous
+			// branch; this fallback cannot make a missing database ready.
+			runtime.markFailure(fmt.Errorf("canonical boot scan degraded: %w", buildErr))
+		}
+		configureProductionBrainProjectionRuntime(runtime)
+		canonicalStartupProgress(mode, "serving_gate", started, "shadow_reconcile_deferred")
+		return runtime, nil
+	}
+	canonicalStartupProgress(mode, "legacy_plan", started, "begin")
 	// A boot scan validates every registered legacy family even when shadow PG
-	// is absent. A source+spool-bound checkpoint may take the read-only resume
-	// path; otherwise boot performs the full import/grant/reconcile sequence.
+	// is absent in required mode. A source+spool-bound checkpoint may take the
+	// read-only resume path; otherwise boot performs the full import/grant and
+	// parity sequence before serving.
 	plan, buildErr := runtime.buildLegacyPlan(ctx)
+	canonicalStartupProgress(mode, "legacy_plan", started, "complete")
 	bootResumed := false
 	if buildErr != nil {
 		if mode == CanonicalModeRequired {
@@ -284,7 +312,12 @@ func initializeCanonicalRuntime(ctx context.Context) (*CanonicalRuntime, error) 
 	// canonical history is never scanned or silently baselined; post-boot
 	// canonical commits explicitly enqueue their exact scope.
 	configureProductionBrainProjectionRuntime(runtime)
+	canonicalStartupProgress(mode, "serving_gate", started, "complete")
 	return runtime, nil
+}
+
+func canonicalStartupProgress(mode CanonicalMode, phase string, started time.Time, state string) {
+	fmt.Fprintf(os.Stderr, "canonical_startup mode=%s phase=%s state=%s elapsed_ms=%d\n", mode, phase, state, time.Since(started).Milliseconds())
 }
 
 func (runtime *CanonicalRuntime) materializeCommittedDeleteJournals() error {
@@ -610,9 +643,21 @@ func (runtime *CanonicalRuntime) startReconcileLoop() {
 	go runtime.reconcileLoop()
 }
 
+func (runtime *CanonicalRuntime) startInitialShadowReconcile() {
+	runtime.mu.Lock()
+	runtime.dirtyHighWater = runtime.spoolHighWater()
+	runtime.mu.Unlock()
+	runtime.startReconcileLoop()
+	select {
+	case runtime.reconcileSignal <- struct{}{}:
+	default:
+	}
+}
+
 func (runtime *CanonicalRuntime) reconcileLoop() {
 	defer runtime.reconcileWG.Done()
 	retry := 0
+	var lastErr error
 	for {
 		if retry == 0 {
 			select {
@@ -623,20 +668,7 @@ func (runtime *CanonicalRuntime) reconcileLoop() {
 			case <-runtime.reconcileSignal:
 			}
 		}
-		delay := 250 * time.Millisecond
-		if retry > 0 {
-			shift := retry - 1
-			if shift > 7 {
-				shift = 7
-			}
-			delay = time.Duration(1<<shift) * 250 * time.Millisecond
-			if delay > 30*time.Second {
-				delay = 30 * time.Second
-			}
-			// Deterministic bounded jitter avoids synchronized replicas without a
-			// shared/global PRNG or nondeterministic tests.
-			delay += time.Duration((retry*7919)%101) * delay / 1000
-		}
+		delay := canonicalReconcileRetryDelay(retry, lastErr)
 		timer := time.NewTimer(delay)
 		select {
 		case <-runtime.reconcileStop:
@@ -652,10 +684,45 @@ func (runtime *CanonicalRuntime) reconcileLoop() {
 				return
 			}
 			retry++
+			lastErr = err
 			continue
 		}
 		retry = 0
+		lastErr = nil
 	}
+}
+
+type canonicalParityDivergenceError struct {
+	Candidates int
+}
+
+func (err canonicalParityDivergenceError) Error() string {
+	return fmt.Sprintf("canonical parity diverged with %d repair candidates", err.Candidates)
+}
+
+func canonicalReconcileRetryDelay(retry int, lastErr error) time.Duration {
+	if retry <= 0 {
+		return 250 * time.Millisecond
+	}
+	var divergence canonicalParityDivergenceError
+	if errors.As(lastErr, &divergence) {
+		// A parity gap needs the guarded repair ceremony or a later source
+		// generation; rescanning a mature volume every 30 seconds only burns CPU
+		// and never makes the candidate safer. Keep a periodic recovery probe.
+		return 10 * time.Minute
+	}
+	shift := retry - 1
+	if shift > 7 {
+		shift = 7
+	}
+	delay := time.Duration(1<<shift) * 250 * time.Millisecond
+	if delay > 30*time.Second {
+		delay = 30 * time.Second
+	}
+	// Deterministic bounded jitter avoids synchronized replicas without a
+	// shared/global PRNG or nondeterministic tests.
+	delay += time.Duration((retry*7919)%101) * delay / 1000
+	return delay
 }
 
 type canonicalReconcileCheckpoint struct {
@@ -798,7 +865,7 @@ func (runtime *CanonicalRuntime) Reconcile(ctx context.Context) error {
 	if err == nil {
 		report, err = ReconcileCanonicalPlanWithOptions(ctx, plan, canonicalLegacyEventView{CanonicalEventStore: runtime.events}, runtime.parityOptions(plan))
 		if err == nil && report.Diverged {
-			err = fmt.Errorf("canonical parity diverged with %d repair candidates", len(report.Candidates))
+			err = canonicalParityDivergenceError{Candidates: len(report.Candidates)}
 		}
 	}
 	if err != nil {
