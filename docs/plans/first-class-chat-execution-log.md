@@ -4,7 +4,39 @@ Date created: 2026-06-21
 
 Primary plan: `docs/plans/first-class-chat-execution-plan.md`
 
-Branch: `main`
+Branch: `codex/country-golf-stride`
+
+## Country+Golf production close-out — 2026-08-04
+
+Status: `shipped_product_candidate`
+
+- Implementation commit `e825291a9ed4c2e5fb3f499fe6c464618c117943`
+  is live from the sealed committed tree on the VPS. Git push is deferred.
+- Chat now has responsive desktop/mobile layout, a resizable channel rail,
+  dual-use activity/comments context, rich link/media previews, adaptive mobile
+  composer height, visible work stages/progress/timers, and durable deliverables.
+- Scout and Colton use distinct first-person identities. Scout can delegate a
+  research run to Colton with an attributable handoff; Marvin remains a reviewed
+  Marketplace candidate rather than an active employee.
+- Per-human context is isolated across three lanes: private imported/1:1 memory,
+  audience-bound public chat and recorded-meeting memory, and authorized company
+  context. Agent retrieval and final delivery both recheck requester, source,
+  revision, destination, and every destination member. Private source material
+  cannot widen into a channel or room. Follow-ups use the human acting now for
+  relationship memory and File ACLs while preserving the original artifact
+  author's durable provenance; each recorded meeting contribution remains
+  speaker-attributed.
+- Successful completed work may propose a provenance-bound relationship-memory
+  update, but it is not active until a human approves it; correction, expiry,
+  and forget remain human controls.
+- Local validation passed: full Go, focused Go race, 392 mobile tests, mobile
+  typecheck, 33 media-harness checks, 23 brand checks, 36 release-harness checks,
+  inline-script parsing, and `git diff --check`.
+- Live product proof remains distinct from Build 36 physical acceptance. The
+  outstanding device matrix is multi-human room invocation, attributed meeting
+  transcription, Files/Drive visibility, extended room stability, rich-feed
+  scrolling, and composer growth/collapse.
+- Canonical Board repair and `stride-site/` remain outside this workstream.
 
 ## How To Use This Log
 

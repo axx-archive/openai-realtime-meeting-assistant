@@ -1,10 +1,11 @@
 # STRIDE Next Evolution — Master Architecture and Execution Ledger
 
 **Status:** Active release close-out. The Scout voice, dictation, typed-thread,
-long-thread performance, explicit invited-room-participant, and E10 security
-foundations are integrated on local `main`. The user has explicitly authorized
-the reviewed Git push, exact-release VPS cutover, required migrations, and the
-next internal TestFlight build after the deterministic gates pass. Scout may be
+long-thread performance, explicit invited-room-participant, agent-work,
+relationship-memory, and E10 security foundations are integrated on
+`codex/country-golf-stride`. The user has explicitly authorized the exact-release
+VPS cutover and next internal TestFlight build, but has deferred the Git push.
+Scout may be
 invited as a visible, attributed room participant only under current room,
 media-generation, audience, and unanimous capture/transcription/model-analysis
 consent. Meeting transcription remains independent and cannot silently invite
@@ -34,6 +35,63 @@ custody, physical-device, HA/DR, pilot, soak, or independent evidence gates.
 External reference, adopted selectively rather than introduced as a runtime dependency: [Block Buzz at audited commit `90e058e`](https://github.com/block/buzz/tree/90e058ebf68137e048a409aec6616519379ff726). STRIDE adopts the useful separation of portable persona definition, runtime identity, and team membership; it does not adopt Buzz's collaboration substrate, permission defaults, prompt-only delegation, or agent-authored memory as organizational truth.
 
 Older model recommendations are historical baselines, not current authority. The current official model references for this plan are [GPT-5.6](https://developers.openai.com/api/docs/guides/latest-model.md), [GPT-Realtime-2.1](https://developers.openai.com/api/docs/models/gpt-realtime-2.1), [GPT Transcribe](https://developers.openai.com/api/docs/models/gpt-transcribe), and [GPT Live Transcribe](https://developers.openai.com/api/docs/models/gpt-live-transcribe).
+
+### Country+Golf shipped product checkpoint — 2026-08-04
+
+- The reviewed implementation commit is
+  `e825291a9ed4c2e5fb3f499fe6c464618c117943`, based on the exact requested live
+  baseline `374150b0bf6651dac1a3c717957fc2f8da463187`. It is live from a sealed
+  committed-tree bundle on the DigitalOcean VPS; the separately owned
+  `stride-site/` tree was excluded and remains untouched. The live canonical
+  board file is byte-identical before and after the product cutover
+  (`4a499809adda2719169b711cf482744a8bd10cdf1576caeaf743078cb576eceb`,
+  20,518 bytes). No Git push is part of this checkpoint.
+- Native distribution truth is separate: Build 34 predated this work; Build 35
+  is the exact `6e6e714119e976d895f10c34c78426ba717c9e43` room/voice predecessor. Build
+  36 is the intended first binary for `e825291a...` and remains pending until
+  EAS completion, Apple `VALID`, intended `Team (Expo)` availability, and a
+  fresh physical-device pass are each independently observed.
+- Focused physical acceptance on Build 35 records: the home cradle listens and
+  talks; one-send dictation works (several seconds of processing remains an
+  observed latency, not a failure claim); Scout can be invited; long mobile
+  feeds are materially smoother; and a room was stable in the observed sitting.
+  Multi-human name invocation, full speaker-attributed recording, Files access,
+  and extended room soak remain explicit Build 36 retests. Files/Drive is a
+  user-controlled deliverable surface, not a synonym for company memory.
+- Desktop and mobile chat now share one first-class contract: responsive shell
+  and resizable channel rail, STRIDE/Bonfire organization identity, dual-use
+  activity/comments context rail, adaptive mobile composer that grows per line
+  and collapses after send, rich link/media previews, visible agent work with
+  stages/progress/timer, durable deliverables, and honest terminal states.
+- Scout is the default coordinating coworker. Colton is the first approved
+  research hire and speaks in first person; Marvin remains a research
+  methodologist candidate, not a silently hired employee. Named-agent prompts
+  receive one identity, never a Scout-plus-specialist blend. Completed-work
+  learnings remain pending and provenance-bound until a human approves,
+  corrects, expires, or forgets them.
+- Relationship memory has three non-interchangeable lanes. Private imports and
+  1:1 agent chat remain bound to that exact human and private thread. Public
+  chat and recorded meetings contribute speaker-attributed shared work only to
+  their exact audience. Company context evolves from authorized shared work,
+  without flattening people into one profile or leaking private imports. Every
+  agent run receives the authenticated requester, destination audience,
+  source revisions, and current permissions; destination delivery is rejected
+  if any recipient cannot read every source. A follow-up by human B uses B's
+  current relationship lane and B's File permissions even when human A created
+  the original artifact, while the durable v1 authorship remains A. Room runs
+  receive the current human's meeting identity and speaker-attributed shared
+  evidence, never private Settings imports or private agent-chat memory.
+- Missing-input prompts, one approved work launch, Scout-to-Colton delegation,
+  live work visualization, proactive follow-up, and durable terminal delivery
+  are production acceptance scenarios for this checkpoint. A promise to act
+  must either schedule durable work or state that it cannot; conversational
+  text alone is never evidence that work exists.
+- E1-E9 remain `deterministic_verified` within their prior local/default-off
+  evidence classes. E10 now includes an exact shipped product candidate and
+  production workflow proof, but it remains open for Build 36 device acceptance,
+  multi-human room/Scout invocation, real speaker-attribution corpus review,
+  Files/Drive acceptance, provider-seat qualification, soak, HA/DR, and external
+  custody. This checkpoint does not reopen or authorize canonical Board repair.
 
 ### Active final release checkpoint — 2026-08-02
 
@@ -1255,7 +1313,7 @@ Rate metrics report numerator/denominator and a 95% Wilson interval. Latency rep
 | E7 | `insights_opportunities_v1` and its first named Insights coworker produce repeatedly useful, reviewed outcomes, learn from typed feedback, and seal the first marketplace-ready package | E6 | ten fixed-release pilots, two reviewers, stable attribution, zero invented assertions/unauthorized disclosure, package/eval/rollback receipt | `deterministic_verified` — complete durable fake-stage workflow; ten paid real-input pilots/two reviewers pending E10 |
 | E8 | Curated Agent Marketplace, organization-owned team agents, evidence-backed growth, chief-of-staff coordination, static seat routing, and spend controls are eval-proven | E2-E7 corpora and I&O proof | verified first-party packages one at a time; lifecycle/permission/export/continuity gates; quality non-regression, ledger agreement, and package/profile/route rollback | `deterministic_verified` — internal-preview lifecycle/default-off candidates; live capability/personality/voice/cost admission pending E10 |
 | E9 | HA/DR, security, native devices, operational readiness, and launch-readiness harnesses | token-free E1-E8 engineering | deterministic restore/failover/isolation/native/security evidence; production operations remain fenced | `deterministic_verified` — temp/loopback/local-simulator evidence only; production HA/RPO/RTO, real media, physical devices, release, and soak pending E10 |
-| E10 | Paid-provider qualification, integrated acceptance, and launch | E1-E9 engineering plus external E0 recovery/consent/custody/quota gates | one-seat-at-a-time live canaries, immutable route map, integrated founder flows, production restore/failover/soak, exact-SHA launch and rollback | `external_waiting` — bounded model access, file transcription, and one synthetic committed-turn `gpt-transcribe` contract passed on 2026-08-01; the one separately authorized Scout retry generated partial output but did not complete, so Scout and every downstream lane remain unqualified; no route/config/Git/production change occurred and all corpus/human/device/launch gates remain open |
+| E10 | Paid-provider qualification, integrated acceptance, and launch | E1-E9 engineering plus external E0 recovery/consent/custody/quota gates | one-seat-at-a-time live canaries, immutable route map, integrated founder flows, production restore/failover/soak, exact-SHA launch and rollback | `product_candidate_live; external_acceptance_waiting` — exact `e825291a...` is sealed and live with Scout/Colton workflow proof and the canonical Board unchanged; Build 36 physical acceptance, multi-human room invocation/transcription attribution, Files/Drive acceptance, real-corpus provider qualification, HA/DR, custody, and soak remain open. The earlier synthetic provider receipts keep their narrow contract meaning and do not qualify a seat. |
 
 ---
 
@@ -1667,26 +1725,29 @@ or a qualifying earlier-wave receipt:
 
 ## 18. Current wave and resume point
 
-**Current wave:** E10 — local substate `release_integration`; external substate
-`external_waiting`. E1-E9 have reached `deterministic_verified` only for the
-local/default-off evidence class described in the wave table and checkpoint
-above. Shipping an immutable candidate and a TestFlight build does not promote
+**Current wave:** E10 — local substate `product_candidate_live`; external substate
+`external_acceptance_waiting`. E1-E9 have reached `deterministic_verified` only
+for the local/default-off evidence class described in the wave table and
+checkpoint above. Shipping an immutable candidate and a TestFlight build does not promote
 the separately gated provider, real-corpus, physical-device, HA, custody, or
 feature-activation states.
 
-**Current owner and stop:** Goal Loop coordinator. The corrected synthetic
+**Current owner and stop:** Goal Loop coordinator. The Country+Golf product
+candidate is live at exact implementation commit `e825291a...`; the Git push is
+deferred, Build 36 remains to be distributed and physically accepted, and the
+canonical Board repair remains explicitly out of scope. The corrected synthetic
 Realtime transcription contract passed. The first Scout attempt exposed an
 optional-event harness defect; exactly one separately authorized retry was
 consumed and failed closed after partial provider generation, before a valid
 `response.done` could reconcile usage and cost. The post-retry correction is
 locally and independently verified but has not been provider-retested. No
-further paid call is authorized. Git integration, the reviewed schema
-migrations, the exact VPS cutover, and Build 29/TestFlight are now authorized
-behind their documented local, backup, migration, rollback, and release gates.
-Do not run another provider generation call; enable a feature/listing/model
-route; rename the repository/application; or claim live traffic, restore,
-physical-device, provider-quality, or HA acceptance without its separate
-authority and evidence.
+further paid **qualification** retry is authorized. The reviewed schema and
+exact VPS cutover have shipped; the next authorized distribution action is the
+exact Build 36/TestFlight ceremony behind its documented release gates.
+Do not run another provider-qualification call; enable a still-fenced
+specialist voice/model route; rename the repository/application; or claim live
+traffic, restore, physical-device, provider-quality, or HA acceptance without
+its separate authority and evidence.
 
 **Frozen local checkpoint:**
 
