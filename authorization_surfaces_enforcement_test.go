@@ -159,7 +159,7 @@ func TestPrivateArtifactIsFilteredFromFilesAndDeniedSaveAndFollowUp(t *testing.T
 func TestEnforcedArtifactSurfaceRegistryMatchesHandlerContracts(t *testing.T) {
 	want := map[string][]ACLAction{
 		"http.assistant.agent_followup":    {ACLReadContent, ACLExecute, ACLWrite},
-		"http.assistant.files":             {ACLReadContent},
+		"http.assistant.files":             {ACLReadContent, ACLWrite, ACLDelete},
 		"http.assistant.file_save":         {ACLReadContent, ACLWrite},
 		"http.assistant.deal_room_request": {ACLReadContent, ACLShare},
 		"http.artifacts":                   {ACLReadContent, ACLWrite},

@@ -60,6 +60,18 @@ func postFileUpload(t *testing.T, cookies []*http.Cookie, name string, contentTy
 	return recorder
 }
 
+func deleteDriveFileRequest(t *testing.T, cookies []*http.Cookie, fileID string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodDelete, "/assistant/files", strings.NewReader(fmt.Sprintf(`{"fileId":%q}`, fileID)))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+	assistantFilesHandler(recorder, req)
+	return recorder
+}
+
 func TestAssistantFilesHandlersGates(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp
@@ -182,6 +194,18 @@ func TestAssistantFileUploadRoundtripAndList(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("txt upload status=%d body=%s, want 200", recorder.Code, recorder.Body.String())
 	}
+	var textPayload struct {
+		File assistantFileRecord `json:"file"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &textPayload); err != nil {
+		t.Fatal(err)
+	}
+	if textPayload.File.BrainStatus != fileBrainStatusIngested {
+		t.Fatalf("plain text brainStatus=%q, want immediate ingestion", textPayload.File.BrainStatus)
+	}
+	if matches := kanbanApp.memory.search("term sheet notes", 5); len(matches) == 0 {
+		t.Fatal("plain text contents must enter recall without a model key")
+	}
 
 	// The list door: newest first, both uploads present.
 	listReq := httptest.NewRequest(http.MethodGet, "/assistant/files", nil)
@@ -219,6 +243,107 @@ func TestAssistantFileUploadRoundtripAndList(t *testing.T) {
 		if entry.Kind == meetingMemoryKindFile {
 			t.Fatal("file entries must not render in the client memory timeline")
 		}
+	}
+}
+
+func TestAssistantFileDeleteRemovesUploadAndRecall(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	t.Setenv("MEETING_ALLOWED_ORIGINS", "")
+	t.Setenv("BONFIRE_FILE_FOLDERS_PATH", filepath.Join(t.TempDir(), "file-folders.json"))
+
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	upload := postFileUpload(t, cookies, "semantic-delete-canary.txt", "text/plain", []byte("delete me"))
+	if upload.Code != http.StatusOK {
+		t.Fatalf("upload status=%d body=%s", upload.Code, upload.Body.String())
+	}
+	var payload struct {
+		File assistantFileRecord `json:"file"`
+	}
+	if err := json.Unmarshal(upload.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if matches := kanbanApp.memory.search("semantic delete canary", 5); len(matches) == 0 {
+		t.Fatal("uploaded file must enter recall before delete")
+	}
+	if response := deleteDriveFileRequest(t, cookies, payload.File.ID); response.Code != http.StatusOK {
+		t.Fatalf("delete status=%d body=%s", response.Code, response.Body.String())
+	}
+	if fileRowVisible(kanbanApp, "aj@shareability.com", payload.File.ID) {
+		t.Fatal("deleted upload still visible in Drive")
+	}
+	if matches := kanbanApp.memory.search("semantic delete canary", 5); len(matches) != 0 {
+		t.Fatalf("deleted upload still participates in recall: %+v", matches)
+	}
+	if response := deleteDriveFileRequest(t, cookies, payload.File.ID); response.Code != http.StatusNotFound {
+		t.Fatalf("second delete status=%d, want 404", response.Code)
+	}
+}
+
+func TestAssistantFileDeleteChatAttachmentAndUnsavesDeliverable(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	t.Setenv("MEETING_ALLOWED_ORIGINS", "")
+	t.Setenv("BONFIRE_FILE_FOLDERS_PATH", filepath.Join(t.TempDir(), "file-folders.json"))
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+
+	thread, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Source chat", "private")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := accountStore().findUser("aj@shareability.com")
+	ref, err := putBlob(tinyPNG(t), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := grantTestPendingAttachment(t, kanbanApp, user, thread, ref)
+	file.Name = "source.png"
+	file.Mime = "image/png"
+	file.Text = "chat recall canary"
+	meta, _ := blobStatForRef(ref)
+	const reservationID = "drive-delete-chat-file"
+	if err := kanbanApp.reservePendingAttachmentUpload(user, thread, file, meta, reservationID); err != nil {
+		t.Fatal(err)
+	}
+	message := scoutChatMessageRecord{
+		ID: "message-files", Kind: "message", Role: "user", Text: "attached", AuthorName: "AJ", AuthorEmail: "aj@shareability.com",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Files: []scoutChatFileAttachment{file},
+		attachmentDestinationRevision: scoutChatAttachmentDestinationRevision(thread), attachmentReservationID: reservationID,
+	}
+	if _, err := kanbanApp.commitScoutChatThreadMessages(user.Email, thread.ID, message); err != nil {
+		t.Fatal(err)
+	}
+	chatID := thread.ID + ":message-files:0"
+	if response := deleteDriveFileRequest(t, cookies, chatID); response.Code != http.StatusOK {
+		t.Fatalf("delete chat file status=%d body=%s", response.Code, response.Body.String())
+	}
+	storedThread, _, err := kanbanApp.scoutChatThreadByID("aj@shareability.com", thread.ID)
+	if err != nil || len(storedThread.Messages) != 1 || len(storedThread.Messages[0].Files) != 0 {
+		t.Fatalf("chat attachment survived delete: thread=%+v err=%v", storedThread, err)
+	}
+
+	report, _, err := kanbanApp.createOSArtifactWithMetadata("research", "Saved report", "# durable artifact", "AJ", map[string]string{
+		"source": "scout_thread", "status": "complete", "threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kanbanApp.saveDeliverableToFiles(report.ID, "", "AJ"); err != nil {
+		t.Fatal(err)
+	}
+	response := deleteDriveFileRequest(t, cookies, report.ID)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "removed_from_drive") {
+		t.Fatalf("unsave status=%d body=%s", response.Code, response.Body.String())
+	}
+	if fileRowVisible(kanbanApp, "aj@shareability.com", report.ID) {
+		t.Fatal("unsaved deliverable still visible in Drive")
+	}
+	if artifact, ok := kanbanApp.osArtifactByID(report.ID); !ok || artifact.Text != "# durable artifact" || artifact.Metadata["savedToFiles"] != "false" {
+		t.Fatalf("unsave damaged source artifact: %+v ok=%v", artifact, ok)
 	}
 }
 

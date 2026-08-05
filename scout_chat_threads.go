@@ -3398,9 +3398,10 @@ func (app *kanbanBoardApp) setScoutChatThreadArchived(ownerEmail string, threadI
 	if err != nil {
 		return scoutChatThreadRecord{}, err
 	}
-	// Any signed-in user can read a public channel, but only its creator may
-	// archive (or restore) it.
-	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic && normalizeAccountEmail(thread.OwnerEmail) != normalizeAccountEmail(ownerEmail) {
+	// Any signed-in user can read a public channel, but only its creator or the
+	// workspace administrator may archive (or restore) it.
+	admin := normalizeAccountEmail(ownerEmail) == artifactLibraryAdminEmail
+	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic && normalizeAccountEmail(thread.OwnerEmail) != normalizeAccountEmail(ownerEmail) && !admin {
 		return scoutChatThreadRecord{}, fmt.Errorf("only the channel creator can archive this channel")
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)

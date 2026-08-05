@@ -19,6 +19,14 @@ func TestBoardProjectionUsesOnlyViewerAuthorizedArtifactAndProjectContext(t *tes
 	if err != nil {
 		t.Fatalf("create project channel: %v", err)
 	}
+	emptyProject, err := app.createScoutChatThread(user.Email, user.Name, "Ball Dogs", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatalf("create empty project channel: %v", err)
+	}
+	team, err := app.createScoutChatThread(user.Email, user.Name, "team", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatalf("create team channel: %v", err)
+	}
 	card := app.snapshotState().Cards[0]
 	artifact, _, err := app.createOSArtifactWithMetadata("research", "Country Golf brief", "# Country Golf\n\nDelivered.", user.Name, map[string]string{
 		"source": "scout_thread", "status": "complete", "threadStatus": "complete",
@@ -42,6 +50,16 @@ func TestBoardProjectionUsesOnlyViewerAuthorizedArtifactAndProjectContext(t *tes
 	}
 	if found.DeliveryStage != boardDeliveryDrive || found.ProjectID != channel.ID || found.ProjectTitle != channel.Title || found.ProjectResolution != "linked" || found.ArtifactID != artifact.ID {
 		t.Fatalf("projection=%+v, want Drive + authorized Country Golf linkage", *found)
+	}
+	projectTitles := map[string]bool{}
+	for _, project := range projection.Projects {
+		projectTitles[project.Title] = true
+	}
+	if !projectTitles[emptyProject.Title] {
+		t.Fatalf("projects=%+v, want empty project channel %q available to filter", projection.Projects, emptyProject.Title)
+	}
+	if projectTitles[team.Title] {
+		t.Fatalf("projects=%+v, company chat must not appear as a Board project", projection.Projects)
 	}
 }
 

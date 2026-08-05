@@ -2768,8 +2768,8 @@
         white-space: nowrap;
       }
 
-      /* When all four columns are empty, the board surface gets a single
-         centered hero line above the columns. */
+      /* The hero is only a loading/connection notice. Once the board is ready,
+         the lane empty states already explain the absence of work. */
       .board-hero {
         display: none;
         font: var(--type-label-lg);
@@ -2780,6 +2780,7 @@
       }
       .board-surface.is-empty .board-hero { display: block; }
       .board-surface.is-locked .board-hero { display: block; }
+      .board-surface.is-empty .board-hero[hidden] { display: none; }
       .board-surface.is-empty .board { opacity: 0.42; }
       .board-surface.is-empty .board { transition: opacity var(--dur-med) var(--ease); }
 
@@ -3004,6 +3005,19 @@
       .card-work-context .card-badge--project.is-missing {
         border-style: dashed;
         color: var(--warn);
+      }
+
+      .card-work-context .card-badge--project.is-linked {
+        cursor: pointer;
+        transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+      }
+
+      .card-work-context .card-badge--project.is-linked:hover,
+      .card-work-context .card-badge--project.is-linked:focus-visible {
+        color: var(--accent);
+        border-color: color-mix(in srgb, var(--accent) 42%, var(--line-1));
+        background: color-mix(in srgb, var(--accent) 8%, var(--surface-3));
+        outline: none;
       }
 
       /* the 18px owner initial chip */
@@ -6042,7 +6056,7 @@
 
       .card-detail-grid {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: var(--sp-3);
       }
 
@@ -9086,6 +9100,10 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+
+      .chat-thread-item__title--bonfire-chat {
+        color: var(--accent);
       }
 
       /* kit ThreadItem meta — right-aligned mono timestamp on the title row */
@@ -14469,10 +14487,14 @@
 
       .drive-shell {
         display: grid;
-        grid-template-columns: 218px minmax(0, 1fr) 292px;
+        grid-template-columns: 196px minmax(0, 1fr);
         min-width: 0;
         min-height: 0;
         height: 100%;
+      }
+
+      .drive-shell.is-details-open {
+        grid-template-columns: 196px minmax(0, 1fr) minmax(320px, 360px);
       }
 
       .drive-sidebar,
@@ -14484,8 +14506,8 @@
       .drive-sidebar {
         display: flex;
         flex-direction: column;
-        gap: 18px;
-        padding: 24px 16px 20px;
+        gap: 14px;
+        padding: 20px 14px 18px;
         border-right: 1px solid var(--line-1);
       }
 
@@ -14550,7 +14572,7 @@
         background: color-mix(in srgb, var(--surface-3) 86%, transparent);
       }
 
-      .drive-new:active { transform: scale(0.97); }
+      .drive-new:active { transform: scale(0.96); }
 
       .drive-nav {
         display: flex;
@@ -14582,7 +14604,7 @@
       }
 
       .drive-nav__item:hover { background: var(--surface-3); color: var(--text-1); }
-      .drive-nav__item:active { transform: scale(0.98); }
+      .drive-nav__item:active { transform: scale(0.96); }
       .drive-nav__item.is-active {
         background: color-mix(in srgb, var(--accent) 10%, var(--surface-3));
         color: var(--text-1);
@@ -14590,35 +14612,15 @@
       }
       .drive-nav__item.is-active > span:first-child { color: var(--accent); }
 
-      .drive-brain-note {
-        display: grid;
-        grid-template-columns: 9px minmax(0, 1fr);
-        gap: 10px;
-        margin-top: auto;
-        padding: 13px;
-        border: 1px solid var(--line-1);
-        border-radius: 14px;
-        background: color-mix(in srgb, var(--surface-3) 78%, transparent);
-      }
-
-      .drive-brain-note__signal {
-        width: 7px;
-        height: 7px;
-        margin-top: 3px;
-        border-radius: 50%;
-        background: var(--live);
-        box-shadow: 0 0 0 4px var(--live-soft);
-      }
-
-      .drive-brain-note b { color: var(--text-1); font: var(--type-label); letter-spacing: var(--track-label); }
-      .drive-brain-note p { margin: 6px 0 0; color: var(--text-3); font: 11px/1.45 var(--font-sans); }
-
       .drive-main {
+        display: block;
+        grid-template: none;
         min-width: 0;
         min-height: 0;
+        isolation: auto;
         overflow-y: auto;
         overscroll-behavior: contain;
-        padding: 28px clamp(24px, 3vw, 46px) 56px;
+        padding: 24px clamp(22px, 2.6vw, 40px) 48px;
       }
 
       .drive-heading {
@@ -14626,7 +14628,7 @@
         align-items: flex-end;
         justify-content: space-between;
         gap: 20px;
-        margin: 0 0 20px;
+        margin: 0 0 16px;
       }
 
       .drive-heading__eyebrow {
@@ -14637,8 +14639,9 @@
         text-transform: uppercase;
       }
 
-      .drive-heading h2 { margin: 0; color: var(--text-1); font: 650 24px/1.1 var(--font-sans); letter-spacing: -0.025em; }
+      .drive-heading h2 { margin: 0; color: var(--text-1); font: 650 24px/1.1 var(--font-sans); letter-spacing: -0.025em; text-wrap: balance; }
       .drive-heading p:last-child { margin: 7px 0 0; color: var(--text-3); font: 12.5px/1.45 var(--font-sans); }
+      .drive-heading p:last-child:empty { display: none; }
 
       .drive-heading__action {
         flex: none;
@@ -14656,10 +14659,16 @@
       .drive-details {
         position: relative;
         min-height: 0;
+        display: none;
         overflow-y: auto;
-        padding: 22px;
-        border-left: 1px solid var(--line-1);
+        padding: 0 20px 24px;
+        background: color-mix(in srgb, var(--surface-2) 86%, transparent);
+        box-shadow: -1px 0 0 var(--line-1), -18px 0 36px rgba(0, 0, 0, 0.045);
       }
+
+      .drive-details.is-open { display: block; }
+
+      .drive-details[hidden] { display: none; }
 
       .drive-details__empty {
         display: flex;
@@ -14691,16 +14700,22 @@
         align-items: flex-start;
         justify-content: space-between;
         gap: 12px;
-        padding-bottom: 18px;
-        border-bottom: 1px solid var(--line-1);
+        min-height: 76px;
+        margin: 0 -20px;
+        padding: 16px 14px 14px 18px;
+        background: color-mix(in srgb, var(--surface-1) 88%, transparent);
+        box-shadow: 0 1px 0 var(--line-1);
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
       }
 
       .drive-detail__identity { min-width: 0; display: flex; gap: 12px; }
       .drive-detail__icon { flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; background: var(--surface-3); color: var(--accent); }
       .drive-detail__identity h3 { margin: 1px 0 5px; overflow-wrap: anywhere; color: var(--text-1); font: 600 13.5px/1.35 var(--font-sans); }
       .drive-detail__identity p { margin: 0; color: var(--text-3); font: var(--type-label); letter-spacing: var(--track-label); }
-      .drive-detail__close { flex: none; width: 30px; height: 30px; border: 0; border-radius: 10px; background: transparent; color: var(--text-3); cursor: pointer; }
+      .drive-detail__close { flex: none; width: 40px; height: 40px; border: 0; border-radius: 12px; background: transparent; color: var(--text-2); cursor: pointer; transition-property: color, background-color, transform; transition-duration: var(--dur-fast); transition-timing-function: var(--ease); }
       .drive-detail__close:hover { background: var(--surface-3); color: var(--text-1); }
+      .drive-detail__close:active { transform: scale(0.96); }
 
       .drive-detail__brain {
         display: grid;
@@ -14727,8 +14742,10 @@
       .drive-detail__activity b { display: block; color: var(--text-2); font: 11.5px/1.4 var(--font-sans); }
       .drive-detail__activity span { color: var(--text-3); font: var(--type-label); letter-spacing: var(--track-label); }
       .drive-detail__actions { display: flex; gap: 8px; margin-top: 18px; }
-      .drive-detail__action { flex: 1; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; padding: 0 12px; border: 1px solid var(--line-1); border-radius: 11px; background: var(--surface-3); color: var(--text-1); font: var(--type-caption-medium); text-decoration: none; cursor: pointer; }
+      .drive-detail__action { flex: 1; min-height: 40px; display: inline-flex; align-items: center; justify-content: center; padding: 0 12px; border: 1px solid var(--line-1); border-radius: 11px; background: var(--surface-3); color: var(--text-1); font: var(--type-caption-medium); text-decoration: none; cursor: pointer; transition-property: color, background-color, border-color, transform; transition-duration: var(--dur-fast); transition-timing-function: var(--ease); }
       .drive-detail__action:hover { border-color: var(--line-2); }
+      .drive-detail__action:active { transform: scale(0.96); }
+      .drive-detail__action--danger { flex: 0 0 auto; color: var(--danger); background: transparent; }
 
       .drive-results-head {
         display: flex;
@@ -14783,7 +14800,8 @@
       .drive-file-list .files-row.is-selected { box-shadow: inset 2px 0 var(--accent); }
 
       @media (max-width: 1180px) and (min-width: 861px) {
-        .drive-shell { grid-template-columns: 190px minmax(0, 1fr); }
+        .drive-shell,
+        .drive-shell.is-details-open { grid-template-columns: 190px minmax(0, 1fr); }
         .drive-details {
           position: fixed;
           z-index: 85;
@@ -14798,7 +14816,8 @@
       }
 
       @media (max-width: 860px) {
-        .drive-shell { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 100%; }
+        .drive-shell,
+        .drive-shell.is-details-open { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 100%; }
         .drive-sidebar { display: none; }
         .drive-main { padding: 20px 18px 112px; overflow: visible; }
         .drive-details {
@@ -14823,6 +14842,24 @@
         .drive-heading__eyebrow,
         .drive-heading p:last-child,
         .drive-results-head__hint { display: none; }
+
+        /* A narrow list keeps the filename primary. Brain status moves under
+           the filename instead of consuming a competing right-hand column. */
+        .drive-list-head,
+        .drive-file-list .files-row {
+          grid-template-columns: 36px minmax(0, 1fr) 28px;
+        }
+        .drive-list-head > span:nth-child(3) { display: none; }
+        .drive-list-head > span:nth-child(4) { grid-column: 3; }
+        .drive-file-list .files-row {
+          grid-template-rows: auto auto;
+          row-gap: 5px;
+          padding-block: 9px;
+        }
+        .drive-file-list .files-row > .files-row__icon { grid-column: 1; grid-row: 1 / 3; }
+        .drive-file-list .files-row > .files-row__body { grid-column: 2; grid-row: 1; }
+        .drive-file-list .files-row > .files-badge { grid-column: 2; grid-row: 2; justify-self: start; }
+        .drive-file-list .files-row > .files-row__kebab-wrap { grid-column: 3; grid-row: 1 / 3; align-self: center; }
       }
 
       .files-head {
@@ -15046,22 +15083,20 @@
         min-width: 0;
       }
 
-      /* kit brain badge: 'in the brain' = live-soft green (the file's text
-         rides model context), 'stored' = quiet grey (only bytes are held) */
+      /* Index state stays quiet: green dot = semantic indexing complete;
+         grey dot = pending. Full copy lives only in the contextual details. */
       .files-badge {
         flex: none;
         display: inline-flex;
         align-items: center;
-        gap: 6px;
-        height: 24px;
-        padding: 0 10px;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        padding: 0;
         border: 0;
-        border-radius: var(--r-full);
-        background: var(--surface-3);
+        border-radius: 50%;
+        background: transparent;
         color: var(--text-3);
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
-        white-space: nowrap;
       }
 
       .files-badge::before {
@@ -15074,7 +15109,7 @@
       }
 
       .files-badge--ingested {
-        background: var(--live-soft);
+        background: transparent;
         color: var(--live);
       }
 
@@ -15082,18 +15117,17 @@
         opacity: 1;
       }
 
-      /* 'in this chat' = a private-thread attachment scout read for that 1:1
-         only; readable but never company recall, so it reads stronger than
-         bytes-only 'stored' yet stays ink, not the company-brain green */
+      /* A private-thread attachment is still indexed; source ACLs determine
+         where recall may use it, not a second noisy badge vocabulary. */
       .files-badge--thread {
-        color: var(--text-2);
+        color: var(--live);
       }
 
       /* kit Files grid — responsive tiles (segmented grid view) */
       .files-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-        gap: 12px;
+        grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+        gap: 14px;
       }
 
       .file-tile {
@@ -15103,16 +15137,20 @@
         min-width: 0; /* grid items default to min-width:auto — let long names shrink, not blow the track out */
         text-align: left;
         background: var(--surface-2);
-        border: 1px solid var(--line-1);
-        border-radius: var(--r-lg);
+        border: 0;
+        border-radius: 16px;
         padding: 10px;
         overflow: visible; /* the move-to menu escapes the tile edge */
-        transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease);
+        box-shadow: 0 0 0 1px var(--line-1), 0 8px 24px rgba(0, 0, 0, 0.035);
+        transition-property: background-color, box-shadow, transform;
+        transition-duration: var(--dur-fast), var(--dur-med), var(--dur-fast);
+        transition-timing-function: var(--ease);
       }
 
       .file-tile:hover {
         background: var(--surface-3);
-        box-shadow: var(--shadow-2);
+        box-shadow: 0 0 0 1px var(--line-2), var(--shadow-2);
+        transform: translateY(-1px);
       }
 
       .file-tile.is-selected {
@@ -15124,14 +15162,14 @@
         position: relative;
         display: grid;
         place-items: center;
-        height: 112px;
-        margin-bottom: 12px;
+        height: 92px;
+        margin-bottom: 10px;
         overflow: hidden;
-        border: 1px solid var(--line-1);
         border-radius: 12px;
         background:
           linear-gradient(135deg, color-mix(in srgb, var(--surface-3) 92%, transparent), color-mix(in srgb, var(--accent) 5%, var(--surface-2))),
           var(--surface-2);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
       }
 
       .file-tile__image {
@@ -15140,6 +15178,8 @@
         width: 100%;
         height: 100%;
         object-fit: cover;
+        outline: 1px solid rgba(255, 255, 255, 0.1);
+        outline-offset: -1px;
       }
 
       .file-tile__icon {
@@ -15194,7 +15234,7 @@
       }
 
       .file-tile__meta {
-        margin: 6px 5px 12px;
+        margin: 5px 5px 10px;
         color: var(--text-3);
         font: var(--type-label);
         letter-spacing: var(--track-label);
@@ -15365,6 +15405,7 @@
         display: flex;
         align-items: center;
         gap: 8px;
+        min-height: 40px;
         padding: 6px 9px;
         border: 0;
         border-radius: var(--r-sm);
@@ -28334,12 +28375,6 @@
         <section id="filesTool" class="memory-tool" aria-label="Drive">
           <div class="drive-shell">
             <aside class="drive-sidebar" aria-label="Drive navigation">
-              <div class="drive-sidebar__brand">
-                <span class="drive-sidebar__mark" aria-hidden="true">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path></svg>
-                </span>
-                <span><b>Drive</b><small>Bonfire</small></span>
-              </div>
               <button id="filesNewButton" class="drive-new" type="button">
                 <span aria-hidden="true">＋</span><span>New</span>
               </button>
@@ -28349,17 +28384,12 @@
                 <button class="drive-nav__item" type="button" data-drive-scope="shared" aria-pressed="false"><span aria-hidden="true">◎</span><span>Shared</span></button>
                 <button class="drive-nav__item" type="button" data-drive-scope="recent" aria-pressed="false"><span aria-hidden="true">◷</span><span>Recent</span></button>
               </nav>
-              <div class="drive-brain-note">
-                <span class="drive-brain-note__signal" aria-hidden="true"></span>
-                <div><b>Connected to the brain</b><p>Authorized files are indexed with their source permissions and retrieved only when relevant.</p></div>
-              </div>
             </aside>
             <main class="drive-main">
               <header class="drive-heading">
                 <div>
-                  <p class="drive-heading__eyebrow">company drive</p>
                   <h2 id="filesScopeTitle">Home</h2>
-                  <p id="filesScopeCopy">Everything your team can work with, understood in context.</p>
+                  <p id="filesScopeCopy"></p>
                 </div>
                 <button id="filesNewFolderButton" class="drive-heading__action" type="button">New folder</button>
               </header>
@@ -28380,7 +28410,6 @@
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"></path><path d="m5 12 7-7 7 7"></path></svg>
                 </span>
                 <span class="files-upload__text"><b>Drop files here</b><small>or choose files · up to 64MB each</small></span>
-                <span class="files-upload__brain">indexed with permissions</span>
               </button>
               <input id="filesUploadInput" type="file" multiple hidden aria-hidden="true">
               <!-- folder chips — filter, drop target, and (active) rename/delete
@@ -28390,19 +28419,12 @@
                 <div id="filesStats" class="memory-stats" hidden>
                   <span id="filesCount" class="memory-tool__count"></span>
                 </div>
-                <span class="drive-results-head__hint">Select a file for context and activity</span>
               </div>
               <div id="filesList" class="memory-list" role="log" aria-label="Drive files">
                 <article class="memory-empty files-empty">nothing shared yet.<span class="files-empty__sub">Files shared in chat land here too.</span></article>
               </div>
             </main>
-            <aside id="filesDetails" class="drive-details" aria-label="File details">
-              <div class="drive-details__empty">
-                <span class="drive-details__empty-icon" aria-hidden="true">◇</span>
-                <b>Select a file</b>
-                <p>See where it came from, who can use it, and how it contributes to the company brain.</p>
-              </div>
-            </aside>
+            <aside id="filesDetails" class="drive-details" aria-label="File details" aria-hidden="true" hidden></aside>
           </div>
         </section>
 
@@ -35982,7 +36004,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           case 'memory':
             return 'memory starts when the room speaks.'
           case 'files':
-            return 'company files · indexed with source permissions'
+            return 'company files'
           case 'team':
             return 'named coworkers · human-approved authority'
           case 'research':
@@ -36125,6 +36147,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const prevTool = appShell.dataset.tool || 'office'
         const next = TOOL_IDS.includes(tool) ? tool : 'office'
         if (next === 'board') {
+          const selectedThread = selectedScoutChatThread()
+          if (prevTool === 'chat' && chatThreadIsProject(selectedThread)) {
+            boardProjectFilterValue = String(selectedThread.id)
+          }
           // opens the board surface; editing controls stay gated by board readiness
           setBoardExpanded(true)
           closeMobileToolRailForSelection()
@@ -40783,6 +40809,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
         appShell.classList.toggle('is-board-expanded', expanded)
         expandBoardButton.setAttribute('aria-expanded', String(expanded))
         if (expanded) {
+          // Project channels can be created or selected while the Board is
+          // closed. Re-project immediately so its filter and lanes open in the
+          // originating project instead of showing a stale All projects view.
+          renderBoard()
           // Board reads work without joining the call (HTTP snapshot); the
           // websocket keeps ownership whenever it is connected.
           loadBoardSnapshot()
@@ -46279,7 +46309,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const bSection = bfEl('section', 'brief__section')
         bSection.appendChild(bfSectionHead('On the board', board.draftCount ? `${board.draftCount} draft${board.draftCount === 1 ? '' : 's'}` : undefined))
         if (!boardItems.length && !board.draftCount) {
-          bSection.appendChild(bfEl('p', 'brief__empty', 'the board is quiet.'))
+          bSection.appendChild(bfEl('p', 'brief__empty', 'no board activity.'))
         }
         boardItems.forEach((item) => {
           const row = bfEl('div', 'brief__row')
@@ -52849,6 +52879,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return String(thread?.visibility || '').toLowerCase() === 'public'
 	      }
 
+	      function chatThreadIsTeam(thread) {
+	        if (!chatThreadIsChannel(thread)) {
+	          return false
+	        }
+	        const title = String(thread?.title || '').trim().toLowerCase()
+	        return Boolean(thread?.table) || title === 'team' || title === 'general'
+	      }
+
+	      function chatThreadIsProject(thread) {
+	        return chatThreadIsChannel(thread) && !chatThreadIsTeam(thread) && !thread?.archivedAt
+	      }
+
 	      // D7 — server defaults that the first message's auto-name replaces;
 	      // presented as the design's `new thread` placeholder until then
 	      function chatThreadTitleIsPlaceholder(thread) {
@@ -52861,6 +52903,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          return 'new thread'
 	        }
 	        if (chatThreadIsChannel(thread)) {
+	          if (chatThreadIsTeam(thread)) {
+	            return 'Bonfire Chat'
+	          }
 	          return String(thread.title || 'team channel')
 	        }
 	        return chatThreadTitleIsPlaceholder(thread) ? 'new thread' : String(thread.title)
@@ -53108,6 +53153,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        row.className = 'chat-thread-item__row'
 	        const titleEl = document.createElement('span')
 	        titleEl.className = 'chat-thread-item__title'
+	        titleEl.classList.toggle('chat-thread-item__title--bonfire-chat', chatThreadIsTeam(thread))
 	        titleEl.textContent = title
 	        const activeWork = chatThreadActiveWork(thread)
 	        const time = activeWork ? chatThreadWorkTimer(thread, activeWork) : document.createElement('span')
@@ -53134,7 +53180,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // from everyone else.
 	        const ownEmail = String(authedUser?.email || '').toLowerCase()
 	        const ownerEmail = String(thread.ownerEmail || '').toLowerCase()
-	        if (!isChannel || (ownEmail && ownerEmail === ownEmail)) {
+	        const canAdminArchive = ownEmail === 'aj@shareability.com'
+	        if (!isChannel || (ownEmail && ownerEmail === ownEmail) || canAdminArchive) {
 	          const archive = document.createElement('button')
 	          archive.type = 'button'
 	          archive.className = 'chat-thread-item__archive'
@@ -53253,7 +53300,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            : `private · only you and ${privateTarget}`
 	        }
 	        if (chatConvoContext) {
-	          const isTeam = Boolean(thread?.table)
+	          const isTeam = chatThreadIsTeam(thread)
 	          const scope = !isChannel ? 'private' : isTeam ? 'pinned · #team' : 'project channel'
 	          const policy = !isChannel ? `only you + ${privateTarget}` : isTeam ? 'whole office · shared memory' : 'members · project memory'
 	          chatConvoScope.textContent = scope
@@ -62014,18 +62061,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const status = String(file?.brainStatus || '')
         if (status === 'ingested') {
           badge.className = 'files-badge files-badge--ingested'
-          badge.textContent = 'in the brain'
-          badge.title = 'scout read this file — its contents answer memory questions'
+          badge.setAttribute('aria-label', 'Semantic indexing complete')
+          badge.title = 'Readable text was added to permission-scoped semantic recall automatically'
         } else if (status === 'thread') {
           // private-thread attachment: scout read it for that chat, but the text
           // never entered company-wide recall
           badge.className = 'files-badge files-badge--thread'
-          badge.textContent = 'in this chat'
-          badge.title = 'scout read this file inside its private chat — it does not answer company-wide memory questions'
+          badge.setAttribute('aria-label', 'Semantic indexing complete in source chat')
+          badge.title = 'Readable text is available only inside its source conversation'
         } else {
           badge.className = 'files-badge'
-          badge.textContent = 'stored'
-          badge.title = 'bytes are stored; the contents were not readable for the brain'
+          badge.setAttribute('aria-label', 'Semantic indexing pending')
+          badge.title = 'Semantic indexing has not completed yet'
         }
         return badge
       }
@@ -62064,10 +62111,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function driveScopeDefinition(scope = filesScope) {
         const definitions = {
-          home: ['Home', 'Everything your team can work with, understood in context.'],
-          mine: ['My Drive', 'Files and deliverables you added to the company workspace.'],
-          shared: ['Shared', 'Files teammates and conversations made available to you.'],
-          recent: ['Recent', 'The latest work across Drive, newest first.']
+          home: ['Home', ''],
+          mine: ['My Drive', ''],
+          shared: ['Shared', ''],
+          recent: ['Recent', '']
         }
         return definitions[scope] || definitions.home
       }
@@ -62094,7 +62141,57 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function closeFileDetails() {
         filesSelectedId = ''
         filesDetails?.classList.remove('is-open')
+        filesDetails?.setAttribute('aria-hidden', 'true')
+        if (filesDetails) filesDetails.hidden = true
+        filesDetails?.parentElement?.classList.remove('is-details-open')
         renderFilesSurface()
+      }
+
+      function fileDeleteLabel(file) {
+        return file?.origin === 'deliverable' ? 'Remove from Drive' : 'Delete file'
+      }
+
+      function fileDeletePrompt(file) {
+        const name = String(file?.name || 'this file')
+        if (file?.origin === 'deliverable') {
+          return `Remove “${name}” from Drive? The original remains in Artifacts.`
+        }
+        if (file?.origin === 'chat') {
+          return `Delete “${name}”? It will be removed from Drive, its source chat, and semantic recall.`
+        }
+        return `Delete “${name}”? It will be removed from Drive and semantic recall.`
+      }
+
+      async function deleteDriveFile(file) {
+        const fileId = String(file?.id || '')
+        if (!fileId || !file?.canDelete || !window.confirm(fileDeletePrompt(file))) {
+          return
+        }
+        try {
+          const response = await fetch('/assistant/files', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fileId })
+          })
+          const payload = await response.json().catch(() => null)
+          if (!response.ok) {
+            showToast({ text: payload?.error || 'could not delete the file', kind: 'error' })
+            return
+          }
+          filesEntries = filesEntries.filter(candidate => String(candidate?.id || '') !== fileId)
+          filesSelectedId = ''
+          filesRowMenuFor = ''
+          const message = payload?.mode === 'removed_from_drive'
+            ? 'Removed from Drive — the original remains in Artifacts'
+            : file?.origin === 'chat'
+              ? 'Deleted from Drive and its source chat'
+              : 'Deleted from Drive and semantic recall'
+          showToast({ text: message, kind: 'done' })
+          renderFilesSurface()
+          loadFilesSurface(true)
+        } catch {
+          showToast({ text: 'could not delete the file', kind: 'error' })
+        }
       }
 
       function fileOpenControl(file) {
@@ -62125,17 +62222,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!file) {
           filesSelectedId = ''
           filesDetails.classList.remove('is-open')
-          const empty = bfEl('div', 'drive-details__empty')
-          empty.append(
-            bfEl('span', 'drive-details__empty-icon', '◇'),
-            bfEl('b', '', 'Select a file'),
-            bfEl('p', '', 'See where it came from, who can use it, and how it contributes to the company brain.')
-          )
-          filesDetails.replaceChildren(empty)
+          filesDetails.hidden = true
+          filesDetails.setAttribute('aria-hidden', 'true')
+          filesDetails.parentElement?.classList.remove('is-details-open')
+          filesDetails.replaceChildren()
           return
         }
 
+        filesDetails.hidden = false
+        filesDetails.setAttribute('aria-hidden', 'false')
         filesDetails.classList.add('is-open')
+        filesDetails.parentElement?.classList.add('is-details-open')
         const head = bfEl('header', 'drive-detail__head')
         const identity = bfEl('div', 'drive-detail__identity')
         const icon = bfEl('span', 'drive-detail__icon')
@@ -62153,12 +62250,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const brain = bfEl('div', 'drive-detail__brain')
         brain.appendChild(bfEl('span', 'drive-detail__brain-dot'))
         const brainCopy = bfEl('div')
-        const brainTitle = status === 'ingested' ? 'Indexed in the brain' : status === 'thread' ? 'Indexed privately' : 'Text extraction needed'
+        const brainTitle = status === 'ingested' ? 'Semantic indexing complete' : status === 'thread' ? 'Indexed in this chat' : 'Semantic indexing pending'
         const brainText = status === 'ingested'
-          ? 'Scout and authorized agents can retrieve relevant passages with this file’s source permissions.'
+          ? 'Readable text was added automatically. Scout and authorized agents can retrieve relevant passages with this file’s source permissions.'
           : status === 'thread'
-            ? 'Its context is understood inside the authorized conversation and stays behind that ACL.'
-            : 'The file is stored safely, but its contents are not yet available for semantic recall.'
+            ? 'Readable text is available automatically inside the authorized conversation and stays behind that ACL.'
+            : 'This file is stored safely; semantic extraction has not completed yet.'
         brainCopy.append(bfEl('b', '', brainTitle), bfEl('p', '', brainText))
         brain.appendChild(brainCopy)
 
@@ -62199,6 +62296,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             setActiveTool('chat')
           })
           actions.appendChild(conversation)
+        }
+        if (file?.canDelete) {
+          const remove = bfEl('button', 'drive-detail__action drive-detail__action--danger', fileDeleteLabel(file))
+          remove.type = 'button'
+          remove.addEventListener('click', () => deleteDriveFile(file))
+          actions.appendChild(remove)
         }
         filesDetails.replaceChildren(head, brain, details, activity, actions)
       }
@@ -62569,7 +62672,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           menu.setAttribute('role', 'menu')
           const label = document.createElement('span')
           label.className = 'files-folder-menu__label'
-          label.textContent = 'move to'
+          label.textContent = 'Actions'
           menu.appendChild(label)
           const currentFolderId = String(file?.folderId || '')
           const targets = [{ id: '', name: 'All files' }, ...filesFolders]
@@ -62594,6 +62697,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             none.disabled = true
             none.textContent = 'no folders yet'
             menu.appendChild(none)
+          }
+          if (file?.canDelete) {
+            const remove = document.createElement('button')
+            remove.type = 'button'
+            remove.className = 'files-folder-menu__item files-folder-menu__item--danger'
+            remove.textContent = fileDeleteLabel(file)
+            remove.addEventListener('click', () => deleteDriveFile(file))
+            menu.appendChild(remove)
           }
           wrap.appendChild(menu)
         }
@@ -62755,8 +62866,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         body.appendChild(meta)
 
-        // one badge renderer, three honest states (in the brain / in this chat /
-        // stored) — see fileBrainBadgeNode
+        // one quiet index-dot renderer; details carry the full explanation
         row.append(icon, body, fileBrainBadgeNode(file))
         const kebab = fileMoveKebabNode(file)
         if (kebab) {
@@ -62833,7 +62943,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           items.className = filesView === 'grid' ? 'files-grid' : 'drive-file-list'
           if (filesView === 'list') {
             const listHead = bfEl('div', 'drive-list-head')
-            listHead.append(bfEl('span', '', ''), bfEl('span', '', 'Name'), bfEl('span', '', 'Brain'), bfEl('span', '', ''))
+            listHead.append(bfEl('span', '', ''), bfEl('span', '', 'Name'), bfEl('span', '', ''), bfEl('span', '', ''))
             items.appendChild(listHead)
           }
           for (const file of group.files) {
@@ -62869,12 +62979,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
                 continue
               }
               const payload = await response.json()
-              showToast({
-                text: payload?.file?.brainStatus === 'ingested'
-                  ? `${file.name} uploaded — in the brain`
-                  : `${file.name} uploaded`,
-                kind: 'done'
-              })
+              showToast({ text: `${file.name} uploaded`, kind: 'done' })
             } catch {
               showToast({ text: `${file.name} failed to upload`, kind: 'error' })
             }
@@ -63645,6 +63750,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return badge
       }
 
+      function boardProjectThreads() {
+        return scoutChatThreads
+          .filter(thread => chatThreadIsProject(thread))
+          .sort((left, right) => chatThreadDisplayTitle(left).localeCompare(chatThreadDisplayTitle(right)))
+      }
+
       function boardDeliveryStages() {
         return [
           { id: 'requested', label: 'Work requested', empty: 'No requested work' },
@@ -63687,6 +63798,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function syncBoardProjectFilter() {
         if (!boardProjectFilter) return
         const projects = new Map()
+        boardProjectThreads().forEach(thread => {
+          projects.set(String(thread.id), chatThreadDisplayTitle(thread))
+        })
         cards.forEach(card => {
           const project = boardCardProject(card)
           projects.set(project.id, project.title)
@@ -63709,6 +63823,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const laneCards = boardProjectFilterValue === 'all'
           ? cards
           : cards.filter(card => boardCardProject(card).id === boardProjectFilterValue)
+        if (isBoardReady && boardState) {
+          boardState.textContent = `${laneCards.length} card${laneCards.length === 1 ? '' : 's'}`
+        }
         boardEl.replaceChildren(...boardDeliveryStages().map(stage => {
           const columnCards = laneCards.filter(card => boardCardDeliveryStage(card) === stage.id)
           const column = document.createElement('section')
@@ -63811,7 +63928,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (railSummary) railSummary.hidden = true
           const empty = document.createElement('p')
           empty.className = 'board-preview__empty'
-          empty.textContent = 'this room is quiet.'
+          empty.textContent = 'No cards yet.'
           boardPreview.replaceChildren(empty)
           return
         }
@@ -63996,6 +64113,24 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const projectChip = renderCardBadge(project.title)
         projectChip.classList.add('card-badge--project')
         if (project.resolution === 'missing') projectChip.classList.add('is-missing')
+        if (project.resolution !== 'missing') {
+          projectChip.classList.add('is-linked')
+          projectChip.tabIndex = 0
+          projectChip.setAttribute('role', 'button')
+          projectChip.setAttribute('aria-label', `Open ${project.title} thread`)
+          const openProjectThread = event => {
+            event.stopPropagation()
+            selectScoutChatThread(project.id)
+            setActiveTool('chat')
+          }
+          projectChip.addEventListener('click', openProjectThread)
+          projectChip.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault()
+              openProjectThread(event)
+            }
+          })
+        }
         const processChip = renderCardBadge(String(card.status || 'Backlog'))
         processChip.classList.add('card-badge--process')
         workContext.append(projectChip, processChip)
@@ -64288,6 +64423,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         const titleField = renderFormField('title', 'input', draft.title || '')
         titleField.input.required = true
+        const projectOptions = [
+          { id: 'needs-project', title: 'Needs project' },
+          ...boardProjectThreads().map(thread => ({ id: String(thread.id), title: chatThreadDisplayTitle(thread) }))
+        ]
+        const currentProject = boardCardProject(draft)
+        const defaultProjectID = isNew && boardProjectFilterValue !== 'all'
+          ? boardProjectFilterValue
+          : currentProject.id
+        const projectField = renderProjectSelectField(projectOptions, defaultProjectID)
         const statusField = renderSelectField('status', statuses, draft.status || 'Backlog')
         const ownerField = renderSelectField('owner', ['Unassigned', ...participantNames()], cardOwner(draft).name)
         const dueField = renderFormField('due date', 'input', cardDueDate(draft))
@@ -64297,7 +64441,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         const grid = document.createElement('div')
         grid.className = 'card-detail-grid'
-        grid.append(statusField.field, ownerField.field, dueField.field)
+        grid.append(projectField.field, statusField.field, ownerField.field, dueField.field)
 
         const actions = document.createElement('div')
         actions.className = 'card-detail-actions'
@@ -64705,6 +64849,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return { field, input }
       }
 
+      function renderProjectSelectField(options, value) {
+        const field = document.createElement('label')
+        field.className = 'field'
+        const label = document.createElement('span')
+        label.textContent = 'project'
+        const input = document.createElement('select')
+        for (const optionValue of options) {
+          const option = document.createElement('option')
+          option.value = optionValue.id
+          option.textContent = optionValue.title
+          option.selected = optionValue.id === value
+          input.appendChild(option)
+        }
+        field.append(label, input)
+        return { field, input }
+      }
+
       function participantNames() {
         return Array.from(participantNameInput.options)
           .map(option => option.value || option.textContent)
@@ -64722,11 +64883,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const keyDates = keyDatesFromForm(form)
         const dueDate = values['due date'] || keyDates.find(item => item.label.toLowerCase() === 'due')?.date || keyDates[0]?.date || ''
         saveCardDateOverride(draft, dueDate, keyDates)
+        const projectThreads = boardProjectThreads()
+        const projectTitles = new Set(projectThreads.map(thread => String(thread.title || '').trim().toLowerCase()))
+        const selectedProject = projectThreads.find(thread => String(thread.id) === values.project)
+        const tags = (Array.isArray(draft.tags) ? draft.tags : [])
+          .filter(tag => !projectTitles.has(String(tag || '').trim().toLowerCase()))
+        if (selectedProject) {
+          tags.push(String(selectedProject.title || '').trim())
+        }
         const payload = {
           title: values.title,
           status: values.status,
           owner: values.owner,
-          tags: Array.isArray(draft.tags) ? [...draft.tags] : [],
+          tags,
           notes: values.notes,
           dueDate,
           keyDates
@@ -67374,12 +67543,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       })()
 
-      // Toggle the empty-board hero when all four columns are empty.
+      // Keep the board-specific empty state in the lanes; this hero is only a
+      // connection/loading notice.
       function updateBoardEmptyState() {
         if (!boardSurface) return
-        boardHero.textContent = isBoardReady
-          ? 'this room is quiet.'
-          : 'join the room to load the board.'
+        boardHero.hidden = isBoardReady
+        boardHero.textContent = isBoardReady ? '' : 'join the room to load the board.'
         boardSurface.classList.toggle('is-empty', isBoardReady && cards.length === 0)
         boardSurface.classList.toggle('is-locked', !isBoardReady)
       }

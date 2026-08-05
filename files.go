@@ -37,6 +37,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 var (
@@ -93,6 +94,10 @@ type assistantFileRecord struct {
 	// FolderID files the row under a Files-surface folder (file_folders.go);
 	// empty means root.
 	FolderID string `json:"folderId,omitempty"`
+	// CanDelete is computed from the source's write authority. The client only
+	// offers a destructive control when the current principal may remove this
+	// Drive projection (or the underlying uploaded/chat file).
+	CanDelete bool `json:"canDelete,omitempty"`
 }
 
 // fileBlobDownloadURL builds the session-gated content-addressed download
@@ -142,6 +147,37 @@ func assistantFileUploadMimeFor(declared string, name string) string {
 		resolved = blobDefaultMime
 	}
 	return resolved
+}
+
+// directFilePlainText makes ordinary text uploads immediately recallable
+// without spending a model call. The Drive accepts more formats than chat, so
+// unsupported binaries still remain safely stored with a pending index dot.
+func directFilePlainText(data []byte, fileMime string) string {
+	fileMime = strings.ToLower(strings.TrimSpace(fileMime))
+	if !strings.HasPrefix(fileMime, "text/") && fileMime != "application/json" && fileMime != "application/xml" {
+		return ""
+	}
+	if len(data) == 0 || !utf8.Valid(data) || bytesContainsNUL(data) {
+		return ""
+	}
+	text := strings.TrimSpace(string(data))
+	if len(text) > scoutChatMaxFileTextBytes {
+		text = text[:scoutChatMaxFileTextBytes]
+		for !utf8.ValidString(text) && len(text) > 0 {
+			text = text[:len(text)-1]
+		}
+		text = strings.TrimSpace(text) + "\n[truncated]"
+	}
+	return text
+}
+
+func bytesContainsNUL(data []byte) bool {
+	for _, value := range data {
+		if value == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // fileRecordFromEntry adapts a kind=file memory entry (direct upload) into
@@ -318,13 +354,22 @@ func (app *kanbanBoardApp) assistantFilesForPrincipal(ctx context.Context, viewe
 	}
 	rows := make([]assistantFileRecord, 0, 32)
 	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindFile, 0) {
-		rows = append(rows, fileRecordFromEntry(entry))
+		row := fileRecordFromEntry(entry)
+		row.CanDelete = viewer != nil && (isArtifactApprovalAdmin(viewer) || normalizeAccountEmail(row.UploaderEmail) == normalizeAccountEmail(viewer.Email))
+		rows = append(rows, row)
 	}
 	for _, thread := range app.scoutChatThreadsSnapshot(viewerEmail, true, 0) {
-		rows = append(rows, app.fileRecordsFromThread(viewerEmail, thread)...)
+		threadRows := app.fileRecordsFromThread(viewerEmail, thread)
+		for index := range threadRows {
+			threadRows[index].CanDelete = viewer != nil && (isArtifactApprovalAdmin(viewer) ||
+				normalizeAccountEmail(threadRows[index].UploaderEmail) == normalizeAccountEmail(viewer.Email) ||
+				normalizeAccountEmail(thread.OwnerEmail) == normalizeAccountEmail(viewer.Email))
+		}
+		rows = append(rows, threadRows...)
 	}
 	for _, entry := range app.authorizedFileDeliverableCandidates(ctx, viewer, ACLReadContent) {
 		if row, ok := fileDeliverableRecord(entry); ok {
+			_, row.CanDelete = authorizedArtifactForActions(ctx, viewer, entry.ID, ACLReadContent, ACLWrite)
 			rows = append(rows, row)
 		}
 	}
@@ -454,7 +499,7 @@ func (app *kanbanBoardApp) grandfatherSavedToFilesAtBoot() {
 // assistantFilesHandler serves GET /assistant/files — the Files surface list.
 // Gate pattern of assistantMemoryHandler: method, origin, session, app.
 func assistantFilesHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodDelete {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -467,8 +512,12 @@ func assistantFilesHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusUnauthorized, "not signed in")
 		return
 	}
-	if kanbanApp == nil {
+	if kanbanApp == nil || kanbanApp.memory == nil {
 		writeAuthError(w, http.StatusServiceUnavailable, "files are unavailable")
+		return
+	}
+	if r.Method == http.MethodDelete {
+		assistantFileDelete(w, r, user)
 		return
 	}
 
@@ -479,6 +528,111 @@ func assistantFilesHandler(w http.ResponseWriter, r *http.Request) {
 		"files":   rows,
 		"folders": folders,
 	})
+}
+
+// assistantFileDelete removes one row through its source-of-truth seam. A
+// direct upload is deleted from memory (and therefore semantic recall); a chat
+// attachment is removed from its source message; a saved deliverable is only
+// removed from Drive because the underlying artifact remains first-class in
+// Artifacts. The response names that distinction so the UI never over-promises.
+func assistantFileDelete(w http.ResponseWriter, r *http.Request, user *userAccount) {
+	payload := struct {
+		FileID string `json:"fileId"`
+	}{}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read delete request")
+		return
+	}
+	payload.FileID = strings.TrimSpace(payload.FileID)
+	if payload.FileID == "" {
+		writeAuthError(w, http.StatusBadRequest, errFileFolderFileID.Error())
+		return
+	}
+	row, writable := authorizedFileRowForMove(r.Context(), user, payload.FileID)
+	if row.ID == "" || !writable {
+		writeAuthError(w, http.StatusNotFound, "file not found")
+		return
+	}
+
+	mode := "deleted"
+	var err error
+	switch row.Origin {
+	case "deliverable":
+		artifact, ok := authorizedArtifactForActions(r.Context(), user, row.ArtifactID, ACLReadContent, ACLWrite)
+		if !ok {
+			writeAuthError(w, http.StatusNotFound, "file not found")
+			return
+		}
+		header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact))
+		_, _, err = kanbanApp.memory.updateOSArtifactMetadataIfHeaderMatches(header, artifact.ID, map[string]string{
+			"savedToFiles": "false",
+		})
+		mode = "removed_from_drive"
+	case "chat":
+		err = kanbanApp.deleteChatAttachmentFromDrive(user, payload.FileID)
+	default:
+		var deleted bool
+		_, deleted, err = kanbanApp.memory.deleteEntryByID(payload.FileID)
+		if err == nil && !deleted {
+			err = errFileSaveNotFound
+		}
+	}
+	if err != nil {
+		if errors.Is(err, errFileSaveNotFound) || strings.Contains(err.Error(), "not found") {
+			writeAuthError(w, http.StatusNotFound, "file not found")
+			return
+		}
+		log.Errorf("Delete Drive file %s failed: %v", payload.FileID, err)
+		writeAuthError(w, http.StatusInternalServerError, "could not delete the file")
+		return
+	}
+	// Folder assignments are projections. A persistence failure here can only
+	// leave a harmless dangling id, so it must not resurrect the removed source.
+	if err := moveFileToFolder(payload.FileID, ""); err != nil {
+		log.Errorf("Clear deleted Drive file folder assignment %s failed: %v", payload.FileID, err)
+	}
+	broadcastSignedInKanbanEvent("file", map[string]any{"kind": "deleted", "fileId": payload.FileID})
+	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": mode})
+}
+
+func (app *kanbanBoardApp) deleteChatAttachmentFromDrive(user *userAccount, fileID string) error {
+	threadID, messageID, fileIndex, ok := parseChatAttachmentFileID(fileID)
+	if !ok || app == nil || app.memory == nil || user == nil {
+		return errFileSaveNotFound
+	}
+	thread, _, err := app.scoutChatThreadByID(user.Email, threadID)
+	if err != nil {
+		return errFileSaveNotFound
+	}
+	messageIndex := -1
+	for index := range thread.Messages {
+		if thread.Messages[index].ID == messageID {
+			messageIndex = index
+			break
+		}
+	}
+	if messageIndex < 0 || fileIndex >= len(thread.Messages[messageIndex].Files) {
+		return errFileSaveNotFound
+	}
+	file := thread.Messages[messageIndex].Files[fileIndex]
+	actor := normalizeAccountEmail(user.Email)
+	if !isArtifactApprovalAdmin(user) && actor != normalizeAccountEmail(thread.OwnerEmail) && actor != normalizeAccountEmail(thread.Messages[messageIndex].AuthorEmail) {
+		return errFileSaveNotFound
+	}
+	if strings.TrimSpace(file.Ref) == "" && strings.TrimSpace(file.Text) == "" {
+		return errFileSaveNotFound
+	}
+	thread.Messages[messageIndex].Files = append(thread.Messages[messageIndex].Files[:fileIndex], thread.Messages[messageIndex].Files[fileIndex+1:]...)
+	thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	if err := app.saveScoutChatThread(thread); err != nil {
+		return err
+	}
+	if strings.TrimSpace(file.SourceID) != "" {
+		if err := app.revokeAttachmentSource(file.SourceID); err != nil {
+			log.Errorf("Revoke deleted Drive chat attachment source %s failed: %v", file.SourceID, err)
+		}
+	}
+	return nil
 }
 
 // assistantFileUploadHandler serves POST /assistant/files/upload — the Files
@@ -571,11 +725,12 @@ func assistantFileUploadHandler(w http.ResponseWriter, r *http.Request) {
 		Ref:  ref,
 		Mime: meta.Mime,
 	}}
-	if kanbanApp.currentOpenAIAPIKey() != "" && attachmentModelSafeMimes[meta.Mime] {
+	transcript := directFilePlainText(data, meta.Mime)
+	if transcript == "" && kanbanApp.currentOpenAIAPIKey() != "" && attachmentModelSafeMimes[meta.Mime] {
 		attachments := openAIAttachmentContent(files)
 		files = deriveAttachmentText(r.Context(), kanbanApp.currentOpenAIAPIKey(), files, attachments)
+		transcript = strings.TrimSpace(files[0].Text)
 	}
-	transcript := strings.TrimSpace(files[0].Text)
 	brainStatus := fileBrainStatusStored
 	if transcript != "" {
 		brainStatus = fileBrainStatusIngested

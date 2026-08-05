@@ -58,6 +58,7 @@ func (app *kanbanBoardApp) boardProjectionForViewer(ctx context.Context, user *u
 
 	channels := map[string]scoutChatThreadRecord{}
 	channelByTitle := map[string]scoutChatThreadRecord{}
+	projects := map[string]string{"needs-project": "Needs project"}
 	for _, thread := range app.scoutChatThreadsSnapshot(user.Email, false, 500) {
 		if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
 			continue
@@ -66,9 +67,11 @@ func (app *kanbanBoardApp) boardProjectionForViewer(ctx context.Context, user *u
 		if title := strings.ToLower(strings.TrimSpace(thread.Title)); title != "" {
 			channelByTitle[title] = thread
 		}
+		title := strings.TrimSpace(thread.Title)
+		if !thread.Table && !strings.EqualFold(title, "team") && !strings.EqualFold(title, "general") {
+			projects[thread.ID] = title
+		}
 	}
-
-	projects := map[string]string{"needs-project": "Needs project"}
 	for _, card := range app.snapshotState().Cards {
 		artifact, linked := latestArtifactByCard[card.ID]
 		stage := boardDeliveryRequested

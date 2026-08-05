@@ -69,6 +69,9 @@ func TestBoardDeliveryStagesAndProjectResolutionAreExplicit(t *testing.T) {
 		"{ id: 'delivered', label: 'Work delivered'",
 		"{ id: 'drive', label: 'Saved to Drive'",
 		"function boardCardProject(card)",
+		"function boardProjectThreads()",
+		"renderProjectSelectField(projectOptions, defaultProjectID)",
+		"setActiveTool('chat')",
 		"title: 'Needs project'",
 		"new Option('All projects', 'all')",
 	} {

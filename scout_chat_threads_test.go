@@ -865,6 +865,16 @@ func TestScoutChatThreadRename(t *testing.T) {
 	if _, err := kanbanApp.renameScoutChatThread("tim@shareability.com", channel.ID, "launch plan v2"); err != nil {
 		t.Fatalf("channel rename by non-creator: %v", err)
 	}
+	if _, err := kanbanApp.setScoutChatThreadArchived("tim@shareability.com", channel.ID, true); err == nil {
+		t.Fatal("non-owner non-admin archived a public channel")
+	}
+	timChannel, err := kanbanApp.createScoutChatThread("tim@shareability.com", "Tim", "retired project", "public")
+	if err != nil {
+		t.Fatalf("create admin-cleanup channel: %v", err)
+	}
+	if _, err := kanbanApp.setScoutChatThreadArchived("aj@shareability.com", timChannel.ID, true); err != nil {
+		t.Fatalf("workspace admin archive: %v", err)
+	}
 
 	// Empty titles are rejected; archived threads refuse renames.
 	if _, err := kanbanApp.renameScoutChatThread("aj@shareability.com", private.ID, "   "); err == nil {

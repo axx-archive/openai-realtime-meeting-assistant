@@ -32,7 +32,7 @@ func TestIndexFilesToolRegistration(t *testing.T) {
 		`const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory', 'files', 'team']`,
 		// topbar identity + canon subtitle
 		`files: 'Drive'`,
-		"company files · indexed with source permissions",
+		"company files",
 		// the meeting PiP follows you onto the files page
 		"tool === 'memory' || tool === 'files')",
 		// full-page CSS: surface swap + active pane
@@ -66,9 +66,9 @@ func TestIndexFilesSurfaceDataLayer(t *testing.T) {
 		"memoryDayBucket(file?.createdAt)",
 		"files-badge files-badge--ingested",
 		// three-state brain badge: company recall / private-thread only / bytes
-		"badge.textContent = 'in the brain'",
-		"badge.textContent = 'in this chat'",
-		"badge.textContent = 'stored'",
+		"badge.setAttribute('aria-label', 'Semantic indexing complete')",
+		"badge.setAttribute('aria-label', 'Semantic indexing complete in source chat')",
+		"badge.setAttribute('aria-label', 'Semantic indexing pending')",
 		"files-badge files-badge--thread",
 		"selectScoutChatThread(file.originThreadId)",
 		// upload door: hidden multi input, multipart POST, 64MB client cap
@@ -76,6 +76,13 @@ func TestIndexFilesSurfaceDataLayer(t *testing.T) {
 		"fetch('/assistant/files/upload', { method: 'POST', body })",
 		"file.size > 64 * 1024 * 1024",
 		"is over the 64MB cap",
+		// source-aware delete: same route, explicit DELETE body, contextual
+		// details-panel action, and honest destructive copy
+		"async function deleteDriveFile(file)",
+		"method: 'DELETE'",
+		"body: JSON.stringify({ fileId })",
+		"Deleted from Drive and semantic recall",
+		"The original remains in Artifacts",
 		// live refresh on the websocket file event
 		"case 'file':",
 		// empty state names the cap and the chat feed
@@ -168,6 +175,37 @@ func TestIndexFilesTileOverflowGuards(t *testing.T) {
 	}
 	if !strings.Contains(html[start:end], "file-tile__name-label") {
 		t.Fatal("fileTileNode must wrap the name in a clamped inner label span")
+	}
+}
+
+func TestIndexDriveDetailsAreContextualAndIndexStateIsOnlyADot(t *testing.T) {
+	html := readIndexForFilesSurface(t)
+	for _, want := range []string{
+		`.drive-shell.is-details-open`,
+		`filesDetails.hidden = false`,
+		`filesDetails.hidden = true`,
+		`filesDetails.parentElement?.classList.add('is-details-open')`,
+		`filesDetails.parentElement?.classList.remove('is-details-open')`,
+		`badge.setAttribute('aria-label', 'Semantic indexing complete')`,
+		`badge.setAttribute('aria-label', 'Semantic indexing pending')`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing contextual Drive detail contract %q", want)
+		}
+	}
+	start := strings.Index(html, "\n      .files-badge {")
+	if start < 0 {
+		t.Fatal("missing files badge CSS")
+	}
+	end := strings.Index(html[start:], "}")
+	if end < 0 {
+		t.Fatal("unterminated files badge CSS")
+	}
+	badgeCSS := html[start : start+end]
+	for _, want := range []string{"width: 20px", "height: 20px", "padding: 0", "background: transparent"} {
+		if !strings.Contains(badgeCSS, want) {
+			t.Fatalf("files index dot missing %q", want)
+		}
 	}
 }
 
