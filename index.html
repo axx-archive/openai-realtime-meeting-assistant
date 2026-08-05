@@ -10452,8 +10452,10 @@
 	      }
 
 	      .scout-chat-pending-file {
+	        width: min(360px, 100%);
 	        min-width: 0;
-	        max-width: min(260px, 100%);
+	        max-width: 100%;
+	        overflow: hidden;
 	        display: inline-flex;
 	        align-items: center;
 	        gap: 8px;
@@ -10465,8 +10467,16 @@
 	        color: var(--text-1);
 	      }
 
+	      .scout-chat-pending-file__body {
+	        flex: 1 1 auto;
+	        min-width: 0;
+	        display: grid;
+	        gap: 2px;
+	      }
+
 	      .scout-chat-pending-file__name {
 	        min-width: 0;
+	        max-width: 100%;
 	        overflow: hidden;
 	        text-overflow: ellipsis;
 	        white-space: nowrap;
@@ -10475,13 +10485,18 @@
 	      }
 
 	      .scout-chat-pending-file__meta {
-	        flex: none;
+	        min-width: 0;
+	        max-width: 100%;
+	        overflow: hidden;
+	        text-overflow: ellipsis;
+	        white-space: nowrap;
 	        font: var(--type-label);
 	        letter-spacing: var(--track-label);
 	        color: var(--text-3);
 	      }
 
 	      .scout-chat-pending-file__remove {
+	        flex: none;
 	        width: 32px;
 	        height: 32px;
 	        display: inline-flex;
@@ -47932,9 +47947,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const name = document.createElement('span')
 	          name.className = 'scout-chat-pending-file__name'
 	          name.textContent = file.name || 'file'
+	          name.title = file.name || 'file'
 	          const meta = document.createElement('span')
 	          meta.className = 'scout-chat-pending-file__meta'
 	          meta.textContent = scoutChatFileMeta(file)
+	          meta.title = meta.textContent
+	          const body = document.createElement('span')
+	          body.className = 'scout-chat-pending-file__body'
+	          body.append(name, meta)
 	          const remove = document.createElement('button')
 	          remove.type = 'button'
 	          remove.className = 'scout-chat-pending-file__remove'
@@ -47945,7 +47965,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            pendingScoutFiles.splice(index, 1)
 	            renderPendingScoutFiles()
 	          })
-	          chip.append(name, meta, remove)
+	          chip.append(body, remove)
 	          return chip
 	        }))
 	      }
@@ -52472,9 +52492,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const replies = messages.filter(candidate => String(candidate?.replyTo?.messageId || '') === String(root.id))
 	        const fragment = document.createDocumentFragment()
 	        fragment.appendChild(desktopContextMessageCard(root, { root: true }))
-	        if (!replies.length) {
-	          fragment.appendChild(bfEl('p', 'chat-context-empty', 'No replies yet. Start the side conversation here.'))
-	        } else {
+	        if (replies.length) {
 	          replies.forEach(reply => fragment.appendChild(desktopContextMessageCard(reply)))
 	        }
 	        chatContextBody.replaceChildren(fragment)
@@ -52488,13 +52506,26 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!text || state?.mode !== 'thread' || !state.threadId || !state.rootMessageId) return
 	        chatContextReplySend.disabled = true
 	        try {
-	          const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(state.threadId)}/messages`, {
-	            method: 'POST',
-	            headers: { 'Content-Type': 'application/json' },
-	            body: JSON.stringify({ text, replyToMessageId: state.rootMessageId })
-	          })
+	          let response
+	          try {
+	            response = await fetch(`/assistant/chat-threads/${encodeURIComponent(state.threadId)}/messages`, {
+	              method: 'POST',
+	              headers: { 'Content-Type': 'application/json' },
+	              body: JSON.stringify({ text, replyToMessageId: state.rootMessageId })
+	            })
+	          } catch {
+	            throw new Error('Connection interrupted — your reply is still here. Try again.')
+	          }
 	          const payload = await response.json().catch(() => ({}))
-	          if (!response.ok || !payload?.thread) throw new Error(payload?.error || 'reply could not be sent')
+	          if (!response.ok) {
+	            const retryable = [502, 503, 504].includes(response.status)
+	            throw new Error(payload?.error || (retryable
+	              ? 'Service briefly unavailable — your reply is still here. Check the thread, then try again.'
+	              : 'Reply wasn\'t sent — your text is still here.'))
+	          }
+	          if (!payload?.thread) {
+	            throw new Error('Reply status could not be confirmed — your text is still here. Refresh the thread before retrying.')
+	          }
 	          upsertScoutChatThread(payload.thread, { select: false })
 	          if (activeScoutThreadId === state.threadId) {
 	            const root = payload.thread.messages?.find(candidate => String(candidate?.id || '') === state.rootMessageId)

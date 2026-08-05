@@ -178,6 +178,47 @@ func TestDesktopChatInteractionTargetsAndComposerStates(t *testing.T) {
 	}
 }
 
+func TestDesktopThreadReplyKeepsDraftAndOmitsRedundantEmptyState(t *testing.T) {
+	html := desktopChatQualityHTML(t)
+	if strings.Contains(html, "No replies yet. Start the side conversation here.") {
+		t.Fatal("desktop thread rail still renders the redundant empty-state instruction")
+	}
+	for _, want := range []string{
+		"Connection interrupted — your reply is still here. Try again.",
+		"Service briefly unavailable — your reply is still here. Check the thread, then try again.",
+		"Reply status could not be confirmed — your text is still here. Refresh the thread before retrying.",
+		"chatContextReplySend.disabled = false",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("desktop thread reply recovery missing %q", want)
+		}
+	}
+}
+
+func TestPendingAttachmentChipCannotOverflowComposer(t *testing.T) {
+	html := desktopChatQualityHTML(t)
+	for _, want := range []string{
+		".scout-chat-pending-file__body",
+		"width: min(360px, 100%);",
+		"overflow: hidden;",
+		"text-overflow: ellipsis;",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("pending attachment overflow guard missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		"body.className = 'scout-chat-pending-file__body'",
+		"name.title = file.name || 'file'",
+		"meta.title = meta.textContent",
+		"chip.append(body, remove)",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("pending attachment truncation wiring missing %q", want)
+		}
+	}
+}
+
 func TestDesktopChatFileCardsExposeSafeTypeRevisionAndActions(t *testing.T) {
 	html := desktopChatQualityHTML(t)
 	start := strings.Index(html, "function scoutChatFilesNode(files)")
