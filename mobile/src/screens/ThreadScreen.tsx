@@ -1224,6 +1224,8 @@ export function ThreadScreen({ route, navigation }: Props) {
         onSend={sendThreadReply}
         onOpenAttachment={openAttachment}
         onLongPress={openMessageActions}
+        onEdit={beginEdit}
+        onDelete={confirmDelete}
         onToggleReaction={toggleReaction}
         onRetryReply={retryScoutReply}
         onOpenLongMessage={openLongMessage}

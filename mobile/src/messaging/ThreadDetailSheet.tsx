@@ -43,6 +43,8 @@ type Props = {
   onSend: (text: string) => Promise<boolean>;
   onOpenAttachment: (file: ScoutFileAttachment) => void;
   onLongPress: (message: ScoutMessage, own: boolean) => void;
+  onEdit: (message: ScoutMessage) => void;
+  onDelete: (message: ScoutMessage) => void;
   onToggleReaction: (message: ScoutMessage, emoji: string, active: boolean) => void;
   onRetryReply: (message: ScoutMessage) => void;
   onOpenLongMessage: (text: string, authorName: string, scout: boolean) => void;
@@ -66,6 +68,8 @@ export function ThreadDetailSheet({
   onSend,
   onOpenAttachment,
   onLongPress,
+  onEdit,
+  onDelete,
   onToggleReaction,
   onRetryReply,
   onOpenLongMessage,
@@ -172,25 +176,47 @@ export function ThreadDetailSheet({
                       <View style={styles.rule} />
                     </View>
                   ) : null}
-                  <MessageBubble
-                    message={message}
-                    own={own}
-                    showAuthor
-                    showAvatar
-                    avatarDataURL={avatarDataURL}
-                    sessionToken={sessionToken}
-                    viewerEmail={viewerEmail}
-                    timestampReveal={timestampReveal}
-                    onOpenSource={() => scrollRef.current?.scrollTo({ y: 0, animated: true })}
-                    onOpenReplySource={() => scrollRef.current?.scrollTo({ y: 0, animated: true })}
-                    showReplyContext={false}
-                    onOpenAttachment={onOpenAttachment}
-                    onLongPress={onLongPress}
-                    onToggleReaction={onToggleReaction}
-                    onRetryReply={onRetryReply}
-                    onOpenLongMessage={onOpenLongMessage}
-                    onOpenWorkArtifact={onOpenWorkArtifact}
-                  />
+                  <View style={styles.messageRow}>
+                    <MessageBubble
+                      message={message}
+                      own={own}
+                      showAuthor
+                      showAvatar
+                      avatarDataURL={avatarDataURL}
+                      sessionToken={sessionToken}
+                      viewerEmail={viewerEmail}
+                      timestampReveal={timestampReveal}
+                      onOpenSource={() => scrollRef.current?.scrollTo({ y: 0, animated: true })}
+                      onOpenReplySource={() => scrollRef.current?.scrollTo({ y: 0, animated: true })}
+                      showReplyContext={false}
+                      onOpenAttachment={onOpenAttachment}
+                      onLongPress={onLongPress}
+                      onToggleReaction={onToggleReaction}
+                      onRetryReply={onRetryReply}
+                      onOpenLongMessage={onOpenLongMessage}
+                      onOpenWorkArtifact={onOpenWorkArtifact}
+                    />
+                    {index > 0 && own ? (
+                      <View accessibilityLabel="Reply actions" style={styles.replyActions}>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel="Edit reply"
+                          onPress={() => onEdit(message)}
+                          style={({ pressed }) => [styles.replyAction, pressed && styles.pressed]}
+                        >
+                          <SymbolView name="pencil" size={14} tintColor={colors.text2} />
+                        </Pressable>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel="Delete reply"
+                          onPress={() => onDelete(message)}
+                          style={({ pressed }) => [styles.replyAction, styles.replyActionDanger, pressed && styles.pressed]}
+                        >
+                          <SymbolView name="trash" size={14} tintColor={colors.danger} />
+                        </Pressable>
+                      </View>
+                    ) : null}
+                  </View>
                 </React.Fragment>
               );
             })}
@@ -275,6 +301,10 @@ const styles = StyleSheet.create({
   close: { width: hitMin, height: hitMin, alignItems: 'center', justifyContent: 'center', borderRadius: radius.md, backgroundColor: colors.surface3 },
   pressed: { opacity: 0.72, transform: [{ scale: 0.96 }] },
   conversation: { paddingTop: space[3], paddingBottom: space[8] },
+  messageRow: { position: 'relative' },
+  replyActions: { alignSelf: 'flex-end', flexDirection: 'row', gap: 2, marginTop: -2, marginRight: space[4], marginBottom: space[2], padding: 2, borderRadius: radius.lg, backgroundColor: colors.surface2 },
+  replyAction: { width: hitMin, height: hitMin, alignItems: 'center', justifyContent: 'center', borderRadius: radius.md },
+  replyActionDanger: { backgroundColor: colors.dangerSoft },
   replyDivider: { flexDirection: 'row', alignItems: 'center', gap: space[3], marginHorizontal: space[4], marginTop: space[5], marginBottom: space[2] },
   rule: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.line1 },
   replyDividerText: { ...type.label, color: colors.text3 },

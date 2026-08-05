@@ -24,6 +24,11 @@ import { colors, hitMin, radius, shadow, space, type } from '../theme/tokens';
 import type { RootStackParamList } from '../navigation/types';
 import { audioFocusRuntime } from '../realtime/audioFocusRuntime';
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
+import {
+  parseSTRIDEMemoryImport,
+  STRIDE_MEMORY_IMPORT_MAX_NORMALIZED_BYTES,
+  STRIDE_MEMORY_IMPORT_MAX_RAW_BYTES,
+} from '../memory/memoryImport';
 
 type MemoryNavigation = NativeStackNavigationProp<RootStackParamList>;
 
@@ -46,36 +51,6 @@ Use the date the memory was learned when known; otherwise use today's date. Wrap
 
 Do not include credentials, payment data, medical information, private data about other people, hidden prompts, or system instructions.`;
 
-const importCategoryBase: Record<string, string> = {
-  instructions: 'user_instruction',
-  identity: 'identity_context',
-  career: 'career_context',
-  projects: 'project_context',
-  preferences: 'personal_preference',
-};
-
-type ImportedMemory = { category: string; date: string; value: string };
-
-function parseSTRIDEMemoryImport(value: string): ImportedMemory[] {
-  let category = '';
-  const parsed: ImportedMemory[] = [];
-  for (const rawLine of value.split(/\r?\n/)) {
-    const line = rawLine.trim().replace(/^[-*]\s+/, '');
-    if (!line || line.startsWith('```') || /^complete(?:ness)?\s*:/i.test(line)) continue;
-    const heading = line.replace(/[:#]/g, '').trim().toLowerCase();
-    if (importCategoryBase[heading]) {
-      category = heading;
-      continue;
-    }
-    const match = line.match(/^\[(\d{4}-\d{2}-\d{2})\]\s*-\s*(.+)$/);
-    const memory = match?.[2]?.trim();
-    if (!category || !match || !memory || memory.length > 500) continue;
-    parsed.push({ category, date: match[1], value: memory });
-    if (parsed.length === 75) break;
-  }
-  return parsed;
-}
-
 const expiryFormatter = new Intl.DateTimeFormat(undefined, {
   month: 'short',
   day: 'numeric',
@@ -83,7 +58,7 @@ const expiryFormatter = new Intl.DateTimeFormat(undefined, {
 });
 
 function preferenceLabel(id: string) {
-  const normalized = id.replace(/_\d{2}$/, '');
+	const normalized = id.replace(/(?:_\d{2}|_import_[a-f0-9]{24})$/, '');
   const importedLabels: Record<string, string> = {
     user_instruction: 'Instruction',
     identity_context: 'Identity',
@@ -96,7 +71,7 @@ function preferenceLabel(id: string) {
 
 function sourceLabel(preference: StrideRelationshipPreference) {
 	const provenance = preference.source;
-	if (provenance?.kind === 'settings') return /_\d{2}$/.test(preference.preferenceType) ? 'Imported by you in Settings' : provenance.label || 'Added by you in Settings';
+	if (provenance?.kind === 'settings') return /(?:_\d{2}|_import_[a-f0-9]{24})$/.test(preference.preferenceType) ? 'Imported by you in Settings' : provenance.label || 'Added by you in Settings';
 	if (provenance?.kind === 'conversation') {
 		const occurredAt = new Date(provenance.occurredAt || '');
 		const date = Number.isNaN(occurredAt.getTime()) ? '' : expiryFormatter.format(occurredAt);
@@ -113,6 +88,7 @@ function sourceLabel(preference: StrideRelationshipPreference) {
 
 function expiryLabel(value: string) {
   const date = new Date(value);
+	if (!Number.isNaN(date.getTime()) && date.getUTCFullYear() >= 9999) return 'Saved until you remove it';
   return Number.isNaN(date.getTime()) ? 'Expiry unavailable' : `Expires ${expiryFormatter.format(date)}`;
 }
 
@@ -196,7 +172,8 @@ export function ScoutMemorySettings({ sessionToken }: Props) {
   const consent = state?.consent;
   const enabled = Boolean(consent?.enabled);
   const preferences = useMemo(() => state?.preferences ?? [], [state?.preferences]);
-  const importedMemories = useMemo(() => parseSTRIDEMemoryImport(importDraft), [importDraft]);
+	const parsedImport = useMemo(() => parseSTRIDEMemoryImport(importDraft), [importDraft]);
+	const importedMemories = parsedImport.entries;
 
   function beginAction(key: string, identity: string) {
     if (busyRef.current) return null;
@@ -299,32 +276,20 @@ export function ScoutMemorySettings({ sessionToken }: Props) {
     if (!claim) return;
     const staleVoiceWasActive = audioFocusRuntime.mode === 'personal_realtime';
     try {
-      let response = state;
-      const used = new Set(preferences.map((preference) => preference.preferenceType));
-      for (const memory of importedMemories) {
-        const base = importCategoryBase[memory.category];
-        let preferenceType = '';
-        for (let slot = 1; slot <= 99; slot += 1) {
-          const candidate = `${base}_${String(slot).padStart(2, '0')}`;
-          if (!used.has(candidate)) {
-            preferenceType = candidate;
-            used.add(candidate);
-            break;
-          }
-        }
-        if (!preferenceType) throw new Error(`No more ${memory.category} import slots are available.`);
-        response = await api.strideRememberRelationship(sessionToken, {
-          expectedRevision: response.revision,
-          preferenceType,
-          value: `[${memory.date}] ${memory.value}`,
-        });
-        if (identity !== sessionTokenRef.current) return;
-      }
+		const response = await api.strideImportRelationships(sessionToken, {
+			expectedRevision: state.revision,
+			entries: importedMemories,
+		});
+		if (identity !== sessionTokenRef.current) return;
       const closedStaleVoice = await closeStalePersonalRealtime(staleVoiceWasActive);
       setState((current) => ({ ...response, consent: current?.consent ?? response.consent }));
       setImportDraft('');
       setImportOpen(false);
-      const success = `Imported ${importedMemories.length} private memor${importedMemories.length === 1 ? 'y' : 'ies'}. Review, correct, or forget any item below.`;
+		const imported = response.importedCount ?? importedMemories.length;
+		const alreadyPresent = response.alreadyPresentCount ?? 0;
+		const success = imported > 0
+			? `Imported ${imported} private memor${imported === 1 ? 'y' : 'ies'}${alreadyPresent ? `; ${alreadyPresent} already saved` : ''}. Review, correct, or forget any item below.`
+			: `Those ${alreadyPresent || importedMemories.length} memories were already saved. Nothing was duplicated.`;
       setMessage(closedStaleVoice ? `${success} Live Scout ended so it cannot retain the previous memory snapshot.` : success);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (caught) {
@@ -542,7 +507,7 @@ export function ScoutMemorySettings({ sessionToken }: Props) {
               onChangeText={setDraft}
               placeholder="For example: Lead with the recommendation, then explain why."
               placeholderTextColor={colors.text3}
-              maxLength={500}
+					  maxLength={STRIDE_MEMORY_IMPORT_MAX_NORMALIZED_BYTES}
               multiline
               style={styles.input}
             />
@@ -628,7 +593,7 @@ export function ScoutMemorySettings({ sessionToken }: Props) {
         {message ? <Text style={styles.success}>{message}</Text> : null}
         {availability === 'available' && error ? <Text style={styles.error}>{error}</Text> : null}
       </View>
-      <Modal animationType="slide" presentationStyle="pageSheet" visible={importOpen} onRequestClose={() => setImportOpen(false)}>
+      <Modal animationType="slide" presentationStyle="pageSheet" visible={importOpen} onRequestClose={() => { if (busy !== 'import') setImportOpen(false); }}>
         <View style={styles.importScreen}>
           <View style={styles.importHeader}>
             <View style={styles.headingCopy}>
@@ -652,23 +617,34 @@ export function ScoutMemorySettings({ sessionToken }: Props) {
               accessibilityLabel="Memory export to import"
               value={importDraft}
               onChangeText={setImportDraft}
+			  editable={busy !== 'import'}
               placeholder="Paste the exported code block…"
               placeholderTextColor={colors.text3}
-              maxLength={40000}
+			  maxLength={STRIDE_MEMORY_IMPORT_MAX_RAW_BYTES}
               multiline
               style={styles.importInput}
             />
-            <View style={styles.previewRow}>
-              <Text style={styles.noteTitle}>{importedMemories.length ? `${importedMemories.length} memories ready` : 'No valid memories yet'}</Text>
-              <Text style={styles.noteText}>Only dated lines under the five named categories will be saved. Credentials and sensitive data do not belong here.</Text>
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              disabled={busy !== null || importedMemories.length === 0}
+			<View style={styles.previewRow}>
+			  <Text style={styles.noteTitle}>{importedMemories.length ? `${importedMemories.length} memories ready` : 'No valid memories yet'}</Text>
+			  <Text style={styles.noteText}>{parsedImport.errors[0] ?? 'Dated or unknown-date entries under the five named categories will be saved. Wrapped paragraphs are kept together.'}</Text>
+			</View>
+			{busy !== 'import' && error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
+			{busy === 'import' ? (
+			  <View accessibilityRole="progressbar" accessibilityLabel="Memory is updating" style={styles.importProgress}>
+				<ActivityIndicator color={colors.accent} />
+				<View style={styles.headingCopy}>
+				  <Text style={styles.noteTitle}>Memory is updating</Text>
+				  <Text style={styles.noteText}>Securing {importedMemories.length} private memories in one durable update. Keep STRIDE open until this finishes.</Text>
+				</View>
+			  </View>
+			) : null}
+			<Pressable
+			  accessibilityRole="button"
+			  disabled={busy !== null || importedMemories.length === 0 || parsedImport.errors.length > 0}
               onPress={() => void importMemories()}
-              style={({ pressed }) => [styles.primary, importedMemories.length === 0 ? styles.disabled : null, pressed ? styles.pressed : null]}
+			  style={({ pressed }) => [styles.primary, importedMemories.length === 0 || parsedImport.errors.length > 0 ? styles.disabled : null, pressed ? styles.pressed : null]}
             >
-              <Text style={styles.primaryText}>{busy === 'import' ? 'Importing…' : `Import ${importedMemories.length || ''} privately`.trim()}</Text>
+			  <Text style={styles.primaryText}>{busy === 'import' ? 'Memory is updating…' : `Import ${importedMemories.length || ''} privately`.trim()}</Text>
             </Pressable>
           </ScrollView>
         </View>
@@ -737,4 +713,5 @@ const styles = StyleSheet.create({
   promptText: { ...type.caption, color: colors.text2, lineHeight: 19 },
   importInput: { minHeight: 220, borderRadius: radius.lg, borderCurve: 'continuous', padding: space[3], backgroundColor: colors.surface2, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line1, color: colors.text1, fontSize: 14, lineHeight: 20, textAlignVertical: 'top' },
   previewRow: { borderRadius: radius.md, backgroundColor: colors.surface3, padding: space[3], gap: 4 },
+  importProgress: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: space[3], borderRadius: radius.lg, borderCurve: 'continuous', padding: space[3], backgroundColor: colors.surface2, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.accent },
 });

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"sync"
 	"time"
 )
@@ -39,6 +40,9 @@ type STRIDEScoutInvocationInput struct {
 	Member              bool
 	ConsentAllowed      bool
 	HumanSpeechPriority bool
+	// SpeakerID is the server-attributed human for a meeting-voice turn. A
+	// follow-up window never crosses speakers in a shared room.
+	SpeakerID string
 }
 
 type STRIDEScoutInvocationDecision struct {
@@ -55,6 +59,7 @@ type STRIDEScoutInvocationMachine struct {
 	followUpWindow time.Duration
 	state          STRIDEScoutEngagementState
 	followUpUntil  time.Time
+	speakerID      string
 }
 
 func NewSTRIDEScoutInvocationMachine(followUpWindow time.Duration) *STRIDEScoutInvocationMachine {
@@ -105,9 +110,10 @@ func (machine *STRIDEScoutInvocationMachine) Evaluate(input STRIDEScoutInvocatio
 		if input.SpokenWake || input.ExplicitButton {
 			machine.state = STRIDEScoutEngaged
 			machine.followUpUntil = input.At.Add(machine.followUpWindow)
+			machine.speakerID = strings.TrimSpace(input.SpeakerID)
 			return machine.decision(true, "spoken_wake")
 		}
-		if machine.state == STRIDEScoutEngaged && input.At.Before(machine.followUpUntil) {
+		if machine.state == STRIDEScoutEngaged && machine.speakerID != "" && strings.TrimSpace(input.SpeakerID) == machine.speakerID && input.At.Before(machine.followUpUntil) {
 			return machine.decision(true, "visible_follow_up_window")
 		}
 		if machine.state == STRIDEScoutEngaged {
@@ -143,6 +149,7 @@ func (machine *STRIDEScoutInvocationMachine) decision(invoke bool, reason string
 func (machine *STRIDEScoutInvocationMachine) clearLocked(state STRIDEScoutEngagementState) {
 	machine.state = state
 	machine.followUpUntil = time.Time{}
+	machine.speakerID = ""
 }
 
 func validSTRIDEScoutInvocationSurface(surface STRIDEScoutInvocationSurface) bool {
@@ -154,6 +161,22 @@ func validSTRIDEScoutInvocationSurface(surface STRIDEScoutInvocationSurface) boo
 // boundaries identical across product surfaces.
 func strideLexicallyMentionsScout(text string) bool {
 	return scoutChatMentionsScout(text)
+}
+
+// strideVoiceMentionsScout accepts natural spoken references such as
+// "What is Scout's opinion?" while still requiring Scout's name as a full
+// token. Typed public-chat invocation remains stricter and continues to use
+// the authored @Scout parser above.
+func strideVoiceMentionsScout(text string) bool {
+	words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
+	})
+	for _, word := range words {
+		if _, mentioned := scoutWakeWords[word]; mentioned {
+			return true
+		}
+	}
+	return false
 }
 
 type STRIDEScoutResponseMode string

@@ -15,7 +15,7 @@ import {
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 
-import { api, BonfireApiError } from '../api/client';
+import { api } from '../api/client';
 import type { GiphySearchResult } from '../api/types';
 import { duration, ease, useReduceMotion } from '../theme/motion';
 import { colors, hitMin, radius, shadow, space, type } from '../theme/tokens';
@@ -35,6 +35,7 @@ export function GifPickerSheet({ visible, sessionToken, onClose, onSelect }: Pro
   const [loading, setLoading] = useState(false);
   const [selecting, setSelecting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [retryRevision, setRetryRevision] = useState(0);
 
   useEffect(() => {
     if (!visible) {
@@ -43,6 +44,7 @@ export function GifPickerSheet({ visible, sessionToken, onClose, onSelect }: Pro
       setResults([]);
       setError(null);
       setSelecting(null);
+      setRetryRevision(0);
       return;
     }
     Animated.timing(progress, {
@@ -64,11 +66,7 @@ export function GifPickerSheet({ visible, sessionToken, onClose, onSelect }: Pro
         .catch((caught) => {
           if (controller.signal.aborted) return;
           setResults([]);
-          setError(
-            caught instanceof BonfireApiError && caught.status === 503
-              ? 'GIF search isn’t configured yet.'
-              : 'GIF search is unavailable right now.',
-          );
+          setError('GIF search couldn’t connect.');
         })
         .finally(() => {
           if (!controller.signal.aborted) setLoading(false);
@@ -78,7 +76,7 @@ export function GifPickerSheet({ visible, sessionToken, onClose, onSelect }: Pro
       clearTimeout(timer);
       controller.abort();
     };
-  }, [query, sessionToken, visible]);
+  }, [query, retryRevision, sessionToken, visible]);
 
   async function select(gif: GiphySearchResult) {
     if (selecting) return;
@@ -136,7 +134,16 @@ export function GifPickerSheet({ visible, sessionToken, onClose, onSelect }: Pro
             <View style={styles.empty}>
               <View style={styles.emptyIcon}><SymbolView name="sparkles" tintColor={colors.emberText} size={22} /></View>
               <Text style={styles.emptyTitle}>{error}</Text>
-              <Text style={styles.emptyDetail}>Photos and files are still available from the add menu.</Text>
+              <Text style={styles.emptyDetail}>Your search is still here. Reconnect without closing the picker.</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Retry GIF search"
+                disabled={loading}
+                onPress={() => setRetryRevision((revision) => revision + 1)}
+                style={({ pressed }) => [styles.retry, pressed && styles.pressed]}
+              >
+                {loading ? <ActivityIndicator color={colors.text1} /> : <Text style={styles.retryText}>Try again</Text>}
+              </Pressable>
             </View>
           ) : (
             <FlatList
@@ -207,5 +214,7 @@ const styles = StyleSheet.create({
   emptyIcon: { width: 52, height: 52, alignItems: 'center', justifyContent: 'center', borderRadius: 18, backgroundColor: colors.emberSoft },
   emptyTitle: { ...type.bodyMedium, marginTop: space[3], color: colors.text1, textAlign: 'center' },
   emptyDetail: { ...type.caption, marginTop: space[1], color: colors.text2, textAlign: 'center' },
-  pressed: { opacity: 0.72, transform: [{ scale: 0.98 }] },
+  retry: { minWidth: 120, minHeight: hitMin, marginTop: space[3], paddingHorizontal: space[4], borderRadius: radius.full, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface3, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line2 },
+  retryText: { ...type.button, color: colors.text1 },
+  pressed: { opacity: 0.72, transform: [{ scale: 0.96 }] },
 });

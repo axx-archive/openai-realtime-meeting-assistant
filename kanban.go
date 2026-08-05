@@ -332,6 +332,7 @@ type kanbanBoardApp struct {
 	scoutLastToolResultAt          time.Time
 	scoutLastToolResultName        string
 	scoutToolCallsInFlight         int
+	scoutInvocation                *STRIDEScoutInvocationMachine
 	officeWorkEpoch                uint64
 	officeWorkSittingID            string
 	officeWorkCtx                  context.Context
@@ -519,6 +520,7 @@ func newKanbanBoardApp() *kanbanBoardApp {
 		},
 		boardLifecycleFrozen: boardLifecycleRecoveryErr != nil,
 		boardLifecycleErr:    boardLifecycleRecoveryErr,
+		scoutInvocation:      NewSTRIDEScoutInvocationMachine(20 * time.Second),
 	}
 	if err := app.initializeAttachmentSourceStore(); err != nil {
 		app.attachmentSourceStoreErr = err
@@ -1530,6 +1532,13 @@ func (app *kanbanBoardApp) privateRealtimeVoiceSessionConfig(model string) map[s
 	session["instructions"] = app.privateRealtimeVoiceSessionInstructions()
 	session["tools"] = app.privateRealtimeVoiceTools()
 	session["tool_choice"] = "auto"
+	// Private Scout is a direct one-to-one conversation, so provider-side VAD
+	// can create responses immediately. Shared rooms deliberately wait for the
+	// server's deterministic Scout-invocation gate before response.create.
+	setRealtimeSessionCreateResponse(session, true)
+	if usesAdvancedCommandProfile(model) {
+		session["reasoning"] = map[string]any{"effort": realtimeReasoningEffort()}
+	}
 	return session
 }
 
@@ -1655,7 +1664,7 @@ func (app *kanbanBoardApp) sessionConfig(model string) map[string]any {
 	}
 	input := map[string]any{
 		"transcription":  transcription,
-		"turn_detection": realtimeTurnDetectionConfig(),
+		"turn_detection": realtimeTurnDetectionConfigWithCreateResponse(false),
 	}
 	// Near-field support is narrower than modern context support. Keep it on the
 	// already-proven gpt-4o transcription family and do not infer support merely
@@ -1684,7 +1693,7 @@ func (app *kanbanBoardApp) sessionConfig(model string) map[string]any {
 
 	if usesAdvancedCommandProfile(model) {
 		session["reasoning"] = map[string]any{
-			"effort": realtimeReasoningEffort(),
+			"effort": realtimeRoomReasoningEffort(),
 		}
 	}
 
@@ -1801,6 +1810,18 @@ func realtimeReasoningEffort() string {
 	}
 }
 
+func realtimeRoomReasoningEffort() string {
+	effort := strings.ToLower(strings.TrimSpace(os.Getenv("OPENAI_ROOM_REALTIME_REASONING_EFFORT")))
+	switch effort {
+	case "minimal", "low", "medium", "high", "xhigh":
+		return effort
+	default:
+		// Room turn classification should feel conversational. The private
+		// homepage assistant keeps the deeper global reasoning profile.
+		return "low"
+	}
+}
+
 func realtimeVoice() string {
 	if voice := strings.TrimSpace(os.Getenv("OPENAI_REALTIME_VOICE")); voice != "" {
 		return voice
@@ -1810,6 +1831,10 @@ func realtimeVoice() string {
 }
 
 func realtimeTurnDetectionConfig() map[string]any {
+	return realtimeTurnDetectionConfigWithCreateResponse(true)
+}
+
+func realtimeTurnDetectionConfigWithCreateResponse(createResponse bool) map[string]any {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("OPENAI_REALTIME_VAD_TYPE"))) {
 	case "server_vad":
 		return map[string]any{
@@ -1817,32 +1842,45 @@ func realtimeTurnDetectionConfig() map[string]any {
 			"threshold":           0.5,
 			"prefix_padding_ms":   300,
 			"silence_duration_ms": 300,
-			"create_response":     true,
+			"create_response":     createResponse,
 			"interrupt_response":  true,
 		}
 	case "semantic_vad":
 		return map[string]any{
 			"type":               "semantic_vad",
 			"eagerness":          realtimeVADEagerness(),
-			"create_response":    true,
+			"create_response":    createResponse,
 			"interrupt_response": true,
 		}
 	case "":
-		return realtimeTurnDetectionConfigWithDefaults()
+		return realtimeTurnDetectionConfigWithDefaultsAndCreateResponse(createResponse)
 	default:
-		return realtimeTurnDetectionConfigWithDefaults()
+		return realtimeTurnDetectionConfigWithDefaultsAndCreateResponse(createResponse)
 	}
 }
 
 func realtimeTurnDetectionConfigWithDefaults() map[string]any {
+	return realtimeTurnDetectionConfigWithDefaultsAndCreateResponse(true)
+}
+
+func realtimeTurnDetectionConfigWithDefaultsAndCreateResponse(createResponse bool) map[string]any {
 	return map[string]any{
 		"type":                defaultRealtimeVADType,
 		"threshold":           0.5,
 		"prefix_padding_ms":   300,
 		"silence_duration_ms": 300,
-		"create_response":     true,
+		"create_response":     createResponse,
 		"interrupt_response":  true,
 	}
+}
+
+func setRealtimeSessionCreateResponse(session map[string]any, createResponse bool) {
+	audio, _ := session["audio"].(map[string]any)
+	input, _ := audio["input"].(map[string]any)
+	if input == nil {
+		return
+	}
+	input["turn_detection"] = realtimeTurnDetectionConfigWithCreateResponse(createResponse)
 }
 
 func realtimeVADEagerness() string {
@@ -1994,19 +2032,35 @@ func transcriptStartsWithScoutWakePhrase(text string) bool {
 	return wake
 }
 
-func (app *kanbanBoardApp) armScoutVoiceResponse(transcript string) {
+func (app *kanbanBoardApp) armScoutVoiceResponse(transcript string) bool {
 	transcript = strings.TrimSpace(transcript)
-	wakePhrase := transcriptStartsWithScoutWakePhrase(transcript)
+	if transcript == "" {
+		return false
+	}
+	explicitReference := strideVoiceMentionsScout(transcript)
 	voiceControl := app.voiceControlEnabled()
-	if !wakePhrase && !(voiceControl && transcript != "") {
-		// a completed non-wake turn means any armed wake turn is over — unless
-		// the wake turn's own response or tool call is still in flight: on the
-		// single mixed room stream another speaker's segment (or the user's
-		// continuation after a pause) must not silence the armed answer.
-		if transcript != "" && !app.scoutTurnInFlight() {
-			app.clearScoutVoiceArm()
+	if !voiceControl && !explicitReference && app.scoutTurnInFlight() {
+		// The room has one mixed stream. Crosstalk during Scout's current turn is
+		// neither a follow-up nor a reason to tear down the active wake window.
+		return false
+	}
+	if !voiceControl {
+		speakerID := app.currentRoomSpeaker(officeRoomID)
+		app.mu.Lock()
+		machine := app.scoutInvocation
+		if machine == nil {
+			machine = NewSTRIDEScoutInvocationMachine(20 * time.Second)
+			app.scoutInvocation = machine
 		}
-		return
+		app.mu.Unlock()
+		decision := machine.Evaluate(STRIDEScoutInvocationInput{
+			Surface: STRIDEScoutMeetingVoice, Text: transcript, At: time.Now().UTC(),
+			SpokenWake: explicitReference, Member: true, ConsentAllowed: true, SpeakerID: speakerID,
+		})
+		if !decision.Invoke {
+			app.clearScoutVoiceArm()
+			return false
+		}
 	}
 
 	now := time.Now()
@@ -2037,15 +2091,30 @@ func (app *kanbanBoardApp) armScoutVoiceResponse(transcript string) {
 		"voiceState":   "hearing",
 	}
 	statusText := "Scout heard the voice request."
-	if wakePhrase {
-		metadata["wakePhrase"] = "Hey Scout"
-		statusText = "Scout heard the wake phrase."
+	if explicitReference {
+		metadata["explicitReference"] = "Scout"
+		statusText = "Scout heard his name."
 	}
 	broadcastAssistantEvent("status", statusText, metadata)
 	if speakNow {
 		log.Infof("Scout wake transcript arrived after %s tool result; speaking now", lastToolName)
 		app.flushScoutSpokenResponseIfPending()
 	}
+	return true
+}
+
+func (app *kanbanBoardApp) currentRoomSpeaker(roomID string) string {
+	if app == nil {
+		return ""
+	}
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	state := app.roomLiveLocked(roomID)
+	name := canonicalRoomActorName(state.activeSpeakerName)
+	if name == "" || state.participantCounts[name] < 1 {
+		return ""
+	}
+	return name
 }
 
 // clearScoutVoiceArmForNewSpeech is intentionally a no-op (the transcript lane
@@ -2260,7 +2329,7 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 	if app.grillSessionActive() {
 		return app.grillSessionInstructions()
 	}
-	voiceControlState := "inactive: only clear utterances that start with Hey Scout are addressed to you."
+	voiceControlState := "inactive: the server admits only clear utterances that mention Scout or Scott anywhere, plus natural follow-ups during a short visible follow-up window."
 	if app.voiceControlEnabled() {
 		voiceControlState = "active: every clear room request is addressed to you until the user turns the shared room voice island off."
 	}
@@ -2288,7 +2357,7 @@ func (app *kanbanBoardApp) sessionInstructions() string {
 		"# Proposed agent work\nUse propose_codex_task when a user asks you to have someone or an agent take on research, design, grill, planning, or writing work later, such as have someone research comparable exits. It never auto-runs: it posts a proposal card with title, mode, and query that any signed-in user must confirm before the agent thread launches. A separate background workflow ticker may later launch proposals a human has already approved, but proposing itself starts nothing. Prefer launch_agent_thread when the user wants the work started right now in their own chat. Use create_package / attach_to_package / advance_package_stage to manage venture packages — the per-IP mission binders shown in Mission Intelligence; pass package_id on propose_codex_task when the proposed work belongs to a named package.",
 		"# Board tools\nUse only the tools listed in this session. If one utterance changes status, notes, owner, tags, and dates for the same existing card, prefer one update_ticket call with all changed fields. Use undo_delete_ticket when the user asks to undo a deletion or restore the last deleted card. Use add_key_date for a pure date or milestone addition to an existing card. Use remove_key_dates when the user asks to remove, clear, erase, or delete key dates from an existing card; set remove_all=true when they do not name specific date labels. Use update_ticket with replace_key_dates=true when the user gives the exact key dates to keep or asks to replace the whole set. Use move_ticket only for a pure status move. Use add_tags only for a pure tag addition. Use create_ticket only when no existing card captures the work. If one transcript contains multiple unrelated operations, call one tool for each operation. Only say an action completed after the tool result succeeds.",
 		"# No-op and background audio\nIf the latest audio is silence, background noise, side conversation, filler, wrap-up, or a handoff with no concrete app action, board operation, artifact request, or recall request, call do_nothing with a short reason. Do not say I'm here, I didn't catch that, or take your time.",
-		"# Wake phrase\nWhen voice control mode is inactive, only speak to the room when the user's clear utterance starts with the exact wake phrase Hey Scout. Treat Hey Scout as an address to you, not as content to save on the board. If the utterance does not start with Hey Scout, stay silent after tool calls.",
+		"# Invocation\nWhen voice control mode is inactive, the server creates a response only for a clear utterance that mentions Scout or Scott anywhere, or a natural follow-up during the short engagement window after Scout speaks. Treat Scout's name as an address, not content to save on the board. If the server has not admitted a turn, no response is created.",
 		"# Verbosity\nPrefer tools over text replies. Keep spoken responses to one short sentence unless the user asks for a memory answer; for memory answers, give the headline first and only the most useful details.",
 	}, "\n\n")
 }
@@ -3144,13 +3213,21 @@ func (app *kanbanBoardApp) handleRealtimeEventForGeneration(mediaGeneration uint
 		// transcription model's rates regardless of which lane persists, so
 		// meter every segment that reports usage.
 		app.recordVoicePeerTranscriptionUsage(event)
-		app.armScoutVoiceResponse(event.Transcript)
+		admitted := app.armScoutVoiceResponse(event.Transcript)
 		if !app.transcriptionLaneConnected() {
 			app.recordVoicePeerTranscriptSegment(event, "completed")
 			if mediaGeneration > 0 {
 				app.rememberTranscriptForGeneration(officeRoomID, mediaGeneration, event, "scout_realtime", app.currentRealtimeModel())
 			} else {
 				app.rememberTranscript(officeRoomID, event, "scout_realtime", app.currentRealtimeModel())
+			}
+		}
+		if admitted {
+			if err := app.SendEvent(map[string]any{
+				"type":     "response.create",
+				"response": map[string]any{"tool_choice": app.realtimeToolChoice()},
+			}); err != nil && !strings.Contains(err.Error(), "Realtime event channel is unavailable") {
+				log.Errorf("Failed to admit Scout room response: %v", err)
 			}
 		}
 	case "conversation.item.input_audio_transcription.failed":
@@ -3165,21 +3242,17 @@ func (app *kanbanBoardApp) handleRealtimeEventForGeneration(mediaGeneration uint
 			app.popPendingAttributionWindow()
 		}
 	case "conversation.item.input_audio_transcription.delta":
-		if text := canonicalizeBoardText(event.Delta); text != "" {
-			broadcastAssistantEvent("transcript", "hearing: "+text, map[string]any{"eventType": event.Type})
-		}
+		// Keep partial room transcription internal. Showing raw ASR deltas made
+		// ambient speech look like Scout was listening before the server had
+		// admitted an addressed turn.
 	case "input_audio_buffer.speech_started":
 		if !app.transcriptionLaneConnected() {
 			app.noteRealtimeSpeechStartedForRoomGeneration(officeRoomID, mediaGeneration)
 		}
-		broadcastAssistantEvent("audio", "assistant detected speech", map[string]any{"eventType": event.Type, "voiceState": "hearing"})
-		app.updateRoomScoutParticipantState(officeRoomID, RoomScoutReady, "hearing", "")
 	case "input_audio_buffer.speech_stopped":
 		if !app.transcriptionLaneConnected() {
 			app.noteRealtimeSpeechStoppedForRoomGeneration(officeRoomID, mediaGeneration)
 		}
-		broadcastAssistantEvent("audio", "assistant detected silence", map[string]any{"eventType": event.Type, "voiceState": "listening"})
-		app.updateRoomScoutParticipantState(officeRoomID, RoomScoutReady, "thinking", "")
 	case "input_audio_buffer.committed":
 		// A6: when the Scout peer is the persisting session (lane down), freeze the
 		// attribution window at commit so its transcription.completed resolves the
@@ -3188,7 +3261,6 @@ func (app *kanbanBoardApp) handleRealtimeEventForGeneration(mediaGeneration uint
 		if !app.transcriptionLaneConnected() {
 			app.freezeAttributionWindowAtCommitForRoomGenerationWithCaptureAndConsent(officeRoomID, mediaGeneration, nil, nil)
 		}
-		broadcastAssistantEvent("audio", "assistant committed a speech turn", map[string]any{"eventType": event.Type, "voiceState": "thinking"})
 	case "response.created":
 		app.markRealtimeResponseActive(true)
 		broadcastAssistantEvent("audio", "Scout is thinking", map[string]any{"eventType": event.Type, "voiceState": "thinking"})

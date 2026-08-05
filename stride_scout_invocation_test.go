@@ -23,6 +23,23 @@ func TestSTRIDEScoutLexicalMentionsRejectSubstrings(t *testing.T) {
 	}
 }
 
+func TestSTRIDEScoutVoiceMentionsAcceptNaturalNameReferences(t *testing.T) {
+	for _, test := range []struct {
+		text string
+		want bool
+	}{
+		{"Hey Scout, can you help?", true},
+		{"What is Scout's opinion on this?", true},
+		{"Could Scott weigh in?", true},
+		{"The scouting report is ready", false},
+		{"We should wrap up", false},
+	} {
+		if got := strideVoiceMentionsScout(test.text); got != test.want {
+			t.Fatalf("voice mention(%q)=%v, want %v", test.text, got, test.want)
+		}
+	}
+}
+
 func TestSTRIDEScoutInvocationSurfaceRulesAndAudienceBoundary(t *testing.T) {
 	machine := NewSTRIDEScoutInvocationMachine(time.Minute)
 	base := STRIDEScoutInvocationInput{Member: true, ConsentAllowed: true, At: time.Date(2026, 7, 30, 18, 0, 0, 0, time.UTC)}
@@ -58,7 +75,7 @@ func TestSTRIDEScoutInvocationSurfaceRulesAndAudienceBoundary(t *testing.T) {
 func TestSTRIDEScoutMeetingVoiceHasBoundedVisibleFollowUpAndHumanPriority(t *testing.T) {
 	machine := NewSTRIDEScoutInvocationMachine(20 * time.Second)
 	now := time.Date(2026, 7, 30, 18, 0, 0, 0, time.UTC)
-	base := STRIDEScoutInvocationInput{Surface: STRIDEScoutMeetingVoice, Member: true, ConsentAllowed: true, At: now}
+	base := STRIDEScoutInvocationInput{Surface: STRIDEScoutMeetingVoice, Member: true, ConsentAllowed: true, At: now, SpeakerID: "AJ"}
 	if decision := machine.Evaluate(base); decision.Invoke || decision.Reason != "spoken_wake_required" {
 		t.Fatalf("ordinary voice decision: %#v", decision)
 	}
@@ -72,6 +89,13 @@ func TestSTRIDEScoutMeetingVoiceHasBoundedVisibleFollowUpAndHumanPriority(t *tes
 	if decision := machine.Evaluate(followUp); !decision.Invoke || decision.Reason != "visible_follow_up_window" {
 		t.Fatalf("follow up decision: %#v", decision)
 	}
+	crossSpeaker := followUp
+	crossSpeaker.SpeakerID = "Tom"
+	if decision := machine.Evaluate(crossSpeaker); decision.Invoke || decision.Reason != "spoken_wake_required" {
+		t.Fatalf("cross-speaker crosstalk decision: %#v", decision)
+	}
+	base.SpokenWake = true
+	machine.Evaluate(base)
 	followUp.HumanSpeechPriority = true
 	if decision := machine.Evaluate(followUp); decision.Invoke || decision.Reason != "human_barge_in" || decision.State != STRIDEScoutIdle {
 		t.Fatalf("barge-in decision: %#v", decision)

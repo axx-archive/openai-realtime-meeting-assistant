@@ -902,6 +902,15 @@ export const api = {
     });
   },
 
+  strideImportRelationships(
+		sessionToken: string,
+		body: { expectedRevision: number; entries: Array<{ category: string; date: string; value: string }> },
+	): Promise<StrideRelationshipMemoryResponse> {
+		return request('/api/stride/v1/coworker/relationships/import', {
+			method: 'POST', body: { action: 'import', ...body }, sessionToken,
+		});
+	},
+
   strideCorrectRelationship(
     sessionToken: string,
     body: { expectedRevision: number; relationshipId: string; value: string },

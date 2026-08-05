@@ -239,6 +239,28 @@ func (controller *MeetingAgentFloorController) AcceptProviderOutput(floor Meetin
 	return state.outputHighWater, nil
 }
 
+// ValidateProviderFloor performs the same exact session/floor-generation and
+// output-track fence as audio publication without consuming an audio or cost
+// budget. It is used for the transcript that must be persisted immediately
+// before the matching audio is released.
+func (controller *MeetingAgentFloorController) ValidateProviderFloor(floor MeetingAgentFloorLease, outputTrackID string) error {
+	if controller == nil || !strideIdentifier(outputTrackID) {
+		return ErrMeetingAgentFloorInvalid
+	}
+	controller.mu.Lock()
+	defer controller.mu.Unlock()
+	now := controller.now().UTC()
+	controller.expireLocked(now)
+	state, err := controller.floorLocked(floor, now)
+	if err != nil {
+		return err
+	}
+	if outputTrackID != state.lease.Scope.AudioTrackID {
+		return ErrMeetingAgentFloorFence
+	}
+	return nil
+}
+
 // HumanBargeIn synchronously fences provider output before the caller sends a
 // provider cancel. It never mutates, mutes, or closes any human media track.
 func (controller *MeetingAgentFloorController) HumanBargeIn(roomID, sittingID string, mediaGeneration uint64) (MeetingAgentFloorInterruption, bool) {

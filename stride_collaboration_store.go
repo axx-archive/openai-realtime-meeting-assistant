@@ -110,6 +110,11 @@ type STRIDECollaborationContextPreference struct {
 	ProjectionRevision int64                   `json:"projectionRevision"`
 }
 
+type STRIDECollaborationImportItem struct {
+	Event    STRIDECollaborationPreferenceEvent
+	Evidence STRIDECollaborationControlEvidence
+}
+
 func (projection STRIDECollaborationContextPreference) validate() error {
 	if projection.Reference.Validate() != nil || projection.Reference.ContractType != STRIDEContractAgentRelationshipMemory || projection.Relationship.Validate() != nil ||
 		projection.Reference != referenceFromHeader(projection.Relationship.Header) || !safeSTRIDECollaborationPreferenceType(projection.PreferenceType) || strings.TrimSpace(projection.Value) == "" || !oneOf(projection.Scope, stridePreferencePrivate, stridePreferenceShared) ||
@@ -200,6 +205,7 @@ func validateDurableSTRIDECollaborationSubject(subject string, state durableSTRI
 		}
 	}
 	var priorControlRevision int64
+	var priorControl *STRIDECollaborationControlReceipt
 	controlEvidence := make(map[string]STRIDECollaborationControlEvidence, len(state.ControlEvidence))
 	for _, evidence := range state.ControlEvidence {
 		id := evidence.Event.Header.ID
@@ -209,8 +215,14 @@ func validateDurableSTRIDECollaborationSubject(subject string, state durableSTRI
 		controlEvidence[id] = evidence
 	}
 	for _, receipt := range state.Controls {
-		if err := receipt.validate(subject); err != nil || receipt.ResultingRevision <= priorControlRevision || receipt.ResultingRevision > state.Revision {
+		if err := receipt.validate(subject); err != nil || receipt.ResultingRevision < priorControlRevision || receipt.ResultingRevision > state.Revision {
 			return ErrSTRIDECollaborationPreferenceDenied
+		}
+		if receipt.ResultingRevision == priorControlRevision {
+			if priorControl == nil || receipt.Action != "remember" || receipt.EvidenceID == "" || !isSTRIDEMemoryImportPreferenceType(receipt.PreferenceType) ||
+				priorControl.Action != "enable" && (priorControl.Action != "remember" || priorControl.EvidenceID == "" || !isSTRIDEMemoryImportPreferenceType(priorControl.PreferenceType)) {
+				return ErrSTRIDECollaborationPreferenceDenied
+			}
 		}
 		if receipt.EvidenceID != "" {
 			evidence, ok := controlEvidence[receipt.EvidenceID]
@@ -220,6 +232,8 @@ func validateDurableSTRIDECollaborationSubject(subject string, state durableSTRI
 			}
 		}
 		priorControlRevision = receipt.ResultingRevision
+		copy := receipt
+		priorControl = &copy
 	}
 	if len(state.Controls) == 0 || priorControlRevision != state.Revision {
 		return ErrSTRIDECollaborationPreferenceDenied
@@ -339,12 +353,13 @@ func (store *durableSTRIDECollaborationStore) mutateSubject(subject string, expe
 	if next.Forgotten == nil {
 		next.Forgotten = map[string]time.Time{}
 	}
+	priorControlCount := len(next.Controls)
 	if err := mutate(&next); err != nil {
 		return err
 	}
 	next.Revision++
-	if len(next.Controls) > 0 {
-		next.Controls[len(next.Controls)-1].ResultingRevision = next.Revision
+	for index := priorControlCount; index < len(next.Controls); index++ {
+		next.Controls[index].ResultingRevision = next.Revision
 	}
 	if next.Consent != nil {
 		next.Consent.Revision = next.Revision
@@ -403,6 +418,57 @@ func (store *durableSTRIDECollaborationStore) RememberFromControl(actor string, 
 	return store.remember(actor, expectedRevision, event, &evidence)
 }
 
+// ImportFromControls commits one reviewed provider export as one subject
+// revision and one durable atomic write. Every imported item retains its own
+// signed evidence/forget handle, while a first import can enable private-only
+// consent in the same transaction.
+func (store *durableSTRIDECollaborationStore) ImportFromControls(actor string, expectedRevision int64, items []STRIDECollaborationImportItem, at time.Time) error {
+	actor = strings.TrimSpace(actor)
+	if !strideIdentifier(actor) || expectedRevision < 0 || at.IsZero() || len(items) == 0 || len(items) > strideMemoryImportMaxEntries {
+		return ErrSTRIDECollaborationPreferenceDenied
+	}
+	for _, item := range items {
+		event, control := item.Event, item.Evidence
+		if event.Action != stridePreferenceObserve || event.SubjectPrincipal != actor || event.Scope != stridePreferencePrivate || event.Origin != stridePreferenceExplicit ||
+			!verifySTRIDECollaborationControlEvidence(store.authority, control) || control.Action != "remember" || control.Actor != actor || control.ExpectedRevision != expectedRevision ||
+			control.PreferenceType != event.PreferenceType || control.Scope != event.Scope || control.ValueDigest != temporalDigest(strings.TrimSpace(event.Value)) ||
+			len(event.Evidence) != 1 || event.Evidence[0] != control.Reference() {
+			return ErrSTRIDECollaborationPreferenceDenied
+		}
+	}
+	return store.mutateSubject(actor, expectedRevision, func(state *durableSTRIDECollaborationSubject) error {
+		if state.Consent == nil || !state.Consent.Enabled {
+			state.Consent = &STRIDECollaborationMemoryConsent{SubjectPrincipal: actor, Enabled: true, AllowInferred: false, AllowShared: false, UpdatedAt: at.UTC(), UpdatedBy: actor}
+			state.Controls = append(state.Controls, STRIDECollaborationControlReceipt{Action: "enable", Actor: actor, OccurredAt: at.UTC()})
+		}
+		for _, item := range items {
+			event := item.Event
+			event.EventID = strideCollaborationControlEventID(actor, state.Revision+1, "remember", event.PreferenceType, event.Value)
+			durableImport := isSTRIDEMemoryImportPreferenceType(event.PreferenceType) && event.ExpiresAt.Equal(strideMemoryImportDurableExpiresAt)
+			originalTTL := event.ExpiresAt.Sub(event.ObservedAt)
+			event.ObservedAt = nextSTRIDECollaborationEventTime(state.Events, event.ObservedAt)
+			if durableImport {
+				event.ExpiresAt = strideMemoryImportDurableExpiresAt
+			} else {
+				event.ExpiresAt = event.ObservedAt.Add(originalTTL)
+			}
+			key := strideCollaborationPreferenceKey(event)
+			delete(state.Forgotten, key)
+			candidate := append(append([]STRIDECollaborationPreferenceEvent(nil), state.Events...), event)
+			if _, err := ReduceSTRIDECollaborationProfile(actor, candidate, event.ObservedAt.Add(time.Nanosecond)); err != nil {
+				return err
+			}
+			state.Events = candidate
+			state.ControlEvidence = append(state.ControlEvidence, item.Evidence)
+			state.Controls = append(state.Controls, STRIDECollaborationControlReceipt{
+				Action: "remember", Actor: actor, RelationshipID: strideCollaborationRelationshipID(key), PreferenceType: event.PreferenceType,
+				EvidenceID: item.Evidence.Event.Header.ID, OccurredAt: event.ObservedAt.UTC(),
+			})
+		}
+		return nil
+	})
+}
+
 func (store *durableSTRIDECollaborationStore) remember(actor string, expectedRevision int64, event STRIDECollaborationPreferenceEvent, control *STRIDECollaborationControlEvidence) error {
 	actor = strings.TrimSpace(actor)
 	if event.Action != stridePreferenceObserve || event.SubjectPrincipal != actor {
@@ -416,9 +482,14 @@ func (store *durableSTRIDECollaborationStore) remember(actor string, expectedRev
 			return ErrSTRIDECollaborationPreferenceDenied
 		}
 		event.EventID = strideCollaborationControlEventID(actor, state.Revision+1, "remember", event.PreferenceType, event.Value)
+		durableImport := isSTRIDEMemoryImportPreferenceType(event.PreferenceType) && event.ExpiresAt.Equal(strideMemoryImportDurableExpiresAt)
 		originalTTL := event.ExpiresAt.Sub(event.ObservedAt)
 		event.ObservedAt = nextSTRIDECollaborationEventTime(state.Events, event.ObservedAt)
-		event.ExpiresAt = event.ObservedAt.Add(originalTTL)
+		if durableImport {
+			event.ExpiresAt = strideMemoryImportDurableExpiresAt
+		} else {
+			event.ExpiresAt = event.ObservedAt.Add(originalTTL)
+		}
 		key := strideCollaborationPreferenceKey(event)
 		if _, forgotten := state.Forgotten[key]; forgotten {
 			if event.Origin != stridePreferenceExplicit {
@@ -451,7 +522,7 @@ func (store *durableSTRIDECollaborationStore) CorrectFromControl(actor, relation
 
 func (store *durableSTRIDECollaborationStore) correct(actor, relationshipID string, expectedRevision int64, value string, evidence []STRIDEReference, at time.Time, control *STRIDECollaborationControlEvidence) error {
 	actor, relationshipID, value = strings.TrimSpace(actor), strings.TrimSpace(relationshipID), strings.TrimSpace(value)
-	if !strideIdentifier(actor) || !strideIdentifier(relationshipID) || value == "" || len(value) > 500 || at.IsZero() || !validUniqueSTRIDEReferences(evidence) {
+	if !strideIdentifier(actor) || !strideIdentifier(relationshipID) || value == "" || len(value) > strideCollaborationPreferenceValueMaxBytes || at.IsZero() || !validUniqueSTRIDEReferences(evidence) {
 		return ErrSTRIDECollaborationPreferenceDenied
 	}
 	if control != nil && (!verifySTRIDECollaborationControlEvidence(store.authority, *control) || control.Action != "correct" || control.Actor != actor || control.RelationshipID != relationshipID || control.ExpectedRevision != expectedRevision || control.ValueDigest != temporalDigest(value) || len(evidence) != 1 || evidence[0] != control.Reference()) {
@@ -473,10 +544,14 @@ func (store *durableSTRIDECollaborationStore) correct(actor, relationshipID stri
 		if control != nil && (control.PreferenceType != current.PreferenceType || control.Scope != current.Scope) {
 			return ErrSTRIDECollaborationPreferenceDenied
 		}
+		expiresAt := observedAt.Add(180 * 24 * time.Hour)
+		if isSTRIDEMemoryImportPreferenceType(current.PreferenceType) {
+			expiresAt = strideMemoryImportDurableExpiresAt
+		}
 		event := STRIDECollaborationPreferenceEvent{
 			EventID: strideCollaborationControlEventID(actor, state.Revision+1, "correct", current.PreferenceType, value), Action: stridePreferenceCorrect,
 			SubjectPrincipal: actor, Scope: current.Scope, ScopeID: current.ScopeID, PreferenceType: current.PreferenceType, Value: value,
-			Origin: stridePreferenceExplicit, Evidence: append([]STRIDEReference(nil), evidence...), Confidence: 1, ObservedAt: observedAt, ExpiresAt: observedAt.Add(180 * 24 * time.Hour),
+			Origin: stridePreferenceExplicit, Evidence: append([]STRIDEReference(nil), evidence...), Confidence: 1, ObservedAt: observedAt, ExpiresAt: expiresAt,
 			Audience: currentAudienceForState(current), CorrectsEventID: current.SourceEventID,
 		}
 		candidate := append(append([]STRIDECollaborationPreferenceEvent(nil), state.Events...), event)
@@ -778,7 +853,7 @@ func makeSTRIDECollaborationContextPreference(state durableSTRIDECollaborationSu
 		return STRIDECollaborationContextPreference{}, err
 	}
 	header := STRIDEContractHeader{TenantID: canonicalTenantID(), ID: id, Revision: state.Revision, SchemaVersion: STRIDEContractSchemaVersion, ContractType: STRIDEContractAgentRelationshipMemory, ContentDigest: digest, CreatedAt: preference.LastObserved.UTC()}
-	relationship := AgentRelationshipMemory{Header: header, AgentID: "scout", Subject: preference.SubjectPrincipal, Scope: preference.ScopeID, ObservationDigest: strings.TrimPrefix(preference.ValueDigest, "sha256:"), Evidence: SortedSTRIDEReferences(preference.Evidence), Confidence: preference.Confidence, FirstObserved: preference.FirstObserved, LastObserved: preference.LastObserved, ReinforcementCount: preference.ReinforcementCount, Audience: preference.Audience, ExpiresAt: timePtr(preference.ExpiresAt), Status: "present"}
+	relationship := AgentRelationshipMemory{Header: header, AgentID: "stride_coworker_foundation", Subject: preference.SubjectPrincipal, Scope: preference.ScopeID, ObservationDigest: strings.TrimPrefix(preference.ValueDigest, "sha256:"), Evidence: SortedSTRIDEReferences(preference.Evidence), Confidence: preference.Confidence, FirstObserved: preference.FirstObserved, LastObserved: preference.LastObserved, ReinforcementCount: preference.ReinforcementCount, Audience: preference.Audience, ExpiresAt: timePtr(preference.ExpiresAt), Status: "present"}
 	projection := STRIDECollaborationContextPreference{Reference: referenceFromHeader(header), Relationship: relationship, PreferenceType: preference.PreferenceType, Value: preference.Value, Scope: preference.Scope, Origin: preference.Origin, SourceEventID: preference.SourceEventID, Evidence: SortedSTRIDEReferences(preference.Evidence), Confidence: preference.Confidence, ExpiresAt: preference.ExpiresAt, ConsentRevision: state.Consent.Revision, ProjectionRevision: state.Revision}
 	if projection.validate() != nil {
 		return STRIDECollaborationContextPreference{}, ErrSTRIDECollaborationPreferenceDenied

@@ -76,8 +76,8 @@ func mintSTRIDECollaborationControlEvidence(config STRIDERuntimeConfig, receipt 
 	if !config.RelationshipMemoryEnabled || !verifySTRIDEProductActivationReceipt(config, receipt, STRIDEProductScopeCoworker, at) ||
 		!strideIdentifier(actor) || !oneOf(action, "remember", "correct") ||
 		(action == "remember" && relationshipID != "") || (action == "correct" && !strideIdentifier(relationshipID)) ||
-		!safeSTRIDECollaborationPreferenceType(preferenceType) || value == "" || len(value) > 500 || !oneOf(scope, stridePreferencePrivate, stridePreferenceShared) ||
-		(action == "remember" && scope != stridePreferencePrivate) || audience.Validate() != nil || expectedRevision < 1 || at.IsZero() {
+		!safeSTRIDECollaborationPreferenceType(preferenceType) || value == "" || len(value) > strideCollaborationPreferenceValueMaxBytes || !oneOf(scope, stridePreferencePrivate, stridePreferenceShared) ||
+		(action == "remember" && scope != stridePreferencePrivate) || audience.Validate() != nil || expectedRevision < 0 || at.IsZero() {
 		return STRIDECollaborationControlEvidence{}, ErrSTRIDECollaborationPreferenceDenied
 	}
 	if scope == stridePreferencePrivate {
@@ -139,7 +139,7 @@ func verifySTRIDECollaborationControlEvidence(authority STRIDESnapshotMACAuthori
 		(evidence.Action == "correct" && !strideIdentifier(evidence.RelationshipID)) ||
 		!safeSTRIDECollaborationPreferenceType(evidence.PreferenceType) || !oneOf(evidence.Scope, stridePreferencePrivate, stridePreferenceShared) ||
 		(evidence.Action == "remember" && evidence.Scope != stridePreferencePrivate) ||
-		!isHexDigest(evidence.ValueDigest) || evidence.ExpectedRevision < 1 ||
+		!isHexDigest(evidence.ValueDigest) || evidence.ExpectedRevision < 0 ||
 		evidence.Event.Header.Revision != evidence.ExpectedRevision+1 || evidence.Event.ContentRevision != evidence.ExpectedRevision+1 ||
 		!isHexDigest(evidence.ProductReceiptDigest) || evidence.Generation == 0 || evidence.KeyID != authority.KeyID || !isHexDigest(evidence.Digest) {
 		return false

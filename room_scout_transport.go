@@ -128,6 +128,12 @@ type openAIRoomScoutTransport struct {
 	pendingGeneration      uint64
 	transcriptionOwnership map[string]bool
 	transcriptionFIFO      []bool
+	invocation             *STRIDEScoutInvocationMachine
+	// requesterName is captured when the provider transcript is admitted, not
+	// later when a tool finishes. The room's active speaker may change during
+	// model latency; authority-sensitive actions must stay bound to the human
+	// who actually invoked Scout.
+	requesterName string
 }
 
 type roomScoutProviderCircuitSnapshot struct {
@@ -163,6 +169,7 @@ func newOpenAIRoomScoutTransport(ctx context.Context, app *kanbanBoardApp, apiKe
 		app: app, scope: scope, callbacks: callbacks, apiKey: apiKey, model: realtimeModel(), dial: dial,
 		ctx: transportCtx, cancel: cancel, done: make(chan struct{}), restarts: make(chan roomScoutRestartRequest, 1),
 		generation: 1, transcriptionOwnership: make(map[string]bool),
+		invocation: NewSTRIDEScoutInvocationMachine(20 * time.Second),
 	}
 	outputTrack, err := addPersistentRoomScoutOutputTrack(scope)
 	if err != nil {
@@ -635,10 +642,9 @@ func (app *kanbanBoardApp) roomScoutSessionConfig(scope RoomScoutScope, model st
 	config := app.sessionConfig(model)
 	config["instructions"] = app.roomScoutSessionInstructions(scope)
 	config["tools"] = app.roomScoutTools()
-	// Every ambient turn first resolves through a tool. The model classifies
-	// natural participant turns with answer_room_question and side conversation
-	// with do_nothing; the server only requests speech for the former (or another
-	// deliberate room-scoped tool). No magic wake-prefix is required.
+	// The server creates a response only after its deterministic invocation
+	// machine admits an explicit Scout reference or a bounded follow-up. The
+	// model then resolves the admitted turn through one closed room-scoped tool.
 	config["tool_choice"] = "required"
 	return config
 }
@@ -652,7 +658,8 @@ var roomScoutAllowedTools = map[string]bool{
 	"portfolio_health":       true, "company_financial_snapshot": true,
 	"financial_comps": true, "meeting_recap": true, "meeting_interval_recall": true,
 	"cross_meeting_briefing": true, "get_meeting_detail": true,
-	"answer_room_question": true, "do_nothing": true,
+	"manage_research_specialist": true,
+	"answer_room_question":       true, "do_nothing": true,
 }
 
 func (app *kanbanBoardApp) roomScoutTools() []map[string]any {
@@ -664,8 +671,19 @@ func (app *kanbanBoardApp) roomScoutTools() []map[string]any {
 		}
 	}
 	tools = append(tools, map[string]any{
+		"type": "function", "name": "manage_research_specialist",
+		"description": "Use when an admitted participant asks Scout about research work, asks who should help with research, or explicitly asks to invite, add, bring, or have Colton join. Scout may recommend Colton as the research specialist; an explicit invitation request may create a visible pending invitation, but a human must separately approve it before Colton can join. Never use for ambient research discussion that was not addressed to Scout.",
+		"parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"request": map[string]any{"type": "string", "description": "The participant's research request or explicit request to invite Colton, preserving the requested purpose."},
+			},
+			"required": []string{"request"}, "additionalProperties": false,
+		},
+	})
+	tools = append(tools, map[string]any{
 		"type": "function", "name": "answer_room_question",
-		"description": "Use when a participant clearly asks Scout a conversational question or request, asks for Scout's opinion, or continues a conversation with Scout. The request may use Scout's name anywhere or omit it in a natural follow-up; no exact wake phrase is required. Never use for side conversation between people, background speech, silence, or filler; use do_nothing for those.",
+		"description": "Use for a server-admitted conversational question or request addressed to Scout, including a natural follow-up during the visible follow-up window. Never use for side conversation between people, background speech, silence, or filler; use do_nothing for those.",
 		"parameters": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -699,8 +717,9 @@ func (app *kanbanBoardApp) roomScoutSessionInstructions(scope RoomScoutScope) st
 		"Treat each human as a separate coworker. Use speaker attribution from the shared meeting transcript and company-visible evidence to understand who said what; never merge one person's statements, preferences, or history into another's.",
 		"A shared room never receives private chats, Settings imports, or private user-profile memory. Do not claim or imply otherwise.",
 		"Tools omitted from this session are intentionally unavailable because their current implementation is office-global or user-private. Do not claim those actions completed.",
+		"Scout is chief of staff for the agent team. When an admitted participant asks about research or explicitly asks to bring Colton in, use manage_research_specialist. Scout may recommend Colton or create a visible pending invitation, but never silently add, approve, or start an agent.",
 		"# Invited-participant turn taking",
-		"You are a visible participant, not a wake-word utility. For a clear question or request directed to Scout, a request for your perspective, or a natural follow-up after you spoke, call answer_room_question unless a more specific listed tool is needed. Scout or Scott may appear anywhere in the turn and no exact phrase is required. For side conversation between people, background speech, silence, filler, or a turn not directed to you, call do_nothing and remain silent. Prefer staying quiet over interrupting.",
+		"You are a visible participant. The server admits only turns that explicitly mention Scout or Scott anywhere, plus natural follow-ups during a short visible follow-up window. For an admitted conversational request, call answer_room_question unless a more specific listed tool is needed. For side conversation, background speech, silence, filler, or a turn not directed to you, call do_nothing and remain silent. Prefer staying quiet over interrupting.",
 		"Never promise future work unless the tool result contains a durable receipt for it. If a requested future action is unavailable, say no work is scheduled and direct the participant to @Scout in room chat with the exact destination channel.",
 	}, " ")
 }
@@ -727,24 +746,30 @@ func (transport *openAIRoomScoutTransport) handleProviderEvent(session roomScout
 		}
 	case "conversation.item.input_audio_transcription.completed":
 		transport.app.recordRoomScoutTranscriptionUsage(transport.scope.RoomID, event)
-		transport.noteVoiceTranscript(event.Transcript)
+		admitted := transport.noteVoiceTranscript(event.Transcript)
 		if sourceOwned, found := transport.takeTranscriptionOwnership(event.ItemID); roomScoutFallbackOwnsTranscription(sourceOwned, found) {
 			transport.app.rememberRoomScoutTranscript(transport.scope, event, "scout_realtime", transport.model)
+		}
+		if admitted {
+			transport.publish(generation, "audio", map[string]any{"text": "Scout heard his name", "voiceState": "hearing"})
+			if err := session.SendEvent(map[string]any{
+				"type":     "response.create",
+				"response": map[string]any{"tool_choice": "required"},
+			}); err != nil {
+				transport.publish(generation, "error", map[string]any{"text": "Scout could not answer", "error": trimForStorage(err.Error(), 300)})
+			}
 		}
 	case "conversation.item.input_audio_transcription.failed":
 		if sourceOwned, found := transport.takeTranscriptionOwnership(event.ItemID); roomScoutFallbackOwnsTranscription(sourceOwned, found) {
 			transport.app.popRoomScoutAttribution(transport.scope)
 		}
 	case "conversation.item.input_audio_transcription.delta":
-		if text := canonicalizeBoardText(event.Delta); text != "" {
-			transport.publish(generation, "transcript", map[string]any{"text": "hearing: " + text, "eventType": event.Type})
-		}
+		// Partial ASR is not visible until the deterministic invocation gate has
+		// admitted this as a Scout turn.
 	case "input_audio_buffer.speech_started":
 		transport.app.noteRoomScoutSpeechStarted(transport.scope)
-		transport.publish(generation, "audio", map[string]any{"text": "Scout detected speech", "voiceState": "hearing"})
 	case "input_audio_buffer.speech_stopped":
 		transport.app.noteRoomScoutSpeechStopped(transport.scope)
-		transport.publish(generation, "audio", map[string]any{"text": "Scout is thinking", "voiceState": "thinking"})
 	case "input_audio_buffer.committed":
 		contributorFences := transport.app.takeRoomScoutContributorFences(transport.scope)
 		sourceOwned := transport.app.claimTranscriptionSourceTurnForRoom(transport.scope.RoomID)
@@ -807,6 +832,7 @@ func (transport *openAIRoomScoutTransport) handleProviderToolCall(session roomSc
 		return
 	}
 	armedAtStart := transport.voiceArmed()
+	requesterName := transport.admittedRequesterName()
 	go func() {
 		err := transport.callbacks.RunTool(transport.ctx, transport.scope, output.CallID, principal, func(ctx context.Context) error {
 			if !transport.accepts(generation) {
@@ -818,7 +844,7 @@ func (transport *openAIRoomScoutTransport) handleProviderToolCall(session roomSc
 			if parseErr != nil {
 				err = parseErr
 			} else {
-				result, changed, err = transport.app.applyRoomScoutToolArgs(ctx, transport.scope, output.Name, args)
+				result, changed, err = transport.app.applyRoomScoutToolArgsForRequester(ctx, transport.scope, requesterName, output.Name, args)
 			}
 			if err != nil {
 				result = map[string]any{"ok": false, "error": err.Error()}
@@ -859,6 +885,10 @@ func (transport *openAIRoomScoutTransport) handleProviderToolCall(session roomSc
 // defaults and global notification/broadcast behavior. A new named-room tool
 // must receive an explicit case here and an owning-room delivery test.
 func (app *kanbanBoardApp) applyRoomScoutToolArgs(ctx context.Context, scope RoomScoutScope, toolName string, args map[string]any) (map[string]any, bool, error) {
+	return app.applyRoomScoutToolArgsForRequester(ctx, scope, app.roomScoutCurrentSpeaker(scope), toolName, args)
+}
+
+func (app *kanbanBoardApp) applyRoomScoutToolArgsForRequester(ctx context.Context, scope RoomScoutScope, requesterName, toolName string, args map[string]any) (map[string]any, bool, error) {
 	if !app.roomScoutScopeCurrent(scope) {
 		return nil, false, ErrRoomScoutFence
 	}
@@ -873,12 +903,51 @@ func (app *kanbanBoardApp) applyRoomScoutToolArgs(ctx context.Context, scope Roo
 	switch toolName {
 	case "answer_memory_question", "cross_meeting_briefing", "get_meeting_detail":
 		return app.applyToolCallArgsForPrincipal(toolName, args, principal)
+	case "manage_research_specialist":
+		request := canonicalizeBoardText(asString(args["request"]))
+		if request == "" {
+			return nil, false, fmt.Errorf("request is required")
+		}
+		requesterName = canonicalRoomActorName(requesterName)
+		requester := accountStore().findUser(participantEmail(requesterName))
+		if requester == nil {
+			return nil, false, fmt.Errorf("an attributed signed-in participant is required")
+		}
+		if app.meetingSpecialists == nil {
+			return nil, false, ErrMeetingSpecialistProductDisabled
+		}
+		keyDigest := sha256Hex([]byte(strings.Join([]string{
+			scope.RoomID, scope.SittingID, requester.Email, request,
+		}, "\x00")))
+		result, err := app.meetingSpecialists.HandleScoutManagedResearchTurn(ctx, requester, MeetingSpecialistScoutResearchTurn{
+			RoomID: scope.RoomID, Utterance: request, Purpose: request, Addressed: true,
+			IdempotencyKey: "scout-colton-" + keyDigest[:32], InvitationTTL: 5 * time.Minute,
+		})
+		if err != nil {
+			if errors.Is(err, ErrMeetingSpecialistProductDisabled) || errors.Is(err, ErrMeetingSpecialistProductAgent) {
+				return map[string]any{
+					"ok": false, "action": "colton_unavailable", "requester": requesterName,
+					"reason": meetingSpecialistProductReason(err), "providerSessionStarted": false,
+				}, false, nil
+			}
+			return nil, false, err
+		}
+		return map[string]any{
+			"ok":                     true,
+			"action":                 result.Action,
+			"requester":              requesterName,
+			"recommendation":         result.Recommendation,
+			"invitation":             result.Invitation,
+			"requiresHumanApproval":  result.RequiresHumanApproval,
+			"invitationCreated":      result.InvitationCreated,
+			"providerSessionStarted": result.ProviderSessionStarted,
+		}, false, nil
 	case "answer_room_question":
 		request := canonicalizeBoardText(asString(args["request"]))
 		if request == "" {
 			return nil, false, fmt.Errorf("request is required")
 		}
-		requester := app.roomScoutCurrentSpeaker(scope)
+		requester := canonicalRoomActorName(requesterName)
 		return map[string]any{
 			"ok": true, "request": trimForStorage(request, 1000),
 			"requester":      firstNonEmptyString(requester, "speaker attribution unavailable"),
@@ -954,18 +1023,41 @@ func (app *kanbanBoardApp) roomScoutCurrentSpeaker(scope RoomScoutScope) string 
 	return name
 }
 
-func (transport *openAIRoomScoutTransport) noteVoiceTranscript(transcript string) {
+func (transport *openAIRoomScoutTransport) noteVoiceTranscript(transcript string) bool {
 	if transport == nil {
-		return
+		return false
 	}
-	now := time.Now()
+	transcript = strings.TrimSpace(transcript)
+	if transcript == "" {
+		return false
+	}
+	if !strideVoiceMentionsScout(transcript) {
+		transport.voiceMu.Lock()
+		inFlight := transport.responseActive
+		transport.voiceMu.Unlock()
+		if inFlight {
+			return false
+		}
+	}
+	if transport.invocation == nil {
+		transport.invocation = NewSTRIDEScoutInvocationMachine(20 * time.Second)
+	}
+	now := time.Now().UTC()
+	requesterName := transport.app.roomScoutCurrentSpeaker(transport.scope)
+	decision := transport.invocation.Evaluate(STRIDEScoutInvocationInput{
+		Surface: STRIDEScoutMeetingVoice, Text: transcript, At: now,
+		SpokenWake: strideVoiceMentionsScout(transcript), Member: true, ConsentAllowed: true, SpeakerID: requesterName,
+	})
 	transport.voiceMu.Lock()
-	if transcriptStartsWithScoutWakePhrase(transcript) {
+	if decision.Invoke {
 		transport.armedUntil = now.Add(scoutVoiceArmDuration)
-	} else if strings.TrimSpace(transcript) != "" {
+		transport.requesterName = requesterName
+	} else {
 		transport.armedUntil = time.Time{}
+		transport.requesterName = ""
 	}
 	transport.voiceMu.Unlock()
+	return decision.Invoke
 }
 
 func (transport *openAIRoomScoutTransport) resetVoiceState() {
@@ -980,7 +1072,11 @@ func (transport *openAIRoomScoutTransport) resetVoiceState() {
 	transport.pendingGeneration = 0
 	transport.transcriptionOwnership = make(map[string]bool)
 	transport.transcriptionFIFO = nil
+	transport.requesterName = ""
 	transport.voiceMu.Unlock()
+	if transport.invocation != nil {
+		transport.invocation.Dismiss()
+	}
 }
 
 func (transport *openAIRoomScoutTransport) rememberTranscriptionOwnership(itemID string, sourceOwned bool) {
@@ -1031,6 +1127,15 @@ func (transport *openAIRoomScoutTransport) voiceArmed() bool {
 	return !transport.armedUntil.IsZero() && !time.Now().After(transport.armedUntil)
 }
 
+func (transport *openAIRoomScoutTransport) admittedRequesterName() string {
+	if transport == nil {
+		return ""
+	}
+	transport.voiceMu.Lock()
+	defer transport.voiceMu.Unlock()
+	return transport.requesterName
+}
+
 func (transport *openAIRoomScoutTransport) shouldSpeakAfterTool(toolName string, result map[string]any, changed, armedAtStart bool) bool {
 	if transport == nil {
 		return false
@@ -1042,6 +1147,7 @@ func (transport *openAIRoomScoutTransport) shouldSpeakAfterTool(toolName string,
 	shouldSpeak := toolName != "do_nothing" && scoutToolShouldSpeak(toolName, result, changed, true)
 	if shouldSpeak {
 		transport.armedUntil = time.Time{}
+		transport.requesterName = ""
 	}
 	transport.voiceMu.Unlock()
 	return shouldSpeak
@@ -1100,7 +1206,7 @@ func roomScoutSpokenResponseInstructions() string {
 	return strings.Join([]string{
 		"Speak to the room as Scout, a visible invited participant.",
 		"Answer the participant's current question or request naturally and directly using the conversation and tool result.",
-		"No wake phrase is required and you must not mention one.",
+		"Do not repeat or mention the invocation phrase.",
 		"Never promise future work unless the tool result contains a durable receipt. If no receipt exists, say no work is scheduled.",
 		"Do not call another tool in this continuation.",
 		"Keep routine answers concise; ask one clear follow-up only when essential.",

@@ -44,7 +44,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // native mobile, native reply/activity sheets, adaptive threaded reply
       // composition, and the polished compact reaction treatment.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '38',
+      buildNumber: '39',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

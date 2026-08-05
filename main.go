@@ -2275,8 +2275,9 @@ func assistantBoardHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeAuthJSON(w, http.StatusOK, map[string]any{
-		"ok":    true,
-		"board": kanbanApp.snapshotState(),
+		"ok":         true,
+		"board":      kanbanApp.snapshotState(),
+		"projection": kanbanApp.boardProjectionForViewer(r.Context(), user),
 	})
 }
 

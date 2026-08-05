@@ -337,6 +337,55 @@ func TestScoutChatMessageReplyPersistsImmutableOriginalContext(t *testing.T) {
 	}
 }
 
+func TestScoutChatReplyUsesTheSameOwnerEditAndDeleteContract(t *testing.T) {
+	app := setupScoutChatMutationTest(t)
+	channel, err := app.createScoutChatThread("aj@shareability.com", "AJ", "team", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := app.commitScoutChatThreadMessages("aj@shareability.com", channel.ID,
+		scoutChatMessageRecord{ID: "reply-root", Kind: "message", Role: "user", Text: "Root", CreatedAt: createdAt, AuthorName: "Tim", AuthorEmail: "tim@shareability.com"},
+		scoutChatMessageRecord{ID: "owned-reply", Kind: "message", Role: "user", Text: "Draft reply", CreatedAt: createdAt, AuthorName: "AJ", AuthorEmail: "aj@shareability.com", ReplyTo: &scoutChatReplyRef{MessageID: "reply-root", AuthorName: "Tim", Text: "Root"}},
+	); err != nil {
+		t.Fatalf("seed reply thread: %v", err)
+	}
+
+	path := "/assistant/chat-threads/" + channel.ID + "/messages/owned-reply"
+	if recorder := mutationRoute(t, http.MethodPatch, path, `{"text":"stolen reply"}`, "tim@shareability.com"); recorder.Code != http.StatusForbidden {
+		t.Fatalf("cross-user reply edit status=%d body=%s, want 403", recorder.Code, recorder.Body.String())
+	}
+	if recorder := mutationRoute(t, http.MethodDelete, path, "", "tim@shareability.com"); recorder.Code != http.StatusForbidden {
+		t.Fatalf("cross-user reply delete status=%d body=%s, want 403", recorder.Code, recorder.Body.String())
+	}
+
+	edited := mutationRoute(t, http.MethodPatch, path, `{"text":"Final reply"}`, "aj@shareability.com")
+	if edited.Code != http.StatusOK {
+		t.Fatalf("own reply edit status=%d body=%s", edited.Code, edited.Body.String())
+	}
+	var editedResponse struct {
+		Message scoutChatMessageRecord `json:"message"`
+	}
+	if err := json.Unmarshal(edited.Body.Bytes(), &editedResponse); err != nil {
+		t.Fatalf("decode reply edit: %v", err)
+	}
+	if editedResponse.Message.Text != "Final reply" || editedResponse.Message.EditedAt == "" || editedResponse.Message.ReplyTo == nil || editedResponse.Message.ReplyTo.MessageID != "reply-root" {
+		t.Fatalf("edited reply lost content or topology: %+v", editedResponse.Message)
+	}
+
+	deleted := mutationRoute(t, http.MethodDelete, path, "", "aj@shareability.com")
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("own reply delete status=%d body=%s", deleted.Code, deleted.Body.String())
+	}
+	persisted, _, err := app.scoutChatThreadByID("aj@shareability.com", channel.ID)
+	if err != nil {
+		t.Fatalf("reload after reply delete: %v", err)
+	}
+	if len(persisted.Messages) != 1 || persisted.Messages[0].ID != "reply-root" {
+		t.Fatalf("reply delete changed the root conversation: %+v", persisted.Messages)
+	}
+}
+
 func TestScoutChatReactionRouteEnforcesACLIdentityAndArchivedState(t *testing.T) {
 	app := setupScoutChatMutationTest(t)
 	private, err := app.createScoutChatThread("aj@shareability.com", "AJ", "private", scoutChatVisibilityPrivate)

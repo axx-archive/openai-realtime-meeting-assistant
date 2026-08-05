@@ -231,8 +231,38 @@ func registerMeetingSpecialistProductRoutes(mux *http.ServeMux) {
 		return
 	}
 	mux.HandleFunc("/api/stride/v1/meeting-specialists", meetingSpecialistProductStatusHandler)
+	mux.HandleFunc("/api/stride/v1/meeting-specialists/recommendations", meetingSpecialistRecommendationHandler)
 	mux.HandleFunc("/api/stride/v1/meeting-specialists/invitations", meetingSpecialistProductInvitationHandler)
 	mux.HandleFunc("/api/stride/v1/meeting-specialists/invitations/", meetingSpecialistProductInvitationHandler)
+}
+
+func meetingSpecialistRecommendationHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAuthError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	user, product, ok := meetingSpecialistRequestContext(w, r)
+	if !ok {
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	var payload struct {
+		RoomID  string `json:"roomId"`
+		Purpose string `json:"purpose"`
+	}
+	if err := decodeMeetingSpecialistProductBody(r, &payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "invalid specialist recommendation request")
+		return
+	}
+	recommendation, err := product.RecommendColtonForResearch(r.Context(), user, payload.RoomID, payload.Purpose)
+	if err != nil {
+		writeMeetingSpecialistProductError(w, err)
+		return
+	}
+	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "recommendation": recommendation, "invitationCreated": false, "providerSessionStarted": false})
 }
 
 func meetingSpecialistProductStatusHandler(w http.ResponseWriter, r *http.Request) {

@@ -53,8 +53,11 @@ test('native settings exposes inspectable, importable, and corrigible employee m
   assert.match(memory, /closeStalePersonalRealtime\(staleVoiceWasActive\)/);
 	assert.match(memory, /parseSTRIDEMemoryImport/);
 	assert.match(memory, /\[YYYY-MM-DD\] - Entry/);
-	assert.match(memory, /String\(slot\)\.padStart\(2, '0'\)/);
-	assert.match(memory, /expectedRevision: response\.revision/);
+	assert.match(memory, /strideImportRelationships/);
+	assert.match(memory, /expectedRevision: state\.revision/);
+	assert.match(memory, /Memory is updating/);
+	assert.match(memory, /Saved until you remove it/);
+	assert.doesNotMatch(memory, /String\(slot\)\.padStart\(2, '0'\)/);
 	assert.match(memory, /No valid memories yet/);
 	assert.match(memory, /Do not include credentials, payment data, medical information/);
 });
@@ -66,6 +69,8 @@ test('native relationship memory uses authenticated private control endpoints', 
   assert.match(client, /strideRelationshipMemory\(sessionToken: string\)/);
   assert.match(client, /strideSetRelationshipConsent/);
   assert.match(client, /strideRememberRelationship/);
+	assert.match(client, /strideImportRelationships/);
+	assert.match(client, /relationships\/import/);
   assert.match(client, /strideCorrectRelationship/);
   assert.match(client, /strideForgetRelationship/);
   assert.match(client, /scope: 'private'/);

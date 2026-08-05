@@ -1,7 +1,7 @@
 package main
 
-// Files surface (card 095), frontend half. Grep-style pins in the
-// frontend_attachments_test.go idiom: the rail earns a files tool, the tool
+// Drive surface (card 095), frontend half. Grep-style pins in the
+// frontend_attachments_test.go idiom: the rail earns the compatible files route, the tool
 // registries route it, the #filesTool canvas lists /assistant/files rows with
 // the feeds-the-brain badge and session-gated blob links, and the upload door
 // posts multipart to /assistant/files/upload with the 64MB client cap.
@@ -25,14 +25,14 @@ func TestIndexFilesToolRegistration(t *testing.T) {
 	html := readIndexForFilesSurface(t)
 	for _, want := range []string{
 		// rail button + surface section
-		`data-tool="files" aria-label="Files"`,
-		`<section id="filesTool" class="memory-tool" aria-label="Files">`,
+		`data-tool="files" aria-label="Drive"`,
+		`<section id="filesTool" class="memory-tool" aria-label="Drive">`,
 		// tool registries: routable + full-page treatment
 		`const osToolIds = ['office', 'chat', 'artifacts', ...agentToolIds, 'memory', 'files', 'team']`,
 		`const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory', 'files', 'team']`,
 		// topbar identity + canon subtitle
-		`files: 'Files'`,
-		"shared materials · readable files feed the brain",
+		`files: 'Drive'`,
+		"company files · indexed with source permissions",
 		// the meeting PiP follows you onto the files page
 		"tool === 'memory' || tool === 'files')",
 		// full-page CSS: surface swap + active pane
@@ -178,11 +178,11 @@ func TestIndexArtifactStageSaveToFiles(t *testing.T) {
 	html := readIndexForFilesSurface(t)
 	for _, want := range []string{
 		"function artifactQualifiesForFiles(entry)",
-		"function artifactSaveToFilesControl(entry)",
+		"function artifactSaveToFilesControl(entry, options = {})",
 		"fetch('/assistant/files/save', {",
 		"body: JSON.stringify({ artifactId })",
-		"button.textContent = 'Save to Files'",
-		"button.textContent = 'Saved to Files'",
+		"const readyLabel = String(options.readyLabel || 'Save to Drive')",
+		"const savedLabel = String(options.savedLabel || 'Saved to Drive')",
 		"entry.metadata.savedToFiles = 'true'",
 	} {
 		if !strings.Contains(html, want) {

@@ -49,6 +49,18 @@ func NewMeetingSpecialistQualifiedRealtimeFactory(config MeetingSpecialistRealti
 	return &MeetingSpecialistQualifiedProviderFactory{request: request, subjectDigest: subjectDigest, create: create}, nil
 }
 
+// NewColtonMeetingSpecialistQualifiedRealtimeFactory is the explicit first
+// production seat seam. It prevents a qualification ceremony for Colton from
+// accidentally blessing Scout's voice. Profile, capability, release, route,
+// accounting, runtime, and voice are still bound by the ordinary sealed E10
+// factory below.
+func NewColtonMeetingSpecialistQualifiedRealtimeFactory(config MeetingSpecialistRealtimeConfig, deployment MeetingSpecialistQualificationDeployment) (*MeetingSpecialistQualifiedProviderFactory, error) {
+	if !meetingSpecialistVoiceMatchesIdentity(coltonMeetingSpecialistAgentID, config.normalized().Voice) {
+		return nil, ErrMeetingSpecialistJoinQualification
+	}
+	return NewMeetingSpecialistQualifiedRealtimeFactory(config, deployment)
+}
+
 func (factory *MeetingSpecialistQualifiedProviderFactory) provider(ctx context.Context, launch MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
 	if factory == nil || factory.create == nil || factory.request.validate() != nil || factory.subjectDigest != factory.request.QualificationSubjectDigest {
 		return nil, ErrMeetingSpecialistJoinQualification

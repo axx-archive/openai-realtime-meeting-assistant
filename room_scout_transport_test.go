@@ -116,6 +116,58 @@ func newScopedRoomScoutTransportTest(t *testing.T, dial roomScoutProviderDialer)
 	return app, bundle, transport, scope
 }
 
+func TestRoomScoutChiefOfStaffResearchToolStaysInvocationAndApprovalBound(t *testing.T) {
+	app := newW2ATestApp(t)
+	t.Cleanup(func() { _ = app.Close() })
+	found := false
+	for _, tool := range app.roomScoutTools() {
+		if asString(tool["name"]) != "manage_research_specialist" {
+			continue
+		}
+		found = true
+		description := asString(tool["description"])
+		for _, want := range []string{"admitted participant", "human must separately approve", "Never use for ambient"} {
+			if !strings.Contains(description, want) {
+				t.Fatalf("research specialist tool description missing %q: %s", want, description)
+			}
+		}
+	}
+	if !found || !roomScoutAllowedTools["manage_research_specialist"] {
+		t.Fatal("named-room Scout is missing the closed research-specialist tool")
+	}
+	instructions := app.roomScoutSessionInstructions(RoomScoutScope{RoomID: officeRoomID, SittingID: "sitting-chief-of-staff", MediaGeneration: 1})
+	for _, want := range []string{"Scout is chief of staff", "never silently add, approve, or start an agent"} {
+		if !strings.Contains(instructions, want) {
+			t.Fatalf("named-room instructions missing %q", want)
+		}
+	}
+}
+
+func TestRoomScoutAuthorityKeepsTheSpeakerCapturedAtInvocation(t *testing.T) {
+	app, _, transport, scope := newScopedRoomScoutTransportTest(t, func(context.Context, *openAIRoomScoutTransport, uint64) (roomScoutProviderSession, error) {
+		return &fakeRoomScoutProviderSession{}, nil
+	})
+	app.mu.Lock()
+	state := app.roomLiveLocked(scope.RoomID)
+	state.mediaSittingID = scope.SittingID
+	state.participantCounts["AJ"] = 1
+	state.participantCounts["Tom"] = 1
+	state.activeSpeakerName = "AJ"
+	app.mu.Unlock()
+	if !transport.noteVoiceTranscript("Scout, should Colton research this?") {
+		t.Fatal("addressed Scout turn was not admitted")
+	}
+	app.mu.Lock()
+	app.roomLiveLocked(scope.RoomID).activeSpeakerName = "Tom"
+	app.mu.Unlock()
+	if got := transport.admittedRequesterName(); got != "AJ" {
+		t.Fatalf("requester changed with later active speaker: got %q want AJ", got)
+	}
+	if transport.noteVoiceTranscript("What would you recommend next?") {
+		t.Fatal("a different participant's speech was admitted as AJ's follow-up")
+	}
+}
+
 func TestOpenAIRoomScoutTransportRestartsWithoutSharingSessionState(t *testing.T) {
 	var mu sync.Mutex
 	sessions := []*fakeRoomScoutProviderSession{}
@@ -265,6 +317,25 @@ func TestRoomScoutSemanticTurnTakingAnswersRequestsAndSuppressesBackgroundSpeech
 	}
 	if response == nil || response["tool_choice"] != "none" {
 		t.Fatalf("addressed answer response=%v, want tool_choice=none", response)
+	}
+}
+
+func TestRoomScoutInvocationGateIgnoresAmbientAudioAndAcceptsNameAnywhere(t *testing.T) {
+	provider := &fakeRoomScoutProviderSession{}
+	_, _, transport, _ := newScopedRoomScoutTransportTest(t, func(context.Context, *openAIRoomScoutTransport, uint64) (roomScoutProviderSession, error) {
+		return provider, nil
+	})
+
+	transport.handleProviderEvent(provider, 1, []byte(`{"type":"input_audio_buffer.speech_started"}`))
+	transport.handleProviderEvent(provider, 1, []byte(`{"type":"input_audio_buffer.speech_stopped"}`))
+	transport.handleProviderEvent(provider, 1, []byte(`{"type":"conversation.item.input_audio_transcription.completed","transcript":"We should probably wrap up soon."}`))
+	if hasRoomScoutEvent(provider, "response.create") {
+		t.Fatal("ambient room audio created a Scout response")
+	}
+
+	transport.handleProviderEvent(provider, 1, []byte(`{"type":"conversation.item.input_audio_transcription.completed","transcript":"What is Scout's opinion on this?"}`))
+	if !hasRoomScoutEvent(provider, "response.create") {
+		t.Fatal("natural third-person Scout reference did not create a response")
 	}
 }
 

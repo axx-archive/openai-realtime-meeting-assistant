@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-// Board doctrine v2 frontend — business-tagged cards leave the four eng
-// lanes for a collapsed Business track rail under the board, and the
-// left-rail preview mirrors the clean lanes. Grep-pinned against index.html
-// like the rest of the frontend contracts.
+// Board delivery projection frontend — every canonical card stays visible in
+// one of three lifecycle lanes, with project filtering layered over the
+// underlying process status. The retired business rail remains inert markup
+// for compatibility but must never split company work out of the main view.
 
 func readIndexForBusinessTrack(t *testing.T) string {
 	t.Helper()
@@ -20,7 +20,7 @@ func readIndexForBusinessTrack(t *testing.T) string {
 	return string(data)
 }
 
-func TestBusinessTrackMarkupIsCollapsedDetailsRail(t *testing.T) {
+func TestBusinessTrackMarkupStaysInertForCompatibility(t *testing.T) {
 	html := readIndexForBusinessTrack(t)
 
 	if !strings.Contains(html, `<details id="businessTrack" class="business-track" hidden>`) {
@@ -34,7 +34,7 @@ func TestBusinessTrackMarkupIsCollapsedDetailsRail(t *testing.T) {
 	}
 }
 
-func TestRenderBoardSplitsBusinessCardsOutOfLanes(t *testing.T) {
+func TestRenderBoardProjectsEveryCardIntoDeliveryLanes(t *testing.T) {
 	html := readIndexForBusinessTrack(t)
 
 	board := functionBodyAfterSignature(html, "function renderBoard(changes = { moved: new Set(), completed: new Set(), fresh: new Set(), toasts: [], commentPreviews: [] })")
@@ -42,66 +42,58 @@ func TestRenderBoardSplitsBusinessCardsOutOfLanes(t *testing.T) {
 		t.Fatal("renderBoard not found")
 	}
 	for _, want := range []string{
-		"cards.filter(card => !isBusinessCard(card))",
-		"cards.filter(card => isBusinessCard(card))",
-		"laneCards.filter(card => card.status === status)",
-		"renderBusinessTrack(businessCards, changes)",
+		"boardDeliveryStages().map(stage =>",
+		"laneCards.filter(card => boardCardDeliveryStage(card) === stage.id)",
+		"renderBusinessTrack([], changes)",
+		"syncBoardProjectFilter()",
 	} {
 		if !strings.Contains(board, want) {
-			t.Errorf("renderBoard missing %q — business cards would leak into the eng lanes", want)
+			t.Errorf("renderBoard missing delivery projection %q", want)
 		}
 	}
-
-	helper := functionBody(html, "function isBusinessCard(")
-	if helper == "" {
-		t.Fatal("isBusinessCard helper not found")
-	}
-	if !strings.Contains(helper, "'business'") || !strings.Contains(helper, "toLowerCase()") {
-		t.Error("isBusinessCard must match the business tag case-insensitively")
+	for _, forbidden := range []string{
+		"cards.filter(card => !isBusinessCard(card))",
+		"cards.filter(card => isBusinessCard(card))",
+	} {
+		if strings.Contains(board, forbidden) {
+			t.Errorf("renderBoard still splits work into the retired business rail: %q", forbidden)
+		}
 	}
 }
 
-func TestRenderBusinessTrackKeepsDraftsAndOpenState(t *testing.T) {
+func TestBoardDeliveryStagesAndProjectResolutionAreExplicit(t *testing.T) {
 	html := readIndexForBusinessTrack(t)
-
-	track := functionBodyAfterSignature(html, "function renderBusinessTrack(businessCards, changes = { moved: new Set() })")
-	if track == "" {
-		t.Fatal("renderBusinessTrack not found")
-	}
-	// Drafts must render through renderCard so accept/dismiss survives in
-	// the rail — that review is the debate.
-	if !strings.Contains(track, "renderCard(") {
-		t.Error("renderBusinessTrack must render cards through renderCard so drafts keep accept/dismiss")
-	}
-	// renderBoard rebuilds the DOM on every board event; the open state must
-	// come from the module-level flag or the rail snaps shut mid-read.
-	for _, want := range []string{"businessTrackOpen", "track.hidden = true", "Business track · ${businessCards.length}"} {
-		if !strings.Contains(track, want) {
-			t.Errorf("renderBusinessTrack missing %q", want)
+	for _, want := range []string{
+		"function boardDeliveryStages()",
+		"{ id: 'requested', label: 'Work requested'",
+		"{ id: 'delivered', label: 'Work delivered'",
+		"{ id: 'drive', label: 'Saved to Drive'",
+		"function boardCardProject(card)",
+		"title: 'Needs project'",
+		"new Option('All projects', 'all')",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("board delivery contract missing %q", want)
 		}
-	}
-	if !strings.Contains(html, "let businessTrackOpen = false") {
-		t.Error("businessTrackOpen must be a module-level flag so re-renders preserve the open state")
 	}
 }
 
-func TestBoardPreviewExcludesBusinessCards(t *testing.T) {
+func TestBoardPreviewRemainsAvailable(t *testing.T) {
 	html := readIndexForBusinessTrack(t)
 
 	preview := functionBodyAfterSignature(html, "function renderBoardPreview(changes = { moved: new Set() })")
 	if preview == "" {
 		t.Fatal("renderBoardPreview not found")
 	}
-	if !strings.Contains(preview, "cards.filter(card => !isBusinessCard(card))") {
-		t.Error("renderBoardPreview must exclude business cards so the rail mirrors the clean lanes")
+	if !strings.Contains(preview, "boardRailCount") {
+		t.Error("renderBoardPreview must retain a compact board count")
 	}
 	for _, want := range []string{
-		"railCards.some(card => card.status === status)",
-		"railCards.filter(card => card.status === status)",
-		"railCards.filter(card => card.status === 'Backlog')",
+		"boardDeliveryStages().map(stage =>",
+		"cards.filter(card => boardCardDeliveryStage(card) === stage.id)",
 	} {
 		if !strings.Contains(preview, want) {
-			t.Errorf("renderBoardPreview rail sections must filter railCards, missing %q", want)
+			t.Errorf("renderBoardPreview missing delivery projection %q", want)
 		}
 	}
 }

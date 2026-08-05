@@ -2250,6 +2250,17 @@ func TestRealtimeWaveformLaunchersUsePrivateVoiceIslandOutsideRoom(t *testing.T)
 	if strings.Contains(html[privateStart:privateEnd], "sendVoiceControlState(true)") {
 		t.Fatal("private Realtime voice must not send room voice_control messages")
 	}
+	roomStart := strings.Index(html, "async function startRealtimeVoiceConversation(event)")
+	roomEnd := strings.Index(html, "async function startRealtimeVoiceFromWaveform(event)")
+	if roomStart < 0 || roomEnd < 0 || roomEnd <= roomStart {
+		t.Fatal("could not isolate room Realtime voice launcher")
+	}
+	if strings.Contains(html[roomStart:roomEnd], "sendVoiceControlState(true)") {
+		t.Fatal("tapping room Scout must not enable ambient always-addressed voice control")
+	}
+	if !strings.Contains(html[roomStart:roomEnd], "say “Scout” to speak") {
+		t.Fatal("room Scout launcher must disclose the explicit invocation contract")
+	}
 }
 
 func TestPrivateRealtimeTerminalErrorsFenceAndCloseTransportBeforeErrorUI(t *testing.T) {

@@ -1343,6 +1343,33 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		return response, nil
 	}
 
+	// Direct Board navigation and whole-board destructive language are product
+	// controls, never generic work. Resolve them before the rich-action,
+	// workstream, router, and Q&A paths so no model can turn "clear the Board"
+	// into a goal card. Until durable Trash exists, a clear request is an exact,
+	// read-only board count plus navigation; it performs no mutation.
+	if boardIntent := scoutChatBoardIntent(text); boardIntent != "" {
+		boardAction, replyText := app.scoutChatBoardActionForIntent(boardIntent)
+		assistantMessage := scoutChatMessageRecord{
+			ID:         fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+			Kind:       "message",
+			Role:       "scout",
+			AuthorName: scoutParticipantName,
+			Text:       replyText,
+			CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+		}
+		saved, commitErr := commitUserMessage(userMessage, assistantMessage)
+		if commitErr != nil {
+			return nil, commitErr
+		}
+		response["answer"] = assistantMessage
+		response["thread"] = saved
+		response["boardAction"] = boardAction
+		response["providerCalls"] = 0
+		response["providerExecutionFenced"] = true
+		return response, nil
+	}
+
 	if richResponse, handled, richErr := app.handleExplicitSTRIDEScoutChatRichAction(ctx, user, thread, userMessage, commitUserMessage); handled {
 		return richResponse, richErr
 	}

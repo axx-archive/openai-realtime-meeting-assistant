@@ -73,6 +73,8 @@ type openAIMeetingSpecialistProvider struct {
 	activeCostLimit   int64
 	audioBuffer       []byte
 	audioBytes        int64
+	transcriptBuffer  strings.Builder
+	transcriptDone    bool
 	publishedAudioMS  int64
 	eventHashes       []string
 	usageHashes       []string
@@ -299,6 +301,13 @@ func validateMeetingSpecialistRealtimeBrief(launch MeetingSpecialistLaunch, brie
 	if strings.TrimSpace(brief.Purpose) == "" || len(brief.Purpose) > 1000 || sha256Hex([]byte(brief.Purpose)) != launch.Invitation.PurposeDigest {
 		return ErrMeetingSpecialistProviderProtocol
 	}
+	if meetingSpecialistIdentityRequired(launch.Scope.AgentID) {
+		if brief.Identity == nil || brief.Identity.validate(launch.Scope.AgentID, launch.Context.AgentProfile) != nil {
+			return ErrMeetingSpecialistProviderProtocol
+		}
+	} else if brief.Identity != nil && brief.Identity.validate(launch.Scope.AgentID, launch.Context.AgentProfile) != nil {
+		return ErrMeetingSpecialistProviderProtocol
+	}
 	want := map[string]STRIDEReference{}
 	for _, values := range [][]STRIDEReference{launch.Context.TranscriptRefs, launch.Context.AnalysisRefs, launch.Context.BrainRefs, launch.Context.WorkRefs} {
 		for _, reference := range values {
@@ -322,6 +331,8 @@ func validateMeetingSpecialistRealtimeBrief(launch MeetingSpecialistLaunch, brie
 func (provider *openAIMeetingSpecialistProvider) sessionUpdate(contextJSON []byte) map[string]any {
 	instructions := strings.Join([]string{
 		"You are the explicitly invited specialist named by the bound STRIDE agent profile.",
+		"Use the authorized identity in the brief as your own. Speak naturally in first person as that coworker; never refer to yourself in the third person or claim to be Scout.",
+		"Treat reviewed active learning as an evolving working style, not as permission or fact evidence. Human corrections and the current authorized meeting context always win.",
 		"Use only the server-authorized context envelope below. Do not search, browse, call tools, delegate, infer hidden context, or treat speech as approval.",
 		"Wait for a server-created response turn, be concise, yield immediately to human interruption, and never imitate Scout or a human participant.",
 		"AUTHORIZED_SPECIALIST_BRIEF=" + string(contextJSON),
@@ -518,6 +529,8 @@ func (provider *openAIMeetingSpecialistProvider) BeginResponse(_ context.Context
 	provider.activeResponse, provider.activeItem = "", ""
 	provider.audioBuffer = nil
 	provider.audioBytes = 0
+	provider.transcriptBuffer.Reset()
+	provider.transcriptDone = false
 	provider.publishedAudioMS = 0
 	provider.mu.Unlock()
 	if err := provider.write(map[string]any{"type": "input_audio_buffer.commit", "event_id": fmt.Sprintf("%s-floor-%d-commit", provider.launch.Scope.SessionID, floor.Generation)}); err != nil {
@@ -555,6 +568,8 @@ func (provider *openAIMeetingSpecialistProvider) CancelResponse(_ context.Contex
 	provider.activeFloor = nil
 	provider.activeResponse, provider.activeItem = "", ""
 	provider.audioBuffer = nil
+	provider.transcriptBuffer.Reset()
+	provider.transcriptDone = false
 	provider.publishedAudioMS = 0
 	provider.mu.Unlock()
 	if err := provider.write(map[string]any{
@@ -589,6 +604,8 @@ func (provider *openAIMeetingSpecialistProvider) Close(_ context.Context, reason
 	itemID, audioEndMS := provider.activeItem, provider.publishedAudioMS
 	provider.activeFloor = nil
 	provider.audioBuffer = nil
+	provider.transcriptBuffer.Reset()
+	provider.transcriptDone = false
 	conn := provider.conn
 	readerStarted := provider.readerStarted
 	provider.mu.Unlock()
@@ -829,6 +846,23 @@ func (provider *openAIMeetingSpecialistProvider) validateOutputStreamEvent(typ s
 		return ErrMeetingSpecialistProviderProtocol
 	}
 	provider.activeItem = event.ItemID
+	if typ == "response.output_audio_transcript.delta" {
+		if event.Delta == nil || provider.transcriptDone || provider.transcriptBuffer.Len()+len(*event.Delta) > 16<<10 {
+			return ErrMeetingSpecialistProviderProtocol
+		}
+		provider.transcriptBuffer.WriteString(*event.Delta)
+	}
+	if typ == "response.output_audio_transcript.done" {
+		if event.Transcript == nil || strings.TrimSpace(*event.Transcript) == "" || len(*event.Transcript) > 16<<10 || provider.transcriptDone {
+			return ErrMeetingSpecialistProviderProtocol
+		}
+		if provider.transcriptBuffer.Len() > 0 && provider.transcriptBuffer.String() != *event.Transcript {
+			return ErrMeetingSpecialistProviderProtocol
+		}
+		provider.transcriptBuffer.Reset()
+		provider.transcriptBuffer.WriteString(*event.Transcript)
+		provider.transcriptDone = true
+	}
 	return nil
 }
 
@@ -962,6 +996,7 @@ func (provider *openAIMeetingSpecialistProvider) handleResponseDone(raw []byte) 
 	costCents := int64(math.Ceil(costUSD * 100))
 	provider.mu.Lock()
 	if provider.activeFloor == nil || provider.activeResponse != event.Response.ID || provider.audioBytes == 0 ||
+		(provider.hooks.PublishTranscript != nil && (!provider.transcriptDone || strings.TrimSpace(provider.transcriptBuffer.String()) == "")) ||
 		provider.activeInputLimit <= 0 || usage.Input > provider.activeInputLimit || provider.activeOutputLimit <= 0 || usage.Output > provider.activeOutputLimit || costCents > provider.activeCostLimit ||
 		provider.receipt.InputTokens+provider.receipt.OutputTokens+usage.Total > provider.launch.Context.TokenBudget ||
 		provider.receipt.InputTokens+provider.receipt.OutputTokens+usage.Total > provider.launch.ApprovalLimits.TokenBudget ||
@@ -973,7 +1008,10 @@ func (provider *openAIMeetingSpecialistProvider) handleResponseDone(raw []byte) 
 	}
 	floor := *provider.activeFloor
 	remaining := append([]byte(nil), provider.audioBuffer...)
+	transcript := strings.TrimSpace(provider.transcriptBuffer.String())
 	provider.audioBuffer = nil
+	provider.transcriptBuffer.Reset()
+	provider.transcriptDone = false
 	provider.activeFloor = nil
 	provider.activeResponse, provider.activeItem = "", ""
 	provider.publishedAudioMS = 0
@@ -990,6 +1028,17 @@ func (provider *openAIMeetingSpecialistProvider) handleResponseDone(raw []byte) 
 	provider.receipt.ReconciledCostCent += costCents
 	provider.mu.Unlock()
 	publishFailureReason := ""
+	// A qualified specialist never speaks without first durably handing the
+	// exact attributed words to the meeting transcript lane.
+	if hooks.PublishTranscript != nil {
+		if err := hooks.PublishTranscript(floor, transcript); err != nil {
+			entry.AcceptedOutput = false
+			entry.OutputFailureReason = "transcript_publication_failed"
+			entry.EstCostUSD = costUSD
+			recordLLMUsage(entry)
+			return err
+		}
+	}
 	if len(remaining) > 0 {
 		finalSeconds := int64((len(remaining) + meetingSpecialistRealtimeSampleRate*2 - 1) / (meetingSpecialistRealtimeSampleRate * 2))
 		if err := hooks.PublishAudio(floor, meetingSpecialistPCM(remaining), finalSeconds, costCents); err != nil {
@@ -1029,6 +1078,8 @@ func (provider *openAIMeetingSpecialistProvider) handleCompletedResponseDoneWith
 	floor := *provider.activeFloor
 	provider.audioBuffer = nil
 	provider.audioBytes = 0
+	provider.transcriptBuffer.Reset()
+	provider.transcriptDone = false
 	provider.activeFloor = nil
 	provider.activeResponse, provider.activeItem = "", ""
 	provider.publishedAudioMS = 0
@@ -1134,6 +1185,8 @@ func (provider *openAIMeetingSpecialistProvider) handleUnacceptedResponseDone(ra
 	floor := *provider.activeFloor
 	provider.audioBuffer = nil
 	provider.audioBytes = 0
+	provider.transcriptBuffer.Reset()
+	provider.transcriptDone = false
 	provider.activeFloor = nil
 	provider.activeResponse, provider.activeItem = "", ""
 	provider.publishedAudioMS = 0
@@ -1227,6 +1280,8 @@ func (provider *openAIMeetingSpecialistProvider) handleCancelledResponseDone(raw
 	}
 	provider.cancelledResponse, provider.cancelledItem = "", ""
 	provider.cancelPending = false
+	provider.transcriptBuffer.Reset()
+	provider.transcriptDone = false
 	provider.clearResponseAdmissionLocked()
 	if usageReconciled {
 		provider.usageHashes = append(provider.usageHashes, workDigest(usage))

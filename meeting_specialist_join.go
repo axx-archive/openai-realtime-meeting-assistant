@@ -124,6 +124,7 @@ type MeetingSpecialistProductionJoinConfig struct {
 	CapabilityAuthority MeetingSpecialistCapabilityAuthority
 	QualifiedProvider   *MeetingSpecialistQualifiedProviderFactory
 	PublishAudio        MeetingSpecialistAudioPublisher
+	PublishTranscript   MeetingSpecialistTranscriptPublisher
 	QualificationStore  *QualificationEvidenceStore
 }
 
@@ -140,6 +141,7 @@ type MeetingSpecialistProductionJoiner struct {
 	capabilityAuthority MeetingSpecialistCapabilityAuthority
 	qualifiedProvider   *MeetingSpecialistQualifiedProviderFactory
 	publishAudio        MeetingSpecialistAudioPublisher
+	publishTranscript   MeetingSpecialistTranscriptPublisher
 	qualificationStore  *QualificationEvidenceStore
 }
 
@@ -151,7 +153,7 @@ func NewMeetingSpecialistProductionJoiner(config MeetingSpecialistProductionJoin
 		enabled: config.Enabled, now: config.Now, gates: config.Gates,
 		resolveCurrent: config.ResolveCurrent, mintCapability: config.MintCapability,
 		capabilityAuthority: config.CapabilityAuthority, qualifiedProvider: config.QualifiedProvider,
-		publishAudio: config.PublishAudio, qualificationStore: config.QualificationStore,
+		publishAudio: config.PublishAudio, publishTranscript: config.PublishTranscript, qualificationStore: config.QualificationStore,
 	}
 }
 
@@ -168,7 +170,7 @@ func (joiner *MeetingSpecialistProductionJoiner) Ready() bool {
 }
 
 func (joiner *MeetingSpecialistProductionJoiner) assemblyReady() bool {
-	return joiner != nil && joiner.gates.launchEnabled() && joiner.resolveCurrent != nil && joiner.mintCapability != nil && joiner.capabilityAuthority != nil && joiner.qualifiedProvider != nil && joiner.publishAudio != nil
+	return joiner != nil && joiner.gates.launchEnabled() && joiner.resolveCurrent != nil && joiner.mintCapability != nil && joiner.capabilityAuthority != nil && joiner.qualifiedProvider != nil && joiner.publishAudio != nil && joiner.publishTranscript != nil
 }
 
 func (joiner *MeetingSpecialistProductionJoiner) qualificationCurrent(request MeetingSpecialistQualificationRequest) (StoredTrustedQualificationResult, error) {
@@ -257,7 +259,7 @@ func (joiner *MeetingSpecialistProductionJoiner) Join(ctx context.Context, reque
 		_, currentErr := joiner.qualificationCurrent(qualificationRequest)
 		return currentErr
 	}
-	runtime := newQualifiedMeetingSpecialistRuntime(joiner.now, joiner.gates, joiner.capabilityAuthority, joiner.qualifiedProvider, qualificationResult, qualificationCurrent, joiner.publishAudio)
+	runtime := newQualifiedMeetingSpecialistRuntime(joiner.now, joiner.gates, joiner.capabilityAuthority, joiner.qualifiedProvider, qualificationResult, qualificationCurrent, joiner.publishAudio, request.Candidate.DisplayName, joiner.publishTranscript)
 	if _, err := runtime.Start(ctx, launch); err != nil {
 		return runtime, err
 	}

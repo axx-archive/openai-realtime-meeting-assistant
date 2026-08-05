@@ -30,6 +30,19 @@ test('focused drafting uses the native text layer and editing gets a full-height
   assert.match(thread, /\{editingMessage \? \(/);
 });
 
+test('threaded replies expose owned edit and delete actions without relying on a hidden long press', () => {
+  const detail = source('src', 'messaging', 'ThreadDetailSheet.tsx');
+  const thread = source('src', 'screens', 'ThreadScreen.tsx');
+
+  assert.match(detail, /index > 0 && own/);
+  assert.match(detail, /accessibilityLabel="Edit reply"/);
+  assert.match(detail, /onPress=\{\(\) => onEdit\(message\)\}/);
+  assert.match(detail, /accessibilityLabel="Delete reply"/);
+  assert.match(detail, /onPress=\{\(\) => onDelete\(message\)\}/);
+  assert.match(thread, /onEdit=\{beginEdit\}/);
+  assert.match(thread, /onDelete=\{confirmDelete\}/);
+});
+
 test('the thread owns one full-message sheet instead of mounting one per recycled bubble', () => {
   const bubble = source('src', 'messaging', 'MessageBubble.tsx');
   const thread = source('src', 'screens', 'ThreadScreen.tsx');

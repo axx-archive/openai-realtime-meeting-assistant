@@ -15,6 +15,8 @@ import (
 
 var ErrSTRIDECollaborationPreferenceDenied = errors.New("collaboration preference is not permitted")
 
+var strideMemoryImportDurableExpiresAt = time.Date(9999, time.December, 31, 23, 59, 59, 0, time.UTC)
+
 const (
 	stridePreferenceObserve  = "observe"
 	stridePreferenceCorrect  = "correct"
@@ -23,6 +25,13 @@ const (
 	stridePreferenceInferred = "inferred"
 	stridePreferencePrivate  = "private"
 	stridePreferenceShared   = "shared"
+	// Imports are durable profile data, so they need substantially more room
+	// than the original one-line preference control. The import endpoint adds
+	// stricter aggregate limits before any value reaches this reducer.
+	strideCollaborationPreferenceValueMaxBytes = 96 << 10
+	strideMemoryImportMaxEntries               = 200
+	strideMemoryImportNormalizedMaxBytes       = 96 << 10
+	strideMemoryImportRequestMaxBytes          = 128 << 10
 )
 
 type STRIDECollaborationPreferenceEvent struct {
@@ -178,16 +187,17 @@ func normalizeSTRIDECollaborationPreferenceEvent(event STRIDECollaborationPrefer
 	event.Origin = strings.ToLower(strings.TrimSpace(event.Origin))
 	event.ObservedAt = event.ObservedAt.UTC()
 	event.ExpiresAt = event.ExpiresAt.UTC()
+	durableImport := isSTRIDEMemoryImportPreferenceType(event.PreferenceType) && event.Origin == stridePreferenceExplicit && event.ExpiresAt.Equal(strideMemoryImportDurableExpiresAt)
 	if !strideIdentifier(event.EventID) || event.SubjectPrincipal != subject || !strideIdentifier(event.ScopeID) ||
 		!oneOf(event.Action, stridePreferenceObserve, stridePreferenceCorrect, stridePreferenceForget) ||
 		!oneOf(event.Scope, stridePreferencePrivate, stridePreferenceShared) ||
 		!oneOf(event.Origin, stridePreferenceExplicit, stridePreferenceInferred) ||
 		!safeSTRIDECollaborationPreferenceType(event.PreferenceType) || event.ObservedAt.IsZero() ||
-		!event.ExpiresAt.After(event.ObservedAt) || event.ExpiresAt.Sub(event.ObservedAt) > 365*24*time.Hour ||
+		!event.ExpiresAt.After(event.ObservedAt) || !durableImport && event.ExpiresAt.After(event.ObservedAt.Add(365*24*time.Hour)) ||
 		event.Audience.Validate() != nil || len(event.Evidence) == 0 || !validUniqueSTRIDEReferences(event.Evidence) {
 		return STRIDECollaborationPreferenceEvent{}, ErrSTRIDECollaborationPreferenceDenied
 	}
-	if event.Action != stridePreferenceForget && (event.Value == "" || len(event.Value) > 500) {
+	if event.Action != stridePreferenceForget && (event.Value == "" || len(event.Value) > strideCollaborationPreferenceValueMaxBytes) {
 		return STRIDECollaborationPreferenceEvent{}, ErrSTRIDECollaborationPreferenceDenied
 	}
 	if event.Action == stridePreferenceForget && event.Origin != stridePreferenceExplicit {
@@ -229,13 +239,39 @@ func safeSTRIDECollaborationPreferenceType(value string) bool {
 	}
 	// Import memory keeps each user-reviewed source line separately corrigible
 	// instead of flattening an entire biography into one opaque blob. The fixed
-	// category plus a two-digit slot is a closed vocabulary, not a caller-defined
-	// prompt key; values remain private data and never confer authority.
+	// category plus either a legacy two-digit slot or a server-derived content
+	// digest is a closed vocabulary, not a caller-defined prompt key. Digest keys
+	// remove the old 99-per-category ceiling and make repeat imports idempotent.
 	for _, base := range []string{"user_instruction", "identity_context", "career_context", "project_context", "personal_preference"} {
 		prefix := base + "_"
 		if strings.HasPrefix(value, prefix) {
 			suffix := strings.TrimPrefix(value, prefix)
-			return len(suffix) == 2 && suffix[0] >= '0' && suffix[0] <= '9' && suffix[1] >= '0' && suffix[1] <= '9' && suffix != "00"
+			if len(suffix) == 2 && suffix[0] >= '0' && suffix[0] <= '9' && suffix[1] >= '0' && suffix[1] <= '9' && suffix != "00" {
+				return true
+			}
+			if !strings.HasPrefix(suffix, "import_") || len(strings.TrimPrefix(suffix, "import_")) != 24 {
+				return false
+			}
+			for _, character := range strings.TrimPrefix(suffix, "import_") {
+				if character < '0' || character > '9' && character < 'a' || character > 'f' {
+					return false
+				}
+			}
+			return true
+		}
+	}
+	return false
+}
+
+func isSTRIDEMemoryImportPreferenceType(value string) bool {
+	for _, base := range []string{"user_instruction", "identity_context", "career_context", "project_context", "personal_preference"} {
+		if suffix := strings.TrimPrefix(value, base+"_import_"); suffix != value && len(suffix) == 24 {
+			for _, character := range suffix {
+				if character < '0' || character > '9' && character < 'a' || character > 'f' {
+					return false
+				}
+			}
+			return true
 		}
 	}
 	return false

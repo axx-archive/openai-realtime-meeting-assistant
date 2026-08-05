@@ -28,8 +28,8 @@ func TestRealtimeSessionConfigUsesGptRealtime2Optimizations(t *testing.T) {
 	if !ok {
 		t.Fatal("session reasoning config missing")
 	}
-	if effort := reasoning["effort"]; effort != "high" {
-		t.Fatalf("reasoning effort=%v, want high", effort)
+	if effort := reasoning["effort"]; effort != "low" {
+		t.Fatalf("room reasoning effort=%v, want low", effort)
 	}
 
 	audio := session["audio"].(map[string]any)
@@ -71,6 +71,9 @@ func TestRealtimeSessionConfigUsesGptRealtime2Optimizations(t *testing.T) {
 	if interrupt := turnDetection["interrupt_response"]; interrupt != true {
 		t.Fatalf("turn_detection.interrupt_response=%v, want true", interrupt)
 	}
+	if create := turnDetection["create_response"]; create != false {
+		t.Fatalf("room turn_detection.create_response=%v, want false until Scout invocation is admitted", create)
+	}
 }
 
 func TestRealtimeVoiceControlSessionAllowsDirectAnswers(t *testing.T) {
@@ -92,6 +95,14 @@ func TestRealtimeVoiceControlSessionAllowsDirectAnswers(t *testing.T) {
 func TestPrivateRealtimeVoiceSessionStaysOutsideRoom(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	session := app.privateRealtimeVoiceSessionConfig("gpt-realtime-2")
+	input := session["audio"].(map[string]any)["input"].(map[string]any)
+	turnDetection := input["turn_detection"].(map[string]any)
+	if create := turnDetection["create_response"]; create != true {
+		t.Fatalf("private turn_detection.create_response=%v, want true", create)
+	}
+	if effort := session["reasoning"].(map[string]any)["effort"]; effort != "high" {
+		t.Fatalf("private reasoning effort=%v, want high", effort)
+	}
 
 	tools, ok := session["tools"].([]map[string]any)
 	if !ok || len(tools) == 0 {

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type strideRelationshipPreferenceSource struct {
@@ -127,6 +128,8 @@ func strideCoworkerSubrouteHandler(w http.ResponseWriter, r *http.Request) {
 		strideCoworkerRelationshipConsentHTTP(w, r, user)
 	case "relationships/remember":
 		strideCoworkerRelationshipRememberHTTP(w, r, user)
+	case "relationships/import":
+		strideCoworkerRelationshipImportHTTP(w, r, user)
 	case "relationships/correct":
 		strideCoworkerRelationshipCorrectHTTP(w, r, user)
 	case "relationships/forget":
@@ -318,6 +321,180 @@ func strideCoworkerRelationshipRememberHTTP(w http.ResponseWriter, r *http.Reque
 	writeAuthJSON(w, http.StatusCreated, map[string]any{"ok": true, "providerExecutionFenced": true, "mode": "deterministic_local", "revision": revision, "preferences": preferences})
 }
 
+type strideRelationshipImportEntry struct {
+	Category string `json:"category"`
+	Date     string `json:"date"`
+	Value    string `json:"value"`
+}
+
+func normalizeSTRIDEMemoryImportValue(value string) string {
+	value = strings.ToValidUTF8(strings.ReplaceAll(strings.ReplaceAll(value, "\r\n", "\n"), "\r", "\n"), "")
+	value = strings.Map(func(character rune) rune {
+		if character == '\n' || character == '\t' || !unicode.IsControl(character) {
+			return character
+		}
+		return -1
+	}, value)
+	lines := strings.Split(value, "\n")
+	normalized := make([]string, 0, len(lines))
+	blank := false
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			if len(normalized) > 0 && !blank {
+				normalized = append(normalized, "")
+				blank = true
+			}
+			continue
+		}
+		normalized = append(normalized, line)
+		blank = false
+	}
+	return strings.TrimSpace(strings.Join(normalized, "\n"))
+}
+
+func strideMemoryImportPreferenceType(category, date, value string) (string, bool) {
+	base, ok := map[string]string{
+		"instructions": "user_instruction", "identity": "identity_context", "career": "career_context",
+		"projects": "project_context", "preferences": "personal_preference",
+	}[strings.ToLower(strings.TrimSpace(category))]
+	if !ok {
+		return "", false
+	}
+	return base + "_import_" + sha256Hex([]byte(base + "\x00" + date + "\x00" + value))[:24], true
+}
+
+func strideCoworkerRelationshipImportHTTP(w http.ResponseWriter, r *http.Request, user *userAccount) {
+	if r.Method != http.MethodPost {
+		writeAuthError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var payload struct {
+		Action           string                          `json:"action"`
+		ExpectedRevision int64                           `json:"expectedRevision"`
+		Entries          []strideRelationshipImportEntry `json:"entries"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, strideMemoryImportRequestMaxBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil || ensureJSONEOF(decoder) != nil || payload.Action != "import" || payload.ExpectedRevision < 0 || len(payload.Entries) == 0 || len(payload.Entries) > strideMemoryImportMaxEntries {
+		writeAuthError(w, http.StatusBadRequest, "invalid relationship-memory import")
+		return
+	}
+	type normalizedImport struct{ preferenceType, value string }
+	normalized := make([]normalizedImport, 0, len(payload.Entries))
+	seen := make(map[string]struct{}, len(payload.Entries))
+	totalBytes := 0
+	for _, entry := range payload.Entries {
+		date := strings.ToLower(strings.TrimSpace(entry.Date))
+		if date != "unknown" {
+			parsed, err := time.Parse("2006-01-02", date)
+			if err != nil || parsed.Format("2006-01-02") != date {
+				writeAuthError(w, http.StatusBadRequest, "invalid relationship-memory import")
+				return
+			}
+		}
+		value := normalizeSTRIDEMemoryImportValue(entry.Value)
+		preferenceType, categoryOK := strideMemoryImportPreferenceType(entry.Category, date, value)
+		if !categoryOK || value == "" || len(value) > strideCollaborationPreferenceValueMaxBytes {
+			writeAuthError(w, http.StatusBadRequest, "invalid relationship-memory import")
+			return
+		}
+		value = "[" + date + "] " + value
+		totalBytes += len(value)
+		if totalBytes > strideMemoryImportNormalizedMaxBytes {
+			writeAuthError(w, http.StatusRequestEntityTooLarge, "memory import is larger than 96 KiB")
+			return
+		}
+		if _, duplicate := seen[preferenceType]; duplicate {
+			continue
+		}
+		seen[preferenceType] = struct{}{}
+		normalized = append(normalized, normalizedImport{preferenceType: preferenceType, value: value})
+	}
+	if len(normalized) == 0 {
+		writeAuthError(w, http.StatusBadRequest, "memory import contains no usable entries")
+		return
+	}
+	store, product, _, err := admittedSTRIDECoworkerCollaboration()
+	if err != nil {
+		writeSTRIDECoworkerError(w, err)
+		return
+	}
+	principal := strideRuntimePrincipalForEmail(user.Email)
+	now := strideCollaborationNow(product.Config)
+	consent, revision, err := store.Consent(principal)
+	if err != nil || revision != payload.ExpectedRevision {
+		if err == nil {
+			err = ErrSTRIDECollaborationStoreConflict
+		}
+		writeSTRIDECoworkerError(w, err)
+		return
+	}
+	existing, existingRevision, err := store.Inspect(principal, now)
+	if err != nil || existingRevision != payload.ExpectedRevision {
+		if err == nil {
+			err = ErrSTRIDECollaborationStoreConflict
+		}
+		writeSTRIDECoworkerError(w, err)
+		return
+	}
+	existingValues := make(map[string]string, len(existing))
+	for _, preference := range existing {
+		existingValues[preference.PreferenceType] = preference.Value
+	}
+	items := make([]STRIDECollaborationImportItem, 0, len(normalized))
+	alreadyPresent := 0
+	audience := STRIDEAudience{Visibility: "private", Principals: []string{principal}}
+	for index, entry := range normalized {
+		if existingValues[entry.preferenceType] == entry.value {
+			alreadyPresent++
+			continue
+		}
+		observedAt := now.Add(time.Duration(index) * time.Nanosecond)
+		control, mintErr := mintSTRIDECollaborationControlEvidence(product.Config, product.Receipt, principal, "remember", "", entry.preferenceType, entry.value, stridePreferencePrivate, audience, payload.ExpectedRevision, observedAt)
+		if mintErr != nil {
+			writeSTRIDECoworkerError(w, mintErr)
+			return
+		}
+		items = append(items, STRIDECollaborationImportItem{Event: STRIDECollaborationPreferenceEvent{
+			Action: stridePreferenceObserve, SubjectPrincipal: principal, Scope: stridePreferencePrivate, ScopeID: principal,
+			PreferenceType: entry.preferenceType, Value: entry.value, Origin: stridePreferenceExplicit, Evidence: []STRIDEReference{control.Reference()},
+			Confidence: 1, ObservedAt: observedAt, ExpiresAt: strideMemoryImportDurableExpiresAt, Audience: audience,
+		}, Evidence: control})
+	}
+	if len(items) > 0 {
+		if err := store.ImportFromControls(principal, payload.ExpectedRevision, items, now); err != nil {
+			writeSTRIDECoworkerError(w, err)
+			return
+		}
+	} else if !consent.Enabled {
+		// A disabled subject cannot have active duplicates. Keep this explicit so
+		// a malformed durable state cannot silently turn memory on.
+		writeSTRIDECoworkerError(w, ErrSTRIDECollaborationPreferenceDenied)
+		return
+	}
+	preferences, revision, err := inspectSTRIDERelationshipPreferences(store, product, user, now)
+	if err != nil {
+		writeSTRIDECoworkerError(w, err)
+		return
+	}
+	consent, consentRevision, err := store.Consent(principal)
+	if err != nil || consentRevision != revision {
+		if err == nil {
+			err = ErrSTRIDECollaborationStoreConflict
+		}
+		writeSTRIDECoworkerError(w, err)
+		return
+	}
+	if len(items) > 0 {
+		notifySTRIDERelationshipMemoryChanged(user.Email, revision, now)
+	}
+	writeAuthJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "providerExecutionFenced": true, "mode": "deterministic_local", "revision": revision, "consent": consent,
+		"preferences": preferences, "importedCount": len(items), "alreadyPresentCount": alreadyPresent,
+	})
+}
+
 func strideCoworkerRelationshipCorrectHTTP(w http.ResponseWriter, r *http.Request, user *userAccount) {
 	if r.Method != http.MethodPost {
 		writeAuthError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -339,7 +516,7 @@ func strideCoworkerRelationshipCorrectHTTP(w http.ResponseWriter, r *http.Reques
 	payload.Value = strings.TrimSpace(payload.Value)
 	payload.ThreadID = strings.TrimSpace(payload.ThreadID)
 	payload.SourceMessageID = strings.TrimSpace(payload.SourceMessageID)
-	if payload.Action != "correct" || payload.ExpectedRevision < 0 || !strideIdentifier(payload.RelationshipID) || payload.Value == "" || len(payload.Value) > 500 || (payload.ThreadID == "") != (payload.SourceMessageID == "") {
+	if payload.Action != "correct" || payload.ExpectedRevision < 0 || !strideIdentifier(payload.RelationshipID) || payload.Value == "" || len(payload.Value) > strideCollaborationPreferenceValueMaxBytes || (payload.ThreadID == "") != (payload.SourceMessageID == "") {
 		writeAuthError(w, http.StatusBadRequest, "invalid relationship-memory correction")
 		return
 	}

@@ -106,14 +106,28 @@ type MeetingSpecialistProviderFactory func(context.Context, MeetingSpecialistLau
 
 type MeetingSpecialistAudioPublisher func(MeetingAgentFloorScope, uint64, []int16) error
 
+type MeetingSpecialistTranscriptContribution struct {
+	RoomID          string          `json:"roomId"`
+	SittingID       string          `json:"sittingId"`
+	AgentID         string          `json:"agentId"`
+	DisplayName     string          `json:"displayName"`
+	AudioTrackID    string          `json:"audioTrackId"`
+	Profile         STRIDEReference `json:"profile"`
+	FloorGeneration uint64          `json:"floorGeneration"`
+	Transcript      string          `json:"transcript"`
+}
+
+type MeetingSpecialistTranscriptPublisher func(MeetingSpecialistTranscriptContribution) error
+
 // MeetingSpecialistProviderHooks are bound by the runtime after floor
 // admission and before the provider receives its context brief. This keeps
 // provider callbacks behind the same floor generation, authorization checks,
 // audio publisher, and teardown path as direct runtime calls.
 type MeetingSpecialistProviderHooks struct {
-	PublishAudio func(MeetingAgentFloorLease, []int16, int64, int64) error
-	CompleteTurn func(MeetingAgentFloorLease) error
-	FailSession  func(string)
+	PublishAudio      func(MeetingAgentFloorLease, []int16, int64, int64) error
+	PublishTranscript func(MeetingAgentFloorLease, string) error
+	CompleteTurn      func(MeetingAgentFloorLease) error
+	FailSession       func(string)
 }
 
 type meetingSpecialistProviderHookBinder interface {
@@ -247,14 +261,16 @@ type MeetingSpecialistCapabilityAuthority interface {
 }
 
 type MeetingSpecialistRuntime struct {
-	mu        sync.Mutex
-	cond      *sync.Cond
-	now       func() time.Time
-	gates     MeetingSpecialistGates
-	floor     *MeetingAgentFloorController
-	factory   MeetingSpecialistProviderFactory
-	publish   MeetingSpecialistAudioPublisher
-	authority MeetingSpecialistCapabilityAuthority
+	mu                sync.Mutex
+	cond              *sync.Cond
+	now               func() time.Time
+	gates             MeetingSpecialistGates
+	floor             *MeetingAgentFloorController
+	factory           MeetingSpecialistProviderFactory
+	publish           MeetingSpecialistAudioPublisher
+	publishTranscript MeetingSpecialistTranscriptPublisher
+	displayName       string
+	authority         MeetingSpecialistCapabilityAuthority
 
 	ctx             context.Context
 	cancel          context.CancelFunc
@@ -293,11 +309,13 @@ func NewMeetingSpecialistRuntime(now func() time.Time, gates MeetingSpecialistGa
 	return runtime
 }
 
-func newQualifiedMeetingSpecialistRuntime(now func() time.Time, gates MeetingSpecialistGates, authority MeetingSpecialistCapabilityAuthority, factory *MeetingSpecialistQualifiedProviderFactory, qualification StoredTrustedQualificationResult, qualificationCurrent func() error, publish MeetingSpecialistAudioPublisher) *MeetingSpecialistRuntime {
+func newQualifiedMeetingSpecialistRuntime(now func() time.Time, gates MeetingSpecialistGates, authority MeetingSpecialistCapabilityAuthority, factory *MeetingSpecialistQualifiedProviderFactory, qualification StoredTrustedQualificationResult, qualificationCurrent func() error, publish MeetingSpecialistAudioPublisher, displayName string, publishTranscript MeetingSpecialistTranscriptPublisher) *MeetingSpecialistRuntime {
 	if factory == nil {
 		return NewMeetingSpecialistRuntime(now, gates, authority, nil, publish)
 	}
 	runtime := NewMeetingSpecialistRuntime(now, gates, authority, factory.provider, publish)
+	runtime.displayName = strings.TrimSpace(displayName)
+	runtime.publishTranscript = publishTranscript
 	runtime.qualificationSubjectDigest = factory.subjectDigest
 	runtime.qualificationResult = cloneMeetingSpecialistQualificationResult(&qualification)
 	runtime.qualificationCurrent = qualificationCurrent
@@ -616,9 +634,14 @@ func (runtime *MeetingSpecialistRuntime) Start(parent context.Context, launch Me
 		return MeetingAgentSessionLease{}, errors.Join(ErrMeetingSpecialistFence, abortErr)
 	}
 	if binder, ok := provider.(meetingSpecialistProviderHookBinder); ok {
+		var publishTranscript func(MeetingAgentFloorLease, string) error
+		if runtime.publishTranscript != nil && strings.TrimSpace(runtime.displayName) != "" {
+			publishTranscript = runtime.PublishProviderTranscript
+		}
 		hooks := MeetingSpecialistProviderHooks{
-			PublishAudio: runtime.PublishProviderAudio,
-			CompleteTurn: runtime.CompleteTurn,
+			PublishAudio:      runtime.PublishProviderAudio,
+			PublishTranscript: publishTranscript,
+			CompleteTurn:      runtime.CompleteTurn,
 			FailSession: func(reason string) {
 				terminalReason, cause := meetingSpecialistProviderTerminal(reason)
 				_ = runtime.stopWithCause(lease, terminalReason, cause)
@@ -674,6 +697,37 @@ func (runtime *MeetingSpecialistRuntime) Start(parent context.Context, launch Me
 	runtime.starting = false
 	runtime.mu.Unlock()
 	return lease, nil
+}
+
+// PublishProviderTranscript preserves the specialist's provider-authored words
+// under the same current floor, agent profile, and room authority as audio.
+// The downstream meeting ledger remains responsible for its normal consent,
+// speaker, retention, and attribution persistence checks.
+func (runtime *MeetingSpecialistRuntime) PublishProviderTranscript(floor MeetingAgentFloorLease, transcript string) error {
+	transcript = strings.TrimSpace(transcript)
+	if runtime == nil || transcript == "" || len(transcript) > 16<<10 {
+		return ErrMeetingSpecialistUnauthorized
+	}
+	admission, err := runtime.beginAdmission(floor.Session)
+	if err != nil {
+		return err
+	}
+	defer admission.release()
+	if err = admission.authorizeCurrent(); err != nil {
+		return err
+	}
+	if err = runtime.floor.ValidateProviderFloor(floor, floor.Session.Scope.AudioTrackID); err != nil {
+		return err
+	}
+	if !admission.current(true) || runtime.publishTranscript == nil || strings.TrimSpace(runtime.displayName) == "" {
+		return ErrMeetingSpecialistDisabled
+	}
+	contribution := MeetingSpecialistTranscriptContribution{
+		RoomID: floor.Session.Scope.RoomID, SittingID: floor.Session.Scope.SittingID,
+		AgentID: floor.Session.Scope.AgentID, DisplayName: runtime.displayName, AudioTrackID: floor.Session.Scope.AudioTrackID,
+		Profile: runtime.launch.Context.AgentProfile, FloorGeneration: floor.Generation, Transcript: transcript,
+	}
+	return runtime.publishTranscript(contribution)
 }
 
 func (runtime *MeetingSpecialistRuntime) launchStateCurrent(ctx context.Context) bool {

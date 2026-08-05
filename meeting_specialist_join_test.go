@@ -120,7 +120,8 @@ func productionJoinFixtureForQualification(t *testing.T, now, evaluatedAt time.T
 			return token, nil
 		},
 		QualifiedProvider: qualifiedProvider, QualificationStore: qualificationStore,
-		PublishAudio: func(MeetingAgentFloorScope, uint64, []int16) error { return nil },
+		PublishAudio:      func(MeetingAgentFloorScope, uint64, []int16) error { return nil },
+		PublishTranscript: func(MeetingSpecialistTranscriptContribution) error { return nil },
 	})
 	return joiner, authority
 }

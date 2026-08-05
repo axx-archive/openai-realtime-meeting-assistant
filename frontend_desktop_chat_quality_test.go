@@ -195,6 +195,41 @@ func TestDesktopThreadReplyKeepsDraftAndOmitsRedundantEmptyState(t *testing.T) {
 	}
 }
 
+func TestDesktopThreadRepliesExposeOwnedEditAndDeleteActions(t *testing.T) {
+	html := desktopChatQualityHTML(t)
+	css := desktopChatQualitySection(t, html)
+	for _, want := range []string{
+		"function desktopChatMessageIsOwn(thread, message)",
+		"function beginDesktopContextMessageEdit(thread, message, card)",
+		"function deleteDesktopContextMessage(thread, message, control)",
+		"if (!options.root && desktopChatMessageIsOwn(thread, message))",
+		"edit.setAttribute('aria-label', 'Edit reply')",
+		"remove.setAttribute('aria-label', 'Delete reply')",
+		"method: 'PATCH'",
+		"method: 'DELETE'",
+		"body: JSON.stringify({ text: input.value.trim() })",
+		"if (!response.ok || !payload?.thread)",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("desktop reply mutation wiring missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		".chat-context-card__message-action",
+		"min-width: 40px;",
+		"min-height: 40px;",
+		"transform: scale(0.96);",
+		"transition-property: color, background-color, transform;",
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("desktop reply action styling missing %q", want)
+		}
+	}
+	if strings.Contains(css, "transition: all") {
+		t.Fatal("desktop reply actions must not use transition: all")
+	}
+}
+
 func TestDesktopThreadRepliesStayDiscoverableAndAvatarLed(t *testing.T) {
 	html := desktopChatQualityHTML(t)
 	css := desktopChatQualitySection(t, html)

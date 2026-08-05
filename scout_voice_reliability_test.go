@@ -110,6 +110,25 @@ func TestVoiceControlArmsSpeechWithoutWakePhrase(t *testing.T) {
 	}
 }
 
+func TestOfficeRoomScoutAcceptsNameAnywhereAndBoundedFollowUp(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.mu.Lock()
+	state := app.roomLiveLocked(officeRoomID)
+	state.participantCounts["AJ"] = 1
+	state.activeSpeakerName = "AJ"
+	app.mu.Unlock()
+	if app.armScoutVoiceResponse("We should probably wrap up soon.") {
+		t.Fatal("ambient office speech was admitted")
+	}
+	if !app.armScoutVoiceResponse("What is Scout's opinion on this?") {
+		t.Fatal("third-person Scout reference was not admitted")
+	}
+	app.clearScoutVoiceArm()
+	if !app.armScoutVoiceResponse("What would you recommend next?") {
+		t.Fatal("natural follow-up inside the engagement window was not admitted")
+	}
+}
+
 // TestCrosstalkTranscriptDoesNotDisarmDuringActiveResponse covers the
 // crosstalk ordering on the single mixed room stream: arm -> another
 // speaker's non-wake transcript completes while the wake turn's response is

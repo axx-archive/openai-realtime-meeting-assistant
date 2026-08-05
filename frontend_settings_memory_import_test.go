@@ -29,10 +29,12 @@ func TestSettingsMemoryImportIsPrivateReviewableAndThemeBranded(t *testing.T) {
 		`Imported memory is separate from Drive and company artifacts.`,
 		`Public chats and recorded meetings build separate, attributed company context`,
 		`function parseSTRIDEMemoryImport(raw)`,
-		`one import can contain up to 75 memories`,
-		`nextSTRIDEMemoryImportType`,
-		`scope: 'private'`,
-		`expectedRevision: snapshot.revision`,
+		`One import can contain up to 200 memories`,
+		`/api/stride/v1/coworker/relationships/import`,
+		`Memory is updating`,
+		`expectedRevision: relationshipMemorySnapshot.revision`,
+		`alreadyPresentCount`,
+		`saved until you remove it`,
 		`relationship_memory_changed`,
 	} {
 		if !strings.Contains(source, marker) {

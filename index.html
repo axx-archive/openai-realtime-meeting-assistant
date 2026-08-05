@@ -2573,6 +2573,46 @@
         margin-bottom: var(--sp-3);
       }
 
+      .board-toolbar__scope {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 0;
+      }
+
+      .board-project-select {
+        display: inline-grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: center;
+        gap: 8px;
+        min-height: 34px;
+        padding: 0 10px;
+        border: 1px solid var(--glass-border);
+        border-radius: 11px;
+        background: var(--glass-chrome);
+        box-shadow: var(--glass-highlight);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+      }
+
+      .board-project-select > span {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: uppercase;
+      }
+
+      .board-project-select select {
+        min-width: 112px;
+        max-width: 210px;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--text-1);
+        font: 500 12px/1 var(--font-sans);
+        cursor: pointer;
+      }
+
       .board-status {
         min-width: 0;
         color: var(--text-3);
@@ -2639,6 +2679,37 @@
         display: inline-flex;
         align-items: baseline;
         gap: 8px;
+      }
+
+      .column--delivery {
+        position: relative;
+        padding: 10px;
+        border: 1px solid color-mix(in srgb, var(--glass-border) 84%, transparent);
+        border-radius: var(--r-lg);
+        background:
+          linear-gradient(145deg, color-mix(in srgb, var(--glass-chrome) 90%, transparent), color-mix(in srgb, var(--surface-2) 72%, transparent));
+        box-shadow: var(--glass-highlight), 0 14px 34px rgba(0, 0, 0, 0.08);
+      }
+
+      .column--delivery header::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        flex: 0 0 auto;
+        align-self: center;
+        border-radius: 50%;
+        background: var(--text-3);
+        box-shadow: 0 0 0 4px color-mix(in srgb, var(--text-3) 10%, transparent);
+      }
+
+      .column--delivery.delivery-delivered header::before {
+        background: var(--live);
+        box-shadow: 0 0 0 4px color-mix(in srgb, var(--live) 12%, transparent);
+      }
+
+      .column--delivery.delivery-drive header::before {
+        background: var(--accent);
+        box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent);
       }
 
       /* design count — quiet numeric beside the name, no badge box */
@@ -2907,6 +2978,33 @@
       }
 
       .card-badges__spacer { flex: 1; }
+
+      .card-work-context {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        margin-top: 10px;
+      }
+
+      .card-work-context .card-badge {
+        max-width: 58%;
+        padding: 4px 7px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+      }
+
+      .card-work-context .card-badge--process {
+        flex: none;
+        max-width: 42%;
+        color: var(--text-2);
+      }
+
+      .card-work-context .card-badge--project.is-missing {
+        border-style: dashed;
+        color: var(--warn);
+      }
 
       /* the 18px owner initial chip */
       .card-owner-chip {
@@ -5570,8 +5668,44 @@
       }
 
       .memory-import-dialog__actions { display: flex; gap: 8px; flex: none; }
+      .memory-import-dialog__feedback { min-width: 0; flex: 1; }
       .memory-import-dialog__status[data-state="error"] { color: var(--danger); }
       .memory-import-dialog__status[data-state="ready"] { color: var(--text-1); }
+
+      .memory-import-progress {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        min-width: 0;
+        padding: 10px 12px;
+        border: 1px solid color-mix(in srgb, var(--ember) 38%, var(--line-1));
+        border-radius: 14px;
+        background: color-mix(in srgb, var(--ember-soft) 48%, var(--surface-2));
+        box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-1) 7%, transparent);
+      }
+
+      .memory-import-progress[hidden] { display: none; }
+      .memory-import-progress__signal {
+        width: 10px;
+        height: 10px;
+        flex: none;
+        border-radius: 50%;
+        background: var(--ember);
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--ember) 35%, transparent);
+        animation: memory-import-pulse 1.5s ease-out infinite;
+      }
+      .memory-import-progress span:last-child { display: grid; gap: 2px; min-width: 0; }
+      .memory-import-progress strong { color: var(--text-1); font: var(--type-body-medium); }
+      .memory-import-progress small { color: var(--text-2); font: var(--type-caption); text-wrap: pretty; }
+
+      @keyframes memory-import-pulse {
+        70% { box-shadow: 0 0 0 8px transparent; }
+        100% { box-shadow: 0 0 0 0 transparent; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .memory-import-progress__signal { animation: none; }
+      }
 
       @media (min-width: 641px) and (hover: hover) and (pointer: fine) {
         .settings-region {
@@ -11697,6 +11831,115 @@
           box-shadow: 0 0 0 1px var(--line-1), 0 5px 16px rgba(0, 0, 0, 0.045);
         }
 
+        #chatTool .chat-context-card__message-actions {
+          display: inline-flex;
+          align-items: center;
+          gap: 2px;
+          margin: -10px -8px -10px auto;
+        }
+
+        #chatTool .chat-context-card__message-action {
+          min-width: 40px;
+          min-height: 40px;
+          display: inline-grid;
+          place-items: center;
+          padding: 0 8px;
+          border: 0;
+          border-radius: 11px;
+          background: transparent;
+          color: var(--text-3);
+          font: var(--type-label);
+          letter-spacing: var(--track-label);
+          cursor: pointer;
+          transition-property: color, background-color, transform;
+          transition-duration: var(--dur-fast);
+          transition-timing-function: var(--ease);
+        }
+
+        #chatTool .chat-context-card__message-action:hover,
+        #chatTool .chat-context-card__message-action:focus-visible {
+          color: var(--text-1);
+          background: var(--surface-3);
+        }
+
+        #chatTool .chat-context-card__message-action[data-armed="1"] {
+          color: var(--danger);
+          background: color-mix(in srgb, var(--danger) 10%, transparent);
+        }
+
+        #chatTool .chat-context-card__message-action:active {
+          transform: scale(0.96);
+        }
+
+        #chatTool .chat-context-card__message-action:focus-visible {
+          outline: 2px solid var(--ring);
+          outline-offset: 1px;
+        }
+
+        #chatTool .chat-context-card__editor {
+          display: grid;
+          gap: 8px;
+        }
+
+        #chatTool .chat-context-card__editor-input {
+          width: 100%;
+          min-height: 88px;
+          max-height: 240px;
+          resize: vertical;
+          padding: 10px 12px;
+          border: 0;
+          border-radius: 12px;
+          outline: 1px solid var(--line-2);
+          outline-offset: -1px;
+          background: var(--surface-2);
+          color: var(--text-1);
+          font: var(--type-body-sm);
+          text-wrap: pretty;
+          transition-property: outline-color, box-shadow;
+          transition-duration: var(--dur-fast);
+          transition-timing-function: var(--ease);
+        }
+
+        #chatTool .chat-context-card__editor-input:focus {
+          outline-color: var(--text-3);
+          box-shadow: 0 0 0 3px var(--ring);
+        }
+
+        #chatTool .chat-context-card__editor-actions {
+          display: flex;
+          justify-content: flex-end;
+          gap: 6px;
+        }
+
+        #chatTool .chat-context-card__editor-action {
+          min-height: 40px;
+          padding: 0 13px;
+          border: 0;
+          border-radius: 12px;
+          background: var(--surface-3);
+          color: var(--text-1);
+          font: var(--type-label-lg);
+          cursor: pointer;
+          box-shadow: 0 0 0 1px var(--line-1);
+          transition-property: background-color, color, transform, opacity;
+          transition-duration: var(--dur-fast);
+          transition-timing-function: var(--ease);
+        }
+
+        #chatTool .chat-context-card__editor-action[data-primary="true"] {
+          background: var(--text-1);
+          color: var(--surface-1);
+        }
+
+        #chatTool .chat-context-card__editor-action:active {
+          transform: scale(0.96);
+        }
+
+        #chatTool .chat-context-card__editor-action:disabled {
+          cursor: default;
+          opacity: 0.48;
+        }
+
         #chatTool .chat-context-worklog {
           display: grid;
           gap: 0;
@@ -12977,17 +13220,16 @@
         #chatTool .chat-work-indicator {
           min-height: 42px;
           align-items: center;
-          gap: 10px;
+          gap: 4px;
           margin-bottom: 9px;
-          padding: 8px 12px;
+          padding: 4px;
           border: 0;
-          border-radius: 15px;
+          border-radius: 16px;
           background: color-mix(in srgb, var(--surface-2) 90%, transparent);
           color: var(--text-2);
           box-shadow: 0 0 0 1px var(--line-1), 0 8px 22px rgba(0, 0, 0, 0.055);
-          cursor: pointer;
           text-align: left;
-          transition-property: background-color, transform;
+          transition-property: background-color, box-shadow;
           transition-duration: var(--dur-fast);
           transition-timing-function: var(--ease);
         }
@@ -12998,13 +13240,35 @@
 
         #chatTool .chat-work-indicator:hover {
           background: var(--surface-3);
+          box-shadow: 0 0 0 1px var(--line-2), 0 10px 28px rgba(0, 0, 0, 0.07);
         }
 
-        #chatTool .chat-work-indicator:active {
+        #chatTool .chat-work-indicator__open {
+          flex: 1;
+          min-width: 0;
+          min-height: 40px;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 6px 8px;
+          border: 0;
+          border-radius: 12px;
+          background: transparent;
+          color: inherit;
+          cursor: pointer;
+          text-align: left;
+          transition-property: transform;
+          transition-duration: var(--dur-fast);
+          transition-timing-function: var(--ease);
+        }
+
+        #chatTool .chat-work-indicator__open:active,
+        #chatTool .chat-work-indicator__action-button:active {
           transform: scale(0.96);
         }
 
-        #chatTool .chat-work-indicator:focus-visible {
+        #chatTool .chat-work-indicator__open:focus-visible,
+        #chatTool .chat-work-indicator__action-button:focus-visible {
           outline: 2px solid var(--ring);
           outline-offset: 2px;
         }
@@ -13033,6 +13297,20 @@
         #chatTool .chat-work-indicator__signal span:nth-child(2) { height: 13px; animation-delay: -240ms; }
         #chatTool .chat-work-indicator__signal span:nth-child(3) { height: 9px; animation-delay: -480ms; }
 
+        #chatTool .chat-work-indicator[data-work-state="complete"] .chat-work-indicator__signal {
+          background: var(--live-soft);
+          color: var(--live);
+        }
+
+        #chatTool .chat-work-indicator[data-work-state="complete"] .chat-work-indicator__signal span {
+          display: none;
+        }
+
+        #chatTool .chat-work-indicator[data-work-state="complete"] .chat-work-indicator__signal::after {
+          content: "✓";
+          font: 700 13px/1 var(--font-sans);
+        }
+
         @keyframes chat-work-wave {
           to { transform: scaleY(0.48); opacity: 0.58; }
         }
@@ -13047,11 +13325,51 @@
           font-variant-numeric: tabular-nums;
         }
 
-        #chatTool .chat-work-indicator__action {
+        #chatTool .chat-work-indicator__activity {
           flex: none;
           color: var(--text-1);
           font: var(--type-label);
           letter-spacing: var(--track-label);
+        }
+
+        #chatTool .chat-work-indicator__actions {
+          flex: none;
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+        }
+
+        #chatTool .chat-work-indicator__actions[hidden] {
+          display: none;
+        }
+
+        #chatTool .chat-work-indicator__action-button {
+          min-height: 36px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0 12px;
+          border: 0;
+          border-radius: 10px;
+          background: var(--surface-1);
+          color: var(--text-1);
+          box-shadow: 0 0 0 1px var(--line-1), 0 2px 8px rgba(0, 0, 0, 0.05);
+          font: var(--type-caption-medium);
+          white-space: nowrap;
+          cursor: pointer;
+          transition-property: background-color, box-shadow, transform;
+          transition-duration: var(--dur-fast);
+          transition-timing-function: var(--ease);
+        }
+
+        #chatTool .chat-work-indicator__action-button:hover {
+          background: var(--surface-2);
+          box-shadow: 0 0 0 1px var(--line-2), 0 4px 12px rgba(0, 0, 0, 0.07);
+        }
+
+        #chatTool .chat-work-indicator__action-button[data-state="saved"] {
+          color: var(--live);
+          cursor: default;
         }
 
         #chatTool .scout-chat-destination {
@@ -14135,15 +14453,376 @@
         padding: 28px max(28px, env(safe-area-inset-right)) 44px max(28px, env(safe-area-inset-left));
       }
 
-      /* canon Files — the shared drive canvas (card 095): reuses the Memory
-         tool page frame (search, count, day groups); rows are files with an
-         uploader line, an origin chip, and the feeds-the-brain badge. */
+      /* Drive — a durable company-file system whose content participates in
+         the brain under source ACLs. The three-pane desktop topology mirrors
+         the product's shared right-card behavior: navigation, work surface,
+         context/activity. */
       #filesTool {
         grid-template-columns: minmax(0, 1fr);
         grid-template-rows: minmax(0, 1fr);
+        overflow: hidden;
+        padding: 0;
+        background:
+          radial-gradient(circle at 58% -18%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 34%),
+          var(--surface-1);
+      }
+
+      .drive-shell {
+        display: grid;
+        grid-template-columns: 218px minmax(0, 1fr) 292px;
+        min-width: 0;
+        min-height: 0;
+        height: 100%;
+      }
+
+      .drive-sidebar,
+      .drive-details {
+        min-width: 0;
+        background: color-mix(in srgb, var(--surface-2) 88%, transparent);
+      }
+
+      .drive-sidebar {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        padding: 24px 16px 20px;
+        border-right: 1px solid var(--line-1);
+      }
+
+      .drive-sidebar__brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 36px;
+        padding: 0 8px;
+      }
+
+      .drive-sidebar__mark {
+        display: grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
+        border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line-1));
+        border-radius: 11px;
+        background: color-mix(in srgb, var(--accent) 12%, var(--surface-3));
+        color: var(--accent);
+        box-shadow: inset 0 1px rgba(255, 255, 255, 0.08);
+      }
+
+      .drive-sidebar__brand > span:last-child {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .drive-sidebar__brand b {
+        color: var(--text-1);
+        font: 650 14px/1 var(--font-sans);
+      }
+
+      .drive-sidebar__brand small {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .drive-new {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        min-height: 42px;
+        margin: 0 4px;
+        border: 1px solid var(--glass-border);
+        border-radius: 14px;
+        background: var(--glass-chrome);
+        color: var(--text-1);
+        box-shadow: var(--glass-highlight), var(--glass-shadow);
+        backdrop-filter: var(--glass-blur);
+        -webkit-backdrop-filter: var(--glass-blur);
+        font: var(--type-caption-medium);
+        cursor: pointer;
+        transition: transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+      }
+
+      .drive-new:hover {
+        border-color: var(--line-2);
+        background: color-mix(in srgb, var(--surface-3) 86%, transparent);
+      }
+
+      .drive-new:active { transform: scale(0.97); }
+
+      .drive-nav {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+
+      .drive-nav__item {
+        display: grid;
+        grid-template-columns: 22px minmax(0, 1fr);
+        align-items: center;
+        gap: 8px;
+        min-height: 38px;
+        padding: 0 12px;
+        border: 0;
+        border-radius: 11px;
+        background: transparent;
+        color: var(--text-2);
+        font: 500 12.5px/1 var(--font-sans);
+        text-align: left;
+        cursor: pointer;
+        transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+
+      .drive-nav__item > span:first-child {
+        color: var(--text-3);
+        font: 15px/1 var(--font-sans);
+        text-align: center;
+      }
+
+      .drive-nav__item:hover { background: var(--surface-3); color: var(--text-1); }
+      .drive-nav__item:active { transform: scale(0.98); }
+      .drive-nav__item.is-active {
+        background: color-mix(in srgb, var(--accent) 10%, var(--surface-3));
+        color: var(--text-1);
+        box-shadow: inset 2px 0 var(--accent);
+      }
+      .drive-nav__item.is-active > span:first-child { color: var(--accent); }
+
+      .drive-brain-note {
+        display: grid;
+        grid-template-columns: 9px minmax(0, 1fr);
+        gap: 10px;
+        margin-top: auto;
+        padding: 13px;
+        border: 1px solid var(--line-1);
+        border-radius: 14px;
+        background: color-mix(in srgb, var(--surface-3) 78%, transparent);
+      }
+
+      .drive-brain-note__signal {
+        width: 7px;
+        height: 7px;
+        margin-top: 3px;
+        border-radius: 50%;
+        background: var(--live);
+        box-shadow: 0 0 0 4px var(--live-soft);
+      }
+
+      .drive-brain-note b { color: var(--text-1); font: var(--type-label); letter-spacing: var(--track-label); }
+      .drive-brain-note p { margin: 6px 0 0; color: var(--text-3); font: 11px/1.45 var(--font-sans); }
+
+      .drive-main {
+        min-width: 0;
+        min-height: 0;
         overflow-y: auto;
         overscroll-behavior: contain;
-        padding: 28px max(28px, env(safe-area-inset-right)) 44px max(28px, env(safe-area-inset-left));
+        padding: 28px clamp(24px, 3vw, 46px) 56px;
+      }
+
+      .drive-heading {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 20px;
+        margin: 0 0 20px;
+      }
+
+      .drive-heading__eyebrow {
+        margin: 0 0 6px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: uppercase;
+      }
+
+      .drive-heading h2 { margin: 0; color: var(--text-1); font: 650 24px/1.1 var(--font-sans); letter-spacing: -0.025em; }
+      .drive-heading p:last-child { margin: 7px 0 0; color: var(--text-3); font: 12.5px/1.45 var(--font-sans); }
+
+      .drive-heading__action {
+        flex: none;
+        min-height: 34px;
+        padding: 0 13px;
+        border: 1px solid var(--line-1);
+        border-radius: 10px;
+        background: var(--surface-2);
+        color: var(--text-2);
+        font: var(--type-caption-medium);
+        cursor: pointer;
+      }
+      .drive-heading__action:hover { border-color: var(--line-2); color: var(--text-1); }
+
+      .drive-details {
+        position: relative;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 22px;
+        border-left: 1px solid var(--line-1);
+      }
+
+      .drive-details__empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 100%;
+        padding: 32px 10px;
+        color: var(--text-3);
+        text-align: center;
+      }
+
+      .drive-details__empty-icon {
+        display: grid;
+        place-items: center;
+        width: 42px;
+        height: 42px;
+        margin-bottom: 14px;
+        border: 1px solid var(--line-1);
+        border-radius: 14px;
+        background: var(--surface-3);
+      }
+
+      .drive-details__empty b { color: var(--text-2); font: var(--type-caption-medium); }
+      .drive-details__empty p { max-width: 220px; margin: 8px 0 0; font: 11.5px/1.5 var(--font-sans); }
+
+      .drive-detail__head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        padding-bottom: 18px;
+        border-bottom: 1px solid var(--line-1);
+      }
+
+      .drive-detail__identity { min-width: 0; display: flex; gap: 12px; }
+      .drive-detail__icon { flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; background: var(--surface-3); color: var(--accent); }
+      .drive-detail__identity h3 { margin: 1px 0 5px; overflow-wrap: anywhere; color: var(--text-1); font: 600 13.5px/1.35 var(--font-sans); }
+      .drive-detail__identity p { margin: 0; color: var(--text-3); font: var(--type-label); letter-spacing: var(--track-label); }
+      .drive-detail__close { flex: none; width: 30px; height: 30px; border: 0; border-radius: 10px; background: transparent; color: var(--text-3); cursor: pointer; }
+      .drive-detail__close:hover { background: var(--surface-3); color: var(--text-1); }
+
+      .drive-detail__brain {
+        display: grid;
+        grid-template-columns: 10px minmax(0, 1fr);
+        gap: 10px;
+        margin: 18px 0;
+        padding: 13px;
+        border: 1px solid color-mix(in srgb, var(--live) 24%, var(--line-1));
+        border-radius: 14px;
+        background: color-mix(in srgb, var(--live-soft) 66%, transparent);
+      }
+      .drive-detail__brain-dot { width: 7px; height: 7px; margin-top: 3px; border-radius: 50%; background: var(--live); }
+      .drive-detail__brain b { color: var(--text-1); font: var(--type-label); letter-spacing: var(--track-label); }
+      .drive-detail__brain p { margin: 5px 0 0; color: var(--text-2); font: 11px/1.45 var(--font-sans); }
+
+      .drive-detail__section { padding: 16px 0; border-top: 1px solid var(--line-1); }
+      .drive-detail__section:first-of-type { border-top: 0; }
+      .drive-detail__section h4 { margin: 0 0 11px; color: var(--text-2); font: var(--type-label); letter-spacing: var(--track-label); text-transform: uppercase; }
+      .drive-detail__meta { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 9px 10px; margin: 0; }
+      .drive-detail__meta dt { color: var(--text-3); font: var(--type-label); letter-spacing: var(--track-label); }
+      .drive-detail__meta dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--text-2); font: 11.5px/1.4 var(--font-sans); }
+      .drive-detail__activity { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 10px; margin-top: 10px; }
+      .drive-detail__activity-dot { width: 6px; height: 6px; margin-top: 5px; border-radius: 50%; background: var(--text-3); }
+      .drive-detail__activity b { display: block; color: var(--text-2); font: 11.5px/1.4 var(--font-sans); }
+      .drive-detail__activity span { color: var(--text-3); font: var(--type-label); letter-spacing: var(--track-label); }
+      .drive-detail__actions { display: flex; gap: 8px; margin-top: 18px; }
+      .drive-detail__action { flex: 1; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; padding: 0 12px; border: 1px solid var(--line-1); border-radius: 11px; background: var(--surface-3); color: var(--text-1); font: var(--type-caption-medium); text-decoration: none; cursor: pointer; }
+      .drive-detail__action:hover { border-color: var(--line-2); }
+
+      .drive-results-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        min-height: 30px;
+        margin: 2px 2px 10px;
+      }
+
+      .drive-results-head .memory-stats { margin: 0; }
+      .drive-results-head__hint { color: var(--text-3); font: var(--type-label); letter-spacing: var(--track-label); }
+
+      .drive-file-section + .drive-file-section { margin-top: 26px; }
+      .drive-section-label {
+        margin: 0 2px 10px;
+        color: var(--text-2);
+        font: 600 12px/1.2 var(--font-sans);
+        letter-spacing: -0.005em;
+      }
+      .drive-file-list {
+        overflow: visible;
+        border: 1px solid var(--line-1);
+        border-radius: 15px;
+        background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+      }
+      .drive-list-head,
+      .drive-file-list .files-row {
+        display: grid;
+        grid-template-columns: 42px minmax(0, 1fr) auto 28px;
+        align-items: center;
+        gap: 12px;
+      }
+      .drive-list-head {
+        min-height: 34px;
+        padding: 0 13px;
+        border-bottom: 1px solid var(--line-1);
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+      .drive-file-list .files-row {
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+      }
+      .drive-file-list .files-row + .files-row {
+        margin-top: 0;
+        border-top: 1px solid var(--line-1);
+      }
+      .drive-file-list .files-row:hover { background: var(--surface-3); }
+      .drive-file-list .files-row.is-selected { box-shadow: inset 2px 0 var(--accent); }
+
+      @media (max-width: 1180px) and (min-width: 861px) {
+        .drive-shell { grid-template-columns: 190px minmax(0, 1fr); }
+        .drive-details {
+          position: fixed;
+          z-index: 85;
+          top: var(--shell-topbar-height, 60px);
+          right: 0;
+          bottom: 0;
+          width: min(340px, 38vw);
+          display: none;
+          box-shadow: var(--shadow-3);
+        }
+        .drive-details.is-open { display: block; animation: bf-slidein var(--dur-med) var(--ease) both; }
+      }
+
+      @media (max-width: 860px) {
+        .drive-shell { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 100%; }
+        .drive-sidebar { display: none; }
+        .drive-main { padding: 20px 18px 112px; overflow: visible; }
+        .drive-details {
+          position: fixed;
+          z-index: 110;
+          inset: auto 0 0;
+          width: 100%;
+          height: min(76dvh, 620px);
+          display: none;
+          padding: 20px max(20px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+          border: 1px solid var(--glass-border);
+          border-bottom: 0;
+          border-radius: 24px 24px 0 0;
+          background: color-mix(in srgb, var(--surface-1) 94%, transparent);
+          box-shadow: 0 0 0 100vmax var(--scrim), var(--shadow-3);
+          backdrop-filter: var(--glass-blur);
+          -webkit-backdrop-filter: var(--glass-blur);
+        }
+        .drive-details.is-open { display: block; animation: bf-sheetin var(--dur-med) var(--ease) both; }
+        .drive-heading { align-items: center; margin-bottom: 16px; }
+        .drive-heading h2 { font-size: 20px; }
+        .drive-heading__eyebrow,
+        .drive-heading p:last-child,
+        .drive-results-head__hint { display: none; }
       }
 
       .files-head {
@@ -14230,8 +14909,28 @@
       }
 
       #filesUploadButton .files-upload__text b {
+        display: block;
         color: var(--text-1);
         font-weight: 600;
+      }
+
+      #filesUploadButton .files-upload__text small {
+        display: block;
+        margin-top: 3px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      #filesUploadButton .files-upload__brain {
+        flex: none;
+        margin-left: auto;
+        padding: 5px 9px;
+        border-radius: var(--r-full);
+        background: var(--live-soft);
+        color: var(--live);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
       }
 
       #filesUploadButton[disabled] {
@@ -14264,6 +14963,16 @@
 
       .files-row + .files-row {
         margin-top: 8px;
+      }
+
+      .files-row:hover,
+      .files-row.is-selected {
+        border-color: var(--line-2);
+        background: var(--surface-3);
+      }
+
+      .files-row.is-selected {
+        box-shadow: inset 2px 0 var(--accent), var(--shadow-1);
       }
 
       .files-row__icon {
@@ -14396,7 +15105,7 @@
         background: var(--surface-2);
         border: 1px solid var(--line-1);
         border-radius: var(--r-lg);
-        padding: 15px;
+        padding: 10px;
         overflow: visible; /* the move-to menu escapes the tile edge */
         transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-med) var(--ease);
       }
@@ -14406,7 +15115,36 @@
         box-shadow: var(--shadow-2);
       }
 
+      .file-tile.is-selected {
+        border-color: color-mix(in srgb, var(--accent) 52%, var(--line-2));
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent), var(--shadow-2);
+      }
+
+      .file-tile__preview {
+        position: relative;
+        display: grid;
+        place-items: center;
+        height: 112px;
+        margin-bottom: 12px;
+        overflow: hidden;
+        border: 1px solid var(--line-1);
+        border-radius: 12px;
+        background:
+          linear-gradient(135deg, color-mix(in srgb, var(--surface-3) 92%, transparent), color-mix(in srgb, var(--accent) 5%, var(--surface-2))),
+          var(--surface-2);
+      }
+
+      .file-tile__image {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
       .file-tile__icon {
+        position: relative;
+        z-index: 1;
         width: 38px;
         height: 38px;
         border-radius: var(--r-md);
@@ -14414,11 +15152,25 @@
         display: grid;
         place-items: center;
         color: var(--text-2);
-        margin-bottom: 12px;
+        margin-bottom: 0;
+        box-shadow: var(--shadow-1);
+      }
+
+      .file-tile__image + .file-tile__icon {
+        position: absolute;
+        right: 8px;
+        bottom: 8px;
+        width: 30px;
+        height: 30px;
+        color: var(--text-1);
+        background: color-mix(in srgb, var(--surface-1) 82%, transparent);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
       }
 
       .file-tile__name {
         display: block;
+        padding: 0 5px;
         color: var(--text-1);
         font: 500 13.5px/1.35 var(--font-sans);
         text-decoration: none;
@@ -14442,7 +15194,7 @@
       }
 
       .file-tile__meta {
-        margin: 6px 0 12px;
+        margin: 6px 5px 12px;
         color: var(--text-3);
         font: var(--type-label);
         letter-spacing: var(--track-label);
@@ -14456,6 +15208,7 @@
         align-items: center;
         gap: 8px;
         min-width: 0;
+        padding: 0 5px 4px;
       }
 
       /* kit folder chips — the Drive-ish filing rail above the day groups.
@@ -20250,6 +21003,12 @@
         align-content: start;
       }
 
+      .board-expanded-surface .column--delivery {
+        padding: 12px;
+        border: 1px solid color-mix(in srgb, var(--glass-border) 84%, transparent);
+        border-radius: var(--r-lg);
+      }
+
       /* Full-page board: four equal lanes. The B2 empty-lane collapse
          (.column--empty, flex 0 0 96px) is a dock/preview affordance — on
          the wide surface it let empty Backlog / In Progress shrink to a
@@ -22983,6 +23742,21 @@
           padding: 4px 16px 0;
         }
 
+        .board-toolbar__scope {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .board-project-select {
+          width: 100%;
+          min-height: 40px;
+        }
+
+        .board-project-select select {
+          width: 100%;
+          max-width: none;
+        }
+
         .board-expanded-surface .board-toolbar .board-status {
           display: none;
         }
@@ -23604,6 +24378,41 @@
         #memoryTool,
         #filesTool {
           padding: 12px 14px 96px;
+        }
+
+        /* Drive owns its own safe-area-aware canvas and bottom-sheet details;
+           do not reapply Memory's page padding to the three-pane shell. */
+        #filesTool {
+          padding: 0;
+        }
+
+        #filesTool .drive-main {
+          padding: 12px 14px 112px;
+        }
+
+        #filesTool .files-head {
+          align-items: stretch;
+        }
+
+        #filesTool .files-seg {
+          height: 38px;
+        }
+
+        #filesTool #filesUploadButton {
+          margin-bottom: 14px;
+        }
+
+        #filesTool #filesUploadButton .files-upload__brain {
+          display: none;
+        }
+
+        #filesTool .files-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        #filesTool .file-tile__preview {
+          height: 92px;
         }
 
         .memory-tool__search {
@@ -26305,9 +27114,9 @@
           </button>
         </span>
         <span class="tool-rail__slot">
-          <button class="tool-rail__tool" type="button" data-tool="files" aria-label="Files" aria-pressed="false">
+          <button class="tool-rail__tool" type="button" data-tool="files" aria-label="Drive" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path></svg>
-            <span class="tool-rail__label">files</span>
+            <span class="tool-rail__label">drive</span>
           </button>
         </span>
         <span class="tool-rail__slot">
@@ -27024,11 +27833,14 @@
               <div id="scoutMentionList" class="scout-mention-popover__list" role="listbox" aria-label="Mention a teammate"></div>
             </div>
             <div id="scoutDeliverablesPopover" class="scout-deliverables-popover" hidden></div>
-            <button id="chatWorkIndicator" class="chat-work-indicator" type="button" aria-label="View active work" hidden>
-              <span class="chat-work-indicator__signal" aria-hidden="true"><span></span><span></span><span></span></span>
-              <span id="chatWorkIndicatorText" class="chat-work-indicator__text"></span>
-              <span class="chat-work-indicator__action">view activity</span>
-            </button>
+            <div id="chatWorkIndicator" class="chat-work-indicator" hidden>
+              <button id="chatWorkIndicatorOpen" class="chat-work-indicator__open" type="button" aria-label="View work activity">
+                <span class="chat-work-indicator__signal" aria-hidden="true"><span></span><span></span><span></span></span>
+                <span id="chatWorkIndicatorText" class="chat-work-indicator__text"></span>
+                <span class="chat-work-indicator__activity">view activity</span>
+              </button>
+              <span id="chatWorkIndicatorActions" class="chat-work-indicator__actions" hidden></span>
+            </div>
             <form id="scoutChatForm" class="scout-chat-form">
               <input id="scoutChatFileInput" type="file" multiple hidden>
               <button id="scoutChatAttach" class="scout-chat-attach" type="button" aria-label="Attach files" title="Attach files" disabled>
@@ -27516,37 +28328,81 @@
           </div>
         </section>
 
-        <!-- Files tool — the shared drive over every uploaded document (card 095) -->
-        <section id="filesTool" class="memory-tool" aria-label="Files">
-          <div class="memory-tool__inner">
-            <div class="files-head">
-              <div class="memory-tool__search">
+        <!-- Drive — durable company files, indexed into the brain under the
+             same ACL that governs each source. The route remains "files" for
+             backwards compatibility; the product surface is Drive. -->
+        <section id="filesTool" class="memory-tool" aria-label="Drive">
+          <div class="drive-shell">
+            <aside class="drive-sidebar" aria-label="Drive navigation">
+              <div class="drive-sidebar__brand">
+                <span class="drive-sidebar__mark" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path></svg>
+                </span>
+                <span><b>Drive</b><small>Bonfire</small></span>
+              </div>
+              <button id="filesNewButton" class="drive-new" type="button">
+                <span aria-hidden="true">＋</span><span>New</span>
+              </button>
+              <nav class="drive-nav" aria-label="Drive views">
+                <button class="drive-nav__item is-active" type="button" data-drive-scope="home" aria-pressed="true"><span aria-hidden="true">⌂</span><span>Home</span></button>
+                <button class="drive-nav__item" type="button" data-drive-scope="mine" aria-pressed="false"><span aria-hidden="true">◇</span><span>My Drive</span></button>
+                <button class="drive-nav__item" type="button" data-drive-scope="shared" aria-pressed="false"><span aria-hidden="true">◎</span><span>Shared</span></button>
+                <button class="drive-nav__item" type="button" data-drive-scope="recent" aria-pressed="false"><span aria-hidden="true">◷</span><span>Recent</span></button>
+              </nav>
+              <div class="drive-brain-note">
+                <span class="drive-brain-note__signal" aria-hidden="true"></span>
+                <div><b>Connected to the brain</b><p>Authorized files are indexed with their source permissions and retrieved only when relevant.</p></div>
+              </div>
+            </aside>
+            <main class="drive-main">
+              <header class="drive-heading">
+                <div>
+                  <p class="drive-heading__eyebrow">company drive</p>
+                  <h2 id="filesScopeTitle">Home</h2>
+                  <p id="filesScopeCopy">Everything your team can work with, understood in context.</p>
+                </div>
+                <button id="filesNewFolderButton" class="drive-heading__action" type="button">New folder</button>
+              </header>
+              <div class="files-head">
+                <div class="memory-tool__search">
                 <span class="memory-tool__search-icon" aria-hidden="true">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
                 </span>
-                <input id="filesSearch" class="memory-tool__search-input" type="search" autocomplete="off" placeholder="search every file the office holds" aria-label="search every file the office holds">
+                  <input id="filesSearch" class="memory-tool__search-input" type="search" autocomplete="off" placeholder="Search Drive" aria-label="Search Drive">
+                </div>
+                <div class="files-seg" role="group" aria-label="file view">
+                  <button id="filesViewGrid" class="files-seg__btn is-active" type="button" aria-pressed="true" aria-label="Grid view">grid</button>
+                  <button id="filesViewList" class="files-seg__btn" type="button" aria-pressed="false" aria-label="List view">list</button>
+                </div>
               </div>
-              <div class="files-seg" role="group" aria-label="file view">
-                <button id="filesViewGrid" class="files-seg__btn is-active" type="button" aria-pressed="true" aria-label="Grid view">grid</button>
-                <button id="filesViewList" class="files-seg__btn" type="button" aria-pressed="false" aria-label="List view">list</button>
+              <button id="filesUploadButton" class="files-upload" type="button">
+                <span class="files-upload__icon" aria-hidden="true">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"></path><path d="m5 12 7-7 7 7"></path></svg>
+                </span>
+                <span class="files-upload__text"><b>Drop files here</b><small>or choose files · up to 64MB each</small></span>
+                <span class="files-upload__brain">indexed with permissions</span>
+              </button>
+              <input id="filesUploadInput" type="file" multiple hidden aria-hidden="true">
+              <!-- folder chips — filter, drop target, and (active) rename/delete
+                   door; JS renders the row from GET /assistant/files folders -->
+              <div id="filesFolders" class="files-folders" role="group" aria-label="Drive folders" hidden></div>
+              <div class="drive-results-head">
+                <div id="filesStats" class="memory-stats" hidden>
+                  <span id="filesCount" class="memory-tool__count"></span>
+                </div>
+                <span class="drive-results-head__hint">Select a file for context and activity</span>
               </div>
-            </div>
-            <button id="filesUploadButton" class="files-upload" type="button">
-              <span class="files-upload__icon" aria-hidden="true">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"></path><path d="m5 12 7-7 7 7"></path></svg>
-              </span>
-              <span class="files-upload__text"><b>drop files or click to upload</b> — decks, PDFs, images, up to 64MB each</span>
-            </button>
-            <input id="filesUploadInput" type="file" multiple hidden aria-hidden="true">
-            <!-- folder chips — filter, drop target, and (active) rename/delete
-                 door; JS renders the row from GET /assistant/files folders -->
-            <div id="filesFolders" class="files-folders" role="group" aria-label="file folders" hidden></div>
-            <div id="filesStats" class="memory-stats" hidden>
-              <span id="filesCount" class="memory-tool__count"></span>
-            </div>
-            <div id="filesList" class="memory-list" role="log" aria-label="uploaded files">
-              <article class="memory-empty files-empty">nothing shared yet.<span class="files-empty__sub">files shared in chat land here too.</span></article>
-            </div>
+              <div id="filesList" class="memory-list" role="log" aria-label="Drive files">
+                <article class="memory-empty files-empty">nothing shared yet.<span class="files-empty__sub">Files shared in chat land here too.</span></article>
+              </div>
+            </main>
+            <aside id="filesDetails" class="drive-details" aria-label="File details">
+              <div class="drive-details__empty">
+                <span class="drive-details__empty-icon" aria-hidden="true">◇</span>
+                <b>Select a file</b>
+                <p>See where it came from, who can use it, and how it contributes to the company brain.</p>
+              </div>
+            </aside>
           </div>
         </section>
 
@@ -27610,7 +28466,15 @@
             </button>
           </header>
           <div class="board-toolbar" aria-label="Board tools">
-            <span id="boardState" class="board-status">waiting room</span>
+            <div class="board-toolbar__scope">
+              <label class="board-project-select">
+                <span>project</span>
+                <select id="boardProjectFilter" aria-label="Filter board by project">
+                  <option value="all">All projects</option>
+                </select>
+              </label>
+              <span id="boardState" class="board-status">waiting room</span>
+            </div>
             <div class="board-tools">
               <button id="newCard" class="btn" type="button" disabled>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>
@@ -28427,14 +29291,23 @@ Wrap the entire export in one code block. After the code block, say whether the 
             <span class="memory-import-step__number">2</span>
             <div class="memory-import-step__content">
               <p class="memory-import-step__title">Paste the export and review what STRIDE found</p>
-              <textarea id="memoryImportInput" class="memory-import-input" rows="8" placeholder="Paste your memory export here" aria-label="Paste your memory export"></textarea>
+              <textarea id="memoryImportInput" class="memory-import-input" rows="8" maxlength="131072" placeholder="Paste your memory export here" aria-label="Paste your memory export"></textarea>
               <div id="memoryImportPreview" class="memory-import-preview" aria-live="polite"></div>
             </div>
           </section>
           <p class="memory-import-dialog__privacy">Saved entries are private to you by default. They follow only your 1:1 agent conversations. Public chats and recorded meetings build separate, attributed company context under their current audience permissions. Imported memory is separate from Drive and company artifacts.</p>
         </div>
         <footer class="memory-import-dialog__foot">
-          <p id="memoryImportStatus" class="memory-import-dialog__status" aria-live="polite">Paste an export to begin.</p>
+          <div class="memory-import-dialog__feedback">
+            <div id="memoryImportProgress" class="memory-import-progress" role="progressbar" aria-label="Memory is updating" hidden>
+              <span class="memory-import-progress__signal" aria-hidden="true"></span>
+              <span>
+                <strong>Memory is updating</strong>
+                <small id="memoryImportProgressDetail">Securing your private memories in one durable update.</small>
+              </span>
+            </div>
+            <p id="memoryImportStatus" class="memory-import-dialog__status" aria-live="polite">Paste an export to begin.</p>
+          </div>
           <div class="memory-import-dialog__actions">
             <button id="memoryImportCancel" class="btn btn--ghost" type="button">Cancel</button>
             <button id="memoryImportSave" class="btn btn--primary" type="button" disabled>Add to memory</button>
@@ -28641,6 +29514,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const boardSurface = document.getElementById('boardSurface')
       const boardHero = document.getElementById('boardHero')
       const boardState = document.getElementById('boardState')
+      const boardProjectFilter = document.getElementById('boardProjectFilter')
       const boardPreview = document.getElementById('boardPreview')
       const boardPreviewState = document.getElementById('boardPreviewState')
       const expandBoardButton = document.getElementById('expandBoard')
@@ -28706,6 +29580,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const memoryImportInput = document.getElementById('memoryImportInput')
       const memoryImportPreview = document.getElementById('memoryImportPreview')
       const memoryImportStatus = document.getElementById('memoryImportStatus')
+      const memoryImportProgress = document.getElementById('memoryImportProgress')
+      const memoryImportProgressDetail = document.getElementById('memoryImportProgressDetail')
       const memoryImportSave = document.getElementById('memoryImportSave')
       const audioNoiseModeInputs = Array.from(document.querySelectorAll('input[name="audioNoiseMode"]'))
       const themeModeInputs = Array.from(document.querySelectorAll('input[name="themeMode"]'))
@@ -28863,11 +29739,19 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const filesViewGridButton = document.getElementById('filesViewGrid')
       const filesViewListButton = document.getElementById('filesViewList')
       const filesFoldersRow = document.getElementById('filesFolders')
+      const filesDetails = document.getElementById('filesDetails')
+      const filesNewButton = document.getElementById('filesNewButton')
+      const filesNewFolderButton = document.getElementById('filesNewFolderButton')
+      const filesScopeTitle = document.getElementById('filesScopeTitle')
+      const filesScopeCopy = document.getElementById('filesScopeCopy')
+      const filesScopeButtons = Array.from(document.querySelectorAll('[data-drive-scope]'))
       let filesEntries = []
       let filesFolders = []
       let filesLoadedAt = 0
       let filesQuery = ''
       let filesView = 'grid'
+      let filesScope = 'home'
+      let filesSelectedId = ''
       // folder chip state: the active filter ('' = All files), which chip is
       // mid-rename, whether the New-folder input is open, and whose kebab /
       // move-to menu is showing (folder id / file id)
@@ -28936,7 +29820,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      const chatContextReplyInput = document.getElementById('chatContextReplyInput')
 	      const chatContextReplySend = document.getElementById('chatContextReplySend')
 	      const chatWorkIndicator = document.getElementById('chatWorkIndicator')
+	      const chatWorkIndicatorOpen = document.getElementById('chatWorkIndicatorOpen')
 	      const chatWorkIndicatorText = document.getElementById('chatWorkIndicatorText')
+	      const chatWorkIndicatorActions = document.getElementById('chatWorkIndicatorActions')
 	      const scoutChatBrainNote = document.getElementById('scoutChatBrainNote')
       const roomChatPanel = document.getElementById('roomChatPanel')
       const roomChatThread = document.getElementById('roomChatThread')
@@ -29415,6 +30301,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       let isBoardReady = false
       let canEditBoard = false
       let canUndoDelete = false
+      let boardProjectFilterValue = 'all'
       // in-flight draft accept/dismiss requests (D4) — declared with the
       // board state so early renderBoard() calls never hit the TDZ
       const boardDraftPendingActions = new Set()
@@ -30330,10 +31217,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
       })
 	      initializeDesktopChatWorkspace()
 	      chatContextClose?.addEventListener('click', () => closeDesktopChatContext())
-	      chatWorkIndicator?.addEventListener('click', () => {
+	      chatWorkIndicatorOpen?.addEventListener('click', () => {
 	        const messageId = String(chatWorkIndicator.dataset.messageId || '')
 	        const message = selectedScoutChatThread()?.messages?.find(candidate => String(candidate?.id || '') === messageId)
-	        if (message) openDesktopWorkContext(message, chatWorkIndicator)
+	        if (message) openDesktopWorkContext(message, chatWorkIndicatorOpen)
 	      })
 	      chatContextReplyInput?.addEventListener('input', () => {
 	        chatContextReplyInput.style.height = 'auto'
@@ -32541,57 +33428,72 @@ Wrap the entire export in one code block. After the code block, say whether the 
         month: 'short', day: 'numeric', year: 'numeric'
       })
 
-      const strideMemoryImportCategoryTypes = {
-        instructions: 'user_instruction',
-        identity: 'identity_context',
-        career: 'career_context',
-        projects: 'project_context',
-        preferences: 'personal_preference'
-      }
-
       function relationshipMemoryLabel(preferenceType) {
-        const normalized = String(preferenceType || '').replace(/_\d{2}$/, '')
+        const normalized = String(preferenceType || '').replace(/(?:_\d{2}|_import_[a-f0-9]{24})$/, '')
         return relationshipMemoryLabels[normalized] || normalized.replaceAll('_', ' ')
       }
 
       function parseSTRIDEMemoryImport(raw) {
         const original = String(raw || '').trim()
         if (!original) return { entries: [], errors: [] }
+        const utf8Length = value => new TextEncoder().encode(value).byteLength
+        if (utf8Length(original) > 128 * 1024) return { entries: [], errors: ['This export is larger than 128 KiB. Import it in two parts.'] }
         const fenced = original.match(/```(?:[a-z0-9_-]+)?\s*\n([\s\S]*?)```/i)
         const source = fenced ? fenced[1] : original
-        const entries = []
+        const draft = []
         const errors = []
-        const seen = new Set()
         let category = ''
+        let current = null
+        let invalidStructure = false
         const heading = /^(?:#{1,6}\s*)?(?:\d+\.\s*)?\*{0,2}(instructions|identity|career|projects|preferences)\*{0,2}:?\s*$/i
-        const entry = /^\[(\d{4}-\d{2}-\d{2}|unknown)\]\s*-\s*(.+)$/i
-        source.split(/\r?\n/).forEach((line, index) => {
+        const entry = /^\[(\d{4}-\d{2}-\d{2}|unknown)\]\s*-\s*(.*)$/i
+        source.replace(/\r\n?/g, '\n').split('\n').forEach(line => {
           const text = line.trim()
           if (!text || text === '```') return
+          if (/^(?:export\s+)?complete(?:ness)?\s*:?/i.test(text) || /^more memories (?:remain|are available)/i.test(text)) return
           const headingMatch = text.match(heading)
           if (headingMatch) {
             category = headingMatch[1].toLowerCase()
+            current = null
             return
           }
-          const entryMatch = text.match(entry)
-          if (!entryMatch || !category) {
-            errors.push(`line ${index + 1} needs a category heading and [date] - entry format`)
+          const entryMatch = text.replace(/^[-*]\s+/, '').match(entry)
+          if (entryMatch && category) {
+            current = { category, date: entryMatch[1].toLowerCase(), value: entryMatch[2] }
+            draft.push(current)
             return
           }
-          const value = `[${entryMatch[1].toLowerCase()}] ${entryMatch[2].trim()}`
-          const key = `${category}\u0000${value.toLowerCase()}`
-          if (seen.has(key)) return
-          seen.add(key)
-          if (value.length > 500) {
-            errors.push(`line ${index + 1} is longer than 500 characters`)
+          if (current) {
+            current.value += `\n${line}`
             return
           }
-          if (entries.length >= 75) {
-            errors.push('one import can contain up to 75 memories')
-            return
-          }
-          entries.push({ category, baseType: strideMemoryImportCategoryTypes[category], value })
+          invalidStructure = true
         })
+        const entries = []
+        const seen = new Set()
+        let normalizedBytes = 0
+        for (const item of draft) {
+          const value = String(item.value || '').normalize('NFC')
+            .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
+            .split('\n').map(line => line.trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim()
+          if (!value) continue
+          const valueBytes = utf8Length(`[${item.date}] ${value}`)
+          const key = `${item.category}\u0000${item.date}\u0000${value.toLocaleLowerCase()}`
+          if (seen.has(key)) continue
+          seen.add(key)
+          normalizedBytes += valueBytes
+          if (normalizedBytes > 96 * 1024) {
+            errors.push('This export contains more than 96 KiB of memory. Import it in two parts.')
+            break
+          }
+          entries.push({ category: item.category, date: item.date, value })
+          if (entries.length > 200) {
+            entries.length = 200
+            errors.push('One import can contain up to 200 memories. Import the rest in a second pass.')
+            break
+          }
+        }
+        if (invalidStructure && !entries.length && !errors.length) errors.push('Use the five category headings and [date] - entry format shown above.')
         return { entries, errors }
       }
 
@@ -32606,6 +33508,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
           return chip
         }))
         memoryImportSave.disabled = relationshipMemoryBusy || !parsed.entries.length || parsed.errors.length > 0
+        memoryImportProgress.hidden = !relationshipMemoryBusy
+        memoryImportStatus.hidden = relationshipMemoryBusy
+        if (relationshipMemoryBusy) return parsed
         if (parsed.errors.length) {
           memoryImportStatus.dataset.state = 'error'
           memoryImportStatus.textContent = parsed.errors[0]
@@ -32632,78 +33537,71 @@ Wrap the entire export in one code block. After the code block, say whether the 
         relationshipMemoryImportStart.focus()
       }
 
-      function nextSTRIDEMemoryImportType(base, used) {
-        for (let index = 1; index <= 99; index += 1) {
-          const candidate = `${base}_${String(index).padStart(2, '0')}`
-          if (!used.has(candidate)) {
-            used.add(candidate)
-            return candidate
-          }
-        }
-        return ''
-      }
-
       async function importSTRIDEMemories() {
         const parsed = renderSTRIDEMemoryImportPreview()
         if (!parsed.entries.length || parsed.errors.length || relationshipMemoryBusy || !relationshipMemorySnapshot || !authedUser) return
         const epoch = relationshipMemoryLoadEpoch
         const identity = String(authedUser.email || '').trim().toLowerCase()
-        const usedTypes = new Set((relationshipMemorySnapshot.preferences || []).map(item => String(item.preferenceType || '')))
-        const entries = parsed.entries.map(item => ({
-          ...item,
-          preferenceType: nextSTRIDEMemoryImportType(item.baseType, usedTypes)
-        }))
-        if (entries.some(item => !item.preferenceType)) {
-          memoryImportStatus.dataset.state = 'error'
-          memoryImportStatus.textContent = 'This profile already has the maximum imported memories in one category.'
-          return
-        }
+        const entries = parsed.entries
         relationshipMemoryBusy = true
         memoryImportSave.disabled = true
         relationshipMemoryImportStart.disabled = true
+        memoryImportProgress.hidden = false
+        memoryImportStatus.hidden = true
+        memoryImportProgressDetail.textContent = `Securing ${entries.length} private ${entries.length === 1 ? 'memory' : 'memories'} in one durable update. Keep STRIDE open until this finishes.`
         const closedStaleVoice = privateRealtimeVoiceInFlight()
         if (closedStaleVoice) {
           stopRealtimeVoiceConversation({ notifyServer: false, terminalReason: 'relationship_memory_changed' })
         }
+        let importFailed = false
         try {
-          let snapshot = relationshipMemorySnapshot
-          if (!snapshot?.consent?.enabled) {
-            const consent = await postAuthJSON('/api/stride/v1/coworker/relationships/consent', {
-              action: 'enable', expectedRevision: snapshot?.revision || 0, allowInferred: false, allowShared: false
-            })
-            if (!consent.ok) throw new Error(consent.data?.error || 'Could not enable private memory.')
-            snapshot = { ...snapshot, ...consent.data, available: true, preferences: snapshot?.preferences || [] }
-          }
-          for (let index = 0; index < entries.length; index += 1) {
-            memoryImportStatus.dataset.state = 'ready'
-            memoryImportStatus.textContent = `Saving ${index + 1} of ${entries.length}…`
-            const result = await postAuthJSON('/api/stride/v1/coworker/relationships/remember', {
-              action: 'remember', expectedRevision: snapshot.revision,
-              preferenceType: entries[index].preferenceType, value: entries[index].value, scope: 'private'
-            })
-            if (!result.ok) throw new Error(result.data?.error || `Import stopped after ${index} saved memories.`)
-            snapshot = { ...snapshot, ...result.data, available: true, consent: result.data.consent || snapshot.consent }
-          }
+          const result = await postAuthJSON('/api/stride/v1/coworker/relationships/import', {
+            action: 'import', expectedRevision: relationshipMemorySnapshot.revision, entries
+          })
+          if (!result.ok) throw new Error(result.data?.error || 'Could not update memory.')
+          const snapshot = { ...relationshipMemorySnapshot, ...result.data, available: true }
           if (epoch !== relationshipMemoryLoadEpoch || identity !== String(authedUser?.email || '').trim().toLowerCase()) return
           relationshipMemorySnapshot = snapshot
           memoryImportInput.value = ''
           renderRelationshipMemory()
           memoryImportStatus.dataset.state = 'ready'
-          memoryImportStatus.textContent = `${entries.length} ${entries.length === 1 ? 'memory' : 'memories'} imported privately.`
-          setRelationshipMemoryStatus(`${entries.length} ${entries.length === 1 ? 'memory' : 'memories'} imported privately${closedStaleVoice ? '. Live Scout ended so it cannot retain the previous profile.' : '.'}`)
+          const imported = Number(result.data?.importedCount ?? entries.length)
+          const alreadyPresent = Number(result.data?.alreadyPresentCount ?? 0)
+          const outcome = imported
+            ? `${imported} ${imported === 1 ? 'memory' : 'memories'} imported privately${alreadyPresent ? `; ${alreadyPresent} already saved` : ''}.`
+            : `Those ${alreadyPresent || entries.length} memories were already saved. Nothing was duplicated.`
+          memoryImportStatus.textContent = outcome
+          setRelationshipMemoryStatus(`${outcome}${closedStaleVoice ? ' Live Scout ended so it cannot retain the previous profile.' : ''}`)
           window.setTimeout(() => {
             if (memoryImportDialog.open && !relationshipMemoryBusy) memoryImportDialog.close()
           }, 650)
         } catch (error) {
           if (epoch !== relationshipMemoryLoadEpoch || identity !== String(authedUser?.email || '').trim().toLowerCase()) return
+          importFailed = true
+          const message = error.message || 'Could not import memory.'
+          relationshipMemoryBusy = false
+          memoryImportProgress.hidden = true
+          memoryImportStatus.hidden = false
+          memoryImportSave.disabled = parsed.errors.length > 0 || !parsed.entries.length
+          relationshipMemoryImportStart.disabled = false
           memoryImportStatus.dataset.state = 'error'
-          memoryImportStatus.textContent = error.message || 'Could not import memory.'
+          memoryImportStatus.textContent = message
           await loadRelationshipMemory()
+          if (identity !== String(authedUser?.email || '').trim().toLowerCase()) return
+          memoryImportStatus.dataset.state = 'error'
+          memoryImportStatus.textContent = message
         } finally {
           if (epoch === relationshipMemoryLoadEpoch && identity === String(authedUser?.email || '').trim().toLowerCase()) {
             relationshipMemoryBusy = false
+            memoryImportProgress.hidden = true
+            memoryImportStatus.hidden = false
             renderRelationshipMemory()
-            renderSTRIDEMemoryImportPreview()
+            if (importFailed) {
+              memoryImportSave.disabled = false
+              relationshipMemoryImportStart.disabled = false
+            } else {
+              renderSTRIDEMemoryImportPreview()
+            }
           }
         }
       }
@@ -32738,7 +33636,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       function relationshipMemorySource(preference) {
 	    const provenance = preference?.source
 	    if (provenance?.kind === 'settings') {
-	      return /^(user_instruction|identity_context|career_context|project_context|personal_preference)_\d{2}$/.test(String(preference?.preferenceType || ''))
+	      return /^(user_instruction|identity_context|career_context|project_context|personal_preference)_(?:\d{2}|import_[a-f0-9]{24})$/.test(String(preference?.preferenceType || ''))
 	        ? 'imported by you in settings'
 	        : provenance.label || 'added by you in settings'
 	    }
@@ -32782,6 +33680,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const date = new Date(value)
         return Number.isNaN(date.getTime())
           ? 'expiry unavailable'
+          : date.getUTCFullYear() >= 9999
+            ? 'saved until you remove it'
           : `expires ${relationshipMemoryExpiryFormatter.format(date)}`
       }
 
@@ -32843,7 +33743,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         editor.className = 'relationship-memory__edit'
         const input = document.createElement('textarea')
         input.rows = 3
-        input.maxLength = 500
+        input.maxLength = 96 * 1024
         input.value = preference.value || ''
         input.setAttribute('aria-label', `correct ${relationshipMemoryLabel(preference.preferenceType) || 'preference'}`)
         const actions = document.createElement('div')
@@ -35082,7 +35982,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           case 'memory':
             return 'memory starts when the room speaks.'
           case 'files':
-            return 'shared materials · readable files feed the brain'
+            return 'company files · indexed with source permissions'
           case 'team':
             return 'named coworkers · human-approved authority'
           case 'research':
@@ -35134,7 +36034,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           case 'artifacts':
             return 'the company brain'
           case 'files':
-            return 'shared materials'
+            return 'company drive'
           case 'team':
             return 'your agent coworkers'
           case 'research':
@@ -35160,7 +36060,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           grill: 'Grill mode',
           board: 'Board',
           memory: 'Memory',
-          files: 'Files',
+          files: 'Drive',
           team: 'Team'
         }
         // the tab name owns the heading; the meeting name lives in the live
@@ -36641,28 +37541,34 @@ Wrap the entire export in one code block. After the code block, say whether the 
         return status === 'complete' || status === 'published'
       }
 
-      function artifactSaveToFilesControl(entry) {
+      function artifactSaveToFilesControl(entry, options = {}) {
         const artifactId = String(entry?.id || '').trim()
         if (!artifactId || !artifactQualifiesForFiles(entry)) return null
         const button = document.createElement('button')
         button.type = 'button'
-        button.className = 'artifact-stage__pdf-btn'
+        button.className = String(options.className || 'artifact-stage__pdf-btn')
+        const readyLabel = String(options.readyLabel || 'Save to Drive')
+        const savingLabel = String(options.savingLabel || 'Saving…')
+        const savedLabel = String(options.savedLabel || 'Saved to Drive')
+        const readyTitle = String(options.readyTitle || 'Save this deliverable to the company Drive')
+        const savedTitle = String(options.savedTitle || 'This deliverable is saved in the company Drive')
+        const errorLabel = String(options.errorLabel || 'could not save to Drive')
         const settleSaved = () => {
-          button.textContent = 'Saved to Files'
+          button.textContent = savedLabel
           button.disabled = true
           button.dataset.state = 'saved'
-          button.title = 'This deliverable is saved on the Files surface'
+          button.title = savedTitle
         }
         if (String(entry?.metadata?.savedToFiles || '').trim().toLowerCase() === 'true') {
           settleSaved()
           return button
         }
-        button.textContent = 'Save to Files'
-        button.title = 'Save this deliverable to the Files surface'
+        button.textContent = readyLabel
+        button.title = readyTitle
         button.addEventListener('click', async () => {
           button.disabled = true
           button.dataset.state = 'saving'
-          button.textContent = 'Saving…'
+          button.textContent = savingLabel
           try {
             const response = await fetch('/assistant/files/save', {
               method: 'POST',
@@ -36671,19 +37577,19 @@ Wrap the entire export in one code block. After the code block, say whether the 
             })
             const payload = await response.json().catch(() => ({}))
             if (!response.ok) {
-              throw new Error(payload.error || 'could not save to Files')
+              throw new Error(payload.error || errorLabel)
             }
             if (entry.metadata && typeof entry.metadata === 'object') {
               entry.metadata.savedToFiles = 'true'
             }
             settleSaved()
-            showToast({ text: 'Saved to Files', kind: 'done' })
+            showToast({ text: savedLabel, kind: 'done' })
             if (typeof loadFilesSurface === 'function') loadFilesSurface(true)
           } catch (error) {
             button.disabled = false
             delete button.dataset.state
-            button.textContent = 'Save to Files'
-            showToast({ text: error.message || 'could not save to Files', kind: 'error' })
+            button.textContent = readyLabel
+            showToast({ text: error.message || errorLabel, kind: 'error' })
           }
         })
         return button
@@ -37630,7 +38536,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           return
         }
         if (roomRealtimeVoiceActive()) {
-          setVoiceIslandState('listening', 'listening…')
+          setVoiceIslandState('listening', 'say “Scout” to speak')
           return
         }
         stopOSAssistantVoice()
@@ -37647,8 +38553,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
         if (localStream && isMicMuted) {
           setLocalMute(false, { announce: true })
         }
-        sendVoiceControlState(true)
-        setVoiceIslandState('listening', 'listening…')
+        // Joining or tapping Scout must not turn ambient room audio into an
+        // always-addressed assistant session. The server admits explicit Scout
+        // references and bounded follow-ups while meeting transcription keeps
+        // running independently.
+        setVoiceIslandState('listening', 'say “Scout” to speak')
       }
 
       async function startRealtimeVoiceFromWaveform(event) {
@@ -47421,8 +48330,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
           if (roomRealtimeVoiceActive()) {
             realtimeVoiceOnlyPending = false
-            sendVoiceControlState(true)
-            setVoiceIslandState('listening', 'listening…')
+            setVoiceIslandState('listening', 'say “Scout” to speak')
           }
         } catch (error) {
           const message = error.message || String(error)
@@ -48207,6 +49115,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            } else if (payload.answer?.text) {
 	              appendScoutChatNode(scoutChatMessageNode('scout', scoutVoice(payload.answer.text), payload.answer.createdAt || new Date().toISOString()))
 	              updateChatThreadItem(payload.answer.text, payload.answer.createdAt || new Date().toISOString())
+	            }
+	            if (payload.boardAction?.surface === 'board') {
+	              setActiveTool('board')
+	              if (payload.boardAction.requestedIntent === 'clear' && !payload.boardAction.mutationExecuted) {
+	                const count = Number(payload.boardAction.activeCardCount || 0)
+	                showToast({
+	                  text: `Opened Board · ${count} ${count === 1 ? 'item' : 'items'} unchanged until recoverable Trash is available`,
+	                  kind: 'note'
+	                })
+	              }
 	            }
 	            // A bare "mode:" prefix without @scout posts as a plain channel
 	            // message — say so instead of silently doing nothing.
@@ -53062,7 +53980,103 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return avatar
 	      }
 
-	      function desktopContextMessageCard(message, options = {}) {
+	      function desktopChatMessageIsOwn(thread, message) {
+	        if (String(message?.role || '').toLowerCase() !== 'user') return false
+	        const viewerEmail = String(authedUser?.email || '').trim().toLowerCase()
+	        if (!viewerEmail) return false
+	        const authorEmail = String(message?.authorEmail || '').trim().toLowerCase()
+	        if (authorEmail) return authorEmail === viewerEmail
+	        return !chatThreadIsChannel(thread)
+	      }
+
+	      function beginDesktopContextMessageEdit(thread, message, card) {
+	        if (!desktopChatMessageIsOwn(thread, message) || card.querySelector('.chat-context-card__editor')) return
+	        const content = card.querySelector('.chat-context-card__content')
+	        const body = card.querySelector('.chat-context-card__body')
+	        if (!content || !body) return
+	        body.hidden = true
+	        card.querySelector('.chat-context-card__message-actions')?.setAttribute('hidden', '')
+	        const editor = document.createElement('form')
+	        editor.className = 'chat-context-card__editor'
+	        const input = document.createElement('textarea')
+	        input.className = 'chat-context-card__editor-input'
+	        input.setAttribute('aria-label', 'Edit reply')
+	        input.value = String(message?.text || message?.content || '')
+	        const actions = bfEl('div', 'chat-context-card__editor-actions')
+	        const cancel = bfEl('button', 'chat-context-card__editor-action', 'Cancel')
+	        cancel.type = 'button'
+	        const save = bfEl('button', 'chat-context-card__editor-action', 'Save')
+	        save.type = 'submit'
+	        save.dataset.primary = 'true'
+	        const canSave = () => Boolean(input.value.trim() || (Array.isArray(message?.files) && message.files.length))
+	        const syncSaveState = () => { save.disabled = !canSave() }
+	        const restore = () => {
+	          editor.remove()
+	          body.hidden = false
+	          card.querySelector('.chat-context-card__message-actions')?.removeAttribute('hidden')
+	        }
+	        input.addEventListener('input', syncSaveState)
+	        cancel.addEventListener('click', restore)
+	        editor.addEventListener('submit', async event => {
+	          event.preventDefault()
+	          if (!canSave()) return
+	          save.disabled = true
+	          cancel.disabled = true
+	          try {
+	            const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(thread.id)}/messages/${encodeURIComponent(message.id)}`, {
+	              method: 'PATCH',
+	              headers: { 'Content-Type': 'application/json' },
+	              body: JSON.stringify({ text: input.value.trim() })
+	            })
+	            const payload = await response.json().catch(() => ({}))
+	            if (!response.ok || !payload?.thread) throw new Error(payload?.error || 'reply could not be edited')
+	            upsertScoutChatThread(payload.thread, { select: false })
+	            renderActiveScoutThread()
+	            syncDesktopOpenChatContext()
+	          } catch (error) {
+	            save.disabled = false
+	            cancel.disabled = false
+	            syncSaveState()
+	            showToast({ text: error?.message || 'reply could not be edited', kind: 'error' })
+	          }
+	        })
+	        actions.append(cancel, save)
+	        editor.append(input, actions)
+	        content.appendChild(editor)
+	        syncSaveState()
+	        input.focus()
+	        input.setSelectionRange(input.value.length, input.value.length)
+	      }
+
+	      async function deleteDesktopContextMessage(thread, message, control) {
+	        if (!desktopChatMessageIsOwn(thread, message)) return
+	        if (control.dataset.armed !== '1') {
+	          control.dataset.armed = '1'
+	          control.textContent = 'Delete?'
+	          window.setTimeout(() => {
+	            if (!control.isConnected) return
+	            delete control.dataset.armed
+	            control.textContent = 'Delete'
+	          }, 2600)
+	          return
+	        }
+	        control.disabled = true
+	        try {
+	          const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(thread.id)}/messages/${encodeURIComponent(message.id)}`, { method: 'DELETE' })
+	          const payload = await response.json().catch(() => ({}))
+	          if (!response.ok || !payload?.thread) throw new Error(payload?.error || 'reply could not be deleted')
+	          upsertScoutChatThread(payload.thread, { select: false })
+	          renderActiveScoutThread()
+	          syncDesktopOpenChatContext()
+	        } catch (error) {
+	          control.disabled = false
+	          delete control.dataset.armed
+	          control.textContent = 'Delete'
+	          showToast({ text: error?.message || 'reply could not be deleted', kind: 'error' })
+	        }
+	      }
+
+	      function desktopContextMessageCard(thread, message, options = {}) {
 	        const card = document.createElement('article')
 	        card.className = 'chat-context-card chat-context-card--message'
 	        if (options.root) card.dataset.root = 'true'
@@ -53072,6 +54086,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          bfEl('span', 'chat-context-card__author', desktopChatAuthorLabel(message)),
 	          bfEl('span', 'chat-context-card__meta', `${scoutChatTimeLabel(message?.createdAt)}${message?.editedAt ? ' · edited' : ''}`)
 	        )
+	        if (!options.root && desktopChatMessageIsOwn(thread, message)) {
+	          const messageActions = bfEl('span', 'chat-context-card__message-actions')
+	          const edit = bfEl('button', 'chat-context-card__message-action', 'Edit')
+	          edit.type = 'button'
+	          edit.setAttribute('aria-label', 'Edit reply')
+	          edit.addEventListener('click', () => beginDesktopContextMessageEdit(thread, message, card))
+	          const remove = bfEl('button', 'chat-context-card__message-action', 'Delete')
+	          remove.type = 'button'
+	          remove.setAttribute('aria-label', 'Delete reply')
+	          remove.addEventListener('click', () => deleteDesktopContextMessage(thread, message, remove))
+	          messageActions.append(edit, remove)
+	          identity.appendChild(messageActions)
+	        }
 	        content.append(
 	          identity,
 	          bfEl('p', 'chat-context-card__body', String(message?.text || message?.content || attachedFilesPreview(message?.files) || 'Attachment'))
@@ -53086,8 +54113,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const resolvedRoot = topology.rootFor(root)
 	        const replies = topology.repliesFor(resolvedRoot)
 	        const fragment = document.createDocumentFragment()
-	        fragment.appendChild(desktopContextMessageCard(resolvedRoot, { root: true }))
-	        replies.forEach(reply => fragment.appendChild(desktopContextMessageCard(reply)))
+	        fragment.appendChild(desktopContextMessageCard(thread, resolvedRoot, { root: true }))
+	        replies.forEach(reply => fragment.appendChild(desktopContextMessageCard(thread, reply)))
 	        chatContextBody.replaceChildren(fragment)
 	        chatContextMeta.textContent = `${replies.length} ${replies.length === 1 ? 'reply' : 'replies'} · reply without losing your place`
 	      }
@@ -53198,6 +54225,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return String(message?.thread?.agentName || meta.agentName || meta.agentDisplayName || meta.workerName || 'Scout').trim() || 'Scout'
 	      }
 
+	      function desktopSaveToDriveControl(artifact, className = 'chat-context-action') {
+	        return artifactSaveToFilesControl(artifact, {
+	          className,
+	          readyLabel: 'Save to Drive',
+	          savedLabel: 'Saved to Drive',
+	          readyTitle: 'Save this deliverable to the company Drive',
+	          savedTitle: 'This deliverable is saved in the company Drive',
+	          errorLabel: 'could not save to Drive'
+	        })
+	      }
+
 	      function renderDesktopWorkContext(message, artifact) {
 	        if (chatContextState?.mode !== 'work' || String(chatContextState.messageId) !== String(message?.id || '')) return
 	        const ref = message?.thread || {}
@@ -53239,27 +54277,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        summary.appendChild(phases)
 	        const actions = bfEl('div', 'chat-context-actions')
 	        if (artifact?.id && artifact?.text) {
-	          const view = bfEl('button', 'chat-context-action', ['complete', 'published'].includes(status) ? 'Open deliverable' : 'Inspect work')
+	          const view = bfEl('button', 'chat-context-action', ['complete', 'published'].includes(status) ? 'View' : 'Inspect work')
 	          view.type = 'button'
 	          view.addEventListener('click', () => openArtifactStage(artifact.id, artifactDisplayTitle(artifact)))
 	          actions.appendChild(view)
 	        }
-	        if (['complete', 'published', 'error', 'failed', 'rejected'].includes(status)) {
-	          const follow = bfEl('button', 'chat-context-action', 'Follow up')
-	          follow.type = 'button'
-	          follow.addEventListener('click', () => {
-	            scoutFollowUpTarget = {
-	              artifactId: String(ref.artifactId || artifact?.id || ''),
-	              mode: String(ref.mode || artifact?.metadata?.mode || 'research'),
-	              query: String(ref.query || artifact?.metadata?.threadQuery || ''),
-	              version: Number(artifact?.metadata?.threadVersion || 1) || 1,
-	              threadId: activeScoutThreadId || ''
-	            }
-	            renderScoutFollowUpTarget()
-	            closeDesktopChatContext({ restoreFocus: false })
-	            scoutChatInput?.focus()
-	          })
-	          actions.appendChild(follow)
+	        if (terminalComplete) {
+	          const save = desktopSaveToDriveControl(artifact)
+	          if (save) actions.appendChild(save)
 	        }
 	        if (actions.childNodes.length) summary.appendChild(actions)
 	        const worklog = document.createElement('section')
@@ -53368,26 +54393,53 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      function syncDesktopActiveWorkIndicator() {
 	        if (!chatWorkIndicator || !desktopChatLayoutQuery.matches) return
 	        const messages = Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []
-	        const message = messages.slice().reverse().find(candidate => {
-	          if (String(candidate?.kind || '') !== 'thread' || !candidate?.thread) return false
+	        const workMessages = messages.filter(candidate => String(candidate?.kind || '') === 'thread' && candidate?.thread)
+	        const activeMessage = workMessages.slice().reverse().find(candidate => {
 	          const artifact = artifactEntries.find(entry => String(entry?.id || '') === String(candidate.thread.artifactId || ''))
-	          const status = String(candidate.thread.status || artifactStatusValue(artifact) || '').toLowerCase()
+	          const status = String(artifactStatusValue(artifact) || candidate.thread.status || '').toLowerCase()
 	          return ['queued', 'running', 'approval_required', 'needs_input', 'parked'].includes(status)
 	        })
+	        const terminalMessage = workMessages.slice().reverse().find(candidate => {
+	          const artifact = artifactEntries.find(entry => String(entry?.id || '') === String(candidate.thread.artifactId || ''))
+	          const status = String(artifactStatusValue(artifact) || candidate.thread.status || '').toLowerCase()
+	          return ['complete', 'published', 'failed', 'error', 'rejected'].includes(status)
+	        })
+	        const message = activeMessage || terminalMessage
 	        if (!message) {
 	          chatWorkIndicator.hidden = true
 	          delete chatWorkIndicator.dataset.messageId
+	          delete chatWorkIndicator.dataset.workState
+	          chatWorkIndicatorActions?.replaceChildren()
+	          if (chatWorkIndicatorActions) chatWorkIndicatorActions.hidden = true
 	          return
 	        }
 	        const artifact = artifactEntries.find(entry => String(entry?.id || '') === String(message.thread.artifactId || ''))
-	        const status = String(message.thread.status || artifactStatusValue(artifact) || 'running')
+	        const status = String(artifactStatusValue(artifact) || message.thread.status || 'running')
+	        const normalizedStatus = status.toLowerCase()
+	        const complete = ['complete', 'published'].includes(normalizedStatus)
 	        const phase = desktopWorkPhase(artifact, status)
 	        const agent = desktopWorkAgentName(message, artifact)
 	        const pct = Number(artifact?.metadata?.progressPercent)
 	        const update = String(artifact?.metadata?.progressNote || message.thread.progressNote || '').trim()
-	        const event = update ? compactArtifactPreview(update) : phase.label
-	        chatWorkIndicatorText.textContent = `${agent} · ${event}${Number.isFinite(pct) ? ` · ${Math.round(pct)}%` : ''}`
+	        const title = compactArtifactPreview(String(artifact?.metadata?.title || message.thread.query || 'Completed work'))
+	        const event = complete ? title : (update ? compactArtifactPreview(update) : phase.label)
+	        chatWorkIndicatorText.textContent = complete
+	          ? `${agent} delivered · ${event}`
+	          : `${agent} · ${event}${Number.isFinite(pct) ? ` · ${Math.round(pct)}%` : ''}`
 	        chatWorkIndicator.dataset.messageId = String(message.id || '')
+	        chatWorkIndicator.dataset.workState = complete ? 'complete' : normalizedStatus
+	        if (chatWorkIndicatorActions) {
+	          chatWorkIndicatorActions.replaceChildren()
+	          if (complete && artifact) {
+	            const view = bfEl('button', 'chat-work-indicator__action-button', 'View')
+	            view.type = 'button'
+	            view.addEventListener('click', () => openArtifactStage(artifact.id, title))
+	            chatWorkIndicatorActions.appendChild(view)
+	            const save = desktopSaveToDriveControl(artifact, 'chat-work-indicator__action-button')
+	            if (save) chatWorkIndicatorActions.appendChild(save)
+	          }
+	          chatWorkIndicatorActions.hidden = !chatWorkIndicatorActions.childElementCount
+	        }
 	        chatWorkIndicator.hidden = false
 	      }
 
@@ -53764,6 +54816,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      // earlier ref renders a one-line marker chip that jumps to the card.
 	      // syncGoalCards querySelectorAll keeps whichever mount is live updated.
 	      function scoutGoalRefRecordNode(message, artifact) {
+	        // Desktop's compact work bar and the shared activity rail own the
+	        // durable work state. Keep the transcript conversational instead of
+	        // repeating the same lifecycle in a second oversized goal card.
+	        // Mobile keeps the existing inline card until its activity sheet is
+	        // available as a dedicated full-height surface.
+	        if (desktopChatLayoutQuery.matches) {
+	          const replyText = String(message?.text || '').trim()
+	          const query = String(message?.thread?.query || '').trim()
+	          return replyText && replyText !== query
+	            ? scoutThreadReplyNode(replyText, message)
+	            : document.createDocumentFragment()
+	        }
 	        const goalId = String(artifact?.id || '')
 	        const messages = Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []
 	        let lastRefId = ''
@@ -60998,6 +62062,168 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return parts.join(' · ')
       }
 
+      function driveScopeDefinition(scope = filesScope) {
+        const definitions = {
+          home: ['Home', 'Everything your team can work with, understood in context.'],
+          mine: ['My Drive', 'Files and deliverables you added to the company workspace.'],
+          shared: ['Shared', 'Files teammates and conversations made available to you.'],
+          recent: ['Recent', 'The latest work across Drive, newest first.']
+        }
+        return definitions[scope] || definitions.home
+      }
+
+      function driveScopeFiles(rows) {
+        const viewerEmail = String(authedUser?.email || '').trim().toLowerCase()
+        const viewerName = String(authedUser?.name || '').trim().toLowerCase()
+        if (filesScope === 'mine') {
+          return rows.filter(file => {
+            const email = String(file?.uploaderEmail || '').trim().toLowerCase()
+            const name = String(file?.uploaderName || '').trim().toLowerCase()
+            return (viewerEmail && email === viewerEmail) || (viewerName && name === viewerName)
+          })
+        }
+        if (filesScope === 'shared') {
+          return rows.filter(file => {
+            const email = String(file?.uploaderEmail || '').trim().toLowerCase()
+            return file?.origin === 'chat' || (viewerEmail && email && email !== viewerEmail)
+          })
+        }
+        return rows
+      }
+
+      function closeFileDetails() {
+        filesSelectedId = ''
+        filesDetails?.classList.remove('is-open')
+        renderFilesSurface()
+      }
+
+      function fileOpenControl(file) {
+        if (file?.origin === 'deliverable' && file?.artifactId) {
+          const button = document.createElement('button')
+          button.type = 'button'
+          button.className = 'drive-detail__action'
+          button.textContent = 'Open'
+          button.addEventListener('click', () => openArtifactStage(file.artifactId, file.name || 'Deliverable'))
+          return button
+        }
+        if (file?.downloadUrl) {
+          const link = document.createElement('a')
+          link.className = 'drive-detail__action'
+          link.href = String(file.downloadUrl)
+          link.target = '_blank'
+          link.rel = 'noopener'
+          if (!file?.previewable) link.setAttribute('download', String(file?.name || 'file'))
+          link.textContent = file?.previewable ? 'Open' : 'Download'
+          return link
+        }
+        return null
+      }
+
+      function renderFileDetails() {
+        if (!filesDetails) return
+        const file = filesEntries.find(candidate => String(candidate?.id || '') === filesSelectedId)
+        if (!file) {
+          filesSelectedId = ''
+          filesDetails.classList.remove('is-open')
+          const empty = bfEl('div', 'drive-details__empty')
+          empty.append(
+            bfEl('span', 'drive-details__empty-icon', '◇'),
+            bfEl('b', '', 'Select a file'),
+            bfEl('p', '', 'See where it came from, who can use it, and how it contributes to the company brain.')
+          )
+          filesDetails.replaceChildren(empty)
+          return
+        }
+
+        filesDetails.classList.add('is-open')
+        const head = bfEl('header', 'drive-detail__head')
+        const identity = bfEl('div', 'drive-detail__identity')
+        const icon = bfEl('span', 'drive-detail__icon')
+        icon.innerHTML = filesRowIconSvg(file)
+        const copy = bfEl('div')
+        copy.append(bfEl('h3', '', String(file?.name || 'File')), bfEl('p', '', fileMetaParts(file)))
+        identity.append(icon, copy)
+        const close = bfEl('button', 'drive-detail__close', '×')
+        close.type = 'button'
+        close.setAttribute('aria-label', 'Close file details')
+        close.addEventListener('click', closeFileDetails)
+        head.append(identity, close)
+
+        const status = String(file?.brainStatus || '')
+        const brain = bfEl('div', 'drive-detail__brain')
+        brain.appendChild(bfEl('span', 'drive-detail__brain-dot'))
+        const brainCopy = bfEl('div')
+        const brainTitle = status === 'ingested' ? 'Indexed in the brain' : status === 'thread' ? 'Indexed privately' : 'Text extraction needed'
+        const brainText = status === 'ingested'
+          ? 'Scout and authorized agents can retrieve relevant passages with this file’s source permissions.'
+          : status === 'thread'
+            ? 'Its context is understood inside the authorized conversation and stays behind that ACL.'
+            : 'The file is stored safely, but its contents are not yet available for semantic recall.'
+        brainCopy.append(bfEl('b', '', brainTitle), bfEl('p', '', brainText))
+        brain.appendChild(brainCopy)
+
+        const details = bfEl('section', 'drive-detail__section')
+        details.appendChild(bfEl('h4', '', 'Details'))
+        const list = bfEl('dl', 'drive-detail__meta')
+        const folder = filesFolders.find(candidate => String(candidate?.id || '') === String(file?.folderId || ''))
+        const source = file?.origin === 'deliverable' ? 'Agent deliverable' : file?.origin === 'chat' ? String(file?.originThreadTitle || 'Chat') : 'Drive upload'
+        const pairs = [
+          ['Owner', String(file?.uploaderName || 'Bonfire')],
+          ['Source', source],
+          ['Folder', String(folder?.name || 'My Drive')],
+          ['Type', String(file?.mime || 'File')],
+          ['Size', scoutChatFileSizeLabel(file?.size) || '—'],
+          ['Added', file?.createdAt ? new Date(file.createdAt).toLocaleString() : '—']
+        ]
+        pairs.forEach(([label, value]) => list.append(bfEl('dt', '', label), bfEl('dd', '', value)))
+        details.appendChild(list)
+
+        const activity = bfEl('section', 'drive-detail__section')
+        activity.appendChild(bfEl('h4', '', 'Activity'))
+        const added = bfEl('div', 'drive-detail__activity')
+        added.append(bfEl('span', 'drive-detail__activity-dot'), bfEl('div', '', ''))
+        added.lastChild.append(bfEl('b', '', file?.origin === 'deliverable' ? 'Saved to Drive' : 'Added to Drive'), bfEl('span', '', file?.createdAt ? new Date(file.createdAt).toLocaleString() : 'time unavailable'))
+        const indexed = bfEl('div', 'drive-detail__activity')
+        indexed.append(bfEl('span', 'drive-detail__activity-dot'), bfEl('div', '', ''))
+        indexed.lastChild.append(bfEl('b', '', brainTitle), bfEl('span', '', 'source permissions preserved'))
+        activity.append(added, indexed)
+
+        const actions = bfEl('div', 'drive-detail__actions')
+        const open = fileOpenControl(file)
+        if (open) actions.appendChild(open)
+        if (file?.origin === 'chat' && file?.originThreadId) {
+          const conversation = bfEl('button', 'drive-detail__action', 'View source')
+          conversation.type = 'button'
+          conversation.addEventListener('click', () => {
+            selectScoutChatThread(file.originThreadId)
+            setActiveTool('chat')
+          })
+          actions.appendChild(conversation)
+        }
+        filesDetails.replaceChildren(head, brain, details, activity, actions)
+      }
+
+      function wireFileSelection(node, file) {
+        const id = String(file?.id || '')
+        if (!id) return
+        node.classList.toggle('is-selected', id === filesSelectedId)
+        node.tabIndex = 0
+        node.setAttribute('aria-selected', id === filesSelectedId ? 'true' : 'false')
+        const select = () => {
+          filesSelectedId = id
+          renderFilesSurface()
+        }
+        node.addEventListener('click', event => {
+          if (event.target instanceof Element && event.target.closest('button, a, .files-folder-menu')) return
+          select()
+        })
+        node.addEventListener('keydown', event => {
+          if (event.key !== 'Enter' && event.key !== ' ') return
+          event.preventDefault()
+          select()
+        })
+      }
+
       /* ---------- Files folders + drag-and-drop ----------
          The custom drag mime keeps an internal row drag distinct from an
          OS-file drop: chips accept it, the upload dropzone ignores it. */
@@ -61259,13 +62485,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         filesFoldersRow.hidden = false
         // counts derive from the visible rows so optimistic moves read true
         const countByFolder = new Map()
-        for (const file of filesEntries) {
+        const scopeRows = driveScopeFiles(filesEntries)
+        for (const file of scopeRows) {
           const folderId = String(file?.folderId || '')
           countByFolder.set(folderId, (countByFolder.get(folderId) || 0) + 1)
         }
         const chips = []
         let focusTarget = null
-        chips.push(filesFolderChipNode({ id: '', name: 'All files' }, filesEntries.length))
+        chips.push(filesFolderChipNode({ id: '', name: 'All files' }, scopeRows.length))
         for (const folder of filesFolders) {
           const id = String(folder?.id || '')
           if (filesFolderRenamingId === id) {
@@ -61393,10 +62620,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         tile.className = 'file-tile'
         wireFileDragSource(tile, file)
 
+        const preview = document.createElement('div')
+        preview.className = 'file-tile__preview'
         const icon = document.createElement('span')
         icon.className = 'file-tile__icon'
         icon.innerHTML = filesRowIconSvg(file)
-        tile.appendChild(icon)
+        if (String(file?.mime || '').startsWith('image/') && file?.downloadUrl) {
+          const image = document.createElement('img')
+          image.className = 'file-tile__image'
+          image.src = String(file.downloadUrl)
+          image.alt = ''
+          image.loading = 'lazy'
+          image.decoding = 'async'
+          preview.appendChild(image)
+        }
+        preview.appendChild(icon)
+        tile.appendChild(preview)
 
         const name = String(file?.name || 'file')
         const downloadUrl = String(file?.downloadUrl || '')
@@ -61452,6 +62691,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           foot.appendChild(kebab)
         }
         tile.appendChild(foot)
+        wireFileSelection(tile, file)
         return tile
       }
 
@@ -61522,6 +62762,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (kebab) {
           row.appendChild(kebab)
         }
+        wireFileSelection(row, file)
         return row
       }
 
@@ -61530,10 +62771,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
         renderFilesFolders()
-        // the folder chip filters first; search and day buckets work inside it
+        const [scopeTitle, scopeCopy] = driveScopeDefinition()
+        if (filesScopeTitle) filesScopeTitle.textContent = scopeTitle
+        if (filesScopeCopy) filesScopeCopy.textContent = scopeCopy
+        filesScopeButtons.forEach(button => {
+          const active = String(button.dataset.driveScope || '') === filesScope
+          button.classList.toggle('is-active', active)
+          button.setAttribute('aria-pressed', active ? 'true' : 'false')
+        })
+        // Scope, folder, and search are composable. The server already applied
+        // the principal ACL before these local views are derived.
+        const inScope = driveScopeFiles(filesEntries)
         const scoped = filesActiveFolderId
-          ? filesEntries.filter(file => String(file?.folderId || '') === filesActiveFolderId)
-          : filesEntries
+          ? inScope.filter(file => String(file?.folderId || '') === filesActiveFolderId)
+          : inScope
         const query = filesQuery.trim().toLowerCase()
         const matches = scoped.filter(file => !query
           || String(file?.name || '').toLowerCase().includes(query)
@@ -61542,8 +62793,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         if (filesStats && filesCount) {
           filesCount.textContent = filesActiveFolderId
-            ? `${scoped.length} of ${filesEntries.length} ${filesEntries.length === 1 ? 'file' : 'files'}`
-            : `${filesEntries.length} ${filesEntries.length === 1 ? 'file' : 'files'}`
+            ? `${scoped.length} of ${inScope.length} ${inScope.length === 1 ? 'file' : 'files'}`
+            : `${inScope.length} ${inScope.length === 1 ? 'file' : 'files'}`
           filesStats.hidden = !filesEntries.length
         }
 
@@ -61562,37 +62813,37 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             empty.appendChild(sub)
           }
           filesList.replaceChildren(empty)
+          renderFileDetails()
           return
         }
 
-        const groups = ['today', 'yesterday', 'last week', 'older'].map(label => ({ label, files: [] }))
-        const groupByLabel = new Map(groups.map(group => [group.label, group]))
-        for (const file of matches) {
-          groupByLabel.get(memoryDayBucket(file?.createdAt)).files.push(file)
-        }
-        const nodes = groups
-          .filter(group => group.files.length)
-          .map(group => {
-            const wrap = document.createElement('section')
-            wrap.className = 'memory-group'
-            const rail = document.createElement('div')
-            rail.className = 'memory-group__rule'
-            const labelRow = document.createElement('div')
-            labelRow.className = 'memory-group__label'
-            const dot = document.createElement('span')
-            dot.className = 'memory-group__dot'
-            const label = document.createElement('span')
-            label.textContent = group.label
-            labelRow.append(dot, label)
-            const items = document.createElement('div')
-            items.className = filesView === 'grid' ? 'files-grid' : 'memory-group__items'
-            for (const file of group.files) {
-              items.appendChild(filesView === 'grid' ? fileTileNode(file) : filesRowNode(file))
-            }
-            wrap.append(rail, labelRow, items)
-            return wrap
-          })
+        const groups = filesScope === 'recent'
+          ? ['today', 'yesterday', 'last week', 'older'].map(label => ({ label, files: matches.filter(file => memoryDayBucket(file?.createdAt) === label) }))
+          : [{
+              label: filesActiveFolderId
+                ? String(filesFolders.find(folder => String(folder?.id || '') === filesActiveFolderId)?.name || 'Folder')
+                : (filesScope === 'home' ? 'Suggested for you' : scopeTitle),
+              files: matches
+            }]
+        const nodes = groups.filter(group => group.files.length).map(group => {
+          const wrap = document.createElement('section')
+          wrap.className = 'drive-file-section'
+          const labelRow = bfEl('div', 'drive-section-label', group.label)
+          const items = document.createElement('div')
+          items.className = filesView === 'grid' ? 'files-grid' : 'drive-file-list'
+          if (filesView === 'list') {
+            const listHead = bfEl('div', 'drive-list-head')
+            listHead.append(bfEl('span', '', ''), bfEl('span', '', 'Name'), bfEl('span', '', 'Brain'), bfEl('span', '', ''))
+            items.appendChild(listHead)
+          }
+          for (const file of group.files) {
+            items.appendChild(filesView === 'grid' ? fileTileNode(file) : filesRowNode(file))
+          }
+          wrap.append(labelRow, items)
+          return wrap
+        })
         filesList.replaceChildren(...nodes)
+        renderFileDetails()
       }
 
       async function uploadFilesToDrive(fileList) {
@@ -61637,6 +62888,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       filesUploadButton?.addEventListener('click', () => filesUploadInput?.click())
+      filesNewButton?.addEventListener('click', () => filesUploadInput?.click())
+      filesNewFolderButton?.addEventListener('click', () => {
+        filesFolderCreating = true
+        filesFolderMenuFor = ''
+        filesRowMenuFor = ''
+        renderFilesSurface()
+      })
+      filesScopeButtons.forEach(button => button.addEventListener('click', () => {
+        filesScope = String(button.dataset.driveScope || 'home')
+        filesActiveFolderId = ''
+        renderFilesSurface()
+      }))
       filesUploadInput?.addEventListener('change', () => {
         uploadFilesToDrive(filesUploadInput.files)
         filesUploadInput.value = ''
@@ -62382,23 +63645,79 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return badge
       }
 
+      function boardDeliveryStages() {
+        return [
+          { id: 'requested', label: 'Work requested', empty: 'No requested work' },
+          { id: 'delivered', label: 'Work delivered', empty: 'Nothing delivered yet' },
+          { id: 'drive', label: 'Saved to Drive', empty: 'Nothing saved to Drive yet' }
+        ]
+      }
+
+      function boardLinkedArtifact(card) {
+        const cardId = String(card?.id || '')
+        if (!cardId) return null
+        return artifactEntries
+          .filter(entry => String(entry?.metadata?.boardCardId || '') === cardId)
+          .sort((left, right) => Date.parse(right?.metadata?.updatedAt || right?.createdAt || 0) - Date.parse(left?.metadata?.updatedAt || left?.createdAt || 0))[0] || null
+      }
+
+      function boardCardDeliveryStage(card) {
+        const artifact = boardLinkedArtifact(card)
+        if (String(artifact?.metadata?.savedToFiles || '').toLowerCase() === 'true') return 'drive'
+        const status = String(artifactStatusValue(artifact) || '').toLowerCase()
+        if (card?.status === 'Done' || ['complete', 'published'].includes(status)) return 'delivered'
+        return 'requested'
+      }
+
+      function boardCardProject(card) {
+        const artifact = boardLinkedArtifact(card)
+        const originId = String(artifact?.metadata?.originId || artifact?.metadata?.originThreadId || '')
+        const sourceThread = scoutChatThreads.find(thread => String(thread?.id || '') === originId && chatThreadIsChannel(thread))
+        if (sourceThread) {
+          return { id: String(sourceThread.id), title: String(sourceThread.title || 'Project'), resolution: 'linked' }
+        }
+        const tags = Array.isArray(card?.tags) ? card.tags : []
+        const tagMatch = scoutChatThreads.find(thread => chatThreadIsChannel(thread) && tags.some(tag => String(tag).trim().toLowerCase() === String(thread?.title || '').trim().toLowerCase()))
+        if (tagMatch) {
+          return { id: String(tagMatch.id), title: String(tagMatch.title || 'Project'), resolution: 'tag' }
+        }
+        return { id: 'needs-project', title: 'Needs project', resolution: 'missing' }
+      }
+
+      function syncBoardProjectFilter() {
+        if (!boardProjectFilter) return
+        const projects = new Map()
+        cards.forEach(card => {
+          const project = boardCardProject(card)
+          projects.set(project.id, project.title)
+        })
+        const options = [new Option('All projects', 'all')]
+        Array.from(projects.entries())
+          .sort((left, right) => left[1].localeCompare(right[1]))
+          .forEach(([id, title]) => options.push(new Option(title, id)))
+        if (boardProjectFilterValue !== 'all' && !projects.has(boardProjectFilterValue)) {
+          boardProjectFilterValue = 'all'
+        }
+        boardProjectFilter.replaceChildren(...options)
+        boardProjectFilter.value = boardProjectFilterValue
+      }
+
       function renderBoard(changes = { moved: new Set(), completed: new Set(), fresh: new Set(), toasts: [], commentPreviews: [] }) {
-        // board doctrine v2: business cards leave the eng lanes for the
-        // collapsed Business track rail so the four lanes stay clean
-        const laneCards = cards.filter(card => !isBusinessCard(card))
-        const businessCards = cards.filter(card => isBusinessCard(card))
-        boardEl.replaceChildren(...statuses.map(status => {
-          const columnCards = laneCards.filter(card => card.status === status)
+        // The canonical four process statuses remain on each card; this view
+        // projects the company-work lifecycle users actually scan for.
+        syncBoardProjectFilter()
+        const laneCards = boardProjectFilterValue === 'all'
+          ? cards
+          : cards.filter(card => boardCardProject(card).id === boardProjectFilterValue)
+        boardEl.replaceChildren(...boardDeliveryStages().map(stage => {
+          const columnCards = laneCards.filter(card => boardCardDeliveryStage(card) === stage.id)
           const column = document.createElement('section')
-          // B2 — collapse an empty lane to a slim rail, but only when other
-          // lanes hold cards; a wholly-empty board keeps equal columns for the hero
-          const collapseEmpty = columnCards.length === 0 && laneCards.length > 0
-          column.className = `column ${statusClass(status)}${collapseEmpty ? ' column--empty' : ''}`
-          column.setAttribute('aria-label', `${status} cards`)
+          column.className = `column column--delivery delivery-${stage.id}`
+          column.setAttribute('aria-label', `${stage.label} cards`)
 
           const header = document.createElement('header')
           const title = document.createElement('h2')
-          title.textContent = status
+          title.textContent = stage.label
           const count = document.createElement('span')
           count.className = 'count'
           count.textContent = String(columnCards.length)
@@ -62409,7 +63728,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (columnCards.length === 0) {
             const empty = document.createElement('div')
             empty.className = 'empty'
-            empty.textContent = 'nothing here yet'
+            empty.textContent = stage.empty
             stack.appendChild(empty)
           } else {
             stack.append(...columnCards.map(card => renderCard(
@@ -62423,11 +63742,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           column.append(header, stack)
           return column
         }))
-        renderBusinessTrack(businessCards, changes)
+        renderBusinessTrack([], changes)
         updateBoardEmptyState()
         renderBoardPreview(changes)
         updateOfficeHome()
       }
+
+      boardProjectFilter?.addEventListener('change', () => {
+        boardProjectFilterValue = String(boardProjectFilter.value || 'all')
+        renderBoard()
+      })
 
       // Business track (board doctrine v2) — business-tagged cards render in
       // a collapsed rail under the lanes; drafts keep their accept/dismiss
@@ -62518,39 +63842,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
         }
 
-        // rail shows In Progress + Blocked columns (multi-card); when nothing
-        // is active yet, peek at the top of the backlog instead so the rail
-        // stays alive while the meeting spins up. Business cards ride the
-        // Business track, not the lanes, so the rail mirrors the clean lanes.
-        const railCards = cards.filter(card => !isBusinessCard(card))
-        const railStatuses = ['In Progress', 'Blocked']
-        const railHasCards = railStatuses.some(status => railCards.some(card => card.status === status))
-        let sections
-        if (railHasCards) {
-          sections = railStatuses.map(status => ({
-            label: status.toLowerCase(),
-            statusCls: statusClass(status),
-            dot: status === 'In Progress' ? 'var(--accent)' : 'var(--warn)',
-            cards: railCards.filter(card => card.status === status),
-            total: null,
-          }))
-        } else {
-          const backlog = railCards.filter(card => card.status === 'Backlog')
-          if (backlog.length === 0) {
-            const empty = document.createElement('p')
-            empty.className = 'board-preview__empty'
-            empty.textContent = 'no active cards.'
-            boardPreview.replaceChildren(empty)
-            return
+        // The compact rail mirrors the same three company-work lifecycle
+        // stages as the expanded Board; canonical process status remains on
+        // each card and no business work disappears into a separate track.
+        const stageDots = { requested: 'var(--text-3)', delivered: 'var(--live)', drive: 'var(--accent)' }
+        const sections = boardDeliveryStages().map(stage => {
+          const stageCards = cards.filter(card => boardCardDeliveryStage(card) === stage.id)
+          return {
+            label: stage.label.toLowerCase(),
+            statusCls: `delivery-${stage.id}`,
+            dot: stageDots[stage.id],
+            cards: stageCards.slice(0, 3),
+            total: stageCards.length,
           }
-          sections = [{
-            label: 'up next',
-            statusCls: statusClass('Backlog'),
-            dot: 'var(--text-3)',
-            cards: backlog.slice(0, 4),
-            total: backlog.length,
-          }]
-        }
+        })
         const columns = sections.map(section => {
           const columnCards = section.cards
           const column = document.createElement('section')
@@ -62603,10 +63908,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             card.addEventListener('click', () => showCardDetail(c))
             column.appendChild(card)
           }
-          if (section.total && section.total > columnCards.length) {
+          if (section.total > columnCards.length) {
             const more = document.createElement('div')
             more.className = 'board-preview__more'
-            more.textContent = `+${section.total - columnCards.length} more in backlog`
+            more.textContent = `+${section.total - columnCards.length} more`
             column.appendChild(more)
           }
           return column
@@ -62684,6 +63989,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           body.textContent = notes
           article.appendChild(body)
         }
+
+        const project = boardCardProject(card)
+        const workContext = document.createElement('div')
+        workContext.className = 'card-work-context'
+        const projectChip = renderCardBadge(project.title)
+        projectChip.classList.add('card-badge--project')
+        if (project.resolution === 'missing') projectChip.classList.add('is-missing')
+        const processChip = renderCardBadge(String(card.status || 'Backlog'))
+        processChip.classList.add('card-badge--process')
+        workContext.append(projectChip, processChip)
+        article.appendChild(workContext)
 
         if (card.draft) {
           // draft actions — Add to board converts, dismiss removes (D4)

@@ -82,6 +82,7 @@ type MeetingSpecialistRealtimeBriefEvidence struct {
 
 type MeetingSpecialistRealtimeBrief struct {
 	Purpose  string                                   `json:"purpose"`
+	Identity *MeetingSpecialistRealtimeIdentity       `json:"identity,omitempty"`
 	Evidence []MeetingSpecialistRealtimeBriefEvidence `json:"evidence"`
 }
 
@@ -156,6 +157,9 @@ func (config MeetingSpecialistRealtimeConfig) validate(launch MeetingSpecialistL
 	}
 	if launch.Validate(config.Now().UTC()) != nil {
 		return ErrMeetingSpecialistUnauthorized
+	}
+	if !meetingSpecialistVoiceMatchesIdentity(launch.Scope.AgentID, config.Voice) {
+		return ErrMeetingSpecialistProviderConfig
 	}
 	if _, _, ok := meetingSpecialistRealtimeResponseAdmission(config, launch, 0, 0); !ok {
 		return ErrMeetingSpecialistProviderConfig

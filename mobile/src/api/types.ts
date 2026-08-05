@@ -236,6 +236,17 @@ export type BoardState = {
 export type BoardResponse = {
   ok: boolean;
   board: BoardState;
+  projection?: {
+    cards?: Array<{
+      cardId: string;
+      deliveryStage: 'requested' | 'delivered' | 'drive';
+      projectId: string;
+      projectTitle: string;
+      projectResolution: 'linked' | 'tag' | 'missing';
+      artifactId?: string;
+    }>;
+    projects?: Array<{ id: string; title: string }>;
+  };
 };
 
 export type StrideRelationshipReference = {
@@ -292,6 +303,8 @@ export type StrideRelationshipMemoryResponse = {
   revision: number;
   consent?: StrideRelationshipConsent;
   preferences?: StrideRelationshipPreference[];
+	importedCount?: number;
+	alreadyPresentCount?: number;
 };
 
 export type StrideRuntimeCapability = {
