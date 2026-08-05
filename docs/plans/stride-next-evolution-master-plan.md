@@ -39,7 +39,7 @@ Older model recommendations are historical baselines, not current authority. The
 ### Country+Golf shipped product checkpoint — 2026-08-04
 
 - The reviewed implementation commit is
-  `e825291a9ed4c2e5fb3f499fe6c464618c117943`, based on the exact requested live
+  `0129b7648151177723eebac11260b80aa20b366c`, based on the exact requested live
   baseline `374150b0bf6651dac1a3c717957fc2f8da463187`. It is live from a sealed
   committed-tree bundle on the DigitalOcean VPS; the separately owned
   `stride-site/` tree was excluded and remains untouched. The live canonical
@@ -48,7 +48,7 @@ Older model recommendations are historical baselines, not current authority. The
   20,518 bytes). No Git push is part of this checkpoint.
 - Native distribution truth is separate: Build 34 predated this work; Build 35
   is the exact `6e6e714119e976d895f10c34c78426ba717c9e43` room/voice predecessor. Build
-  36 is the intended first binary for `e825291a...` and remains pending until
+  36 is the intended first binary for `0129b764...` and remains pending until
   EAS completion, Apple `VALID`, intended `Team (Expo)` availability, and a
   fresh physical-device pass are each independently observed.
 - Focused physical acceptance on Build 35 records: the home cradle listens and
@@ -63,6 +63,11 @@ Older model recommendations are historical baselines, not current authority. The
   activity/comments context rail, adaptive mobile composer that grows per line
   and collapses after send, rich link/media previews, visible agent work with
   stages/progress/timer, durable deliverables, and honest terminal states.
+  Desktop thread replies omit redundant empty-state copy and preserve the draft
+  with an explicit recovery instruction when a connection or cutover interrupts
+  confirmation. Pending attachment chips constrain both filename and provenance
+  metadata with ellipsis while keeping the remove action fixed and the full text
+  available on hover/focus, so long names cannot escape the composer.
 - Scout is the default coordinating coworker. Colton is the first approved
   research hire and speaks in first person; Marvin remains a research
   methodologist candidate, not a silently hired employee. Named-agent prompts
