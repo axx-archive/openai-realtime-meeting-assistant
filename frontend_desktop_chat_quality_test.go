@@ -198,6 +198,16 @@ func TestDesktopThreadReplyKeepsDraftAndOmitsRedundantEmptyState(t *testing.T) {
 func TestDesktopThreadRepliesStayDiscoverableAndAvatarLed(t *testing.T) {
 	html := desktopChatQualityHTML(t)
 	css := desktopChatQualitySection(t, html)
+	renderBody := functionBody(html, "function renderActiveScoutThread()")
+	for _, want := range []string{
+		"const feedMessages = desktopChatLayoutQuery.matches",
+		"messages.filter(message => !message?.replyTo?.messageId)",
+		"feedMessages.forEach((message, messageIndex) =>",
+	} {
+		if !strings.Contains(renderBody, want) {
+			t.Errorf("desktop root-only feed projection missing %q", want)
+		}
+	}
 	for _, want := range []string{
 		"function desktopChatReplyTopology(messages)",
 		"const desktopChatReplyTopologyCache = new WeakMap()",
@@ -216,6 +226,10 @@ func TestDesktopThreadRepliesStayDiscoverableAndAvatarLed(t *testing.T) {
 		"openDesktopMessageContext(message, summary)",
 		"openDesktopMessageContext(message, quote)",
 		"if (chatContextState.mode === 'thread')",
+		"const feedMessages = desktopChatLayoutQuery.matches",
+		"messages.filter(message => !message?.replyTo?.messageId)",
+		"feedMessages.forEach((message, messageIndex) =>",
+		"openDesktopMessageContext(message, document.activeElement)",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("desktop reply discovery contract missing %q", want)
@@ -229,6 +243,9 @@ func TestDesktopThreadRepliesStayDiscoverableAndAvatarLed(t *testing.T) {
 		"min-height: 40px;",
 		"transform: scale(0.96);",
 		"font-variant-numeric: tabular-nums;",
+		"#chatTool .scout-chat-msg__stack",
+		"backdrop-filter: var(--glass-blur-chrome) saturate(1.25);",
+		"radial-gradient(circle at 18% 0%",
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("desktop reply visual contract missing %q", want)

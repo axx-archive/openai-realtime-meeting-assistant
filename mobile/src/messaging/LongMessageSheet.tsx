@@ -1,11 +1,10 @@
-import React, { useEffect, useMemo, useRef } from 'react';
-import { Animated, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useMemo } from 'react';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SymbolView } from 'expo-symbols';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Linking from 'expo-linking';
 
-import { useReduceMotion, duration, ease } from '../theme/motion';
-import { colors, hitMin, radius, shadow, space, type } from '../theme/tokens';
+import { colors, hitMin, radius, space, type } from '../theme/tokens';
 import { parseMessageTextSegments } from './messagePresentation';
 import { ScoutRichText } from './ScoutRichText';
 
@@ -14,6 +13,7 @@ type Props = {
   text: string;
   authorName: string;
   scout: boolean;
+  activity?: boolean;
   onClose: () => void;
 };
 
@@ -32,52 +32,30 @@ function PlainRichText({ text }: { text: string }) {
   );
 }
 
-export function LongMessageSheet({ visible, text, authorName, scout, onClose }: Props) {
-  const insets = useSafeAreaInsets();
-  const reduceMotion = useReduceMotion();
-  const scrim = useRef(new Animated.Value(0)).current;
-  const sheet = useRef(new Animated.Value(28)).current;
-
-  useEffect(() => {
-    if (!visible) return;
-    scrim.setValue(0);
-    sheet.setValue(reduceMotion ? 0 : 28);
-    Animated.parallel([
-      Animated.timing(scrim, { toValue: 1, duration: reduceMotion ? 1 : duration.fast, easing: ease, useNativeDriver: true }),
-      Animated.timing(sheet, { toValue: 0, duration: reduceMotion ? 1 : duration.slow, easing: ease, useNativeDriver: true }),
-    ]).start();
-  }, [reduceMotion, scrim, sheet, visible]);
-
+export function LongMessageSheet({ visible, text, authorName, scout, activity = false, onClose }: Props) {
   return (
-    <Modal visible={visible} transparent statusBarTranslucent animationType="none" onRequestClose={onClose}>
-      <View style={styles.modal}>
-        <Animated.View style={[StyleSheet.absoluteFill, styles.scrim, { opacity: scrim }]}>
-          <Pressable accessibilityLabel="Close full message" onPress={onClose} style={StyleSheet.absoluteFill} />
-        </Animated.View>
-        <Animated.View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, space[4]), transform: [{ translateY: sheet }] }]}>
-          <View style={styles.handle} />
-          <View style={styles.header}>
-            <View style={styles.headerCopy}>
-              <Text style={[styles.eyebrow, scout && styles.eyebrowScout]}>{scout ? 'SCOUT RESPONSE' : 'MESSAGE'}</Text>
-              <Text numberOfLines={1} style={styles.title}>{authorName}</Text>
-            </View>
-            <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} hitSlop={8} style={({ pressed }) => [styles.close, pressed && styles.closePressed]}>
-              <SymbolView name="xmark" size={15} tintColor={colors.text2} />
-            </Pressable>
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <SafeAreaView style={styles.sheet} edges={['left', 'right', 'bottom']}>
+        <View style={styles.handle} />
+        <View style={styles.header}>
+          <View style={styles.headerCopy}>
+            <Text style={[styles.eyebrow, scout && styles.eyebrowScout]}>{activity ? 'SCOUT · ACTIVITY' : scout ? 'SCOUT RESPONSE' : 'MESSAGE'}</Text>
+            <Text numberOfLines={1} style={styles.title}>{authorName}</Text>
           </View>
-          <ScrollView showsVerticalScrollIndicator contentContainerStyle={styles.content}>
-            {scout ? <ScoutRichText text={text} /> : <PlainRichText text={text} />}
-          </ScrollView>
-        </Animated.View>
-      </View>
+          <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} hitSlop={8} style={({ pressed }) => [styles.close, pressed && styles.closePressed]}>
+            <SymbolView name="xmark" size={15} tintColor={colors.text2} />
+          </Pressable>
+        </View>
+        <ScrollView contentInsetAdjustmentBehavior="automatic" showsVerticalScrollIndicator contentContainerStyle={styles.content}>
+          {scout ? <ScoutRichText text={text} /> : <PlainRichText text={text} />}
+        </ScrollView>
+      </SafeAreaView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  modal: { flex: 1, justifyContent: 'flex-end' },
-  scrim: { backgroundColor: colors.scrim },
-  sheet: { ...shadow.glass, maxHeight: '88%', minHeight: '48%', overflow: 'hidden', borderTopLeftRadius: radius.xxl, borderTopRightRadius: radius.xxl, borderWidth: StyleSheet.hairlineWidth, borderBottomWidth: 0, borderColor: colors.glassBorder, backgroundColor: colors.surface1 },
+  sheet: { flex: 1, overflow: 'hidden', backgroundColor: colors.bgApp },
   handle: { alignSelf: 'center', width: 36, height: 5, marginTop: space[2], borderRadius: radius.full, backgroundColor: colors.line2 },
   header: { minHeight: 70, flexDirection: 'row', alignItems: 'center', gap: space[3], paddingHorizontal: space[5], borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line1 },
   headerCopy: { flex: 1 },

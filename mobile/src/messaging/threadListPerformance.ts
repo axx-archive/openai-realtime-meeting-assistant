@@ -2,6 +2,7 @@ import type { ScoutMessage } from '../api/types';
 
 export type ThreadListRow = {
   message: ScoutMessage;
+  threadReplies: readonly ScoutMessage[];
   own: boolean;
   showAuthor: boolean;
   showAvatar: boolean;
@@ -87,6 +88,7 @@ export function threadRowPresentationEqual(
   right: ThreadListRow,
 ): boolean {
   return left.message === right.message
+    && left.threadReplies === right.threadReplies
     && left.own === right.own
     && left.showAuthor === right.showAuthor
     && left.showAvatar === right.showAvatar

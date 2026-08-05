@@ -33,6 +33,7 @@ import { buildTimelineMarkers } from '../messaging/timelineMarkers';
 import { CatchUpSheet } from '../messaging/CatchUpSheet';
 import { MessageActionSheet } from '../messaging/MessageActionSheet';
 import { LongMessageSheet } from '../messaging/LongMessageSheet';
+import { ThreadDetailSheet } from '../messaging/ThreadDetailSheet';
 import { MentionComposerInput } from '../messaging/MentionComposerInput';
 import { AttachmentSourceSheet } from '../messaging/AttachmentSourceSheet';
 import { GifPickerSheet } from '../messaging/GifPickerSheet';
@@ -45,6 +46,7 @@ import {
 } from '../messaging/attachmentSources';
 import { ThreadNotificationMenu, type ThreadNotificationLevel } from '../messaging/ThreadNotificationMenu';
 import { groupMessageReactions, isOwnMessageForViewer } from '../messaging/messagePresentation';
+import { buildThreadReplyTopology } from '../messaging/threadReplyTopology';
 import {
   applyChatThreadEvent,
   chatThreadEventJournalCovers,
@@ -109,6 +111,7 @@ type ThreadMessageRowProps = {
   onOpenCatchUp: () => void;
   onOpenLongMessage: (text: string, authorName: string, scout: boolean) => void;
   onOpenWorkArtifact: (message: ScoutMessage) => void;
+  onOpenThread: (message: ScoutMessage) => void;
 };
 
 const ThreadMessageRow = React.memo(function ThreadMessageRow({
@@ -125,6 +128,7 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
   onOpenCatchUp,
   onOpenLongMessage,
   onOpenWorkArtifact,
+  onOpenThread,
 }: ThreadMessageRowProps) {
   return (
     <>
@@ -166,6 +170,8 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
         timestampReveal={timestampReveal}
         onOpenSource={onOpenSource}
         onOpenReplySource={onOpenSource}
+        threadReplies={item.threadReplies}
+        onOpenThread={onOpenThread}
         onOpenAttachment={onOpenAttachment}
         onLongPress={onLongPress}
         onToggleReaction={onToggleReaction}
@@ -190,6 +196,7 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
   && previous.onOpenCatchUp === next.onOpenCatchUp
   && previous.onOpenLongMessage === next.onOpenLongMessage
   && previous.onOpenWorkArtifact === next.onOpenWorkArtifact
+  && previous.onOpenThread === next.onOpenThread
 ));
 
 const threadRowKey = (row: ThreadRow) => String(row.message.id);
@@ -223,10 +230,9 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [pendingFiles, setPendingFiles] = useState<ScoutFileAttachment[]>([]);
   const [stagingFiles, setStagingFiles] = useState<Array<{ id: string; name: string; mime: string; uri?: string }>>([]);
   const [editingMessage, setEditingMessage] = useState<ScoutMessage | null>(null);
-  const [replyingTo, setReplyingTo] = useState<ScoutMessage | null>(null);
   const [actionMessage, setActionMessage] = useState<{ message: ScoutMessage; own: boolean } | null>(null);
   const [previewFile, setPreviewFile] = useState<ScoutFileAttachment | null>(null);
-  const [expandedMessage, setExpandedMessage] = useState<{ text: string; authorName: string; scout: boolean } | null>(null);
+  const [expandedMessage, setExpandedMessage] = useState<{ text: string; authorName: string; scout: boolean; activity?: boolean } | null>(null);
   const [participants, setParticipants] = useState<ChatMentionCandidate[]>([{ name: 'Scout', kind: 'scout' }]);
   const [threadVisibility, setThreadVisibility] = useState('private');
   const [threadOwnerEmail, setThreadOwnerEmail] = useState('');
@@ -241,11 +247,23 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [typingParticipants, setTypingParticipants] = useState<TypingParticipant[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [retryingReplyID, setRetryingReplyID] = useState<string | null>(null);
+  const [threadContextRootID, setThreadContextRootID] = useState<string | null>(null);
+  const [threadContextFocusComposer, setThreadContextFocusComposer] = useState(false);
+  const [threadReplySending, setThreadReplySending] = useState(false);
+  const [threadReplyError, setThreadReplyError] = useState('');
   // null means "not yet loaded" — distinct from "" which means never read.
   const [readAt, setReadAt] = useState<string | null>(null);
   const listRef = useRef<FlashListRef<ThreadRow>>(null);
   const messagesRef = useRef<ScoutMessage[]>([]);
   messagesRef.current = messages;
+  const replyTopology = useMemo(() => buildThreadReplyTopology(messages), [messages]);
+  const replyTopologyRef = useRef(replyTopology);
+  replyTopologyRef.current = replyTopology;
+  const feedMessages = replyTopology.feedMessages;
+  const feedMessagesRef = useRef<ScoutMessage[]>([]);
+  feedMessagesRef.current = feedMessages;
+  const threadContextRoot = threadContextRootID ? replyTopology.rootFor(threadContextRootID) ?? null : null;
+  const threadContextReplies = threadContextRoot ? replyTopology.repliesFor(threadContextRoot) : [];
   // Starts false while the thread loads. A normal open flips it true once the
   // bottom-rendered list is on screen; a targeted message link stays false
   // until the viewer actually reaches the latest message.
@@ -299,11 +317,41 @@ export function ThreadScreen({ route, navigation }: Props) {
   // real messages, so both need to be able to land on one.
   const scrollToMessage = useCallback(
     (messageId: string) => {
-      const index = messagesRef.current.findIndex((message) => String(message.id) === messageId);
+      const message = messagesRef.current.find((candidate) => String(candidate.id) === messageId);
+      if (!message) return;
+      const root = replyTopologyRef.current.rootFor(message);
+      if (root && String(root.id) !== String(message.id)) {
+        setThreadContextFocusComposer(false);
+        setThreadReplyError('');
+        setThreadContextRootID(String(root.id));
+        return;
+      }
+      const index = feedMessagesRef.current.findIndex((candidate) => String(candidate.id) === messageId);
       if (index >= 0) listRef.current?.scrollToIndex({ index, animated: true });
     },
     [],
   );
+
+  const openThreadContext = useCallback((message: ScoutMessage, focusComposer = false) => {
+    const root = replyTopologyRef.current.rootFor(message);
+    if (!root?.id) return;
+    setActionMessage(null);
+    setEditingMessage(null);
+    setThreadReplyError('');
+    setThreadContextFocusComposer(focusComposer);
+    setThreadContextRootID(String(root.id));
+    void Haptics.selectionAsync();
+  }, []);
+
+  const closeThreadContext = useCallback(() => {
+    setThreadContextRootID(null);
+    setThreadContextFocusComposer(false);
+    setThreadReplyError('');
+  }, []);
+
+  useEffect(() => {
+    if (threadContextRootID && !threadContextRoot) closeThreadContext();
+  }, [closeThreadContext, threadContextRoot, threadContextRootID]);
 
   const dictation = useComposerDictation({
     context: threadVisibility === 'private' ? 'scout' : 'chat',
@@ -444,6 +492,14 @@ export function ThreadScreen({ route, navigation }: Props) {
       .filter((participant) => participant.email)
       .map((participant) => [String(participant.email).trim().toLowerCase(), participant]),
   ), [participants]);
+  const participantAvatars = useMemo(() => new Map(
+    participants
+      .filter((participant) => participant.email && participant.avatarDataURL)
+      .map((participant) => [
+        String(participant.email).trim().toLowerCase(),
+        String(participant.avatarDataURL),
+      ]),
+  ), [participants]);
 
   useEffect(() => {
     if (office.event !== 'chat_typing') return;
@@ -532,13 +588,13 @@ export function ThreadScreen({ route, navigation }: Props) {
   // Where the "N new messages" divider goes. -1 means everything is read and
   // no divider renders.
   const boundary = useMemo(
-    () => firstUnreadIndex(messages, readAt ?? undefined, email),
-    [email, messages, readAt],
+    () => firstUnreadIndex(feedMessages, readAt ?? undefined, email),
+    [email, feedMessages, readAt],
   );
 
   const timelineLabels = useMemo(
-    () => buildTimelineMarkers(messages),
-    [messages],
+    () => buildTimelineMarkers(feedMessages),
+    [feedMessages],
   );
 
   const activeWorkMessage = useMemo(
@@ -548,25 +604,26 @@ export function ThreadScreen({ route, navigation }: Props) {
 
   const rows = useMemo(
     () =>
-      messages.map((message, index) => {
+      feedMessages.map((message, index) => {
         const own = isOwnMessageForViewer(message, {
           viewerEmail: email,
           threadVisibility,
           threadOwnerEmail,
         });
-        const previous = messages[index - 1];
+        const previous = feedMessages[index - 1];
         const showAvatar = !own
           && String(message.role ?? '').toLowerCase() === 'user'
-          && isMessageRunEnd(messages, index);
+          && isMessageRunEnd(feedMessages, index);
         const knownParticipant = participantByEmail.get(String(message.authorEmail ?? '').trim().toLowerCase());
         const showAuthor =
           !previous ||
           previous.role !== message.role ||
           previous.authorEmail !== message.authorEmail;
         const isBoundary = index === boundary;
-        const unreadCount = isBoundary ? messages.length - boundary : 0;
+        const unreadCount = isBoundary ? feedMessages.length - boundary : 0;
         return {
           message,
+          threadReplies: replyTopology.repliesFor(message),
           own,
           showAuthor,
           showAvatar,
@@ -580,7 +637,7 @@ export function ThreadScreen({ route, navigation }: Props) {
           showCatchUp: isBoundary && Boolean(digest?.catchUp?.bullets?.length),
         };
       }),
-    [boundary, digest?.catchUp?.bullets?.length, email, messages, participantByEmail, threadOwnerEmail, threadVisibility, timelineLabels],
+    [boundary, digest?.catchUp?.bullets?.length, email, feedMessages, participantByEmail, replyTopology, threadOwnerEmail, threadVisibility, timelineLabels],
   );
 
   // Advance the marker only when the latest message is genuinely on screen.
@@ -637,12 +694,11 @@ export function ThreadScreen({ route, navigation }: Props) {
     try {
       const response = editingMessage
         ? await api.updateScoutMessage(sessionToken, route.params.threadId, String(editingMessage.id), text, messageFiles)
-        : await api.sendScoutMessage(sessionToken, route.params.threadId, text, messageFiles, String(replyingTo?.id ?? ''));
+        : await api.sendScoutMessage(sessionToken, route.params.threadId, text, messageFiles);
       if (textOverride === undefined) {
         setDraft('');
         setPendingFiles([]);
         setEditingMessage(null);
-        setReplyingTo(null);
       }
       applyTranscriptSnapshot(generationAtRequest, response.thread?.messages ?? response.messages ?? []);
       Keyboard.dismiss();
@@ -655,6 +711,31 @@ export function ThreadScreen({ route, navigation }: Props) {
       setSending(false);
     }
   }
+
+  const sendThreadReply = useCallback(async (text: string): Promise<boolean> => {
+    const rootID = String(threadContextRootID ?? '').trim();
+    if (!sessionToken || !rootID || !text.trim() || threadReplySending) return false;
+    const generationAtRequest = transcriptGenerationRef.current;
+    setThreadReplySending(true);
+    setThreadReplyError('');
+    try {
+      const response = await api.sendScoutMessage(
+        sessionToken,
+        route.params.threadId,
+        text.trim(),
+        [],
+        rootID,
+      );
+      applyTranscriptSnapshot(generationAtRequest, response.thread?.messages ?? response.messages ?? []);
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      return true;
+    } catch (caught) {
+      setThreadReplyError(caught instanceof BonfireApiError ? caught.message : 'Reply did not send. Your text is still here.');
+      return false;
+    } finally {
+      setThreadReplySending(false);
+    }
+  }, [applyTranscriptSnapshot, route.params.threadId, sessionToken, threadContextRootID, threadReplySending]);
 
   const retryScoutReply = useCallback(async (message: ScoutMessage) => {
     const replyID = String(message.id ?? '').trim();
@@ -808,7 +889,7 @@ export function ThreadScreen({ route, navigation }: Props) {
   function beginEdit(message: ScoutMessage) {
     stopTyping();
     setActionMessage(null);
-    setReplyingTo(null);
+    closeThreadContext();
     setEditingMessage(message);
     setDraft(String(message.text ?? message.content ?? ''));
     setPendingFiles(Array.isArray(message.files) ? message.files : []);
@@ -823,10 +904,7 @@ export function ThreadScreen({ route, navigation }: Props) {
   }
 
   function beginReply(message: ScoutMessage) {
-    setActionMessage(null);
-    setEditingMessage(null);
-    setReplyingTo(message);
-    void Haptics.selectionAsync();
+    openThreadContext(message, true);
   }
 
   function copyMessage(message: ScoutMessage) {
@@ -836,10 +914,6 @@ export function ThreadScreen({ route, navigation }: Props) {
     void Clipboard.setStringAsync(text).then(() => {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }).catch(() => setError('Message could not be copied.'));
-  }
-
-  function cancelReply() {
-    setReplyingTo(null);
   }
 
   function confirmDelete(message: ScoutMessage) {
@@ -949,6 +1023,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         text: `# ${workThreadPhase(message)}\n\n${String(message.thread?.progressNote ?? '').trim() || `${agentName} is working. Updates and the finished deliverable will land durably in this conversation.`}\n\n## Work log\n\n- Request accepted from this conversation\n- Current stage: ${String(message.thread?.currentStage ?? 'working').replaceAll('_', ' ')}\n- Delivery: the finished work will land durably here`,
         authorName: `${agentName} · work activity`,
         scout: true,
+        activity: true,
       });
       return;
     }
@@ -976,6 +1051,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         text: `# ${phase}${Number.isFinite(progress) ? ` · ${Math.round(progress)}%` : ''}\n\n${note || `${agentName} is working. Updates and the finished deliverable will land durably in this conversation.`}\n\n## Work log\n\n- Request accepted from this conversation\n- Current stage: ${String(artifact?.metadata?.currentStage ?? message.thread?.currentStage ?? 'working').replaceAll('_', ' ')}\n- Source trail and review receipts remain attached to the completed report\n- Delivery: the finished work will land durably here\n\n## Technical details\n\nRun ${String(message.thread?.id ?? 'pending')} · artifact ${artifactId}`,
         authorName: `${agentName} · work activity`,
         scout: true,
+        activity: true,
       });
     } catch (caught) {
       setError(caught instanceof BonfireApiError ? caught.message : caught instanceof Error ? caught.message : 'Could not open that deliverable.');
@@ -1002,6 +1078,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       onOpenCatchUp={openCatchUp}
       onOpenLongMessage={openLongMessage}
       onOpenWorkArtifact={openWorkArtifact}
+      onOpenThread={openThreadContext}
     />
   ), [
     email,
@@ -1010,6 +1087,7 @@ export function ThreadScreen({ route, navigation }: Props) {
     openMessageActions,
     openLongMessage,
     openWorkArtifact,
+    openThreadContext,
     retryScoutReply,
     retryingReplyID,
     scrollToMessage,
@@ -1125,7 +1203,31 @@ export function ThreadScreen({ route, navigation }: Props) {
         text={expandedMessage?.text ?? ''}
         authorName={expandedMessage?.authorName ?? ''}
         scout={Boolean(expandedMessage?.scout)}
+        activity={Boolean(expandedMessage?.activity)}
         onClose={() => setExpandedMessage(null)}
+      />
+
+      <ThreadDetailSheet
+        visible={Boolean(threadContextRoot)}
+        title={threadTitle}
+        root={threadContextRoot}
+        replies={threadContextReplies}
+        viewerEmail={email}
+        threadVisibility={threadVisibility}
+        threadOwnerEmail={threadOwnerEmail}
+        sessionToken={sessionToken ?? ''}
+        participantAvatars={participantAvatars}
+        focusComposer={threadContextFocusComposer}
+        sending={threadReplySending}
+        error={threadReplyError}
+        onClose={closeThreadContext}
+        onSend={sendThreadReply}
+        onOpenAttachment={openAttachment}
+        onLongPress={openMessageActions}
+        onToggleReaction={toggleReaction}
+        onRetryReply={retryScoutReply}
+        onOpenLongMessage={openLongMessage}
+        onOpenWorkArtifact={openWorkArtifact}
       />
 
       <AttachmentSourceSheet
@@ -1346,21 +1448,6 @@ export function ThreadScreen({ route, navigation }: Props) {
             <Text style={styles.error}>{dictation.error}</Text>
             <Pressable onPress={dictation.retry} accessibilityRole="button">
               <Text style={styles.retry}>Retry</Text>
-            </Pressable>
-          </View>
-        ) : null}
-
-        {!editingMessage && replyingTo ? (
-          <View style={styles.replyingBar}>
-            <View style={styles.replyingMark} />
-            <View style={styles.editingCopy}>
-              <Text style={styles.replyingTitle}>
-                Replying to {String(replyingTo.authorName ?? (replyingTo.role === 'scout' || replyingTo.role === 'assistant' ? 'Scout' : 'message'))}
-              </Text>
-              <Text style={styles.editingHint} numberOfLines={1}>{String(replyingTo.text ?? replyingTo.content ?? 'Attachment')}</Text>
-            </View>
-            <Pressable accessibilityRole="button" accessibilityLabel="Cancel reply" onPress={cancelReply} style={({ pressed }) => [styles.editingCancel, pressed && styles.headerActionPressed]}>
-              <SymbolView name="xmark" tintColor={colors.text2} size={14} />
             </Pressable>
           </View>
         ) : null}

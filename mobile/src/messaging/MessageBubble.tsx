@@ -30,6 +30,9 @@ export type MessageBubbleProps = {
   timestampReveal: Animated.Value;
   onOpenSource?: (messageId: string) => void;
   onOpenReplySource?: (messageId: string) => void;
+  showReplyContext?: boolean;
+  threadReplies?: readonly ScoutMessage[];
+  onOpenThread?: (message: ScoutMessage) => void;
   onLongPress?: (message: ScoutMessage, own: boolean) => void;
   onOpenAttachment?: (file: ScoutFileAttachment) => void;
   onToggleReaction?: (message: ScoutMessage, emoji: string, active: boolean) => void;
@@ -128,6 +131,9 @@ export const MessageBubble = React.memo(function MessageBubble({
   timestampReveal,
   onOpenSource,
   onOpenReplySource,
+  showReplyContext = true,
+  threadReplies = [],
+  onOpenThread,
   onLongPress,
   onOpenAttachment,
   onToggleReaction,
@@ -163,6 +169,16 @@ export const MessageBubble = React.memo(function MessageBubble({
     [message.reactions, viewerEmail],
   );
   const timeLabel = useMemo(() => timeOf(message), [message.createdAt]);
+  const threadParticipants = useMemo(() => {
+    const seen = new Set<string>();
+    return threadReplies.filter((reply) => {
+      const key = String(reply.authorEmail ?? reply.authorName ?? reply.role ?? '').trim().toLowerCase();
+      if (!key || seen.has(key) || seen.size >= 3) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [threadReplies]);
+  const latestThreadReply = threadReplies[threadReplies.length - 1];
   const translated = useMemo(() => ({
     transform: [{ translateX: timestampReveal.interpolate({ inputRange: [0, 1], outputRange: [0, -68] }) }],
   }), [timestampReveal]);
@@ -215,7 +231,7 @@ export const MessageBubble = React.memo(function MessageBubble({
             </View>
           ) : null}
 
-          {replyTo?.messageId ? (
+          {showReplyContext && replyTo?.messageId ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Replying to ${replyTo.authorName}: ${replyTo.text}`}
@@ -417,6 +433,37 @@ export const MessageBubble = React.memo(function MessageBubble({
           </View>
         ) : null}
 
+        {threadReplies.length > 0 && !replyTo?.messageId ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Open ${threadReplies.length} ${threadReplies.length === 1 ? 'reply' : 'replies'}`}
+            accessibilityHint="Opens the thread in a dismissible sheet"
+            onPress={() => onOpenThread?.(message)}
+            style={({ pressed }) => [styles.threadSummary, own && styles.threadSummaryOwn, pressed && styles.threadSummaryPressed]}
+          >
+            <View style={styles.threadAvatars}>
+              {threadParticipants.map((participant, index) => (
+                <View key={String(participant.id)} style={[styles.threadAvatar, index > 0 && styles.threadAvatarOverlap]}>
+                  <ChatAvatar
+                    name={String(participant.authorName ?? (isScout(participant) ? 'Scout' : 'Teammate'))}
+                    avatarDataURL={String(participant.avatarDataURL ?? '') || undefined}
+                    size={22}
+                  />
+                </View>
+              ))}
+            </View>
+            <View style={styles.threadSummaryCopy}>
+              <Text style={styles.threadSummaryCount}>
+                {threadReplies.length} {threadReplies.length === 1 ? 'reply' : 'replies'}
+              </Text>
+              <Text numberOfLines={1} style={styles.threadSummaryLatest}>
+                {latestThreadReply ? `Latest ${timeOf(latestThreadReply)}` : 'Open thread'}
+              </Text>
+            </View>
+            <SymbolView name="chevron.up" tintColor={colors.text3} size={11} />
+          </Pressable>
+        ) : null}
+
         {scout && sources.length > 0 ? (
           <View style={styles.sources}>
             {sources.map((source, index) => (
@@ -526,6 +573,15 @@ const styles = StyleSheet.create({
   reactionChipOwn: { backgroundColor: colors.surface3, transform: [{ scale: 1.02 }] },
   reactionPressed: { transform: [{ scale: 0.96 }], opacity: 0.78 },
   reactionEmoji: { fontSize: 17, lineHeight: 22 },
+  threadSummary: { minHeight: 44, maxWidth: 286, flexDirection: 'row', alignItems: 'center', gap: space[2], marginTop: space[2], paddingHorizontal: 8, paddingVertical: 5, borderRadius: radius.full, backgroundColor: colors.surface2 },
+  threadSummaryOwn: { alignSelf: 'flex-end' },
+  threadSummaryPressed: { opacity: 0.74, transform: [{ scale: 0.96 }] },
+  threadAvatars: { minWidth: 24, flexDirection: 'row', alignItems: 'center' },
+  threadAvatar: { borderRadius: radius.full, borderWidth: 2, borderColor: colors.bgApp, overflow: 'hidden' },
+  threadAvatarOverlap: { marginLeft: -7 },
+  threadSummaryCopy: { minWidth: 0, flex: 1 },
+  threadSummaryCount: { ...type.captionMedium, color: colors.text1, fontVariant: ['tabular-nums'] },
+  threadSummaryLatest: { ...type.label, color: colors.text3, fontVariant: ['tabular-nums'] },
   sources: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 5, marginLeft: space[1] },
   sourceChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.ember, backgroundColor: colors.emberSoft, maxWidth: 150 },
   sourcePressed: { opacity: 0.6 },

@@ -22,6 +22,7 @@ function row(overrides: Partial<ThreadListRow> = {}): ThreadListRow {
   };
   return {
     message,
+    threadReplies: [],
     own: false,
     showAuthor: true,
     showAvatar: true,

@@ -12408,23 +12408,30 @@
            peer author rows never collide). The 40px recipe above still
            governs sources and hover actions. */
         #chatTool .desktop-chat-reactions {
+          align-self: flex-end;
+          gap: 2px;
           margin-top: -12px;
-          padding: 0 8px;
+          padding: 3px;
           position: relative;
           z-index: 2;
+          border-radius: var(--r-full);
+          background:
+            radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.18), transparent 58%),
+            var(--glass-chrome);
+          -webkit-backdrop-filter: var(--glass-blur-chrome) saturate(1.2);
+          backdrop-filter: var(--glass-blur-chrome) saturate(1.2);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.13),
+            0 0 0 1px var(--glass-border),
+            0 7px 18px rgba(0, 0, 0, 0.12);
         }
         #chatTool .desktop-chat-reactions button {
           min-width: 0;
           min-height: 28px;
           height: 28px;
-          padding: 0 9px;
-          background: var(--glass-chrome);
-          -webkit-backdrop-filter: var(--glass-blur-chrome);
-          backdrop-filter: var(--glass-blur-chrome);
-          box-shadow:
-            var(--glass-highlight),
-            0 0 0 1px var(--glass-border),
-            0 4px 10px rgba(0, 0, 0, 0.1);
+          padding: 0 8px;
+          background: transparent;
+          box-shadow: none;
         }
 
         /* The hover toolbar FLOATS over the row instead of reserving a blank
@@ -12434,22 +12441,28 @@
         #chatTool .scout-chat-msg {
           position: relative;
         }
+        #chatTool .scout-chat-msg__stack {
+          position: relative;
+        }
         #chatTool .desktop-chat-actions {
           position: absolute;
           top: -18px;
-          right: 0;
+          right: -8px;
           z-index: 3;
           flex-wrap: nowrap;
           gap: 2px;
           padding: 3px;
           border-radius: var(--r-full);
-          background: var(--glass-chrome);
-          -webkit-backdrop-filter: var(--glass-blur-chrome);
-          backdrop-filter: var(--glass-blur-chrome);
+          background:
+            radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.2), transparent 56%),
+            linear-gradient(135deg, color-mix(in srgb, var(--surface-1) 76%, transparent), color-mix(in srgb, var(--surface-3) 52%, transparent)),
+            var(--glass-chrome);
+          -webkit-backdrop-filter: var(--glass-blur-chrome) saturate(1.25);
+          backdrop-filter: var(--glass-blur-chrome) saturate(1.25);
           box-shadow:
-            var(--glass-highlight),
+            inset 0 1px 0 rgba(255, 255, 255, 0.16),
             0 0 0 1px var(--glass-border),
-            0 8px 20px rgba(0, 0, 0, 0.12);
+            0 10px 26px rgba(0, 0, 0, 0.16);
           opacity: 0;
           pointer-events: none;
           transform: translateY(3px);
@@ -12457,17 +12470,17 @@
           transition-duration: var(--dur-fast);
           transition-timing-function: var(--ease);
         }
-        #chatTool .scout-chat-msg--scout .desktop-chat-actions,
-        #chatTool .scout-chat-msg--peer .desktop-chat-actions,
-        #chatTool .scout-chat-msg--error .desktop-chat-actions {
-          right: auto;
-          left: 31px;
-        }
         #chatTool .desktop-chat-actions button {
           min-width: 32px;
           min-height: 32px;
           padding: 0 8px;
           background: transparent;
+          box-shadow: none;
+        }
+
+        #chatTool .desktop-chat-actions button:hover,
+        #chatTool .desktop-chat-actions button:focus-visible {
+          background: color-mix(in srgb, var(--surface-3) 68%, transparent);
           box-shadow: none;
         }
 
@@ -52590,6 +52603,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        renderScoutFollowUpTarget()
 	        const messages = Array.isArray(thread?.messages) ? thread.messages : []
+	        // Desktop threads follow the Slack/Buzz hierarchy: only roots live in
+	        // the channel timeline. Replies remain durable messages, projected
+	        // through the root's reply summary and right-side conversation rail.
+	        // Narrow web retains its established inline fallback because the
+	        // native iOS surface owns the mobile sheet interaction.
+	        const feedMessages = desktopChatLayoutQuery.matches
+	          ? messages.filter(message => !message?.replyTo?.messageId)
+	          : messages
 	        if (!messages.length) {
 	          remountGhostGoalCards()
 	          if (!scoutChatThread.querySelector('.goalcard')) {
@@ -52603,14 +52624,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        scoutChatThread.querySelectorAll('.scout-chat-empty, .scout-chat-brain-chip, .scout-starters').forEach(function (n) { n.remove() })
 	        resetScoutFeedRenderPass()
 	        let unreadBoundaryMounted = false
-	        messages.forEach((message, messageIndex) => {
+	        feedMessages.forEach((message, messageIndex) => {
 	          if (!unreadBoundaryMounted && priorSeenAt && String(message?.createdAt || '') > priorSeenAt) {
 	            const boundary = desktopChatUnreadBoundaryNode()
 	            // the boundary names its debt — "n new messages", not a bare
 	            // word. Machine records (run-log stages, proposals, manifests)
 	            // are not messages and must not inflate the count; thread-kind
 	            // records DO count — a workstream landing is real catch-up debt.
-	            const remaining = messages.slice(messageIndex).filter(record =>
+	            const remaining = feedMessages.slice(messageIndex).filter(record =>
 	              !['artifact', 'proposal', 'manifest'].includes(String(record?.kind || ''))
 	            ).length
 	            boundary.textContent = remaining === 1 ? '1 new message' : `${remaining} new messages`
@@ -53497,6 +53518,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      function desktopChatScrollToMessage(messageId) {
 	        const target = scoutChatThread?.querySelector(`.scout-chat-msg[data-message-id="${selectorEscape(String(messageId || ''))}"]`)
 	        if (!target) {
+	          const thread = selectedScoutChatThread()
+	          const message = thread?.messages?.find(candidate => String(candidate?.id || '') === String(messageId || ''))
+	          if (message?.replyTo?.messageId) {
+	            openDesktopMessageContext(message, document.activeElement)
+	            return
+	          }
 	          showToast({ text: 'the original message is unavailable', kind: 'note' })
 	          return
 	        }
