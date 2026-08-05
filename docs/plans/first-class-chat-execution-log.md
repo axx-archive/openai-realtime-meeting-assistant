@@ -6,6 +6,37 @@ Primary plan: `docs/plans/first-class-chat-execution-plan.md`
 
 Branch: `codex/country-golf-stride`
 
+## Complete STRIDE product carrier — 2026-08-05
+
+Status: `release_carrier`
+
+- Implementation baseline:
+  `65c3948bed19c3e469c62c762aa653e96bc76027`; Build 39 is reserved for the
+  release carrier containing this reconciliation. Build 38 at `22b9c6e...` is
+  the finished predecessor, not the carrier for the integrated memory, Board,
+  Drive, reply, and room-agent changes.
+- Completed product surfaces are frozen to verification: rich media/GIPHY,
+  STRIDE/Bonfire wordmark and organization shell, settings, reply/activity
+  panels, reactions, notifications, Board, Drive, work visualization, compact
+  delivery, and the corrected room lobby. AnyDoc is not adopted.
+- User memory is continually evolving and individually attributed. Imports are
+  optional, repeatable, idempotent, mergeable, and free of artificial per-line
+  limits; private imports never widen into public chat or meetings. Authorized
+  public chat, recorded meetings, work, feedback, and company context update
+  separate audience-bound evidence without blending people together.
+- Scout can recommend or prepare an explicitly approved Colton invitation.
+  Colton's identity/personality/research role is durable, but live provider
+  speech remains E10-gated and is not represented as production-ready from
+  deterministic wiring alone.
+- Release-candidate validation: full Go and focused Go race passed; 402 native
+  tests and typecheck passed; media and brand harnesses passed; rendered
+  desktop/mobile QA passed for the integrated product surfaces. Disposable
+  local QA data was separate from the production named volume.
+- Physical Build 39 acceptance remains the user gate for cradle, one-send
+  dictation, multi-human Scout invocation, background attributed transcripts,
+  durable promised work, long-feed scrolling, replies, Drive visibility, and
+  room stability. Canonical Board repair and `stride-site/` remain out of scope.
+
 ## Country+Golf production close-out — 2026-08-04
 
 Status: `shipped_product_candidate`
