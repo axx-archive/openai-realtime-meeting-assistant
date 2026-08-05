@@ -4,7 +4,7 @@ import * as Haptics from 'expo-haptics';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { api, BonfireApiError } from '../api/client';
-import type { ScoutThread } from '../api/types';
+import type { ScoutMessage, ScoutThread } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
 import type { RootStackParamList } from '../navigation/types';
@@ -40,6 +40,44 @@ function timeAgo(raw: unknown): string {
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `${hours}h`;
   return `${Math.round(hours / 24)}d`;
+}
+
+const activeWorkStatuses = new Set(['queued', 'running', 'approval_required', 'needs_input', 'parked']);
+
+type ActiveWork = { message: ScoutMessage; work: NonNullable<ScoutMessage['thread']> };
+
+function activeWork(thread: ScoutThread): ActiveWork | null {
+  const messages = Array.isArray(thread.messages) ? thread.messages : [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message.thread || !activeWorkStatuses.has(String(message.thread.status ?? '').toLowerCase())) continue;
+    return { message, work: message.thread };
+  }
+  return null;
+}
+
+const ActiveWorkTimer = React.memo(function ActiveWorkTimer({ active }: { active: ActiveWork }) {
+  const [clock, setClock] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setClock(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <View accessibilityLabel={`${String(active.work.agentName ?? 'Scout')} is working`} style={styles.workTimer}>
+      <View style={styles.workDot} />
+      <Text style={styles.workTime}>{workElapsed(active.work.startedAt ?? active.message.createdAt, clock)}</Text>
+    </View>
+  );
+});
+
+function workElapsed(raw: unknown, now: number): string {
+  const started = new Date(String(raw ?? '')).getTime();
+  if (!Number.isFinite(started)) return 'live';
+  const seconds = Math.max(0, Math.floor((now - started) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`;
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
 }
 
 export function ChannelList() {
@@ -146,6 +184,7 @@ export function ChannelList() {
 		const unread = Math.max(0, Number(thread.unreadCount ?? 0));
         const threadID = String(thread.id);
         const editing = editingThreadID === threadID;
+        const working = activeWork(thread);
         return (
           <Pressable
             key={threadID}
@@ -198,7 +237,7 @@ export function ChannelList() {
               ) : null}
             </View>
 			<View style={styles.meta}>
-				<Text style={styles.time}>{timeAgo(thread.updatedAt)}</Text>
+				{working ? <ActiveWorkTimer active={working} /> : <Text style={styles.time}>{timeAgo(thread.updatedAt)}</Text>}
 				{unread > 0 ? (
 					<View style={styles.unreadBadge}>
 						<Text style={styles.unreadText}>{unread > 99 ? '99+' : unread}</Text>
@@ -242,10 +281,21 @@ const styles = StyleSheet.create({
     ...type.caption,
     color: colors.text2,
   },
-  time: {
+	time: {
     ...type.label,
     color: colors.text3,
   },
+	workTimer: {
+    minHeight: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 7,
+    borderRadius: radius.full,
+    backgroundColor: colors.emberSoft,
+  },
+  workDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.ember },
+  workTime: { ...type.label, color: colors.text2, fontVariant: ['tabular-nums'] },
 	meta: { alignItems: 'flex-end', gap: space[1] },
 	unreadBadge: {
 		minWidth: 20,

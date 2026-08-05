@@ -87,7 +87,7 @@ func giphyRequest(t *testing.T, method, path string, cookies []*http.Cookie) *ht
 	return recorder
 }
 
-func TestAssistantGiphyLaneIsCompileTimeDisabledPendingPrivacyAndProvenance(t *testing.T) {
+func TestAssistantGiphyLaneFailSafeCanDisableSearchAndImport(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp
 	kanbanApp = newIsolatedKanbanBoardApp(t)

@@ -309,7 +309,13 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAuthorizedSnapshot(expec
 		Artifact: updated,
 		Actions:  actions,
 	}
-	input := buildAgentThreadFollowUpInput(thread, artifact, nextVersion, replyText, teamReplies, app.snapshotState(), app.delegatedMemorySnapshot(context.Background(), firstNonEmptyString(updated.Metadata["requestedBy"], requestedByName), updated.Metadata["originRoomId"], 12), time.Now())
+	requester := firstNonEmptyString(updated.Metadata["requestedBy"], requestedByName)
+	principal, principalOK := app.agentThreadRecallPrincipal(requester, updated.Metadata)
+	var memory []meetingMemoryEntry
+	if principalOK {
+		memory = app.memorySnapshotForPrincipal(context.Background(), principal, 12)
+	}
+	input := buildAgentThreadFollowUpInput(thread, artifact, nextVersion, replyText, teamReplies, app.snapshotState(), memory, time.Now())
 
 	// Signal capture (signals.go): asking for a re-run means v(N) missed — a
 	// negative signal whose payload carries WHAT was asked for. Log-and-continue.

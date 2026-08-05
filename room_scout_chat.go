@@ -89,6 +89,7 @@ func (app *kanbanBoardApp) runRoomScoutTextMention(scope RoomScoutScope, questio
 	}
 	principal := sharedRoomRecallPrincipal(scope.RoomID, scope.SittingID)
 	principal.MediaGeneration = scope.MediaGeneration
+	question = app.prepareSTRIDERoomRequesterModelQuery(scope, requesterEmail, requesterName, question)
 	ctx := withAssistantModelSuccessRequired(context.Background())
 	ctx = withAssistantBoardShortcutDisabled(ctx)
 	ctx = withAssistantResponseStyle(ctx, roomScoutTextResponseStyle)
@@ -108,6 +109,24 @@ func (app *kanbanBoardApp) runRoomScoutTextMention(scope RoomScoutScope, questio
 		return
 	}
 	app.publishRoomScoutTextAnswer(scope, replyTo, answer, nil)
+}
+
+// prepareSTRIDERoomRequesterModelQuery preserves who asked without turning a
+// shared meeting into a private-profile lookup. The room's ACL-scoped recall
+// lane already supplies attributed transcripts and company-visible memory;
+// this suffix tells the model how to keep those human identities separate.
+func (app *kanbanBoardApp) prepareSTRIDERoomRequesterModelQuery(scope RoomScoutScope, requesterEmail, requesterName, query string) string {
+	requesterEmail = normalizeAccountEmail(requesterEmail)
+	requesterName = firstNonEmptyString(canonicalRoomActorName(requesterName), participantNameForEmail(requesterEmail), "a room participant")
+	requesterIdentity := requesterName
+	if principal := strideRuntimePrincipalForEmail(requesterEmail); principal != "" {
+		requesterIdentity += " (" + principal + ")"
+	}
+	roster := []string(nil)
+	if app != nil {
+		roster = app.participantSnapshotForRoom(scope.RoomID)
+	}
+	return query + "\n\n[STRIDE shared meeting context: requester=" + requesterIdentity + "; room=" + scope.RoomID + "; sitting=" + scope.SittingID + "; participants=" + strings.Join(roster, ", ") + ". Keep every participant's statements and speaker-attributed meeting history distinct. Use only this sitting's shared transcript plus ACL-authorized company context. Never access, infer from, or reveal private chats, Settings imports, or private user profiles.]"
 }
 
 func (app *kanbanBoardApp) publishRoomScoutTextAnswer(scope RoomScoutScope, replyTo, answer string, extraMetadata map[string]string) {

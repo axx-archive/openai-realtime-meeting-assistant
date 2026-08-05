@@ -7,13 +7,16 @@ import { fileURLToPath } from 'node:url';
 const mobileRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const source = (...parts: string[]) => fs.readFileSync(path.join(mobileRoot, ...parts), 'utf8');
 
-test('native settings exposes inspectable and corrigible Scout memory', () => {
+test('native settings exposes inspectable, importable, and corrigible employee memory', () => {
   const settings = source('src', 'screens', 'SettingsScreen.tsx');
   const memory = source('src', 'components', 'ScoutMemorySettings.tsx');
 
   assert.match(settings, /<ScoutMemorySettings sessionToken=\{sessionToken\}/);
   for (const phrase of [
-    'What Scout remembers about me',
+    'What STRIDE remembers about me',
+	'Import memory to STRIDE',
+	'Copy prompt',
+	'Imported by you in Settings',
     'Turn on private memory',
 	'Learn from repeated patterns · not active yet',
 	'Shared-channel preferences · not active yet',
@@ -47,7 +50,13 @@ test('native settings exposes inspectable and corrigible Scout memory', () => {
 	assert.match(memory, /if \(busyRef\.current\) return null/);
 	assert.match(memory, /if \(busyRef\.current !== claim\) return/);
 	assert.match(memory, /office\.event !== 'relationship_memory_changed'/);
-	assert.match(memory, /closeStalePersonalRealtime\(staleVoiceWasActive\)/);
+  assert.match(memory, /closeStalePersonalRealtime\(staleVoiceWasActive\)/);
+	assert.match(memory, /parseSTRIDEMemoryImport/);
+	assert.match(memory, /\[YYYY-MM-DD\] - Entry/);
+	assert.match(memory, /String\(slot\)\.padStart\(2, '0'\)/);
+	assert.match(memory, /expectedRevision: response\.revision/);
+	assert.match(memory, /No valid memories yet/);
+	assert.match(memory, /Do not include credentials, payment data, medical information/);
 });
 
 test('native relationship memory uses authenticated private control endpoints', () => {

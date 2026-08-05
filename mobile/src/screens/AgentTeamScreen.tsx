@@ -201,10 +201,11 @@ function AgentCard({ record, marketplace, seats, busy, navigation, onDetails, ru
   const name = words(record.displayName, id);
   const role = words(record.category, marketplace ? 'specialist' : 'agent coworker');
   const seat = marketplace ? seats.find((candidate) => candidate.listingId === id) : seatRecord;
-  const state = marketplace ? words(listing.availability, 'internal preview') : words(seatRecord.status, 'unavailable');
+  const state = marketplace ? (listing.id === 'scout' ? 'included' : words(listing.availability, 'internal preview')) : words(seatRecord.status, 'unavailable');
   const outcome = marketplace ? words(listing.outcomeSummary, listing.personalitySummary) : 'Identity, assignments, learning, and access remain in the durable team record.';
   const action = marketplace
-    ? !seat ? { label: 'Start preview', press: () => run(`trial:${id}`, () => api.strideStartTrial(sessionToken, id)) }
+    ? listing.id === 'scout' ? { label: 'Included with STRIDE', press: undefined }
+      : !seat ? { label: 'Start preview', press: () => run(`trial:${id}`, () => api.strideStartTrial(sessionToken, id)) }
       : seat.status === 'trial' ? { label: 'Hire with approval', press: () => run(`hire:${id}`, () => api.strideHire(sessionToken, id, seat.revision)) }
         : { label: 'On your team', press: undefined }
     : seatRecord.status === 'hired_fenced' ? { label: 'Pause', press: () => run(`pause:${id}`, () => api.strideSeatAction(sessionToken, id, 'pause', seatRecord.revision)) }
@@ -261,7 +262,7 @@ function AgentDetailModal({ busy, listing, marketplace, navigation, onClose, rec
     return [
       { id: 'responsibilities', title: 'Responsibilities', body: seat.assignments.length ? seat.assignments.map((item) => `${words(item.role)} · ${item.responsibility}\n${words(item.projectOrChannel)} → ${words(item.destination)}`).join('\n\n') : 'No project or channel assignment yet.' },
       { id: 'access', title: 'Access', body: `${seat.accessRevoked ? 'Revoked' : 'Human-approved and provider-fenced'} · ${(seat.config.memberships ?? []).map((item) => words(item)).join(', ') || 'no memberships'}` },
-      { id: 'memory', title: 'Memory & learning', body: seat.learning.length ? seat.learning.map((item) => `${words(item.status)} · ${item.summary}`).join('\n') : 'No reviewed learning records yet.' },
+      { id: 'memory', title: 'Memory & learning', body: seat.learning.length ? seat.learning.map((item) => `${words(item.status)} · ${item.summary}${item.artifactId ? `\nSource: ${item.artifactId}${item.runId ? ` · ${item.runId}` : ''}${item.confidence ? ` · ${Math.round(item.confidence * 100)}% candidate confidence` : ''}` : ''}`).join('\n\n') : 'No reviewed learning records yet.' },
       { id: 'growth', title: 'Growth & versions', body: latestUpdate ? `${words(latestUpdate.status)} · ${latestUpdate.summary}\n${latestUpdate.semanticDiff ? semanticDiffSummary(latestUpdate.semanticDiff) : 'Legacy update; semantic diff unavailable.'}` : 'No profile updates proposed. Every material change remains opt-in.' },
       { id: 'activity', title: 'Activity', body: seat.lifecycle?.slice(-6).map((item) => `• ${words(item)}`).join('\n') || 'No lifecycle activity.' },
       { id: 'cost', title: 'Cost controls', body: `${seat.config.perRunBudgetCents}¢ per run · ${seat.config.dailyBudgetCents}¢ daily · ${words(seat.config.proactivity)} proactivity` },
@@ -282,7 +283,7 @@ function AgentDetailModal({ busy, listing, marketplace, navigation, onClose, rec
     void run(`update:${seat.id}`, () => api.strideProposeAgentUpdate(sessionToken, seat.id, { revision: seat.revision, summary: 'Human-requested profile, access, and budget review.', candidate: candidateConfig }));
   };
 
-  const footer = !seat ? <View style={styles.detailSafety}><Text style={styles.detailSafetyTitle}>Admission stays closed</Text><Text style={styles.detailSafetyBody}>This preview can be inspected and trialed locally. It cannot start a provider session or inherit standing authority.</Text></View> : (
+  const footer = !seat ? <View style={styles.detailSafety}><Text style={styles.detailSafetyTitle}>{candidate?.id === 'scout' ? 'Included with STRIDE' : 'Admission stays closed'}</Text><Text style={styles.detailSafetyBody}>{candidate?.id === 'scout' ? 'Scout’s personality, memory, and authority contract are inspectable here. There is no duplicate seat or separate hire.' : 'This preview can be inspected and trialed locally. It cannot start a provider session or inherit standing authority.'}</Text></View> : (
     <View style={styles.detailControls}>
       <Text style={styles.detailControlTitle}>Propose a profile update</Text>
       <Text style={styles.detailControlHint}>Nothing changes until the semantic diff is reviewed and approved.</Text>
@@ -297,7 +298,8 @@ function AgentDetailModal({ busy, listing, marketplace, navigation, onClose, rec
       <TextInput accessibilityLabel="Responsibility" editable={!busy} onChangeText={setResponsibility} placeholder="What this coworker owns" placeholderTextColor={colors.text3} style={styles.detailInput} value={responsibility} />
       <Action label="Add assignment" disabled={busy || !project.trim() || !destination.trim() || !responsibility.trim()} onPress={() => { onClose(); void run(`assign:${seat.id}`, () => api.strideAssignAgent(sessionToken, seat.id, { revision: seat.revision, projectOrChannel: project.trim(), role: `${seat.category}_partner`, responsibility: responsibility.trim(), destination: destination.trim() })); }} />
 
-      <Text style={styles.detailControlTitle}>Reviewed learning</Text>
+      <Text style={styles.detailControlTitle}>Memory & growth</Text>
+      {latestLearning?.status === 'pending' ? <View style={styles.detailActionRow}><Action label="Approve proposed learning" disabled={busy} onPress={() => { onClose(); void run(`approve-learning:${seat.id}`, () => api.strideResolveAgentLearning(sessionToken, seat.id, latestLearning.id, 'approve', { revision: seat.revision, summary: '' })); }} /></View> : null}
       <TextInput accessibilityLabel="Learning or correction" editable={!busy} multiline onChangeText={setLearningText} placeholder="Add a source-linked lesson or correct the latest one" placeholderTextColor={colors.text3} style={[styles.detailInput, styles.detailInputMultiline]} value={learningText} />
       <View style={styles.detailActionRow}><Action label="Record" disabled={busy || !learningText.trim()} onPress={() => { onClose(); void run(`learn:${seat.id}`, () => api.strideRecordAgentLearning(sessionToken, seat.id, { revision: seat.revision, subject: seat.category, scope: 'team', summary: learningText.trim() })); }} />{latestLearning ? <Action label="Correct latest" disabled={busy || !learningText.trim()} onPress={() => { onClose(); void run(`correct:${seat.id}`, () => api.strideResolveAgentLearning(sessionToken, seat.id, latestLearning.id, 'correct', { revision: seat.revision, summary: learningText.trim() })); }} /> : null}{latestLearning && latestLearning.status !== 'forgotten' ? <Action label="Forget latest" disabled={busy} onPress={() => { onClose(); void run(`forget:${seat.id}`, () => api.strideResolveAgentLearning(sessionToken, seat.id, latestLearning.id, 'forget', { revision: seat.revision, summary: '' })); }} /> : null}</View>
 
@@ -308,7 +310,7 @@ function AgentDetailModal({ busy, listing, marketplace, navigation, onClose, rec
   return (
     <Modal visible animationType="slide" presentationStyle="formSheet" onRequestClose={onClose}>
       <SafeAreaView style={styles.pickerSafe} edges={['top', 'bottom', 'left', 'right']}>
-        <View style={styles.pickerHead}><View style={styles.pickerHeading}><Text style={styles.pickerEyebrow}>{marketplace ? 'MARKETPLACE PROFILE' : 'TEAM COWORKER'}</Text><Text style={styles.pickerTitle}>{name}</Text><Text style={styles.detailSubtitle}>{words(record.category)} · {words(marketplace ? candidate?.availability : seat?.status)}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Close agent details" hitSlop={8} onPress={onClose} style={({ pressed }) => [styles.pickerClose, pressed && styles.pressed]}><SymbolView name="xmark" size={15} tintColor={colors.text2} /></Pressable></View>
+        <View style={styles.pickerHead}><View style={styles.pickerHeading}><Text style={styles.pickerEyebrow}>{marketplace ? 'MARKETPLACE PROFILE' : 'TEAM COWORKER'}</Text><Text style={styles.pickerTitle}>{name}</Text><Text style={styles.detailSubtitle}>{words(record.category)} · {candidate?.id === 'scout' ? 'included' : words(marketplace ? candidate?.availability : seat?.status)}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Close agent details" hitSlop={8} onPress={onClose} style={({ pressed }) => [styles.pickerClose, pressed && styles.pressed]}><SymbolView name="xmark" size={15} tintColor={colors.text2} /></Pressable></View>
         <FlatList data={sections} keyExtractor={(item) => item.id} renderItem={({ item }) => <View style={styles.detailSection}><Text style={styles.detailSectionTitle}>{item.title}</Text><Text style={styles.detailSectionBody}>{item.body}</Text></View>} ItemSeparatorComponent={() => <View style={styles.detailDivider} />} ListFooterComponent={footer} contentContainerStyle={styles.detailList} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} />
       </SafeAreaView>
     </Modal>

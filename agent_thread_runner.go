@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -72,14 +73,28 @@ func (app *kanbanBoardApp) launchAgentThread(mode string, query string, createdB
 // reproduces today's behavior exactly. Present fields become additive artifact
 // metadata the AgentRunner layer (and Wave 2's /goal engine) can read back.
 type agentThreadGoalSpec struct {
-	Objective     string
-	ToolTemplate  string
-	ContextRefs   string
-	OriginSurface string
-	RequestedBy   string
-	Authority     string
-	Visibility    string
-	PackageID     string
+	Objective           string
+	ToolTemplate        string
+	ContextRefs         string
+	OriginSurface       string
+	RequestedBy         string
+	Authority           string
+	Visibility          string
+	PackageID           string
+	AgentID             string
+	AgentName           string
+	AgentRole           string
+	AgentOutcome        string
+	AgentPersona        string
+	AgentVoice          string
+	AgentStyle          string
+	AgentTraits         string
+	AgentCapabilities   string
+	AgentMemoryPolicy   string
+	AgentCoreMemories   string
+	AgentActiveLearning string
+	AgentDigest         string
+	DelegatedBy         string
 	// Goal-engine linkage (Wave 2): a subtask launched by the /goal engine
 	// stamps its parent goal + subtask id so the child's terminal seam folds
 	// the result back into the parent plan, and the assigned runner so
@@ -120,18 +135,32 @@ type launchFunnelLineage struct {
 func (spec agentThreadGoalSpec) metadata() map[string]string {
 	metadata := map[string]string{}
 	for key, value := range map[string]string{
-		"objective":      spec.Objective,
-		"toolTemplate":   spec.ToolTemplate,
-		"contextRefs":    spec.ContextRefs,
-		"originSurface":  spec.OriginSurface,
-		"requestedBy":    spec.RequestedBy,
-		"authority":      spec.Authority,
-		"visibility":     spec.Visibility,
-		"packageId":      spec.PackageID,
-		"goalParentId":   spec.ParentGoalID,
-		"goalSubtaskId":  spec.SubtaskID,
-		"assignedRunner": spec.AssignedRunner,
-		"outputContract": spec.OutputContract,
+		"objective":           spec.Objective,
+		"toolTemplate":        spec.ToolTemplate,
+		"contextRefs":         spec.ContextRefs,
+		"originSurface":       spec.OriginSurface,
+		"requestedBy":         spec.RequestedBy,
+		"authority":           spec.Authority,
+		"visibility":          spec.Visibility,
+		"packageId":           spec.PackageID,
+		"agentId":             spec.AgentID,
+		"agentName":           spec.AgentName,
+		"agentRole":           spec.AgentRole,
+		"agentOutcome":        spec.AgentOutcome,
+		"agentPersona":        spec.AgentPersona,
+		"agentVoice":          spec.AgentVoice,
+		"agentStyle":          spec.AgentStyle,
+		"agentTraits":         spec.AgentTraits,
+		"agentCapabilities":   spec.AgentCapabilities,
+		"agentMemoryPolicy":   spec.AgentMemoryPolicy,
+		"agentCoreMemories":   spec.AgentCoreMemories,
+		"agentActiveLearning": spec.AgentActiveLearning,
+		"agentDigest":         spec.AgentDigest,
+		"delegatedBy":         spec.DelegatedBy,
+		"goalParentId":        spec.ParentGoalID,
+		"goalSubtaskId":       spec.SubtaskID,
+		"assignedRunner":      spec.AssignedRunner,
+		"outputContract":      spec.OutputContract,
 	} {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
 			metadata[key] = trimmed
@@ -166,7 +195,7 @@ func (app *kanbanBoardApp) launchAgentThreadWithSpec(mode string, query string, 
 	threadID := fmt.Sprintf("agent-thread-%s-%d", mode, time.Now().UnixNano())
 	worker := configuredAgentThreadWorkerName()
 	requester := firstNonEmptyString(strings.TrimSpace(origin["requestedBy"]), createdBy)
-	content := buildAgentThreadScaffold(mode, query, app.snapshotState(), app.agentThreadMemory(context.Background(), requester, origin["originRoomId"], spec.ContextRefs, 12))
+	content := buildAgentThreadScaffold(mode, query, app.snapshotState(), app.agentThreadMemory(context.Background(), requester, origin, spec.ContextRefs, 12))
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	metadata := map[string]string{
 		"source":          "scout_thread",
@@ -373,16 +402,29 @@ var genericContractHeadings = map[string]struct{}{
 	"next moves":         {},
 	"verification":       {},
 	// common report furniture no contract needs to mandate
-	"overview":     {},
-	"summary":      {},
-	"key findings": {},
-	"findings":     {},
-	"background":   {},
-	"introduction": {},
-	"conclusion":   {},
-	"methodology":  {},
-	"appendix":     {},
-	"next steps":   {},
+	"overview":          {},
+	"summary":           {},
+	"role":              {},
+	"mission":           {},
+	"objective":         {},
+	"evidence standard": {},
+	"output contract":   {},
+	"key findings":      {},
+	"findings":          {},
+	"background":        {},
+	"introduction":      {},
+	"conclusion":        {},
+	"methodology":       {},
+	"appendix":          {},
+	"next steps":        {},
+}
+
+func agentThreadArtifactWriter(thread scoutAgentThread, result agentThreadWorkerResult) string {
+	return firstNonEmptyString(
+		strings.TrimSpace(result.Metadata["agentName"]),
+		strings.TrimSpace(thread.Artifact.Metadata["agentName"]),
+		scoutParticipantName,
+	)
 }
 
 func isGenericContractHeading(value string) bool {
@@ -402,7 +444,7 @@ func agentThreadDisplayTitle(body string, fallback string) string {
 }
 
 func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
-	ctx, cancel := context.WithTimeout(context.Background(), agentThreadRequestTimeout())
+	ctx, cancel := agentThreadRequestContext(context.Background(), thread)
 	defer cancel()
 
 	workerResult, err := app.produceAgentThreadArtifactWithWorker(ctx, thread, createOpenAITextResponse)
@@ -462,7 +504,7 @@ func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
 		appendThreadRunLog(thread.Artifact, metadata, thread.ID, version, thread.Artifact.Metadata["createdBy"])
 	}
 
-	artifact, _, updateErr := app.updateOSArtifactWithMetadata(thread.Artifact.ID, title, output, scoutParticipantName, metadata)
+	artifact, _, updateErr := app.updateOSArtifactWithMetadata(thread.Artifact.ID, title, output, agentThreadArtifactWriter(thread, workerResult), metadata)
 	if updateErr != nil {
 		log.Errorf("Failed to update Scout thread artifact %s: %v", thread.ID, updateErr)
 		broadcastAssistantEvent("error", "Scout thread could not update its artifact", map[string]any{
@@ -799,6 +841,60 @@ func (app *kanbanBoardApp) appendAgentRunLogEntry(thread scoutAgentThread, artif
 		"thread_id": thread.ID,
 		"mode":      thread.Mode,
 	})
+	if status == "complete" {
+		app.proposeAgentLearningFromCompletedThread(thread, artifact, output)
+	}
+}
+
+func agentLearningCandidateSummary(thread scoutAgentThread, artifact meetingMemoryEntry, output string) string {
+	title := firstNonEmptyString(strings.TrimSpace(artifact.Metadata["title"]), strings.TrimSpace(artifact.Metadata["threadQuery"]), compactAssistantLine(thread.Query))
+	result := agentRunLogSummary("complete", output, "")
+	if result == "" {
+		result = "The completed artifact passed its delivery gate and remains available for review."
+	}
+	return trimForStorage(fmt.Sprintf("Candidate lesson from %s: %s", compactAssistantLine(title), result), 600)
+}
+
+// Successful named-coworker work can teach the teammate, but never silently.
+// This seam proposes one provenance-bound memory candidate and persists the
+// signed product snapshot; only a later human approve/correct action makes it
+// active provider context.
+func (app *kanbanBoardApp) proposeAgentLearningFromCompletedThread(thread scoutAgentThread, artifact meetingMemoryEntry, output string) {
+	agentID := strings.TrimSpace(artifact.Metadata["agentId"])
+	if app == nil || app.strideRuntime == nil || agentID == "" || strings.TrimSpace(artifact.ID) == "" || strings.TrimSpace(thread.ID) == "" {
+		return
+	}
+	subject := normalizeAgentThreadMode(thread.Mode) + "_delivery"
+	if !strideIdentifier(subject) {
+		subject = "work_delivery"
+	}
+	sourceThreadID := firstNonEmptyString(strings.TrimSpace(artifact.Metadata["originId"]), thread.ID)
+	if !strideIdentifier(sourceThreadID) {
+		sourceThreadID = thread.ID
+	}
+	scope := sourceThreadID
+	if !strideIdentifier(scope) {
+		scope = "team"
+	}
+	sourceRefs := append([]string{"artifact:" + artifact.ID, "run:" + thread.ID}, decodeAssistantContextRefs(artifact.Metadata["contextRefs"])...)
+
+	app.strideProductMu.Lock()
+	defer app.strideProductMu.Unlock()
+	proposed := false
+	err := app.strideRuntime.WithProductContext(canonicalTenantID(), STRIDEProductScopeMarketplace, func(ctx STRIDEProductContext) error {
+		_, created, proposalErr := ctx.Product.proposeAgentLearningFromWork(
+			agentID, subject, scope, agentLearningCandidateSummary(thread, artifact, output), thread.ID, artifact.ID, sourceThreadID,
+			sourceRefs, 0.6, nil, time.Now().UTC(),
+		)
+		proposed = created
+		return proposalErr
+	})
+	if err == nil && proposed {
+		err = app.strideRuntime.Save()
+	}
+	if err != nil {
+		log.Errorf("Failed to propose durable learning for agent %s from run %s: %v", agentID, thread.ID, err)
+	}
 }
 
 // appendAgentRunLogEntryForArtifact is the run ledger's codex-queue seam:
@@ -864,7 +960,7 @@ func (app *kanbanBoardApp) updateQueuedAgentThread(thread scoutAgentThread, work
 		}
 	}
 
-	artifact, _, updateErr := app.updateOSArtifactWithMetadata(thread.Artifact.ID, title, output, scoutParticipantName, metadata)
+	artifact, _, updateErr := app.updateOSArtifactWithMetadata(thread.Artifact.ID, title, output, agentThreadArtifactWriter(thread, workerResult), metadata)
 	if updateErr != nil {
 		log.Errorf("Failed to update queued Scout thread artifact %s: %v", thread.ID, updateErr)
 		broadcastAssistantEvent("error", "Scout thread could not update its queued artifact", map[string]any{
@@ -894,7 +990,7 @@ func (app *kanbanBoardApp) updateQueuedAgentThread(thread scoutAgentThread, work
 	}
 }
 
-func agentThreadRequestTimeout() time.Duration {
+func agentThreadRequestTimeout(thread scoutAgentThread) time.Duration {
 	switch selectedAgentRunnerName() {
 	case agentRunnerCodexSidecar, agentRunnerCodexLocal:
 		return codexExecConfigFromEnv().Timeout
@@ -903,9 +999,24 @@ func agentThreadRequestTimeout() time.Duration {
 		// single-completion default. Only applies when the orchestrator is
 		// selected, so the codex/openai timeouts are unchanged.
 		return orchestratorTimeout()
+	case agentRunnerOpenAIText:
+		// Research is durable background work, not a chat completion. A hard
+		// wall-clock deadline turns a healthy long source pass into a false
+		// failure, so hosted research is cancellation-owned rather than timed.
+		if agentThreadUsesLiveWebSearch(thread) {
+			return 0
+		}
+		return defaultAgentThreadRequestTimeout
 	default:
 		return defaultAgentThreadRequestTimeout
 	}
+}
+
+func agentThreadRequestContext(parent context.Context, thread scoutAgentThread) (context.Context, context.CancelFunc) {
+	if timeout := agentThreadRequestTimeout(thread); timeout > 0 {
+		return context.WithTimeout(parent, timeout)
+	}
+	return context.WithCancel(parent)
 }
 
 type agentThreadWorkerResult struct {
@@ -922,7 +1033,21 @@ type agentThreadWorkerResult struct {
 // wrapper providers emit their underlying result verbatim, so codex/openai
 // paths are byte-for-byte unchanged; only the anthropic path is new.
 func (app *kanbanBoardApp) produceAgentThreadArtifactWithWorker(ctx context.Context, thread scoutAgentThread, responder openAITextResponder) (agentThreadWorkerResult, error) {
+	var err error
+	thread, err = app.reauthorizeAgentThreadProfile(thread)
+	if err != nil {
+		return agentThreadWorkerResult{}, err
+	}
+	// Context refs are launch-time identity bindings, not bearer grants. Resolve
+	// every referenced File again under the original requester immediately at
+	// provider admission, then hand this one authorized snapshot to whichever
+	// runner is selected. A changed/revoked source stops before any provider call.
+	providerContext, err := app.agentThreadProviderContext(ctx, thread)
+	if err != nil {
+		return agentThreadWorkerResult{}, err
+	}
 	job := app.newAgentJob(thread)
+	job.Context = providerContext
 	runner := app.selectAgentRunner(job, responder)
 	progress, err := runner.RunJob(ctx, job)
 	if err != nil {
@@ -931,9 +1056,110 @@ func (app *kanbanBoardApp) produceAgentThreadArtifactWithWorker(ctx context.Cont
 	// onProgress persists each non-terminal turn onto the running artifact so the
 	// progress card advances mid-run; the terminal update is left to the seam in
 	// runAgentThread (folding that write here would race it).
-	return drainAgentProgress(progress, func(update AgentProgress) {
+	result, runErr := drainAgentProgress(progress, func(update AgentProgress) {
 		app.persistAgentThreadProgress(thread, update)
 	})
+	// The launch digest is an audit snapshot, not continuing authority. Carry
+	// the just-reauthorized identity fields through the runner result so both
+	// synchronous completion and queued-worker status persist the current
+	// digest/persona that actually governed provider admission.
+	if strings.TrimSpace(thread.Artifact.Metadata["agentId"]) != "" {
+		if result.Metadata == nil {
+			result.Metadata = map[string]string{}
+		}
+		for _, key := range agentThreadProfileMetadataKeys {
+			if value := strings.TrimSpace(thread.Artifact.Metadata[key]); value != "" {
+				result.Metadata[key] = value
+			}
+		}
+		result.Metadata["agentReauthorizedAt"] = thread.Artifact.Metadata["agentReauthorizedAt"]
+	}
+	return result, runErr
+}
+
+var agentThreadProfileMetadataKeys = []string{
+	"agentId", "agentName", "agentRole", "agentOutcome", "agentPersona", "agentVoice", "agentStyle",
+	"agentTraits", "agentCapabilities", "agentMemoryPolicy", "agentCoreMemories", "agentActiveLearning", "agentDigest",
+}
+
+// reauthorizeAgentThreadProfile is the launch-to-provider capability fence for
+// a hired coworker. Launch metadata is only an audit snapshot: immediately
+// before a runner sees the job, resolve the seat from the current signed
+// product state again. A pause/offboard/revocation therefore stops the call;
+// a human correction refreshes the digest and the prompt instead of running
+// with stale learning. The coworker's provider seat remains fenced — this
+// authorizes only the existing bounded STRIDE runner selected for the thread.
+func (app *kanbanBoardApp) reauthorizeAgentThreadProfile(thread scoutAgentThread) (scoutAgentThread, error) {
+	agentID := strings.TrimSpace(thread.Artifact.Metadata["agentId"])
+	if agentID == "" {
+		return thread, nil
+	}
+	if app == nil || app.strideRuntime == nil {
+		return scoutAgentThread{}, fmt.Errorf("assigned agent is unavailable; reassign or resume the seat before retrying")
+	}
+
+	var profile STRIDEProductAgentContextProfile
+	found := false
+	err := app.strideRuntime.WithProductContext(canonicalTenantID(), STRIDEProductScopeMarketplace, func(ctx STRIDEProductContext) error {
+		profile, found = ctx.Product.agentContextProfile(agentID)
+		return nil
+	})
+	if err != nil || !found {
+		return scoutAgentThread{}, fmt.Errorf("assigned agent is unavailable; reassign or resume the seat before retrying")
+	}
+	// Reviewed run-derived learning is continuing context, not a bearer grant.
+	// Reauthorize its source artifact for the original requester on every run;
+	// revoked/deleted sources simply fall out of the active memory projection.
+	requester := firstNonEmptyString(strings.TrimSpace(thread.Artifact.Metadata["requestedBy"]), strings.TrimSpace(thread.Artifact.Metadata["createdBy"]))
+	profile.ActiveLearning = app.reauthorizedAgentLearningForRequester(profile.ActiveLearning, requester)
+	profile.Digest = ""
+	profileDigest, digestErr := STRIDEContractDigest(profile)
+	if digestErr != nil {
+		return scoutAgentThread{}, fmt.Errorf("assigned agent profile could not be verified")
+	}
+	profile.Digest = profileDigest
+	if normalizeAgentThreadMode(thread.Mode) == "research" && !containsSTRIDEID(profile.Capabilities, "deep_research") {
+		return scoutAgentThread{}, fmt.Errorf("%s is not currently approved for deep research", profile.DisplayName)
+	}
+
+	metadata := make(map[string]string, len(thread.Artifact.Metadata)+len(agentThreadProfileMetadataKeys))
+	for key, value := range thread.Artifact.Metadata {
+		metadata[key] = value
+	}
+	for _, key := range agentThreadProfileMetadataKeys {
+		delete(metadata, key)
+	}
+	for key, value := range agentThreadGoalSpecForProfile(profile, metadata["delegatedBy"]).metadata() {
+		if strings.HasPrefix(key, "agent") {
+			metadata[key] = value
+		}
+	}
+	metadata["agentReauthorizedAt"] = time.Now().UTC().Format(time.RFC3339Nano)
+	thread.Artifact.Metadata = metadata
+	return thread, nil
+}
+
+func (app *kanbanBoardApp) reauthorizedAgentLearningForRequester(values []STRIDEProductAgentLearning, requester string) []STRIDEProductAgentLearning {
+	if len(values) == 0 {
+		return nil
+	}
+	user := accountStore().findUser(requester)
+	result := make([]STRIDEProductAgentLearning, 0, len(values))
+	for _, learning := range values {
+		if learning.ExpiresAt != nil && !learning.ExpiresAt.After(time.Now().UTC()) {
+			continue
+		}
+		if learning.ArtifactID != "" {
+			if user == nil {
+				continue
+			}
+			if _, ok := authorizedArtifactForActions(context.Background(), user, learning.ArtifactID, ACLReadContent); !ok {
+				continue
+			}
+		}
+		result = append(result, learning)
+	}
+	return result
 }
 
 // persistAgentThreadProgress stamps a runner's per-turn progress (currentStage,
@@ -953,6 +1179,11 @@ func (app *kanbanBoardApp) persistAgentThreadProgress(thread scoutAgentThread, u
 		log.Errorf("Failed to persist thread %s progress: %v", thread.ID, err)
 		return
 	}
+	// The chat work card is a durable projection, not a launch-time snapshot.
+	// Persist and fan out every bounded runner update so native clients (which
+	// intentionally render from the authorized thread record) advance without
+	// polling the artifact endpoint or waiting for the terminal write.
+	app.updateScoutChatThreadRefs(thread.ID, "running", thread.Artifact.ID)
 	// Live progress: mirror the goal engine's persist (goal_engine.go) — the
 	// memory snapshot rides the kanban socket so clients holding the artifact
 	// see the bar move without a reload. updateOSArtifactWithMetadata already
@@ -963,6 +1194,20 @@ func (app *kanbanBoardApp) persistAgentThreadProgress(thread scoutAgentThread, u
 }
 
 func (app *kanbanBoardApp) produceAgentThreadArtifact(ctx context.Context, thread scoutAgentThread, responder openAITextResponder) (string, error) {
+	job := app.newAgentJob(thread)
+	providerContext, err := app.agentThreadProviderContext(ctx, thread)
+	if err != nil {
+		return "", err
+	}
+	job.Context = providerContext
+	return app.produceAgentThreadArtifactForJob(ctx, job, responder)
+}
+
+// produceAgentThreadArtifactForJob consumes the provider-admission snapshot
+// already attached to the job. The runner wrapper must not re-read Files or
+// rebuild memory after the shared ACL fence.
+func (app *kanbanBoardApp) produceAgentThreadArtifactForJob(ctx context.Context, job AgentJob, responder openAITextResponder) (string, error) {
+	thread := job.thread
 	if app == nil {
 		return "", fmt.Errorf("assistant is unavailable")
 	}
@@ -974,15 +1219,21 @@ func (app *kanbanBoardApp) produceAgentThreadArtifact(ctx context.Context, threa
 		return "", fmt.Errorf("OPENAI_API_KEY is not configured")
 	}
 
-	requester := firstNonEmptyString(strings.TrimSpace(thread.Artifact.Metadata["requestedBy"]), strings.TrimSpace(thread.Artifact.Metadata["createdBy"]))
+	liveWebSearch := agentThreadUsesLiveWebSearch(thread)
+	instructions := app.agentThreadInstructionsForThread(thread)
+	if liveWebSearch {
+		instructions += "\n\nLive research authority: Use the hosted web-search tool for every current or externally verifiable claim. Prefer primary or official sources, distinguish sourced fact from inference, and include the exact source URL for each material claim. If a claim cannot be verified with the tool in this run, label it unverified rather than filling the gap from recall."
+	}
 	output, err := responder(ctx, apiKey, openAITextRequest{
 		Model:           meetingBrainModel(),
 		Seat:            seatAgentThreadText,
-		Instructions:    app.agentThreadInstructionsForThread(thread),
-		Input:           buildAgentThreadInput(thread, app.snapshotState(), app.agentThreadMemory(ctx, requester, thread.Artifact.Metadata["originRoomId"], thread.Artifact.Metadata["contextRefs"], 20), time.Now()),
+		Workflow:        firstNonEmptyString(strings.TrimSpace(thread.Artifact.Metadata["toolTemplate"]), "agent_thread_"+normalizeAgentThreadMode(thread.Mode)),
+		Instructions:    instructions,
+		Input:           buildAgentThreadInput(thread, job.Context.Board, job.Context.Memory, time.Now()),
 		ReasoningEffort: "low",
 		Verbosity:       "medium",
-		MaxOutputTokens: 2600,
+		MaxOutputTokens: agentThreadMaxOutputTokens(),
+		EnableWebSearch: liveWebSearch,
 	})
 	if err != nil {
 		return "", err
@@ -993,6 +1244,23 @@ func (app *kanbanBoardApp) produceAgentThreadArtifact(ctx context.Context, threa
 	}
 
 	return output, nil
+}
+
+func agentThreadUsesLiveWebSearch(thread scoutAgentThread) bool {
+	return normalizeAgentThreadMode(thread.Mode) == "research" || strings.EqualFold(strings.TrimSpace(thread.Artifact.Metadata["toolTemplate"]), "deep_research")
+}
+
+const defaultAgentThreadMaxOutputTokens = 8000
+
+func agentThreadMaxOutputTokens() int {
+	value := positiveIntEnv("BONFIRE_AGENT_THREAD_MAX_OUTPUT_TOKENS", defaultAgentThreadMaxOutputTokens)
+	if value < 3200 {
+		return 3200
+	}
+	if value > 12000 {
+		return 12000
+	}
+	return value
 }
 
 func (app *kanbanBoardApp) currentOpenAIAPIKey() string {
@@ -1027,6 +1295,10 @@ func buildAgentThreadScaffold(mode string, query string, board kanbanBoardState,
 }
 
 func buildAgentThreadError(thread scoutAgentThread, err error) string {
+	nextAction := "retry the run — the agent orchestrator hit an error, not a missing worker. If it recurs, check the worker logs. This thread does not require reconnecting an external Codex worker."
+	if errors.Is(err, ErrAgentThreadSourceChanged) {
+		nextAction = "the source changed after this work was requested. Reselect or reattach every referenced File, confirm you can still open it, then retry. Nothing was sent to a provider with stale or revoked source access."
+	}
 	lines := []string{
 		"Scout work thread",
 		"",
@@ -1038,7 +1310,7 @@ func buildAgentThreadError(thread scoutAgentThread, err error) string {
 		"- Scout created the artifact and ran the agent orchestrator.",
 		"- Worker error: " + strings.TrimSpace(err.Error()),
 		"",
-		"Next action: retry the run — the agent orchestrator hit an error, not a missing worker. If it recurs, check the worker logs. This thread does not require reconnecting an external Codex worker.",
+		"Next action: " + nextAction,
 	}
 	return strings.Join(appendGoalWorkflow(lines, thread.Mode, thread.Query, err.Error(), agentThreadDeliverable(thread.Mode), "worker error recorded on artifact"), "\n")
 }
@@ -1050,9 +1322,14 @@ func buildAgentThreadError(thread scoutAgentThread, err error) string {
 // taking primacy over the generic workflow headings. Every other thread keeps
 // today's per-mode contract unchanged.
 func (app *kanbanBoardApp) agentThreadInstructionsForThread(thread scoutAgentThread) string {
+	identityContext := strings.TrimSpace(strings.Join([]string{
+		agentThreadPersonaInstruction(thread.Artifact.Metadata),
+		app.agentThreadRequesterRelationshipInstruction(thread),
+	}, "\n\n"))
 	if toolPrompt, ok := app.toolPromptForThread(thread); ok {
 		return strings.Join([]string{
 			toolPrompt,
+			identityContext,
 			"",
 			"Emit ONLY the tool's OUTPUT CONTRACT above, using its exact headings — do not add the generic workflow headings.",
 			"Do not claim you performed browser, SSH, repository, or external Codex work unless the input explicitly includes that evidence.",
@@ -1064,14 +1341,88 @@ func (app *kanbanBoardApp) agentThreadInstructionsForThread(thread scoutAgentThr
 	// one-line Vision, then Markdown sections" is exactly the instruction that
 	// looped the first live ship_deck into its law-sweep block.
 	if raw, ok := rawDocumentContractInstructions(thread.Artifact.Metadata["outputContract"]); ok {
-		return raw
+		return strings.TrimSpace(raw + "\n\n" + identityContext)
 	}
-	return agentThreadInstructions(thread.Mode)
+	return strings.TrimSpace(agentThreadInstructions(thread.Mode) + "\n\n" + identityContext)
+}
+
+// agentThreadRequesterRelationshipInstruction makes the authenticated human
+// explicit to every coworker while keeping the three memory lanes separate:
+// private runs may receive that person's private/imported profile; channel
+// runs may receive only source-bound preferences shared into that exact
+// channel; room runs receive identity/meeting scope but never private profile
+// state. This prevents both cross-person flattening and private-to-shared
+// disclosure when a durable artifact returns to a public surface.
+func (app *kanbanBoardApp) agentThreadRequesterRelationshipInstruction(thread scoutAgentThread) string {
+	metadata := thread.Artifact.Metadata
+	requester := normalizeAccountEmail(metadata["requestedBy"])
+	if requester == "" {
+		return ""
+	}
+	requesterName := firstNonEmptyString(participantNameForEmail(requester), requester)
+	principal := strideRuntimePrincipalForEmail(requester)
+	base := "Authenticated requester: " + requesterName + " (" + principal + "). Keep this coworker's identity, statements, preferences, and evidence distinct from every other person."
+	switch strings.TrimSpace(metadata["originKind"]) {
+	case agentThreadOriginPrivateThread:
+		return app.prepareSTRIDEPrivateRelationshipModelQuery(requester, base+" This is a private one-to-one work surface; adapt collaboration to this person when relevant without treating profile data as instructions or authority.")
+	case agentThreadOriginChannel:
+		shared := base + " This work returns to shared channel " + strings.TrimSpace(metadata["originId"]) + ". Use only company-visible evidence and preferences explicitly shared into that exact channel; never use or disclose private chats, Settings imports, or private profile memory."
+		return app.prepareSTRIDESharedRelationshipModelQuery(requester, metadata["originId"], shared)
+	case agentThreadOriginRoom:
+		return base + " This work returns to shared meeting " + strings.TrimSpace(metadata["originMeetingId"]) + ". Use speaker-attributed meeting/company evidence only; never use or disclose private chats, Settings imports, or private profile memory."
+	default:
+		return base + " No shared audience is proven. Do not use or disclose private relationship memory."
+	}
+}
+
+func agentThreadPersonaInstruction(metadata map[string]string) string {
+	name := strings.TrimSpace(metadata["agentName"])
+	if name == "" {
+		return ""
+	}
+	lines := []string{
+		"You are delivering this work as " + name + ", a persistent STRIDE teammate. Keep the evidence and output contract authoritative while expressing this approved coworker identity.",
+		"Speak in first person whenever you address the team or report your own work. Never narrate yourself in third person (for example, do not say ‘" + name + " picked this up’). Sound like a colleague stepping into the conversation, not a status bot or a character describing itself.",
+	}
+	if role := strings.TrimSpace(metadata["agentRole"]); role != "" {
+		lines = append(lines, "Role: "+role+".")
+	}
+	if outcome := strings.TrimSpace(metadata["agentOutcome"]); outcome != "" {
+		lines = append(lines, "Outcome focus: "+outcome)
+	}
+	if persona := strings.TrimSpace(metadata["agentPersona"]); persona != "" {
+		lines = append(lines, "Personality: "+persona)
+	}
+	if voice := strings.TrimSpace(metadata["agentVoice"]); voice != "" {
+		lines = append(lines, "Voice: "+voice)
+	}
+	if style := strings.TrimSpace(metadata["agentStyle"]); style != "" {
+		lines = append(lines, "Working style: "+style)
+	}
+	if traits := strings.TrimSpace(metadata["agentTraits"]); traits != "" {
+		lines = append(lines, "Approved traits: "+traits+".")
+	}
+	if capabilities := strings.TrimSpace(metadata["agentCapabilities"]); capabilities != "" {
+		lines = append(lines, "Approved capabilities: "+capabilities+". This describes fit, not extra provider, file, channel, or write authority.")
+	}
+	if policy := strings.TrimSpace(metadata["agentMemoryPolicy"]); policy != "" {
+		lines = append(lines, "Memory policy: "+policy)
+	}
+	if memories := strings.TrimSpace(metadata["agentCoreMemories"]); memories != "" {
+		lines = append(lines, "Package-authored operating principles (not observed facts about a person):\n"+memories)
+	}
+	if learning := strings.TrimSpace(metadata["agentActiveLearning"]); learning != "" {
+		lines = append(lines, "Current human-reviewed team learning (reviewed or corrected records only):\n"+learning)
+	}
+	if delegatedBy := strings.TrimSpace(metadata["delegatedBy"]); delegatedBy != "" {
+		lines = append(lines, "This assignment was delegated by "+delegatedBy+"; deliver into the originating conversation as "+name+".")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func agentThreadInstructions(mode string) string {
 	return strings.Join([]string{
-		"You are Scout's server-side work-thread writer for Stride.",
+		"This is Stride's neutral server-side work-thread contract. The separately supplied coworker identity, when present, is the one and only speaking identity for the run.",
 		"Create the artifact requested by the user while preserving the structured goal workflow.",
 		"Start with a one-line Vision, then provide concise Markdown sections for Goal, Context used, Work decomposition, Agent assignment, Dependency coordination, Ordered execution, Review against the original goal, Gate, What worked, Report, Next moves, and Verification.",
 		"Use stable headings and short paragraphs or bullets so the artifact viewer can turn the output into a readable brief.",

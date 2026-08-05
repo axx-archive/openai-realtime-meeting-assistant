@@ -52,6 +52,9 @@ export function MentionComposerInput({
 }: Props) {
   const reduceMotion = useReduceMotion();
   const shimmer = useRef(new Animated.Value(1)).current;
+  const valueRef = useRef(value);
+  const inputWidthRef = useRef(0);
+  const nativeContentHeightRef = useRef(compactComposerHeight);
   const [measuredHeight, setMeasuredHeight] = useState(compactComposerHeight);
   const [focused, setFocused] = useState(false);
   const active = useMemo(() => activeMentionQuery(value), [value]);
@@ -63,8 +66,13 @@ export function MentionComposerInput({
   const segments = useMemo(() => draftSegments(value, candidates), [candidates, value]);
   const showMentionOverlay = !focused && segments.some((segment) => Boolean(segment.mention));
 
+  valueRef.current = value;
+
   useEffect(() => {
-    if (!value) setMeasuredHeight(compactComposerHeight);
+    if (!value) {
+      nativeContentHeightRef.current = compactComposerHeight;
+      setMeasuredHeight(compactComposerHeight);
+    }
   }, [value]);
 
   useEffect(() => {
@@ -117,14 +125,24 @@ export function MentionComposerInput({
           placeholderTextColor={colors.text3}
           selectionColor={colors.info}
           value={value}
-          onChangeText={onChangeText}
+          onChangeText={(nextValue) => {
+            valueRef.current = nextValue;
+            if (!nextValue) nativeContentHeightRef.current = compactComposerHeight;
+            setMeasuredHeight(composerHeight(nextValue, nativeContentHeightRef.current, maxHeight, inputWidthRef.current));
+            onChangeText(nextValue);
+          }}
           onFocus={() => setFocused(true)}
           onBlur={() => {
             setFocused(false);
             onBlur?.();
           }}
           onContentSizeChange={(event) => {
-            setMeasuredHeight(composerHeight(value, event.nativeEvent.contentSize.height, maxHeight));
+            nativeContentHeightRef.current = event.nativeEvent.contentSize.height;
+            setMeasuredHeight(composerHeight(valueRef.current, nativeContentHeightRef.current, maxHeight, inputWidthRef.current));
+          }}
+          onLayout={(event) => {
+            inputWidthRef.current = event.nativeEvent.layout.width;
+            setMeasuredHeight(composerHeight(valueRef.current, nativeContentHeightRef.current, maxHeight, inputWidthRef.current));
           }}
           multiline
           editable={editable}

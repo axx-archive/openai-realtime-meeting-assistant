@@ -78,6 +78,23 @@ import { useReduceMotion } from '../theme/motion';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Thread'>;
 
+function workThreadIsActive(message: ScoutMessage): boolean {
+  if (String(message.kind ?? '').toLowerCase() !== 'thread' || !message.thread) return false;
+  return ['queued', 'running', 'approval_required', 'needs_input', 'parked'].includes(String(message.thread.status ?? '').toLowerCase());
+}
+
+function workThreadPhase(message: ScoutMessage): string {
+  const status = String(message.thread?.status ?? '').toLowerCase();
+  const stage = String(message.thread?.currentStage ?? '').toLowerCase();
+  if (status === 'approval_required' || status === 'needs_input' || status === 'parked') return 'Needs input';
+  if (/deliver|verify_goal_completed/u.test(stage)) return 'Delivering';
+  if (/gate|review|verif/u.test(stage)) return 'Verifying';
+  if (/research|source|evidence/u.test(stage)) return 'Gathering evidence';
+  if (/build|draft|synth|execute|codex/u.test(stage)) return 'Building';
+  if (status === 'queued') return 'Queued';
+  return 'Understanding';
+}
+
 type ThreadMessageRowProps = {
   item: ThreadRow;
   sessionToken: string;
@@ -524,6 +541,11 @@ export function ThreadScreen({ route, navigation }: Props) {
     [messages],
   );
 
+  const activeWorkMessage = useMemo(
+    () => [...messages].reverse().find(workThreadIsActive) ?? null,
+    [messages],
+  );
+
   const rows = useMemo(
     () =>
       messages.map((message, index) => {
@@ -919,14 +941,42 @@ export function ThreadScreen({ route, navigation }: Props) {
   }, []);
   const openWorkArtifact = useCallback(async (message: ScoutMessage) => {
     const artifactId = String(message.thread?.artifactId ?? '').trim();
-    if (!sessionToken || !artifactId) return;
+    const agentName = String(message.thread?.agentName ?? 'Scout').trim() || 'Scout';
+    const status = String(message.thread?.status ?? 'running').toLowerCase();
+    const terminal = status === 'complete' || status === 'published';
+    if (!sessionToken || !artifactId) {
+      setExpandedMessage({
+        text: `# ${workThreadPhase(message)}\n\n${String(message.thread?.progressNote ?? '').trim() || `${agentName} is working. Updates and the finished deliverable will land durably in this conversation.`}\n\n## Work log\n\n- Request accepted from this conversation\n- Current stage: ${String(message.thread?.currentStage ?? 'working').replaceAll('_', ' ')}\n- Delivery: the finished work will land durably here`,
+        authorName: `${agentName} · work activity`,
+        scout: true,
+      });
+      return;
+    }
     try {
       const response = await api.artifact(sessionToken, artifactId);
       const artifact = response.artifacts[0];
       const text = String(artifact?.text ?? '').trim();
-      if (!text) throw new Error('The completed report is not available yet.');
-      const title = String(artifact?.metadata?.title ?? message.thread?.query ?? 'Scout deliverable').trim();
-      setExpandedMessage({ text, authorName: title || 'Scout deliverable', scout: true });
+      if (terminal && text) {
+        const title = String(artifact?.metadata?.title ?? message.thread?.query ?? `${agentName} deliverable`).trim();
+        setExpandedMessage({ text, authorName: title || `${agentName} deliverable`, scout: true });
+        return;
+      }
+      const phase = workThreadPhase({
+        ...message,
+        thread: {
+          ...message.thread!,
+          currentStage: String(artifact?.metadata?.currentStage ?? message.thread?.currentStage ?? ''),
+          progressNote: String(artifact?.metadata?.progressNote ?? message.thread?.progressNote ?? ''),
+          progressPercent: Number(artifact?.metadata?.progressPercent ?? message.thread?.progressPercent),
+        },
+      });
+      const progress = Number(artifact?.metadata?.progressPercent ?? message.thread?.progressPercent);
+      const note = String(artifact?.metadata?.progressNote ?? message.thread?.progressNote ?? '').trim();
+      setExpandedMessage({
+        text: `# ${phase}${Number.isFinite(progress) ? ` · ${Math.round(progress)}%` : ''}\n\n${note || `${agentName} is working. Updates and the finished deliverable will land durably in this conversation.`}\n\n## Work log\n\n- Request accepted from this conversation\n- Current stage: ${String(artifact?.metadata?.currentStage ?? message.thread?.currentStage ?? 'working').replaceAll('_', ' ')}\n- Source trail and review receipts remain attached to the completed report\n- Delivery: the finished work will land durably here\n\n## Technical details\n\nRun ${String(message.thread?.id ?? 'pending')} · artifact ${artifactId}`,
+        authorName: `${agentName} · work activity`,
+        scout: true,
+      });
     } catch (caught) {
       setError(caught instanceof BonfireApiError ? caught.message : caught instanceof Error ? caught.message : 'Could not open that deliverable.');
     }
@@ -1270,6 +1320,26 @@ export function ThreadScreen({ route, navigation }: Props) {
           </View>
         )}
 
+	{!editingMessage && activeWorkMessage ? (
+	  <Pressable
+	    accessibilityRole="button"
+	    accessibilityLabel={`View ${String(activeWorkMessage.thread?.agentName ?? 'Scout')} work activity`}
+	    onPress={() => void openWorkArtifact(activeWorkMessage)}
+	    style={({ pressed }) => [styles.activeWork, pressed && styles.activeWorkPressed]}
+	  >
+	    <View style={styles.activeWorkSignal}>
+	      <View style={styles.activeWorkBarShort} />
+	      <View style={styles.activeWorkBarTall} />
+	      <View style={styles.activeWorkBarMid} />
+	    </View>
+	    <Text numberOfLines={1} style={styles.activeWorkText}>
+	      {String(activeWorkMessage.thread?.agentName ?? 'Scout')} · {workThreadPhase(activeWorkMessage)}
+	      {Number.isFinite(Number(activeWorkMessage.thread?.progressPercent)) ? ` · ${Math.round(Number(activeWorkMessage.thread?.progressPercent))}%` : ''}
+	    </Text>
+	    <Text style={styles.activeWorkAction}>View activity</Text>
+	  </Pressable>
+	) : null}
+
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {dictation.error ? (
           <View style={styles.dictationError}>
@@ -1520,6 +1590,27 @@ const styles = StyleSheet.create({
     // message never sits tucked under it.
     paddingBottom: space[5],
   },
+	activeWork: {
+	  minHeight: 44,
+	  flexDirection: 'row',
+	  alignItems: 'center',
+	  gap: space[2],
+	  marginHorizontal: space[4],
+	  marginBottom: space[2],
+	  paddingHorizontal: space[3],
+	  borderRadius: radius.lg,
+	  borderCurve: 'continuous',
+	  borderWidth: StyleSheet.hairlineWidth,
+	  borderColor: colors.line1,
+	  backgroundColor: colors.surface2,
+	},
+	activeWorkPressed: { opacity: 0.76, transform: [{ scale: 0.99 }] },
+	activeWorkSignal: { width: 26, height: 26, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 2, borderRadius: radius.sm, backgroundColor: colors.emberSoft },
+	activeWorkBarShort: { width: 2, height: 7, borderRadius: radius.full, backgroundColor: colors.emberText },
+	activeWorkBarTall: { width: 2, height: 13, borderRadius: radius.full, backgroundColor: colors.emberText },
+	activeWorkBarMid: { width: 2, height: 9, borderRadius: radius.full, backgroundColor: colors.emberText },
+	activeWorkText: { ...type.captionMedium, flex: 1, color: colors.text1 },
+	activeWorkAction: { ...type.captionMedium, color: colors.emberText },
   composer: {
     marginHorizontal: space[4],
     marginBottom: space[2],

@@ -1085,13 +1085,23 @@ func (r *anthropicFableRunner) systemPrompt(job AgentJob) string {
 		modeContract = raw
 		finalLine = "When the goal is met, your final message is the deliverable FILE ITSELF — nothing before the <!doctype html>, nothing after the closing </html>."
 	}
+	identityLine := "You are Scout, the in-process orchestrator for Stride."
+	if name := strings.TrimSpace(job.thread.Artifact.Metadata["agentName"]); name != "" {
+		identityLine = "You are " + name + ", a persistent STRIDE teammate running this assignment. Scout is the delegator only when the assignment metadata names Scout; Scout is never your speaking identity."
+	}
 	lines := []string{
-		"You are Scout, the in-process orchestrator for Stride.",
+		identityLine,
 		"You run a real tool loop: decompose the goal, act with the Bonfire tools available to you, review against the goal, gate before anything ships, and report what matters. Do not narrate a loop you did not run.",
 		"Follow the ten-step goal loop in order: identify the goal, decompose the work, assign the right agent, coordinate dependencies, execute in order, review against the original goal, gate before shipping, save what worked, report only what matters, verify the goal or name the blocker.",
 		"Call report_goal_state whenever the goal status, review gate, stage, or progress changes so the operator UI stays in step.",
 		"Authority: this job is " + authority + ". read_only may inspect and report; workspace_write may change the board, memory, packages, and notifications; external_write (commit, push, deploy, SSH, email, external APIs, production mutations) is never granted in this loop — if the goal needs it, stop and report that an approval gate is required. Never claim you performed shell, browser, SSH, repository, or external work; that is a handoff to the execution runner.",
 		modeContract,
+	}
+	if persona := agentThreadPersonaInstruction(job.thread.Artifact.Metadata); persona != "" {
+		lines = append(lines, persona)
+	}
+	if relationship := r.app.agentThreadRequesterRelationshipInstruction(job.thread); relationship != "" {
+		lines = append(lines, relationship)
 	}
 	// Research mode carries the live server web tools (attached in tools()); tell
 	// Scout to prefer fetching current data over recalling it. The "no live web

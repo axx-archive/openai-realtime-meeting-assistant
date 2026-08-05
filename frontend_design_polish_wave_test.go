@@ -121,7 +121,7 @@ func TestDiscoveryStartersSeeded(t *testing.T) {
 
 func TestDiscoveryComposerHintsLauncher(t *testing.T) {
 	html := readIndexForComposerPolish(t)
-	if !strings.Contains(html, "ask Scout, or tap + to run a task") {
+	if !strings.Contains(html, "`ask ${directAgent || 'Scout'}, or tap + to run a task`") {
 		t.Error("composer placeholder no longer hints the task launcher")
 	}
 	if !strings.Contains(html, `aria-label="Run a task or tool"`) {

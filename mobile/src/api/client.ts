@@ -980,7 +980,7 @@ export const api = {
     });
   },
 
-  strideResolveAgentLearning(sessionToken: string, agentId: string, learningId: string, action: 'correct' | 'forget', body: { revision: number; summary: string }): Promise<StrideSeatMutationResponse> {
+  strideResolveAgentLearning(sessionToken: string, agentId: string, learningId: string, action: 'approve' | 'correct' | 'forget', body: { revision: number; summary: string }): Promise<StrideSeatMutationResponse> {
     return request(`/api/stride/v1/roster/${encodeURIComponent(agentId)}/learning/${encodeURIComponent(learningId)}/${action}`, {
       method: 'POST', body, sessionToken,
     });

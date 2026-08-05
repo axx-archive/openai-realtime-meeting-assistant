@@ -120,6 +120,32 @@ func TestIndexGoalcardHeroContract(t *testing.T) {
 	}
 }
 
+func TestIndexGoalcardFailureIsACompactRecoveryBrief(t *testing.T) {
+	html := readIndexForFeedDesign(t)
+	terminal := functionBody(html, "function goalCardRenderTerminal(card, artifact, plan, state, prevState)")
+	for _, want := range []string{
+		"goalcard__failure-copy",
+		"Stopped before delivery",
+		"goalcard__failure-activity",
+		"Retry keeps completed stages and resumes at the blocker.",
+		"view activity",
+	} {
+		if !strings.Contains(terminal, want) {
+			t.Errorf("goalcard recovery brief missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		`.goalcard[data-state="error"] {`,
+		"width: min(860px, 100%);",
+		".goalcard__failure {",
+		".goalcard__failure-actions {",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("goalcard recovery styling missing %q", want)
+		}
+	}
+}
+
 // §6 the ember sweep: static feed chrome dropped --agent — review doors and
 // stage links read ink; ember survives only on working-now signals.
 func TestIndexEmberSweepStaticConsumers(t *testing.T) {

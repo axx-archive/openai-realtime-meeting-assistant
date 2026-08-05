@@ -32,9 +32,9 @@ func TestDesktopChatQualityIsDesktopIsolatedAndResponsive(t *testing.T) {
 		"@media (min-width: 861px)",
 		"@media (min-width: 1280px)",
 		"@media (min-width: 1728px)",
-		"@media (min-width: 861px) and (max-width: 1100px)",
-		"--desktop-chat-measure: 744px;",
-		"calc((100% - var(--desktop-chat-measure)) / 2)",
+		"@media (min-width: 861px) and (max-width: 1279px)",
+		"--desktop-chat-measure: 760px;",
+		"padding: 30px var(--desktop-chat-gutter);",
 		"width: min(var(--desktop-chat-measure), calc(100% - (var(--desktop-chat-gutter) * 2)));",
 		"@media (prefers-reduced-motion: reduce) and (min-width: 861px)",
 	} {
@@ -57,7 +57,7 @@ func TestDesktopChatHeaderAndMessageHierarchyWiring(t *testing.T) {
 		`id="chatConvoScope" class="desktop-chat-context__scope"`,
 		`id="chatConvoPolicy" class="desktop-chat-context__policy"`,
 		"const scope = !isChannel ? 'private' : isTeam ? 'pinned · #team' : 'project channel'",
-		"const policy = !isChannel ? 'only you + Scout' : isTeam ? 'whole office · shared memory' : 'members · project memory'",
+		"const policy = !isChannel ? `only you + ${privateTarget}` : isTeam ? 'whole office · shared memory' : 'members · project memory'",
 		"if (appShell?.dataset.tool === 'chat') syncToolTopbar()",
 		"? `Channel chat ${chatThreadDisplayTitle(thread)}`",
 		"start the conversation — @scout can help when you want it.",
@@ -70,6 +70,8 @@ func TestDesktopChatHeaderAndMessageHierarchyWiring(t *testing.T) {
 		"message.sources",
 		"message.editedAt",
 		"replyToMessageId",
+		"closeDesktopChatContext({ restoreFocus: false })",
+		"binding.handle.setAttribute('aria-valuemax', String(responsiveMax))",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("desktop conversation hierarchy missing %q", want)
@@ -114,6 +116,9 @@ func TestDesktopChatRichPreviewsStayOnAuthorizedSameOriginRoutes(t *testing.T) {
 		"is-loading",
 		"is-text-only",
 		"is-degraded",
+		`const previewKind = String(preview?.kind || 'link').toLowerCase()`,
+		`card.dataset.kind = previewKind`,
+		"stack.closest('.scout-chat-msg')?.classList.add('scout-chat-msg--media')",
 	} {
 		if !strings.Contains(preview, want) {
 			t.Errorf("authorized link preview path missing %q", want)
@@ -125,13 +130,14 @@ func TestDesktopChatRichPreviewsStayOnAuthorizedSameOriginRoutes(t *testing.T) {
 
 	css := desktopChatQualitySection(t, html)
 	for _, want := range []string{
-		"min-height: 112px;",
+		"min-height: 168px;",
 		"min-height: 96px;",
-		"aspect-ratio: 4 / 3;",
 		"aspect-ratio: 16 / 10;",
+		"aspect-ratio: 16 / 9;",
 		"outline: 1px solid rgba(0, 0, 0, 0.1);",
 		"outline-color: rgba(255, 255, 255, 0.1);",
 		"object-fit: contain;",
+		"#chatTool .scout-chat-msg--media",
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("stable rich-media CSS missing %q", want)
@@ -163,8 +169,8 @@ func TestDesktopChatInteractionTargetsAndComposerStates(t *testing.T) {
 		"optimisticState.textContent = 'not sent'",
 		"function updateDesktopChatReaction(messageId, emoji, set)",
 		"method: set ? 'PUT' : 'DELETE'",
-		"scoutChatReplyTarget = {",
-		"scoutChatInput?.focus()",
+		"openDesktopMessageContext(message, replyButton)",
+		"submitDesktopThreadReply",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("desktop interaction state wiring missing %q", want)
@@ -191,6 +197,35 @@ func TestDesktopChatFileCardsExposeSafeTypeRevisionAndActions(t *testing.T) {
 	} {
 		if !strings.Contains(files, want) {
 			t.Errorf("desktop file card missing %q", want)
+		}
+	}
+}
+
+func TestDesktopWorkContextReconcilesDurableTerminalState(t *testing.T) {
+	html := desktopChatQualityHTML(t)
+	for _, want := range []string{
+		"function syncDesktopOpenChatContext()",
+		"syncDesktopOpenChatContext()",
+		"run stopped before delivery",
+		"delivered this work and saved it durably",
+		"Terminal socket/poll updates must",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("desktop work context is missing live terminal reconciliation %q", want)
+		}
+	}
+	workerStart := strings.Index(html, "function artifactWorkerLabel(entry)")
+	if workerStart < 0 {
+		t.Fatal("could not isolate artifact worker label")
+	}
+	workerEnd := strings.Index(html[workerStart:], "function artifactIsHTMLDeck(entry)")
+	if workerEnd < 0 {
+		t.Fatal("could not isolate artifact worker label")
+	}
+	worker := html[workerStart : workerStart+workerEnd]
+	for _, want := range []string{"metadata?.agentName", "metadata?.agentRole", "`${agentName} · ${agentRole}`"} {
+		if !strings.Contains(worker, want) {
+			t.Fatalf("named coworker attribution missing %q", want)
 		}
 	}
 }

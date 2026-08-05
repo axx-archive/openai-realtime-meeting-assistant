@@ -116,7 +116,11 @@ func (app *kanbanBoardApp) newAgentJob(thread scoutAgentThread) AgentJob {
 		authority = codexJobAuthorityForThread(thread)
 	}
 	requestedBy := firstNonEmptyString(strings.TrimSpace(meta["requestedBy"]), strings.TrimSpace(meta["createdBy"]))
-	roomID := strings.TrimSpace(meta["originRoomId"])
+	principal, principalOK := app.agentThreadRecallPrincipal(requestedBy, meta)
+	var memory []meetingMemoryEntry
+	if principalOK {
+		memory = app.memorySnapshotForPrincipal(context.Background(), principal, 20)
+	}
 	job := AgentJob{
 		JobID:       thread.ID,
 		ArtifactID:  thread.Artifact.ID,
@@ -124,7 +128,7 @@ func (app *kanbanBoardApp) newAgentJob(thread scoutAgentThread) AgentJob {
 		Mode:        thread.Mode,
 		Objective:   firstNonEmptyString(strings.TrimSpace(meta["objective"]), thread.Query),
 		Authority:   authority,
-		Context:     AgentJobContext{Board: app.snapshotState(), Memory: app.delegatedMemorySnapshot(context.Background(), requestedBy, roomID, 20)},
+		Context:     AgentJobContext{Board: app.snapshotState(), Memory: memory},
 		Origin:      agentJobOrigin(meta),
 		RequestedBy: requestedBy,
 		thread:      thread,

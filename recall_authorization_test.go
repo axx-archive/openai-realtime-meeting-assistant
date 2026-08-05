@@ -69,6 +69,20 @@ func TestRecallPrincipalFiltersBeforeLexicalSemanticAndArtifactLanes(t *testing.
 	}
 }
 
+func TestSharedChannelAgentRecallNeverReceivesRequesterPrivateMemory(t *testing.T) {
+	app, private := setupRecallAuthorizationTest(t)
+	principal := recallPrincipalForEmail("aj@shareability.com")
+	principal.Audience = "shared_channel"
+	principal.ThreadID = "team"
+	store := app.recallStoreForPrincipal(context.Background(), principal)
+	if _, ok := store.entryByID(private.ID); ok {
+		t.Fatalf("requester-private artifact %q reached a shared-channel worker", private.ID)
+	}
+	if matches := store.search("AJ PRIVATE LEXICAL CANARY", 8); len(matches) != 0 {
+		t.Fatalf("requester-private content reached shared-channel lexical recall: %+v", matches)
+	}
+}
+
 func TestRecallPrincipalFiltersPrivateDigestLedgerAndKeepsLegacyOrgRoomHistory(t *testing.T) {
 	app, _ := setupRecallAuthorizationTest(t)
 	now := time.Now().UTC()

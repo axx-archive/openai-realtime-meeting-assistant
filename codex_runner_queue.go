@@ -40,12 +40,18 @@ const (
 var errCodexRunnerClaimLost = errors.New("Codex runner claim ownership was lost")
 
 type codexRunnerJob struct {
-	ID              string            `json:"id"`
-	ArtifactID      string            `json:"artifact_id"`
-	ThreadID        string            `json:"thread_id"`
-	Mode            string            `json:"mode"`
-	Query           string            `json:"query"`
-	Prompt          string            `json:"prompt"`
+	ID         string `json:"id"`
+	ArtifactID string `json:"artifact_id"`
+	ThreadID   string `json:"thread_id"`
+	Mode       string `json:"mode"`
+	Query      string `json:"query"`
+	Prompt     string `json:"prompt"`
+	// ThreadMetadata is populated for source-bound jobs. Their provider prompt
+	// is deliberately NOT serialized at enqueue because it contains File body
+	// context; the sidecar reauthorizes these refs and builds the prompt only
+	// after claiming the job. Legacy/source-free jobs keep Prompt for backwards
+	// compatibility.
+	ThreadMetadata  map[string]string `json:"thread_metadata,omitempty"`
 	Authority       string            `json:"authority"`
 	Status          string            `json:"status"`
 	CreatedAt       time.Time         `json:"created_at"`
@@ -555,10 +561,21 @@ func codexExecConfigForAuthority(cfg codexExecConfig, authority string, mode str
 	return cfg
 }
 
-func (app *kanbanBoardApp) enqueueCodexAgentThreadArtifact(_ context.Context, thread scoutAgentThread) (agentThreadWorkerResult, error) {
+func (app *kanbanBoardApp) enqueueCodexAgentThreadArtifact(ctx context.Context, thread scoutAgentThread) (agentThreadWorkerResult, error) {
 	if app == nil {
 		return agentThreadWorkerResult{}, fmt.Errorf("assistant is unavailable")
 	}
+	providerContext, err := app.agentThreadProviderContext(ctx, thread)
+	if err != nil {
+		return agentThreadWorkerResult{}, err
+	}
+	job := app.newAgentJob(thread)
+	job.Context = providerContext
+	return app.enqueueCodexAgentThreadArtifactForJob(ctx, job)
+}
+
+func (app *kanbanBoardApp) enqueueCodexAgentThreadArtifactForJob(_ context.Context, job AgentJob) (agentThreadWorkerResult, error) {
+	thread := job.thread
 
 	authority := codexJobAuthorityForThread(thread)
 	// Wave-6 handoff: a /goal subtask child (goalParentId present) already had
@@ -576,7 +593,7 @@ func (app *kanbanBoardApp) enqueueCodexAgentThreadArtifact(_ context.Context, th
 		return codexApprovalRequiredResult(thread, authority), nil
 	}
 
-	return app.enqueueCodexAgentThreadJob(thread, authority)
+	return app.enqueueCodexAgentThreadJobWithContext(job, authority, "")
 }
 
 func codexApprovalRequiredResult(thread scoutAgentThread, authority string) agentThreadWorkerResult {
@@ -605,18 +622,39 @@ func (app *kanbanBoardApp) enqueueCodexAgentThreadJob(thread scoutAgentThread, a
 }
 
 func (app *kanbanBoardApp) enqueueCodexAgentThreadJobWithID(thread scoutAgentThread, authority string, reservedJobID string) (agentThreadWorkerResult, error) {
+	providerContext, err := app.agentThreadProviderContext(context.Background(), thread)
+	if err != nil {
+		return agentThreadWorkerResult{}, err
+	}
+	job := app.newAgentJob(thread)
+	job.Context = providerContext
+	return app.enqueueCodexAgentThreadJobWithContext(job, authority, reservedJobID)
+}
+
+func (app *kanbanBoardApp) enqueueCodexAgentThreadJobWithContext(admittedJob AgentJob, authority string, reservedJobID string) (agentThreadWorkerResult, error) {
+	thread := admittedJob.thread
 	authority = normalizeCodexJobAuthority(authority)
 	metadata := codexRunnerQueuedMetadata(thread, authority)
 	store := newCodexRunnerJobStore(codexRunnerQueuePath())
-	prompt := app.buildCodexAgentThreadPrompt(thread, time.Now(), authority)
-	job, err := store.enqueue(codexRunnerJob{
-		ID:         strings.TrimSpace(reservedJobID),
-		ArtifactID: thread.Artifact.ID,
-		ThreadID:   thread.ID,
-		Mode:       thread.Mode,
-		Query:      thread.Query,
-		Prompt:     prompt,
-		Authority:  authority,
+	prompt := app.buildCodexAgentJobPrompt(admittedJob, time.Now(), authority)
+	var threadMetadata map[string]string
+	if len(decodeAssistantContextRefs(thread.Artifact.Metadata["contextRefs"])) > 0 {
+		// A queued prompt can outlive the ACL/seat decisions that created it.
+		// Persist the thread's audit metadata (refs, requester, profile snapshot)
+		// but not the File body; the claimed sidecar refreshes the profile,
+		// resolves current content, and constructs the actual provider prompt.
+		prompt = ""
+		threadMetadata = cloneCodexThreadMetadata(thread.Artifact.Metadata)
+	}
+	queuedJob, err := store.enqueue(codexRunnerJob{
+		ID:             strings.TrimSpace(reservedJobID),
+		ArtifactID:     thread.Artifact.ID,
+		ThreadID:       thread.ID,
+		Mode:           thread.Mode,
+		Query:          thread.Query,
+		Prompt:         prompt,
+		ThreadMetadata: threadMetadata,
+		Authority:      authority,
 		Metadata: map[string]string{
 			"toolRegistry":   codexToolRegistrySummary(),
 			"requestedTools": codexRequestedToolsForMode(thread.Mode),
@@ -632,16 +670,27 @@ func (app *kanbanBoardApp) enqueueCodexAgentThreadJobWithID(thread scoutAgentThr
 		return agentThreadWorkerResult{Metadata: metadata}, err
 	}
 
-	metadata["runnerJobId"] = job.ID
-	metadata["threadId"] = job.ThreadID
+	metadata["runnerJobId"] = queuedJob.ID
+	metadata["threadId"] = queuedJob.ThreadID
 	metadata["runnerQueuePath"] = store.dir
-	metadata["createdAt"] = job.CreatedAt.Format(time.RFC3339Nano)
+	metadata["createdAt"] = queuedJob.CreatedAt.Format(time.RFC3339Nano)
 
 	return agentThreadWorkerResult{
-		Text:     buildCodexQueuedArtifact(thread, job),
+		Text:     buildCodexQueuedArtifact(thread, queuedJob),
 		Metadata: metadata,
 		Terminal: false,
 	}, nil
+}
+
+func cloneCodexThreadMetadata(source map[string]string) map[string]string {
+	if len(source) == 0 {
+		return nil
+	}
+	cloned := make(map[string]string, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func codexRunnerQueuedMetadata(thread scoutAgentThread, authority string) map[string]string {
@@ -750,12 +799,87 @@ func runCodexRunnerLoop(ctx context.Context) error {
 	}
 }
 
+// codexRunnerPromptAtProviderAdmission is the delayed sidecar equivalent of
+// produceAgentThreadArtifactWithWorker's in-process admission fence. New
+// source-bound queue records intentionally carry no prompt body: after claim,
+// the sidecar resolves every ref under the original requester and only then
+// assembles the provider prompt. This closes the enqueue-to-claim revocation
+// window without invalidating legacy/source-free queue records.
+func codexRunnerPromptAtProviderAdmission(ctx context.Context, job codexRunnerJob) (string, map[string]string, error) {
+	if len(job.ThreadMetadata) == 0 {
+		prompt := strings.TrimSpace(job.Prompt)
+		if prompt == "" {
+			return "", nil, fmt.Errorf("Codex runner prompt is unavailable")
+		}
+		return prompt, nil, nil
+	}
+	if kanbanApp == nil {
+		return "", nil, fmt.Errorf("%w: Files authority is unavailable at sidecar claim", ErrAgentThreadSourceChanged)
+	}
+	thread := scoutAgentThread{
+		ID:    job.ThreadID,
+		Mode:  job.Mode,
+		Query: job.Query,
+		Artifact: meetingMemoryEntry{
+			ID:       job.ArtifactID,
+			Metadata: cloneCodexThreadMetadata(job.ThreadMetadata),
+		},
+	}
+	// The hired-seat profile and File refs are both launch-time snapshots. A
+	// delayed sidecar claim must reauthorize them together so pause/offboard and
+	// human-corrected learning take effect before Codex sees the job.
+	var err error
+	thread, err = kanbanApp.reauthorizeAgentThreadProfile(thread)
+	if err != nil {
+		return "", nil, err
+	}
+	providerContext, err := kanbanApp.agentThreadProviderContext(ctx, thread)
+	if err != nil {
+		return "", nil, err
+	}
+	agentJob := kanbanApp.newAgentJob(thread)
+	agentJob.Context = providerContext
+	return kanbanApp.buildCodexAgentJobPrompt(agentJob, time.Now(), job.Authority), cloneCodexThreadMetadata(thread.Artifact.Metadata), nil
+}
+
+func failCodexRunnerProviderAdmission(ctx context.Context, store *codexRunnerJobStore, job codexRunnerJob, err error) {
+	completedAt := time.Now().UTC()
+	job.Status = codexJobStatusFailed
+	job.CompletedAt = completedAt
+	job.Error = err.Error()
+	job.Metadata = mergeStringMaps(job.Metadata, map[string]string{
+		"status":          "error",
+		"threadStatus":    "error",
+		"goalStatus":      "needs_attention",
+		"currentStage":    "gate_before_shipping",
+		"progressPercent": "72",
+		"reviewGate":      "blocked",
+		"completedAt":     completedAt.Format(time.RFC3339Nano),
+		"error":           err.Error(),
+		"sourceChanged":   strconv.FormatBool(errors.Is(err, ErrAgentThreadSourceChanged)),
+	})
+	if updateErr := store.update(job); updateErr != nil {
+		log.Errorf("Codex runner could not persist provider-admission failure for job %s: %v", job.ID, updateErr)
+		return
+	}
+	_ = sendCodexRunnerCallback(ctx, codexRunnerCallbackPayload{
+		JobID: job.ID, ArtifactID: job.ArtifactID, ThreadID: job.ThreadID,
+		Status: job.Status, Text: buildCodexRunnerErrorArtifact(job, err), Error: job.Error, Metadata: job.Metadata,
+		ClaimGeneration: job.ClaimGeneration, FencingToken: job.FencingToken,
+	})
+}
+
 func processCodexRunnerJob(ctx context.Context, store *codexRunnerJobStore, job codexRunnerJob) {
 	authority := normalizeCodexJobAuthority(job.Authority)
 	cfg := codexExecConfigForAuthority(codexExecConfigFromEnv(), authority, job.Mode)
 	cfg.ScratchDir = filepath.Join(getenvDefault("BONFIRE_CODEX_SCRATCH_ROOT", "/runner-data/jobs"), filepath.Base(job.ID))
 	defer os.RemoveAll(cfg.ScratchDir)
 	now := time.Now().UTC()
+	prompt, currentThreadMetadata, admissionErr := codexRunnerPromptAtProviderAdmission(ctx, job)
+	if admissionErr != nil {
+		failCodexRunnerProviderAdmission(ctx, store, job, admissionErr)
+		return
+	}
 	runningMetadata := map[string]string{
 		"status":              codexJobStatusRunning,
 		"threadStatus":        codexJobStatusRunning,
@@ -775,6 +899,14 @@ func processCodexRunnerJob(ctx context.Context, store *codexRunnerJobStore, job 
 		"codexReasoning":      cfg.Reasoning,
 		"codexSearch":         strconv.FormatBool(cfg.Search),
 		"startedAt":           firstNonEmptyString(job.StartedAt.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)),
+	}
+	if len(currentThreadMetadata) > 0 {
+		job.ThreadMetadata = currentThreadMetadata
+		for _, key := range append(append([]string(nil), agentThreadProfileMetadataKeys...), "agentReauthorizedAt") {
+			if value := strings.TrimSpace(currentThreadMetadata[key]); value != "" {
+				runningMetadata[key] = value
+			}
+		}
 	}
 	job.Status = codexJobStatusRunning
 	job.Metadata = mergeStringMaps(job.Metadata, runningMetadata)
@@ -815,7 +947,7 @@ func processCodexRunnerJob(ctx context.Context, store *codexRunnerJobStore, job 
 	runCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 	stopHeartbeat, heartbeatResult := startCodexRunnerClaimHeartbeat(runCtx, store, job, cancel)
-	result, err := runCodexExecCommand(runCtx, cfg, strings.TrimSpace(job.Prompt))
+	result, err := runCodexExecCommand(runCtx, cfg, prompt)
 	stopHeartbeat()
 	if heartbeatErr := <-heartbeatResult; heartbeatErr != nil {
 		// Once renewal is ambiguous or ownership is lost, this generation has no
@@ -941,6 +1073,10 @@ func startCodexRunnerClaimHeartbeat(ctx context.Context, store *codexRunnerJobSt
 }
 
 func buildCodexRunnerErrorArtifact(job codexRunnerJob, err error) string {
+	nextAction := "inspect runner logs, credentials, queue health, or sandbox access, then rerun the thread."
+	if errors.Is(err, ErrAgentThreadSourceChanged) {
+		nextAction = "the source changed while this job was queued. Reselect or reattach every referenced File, confirm you can still open it, then retry. The sidecar stopped before sending stale or revoked source content to Codex."
+	}
 	lines := []string{
 		"Scout work thread",
 		"",
@@ -952,7 +1088,7 @@ func buildCodexRunnerErrorArtifact(job codexRunnerJob, err error) string {
 		"- The sidecar Codex runner claimed the job.",
 		"- Worker error: " + strings.TrimSpace(err.Error()),
 		"",
-		"Next action: inspect runner logs, credentials, queue health, or sandbox access, then rerun the thread.",
+		"Next action: " + nextAction,
 	}
 	return strings.Join(appendGoalWorkflow(lines, job.Mode, job.Query, err.Error(), agentThreadDeliverable(job.Mode), "worker error recorded on artifact"), "\n")
 }
@@ -1268,7 +1404,14 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 		stampReadinessMetadata(existing, firstNonEmptyString(existing.Metadata["mode"], existing.Kind), text, metadata)
 	}
 
-	artifact, changed, err := kanbanApp.updateOSArtifactWithMetadata(artifactID, title, text, "Codex runner", metadata)
+	// Sidecar completion is still work by the named coworker. Reuse the same
+	// durable authorship resolver as synchronous and queued-interim seams so a
+	// Colton/Marvin run cannot fall back to the transport label at terminal.
+	writer := agentThreadArtifactWriter(
+		scoutAgentThread{Artifact: existing},
+		agentThreadWorkerResult{Metadata: metadata},
+	)
+	artifact, changed, err := kanbanApp.updateOSArtifactWithMetadata(artifactID, title, text, writer, metadata)
 	if err != nil {
 		writeSystemStatusJSON(w, r, http.StatusBadRequest, map[string]any{
 			"ok":    false,

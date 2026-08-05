@@ -162,7 +162,7 @@ test('the icon bundle only uses keys the renderer actually honours', () => {
   assert.match(read('mobile/app.config.ts'), /icon: '\.\/assets\/Stride\.icon'/);
 });
 
-test('the wordmark is one outline, and every surface draws that one', () => {
+test('the legacy vector wordmark remains canonical where it is still used', () => {
   const source = read('brand/stride-wordmark-source.svg');
   const outline = source.match(/ d="([^"]+)"/)?.[1];
   assert.ok(outline, 'the wordmark source has no outline');
@@ -177,9 +177,9 @@ test('the wordmark is one outline, and every surface draws that one', () => {
   const native = read('mobile/src/theme/strideWordmark.ts');
   assert.ok(native.includes(`'${outline}'`), 'the native wordmark print has drifted — regenerate it');
 
-  // Desktop and marketing both mask the same generated file rather than
-  // carrying a copy at all, which is why there is nothing else to compare.
-  assert.match(read('index.html'), /mask: url\(\/public\/wordmark\.svg\)/);
+  // Marketing remains outside this product pass and continues to consume the
+  // generated vector. Bonfire itself deliberately uses the founder-supplied
+  // black/orange artwork, verified below.
   assert.match(read('stride-site/app/globals.css'), /mask: url\(\/wordmark\.svg\)/);
 });
 
@@ -293,42 +293,32 @@ test('the light theme is grounded on the putty, in both token copies', () => {
   assert.match(read('index.html'), /rgba\(255, 90, 25, 0\.03\), transparent 55%/);
 });
 
-test('the wordmark is the receiving row, never the orange, on every surface', () => {
+test('Bonfire uses the supplied black wordmark on light and orange on dark', () => {
   /**
-   * "The only orange thing is the ball in motion." — AJ, 2026-07-31.
-   *
-   * Orange is custody of energy. The name is the one thing that never moves, so
-   * it takes the row's graphite, and each cut IS that appearance's row — the
-   * wordmark matches the balls in the tile beside it. The four web placements
-   * declare it separately, so all four are checked, and each is checked for
-   * the orange creeping back as "more on-brand".
+   * Founder override, 2026-08-04: use the supplied orange Stride logo in dark
+   * mode and the supplied black Stride logo in light mode. Marketing remains
+   * outside this product pass; this gate covers Bonfire web and native.
    */
-  const ROW_ON_LIGHT = '#54545C';
-  const ROW_ON_DARK = '#77777D';
-
   const html = read('index.html');
-  assert.match(html, new RegExp(`--wordmark: ${ROW_ON_LIGHT};`));
-  assert.match(html, new RegExp(`--wordmark: ${ROW_ON_DARK};`));
-  // Every placement reads the token rather than picking its own colour.
-  assert.equal((html.match(/color: var\(--wordmark\)/g) ?? []).length, 4);
-  // Bounded to the rule's own block. An unbounded `[\s\S]*?` here matches the
-  // next --ember ANYWHERE later in a 30k-line file and always fails.
-  const loginRule = html.slice(html.indexOf('.login-wordmark {'));
-  assert.match(loginRule.slice(0, loginRule.indexOf('}')), /color: var\(--wordmark\)/);
-  assert.doesNotMatch(loginRule.slice(0, loginRule.indexOf('}')), /--ember/);
-
-  assert.match(read('mobile/src/theme/tokens.ts'), new RegExp(`wordmark: adaptive\\('${ROW_ON_LIGHT}', '${ROW_ON_DARK}'\\)`));
+  assert.match(html, /--wordmark: #000000;/);
+  assert.match(html, /--wordmark-image: url\(\/public\/stride-wordmark-black\.png\);/);
+  assert.match(html, /--wordmark: var\(--ember-500\);/);
+  assert.match(html, /--wordmark-image: url\(\/public\/stride-wordmark-orange\.png\);/);
+  assert.equal(
+    sha256(readBytes('public/stride-wordmark-black.png')),
+    'cf4c49affc0f00293d31ad5149f2c640fa5a1103dc3d3b6a466d46a82ffffa97',
+    'the founder-supplied black artwork changed',
+  );
+  assert.equal(
+    sha256(readBytes('public/stride-wordmark-orange.png')),
+    '978420efa0620630883e22fa69a90de16dd253dad1b2b25e99a4e97acaffbbab',
+    'the founder-supplied orange artwork changed',
+  );
+  // Placements consume the theme token or themed asset, not one-off cuts.
+  assert.equal((html.match(/color: var\(--wordmark\)/g) ?? []).length, 5);
+  assert.match(read('mobile/src/theme/tokens.ts'), /wordmark: adaptive\('#000000', '#FF5A19'\)/);
   assert.match(read('mobile/src/components/BrandMark.tsx'), /color = colors\.wordmark/);
   assert.doesNotMatch(read('mobile/src/components/BrandMark.tsx'), /color = colors\.ember/);
-
-  const css = read('stride-site/app/globals.css');
-  assert.match(css, new RegExp(`--wordmark-on-light: ${ROW_ON_LIGHT.toLowerCase()};`));
-  assert.match(css, new RegExp(`--wordmark-on-dark: ${ROW_ON_DARK.toLowerCase()};`));
-  // The hero and footer ride --black, the nav rides paper: each takes its own cut.
-  for (const rule of ['.hero-wordmark', '.nav-brand > a', '.footer-brand > a']) {
-    const block = css.slice(css.indexOf(rule));
-    assert.match(block.slice(0, 200), /color: var\(--wordmark-on-(light|dark)\)/, `${rule} must use a wordmark cut`);
-  }
 });
 
 test('the mark and the name are one lockup, not two marks near each other', () => {

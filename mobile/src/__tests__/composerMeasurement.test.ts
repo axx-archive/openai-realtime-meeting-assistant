@@ -19,3 +19,11 @@ test('composer measurement clamps invalid, short, and oversized content', () => 
   assert.equal(composerHeight('draft', 400), expandedComposerMaxHeight);
   assert.equal(composerHeight('draft', 400, editingComposerMaxHeight), editingComposerMaxHeight);
 });
+
+test('composer expands from wrapped text even when native iOS reports its pinned frame', () => {
+  const width = 240;
+  assert.equal(composerHeight('short line', compactComposerHeight, expandedComposerMaxHeight, width), compactComposerHeight);
+  assert.equal(composerHeight('x'.repeat(90), compactComposerHeight, expandedComposerMaxHeight, width), 66);
+  assert.equal(composerHeight('one\ntwo\nthree\nfour', compactComposerHeight, expandedComposerMaxHeight, width), 88);
+  assert.equal(composerHeight('', 120, expandedComposerMaxHeight, width), compactComposerHeight);
+});

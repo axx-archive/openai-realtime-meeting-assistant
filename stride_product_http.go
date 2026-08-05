@@ -692,7 +692,11 @@ func strideProductApprove(w http.ResponseWriter, r *http.Request, user *userAcco
 		if completionMessageCommitted {
 			// The chat row is already durable and message IDs are deterministic.
 			// Projection is idempotent, and startup replay is the crash backstop.
+			// Live delivery also happens here, after runtime.mu is released: its
+			// viewer projection may consult the Product ledger to upgrade a legacy
+			// direct-agent thread, which would self-deadlock inside the transaction.
 			kanbanApp.observeSTRIDETeamChatMessage(thread, message, "message", "")
+			deliverScoutChatThreadUpdate(thread, message)
 		}
 		if errors.Is(postErr, ErrSTRIDEWorkSourceChanged) {
 			writeSTRIDEProductError(w, postErr)
@@ -1288,7 +1292,7 @@ func strideProductMarketplaceHandle(w http.ResponseWriter, r *http.Request) {
 			writeSTRIDEProductError(w, ErrSTRIDEProductInvalid)
 			return
 		}
-		agentID := "agent_" + id
+		agentID := candidateAgentID(id)
 		var prior STRIDEProductTeamAgent
 		err := runtime.WithProductContext(canonicalTenantID(), STRIDEProductScopeMarketplace, func(ctx STRIDEProductContext) error {
 			var found bool
@@ -1430,7 +1434,7 @@ func strideProductRosterHandle(w http.ResponseWriter, r *http.Request) {
 		strideProductWriteAgentMutation(w, runtime, agent, err)
 		return
 	}
-	if len(parts) == 4 && parts[1] == "learning" && (parts[3] == "correct" || parts[3] == "forget") {
+	if len(parts) == 4 && parts[1] == "learning" && (parts[3] == "approve" || parts[3] == "correct" || parts[3] == "forget") {
 		var body struct {
 			Revision int64  `json:"revision"`
 			Summary  string `json:"summary"`
@@ -1658,14 +1662,17 @@ func strideProductCommitMessageOnce(thread scoutChatThreadRecord, message scoutC
 }
 
 func strideProductCommitMessageOnceLocked(thread scoutChatThreadRecord, message scoutChatMessageRecord) bool {
-	return strideProductCommitMessageOnceLockedWithObservation(thread, message, true)
+	return strideProductCommitMessageOnceLockedWithSideEffects(thread, message, true, true)
 }
 
 func strideProductCommitMessageOnceLockedWithoutObservation(thread scoutChatThreadRecord, message scoutChatMessageRecord) bool {
-	return strideProductCommitMessageOnceLockedWithObservation(thread, message, false)
+	// This path runs inside WithProductContext while runtime.mu is held. Both
+	// conversation observation and websocket projection can re-enter the
+	// runtime, so the caller performs both only after the transaction releases.
+	return strideProductCommitMessageOnceLockedWithSideEffects(thread, message, false, false)
 }
 
-func strideProductCommitMessageOnceLockedWithObservation(thread scoutChatThreadRecord, message scoutChatMessageRecord, observe bool) bool {
+func strideProductCommitMessageOnceLockedWithSideEffects(thread scoutChatThreadRecord, message scoutChatMessageRecord, observe, deliver bool) bool {
 	for _, existing := range thread.Messages {
 		if existing.ID == message.ID {
 			return true
@@ -1682,7 +1689,9 @@ func strideProductCommitMessageOnceLockedWithObservation(thread scoutChatThreadR
 	if observe {
 		kanbanApp.observeSTRIDETeamChatMessage(thread, message, "message", "")
 	}
-	deliverScoutChatThreadUpdate(thread, message)
+	if deliver {
+		deliverScoutChatThreadUpdate(thread, message)
+	}
 	return true
 }
 

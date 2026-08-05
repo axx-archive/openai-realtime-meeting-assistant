@@ -910,7 +910,7 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 		"inset: 0 auto 0 0;",
 		"border-right: 1px solid var(--line-1);",
 		"width: 60px;",
-		"padding: 16px 0 14px;",
+		"padding: 0 20px;",
 		"transform: translateY(-50%);",
 		"display: none;",
 		".tool-rail:hover,",
@@ -923,7 +923,7 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 		".tool-rail__tool:focus-visible .tool-rail__label {",
 		"transition-delay: 350ms;",
 		"#appShell.is-authed .workspace",
-		"padding-left: 60px;",
+		"padding-left: 72px;",
 		`<span class="tool-rail__label"><span class="wordmark" role="img" aria-label="Stride"></span></span>`,
 		`<span class="tool-rail__label">the room</span>`,
 		`<span class="tool-rail__label">chat</span>`,
@@ -1026,13 +1026,13 @@ func TestToolRailFloatingIslandAnchorsStayViewportSafe(t *testing.T) {
 	desktopShellBlock := functionBody(html, "@media (min-width: 641px) {")
 	for _, want := range []string{
 		"#appShell.is-authed {",
-		"--shell-topbar-height: 52px;",
-		"padding-left: 60px;",
+		"--shell-topbar-height: 60px;",
+		"padding-left: 72px;",
 		"#appShell.is-authed .topbar {",
 		"display: flex;",
 	} {
 		if !strings.Contains(desktopShellBlock, want) {
-			t.Fatalf("desktop shell must clear the 60px rail and show the 52px header; missing %q in the min-width 641px block", want)
+			t.Fatalf("desktop shell must clear the 72px rail and show the 60px header; missing %q in the min-width 641px block", want)
 		}
 	}
 
@@ -2092,12 +2092,9 @@ func TestIndexRoomEntryChoreographyHoldsFinalVisibleState(t *testing.T) {
 
 	html := string(rawHTML)
 
-	// The .mount-stagger base state is opacity 0, so any animation that
-	// overrides mount-rise (which uses a forwards fill) must also hold its
-	// final frame. A bare backwards fill snaps the room back to opacity 0
-	// once the entry animation ends, leaving a first-time visitor staring
-	// at the background gradient until they refresh (the reload path takes
-	// the .is-fast-mount branch, which masks the bug).
+	// Room-entry animations own both start and finish frames while active;
+	// the stable .mount-stagger base is independently visible if bootstrap
+	// is interrupted.
 	for _, want := range []string{
 		"#appShell.is-in-room .hearth-presentation { animation: rise-in 480ms var(--ease-out) both; }",
 		"#appShell.is-in-room .scout-rail          { animation: rise-in 480ms var(--ease-out) 80ms both; }",

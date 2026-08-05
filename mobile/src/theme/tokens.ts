@@ -137,25 +137,8 @@ export const colors = {
    */
   emberText: adaptive('#86290F', ember[500]),
 
-  /**
-   * THE WORDMARK'S COLOUR — the receiving row's graphite, never orange.
-   * AJ, 2026-07-31: "the only orange thing is the ball in motion."
-   *
-   * In the Strike, orange is custody of energy — the mass that is moving — and
-   * the neutral row is everything at rest: the name, the shared context, the
-   * company. A wordmark painted orange claims to be in motion, and it is the
-   * one thing on screen that never is. So the name takes the row's colour and
-   * orange stays earned in the logotype exactly as it is everywhere else.
-   *
-   * The two cuts come from the SAME graphite family the icon's receiving rows
-   * use, but are chosen by the GROUND the mark sits on rather than copied from
-   * whichever tile is beside it — a tile's row is picked for that tile's own
-   * field, so the two do not always coincide. Ground decides legibility, so
-   * ground decides this.
-   * 4.4:1 on the putty ground, 4.9:1 on true black — and the orange it replaces
-   * measured 1.83:1 on putty, so this is more legible as well as more correct.
-   */
-  wordmark: adaptive('#54545C', '#77777D'),
+  /** Founder-supplied wordmark cuts: black on light, Stride Orange on dark. */
+  wordmark: adaptive('#000000', '#FF5A19'),
   /** Ember text when the surrounding fill is `accent` (dark in light mode, light in dark mode). */
   onAccentEmber: adaptive(ember[500], '#B83A18'),
 

@@ -99,7 +99,7 @@ func assistantLinkPreviewImageHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, "image link is invalid")
 		return
 	}
-	req.Header.Set("Accept", "image/avif,image/webp,image/png,image/jpeg,image/gif")
+	req.Header.Set("Accept", "image/webp,image/png,image/jpeg,image/gif")
 	req.Header.Set("User-Agent", "BonfireOS-LinkPreview/1.0")
 	response, err := linkPreviewHTTPClient().Do(req)
 	if err != nil {
@@ -254,7 +254,22 @@ func fetchLinkPreview(ctx context.Context, target *url.URL) (linkPreview, error)
 			return video, nil
 		}
 	}
-	return fetchHTMLLinkPreview(ctx, target)
+	if tiktokVideoURL(target) {
+		if video, videoErr := fetchTikTokVideoPreview(ctx, target); videoErr == nil {
+			return video, nil
+		}
+	}
+	page, pageErr := fetchHTMLLinkPreview(ctx, target)
+	if pageErr == nil {
+		return normalizeProviderLinkPreview(target, page), nil
+	}
+	// Provider APIs and public HTML endpoints are not uniformly available. A
+	// recognized public post should still render as a useful, honest card when
+	// richer metadata is blocked; clients never receive provider HTML or scripts.
+	if fallback, ok := recognizedProviderLinkPreview(target); ok {
+		return fallback, nil
+	}
+	return linkPreview{}, pageErr
 }
 
 func fetchHTMLLinkPreview(ctx context.Context, target *url.URL) (linkPreview, error) {
@@ -299,6 +314,16 @@ type youtubeOEmbedResponse struct {
 	AuthorName   string `json:"author_name"`
 	ProviderName string `json:"provider_name"`
 	ThumbnailURL string `json:"thumbnail_url"`
+}
+
+type tiktokOEmbedResponse struct {
+	Title           string `json:"title"`
+	AuthorName      string `json:"author_name"`
+	AuthorURL       string `json:"author_url"`
+	ProviderName    string `json:"provider_name"`
+	ThumbnailURL    string `json:"thumbnail_url"`
+	ThumbnailWidth  int    `json:"thumbnail_width"`
+	ThumbnailHeight int    `json:"thumbnail_height"`
 }
 
 func youtubeVideoURL(target *url.URL) bool {
@@ -354,10 +379,258 @@ func fetchYouTubeVideoPreview(ctx context.Context, target *url.URL) (linkPreview
 		imageURL = thumbnail.String()
 	}
 	return linkPreview{
-		URL: target.String(), Kind: "video", Title: title,
+		URL: target.String(), Kind: "youtube_video", Title: title,
 		Description: previewText(embed.AuthorName, 120), SiteName: firstNonEmptyString(previewText(embed.ProviderName, 80), "YouTube"),
 		ImageURL: imageURL, MediaType: "video",
 	}, nil
+}
+
+func tiktokCanonicalVideoURL(target *url.URL) bool {
+	if target == nil {
+		return false
+	}
+	host := strings.ToLower(strings.TrimPrefix(target.Hostname(), "www."))
+	if host != "tiktok.com" && host != "m.tiktok.com" {
+		return false
+	}
+	parts := strings.Split(strings.Trim(target.Path, "/"), "/")
+	if len(parts) != 3 || !strings.HasPrefix(parts[0], "@") || len(parts[0]) < 2 || parts[1] != "video" {
+		return false
+	}
+	for _, character := range parts[2] {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return parts[2] != ""
+}
+
+func tiktokShortVideoURL(target *url.URL) bool {
+	if target == nil {
+		return false
+	}
+	host := strings.ToLower(target.Hostname())
+	parts := strings.Split(strings.Trim(target.Path, "/"), "/")
+	if (host == "vm.tiktok.com" || host == "vt.tiktok.com") && len(parts) == 1 {
+		return validTikTokShareCode(parts[0])
+	}
+	host = strings.TrimPrefix(host, "www.")
+	return host == "tiktok.com" && len(parts) == 2 && parts[0] == "t" && validTikTokShareCode(parts[1])
+}
+
+func validTikTokShareCode(value string) bool {
+	if len(value) < 4 || len(value) > 80 {
+		return false
+	}
+	for _, character := range value {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '-' || character == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func tiktokVideoURL(target *url.URL) bool {
+	return tiktokCanonicalVideoURL(target) || tiktokShortVideoURL(target)
+}
+
+// resolveTikTokVideoURL follows only recognized TikTok share links through the
+// same DNS-pinned, private-network-denying client as every other preview. The
+// final destination must be a canonical TikTok video; a short link cannot turn
+// this specialized lane into a general redirector.
+func resolveTikTokVideoURL(ctx context.Context, target *url.URL) (*url.URL, error) {
+	if tiktokCanonicalVideoURL(target) {
+		copy := *target
+		return &copy, nil
+	}
+	if !tiktokShortVideoURL(target) {
+		return nil, fmt.Errorf("tiktok video link is invalid")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "text/html,application/xhtml+xml;q=0.9")
+	req.Header.Set("Range", "bytes=0-0")
+	req.Header.Set("User-Agent", "BonfireOS-LinkPreview/1.0")
+	response, err := linkPreviewHTTPClient().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	response.Body.Close()
+	canonical := response.Request.URL
+	if !tiktokCanonicalVideoURL(canonical) {
+		return nil, fmt.Errorf("tiktok share link did not resolve to a video")
+	}
+	copy := *canonical
+	copy.Fragment = ""
+	return &copy, nil
+}
+
+func fetchTikTokVideoPreview(ctx context.Context, target *url.URL) (linkPreview, error) {
+	canonical, err := resolveTikTokVideoURL(ctx, target)
+	if err != nil {
+		return linkPreview{}, err
+	}
+	endpoint, _ := url.Parse("https://www.tiktok.com/oembed")
+	query := endpoint.Query()
+	query.Set("url", canonical.String())
+	endpoint.RawQuery = query.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	if err != nil {
+		return linkPreview{}, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "BonfireOS-LinkPreview/1.0")
+	response, err := linkPreviewHTTPClient().Do(req)
+	if err != nil {
+		return linkPreview{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return linkPreview{}, fmt.Errorf("tiktok oembed returned %d", response.StatusCode)
+	}
+	var embed tiktokOEmbedResponse
+	decoder := json.NewDecoder(io.LimitReader(response.Body, 256<<10))
+	if err := decoder.Decode(&embed); err != nil {
+		return linkPreview{}, err
+	}
+	return tiktokPreviewFromOEmbed(canonical, embed)
+}
+
+func tiktokPreviewFromOEmbed(target *url.URL, embed tiktokOEmbedResponse) (linkPreview, error) {
+	if !tiktokCanonicalVideoURL(target) {
+		return linkPreview{}, fmt.Errorf("tiktok video link is invalid")
+	}
+	author := previewText(embed.AuthorName, 120)
+	handle := tiktokAuthorHandle(target)
+	title := previewText(embed.Title, 180)
+	if title == "" && author != "" {
+		title = "Video by " + author
+	}
+	if title == "" {
+		return linkPreview{}, fmt.Errorf("tiktok oembed response is incomplete")
+	}
+	imageURL := ""
+	if thumbnail, err := normalizeLinkPreviewURL(strings.TrimSpace(embed.ThumbnailURL)); err == nil {
+		imageURL = thumbnail.String()
+	}
+	description := author
+	if handle != "" {
+		description = "@" + handle
+		if author != "" && !strings.EqualFold(author, "@"+handle) {
+			description = author + " · @" + handle
+		}
+	}
+	return linkPreview{
+		URL: target.String(), Kind: "tiktok_video", Title: title, Description: description,
+		SiteName: firstNonEmptyString(previewText(embed.ProviderName, 80), "TikTok"), ImageURL: imageURL, MediaType: "video",
+		AuthorName: author, AuthorHandle: previewText(handle, 80),
+	}, nil
+}
+
+func tiktokAuthorHandle(target *url.URL) string {
+	if !tiktokCanonicalVideoURL(target) {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(target.Path, "/"), "/")
+	return strings.TrimPrefix(parts[0], "@")
+}
+
+func instagramContentKind(target *url.URL) string {
+	if target == nil {
+		return ""
+	}
+	host := strings.ToLower(strings.TrimPrefix(target.Hostname(), "www."))
+	if host != "instagram.com" && host != "m.instagram.com" {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(target.Path, "/"), "/")
+	if len(parts) != 2 || !validInstagramShortcode(parts[1]) {
+		return ""
+	}
+	switch strings.ToLower(parts[0]) {
+	case "reel", "reels":
+		return "instagram_reel"
+	case "tv":
+		return "instagram_video"
+	case "p":
+		return "instagram_post"
+	default:
+		return ""
+	}
+}
+
+func validInstagramShortcode(value string) bool {
+	if len(value) < 4 || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '-' || character == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func recognizedProviderLinkPreview(target *url.URL) (linkPreview, bool) {
+	if target == nil {
+		return linkPreview{}, false
+	}
+	if kind := instagramContentKind(target); kind != "" {
+		title, mediaType := "Instagram post", "rich"
+		switch kind {
+		case "instagram_reel":
+			title, mediaType = "Instagram reel", "video"
+		case "instagram_video":
+			title, mediaType = "Instagram video", "video"
+		}
+		return linkPreview{
+			URL: target.String(), Kind: kind, Title: title, Description: "Open the original on Instagram",
+			SiteName: "Instagram", MediaType: mediaType,
+		}, true
+	}
+	if xPostURL(target) {
+		return linkPreview{
+			URL: target.String(), Kind: "x_post", Title: "Post on X", Description: "Open the original post on X",
+			SiteName: "X", MediaType: "rich",
+		}, true
+	}
+	if youtubeVideoURL(target) {
+		return linkPreview{
+			URL: target.String(), Kind: "youtube_video", Title: "YouTube video", Description: "Open the original video on YouTube",
+			SiteName: "YouTube", MediaType: "video",
+		}, true
+	}
+	if tiktokVideoURL(target) {
+		return linkPreview{
+			URL: target.String(), Kind: "tiktok_video", Title: "TikTok video", Description: "Open the original video on TikTok",
+			SiteName: "TikTok", MediaType: "video",
+		}, true
+	}
+	return linkPreview{}, false
+}
+
+func normalizeProviderLinkPreview(target *url.URL, preview linkPreview) linkPreview {
+	fallback, recognized := recognizedProviderLinkPreview(target)
+	if !recognized {
+		return preview
+	}
+	preview.URL = fallback.URL
+	preview.Kind = fallback.Kind
+	preview.SiteName = fallback.SiteName
+	if preview.Title == "" || strings.EqualFold(preview.Title, fallback.SiteName) {
+		preview.Title = fallback.Title
+	}
+	if preview.Description == "" {
+		preview.Description = fallback.Description
+	}
+	if preview.MediaType == "" {
+		preview.MediaType = fallback.MediaType
+	}
+	return preview
 }
 
 func xPostURL(target *url.URL) bool {
@@ -410,20 +683,33 @@ func fetchXPostPreview(ctx context.Context, target *url.URL) (linkPreview, error
 	if postText == "" || strings.TrimSpace(embed.AuthorName) == "" {
 		return linkPreview{}, fmt.Errorf("x oembed response is incomplete")
 	}
-	handle := ""
-	if authorURL, err := url.Parse(embed.AuthorURL); err == nil {
-		handle = strings.Trim(strings.TrimSpace(authorURL.Path), "/")
-	}
-	canonicalURL := strings.TrimSpace(embed.URL)
-	if canonicalURL == "" {
-		canonicalURL = target.String()
+	handle := xAuthorHandle(embed.AuthorURL)
+	canonicalURL := target.String()
+	if embeddedURL, err := normalizeLinkPreviewURL(strings.TrimSpace(embed.URL)); err == nil && xPostURL(embeddedURL) {
+		canonicalURL = embeddedURL.String()
 	}
 	return linkPreview{
-		URL: canonicalURL, Kind: "x_post", Title: strings.TrimSpace(embed.AuthorName) + " on X",
+		URL: canonicalURL, Kind: "x_post", Title: previewText(embed.AuthorName+" on X", 100),
 		Description: previewMultilineText(postText, 700), SiteName: "X", MediaType: "rich",
 		AuthorName: previewText(embed.AuthorName, 80), AuthorHandle: previewText(handle, 40),
 		PublishedAt: previewText(publishedAt, 40),
 	}, nil
+}
+
+func xAuthorHandle(raw string) string {
+	authorURL, err := normalizeLinkPreviewURL(strings.TrimSpace(raw))
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(strings.TrimPrefix(authorURL.Hostname(), "www."))
+	if host != "x.com" && host != "twitter.com" {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(authorURL.Path, "/"), "/")
+	if len(parts) != 1 || parts[0] == "" {
+		return ""
+	}
+	return previewText(parts[0], 40)
 }
 
 func previewMultilineText(value string, limit int) string {
@@ -563,11 +849,24 @@ func linkPreviewKind(base *url.URL, mediaType, imageURL string) string {
 	if base != nil {
 		host := strings.ToLower(strings.TrimPrefix(base.Hostname(), "www."))
 		if host == "youtube.com" || host == "youtu.be" || host == "m.youtube.com" {
-			return "video"
+			return "youtube_video"
+		}
+		if tiktokVideoURL(base) {
+			return "tiktok_video"
+		}
+		if kind := instagramContentKind(base); kind != "" {
+			return kind
+		}
+		if xPostURL(base) {
+			return "x_post"
 		}
 	}
-	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(mediaType)), "video") {
+	normalizedMediaType := strings.ToLower(strings.TrimSpace(mediaType))
+	if strings.HasPrefix(normalizedMediaType, "video") {
 		return "video"
+	}
+	if strings.HasPrefix(normalizedMediaType, "article") {
+		return "article"
 	}
 	if strings.TrimSpace(imageURL) != "" {
 		return "website"

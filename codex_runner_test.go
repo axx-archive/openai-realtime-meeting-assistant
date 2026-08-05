@@ -354,6 +354,7 @@ func TestInternalCodexRunnerCallbackUpdatesArtifact(t *testing.T) {
 		"threadId":     "agent-thread-test",
 		"runnerJobId":  "codex-job-test",
 		"threadStatus": codexJobStatusQueued,
+		"agentName":    "Colton",
 	})
 	if err != nil {
 		t.Fatalf("createOSArtifactWithMetadata: %v", err)
@@ -387,6 +388,9 @@ func TestInternalCodexRunnerCallbackUpdatesArtifact(t *testing.T) {
 	}
 	if updated.Metadata["threadStatus"] != codexJobStatusComplete || updated.Metadata["runnerJobId"] != "codex-job-test" {
 		t.Fatalf("metadata=%v, want complete runner callback", updated.Metadata)
+	}
+	if updated.Metadata["updatedBy"] != "Colton" {
+		t.Fatalf("updatedBy=%q, want named sidecar coworker Colton", updated.Metadata["updatedBy"])
 	}
 	if !strings.Contains(updated.Text, "finished") {
 		t.Fatalf("updated.Text=%q, want callback text", updated.Text)

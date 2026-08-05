@@ -83,7 +83,7 @@ func TestWebHomeScoutOpeningRendersReplyLifecycleWithoutFalseProviderClaims(t *t
 		"decorateScoutReplyLifecycle(node, message, replyLifecycle)",
 		"const messageActionsReady = !message.reply || message.reply.state === 'completed'",
 		"message.id && kind !== 'error' && messageActionsReady",
-		"idname.textContent = 'scout'",
+		"? (String(authorLabel || '').trim() || 'scout')",
 		"isPhone ? 'ask…'",
 	} {
 		if !strings.Contains(html, want) {

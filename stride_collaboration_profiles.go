@@ -226,9 +226,19 @@ func safeSTRIDECollaborationPreferenceType(value string) bool {
 	switch value {
 	case "communication_format", "response_length", "meeting_pace", "feedback_style", "notification_timing", "decision_detail", "collaboration_channel", "working_hours", "name_pronunciation":
 		return true
-	default:
-		return false
 	}
+	// Import memory keeps each user-reviewed source line separately corrigible
+	// instead of flattening an entire biography into one opaque blob. The fixed
+	// category plus a two-digit slot is a closed vocabulary, not a caller-defined
+	// prompt key; values remain private data and never confer authority.
+	for _, base := range []string{"user_instruction", "identity_context", "career_context", "project_context", "personal_preference"} {
+		prefix := base + "_"
+		if strings.HasPrefix(value, prefix) {
+			suffix := strings.TrimPrefix(value, prefix)
+			return len(suffix) == 2 && suffix[0] >= '0' && suffix[0] <= '9' && suffix[1] >= '0' && suffix[1] <= '9' && suffix != "00"
+		}
+	}
+	return false
 }
 
 func containsSTRIDEPrincipal(values []string, want string) bool {

@@ -192,13 +192,24 @@ func durationEnv(name string, fallback time.Duration, minimum time.Duration) tim
 }
 
 func (app *kanbanBoardApp) produceCodexAgentThreadArtifact(ctx context.Context, thread scoutAgentThread) (agentThreadWorkerResult, error) {
+	providerContext, err := app.agentThreadProviderContext(ctx, thread)
+	if err != nil {
+		return agentThreadWorkerResult{}, err
+	}
+	job := app.newAgentJob(thread)
+	job.Context = providerContext
+	return app.produceCodexAgentThreadArtifactForJob(ctx, job)
+}
+
+func (app *kanbanBoardApp) produceCodexAgentThreadArtifactForJob(ctx context.Context, job AgentJob) (agentThreadWorkerResult, error) {
+	thread := job.thread
 	cfg := codexExecConfigFromEnv()
 	authority := codexJobAuthorityForThread(thread)
 	if authority == codexJobAuthorityExternalWrite {
 		return codexApprovalRequiredResult(thread, authority), nil
 	}
 	cfg = codexExecConfigForAuthority(cfg, authority, thread.Mode)
-	prompt := app.buildCodexAgentThreadPrompt(thread, time.Now(), authority)
+	prompt := app.buildCodexAgentJobPrompt(job, time.Now(), authority)
 	result, err := runCodexExecCommand(ctx, cfg, prompt)
 	metadata := map[string]string{
 		"worker":              agentThreadWorkerCodexExec,
@@ -247,8 +258,13 @@ func appendCodexWorkerEvidenceForContract(output string, cfg codexExecConfig, co
 }
 
 func (app *kanbanBoardApp) buildCodexAgentThreadPrompt(thread scoutAgentThread, now time.Time, authority string) string {
-	board := app.snapshotState()
-	memory := app.delegatedMemorySnapshot(context.Background(), firstNonEmptyString(thread.Artifact.Metadata["requestedBy"], thread.Artifact.Metadata["createdBy"]), thread.Artifact.Metadata["originRoomId"], 20)
+	return app.buildCodexAgentJobPrompt(app.newAgentJob(thread), now, authority)
+}
+
+func (app *kanbanBoardApp) buildCodexAgentJobPrompt(job AgentJob, now time.Time, authority string) string {
+	thread := job.thread
+	board := job.Context.Board
+	memory := job.Context.Memory
 	contextLine := boardAndMemoryContextLine(board, memory)
 	authority = normalizeCodexJobAuthority(authority)
 
@@ -264,6 +280,10 @@ func (app *kanbanBoardApp) buildCodexAgentThreadPrompt(thread scoutAgentThread, 
 	builder.WriteString(now.Format(time.RFC3339))
 	builder.WriteString("\nUser request: ")
 	builder.WriteString(thread.Query)
+	if persona := agentThreadPersonaInstruction(thread.Artifact.Metadata); persona != "" {
+		builder.WriteString("\n\nApproved coworker identity:\n")
+		builder.WriteString(persona)
+	}
 	builder.WriteString("\n\nFollow this goal loop in order:\n")
 	builder.WriteString("1. Identify and restate the goal.\n")
 	builder.WriteString("2. Decompose the work.\n")

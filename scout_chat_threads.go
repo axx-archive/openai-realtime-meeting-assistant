@@ -9,9 +9,11 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -159,11 +161,109 @@ type scoutChatFileAttachment struct {
 }
 
 type scoutChatThreadRef struct {
-	ID         string `json:"id"`
-	Mode       string `json:"mode"`
-	Query      string `json:"query"`
-	Status     string `json:"status"`
-	ArtifactID string `json:"artifactId,omitempty"`
+	ID              string  `json:"id"`
+	Mode            string  `json:"mode"`
+	Query           string  `json:"query"`
+	Status          string  `json:"status"`
+	ArtifactID      string  `json:"artifactId,omitempty"`
+	AgentID         string  `json:"agentId,omitempty"`
+	AgentName       string  `json:"agentName,omitempty"`
+	DelegatedBy     string  `json:"delegatedBy,omitempty"`
+	CurrentStage    string  `json:"currentStage,omitempty"`
+	ProgressPercent float64 `json:"progressPercent,omitempty"`
+	ProgressNote    string  `json:"progressNote,omitempty"`
+	StartedAt       string  `json:"startedAt,omitempty"`
+}
+
+func agentThreadGoalSpecForProfile(profile STRIDEProductAgentContextProfile, delegatedBy string) agentThreadGoalSpec {
+	return agentThreadGoalSpec{
+		AgentID:             profile.AgentID,
+		AgentName:           profile.DisplayName,
+		AgentRole:           profile.RoleTitle,
+		AgentOutcome:        profile.OutcomeSummary,
+		AgentPersona:        strings.TrimSpace(strings.Join([]string{profile.PersonalitySummary, profile.PersonalityNotes}, " ")),
+		AgentVoice:          profile.VoiceSummary,
+		AgentStyle:          profile.WorkingStyle,
+		AgentTraits:         strings.Join(profile.PersonalityTraits, ", "),
+		AgentCapabilities:   strings.Join(profile.Capabilities, ", "),
+		AgentMemoryPolicy:   profile.MemoryPolicy,
+		AgentCoreMemories:   agentThreadCoreMemoryContext(profile.CoreMemories),
+		AgentActiveLearning: agentThreadLearningContext(profile.ActiveLearning),
+		AgentDigest:         profile.Digest,
+		DelegatedBy:         strings.TrimSpace(delegatedBy),
+	}
+}
+
+func agentThreadCoreMemoryContext(memories []STRIDEProductAgentCoreMemory) string {
+	lines := make([]string, 0, len(memories))
+	for _, memory := range memories {
+		subject := strings.TrimSpace(memory.Subject)
+		summary := strings.Join(strings.Fields(memory.Summary), " ")
+		if subject != "" && summary != "" {
+			lines = append(lines, "- "+subject+": "+summary)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func agentThreadLearningContext(learning []STRIDEProductAgentLearning) string {
+	lines := make([]string, 0, len(learning))
+	for _, item := range learning {
+		if item.Status != "reviewed" && item.Status != "corrected" {
+			continue
+		}
+		subject := strings.TrimSpace(item.Subject)
+		scope := strings.TrimSpace(item.Scope)
+		summary := strings.Join(strings.Fields(item.Summary), " ")
+		if subject != "" && scope != "" && summary != "" {
+			lines = append(lines, "- "+scope+" / "+subject+": "+summary)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func directResearchRequestNeedsInput(text string, files []scoutChatFileAttachment, contextRefs []string) bool {
+	if len(files) > 0 || len(contextRefs) > 0 {
+		return false
+	}
+	ignored := map[string]bool{
+		"a": true, "about": true, "agent": true, "and": true, "can": true, "colton": true, "could": true,
+		"deep": true, "do": true, "for": true, "hello": true, "help": true, "hey": true, "hi": true, "i": true,
+		"into": true, "it": true, "look": true, "marvin": true, "me": true, "on": true, "please": true, "research": true,
+		"scout": true, "some": true, "something": true, "that": true, "the": true, "this": true, "to": true, "up": true,
+		"want": true, "with": true, "would": true, "you": true,
+	}
+	informative := 0
+	for _, token := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	}) {
+		if !ignored[token] {
+			informative++
+		}
+	}
+	return informative < 2
+}
+
+func scoutChatResearchInputRequest(profile STRIDEProductAgentContextProfile, now time.Time) scoutChatMessageRecord {
+	name := firstNonEmptyString(strings.TrimSpace(profile.DisplayName), "Your research partner")
+	return scoutChatMessageRecord{
+		ID:         fmt.Sprintf("scout-chat-message-%d", now.UnixNano()),
+		Kind:       "message",
+		Role:       "scout",
+		AuthorName: name,
+		Text:       "What should I research? Send me the topic or question, the decision or scope you care about, and any specific sources or Files you want me to use.",
+		CreatedAt:  now.Format(time.RFC3339Nano),
+	}
+}
+
+func scoutChatThreadRefForAgent(thread scoutAgentThread, profile STRIDEProductAgentContextProfile, delegatedBy string) *scoutChatThreadRef {
+	progress, _ := strconv.ParseFloat(strings.TrimSpace(thread.Artifact.Metadata["progressPercent"]), 64)
+	return &scoutChatThreadRef{
+		ID: thread.ID, Mode: thread.Mode, Query: thread.Query, Status: thread.Status, ArtifactID: thread.Artifact.ID,
+		AgentID: profile.AgentID, AgentName: profile.DisplayName, DelegatedBy: strings.TrimSpace(delegatedBy),
+		CurrentStage: thread.Artifact.Metadata["currentStage"], ProgressPercent: progress,
+		ProgressNote: thread.Artifact.Metadata["progressNote"], StartedAt: thread.Artifact.Metadata["startedAt"],
+	}
 }
 
 // scoutChatMessageReaction is one authenticated member's durable reaction to
@@ -285,9 +385,13 @@ type scoutChatMessageRecord struct {
 }
 
 type scoutChatThreadRecord struct {
-	ID         string `json:"id"`
-	Title      string `json:"title"`
-	Preview    string `json:"preview"`
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	Preview string `json:"preview"`
+	// Agent identity is projected from the signed workforce ledger for direct
+	// coworker threads. It is display/routing context only, never authority.
+	AgentID    string `json:"agentId,omitempty"`
+	AgentName  string `json:"agentName,omitempty"`
 	OwnerEmail string `json:"ownerEmail"`
 	CreatedBy  string `json:"createdBy,omitempty"`
 	Visibility string `json:"visibility,omitempty"`
@@ -803,7 +907,9 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		return nil, fmt.Errorf("message text or attachment is required")
 	}
 	coworkerProviderFenced := app.strideAgentDirectThreadProviderFenced(thread.ID)
-	deferAttachmentDerivation := coworkerProviderFenced || (shouldDeferScoutChatAttachmentDerivation(thread, text, files, followUpArtifactID, toolTemplate) && !replyTargetsScout)
+	coworkerProfile, coworkerProfileAvailable := app.strideAgentDirectThreadContext(thread.ID)
+	coworkerResearchBridge := coworkerProfileAvailable && containsSTRIDEID(coworkerProfile.Capabilities, "deep_research")
+	deferAttachmentDerivation := (coworkerProviderFenced && !coworkerResearchBridge) || (shouldDeferScoutChatAttachmentDerivation(thread, text, files, followUpArtifactID, toolTemplate) && !replyTargetsScout)
 
 	// Binary attachments (card 085): build the provider-native content once,
 	// then run the bounded derived-text pass BEFORE any commit so file.Text
@@ -872,7 +978,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// that thread useful for capture without silently routing the turn through
 	// Scout, a legacy launcher, attachment derivation, or any provider. E10 is
 	// the only wave allowed to admit an active, explicitly unfenced seat.
-	if coworkerProviderFenced {
+	if coworkerProviderFenced && !coworkerResearchBridge {
 		saved, commitErr := commitUserMessage(userMessage)
 		if commitErr != nil {
 			return nil, commitErr
@@ -909,6 +1015,9 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		sourceNeed = app.scoutChatReadableSourceNeed(ctx, user, thread, userMessage)
 		if sourceNeed.Required && sourceNeed.Missing {
 			assistantMessage := scoutChatMissingSourceResponse(sourceNeed)
+			if coworkerResearchBridge {
+				assistantMessage.AuthorName = coworkerProfile.DisplayName
+			}
 			saved, commitErr := commitUserMessage(userMessage, assistantMessage)
 			if commitErr != nil {
 				return nil, commitErr
@@ -921,6 +1030,71 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			return response, nil
 		}
 		ctx = withAssistantContextRefs(ctx, sourceNeed.ContextRefs)
+	}
+
+	// A hired research coworker's model seat remains provider-fenced, but an
+	// explicit message in that coworker's private thread may use Scout's already
+	// approved read-only research runner. The persisted profile controls voice,
+	// identity, and active human-reviewed learning; the bridge grants no broader
+	// file, channel, provider-session, or external-write authority.
+	if coworkerResearchBridge {
+		if directResearchRequestNeedsInput(text, files, sourceNeed.ContextRefs) {
+			assistantMessage := scoutChatResearchInputRequest(coworkerProfile, time.Now().UTC())
+			saved, commitErr := commitUserMessage(userMessage, assistantMessage)
+			if commitErr != nil {
+				return nil, commitErr
+			}
+			response["answer"] = assistantMessage
+			response["thread"] = saved
+			response["missingInput"] = true
+			response["dependencyRequired"] = true
+			response["providerCalls"] = 0
+			response["providerExecutionFenced"] = true
+			return response, nil
+		}
+		fileObjective := ""
+		if len(files) > 0 {
+			fileObjective = "Research " + firstNonBlank(strings.TrimSpace(files[0].Name), "the attached file")
+		}
+		objective := firstNonEmptyString(strings.TrimSpace(text), fileObjective, coworkerProfile.DisplayName+" research request")
+		spec := agentThreadGoalSpecForProfile(coworkerProfile, "")
+		spec.Objective = objective
+		spec.ToolTemplate = "deep_research"
+		spec.ContextRefs = encodeAssistantContextRefs(sourceNeed.ContextRefs)
+		spec.OriginSurface = "chat:" + threadID
+		spec.RequestedBy = normalizeAccountEmail(user.Email)
+		spec.Authority = toolAuthorityReadOnly
+		agentThread, launchErr := app.launchAgentThreadWithSpec("research", objective, user.Name, map[string]string{
+			"originKind":  agentThreadOriginPrivateThread,
+			"originId":    threadID,
+			"requestedBy": normalizeAccountEmail(user.Email),
+		}, spec)
+		if launchErr != nil {
+			if _, commitErr := commitUserMessage(userMessage); commitErr != nil {
+				return nil, commitErr
+			}
+			return nil, launchErr
+		}
+		assistantMessage := scoutChatMessageRecord{
+			ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: "thread", Role: "scout",
+			AuthorName: coworkerProfile.DisplayName,
+			Text:       "I’m on it — I’m starting the research now, and I’ll bring the finished brief back here.",
+			CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+			Thread:     scoutChatThreadRefForAgent(agentThread, coworkerProfile, ""),
+		}
+		saved, commitErr := commitUserMessage(userMessage, assistantMessage)
+		if commitErr != nil {
+			return nil, commitErr
+		}
+		response["answer"] = assistantMessage
+		response["thread"] = saved
+		response["agentThread"] = agentThread
+		response["artifact"] = agentThread.Artifact
+		response["actions"] = agentThread.Actions
+		response["providerCalls"] = 0
+		response["providerExecutionFenced"] = true
+		response["executionBridge"] = "scout_read_only_research_runner"
+		return response, nil
 	}
 
 	// A follow-up reply re-runs an existing agent-thread artifact in place
@@ -1066,17 +1240,32 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			return nil, fmt.Errorf("unknown tool template %q", toolTemplate)
 		}
 		objective := firstNonBlank(text, tool.Name)
-		agentThread, err := app.launchAgentThreadWithSpec(tool.Mode, objective, user.Name, map[string]string{
-			"originKind": originKind,
-			"originId":   threadID,
-		}, agentThreadGoalSpec{
+		spec := agentThreadGoalSpec{
 			Objective:     objective,
 			ToolTemplate:  tool.ID,
 			ContextRefs:   encodeAssistantContextRefs(sourceNeed.ContextRefs),
 			OriginSurface: "chat:" + threadID,
 			RequestedBy:   normalizeAccountEmail(user.Email),
 			Authority:     tool.Authority,
-		})
+		}
+		delegatedProfile, delegated := STRIDEProductAgentContextProfile{}, false
+		if tool.Mode == "research" {
+			delegatedProfile, delegated = app.stridePreferredResearchAgentContext()
+			if delegated {
+				identity := agentThreadGoalSpecForProfile(delegatedProfile, scoutParticipantName)
+				identity.Objective = spec.Objective
+				identity.ToolTemplate = spec.ToolTemplate
+				identity.ContextRefs = spec.ContextRefs
+				identity.OriginSurface = spec.OriginSurface
+				identity.RequestedBy = spec.RequestedBy
+				identity.Authority = spec.Authority
+				spec = identity
+			}
+		}
+		agentThread, err := app.launchAgentThreadWithSpec(tool.Mode, objective, user.Name, map[string]string{
+			"originKind": originKind,
+			"originId":   threadID,
+		}, spec)
 		if err != nil {
 			return nil, err
 		}
@@ -1093,6 +1282,10 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 				Status:     agentThread.Status,
 				ArtifactID: agentThread.Artifact.ID,
 			},
+		}
+		if delegated {
+			assistantMessage.Text = "I tapped " + delegatedProfile.DisplayName + " for this — running against the research contract and gate rubric"
+			assistantMessage.Thread = scoutChatThreadRefForAgent(agentThread, delegatedProfile, scoutParticipantName)
 		}
 		saved, err := commitUserMessage(userMessage, assistantMessage)
 		if err != nil {
@@ -1619,17 +1812,28 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 			if !app.assistantContextRefsReadable(ctx, user, proposal.ContextRefs) {
 				return nil, fmt.Errorf("a source file changed or is no longer readable; attach it again before launching")
 			}
-			agentThread, err := app.launchAgentThreadWithSpec(mode, objective, user.Name, map[string]string{
-				"originKind":  originKind,
-				"originId":    threadID,
-				"requestedBy": normalizeAccountEmail(user.Email),
-			}, agentThreadGoalSpec{
+			spec := agentThreadGoalSpec{
 				ContextRefs: proposal.ContextRefs,
 				Launch: launchFunnelLineage{
 					ProposalID: messageID,
 					Path:       "chat_workstream",
 				},
-			})
+			}
+			delegatedProfile, delegated := STRIDEProductAgentContextProfile{}, false
+			if mode == "research" {
+				delegatedProfile, delegated = app.stridePreferredResearchAgentContext()
+				if delegated {
+					identity := agentThreadGoalSpecForProfile(delegatedProfile, scoutParticipantName)
+					identity.ContextRefs = spec.ContextRefs
+					identity.Launch = spec.Launch
+					spec = identity
+				}
+			}
+			agentThread, err := app.launchAgentThreadWithSpec(mode, objective, user.Name, map[string]string{
+				"originKind":  originKind,
+				"originId":    threadID,
+				"requestedBy": normalizeAccountEmail(user.Email),
+			}, spec)
 			if err != nil {
 				return nil, err
 			}
@@ -1646,6 +1850,10 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 					Status:     agentThread.Status,
 					ArtifactID: agentThread.Artifact.ID,
 				},
+			}
+			if delegated {
+				assistantMessage.Text = "I tapped " + delegatedProfile.DisplayName + " for this — research is running now and the finished brief will land here"
+				assistantMessage.Thread = scoutChatThreadRefForAgent(agentThread, delegatedProfile, scoutParticipantName)
 			}
 			saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, assistantMessage)
 			if err != nil {
@@ -2050,18 +2258,31 @@ func (app *kanbanBoardApp) commitScoutChatThreadRefStatus(threadID string, owner
 	if err != nil {
 		return err
 	}
+	artifact, artifactFound := app.osArtifactByID(artifactID)
 	changed := make([]scoutChatMessageRecord, 0, 1)
 	for index := range thread.Messages {
 		ref := thread.Messages[index].Thread
 		if ref == nil || ref.ID != agentThreadID {
 			continue
 		}
-		if ref.Status == status && (artifactID == "" || ref.ArtifactID == artifactID) {
-			continue
-		}
+		before := *ref
 		ref.Status = status
 		if artifactID != "" {
 			ref.ArtifactID = artifactID
+		}
+		if artifactFound {
+			ref.AgentID = firstNonBlank(artifact.Metadata["agentId"], ref.AgentID)
+			ref.AgentName = firstNonBlank(artifact.Metadata["agentName"], ref.AgentName)
+			ref.DelegatedBy = firstNonBlank(artifact.Metadata["delegatedBy"], ref.DelegatedBy)
+			ref.CurrentStage = artifact.Metadata["currentStage"]
+			ref.ProgressNote = artifact.Metadata["progressNote"]
+			ref.StartedAt = firstNonBlank(artifact.Metadata["startedAt"], ref.StartedAt)
+			if progress, parseErr := strconv.ParseFloat(strings.TrimSpace(artifact.Metadata["progressPercent"]), 64); parseErr == nil {
+				ref.ProgressPercent = progress
+			}
+		}
+		if *ref == before {
+			continue
 		}
 		changed = append(changed, thread.Messages[index])
 	}

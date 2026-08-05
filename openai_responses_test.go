@@ -285,3 +285,55 @@ func TestCreateOpenAITextResponseRecordsErrorEntryOnFailure(t *testing.T) {
 		t.Fatalf("token fields stamped on a failed call with no usage: %v", row)
 	}
 }
+
+func TestCreateOpenAITextResponseEnablesWebSearchAndPreservesCitationURLs(t *testing.T) {
+	var payload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Write([]byte(`{
+			"status":"completed",
+			"output":[{"type":"web_search_call"},{"type":"message","content":[{"type":"output_text","text":"The official release confirms the feature.","annotations":[
+				{"type":"url_citation","url":"https://docs.example.com/releases/2026","title":"Official 2026 release"},
+				{"type":"url_citation","url":"javascript:alert(1)","title":"unsafe"}
+			]}]}]
+		}`))
+	}))
+	defer server.Close()
+	t.Setenv("OPENAI_RESPONSES_BASE_URL", server.URL)
+
+	text, err := createOpenAITextResponseHTTP(context.Background(), "test-key", openAITextRequest{
+		Model: "gpt-5.5", Input: "verify the current release", EnableWebSearch: true,
+	})
+	if err != nil {
+		t.Fatalf("create response: %v", err)
+	}
+	tools, ok := payload["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("tools=%#v, want one hosted search tool", payload["tools"])
+	}
+	tool, _ := tools[0].(map[string]any)
+	if tool["type"] != "web_search" {
+		t.Fatalf("tool=%#v, want current Responses web_search contract", tool)
+	}
+	if !strings.Contains(text, "Official 2026 release — https://docs.example.com/releases/2026") {
+		t.Fatalf("text=%q, want durable exact citation URL", text)
+	}
+	if strings.Contains(text, "javascript:") {
+		t.Fatalf("text=%q, unsafe citation URL was preserved", text)
+	}
+}
+
+func TestOpenAIResponsesRequestTimeoutIsScopedToWorkShape(t *testing.T) {
+	if got := openAIResponsesRequestTimeout(openAITextRequest{}); got != 45*time.Second {
+		t.Fatalf("compact timeout=%s, want 45s", got)
+	}
+	if got := openAIResponsesRequestTimeout(openAITextRequest{MaxOutputTokens: 8000}); got != 120*time.Second {
+		t.Fatalf("long-form timeout=%s, want 120s", got)
+	}
+	if got := openAIResponsesRequestTimeout(openAITextRequest{MaxOutputTokens: 8000, EnableWebSearch: true}); got != 0 {
+		t.Fatalf("hosted-search timeout=%s, want cancellation-owned work with no artificial deadline", got)
+	}
+}

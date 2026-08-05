@@ -714,12 +714,9 @@ func TestIndexRoomsLobbyGuestChromeGuard(t *testing.T) {
 // The mount cascade is one-shot: bootstrapMount must RELEASE .is-mounting
 // once the longest mount-rise finishes and converge on the fast-mount state.
 // Leaving it on for the tab's life let the room pane's higher-specificity
-// bf-tabin rule take the animation shorthand from mount-rise (forwards) and
-// then drop the pane back to the .mount-stagger opacity-0 base when the 0.4s
-// rise ended — a first-session lobby that flashed in and stayed invisible
-// until a reload took the sessionStorage fast-mount branch. Belt and
-// suspenders: the tab-pane bf-tabin rule itself must hold its final frame
-// (`both`) so no window between the rise ending and the class swap blanks it.
+// bf-tabin rule take the animation shorthand from mount-rise (forwards).
+// The tab-pane bf-tabin rule itself owns both frames while active, and the
+// base mount state stays visible if bootstrap is interrupted.
 func TestIndexRoomsLobbyMountCascadeReleases(t *testing.T) {
 	html := readIndexHTMLForRooms(t)
 
@@ -729,7 +726,15 @@ func TestIndexRoomsLobbyMountCascadeReleases(t *testing.T) {
 	}
 	paneRule := html[paneRuleAt : paneRuleAt+strings.Index(html[paneRuleAt:], "}")]
 	if !strings.Contains(paneRule, "animation: bf-tabin var(--dur-med) var(--ease) both") {
-		t.Error("the room pane's bf-tabin must hold its final frame (both) — over the opacity-0 .mount-stagger base a bare fill blanks the lobby when the rise ends")
+		t.Error("the room pane's bf-tabin must own and hold both entrance frames")
+	}
+	baseRuleAt := strings.Index(html, ".mount-stagger {")
+	if baseRuleAt == -1 {
+		t.Fatal("index.html missing mount-stagger base rule")
+	}
+	baseRule := html[baseRuleAt : baseRuleAt+strings.Index(html[baseRuleAt:], "}")]
+	if !strings.Contains(baseRule, "opacity: 1") || !strings.Contains(baseRule, "transform: none") {
+		t.Error("mount-stagger's stable base must remain visible if bootstrap is interrupted")
 	}
 
 	bootAt := strings.Index(html, "(function bootstrapMount()")
@@ -743,7 +748,7 @@ func TestIndexRoomsLobbyMountCascadeReleases(t *testing.T) {
 	boot := html[bootAt:bootEnd]
 	removeAt := strings.Index(boot, "shell.classList.remove('is-mounting')")
 	if removeAt == -1 {
-		t.Fatal("bootstrapMount must remove .is-mounting after the cascade — leaving it on lets later animation rules fall back to the opacity-0 base")
+		t.Fatal("bootstrapMount must remove .is-mounting after the cascade")
 	}
 	if !strings.Contains(boot[removeAt:], "shell.classList.add('is-fast-mount')") {
 		t.Error("bootstrapMount must converge on .is-fast-mount (the pinned-visible state every reload already uses) when the cascade releases")
@@ -970,6 +975,30 @@ func TestIndexRoomsLobbyCanonPanelLayout(t *testing.T) {
 	}
 	if !strings.Contains(desk, ".lobby__rail { order: 1; width: 280px;") {
 		t.Error("≥880 the switcher must flip to order:1 at 280px (visual left)")
+	}
+}
+
+// The desktop room is a viewport-bounded app surface. A screen-share video's
+// intrinsic dimensions must stay inside the stage; otherwise the shared stage
+// can grow the document and leave the lobby join control above a long blank
+// scroll tail. Short lobby viewports scroll inside the lobby overlay instead.
+func TestIndexRoomsDesktopViewportIsBounded(t *testing.T) {
+	html := readIndexHTMLForRooms(t)
+
+	for _, contract := range []string{
+		`#appShell.is-authed[data-tool="room"] {`,
+		"height: 100dvh;",
+		"overflow: hidden;",
+		"grid-template-rows: minmax(0, 1fr);",
+		`#appShell.is-in-room .presentation-tile.is-screen-sharing .screen-stage video#screenStageVideo {`,
+		"max-height: 100%;",
+		"overflow-y: auto;",
+		"overscroll-behavior: contain;",
+		"margin-block: auto;",
+	} {
+		if !strings.Contains(html, contract) {
+			t.Errorf("desktop room viewport contract is missing %q", contract)
+		}
 	}
 }
 

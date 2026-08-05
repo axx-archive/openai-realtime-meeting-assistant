@@ -225,26 +225,11 @@
            accessibility gain. */
         --ember-text: #86290F;
 
-        /* THE WORDMARK'S COLOUR — the receiving row's graphite, never orange.
-           AJ, 2026-07-31: "the only orange thing is the ball in motion."
-
-           That is the whole identity in one line. In the Strike, orange is
-           custody of energy — the mass that is moving — and the neutral row is
-           everything at rest: the name, the shared context, the company. A
-           wordmark painted orange claims to be in motion, and it is the one
-           thing on screen that never is. So the name takes the row's colour and
-           orange stays earned, in the logotype exactly as it is everywhere else.
-
-           The two cuts are drawn from the SAME graphite family the icon's
-           receiving rows use, but chosen by the GROUND the mark sits on rather
-           than copied from whichever tile is next to it — the tile's row is
-           picked for the tile's own field, so the two do not always coincide
-           (the sign-in shows the dark tile on putty). Ground is what decides
-           legibility, so ground is what decides this.
-           5.1:1 on the softened desktop ground (4.4:1 on brand putty, where
-           native still sits); the orange it replaces measured 1.83:1 there,
-           so this is also simply more legible. */
-        --wordmark: #54545C;
+        /* AJ-supplied production wordmarks: black on light, orange on dark.
+           The variable is retained for legacy text fallbacks; the artwork
+           itself is selected by .wordmark below. */
+        --wordmark: #000000;
+        --wordmark-image: url(/public/stride-wordmark-black.png);
 
         --scrim: rgba(38, 35, 30, 0.35);
         --blur-material: var(--glass-blur); /* legacy alias */
@@ -434,9 +419,8 @@
            values, so callers never have to ask which theme they are in. */
         --ember-text: var(--ember-500);
 
-        /* The dark appearance's receiving row — the graphite that reads on
-           true black. 4.9:1. */
-        --wordmark: #77777D;
+        --wordmark: var(--ember-500);
+        --wordmark-image: url(/public/stride-wordmark-orange.png);
 
         --scrim: rgba(0, 0, 0, 0.60);
 
@@ -619,11 +603,11 @@
         flex-direction: column;
         align-items: center;
         gap: 2px;
-        width: 60px;
+        width: 72px;
         height: auto;
         align-self: stretch;
         flex: none;
-        padding: 16px 0 14px;
+        padding: 14px 0;
         overflow: visible;
         background: transparent;
         border-right: 1px solid var(--line-1);
@@ -653,8 +637,8 @@
         align-items: center;
         justify-content: center;
         gap: 0;
-        width: 38px;
-        height: 38px;
+        width: 42px;
+        height: 42px;
         padding: 0;
         border: 1px solid transparent;
         border-radius: var(--r-md);
@@ -927,28 +911,36 @@
         z-index: 70;
         display: none;
         align-items: center;
-        gap: 12px;
-        height: 52px;
+        gap: 14px;
+        height: 60px;
         min-height: var(--shell-topbar-height);
         /* 16px matches the workspace's --sp-4 padding, so the heading and the
            content below it sit on the same left edge. */
-        padding: 0 16px;
+        padding: 0 20px;
         border: 0;
         border-radius: 0;
-        background: transparent;
+        background: color-mix(in srgb, var(--bg-app) 90%, transparent);
         border-bottom: 1px solid var(--line-1);
+        backdrop-filter: blur(22px) saturate(1.08);
+        -webkit-backdrop-filter: blur(22px) saturate(1.08);
       }
 
       /* the shell (rail + header) arrives with auth; ≥641px it is the design
          chrome — the phone shell keeps its own bottom-island system for now */
       @media (min-width: 641px) {
         #appShell.is-authed {
-          --shell-topbar-height: 52px;
-          padding-left: 60px;
+          --shell-topbar-height: 60px;
+          padding-left: 72px;
         }
 
         #appShell.is-authed .topbar {
           display: flex;
+        }
+
+        /* The full product identity lives in the header once authenticated.
+           Do not repeat the wordmark in the icon rail. */
+        #appShell.is-authed .tool-rail > .topbar__mark {
+          display: none;
         }
       }
 
@@ -960,16 +952,16 @@
         position: relative;
         align-items: center;
         justify-content: center;
-        width: 44px;
-        height: 38px;
+        width: 58px;
+        height: 42px;
         flex: 0 0 auto;
-        margin-bottom: 14px;
+        margin-bottom: 10px;
         overflow: visible;
         color: var(--wordmark);
         transition: opacity var(--dur-med) var(--ease);
       }
       .topbar__wordmark {
-        width: 44px;
+        width: 58px;
         color: inherit;
         transition:
           color var(--dur-med) var(--ease),
@@ -1005,6 +997,90 @@
       @keyframes mark-recognize {
         0%, 100% { transform: scale(1); opacity: 1; }
         45% { transform: scale(1.05); opacity: 0.78; }
+      }
+
+      .topbar__brand-lockup {
+        display: inline-flex;
+        align-items: center;
+        gap: 13px;
+        min-width: 0;
+        flex: 0 0 auto;
+      }
+
+      .topbar__brand-wordmark {
+        display: block;
+        width: 68px;
+        height: 17px;
+        color: var(--wordmark);
+        flex: 0 0 auto;
+      }
+
+      .topbar__brand-lockup.is-listening .topbar__brand-wordmark {
+        color: var(--text-1);
+      }
+
+      .topbar__brand-lockup.is-wake .topbar__brand-wordmark {
+        animation: bf-breathe var(--dur-breathe) var(--ease) 1;
+      }
+
+      .topbar__brand-lockup.is-hot-ember .topbar__brand-wordmark {
+        animation: mark-recognize 1.6s var(--ease) 1;
+      }
+
+      .topbar__identity-divider,
+      .topbar__context-divider {
+        width: 1px;
+        height: 28px;
+        flex: 0 0 auto;
+        background: var(--line-1);
+      }
+
+      .topbar__organization {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        min-width: 0;
+      }
+
+      .topbar__organization-mark {
+        display: grid;
+        place-items: center;
+        width: 30px;
+        height: 30px;
+        flex: 0 0 auto;
+        border-radius: 10px;
+        background: color-mix(in srgb, var(--accent) 12%, var(--surface-3));
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, var(--line-1));
+        color: var(--text-1);
+        font: 650 12px/1 var(--font-sans);
+        letter-spacing: -0.02em;
+      }
+
+      .topbar__organization-copy {
+        display: grid;
+        gap: 1px;
+        min-width: 0;
+      }
+
+      .topbar__organization-label {
+        color: var(--text-3);
+        font: 600 8.5px/1.1 var(--font-sans);
+        letter-spacing: 0.095em;
+        text-transform: uppercase;
+      }
+
+      .topbar__organization-name {
+        color: var(--text-1);
+        font: 600 13px/1.2 var(--font-sans);
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+      }
+
+      .topbar__context {
+        display: grid;
+        gap: 1px;
+        min-width: 0;
+        flex: 0 1 auto;
       }
 
       .topbar__heading {
@@ -1890,20 +1966,14 @@
         object-fit: cover;
       }
 
-      /* THE WORDMARK — the name as artwork, not as type.
-         One asset (public/wordmark.svg, generated by `npm run brand:regen`)
-         painted through a CSS mask, so the colour is `color` and a theme
-         switch never has to swap a file. Height comes from font-size in `em`,
-         which means every existing type override that sized the old text still
-         sizes the mark and nothing had to learn a new unit. */
+      /* THE WORDMARK — AJ's supplied production artwork. The transparent PNGs
+         are trimmed to their exact ink bounds so every lockup keeps the same
+         optical dimensions when the theme swaps black ↔ orange. */
       .wordmark {
         display: inline-block;
         vertical-align: baseline;
-        /* traced outline: 1000 × 262.238 */
-        aspect-ratio: 1000 / 262.238;
-        background-color: currentColor;
-        -webkit-mask: url(/public/wordmark.svg) no-repeat center / contain;
-        mask: url(/public/wordmark.svg) no-repeat center / contain;
+        aspect-ratio: 3.78 / 1;
+        background: var(--wordmark-image) no-repeat center / contain;
       }
 
       .login-wordmark {
@@ -5038,6 +5108,37 @@
         text-wrap: pretty;
       }
 
+      .relationship-memory__lanes {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .relationship-memory__lane {
+        min-width: 0;
+        padding: 12px;
+        border: 1px solid var(--line-1);
+        border-radius: 14px;
+        background: color-mix(in srgb, var(--surface-1) 74%, transparent);
+      }
+
+      .relationship-memory__lane strong,
+      .relationship-memory__lane span {
+        display: block;
+      }
+
+      .relationship-memory__lane strong {
+        margin-bottom: 4px;
+        color: var(--text-1);
+        font: var(--type-caption-medium);
+      }
+
+      .relationship-memory__lane span {
+        color: var(--text-3);
+        font: var(--type-caption);
+        text-wrap: pretty;
+      }
+
       .relationship-memory__notice {
         display: grid;
         gap: 4px;
@@ -5236,6 +5337,319 @@
         padding: 0 var(--sp-6) var(--sp-6);
       }
 
+      /* Premium settings shell — calm two-pane hierarchy on desktop. The room
+         gear and the account avatar both open this exact surface, so device
+         controls and personal controls no longer look like different apps. */
+      .settings-nav__group {
+        margin: 14px 10px 4px;
+        color: var(--text-3);
+        font: 600 10px/1.2 var(--font-mono);
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .settings-nav__group:first-child { margin-top: 2px; }
+
+      .settings-nav__icon {
+        width: 17px;
+        height: 17px;
+        flex: 0 0 17px;
+        opacity: 0.78;
+      }
+
+      .settings-nav__item[aria-current="true"] .settings-nav__icon { opacity: 1; }
+
+      .settings-header__brand {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        min-width: 0;
+      }
+
+      .settings-header__wordmark {
+        width: 76px;
+        height: 20px;
+        flex: 0 0 auto;
+      }
+
+      .settings-header__divider {
+        width: 1px;
+        height: 30px;
+        background: var(--line-1);
+      }
+
+      .settings-header__copy { min-width: 0; }
+
+      .settings-header__org {
+        display: block;
+        margin-top: 4px;
+        color: var(--text-3);
+        font: 500 11px/1.2 var(--font-mono);
+        letter-spacing: 0.04em;
+      }
+
+      .relationship-memory__import {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 18px;
+        padding: 16px;
+        border: 1px solid var(--line-1);
+        border-radius: 16px;
+        background:
+          radial-gradient(320px 120px at 100% 0%, var(--ember-soft), transparent 68%),
+          var(--surface-1);
+      }
+
+      .relationship-memory__import-copy {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+      }
+
+      .relationship-memory__import-copy strong {
+        color: var(--text-1);
+        font: var(--type-body-medium);
+      }
+
+      .relationship-memory__import-copy span {
+        color: var(--text-2);
+        font: var(--type-caption);
+        text-wrap: pretty;
+      }
+
+      .memory-import-dialog {
+        width: min(620px, calc(100vw - 32px));
+        max-height: min(820px, calc(100dvh - 32px));
+        margin: auto;
+        padding: 0;
+        overflow: hidden;
+        border: 1px solid var(--line-2);
+        border-radius: 24px;
+        color: var(--text-1);
+        background: color-mix(in srgb, var(--surface-1) 96%, transparent);
+        box-shadow: 0 28px 90px rgba(0, 0, 0, 0.42);
+      }
+
+      .memory-import-dialog::backdrop {
+        background: rgba(0, 0, 0, 0.64);
+        -webkit-backdrop-filter: blur(10px) saturate(1.08);
+        backdrop-filter: blur(10px) saturate(1.08);
+      }
+
+      .memory-import-dialog__shell {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        max-height: inherit;
+      }
+
+      .memory-import-dialog__head,
+      .memory-import-dialog__foot {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 22px 24px;
+      }
+
+      .memory-import-dialog__head { border-bottom: 1px solid var(--line-1); }
+      .memory-import-dialog__foot { align-items: center; border-top: 1px solid var(--line-1); }
+
+      .memory-import-dialog__head h3 {
+        margin: 0;
+        color: var(--text-1);
+        font: 620 20px/1.15 var(--font-sans);
+        letter-spacing: -0.025em;
+      }
+
+      .memory-import-dialog__head p,
+      .memory-import-dialog__privacy,
+      .memory-import-dialog__status {
+        margin: 5px 0 0;
+        color: var(--text-2);
+        font: var(--type-caption);
+        text-wrap: pretty;
+      }
+
+      .memory-import-dialog__close {
+        width: 32px;
+        height: 32px;
+        min-width: 32px;
+        min-height: 32px;
+        padding: 0;
+        border-radius: 50%;
+      }
+
+      .memory-import-dialog__body {
+        display: grid;
+        gap: 18px;
+        min-height: 0;
+        padding: 22px 24px 26px;
+        overflow: auto;
+      }
+
+      .memory-import-step {
+        display: grid;
+        grid-template-columns: 28px minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+      }
+
+      .memory-import-step__number {
+        display: grid;
+        place-items: center;
+        width: 26px;
+        height: 26px;
+        border: 1px solid var(--line-1);
+        border-radius: 50%;
+        color: var(--text-2);
+        background: var(--surface-2);
+        font: 600 11px/1 var(--font-mono);
+      }
+
+      .memory-import-step__content { display: grid; gap: 10px; min-width: 0; }
+
+      .memory-import-step__title {
+        margin: 3px 0 0;
+        color: var(--text-1);
+        font: var(--type-body-medium);
+      }
+
+      .memory-import-prompt {
+        position: relative;
+        max-height: 150px;
+        margin: 0;
+        padding: 14px 52px 14px 14px;
+        overflow: auto;
+        border: 1px solid var(--line-1);
+        border-radius: 14px;
+        color: var(--text-2);
+        background: var(--surface-2);
+        font: 400 11px/1.55 var(--font-mono);
+        white-space: pre-wrap;
+      }
+
+      .memory-import-copy {
+        justify-self: start;
+        min-height: 38px;
+      }
+
+      .memory-import-input {
+        width: 100%;
+        min-height: 160px;
+        padding: 14px;
+        resize: vertical;
+        border: 1px solid var(--line-1);
+        border-radius: 14px;
+        outline: 0;
+        color: var(--text-1);
+        background: var(--surface-2);
+        font: 400 12px/1.55 var(--font-mono);
+      }
+
+      .memory-import-input:focus {
+        border-color: color-mix(in srgb, var(--ember) 55%, var(--line-2));
+        box-shadow: 0 0 0 3px var(--ember-soft);
+      }
+
+      .memory-import-preview {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        min-height: 24px;
+      }
+
+      .memory-import-preview:empty { display: none; }
+
+      .memory-import-preview__chip {
+        padding: 6px 9px;
+        border-radius: 999px;
+        color: var(--text-2);
+        background: var(--surface-3);
+        font: 600 10px/1 var(--font-mono);
+      }
+
+      .memory-import-dialog__actions { display: flex; gap: 8px; flex: none; }
+      .memory-import-dialog__status[data-state="error"] { color: var(--danger); }
+      .memory-import-dialog__status[data-state="ready"] { color: var(--text-1); }
+
+      @media (min-width: 641px) and (hover: hover) and (pointer: fine) {
+        .settings-region {
+          padding: 24px;
+          background: rgba(0, 0, 0, 0.56);
+          -webkit-backdrop-filter: blur(12px) saturate(1.08);
+          backdrop-filter: blur(12px) saturate(1.08);
+        }
+
+        .settings-panel {
+          grid-template-rows: auto minmax(0, 1fr);
+          width: min(920px, calc(100vw - 48px));
+          height: min(720px, calc(100dvh - 48px));
+          max-height: none;
+          border-color: var(--line-1);
+          border-radius: 22px;
+          background: color-mix(in srgb, var(--surface-1) 95%, transparent);
+          box-shadow: 0 34px 110px rgba(0, 0, 0, 0.46), inset 0 1px 0 color-mix(in srgb, var(--text-1) 8%, transparent);
+        }
+
+        .settings-header {
+          align-items: center;
+          padding: 20px 22px;
+        }
+
+        .settings-header h2 {
+          margin: 0;
+          font: 620 17px/1.2 var(--font-sans);
+          letter-spacing: -0.02em;
+        }
+
+        .settings-layout {
+          grid-template-columns: 210px minmax(0, 1fr);
+          gap: 0;
+          padding: 0;
+          border-top: 1px solid var(--line-1);
+        }
+
+        .settings-nav {
+          padding: 18px 12px 22px;
+          overflow: auto;
+          border-right: 1px solid var(--line-1);
+          background: color-mix(in srgb, var(--surface-2) 72%, transparent);
+        }
+
+        .settings-nav__item {
+          gap: 10px;
+          min-height: 42px;
+          padding: 0 11px;
+          border-radius: 11px;
+          text-transform: none;
+        }
+
+        .settings-nav__item[aria-current="true"] {
+          background: color-mix(in srgb, var(--surface-3) 88%, transparent);
+          box-shadow: inset 0 0 0 1px var(--line-1), 0 5px 16px rgba(0, 0, 0, 0.08);
+        }
+
+        .settings-body {
+          gap: 24px;
+          padding: 30px 34px 40px;
+          scrollbar-gutter: stable;
+        }
+
+        .settings-body > section { gap: 18px; }
+
+        .settings-body > section > .voice-profile__label:first-child,
+        .settings-body > section > fieldset:first-child > legend {
+          margin: 0 0 2px;
+          color: var(--text-1);
+          font: 620 23px/1.15 var(--font-sans);
+          letter-spacing: -0.035em;
+          text-transform: none;
+        }
+
+        .settings-panel > .settings-actions { display: none; }
+      }
+
       @media (max-width: 640px), (max-height: 500px) and (hover: none) and (pointer: coarse) {
         /* bottom sheet: full width, chip-row section nav */
         .settings-region {
@@ -5261,6 +5675,40 @@
           padding-bottom: 2px;
           -webkit-overflow-scrolling: touch;
         }
+
+        .settings-nav__group { display: none; }
+
+        .settings-nav__icon { display: none; }
+
+        .relationship-memory__import {
+          grid-template-columns: 1fr;
+          gap: 12px;
+        }
+
+        .relationship-memory__lanes { grid-template-columns: 1fr; }
+
+        .relationship-memory__import .btn { justify-self: start; }
+
+        .memory-import-dialog {
+          width: 100%;
+          max-width: none;
+          max-height: calc(100dvh - 24px);
+          margin: auto 0 0;
+          border-radius: 24px 24px 0 0;
+        }
+
+        .memory-import-dialog__head,
+        .memory-import-dialog__body,
+        .memory-import-dialog__foot { padding-right: 18px; padding-left: 18px; }
+
+        .memory-import-dialog__foot {
+          align-items: stretch;
+          flex-direction: column;
+          padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+        }
+
+        .memory-import-dialog__actions { width: 100%; }
+        .memory-import-dialog__actions .btn { flex: 1; min-height: 44px; }
 
         .settings-nav__item {
           flex: none;
@@ -6194,10 +6642,9 @@
       /* tab panes enter with the canon rise (bf-tabin, token speed) — display flips
          from none on tool switch, so the animation replays per entry. The
          live room keeps its own rise-in choreography; the expanded board
-         keeps its animation kill-switch. `both`, never bare: the room pane
-         carries the opacity-0 .mount-stagger base, and this rule outranks
-         .is-mounting's mount-rise on the animation shorthand — without a
-         held final frame the lobby vanishes when the rise ends. */
+         keeps its animation kill-switch. `both`, never bare: this rule can
+         outrank .is-mounting's mount-rise on the animation shorthand, so its
+         entrance owns and holds both start and finish frames. */
       #appShell.is-authed[data-tool="office"] #officeTool,
       #appShell.is-authed[data-tool="chat"] #chatTool,
       #appShell.is-authed[data-tool="artifacts"] #artifactsTool,
@@ -8514,6 +8961,111 @@
         letter-spacing: var(--track-label);
         color: var(--text-3);
         white-space: nowrap;
+      }
+
+      .chat-thread-item__work-timer {
+        position: relative;
+        z-index: 2;
+        flex: none;
+        min-height: 24px;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 0 7px;
+        margin: -4px -5px -4px 0;
+        border: 0;
+        border-radius: var(--r-full);
+        background: color-mix(in srgb, var(--ember) 10%, var(--surface-3));
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+        transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+
+      .chat-thread-item__work-timer::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        flex: 0 0 auto;
+        border-radius: 50%;
+        background: var(--ember);
+        animation: bf-breathe var(--dur-breathe) var(--ease) infinite;
+      }
+
+      .chat-thread-item__work-timer:hover,
+      .chat-thread-item__work-timer:focus-visible {
+        background: color-mix(in srgb, var(--ember) 16%, var(--surface-3));
+        color: var(--text-1);
+      }
+
+      .chat-thread-item__work-timer:active {
+        transform: scale(0.96);
+      }
+
+      .chat-channel-activity-popover {
+        position: fixed;
+        z-index: 180;
+        width: min(286px, calc(100vw - 24px));
+        display: grid;
+        gap: 12px;
+        padding: 14px;
+        border: 1px solid var(--glass-border);
+        border-radius: 16px;
+        background: color-mix(in srgb, var(--glass-chrome) 96%, var(--surface-1));
+        color: var(--text-1);
+        box-shadow: var(--glass-highlight), 0 18px 52px rgba(0, 0, 0, 0.18);
+        backdrop-filter: var(--glass-blur-chrome);
+        -webkit-backdrop-filter: var(--glass-blur-chrome);
+      }
+
+      .chat-channel-activity-popover[hidden] { display: none; }
+
+      .chat-channel-activity-popover__eyebrow {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: uppercase;
+      }
+
+      .chat-channel-activity-popover__agent {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 9px;
+      }
+
+      .chat-channel-activity-popover__avatar {
+        width: 34px;
+        height: 34px;
+        display: grid;
+        place-items: center;
+        border-radius: 11px;
+        background: color-mix(in srgb, var(--ember) 12%, var(--surface-3));
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ember) 22%, var(--line-1));
+        font: 650 12px/1 var(--font-sans);
+      }
+
+      .chat-channel-activity-popover__agent-copy { min-width: 0; display: grid; gap: 2px; }
+      .chat-channel-activity-popover__name { font: 600 13px/1.25 var(--font-sans); }
+      .chat-channel-activity-popover__phase,
+      .chat-channel-activity-popover__elapsed { color: var(--text-3); font: var(--type-label); font-variant-numeric: tabular-nums; }
+      .chat-channel-activity-popover__note { margin: 0; color: var(--text-2); font: var(--type-body-sm); text-wrap: pretty; }
+      .chat-channel-activity-popover__open {
+        min-height: 40px;
+        padding: 0 13px;
+        border: 0;
+        border-radius: var(--r-full);
+        background: var(--text-1);
+        color: var(--bg-app);
+        font: 600 12px var(--font-sans);
+        transition: transform var(--dur-fast) var(--ease);
+      }
+      .chat-channel-activity-popover__open:active { transform: scale(0.96); }
+
+      @media (prefers-reduced-motion: reduce) {
+        .chat-thread-item__work-timer::before { animation: none; }
       }
 
 	      .chat-thread-item__preview {
@@ -10835,7 +11387,10 @@
       .desktop-chat-state,
       .desktop-chat-sources,
       .desktop-chat-link-preview,
-      .desktop-chat-unread {
+      .desktop-chat-unread,
+      .chat-workspace-resizer,
+      .chat-context-rail,
+      .chat-work-indicator {
         display: none;
       }
 
@@ -10849,18 +11404,461 @@
         }
 
         #chatTool {
-          --desktop-chat-measure: 744px;
-          --desktop-chat-gutter: clamp(24px, 3vw, 52px);
+          --desktop-chat-measure: 760px;
+          --desktop-chat-media-measure: 920px;
+          --desktop-chat-work-measure: 820px;
+          --desktop-chat-gutter: clamp(22px, 2.4vw, 48px);
+          --chat-thread-rail-width: 308px;
+          --chat-context-rail-width: 440px;
           background:
             radial-gradient(circle at 72% -12%, color-mix(in srgb, var(--accent) 5%, transparent), transparent 34%),
             var(--surface-1);
         }
 
         #chatTool .chat-threads {
-          width: 292px;
+          width: clamp(240px, var(--chat-thread-rail-width), 420px);
           padding: 14px 8px 12px;
           background: color-mix(in srgb, var(--surface-2) 74%, transparent);
           scrollbar-gutter: stable;
+        }
+
+        #chatTool .chat-workspace-resizer {
+          position: relative;
+          z-index: 4;
+          flex: 0 0 12px;
+          width: 12px;
+          min-width: 12px;
+          align-self: stretch;
+          display: block;
+          border: 0;
+          cursor: col-resize;
+          touch-action: none;
+          outline: none;
+        }
+
+        #chatTool .chat-workspace-resizer::after {
+          content: "";
+          position: absolute;
+          inset-block: 0;
+          left: 5px;
+          width: 1px;
+          background: var(--line-1);
+          transition-property: background-color, box-shadow;
+          transition-duration: var(--dur-fast);
+          transition-timing-function: var(--ease);
+        }
+
+        #chatTool .chat-workspace-resizer:hover::after,
+        #chatTool .chat-workspace-resizer:focus-visible::after,
+        #chatTool .chat-workspace-resizer.is-dragging::after {
+          background: var(--text-3);
+          box-shadow: 0 0 0 3px var(--ring);
+        }
+
+        #chatTool .chat-workspace-resizer[hidden] {
+          display: none;
+        }
+
+        #chatTool .chat-context-rail {
+          flex: 0 0 clamp(360px, var(--chat-context-rail-width), 640px);
+          width: clamp(360px, var(--chat-context-rail-width), 640px);
+          min-width: 0;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          background: color-mix(in srgb, var(--surface-2) 86%, transparent);
+          box-shadow: -1px 0 0 var(--line-1), -18px 0 36px rgba(0, 0, 0, 0.045);
+        }
+
+        #chatTool .chat-context-rail[hidden] {
+          display: none;
+        }
+
+        #chatTool .chat-context-rail__head {
+          flex: none;
+          min-height: 76px;
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
+          padding: 16px 14px 14px 18px;
+          box-shadow: 0 1px 0 var(--line-1);
+          background: color-mix(in srgb, var(--surface-1) 88%, transparent);
+          backdrop-filter: blur(18px);
+          -webkit-backdrop-filter: blur(18px);
+        }
+
+        #chatTool .chat-context-rail__heading {
+          flex: 1;
+          min-width: 0;
+          display: grid;
+          gap: 3px;
+        }
+
+        #chatTool .chat-context-rail__kicker,
+        #chatTool .chat-context-rail__meta {
+          margin: 0;
+          color: var(--text-3);
+          font: var(--type-label);
+          letter-spacing: var(--track-label);
+          font-variant-numeric: tabular-nums;
+        }
+
+        #chatTool .chat-context-rail__title {
+          margin: 0;
+          color: var(--text-1);
+          font: 650 17px/1.25 var(--font-sans);
+          letter-spacing: -0.01em;
+          text-wrap: balance;
+        }
+
+        #chatTool .chat-context-rail__close {
+          flex: none;
+          width: 40px;
+          height: 40px;
+          display: inline-grid;
+          place-items: center;
+          padding: 0;
+          border: 0;
+          border-radius: 12px;
+          background: transparent;
+          color: var(--text-2);
+          cursor: pointer;
+          transition-property: color, background-color, transform;
+          transition-duration: var(--dur-fast);
+          transition-timing-function: var(--ease);
+        }
+
+        #chatTool .chat-context-rail__close:hover {
+          color: var(--text-1);
+          background: var(--surface-3);
+        }
+
+        #chatTool .chat-context-rail__close:active {
+          transform: scale(0.96);
+        }
+
+        #chatTool .chat-context-rail__close:focus-visible {
+          outline: 2px solid var(--ring);
+          outline-offset: 2px;
+        }
+
+        #chatTool .chat-context-rail__body {
+          flex: 1;
+          min-height: 0;
+          overflow-y: auto;
+          overscroll-behavior: contain;
+          padding: 18px;
+          scrollbar-gutter: stable;
+        }
+
+        #chatTool .chat-context-card,
+        #chatTool .chat-context-event,
+        #chatTool .chat-context-empty {
+          padding: 14px 15px;
+          border-radius: 16px;
+          background: var(--surface-1);
+          color: var(--text-2);
+          box-shadow: 0 0 0 1px var(--line-1), 0 8px 24px rgba(0, 0, 0, 0.045);
+        }
+
+        #chatTool .chat-context-card + .chat-context-card,
+        #chatTool .chat-context-event + .chat-context-event {
+          margin-top: 10px;
+        }
+
+        #chatTool .chat-context-card__author,
+        #chatTool .chat-context-event__phase {
+          display: block;
+          margin-bottom: 5px;
+          color: var(--text-1);
+          font: 600 12.5px/1.35 var(--font-sans);
+        }
+
+        #chatTool .chat-context-card__body,
+        #chatTool .chat-context-event__note,
+        #chatTool .chat-context-empty {
+          margin: 0;
+          font: var(--type-body-sm);
+          text-wrap: pretty;
+          overflow-wrap: anywhere;
+        }
+
+        #chatTool .chat-context-card__meta,
+        #chatTool .chat-context-event__meta {
+          display: block;
+          margin-top: 8px;
+          color: var(--text-3);
+          font: var(--type-label);
+          letter-spacing: var(--track-label);
+          font-variant-numeric: tabular-nums;
+        }
+
+        #chatTool .chat-context-worklog {
+          display: grid;
+          gap: 0;
+          margin-top: 18px;
+        }
+
+        #chatTool .chat-context-section-title {
+          margin: 0 0 9px;
+          color: var(--text-3);
+          font: var(--type-label);
+          letter-spacing: var(--track-label);
+          text-transform: uppercase;
+        }
+
+        #chatTool .chat-context-log-entry {
+          position: relative;
+          display: grid;
+          grid-template-columns: 12px minmax(0, 1fr);
+          column-gap: 10px;
+          padding: 0 0 14px;
+        }
+
+        #chatTool .chat-context-log-entry:not(:last-child)::before {
+          content: "";
+          position: absolute;
+          top: 11px;
+          bottom: -1px;
+          left: 5px;
+          width: 1px;
+          background: var(--line-1);
+        }
+
+        #chatTool .chat-context-log-entry__dot {
+          position: relative;
+          z-index: 1;
+          width: 9px;
+          height: 9px;
+          margin-top: 4px;
+          border-radius: 50%;
+          background: var(--surface-3);
+          box-shadow: 0 0 0 1px var(--line-2), 0 0 0 3px var(--surface-2);
+        }
+
+        #chatTool .chat-context-log-entry.is-current .chat-context-log-entry__dot {
+          background: var(--ember);
+          box-shadow: 0 0 0 3px color-mix(in srgb, var(--ember) 15%, var(--surface-2));
+        }
+
+        #chatTool .chat-context-log-entry.is-complete .chat-context-log-entry__dot {
+          background: var(--text-1);
+        }
+
+        #chatTool .chat-context-log-entry__copy {
+          min-width: 0;
+          display: grid;
+          gap: 3px;
+        }
+
+        #chatTool .chat-context-log-entry__title {
+          color: var(--text-1);
+          font: 600 12.5px/1.35 var(--font-sans);
+        }
+
+        #chatTool .chat-context-log-entry__note {
+          margin: 0;
+          color: var(--text-2);
+          font: var(--type-body-sm);
+          text-wrap: pretty;
+          overflow-wrap: anywhere;
+        }
+
+        #chatTool .chat-context-log-entry__meta {
+          color: var(--text-3);
+          font: var(--type-label);
+          letter-spacing: var(--track-label);
+          font-variant-numeric: tabular-nums;
+        }
+
+        #chatTool .chat-context-source-list {
+          display: grid;
+          gap: 6px;
+          margin-top: 4px;
+        }
+
+        #chatTool .chat-context-source {
+          min-height: 38px;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          align-items: center;
+          gap: 10px;
+          padding: 8px 10px;
+          border-radius: 11px;
+          background: var(--surface-3);
+          color: var(--text-1);
+          text-decoration: none;
+          box-shadow: inset 0 0 0 1px var(--line-1);
+        }
+
+        #chatTool .chat-context-source__name {
+          min-width: 0;
+          overflow: hidden;
+          font: 500 12px/1.3 var(--font-sans);
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        #chatTool .chat-context-source__open { color: var(--text-3); font: var(--type-label); }
+
+        #chatTool .chat-context-progress {
+          height: 5px;
+          margin: 13px 0 8px;
+          overflow: hidden;
+          border-radius: var(--r-full);
+          background: var(--surface-3);
+        }
+
+        #chatTool .chat-context-progress__fill {
+          display: block;
+          width: 100%;
+          height: 100%;
+          border-radius: inherit;
+          background: var(--ember);
+          transform-origin: left center;
+          transition-property: transform;
+          transition-duration: var(--dur-med);
+          transition-timing-function: var(--ease);
+        }
+
+        #chatTool .chat-context-phases {
+          display: grid;
+          gap: 8px;
+          margin: 16px 0;
+        }
+
+        #chatTool .chat-context-phase {
+          display: grid;
+          grid-template-columns: 9px minmax(0, 1fr);
+          align-items: center;
+          gap: 9px;
+          color: var(--text-3);
+          font: var(--type-caption);
+        }
+
+        #chatTool .chat-context-phase::before {
+          content: "";
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          background: var(--surface-3);
+          box-shadow: 0 0 0 1px var(--line-2);
+        }
+
+        #chatTool .chat-context-phase.is-done,
+        #chatTool .chat-context-phase.is-active {
+          color: var(--text-1);
+        }
+
+        #chatTool .chat-context-phase.is-done::before {
+          background: var(--text-1);
+        }
+
+        #chatTool .chat-context-phase.is-active::before {
+          background: var(--ember);
+          box-shadow: 0 0 0 4px color-mix(in srgb, var(--ember) 16%, transparent);
+        }
+
+        #chatTool .chat-context-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-top: 14px;
+        }
+
+        #chatTool .chat-context-action {
+          min-height: 40px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0 14px;
+          border: 0;
+          border-radius: var(--r-full);
+          background: var(--surface-3);
+          color: var(--text-1);
+          font: 600 12px var(--font-sans);
+          cursor: pointer;
+          box-shadow: 0 0 0 1px var(--line-1);
+          transition-property: background-color, transform;
+          transition-duration: var(--dur-fast);
+          transition-timing-function: var(--ease);
+        }
+
+        #chatTool .chat-context-action:hover {
+          background: var(--accent-soft);
+        }
+
+        #chatTool .chat-context-action:active {
+          transform: scale(0.96);
+        }
+
+        #chatTool .chat-context-reply {
+          flex: none;
+          display: grid;
+          gap: 7px;
+          padding: 12px 14px 16px;
+          background: var(--surface-1);
+          box-shadow: 0 -1px 0 var(--line-1);
+        }
+
+        #chatTool .chat-context-reply[hidden] {
+          display: none;
+        }
+
+        #chatTool .chat-context-reply__label {
+          color: var(--text-3);
+          font: var(--type-label);
+          letter-spacing: var(--track-label);
+        }
+
+        #chatTool .chat-context-reply__composer {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) 40px;
+          align-items: end;
+          gap: 8px;
+          padding: 7px 8px 7px 12px;
+          border-radius: 18px;
+          background: var(--surface-3);
+          box-shadow: 0 0 0 1px var(--line-1), 0 8px 22px rgba(0, 0, 0, 0.08);
+        }
+
+        #chatTool .chat-context-reply textarea {
+          min-height: 40px;
+          max-height: 128px;
+          resize: none;
+          overflow-y: auto;
+          padding: 9px 0;
+          border: 0;
+          outline: 0;
+          background: transparent;
+          color: var(--text-1);
+          font: 400 14px/1.45 var(--font-sans);
+        }
+
+        #chatTool .chat-context-reply button {
+          width: 40px;
+          height: 40px;
+          display: inline-grid;
+          place-items: center;
+          padding: 0;
+          border: 0;
+          border-radius: 50%;
+          background: var(--text-1);
+          color: var(--bg-app);
+          cursor: pointer;
+          transition-property: opacity, transform;
+          transition-duration: var(--dur-fast);
+          transition-timing-function: var(--ease);
+        }
+
+        #chatTool .chat-context-reply button:active {
+          transform: scale(0.96);
+        }
+
+        #chatTool .chat-context-reply button[disabled] {
+          opacity: 0.42;
+          cursor: default;
         }
 
         #chatTool .chat-threads__search {
@@ -11009,13 +12007,22 @@
         }
 
         #chatTool .scout-chat-thread {
-          padding: 30px max(var(--desktop-chat-gutter), calc((100% - var(--desktop-chat-measure)) / 2));
+          padding: 30px var(--desktop-chat-gutter);
           scroll-padding-block: 30px 144px;
           scrollbar-gutter: stable;
         }
 
         #chatTool .scout-chat-msg {
-          max-width: min(620px, 82%);
+          width: min(680px, calc(100% - (var(--desktop-chat-gutter) * 2)));
+          max-width: min(680px, 82%);
+        }
+
+        /* Media needs the canvas, not a text-message cap. The renderer adds
+           this class only when a message owns an authorized preview or file,
+           so ordinary conversation keeps its readable 680px measure. */
+        #chatTool .scout-chat-msg--media {
+          width: min(var(--desktop-chat-media-measure), calc(100% - (var(--desktop-chat-gutter) * 2)));
+          max-width: var(--desktop-chat-media-measure);
         }
 
         #chatTool .scout-chat-msg--longform,
@@ -11025,8 +12032,9 @@
         #chatTool .goalcard,
         #chatTool .scout-proposal-card,
         #chatTool .returncard {
-          width: min(var(--desktop-chat-measure), 100%);
-          max-width: var(--desktop-chat-measure);
+          width: min(var(--desktop-chat-work-measure), calc(100% - (var(--desktop-chat-gutter) * 2)));
+          max-width: var(--desktop-chat-work-measure);
+          align-self: center;
         }
 
         #chatTool .scout-chat-msg__stack {
@@ -11292,10 +12300,10 @@
 
         #chatTool .desktop-chat-link-preview {
           order: 2;
-          width: min(520px, 100%);
-          min-height: 112px;
+          width: min(720px, 100%);
+          min-height: 168px;
           display: grid;
-          grid-template-columns: minmax(0, 1fr) 148px;
+          grid-template-columns: minmax(0, 1fr) clamp(220px, 34%, 260px);
           overflow: hidden;
           border: 0;
           border-radius: 18px;
@@ -11366,9 +12374,9 @@
 
         #chatTool .desktop-chat-link-preview__media,
         #chatTool .desktop-chat-link-preview__skeleton {
-          width: 148px;
-          min-height: 112px;
-          aspect-ratio: 4 / 3;
+          width: 100%;
+          min-height: 168px;
+          aspect-ratio: 16 / 10;
           background: var(--surface-3);
         }
 
@@ -11408,6 +12416,257 @@
           grid-template-columns: 1fr;
         }
 
+	    #chatTool .desktop-chat-link-preview:is([data-kind="video"], [data-kind="youtube_video"]) {
+	      width: min(840px, 100%);
+	      min-height: 0;
+	      grid-template-columns: 1fr;
+	    }
+
+	    #chatTool .desktop-chat-link-preview:is([data-kind="video"], [data-kind="youtube_video"]) .desktop-chat-link-preview__media,
+	    #chatTool .desktop-chat-link-preview:is([data-kind="video"], [data-kind="youtube_video"]) .desktop-chat-link-preview__skeleton,
+	    #chatTool .desktop-chat-link-preview[data-kind="youtube_video"] .desktop-chat-link-preview__visual {
+	      grid-row: 1;
+	      aspect-ratio: 16 / 9;
+	      min-height: 0;
+	      max-height: 472px;
+	    }
+
+	    #chatTool .desktop-chat-link-preview:is([data-kind="video"], [data-kind="youtube_video"]) .desktop-chat-link-preview__copy {
+	      grid-row: 2;
+	    }
+
+	    #chatTool .desktop-chat-link-preview[data-kind="youtube_video"] .desktop-chat-link-preview__visual,
+	    #chatTool .desktop-chat-link-preview[data-kind="youtube_video"] .desktop-chat-link-preview__media {
+	      width: 100%;
+	      height: 100%;
+	      min-height: 0;
+	      aspect-ratio: 16 / 9;
+	    }
+
+	    #chatTool .desktop-chat-link-preview[data-kind="tiktok_video"] {
+	      position: relative;
+	      width: min(720px, 100%);
+	      min-height: 384px;
+	      grid-template-columns: minmax(0, 1fr) clamp(216px, 34%, 248px);
+	      background:
+	        radial-gradient(circle at 18% 18%, color-mix(in srgb, var(--ember) 7%, transparent), transparent 42%),
+	        var(--surface-2);
+	    }
+
+	    #chatTool .desktop-chat-link-preview[data-kind="tiktok_video"] .desktop-chat-link-preview__copy {
+	      grid-column: 1;
+	      align-content: end;
+	      gap: 8px;
+	      padding: 26px 24px;
+	    }
+
+	    #chatTool .desktop-chat-link-preview__creator {
+	      color: var(--text-2);
+	      font: 600 12px/1.35 var(--font-sans);
+	      text-wrap: pretty;
+	    }
+
+	    #chatTool .desktop-chat-link-preview__visual {
+	      position: relative;
+	      display: block;
+	      min-width: 0;
+	      overflow: hidden;
+	      background: #09090b;
+	    }
+
+	    #chatTool .desktop-chat-link-preview[data-kind="tiktok_video"] .desktop-chat-link-preview__visual {
+	      grid-column: 2;
+	      width: 100%;
+	      min-height: 384px;
+	      aspect-ratio: 9 / 16;
+	    }
+
+	    #chatTool .desktop-chat-link-preview[data-kind="tiktok_video"] .desktop-chat-link-preview__media {
+	      width: 100%;
+	      height: 100%;
+	      min-height: 0;
+	      aspect-ratio: 9 / 16;
+	      object-fit: cover;
+	    }
+
+	    #chatTool .desktop-chat-link-preview[data-kind^="instagram_"] {
+	      width: min(760px, 100%);
+	      min-height: 348px;
+	      grid-template-columns: minmax(0, 1fr) clamp(236px, 38%, 288px);
+	      background:
+	        radial-gradient(circle at 12% 16%, color-mix(in srgb, #d85f73 9%, transparent), transparent 40%),
+	        var(--surface-2);
+	    }
+
+	    #chatTool .desktop-chat-link-preview[data-kind^="instagram_"] .desktop-chat-link-preview__copy {
+	      align-content: end;
+	      gap: 8px;
+	      padding: 26px 24px;
+	    }
+
+	    #chatTool .desktop-chat-link-preview[data-kind^="instagram_"] .desktop-chat-link-preview__visual {
+	      grid-column: 2;
+	      min-height: 348px;
+	      aspect-ratio: 4 / 5;
+	    }
+
+	    #chatTool .desktop-chat-link-preview[data-kind="instagram_post"] .desktop-chat-link-preview__visual,
+	    #chatTool .desktop-chat-link-preview[data-kind="instagram_post"] .desktop-chat-link-preview__media {
+	      aspect-ratio: 1;
+	    }
+
+	    #chatTool .desktop-chat-link-preview[data-kind^="instagram_"] .desktop-chat-link-preview__media {
+	      width: 100%;
+	      height: 100%;
+	      min-height: 0;
+	      aspect-ratio: 4 / 5;
+	      object-fit: cover;
+	    }
+
+	    #chatTool .desktop-chat-link-preview[data-kind="instagram_post"] .desktop-chat-link-preview__visual {
+	      align-self: center;
+	      min-height: 0;
+	    }
+
+	    #chatTool .desktop-chat-link-preview[data-kind="instagram_post"] .desktop-chat-link-preview__media {
+	      aspect-ratio: 1;
+	    }
+
+	    #chatTool .desktop-chat-link-preview.is-text-only[data-kind^="instagram_"] {
+	      min-height: 124px;
+	      grid-template-columns: 1fr;
+	    }
+
+	    #chatTool .desktop-chat-link-preview[data-kind="x_post"] {
+	      width: min(640px, 100%);
+	      min-height: 0;
+	      grid-template-columns: 1fr;
+	      background: var(--surface-2);
+	    }
+
+	    #chatTool .desktop-chat-link-preview[data-kind="x_post"] .desktop-chat-link-preview__copy {
+	      gap: 13px;
+	      padding: 18px;
+	    }
+
+	    #chatTool .desktop-chat-link-preview__post-header,
+	    #chatTool .desktop-chat-link-preview__post-footer {
+	      display: flex;
+	      align-items: center;
+	      min-width: 0;
+	    }
+
+	    #chatTool .desktop-chat-link-preview__post-header {
+	      gap: 10px;
+	    }
+
+	    #chatTool .desktop-chat-link-preview__post-avatar,
+	    #chatTool .desktop-chat-link-preview__post-avatar-fallback {
+	      flex: 0 0 auto;
+	      width: 38px;
+	      height: 38px;
+	      min-height: 38px;
+	      border-radius: 50%;
+	    }
+
+	    #chatTool .desktop-chat-link-preview__post-avatar-fallback {
+	      display: inline-flex;
+	      align-items: center;
+	      justify-content: center;
+	      color: var(--text-2);
+	      background: var(--surface-3);
+	      font: 650 13px/1 var(--font-sans);
+	    }
+
+	    #chatTool .desktop-chat-link-preview__post-author {
+	      min-width: 0;
+	      display: grid;
+	      flex: 1;
+	      gap: 1px;
+	    }
+
+	    #chatTool .desktop-chat-link-preview__post-name {
+	      overflow: hidden;
+	      color: var(--text-1);
+	      font: 650 13px/1.35 var(--font-sans);
+	      text-overflow: ellipsis;
+	      white-space: nowrap;
+	    }
+
+	    #chatTool .desktop-chat-link-preview__post-handle,
+	    #chatTool .desktop-chat-link-preview__post-footer {
+	      color: var(--text-3);
+	      font: var(--type-caption);
+	    }
+
+	    #chatTool .desktop-chat-link-preview__post-mark {
+	      color: var(--text-1);
+	      font: 500 21px/1 var(--font-sans);
+	    }
+
+	    #chatTool .desktop-chat-link-preview__post-text {
+	      color: var(--text-1);
+	      font: 400 14px/1.55 var(--font-sans);
+	      white-space: pre-line;
+	      display: -webkit-box;
+	      -webkit-line-clamp: 6;
+	      -webkit-box-orient: vertical;
+	      overflow: hidden;
+	    }
+
+	    #chatTool .desktop-chat-link-preview__post-footer {
+	      justify-content: space-between;
+	      gap: 12px;
+	    }
+
+	    #chatTool .desktop-chat-link-preview__provider-fallback {
+	      width: fit-content;
+	      min-height: 30px;
+	      display: inline-flex;
+	      align-items: center;
+	      padding: 0 11px;
+	      border-radius: 15px;
+	      color: var(--text-1);
+	      background: color-mix(in srgb, var(--surface-3) 86%, transparent);
+	      box-shadow: inset 0 0 0 1px var(--line-1);
+	      font: 650 11px/1 var(--font-sans);
+	    }
+
+	    #chatTool .desktop-chat-link-preview__brand,
+	    #chatTool .desktop-chat-link-preview__play {
+	      position: absolute;
+	      z-index: 1;
+	      display: inline-flex;
+	      align-items: center;
+	      justify-content: center;
+	      color: #fff;
+	      background: rgba(9, 9, 11, 0.68);
+	      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+	      backdrop-filter: blur(12px);
+	      -webkit-backdrop-filter: blur(12px);
+	    }
+
+	    #chatTool .desktop-chat-link-preview__brand {
+	      top: 12px;
+	      left: 12px;
+	      min-height: 30px;
+	      padding: 0 10px;
+	      border-radius: 15px;
+	      font: 650 11px/1 var(--font-sans);
+	      letter-spacing: 0.02em;
+	    }
+
+	    #chatTool .desktop-chat-link-preview__play {
+	      top: 50%;
+	      left: 50%;
+	      width: 58px;
+	      height: 58px;
+	      border-radius: 29px;
+	      font: 700 21px/1 var(--font-sans);
+	      padding-left: 2px;
+	      transform: translate(-50%, -50%);
+	    }
+
         /* seamless: a message that IS a link renders as the card alone —
            the raw-URL bubble yields once the preview has taken its place */
         #chatTool .scout-chat-msg__stack.desktop-chat-stack--link-only .scout-chat-text {
@@ -11415,7 +12674,7 @@
         }
 
         #chatTool .scout-chat-files {
-          max-width: min(520px, 100%);
+          max-width: min(var(--desktop-chat-media-measure), 100%);
           width: 100%;
         }
 
@@ -11447,9 +12706,9 @@
         }
 
         #chatTool .scout-chat-file--image {
-          width: min(520px, 100%);
+          width: min(var(--desktop-chat-media-measure), 100%);
           min-height: 0;
-          aspect-ratio: 16 / 10;
+          max-height: min(68vh, 760px);
           padding: 0;
           border-radius: 18px;
           background: var(--surface-3);
@@ -11474,12 +12733,12 @@
         }
 
         #chatTool .scout-chat-image {
-          width: min(560px, 100%);
-          max-width: min(560px, 100%);
+          width: min(var(--desktop-chat-media-measure), 100%);
+          max-width: min(var(--desktop-chat-media-measure), 100%);
         }
 
         #chatTool .scout-chat-image__img {
-          aspect-ratio: 16 / 10;
+          max-height: min(68vh, 760px);
           border-radius: 16px;
           background: var(--surface-3);
         }
@@ -11491,6 +12750,7 @@
         #chatTool .scout-chat-destination,
         #chatTool .scout-followup-target,
         #chatTool .scout-chat-pending-files,
+        #chatTool .chat-work-indicator,
         #chatTool .scout-chat-form,
         #chatTool .scout-chat-hint,
         #chatTool .scout-chat-brain-note {
@@ -11498,6 +12758,86 @@
           max-width: var(--desktop-chat-measure);
           margin-left: auto;
           margin-right: auto;
+        }
+
+        #chatTool .chat-work-indicator {
+          min-height: 42px;
+          align-items: center;
+          gap: 10px;
+          margin-bottom: 9px;
+          padding: 8px 12px;
+          border: 0;
+          border-radius: 15px;
+          background: color-mix(in srgb, var(--surface-2) 90%, transparent);
+          color: var(--text-2);
+          box-shadow: 0 0 0 1px var(--line-1), 0 8px 22px rgba(0, 0, 0, 0.055);
+          cursor: pointer;
+          text-align: left;
+          transition-property: background-color, transform;
+          transition-duration: var(--dur-fast);
+          transition-timing-function: var(--ease);
+        }
+
+        #chatTool .chat-work-indicator:not([hidden]) {
+          display: flex;
+        }
+
+        #chatTool .chat-work-indicator:hover {
+          background: var(--surface-3);
+        }
+
+        #chatTool .chat-work-indicator:active {
+          transform: scale(0.96);
+        }
+
+        #chatTool .chat-work-indicator:focus-visible {
+          outline: 2px solid var(--ring);
+          outline-offset: 2px;
+        }
+
+        #chatTool .chat-work-indicator__signal {
+          flex: none;
+          width: 26px;
+          height: 26px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 2px;
+          border-radius: 9px;
+          background: var(--ember-soft);
+          color: var(--ember-text);
+        }
+
+        #chatTool .chat-work-indicator__signal span {
+          width: 2px;
+          border-radius: var(--r-full);
+          background: currentColor;
+          animation: chat-work-wave 1s var(--ease) infinite alternate;
+        }
+
+        #chatTool .chat-work-indicator__signal span:nth-child(1) { height: 7px; }
+        #chatTool .chat-work-indicator__signal span:nth-child(2) { height: 13px; animation-delay: -240ms; }
+        #chatTool .chat-work-indicator__signal span:nth-child(3) { height: 9px; animation-delay: -480ms; }
+
+        @keyframes chat-work-wave {
+          to { transform: scaleY(0.48); opacity: 0.58; }
+        }
+
+        #chatTool .chat-work-indicator__text {
+          flex: 1;
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          font: 500 12.5px/1.35 var(--font-sans);
+          font-variant-numeric: tabular-nums;
+        }
+
+        #chatTool .chat-work-indicator__action {
+          flex: none;
+          color: var(--text-1);
+          font: var(--type-label);
+          letter-spacing: var(--track-label);
         }
 
         #chatTool .scout-chat-destination {
@@ -11619,29 +12959,37 @@
       }
 
       @media (min-width: 1280px) {
-        #chatTool .chat-threads {
-          width: 308px;
-        }
+        #chatTool { --desktop-chat-media-measure: 920px; }
       }
 
       @media (min-width: 1728px) {
         #chatTool {
           --desktop-chat-measure: 780px;
+          --desktop-chat-media-measure: 960px;
+          --desktop-chat-work-measure: 860px;
           --desktop-chat-gutter: 64px;
-        }
-
-        #chatTool .chat-threads {
-          width: 324px;
         }
       }
 
-      @media (min-width: 861px) and (max-width: 1100px) {
+      @media (min-width: 861px) and (max-width: 1279px) {
         #chatTool {
           --desktop-chat-gutter: 22px;
         }
 
         #chatTool .chat-threads {
-          width: 264px;
+          width: clamp(240px, var(--chat-thread-rail-width), 320px);
+        }
+
+        #chatTool .chat-context-rail {
+          position: absolute;
+          inset: 0 0 0 auto;
+          z-index: 20;
+          width: min(var(--chat-context-rail-width), calc(100% - 280px));
+          box-shadow: -18px 0 36px rgba(0, 0, 0, 0.18);
+        }
+
+        #chatTool .chat-workspace-resizer--context {
+          display: none;
         }
 
         #chatTool .desktop-chat-context__policy {
@@ -11649,14 +12997,32 @@
         }
 
         #chatTool .desktop-chat-link-preview {
-          grid-template-columns: minmax(0, 1fr) 116px;
+          grid-template-columns: minmax(0, 1fr) 180px;
         }
 
         #chatTool .desktop-chat-link-preview__media,
         #chatTool .desktop-chat-link-preview__skeleton {
-          width: 116px;
+          width: 100%;
         }
-      }
+
+	    #chatTool .desktop-chat-link-preview[data-kind="tiktok_video"] {
+	      grid-template-columns: minmax(0, 1fr) 190px;
+	      min-height: 338px;
+	    }
+
+	    #chatTool .desktop-chat-link-preview[data-kind="tiktok_video"] .desktop-chat-link-preview__visual {
+	      min-height: 338px;
+	    }
+
+	    #chatTool .desktop-chat-link-preview[data-kind^="instagram_"] {
+	      min-height: 320px;
+	      grid-template-columns: minmax(0, 1fr) 210px;
+	    }
+
+	    #chatTool .desktop-chat-link-preview[data-kind^="instagram_"] .desktop-chat-link-preview__visual {
+	      min-height: 320px;
+	    }
+	  }
 
       @media (prefers-reduced-motion: reduce) and (min-width: 861px) {
         #chatTool .desktop-chat-actions,
@@ -11666,8 +13032,12 @@
         #chatTool .desktop-chat-reactions button,
         #chatTool .desktop-chat-actions button,
         #chatTool .chat-thread-item,
-        #chatTool .scout-chat-file {
+        #chatTool .scout-chat-file,
+        #chatTool .chat-context-progress__fill,
+        #chatTool .chat-work-indicator,
+        #chatTool .chat-work-indicator__signal span {
           transition-duration: 0ms;
+          animation: none;
         }
 
         #chatTool .desktop-chat-actions {
@@ -11883,8 +13253,7 @@
 
       #appShell.is-room-chat-open.is-in-room .scout-rail {
         animation: none;
-        /* dropping the animation also drops rise-in's fill, so the rail would
-           fall back to mount-stagger's opacity-0 base — pin it visible */
+        /* Pin the sheet host to its stable state after dropping rise-in. */
         opacity: 1;
         transform: none;
         /* mount-stagger's will-change would make the rail the containing
@@ -16042,9 +17411,11 @@
         z-index: 6;
         flex-direction: column;
         align-items: center;
-        justify-content: center;
+        justify-content: flex-start;
         gap: 18px;
         padding: 24px;
+        overflow-y: auto;
+        overscroll-behavior: contain;
         text-align: center;
         /* --bg-app: paper in light, true black in dark */
         background: var(--bg-app);
@@ -16119,9 +17490,11 @@
         display: flex;
         flex-direction: column;
         align-items: center;
+        flex: none;
         gap: 24px;
         width: 100%;
         max-width: 520px;
+        margin-block: auto;
         padding: 24px;
         border-radius: var(--r-2xl);
         border: 1px solid rgba(var(--lob-fg), 0.09);
@@ -18988,6 +20361,27 @@
          the full themed content region; tiles inset 60/20/100 for the
          chrome above and the dock below (design §6) */
       @media (min-width: 641px) {
+        /* The room is one viewport, not a document. In particular, an active
+           share's intrinsic video size must never grow the grid row and push
+           the lobby or call controls below a blank page-length tail. */
+        #appShell.is-authed[data-tool="room"] {
+          height: 100vh;
+          height: 100dvh;
+          min-height: 0;
+          overflow: hidden;
+        }
+
+        #appShell.is-authed[data-tool="room"] .workspace,
+        #appShell.is-authed[data-tool="room"] .hearth-presentation {
+          min-height: 0;
+          min-width: 0;
+          overflow: hidden;
+        }
+
+        #appShell.is-authed[data-tool="room"] .hearth-presentation {
+          height: 100%;
+        }
+
         #appShell.is-in-room:not(.is-board-expanded):not(.is-room-chat-open) .workspace,
         #appShell.is-authed[data-tool="room"]:not(.is-in-room) .workspace {
           padding: 0;
@@ -19025,6 +20419,7 @@
         /* screen share: main placeholder panel + 190px filmstrip (design §6.3) */
         #appShell.is-in-room .presentation-tile.is-screen-sharing {
           grid-template-columns: minmax(0, 1fr) 190px;
+          grid-template-rows: minmax(0, 1fr);
           gap: 12px;
         }
 
@@ -19039,6 +20434,15 @@
         #appShell.is-in-room .presentation-tile.is-screen-sharing .screen-stage {
           grid-column: 1;
           grid-row: 1;
+          height: 100%;
+          min-height: 0;
+          max-height: 100%;
+        }
+
+        #appShell.is-in-room .presentation-tile.is-screen-sharing .screen-stage video#screenStageVideo {
+          height: 100%;
+          min-height: 0;
+          max-height: 100%;
         }
 
         #appShell.is-in-room .presentation-tile.is-screen-sharing .hearth-seat {
@@ -20150,6 +21554,21 @@
             10px
             max(18px, env(safe-area-inset-left, 0px));
           background: var(--bg-app);
+          backdrop-filter: none;
+          -webkit-backdrop-filter: none;
+        }
+
+        .topbar__brand-lockup,
+        .topbar__context-divider {
+          display: none;
+        }
+
+        .topbar__context {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          min-width: 0;
+          flex: 0 1 auto;
         }
 
         .topbar__heading {
@@ -22062,15 +23481,17 @@
       }
 
       /* ---------- Mount stagger (the room arrives) ----------
-         Each anchor element starts at opacity 0.5 with a 4-6px lift and slides
-         home with a staggered delay. The pulse is alive from frame 1; everything
-         else gathers around it. Fast-path skips the cascade entirely. */
+         The stable state is visible. Only the explicit one-shot mounting state
+         applies the hidden/lifted start frame, so a late script failure can
+         never strand the shell off-canvas. Fast-path skips the cascade. */
       .mount-stagger {
+        opacity: 1;
+        transform: none;
+      }
+      .is-mounting .mount-stagger {
         opacity: 0;
         transform: translate3d(0, 16px, 0);
         will-change: opacity, transform;
-      }
-      .is-mounting .mount-stagger {
         animation: mount-rise 520ms var(--ease-out) forwards;
       }
       .is-mounting .topbar         { animation-delay: 60ms; }
@@ -22086,9 +23507,8 @@
 
       /* room-entry choreography — the room assembles around the stage,
          keyed off the .is-in-room class JS already toggles */
-      /* `both`, not `backwards`: these override the mount-rise forwards fill
-         on elements whose base .mount-stagger state is opacity 0, so the
-         final frame must be held or the room vanishes after the entrance. */
+      /* `both`, not `backwards`: these override the mount-rise forwards fill,
+         so the final frame remains owned by the room-entry choreography. */
       #appShell.is-in-room .hearth-presentation { animation: rise-in 480ms var(--ease-out) both; }
       #appShell.is-in-room .scout-rail          { animation: rise-in 480ms var(--ease-out) 80ms both; }
       #appShell.is-in-room .board-rail          { animation: rise-in 480ms var(--ease-out) 160ms both; }
@@ -22102,6 +23522,7 @@
       .is-fast-mount .mount-stagger {
         opacity: 1;
         transform: none;
+        will-change: auto;
         animation: none;
       }
 
@@ -22392,6 +23813,25 @@
       .goalcard[data-held="1"] { background: var(--surface-1); opacity: 0.82; }
       /* sheet 3a parked: the card's edge firms up while it needs a human */
       .goalcard[data-state="gate"] { border-color: var(--line-2); }
+      /* A failed run is a recovery surface, not a stretched system alert. The
+         narrower measure and restrained edge treatment keep the next decision
+         together instead of scattering status, explanation, and actions. */
+      .goalcard[data-state="error"] {
+        width: min(860px, 100%);
+        gap: 12px;
+        padding: 18px 20px 20px;
+        border-color: color-mix(in srgb, var(--danger) 22%, var(--line-1));
+        background: color-mix(in srgb, var(--surface-2) 96%, var(--danger) 4%);
+        box-shadow: 0 18px 54px rgba(0, 0, 0, 0.16);
+        overflow: hidden;
+      }
+      .goalcard[data-state="error"]::before {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 2px;
+        background: color-mix(in srgb, var(--danger) 72%, transparent);
+      }
       /* sheet 2d cancelled: a human stopped it — the card recedes to mono */
       .goalcard[data-state="cancelled"] { background: var(--surface-1); box-shadow: none; }
       .goalcard[data-state="cancelled"] .goalcard__rail,
@@ -22460,6 +23900,11 @@
       }
       .goalcard__kicker[hidden] { display: none; }
       .goalcard__title { font: var(--type-headline); letter-spacing: var(--track-headline); color: var(--text-1); min-width: 0; text-wrap: balance; }
+      .goalcard[data-state="error"] .goalcard__title {
+        font-size: clamp(17px, 1.35vw, 20px);
+        line-height: 1.3;
+        max-width: 58ch;
+      }
       .goalcard__controls { display: flex; align-items: center; gap: 4px; flex: none; }
       .goalcard__ctrl {
         width: 30px; height: 30px;
@@ -22599,8 +24044,20 @@
         white-space: nowrap;
       }
       .goalcard[data-state="complete"] .goalcard__meta { display: none; }
+      .goalcard[data-state="error"] .goalcard__meta {
+        margin-top: 0;
+        padding: 5px 9px;
+        border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--line-1));
+        border-radius: var(--r-full);
+        background: var(--danger-soft);
+        color: var(--danger);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: uppercase;
+      }
       .goalcard__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
       .goalcard[data-state="complete"] .goalcard__foot { display: none; }
+      .goalcard[data-state="error"] .goalcard__foot { display: none; }
       /* sheet 3a: "show working" is the system's mono voice */
       .goalcard__disclosure {
         border: 0; background: transparent;
@@ -22680,6 +24137,57 @@
       .goalcard__trust-flag { color: var(--warn); }
       .goalcard__trust .goalcard__disclosure { margin-left: auto; }
       .goalcard__terminal-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+      .goalcard__terminal[hidden] { display: none; }
+      .goalcard__failure {
+        display: grid;
+        gap: 14px;
+        padding: 16px;
+        border: 1px solid var(--line-1);
+        border-radius: calc(var(--r-lg) - 4px);
+        background: color-mix(in srgb, var(--surface-1) 72%, transparent);
+      }
+      .goalcard__failure-copy { display: grid; gap: 5px; max-width: 68ch; }
+      .goalcard__failure-eyebrow {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: uppercase;
+        color: var(--text-3);
+      }
+      .goalcard__failure-title {
+        font: var(--type-body-medium);
+        color: var(--text-1);
+        text-wrap: balance;
+      }
+      .goalcard__failure-note {
+        font: var(--type-caption);
+        color: var(--text-2);
+        text-wrap: pretty;
+      }
+      .goalcard__failure-activity {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-height: 38px;
+        padding: 0 2px;
+        border-top: 1px solid var(--line-1);
+        border-bottom: 1px solid var(--line-1);
+      }
+      .goalcard__failure-activity-label {
+        font: var(--type-caption-medium);
+        color: var(--text-2);
+      }
+      .goalcard__failure .goalcard__working {
+        margin-top: -6px;
+        padding: 4px 2px 2px;
+      }
+      .goalcard__failure-actions { display: grid; gap: 7px; }
+      .goalcard__failure-actions .goalcard__terminal-actions { gap: 8px; }
+      .goalcard__failure-helper {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
       /* sheet buttons: pills — filled ink primary, outlined secondary, ghost */
       .goalcard__link {
         display: inline-flex;
@@ -22916,6 +24424,13 @@
         .goalcard:not(.is-rail-expanded) .goalcard__node[data-compressed="hide"],
         .goalcard:not(.is-rail-expanded) .goalcard__conn[data-compressed="hide"] { display: none; }
         .goalcard:not(.is-rail-expanded) .goalcard__rail-count { display: inline; }
+        .goalcard[data-state="error"] { padding: 15px; }
+        .goalcard[data-state="error"] .goalcard__head { gap: 10px; }
+        .goalcard[data-state="error"] .goalcard__id { flex-basis: calc(100% - 88px); }
+        .goalcard[data-state="error"] .goalcard__meta { order: initial; flex-basis: auto; }
+        .goalcard__failure { padding: 14px; }
+        .goalcard__failure-actions .goalcard__terminal-actions { align-items: stretch; }
+        .goalcard__failure-actions .goalcard__link--primary { flex: 1 1 100%; justify-content: center; }
       }
       /* sheet 3a the micro-survey afterword: a centered, detached whisper —
          "did this land? [landed] [off]" (it stays inside the card so the
@@ -24437,8 +25952,22 @@
         <button id="topbarBack" class="topbar__back" type="button" aria-label="Back to Stride">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
         </button>
-        <h1 class="topbar__heading"><span id="topbarProject">meeting</span><span id="topbarToolTitle" hidden></span></h1>
-        <span id="topbarSubtitle" class="topbar__subtitle"></span>
+        <div class="topbar__brand-lockup" aria-label="Stride · Bonfire organization">
+          <span class="wordmark topbar__brand-wordmark" role="img" aria-label="Stride"></span>
+          <span class="topbar__identity-divider" aria-hidden="true"></span>
+          <span class="topbar__organization">
+            <span class="topbar__organization-mark" aria-hidden="true">B</span>
+            <span class="topbar__organization-copy">
+              <span class="topbar__organization-label">Organization</span>
+              <strong class="topbar__organization-name">Bonfire</strong>
+            </span>
+          </span>
+        </div>
+        <span class="topbar__context-divider" aria-hidden="true"></span>
+        <div class="topbar__context">
+          <h1 class="topbar__heading"><span id="topbarProject">meeting</span><span id="topbarToolTitle" hidden></span></h1>
+          <span id="topbarSubtitle" class="topbar__subtitle"></span>
+        </div>
         <div id="topbarMeta" class="topbar__meta" aria-label="Meeting context">
           <span class="topbar__meta-item" id="topbarDate">—</span>
           <span class="topbar__meta-sep" aria-hidden="true">·</span>
@@ -25040,6 +26569,7 @@
             </button>
             <div id="chatAgentThreads" class="chat-agent-threads" aria-label="Chat threads"></div>
           </aside>
+          <div id="chatThreadsResize" class="chat-workspace-resizer chat-workspace-resizer--threads" role="separator" aria-label="Resize channel list" aria-orientation="vertical" aria-valuemin="240" aria-valuemax="420" aria-valuenow="324" tabindex="0"></div>
           <div id="scoutPrivatePane" class="chat-conversation">
             <div class="chat-convo-head">
               <button id="chatConvoBack" class="chat-convo-head__back" type="button" aria-label="Back to threads">
@@ -25082,6 +26612,11 @@
               <div id="scoutMentionList" class="scout-mention-popover__list" role="listbox" aria-label="Mention a teammate"></div>
             </div>
             <div id="scoutDeliverablesPopover" class="scout-deliverables-popover" hidden></div>
+            <button id="chatWorkIndicator" class="chat-work-indicator" type="button" aria-label="View active work" hidden>
+              <span class="chat-work-indicator__signal" aria-hidden="true"><span></span><span></span><span></span></span>
+              <span id="chatWorkIndicatorText" class="chat-work-indicator__text"></span>
+              <span class="chat-work-indicator__action">view activity</span>
+            </button>
             <form id="scoutChatForm" class="scout-chat-form">
               <input id="scoutChatFileInput" type="file" multiple hidden>
               <button id="scoutChatAttach" class="scout-chat-attach" type="button" aria-label="Attach files" title="Attach files" disabled>
@@ -25111,6 +26646,29 @@
             <p id="scoutChatHint" class="scout-chat-hint">join the room to ask Scout</p>
             <p id="scoutChatBrainNote" class="scout-chat-brain-note">private · not shared with the company brain — use "Feed the brain" to teach the office</p>
           </div>
+          <div id="chatContextResize" class="chat-workspace-resizer chat-workspace-resizer--context" role="separator" aria-label="Resize context panel" aria-orientation="vertical" aria-valuemin="360" aria-valuemax="640" aria-valuenow="440" tabindex="0" hidden></div>
+          <aside id="chatContextRail" class="chat-context-rail" aria-label="Conversation context" aria-live="polite" hidden>
+            <header class="chat-context-rail__head">
+              <div class="chat-context-rail__heading">
+                <span id="chatContextKicker" class="chat-context-rail__kicker">context</span>
+                <h2 id="chatContextTitle" class="chat-context-rail__title">Conversation</h2>
+                <p id="chatContextMeta" class="chat-context-rail__meta"></p>
+              </div>
+              <button id="chatContextClose" class="chat-context-rail__close" type="button" aria-label="Close context panel">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+              </button>
+            </header>
+            <div id="chatContextBody" class="chat-context-rail__body"></div>
+            <form id="chatContextReplyForm" class="chat-context-reply" hidden>
+              <label class="chat-context-reply__label" for="chatContextReplyInput">Reply in thread</label>
+              <div class="chat-context-reply__composer">
+                <textarea id="chatContextReplyInput" rows="1" maxlength="12000" placeholder="Reply without losing the channel…"></textarea>
+                <button id="chatContextReplySend" type="submit" aria-label="Send threaded reply">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"></path><path d="m5 12 7-7 7 7"></path></svg>
+                </button>
+              </div>
+            </form>
+          </aside>
         </section>
 
         <!-- Mission Intelligence — the company brain, visible to every user;
@@ -26076,9 +27634,13 @@
           <button id="sheetSignOut" class="settings-sheet-signout" type="button">Sign out</button>
         </div>
         <header class="settings-header">
-          <div>
-            <h2 id="settingsTitle">settings.</h2>
-            <p>your profile, security, devices, and appearance.</p>
+          <div class="settings-header__brand">
+            <span class="wordmark settings-header__wordmark" role="img" aria-label="Stride"></span>
+            <span class="settings-header__divider" aria-hidden="true"></span>
+            <span class="settings-header__copy">
+              <h2 id="settingsTitle">Settings</h2>
+              <span class="settings-header__org">Bonfire organization</span>
+            </span>
           </div>
           <button id="settingsClose" class="btn btn--ghost settings-close" type="button" aria-label="Close settings" title="close">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -26089,13 +27651,16 @@
         </header>
         <div class="settings-layout">
           <nav class="settings-nav" aria-label="Settings sections">
-            <button type="button" class="settings-nav__item" data-settings-section="profile" aria-current="true">profile</button>
-            <button type="button" class="settings-nav__item" data-settings-section="account" aria-current="false">account</button>
-            <button type="button" class="settings-nav__item" data-settings-section="scout-memory" aria-current="false">scout memory</button>
-            <button type="button" class="settings-nav__item" data-settings-section="devices" aria-current="false">audio &amp; video</button>
-            <button type="button" class="settings-nav__item" data-settings-section="notifications" aria-current="false">notifications</button>
-            <button type="button" class="settings-nav__item" data-settings-section="dealrooms" aria-current="false">deal rooms</button>
-            <button type="button" class="settings-nav__item" data-settings-section="appearance" aria-current="false">appearance</button>
+            <span class="settings-nav__group">You</span>
+            <button type="button" class="settings-nav__item" data-settings-section="profile" aria-current="true"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4.5 21a7.5 7.5 0 0 1 15 0"></path></svg><span>Profile</span></button>
+            <button type="button" class="settings-nav__item" data-settings-section="account" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"></rect><path d="M7 9h10M7 13h6"></path></svg><span>Account &amp; security</span></button>
+            <button type="button" class="settings-nav__item" data-settings-section="scout-memory" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M9.5 4.5A3.5 3.5 0 0 0 6 8v1a3 3 0 0 0 0 6v1a3.5 3.5 0 0 0 3.5 3.5M14.5 4.5A3.5 3.5 0 0 1 18 8v1a3 3 0 0 1 0 6v1a3.5 3.5 0 0 1-3.5 3.5M12 3v18"></path></svg><span>Memory</span></button>
+            <span class="settings-nav__group">Experience</span>
+            <button type="button" class="settings-nav__item" data-settings-section="devices" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3"></path></svg><span>Audio &amp; video</span></button>
+            <button type="button" class="settings-nav__item" data-settings-section="notifications" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"></path></svg><span>Notifications</span></button>
+            <button type="button" class="settings-nav__item" data-settings-section="appearance" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9c0-1.1-.9-2-2-2h-2.2a2 2 0 0 1-1.8-2.8l.7-1.6A1.8 1.8 0 0 0 14 3.1 9 9 0 0 0 12 3Z"></path><circle cx="7.5" cy="11.5" r=".8" fill="currentColor" stroke="none"></circle><circle cx="10" cy="7.5" r=".8" fill="currentColor" stroke="none"></circle></svg><span>Appearance</span></button>
+            <span class="settings-nav__group">Organization</span>
+            <button type="button" class="settings-nav__item" data-settings-section="dealrooms" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7h16v13H4zM8 7V4h8v3M4 11h16"></path></svg><span>Deal rooms</span></button>
           </nav>
           <div class="settings-body">
             <section data-settings-section="profile" aria-label="Profile">
@@ -26150,16 +27715,25 @@
                 <p id="accountStatus" class="access-hint" aria-live="polite"></p>
               </section>
             </section>
-            <section data-settings-section="scout-memory" hidden aria-label="Scout memory">
+            <section data-settings-section="scout-memory" hidden aria-label="Employee memory">
               <div class="relationship-memory">
                 <div class="relationship-memory__head">
                   <div>
-                    <div class="voice-profile__label">scout memory</div>
-                    <h3>What Scout remembers about me</h3>
+                    <div class="voice-profile__label">employee memory</div>
+                    <h3>What STRIDE remembers about me</h3>
                   </div>
                   <span id="relationshipMemoryState" class="relationship-memory__state">checking</span>
                 </div>
-                <p class="relationship-memory__intro">You stay in control. Scout only saves a preference after consent, shows where it came from, and lets you correct or remove it.</p>
+                <p class="relationship-memory__intro">Help Scout, Colton, and future coworkers understand you as one distinct teammate. Private memories stay source-labeled, reviewable, and removable; shared work stays attributed to the people who actually said or did it.</p>
+                <div class="relationship-memory__lanes" aria-label="How STRIDE keeps memory separate">
+                  <div class="relationship-memory__lane"><strong>1:1 private</strong><span>Your imports and approved preferences follow you only into private agent conversations.</span></div>
+                  <div class="relationship-memory__lane"><strong>Shared work</strong><span>Public chats and recorded meetings remain speaker- or author-attributed inside their current audience.</span></div>
+                  <div class="relationship-memory__lane"><strong>Company context</strong><span>Agents use the evolving company brain through live permissions without blending coworkers together.</span></div>
+                </div>
+                <div class="relationship-memory__import">
+                  <span class="relationship-memory__import-copy"><strong>Import memory to STRIDE</strong><span>Bring over the useful context another AI assistant already knows about you. You review the export before anything is saved.</span></span>
+                  <button id="relationshipMemoryImportStart" class="btn btn--ghost" type="button">Start import</button>
+                </div>
                 <div id="relationshipMemoryUnavailable" class="relationship-memory__notice" hidden>
                   <strong>not available in this build</strong>
                   <span>relationship memory is off at the organization level. nothing is being learned or stored.</span>
@@ -26174,7 +27748,7 @@
                     <span><i aria-hidden="true"></i>on · private by default</span>
                     <button id="relationshipMemoryDisable" class="login-textlink relationship-memory__danger" type="button">turn off</button>
                   </div>
-                  <p class="relationship-memory__trust">saved preferences expire and are never authority, permissions, or company facts.</p>
+                  <p class="relationship-memory__trust">Private profile context can shape how coworkers communicate with you. It never grants authority, changes permissions, or becomes a company fact.</p>
                   <label class="relationship-memory__toggle">
                     <span><strong>learn from repeated patterns · not active yet</strong><small>no conversation is inferred into a preference in this build.</small></span>
                     <input id="relationshipMemoryInferred" type="checkbox" disabled>
@@ -26391,6 +27965,58 @@
         </footer>
       </section>
     </div>
+
+    <dialog id="memoryImportDialog" class="memory-import-dialog" aria-labelledby="memoryImportTitle">
+      <div class="memory-import-dialog__shell">
+        <header class="memory-import-dialog__head">
+          <div>
+            <h3 id="memoryImportTitle">Import memory to STRIDE</h3>
+            <p>Transfer preferences and context from another AI assistant.</p>
+          </div>
+          <button id="memoryImportClose" class="btn btn--ghost memory-import-dialog__close" type="button" aria-label="Close memory import">×</button>
+        </header>
+        <div class="memory-import-dialog__body">
+          <section class="memory-import-step">
+            <span class="memory-import-step__number">1</span>
+            <div class="memory-import-step__content">
+              <p class="memory-import-step__title">Copy this prompt into your other AI assistant</p>
+              <pre id="memoryImportPrompt" class="memory-import-prompt">Export all of my stored memories and any context you've learned about me from past conversations. Preserve my words verbatim where possible, especially for instructions and preferences. Do not include passwords, credentials, payment details, medical information, or private data about other people.
+
+## Categories (output in this order):
+1. **Instructions**: Rules I've explicitly asked you to follow going forward — tone, format, style, “always do X”, “never do Y”, and corrections to your behavior. Only include durable rules, not one-off requests.
+2. **Identity**: Name, location, education, family or relationships I have explicitly shared, languages, and personal interests.
+3. **Career**: Current and past roles, companies, and general skill areas.
+4. **Projects**: Projects I meaningfully built or committed to. Use one entry per project and include what it does, current status, and key decisions.
+5. **Preferences**: Opinions, tastes, collaboration habits, and working-style preferences that apply broadly.
+
+## Format:
+Use section headers for each category. Within each category, list one entry per line, sorted by oldest date first:
+[YYYY-MM-DD] - Entry content here.
+If no date is known, use [unknown].
+
+Wrap the entire export in one code block. After the code block, say whether the export is complete or more memories remain.</pre>
+              <button id="memoryImportCopy" class="btn btn--ghost memory-import-copy" type="button">Copy prompt</button>
+            </div>
+          </section>
+          <section class="memory-import-step">
+            <span class="memory-import-step__number">2</span>
+            <div class="memory-import-step__content">
+              <p class="memory-import-step__title">Paste the export and review what STRIDE found</p>
+              <textarea id="memoryImportInput" class="memory-import-input" rows="8" placeholder="Paste your memory export here" aria-label="Paste your memory export"></textarea>
+              <div id="memoryImportPreview" class="memory-import-preview" aria-live="polite"></div>
+            </div>
+          </section>
+          <p class="memory-import-dialog__privacy">Saved entries are private to you by default. They follow only your 1:1 agent conversations. Public chats and recorded meetings build separate, attributed company context under their current audience permissions. Imported memory is separate from Drive and company artifacts.</p>
+        </div>
+        <footer class="memory-import-dialog__foot">
+          <p id="memoryImportStatus" class="memory-import-dialog__status" aria-live="polite">Paste an export to begin.</p>
+          <div class="memory-import-dialog__actions">
+            <button id="memoryImportCancel" class="btn btn--ghost" type="button">Cancel</button>
+            <button id="memoryImportSave" class="btn btn--primary" type="button" disabled>Add to memory</button>
+          </div>
+        </footer>
+      </div>
+    </dialog>
 
     <script>
       /* ---------- theme (glass & ink) ----------
@@ -26610,6 +28236,7 @@
       const statusPillEl = document.getElementById('statusPill')
       const statusTextEl = document.getElementById('statusText')
       const brandMarkEl = document.getElementById('brandMark')
+      const topbarBrandLockupEl = document.querySelector('.topbar__brand-lockup')
       const logEl = document.getElementById('log')
       const joinButton = document.getElementById('join')
       const joinAccessButton = document.getElementById('joinAccess')
@@ -26645,6 +28272,16 @@
       const relationshipMemoryCount = document.getElementById('relationshipMemoryCount')
       const relationshipMemoryList = document.getElementById('relationshipMemoryList')
       const relationshipMemoryStatus = document.getElementById('relationshipMemoryStatus')
+      const relationshipMemoryImportStart = document.getElementById('relationshipMemoryImportStart')
+      const memoryImportDialog = document.getElementById('memoryImportDialog')
+      const memoryImportClose = document.getElementById('memoryImportClose')
+      const memoryImportCancel = document.getElementById('memoryImportCancel')
+      const memoryImportCopy = document.getElementById('memoryImportCopy')
+      const memoryImportPrompt = document.getElementById('memoryImportPrompt')
+      const memoryImportInput = document.getElementById('memoryImportInput')
+      const memoryImportPreview = document.getElementById('memoryImportPreview')
+      const memoryImportStatus = document.getElementById('memoryImportStatus')
+      const memoryImportSave = document.getElementById('memoryImportSave')
       const audioNoiseModeInputs = Array.from(document.querySelectorAll('input[name="audioNoiseMode"]'))
       const themeModeInputs = Array.from(document.querySelectorAll('input[name="themeMode"]'))
       const audioNoiseStatusEls = Array.from(document.querySelectorAll('.noise-mode-status[data-mode-status]'))
@@ -26862,6 +28499,19 @@
 	      const chatConvoContext = document.getElementById('chatConvoContext')
 	      const chatConvoScope = document.getElementById('chatConvoScope')
 	      const chatConvoPolicy = document.getElementById('chatConvoPolicy')
+	      const chatThreadsResize = document.getElementById('chatThreadsResize')
+	      const chatContextResize = document.getElementById('chatContextResize')
+	      const chatContextRail = document.getElementById('chatContextRail')
+	      const chatContextKicker = document.getElementById('chatContextKicker')
+	      const chatContextTitle = document.getElementById('chatContextTitle')
+	      const chatContextMeta = document.getElementById('chatContextMeta')
+	      const chatContextClose = document.getElementById('chatContextClose')
+	      const chatContextBody = document.getElementById('chatContextBody')
+	      const chatContextReplyForm = document.getElementById('chatContextReplyForm')
+	      const chatContextReplyInput = document.getElementById('chatContextReplyInput')
+	      const chatContextReplySend = document.getElementById('chatContextReplySend')
+	      const chatWorkIndicator = document.getElementById('chatWorkIndicator')
+	      const chatWorkIndicatorText = document.getElementById('chatWorkIndicatorText')
 	      const scoutChatBrainNote = document.getElementById('scoutChatBrainNote')
       const roomChatPanel = document.getElementById('roomChatPanel')
       const roomChatThread = document.getElementById('roomChatThread')
@@ -27130,6 +28780,25 @@
 	      let scoutOfficeChatTurns = []
 	      let scoutChatThreads = []
 	      let activeScoutThreadId = ''
+	      // These states are used by authenticated bootstrap renders. Keep them
+	      // above the first renderLoginMode/syncAuthenticatedShell call so an
+	      // empty first load cannot enter a temporal-dead-zone and abort the app.
+	      let chatChannelActivityPopover = null
+	      let chatChannelActivityHideTimer = 0
+	      let chatWorkTimerTicker = 0
+	      let strideTeamLoadGeneration = 0
+	      let strideRosterRecords = []
+	      let strideMarketplaceRecords = []
+	      let strideMarketplaceCanManage = false
+	      let strideAgentDetailContext = null
+	      let strideProjectPickerRecord = null
+	      let multiDeviceHandoffChip = null
+	      let multiDeviceHandoffDismissed = false
+	      let deviceOfferChip = null
+	      let deviceOfferChipTargetId = ''
+	      let chatContextState = null
+	      let chatContextReturnFocus = null
+	      let chatContextGeneration = 0
 	      let pendingScoutFiles = []
 	      // armed follow-up: {artifactId, mode, query, version, threadId} — the
 	      // next send re-runs that artifact in place via followUpArtifactId
@@ -28229,9 +29898,29 @@
       })
       desktopChatLayoutQuery.addEventListener?.('change', () => {
         if ((appShell.dataset.tool || '') === 'chat') {
+          if (!desktopChatLayoutQuery.matches) closeDesktopChatContext({ restoreFocus: false })
           renderActiveScoutThread()
         }
       })
+	      initializeDesktopChatWorkspace()
+	      chatContextClose?.addEventListener('click', () => closeDesktopChatContext())
+	      chatWorkIndicator?.addEventListener('click', () => {
+	        const messageId = String(chatWorkIndicator.dataset.messageId || '')
+	        const message = selectedScoutChatThread()?.messages?.find(candidate => String(candidate?.id || '') === messageId)
+	        if (message) openDesktopWorkContext(message, chatWorkIndicator)
+	      })
+	      chatContextReplyInput?.addEventListener('input', () => {
+	        chatContextReplyInput.style.height = 'auto'
+	        chatContextReplyInput.style.height = `${Math.min(128, Math.max(40, chatContextReplyInput.scrollHeight))}px`
+	        chatContextReplySend.disabled = !chatContextReplyInput.value.trim()
+	      })
+	      chatContextReplyForm?.addEventListener('submit', submitDesktopThreadReply)
+	      document.addEventListener('keydown', event => {
+	        if (event.key === 'Escape' && !chatContextRail?.hidden) {
+	          event.stopPropagation()
+	          closeDesktopChatContext()
+	        }
+	      })
       collapseBoardButton.addEventListener('click', () => setBoardExpanded(false))
       videoStack.addEventListener('pointerdown', beginVideoTilePointerDrag)
       videoStack.addEventListener('keydown', handleVideoReorderKey)
@@ -30415,11 +32104,183 @@
         notification_timing: 'notification timing',
         collaboration_channel: 'collaboration channel',
         working_hours: 'working hours',
-        name_pronunciation: 'name pronunciation'
+        name_pronunciation: 'name pronunciation',
+        user_instruction: 'instruction',
+        identity_context: 'identity',
+        career_context: 'career',
+        project_context: 'project',
+        personal_preference: 'preference'
       }
       const relationshipMemoryExpiryFormatter = new Intl.DateTimeFormat(undefined, {
         month: 'short', day: 'numeric', year: 'numeric'
       })
+
+      const strideMemoryImportCategoryTypes = {
+        instructions: 'user_instruction',
+        identity: 'identity_context',
+        career: 'career_context',
+        projects: 'project_context',
+        preferences: 'personal_preference'
+      }
+
+      function relationshipMemoryLabel(preferenceType) {
+        const normalized = String(preferenceType || '').replace(/_\d{2}$/, '')
+        return relationshipMemoryLabels[normalized] || normalized.replaceAll('_', ' ')
+      }
+
+      function parseSTRIDEMemoryImport(raw) {
+        const original = String(raw || '').trim()
+        if (!original) return { entries: [], errors: [] }
+        const fenced = original.match(/```(?:[a-z0-9_-]+)?\s*\n([\s\S]*?)```/i)
+        const source = fenced ? fenced[1] : original
+        const entries = []
+        const errors = []
+        const seen = new Set()
+        let category = ''
+        const heading = /^(?:#{1,6}\s*)?(?:\d+\.\s*)?\*{0,2}(instructions|identity|career|projects|preferences)\*{0,2}:?\s*$/i
+        const entry = /^\[(\d{4}-\d{2}-\d{2}|unknown)\]\s*-\s*(.+)$/i
+        source.split(/\r?\n/).forEach((line, index) => {
+          const text = line.trim()
+          if (!text || text === '```') return
+          const headingMatch = text.match(heading)
+          if (headingMatch) {
+            category = headingMatch[1].toLowerCase()
+            return
+          }
+          const entryMatch = text.match(entry)
+          if (!entryMatch || !category) {
+            errors.push(`line ${index + 1} needs a category heading and [date] - entry format`)
+            return
+          }
+          const value = `[${entryMatch[1].toLowerCase()}] ${entryMatch[2].trim()}`
+          const key = `${category}\u0000${value.toLowerCase()}`
+          if (seen.has(key)) return
+          seen.add(key)
+          if (value.length > 500) {
+            errors.push(`line ${index + 1} is longer than 500 characters`)
+            return
+          }
+          if (entries.length >= 75) {
+            errors.push('one import can contain up to 75 memories')
+            return
+          }
+          entries.push({ category, baseType: strideMemoryImportCategoryTypes[category], value })
+        })
+        return { entries, errors }
+      }
+
+      function renderSTRIDEMemoryImportPreview() {
+        const parsed = parseSTRIDEMemoryImport(memoryImportInput.value)
+        const counts = new Map()
+        parsed.entries.forEach(item => counts.set(item.category, (counts.get(item.category) || 0) + 1))
+        memoryImportPreview.replaceChildren(...Array.from(counts.entries()).map(([category, count]) => {
+          const chip = document.createElement('span')
+          chip.className = 'memory-import-preview__chip'
+          chip.textContent = `${category} · ${count}`
+          return chip
+        }))
+        memoryImportSave.disabled = relationshipMemoryBusy || !parsed.entries.length || parsed.errors.length > 0
+        if (parsed.errors.length) {
+          memoryImportStatus.dataset.state = 'error'
+          memoryImportStatus.textContent = parsed.errors[0]
+        } else if (parsed.entries.length) {
+          memoryImportStatus.dataset.state = 'ready'
+          memoryImportStatus.textContent = `${parsed.entries.length} private ${parsed.entries.length === 1 ? 'memory' : 'memories'} ready to review and save.`
+        } else {
+          memoryImportStatus.dataset.state = ''
+          memoryImportStatus.textContent = 'Paste an export to begin.'
+        }
+        return parsed
+      }
+
+      function openSTRIDEMemoryImport() {
+        if (relationshipMemoryBusy || relationshipMemorySnapshot?.available === false) return
+        renderSTRIDEMemoryImportPreview()
+        memoryImportDialog.showModal()
+        window.requestAnimationFrame(() => memoryImportInput.focus())
+      }
+
+      function closeSTRIDEMemoryImport() {
+        if (relationshipMemoryBusy) return
+        memoryImportDialog.close()
+        relationshipMemoryImportStart.focus()
+      }
+
+      function nextSTRIDEMemoryImportType(base, used) {
+        for (let index = 1; index <= 99; index += 1) {
+          const candidate = `${base}_${String(index).padStart(2, '0')}`
+          if (!used.has(candidate)) {
+            used.add(candidate)
+            return candidate
+          }
+        }
+        return ''
+      }
+
+      async function importSTRIDEMemories() {
+        const parsed = renderSTRIDEMemoryImportPreview()
+        if (!parsed.entries.length || parsed.errors.length || relationshipMemoryBusy || !relationshipMemorySnapshot || !authedUser) return
+        const epoch = relationshipMemoryLoadEpoch
+        const identity = String(authedUser.email || '').trim().toLowerCase()
+        const usedTypes = new Set((relationshipMemorySnapshot.preferences || []).map(item => String(item.preferenceType || '')))
+        const entries = parsed.entries.map(item => ({
+          ...item,
+          preferenceType: nextSTRIDEMemoryImportType(item.baseType, usedTypes)
+        }))
+        if (entries.some(item => !item.preferenceType)) {
+          memoryImportStatus.dataset.state = 'error'
+          memoryImportStatus.textContent = 'This profile already has the maximum imported memories in one category.'
+          return
+        }
+        relationshipMemoryBusy = true
+        memoryImportSave.disabled = true
+        relationshipMemoryImportStart.disabled = true
+        const closedStaleVoice = privateRealtimeVoiceInFlight()
+        if (closedStaleVoice) {
+          stopRealtimeVoiceConversation({ notifyServer: false, terminalReason: 'relationship_memory_changed' })
+        }
+        try {
+          let snapshot = relationshipMemorySnapshot
+          if (!snapshot?.consent?.enabled) {
+            const consent = await postAuthJSON('/api/stride/v1/coworker/relationships/consent', {
+              action: 'enable', expectedRevision: snapshot?.revision || 0, allowInferred: false, allowShared: false
+            })
+            if (!consent.ok) throw new Error(consent.data?.error || 'Could not enable private memory.')
+            snapshot = { ...snapshot, ...consent.data, available: true, preferences: snapshot?.preferences || [] }
+          }
+          for (let index = 0; index < entries.length; index += 1) {
+            memoryImportStatus.dataset.state = 'ready'
+            memoryImportStatus.textContent = `Saving ${index + 1} of ${entries.length}…`
+            const result = await postAuthJSON('/api/stride/v1/coworker/relationships/remember', {
+              action: 'remember', expectedRevision: snapshot.revision,
+              preferenceType: entries[index].preferenceType, value: entries[index].value, scope: 'private'
+            })
+            if (!result.ok) throw new Error(result.data?.error || `Import stopped after ${index} saved memories.`)
+            snapshot = { ...snapshot, ...result.data, available: true, consent: result.data.consent || snapshot.consent }
+          }
+          if (epoch !== relationshipMemoryLoadEpoch || identity !== String(authedUser?.email || '').trim().toLowerCase()) return
+          relationshipMemorySnapshot = snapshot
+          memoryImportInput.value = ''
+          renderRelationshipMemory()
+          memoryImportStatus.dataset.state = 'ready'
+          memoryImportStatus.textContent = `${entries.length} ${entries.length === 1 ? 'memory' : 'memories'} imported privately.`
+          setRelationshipMemoryStatus(`${entries.length} ${entries.length === 1 ? 'memory' : 'memories'} imported privately${closedStaleVoice ? '. Live Scout ended so it cannot retain the previous profile.' : '.'}`)
+          window.setTimeout(() => {
+            if (memoryImportDialog.open && !relationshipMemoryBusy) memoryImportDialog.close()
+          }, 650)
+        } catch (error) {
+          if (epoch !== relationshipMemoryLoadEpoch || identity !== String(authedUser?.email || '').trim().toLowerCase()) return
+          memoryImportStatus.dataset.state = 'error'
+          memoryImportStatus.textContent = error.message || 'Could not import memory.'
+          await loadRelationshipMemory()
+        } finally {
+          if (epoch === relationshipMemoryLoadEpoch && identity === String(authedUser?.email || '').trim().toLowerCase()) {
+            relationshipMemoryBusy = false
+            renderRelationshipMemory()
+            renderSTRIDEMemoryImportPreview()
+          }
+        }
+      }
 
 	  function relationshipMemoryVisibleRevision() {
 	    const revision = relationshipMemorySnapshot?.revision
@@ -30451,7 +32312,9 @@
       function relationshipMemorySource(preference) {
 	    const provenance = preference?.source
 	    if (provenance?.kind === 'settings') {
-	      return provenance.label || 'added by you in settings'
+	      return /^(user_instruction|identity_context|career_context|project_context|personal_preference)_\d{2}$/.test(String(preference?.preferenceType || ''))
+	        ? 'imported by you in settings'
+	        : provenance.label || 'added by you in settings'
 	    }
 	    if (provenance?.kind === 'conversation') {
 	      const location = provenance.threadTitle || 'a conversation'
@@ -30522,7 +32385,7 @@
           const head = document.createElement('div')
           head.className = 'relationship-memory__item-head'
           const kind = document.createElement('strong')
-          kind.textContent = relationshipMemoryLabels[preference.preferenceType] || String(preference.preferenceType || '').replaceAll('_', ' ')
+          kind.textContent = relationshipMemoryLabel(preference.preferenceType)
           const scope = document.createElement('span')
           scope.className = 'relationship-memory__scope'
           const paused = preference.scope === 'shared' && !relationshipMemorySnapshot?.consent?.allowShared
@@ -30556,7 +32419,7 @@
         input.rows = 3
         input.maxLength = 500
         input.value = preference.value || ''
-        input.setAttribute('aria-label', `correct ${relationshipMemoryLabels[preference.preferenceType] || 'preference'}`)
+        input.setAttribute('aria-label', `correct ${relationshipMemoryLabel(preference.preferenceType) || 'preference'}`)
         const actions = document.createElement('div')
         actions.className = 'relationship-memory__item-actions'
         actions.append(
@@ -30596,6 +32459,7 @@
         relationshipMemoryInferred.disabled = true
         relationshipMemoryShared.disabled = true
         relationshipMemoryRemember.disabled = relationshipMemoryBusy
+        relationshipMemoryImportStart.disabled = relationshipMemoryBusy || !available || !relationshipMemorySnapshot
         relationshipMemoryInferred.checked = Boolean(consent.allowInferred)
         relationshipMemoryShared.checked = Boolean(consent.allowShared)
         renderRelationshipMemoryList(enabled ? relationshipMemorySnapshot.preferences || [] : [])
@@ -30780,6 +32644,28 @@
           scope: 'private'
         }, 'Saved privately. You can correct or forget it any time.', { clearValue: true })
       })
+      relationshipMemoryImportStart.addEventListener('click', openSTRIDEMemoryImport)
+      memoryImportClose.addEventListener('click', closeSTRIDEMemoryImport)
+      memoryImportCancel.addEventListener('click', closeSTRIDEMemoryImport)
+      memoryImportDialog.addEventListener('cancel', event => {
+        if (relationshipMemoryBusy) {
+          event.preventDefault()
+          return
+        }
+        relationshipMemoryImportStart.focus()
+      })
+      memoryImportInput.addEventListener('input', renderSTRIDEMemoryImportPreview)
+      memoryImportCopy.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(memoryImportPrompt.textContent.trim())
+          memoryImportCopy.textContent = 'Copied ✓'
+          window.setTimeout(() => { memoryImportCopy.textContent = 'Copy prompt' }, 1500)
+        } catch (error) {
+          memoryImportStatus.dataset.state = 'error'
+          memoryImportStatus.textContent = 'Could not copy automatically. Select the prompt and copy it manually.'
+        }
+      })
+      memoryImportSave.addEventListener('click', importSTRIDEMemories)
 
       /* ---------- account settings (inside the settings dialog) ---------- */
       const accountIdentityEl = document.getElementById('accountIdentity')
@@ -31182,8 +33068,6 @@
       // on more than one device, both stay in the room — there is no alarming
       // session_replaced eviction. This calm, dismissible chip simply names the
       // situation and offers "leave here" for a deliberate hand-off.
-      let multiDeviceHandoffChip = null
-      let multiDeviceHandoffDismissed = false
       function ensureMultiDeviceHandoffChip() {
         if (multiDeviceHandoffChip) {
           return multiDeviceHandoffChip
@@ -31244,8 +33128,6 @@
       // mid-call (you plugged your good mic back in), we never auto-yank the
       // live track — we surface this calm, dismissible "switch to <name>?" offer
       // and let the human decide. Reuses the handoff chip's calm visual register.
-      let deviceOfferChip = null
-      let deviceOfferChipTargetId = ''
       function ensureDeviceOfferChip() {
         if (deviceOfferChip) {
           return deviceOfferChip
@@ -31516,13 +33398,6 @@
       }
 
       /* ---------- STRIDE agent team / Marketplace / suggested work ---------- */
-      let strideTeamLoadGeneration = 0
-      let strideRosterRecords = []
-      let strideMarketplaceRecords = []
-      let strideMarketplaceCanManage = false
-      let strideAgentDetailContext = null
-      let strideProjectPickerRecord = null
-
       function strideField(value, ...names) {
         if (!value || typeof value !== 'object') return undefined
         for (const name of names) {
@@ -31661,11 +33536,14 @@
 
       function strideAgentCard(record, kind) {
         const listing = strideField(record, 'listing', 'Listing') || record
-        const id = strideWords(
+        // IDs are transport identifiers, not display copy. Preserve their
+        // exact punctuation so a marketplace card for `colton-research`
+        // cannot accidentally call the API as `colton research`.
+        const id = String(
           strideField(record, 'id', 'ID', 'agentId', 'AgentID', 'listingId', 'ListingID') ||
-          strideField(listing, 'id', 'ID'),
-          kind === 'marketplace' ? 'candidate' : 'coworker'
-        )
+          strideField(listing, 'id', 'ID') ||
+          (kind === 'marketplace' ? 'candidate' : 'coworker')
+        ).trim()
         const category = strideWords(
           strideField(record, 'category', 'Category') || strideField(listing, 'category', 'Category'),
           kind === 'marketplace' ? 'specialist' : 'agent coworker'
@@ -31675,10 +33553,11 @@
           strideField(listing, 'displayName', 'DisplayName', 'name', 'Name'),
           id.replace(/^agent\s+/i, '')
         )
-        const state = strideWords(
-          strideField(record, 'state', 'State', 'status', 'Status', 'activationStage', 'ActivationStage'),
+        const rawState = id === 'scout' ? 'included' : strideWords(
+          strideField(record, 'state', 'State', 'status', 'Status', 'activationStage', 'ActivationStage', 'availability', 'Availability'),
           'unavailable'
         )
+        const state = rawState === 'internal preview' ? 'reviewed preview' : rawState
         const costBand = strideWords(
           strideField(record, 'costBand', 'CostBand') || strideField(listing, 'costBand', 'CostBand'),
           'cost not qualified'
@@ -31736,11 +33615,16 @@
         foot.className = 'stride-agent-card__foot'
         const status = document.createElement('span')
         status.className = 'stride-agent-card__state'
-        status.textContent = `${state} · ${costBand}`
+        status.textContent = id === 'scout' ? 'Included with STRIDE' : `${state} · ${costBand}`
         const actions = document.createElement('div')
         actions.className = 'stride-agent-card__actions'
         actions.append(strideAction('Details', async () => openStrideAgentDetail(record, kind)))
         if (kind === 'marketplace' && strideMarketplaceCanManage) {
+          if (id === 'scout') {
+            foot.append(status, actions)
+            card.append(top, body, personalityLine, chips, foot)
+            return card
+          }
           const seat = strideRosterRecords.find(item => strideField(item, 'listingId', 'ListingID') === id)
           const seatStatus = strideField(seat, 'status', 'Status')
           if (!seat) {
@@ -31799,7 +33683,10 @@
           strideField(listing, 'displayName', 'DisplayName', 'name', 'Name'),
           id.replace(/^agent\s+/i, '')
         )
-        const rawState = String(strideField(record, 'status', 'Status', 'availability', 'Availability', 'state', 'State') || 'unavailable')
+        const rawStateValue = kind === 'marketplace' && id === 'scout'
+          ? 'included'
+          : String(strideField(record, 'status', 'Status', 'availability', 'Availability', 'state', 'State') || 'unavailable')
+        const rawState = strideWords(rawStateValue, 'unavailable') === 'internal preview' ? 'reviewed preview' : rawStateValue
         const config = strideField(record, 'config', 'Config') || {}
         return {
           id,
@@ -31947,6 +33834,13 @@
       }
 
       function appendStrideMarketplaceControls(controls, record, profile) {
+        if (profile.id === 'scout') {
+          const note = document.createElement('p')
+          note.className = 'stride-agent-dialog__safety'
+          note.textContent = 'Scout is included with STRIDE. This profile makes his personality, memory, and authority contract inspectable; there is no separate hire or duplicate seat.'
+          controls.append(note)
+          return
+        }
         if (!strideMarketplaceCanManage) {
           const note = document.createElement('p')
           note.className = 'stride-agent-dialog__safety'
@@ -32028,12 +33922,31 @@
           const status = String(strideField(item, 'status', 'Status') || 'reviewed')
           const subject = strideWords(strideField(item, 'subject', 'Subject'), 'learning')
           const scope = strideWords(strideField(item, 'scope', 'Scope'), 'team')
-          const card = strideChangeCard(subject + ' · ' + scope, status, strideWords(strideField(item, 'summary', 'Summary')))
+          const provenance = []
+          const artifactID = String(strideField(item, 'artifactId', 'ArtifactID') || '')
+          const runID = String(strideField(item, 'runId', 'RunID') || '')
+          const sourceThreadID = String(strideField(item, 'sourceThreadId', 'SourceThreadID') || '')
+          const confidence = Number(strideField(item, 'confidence', 'Confidence') || 0)
+          if (artifactID) provenance.push('artifact ' + artifactID)
+          if (runID) provenance.push('run ' + runID)
+          if (sourceThreadID) provenance.push('thread ' + sourceThreadID)
+          if (confidence > 0) provenance.push(Math.round(confidence * 100) + '% candidate confidence')
+          const learningCopy = strideWords(strideField(item, 'summary', 'Summary')) + (provenance.length ? '\n\nSource · ' + provenance.join(' · ') : '')
+          const card = strideChangeCard(subject + ' · ' + scope, status, learningCopy)
           if (strideMarketplaceCanManage && learningID && status !== 'forgotten' && profile.rawState !== 'offboarded') {
             const buttons = document.createElement('div')
             buttons.className = 'stride-agent-dialog__buttons'
+            if (status === 'pending') {
+              buttons.append(strideAction('Approve learning', async () => {
+                await strideTeamJSON('/api/stride/v1/roster/' + encodeURIComponent(profile.id) + '/learning/' + encodeURIComponent(learningID) + '/approve', {
+                  method: 'POST',
+                  body: { revision: profile.revision, summary: '' }
+                })
+                await strideRefreshAgentDetail(profile.id, 'roster')
+              }))
+            }
             buttons.append(strideAction('Correct', async () => {
-              const summary = window.prompt('Correct this reviewed learning', strideWords(strideField(item, 'summary', 'Summary')))
+              const summary = window.prompt(status === 'pending' ? 'Correct and approve this proposed learning' : 'Correct this reviewed learning', strideWords(strideField(item, 'summary', 'Summary')))
               if (!summary) return
               await strideTeamJSON('/api/stride/v1/roster/' + encodeURIComponent(profile.id) + '/learning/' + encodeURIComponent(learningID) + '/correct', {
                 method: 'POST',
@@ -32053,7 +33966,7 @@
           }
           register.append(card)
         })
-        controls.append(strideDetailHeading('Reviewed learning', 'Company-owned learning remains visible, source-bounded, correctable, and forgettable.'), register)
+        controls.append(strideDetailHeading('Memory & growth', 'Completed work proposes source-bound lessons here. Nothing becomes active until a human approves or corrects it; every lesson remains forgettable.'), register)
       }
 
       function appendStrideRosterControls(controls, record, profile) {
@@ -32782,6 +34695,8 @@
          the wordmark, the sub is terse, office/board/memory carry none */
       function phoneToolSubtitle(tool) {
         switch (tool) {
+          case 'office':
+            return 'Bonfire'
           case 'room':
             return appShell.classList.contains('is-in-room')
               ? (roomRecordingEnabled ? 'listening' : 'not listening')
@@ -33831,6 +35746,9 @@
       }
 
       function artifactWorkerLabel(entry) {
+	        const agentName = String(entry?.metadata?.agentName || '').trim()
+	        const agentRole = String(entry?.metadata?.agentRole || '').trim()
+	        if (agentName) return agentRole ? `${agentName} · ${agentRole}` : agentName
         const worker = String(entry?.metadata?.worker || '').trim()
         if (worker === 'codex_exec') return 'Codex worker'
         if (worker === 'openai_text_response') return 'Scout writer'
@@ -46041,9 +47959,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (String(thread?.intake || '').toLowerCase() === 'brain') {
 	          return isPhone ? 'answer, attach, or skip' : 'answer, attach files, or say "skip"'
 	        }
+	        const directAgent = scoutChatDirectAgentName(thread)
 	        return chatThreadIsChannel(thread)
 	          ? (isPhone ? 'message…' : 'message the thread — @scout to ask')
-	          : (isPhone ? 'ask…' : 'ask Scout, or tap + to run a task')
+	          : (isPhone ? 'ask…' : `ask ${directAgent || 'Scout'}, or tap + to run a task`)
+	      }
+
+	      function scoutChatDirectAgentName(thread) {
+	        if (!thread || chatThreadIsChannel(thread)) return ''
+	        const stamped = String(thread.agentName || '').trim()
+	        if (stamped) return stamped
+	        const roster = strideRosterRecords.find(record => String(strideField(record, 'directThreadId', 'DirectThreadID') || '') === String(thread.id || ''))
+	        if (roster) return String(strideField(roster, 'displayName', 'DisplayName') || '').trim()
+	        const titleMatch = /^(.+?)\s+·\s+agent$/i.exec(String(thread.title || '').trim())
+	        return titleMatch ? titleMatch[1].trim() : ''
 	      }
 
 	      // card 070: destination guard — a persistent pill naming where the next
@@ -46056,17 +47985,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        const thread = selectedScoutChatThread()
 	        const isChannel = chatThreadIsChannel(thread)
+	        const directAgent = scoutChatDirectAgentName(thread)
+	        const privateTarget = directAgent || 'Scout'
 	        scoutChatDestination.classList.toggle('scout-chat-destination--channel', isChannel)
 	        scoutChatDestination.classList.toggle('scout-chat-destination--private', !isChannel)
 	        const title = chatThreadDisplayTitle(thread)
 	        scoutChatDestination.textContent = isChannel
 	          ? `→ #${title} · everyone in the office`
-	          : '→ Scout · private to you'
+	          : `→ ${privateTarget} · private to you`
 	        scoutChatDestination.hidden = false
 	        if (scoutChatInput) {
 	          scoutChatInput.setAttribute('aria-label', isChannel
 	            ? `Message #${title} — everyone in the office`
-	            : 'Message Scout privately')
+	            : `Message ${privateTarget} privately`)
 	        }
 	      }
 
@@ -46941,8 +48872,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // the plan's flag survives restarts; metadata mirrors it for
         // consumers holding only the artifact row
         if (plan?.cancelled || String(m.cancelled || '').toLowerCase() === 'true' || goalStatus === 'cancelled') return 'cancelled'
-        if (stage === 'approval_required' || gate === 'approval_required' || planState === 'approval_required' || status === 'approval_required' || goalStatus === 'approval_required' || String(m.threadStatus || '').toLowerCase() === 'approval_required' || (stage === 'gate_before_shipping' && gate === 'blocked') || plan?.gate?.approvalRequired) return 'gate'
+        // A worker failure can stop at the gate with reviewGate=blocked.
+        // Error must win before the generic parked-gate shape or the UI would
+        // offer Approve on an incomplete/truncated deliverable.
         if (goalStatus === 'needs_attention' || stage === 'needs_attention' || gate === 'error' || ['error', 'failed'].includes(status)) return 'error'
+        if (stage === 'approval_required' || gate === 'approval_required' || planState === 'approval_required' || status === 'approval_required' || goalStatus === 'approval_required' || String(m.threadStatus || '').toLowerCase() === 'approval_required' || (stage === 'gate_before_shipping' && gate === 'blocked') || plan?.gate?.approvalRequired) return 'gate'
         return 'running'
       }
 
@@ -47130,7 +49064,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         disclosure?.addEventListener('click', () => {
           const open = card.classList.toggle('is-working-open')
           disclosure.setAttribute('aria-expanded', String(open))
-          disclosure.lastChild.textContent = open ? ' hide working' : ' show working'
+          const activityCopy = Boolean(disclosure.closest('.goalcard__failure'))
+          disclosure.lastChild.textContent = open
+            ? (activityCopy ? ' hide activity' : ' hide working')
+            : (activityCopy ? ' view activity' : ' show working')
         })
         // sheet 3a running foot: "watch report" opens the live goal artifact
         // in the chat-side stage without leaving the thread
@@ -47272,9 +49209,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const subtasks = plan?.subtasks || []
         const doneCount = subtasks.filter(task => task.status === 'complete').length
         const metaBits = []
-        if (subtasks.length) metaBits.push(`${doneCount} of ${subtasks.length}`)
+        if (subtasks.length && state !== 'error') metaBits.push(`${doneCount} of ${subtasks.length}`)
         card.__goalStartedAt = card.__goalStartedAt || Date.parse(artifact.createdAt || m.createdAt || '') || Date.now()
-        metaBits.push(state === 'error' || state === 'cancelled' ? 'stopped' : goalElapsedLabel(card.__goalStartedAt))
+        metaBits.push(state === 'error' ? 'Needs attention' : state === 'cancelled' ? 'stopped' : goalElapsedLabel(card.__goalStartedAt))
         card.querySelector('[data-goal-meta]').textContent = metaBits.join(' · ')
         const shownPct = Number.isFinite(pct)
           ? Math.round(pct)
@@ -47580,6 +49517,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function goalCardRenderTerminal(card, artifact, plan, state, prevState) {
         const terminal = card.querySelector('[data-goal-terminal]')
+        // Error recovery temporarily nests the activity log beside its
+        // disclosure. Restore that durable node before clearing the terminal.
+        const working = card.querySelector('[data-goal-working]')
+        if (working?.closest('[data-goal-terminal]')) terminal.before(working)
         terminal.replaceChildren()
         // the verified band borrows the disclosure button; any other state
         // seats it back on the foot so "show working" is never orphaned
@@ -47692,10 +49633,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return
         }
 
-        // error / needs_attention
+        // error / needs_attention — a compact recovery brief: explain what
+        // happened, keep the activity record inspectable in place, then offer
+        // one obvious continuation and two quieter alternatives.
         const m = artifact.metadata || {}
         const message = plan?.blocker || m.blocker || 'The goal stopped before finishing.'
-        terminal.appendChild(bfEl('div', 'goalcard__result', message))
+        const failure = bfEl('section', 'goalcard__failure')
+        failure.setAttribute('aria-label', 'Goal recovery')
+        const copy = bfEl('div', 'goalcard__failure-copy')
+        copy.appendChild(bfEl('div', 'goalcard__failure-eyebrow', 'Recovery'))
+        copy.appendChild(bfEl('div', 'goalcard__failure-title', 'Stopped before delivery'))
+        copy.appendChild(bfEl('div', 'goalcard__failure-note', message))
+        failure.appendChild(copy)
         // Salvage last mile: when the run fell short but the engine saved its best
         // draft, that 8/10 work must be openable from the card, not just attached
         // to the package. An honest one-liner names the gap it missed.
@@ -47703,7 +49652,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const gap = String(m.goalGap || '').trim()
         const actions = bfEl('div', 'goalcard__terminal-actions')
         if (deliverableId) {
-          terminal.appendChild(bfEl('div', 'goalcard__salvage', gap ? `draft saved · missed: ${gap}` : 'draft saved'))
+          failure.appendChild(bfEl('div', 'goalcard__salvage', gap ? `Draft saved · missed: ${gap}` : 'Draft saved'))
           const openDraft = bfEl('button', 'goalcard__link goalcard__link--accent', 'open draft')
           openDraft.type = 'button'
           // rerouted (review 2026-07-07): the salvage draft opens in the
@@ -47735,7 +49684,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         ask.type = 'button'
         ask.addEventListener('click', () => promptScoutForWork('', `About the goal "${goalArtifactTitle(artifact)}": `))
         actions.append(retry, restart, ask)
-        terminal.appendChild(actions)
+        const activity = bfEl('div', 'goalcard__failure-activity')
+        activity.appendChild(bfEl('span', 'goalcard__failure-activity-label', 'Run activity'))
+        if (card.__disclosureBtn) {
+          card.__disclosureBtn.lastChild.textContent = card.classList.contains('is-working-open') ? ' hide activity' : ' view activity'
+          activity.appendChild(card.__disclosureBtn)
+        }
+        failure.appendChild(activity)
+        if (working) failure.appendChild(working)
+        const actionWrap = bfEl('div', 'goalcard__failure-actions')
+        actionWrap.appendChild(actions)
+        actionWrap.appendChild(bfEl('div', 'goalcard__failure-helper', 'Retry keeps completed stages and resumes at the blocker.'))
+        failure.appendChild(actionWrap)
+        terminal.appendChild(failure)
       }
 
       // the single 5-7 particle ember spark, once per completed goal (§4 item 1)
@@ -49507,6 +51468,137 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return scoutChatThreads[0]?.id || ''
 	      }
 
+	      const chatActiveWorkStatuses = new Set(['queued', 'running', 'approval_required', 'needs_input', 'parked'])
+
+	      function chatThreadActiveWork(thread) {
+	        const messages = Array.isArray(thread?.messages) ? thread.messages : []
+	        for (let index = messages.length - 1; index >= 0; index -= 1) {
+	          const message = messages[index]
+	          if (!message?.thread) continue
+	          const artifactId = String(message.thread.artifactId || '')
+	          const artifact = artifactEntries.find(entry => String(entry?.id || '') === artifactId) || scoutThreadFromChatMessage(message).artifact
+	          const status = String(message.thread.status || artifactStatusValue(artifact) || '').toLowerCase()
+	          if (!chatActiveWorkStatuses.has(status)) continue
+	          return {
+	            message,
+	            artifact,
+	            status,
+	            agentName: desktopWorkAgentName(message, artifact),
+	            startedAt: String(message.thread.startedAt || artifact?.metadata?.startedAt || message.createdAt || ''),
+	            note: String(artifact?.metadata?.progressNote || message.thread.progressNote || message.text || '').trim(),
+	          }
+	        }
+	        return null
+	      }
+
+	      function chatWorkElapsedLabel(value) {
+	        const startedAt = Date.parse(String(value || ''))
+	        if (!Number.isFinite(startedAt)) return 'live'
+	        const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
+	        if (seconds < 60) return `${seconds}s`
+	        const minutes = Math.floor(seconds / 60)
+	        if (minutes < 60) return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`
+	        return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`
+	      }
+
+	      function refreshChatWorkTimers() {
+	        document.querySelectorAll('[data-chat-work-started-at]').forEach(node => {
+	          node.textContent = chatWorkElapsedLabel(node.dataset.chatWorkStartedAt)
+	        })
+	      }
+
+	      function ensureChatWorkTimerTicker() {
+	        if (chatWorkTimerTicker) return
+	        chatWorkTimerTicker = window.setInterval(refreshChatWorkTimers, 1000)
+	      }
+
+	      function ensureChatChannelActivityPopover() {
+	        if (chatChannelActivityPopover?.isConnected) return chatChannelActivityPopover
+	        const popover = document.createElement('section')
+	        popover.className = 'chat-channel-activity-popover'
+	        popover.setAttribute('role', 'dialog')
+	        popover.setAttribute('aria-label', 'Channel activity')
+	        popover.hidden = true
+	        popover.addEventListener('mouseenter', () => window.clearTimeout(chatChannelActivityHideTimer))
+	        popover.addEventListener('mouseleave', scheduleHideChatChannelActivityPopover)
+	        document.body.appendChild(popover)
+	        chatChannelActivityPopover = popover
+	        return popover
+	      }
+
+	      function hideChatChannelActivityPopover() {
+	        window.clearTimeout(chatChannelActivityHideTimer)
+	        if (chatChannelActivityPopover) chatChannelActivityPopover.hidden = true
+	      }
+
+	      function scheduleHideChatChannelActivityPopover() {
+	        window.clearTimeout(chatChannelActivityHideTimer)
+	        chatChannelActivityHideTimer = window.setTimeout(hideChatChannelActivityPopover, 160)
+	      }
+
+	      function openThreadWorkFromList(thread, work, trigger) {
+	        hideChatChannelActivityPopover()
+	        selectScoutChatThread(thread.id)
+	        setMobileChatView('convo')
+	        if (!desktopChatLayoutQuery.matches) return
+	        window.requestAnimationFrame(() => openDesktopWorkContext(work.message, trigger))
+	      }
+
+	      function showChatChannelActivityPopover(trigger, thread, work) {
+	        if (!desktopChatLayoutQuery.matches || !trigger?.isConnected) return
+	        window.clearTimeout(chatChannelActivityHideTimer)
+	        const popover = ensureChatChannelActivityPopover()
+	        const phase = desktopWorkPhase(work.artifact, work.status)
+	        const eyebrow = bfEl('span', 'chat-channel-activity-popover__eyebrow', 'Channel activity')
+	        const agent = bfEl('div', 'chat-channel-activity-popover__agent')
+	        const avatar = bfEl('span', 'chat-channel-activity-popover__avatar', String(work.agentName || 'S').slice(0, 1).toUpperCase())
+	        const copy = bfEl('span', 'chat-channel-activity-popover__agent-copy')
+	        copy.append(
+	          bfEl('strong', 'chat-channel-activity-popover__name', work.agentName),
+	          bfEl('span', 'chat-channel-activity-popover__phase', phase.label)
+	        )
+	        const elapsed = bfEl('span', 'chat-channel-activity-popover__elapsed', chatWorkElapsedLabel(work.startedAt))
+	        elapsed.dataset.chatWorkStartedAt = work.startedAt
+	        agent.append(avatar, copy, elapsed)
+	        const note = bfEl('p', 'chat-channel-activity-popover__note', work.note || `${work.agentName} is working. The next update and finished deliverable will land in this conversation.`)
+	        const open = bfEl('button', 'chat-channel-activity-popover__open', 'View activity')
+	        open.type = 'button'
+	        open.addEventListener('click', event => {
+	          event.stopPropagation()
+	          openThreadWorkFromList(thread, work, trigger)
+	        })
+	        popover.replaceChildren(eyebrow, agent, note, open)
+	        popover.hidden = false
+	        const rect = trigger.getBoundingClientRect()
+	        const width = Math.min(286, window.innerWidth - 24)
+	        const left = Math.min(window.innerWidth - width - 12, rect.right + 10)
+	        const top = Math.max(12, Math.min(window.innerHeight - popover.offsetHeight - 12, rect.top - 12))
+	        popover.style.left = `${Math.max(12, left)}px`
+	        popover.style.top = `${top}px`
+	      }
+
+	      function chatThreadWorkTimer(thread, work) {
+	        ensureChatWorkTimerTicker()
+	        const timer = document.createElement('button')
+	        timer.type = 'button'
+	        timer.className = 'chat-thread-item__work-timer'
+	        timer.setAttribute('aria-label', `${work.agentName} is working in ${chatThreadDisplayTitle(thread)}. View activity.`)
+	        timer.title = `${work.agentName} · ${desktopWorkPhase(work.artifact, work.status).label}`
+	        const elapsed = bfEl('span', '', chatWorkElapsedLabel(work.startedAt))
+	        elapsed.dataset.chatWorkStartedAt = work.startedAt
+	        timer.appendChild(elapsed)
+	        timer.addEventListener('pointerdown', event => event.stopPropagation())
+	        timer.addEventListener('click', event => {
+	          event.stopPropagation()
+	          openThreadWorkFromList(thread, work, timer)
+	        })
+	        timer.addEventListener('mouseenter', () => showChatChannelActivityPopover(timer, thread, work))
+	        timer.addEventListener('mouseleave', scheduleHideChatChannelActivityPopover)
+	        timer.addEventListener('focus', () => showChatChannelActivityPopover(timer, thread, work))
+	        timer.addEventListener('blur', scheduleHideChatChannelActivityPopover)
+	        return timer
+	      }
+
 	      function chatThreadRowNode(thread, q) {
 	        const isChannel = chatThreadIsChannel(thread)
 	        const title = chatThreadDisplayTitle(thread)
@@ -49545,9 +51637,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const titleEl = document.createElement('span')
 	        titleEl.className = 'chat-thread-item__title'
 	        titleEl.textContent = title
-	        const time = document.createElement('span')
-	        time.className = 'chat-thread-item__time'
-	        time.textContent = chatThreadTimeLabel(thread.updatedAt || thread.createdAt)
+	        const activeWork = chatThreadActiveWork(thread)
+	        const time = activeWork ? chatThreadWorkTimer(thread, activeWork) : document.createElement('span')
+	        if (!activeWork) {
+	          time.className = 'chat-thread-item__time'
+	          time.textContent = chatThreadTimeLabel(thread.updatedAt || thread.createdAt)
+	        }
 	        if (!active && chatThreadHasUnread(thread)) {
 	          const unreadDot = document.createElement('span')
 	          unreadDot.className = 'chat-thread-item__unread-dot'
@@ -49588,6 +51683,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          return
 	        }
 	        const q = (chatThreadSearch?.value || '').trim().toLowerCase()
+	        hideChatChannelActivityPopover()
 	        // card 070: no scope toggle — both audiences render at once into their
 	        // own always-visible section (channels · whole office / private · you +
 	        // Scout). The per-row search filter (chat-thread-item--hidden) still
@@ -49638,7 +51734,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function selectScoutChatThread(id) {
-	        activeScoutThreadId = String(id || '')
+	        const nextThreadId = String(id || '')
+	        // A side reply is authority-bound to the thread that opened it.
+	        // Never leave that composer visible after navigation: its submit
+	        // handler intentionally posts against chatContextState.threadId.
+	        if (chatContextState && String(chatContextState.threadId || '') !== nextThreadId) {
+	          closeDesktopChatContext({ restoreFocus: false })
+	        }
+	        activeScoutThreadId = nextThreadId
 	        // opening a thread cancels an in-flight rename (design §7.6)
 	        chatRenameActive = false
 	        // Desktop captures the prior marker during render so it can place an
@@ -49660,6 +51763,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        const thread = selectedScoutChatThread()
 	        const isChannel = chatThreadIsChannel(thread)
+	        const directAgent = scoutChatDirectAgentName(thread)
+	        const privateTarget = directAgent || 'Scout'
 	        chatConvoTitle.textContent = chatThreadDisplayTitle(thread)
 	        chatConvoTitle.hidden = chatRenameActive
 	        if (chatConvoRenameInput) {
@@ -49673,12 +51778,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (chatConvoMeta) {
 	          chatConvoMeta.textContent = isChannel
 	            ? 'public · everyone in the office'
-	            : 'private · only you and Scout'
+	            : `private · only you and ${privateTarget}`
 	        }
 	        if (chatConvoContext) {
 	          const isTeam = Boolean(thread?.table)
 	          const scope = !isChannel ? 'private' : isTeam ? 'pinned · #team' : 'project channel'
-	          const policy = !isChannel ? 'only you + Scout' : isTeam ? 'whole office · shared memory' : 'members · project memory'
+	          const policy = !isChannel ? `only you + ${privateTarget}` : isTeam ? 'whole office · shared memory' : 'members · project memory'
 	          chatConvoScope.textContent = scope
 	          chatConvoPolicy.textContent = policy
 	          chatConvoContext.setAttribute('aria-label', `${scope}; ${policy}`)
@@ -49686,7 +51791,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (scoutChatThread) {
 	          scoutChatThread.setAttribute('aria-label', isChannel
 	            ? `Channel chat ${chatThreadDisplayTitle(thread)}`
-	            : 'Private chat with Scout')
+	            : `Private chat with ${privateTarget}`)
 	        }
 	        if (scoutChatBrainNote) {
 	          // "private" means hidden from teammates, not from the system — the
@@ -49949,6 +52054,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          if (!scoutChatThread.querySelector('.goalcard')) {
 	            ensureScoutChatEmptyState()
 	          }
+	          syncDesktopActiveWorkIndicator()
+	          syncDesktopOpenChatContext()
 	          updateChatThreadItem(chatThreadDisplayPreview(thread), thread?.updatedAt || '')
 	          return
 	        }
@@ -49979,6 +52086,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // return) when no card carries a thread-artifact id, so an empty
 	        // thread is safe.
 	        syncScoutChatResearchCards()
+	        syncDesktopActiveWorkIndicator()
+	        // The right rail is a projection of the durable message ref, not a
+	        // snapshot captured when it opened. Terminal socket/poll updates must
+	        // replace running state immediately without closing the conversation.
+	        syncDesktopOpenChatContext()
 	        updateChatThreadItem(thread.preview || messages[messages.length - 1]?.text || 'chat thread', thread.updatedAt || messages[messages.length - 1]?.createdAt)
 	      }
 
@@ -50146,6 +52258,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const authorEmail = String(message?.authorEmail || '').toLowerCase()
 	        const authorName = String(message?.authorName || '').trim()
 	        const selfEmail = String(authedUser?.email || '').toLowerCase()
+	        if (kind === 'scout' && authorName) {
+	          authorLabel = authorName
+	        }
 	        if (kind === 'user' && authorEmail && authorEmail !== selfEmail) {
 	          kind = 'peer'
 	          // the design shows the author name as-is ("Tim", not "tim");
@@ -50190,6 +52305,381 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          }
 	        }
 	        return node
+	      }
+
+	      function clampDesktopChatWidth(value, min, max) {
+	        return Math.max(min, Math.min(max, Number(value) || min))
+	      }
+
+	      function initializeDesktopChatWorkspace() {
+	        const storage = window.localStorage
+	        const bindings = [
+	          { handle: chatThreadsResize, property: '--chat-thread-rail-width', key: 'stride.chat.threads-width.v1', min: 240, max: 420, start: 308, direction: 1 },
+	          { handle: chatContextResize, property: '--chat-context-rail-width', key: 'stride.chat.context-width.v1', min: 360, max: 640, start: 440, direction: -1 }
+	        ]
+	        bindings.forEach(binding => {
+	          if (!binding.handle || !chatToolSection) return
+	          let stored = binding.start
+	          try { stored = Number(storage?.getItem(binding.key)) || binding.start } catch {}
+	          const apply = value => {
+	            const responsiveMax = binding.property === '--chat-thread-rail-width' && window.innerWidth < 1280
+	              ? 320
+	              : binding.max
+	            const width = clampDesktopChatWidth(value, binding.min, responsiveMax)
+	            chatToolSection.style.setProperty(binding.property, `${width}px`)
+	            binding.handle.setAttribute('aria-valuenow', String(Math.round(width)))
+	            binding.handle.setAttribute('aria-valuemax', String(responsiveMax))
+	            return width
+	          }
+	          apply(stored)
+	          let frame = 0
+	          let originX = 0
+	          let originWidth = stored
+	          binding.handle.addEventListener('pointerdown', event => {
+	            if (event.button !== 0) return
+	            originX = event.clientX
+	            originWidth = Number(binding.handle.getAttribute('aria-valuenow')) || binding.start
+	            binding.handle.classList.add('is-dragging')
+	            binding.handle.setPointerCapture?.(event.pointerId)
+	          })
+	          binding.handle.addEventListener('pointermove', event => {
+	            if (!binding.handle.classList.contains('is-dragging')) return
+	            const next = originWidth + ((event.clientX - originX) * binding.direction)
+	            window.cancelAnimationFrame(frame)
+	            frame = window.requestAnimationFrame(() => apply(next))
+	          })
+	          const finish = event => {
+	            if (!binding.handle.classList.contains('is-dragging')) return
+	            binding.handle.classList.remove('is-dragging')
+	            binding.handle.releasePointerCapture?.(event.pointerId)
+	            try { storage?.setItem(binding.key, binding.handle.getAttribute('aria-valuenow')) } catch {}
+	          }
+	          binding.handle.addEventListener('pointerup', finish)
+	          binding.handle.addEventListener('pointercancel', finish)
+	          binding.handle.addEventListener('dblclick', () => {
+	            apply(binding.start)
+	            try { storage?.setItem(binding.key, String(binding.start)) } catch {}
+	          })
+	          binding.handle.addEventListener('keydown', event => {
+	            const current = Number(binding.handle.getAttribute('aria-valuenow')) || binding.start
+	            const step = event.shiftKey ? 32 : 12
+	            let next = current
+	            if (event.key === 'ArrowLeft') next = current - (step * binding.direction)
+	            else if (event.key === 'ArrowRight') next = current + (step * binding.direction)
+	            else if (event.key === 'Home') next = binding.min
+	            else if (event.key === 'End') next = binding.max
+	            else return
+	            event.preventDefault()
+	            apply(next)
+	            try { storage?.setItem(binding.key, binding.handle.getAttribute('aria-valuenow')) } catch {}
+	          })
+	          window.addEventListener('resize', () => {
+	            apply(Number(binding.handle.getAttribute('aria-valuenow')) || binding.start)
+	          }, { passive: true })
+	        })
+	      }
+
+	      function desktopChatAuthorLabel(message) {
+	        const role = String(message?.role || '').toLowerCase()
+	        if (role === 'assistant' || role === 'scout') return String(message?.authorName || 'Scout')
+	        if (String(message?.authorEmail || '').toLowerCase() === String(authedUser?.email || '').toLowerCase()) return 'You'
+	        return String(message?.authorName || 'Teammate')
+	      }
+
+	      function desktopContextMessageCard(message, options = {}) {
+	        const card = document.createElement('article')
+	        card.className = 'chat-context-card'
+	        if (options.root) card.dataset.root = 'true'
+	        card.append(
+	          bfEl('span', 'chat-context-card__author', desktopChatAuthorLabel(message)),
+	          bfEl('p', 'chat-context-card__body', String(message?.text || message?.content || attachedFilesPreview(message?.files) || 'Attachment')),
+	          bfEl('span', 'chat-context-card__meta', `${scoutChatTimeLabel(message?.createdAt)}${message?.editedAt ? ' · edited' : ''}`)
+	        )
+	        return card
+	      }
+
+	      function closeDesktopChatContext(options = {}) {
+	        chatContextGeneration += 1
+	        chatContextState = null
+	        if (chatContextRail) chatContextRail.hidden = true
+	        if (chatContextResize) chatContextResize.hidden = true
+	        if (chatContextReplyForm) chatContextReplyForm.hidden = true
+	        if (chatContextBody) chatContextBody.replaceChildren()
+	        if (options.restoreFocus !== false) chatContextReturnFocus?.focus?.({ preventScroll: true })
+	        chatContextReturnFocus = null
+	      }
+
+	      function showDesktopChatContext({ mode, title, meta, trigger, reply = false }) {
+	        if (!desktopChatLayoutQuery.matches || !chatContextRail) return false
+	        chatContextReturnFocus = trigger || document.activeElement
+	        chatContextKicker.textContent = mode
+	        chatContextTitle.textContent = title
+	        chatContextMeta.textContent = meta || ''
+	        chatContextRail.hidden = false
+	        chatContextResize.hidden = false
+	        chatContextReplyForm.hidden = !reply
+	        if (reply) {
+	          chatContextReplyInput.value = ''
+	          chatContextReplyInput.style.height = 'auto'
+	          chatContextReplySend.disabled = true
+	        }
+	        window.requestAnimationFrame(() => chatContextClose?.focus({ preventScroll: true }))
+	        return true
+	      }
+
+	      function openDesktopMessageContext(message, trigger) {
+	        const thread = selectedScoutChatThread()
+	        const messages = Array.isArray(thread?.messages) ? thread.messages : []
+	        let root = message
+	        if (message?.replyTo?.messageId) {
+	          root = messages.find(candidate => String(candidate?.id || '') === String(message.replyTo.messageId)) || message
+	        }
+	        if (!root?.id || !showDesktopChatContext({
+	          mode: 'thread',
+	          title: String(thread?.title || 'Conversation'),
+	          meta: 'Reply without losing your place',
+	          trigger,
+	          reply: true
+	        })) return
+	        chatContextState = { mode: 'thread', threadId: String(thread?.id || ''), rootMessageId: String(root.id) }
+	        const replies = messages.filter(candidate => String(candidate?.replyTo?.messageId || '') === String(root.id))
+	        const fragment = document.createDocumentFragment()
+	        fragment.appendChild(desktopContextMessageCard(root, { root: true }))
+	        if (!replies.length) {
+	          fragment.appendChild(bfEl('p', 'chat-context-empty', 'No replies yet. Start the side conversation here.'))
+	        } else {
+	          replies.forEach(reply => fragment.appendChild(desktopContextMessageCard(reply)))
+	        }
+	        chatContextBody.replaceChildren(fragment)
+	        chatContextMeta.textContent = `${replies.length} ${replies.length === 1 ? 'reply' : 'replies'} · reply without losing your place`
+	      }
+
+	      async function submitDesktopThreadReply(event) {
+	        event.preventDefault()
+	        const state = chatContextState
+	        const text = String(chatContextReplyInput?.value || '').trim()
+	        if (!text || state?.mode !== 'thread' || !state.threadId || !state.rootMessageId) return
+	        chatContextReplySend.disabled = true
+	        try {
+	          const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(state.threadId)}/messages`, {
+	            method: 'POST',
+	            headers: { 'Content-Type': 'application/json' },
+	            body: JSON.stringify({ text, replyToMessageId: state.rootMessageId })
+	          })
+	          const payload = await response.json().catch(() => ({}))
+	          if (!response.ok || !payload?.thread) throw new Error(payload?.error || 'reply could not be sent')
+	          upsertScoutChatThread(payload.thread, { select: false })
+	          if (activeScoutThreadId === state.threadId) {
+	            const root = payload.thread.messages?.find(candidate => String(candidate?.id || '') === state.rootMessageId)
+	            renderActiveScoutThread()
+	            if (root) openDesktopMessageContext(root, chatContextReturnFocus)
+	          }
+	        } catch (error) {
+	          showToast({ text: error?.message || 'reply could not be sent', kind: 'error' })
+	          chatContextReplySend.disabled = false
+	        }
+	      }
+
+	      function desktopWorkPhase(artifact, status) {
+	        const current = String(artifact?.metadata?.currentStage || '').toLowerCase()
+	        const value = String(status || '').toLowerCase()
+	        if (['complete', 'published'].includes(value)) return { label: 'Delivered', index: 4 }
+	        if (['approval_required', 'needs_input', 'parked'].includes(value)) return { label: 'Needs input', index: 3 }
+	        if (['error', 'failed', 'rejected'].includes(value)) return { label: 'Needs attention', index: 3 }
+	        if (/deliver|verify_goal_completed/.test(current)) return { label: 'Delivering', index: 4 }
+	        if (/gate|review|verif/.test(current)) return { label: 'Verifying', index: 3 }
+	        if (/research|source|evidence/.test(current)) return { label: 'Gathering evidence', index: 1 }
+	        if (/build|draft|synth|execute|codex/.test(current)) return { label: 'Building', index: 2 }
+	        if (/assign|decompose|identify|goal|plan/.test(current)) return { label: 'Understanding', index: 0 }
+	        return value === 'queued' ? { label: 'Queued', index: 0 } : { label: 'Working', index: 1 }
+	      }
+
+	      function desktopWorkAgentName(message, artifact) {
+	        const meta = artifact?.metadata || {}
+	        return String(message?.thread?.agentName || meta.agentName || meta.agentDisplayName || meta.workerName || 'Scout').trim() || 'Scout'
+	      }
+
+	      function renderDesktopWorkContext(message, artifact) {
+	        if (chatContextState?.mode !== 'work' || String(chatContextState.messageId) !== String(message?.id || '')) return
+	        const ref = message?.thread || {}
+	        const status = String(ref.status || artifactStatusValue(artifact) || 'running').toLowerCase()
+	        const phase = desktopWorkPhase(artifact, status)
+	        const agentName = desktopWorkAgentName(message, artifact)
+	        const pctRaw = Number(artifact?.metadata?.progressPercent)
+	        const pct = Number.isFinite(pctRaw) ? clampDesktopChatWidth(pctRaw, 0, 100) : ['complete', 'published'].includes(status) ? 100 : status === 'queued' ? 12 : 35
+	        const terminalError = ['error', 'failed', 'rejected'].includes(status)
+	        const terminalComplete = ['complete', 'published'].includes(status)
+	        const note = terminalError
+	          ? `${agentName}'s run stopped before delivery. Inspect the work receipt, then retry or follow up from this conversation.`
+	          : terminalComplete
+	            ? `${agentName} delivered this work and saved it durably in the conversation.`
+	            : String(artifact?.metadata?.progressNote || '').trim() || `${agentName} is moving this work toward a durable deliverable.`
+	        const sources = artifact ? researchArtifactSources(artifact) : []
+	        chatContextKicker.textContent = `${agentName} · work`
+	        chatContextTitle.textContent = String(ref.query || artifact?.metadata?.threadQuery || message?.text || 'Research workstream')
+	        chatContextMeta.textContent = `${phase.label} · ${Math.round(pct)}%${sources.length ? ` · ${sources.length} source${sources.length === 1 ? '' : 's'}` : ''}`
+	        const summary = document.createElement('section')
+	        summary.className = 'chat-context-event'
+	        summary.append(
+	          bfEl('strong', 'chat-context-event__phase', `${agentName} · ${phase.label}`),
+	          bfEl('p', 'chat-context-event__note', note)
+	        )
+	        const progress = bfEl('div', 'chat-context-progress')
+	        const fill = bfEl('span', 'chat-context-progress__fill')
+	        fill.style.transform = `scaleX(${Math.max(0, Math.min(100, pct)) / 100})`
+	        progress.appendChild(fill)
+	        summary.appendChild(progress)
+	        summary.appendChild(bfEl('span', 'chat-context-event__meta', `${status.replaceAll('_', ' ')} · ${Math.round(pct)}%`))
+	        const phases = bfEl('div', 'chat-context-phases')
+	        ;['Understanding', 'Gathering evidence', 'Building', 'Verifying', 'Delivering'].forEach((label, index) => {
+	          const row = bfEl('span', 'chat-context-phase', label)
+	          if (index < phase.index || ['complete', 'published'].includes(status)) row.classList.add('is-done')
+	          else if (index === phase.index) row.classList.add('is-active')
+	          phases.appendChild(row)
+	        })
+	        summary.appendChild(phases)
+	        const actions = bfEl('div', 'chat-context-actions')
+	        if (artifact?.id && artifact?.text) {
+	          const view = bfEl('button', 'chat-context-action', ['complete', 'published'].includes(status) ? 'Open deliverable' : 'Inspect work')
+	          view.type = 'button'
+	          view.addEventListener('click', () => openArtifactStage(artifact.id, artifactDisplayTitle(artifact)))
+	          actions.appendChild(view)
+	        }
+	        if (['complete', 'published', 'error', 'failed', 'rejected'].includes(status)) {
+	          const follow = bfEl('button', 'chat-context-action', 'Follow up')
+	          follow.type = 'button'
+	          follow.addEventListener('click', () => {
+	            scoutFollowUpTarget = {
+	              artifactId: String(ref.artifactId || artifact?.id || ''),
+	              mode: String(ref.mode || artifact?.metadata?.mode || 'research'),
+	              query: String(ref.query || artifact?.metadata?.threadQuery || ''),
+	              version: Number(artifact?.metadata?.threadVersion || 1) || 1,
+	              threadId: activeScoutThreadId || ''
+	            }
+	            renderScoutFollowUpTarget()
+	            closeDesktopChatContext({ restoreFocus: false })
+	            scoutChatInput?.focus()
+	          })
+	          actions.appendChild(follow)
+	        }
+	        if (actions.childNodes.length) summary.appendChild(actions)
+	        const worklog = document.createElement('section')
+	        worklog.className = 'chat-context-worklog'
+	        worklog.appendChild(bfEl('h3', 'chat-context-section-title', 'Work log'))
+	        const startedAt = String(artifact?.metadata?.startedAt || ref.startedAt || message?.createdAt || '')
+	        const completedAt = String(artifact?.metadata?.completedAt || '')
+	        const currentStage = String(artifact?.metadata?.currentStage || ref.currentStage || 'not reported').replaceAll('_', ' ')
+	        const eventRows = [
+	          { title: 'Request accepted', note: String(ref.query || artifact?.metadata?.threadQuery || message?.text || 'Work requested'), meta: startedAt ? `${scoutChatTimeLabel(startedAt)} · origin linked` : 'origin linked', state: 'complete' },
+	          { title: phase.label, note, meta: `${currentStage} · ${Math.round(pct)}%`, state: terminalComplete ? 'complete' : 'current' },
+	        ]
+	        if (sources.length) {
+	          eventRows.push({ title: 'Source trail', note: `${sources.length} source${sources.length === 1 ? '' : 's'} retained with the deliverable.`, meta: 'open below · exact URLs', state: terminalComplete ? 'complete' : '' })
+	        }
+	        if (artifact?.metadata?.reviewGate) {
+	          eventRows.push({ title: 'Review gate', note: `Gate ${String(artifact.metadata.reviewGate).replaceAll('_', ' ')}. Confidence and remaining gaps stay in the report.`, meta: String(artifact?.metadata?.goalStatus || 'reviewed').replaceAll('_', ' '), state: terminalComplete ? 'complete' : '' })
+	        }
+	        if (terminalComplete) {
+	          eventRows.push({ title: 'Delivered here', note: `${agentName} saved the completed work durably in this conversation.`, meta: completedAt ? scoutChatTimeLabel(completedAt) : 'delivery receipt retained', state: 'complete' })
+	        }
+	        eventRows.forEach(event => {
+	          const row = bfEl('div', `chat-context-log-entry${event.state ? ` is-${event.state}` : ''}`)
+	          const dot = bfEl('span', 'chat-context-log-entry__dot')
+	          const copy = bfEl('span', 'chat-context-log-entry__copy')
+	          copy.append(
+	            bfEl('strong', 'chat-context-log-entry__title', event.title),
+	            bfEl('p', 'chat-context-log-entry__note', event.note),
+	            bfEl('span', 'chat-context-log-entry__meta', event.meta)
+	          )
+	          row.append(dot, copy)
+	          worklog.appendChild(row)
+	        })
+	        if (sources.length) {
+	          const sourceList = bfEl('div', 'chat-context-source-list')
+	          sources.slice(0, 8).forEach(source => {
+	            const link = document.createElement('a')
+	            link.className = 'chat-context-source'
+	            link.href = source.url
+	            link.target = '_blank'
+	            link.rel = 'noopener noreferrer'
+	            link.append(bfEl('span', 'chat-context-source__name', source.name), bfEl('span', 'chat-context-source__open', 'open ↗'))
+	            sourceList.appendChild(link)
+	          })
+	          worklog.appendChild(sourceList)
+	        }
+	        const technical = document.createElement('details')
+	        technical.className = 'chat-context-card'
+	        const technicalTitle = document.createElement('summary')
+	        technicalTitle.className = 'chat-context-card__author'
+	        technicalTitle.textContent = 'Technical details'
+	        technical.append(technicalTitle, bfEl('p', 'chat-context-card__body', `run ${ref.id || 'pending'} · artifact ${ref.artifactId || artifact?.id || 'pending'} · stage ${artifact?.metadata?.currentStage || 'not reported'} · worker ${artifact?.metadata?.worker || 'provider managed'}`))
+	        chatContextBody.replaceChildren(summary, worklog, technical)
+	      }
+
+	      function openDesktopWorkContext(message, trigger) {
+	        if (!message?.thread || !showDesktopChatContext({
+	          mode: 'work',
+	          title: String(message.thread.query || 'Workstream'),
+	          meta: 'Live, durable activity',
+	          trigger,
+	          reply: false
+	        })) return
+	        const generation = ++chatContextGeneration
+	        chatContextState = { mode: 'work', messageId: String(message.id || ''), threadId: String(activeScoutThreadId || '') }
+	        const artifactId = String(message.thread.artifactId || '')
+	        const artifact = artifactEntries.find(candidate => String(candidate?.id || '') === artifactId) || scoutThreadFromChatMessage(message).artifact
+	        renderDesktopWorkContext(message, artifact)
+	        if (!artifactId || (artifact?.text && artifact?.metadata?.currentStage)) return
+	        fetch(`/artifacts?id=${encodeURIComponent(artifactId)}`, { cache: 'no-store' })
+	          .then(response => response.ok ? response.json() : Promise.reject(new Error('work details unavailable')))
+	          .then(payload => {
+	            if (generation !== chatContextGeneration) return
+	            const entry = (payload?.artifacts || []).find(candidate => String(candidate?.id || '') === artifactId)
+	            if (entry) {
+	              addArtifactEntry(entry, { select: false })
+	              renderDesktopWorkContext(message, entry)
+	            }
+	          })
+	          .catch(() => {})
+	      }
+
+	      function syncDesktopOpenChatContext() {
+	        if (!chatContextState || String(chatContextState.threadId || '') !== String(activeScoutThreadId || '')) return
+	        if (chatContextState.mode !== 'work') return
+	        const message = selectedScoutChatThread()?.messages?.find(candidate => String(candidate?.id || '') === String(chatContextState.messageId || ''))
+	        if (!message?.thread) {
+	          closeDesktopChatContext({ restoreFocus: false })
+	          return
+	        }
+	        const artifactId = String(message.thread.artifactId || '')
+	        const artifact = artifactEntries.find(candidate => String(candidate?.id || '') === artifactId) || scoutThreadFromChatMessage(message).artifact
+	        renderDesktopWorkContext(message, artifact)
+	      }
+
+	      function syncDesktopActiveWorkIndicator() {
+	        if (!chatWorkIndicator || !desktopChatLayoutQuery.matches) return
+	        const messages = Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []
+	        const message = messages.slice().reverse().find(candidate => {
+	          if (String(candidate?.kind || '') !== 'thread' || !candidate?.thread) return false
+	          const artifact = artifactEntries.find(entry => String(entry?.id || '') === String(candidate.thread.artifactId || ''))
+	          const status = String(candidate.thread.status || artifactStatusValue(artifact) || '').toLowerCase()
+	          return ['queued', 'running', 'approval_required', 'needs_input', 'parked'].includes(status)
+	        })
+	        if (!message) {
+	          chatWorkIndicator.hidden = true
+	          delete chatWorkIndicator.dataset.messageId
+	          return
+	        }
+	        const artifact = artifactEntries.find(entry => String(entry?.id || '') === String(message.thread.artifactId || ''))
+	        const status = String(message.thread.status || artifactStatusValue(artifact) || 'running')
+	        const phase = desktopWorkPhase(artifact, status)
+	        const agent = desktopWorkAgentName(message, artifact)
+	        const pct = Number(artifact?.metadata?.progressPercent)
+	        const update = String(artifact?.metadata?.progressNote || message.thread.progressNote || '').trim()
+	        const event = update ? compactArtifactPreview(update) : phase.label
+	        chatWorkIndicatorText.textContent = `${agent} · ${event}${Number.isFinite(pct) ? ` · ${Math.round(pct)}%` : ''}`
+	        chatWorkIndicator.dataset.messageId = String(message.id || '')
+	        chatWorkIndicator.hidden = false
 	      }
 
 	      function decorateDesktopChatMessage(node, message, kind, authorLabel) {
@@ -50272,16 +52762,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          actions.setAttribute('aria-label', 'Message actions')
 	          const replyButton = bfEl('button', '', 'reply')
 	          replyButton.type = 'button'
-	          replyButton.addEventListener('click', () => {
-	            scoutChatReplyTarget = {
-	              messageId: String(message.id),
-	              threadId: String(activeScoutThreadId || ''),
-	              author: authorLabel || message.authorName || (kind === 'user' ? 'you' : 'Scout'),
-	              text: String(message.text || '')
-	            }
-	            renderScoutFollowUpTarget()
-	            scoutChatInput?.focus()
-	          })
+	          replyButton.addEventListener('click', () => openDesktopMessageContext(message, replyButton))
 	          actions.appendChild(replyButton)
 	          ;['👍', '❤️', '🔥'].forEach(emoji => {
 	            const mine = reactions.some(reaction => String(reaction?.emoji || '') === emoji && String(reaction?.actorEmail || '').toLowerCase() === String(authedUser?.email || '').toLowerCase())
@@ -50343,6 +52824,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!url || !stack) {
 	          return
 	        }
+	        stack.closest('.scout-chat-msg')?.classList.add('scout-chat-msg--media')
 	        desktopChatPreviewCache = desktopChatPreviewCache || new Map()
 	        // seamless mode (mobile's LinkPreviewCard): when the message IS the
 	        // link, the card replaces the bubble instead of following it —
@@ -50390,17 +52872,66 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const safeURL = /^https?:\/\//i.test(String(preview?.url || '')) ? String(preview.url) : fallbackURL
 	        let domain = ''
 	        try { domain = new URL(safeURL).hostname.replace(/^www\./, '') } catch { domain = 'link' }
+	        const previewKind = String(preview?.kind || 'link').toLowerCase()
+	        const isTikTok = previewKind === 'tiktok_video'
+	        const isYouTube = previewKind === 'youtube_video'
+	        const isXPost = previewKind === 'x_post'
+	        const isInstagram = previewKind.startsWith('instagram_')
+	        const isInstagramVideo = previewKind === 'instagram_reel' || previewKind === 'instagram_video'
+	        const imageURL = String(preview?.imageUrl || '')
 	        card.classList.remove('is-loading', 'is-degraded', 'is-text-only')
+	        card.dataset.kind = previewKind
 	        card.href = safeURL
 	        card.setAttribute('aria-label', `Open ${preview?.title || domain} in a new tab`)
+	        if (isXPost) {
+	          const author = String(preview?.authorName || preview?.title || 'Post on X')
+	          const handle = String(preview?.authorHandle || '').replace(/^@/, '')
+	          const postCopy = bfEl('span', 'desktop-chat-link-preview__copy')
+	          const postHeader = bfEl('span', 'desktop-chat-link-preview__post-header')
+	          const avatarFallback = bfEl('span', 'desktop-chat-link-preview__post-avatar-fallback', author.trim().slice(0, 1).toUpperCase() || 'X')
+	          if (imageURL.startsWith('/assistant/link-preview/image?')) {
+	            const avatar = document.createElement('img')
+	            avatar.className = 'desktop-chat-link-preview__media desktop-chat-link-preview__post-avatar'
+	            avatar.src = imageURL
+	            avatar.alt = ''
+	            avatar.loading = 'lazy'
+	            avatar.decoding = 'async'
+	            avatar.addEventListener('error', () => avatar.replaceWith(avatarFallback))
+	            postHeader.appendChild(avatar)
+	          } else {
+	            postHeader.appendChild(avatarFallback)
+	          }
+	          const authorCopy = bfEl('span', 'desktop-chat-link-preview__post-author')
+	          authorCopy.append(bfEl('span', 'desktop-chat-link-preview__post-name', author))
+	          if (handle) authorCopy.append(bfEl('span', 'desktop-chat-link-preview__post-handle', `@${handle}`))
+	          postHeader.append(authorCopy, bfEl('span', 'desktop-chat-link-preview__post-mark', '𝕏'))
+	          const postText = bfEl('span', 'desktop-chat-link-preview__post-text', preview?.description || 'Open the original post on X')
+	          const postFooter = bfEl('span', 'desktop-chat-link-preview__post-footer')
+	          postFooter.append(
+	            bfEl('span', '', preview?.publishedAt ? `${preview.publishedAt} · x.com` : 'x.com'),
+	            bfEl('span', '', 'open ↗')
+	          )
+	          postCopy.append(postHeader, postText, postFooter)
+	          card.replaceChildren(postCopy)
+	          return
+	        }
+	        const eyebrow = isTikTok ? 'TikTok · video'
+	          : isYouTube ? 'YouTube · video'
+	            : isInstagram ? `Instagram · ${previewKind.replace('instagram_', '')}`
+	              : `${preview?.siteName || domain} · ${preview?.kind || 'link'}`
 	        const copy = bfEl('span', 'desktop-chat-link-preview__copy')
 	        copy.append(
-	          bfEl('span', 'desktop-chat-link-preview__eyebrow', `${preview?.siteName || domain} · ${preview?.kind || 'link'}`),
+	          bfEl('span', 'desktop-chat-link-preview__eyebrow', eyebrow),
 	          bfEl('span', 'desktop-chat-link-preview__title', preview?.title || domain),
-	          bfEl('span', 'desktop-chat-link-preview__description', preview?.description || 'Open the authorized source'),
+	          bfEl('span', 'desktop-chat-link-preview__description', isTikTok ? 'Open the original video on TikTok' : (preview?.description || 'Open the authorized source')),
 	          bfEl('span', 'desktop-chat-link-preview__domain', domain)
 	        )
-	        const imageURL = String(preview?.imageUrl || '')
+	        if (isTikTok && (preview?.authorName || preview?.authorHandle)) {
+	          const creator = preview?.authorName && preview?.authorHandle
+	            ? `${preview.authorName} · @${preview.authorHandle}`
+	            : String(preview?.authorName || `@${preview?.authorHandle}`)
+	          copy.insertBefore(bfEl('span', 'desktop-chat-link-preview__creator', creator), copy.querySelector('.desktop-chat-link-preview__domain'))
+	        }
 	        if (imageURL.startsWith('/assistant/link-preview/image?')) {
 	          const image = document.createElement('img')
 	          image.className = 'desktop-chat-link-preview__media'
@@ -50409,9 +52940,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          image.loading = 'lazy'
 	          image.decoding = 'async'
 	          image.addEventListener('error', () => image.replaceWith(bfEl('span', 'desktop-chat-link-preview__skeleton')))
-	          card.replaceChildren(copy, image)
+	          if (isTikTok || isYouTube || isInstagram) {
+	            const visual = bfEl('span', 'desktop-chat-link-preview__visual')
+	            const brand = isTikTok ? 'TikTok' : isYouTube ? 'YouTube' : 'Instagram'
+	            visual.append(image, bfEl('span', 'desktop-chat-link-preview__brand', brand))
+	            if (isTikTok || isYouTube || isInstagramVideo) {
+	              visual.appendChild(bfEl('span', 'desktop-chat-link-preview__play', '▶'))
+	            }
+	            card.replaceChildren(copy, visual)
+	          } else {
+	            card.replaceChildren(copy, image)
+	          }
 	        } else {
 	          card.classList.add('is-text-only')
+	          if (isTikTok || isYouTube || isInstagram) {
+	            const providerLabel = isTikTok ? 'TikTok · video' : isYouTube ? 'YouTube · video' : eyebrow
+	            copy.insertBefore(bfEl('span', 'desktop-chat-link-preview__provider-fallback', providerLabel), copy.firstChild)
+	          }
 	          card.replaceChildren(copy)
 	        }
 	      }
@@ -50438,7 +52983,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (/^parked — /.test(replyText)) {
 	          return bfEl('p', 'scout-chat-system scout-chat-note--park', scoutVoice(replyText))
 	        }
-	        return scoutChatMessageNode('scout', scoutVoice(replyText), message?.createdAt || new Date().toISOString())
+	        return scoutChatMessageNode('scout', scoutVoice(replyText), message?.createdAt || new Date().toISOString(), [], message?.authorName || 'scout')
 	      }
 
 	      function scoutThreadFromChatMessage(message) {
@@ -50453,7 +52998,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            threadId: ref.id || '',
 	            threadQuery: ref.query || message.text || '',
 	            threadStatus: ref.status || 'running',
-	            status: ref.status || 'running'
+	            status: ref.status || 'running',
+	            agentId: ref.agentId || '',
+	            agentName: ref.agentName || '',
+	            delegatedBy: ref.delegatedBy || '',
+	            currentStage: ref.currentStage || '',
+	            progressPercent: String(ref.progressPercent || ''),
+	            progressNote: ref.progressNote || '',
+	            startedAt: ref.startedAt || ''
 	          }
 	        } : null)
 	        return {
@@ -51371,6 +53923,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function scoutChatMessageNode(kind, text, ts, files, authorLabel, viaScout = false) {
         const item = document.createElement('article')
         item.className = `scout-chat-msg scout-chat-msg--${kind}`
+		if (Array.isArray(files) && files.length) {
+		  item.classList.add('scout-chat-msg--media')
+		}
         // sheet §3 letters: past ~400 chars the bubble becomes a letter card
         // on the feed measure with an identity header + clamp
         const longform = String(text || '').length > 400
@@ -51408,7 +53963,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           badge.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2c.8 4 7 6.5 7 13a7 7 0 1 1-14 0C5 8.5 11.2 6 12 2Zm0 10c.5 2.4 3.5 3.3 3.5 6.2a3.5 3.5 0 1 1-7 0C8.5 15.3 11.5 14.4 12 12Z"></path></svg>'
           const idname = document.createElement('span')
           idname.className = 'scout-chat-msg__idname'
-          idname.textContent = 'scout'
+          // Ordinary assistant turns are always visibly Scout; only a
+          // server-stamped authored work reply supplies a coworker label.
+          const senderName = kind === 'scout'
+            ? (String(authorLabel || '').trim() || 'scout')
+            : label
+          idname.textContent = senderName
           const idtime = document.createElement('span')
           idtime.className = 'scout-chat-msg__idtime'
           idtime.textContent = scoutChatTimeLabel(ts)
@@ -51737,6 +54297,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
               <span class="scout-chat-research__pct" data-research-pct></span>
             </div>
             <div class="scout-chat-research__actions">
+              <button class="scout-chat-research__action" type="button" data-research-activity>view activity</button>
               <button class="scout-chat-research__artifact scout-chat-research__action" type="button" data-research-artifact hidden>view report</button>
               <button class="scout-chat-research__action" type="button" data-research-download hidden>download .md</button>
               <button class="scout-chat-research__action" type="button" data-research-copy hidden>copy md</button>
@@ -51747,6 +54308,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           <div class="scout-chat-research__report artifact-read" data-research-report hidden></div>`
 
         card.querySelector('.scout-chat-research__title').textContent = title
+	        card.querySelector('[data-research-activity]')?.addEventListener('click', event => {
+	          const message = selectedScoutChatThread()?.messages?.find(candidate => {
+	            const ref = candidate?.thread || {}
+	            return String(candidate?.kind || '') === 'thread' && (
+	              (thread?.id && String(ref.id || '') === String(thread.id)) ||
+	              (artifactId && String(ref.artifactId || '') === artifactId)
+	            )
+	          })
+	          if (message) openDesktopWorkContext(message, event.currentTarget)
+	        })
         const artifactButton = card.querySelector('[data-research-artifact]')
         // rerouted (founder, live test 2026-07-07): the report opens in the
         // right-side artifact stage over the thread — the designed reader with
@@ -51807,7 +54378,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const done = value === 'complete' || value === 'published'
         const metadataPct = Number(artifact?.metadata?.progressPercent)
         const pct = Number.isFinite(metadataPct) ? metadataPct : done ? 100 : approvalRequired ? 82 : rejected || error ? 72 : queued ? 12 : 35
-        const stageIndex = done ? scoutChatThreadStages.length - 1 : approvalRequired || rejected || error ? 4 : queued ? 0 : 3
+        const humanPhase = desktopWorkPhase(artifact, value)
+        const stageIndex = done ? scoutChatThreadStages.length - 1 : approvalRequired || rejected || error ? 4 : queued ? 0 : Math.min(4, humanPhase.index)
         const active = queued || running
 
         // card-level state hook — the head's ember treatment keys off it
@@ -51837,7 +54409,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           statusText.textContent = queued ? 'queued' : running ? 'running' : approvalRequired ? 'needs approval' : rejected ? 'rejected' : error ? 'needs attention' : 'complete'
         }
         if (agents) {
-          agents.textContent = queued ? 'waiting for Codex' : running ? 'worker running' : approvalRequired ? 'approval gate' : rejected ? 'gate rejected' : error ? 'gate blocked' : 'artifact ready'
+          const agentName = String(artifact?.metadata?.agentName || artifact?.metadata?.agentDisplayName || artifact?.metadata?.workerName || 'Scout').trim() || 'Scout'
+          agents.textContent = queued ? `${agentName} · queued` : running ? `${agentName} · ${humanPhase.label}` : approvalRequired ? `${agentName} · needs approval` : rejected ? `${agentName} · gate rejected` : error ? `${agentName} · needs attention` : `${agentName} · delivered`
         }
         if (fill) {
           fill.style.transform = `translateX(${Math.max(0, Math.min(100, pct)) - 100}%)`
@@ -51914,6 +54487,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (report && !report.hidden && entry) {
           renderArtifactRead(report, entry)
         }
+	        if (chatContextState?.mode === 'work') {
+	          const message = selectedScoutChatThread()?.messages?.find(candidate => String(candidate?.id || '') === String(chatContextState.messageId || ''))
+	          if (message && String(message?.thread?.artifactId || '') === String(card.dataset.threadArtifactId || '')) {
+	            renderDesktopWorkContext(message, entry || artifact)
+	          }
+	        }
+	        syncDesktopActiveWorkIndicator()
       }
 
       // Flip any rendered research cards to match their artifact's live status
@@ -51921,6 +54501,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function syncScoutChatResearchCards() {
         const cards = scoutChatThread?.querySelectorAll('.scout-chat-research[data-thread-artifact-id]')
         if (!cards || !cards.length) {
+	          syncDesktopActiveWorkIndicator()
           return
         }
         // Boot races /artifacts: the thread can render before the artifact
@@ -60642,9 +63223,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         updateOfficeHome()
         if (state === 'listening') {
           brandMarkEl.classList.add('is-listening')
+          topbarBrandLockupEl?.classList.add('is-listening')
         } else {
           brandMarkEl.classList.remove('is-listening')
           brandMarkEl.classList.remove('is-hot-ember')
+          topbarBrandLockupEl?.classList.remove('is-listening')
+          topbarBrandLockupEl?.classList.remove('is-hot-ember')
         }
       }
 
@@ -62627,9 +65211,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         lastHotEmberAt = now
         brandMarkEl.classList.add('is-hot-ember')
+        topbarBrandLockupEl?.classList.add('is-hot-ember')
         window.clearTimeout(hotEmberTimer)
         hotEmberTimer = window.setTimeout(() => {
           brandMarkEl.classList.remove('is-hot-ember')
+          topbarBrandLockupEl?.classList.remove('is-hot-ember')
         }, HOT_EMBER_DURATION)
       }
 
@@ -62647,6 +65233,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         lastWakePulseAt = now
         brandMarkEl.classList.add('is-wake')
+        topbarBrandLockupEl?.classList.add('is-wake')
         const islandState = voiceIsland?.dataset.state || 'idle'
         if (voiceIsland && (islandState === 'idle' || islandState === 'listening')) {
           voiceIsland.classList.add('is-wake')
@@ -62654,6 +65241,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         window.clearTimeout(wakePulseTimer)
         wakePulseTimer = window.setTimeout(() => {
           brandMarkEl.classList.remove('is-wake')
+          topbarBrandLockupEl?.classList.remove('is-wake')
           voiceIsland?.classList.remove('is-wake')
         }, WAKE_PULSE_DURATION)
       }

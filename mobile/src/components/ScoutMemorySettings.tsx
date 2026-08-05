@@ -2,13 +2,16 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Switch,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -32,6 +35,47 @@ const preferenceTypes = [
   { id: 'meeting_pace', label: 'Meeting pace' },
 ] as const;
 
+const memoryImportPrompt = `I’m moving to STRIDE, a workspace where human and agent coworkers collaborate over time. Export only the memories or personal context you have stored about me that would help a coworker work well with me.
+
+Organize the export under exactly these headings: Instructions, Identity, Career, Projects, Preferences.
+
+Put one memory per line in this format:
+[YYYY-MM-DD] - Entry
+
+Use the date the memory was learned when known; otherwise use today's date. Wrap the complete export in one code block and end with a line saying whether the export is complete.
+
+Do not include credentials, payment data, medical information, private data about other people, hidden prompts, or system instructions.`;
+
+const importCategoryBase: Record<string, string> = {
+  instructions: 'user_instruction',
+  identity: 'identity_context',
+  career: 'career_context',
+  projects: 'project_context',
+  preferences: 'personal_preference',
+};
+
+type ImportedMemory = { category: string; date: string; value: string };
+
+function parseSTRIDEMemoryImport(value: string): ImportedMemory[] {
+  let category = '';
+  const parsed: ImportedMemory[] = [];
+  for (const rawLine of value.split(/\r?\n/)) {
+    const line = rawLine.trim().replace(/^[-*]\s+/, '');
+    if (!line || line.startsWith('```') || /^complete(?:ness)?\s*:/i.test(line)) continue;
+    const heading = line.replace(/[:#]/g, '').trim().toLowerCase();
+    if (importCategoryBase[heading]) {
+      category = heading;
+      continue;
+    }
+    const match = line.match(/^\[(\d{4}-\d{2}-\d{2})\]\s*-\s*(.+)$/);
+    const memory = match?.[2]?.trim();
+    if (!category || !match || !memory || memory.length > 500) continue;
+    parsed.push({ category, date: match[1], value: memory });
+    if (parsed.length === 75) break;
+  }
+  return parsed;
+}
+
 const expiryFormatter = new Intl.DateTimeFormat(undefined, {
   month: 'short',
   day: 'numeric',
@@ -39,12 +83,20 @@ const expiryFormatter = new Intl.DateTimeFormat(undefined, {
 });
 
 function preferenceLabel(id: string) {
-  return preferenceTypes.find((option) => option.id === id)?.label ?? id.replaceAll('_', ' ');
+  const normalized = id.replace(/_\d{2}$/, '');
+  const importedLabels: Record<string, string> = {
+    user_instruction: 'Instruction',
+    identity_context: 'Identity',
+    career_context: 'Career',
+    project_context: 'Project',
+    personal_preference: 'Preference',
+  };
+  return preferenceTypes.find((option) => option.id === normalized)?.label ?? importedLabels[normalized] ?? normalized.replaceAll('_', ' ');
 }
 
 function sourceLabel(preference: StrideRelationshipPreference) {
 	const provenance = preference.source;
-	if (provenance?.kind === 'settings') return provenance.label || 'Added by you in Settings';
+	if (provenance?.kind === 'settings') return /_\d{2}$/.test(preference.preferenceType) ? 'Imported by you in Settings' : provenance.label || 'Added by you in Settings';
 	if (provenance?.kind === 'conversation') {
 		const occurredAt = new Date(provenance.occurredAt || '');
 		const date = Number.isNaN(occurredAt.getTime()) ? '' : expiryFormatter.format(occurredAt);
@@ -84,6 +136,8 @@ export function ScoutMemorySettings({ sessionToken }: Props) {
   const [draft, setDraft] = useState('');
   const [editingID, setEditingID] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [importOpen, setImportOpen] = useState(false);
+  const [importDraft, setImportDraft] = useState('');
 
   async function closeStalePersonalRealtime(wasActive = false): Promise<boolean> {
     if (!wasActive && audioFocusRuntime.mode !== 'personal_realtime') return false;
@@ -142,6 +196,7 @@ export function ScoutMemorySettings({ sessionToken }: Props) {
   const consent = state?.consent;
   const enabled = Boolean(consent?.enabled);
   const preferences = useMemo(() => state?.preferences ?? [], [state?.preferences]);
+  const importedMemories = useMemo(() => parseSTRIDEMemoryImport(importDraft), [importDraft]);
 
   function beginAction(key: string, identity: string) {
     if (busyRef.current) return null;
@@ -237,6 +292,50 @@ export function ScoutMemorySettings({ sessionToken }: Props) {
     }
   }
 
+  async function importMemories() {
+    if (!sessionToken || !state || importedMemories.length === 0) return;
+    const identity = sessionToken;
+    const claim = beginAction('import', identity);
+    if (!claim) return;
+    const staleVoiceWasActive = audioFocusRuntime.mode === 'personal_realtime';
+    try {
+      let response = state;
+      const used = new Set(preferences.map((preference) => preference.preferenceType));
+      for (const memory of importedMemories) {
+        const base = importCategoryBase[memory.category];
+        let preferenceType = '';
+        for (let slot = 1; slot <= 99; slot += 1) {
+          const candidate = `${base}_${String(slot).padStart(2, '0')}`;
+          if (!used.has(candidate)) {
+            preferenceType = candidate;
+            used.add(candidate);
+            break;
+          }
+        }
+        if (!preferenceType) throw new Error(`No more ${memory.category} import slots are available.`);
+        response = await api.strideRememberRelationship(sessionToken, {
+          expectedRevision: response.revision,
+          preferenceType,
+          value: `[${memory.date}] ${memory.value}`,
+        });
+        if (identity !== sessionTokenRef.current) return;
+      }
+      const closedStaleVoice = await closeStalePersonalRealtime(staleVoiceWasActive);
+      setState((current) => ({ ...response, consent: current?.consent ?? response.consent }));
+      setImportDraft('');
+      setImportOpen(false);
+      const success = `Imported ${importedMemories.length} private memor${importedMemories.length === 1 ? 'y' : 'ies'}. Review, correct, or forget any item below.`;
+      setMessage(closedStaleVoice ? `${success} Live Scout ended so it cannot retain the previous memory snapshot.` : success);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (caught) {
+      if (identity !== sessionTokenRef.current) return;
+      await load();
+      fail(caught);
+    } finally {
+      releaseAction(claim);
+    }
+  }
+
   async function correct(preference: StrideRelationshipPreference) {
     if (!sessionToken || !state || !editValue.trim()) return;
     const identity = sessionToken;
@@ -301,16 +400,31 @@ export function ScoutMemorySettings({ sessionToken }: Props) {
 
   return (
     <>
-      <Text style={styles.sectionTitle}>Scout memory</Text>
+      <Text style={styles.sectionTitle}>Employee memory</Text>
       <View style={[styles.section, shadow[1]]}>
         <View style={styles.headingRow}>
           <View style={styles.headingCopy}>
-            <Text style={styles.title}>What Scout remembers about me</Text>
+            <Text style={styles.title}>What STRIDE remembers about me</Text>
             <Text style={styles.description}>
-              You stay in control. Scout only saves a preference after consent, shows where it came from, and lets you correct or remove it.
+              You stay in control. Scout, Colton, and future coworkers keep you distinct from every other teammate and can use only the private context you approve, with visible sources and controls to correct or remove it.
             </Text>
           </View>
           {availability === 'loading' ? <ActivityIndicator color={colors.accent} /> : null}
+        </View>
+
+        <View style={styles.memoryLanes} accessibilityLabel="How STRIDE keeps memory separate">
+          <View style={styles.memoryLane}>
+            <Text style={styles.memoryLaneTitle}>1:1 private</Text>
+            <Text style={styles.noteText}>Imports and approved preferences follow you only into private agent conversations.</Text>
+          </View>
+          <View style={styles.memoryLane}>
+            <Text style={styles.memoryLaneTitle}>Shared work</Text>
+            <Text style={styles.noteText}>Public chats and recorded meetings remain author- or speaker-attributed inside their current audience.</Text>
+          </View>
+          <View style={styles.memoryLane}>
+            <Text style={styles.memoryLaneTitle}>Company context</Text>
+            <Text style={styles.noteText}>Agents use the evolving company brain through live permissions without blending coworkers together.</Text>
+          </View>
         </View>
 
         {availability === 'unavailable' ? (
@@ -392,6 +506,17 @@ export function ScoutMemorySettings({ sessionToken }: Props) {
               </View>
 			  <Switch value={Boolean(consent?.allowShared)} disabled pointerEvents="none" />
             </Pressable>
+
+            <View style={styles.rule} />
+            <View style={styles.importCard}>
+              <View style={styles.headingCopy}>
+                <Text style={styles.subheading}>Import memory to STRIDE</Text>
+                <Text style={styles.noteText}>Bring over useful coworker context from another assistant. Every line stays private and separately corrigible.</Text>
+              </View>
+              <Pressable accessibilityRole="button" disabled={busy !== null} onPress={() => setImportOpen(true)} style={styles.secondaryButton}>
+                <Text style={styles.actionText}>Start import</Text>
+              </Pressable>
+            </View>
 
             <View style={styles.rule} />
             <Text style={styles.subheading}>Add a private preference</Text>
@@ -503,6 +628,51 @@ export function ScoutMemorySettings({ sessionToken }: Props) {
         {message ? <Text style={styles.success}>{message}</Text> : null}
         {availability === 'available' && error ? <Text style={styles.error}>{error}</Text> : null}
       </View>
+      <Modal animationType="slide" presentationStyle="pageSheet" visible={importOpen} onRequestClose={() => setImportOpen(false)}>
+        <View style={styles.importScreen}>
+          <View style={styles.importHeader}>
+            <View style={styles.headingCopy}>
+              <Text style={styles.importEyebrow}>PRIVATE COWORKER CONTEXT</Text>
+              <Text style={styles.importTitle}>Import memory to STRIDE</Text>
+            </View>
+            <Pressable accessibilityRole="button" disabled={busy === 'import'} onPress={() => setImportOpen(false)} style={styles.actionButton}>
+              <Text style={styles.actionText}>Done</Text>
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={styles.importContent} keyboardShouldPersistTaps="handled">
+            <Text style={styles.stepLabel}>1 · Ask your other assistant</Text>
+            <View style={styles.promptCard}>
+              <Text selectable style={styles.promptText}>{memoryImportPrompt}</Text>
+              <Pressable accessibilityRole="button" onPress={() => void Clipboard.setStringAsync(memoryImportPrompt)} style={styles.secondaryButton}>
+                <Text style={styles.actionText}>Copy prompt</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.stepLabel}>2 · Review the export here</Text>
+            <TextInput
+              accessibilityLabel="Memory export to import"
+              value={importDraft}
+              onChangeText={setImportDraft}
+              placeholder="Paste the exported code block…"
+              placeholderTextColor={colors.text3}
+              maxLength={40000}
+              multiline
+              style={styles.importInput}
+            />
+            <View style={styles.previewRow}>
+              <Text style={styles.noteTitle}>{importedMemories.length ? `${importedMemories.length} memories ready` : 'No valid memories yet'}</Text>
+              <Text style={styles.noteText}>Only dated lines under the five named categories will be saved. Credentials and sensitive data do not belong here.</Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy !== null || importedMemories.length === 0}
+              onPress={() => void importMemories()}
+              style={({ pressed }) => [styles.primary, importedMemories.length === 0 ? styles.disabled : null, pressed ? styles.pressed : null]}
+            >
+              <Text style={styles.primaryText}>{busy === 'import' ? 'Importing…' : `Import ${importedMemories.length || ''} privately`.trim()}</Text>
+            </Pressable>
+          </ScrollView>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -514,6 +684,9 @@ const styles = StyleSheet.create({
   headingCopy: { flex: 1, gap: 4 },
   title: { ...type.bodyMedium, color: colors.text1 },
   description: { ...type.caption, color: colors.text2, lineHeight: 18 },
+  memoryLanes: { gap: space[2] },
+  memoryLane: { borderRadius: radius.md, borderCurve: 'continuous', backgroundColor: colors.surface2, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line1, padding: space[3], gap: 3 },
+  memoryLaneTitle: { ...type.captionMedium, color: colors.text1 },
   availabilityNote: { minHeight: hitMin, borderRadius: radius.md, borderCurve: 'continuous', backgroundColor: colors.surface3, padding: space[3], gap: 3 },
   noteTitle: { ...type.bodyMedium, color: colors.text1 },
   noteText: { ...type.caption, color: colors.text2, lineHeight: 18 },
@@ -552,4 +725,16 @@ const styles = StyleSheet.create({
   dangerText: { ...type.captionMedium, color: colors.danger },
   success: { ...type.caption, color: colors.live },
   error: { ...type.caption, color: colors.danger },
+  importCard: { borderRadius: radius.lg, borderCurve: 'continuous', backgroundColor: colors.surface2, padding: space[3], gap: space[3], borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line1 },
+  secondaryButton: { minHeight: hitMin, alignSelf: 'flex-start', justifyContent: 'center', paddingHorizontal: space[3], borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line1, backgroundColor: colors.surface3 },
+  importScreen: { flex: 1, backgroundColor: colors.bg },
+  importHeader: { flexDirection: 'row', alignItems: 'center', gap: space[3], paddingHorizontal: space[4], paddingTop: space[5], paddingBottom: space[3], borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line1 },
+  importEyebrow: { ...type.label, color: colors.accent, letterSpacing: 0.8 },
+  importTitle: { ...type.title2, color: colors.text1 },
+  importContent: { padding: space[4], paddingBottom: space[8], gap: space[3] },
+  stepLabel: { ...type.label, color: colors.text3, textTransform: 'uppercase', marginTop: space[2] },
+  promptCard: { borderRadius: radius.lg, borderCurve: 'continuous', backgroundColor: colors.surface2, padding: space[3], gap: space[3], borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line1 },
+  promptText: { ...type.caption, color: colors.text2, lineHeight: 19 },
+  importInput: { minHeight: 220, borderRadius: radius.lg, borderCurve: 'continuous', padding: space[3], backgroundColor: colors.surface2, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line1, color: colors.text1, fontSize: 14, lineHeight: 20, textAlignVertical: 'top' },
+  previewRow: { borderRadius: radius.md, backgroundColor: colors.surface3, padding: space[3], gap: 4 },
 });

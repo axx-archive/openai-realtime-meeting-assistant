@@ -35,6 +35,61 @@ func TestAgentThreadGoalSpecStampsDeliverableFlag(t *testing.T) {
 	}
 }
 
+func TestPersistAgentThreadProgressAdvancesDurableChatRef(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	previousRunner := startAgentThreadAsync
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) {}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	chat, err := app.createScoutChatThread("aj@shareability.com", "AJ", "progress projection", "")
+	if err != nil {
+		t.Fatalf("create chat: %v", err)
+	}
+	thread, err := app.launchAgentThreadWithOrigin("research", "map the category", "AJ", map[string]string{
+		"originKind":  agentThreadOriginPrivateThread,
+		"originId":    chat.ID,
+		"requestedBy": "aj@shareability.com",
+	})
+	if err != nil {
+		t.Fatalf("launch thread: %v", err)
+	}
+	refMessage := scoutChatMessageRecord{
+		ID:        "progress-ref-1",
+		Kind:      "thread",
+		Role:      "scout",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Thread: &scoutChatThreadRef{
+			ID: thread.ID, Mode: "research", Query: thread.Query, Status: "running",
+			ArtifactID: thread.Artifact.ID, ProgressPercent: 35,
+		},
+	}
+	if _, err := app.commitScoutChatThreadMessages("aj@shareability.com", chat.ID, refMessage); err != nil {
+		t.Fatalf("commit work ref: %v", err)
+	}
+
+	app.persistAgentThreadProgress(thread, AgentProgress{
+		Stage: "gate_before_shipping", ProgressPercent: 78, GoalStatus: "review", ReviewGate: "pending", Note: "checking every cited claim",
+	})
+
+	saved, _, err := app.scoutChatThreadByID("aj@shareability.com", chat.ID)
+	if err != nil {
+		t.Fatalf("reload chat: %v", err)
+	}
+	var projected *scoutChatThreadRef
+	for index := range saved.Messages {
+		if saved.Messages[index].Thread != nil && saved.Messages[index].Thread.ID == thread.ID {
+			projected = saved.Messages[index].Thread
+			break
+		}
+	}
+	if projected == nil {
+		t.Fatal("durable work ref disappeared")
+	}
+	if projected.ProgressPercent != 78 || projected.CurrentStage != "gate_before_shipping" || projected.ProgressNote != "checking every cited claim" {
+		t.Fatalf("projected ref=%#v, want the bounded mid-run progress", projected)
+	}
+}
+
 func TestAgentThreadProducesStructuredArtifactWithResponder(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	app.apiKey = "test-key"
@@ -66,6 +121,68 @@ func TestAgentThreadProducesStructuredArtifactWithResponder(t *testing.T) {
 	}
 	if !strings.Contains(captured.Input, thread.Query) || !strings.Contains(captured.Input, "Board and memory context") {
 		t.Fatalf("input=%q, want thread query and context", captured.Input)
+	}
+	if captured.MaxOutputTokens != defaultAgentThreadMaxOutputTokens {
+		t.Fatalf("MaxOutputTokens=%d, want durable artifact headroom %d", captured.MaxOutputTokens, defaultAgentThreadMaxOutputTokens)
+	}
+	if !captured.EnableWebSearch {
+		t.Fatal("research thread did not receive the hosted web-search tool")
+	}
+	if captured.Workflow != "agent_thread_research" || !strings.Contains(captured.Instructions, "Live research authority") {
+		t.Fatalf("research request provenance/instructions=%q / %q", captured.Workflow, captured.Instructions)
+	}
+}
+
+func TestAgentThreadLiveWebSearchIsResearchScoped(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		thread scoutAgentThread
+		want   bool
+	}{
+		{name: "research", thread: scoutAgentThread{Mode: "research"}, want: true},
+		{name: "deep research tool", thread: scoutAgentThread{Mode: "artifact", Artifact: meetingMemoryEntry{Metadata: map[string]string{"toolTemplate": "deep_research"}}}, want: true},
+		{name: "design", thread: scoutAgentThread{Mode: "design"}, want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := agentThreadUsesLiveWebSearch(tt.thread); got != tt.want {
+				t.Fatalf("agentThreadUsesLiveWebSearch=%v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAgentThreadRequestContextLeavesLiveResearchUnbounded(t *testing.T) {
+	t.Setenv("BONFIRE_AGENT_RUNNER", agentRunnerOpenAIText)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	for _, tt := range []struct {
+		name         string
+		thread       scoutAgentThread
+		wantDeadline bool
+	}{
+		{name: "ordinary work remains bounded", thread: scoutAgentThread{Mode: "design"}, wantDeadline: true},
+		{name: "research runs until completion or cancellation", thread: scoutAgentThread{Mode: "research"}, wantDeadline: false},
+		{name: "deep research tool runs until completion or cancellation", thread: scoutAgentThread{Mode: "artifact", Artifact: meetingMemoryEntry{Metadata: map[string]string{"toolTemplate": "deep_research"}}}, wantDeadline: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := agentThreadRequestContext(context.Background(), tt.thread)
+			defer cancel()
+			_, hasDeadline := ctx.Deadline()
+			if hasDeadline != tt.wantDeadline {
+				t.Fatalf("context deadline=%v, want %v", hasDeadline, tt.wantDeadline)
+			}
+		})
+	}
+}
+
+func TestAgentThreadMaxOutputTokensIsBounded(t *testing.T) {
+	t.Setenv("BONFIRE_AGENT_THREAD_MAX_OUTPUT_TOKENS", "1")
+	if got := agentThreadMaxOutputTokens(); got != 3200 {
+		t.Fatalf("low budget=%d, want 3200", got)
+	}
+	t.Setenv("BONFIRE_AGENT_THREAD_MAX_OUTPUT_TOKENS", "999999")
+	if got := agentThreadMaxOutputTokens(); got != 12000 {
+		t.Fatalf("high budget=%d, want 12000", got)
 	}
 }
 
@@ -714,6 +831,12 @@ func TestAgentThreadDisplayTitleRejectsGenericContractHeadings(t *testing.T) {
 			want:     "the launch query",
 		},
 		{
+			name:     "tool role heading falls back to the research subject",
+			body:     "# ROLE\n\nColton — Research Partner.",
+			fallback: "compare Zoom and Otter",
+			want:     "compare Zoom and Otter",
+		},
+		{
 			name:     "workflow contract heading falls back",
 			body:     "# Vision\n\nbody",
 			fallback: "package the Aurora IP",
@@ -743,6 +866,35 @@ func TestAgentThreadDisplayTitleRejectsGenericContractHeadings(t *testing.T) {
 				t.Fatalf("agentThreadDisplayTitle=%q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAgentThreadArtifactWriterUsesNamedCoworker(t *testing.T) {
+	thread := scoutAgentThread{Artifact: meetingMemoryEntry{Metadata: map[string]string{"agentName": "Colton"}}}
+	if got := agentThreadArtifactWriter(thread, agentThreadWorkerResult{}); got != "Colton" {
+		t.Fatalf("artifact writer=%q, want Colton", got)
+	}
+	if got := agentThreadArtifactWriter(thread, agentThreadWorkerResult{Metadata: map[string]string{"agentName": "Marvin"}}); got != "Marvin" {
+		t.Fatalf("reauthorized artifact writer=%q, want Marvin", got)
+	}
+	if got := agentThreadArtifactWriter(scoutAgentThread{}, agentThreadWorkerResult{}); got != scoutParticipantName {
+		t.Fatalf("ordinary artifact writer=%q, want Scout", got)
+	}
+}
+
+func TestNamedCoworkerOwnsSingularFirstPersonIdentityAcrossRunnerPrompts(t *testing.T) {
+	thread := scoutAgentThread{Mode: "research", Artifact: meetingMemoryEntry{Metadata: map[string]string{
+		"agentId": "agent_colton-research", "agentName": "Colton", "agentRole": "Research Partner", "delegatedBy": "Scout",
+	}}}
+	app := &kanbanBoardApp{}
+	writerPrompt := app.agentThreadInstructionsForThread(thread)
+	if strings.Contains(writerPrompt, "You are Scout's") || !strings.Contains(writerPrompt, "You are delivering this work as Colton") || !strings.Contains(writerPrompt, "Speak in first person") {
+		t.Fatalf("writer prompt has conflicting identity:\n%s", writerPrompt)
+	}
+	runner := &anthropicFableRunner{app: app}
+	system := runner.systemPrompt(AgentJob{Mode: "research", Authority: toolAuthorityReadOnly, thread: thread})
+	if !strings.Contains(system, "You are Colton") || strings.Contains(system, "You are Scout, the in-process orchestrator") || !strings.Contains(system, "Scout is the delegator") {
+		t.Fatalf("Anthropic prompt has conflicting identity:\n%s", system)
 	}
 }
 

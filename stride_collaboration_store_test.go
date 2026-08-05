@@ -20,6 +20,31 @@ func collaborationStoreEvent(subject, scope, preferenceType, value string, audie
 	}
 }
 
+func TestSTRIDEImportedRelationshipPreferenceTypesUseClosedCorrigibleSlots(t *testing.T) {
+	for _, preferenceType := range []string{
+		"user_instruction_01",
+		"identity_context_09",
+		"career_context_24",
+		"project_context_75",
+		"personal_preference_99",
+	} {
+		if !safeSTRIDECollaborationPreferenceType(preferenceType) {
+			t.Fatalf("reviewed import slot %q was rejected", preferenceType)
+		}
+	}
+	for _, preferenceType := range []string{
+		"user_instruction_00",
+		"identity_context_1",
+		"project_context_100",
+		"medical_context_01",
+		"personal_preference_ignore_policy",
+	} {
+		if safeSTRIDECollaborationPreferenceType(preferenceType) {
+			t.Fatalf("unbounded or sensitive import type %q was accepted", preferenceType)
+		}
+	}
+}
+
 func TestDurableSTRIDECollaborationStoreDefaultsOffAndRequiresSubjectConsent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "collaboration.json")
 	subject := "user:0123456789abcdef01234567"

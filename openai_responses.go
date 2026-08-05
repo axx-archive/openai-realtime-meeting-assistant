@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -54,6 +55,11 @@ type openAITextRequest struct {
 	Workflow    string
 	ServiceTier string
 	JSONSchema  *openAIJSONSchema
+	// EnableWebSearch gives an explicitly research-scoped request the hosted
+	// Responses web-search tool. It is false by default so ordinary chat,
+	// meeting, routing, and structured-output calls retain their existing
+	// authority and wire contract.
+	EnableWebSearch bool
 	// ValidateOutput runs before a wire response is accepted. It is deliberately
 	// request-local so strict lanes can book wire success separately from a
 	// parse/schema rejection while ordinary text callers remain unchanged.
@@ -80,14 +86,19 @@ type openAIJSONSchema struct {
 }
 
 type openAIResponsesPayload struct {
-	Model           string         `json:"model"`
-	Instructions    string         `json:"instructions,omitempty"`
-	Input           any            `json:"input"`
-	Reasoning       map[string]any `json:"reasoning,omitempty"`
-	Text            map[string]any `json:"text,omitempty"`
-	MaxOutputTokens int            `json:"max_output_tokens,omitempty"`
-	Store           *bool          `json:"store,omitempty"`
-	ServiceTier     string         `json:"service_tier,omitempty"`
+	Model           string                `json:"model"`
+	Instructions    string                `json:"instructions,omitempty"`
+	Input           any                   `json:"input"`
+	Reasoning       map[string]any        `json:"reasoning,omitempty"`
+	Text            map[string]any        `json:"text,omitempty"`
+	MaxOutputTokens int                   `json:"max_output_tokens,omitempty"`
+	Store           *bool                 `json:"store,omitempty"`
+	ServiceTier     string                `json:"service_tier,omitempty"`
+	Tools           []openAIResponsesTool `json:"tools,omitempty"`
+}
+
+type openAIResponsesTool struct {
+	Type string `json:"type"`
 }
 
 type openAIResponsesBody struct {
@@ -99,8 +110,9 @@ type openAIResponsesBody struct {
 	Output []struct {
 		Type    string `json:"type,omitempty"`
 		Content []struct {
-			Type string `json:"type,omitempty"`
-			Text string `json:"text,omitempty"`
+			Type        string                     `json:"type,omitempty"`
+			Text        string                     `json:"text,omitempty"`
+			Annotations []openAIResponseAnnotation `json:"annotations,omitempty"`
 		} `json:"content,omitempty"`
 	} `json:"output,omitempty"`
 	// Usage is the Responses API usage object (W0 item 4: the ambient fleet's
@@ -111,6 +123,12 @@ type openAIResponsesBody struct {
 	Error *struct {
 		Message string `json:"message,omitempty"`
 	} `json:"error,omitempty"`
+}
+
+type openAIResponseAnnotation struct {
+	Type  string `json:"type,omitempty"`
+	URL   string `json:"url,omitempty"`
+	Title string `json:"title,omitempty"`
 }
 
 type openAIResponsesUsage struct {
@@ -251,6 +269,9 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 	if request.MaxOutputTokens > 0 {
 		payload.MaxOutputTokens = request.MaxOutputTokens
 	}
+	if request.EnableWebSearch {
+		payload.Tools = []openAIResponsesTool{{Type: "web_search"}}
+	}
 
 	rawPayload, err := json.Marshal(payload)
 	if err != nil {
@@ -300,7 +321,12 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 		recordLLMUsage(entry)
 	}
 
-	response, err := aiProviderHTTPClient(45 * time.Second).Do(httpRequest)
+	// Long-form artifact writers legitimately need more wall time than chat or
+	// routing responses. Hosted research may perform several searches and source
+	// reads inside one Responses call, so it receives a separate bounded window;
+	// compact calls retain the existing 45-second failure boundary.
+	timeout := openAIResponsesRequestTimeout(request)
+	response, err := aiProviderHTTPClient(timeout).Do(httpRequest)
 	if err != nil {
 		wireErr := &openAIProviderFailure{err: fmt.Errorf("create OpenAI response: %w", err)}
 		recordWire(nil, false, false, "transport_error", "", wireErr)
@@ -345,6 +371,9 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 	}
 
 	text := extractOpenAIResponseText(body)
+	if request.EnableWebSearch && request.JSONSchema == nil {
+		text = appendOpenAIResponseWebSources(text, extractOpenAIResponseWebCitations(body))
+	}
 	if text == "" {
 		emptyErr := &openAIOutputRejection{reason: "empty_output"}
 		recordWire(body.Usage, true, false, "empty_output", body.ServiceTier, emptyErr)
@@ -360,6 +389,19 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 
 	recordWire(body.Usage, true, true, "", body.ServiceTier, nil)
 	return text, nil
+}
+
+func openAIResponsesRequestTimeout(request openAITextRequest) time.Duration {
+	if request.EnableWebSearch {
+		// Hosted research may fan through multiple searches and source reads.
+		// Its durable thread context owns cancellation; a client-wide deadline
+		// would manufacture failures based on wall time rather than work state.
+		return 0
+	}
+	if request.MaxOutputTokens > 4000 {
+		return 120 * time.Second
+	}
+	return 45 * time.Second
 }
 
 type apiRequestFailure struct {
@@ -415,4 +457,60 @@ func extractOpenAIResponseText(body openAIResponsesBody) string {
 	}
 
 	return strings.TrimSpace(strings.Join(parts, "\n"))
+}
+
+type openAIResponseWebCitation struct {
+	Title string
+	URL   string
+}
+
+func extractOpenAIResponseWebCitations(body openAIResponsesBody) []openAIResponseWebCitation {
+	seen := map[string]bool{}
+	citations := make([]openAIResponseWebCitation, 0)
+	for _, output := range body.Output {
+		if output.Type != "" && output.Type != "message" {
+			continue
+		}
+		for _, content := range output.Content {
+			for _, annotation := range content.Annotations {
+				if annotation.Type != "" && annotation.Type != "url_citation" {
+					continue
+				}
+				rawURL := strings.TrimSpace(annotation.URL)
+				parsed, err := url.Parse(rawURL)
+				if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || seen[rawURL] {
+					continue
+				}
+				seen[rawURL] = true
+				title := strings.Join(strings.Fields(annotation.Title), " ")
+				if len(title) > 180 {
+					title = title[:180]
+				}
+				citations = append(citations, openAIResponseWebCitation{Title: title, URL: rawURL})
+			}
+		}
+	}
+	return citations
+}
+
+// appendOpenAIResponseWebSources makes the provider's URL-citation receipt
+// durable in the saved artifact even when the model rendered citation markers
+// rather than literal URLs in its prose. URLs already present are not repeated.
+func appendOpenAIResponseWebSources(text string, citations []openAIResponseWebCitation) string {
+	text = strings.TrimSpace(text)
+	var lines []string
+	for _, citation := range citations {
+		if strings.Contains(text, citation.URL) {
+			continue
+		}
+		line := "- " + citation.URL
+		if citation.Title != "" {
+			line = "- " + citation.Title + " — " + citation.URL
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		return text
+	}
+	return strings.TrimSpace(text + "\n\nWeb sources used\n" + strings.Join(lines, "\n"))
 }

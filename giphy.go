@@ -30,10 +30,11 @@ const (
 var (
 	giphySearchEndpoint   = "https://api.giphy.com/v1/gifs/search"
 	giphyTrendingEndpoint = "https://api.giphy.com/v1/gifs/trending"
-	// The E0 security floor keeps the provider lane unreachable in production
-	// until E4 ships proxied previews, non-identity telemetry, and durable
-	// provenance. This is intentionally not environment-configurable.
-	giphyIntegrationEnabled = false
+	// Search and import stay behind the authenticated server proxy: the key is
+	// never sent to a client, result URLs remain allowlisted to GIPHY HTTPS
+	// hosts, and imports are byte/MIME validated into the ordinary attachment
+	// store. Tests may flip this fail-safe off to prove the closed behavior.
+	giphyIntegrationEnabled = true
 	giphySearchClient       = &http.Client{
 		Timeout: 8 * time.Second,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {

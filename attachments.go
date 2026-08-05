@@ -1108,6 +1108,14 @@ func (app *kanbanBoardApp) committedAttachmentsAuthorized(viewerEmail string, th
 func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, thread scoutChatThreadRecord) scoutChatThreadRecord {
 	projected := thread
 	projected.OpeningOperation = nil
+	// Direct coworker identity comes from the signed Product ledger so an old
+	// chat record is upgraded on read without making the chat title authoritative.
+	if app != nil {
+		if agent, ok := app.strideRuntime.productAgentForDirectThread(thread.ID); ok {
+			projected.AgentID = agent.ID
+			projected.AgentName = agent.DisplayName
+		}
+	}
 	if len(thread.Messages) == 0 {
 		return projected
 	}

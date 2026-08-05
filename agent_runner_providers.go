@@ -25,7 +25,7 @@ func (r *openAITextAgentRunner) RunJob(ctx context.Context, job AgentJob) (<-cha
 	out := make(chan AgentProgress, 1)
 	go func() {
 		defer close(out)
-		output, err := r.app.produceAgentThreadArtifact(ctx, job.thread, r.responder)
+		output, err := r.app.produceAgentThreadArtifactForJob(ctx, job, r.responder)
 		out <- AgentProgress{
 			Terminal: true,
 			Text:     output,
@@ -73,9 +73,9 @@ func (r *codexSidecarAgentRunner) RunJob(ctx context.Context, job AgentJob) (<-c
 		var result agentThreadWorkerResult
 		var err error
 		if r.local {
-			result, err = r.app.produceCodexAgentThreadArtifact(ctx, job.thread)
+			result, err = r.app.produceCodexAgentThreadArtifactForJob(ctx, job)
 		} else {
-			result, err = r.app.enqueueCodexAgentThreadArtifact(ctx, job.thread)
+			result, err = r.app.enqueueCodexAgentThreadArtifactForJob(ctx, job)
 		}
 		out <- AgentProgress{
 			Terminal: result.Terminal,

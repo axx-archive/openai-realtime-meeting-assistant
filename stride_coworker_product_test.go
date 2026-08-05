@@ -440,6 +440,28 @@ func TestSTRIDECoworkerSettingsCanCreateCorrectAndForgetPrivateMemoryWithoutPubl
 	if !strings.Contains(privateQuery, "approved_collaboration_preferences_data") || !strings.Contains(privateQuery, "Direct, kind, and specific.") {
 		t.Fatalf("private Settings preference missing from one-to-one Scout query: %q", privateQuery)
 	}
+	privateAgentInstructions := fixture.app.agentThreadInstructionsForThread(scoutAgentThread{
+		Mode: "research",
+		Artifact: meetingMemoryEntry{Metadata: map[string]string{
+			"originKind":  agentThreadOriginPrivateThread,
+			"requestedBy": fixture.user.Email,
+			"agentName":   "Colton",
+		}},
+	})
+	if !strings.Contains(privateAgentInstructions, "STRIDE private relationship context") || !strings.Contains(privateAgentInstructions, "Direct, kind, and specific.") {
+		t.Fatalf("private Settings preference missing from direct teammate instructions: %q", privateAgentInstructions)
+	}
+	channelAgentInstructions := fixture.app.agentThreadInstructionsForThread(scoutAgentThread{
+		Mode: "research",
+		Artifact: meetingMemoryEntry{Metadata: map[string]string{
+			"originKind":  agentThreadOriginChannel,
+			"requestedBy": fixture.user.Email,
+			"agentName":   "Colton",
+		}},
+	})
+	if strings.Contains(channelAgentInstructions, "Direct, kind, and specific.") || strings.Contains(channelAgentInstructions, "STRIDE private relationship context") {
+		t.Fatalf("private Settings preference escaped into shared teammate instructions: %q", channelAgentInstructions)
+	}
 	voiceConfig := fixture.app.privateRealtimeVoiceSessionConfigForUser("gpt-realtime-2", fixture.user.Email)
 	voiceInstructions, _ := voiceConfig["instructions"].(string)
 	if !strings.Contains(voiceInstructions, "Direct, kind, and specific.") || !strings.Contains(voiceInstructions, "STRIDE private relationship context") {
@@ -502,6 +524,37 @@ func TestSTRIDECoworkerSettingsCanCreateCorrectAndForgetPrivateMemoryWithoutPubl
 	sharedCorrect := request(strideRuntimeAPIBase+"coworker/relationships/correct", fmt.Sprintf(`{"action":"correct","expectedRevision":6,"relationshipId":%q,"value":"one paragraph, then sources"}`, shared.Preferences[0].Reference.ID))
 	if sharedCorrect.Code != http.StatusOK || !strings.Contains(sharedCorrect.Body.String(), "one paragraph, then sources") {
 		t.Fatalf("shared Settings correction status=%d body=%s", sharedCorrect.Code, sharedCorrect.Body.String())
+	}
+	channelInstructions := fixture.app.agentThreadInstructionsForThread(scoutAgentThread{
+		Mode: "research",
+		Artifact: meetingMemoryEntry{Metadata: map[string]string{
+			"originKind":  agentThreadOriginChannel,
+			"originId":    fixture.table.ID,
+			"requestedBy": fixture.user.Email,
+			"agentName":   "Colton",
+		}},
+	})
+	if !strings.Contains(channelInstructions, "Authenticated requester: AJ") || !strings.Contains(channelInstructions, "STRIDE shared coworker context") || !strings.Contains(channelInstructions, "one paragraph, then sources") {
+		t.Fatalf("shared preference/requester missing from exact-channel coworker instructions: %q", channelInstructions)
+	}
+	if strings.Contains(channelInstructions, "STRIDE private relationship context") || strings.Contains(channelInstructions, "Direct, kind, and specific") {
+		t.Fatalf("private profile escaped into exact-channel coworker instructions: %q", channelInstructions)
+	}
+	otherThread, err := fixture.app.createScoutChatThread(fixture.user.Email, fixture.user.Name, "shared-memory-other-channel", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherInstructions := fixture.app.agentThreadInstructionsForThread(scoutAgentThread{
+		Mode: "research",
+		Artifact: meetingMemoryEntry{Metadata: map[string]string{
+			"originKind":  agentThreadOriginChannel,
+			"originId":    otherThread.ID,
+			"requestedBy": fixture.user.Email,
+			"agentName":   "Colton",
+		}},
+	})
+	if strings.Contains(otherInstructions, "one paragraph, then sources") || strings.Contains(otherInstructions, "STRIDE shared coworker context") {
+		t.Fatalf("channel-scoped preference escaped into another channel: %q", otherInstructions)
 	}
 }
 

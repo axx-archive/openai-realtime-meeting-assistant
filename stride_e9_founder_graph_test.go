@@ -308,11 +308,12 @@ func TestE9DeterministicFounderGraphThroughProductEndpoints(t *testing.T) {
 	// fixtures, not live/provider-qualified listings. The signed local product
 	// scope makes the lifecycle reachable without changing that availability.
 	marketplace := e9DecodeFounder[e9FounderMarketplaceResponse](t, e9FounderExpect(t, e9FounderRequest(t, mux, http.MethodGet, strideRuntimeAPIBase+"marketplace", ajCookies, nil, ""), http.StatusOK))
-	if marketplace.Available || !marketplace.ProductReachable || !marketplace.LiveAdmissionFenced || len(marketplace.Listings) != 5 {
+	if marketplace.Available || !marketplace.ProductReachable || !marketplace.LiveAdmissionFenced || len(marketplace.Listings) != 8 {
 		t.Fatalf("marketplace discovery=%+v", marketplace)
 	}
-	wantListings := map[string]bool{"insights-analyst": true, "mary-marketing": true, "rowan-research": true, "jules-design": true, "kit-builder": true}
+	wantListings := map[string]bool{"scout": true, "insights-analyst": true, "mary-marketing": true, "rowan-research": true, "colton-research": true, "marvin-research": true, "jules-design": true, "kit-builder": true}
 	var maryListing STRIDEProductMarketplaceCandidate
+	researchSeats := map[string]STRIDEProductMarketplaceCandidate{}
 	for _, listing := range marketplace.Listings {
 		if !wantListings[listing.ID] {
 			t.Fatalf("unexpected marketplace candidate=%+v", listing)
@@ -321,12 +322,22 @@ func TestE9DeterministicFounderGraphThroughProductEndpoints(t *testing.T) {
 		if listing.ID == "mary-marketing" {
 			maryListing = listing
 		}
+		if listing.ID == "colton-research" || listing.ID == "marvin-research" {
+			researchSeats[listing.ID] = listing
+		}
 	}
 	if len(wantListings) != 0 {
 		t.Fatalf("missing marketplace candidates=%v", wantListings)
 	}
 	if maryListing.ID == "" || maryListing.DisplayName != "Mary" || maryListing.Availability != "internal_preview" || maryListing.LiveAvailable || !maryListing.ProviderExecutionFenced || maryListing.ReceiptStatus["providerQuality"] || maryListing.ReceiptStatus["humanAdmission"] {
 		t.Fatalf("Mary candidate escaped honest fence: %+v", maryListing)
+	}
+	for _, id := range []string{"colton-research", "marvin-research"} {
+		listing := researchSeats[id]
+		if listing.ID == "" || listing.Category != "research" || listing.RoleTitle == "" || !containsSTRIDEID(listing.Capabilities, "deep_research") ||
+			listing.LiveAvailable || !listing.ProviderExecutionFenced || listing.ReceiptStatus["providerQuality"] || listing.ReceiptStatus["humanAdmission"] {
+			t.Fatalf("research coworker escaped honest fence: %+v", listing)
+		}
 	}
 	listingDetail := e9DecodeFounder[e9FounderMarketplaceResponse](t, e9FounderExpect(t, e9FounderRequest(t, mux, http.MethodGet, strideRuntimeAPIBase+"marketplace/"+maryListing.ID, ajCookies, nil, ""), http.StatusOK))
 	if listingDetail.Listing.ID != maryListing.ID || !listingDetail.LiveAdmissionFenced {

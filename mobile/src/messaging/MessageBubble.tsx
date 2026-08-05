@@ -60,19 +60,45 @@ function workThreadPresentation(message: ScoutMessage) {
   const status = String(message.thread.status ?? 'running').toLowerCase();
   const active = status === 'queued' || status === 'running';
   const complete = status === 'complete' || status === 'published';
-  const failed = status === 'failed' || status === 'error' || status === 'needs_attention';
+  const failed = status === 'failed' || status === 'error' || status === 'needs_attention' || status === 'rejected';
+  const needsInput = status === 'approval_required' || status === 'needs_input' || status === 'parked';
+  const stage = String(message.thread.currentStage ?? '').toLowerCase();
+  const phase = complete
+    ? 'Delivered'
+    : needsInput
+      ? 'Needs input'
+      : failed
+        ? 'Needs attention'
+        : /deliver|verify_goal_completed/u.test(stage)
+          ? 'Delivering'
+          : /gate|review|verif/u.test(stage)
+            ? 'Verifying'
+            : /build|draft|synth|execute|research|source|evidence/u.test(stage)
+              ? 'Gathering evidence'
+              : status === 'queued'
+                ? 'Queued'
+                : 'Understanding';
+  const agentName = String(message.thread.agentName ?? 'Scout').trim() || 'Scout';
+  const progress = Number(message.thread.progressPercent);
   return {
     active,
     complete,
     failed,
+    needsInput,
+    agentName,
+	delegatedBy: String(message.thread.delegatedBy ?? '').trim(),
+    phase,
+    progress: Number.isFinite(progress) ? Math.max(0, Math.min(100, progress)) : undefined,
     mode: String(message.thread.mode ?? 'work').trim() || 'work',
     query: String(message.thread.query ?? '').trim() || 'Scout workstream',
     label: status === 'queued'
       ? 'Queued'
       : status === 'running'
-        ? 'Scout is working'
+        ? phase
         : complete
           ? 'Deliverable ready'
+          : needsInput
+            ? 'Needs input'
           : failed
             ? 'Needs attention'
             : status.replaceAll('_', ' '),
@@ -121,7 +147,10 @@ export const MessageBubble = React.memo(function MessageBubble({
   const viaScout = String(message.postedOnBehalfOf ?? '').trim() !== '';
   const sources = Array.isArray(message.sources) ? message.sources : [];
   const longMessage = body.length > 700 || body.split('\n').length > 12;
-  const authorName = scout ? 'Scout' : own ? 'You' : String(message.authorName ?? 'Someone');
+  // A work-reference row is authored by the durable coworker named on the
+  // server-owned ref. `delegatedBy` describes the handoff; it never relabels
+  // Colton/Marvin's output as a generic Scout response.
+  const authorName = workThread?.agentName ?? (scout ? 'Scout' : own ? 'You' : String(message.authorName ?? 'Someone'));
   const inlineBody = longMessage && !scout ? shortenedMessage(body, 560) : body;
   const segments = useMemo(() => parseMessageTextSegments(inlineBody), [inlineBody]);
   const urls = useMemo(() => extractHttpUrls(body), [body]);
@@ -157,14 +186,14 @@ export const MessageBubble = React.memo(function MessageBubble({
       <Animated.View style={[styles.stack, own && styles.stackOwn, translated]}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${own ? 'You' : String(message.authorName ?? (scout ? 'Scout' : 'Someone'))}: ${body || lifecycle?.label || `${files.length} attachment${files.length === 1 ? '' : 's'}`}. ${message.editedAt ? 'Edited. ' : ''}${timeLabel}`}
-          accessibilityHint={workThread?.complete && message.thread?.artifactId ? 'Opens the completed deliverable' : longMessage ? 'Opens the full message. Touch and hold for message actions' : 'Touch and hold for message actions'}
+          accessibilityLabel={`${own ? 'You' : authorName}: ${body || lifecycle?.label || workThread?.label || `${files.length} attachment${files.length === 1 ? '' : 's'}`}. ${message.editedAt ? 'Edited. ' : ''}${timeLabel}`}
+          accessibilityHint={workThread ? 'Opens live work details or the completed deliverable' : longMessage ? 'Opens the full message. Touch and hold for message actions' : 'Touch and hold for message actions'}
           accessibilityActions={[{ name: 'longpress', label: 'Show message actions' }]}
           delayLongPress={messageLongPressDelayMs}
           onAccessibilityAction={(event) => {
             if (event.nativeEvent.actionName === 'longpress') onLongPress?.(message, own);
           }}
-          onPress={workThread?.complete && message.thread?.artifactId ? () => onOpenWorkArtifact?.(message) : longMessage ? () => onOpenLongMessage?.(body, authorName, scout) : undefined}
+          onPress={workThread ? () => onOpenWorkArtifact?.(message) : longMessage ? () => onOpenLongMessage?.(body, authorName, scout) : undefined}
           onLongPress={() => onLongPress?.(message, own)}
           style={[
             styles.bubble,
@@ -176,7 +205,7 @@ export const MessageBubble = React.memo(function MessageBubble({
         >
           {showAuthor && !own ? (
             <Text style={[styles.author, scout && styles.authorScout]}>
-              {scout ? 'Scout' : String(message.authorName ?? 'Someone')}
+		      {authorName}
             </Text>
           ) : null}
 
@@ -222,25 +251,32 @@ export const MessageBubble = React.memo(function MessageBubble({
                   <View style={styles.workIcon}>
                     <SymbolView name="flame.fill" tintColor={colors.emberText} size={13} />
                   </View>
-                  <Text style={styles.workKicker}>Scout · {workThread.mode}</Text>
+			      <Text style={styles.workKicker}>
+			        {workThread.agentName} · {workThread.mode}{workThread.delegatedBy ? ` · via ${workThread.delegatedBy}` : ''}
+			      </Text>
                 </View>
-                <View style={[styles.workStatus, workThread.complete && styles.workStatusComplete, workThread.failed && styles.workStatusFailed]}>
+			    <View style={[styles.workStatus, workThread.complete && styles.workStatusComplete, workThread.needsInput && styles.workStatusNeedsInput, workThread.failed && styles.workStatusFailed]}>
                   {workThread.active ? <ActivityIndicator color={colors.emberText} size="small" /> : null}
                   {!workThread.active ? (
                     <SymbolView
-                      name={workThread.complete ? 'checkmark.circle.fill' : 'exclamationmark.circle.fill'}
-                      tintColor={workThread.failed ? colors.danger : colors.success}
+				      name={workThread.complete ? 'checkmark.circle.fill' : workThread.needsInput ? 'questionmark.circle.fill' : 'exclamationmark.circle.fill'}
+				      tintColor={workThread.failed ? colors.danger : workThread.needsInput ? colors.emberText : colors.success}
                       size={13}
                     />
                   ) : null}
-                  <Text style={[styles.workStatusText, workThread.failed && styles.workStatusTextFailed]}>{workThread.label}</Text>
+				  <Text style={[styles.workStatusText, workThread.needsInput && styles.workStatusTextNeedsInput, workThread.failed && styles.workStatusTextFailed]}>{workThread.label}</Text>
                 </View>
               </View>
               <Text numberOfLines={3} style={styles.workQuery}>{workThread.query}</Text>
+	      {workThread.progress !== undefined ? (
+	        <View style={styles.workProgress}>
+	          <View style={[styles.workProgressFill, { width: `${workThread.progress}%` }]} />
+	        </View>
+	      ) : null}
               <View style={styles.workFoot}>
-                <View style={[styles.workDot, workThread.active && styles.workDotActive, workThread.complete && styles.workDotComplete, workThread.failed && styles.workDotFailed]} />
+			    <View style={[styles.workDot, workThread.active && styles.workDotActive, workThread.complete && styles.workDotComplete, workThread.needsInput && styles.workDotNeedsInput, workThread.failed && styles.workDotFailed]} />
                 <Text style={styles.workFootText}>
-                  {workThread.active ? 'Updates and the finished work will land here' : workThread.complete ? 'Delivered here · Tap to open the report' : 'Open the thread details to inspect the run'}
+                  {workThread.active ? `${workThread.phase} · Tap to view activity` : workThread.complete ? 'Delivered here · Tap to open the report' : 'Open the work details to inspect the run'}
                 </Text>
               </View>
             </View>
@@ -450,14 +486,19 @@ const styles = StyleSheet.create({
   workKicker: { ...type.captionMedium, color: colors.emberText, textTransform: 'capitalize', flexShrink: 1 },
   workStatus: { minHeight: 26, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, borderRadius: radius.full, backgroundColor: colors.emberSoft },
   workStatusComplete: { backgroundColor: colors.liveSoft },
+	workStatusNeedsInput: { backgroundColor: colors.emberSoft },
   workStatusFailed: { backgroundColor: colors.dangerSoft },
   workStatusText: { ...type.captionMedium, color: colors.emberText },
+	workStatusTextNeedsInput: { color: colors.emberText },
   workStatusTextFailed: { color: colors.danger },
   workQuery: { ...type.bodyMedium, color: colors.text1 },
+	workProgress: { height: 4, overflow: 'hidden', borderRadius: radius.full, backgroundColor: colors.surface3 },
+	workProgressFill: { height: '100%', borderRadius: radius.full, backgroundColor: colors.ember },
   workFoot: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingTop: 2 },
   workDot: { width: 7, height: 7, borderRadius: radius.full, backgroundColor: colors.text3 },
   workDotActive: { backgroundColor: colors.ember },
   workDotComplete: { backgroundColor: colors.success },
+	workDotNeedsInput: { backgroundColor: colors.ember },
   workDotFailed: { backgroundColor: colors.danger },
   workFootText: { ...type.caption, color: colors.text3, flex: 1 },
   link: { color: colors.info, textDecorationLine: 'underline' },

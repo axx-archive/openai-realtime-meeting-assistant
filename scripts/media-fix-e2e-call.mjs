@@ -435,11 +435,34 @@ try {
     const style = getComputedStyle(video)
     return { objectFit: style.objectFit, objectPosition: style.objectPosition }
   })
+  const stageViewport = await B.page.evaluate(() => {
+    const scroller = document.scrollingElement
+    const presentation = document.getElementById('presentationTile')
+    const stage = document.getElementById('screenStage')
+    const video = document.getElementById('screenStageVideo')
+    if (!(scroller && presentation && stage && video)) return null
+    const presentationRect = presentation.getBoundingClientRect()
+    const stageRect = stage.getBoundingClientRect()
+    const videoRect = video.getBoundingClientRect()
+    return {
+      clientHeight: scroller.clientHeight,
+      scrollHeight: scroller.scrollHeight,
+      presentationBottom: Math.round(presentationRect.bottom),
+      stageBottom: Math.round(stageRect.bottom),
+      videoBottom: Math.round(videoRect.bottom)
+    }
+  })
   console.log('   B sees screen stage:', bSees, '| C sees screen stage:', cSees)
+  console.log('   B screen-stage viewport:', JSON.stringify(stageViewport))
   ok('B (Safari engine) sees the shared screen on the presentation stage', bSees)
   ok('C (iPhone) sees the shared screen on the presentation stage', cSees)
   ok('Shared content is fully visible and centered', stageFit?.objectFit === 'contain'
     && stageFit?.objectPosition === '50% 50%')
+  ok('Desktop shared-screen stage stays inside one viewport without document scroll',
+    stageViewport?.scrollHeight <= stageViewport?.clientHeight + 2
+      && stageViewport?.presentationBottom <= stageViewport?.clientHeight + 2
+      && stageViewport?.stageBottom <= stageViewport?.presentationBottom + 2
+      && stageViewport?.videoBottom <= stageViewport?.stageBottom + 2)
 
   console.log('\n[4] Screen share SURVIVES renegotiation — D joins WHILE A is sharing')
   // A new participant joining triggers SDP renegotiation on every peer. The old

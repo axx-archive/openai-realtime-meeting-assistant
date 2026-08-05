@@ -30,6 +30,29 @@ func readIndexForLiveSimFixes(t *testing.T) string {
 	return string(raw)
 }
 
+func TestAuthenticatedBootstrapStatePrecedesFirstRender(t *testing.T) {
+	html := readIndexForLiveSimFixes(t)
+	firstRender := strings.Index(html, "      renderLoginMode()")
+	if firstRender == -1 {
+		t.Fatal("initial renderLoginMode call is missing")
+	}
+	for _, declaration := range []string{
+		"let chatChannelActivityPopover = null",
+		"let chatChannelActivityHideTimer = 0",
+		"let chatWorkTimerTicker = 0",
+		"let strideTeamLoadGeneration = 0",
+		"let strideRosterRecords = []",
+		"let strideMarketplaceRecords = []",
+		"let multiDeviceHandoffChip = null",
+		"let deviceOfferChip = null",
+	} {
+		at := strings.Index(html, declaration)
+		if at == -1 || at > firstRender {
+			t.Errorf("bootstrap-owned state %q must be initialized before the first authenticated render", declaration)
+		}
+	}
+}
+
 // Bug 1 — proposal cards dedupe through a module-level node cache keyed by
 // message id (the goalThreadCardNodes pattern): the immediate-reply render and
 // every renderActiveScoutThread rebuild return the SAME node, the rebuild pass
@@ -152,6 +175,9 @@ func TestIndexParkedGoalCardRendersFromThreadRef(t *testing.T) {
 		if !strings.Contains(state, want) {
 			t.Errorf("goalCardStateFor body missing %q", want)
 		}
+	}
+	if errorIndex, gateIndex := strings.Index(state, "goalStatus === 'needs_attention'"), strings.Index(state, "stage === 'approval_required'"); errorIndex < 0 || gateIndex < 0 || errorIndex > gateIndex {
+		t.Fatal("needs-attention/error state must win before the approval gate so failed work cannot expose Approve")
 	}
 	nodeFor := functionBody(html, "function goalCardNodeFor(artifact)")
 	if nodeFor == "" || !strings.Contains(nodeFor, "fetchGoalArtifactById(id)") {

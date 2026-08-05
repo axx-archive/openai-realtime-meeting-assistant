@@ -17,6 +17,10 @@ type RecallPrincipal struct {
 	TenantID  string
 	RoomID    string
 	SittingID string
+	// ThreadID narrows a shared-channel worker to the exact destination
+	// audience. It is server-stamped from durable origin metadata and is never
+	// accepted as continuing authority from a model response.
+	ThreadID string
 	// MediaGeneration is populated only by server-owned, exact-scope readers.
 	// It is never accepted from a browser or tool payload.
 	MediaGeneration uint64
@@ -88,6 +92,9 @@ func recallEntryScopeAllowed(metadata map[string]string, principal RecallPrincip
 		// Known organization/shared vocabularies. Empty is the legacy office
 		// migration value and remains organization-visible.
 	case "private", "owner":
+		if principal.Audience == "shared_channel" || principal.Audience == "shared_room" {
+			return false
+		}
 		viewer := ""
 		if principal.User != nil {
 			viewer = normalizeAccountEmail(principal.User.Email)

@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -18,6 +19,12 @@ import (
 )
 
 const scoutFileContextLimit = 4
+
+// ErrAgentThreadSourceChanged is the provider-admission fence for durable
+// agent work. A context ref is only an audit binding to a server-resolved File;
+// it is never continuing authority. Every runner must resolve the ref again as
+// the original requester immediately before provider admission.
+var ErrAgentThreadSourceChanged = errors.New("agent work source changed or is no longer authorized")
 
 type assistantContextRefsContextKey struct{}
 
@@ -390,19 +397,169 @@ func (app *kanbanBoardApp) readableAssistantFileByName(ctx context.Context, user
 	return assistantFileRecord{}, "", false
 }
 
-func (app *kanbanBoardApp) agentThreadMemory(ctx context.Context, requester string, roomID string, refsValue string, limit int) []meetingMemoryEntry {
-	base := app.delegatedMemorySnapshot(ctx, requester, roomID, limit)
+func (app *kanbanBoardApp) agentThreadRecallPrincipal(requester string, metadata map[string]string) (RecallPrincipal, bool) {
 	user, ok := authenticatedRequester(requester)
 	if !ok {
-		return base
+		return RecallPrincipal{}, false
 	}
 	principal := recallPrincipalForUser(user)
-	if strings.TrimSpace(roomID) != "" {
-		principal = app.recallPrincipalForMemberRoom(user.Email, roomID)
+	switch strings.TrimSpace(metadata["originKind"]) {
+	case agentThreadOriginChannel:
+		threadID := strings.TrimSpace(metadata["originId"])
+		thread, _, err := app.scoutChatThreadByID(user.Email, threadID)
+		if err != nil || scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic || thread.ArchivedAt != "" {
+			return RecallPrincipal{}, false
+		}
+		principal.Audience = "shared_channel"
+		principal.ThreadID = thread.ID
+	case agentThreadOriginRoom:
+		roomID := normalizeRoomID(firstNonEmptyString(metadata["originRoomId"], officeRoomID))
+		principal.Audience = "shared_room"
+		principal.RoomID = roomID
+		principal.SittingID = firstNonEmptyString(strings.TrimSpace(metadata["originMeetingId"]), app.memory.currentMeetingID(roomID))
 	}
+	return principal, true
+}
+
+func (app *kanbanBoardApp) agentThreadMemory(ctx context.Context, requester string, metadata map[string]string, refsValue string, limit int) []meetingMemoryEntry {
+	principal, ok := app.agentThreadRecallPrincipal(requester, metadata)
+	if !ok {
+		return nil
+	}
+	base := app.memorySnapshotForPrincipal(ctx, principal, limit)
 	refCtx := withAssistantContextRefs(ctx, decodeAssistantContextRefs(refsValue))
 	pinned := app.assistantFileContextEntries(refCtx, principal, "")
+	if strings.TrimSpace(metadata["originKind"]) == agentThreadOriginChannel || strings.TrimSpace(metadata["originKind"]) == agentThreadOriginRoom {
+		shared := pinned[:0]
+		for _, entry := range pinned {
+			if app.agentThreadEntryAuthorizedForDestination(ctx, metadata, entry) {
+				shared = append(shared, entry)
+			}
+		}
+		pinned = append([]meetingMemoryEntry(nil), shared...)
+	}
 	return appendUniqueFileContextEntries(pinned, base)
+}
+
+// agentThreadEntryAuthorizedForDestination proves that a selected source can
+// be read by the audience that will receive the completed work. Requester read
+// access is necessary but not sufficient for a shared delivery: a private
+// artifact or project-channel attachment must not be laundered into a broader
+// channel/meeting through an agent prompt.
+func (app *kanbanBoardApp) agentThreadEntryAuthorizedForDestination(ctx context.Context, metadata map[string]string, entry meetingMemoryEntry) bool {
+	originKind := strings.TrimSpace(metadata["originKind"])
+	if originKind != agentThreadOriginChannel && originKind != agentThreadOriginRoom {
+		return true
+	}
+	visibility := strings.ToLower(strings.TrimSpace(entry.Metadata["visibility"]))
+	if visibility == "private" || visibility == "owner" {
+		return false
+	}
+
+	var destinationEmails []string
+	if originKind == agentThreadOriginChannel {
+		threadID := strings.TrimSpace(metadata["originId"])
+		requester := normalizeAccountEmail(metadata["requestedBy"])
+		destination, _, err := app.scoutChatThreadByID(requester, threadID)
+		if err != nil || scoutChatThreadVisibility(destination) != scoutChatVisibilityPublic || destination.ArchivedAt != "" {
+			return false
+		}
+		if scoutChatThreadIsOrganizationPublic(destination) {
+			for _, seed := range seededAccounts {
+				destinationEmails = append(destinationEmails, normalizeAccountEmail(seed.Email))
+			}
+		} else {
+			destinationEmails = scoutChatThreadMemberEmails(destination)
+		}
+		if sourceThreadID := strings.TrimSpace(entry.Metadata["originThreadId"]); sourceThreadID != "" {
+			source, _, sourceErr := app.scoutChatThreadByID(requester, sourceThreadID)
+			if sourceErr != nil || scoutChatThreadVisibility(source) != scoutChatVisibilityPublic || source.ArchivedAt != "" {
+				return false
+			}
+			for _, email := range destinationEmails {
+				if !scoutChatThreadAllowsViewer(source, email) {
+					return false
+				}
+			}
+		}
+	} else {
+		roomID := normalizeRoomID(firstNonEmptyString(metadata["originRoomId"], officeRoomID))
+		for _, name := range app.participantSnapshotForRoom(roomID) {
+			if email := participantEmail(name); email != "" {
+				destinationEmails = append(destinationEmails, email)
+			}
+		}
+		if sourceThreadID := strings.TrimSpace(entry.Metadata["originThreadId"]); sourceThreadID != "" {
+			requester := normalizeAccountEmail(metadata["requestedBy"])
+			source, _, sourceErr := app.scoutChatThreadByID(requester, sourceThreadID)
+			if sourceErr != nil || !scoutChatThreadIsOrganizationPublic(source) || source.ArchivedAt != "" {
+				return false
+			}
+		}
+	}
+
+	if entry.Kind != meetingMemoryKindOSArtifact {
+		return true
+	}
+	header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(entry))
+	if !strings.EqualFold(strings.TrimSpace(header.Visibility), "organization") && len(destinationEmails) == 0 {
+		return false
+	}
+	for _, email := range destinationEmails {
+		user := accountStore().findUser(email)
+		if user == nil || !artifactHeaderAuthorized(ctx, user, ACLReadContent, header) {
+			return false
+		}
+	}
+	return true
+}
+
+// agentThreadProviderContext resolves the exact source bindings carried by a
+// launched work thread under the requester's current tenant/File ACL. It is the
+// single admission seam shared by OpenAI, Anthropic, and selectable Codex
+// runners, so no provider can accidentally receive a stale launch-time source
+// or a different memory snapshot.
+//
+// Missing, deleted, unreadable, tenant-mismatched, or newly private refs all
+// fail closed. The caller turns the returned error into a durable
+// needs-attention work card; it must never silently continue with ambient
+// memory only.
+func (app *kanbanBoardApp) agentThreadProviderContext(ctx context.Context, thread scoutAgentThread) (AgentJobContext, error) {
+	if app == nil {
+		return AgentJobContext{}, fmt.Errorf("%w: assistant is unavailable", ErrAgentThreadSourceChanged)
+	}
+	metadata := thread.Artifact.Metadata
+	requester := firstNonEmptyString(strings.TrimSpace(metadata["requestedBy"]), strings.TrimSpace(metadata["createdBy"]))
+	principal, ok := app.agentThreadRecallPrincipal(requester, metadata)
+	var base []meetingMemoryEntry
+	if ok {
+		base = app.memorySnapshotForPrincipal(ctx, principal, 20)
+	}
+	context := AgentJobContext{Board: app.snapshotState(), Memory: base}
+	refs := decodeAssistantContextRefs(metadata["contextRefs"])
+	sharedOrigin := strings.TrimSpace(metadata["originKind"]) == agentThreadOriginChannel || strings.TrimSpace(metadata["originKind"]) == agentThreadOriginRoom
+	if !ok && (len(refs) > 0 || sharedOrigin) {
+		return AgentJobContext{}, fmt.Errorf("%w: the original requester or destination is no longer authorized; ask them to retry", ErrAgentThreadSourceChanged)
+	}
+	if len(refs) == 0 {
+		return context, nil
+	}
+	if len(refs) > scoutFileContextLimit {
+		return AgentJobContext{}, fmt.Errorf("%w: select no more than %d Files and retry", ErrAgentThreadSourceChanged, scoutFileContextLimit)
+	}
+	pinned := make([]meetingMemoryEntry, 0, len(refs))
+	for _, ref := range refs {
+		entry, readable := app.assistantContextEntryForRef(ctx, principal, ref)
+		if !readable {
+			return AgentJobContext{}, fmt.Errorf("%w: a referenced File is missing, unreadable, or its access was revoked; reselect or reattach the source and retry", ErrAgentThreadSourceChanged)
+		}
+		if !app.agentThreadEntryAuthorizedForDestination(ctx, metadata, entry) {
+			return AgentJobContext{}, fmt.Errorf("%w: a referenced File is not readable by the work's current destination audience; share it there or choose a different source", ErrAgentThreadSourceChanged)
+		}
+		pinned = append(pinned, entry)
+	}
+	context.Memory = appendUniqueFileContextEntries(pinned, base)
+	return context, nil
 }
 
 func (app *kanbanBoardApp) assistantContextRefsReadable(ctx context.Context, user *userAccount, refsValue string) bool {

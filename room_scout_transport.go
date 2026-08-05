@@ -678,10 +678,26 @@ func (app *kanbanBoardApp) roomScoutTools() []map[string]any {
 }
 
 func (app *kanbanBoardApp) roomScoutSessionInstructions(scope RoomScoutScope) string {
+	roster := app.participantSnapshotForRoom(scope.RoomID)
+	people := "No human participant roster is currently available."
+	if len(roster) > 0 {
+		identities := make([]string, 0, len(roster))
+		for _, name := range roster {
+			identity := canonicalRoomActorName(name)
+			if seed, ok := seededAccountForName(identity); ok {
+				identity += " (" + strideRuntimePrincipalForEmail(seed.Email) + ")"
+			}
+			identities = append(identities, identity)
+		}
+		people = "Human roster for this sitting: " + strings.Join(identities, ", ") + "."
+	}
 	return app.sessionInstructions() + "\n\n" + strings.Join([]string{
 		"# Named-room authority",
 		fmt.Sprintf("This provider session is bound by the server to room %q, sitting %q, media generation %d.", scope.RoomID, scope.SittingID, scope.MediaGeneration),
 		"Never infer, select, or change that room from user speech or tool arguments. Recall, recap, recording, proposals, artifacts, and launched work are server-scoped to this sitting.",
+		people,
+		"Treat each human as a separate coworker. Use speaker attribution from the shared meeting transcript and company-visible evidence to understand who said what; never merge one person's statements, preferences, or history into another's.",
+		"A shared room never receives private chats, Settings imports, or private user-profile memory. Do not claim or imply otherwise.",
 		"Tools omitted from this session are intentionally unavailable because their current implementation is office-global or user-private. Do not claim those actions completed.",
 		"# Invited-participant turn taking",
 		"You are a visible participant, not a wake-word utility. For a clear question or request directed to Scout, a request for your perspective, or a natural follow-up after you spoke, call answer_room_question unless a more specific listed tool is needed. Scout or Scott may appear anywhere in the turn and no exact phrase is required. For side conversation between people, background speech, silence, filler, or a turn not directed to you, call do_nothing and remain silent. Prefer staying quiet over interrupting.",
@@ -862,7 +878,13 @@ func (app *kanbanBoardApp) applyRoomScoutToolArgs(ctx context.Context, scope Roo
 		if request == "" {
 			return nil, false, fmt.Errorf("request is required")
 		}
-		return map[string]any{"ok": true, "request": trimForStorage(request, 1000)}, false, nil
+		requester := app.roomScoutCurrentSpeaker(scope)
+		return map[string]any{
+			"ok": true, "request": trimForStorage(request, 1000),
+			"requester":      firstNonEmptyString(requester, "speaker attribution unavailable"),
+			"audience":       app.participantSnapshotForRoom(scope.RoomID),
+			"memoryBoundary": "shared speaker-attributed meeting and ACL-authorized company context only; no private chats, Settings imports, or private user profiles",
+		}, false, nil
 	case "meeting_recap":
 		return app.meetingRecap(args, "", scope.RoomID)
 	case "meeting_interval_recall":
@@ -909,6 +931,27 @@ func (app *kanbanBoardApp) applyRoomScoutToolArgs(ctx context.Context, scope Roo
 		// registry edit cannot accidentally fall through to an office-global tool.
 		return nil, false, fmt.Errorf("named-room Scout has no scoped handler for %q", toolName)
 	}
+}
+
+// roomScoutCurrentSpeaker reads the stable server-side active-speaker state
+// without consuming the transcription attribution FIFO. It lets the Realtime
+// model address the human who invoked Scout while the persisted transcript
+// continues to own final speaker attribution independently.
+func (app *kanbanBoardApp) roomScoutCurrentSpeaker(scope RoomScoutScope) string {
+	if app == nil || !scope.valid() {
+		return ""
+	}
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	state := app.roomLiveLocked(scope.RoomID)
+	if state.mediaGen != scope.MediaGeneration || state.mediaSittingID != strings.TrimSpace(scope.SittingID) {
+		return ""
+	}
+	name := canonicalRoomActorName(state.activeSpeakerName)
+	if name == "" || state.participantCounts[name] < 1 {
+		return ""
+	}
+	return name
 }
 
 func (transport *openAIRoomScoutTransport) noteVoiceTranscript(transcript string) {

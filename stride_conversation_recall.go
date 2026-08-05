@@ -142,7 +142,7 @@ func (app *kanbanBoardApp) strideConversationProjectionPrincipal(principal Recal
 			return "", false, false
 		}
 		projected := strideRuntimePrincipalForEmail(user.Email)
-		return projected, false, projected != ""
+		return projected, principal.Audience == "shared_room", projected != ""
 	}
 	if principal.Audience != "shared_room" || strings.TrimSpace(principal.ServiceID) != "scout-recall" {
 		return "", false, false
@@ -203,6 +203,9 @@ func (app *kanbanBoardApp) authorizedSTRIDEConversationEntries(principal RecallP
 		threadProjection := byThread[thread.ID]
 		if !decoded || len(threadProjection) == 0 || scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic || thread.ArchivedAt != "" ||
 			organizationOnly && !scoutChatThreadIsOrganizationPublic(thread) {
+			continue
+		}
+		if principal.Audience == "shared_channel" && strings.TrimSpace(principal.ThreadID) != thread.ID {
 			continue
 		}
 		if principal.User != nil && !scoutChatThreadAllowsViewer(thread, principal.User.Email) {

@@ -68,10 +68,9 @@ const EMBER_TEXT_LIGHT = hexToRgb('#86290F');
 const TEXT2_ALPHA = 0.87;
 const TEXT3_ALPHA = 0.75;
 const EMBER_SOFT_ALPHA = 0.14;
-// The wordmark's two cuts ARE the icon's two receiving rows, so the mark and
-// the tile beside it are drawn in the same grey.
-const WORDMARK_LIGHT = hexToRgb('#54545C');
-const WORDMARK_DARK = hexToRgb('#77777D');
+// Founder-supplied cuts: black on light; Stride Orange on dark.
+const WORDMARK_LIGHT = hexToRgb('#000000');
+const WORDMARK_DARK = hexToRgb('#FF5A19');
 
 const AA_BODY = 4.5;
 
@@ -153,30 +152,10 @@ test('the accent button clears AA', () => {
   assert.ok(contrast(ON_ACCENT_LIGHT, TEXT1_LIGHT) >= AA_BODY);
 });
 
-/**
- * The wordmark is NEVER orange.
- *
- * AJ, 2026-07-31: "the only orange thing is the ball in motion." In the Strike,
- * orange is custody of energy — the mass that is moving — and the neutral row
- * is everything at rest: the name, the shared context, the company. A wordmark
- * painted orange claims to be in motion, and it is the one thing on screen that
- * never is.
- *
- * So the name takes the receiving row's graphite, and each value IS that
- * appearance's row — the wordmark matches the balls in the tile beside it.
- * This test exists to stop the orange creeping back as "more on-brand".
- */
-test('the wordmark is the receiving row, never the orange', () => {
-  assert.notDeepEqual(WORDMARK_LIGHT, EMBER, 'the wordmark must not be Stride Orange');
-  assert.notDeepEqual(WORDMARK_DARK, EMBER, 'the wordmark must not be Stride Orange');
-  // Neutral: a graphite has no meaningful hue spread. Orange does.
-  for (const [name, c] of [['light', WORDMARK_LIGHT], ['dark', WORDMARK_DARK]] as const) {
-    assert.ok(Math.max(...c) - Math.min(...c) < 24, `the ${name} wordmark must stay neutral, not tinted`);
-  }
-  // And it must out-read the orange it replaced on the ground it sits on.
-  const grey = contrast(WORDMARK_LIGHT, PAPER_50);
-  const orange = contrast(EMBER, PAPER_50);
-  assert.ok(grey > orange, `graphite ${grey.toFixed(2)}:1 must beat orange ${orange.toFixed(2)}:1 on the putty`);
-  assert.ok(grey >= 3, `the wordmark on the ground was ${grey.toFixed(2)}:1`);
-  assert.ok(contrast(WORDMARK_DARK, INK_950) >= 3, 'the wordmark must read on true black too');
+/** Founder override, 2026-08-04: black on light; Stride Orange on dark. */
+test('the wordmark follows the supplied black and orange theme cuts', () => {
+  assert.deepEqual(WORDMARK_LIGHT, [0, 0, 0], 'light mode must use the black wordmark');
+  assert.deepEqual(WORDMARK_DARK, EMBER, 'dark mode must use Stride Orange');
+  assert.ok(contrast(WORDMARK_LIGHT, PAPER_50) >= 3, 'the black wordmark must read on putty');
+  assert.ok(contrast(WORDMARK_DARK, INK_950) >= 3, 'the orange wordmark must read on true black');
 });

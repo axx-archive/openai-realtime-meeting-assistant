@@ -106,6 +106,13 @@ export type ScoutWorkThreadRef = {
   query: string;
   status: string;
   artifactId?: string;
+  agentId?: string;
+  agentName?: string;
+  delegatedBy?: string;
+  currentStage?: string;
+  progressPercent?: number;
+  progressNote?: string;
+  startedAt?: string;
 };
 
 export type ScoutMessage = {
@@ -432,6 +439,13 @@ export type StrideTeamSeat = {
     scope: string;
     summary: string;
     status: string;
+    origin?: string;
+    runId?: string;
+    artifactId?: string;
+    sourceThreadId?: string;
+    sourceRefs?: string[];
+    confidence?: number;
+    expiresAt?: string;
     revision: number;
     createdAt: string;
     updatedAt: string;

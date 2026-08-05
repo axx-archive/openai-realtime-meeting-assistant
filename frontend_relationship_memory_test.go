@@ -14,7 +14,11 @@ func TestFrontendScoutMemoryIsInspectableCorrigibleAndDefaultPrivate(t *testing.
 	html := string(raw)
 	for _, want := range []string{
 		`data-settings-section="scout-memory"`,
-		`What Scout remembers about me`,
+		`What STRIDE remembers about me`,
+		`Help Scout, Colton, and future coworkers understand you as one distinct teammate.`,
+		`1:1 private`,
+		`Shared work`,
+		`Company context`,
 		`turn on private memory`,
 		`learn from repeated patterns · not active yet`,
 		`shared-channel preferences · not active yet`,
