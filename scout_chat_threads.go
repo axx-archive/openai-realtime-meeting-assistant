@@ -912,7 +912,8 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	coworkerProviderFenced := app.strideAgentDirectThreadProviderFenced(thread.ID)
 	coworkerProfile, coworkerProfileAvailable := app.strideAgentDirectThreadContext(thread.ID)
 	coworkerResearchBridge := coworkerProfileAvailable && containsSTRIDEID(coworkerProfile.Capabilities, "deep_research")
-	deferAttachmentDerivation := (coworkerProviderFenced && !coworkerResearchBridge) || (shouldDeferScoutChatAttachmentDerivation(thread, text, files, followUpArtifactID, toolTemplate) && !replyTargetsScout)
+	plainCoworkerThreadReply := coworkerResearchBridge && replyTo != nil && strings.TrimSpace(followUpArtifactID) == "" && strings.TrimSpace(toolTemplate) == ""
+	deferAttachmentDerivation := plainCoworkerThreadReply || (coworkerProviderFenced && !coworkerResearchBridge) || (shouldDeferScoutChatAttachmentDerivation(thread, text, files, followUpArtifactID, toolTemplate) && !replyTargetsScout)
 
 	// Binary attachments (card 085): build the provider-native content once,
 	// then run the bounded derived-text pass BEFORE any commit so file.Text
@@ -1000,6 +1001,24 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			attachmentCommitted = true
 		}
 		return result, intakeErr
+	}
+
+	// The desktop context rail is a nested side conversation, not an implicit
+	// work launcher. A plain reply in a direct coworker thread persists with its
+	// immutable reply ancestry and stops here. Explicit artifact follow-up and
+	// tool-template controls still take their dedicated launch paths below.
+	// This boundary prevents acknowledgements, corrections, and comments from
+	// being misclassified as a fresh Colton research objective.
+	if plainCoworkerThreadReply {
+		saved, commitErr := commitUserMessage(userMessage)
+		if commitErr != nil {
+			return nil, commitErr
+		}
+		response["thread"] = saved
+		response["providerCalls"] = 0
+		response["providerExecutionFenced"] = true
+		response["routing"] = "thread_reply_only"
+		return response, nil
 	}
 
 	// File-dependent asks have a deterministic admission boundary. Seeing a

@@ -132,6 +132,48 @@ func TestDirectResearchCoworkerRequestsMissingInputWithoutLaunchingProvider(t *t
 	}
 }
 
+func TestDirectCoworkerThreadReplyPersistsWithoutLaunchingWork(t *testing.T) {
+	fixture := newSTRIDEProjectAuthorityFixture(t)
+	directThreadID := strideProductAgentDirectThreadPrefix + "colton_plain_reply_test"
+	hireResearchAgentForBridgeTest(t, fixture, "colton-research", directThreadID)
+	thread, _, err := fixture.app.ensureScoutChatThread(directThreadID, fixture.user.Email, fixture.user.Name, "Colton · agent", scoutChatVisibilityPrivate, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := scoutChatMessageRecord{
+		ID: "colton-reply-root", Kind: "message", Role: "user", Text: "Research the Country+Golf membership strategy.",
+		CreatedAt: time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano), AuthorName: fixture.user.Name, AuthorEmail: fixture.user.Email,
+	}
+	if _, err := fixture.app.commitScoutChatThreadMessages(fixture.user.Email, thread.ID, root); err != nil {
+		t.Fatal(err)
+	}
+	previousRunner := startAgentThreadAsync
+	var launches atomic.Int64
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) { launches.Add(1) }
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	response, err := fixture.app.appendScoutChatThreadMessageWithReplyAndTool(
+		context.Background(), fixture.user, thread.ID, "That framing works for me.", nil, "", root.ID, "",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if launches.Load() != 0 || response["providerCalls"] != 0 || response["routing"] != "thread_reply_only" {
+		t.Fatalf("plain nested reply launched coworker work: launches=%d response=%v", launches.Load(), response)
+	}
+	if response["agentThread"] != nil || response["artifact"] != nil || response["answer"] != nil {
+		t.Fatalf("plain nested reply invented work output: %v", response)
+	}
+	saved, ok := response["thread"].(scoutChatThreadRecord)
+	if !ok || len(saved.Messages) != 2 {
+		t.Fatalf("saved thread=%#v", response["thread"])
+	}
+	reply := saved.Messages[1]
+	if reply.ReplyTo == nil || reply.ReplyTo.MessageID != root.ID || reply.ReplyTo.Text != root.Text || reply.Text != "That framing works for me." {
+		t.Fatalf("plain nested reply=%+v", reply)
+	}
+}
+
 func TestDirectResearchRequestNeedsMaterialTopicAndScope(t *testing.T) {
 	for _, vague := range []string{
 		"Hey Colton",
