@@ -10,8 +10,9 @@ Pushing to GitHub does not automatically update the running app because the VPS 
 - Public IP: `146.190.171.224`
 - SSH user: `root`
 - Live hosts: `thebonfire.xyz`, `146.190.171.224.nip.io`
-- VPS app path: `/opt/meetingassist`
-- Compose path: `/opt/meetingassist/deploy/digitalocean`
+- Legacy mutable app path: `/opt/meetingassist` (runtime secrets only; never deploy from this tree)
+- Exact releases path: `/opt/meetingassist-releases/<full-commit-sha>`
+- Active release ledger: `/opt/meetingassist-releases/active-release.json`
 - Backups path: `/opt/meetingassist-backups`
 - Compose service: `meetingassist`
 - Caddy service: `caddy`
@@ -35,31 +36,29 @@ Deploy rsyncs must keep excluding `data/`.
 When asked to deploy this repo to the VPS:
 
 1. Commit and push local changes to `axx/main` if the user asked for a git push.
-2. Back up the current VPS files before replacing them:
+2. Use the exact-release procedure in `deploy/digitalocean/README.md`: prepare a clean,
+   reviewed full commit archive locally, upload it under
+   `/opt/meetingassist-releases/<sha>/`, build only that archive, and activate it through
+   the verified tool retained in the currently active rollback release.
+3. Never rsync application files into `/opt/meetingassist` and never run
+   `docker compose up -d --build` there. That mutable route bypasses the release receipt
+   and makes `active-release.json` disagree with the serving containers.
+4. Before activation, require all of the following to agree:
+   - the ledger's active release directory and receipt;
+   - every running Compose service image ID;
+   - the public `/healthz` and `/readyz` release identity;
+   - the retained rollback bundle and images.
+5. Allow the receipted five-minute first-start window to finish. A container in Docker's
+   `starting` state is not a failed release unless the bounded activation command fails.
+6. After activation, run the retained release verifier and require
+   `verified-local-unsigned` for the exact target commit. Keep the prior release directory
+   and images intact for rollback.
 
-   ```bash
-   ssh root@146.190.171.224 'cd /opt/meetingassist && backup_dir="/opt/meetingassist-backups/$(date +%Y%m%d-%H%M%S)-<reason>" && mkdir -p "$backup_dir" && cp <changed-files> "$backup_dir"/'
-   ```
-
-3. Sync changed files to the VPS:
-
-   ```bash
-   rsync -av <changed-files> root@146.190.171.224:/opt/meetingassist/
-   ```
-
-4. Rebuild and restart the live containers:
-
-   ```bash
-   ssh root@146.190.171.224 'cd /opt/meetingassist/deploy/digitalocean && docker compose up -d --build && docker compose ps'
-   ```
-
-5. Verify the deployed app:
-
-   ```bash
-   curl -fsSI --max-time 20 https://thebonfire.xyz
-   curl -fsS --max-time 20 https://thebonfire.xyz | rg '<expected new code/text>'
-   ssh root@146.190.171.224 'cd /opt/meetingassist/deploy/digitalocean && docker compose logs --tail=80 meetingassist'
-   ```
+If the ledger and serving containers ever disagree, stop the normal activation path. Do
+not switch application images merely to make a stale ledger true, and do not edit
+production data. First identify the exact serving receipt. Reconcile the ledger only after
+the entire already-serving bundle passes the same image, runtime, renderer, Caddy, health,
+and readiness checks as a normal activation; preserve a private copy of the prior ledger.
 
 The VPS does not have Go installed directly, so run `go test ./...` locally before deployment.
-The Docker build compiles the Go binary inside the container image.
+The exact Docker build compiles the Go binary from the reviewed archive inside the image.
