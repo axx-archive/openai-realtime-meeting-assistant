@@ -957,6 +957,21 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// Scout — nobody else can read them, so nobody gets paged into them.
 	mentionsPending := scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic
 	commitUserMessage := func(messages ...scoutChatMessageRecord) (scoutChatThreadRecord, error) {
+		// A response caused by a threaded human reply belongs to that same side
+		// conversation. Persist the immutable ancestry on every immediate Scout
+		// or coworker response so desktop counts/right-rail rendering never have
+		// to infer causality from adjacency. Human messages already carry their
+		// own ReplyTo above; pre-threaded records keep their explicit ancestry.
+		if replyTo != nil {
+			for index := range messages {
+				role := strings.ToLower(strings.TrimSpace(messages[index].Role))
+				if role == "user" || messages[index].ReplyTo != nil {
+					continue
+				}
+				rootRef := *replyTo
+				messages[index].ReplyTo = &rootRef
+			}
+		}
 		saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, messages...)
 		if err == nil {
 			attachmentCommitted = true

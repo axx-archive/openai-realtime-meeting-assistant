@@ -82,6 +82,18 @@ func TestReplyToScoutRequestsMissingPDFInsteadOfRepeatingPromise(t *testing.T) {
 	if !strings.Contains(answer.Text, "Dog Perfect PDF.pdf") || !strings.Contains(answer.Text, "don't have readable contents") {
 		t.Fatalf("answer=%q, want the exact missing dependency", answer.Text)
 	}
+	saved := response["thread"].(scoutChatThreadRecord)
+	if len(saved.Messages) != 4 {
+		t.Fatalf("thread messages=%d, want root, prior Scout turn, human reply, and threaded Scout response", len(saved.Messages))
+	}
+	humanReply := saved.Messages[2]
+	scoutReply := saved.Messages[3]
+	if humanReply.ReplyTo == nil || humanReply.ReplyTo.MessageID != "false-promise" {
+		t.Fatalf("human reply ancestry=%+v", humanReply.ReplyTo)
+	}
+	if scoutReply.ReplyTo == nil || scoutReply.ReplyTo.MessageID != "false-promise" || scoutReply.Role != "scout" {
+		t.Fatalf("Scout reply ancestry=%+v role=%q, want the same durable side conversation", scoutReply.ReplyTo, scoutReply.Role)
+	}
 }
 
 func TestAuthorizedFilesSourceBindsProposalLaunchAndRunningCard(t *testing.T) {

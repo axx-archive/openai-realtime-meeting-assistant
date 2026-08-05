@@ -195,6 +195,79 @@ func TestDesktopThreadReplyKeepsDraftAndOmitsRedundantEmptyState(t *testing.T) {
 	}
 }
 
+func TestDesktopThreadRepliesStayDiscoverableAndAvatarLed(t *testing.T) {
+	html := desktopChatQualityHTML(t)
+	css := desktopChatQualitySection(t, html)
+	for _, want := range []string{
+		"function desktopChatReplyTopology(messages)",
+		"const desktopChatReplyTopologyCache = new WeakMap()",
+		"function renderDesktopMessageContext(thread, root)",
+		"function desktopChatAvatarNode(message, className = 'chat-context-card__avatar')",
+		"fetch('/assistant/chat-participants', { cache: 'no-store' })",
+		"desktopChatParticipantDirectoryViewer !== viewer",
+		"desktopChatParticipantDirectoryGeneration += 1",
+		"desktopChatParticipantDirectoryPromise = null",
+		"const requestViewer = viewer",
+		"const requestGeneration = desktopChatParticipantDirectoryGeneration",
+		"desktopChatParticipantDirectoryViewer !== requestViewer",
+		"desktopChatParticipantDirectoryGeneration !== requestGeneration",
+		"desktopChatParticipantDirectoryPromise === requestPromise",
+		"summary.className = 'desktop-chat-thread-summary'",
+		"openDesktopMessageContext(message, summary)",
+		"openDesktopMessageContext(message, quote)",
+		"if (chatContextState.mode === 'thread')",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("desktop reply discovery contract missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		"#chatTool .desktop-chat-thread-summary",
+		"#chatTool .desktop-chat-thread-summary__avatars",
+		"#chatTool .chat-context-card__avatar",
+		"grid-template-columns: 34px minmax(0, 1fr);",
+		"min-height: 40px;",
+		"transform: scale(0.96);",
+		"font-variant-numeric: tabular-nums;",
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("desktop reply visual contract missing %q", want)
+		}
+	}
+	eventBody := functionBody(html, "function handleChatThreadEvent(payload)")
+	if strings.Contains(eventBody, "messages.push(message)") || strings.Contains(eventBody, "messages[messageIndex] = message") {
+		t.Fatal("live chat events must replace the messages array so cached reply topology cannot go stale")
+	}
+	for _, want := range []string{"existing.messages = [...messages, message]", "existing.messages = messages.map("} {
+		if !strings.Contains(eventBody, want) {
+			t.Errorf("live reply invalidation contract missing %q", want)
+		}
+	}
+}
+
+func TestDesktopParticipantDirectoryDiscardsOverlappingViewerResponse(t *testing.T) {
+	html := desktopChatQualityHTML(t)
+	body := functionBody(html, "function ensureDesktopChatParticipantDirectory()")
+	for _, want := range []string{
+		"desktopChatParticipantDirectoryGeneration += 1",
+		"desktopChatParticipantDirectoryPromise = null",
+		"const requestViewer = viewer",
+		"const requestGeneration = desktopChatParticipantDirectoryGeneration",
+		"desktopChatParticipantDirectoryViewer !== requestViewer",
+		"desktopChatParticipantDirectoryGeneration !== requestGeneration",
+		"desktopChatParticipantDirectoryPromise === requestPromise",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("participant-directory account-race guard missing %q", want)
+		}
+	}
+	staleGuard := strings.Index(body, "desktopChatParticipantDirectoryViewer !== requestViewer")
+	populate := strings.Index(body, "desktopChatParticipantDirectory.set(email, participant)")
+	if staleGuard < 0 || populate < 0 || staleGuard > populate {
+		t.Fatal("a stale viewer response must be rejected before it can populate the avatar directory")
+	}
+}
+
 func TestPendingAttachmentChipCannotOverflowComposer(t *testing.T) {
 	html := desktopChatQualityHTML(t)
 	for _, want := range []string{

@@ -11503,6 +11503,10 @@
           -webkit-backdrop-filter: blur(18px);
         }
 
+        #chatTool .chat-context-rail:focus {
+          outline: none;
+        }
+
         #chatTool .chat-context-rail__heading {
           flex: 1;
           min-width: 0;
@@ -11607,6 +11611,90 @@
           font: var(--type-label);
           letter-spacing: var(--track-label);
           font-variant-numeric: tabular-nums;
+        }
+
+        #chatTool .chat-context-card--message {
+          display: grid;
+          grid-template-columns: 34px minmax(0, 1fr);
+          align-items: start;
+          gap: 10px;
+          padding: 0;
+          border-radius: 0;
+          background: transparent;
+          box-shadow: none;
+        }
+
+        #chatTool .chat-context-card--message + .chat-context-card--message {
+          margin-top: 16px;
+        }
+
+        #chatTool .chat-context-card--message[data-root="true"] {
+          margin-bottom: 18px;
+          padding-bottom: 18px;
+          box-shadow: 0 1px 0 var(--line-1);
+        }
+
+        #chatTool .chat-context-card__avatar {
+          width: 34px;
+          height: 34px;
+          display: grid;
+          place-items: center;
+          border-radius: 12px;
+          background: var(--surface-3);
+          color: var(--text-1);
+          font: 650 11px/1 var(--font-sans);
+          box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+          overflow: hidden;
+        }
+
+        :root[data-theme="dark"] #chatTool .chat-context-card__avatar {
+          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+        }
+
+        #chatTool .chat-context-card__avatar img {
+          width: 100%;
+          height: 100%;
+          display: block;
+          object-fit: cover;
+          outline: 1px solid rgba(0, 0, 0, 0.1);
+          outline-offset: -1px;
+        }
+
+        :root[data-theme="dark"] #chatTool .chat-context-card__avatar img {
+          outline-color: rgba(255, 255, 255, 0.1);
+        }
+
+        #chatTool .chat-context-card__content {
+          min-width: 0;
+          display: grid;
+          gap: 5px;
+        }
+
+        #chatTool .chat-context-card__identity {
+          display: flex;
+          align-items: baseline;
+          gap: 7px;
+          min-width: 0;
+        }
+
+        #chatTool .chat-context-card--message .chat-context-card__author,
+        #chatTool .chat-context-card--message .chat-context-card__meta {
+          margin: 0;
+        }
+
+        #chatTool .chat-context-card--message .chat-context-card__meta {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        #chatTool .chat-context-card--message .chat-context-card__body {
+          width: fit-content;
+          max-width: 100%;
+          padding: 10px 12px;
+          border-radius: 4px 15px 15px 15px;
+          background: var(--surface-2);
+          box-shadow: 0 0 0 1px var(--line-1), 0 5px 16px rgba(0, 0, 0, 0.045);
         }
 
         #chatTool .chat-context-worklog {
@@ -12147,6 +12235,104 @@
           text-overflow: ellipsis;
           white-space: nowrap;
           font: var(--type-caption);
+        }
+
+        #chatTool .desktop-chat-thread-summary {
+          order: 5;
+          align-self: flex-start;
+          min-height: 40px;
+          display: inline-flex;
+          align-items: center;
+          gap: 10px;
+          max-width: min(420px, 100%);
+          padding: 4px 11px 4px 5px;
+          border: 0;
+          border-radius: var(--r-full);
+          background: transparent;
+          color: var(--text-2);
+          text-align: left;
+          cursor: pointer;
+          transition-property: color, background-color, transform;
+          transition-duration: var(--dur-fast);
+          transition-timing-function: var(--ease);
+        }
+
+        #chatTool .desktop-chat-thread-summary:hover {
+          color: var(--text-1);
+          background: var(--surface-3);
+        }
+
+        #chatTool .desktop-chat-thread-summary:active {
+          transform: scale(0.96);
+        }
+
+        #chatTool .desktop-chat-thread-summary:focus-visible {
+          outline: 2px solid var(--ring);
+          outline-offset: 2px;
+        }
+
+        #chatTool .desktop-chat-thread-summary__avatars {
+          min-width: 34px;
+          display: inline-flex;
+          align-items: center;
+          padding-left: 2px;
+        }
+
+        #chatTool .desktop-chat-thread-summary__avatar {
+          width: 26px;
+          height: 26px;
+          display: grid;
+          place-items: center;
+          margin-left: -6px;
+          border-radius: 9px;
+          background: var(--surface-2);
+          color: var(--text-1);
+          font: 650 9px/1 var(--font-sans);
+          box-shadow: 0 0 0 2px var(--bg-app), inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+          overflow: hidden;
+        }
+
+        :root[data-theme="dark"] #chatTool .desktop-chat-thread-summary__avatar {
+          box-shadow: 0 0 0 2px var(--bg-app), inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+        }
+
+        #chatTool .desktop-chat-thread-summary__avatar:first-child {
+          margin-left: 0;
+        }
+
+        #chatTool .desktop-chat-thread-summary__avatar img {
+          width: 100%;
+          height: 100%;
+          display: block;
+          object-fit: cover;
+          outline: 1px solid rgba(0, 0, 0, 0.1);
+          outline-offset: -1px;
+        }
+
+        :root[data-theme="dark"] #chatTool .desktop-chat-thread-summary__avatar img {
+          outline-color: rgba(255, 255, 255, 0.1);
+        }
+
+        #chatTool .desktop-chat-thread-summary__copy {
+          min-width: 0;
+          display: grid;
+          gap: 1px;
+        }
+
+        #chatTool .desktop-chat-thread-summary__count {
+          color: currentColor;
+          font: 600 12px/1.25 var(--font-sans);
+          font-variant-numeric: tabular-nums;
+        }
+
+        #chatTool .desktop-chat-thread-summary__latest {
+          overflow: hidden;
+          color: var(--text-3);
+          font: var(--type-label);
+          letter-spacing: var(--track-label);
+          font-variant-numeric: tabular-nums;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
         #chatTool .desktop-chat-state {
@@ -13043,6 +13229,8 @@
         #chatTool .desktop-chat-actions,
         #chatTool .desktop-chat-link-preview,
         #chatTool .desktop-chat-reply,
+        #chatTool .desktop-chat-thread-summary,
+        #chatTool .desktop-chat-thread-summary__avatar,
         #chatTool .desktop-chat-source,
         #chatTool .desktop-chat-reactions button,
         #chatTool .desktop-chat-actions button,
@@ -13364,20 +13552,20 @@
         100% { box-shadow: 0 0 0 1.5px var(--bg-app); }
       }
 
-      /* chrome glass, applied once on the window; the list items inside stay
-         flat surface-2. Sits beside the rail on desktop. */
+      /* The desktop window grows from the bell that opened it. JavaScript
+         measures that trigger and writes the clamped viewport coordinates;
+         the fallbacks keep the panel usable before the first measurement. */
       .notification-panel {
         position: fixed;
-        left: max(92px, calc(env(safe-area-inset-left) + 92px));
-        top: 50%;
-        transform: translateY(-50%);
+        left: var(--notification-panel-left, max(92px, calc(env(safe-area-inset-left) + 92px)));
+        bottom: var(--notification-panel-bottom, 24px);
         z-index: 1150; /* below toasts (1400) and card-detail (1200) */
-        width: min(380px, calc(100vw - 108px));
-        max-height: min(560px, calc(100svh - 48px));
+        width: min(404px, calc(100vw - 108px));
+        max-height: min(620px, calc(100svh - 32px));
         display: flex;
         flex-direction: column;
-        gap: var(--sp-3);
-        padding: 16px;
+        gap: 12px;
+        padding: 14px;
         border: 1px solid var(--glass-border);
         border-radius: var(--r-2xl);
         background: var(--glass-chrome);
@@ -13385,28 +13573,40 @@
         -webkit-backdrop-filter: var(--glass-blur);
         box-shadow: var(--glass-highlight), var(--glass-shadow);
         animation: bf-islandin var(--dur-med) var(--ease);
-        transform-origin: left center;
+        transform-origin: left bottom;
       }
 
       .notification-panel[hidden] {
         display: none;
       }
 
-      /* header rhythm: title anchors left; 'mark all read' + close ride as a
-         tight right-aligned group */
       .notification-panel__head {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: var(--sp-2);
+        gap: 12px;
+        min-height: 44px;
+        padding-left: 4px;
+      }
+
+      .notification-panel__heading {
+        flex: 1;
+        min-width: 0;
+        display: grid;
+        gap: 2px;
       }
 
       .notification-panel__title {
-        flex: 1;
-        min-width: 0;
+        color: var(--text-1);
+        font: 650 16px/1.25 var(--font-sans);
+        letter-spacing: -0.01em;
+      }
+
+      .notification-panel__summary {
+        color: var(--text-3);
         font: var(--type-label);
         letter-spacing: var(--track-label);
-        color: var(--text-2);
+        font-variant-numeric: tabular-nums;
       }
 
       .notification-panel__actions {
@@ -13416,80 +13616,157 @@
         gap: 2px;
       }
 
-      .notification-panel__mark {
-        min-height: var(--hit-min);
-      }
-
+      .notification-panel__action,
       .notification-panel__close {
-        width: var(--hit-min);
-        height: var(--hit-min);
+        width: 44px;
+        height: 44px;
+        display: inline-grid;
+        place-items: center;
         padding: 0;
         flex: none;
+        border: 0;
+        border-radius: 14px;
+        background: transparent;
+        color: var(--text-2);
+        cursor: pointer;
+        transition-property: color, background-color, transform, opacity;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
+      }
+
+      .notification-panel__action:hover,
+      .notification-panel__close:hover {
+        color: var(--text-1);
+        background: var(--surface-3);
+      }
+
+      .notification-panel__action:active,
+      .notification-panel__close:active {
+        transform: scale(0.96);
+      }
+
+      .notification-panel__action:focus-visible,
+      .notification-panel__close:focus-visible {
+        outline: 2px solid var(--ring);
+        outline-offset: 2px;
+      }
+
+      .notification-panel__action:disabled {
+        opacity: 0.32;
+        cursor: default;
+      }
+
+      .notification-panel__action:disabled:active {
+        transform: none;
       }
 
       .notification-panel__list {
         display: grid;
-        gap: var(--sp-2);
+        grid-auto-rows: max-content;
+        align-content: start;
+        gap: 2px;
         overflow-y: auto;
         min-height: 0;
+        padding: 4px;
+        border-radius: calc(var(--r-xl) + 2px);
+        background: color-mix(in srgb, var(--surface-2) 76%, transparent);
+        box-shadow: inset 0 0 0 1px var(--line-1);
         overscroll-behavior: contain;
+        scrollbar-gutter: stable;
       }
 
       .notification-panel__empty {
         margin: 0;
-        padding: var(--sp-4) 0;
+        padding: 42px 18px 46px;
         text-align: center;
-        font: var(--type-label);
-        letter-spacing: var(--track-label);
+        color: var(--text-2);
+      }
+
+      .notification-panel__empty-mark {
+        width: 38px;
+        height: 38px;
+        display: grid;
+        place-items: center;
+        margin: 0 auto 12px;
+        border-radius: 13px;
+        background: var(--surface-3);
+        color: var(--text-2);
+        box-shadow: inset 0 0 0 1px var(--line-1);
+      }
+
+      .notification-panel__empty-title {
+        display: block;
+        color: var(--text-1);
+        font: 600 14px/1.35 var(--font-sans);
+      }
+
+      .notification-panel__empty-copy {
+        display: block;
+        margin-top: 4px;
         color: var(--text-3);
+        font: var(--type-caption);
       }
 
       .notification-panel__empty[hidden] {
         display: none;
       }
 
-      /* items follow the .assistant-message flat recipe; unread earns the ink
-         dot + full-ink medium text, never a hue. Body type reads at the
-         message tier (--type-body-sm), not caption size — the bell is prose,
-         not chrome. */
       .notification-item {
-        display: flex;
-        align-items: flex-start;
+        position: relative;
+        display: grid;
+        grid-template-columns: 38px minmax(0, 1fr) auto;
+        align-items: start;
         gap: 10px;
         width: 100%;
-        min-height: var(--hit-min);
-        padding: var(--sp-2) var(--sp-3);
-        text-align: left;
-        border: 1px solid var(--line-1);
-        border-radius: var(--r-md);
-        background: var(--surface-2);
+        min-height: 68px;
+        padding: 10px;
+        border-radius: var(--r-xl);
+        background: transparent;
         color: var(--text-2);
         font: var(--type-body-sm);
-        cursor: pointer;
-        transition:
-          background var(--dur-fast) var(--ease),
-          border-color var(--dur-fast) var(--ease),
-          transform var(--dur-fast) var(--ease);
+        transition-property: background-color, box-shadow;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
       }
 
-      .notification-item:hover {
+      .notification-item:hover,
+      .notification-item:focus-within {
+        background: color-mix(in srgb, var(--surface-3) 88%, transparent);
+        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.07);
+      }
+
+      .notification-item__identity {
+        position: relative;
+        width: 38px;
+        height: 38px;
+        display: grid;
+        place-items: center;
+        border-radius: 13px;
         background: var(--surface-3);
-        border-color: var(--line-2);
+        color: var(--text-1);
+        font: 650 12px/1 var(--font-sans);
+        letter-spacing: -0.01em;
+        box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+        overflow: visible;
       }
 
-      .notification-item:active {
-        transform: scale(var(--press-scale));
+      :root[data-theme="dark"] .notification-item__identity {
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
       }
 
       .notification-item__dot {
-        flex: none;
+        position: absolute;
+        right: -1px;
+        bottom: -1px;
         width: 7px;
         height: 7px;
-        margin-top: 7px; /* optically centered on the first body line */
         border-radius: var(--r-full);
         background: var(--accent);
+        box-shadow: 0 0 0 2px var(--surface-2);
         opacity: 0;
-        transition: opacity var(--dur-med) var(--ease);
+        transition-property: opacity;
+        transition-duration: var(--dur-med);
+        transition-timing-function: var(--ease);
       }
 
       .notification-item.is-unread {
@@ -13500,46 +13777,141 @@
         opacity: 1;
       }
 
-      .notification-item.is-unread .notification-item__text {
-        font-weight: 500;
+      .notification-item__body {
+        min-width: 0;
+        min-height: 44px;
+        display: grid;
+        align-content: center;
+        gap: 3px;
+        padding: 1px 0;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        text-align: left;
+        cursor: pointer;
       }
 
-      .notification-item__body {
-        flex: 1;
-        display: grid;
-        gap: 4px;
+      .notification-item__body:active {
+        transform: scale(0.96);
+      }
+
+      .notification-item__body:focus-visible {
+        outline: 2px solid var(--ring);
+        outline-offset: 3px;
+        border-radius: var(--r-md);
+      }
+
+      .notification-item__headline {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
         min-width: 0;
       }
 
-      /* long bodies (chat lines, recap headlines) clamp to three lines; break
-         anywhere so an id or URL can never push the row wide */
+      .notification-item__author {
+        overflow: hidden;
+        color: var(--text-1);
+        font: 600 12.5px/1.3 var(--font-sans);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .notification-item__context {
+        overflow: hidden;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
       .notification-item__text {
         display: -webkit-box;
-        -webkit-line-clamp: 3;
+        -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
         overflow: hidden;
         overflow-wrap: anywhere;
+        color: var(--text-2);
+        font: var(--type-body-sm);
+        text-wrap: pretty;
       }
 
       .notification-item__meta {
+        margin-top: 1px;
         font: var(--type-label);
         letter-spacing: var(--track-label);
         color: var(--text-3);
         font-variant-numeric: tabular-nums;
       }
 
-      /* Wave 8: an approval notification lays its body + one-tap actions in a
-         column (the row is a div, not a button, so actions can nest). */
-      .notification-item--approval {
-        flex-wrap: wrap;
-        cursor: default;
+      .notification-item__controls {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        margin: -3px -3px 0 0;
+        opacity: 0;
+        pointer-events: none;
+        transform: translateX(3px);
+        transition-property: opacity, transform;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
       }
+
+      .notification-item:hover .notification-item__controls,
+      .notification-item:focus-within .notification-item__controls {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateX(0);
+      }
+
+      .notification-item__control {
+        width: 40px;
+        height: 40px;
+        display: inline-grid;
+        place-items: center;
+        padding: 0;
+        border: 0;
+        border-radius: 12px;
+        background: transparent;
+        color: var(--text-3);
+        cursor: pointer;
+        transition-property: color, background-color, transform;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
+      }
+
+      .notification-item__control:hover {
+        color: var(--text-1);
+        background: var(--surface-1);
+      }
+
+      .notification-item__control:active {
+        transform: scale(0.96);
+      }
+
+      .notification-item__control:focus-visible {
+        outline: 2px solid var(--ring);
+        outline-offset: 1px;
+      }
+
+      .notification-item__body,
+      .notification-item__control {
+        transition-property: color, background-color, transform;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
+      }
+
+      .notification-item--approval,
+      .notification-item--survey {
+        grid-template-rows: auto auto;
+      }
+
       .notification-item__actions {
+        grid-column: 2 / -1;
         display: flex;
         gap: 8px;
         width: 100%;
-        margin-top: 8px;
-        padding-left: 18px; /* clear the status dot's column */
+        margin-top: 2px;
       }
       .notification-item__actions .approval__btn { flex: 1; min-height: var(--hit-min); }
 
@@ -13553,6 +13925,18 @@
           transform: none;
           bottom: calc(max(12px, env(safe-area-inset-bottom)) + 72px);
           max-height: min(60svh, 480px);
+        }
+
+        .notification-panel__action,
+        .notification-panel__close {
+          width: 40px;
+          height: 40px;
+        }
+
+        .notification-item__controls {
+          opacity: 1;
+          pointer-events: auto;
+          transform: none;
         }
       }
 
@@ -24650,8 +25034,8 @@
       .survey-chips__thanks { font: var(--type-caption); color: var(--text-3); }
       /* the goal-verified notification row nests the chips the way approvals
          nest their one-tap actions (div row, actions clear the dot column) */
-      .notification-item--survey { flex-wrap: wrap; cursor: default; }
-      .notification-item--survey .survey-chips { width: 100%; margin-top: 8px; padding-left: 18px; }
+      .notification-item--survey { cursor: default; }
+      .notification-item--survey .survey-chips { grid-column: 2 / -1; width: 100%; margin-top: 8px; padding-left: 0; }
 
       /* ---------- §7 the artifact stage: deliverables open IN the chat ----------
          A right-side stage over the feed — the deliverable is the payoff of the
@@ -26662,7 +27046,7 @@
             <p id="scoutChatBrainNote" class="scout-chat-brain-note">private · not shared with the company brain — use "Feed the brain" to teach the office</p>
           </div>
           <div id="chatContextResize" class="chat-workspace-resizer chat-workspace-resizer--context" role="separator" aria-label="Resize context panel" aria-orientation="vertical" aria-valuemin="360" aria-valuemax="640" aria-valuenow="440" tabindex="0" hidden></div>
-          <aside id="chatContextRail" class="chat-context-rail" aria-label="Conversation context" aria-live="polite" hidden>
+          <aside id="chatContextRail" class="chat-context-rail" aria-label="Conversation context" aria-live="polite" tabindex="-1" hidden>
             <header class="chat-context-rail__head">
               <div class="chat-context-rail__heading">
                 <span id="chatContextKicker" class="chat-context-rail__kicker">context</span>
@@ -27562,17 +27946,30 @@
     <!-- notification center — durable tier above toasts; opened from the rail bell -->
     <section id="notificationPanel" class="notification-panel" role="dialog" aria-label="Notifications" hidden>
       <header class="notification-panel__head">
-        <span class="notification-panel__title">notifications</span>
+        <span class="notification-panel__heading">
+          <span class="notification-panel__title">Notifications</span>
+          <span id="notificationSummary" class="notification-panel__summary">No unread notifications</span>
+        </span>
         <span class="notification-panel__actions">
-          <button id="notificationMarkAll" class="btn btn--text notification-panel__mark" type="button">mark all read</button>
-          <button id="notificationClearAll" class="btn btn--text notification-panel__mark" type="button">clear all</button>
-          <button id="notificationClose" class="btn btn--ghost notification-panel__close" type="button" aria-label="Close notifications">
+          <button id="notificationMarkAll" class="notification-panel__action" type="button" aria-label="Mark all notifications read" title="Mark all read">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m2 12 5 5L17 7"></path><path d="m12 17 10-10"></path></svg>
+          </button>
+          <button id="notificationClearAll" class="notification-panel__action" type="button" aria-label="Clear all notifications" title="Clear all">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="m19 6-1 14H6L5 6"></path><path d="M10 11v5"></path><path d="M14 11v5"></path></svg>
+          </button>
+          <button id="notificationClose" class="notification-panel__close" type="button" aria-label="Close notifications" title="Close">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
           </button>
         </span>
       </header>
       <div id="notificationList" class="notification-panel__list" role="list"></div>
-      <p id="notificationEmpty" class="notification-panel__empty">nothing yet</p>
+      <p id="notificationEmpty" class="notification-panel__empty">
+        <span class="notification-panel__empty-mark" aria-hidden="true">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"></path></svg>
+        </span>
+        <span class="notification-panel__empty-title">You’re all caught up</span>
+        <span class="notification-panel__empty-copy">New activity will show up here.</span>
+      </p>
     </section>
     <div id="commentPreviewRegion" class="comment-preview-region" aria-live="polite" aria-atomic="true"></div>
     <div id="cardDetailRegion" class="card-detail-region"></div>
@@ -28544,6 +28941,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const notificationPanel = document.getElementById('notificationPanel')
       const notificationList = document.getElementById('notificationList')
       const notificationEmpty = document.getElementById('notificationEmpty')
+      const notificationSummary = document.getElementById('notificationSummary')
       const notificationMarkAll = document.getElementById('notificationMarkAll')
       const notificationClearAll = document.getElementById('notificationClearAll')
       const notificationClose = document.getElementById('notificationClose')
@@ -29881,7 +30279,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // mobile header (design §1): back chevron leaves the intel sub-screen,
       // the bell opens notifications, the avatar opens the settings sheet
       topbarBackButton?.addEventListener('click', () => setActiveTool('office'))
-      topbarBellButton?.addEventListener('click', () => setNotificationPanelOpen(notificationPanel.hidden))
+      topbarBellButton?.addEventListener('click', () => setNotificationPanelOpen(notificationPanel.hidden, topbarBellButton))
       topbarMobileAccountButton?.addEventListener('click', () => openSettings({ section: 'profile', allowLocked: true, restoreFocusTo: topbarMobileAccountButton }))
       // office → intelligence entry card (D14)
       officeIntelCard?.addEventListener('click', () => setActiveTool('artifacts'))
@@ -30135,8 +30533,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
       })
       roomChatToggle.addEventListener('click', () => setRoomChatOpen(!isRoomChatOpen()))
       roomChatClose.addEventListener('click', () => setRoomChatOpen(false))
-      notificationBell.addEventListener('click', () => setNotificationPanelOpen(notificationPanel.hidden))
-      notificationClose.addEventListener('click', () => setNotificationPanelOpen(false))
+      notificationBell.addEventListener('click', () => setNotificationPanelOpen(notificationPanel.hidden, notificationBell))
+      notificationClose.addEventListener('click', () => setNotificationPanelOpen(false, null, { restoreFocus: true }))
       notificationMarkAll.addEventListener('click', markAllNotificationsRead)
       notificationClearAll.addEventListener('click', clearAllNotifications)
       document.querySelectorAll('[data-scout-query]').forEach(button => {
@@ -30148,6 +30546,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       window.addEventListener('beforeunload', leaveRoom)
       window.addEventListener('resize', () => {
         window.requestAnimationFrame(updateMobileRoomStageMetrics)
+        window.requestAnimationFrame(positionNotificationPanel)
         scheduleAuxiliaryVideoPlaybackRepair('viewport resize', 160)
         schedulePrimaryVideoPlaybackRepair('viewport resize', 180)
         // The Stride Signal needs nothing on resize: the aperture is drawn in
@@ -30242,8 +30641,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             return
           }
           if (!notificationPanel.hidden) {
-            setNotificationPanelOpen(false)
-            notificationBell.focus()
+            setNotificationPanelOpen(false, null, { restoreFocus: true })
             return
           }
           if (isRoomChatOpen()) {
@@ -47594,13 +47992,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const messages = Array.isArray(existing.messages) ? existing.messages : []
 	          const messageIndex = messages.findIndex(candidate => String(candidate?.id || '') === String(message.id))
 	          if (messageIndex === -1) {
-	            messages.push(message)
+	            existing.messages = [...messages, message]
 	          } else {
 	            // A re-broadcast of an existing message (e.g. a thread ref whose
 	            // status just flipped to complete) replaces it in place.
-	            messages[messageIndex] = message
+	            existing.messages = messages.map((candidate, index) => index === messageIndex ? message : candidate)
 	          }
-	          existing.messages = messages
 	        }
 	        upsertScoutChatThread(existing, { select: false })
 	        if (activeScoutThreadId === id) {
@@ -50201,7 +50598,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           tool: String(payload.tool || ''),
           artifactId: String(payload.artifactId || ''),
           threadId: String(payload.threadId || ''),
+          messageId: String(payload.messageId || ''),
+          threadName: String(payload.threadName || ''),
+          authorName: String(payload.authorName || ''),
+          messagePreview: String(payload.messagePreview || ''),
           proposalId: String(payload.proposalId || ''),
+          redactedAt: String(payload.redactedAt || ''),
           createdAt: String(payload.createdAt || new Date().toISOString()),
           read: Boolean(payload.read)
         }
@@ -50256,57 +50658,104 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function notificationItemNode(entry) {
-        // An approval notification carries one-tap actions, so its row is a div
-        // (a button cannot legally nest the action buttons); every other row
-        // stays a single clickable button.
         const isApproval = entry.tool === 'approval' && Boolean(entry.artifactId)
-        // a goal-verified milestone carries the micro-survey chips (§5), so its
-        // row is a div for the same button-nesting reason approvals are
         const isGoalVerified = !isApproval && entry.kind === 'agent' && Boolean(entry.artifactId) && entry.text.startsWith('Goal verified')
-        const item = document.createElement(isApproval || isGoalVerified ? 'div' : 'button')
-        if (!isApproval && !isGoalVerified) item.type = 'button'
+        const pendingProposal = Boolean(entry.proposalId) && !entry.read
+        const item = document.createElement('article')
         item.className = `notification-item${entry.read ? '' : ' is-unread'}${isApproval ? ' notification-item--approval' : ''}${isGoalVerified ? ' notification-item--survey' : ''}`
         item.setAttribute('role', 'listitem')
 
+        const identity = document.createElement('span')
+        identity.className = 'notification-item__identity'
+        identity.setAttribute('aria-hidden', 'true')
+        const author = String(entry.authorName || '').trim()
+        const identityLabel = author
+          ? chatPeerInitials(author)
+          : entry.kind === 'agent' ? '✦'
+            : entry.kind === 'alert' ? '!'
+              : entry.kind === 'task' ? '✓'
+                : entry.kind === 'chat' ? '#'
+                  : '·'
+        identity.textContent = identityLabel
         const dot = document.createElement('span')
         dot.className = 'notification-item__dot'
         dot.setAttribute('aria-hidden', 'true')
+        identity.appendChild(dot)
 
-        const body = document.createElement('span')
+        const body = document.createElement('button')
+        body.type = 'button'
         body.className = 'notification-item__body'
+        const headline = document.createElement('span')
+        headline.className = 'notification-item__headline'
+        const authorLabel = document.createElement('span')
+        authorLabel.className = 'notification-item__author'
+        authorLabel.textContent = author || ({ agent: 'Scout', alert: 'Needs attention', task: 'Work update', chat: 'New message', info: 'Update' }[entry.kind] || 'Update')
+        const context = document.createElement('span')
+        context.className = 'notification-item__context'
+        const threadLabel = String(entry.threadName || '').trim()
+        context.textContent = threadLabel ? `#${threadLabel.replace(/^#/, '')}` : String(entry.kind || 'info').replaceAll('_', ' ')
+        headline.append(authorLabel, context)
         const text = document.createElement('span')
         text.className = 'notification-item__text'
-        text.textContent = entry.text
+        text.textContent = entry.redactedAt ? 'This private notification has expired.' : (entry.messagePreview || entry.text)
         const meta = document.createElement('span')
         meta.className = 'notification-item__meta'
-        // Consistent order (kind, then relative time); alert is the only kind
-        // that earns a leading glyph so a real alert stays scannable — a
-        // monochrome marker, never a hue (the notification mono-canon).
-        const kindGlyph = entry.kind === 'alert' ? '! ' : ''
-        meta.textContent = `${kindGlyph}${entry.kind} · ${scoutChatTimeLabel(entry.createdAt)}`
-        body.append(text, meta)
+        meta.textContent = scoutChatTimeLabel(entry.createdAt)
+        body.append(headline, text, meta)
+        body.addEventListener('click', () => {
+          if (isApproval) {
+            markNotificationsRead([entry.id])
+            openBrief()
+          } else {
+            openNotificationEntry(entry)
+          }
+        })
 
-        item.append(dot, body)
+        item.append(identity, body)
+        const controls = document.createElement('span')
+        controls.className = 'notification-item__controls'
+        if (!entry.read && !pendingProposal) {
+          controls.appendChild(notificationItemControl('read', 'Mark notification read', () => markNotificationsRead([entry.id])))
+        }
+        if (!pendingProposal) {
+          controls.appendChild(notificationItemControl('dismiss', 'Dismiss notification', () => clearNotifications([entry.id])))
+        }
+        if (controls.childNodes.length) item.appendChild(controls)
+
         if (isApproval) {
-          // the text opens the full Brief; the buttons act in place.
-          body.style.cursor = 'pointer'
-          body.addEventListener('click', () => { markNotificationsRead([entry.id]); openBrief() })
           item.append(notificationApprovalActions(entry))
         } else if (isGoalVerified) {
-          // the text still deep-links to the run; the chips act in place.
-          body.style.cursor = 'pointer'
-          body.addEventListener('click', () => openNotificationEntry(entry))
           const survey = surveyChipsNode(entry.artifactId)
           if (survey) item.appendChild(survey)
-        } else {
-          item.addEventListener('click', () => openNotificationEntry(entry))
         }
         return item
+      }
+
+      function notificationItemControl(kind, label, onClick) {
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = 'notification-item__control'
+        button.setAttribute('aria-label', label)
+        button.title = label
+        button.innerHTML = kind === 'read'
+          ? '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 12 5 5L20 6"></path></svg>'
+          : '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>'
+        button.addEventListener('click', event => {
+          event.stopPropagation()
+          onClick()
+        })
+        return button
       }
 
       function renderNotifications() {
         notificationList.replaceChildren(...notificationEntries.map(notificationItemNode))
         notificationEmpty.hidden = notificationEntries.length > 0
+        const unread = unreadNotificationCount()
+        notificationSummary.textContent = unread
+          ? `${unread} unread${notificationEntries.length > unread ? ` · ${notificationEntries.length} total` : ''}`
+          : notificationEntries.length ? `${notificationEntries.length} read` : 'No unread notifications'
+        notificationMarkAll.disabled = !notificationEntries.some(entry => !entry.read && !entry.proposalId)
+        notificationClearAll.disabled = !notificationEntries.some(entry => !(entry.proposalId && !entry.read))
         renderNotificationBadge()
       }
 
@@ -50678,9 +51127,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ids: wanted })
-        }).catch(() => {
-          // Read receipts re-sync on the next load.
-        })
+        }).then(response => {
+          if (!response.ok) loadNotifications()
+        }).catch(loadNotifications)
       }
 
       function markAllNotificationsRead() {
@@ -50688,6 +51137,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // the sweep skips them, and the server refuses their receipts too,
         // so a bypass could never stick.
         markNotificationsRead(notificationEntries.filter(entry => !entry.read && !entry.proposalId).map(entry => entry.id))
+      }
+
+      function clearNotifications(ids) {
+        const wanted = [...new Set(ids.map(id => String(id || '')).filter(Boolean))]
+        if (!wanted.length) return
+        const wantedSet = new Set(wanted)
+        const previous = notificationEntries
+        notificationEntries = notificationEntries.filter(entry => !wantedSet.has(entry.id) || (entry.proposalId && !entry.read))
+        if (notificationEntries.length === previous.length) return
+        renderNotifications()
+        fetch('/assistant/notifications/clear', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: wanted })
+        }).then(response => {
+          if (!response.ok) loadNotifications()
+        }).catch(loadNotifications)
       }
 
       function clearAllNotifications() {
@@ -50765,17 +51231,45 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
-      function setNotificationPanelOpen(open) {
+      let notificationPanelTrigger = notificationBell
+
+      function positionNotificationPanel() {
+        if (!notificationPanel || notificationPanel.hidden) return
+        if (window.matchMedia('(max-width: 860px)').matches) {
+          notificationPanel.style.removeProperty('--notification-panel-left')
+          notificationPanel.style.removeProperty('--notification-panel-bottom')
+          return
+        }
+        const trigger = notificationPanelTrigger?.isConnected ? notificationPanelTrigger : notificationBell
+        const triggerRect = trigger.getBoundingClientRect()
+        const margin = 16
+        const gap = 12
+        const panelWidth = notificationPanel.offsetWidth
+        const panelHeight = notificationPanel.offsetHeight
+        const left = Math.max(margin, Math.min(window.innerWidth - panelWidth - margin, triggerRect.right + gap))
+        const desiredBottom = Math.max(margin, window.innerHeight - triggerRect.bottom)
+        const maxBottom = Math.max(margin, window.innerHeight - panelHeight - margin)
+        const bottom = Math.min(desiredBottom, maxBottom)
+        notificationPanel.style.setProperty('--notification-panel-left', `${Math.round(left)}px`)
+        notificationPanel.style.setProperty('--notification-panel-bottom', `${Math.round(bottom)}px`)
+      }
+
+      function setNotificationPanelOpen(open, trigger = null, options = {}) {
+        if (open && trigger) notificationPanelTrigger = trigger
         notificationPanel.hidden = !open
         notificationBell.setAttribute('aria-expanded', String(Boolean(open)))
+        topbarBellButton?.setAttribute('aria-expanded', String(Boolean(open)))
         if (open) {
           // one popover at a time — opening the bell closes the account menu
           // and the board-dock menu (PV-1)
           setAccountMenuOpen(false)
           closeBoardDockMenu()
-          // Opening the bell acknowledges the backlog: refresh the list, then
-          // clear the unread badge.
-          loadNotifications().then(() => markAllNotificationsRead())
+          // Opening is observation only. The unread state changes when a row
+          // opens or the user chooses one of the explicit read controls.
+          positionNotificationPanel()
+          loadNotifications().then(positionNotificationPanel)
+        } else if (options.restoreFocus) {
+          notificationPanelTrigger?.focus?.({ preventScroll: true })
         }
       }
 
@@ -52433,16 +52927,148 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return String(message?.authorName || 'Teammate')
 	      }
 
+	      const desktopChatReplyTopologyCache = new WeakMap()
+	      const desktopChatParticipantDirectory = new Map()
+	      let desktopChatParticipantDirectoryPromise = null
+	      let desktopChatParticipantDirectoryLoaded = false
+	      let desktopChatParticipantDirectoryViewer = ''
+	      let desktopChatParticipantDirectoryGeneration = 0
+
+	      function desktopChatReplyTopology(messages) {
+	        const list = Array.isArray(messages) ? messages : []
+	        const cached = desktopChatReplyTopologyCache.get(list)
+	        if (cached) return cached
+	        const byId = new Map(list.map(message => [String(message?.id || ''), message]).filter(([id]) => id))
+	        const rootIdById = new Map()
+	        const rootIdFor = message => {
+	          const messageId = String(message?.id || '')
+	          if (!messageId) return ''
+	          if (rootIdById.has(messageId)) return rootIdById.get(messageId)
+	          let current = message
+	          const seen = new Set([messageId])
+	          while (current?.replyTo?.messageId) {
+	            const parentId = String(current.replyTo.messageId)
+	            const parent = byId.get(parentId)
+	            if (!parent || seen.has(parentId)) break
+	            seen.add(parentId)
+	            current = parent
+	          }
+	          const rootId = String(current?.id || messageId)
+	          rootIdById.set(messageId, rootId)
+	          return rootId
+	        }
+	        const repliesByRoot = new Map()
+	        list.forEach(message => {
+	          if (!message?.replyTo?.messageId) return
+	          const rootId = rootIdFor(message)
+	          if (!rootId || rootId === String(message?.id || '')) return
+	          const replies = repliesByRoot.get(rootId) || []
+	          replies.push(message)
+	          repliesByRoot.set(rootId, replies)
+	        })
+	        const topology = {
+	          rootFor(message) {
+	            return byId.get(rootIdFor(message)) || message
+	          },
+	          repliesFor(message) {
+	            const root = this.rootFor(message)
+	            return repliesByRoot.get(String(root?.id || '')) || []
+	          }
+	        }
+	        desktopChatReplyTopologyCache.set(list, topology)
+	        return topology
+	      }
+
+	      function ensureDesktopChatParticipantDirectory() {
+	        const viewer = String(authedUser?.email || '').trim().toLowerCase()
+	        if (desktopChatParticipantDirectoryViewer !== viewer) {
+	          desktopChatParticipantDirectoryGeneration += 1
+	          desktopChatParticipantDirectory.clear()
+	          desktopChatParticipantDirectoryLoaded = false
+	          desktopChatParticipantDirectoryViewer = viewer
+	          desktopChatParticipantDirectoryPromise = null
+	        }
+	        if (!viewer) return null
+	        if (desktopChatParticipantDirectoryLoaded) return Promise.resolve()
+	        if (desktopChatParticipantDirectoryPromise) return desktopChatParticipantDirectoryPromise
+	        const requestViewer = viewer
+	        const requestGeneration = desktopChatParticipantDirectoryGeneration
+	        const requestPromise = fetch('/assistant/chat-participants', { cache: 'no-store' })
+	          .then(response => response.ok ? response.json() : Promise.reject(new Error('participant directory unavailable')))
+	          .then(payload => {
+	            if (desktopChatParticipantDirectoryViewer !== requestViewer ||
+	                desktopChatParticipantDirectoryGeneration !== requestGeneration) return
+	            ;(Array.isArray(payload?.participants) ? payload.participants : []).forEach(participant => {
+	              const email = String(participant?.email || '').trim().toLowerCase()
+	              if (email) desktopChatParticipantDirectory.set(email, participant)
+	            })
+	            desktopChatParticipantDirectoryLoaded = true
+	            syncDesktopOpenChatContext()
+	          })
+	          .catch(() => {})
+	          .finally(() => {
+	            if (desktopChatParticipantDirectoryPromise === requestPromise) {
+	              desktopChatParticipantDirectoryPromise = null
+	            }
+	          })
+	        desktopChatParticipantDirectoryPromise = requestPromise
+	        return desktopChatParticipantDirectoryPromise
+	      }
+
+	      function desktopChatAvatarNode(message, className = 'chat-context-card__avatar') {
+	        const avatar = document.createElement('span')
+	        avatar.className = className
+	        avatar.setAttribute('aria-hidden', 'true')
+	        const role = String(message?.role || '').toLowerCase()
+	        const email = String(message?.authorEmail || '').trim().toLowerCase()
+	        const selfEmail = String(authedUser?.email || '').trim().toLowerCase()
+	        const agent = role === 'assistant' || role === 'scout' || role === 'error'
+	        const author = desktopChatAuthorLabel(message)
+	        const directoryEntry = desktopChatParticipantDirectory.get(email)
+	        const avatarDataURL = email && email === selfEmail
+	          ? String(authedUser?.avatarDataURL || '')
+	          : String(directoryEntry?.avatarDataURL || '')
+	        if (avatarDataURL) {
+	          const image = document.createElement('img')
+	          image.src = avatarDataURL
+	          image.alt = ''
+	          avatar.appendChild(image)
+	        } else {
+	          avatar.textContent = agent
+	            ? (String(author).toLowerCase() === 'scout' ? '✦' : chatPeerInitials(author))
+	            : chatPeerInitials(author === 'You' ? scoutChatSelfHandle() : author)
+	        }
+	        return avatar
+	      }
+
 	      function desktopContextMessageCard(message, options = {}) {
 	        const card = document.createElement('article')
-	        card.className = 'chat-context-card'
+	        card.className = 'chat-context-card chat-context-card--message'
 	        if (options.root) card.dataset.root = 'true'
-	        card.append(
+	        const content = bfEl('span', 'chat-context-card__content')
+	        const identity = bfEl('span', 'chat-context-card__identity')
+	        identity.append(
 	          bfEl('span', 'chat-context-card__author', desktopChatAuthorLabel(message)),
-	          bfEl('p', 'chat-context-card__body', String(message?.text || message?.content || attachedFilesPreview(message?.files) || 'Attachment')),
 	          bfEl('span', 'chat-context-card__meta', `${scoutChatTimeLabel(message?.createdAt)}${message?.editedAt ? ' · edited' : ''}`)
 	        )
+	        content.append(
+	          identity,
+	          bfEl('p', 'chat-context-card__body', String(message?.text || message?.content || attachedFilesPreview(message?.files) || 'Attachment'))
+	        )
+	        card.append(desktopChatAvatarNode(message), content)
 	        return card
+	      }
+
+	      function renderDesktopMessageContext(thread, root) {
+	        const messages = Array.isArray(thread?.messages) ? thread.messages : []
+	        const topology = desktopChatReplyTopology(messages)
+	        const resolvedRoot = topology.rootFor(root)
+	        const replies = topology.repliesFor(resolvedRoot)
+	        const fragment = document.createDocumentFragment()
+	        fragment.appendChild(desktopContextMessageCard(resolvedRoot, { root: true }))
+	        replies.forEach(reply => fragment.appendChild(desktopContextMessageCard(reply)))
+	        chatContextBody.replaceChildren(fragment)
+	        chatContextMeta.textContent = `${replies.length} ${replies.length === 1 ? 'reply' : 'replies'} · reply without losing your place`
 	      }
 
 	      function closeDesktopChatContext(options = {}) {
@@ -52470,17 +53096,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          chatContextReplyInput.style.height = 'auto'
 	          chatContextReplySend.disabled = true
 	        }
-	        window.requestAnimationFrame(() => chatContextClose?.focus({ preventScroll: true }))
+	        // Move assistive focus into the rail without painting a keyboard ring
+	        // around Close after a pointer click. The first Tab still lands on
+	        // that control and receives its normal focus-visible treatment.
+	        window.requestAnimationFrame(() => chatContextRail?.focus({ preventScroll: true }))
 	        return true
 	      }
 
 	      function openDesktopMessageContext(message, trigger) {
 	        const thread = selectedScoutChatThread()
 	        const messages = Array.isArray(thread?.messages) ? thread.messages : []
-	        let root = message
-	        if (message?.replyTo?.messageId) {
-	          root = messages.find(candidate => String(candidate?.id || '') === String(message.replyTo.messageId)) || message
-	        }
+	        const root = desktopChatReplyTopology(messages).rootFor(message)
 	        if (!root?.id || !showDesktopChatContext({
 	          mode: 'thread',
 	          title: String(thread?.title || 'Conversation'),
@@ -52489,14 +53115,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          reply: true
 	        })) return
 	        chatContextState = { mode: 'thread', threadId: String(thread?.id || ''), rootMessageId: String(root.id) }
-	        const replies = messages.filter(candidate => String(candidate?.replyTo?.messageId || '') === String(root.id))
-	        const fragment = document.createDocumentFragment()
-	        fragment.appendChild(desktopContextMessageCard(root, { root: true }))
-	        if (replies.length) {
-	          replies.forEach(reply => fragment.appendChild(desktopContextMessageCard(reply)))
-	        }
-	        chatContextBody.replaceChildren(fragment)
-	        chatContextMeta.textContent = `${replies.length} ${replies.length === 1 ? 'reply' : 'replies'} · reply without losing your place`
+	        renderDesktopMessageContext(thread, root)
+	        ensureDesktopChatParticipantDirectory()
 	      }
 
 	      async function submitDesktopThreadReply(event) {
@@ -52703,6 +53323,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	      function syncDesktopOpenChatContext() {
 	        if (!chatContextState || String(chatContextState.threadId || '') !== String(activeScoutThreadId || '')) return
+	        if (chatContextState.mode === 'thread') {
+	          const thread = selectedScoutChatThread()
+	          const root = thread?.messages?.find(candidate => String(candidate?.id || '') === String(chatContextState.rootMessageId || ''))
+	          if (!root) {
+	            closeDesktopChatContext({ restoreFocus: false })
+	            return
+	          }
+	          renderDesktopMessageContext(thread, root)
+	          return
+	        }
 	        if (chatContextState.mode !== 'work') return
 	        const message = selectedScoutChatThread()?.messages?.find(candidate => String(candidate?.id || '') === String(chatContextState.messageId || ''))
 	        if (!message?.thread) {
@@ -52749,18 +53379,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          return
 	        }
 	        const messageActionsReady = !message.reply || message.reply.state === 'completed'
+	        const threadMessages = Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []
+	        const replyTopology = desktopChatReplyTopology(threadMessages)
 
 	        const reply = message.replyTo
 	        if (reply?.messageId) {
 	          const quote = document.createElement('button')
 	          quote.type = 'button'
 	          quote.className = 'desktop-chat-reply'
-	          quote.setAttribute('aria-label', `Jump to reply from ${reply.authorName || 'message author'}`)
+	          quote.setAttribute('aria-label', `Open thread started by ${reply.authorName || 'message author'}`)
 	          quote.append(
 	            bfEl('span', 'desktop-chat-reply__author', `reply to ${reply.authorName || 'message'}`),
 	            bfEl('span', 'desktop-chat-reply__text', String(reply.text || 'original message unavailable'))
 	          )
-	          quote.addEventListener('click', () => desktopChatScrollToMessage(reply.messageId))
+	          quote.addEventListener('click', () => openDesktopMessageContext(message, quote))
 	          stack.insertBefore(quote, stack.querySelector('.scout-chat-files, .scout-chat-text') || stack.firstChild)
 	        }
 
@@ -52813,6 +53445,31 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            reactionRow.appendChild(button)
 	          })
 	          stack.appendChild(reactionRow)
+	        }
+
+	        const threadReplies = message?.replyTo?.messageId ? [] : replyTopology.repliesFor(message)
+	        if (threadReplies.length) {
+	          const summary = document.createElement('button')
+	          summary.type = 'button'
+	          summary.className = 'desktop-chat-thread-summary'
+	          const latest = threadReplies[threadReplies.length - 1]
+	          summary.setAttribute('aria-label', `Open ${threadReplies.length} ${threadReplies.length === 1 ? 'reply' : 'replies'}; latest ${scoutChatTimeLabel(latest?.createdAt)}`)
+	          const avatars = bfEl('span', 'desktop-chat-thread-summary__avatars')
+	          const seen = new Set()
+	          threadReplies.slice().reverse().forEach(replyMessage => {
+	            const key = String(replyMessage?.authorEmail || replyMessage?.authorName || replyMessage?.role || '').toLowerCase()
+	            if (!key || seen.has(key) || seen.size >= 3) return
+	            seen.add(key)
+	            avatars.prepend(desktopChatAvatarNode(replyMessage, 'desktop-chat-thread-summary__avatar'))
+	          })
+	          const copy = bfEl('span', 'desktop-chat-thread-summary__copy')
+	          copy.append(
+	            bfEl('span', 'desktop-chat-thread-summary__count', `${threadReplies.length} ${threadReplies.length === 1 ? 'reply' : 'replies'}`),
+	            bfEl('span', 'desktop-chat-thread-summary__latest', `latest ${scoutChatTimeLabel(latest?.createdAt)}`)
+	          )
+	          summary.append(avatars, copy)
+	          summary.addEventListener('click', () => openDesktopMessageContext(message, summary))
+	          stack.appendChild(summary)
 	        }
 
 	        if (message.id && kind !== 'error' && messageActionsReady) {

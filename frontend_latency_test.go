@@ -1853,8 +1853,8 @@ func TestIndexSimulationQuickFixWiring(t *testing.T) {
 		"fetch('/assistant/memory', { cache: 'no-store' })",
 		"function applyBoardSnapshot(data)",
 		"function applyMemorySnapshot(data)",
-		// the bell badge fills at sign-in and clears when the popover opens
-		"loadNotifications().then(() => markAllNotificationsRead())",
+		// opening the bell refreshes and positions it without erasing unread state
+		"loadNotifications().then(positionNotificationPanel)",
 		// room-chat unread rides the rail icon and the meeting PiP
 		"function renderRoomChatUnreadBadges()",
 		`id="roomRailUnread"`,
@@ -2433,7 +2433,7 @@ func TestIndexAuditFixWiring(t *testing.T) {
 	}
 
 	// Escape closes the notifications panel and the room chat sheet
-	if !strings.Contains(html, "if (!notificationPanel.hidden) {\n            setNotificationPanelOpen(false)") {
+	if !strings.Contains(html, "if (!notificationPanel.hidden) {\n            setNotificationPanelOpen(false, null, { restoreFocus: true })") {
 		t.Fatal("the Escape handler must close the notifications panel")
 	}
 	if !strings.Contains(html, "if (isRoomChatOpen()) {\n            setRoomChatOpen(false)") {

@@ -541,6 +541,7 @@ func TestIndexNotificationCenterWiring(t *testing.T) {
 		`id="notificationBadge"`,
 		`id="notificationPanel"`,
 		`id="notificationList"`,
+		`id="notificationSummary"`,
 		`id="notificationMarkAll"`,
 		`id="notificationClose"`,
 	} {
@@ -599,6 +600,49 @@ func TestIndexNotificationCenterWiring(t *testing.T) {
 	reduced := html[strings.LastIndex(html, "@media (prefers-reduced-motion: reduce)"):]
 	if !strings.Contains(reduced, ".notification-panel") {
 		t.Fatal("notification panel animation must be covered by the reduced-motion block")
+	}
+}
+
+func TestIndexNotificationPolishAndIndividualControls(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	html := string(rawHTML)
+
+	for _, want := range []string{
+		`aria-label="Mark all notifications read"`,
+		`aria-label="Clear all notifications"`,
+		`class="notification-panel__empty-title">You’re all caught up`,
+		"function positionNotificationPanel()",
+		"notificationPanelTrigger = trigger",
+		"trigger.getBoundingClientRect()",
+		"--notification-panel-left",
+		"--notification-panel-bottom",
+		"function notificationItemControl(kind, label, onClick)",
+		"notificationItemControl('read', 'Mark notification read'",
+		"notificationItemControl('dismiss', 'Dismiss notification'",
+		"const item = document.createElement('article')",
+		"const body = document.createElement('button')",
+		"notificationPanelTrigger?.focus?.({ preventScroll: true })",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("polished notification contract missing %q", want)
+		}
+	}
+
+	normalize := functionBody(html, "function normalizeNotificationEntry(payload)")
+	for _, field := range []string{"messageId", "threadName", "authorName", "messagePreview", "redactedAt"} {
+		if !strings.Contains(normalize, field+":") {
+			t.Errorf("notification normalizer drops server field %q", field)
+		}
+	}
+	clearOne := functionBody(html, "function clearNotifications(ids)")
+	if !strings.Contains(clearOne, "/assistant/notifications/clear") || !strings.Contains(clearOne, "JSON.stringify({ ids: wanted })") || !strings.Contains(clearOne, "loadNotifications()") {
+		t.Fatal("individual clear must optimistically dismiss by id and authoritatively re-sync on failure")
+	}
+	if strings.Contains(html, "loadNotifications().then(() => markAllNotificationsRead())") {
+		t.Fatal("opening notifications must not silently mark the entire inbox read")
 	}
 }
 
