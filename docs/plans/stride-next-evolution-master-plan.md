@@ -307,9 +307,10 @@ Current canonical wave is E10; the active nested checkpoint is E10-R1. E10-R0
 is complete in production. Exact release
 `ba9bca4a0392085df93f5dcd0607cba547260289` is serving under ledger generation
 16 with `verified-local-unsigned` attestation and retained exact release
-`7970f0c78f4ea772046217b85e1e4960aa2391e0` as rollback. The full repository
-suite, focused race gate, exact-release activation verifier, and independent
-architecture Critic all passed.
+`7970f0c78f4ea772046217b85e1e4960aa2391e0` as rollback. The preceding
+continuity candidate passed the full repository suite; the final bounded
+hotfix passed its focused normal and race gates. The exact-release activation
+verifier and independent architecture Critic also passed.
 
 The live repair proved two independent failures. First, routing and retrieval
 were classifying the structured public-channel envelope rather than only the
@@ -351,9 +352,9 @@ an invalid held window fails closed; and an invalid non-held checkpoint repairs
 only from an unambiguous durable worker cursor. Readiness now distinguishes
 configuration from a running supervisor, records real poll liveness, reports
 continuity scope health without raw message IDs, exposes `analysisReady`, and
-degrades the exact disabled-with-backfill-armed state. Focused, broader ambient,
-focused race, and full repository tests passed before release. Live readiness
-now honestly reports `analysisReady=false`: brain continuity is structurally
+degrades the exact disabled-with-backfill-armed state. The continuity candidate
+passed focused, broader ambient, focused race, and full repository tests before
+its release. Live readiness now honestly reports `analysisReady=false`: brain continuity is structurally
 healthy but stale, meeting digest remains disabled, and ambiguous legacy
 cursors keep the affected Board/Narrative scopes fail-closed instead of
 silently skipping evidence.
