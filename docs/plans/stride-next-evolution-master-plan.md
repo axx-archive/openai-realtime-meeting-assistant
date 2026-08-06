@@ -296,6 +296,19 @@ remediation/workstream checkpoints, not A-waves and not a competing release
 plan. Every live activation inherits E0/E9 integrity, exact-release,
 receipt/ledger agreement, rollback-bundle retention, and E10 acceptance gates.
 
+**Activation mandate:** default-off is only a fail-closed construction and
+rollout state; it is not the intended product destination and does not satisfy a
+checkpoint outcome. Every approved capability in this plan must finish fully
+implemented, provider- and authority-qualified where applicable, activated in
+the real product, observable, rollback-proven, and accepted on its actual web,
+mobile, meeting, and coworker surfaces. A capability may remain off only while a
+named prerequisite is genuinely unresolved or when AJ explicitly defers it.
+Code presence, migrations, shadow tables, hidden routes, disabled workers, and
+passing isolated tests must never be reported as “done” while the user-facing
+behavior is dormant. The active workstream owns removing those temporary fences
+in dependency order and must record the exact blocker and activation proof for
+anything that cannot yet be turned on.
+
 | Checkpoint | Outcome | Dependencies | Acceptance gate | Explicit rollback | Status |
 |---|---|---|---|---|---|
 | E10-R0 | Repair Ball Dogs routing, causal deletion, cleanup, and independent answer | current exact serving receipt and E10 release authority | focused/full tests; both public mention and direct reply call the model once; authored-only retrieval; caused answer retracts from chat and canonical projections; useful live answer | reactivate retained prior exact release; do not rewrite named-volume data | `completed` — exact release `ba9bca4a0392085df93f5dcd0607cba547260289`, ledger generation 16, durable cleanup, accepted independent answer, and causal lineage verified live |
