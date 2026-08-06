@@ -290,7 +290,7 @@ func (engine *AmbientReplayEngine) Plan(ctx context.Context, request AmbientRepl
 	}
 	manifest := AmbientReplayManifest{Schema: ambientReplaySchema, IdempotencyKey: request.IdempotencyKey, TenantID: request.TenantID, RoomID: room, SittingID: sitting,
 		StartAfter: startAfter, EndAt: endAt, Sources: sources, ExcludedSources: uniqueSortedStrings(authority.ExcludedSources), Stages: stages,
-		CursorDigests: cloneStringMap(authority.CursorDigests), SourceManifestDigest: sourceDigest, PurgeGeneration: authority.PurgeGeneration,
+		CursorDigests: cloneAmbientReplayStringMap(authority.CursorDigests), SourceManifestDigest: sourceDigest, PurgeGeneration: authority.PurgeGeneration,
 		MaxCalls: request.MaxCalls, MaxTokens: request.MaxTokens, MaxCostMicros: request.MaxCostMicros, AuthorizedBy: request.AuthorizedBy,
 		ApprovalReference: authority.ApprovalReference, GeneratedAt: now, ExpiresAt: request.ExpiresAt, ReleaseCommit: authority.ReleaseCommit,
 		ReleaseTreeDigest: authority.ReleaseTreeDigest, ReleaseReceiptDigest: authority.ReleaseReceiptDigest, RollbackFloor: authority.RollbackFloor}
@@ -349,6 +349,17 @@ func digestAmbientReplayValue(value any) (string, error) {
 	}
 	digest := sha256.Sum256(raw)
 	return hex.EncodeToString(digest[:]), nil
+}
+
+func cloneAmbientReplayStringMap(source map[string]string) map[string]string {
+	if source == nil {
+		return nil
+	}
+	cloned := make(map[string]string, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func digestAmbientReplayArtifacts(artifacts []AmbientReplayArtifact) (string, error) {
