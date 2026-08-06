@@ -229,8 +229,9 @@ func TestScoutChatGoalRunAcceptIsSignalOnly(t *testing.T) {
 	}
 }
 
-// Keyless deploys never attempt a router turn, so propose_goal never fires and
-// the ask degrades to plain Q&A with no proposal.
+// Keyless deploys never attempt a router turn, so propose_goal never fires.
+// Conversational Scout also fails honestly instead of substituting an
+// unrelated deterministic memory-search answer for the missing model turn.
 func TestScoutChatGoalRunKeylessNeverProposes(t *testing.T) {
 	setupAuthTestEnv(t)
 	t.Setenv("OPENAI_API_KEY", "")
@@ -253,14 +254,21 @@ func TestScoutChatGoalRunKeylessNeverProposes(t *testing.T) {
 		t.Fatalf("create private thread: %v", err)
 	}
 	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, private.ID, "take this from idea to a shipped pitch end to end as a goal", nil, "")
-	if err != nil {
-		t.Fatalf("keyless append must degrade to plain Q&A, got error: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "OPENAI_API_KEY is not configured") {
+		t.Fatalf("keyless append error=%v, want honest provider error", err)
 	}
-	if _, proposed := response["proposal"]; proposed {
+	if response != nil {
 		t.Fatalf("response keys=%v, want no proposal keyless", responseKeys(response))
 	}
-	if answer, ok := response["answer"].(scoutChatMessageRecord); !ok || strings.TrimSpace(answer.Text) == "" {
-		t.Fatalf("answer=%#v, want the deterministic fallback answer", response["answer"])
+	saved, _, readErr := kanbanApp.scoutChatThreadByID(user.Email, private.ID)
+	if readErr != nil {
+		t.Fatalf("read keyless thread: %v", readErr)
+	}
+	if len(saved.Messages) != 2 || saved.Messages[0].Role != "user" || saved.Messages[1].Role != "error" {
+		t.Fatalf("saved messages=%#v, want persisted human request plus provider error", saved.Messages)
+	}
+	if saved.Messages[0].Text == "" || !strings.Contains(saved.Messages[1].Text, "OPENAI_API_KEY is not configured") {
+		t.Fatalf("saved messages=%#v, want the request and honest provider error", saved.Messages)
 	}
 }
 
