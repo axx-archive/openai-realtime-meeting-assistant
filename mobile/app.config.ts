@@ -44,7 +44,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // bottom-first reply entry and notification badges, and separates the
       // pinned channel list from private work.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '42',
+      buildNumber: '43',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

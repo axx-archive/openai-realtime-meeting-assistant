@@ -23,6 +23,10 @@ test('mobile channel rows render only topology roots with one persistent reply a
 
 test('thread replies use a native dismissible page sheet with their own composer', () => {
   assert.match(sheetSource, /presentationStyle="pageSheet"/);
+  assert.match(sheetSource, /measureSheetKeyboardOffset/);
+  assert.match(sheetSource, /measureInWindow/);
+  assert.match(sheetSource, /screenHeight - height/);
+  assert.match(sheetSource, /keyboardVerticalOffset=\{keyboardOffset\}/);
   assert.match(sheetSource, /onRequestClose=\{onClose\}/);
   assert.match(sheetSource, /name="xmark"/);
   assert.match(sheetSource, /contentInsetAdjustmentBehavior="automatic"/);

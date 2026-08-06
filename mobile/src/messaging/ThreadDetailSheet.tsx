@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  Dimensions,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -84,11 +85,27 @@ export function ThreadDetailSheet({
 }: Props) {
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<ScrollView>(null);
+  const sheetRef = useRef<View>(null);
   const timestampReveal = useRef(new Animated.Value(0)).current;
   const previousReplyCountRef = useRef(0);
   const initialScrollCompleteRef = useRef(false);
+  const [keyboardOffset, setKeyboardOffset] = useState(8);
 
   const conversation = useMemo(() => root ? [root, ...replies] : [], [replies, root]);
+
+  const measureSheetKeyboardOffset = useCallback(() => {
+    requestAnimationFrame(() => {
+      sheetRef.current?.measureInWindow((_x, y, _width, height) => {
+        // iOS page sheets report their layout relative to the sheet while
+        // keyboard coordinates remain screen-relative. Account for the
+        // sheet's top edge so the composer clears the keyboard completely.
+        const screenHeight = Dimensions.get('screen').height;
+        const sheetTop = Math.max(0, y, screenHeight - height);
+        const nextOffset = Math.max(8, Math.round(sheetTop) + 8);
+        setKeyboardOffset((current) => current === nextOffset ? current : nextOffset);
+      });
+    });
+  }, []);
 
   useEffect(() => {
     if (!visible) {
@@ -122,13 +139,19 @@ export function ThreadDetailSheet({
       visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
+      onShow={measureSheetKeyboardOffset}
       onRequestClose={onClose}
     >
-      <SafeAreaView style={styles.safe} edges={['left', 'right', 'bottom']}>
+      <SafeAreaView
+        ref={sheetRef}
+        style={styles.safe}
+        edges={['left', 'right', 'bottom']}
+        onLayout={measureSheetKeyboardOffset}
+      >
         <KeyboardAvoidingView
           style={styles.fill}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={8}
+          keyboardVerticalOffset={keyboardOffset}
         >
           <View style={styles.handle} />
           <View style={styles.header}>
