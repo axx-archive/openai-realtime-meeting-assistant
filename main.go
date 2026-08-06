@@ -918,6 +918,7 @@ func main() {
 	kanbanApp.startScoutOpeningReplyWorkers()
 	installLiveMediaSoakObserver(kanbanApp)
 	configureProductionCatchUpResolver(kanbanApp)
+	configureAmbientReplayRuntime(kanbanApp)
 	if err := configureProductionInsightsOpportunitiesExecutor(kanbanApp); err != nil {
 		fmt.Fprintf(os.Stderr, "Insights & Opportunities executor startup failed: %v\n", err)
 		os.Exit(2)
@@ -1064,6 +1065,9 @@ func main() {
 	http.HandleFunc("/api/usage/rollup", usageRollupHandler)
 	http.HandleFunc("/api/consent", consentHandler)
 	http.HandleFunc("/api/admin/brain-projection/backfill", brainProjectionHistoricalBackfillHandler)
+	http.HandleFunc("/api/admin/ambient-intelligence-replay/plan", ambientReplayPlanHandler)
+	http.HandleFunc("/api/admin/ambient-intelligence-replay/execute", ambientReplayExecuteHandler)
+	http.HandleFunc("/api/artifact-dispositions/v1", artifactDispositionHandler)
 	registerSTRIDERuntimeRoutes(http.DefaultServeMux)
 	registerMeetingSpecialistProductRoutes(http.DefaultServeMux)
 	registerRoomAgentRoutes(http.DefaultServeMux)
@@ -1274,6 +1278,7 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 		ready = false
 	}
 	strideRuntime := strideRuntimeCapabilitySnapshot(kanbanApp)
+	ambientReplay := ambientReplayRuntimeSnapshot()
 	status := http.StatusOK
 	if !ready {
 		status = http.StatusServiceUnavailable
@@ -1307,6 +1312,9 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 	if !releaseIdentityAllowsTraffic(release) {
 		degraded = append(degraded, "release_process_identity_unqualified")
 	}
+	if ambientReplay.Enabled && !ambientReplay.Ready {
+		degraded = append(degraded, "ambient_intelligence_replay_degraded")
+	}
 
 	writeSystemStatusJSON(w, r, status, map[string]any{
 		"ok":           ready,
@@ -1327,6 +1335,7 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 			"boardFile":        boardCheck,
 			"boardLifecycle":   boardLifecycle,
 			"strideRuntime":    strideRuntime,
+			"ambientReplay":    ambientReplay,
 			"realtime":         realtime,
 			"backup":           readinessBackupSnapshot(),
 			"agents": map[string]any{

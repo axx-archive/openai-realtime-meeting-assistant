@@ -713,7 +713,6 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		`<div class="intel-canvas mount-stagger">`,
 		`id="intelRefreshButton" class="btn btn--ghost"`,
 		`id="intelPulseGrid" class="intel-tiles"`,
-		`id="intelContribList" class="intel-contrib"`,
 		`id="intelThemes" class="intel-col__body"`,
 		`id="intelQuestions" class="intel-col__body"`,
 		`id="intelAlignments" class="intel-col__body"`,
@@ -728,7 +727,6 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"intelPulseLive.hidden = !(Number(pulse?.liveParticipants) > 0)",
 		`id="intelLibraryToggle" class="btn btn--ghost" type="button" aria-expanded="false"`,
 		`id="intelLibrary" class="artifacts-workspace" hidden`,
-		"fuel for the brain — every word makes the company smarter",
 		"scout needs an api key to synthesize themes",
 		"async function loadMissionIntelligence(force = false)",
 		"fetch('/assistant/mission', { cache: 'no-store' })",
@@ -736,7 +734,6 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"function renderMissionIntelligence()",
 		"case 'mission_insight':",
 		"themes are already fresh",
-		"unattributed · ${unattributed} spoken",
 		".intel-contrib__fill",
 		"background: var(--accent);",
 		".intel-live__dot { animation: none; }",
@@ -745,6 +742,16 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing Mission Intelligence marker %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		`aria-label="Contribution lens"`,
+		`id="intelContribList" class="intel-contrib"`,
+		"fuel for the brain — every word makes the company smarter",
+		"\n        renderIntelContributions()\n",
+	} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("Mission Intelligence must not expose activity-volume contribution ranking %q", forbidden)
 		}
 	}
 	// The package binder segment: an intelligence/packages segmented control,

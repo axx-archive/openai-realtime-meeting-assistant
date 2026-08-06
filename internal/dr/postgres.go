@@ -18,19 +18,25 @@ import (
 // a tenant_id column. QueryPurgeStates compares it with information_schema so a
 // migration cannot add a tenant-only table without also updating this gate.
 var tenantBearingTables = []string{
-	"approvals", "brain_projection_backfill_requests", "brain_projection_checkpoints",
+	"ambient_intelligence_replay_manifests", "approvals", "brain_projection_backfill_requests", "brain_projection_checkpoints",
 	"brain_projection_work", "canonical_events", "catch_up_publications", "consent_records",
 	"jobs", "object_grants", "object_revisions", "objects", "org_memberships", "principals",
 	"purge_ledger", "retention_state", "revision_bodies", "stride_contract_revisions",
 	"stride_conversation_derived_edges", "stride_conversation_events",
 	"stride_conversation_projection_checkpoints", "stride_registry_revisions",
-	"stride_source_derived_edges",
+	"stride_source_derived_edges", "stride_artifact_discard_confirmations",
+	"stride_artifact_disposition_receipts", "stride_artifact_disposition_states",
+	"stride_ambient_projection_checkpoints", "stride_ambient_projection_events",
+	"stride_ambient_projection_node_edges", "stride_ambient_projection_node_states",
+	"stride_ambient_projection_nodes", "stride_ambient_projection_source_edges", "stride_ambient_projection_sources",
 }
 
 // canonicalTables is the exhaustive registry for the logical database digest.
 // The migration drift test and live information_schema check both fail closed
 // when a canonical table is added without joining this registry.
 var canonicalTables = []string{
+	"ambient_intelligence_replay_cursors", "ambient_intelligence_replay_manifests",
+	"ambient_intelligence_replay_sources", "ambient_intelligence_replay_stage_receipts",
 	"approval_endorsements", "approvals", "blobs", "brain_projection_backfill_requests",
 	"brain_projection_checkpoints", "brain_projection_work", "canonical_events",
 	"catch_up_publications", "consent_records", "execution_receipts", "jobs",
@@ -39,7 +45,16 @@ var canonicalTables = []string{
 	"purge_ledger", "retention_state", "revision_bodies", "schema_migrations",
 	"stride_contract_revisions", "stride_conversation_derived_edges",
 	"stride_conversation_events", "stride_conversation_projection_checkpoints",
-	"stride_feature_switches", "stride_registry_revisions", "stride_source_derived_edges",
+	"stride_artifact_discard_confirmations", "stride_artifact_disposition_receipts",
+	"stride_artifact_disposition_states",
+	"stride_ambient_projection_checkpoints", "stride_ambient_projection_events",
+	"stride_ambient_projection_node_edges", "stride_ambient_projection_node_states",
+	"stride_ambient_projection_nodes", "stride_ambient_projection_source_edges", "stride_ambient_projection_sources",
+	"stride_feature_switches", "stride_mymind_authority_grants",
+	"stride_mymind_custody_deletion_items", "stride_mymind_custody_deletion_receipts",
+	"stride_mymind_disclosure_grants", "stride_mymind_export_receipts",
+	"stride_mymind_sources", "stride_person_principals", "stride_registry_revisions",
+	"stride_source_derived_edges", "stride_workspace_memberships",
 }
 
 type DatabaseState struct {

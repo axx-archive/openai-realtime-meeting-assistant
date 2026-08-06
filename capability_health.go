@@ -813,6 +813,16 @@ func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 	if strideRuntime["status"] == "degraded" {
 		degraded = append(degraded, "stride_runtime_unavailable")
 	}
+	replayStatus := ambientReplayRuntimeSnapshot()
+	replay := map[string]any{"mode": replayStatus.Mode, "enabled": replayStatus.Enabled, "database": replayStatus.Database,
+		"plannerConfigured": replayStatus.PlannerConfigured, "executorConfigured": replayStatus.ExecutorConfigured,
+		"boardExcluded": replayStatus.BoardExcluded, "maxSources": replayStatus.MaxSources, "status": "disabled"}
+	if replayStatus.Enabled {
+		replay["status"] = map[bool]string{true: "healthy", false: "degraded"}[replayStatus.Ready]
+		if !replayStatus.Ready {
+			degraded = append(degraded, "ambientReplay")
+		}
+	}
 	sort.Strings(degraded)
 
 	snapshot := map[string]any{
@@ -833,6 +843,7 @@ func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 		"backup":              backup,
 		"rooms":               roomRows,
 		"strideRuntime":       strideRuntime,
+		"ambientReplay":       replay,
 	}
 	redactCapabilityErrors(snapshot)
 	return snapshot, degraded

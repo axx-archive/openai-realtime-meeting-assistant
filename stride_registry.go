@@ -50,6 +50,9 @@ const (
 	STRIDEFeatureSpecialistTools        STRIDEFeature = "specialist_tools"
 	STRIDEFeatureSpecialistAudio        STRIDEFeature = "specialist_audio_publication"
 	STRIDEFeatureVisibleSpecialist      STRIDEFeature = "visible_specialist_profile"
+	STRIDEFeaturePersonMyMindContext    STRIDEFeature = "person_mymind_context"
+	STRIDEFeatureArtifactDisposition    STRIDEFeature = "artifact_disposition"
+	STRIDEFeatureAmbientMindShadow      STRIDEFeature = "ambient_mind_projection_shadow"
 )
 
 var allSTRIDEFeatures = []STRIDEFeature{
@@ -63,6 +66,9 @@ var allSTRIDEFeatures = []STRIDEFeature{
 	STRIDEFeatureTeamAgentTrial, STRIDEFeatureTeamAgentHire, STRIDEFeatureTeamAgentUpdate, STRIDEFeatureTeamAgentAssignment,
 	STRIDEFeatureSpecialistTokenMinting, STRIDEFeatureMeetingInvitation, STRIDEFeatureSpecialistContext,
 	STRIDEFeatureSpecialistTools, STRIDEFeatureSpecialistAudio, STRIDEFeatureVisibleSpecialist,
+	STRIDEFeaturePersonMyMindContext,
+	STRIDEFeatureArtifactDisposition,
+	STRIDEFeatureAmbientMindShadow,
 }
 
 type STRIDERegistryKind string

@@ -253,7 +253,7 @@ func TestMissionPulseWindowBucketsByWindow(t *testing.T) {
 	}
 }
 
-func TestMissionContributionsAttributionAndPrivacy(t *testing.T) {
+func TestMissionContributionActivityStaysOutOfMemberPayload(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 
 	if _, appended, err := app.memory.appendAttributedTranscript("t-1", "i-1", "AJ", "dominant", "We decided to ship the mission intel canvas."); err != nil || !appended {
@@ -314,49 +314,8 @@ func TestMissionContributionsAttributionAndPrivacy(t *testing.T) {
 	}
 
 	snapshot := app.missionIntelligenceSnapshot(time.Now())
-	contributions, ok := snapshot["contributions"].(map[string]any)
-	if !ok {
-		t.Fatalf("contributions type=%T, want map", snapshot["contributions"])
-	}
-	people, ok := contributions["people"].([]missionContributionRow)
-	if !ok {
-		t.Fatalf("people type=%T, want []missionContributionRow", contributions["people"])
-	}
-	if len(people) != len(meetingParticipantNames) {
-		t.Fatalf("people=%d, want all %d roster rows (zero-state included)", len(people), len(meetingParticipantNames))
-	}
-	rows := map[string]missionContributionRow{}
-	for _, row := range people {
-		rows[row.Name] = row
-	}
-
-	aj := rows["AJ"]
-	if aj.Spoken != 2 || aj.ThreadsStarted != 1 || aj.ArtifactsCreated != 1 {
-		t.Fatalf("AJ row=%+v, want spoken 2 (incl. split), 1 thread, 1 artifact", aj)
-	}
-	if want := 2 + 3*1 + 5*1; aj.Fuel != want {
-		t.Fatalf("AJ fuel=%d, want %d", aj.Fuel, want)
-	}
-	tim := rows["Tim"]
-	if tim.Spoken != 1 || tim.Chat != 1 || tim.ThreadsStarted != 1 {
-		t.Fatalf("Tim row=%+v, want split spoken 1, chat 1, threadsStarted 1", tim)
-	}
-	if tim.ChannelMessages != 2 {
-		t.Fatalf("Tim channelMessages=%d, want 2 — private thread messages must never be counted", tim.ChannelMessages)
-	}
-	tyler := rows["Tyler"]
-	if tyler.ProposalsConfirmed != 1 {
-		t.Fatalf("Tyler row=%+v, want proposalsConfirmed 1", tyler)
-	}
-	if unattributed, _ := contributions["unattributed"].(int); unattributed != 1 {
-		t.Fatalf("unattributed=%v, want 1", contributions["unattributed"])
-	}
-	fuelMax, _ := contributions["fuelMax"].(int)
-	if fuelMax != aj.Fuel {
-		t.Fatalf("fuelMax=%d, want AJ's %d", fuelMax, aj.Fuel)
-	}
-	if people[0].Fuel < people[len(people)-1].Fuel {
-		t.Fatalf("people not sorted by fuel desc: first=%+v last=%+v", people[0], people[len(people)-1])
+	if _, exposed := snapshot["contributions"]; exposed {
+		t.Fatalf("member mission payload exposed activity-volume contribution ranking: %#v", snapshot["contributions"])
 	}
 
 	// hard privacy rule: the snapshot JSON must never carry thread text
@@ -398,7 +357,6 @@ func TestAssistantMissionHandlerAuth(t *testing.T) {
 		OK      bool `json:"ok"`
 		Mission struct {
 			Pulse           map[string]any `json:"pulse"`
-			Contributions   map[string]any `json:"contributions"`
 			ThemesAvailable bool           `json:"themesAvailable"`
 			Degraded        []string       `json:"degraded"`
 		} `json:"mission"`
@@ -406,8 +364,11 @@ func TestAssistantMissionHandlerAuth(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode mission payload: %v", err)
 	}
-	if !payload.OK || payload.Mission.Pulse == nil || payload.Mission.Contributions == nil {
-		t.Fatalf("mission payload=%s, want pulse + contributions", recorder.Body.String())
+	if !payload.OK || payload.Mission.Pulse == nil {
+		t.Fatalf("mission payload=%s, want pulse", recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), `"contributions"`) {
+		t.Fatalf("mission payload exposed activity-volume contribution ranking: %s", recorder.Body.String())
 	}
 	if payload.Mission.ThemesAvailable {
 		t.Fatal("themesAvailable=true, want false with no insight entries")

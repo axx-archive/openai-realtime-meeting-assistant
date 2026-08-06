@@ -695,7 +695,6 @@ func (app *kanbanBoardApp) missionIntelligenceSnapshot(now time.Time) map[string
 		return map[string]any{
 			"generatedAt":     now.UTC().Format(time.RFC3339Nano),
 			"pulse":           map[string]any{"last24h": missionPulseWindow(nil, now), "last7d": missionPulseWindow(nil, now), "totalEntries": 0, "lastIngestAt": "", "currentMeetingId": "", "liveParticipants": 0, "histogram": missionPulseHistogram(nil, now), "transcriptLines": 0, "meetingsToday": 0, "meetingsThisWeek": 0},
-			"contributions":   map[string]any{"people": []missionContributionRow{}, "unattributed": 0, "fuelMax": 0},
 			"themes":          nil,
 			"themesAvailable": false,
 			"decisions":       []map[string]any{},
@@ -706,7 +705,6 @@ func (app *kanbanBoardApp) missionIntelligenceSnapshot(now time.Time) map[string
 	}
 
 	entries := app.memory.snapshot(0)
-	board := app.snapshotState()
 
 	lastIngestAt := ""
 	newest := time.Time{}
@@ -738,13 +736,6 @@ func (app *kanbanBoardApp) missionIntelligenceSnapshot(now time.Time) map[string
 	pulse["meetingsToday"] = meetingsToday
 	pulse["meetingsThisWeek"] = meetingsThisWeek
 
-	people, unattributed, fuelMax := missionContributions(entries, board)
-	contributions := map[string]any{
-		"people":       people,
-		"unattributed": unattributed,
-		"fuelMax":      fuelMax,
-	}
-
 	themes := app.latestMissionInsight()
 	if strings.TrimSpace(app.currentAPIKey()) == "" {
 		degraded = append(degraded, "openai_api_key_missing")
@@ -753,7 +744,6 @@ func (app *kanbanBoardApp) missionIntelligenceSnapshot(now time.Time) map[string
 	return map[string]any{
 		"generatedAt":     now.UTC().Format(time.RFC3339Nano),
 		"pulse":           pulse,
-		"contributions":   contributions,
 		"themes":          themes,
 		"themesAvailable": themes != nil,
 		"decisions":       app.decisionLedgerSnapshot(decisionSnapshotLimit),

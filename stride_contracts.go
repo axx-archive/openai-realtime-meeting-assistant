@@ -56,6 +56,12 @@ const (
 	STRIDEContractAgentPerformanceReceipt  STRIDEContractType = "agent_performance_receipt"
 	STRIDEContractAgentUpdateProposal      STRIDEContractType = "agent_update_proposal"
 	STRIDEContractWorkforcePolicy          STRIDEContractType = "workforce_policy"
+	STRIDEContractPersonPrincipal          STRIDEContractType = "person_principal"
+	STRIDEContractWorkspaceMembership      STRIDEContractType = "workspace_membership"
+	STRIDEContractMyMindSource             STRIDEContractType = "mymind_source"
+	STRIDEContractMyMindDisclosureGrant    STRIDEContractType = "mymind_disclosure_grant"
+	STRIDEContractMyMindCustodyDeletion    STRIDEContractType = "mymind_custody_deletion_receipt"
+	STRIDEContractArtifactDisposition      STRIDEContractType = "artifact_disposition"
 )
 
 // STRIDEContractHeader is the immutable, body-free identity shared by every
@@ -913,7 +919,7 @@ func STRIDEContractDigest(value any) (string, error) {
 
 func validSTRIDEContractType(value STRIDEContractType) bool {
 	switch value {
-	case STRIDEContractConversationEvent, STRIDEContractTranscriptSegment, STRIDEContractTranscriptRevision, STRIDEContractAnalysisProjection, STRIDEContractKnowledgeAssertion, STRIDEContractCollaborationPreference, STRIDEContractWorkIntent, STRIDEContractWorkProposal, STRIDEContractWorkRun, STRIDEContractOutcome, STRIDEContractMeetingAnswer, STRIDEContractCompanyAnswer, STRIDEContractAgentCoreProfile, STRIDEContractAgentProfileOverlay, STRIDEContractAgentCapabilityManifest, STRIDEContractChannelNormProfile, STRIDEContractAgentRelationshipMemory, STRIDEContractAgentContextEnvelope, STRIDEContractDelegationRun, STRIDEContractRichMessagePart, STRIDEContractMeetingAgentInvitation, STRIDEContractMeetingSpecialistContext, STRIDEContractMeetingAgentSession, STRIDEContractMeetingAgentContribution, STRIDEContractAgentPackageManifest, STRIDEContractMarketplaceListing, STRIDEContractTeamAgent, STRIDEContractAgentAssignment, STRIDEContractAgentLearningRecord, STRIDEContractAgentPerformanceReceipt, STRIDEContractAgentUpdateProposal, STRIDEContractWorkforcePolicy:
+	case STRIDEContractConversationEvent, STRIDEContractTranscriptSegment, STRIDEContractTranscriptRevision, STRIDEContractAnalysisProjection, STRIDEContractKnowledgeAssertion, STRIDEContractCollaborationPreference, STRIDEContractWorkIntent, STRIDEContractWorkProposal, STRIDEContractWorkRun, STRIDEContractOutcome, STRIDEContractMeetingAnswer, STRIDEContractCompanyAnswer, STRIDEContractAgentCoreProfile, STRIDEContractAgentProfileOverlay, STRIDEContractAgentCapabilityManifest, STRIDEContractChannelNormProfile, STRIDEContractAgentRelationshipMemory, STRIDEContractAgentContextEnvelope, STRIDEContractDelegationRun, STRIDEContractRichMessagePart, STRIDEContractMeetingAgentInvitation, STRIDEContractMeetingSpecialistContext, STRIDEContractMeetingAgentSession, STRIDEContractMeetingAgentContribution, STRIDEContractAgentPackageManifest, STRIDEContractMarketplaceListing, STRIDEContractTeamAgent, STRIDEContractAgentAssignment, STRIDEContractAgentLearningRecord, STRIDEContractAgentPerformanceReceipt, STRIDEContractAgentUpdateProposal, STRIDEContractWorkforcePolicy, STRIDEContractPersonPrincipal, STRIDEContractWorkspaceMembership, STRIDEContractMyMindSource, STRIDEContractMyMindDisclosureGrant, STRIDEContractMyMindCustodyDeletion, STRIDEContractArtifactDisposition:
 		return true
 	}
 	return false

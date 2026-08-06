@@ -15810,7 +15810,7 @@
       }
 
       /* canon Mission Intelligence — a flat content canvas (like Memory) for
-         every signed-in user: pulse tiles, contribution lens, themes cards.
+         every signed-in user: pulse tiles, themes, storylines, and decisions.
          The admin artifact library keeps its 320px sidebar + detail editor,
          boxed inside #intelLibrary. Hue = state only: the live dot and the
          alignment check earn --live; bars are ink. */
@@ -24693,8 +24693,7 @@
         /* ---- intelligence (design mobile §8): 2×2 stat tiles, tighter
            canvas; entered from the office card with the header chevron ---- */
         #artifactsTool {
-          /* clear the fixed bottom rail + the home-indicator safe area so the
-             contribution lens' last rows/heading never sit under the dock (CL-4) */
+          /* clear the fixed bottom rail + the home-indicator safe area */
           padding: 14px 16px calc(env(safe-area-inset-bottom) + 96px);
         }
 
@@ -28315,14 +28314,6 @@
                 <span class="intel-section__hint">updates as the room speaks</span>
               </div>
               <div id="intelLearnedList" class="intel-learned"></div>
-            </section>
-
-            <section class="intel-section" aria-label="Contribution lens">
-              <div class="intel-section__head">
-                <span class="intel-section__label">contribution lens</span>
-                <span class="intel-section__hint">fuel for the brain — every word makes the company smarter</span>
-              </div>
-              <div id="intelContribList" class="intel-contrib"></div>
             </section>
 
             <section class="intel-section" aria-label="Themes and consensus">
@@ -60987,7 +60978,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           intelPulseLive.hidden = !(Number(pulse?.liveParticipants) > 0)
         }
         renderIntelLearned()
-        renderIntelContributions()
         renderIntelThemes()
         renderIntelStorylines()
         renderIntelDecisions()

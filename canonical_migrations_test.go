@@ -11,8 +11,8 @@ func TestLoadCanonicalMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load migrations: %v", err)
 	}
-	if len(migrations) != 9 {
-		t.Fatalf("migration count = %d, want 9", len(migrations))
+	if len(migrations) != 13 {
+		t.Fatalf("migration count = %d, want 13", len(migrations))
 	}
 	migration := migrations[0]
 	if migration.Version != 1 || migration.Name != "0001_canonical.sql" {
@@ -63,6 +63,50 @@ func TestLoadCanonicalMigrations(t *testing.T) {
 		!strings.Contains(migrations[8].SQL, "CREATE TABLE stride_conversation_derived_edges") ||
 		!strings.Contains(migrations[8].SQL, "recall_eligible boolean NOT NULL DEFAULT false CHECK (recall_eligible = false)") {
 		t.Fatalf("unexpected STRIDE conversation ledger migration: %+v", migrations[8])
+	}
+	if migrations[9].Version != 10 || migrations[9].Name != "0010_stride_person_mymind.sql" ||
+		migrations[9].SHA256 != sha256.Sum256([]byte(migrations[9].SQL)) ||
+		!strings.Contains(migrations[9].SQL, "CREATE TABLE stride_person_principals") ||
+		!strings.Contains(migrations[9].SQL, "CREATE TABLE stride_workspace_memberships") ||
+		!strings.Contains(migrations[9].SQL, "CREATE TABLE stride_mymind_sources") ||
+		!strings.Contains(migrations[9].SQL, "CREATE TABLE stride_mymind_disclosure_grants") ||
+		!strings.Contains(migrations[9].SQL, "CREATE TABLE stride_mymind_authority_grants") ||
+		!strings.Contains(migrations[9].SQL, "CREATE TABLE stride_mymind_custody_deletion_receipts") ||
+		!strings.Contains(migrations[9].SQL, "CREATE TABLE stride_mymind_custody_deletion_items") ||
+		!strings.Contains(migrations[9].SQL, "CREATE TABLE stride_mymind_export_receipts") ||
+		!strings.Contains(migrations[9].SQL, "stride_person_delete_has_exact_custody_receipt") ||
+		!strings.Contains(migrations[9].SQL, "destination_audience_id NOT IN ('', 'organization', 'workspace')") ||
+		!strings.Contains(migrations[9].SQL, "VALUES ('person_mymind_context', false, 1)") {
+		t.Fatalf("unexpected STRIDE person/MyMind migration: %+v", migrations[9])
+	}
+	if migrations[10].Version != 11 || migrations[10].Name != "0011_ambient_intelligence_replay.sql" ||
+		migrations[10].SHA256 != sha256.Sum256([]byte(migrations[10].SQL)) ||
+		!strings.Contains(migrations[10].SQL, "CREATE TABLE ambient_intelligence_replay_manifests") ||
+		!strings.Contains(migrations[10].SQL, "CREATE TABLE ambient_intelligence_replay_sources") ||
+		!strings.Contains(migrations[10].SQL, "CREATE TABLE ambient_intelligence_replay_stage_receipts") ||
+		!strings.Contains(migrations[10].SQL, "idempotency_key bytea NOT NULL") ||
+		!strings.Contains(migrations[10].SQL, "lease_expires_at timestamptz") ||
+		!strings.Contains(migrations[10].SQL, "CHECK (stage <> 'board')") {
+		t.Fatalf("unexpected ambient replay migration: %+v", migrations[10])
+	}
+	if migrations[11].Version != 12 || migrations[11].Name != "0012_artifact_dispositions.sql" ||
+		migrations[11].SHA256 != sha256.Sum256([]byte(migrations[11].SQL)) ||
+		!strings.Contains(migrations[11].SQL, "CREATE TABLE stride_artifact_disposition_states") ||
+		!strings.Contains(migrations[11].SQL, "CREATE TABLE stride_artifact_discard_confirmations") ||
+		!strings.Contains(migrations[11].SQL, "CREATE TABLE stride_artifact_disposition_receipts") {
+		t.Fatalf("unexpected artifact disposition migration: %+v", migrations[11])
+	}
+	if migrations[12].Version != 13 || migrations[12].Name != "0013_ambient_mind_projections.sql" ||
+		migrations[12].SHA256 != sha256.Sum256([]byte(migrations[12].SQL)) ||
+		!strings.Contains(migrations[12].SQL, "CREATE TABLE stride_ambient_projection_events") ||
+		!strings.Contains(migrations[12].SQL, "CREATE TABLE stride_ambient_projection_sources") ||
+		!strings.Contains(migrations[12].SQL, "CREATE TABLE stride_ambient_projection_nodes") ||
+		!strings.Contains(migrations[12].SQL, "CREATE TABLE stride_ambient_projection_source_edges") ||
+		!strings.Contains(migrations[12].SQL, "CREATE TABLE stride_ambient_projection_node_edges") ||
+		!strings.Contains(migrations[12].SQL, "CREATE TABLE stride_ambient_projection_node_states") ||
+		!strings.Contains(migrations[12].SQL, "CREATE TABLE stride_ambient_projection_checkpoints") ||
+		!strings.Contains(migrations[12].SQL, "VALUES ('ambient_mind_projection_shadow',false,1)") {
+		t.Fatalf("unexpected AmbientMind projection migration: %+v", migrations[12])
 	}
 	for _, marker := range []string{
 		"CREATE TABLE canonical_events",
