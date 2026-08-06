@@ -115,11 +115,14 @@ func (failure *ambientOutputRejection) providerOutputRejection() {}
 // records only the pre-window baseline and head needed to prevent a restart
 // from re-baselining past held work.
 type ambientHeldWindow struct {
-	Agent         string `json:"agent"`
-	RoomID        string `json:"roomId"`
-	WindowID      string `json:"windowId"`
-	BaselineID    string `json:"baselineId,omitempty"`
-	BlockedReason string `json:"blockedReason,omitempty"`
+	Agent             string `json:"agent"`
+	RoomID            string `json:"roomId"`
+	InputKind         string `json:"inputKind,omitempty"`
+	ArtifactKind      string `json:"artifactKind,omitempty"`
+	CursorMetadataKey string `json:"cursorMetadataKey,omitempty"`
+	WindowID          string `json:"windowId"`
+	BaselineID        string `json:"baselineId,omitempty"`
+	BlockedReason     string `json:"blockedReason,omitempty"`
 }
 
 type ambientHeldWindowState struct {
@@ -130,6 +133,12 @@ type ambientHeldWindowState struct {
 var ambientHeldWindowStateMu sync.Mutex
 
 const ambientContinuityAmbiguous = "durable_cursor_ambiguous"
+
+const (
+	ambientContinuityCheckpointInvalid = "durable_checkpoint_invalid"
+	ambientContinuityHeldWindowInvalid = "durable_held_window_invalid"
+	ambientContinuityContractMismatch  = "durable_checkpoint_contract_mismatch"
+)
 
 // ambientHeldWindowStatePersist is an injectable durability seam. Production
 // always uses the fsync'd atomic writer; tests replace it to prove that write,
@@ -207,10 +216,13 @@ func (app *kanbanBoardApp) persistAmbientHeldWindow(agent ambientAgentConfig, he
 	roomID = agent.scopeRoomID(roomID)
 	key := ambientAgentScopeKey(agent, roomID)
 	window := ambientHeldWindow{
-		Agent:      agent.name,
-		RoomID:     roomID,
-		WindowID:   strings.TrimSpace(headID),
-		BaselineID: app.ambientAgentBaselineID(key),
+		Agent:             agent.name,
+		RoomID:            roomID,
+		InputKind:         agent.inputKind,
+		ArtifactKind:      agent.artifactKind,
+		CursorMetadataKey: agent.cursorMetadataKey,
+		WindowID:          strings.TrimSpace(headID),
+		BaselineID:        app.ambientAgentBaselineID(key),
 	}
 	ambientHeldWindowStateMu.Lock()
 	defer ambientHeldWindowStateMu.Unlock()
@@ -237,14 +249,21 @@ func (app *kanbanBoardApp) ensureAmbientScopeCheckpoint(agent ambientAgentConfig
 	if err != nil {
 		return ambientHeldWindow{}, err
 	}
-	checkpoint, ok := state.Windows[key]
-	if !ok {
-		checkpoint = ambientHeldWindow{Agent: agent.name, RoomID: roomID, BaselineID: strings.TrimSpace(baselineID)}
-		if len(blockedReason) > 0 {
-			checkpoint.BlockedReason = strings.TrimSpace(blockedReason[0])
-		}
-		state.Windows[key] = checkpoint
+	checkpoint := state.Windows[key]
+	reason := ""
+	if len(blockedReason) > 0 {
+		reason = strings.TrimSpace(blockedReason[0])
 	}
+	if strings.TrimSpace(checkpoint.WindowID) == "" {
+		checkpoint.BaselineID = strings.TrimSpace(baselineID)
+		checkpoint.BlockedReason = reason
+	}
+	checkpoint.Agent = agent.name
+	checkpoint.RoomID = roomID
+	checkpoint.InputKind = agent.inputKind
+	checkpoint.ArtifactKind = agent.artifactKind
+	checkpoint.CursorMetadataKey = agent.cursorMetadataKey
+	state.Windows[key] = checkpoint
 	// Rewrite even an existing checkpoint. Besides refreshing the 0600 atomic
 	// envelope, this is the recovery probe that must succeed before an explicit
 	// worker restart may clear a prior persistence-open circuit.
@@ -282,9 +301,12 @@ func (app *kanbanBoardApp) persistAmbientCheckpointBaseline(agent ambientAgentCo
 		return err
 	}
 	state.Windows[key] = ambientHeldWindow{
-		Agent:      agent.name,
-		RoomID:     roomID,
-		BaselineID: strings.TrimSpace(baselineID),
+		Agent:             agent.name,
+		RoomID:            roomID,
+		InputKind:         agent.inputKind,
+		ArtifactKind:      agent.artifactKind,
+		CursorMetadataKey: agent.cursorMetadataKey,
+		BaselineID:        strings.TrimSpace(baselineID),
 	}
 	return ambientHeldWindowStatePersist(path, state)
 }
@@ -296,6 +318,21 @@ func (app *kanbanBoardApp) bootstrapAmbientContinuity(agent ambientAgentConfig, 
 		return "", "", err
 	}
 	if ok {
+		normalized, changed := app.validateAndNormalizeAmbientCheckpoint(agent, roomID, checkpoint)
+		if changed {
+			ambientHeldWindowStateMu.Lock()
+			path := app.ambientHeldWindowPath()
+			state, loadErr := loadAmbientHeldWindowState(path)
+			if loadErr == nil {
+				state.Windows[key] = normalized
+				loadErr = ambientHeldWindowStatePersist(path, state)
+			}
+			ambientHeldWindowStateMu.Unlock()
+			if loadErr != nil {
+				return normalized.BaselineID, normalized.BlockedReason, loadErr
+			}
+			checkpoint = normalized
+		}
 		return checkpoint.BaselineID, checkpoint.BlockedReason, nil
 	}
 	if boolEnv(agent.backfillEnv) {
@@ -306,6 +343,64 @@ func (app *kanbanBoardApp) bootstrapAmbientContinuity(agent ambientAgentConfig, 
 		return "", ambientContinuityAmbiguous, nil
 	}
 	return baselineID, "", nil
+}
+
+// validateAndNormalizeAmbientCheckpoint upgrades legacy untyped checkpoints and
+// rejects cursor references that do not belong to this worker's input stream and
+// scope. A bad held head is never discarded or skipped: it remains visible in
+// the sidecar and opens a continuity circuit until an operator repairs it.
+func (app *kanbanBoardApp) validateAndNormalizeAmbientCheckpoint(agent ambientAgentConfig, roomID string, checkpoint ambientHeldWindow) (ambientHeldWindow, bool) {
+	roomID = agent.scopeRoomID(roomID)
+	normalized := checkpoint
+	contractMismatch := (strings.TrimSpace(checkpoint.Agent) != "" && checkpoint.Agent != agent.name) ||
+		(strings.TrimSpace(checkpoint.RoomID) != "" && normalizeRoomID(checkpoint.RoomID) != roomID) ||
+		(strings.TrimSpace(checkpoint.InputKind) != "" && checkpoint.InputKind != agent.inputKind) ||
+		(strings.TrimSpace(checkpoint.ArtifactKind) != "" && checkpoint.ArtifactKind != agent.artifactKind) ||
+		(strings.TrimSpace(checkpoint.CursorMetadataKey) != "" && checkpoint.CursorMetadataKey != agent.cursorMetadataKey)
+	normalized.Agent = agent.name
+	normalized.RoomID = roomID
+	normalized.InputKind = agent.inputKind
+	normalized.ArtifactKind = agent.artifactKind
+	normalized.CursorMetadataKey = agent.cursorMetadataKey
+	changed := normalized != checkpoint
+
+	baseline, baselineOK, windowOK := app.memory.normalizeAmbientCheckpointReferences(agent, roomID, checkpoint.BaselineID, checkpoint.WindowID)
+	if contractMismatch || strings.TrimSpace(checkpoint.BlockedReason) != "" {
+		baselineOK = false
+	}
+	if !windowOK {
+		normalized.BlockedReason = ambientContinuityHeldWindowInvalid
+		return normalized, true
+	}
+	if baselineOK {
+		if normalized.BaselineID != baseline || normalized.BlockedReason != "" {
+			normalized.BaselineID = baseline
+			normalized.BlockedReason = ""
+			changed = true
+		}
+		return normalized, changed
+	}
+
+	// A bad sidecar can be repaired only from the newest durable artifact
+	// cursor. A held sidecar additionally has to prove that cursor remains
+	// strictly before the validated held input.
+	recovered, _, ambiguous := app.memory.ambientContinuityBaseline(agent, roomID)
+	if ambiguous {
+		normalized.BlockedReason = ambientContinuityAmbiguous
+		return normalized, true
+	}
+	_, recoveredOK, recoveredWindowOK := app.memory.normalizeAmbientCheckpointReferences(agent, roomID, recovered, checkpoint.WindowID)
+	if !recoveredOK || !recoveredWindowOK {
+		if contractMismatch {
+			normalized.BlockedReason = ambientContinuityContractMismatch
+		} else {
+			normalized.BlockedReason = ambientContinuityCheckpointInvalid
+		}
+		return normalized, true
+	}
+	normalized.BaselineID = recovered
+	normalized.BlockedReason = ""
+	return normalized, true
 }
 
 // ambientAgentCircuitOpenError is safe to return to on-demand callers. It
@@ -369,6 +464,11 @@ type ambientAgentConfig struct {
 	// nudgeMaxAge overrides defaultAmbientNudgeMaxAge for this agent's A3 nudge
 	// staleness floor; zero uses the default.
 	nudgeMaxAge time.Duration
+	// syntheticHeldWindow is reserved for specialty batches that can combine
+	// multiple input kinds and therefore have no single input entry as their
+	// provider-window key. Generic ambient workers must keep this false so their
+	// held WindowID remains a typed, scope-ordered input cursor.
+	syntheticHeldWindow bool
 	// roomScoped partitions the agent's bookkeeping by room (multi-room W4
 	// §7.4): the cursor for (agent, room) is the newest artifact-of-kind
 	// stamped with that roomId (legacy artifacts without roomId are the OFFICE
@@ -441,12 +541,24 @@ func (store *meetingMemoryStore) ambientContinuityBaseline(agent ambientAgentCon
 		}
 		cursorID := strings.TrimSpace(artifact.Metadata[agent.cursorMetadataKey])
 		if cursorID == "" {
-			// Legacy workers used the artifact's own position as the cursor; the
-			// normal window scanner has the same fallback.
-			return artifact.ID, false, false
+			// Normalize a cursorless legacy artifact to the newest matching input
+			// at or before that artifact. Persisting the artifact id itself keeps
+			// the sidecar untyped and can skip unrelated raw inputs after a config
+			// change.
+			for inputIndex := index; inputIndex >= 0; inputIndex-- {
+				input := store.entries[inputIndex]
+				if input.Kind == agent.inputKind && !memoryEntryHiddenFromRecall(input) && matchesRoom(input) {
+					return input.ID, false, false
+				}
+			}
+			if !hasInput {
+				return "", true, false
+			}
+			return "", false, true
 		}
-		for _, input := range store.entries {
-			if input.ID == cursorID && input.Kind == agent.inputKind && matchesRoom(input) {
+		for inputIndex := index; inputIndex >= 0; inputIndex-- {
+			input := store.entries[inputIndex]
+			if input.ID == cursorID && input.Kind == agent.inputKind && !memoryEntryHiddenFromRecall(input) && matchesRoom(input) {
 				return cursorID, false, false
 			}
 		}
@@ -469,6 +581,72 @@ func (store *meetingMemoryStore) ambientContinuityBaseline(agent ambientAgentCon
 		return "", false, true
 	}
 	return "", true, false
+}
+
+// normalizeAmbientCheckpointReferences resolves a baseline to this worker's
+// input stream. Legacy artifact references are accepted only as migration input
+// and normalized to a proven input cursor. The held head must be a later input
+// in the same effective room.
+func (store *meetingMemoryStore) normalizeAmbientCheckpointReferences(agent ambientAgentConfig, roomID, baselineID, windowID string) (normalizedBaseline string, baselineOK, windowOK bool) {
+	if store == nil {
+		return "", strings.TrimSpace(baselineID) == "", strings.TrimSpace(windowID) == ""
+	}
+	windowRoomID := agent.windowRoomID(roomID)
+	matchesRoom := func(entry meetingMemoryEntry) bool {
+		return windowRoomID == "" || normalizeRoomID(entry.Metadata["roomId"]) == normalizeRoomID(windowRoomID)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	find := func(id string) (meetingMemoryEntry, int, bool) {
+		id = strings.TrimSpace(id)
+		for index := len(store.entries) - 1; index >= 0; index-- {
+			entry := store.entries[index]
+			if entry.ID == id && !memoryEntryHiddenFromRecall(entry) {
+				return entry, index, true
+			}
+		}
+		return meetingMemoryEntry{}, -1, false
+	}
+
+	baselineID = strings.TrimSpace(baselineID)
+	baselineIndex := -1
+	baselineOK = baselineID == ""
+	if baselineID != "" {
+		entry, index, ok := find(baselineID)
+		if ok && matchesRoom(entry) {
+			switch entry.Kind {
+			case agent.inputKind:
+				normalizedBaseline, baselineIndex, baselineOK = entry.ID, index, true
+			case agent.artifactKind:
+				cursorID := strings.TrimSpace(entry.Metadata[agent.cursorMetadataKey])
+				if cursorID != "" {
+					cursor, cursorIndex, cursorOK := find(cursorID)
+					if cursorOK && cursor.Kind == agent.inputKind && matchesRoom(cursor) && cursorIndex <= index {
+						normalizedBaseline, baselineIndex, baselineOK = cursor.ID, cursorIndex, true
+					}
+				} else {
+					for cursorIndex := index; cursorIndex >= 0; cursorIndex-- {
+						cursor := store.entries[cursorIndex]
+						if cursor.Kind == agent.inputKind && !memoryEntryHiddenFromRecall(cursor) && matchesRoom(cursor) {
+							normalizedBaseline, baselineIndex, baselineOK = cursor.ID, cursorIndex, true
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	windowID = strings.TrimSpace(windowID)
+	windowOK = windowID == ""
+	if windowID != "" {
+		if agent.syntheticHeldWindow {
+			return normalizedBaseline, baselineOK, true
+		}
+		window, windowIndex, ok := find(windowID)
+		windowOK = ok && window.Kind == agent.inputKind && matchesRoom(window) && (!baselineOK || baselineIndex < 0 || windowIndex > baselineIndex)
+	}
+	return normalizedBaseline, baselineOK, windowOK
 }
 
 // ambientAgentKey is the map key for one agent's per-room bookkeeping
@@ -843,6 +1021,7 @@ func (app *kanbanBoardApp) invokeAmbientAgentGuarded(agent ambientAgentConfig, c
 	if app == nil || app.memory == nil {
 		return meetingMemoryEntry{}, nil
 	}
+	recordCapabilityPoll(agent.name, time.Now().UTC())
 	if minBatch < 1 {
 		minBatch = 1
 	}
@@ -1596,7 +1775,7 @@ func (store *meetingMemoryStore) unconsumedEntriesAfterForRoomForPrincipal(input
 	baselineID = strings.TrimSpace(baselineID)
 	if baselineID != "" {
 		for index := len(entries) - 1; index >= 0; index-- {
-			if entries[index].ID == baselineID && !memoryEntryHiddenFromRecall(entries[index]) {
+			if entries[index].ID == baselineID && entries[index].Kind == inputKind && !memoryEntryHiddenFromRecall(entries[index]) && matchesRoom(entries[index]) && (principal.Audience == "" || recallEntryScopeAllowed(entries[index].Metadata, principal)) {
 				startIndex = index + 1
 				break
 			}
@@ -1610,7 +1789,7 @@ func (store *meetingMemoryStore) unconsumedEntriesAfterForRoomForPrincipal(input
 		cursorID := strings.TrimSpace(entry.Metadata[cursorKey])
 		if cursorID != "" {
 			for inputIndex := len(entries) - 1; inputIndex >= 0; inputIndex-- {
-				if entries[inputIndex].ID == cursorID {
+				if entries[inputIndex].ID == cursorID && entries[inputIndex].Kind == inputKind && !memoryEntryHiddenFromRecall(entries[inputIndex]) && matchesRoom(entries[inputIndex]) && (principal.Audience == "" || recallEntryScopeAllowed(entries[inputIndex].Metadata, principal)) {
 					if inputIndex+1 > startIndex {
 						startIndex = inputIndex + 1
 					}

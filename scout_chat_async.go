@@ -320,6 +320,7 @@ func (app *kanbanBoardApp) scoutOpeningReplyWorker(ctx context.Context, queue <-
 func (app *kanbanBoardApp) scoutOpeningReplyRecoveryLoop(ctx context.Context) {
 	defer app.scoutReplyWG.Done()
 	app.recoverScoutOpeningReplies()
+	app.recoverScoutChatModerations()
 	ticker := time.NewTicker(scoutReplyRecoveryEvery)
 	defer ticker.Stop()
 	for {
@@ -328,6 +329,7 @@ func (app *kanbanBoardApp) scoutOpeningReplyRecoveryLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			app.recoverScoutOpeningReplies()
+			app.recoverScoutChatModerations()
 		}
 	}
 }

@@ -28,6 +28,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -57,19 +58,20 @@ const (
 
 func slopClassifierAgent() ambientAgentConfig {
 	return ambientAgentConfig{
-		name:              slopClassifierAgentName,
-		defaultInterval:   defaultSlopClassifierInterval,
-		intervalEnv:       "SLOP_CLASSIFIER_INTERVAL",
-		disabledEnv:       "SLOP_CLASSIFIER_DISABLED",
-		backfillEnv:       "SLOP_CLASSIFIER_BACKFILL",
-		minBatchEnv:       "SLOP_CLASSIFIER_MIN_INPUTS",
-		defaultMinBatch:   defaultSlopClassifierMinBatch,
-		maxBatchEnv:       "SLOP_CLASSIFIER_MAX_INPUTS",
-		defaultMaxBatch:   defaultSlopClassifierMaxBatch,
-		inputKind:         meetingMemoryKindTranscript,
-		artifactKind:      meetingMemoryKindSlopPass,
-		cursorMetadataKey: slopClassifierCursorKey,
-		requestTimeout:    slopClassifierRequestTimeout,
+		name:                slopClassifierAgentName,
+		defaultInterval:     defaultSlopClassifierInterval,
+		intervalEnv:         "SLOP_CLASSIFIER_INTERVAL",
+		disabledEnv:         "SLOP_CLASSIFIER_DISABLED",
+		backfillEnv:         "SLOP_CLASSIFIER_BACKFILL",
+		minBatchEnv:         "SLOP_CLASSIFIER_MIN_INPUTS",
+		defaultMinBatch:     defaultSlopClassifierMinBatch,
+		maxBatchEnv:         "SLOP_CLASSIFIER_MAX_INPUTS",
+		defaultMaxBatch:     defaultSlopClassifierMaxBatch,
+		inputKind:           meetingMemoryKindTranscript,
+		artifactKind:        meetingMemoryKindSlopPass,
+		cursorMetadataKey:   slopClassifierCursorKey,
+		requestTimeout:      slopClassifierRequestTimeout,
+		syntheticHeldWindow: true,
 		// produce is unused: the classifier owns its loop (below) because the
 		// expiry sweep must ride EVERY tick, not only minBatch-triggered passes.
 	}
@@ -194,14 +196,21 @@ func (app *kanbanBoardApp) runSlopClassifierOnce(agent ambientAgentConfig, ctx c
 	for _, candidate := range candidates {
 		byID[candidate.ID] = candidate
 	}
+	if reason := validateSlopVerdictSet(byID, verdicts); reason != "" {
+		recordEvalEvent(seatSlop, evalKindParseFailure, map[string]any{"seat": seatSlop, "model": model, "reason": reason})
+		app.recordAmbientAgentHoldFailure(agent, providerWindow, officeRoomID)
+		return fmt.Errorf("%s output rejected: %s", slopClassifierAgentName, reason)
+	}
 
 	quarantined, archived := 0, 0
 	for _, verdict := range verdicts {
-		candidate, found := byID[strings.TrimSpace(verdict.EntryID)]
-		if !found {
-			continue // never act on an id the model invented outside the batch.
+		candidate := byID[strings.TrimSpace(verdict.EntryID)]
+		target, err := app.applySlopVerdict(candidate, verdict)
+		if err != nil {
+			app.recordAmbientAgentHoldFailure(agent, providerWindow, officeRoomID)
+			return err
 		}
-		switch app.applySlopVerdict(candidate, verdict) {
+		switch target {
 		case relevanceQuarantined:
 			quarantined++
 		case relevanceArchived:
@@ -223,6 +232,7 @@ func (app *kanbanBoardApp) runSlopClassifierOnce(agent ambientAgentConfig, ctx c
 		"archivedCount":         strconv.Itoa(archived),
 	}
 	if _, _, err := app.memory.appendSlopPass(durableTimestampID("slop-pass", time.Now()), passText, passMetadata); err != nil {
+		app.recordAmbientAgentHoldFailure(agent, providerWindow, officeRoomID)
 		return err
 	}
 	if err := app.clearAmbientAgentFailure(agent.name); err != nil {
@@ -336,7 +346,7 @@ func slopEntryHumanPinned(entry meetingMemoryEntry) bool {
 // applySlopVerdict stamps the classifier's decision on one candidate and fans a
 // quarantine_change event on a real transition. Returns the resulting relevance
 // (relevanceActive for keep). Thresholds bias to keep.
-func (app *kanbanBoardApp) applySlopVerdict(entry meetingMemoryEntry, verdict slopVerdict) string {
+func (app *kanbanBoardApp) applySlopVerdict(entry meetingMemoryEntry, verdict slopVerdict) (string, error) {
 	now := time.Now().UTC()
 	confidence := verdict.Confidence
 	reason := trimForStorage(normalizeMemoryText(verdict.Reason), 200)
@@ -379,8 +389,7 @@ func (app *kanbanBoardApp) applySlopVerdict(entry meetingMemoryEntry, verdict sl
 
 	stamped, _, err := app.memory.updateEntryWithMetadata(entry.Kind, entry.ID, entry.Text, updates)
 	if err != nil {
-		log.Errorf("%s failed to stamp verdict on %s: %v", slopClassifierAgentName, entry.ID, err)
-		return relevanceActive
+		return relevanceActive, fmt.Errorf("%s failed to stamp verdict on %s: %w", slopClassifierAgentName, entry.ID, err)
 	}
 	if target == relevanceQuarantined || target == relevanceArchived {
 		broadcastOSEvent(osEvent{
@@ -391,7 +400,7 @@ func (app *kanbanBoardApp) applySlopVerdict(entry meetingMemoryEntry, verdict sl
 			Actor:         reviewedByClassifier,
 		})
 	}
-	return target
+	return target, nil
 }
 
 // sweepExpiredQuarantine hard-deletes quarantined entries past their expiry —
@@ -605,6 +614,44 @@ type slopVerdict struct {
 	Confidence float64 `json:"confidence"`
 	Reason     string  `json:"reason"`
 	Evidence   string  `json:"evidence"`
+}
+
+// validateSlopVerdictSet requires one and only one verdict for every supplied
+// candidate. Partial, duplicate, and invented-id outputs keep the held window
+// and cursor in place; "no verdict" is not equivalent to a durable keep.
+func validateSlopVerdictSet(candidates map[string]meetingMemoryEntry, verdicts []slopVerdict) string {
+	if len(verdicts) != len(candidates) {
+		return "candidate_verdict_count_mismatch"
+	}
+	seen := make(map[string]struct{}, len(verdicts))
+	for _, verdict := range verdicts {
+		id := strings.TrimSpace(verdict.EntryID)
+		if id == "" {
+			return "missing_candidate_id"
+		}
+		if _, ok := candidates[id]; !ok {
+			return "invented_candidate_id"
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return "duplicate_candidate_id"
+		}
+		switch strings.ToLower(strings.TrimSpace(verdict.Verdict)) {
+		case "keep", "archive", "quarantine":
+		default:
+			return "invalid_verdict"
+		}
+		if math.IsNaN(verdict.Confidence) || math.IsInf(verdict.Confidence, 0) || verdict.Confidence < 0 || verdict.Confidence > 1 {
+			return "invalid_confidence"
+		}
+		if strings.TrimSpace(verdict.Reason) == "" {
+			return "missing_reason"
+		}
+		if strings.TrimSpace(verdict.Evidence) == "" {
+			return "missing_evidence"
+		}
+		seen[id] = struct{}{}
+	}
+	return ""
 }
 
 // parseSlopClassifierOutput accepts a bare JSON array or an object wrapping one

@@ -411,10 +411,153 @@ func ambientWorkerCapabilitySnapshot(agent ambientAgentConfig, now time.Time, pr
 	for key, value := range readinessAgentSnapshot(agent) {
 		snap[key] = value
 	}
+	backfillArmed := boolEnv(agent.backfillEnv)
+	snap["backfillArmed"] = backfillArmed
+	registered, running, pendingRooms := ambientWorkerSupervisorState(kanbanApp, agent.name)
+	snap["supervisorRegistered"] = registered
+	snap["supervisorRunning"] = running
+	snap["pendingRoomCount"] = pendingRooms
+	if diagnostics := ambientWorkerCheckpointDiagnostics(kanbanApp, agent); len(diagnostics) > 0 {
+		for key, value := range diagnostics {
+			snap[key] = value
+		}
+	}
 	snap["provider"] = provider
 	markNamedProviderFailure(snap, provider, providerReady)
+	// Cadence-gated specialty workers can also run synchronously on demand and
+	// prove current health from their typed artifact + workDue contract. Generic
+	// meeting-intelligence workers always require a live supervisor.
+	requiresSupervisor := agent.healthWorkDue == nil
+	if snap["enabled"] == true && providerReady && !running && requiresSupervisor {
+		snap["supervisorError"] = true
+		if strings.TrimSpace(asString(snap["lastError"])) == "" {
+			snap["lastError"] = "worker supervisor is not running"
+		}
+	}
+	if snap["enabled"] == false && backfillArmed {
+		snap["unsafeActivation"] = true
+		snap["activationWarning"] = "worker is disabled while full-history backfill is armed"
+	}
+	if snap["ambientContinuityHealthy"] == false {
+		snap["continuityError"] = true
+		if strings.TrimSpace(asString(snap["lastError"])) == "" {
+			snap["lastError"] = "ambient continuity checkpoint requires repair"
+		}
+	}
 	snap["status"] = capabilityStatus(snap, providerReady)
+	if snap["unsafeActivation"] == true {
+		snap["status"] = "degraded"
+	}
+	snap["analysisReady"] = snap["status"] == "healthy" && running && snap["ambientContinuityHealthy"] != false
 	return snap
+}
+
+// ambientWorkerSupervisorState reports process liveness without manufacturing
+// success. Registration proves a loop was installed this boot; the done channel
+// proves whether that exact supervisor is still running. Pending rooms are only
+// nudges waiting to be drained, not a fabricated full backlog count.
+func ambientWorkerSupervisorState(app *kanbanBoardApp, name string) (registered, running bool, pendingRooms int) {
+	if app == nil {
+		return false, false, 0
+	}
+	app.mu.Lock()
+	_, registered = app.agentCancels[name]
+	done := app.agentDones[name]
+	pendingRooms = len(app.agentPendingRooms[name])
+	app.mu.Unlock()
+	if !registered || done == nil {
+		return registered, false, pendingRooms
+	}
+	select {
+	case <-done:
+		return true, false, pendingRooms
+	default:
+		return true, true, pendingRooms
+	}
+}
+
+// ambientWorkerCheckpointDiagnostics makes restart continuity inspectable while
+// keeping the public health surface free of raw message ids. Legacy artifact
+// baselines are considered valid only when they normalize to a proven input
+// cursor; a held window must always resolve to a later input in the same scope.
+func ambientWorkerCheckpointDiagnostics(app *kanbanBoardApp, agent ambientAgentConfig) map[string]any {
+	if app == nil || app.memory == nil {
+		return nil
+	}
+	ambientHeldWindowStateMu.Lock()
+	state, err := loadAmbientHeldWindowState(app.ambientHeldWindowPath())
+	ambientHeldWindowStateMu.Unlock()
+	if err != nil {
+		return map[string]any{"checkpointStatus": "unreadable", "checkpointError": true}
+	}
+	prefix := agent.name + "@"
+	checkpoints, held, blocked, invalid := 0, 0, 0, 0
+	continuityScopes := make([]map[string]any, 0)
+	for key, checkpoint := range state.Windows {
+		if key != agent.name && !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		checkpoints++
+		expectedRoom := officeRoomID
+		if key != agent.name {
+			expectedRoom = strings.TrimPrefix(key, prefix)
+		}
+		expectedRoom = agent.scopeRoomID(expectedRoom)
+		contractInvalid := key != ambientAgentScopeKey(agent, expectedRoom) || strings.TrimSpace(checkpoint.Agent) != agent.name ||
+			(strings.TrimSpace(checkpoint.RoomID) != "" && normalizeRoomID(checkpoint.RoomID) != expectedRoom) ||
+			(strings.TrimSpace(checkpoint.InputKind) != "" && checkpoint.InputKind != agent.inputKind) ||
+			(strings.TrimSpace(checkpoint.ArtifactKind) != "" && checkpoint.ArtifactKind != agent.artifactKind) ||
+			(strings.TrimSpace(checkpoint.CursorMetadataKey) != "" && checkpoint.CursorMetadataKey != agent.cursorMetadataKey)
+		reason := strings.TrimSpace(checkpoint.BlockedReason)
+		if reason != "" {
+			blocked++
+		}
+		_, baselineOK, windowOK := app.memory.normalizeAmbientCheckpointReferences(agent, expectedRoom, checkpoint.BaselineID, checkpoint.WindowID)
+		if strings.TrimSpace(checkpoint.WindowID) != "" {
+			held++
+		}
+		scopeInvalid := contractInvalid || !baselineOK || !windowOK
+		if scopeInvalid {
+			invalid++
+		}
+		if scopeInvalid || reason != "" {
+			if reason == "" {
+				reason = ambientContinuityCheckpointInvalid
+			}
+			continuityScopes = append(continuityScopes, map[string]any{
+				"roomId":        expectedRoom,
+				"blockedReason": reason,
+				"inputKind":     agent.inputKind,
+				"artifactKind":  agent.artifactKind,
+				"heldWindow":    strings.TrimSpace(checkpoint.WindowID) != "",
+			})
+		}
+	}
+	status := "missing"
+	if checkpoints > 0 {
+		status = "ready"
+	}
+	if held > 0 {
+		status = "held"
+	}
+	if blocked > 0 {
+		status = "blocked"
+	}
+	if invalid > 0 {
+		status = "invalid"
+	}
+	out := map[string]any{
+		"checkpointStatus":         status,
+		"checkpointScopes":         checkpoints,
+		"heldScopeCount":           held,
+		"blockedScopeCount":        blocked,
+		"invalidScopeCount":        invalid,
+		"ambientContinuityHealthy": invalid == 0 && blocked == 0,
+	}
+	if len(continuityScopes) > 0 {
+		out["continuityScopes"] = continuityScopes
+	}
+	return out
 }
 
 func ambientWorkersCapabilitySnapshot(now time.Time, openAIReady, anthropicReady bool) map[string]any {

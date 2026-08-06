@@ -60,6 +60,10 @@ func (app *kanbanBoardApp) observeSTRIDETeamChatMessage(thread scoutChatThreadRe
 }
 
 func (app *kanbanBoardApp) projectSTRIDETeamChatMessage(thread scoutChatThreadRecord, message scoutChatMessageRecord, eventType, actorEmail string) (bool, error) {
+	return app.projectSTRIDETeamChatMessageWithStructuredRefs(thread, message, eventType, actorEmail, nil)
+}
+
+func (app *kanbanBoardApp) projectSTRIDETeamChatMessageWithStructuredRefs(thread scoutChatThreadRecord, message scoutChatMessageRecord, eventType, actorEmail string, extraStructuredRefs []STRIDEReference) (bool, error) {
 	if app == nil || app.strideRuntime == nil || scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic ||
 		!strideIdentifier(thread.ID) || !strideIdentifier(message.ID) || !oneOf(eventType, "message", "edit", "delete", "reaction") {
 		return false, ErrSTRIDEConversationInvalid
@@ -91,6 +95,13 @@ func (app *kanbanBoardApp) projectSTRIDETeamChatMessage(thread scoutChatThreadRe
 		if err != nil {
 			return err
 		}
+		for _, ref := range extraStructuredRefs {
+			if ref.Validate() != nil {
+				return ErrSTRIDEConversationInvalid
+			}
+			structuredRefs = append(structuredRefs, ref)
+		}
+		structuredRefs = SortedSTRIDEReferences(structuredRefs)
 		reactionActors := strideChatReactionActors(message)
 		if eventType == "reaction" && reactionActors == nil {
 			// An explicit empty set means the mutation cleared the final
@@ -178,6 +189,87 @@ func (app *kanbanBoardApp) projectSTRIDETeamChatMessage(thread scoutChatThreadRe
 		return nil
 	})
 	return changed, err
+}
+
+func (app *kanbanBoardApp) latestSTRIDETeamChatEvent(threadID string, messageID string) (ConversationEvent, bool, error) {
+	if app == nil || app.strideRuntime == nil || app.strideRuntime.Health().State != STRIDERuntimeStandby {
+		return ConversationEvent{}, false, ErrSTRIDERuntimeUnavailable
+	}
+	var latest ConversationEvent
+	found := false
+	err := app.strideRuntime.WithTenantDomains(canonicalTenantID(), func(domains STRIDERuntimeDomains) error {
+		snapshot, snapshotErr := domains.ConversationLedger.Snapshot()
+		if snapshotErr != nil {
+			return snapshotErr
+		}
+		var sequence uint64
+		for _, record := range snapshot.Events {
+			event := record.Append.Event
+			if event.Header.TenantID == canonicalTenantID() && event.SourceType == "channel_message" && event.ThreadID == threadID && event.SourceID == messageID && (!found || record.Sequence > sequence) {
+				latest, sequence, found = event, record.Sequence, true
+			}
+		}
+		return nil
+	})
+	return latest, found, err
+}
+
+func scoutChatModerationReference(receipt scoutChatModerationReceipt) (STRIDEReference, error) {
+	digest, err := STRIDEContractDigest(struct {
+		OperationID         string `json:"operationId"`
+		ThreadID            string `json:"threadId"`
+		MessageID           string `json:"messageId"`
+		ActorEmail          string `json:"actorEmail"`
+		ReasonDigest        string `json:"reasonDigest"`
+		TargetContentDigest string `json:"targetContentDigest"`
+		TargetEventID       string `json:"targetEventId,omitempty"`
+		TargetEventRevision int64  `json:"targetEventRevision,omitempty"`
+	}{receipt.OperationID, receipt.ThreadID, receipt.MessageID, receipt.ActorEmail, receipt.ReasonDigest, receipt.TargetContentDigest, receipt.TargetEventID, receipt.TargetEventRevision})
+	if err != nil {
+		return STRIDEReference{}, err
+	}
+	ref := STRIDEReference{ContractType: STRIDEContractRichMessagePart, ID: "chat_moderation_" + digest[:24], Revision: 1, Digest: digest}
+	if ref.Validate() != nil {
+		return STRIDEReference{}, ErrSTRIDEConversationInvalid
+	}
+	return ref, nil
+}
+
+func strideConversationEventHasReference(event ConversationEvent, wanted STRIDEReference) bool {
+	wantedKey := strideConversationReferenceKey(wanted)
+	for _, ref := range event.StructuredRefs {
+		if strideConversationReferenceKey(ref) == wantedKey {
+			return true
+		}
+	}
+	return false
+}
+
+// retractSTRIDETeamChatModeration durably closes one moderation outbox item.
+// A retry after the ledger append but before the snapshot/receipt update sees
+// the exact moderation reference and only re-saves; it never creates another
+// delete revision. If the source was provably never projected (or was already
+// retracted), persisting that current runtime snapshot is sufficient proof of
+// canonical absence.
+func (app *kanbanBoardApp) retractSTRIDETeamChatModeration(thread scoutChatThreadRecord, receipt scoutChatModerationReceipt) error {
+	ref, err := scoutChatModerationReference(receipt)
+	if err != nil {
+		return err
+	}
+	latest, found, err := app.latestSTRIDETeamChatEvent(thread.ID, receipt.MessageID)
+	if err != nil {
+		return err
+	}
+	if !found || latest.EventType == "delete" && (strideConversationEventHasReference(latest, ref) || latest.SourceID == receipt.MessageID) {
+		return app.strideRuntime.Save()
+	}
+	if receipt.TargetEventID != "" && (latest.Header.ID != receipt.TargetEventID || latest.ContentRevision != receipt.TargetEventRevision) {
+		return ErrSTRIDEConversationConflict
+	}
+	if _, err := app.projectSTRIDETeamChatMessageWithStructuredRefs(thread, receipt.Target, "delete", receipt.ActorEmail, []STRIDEReference{ref}); err != nil {
+		return err
+	}
+	return app.strideRuntime.Save()
 }
 
 func parseSTRIDEChatTime(value string) (time.Time, error) {

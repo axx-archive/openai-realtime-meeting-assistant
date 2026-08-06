@@ -342,6 +342,13 @@ type scoutChatMessageRecord struct {
 	// silently impersonate. The client renders a visible "via Scout" chip
 	// whenever this is present.
 	PostedOnBehalfOf string `json:"postedOnBehalfOf,omitempty"`
+	// CausedByMessageID binds an immediate conversational Scout response to the
+	// human turn that produced it. It is lifecycle metadata, not reply topology:
+	// the answer stays in the channel timeline, but deleting the source message
+	// can atomically remove the now-orphaned ordinary answer. Durable work,
+	// artifacts, images, proposals, and manifests are deliberately excluded from
+	// that cascade by deleteScoutChatThreadMessage.
+	CausedByMessageID string `json:"causedByMessageId,omitempty"`
 	// Sources are the thread messages a Scout answer provably quotes. omitempty
 	// for the same round-trip reason every other added field is: pre-Sources
 	// messages on disk must decode unchanged.
@@ -424,6 +431,12 @@ type scoutChatThreadRecord struct {
 	// one private thread. It contains hashes and deterministic ids only and is
 	// stripped from every client projection.
 	OpeningOperation *scoutChatOpeningOperation `json:"openingOperation,omitempty"`
+	// ModerationReceipts are a private durable outbox. Removing an ordinary
+	// public agent reply and recording the pending canonical retraction happen
+	// in the same thread rewrite; retries and restarts can therefore finish the
+	// AmbientMind deletion even after response loss. Viewer projections always
+	// strip this field.
+	ModerationReceipts []scoutChatModerationReceipt `json:"moderationReceipts,omitempty"`
 }
 
 func assistantChatThreadsHandler(w http.ResponseWriter, r *http.Request) {
@@ -651,6 +664,39 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(parts) == 4 && parts[1] == "messages" && parts[3] == "moderate-delete" && r.Method == http.MethodPost {
+		if !isArtifactApprovalAdmin(user) {
+			writeAuthError(w, http.StatusForbidden, "agent message moderation is admin-only")
+			return
+		}
+		payload := struct {
+			Reason string `json:"reason"`
+		}{}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&payload); err != nil {
+			writeAuthError(w, http.StatusBadRequest, "could not read moderation request")
+			return
+		}
+		thread, receipt, err := kanbanApp.moderateScoutChatThreadMessage(user, threadID, parts[2], payload.Reason)
+		if err != nil {
+			writeScoutChatThreadError(w, err)
+			return
+		}
+		status := http.StatusAccepted
+		complete := receipt.ProjectionState == scoutChatModerationComplete
+		if complete {
+			status = http.StatusOK
+		}
+		writeAuthJSON(w, status, map[string]any{
+			"ok":       complete,
+			"accepted": true,
+			"thread":   kanbanApp.projectScoutChatThreadForViewer(user.Email, thread),
+			"receipt":  projectScoutChatModerationReceipt(receipt),
+		})
+		return
+	}
+
 	if len(parts) == 3 && parts[1] == "messages" && r.Method == http.MethodDelete {
 		thread, err := kanbanApp.deleteScoutChatThreadMessage(user.Email, threadID, parts[2])
 		if err != nil {
@@ -713,16 +759,64 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 
 func writeScoutChatThreadError(w http.ResponseWriter, err error) {
 	status := http.StatusBadRequest
+	if errors.Is(err, ErrSTRIDERuntimeUnavailable) || errors.Is(err, ErrSTRIDERuntimeDisabled) || errors.Is(err, ErrSTRIDERuntimeClosed) {
+		status = http.StatusServiceUnavailable
+	}
+	if errors.Is(err, ErrSTRIDEConversationConflict) {
+		status = http.StatusConflict
+	}
 	if strings.Contains(err.Error(), "not found") {
 		status = http.StatusNotFound
 	}
 	if strings.Contains(err.Error(), "archived") {
 		status = http.StatusConflict
 	}
-	if strings.Contains(err.Error(), "your own") {
+	if strings.Contains(err.Error(), "your own") || strings.Contains(err.Error(), "admin-only") || strings.Contains(err.Error(), "public agent replies") {
 		status = http.StatusForbidden
 	}
 	writeAuthError(w, status, err.Error())
+}
+
+type scoutChatModerationReceipt struct {
+	OperationID         string                 `json:"operationId"`
+	ThreadID            string                 `json:"threadId"`
+	MessageID           string                 `json:"messageId"`
+	ActorEmail          string                 `json:"actorEmail"`
+	ReasonDigest        string                 `json:"reasonDigest"`
+	TargetContentDigest string                 `json:"targetContentDigest"`
+	TargetEventID       string                 `json:"targetEventId,omitempty"`
+	TargetEventRevision int64                  `json:"targetEventRevision,omitempty"`
+	DeletedAt           string                 `json:"deletedAt"`
+	ProjectionState     string                 `json:"projectionState"`
+	AttemptCount        int                    `json:"attemptCount,omitempty"`
+	LastAttemptAt       string                 `json:"lastAttemptAt,omitempty"`
+	CompletedAt         string                 `json:"completedAt,omitempty"`
+	Target              scoutChatMessageRecord `json:"target"`
+}
+
+type scoutChatModerationReceiptView struct {
+	OperationID     string `json:"operationId"`
+	ThreadID        string `json:"threadId"`
+	MessageID       string `json:"messageId"`
+	ActorEmail      string `json:"actorEmail"`
+	ReasonDigest    string `json:"reasonDigest"`
+	ProjectionState string `json:"projectionState"`
+	AttemptCount    int    `json:"attemptCount"`
+	DeletedAt       string `json:"deletedAt"`
+	CompletedAt     string `json:"completedAt,omitempty"`
+}
+
+const (
+	scoutChatModerationPending  = "pending"
+	scoutChatModerationComplete = "complete"
+)
+
+func projectScoutChatModerationReceipt(receipt scoutChatModerationReceipt) scoutChatModerationReceiptView {
+	return scoutChatModerationReceiptView{
+		OperationID: receipt.OperationID, ThreadID: receipt.ThreadID, MessageID: receipt.MessageID,
+		ActorEmail: receipt.ActorEmail, ReasonDigest: receipt.ReasonDigest, ProjectionState: receipt.ProjectionState,
+		AttemptCount: receipt.AttemptCount, DeletedAt: receipt.DeletedAt, CompletedAt: receipt.CompletedAt,
+	}
 }
 
 func (app *kanbanBoardApp) createScoutChatThread(ownerEmail string, createdBy string, title string, visibility string) (scoutChatThreadRecord, error) {
@@ -971,6 +1065,12 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 				}
 				rootRef := *replyTo
 				messages[index].ReplyTo = &rootRef
+			}
+		}
+		for index := range messages {
+			role := strings.ToLower(strings.TrimSpace(messages[index].Role))
+			if role != "user" && strings.TrimSpace(messages[index].CausedByMessageID) == "" {
+				messages[index].CausedByMessageID = userMessage.ID
 			}
 		}
 		saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, messages...)
@@ -1603,7 +1703,19 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	if replyTargetsScout {
 		responseStyle = scoutDirectReplyResponseStyle(responseStyle)
 	}
-	result, err := app.resolveAssistantQueryContextForUserWithAttachments(withAssistantResponseStyle(ctx, responseStyle), user.Email, modelQuery, history, openAIAttachments)
+	answerContext := withAssistantResponseStyle(ctx, responseStyle)
+	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+		// Public-channel turns carry a structured identity/lineage envelope for
+		// the model, but retrieval must rank against what the person actually
+		// wrote. Strategy chat is also never permission to take the legacy Board
+		// shortcut; an explicit Board surface/field phrase or exact card title/id
+		// remains eligible.
+		answerContext = withAssistantRecallQuery(answerContext, text)
+		if !isCurrentBoardQuery(text) && !queryNamesBoardCard(text, app.snapshotState().Cards) {
+			answerContext = withAssistantBoardShortcutDisabled(answerContext)
+		}
+	}
+	result, err := app.resolveAssistantQueryContextForUserWithAttachments(answerContext, user.Email, modelQuery, history, openAIAttachments)
 	if err != nil {
 		errorMessage := scoutChatMessageRecord{
 			ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
@@ -2924,6 +3036,7 @@ func (app *kanbanBoardApp) deleteScoutChatThreadMessage(viewerEmail string, thre
 		return scoutChatThreadRecord{}, fmt.Errorf("you can only delete your own messages")
 	}
 	deletedIDs := []string{messageID}
+	deletedMessages := []scoutChatMessageRecord{message}
 	if thread.OpeningOperation != nil && thread.OpeningOperation.UserMessageID == messageID {
 		replyID := thread.OpeningOperation.ReplyMessageID
 		filtered := make([]scoutChatMessageRecord, 0, len(thread.Messages)-1)
@@ -2931,6 +3044,7 @@ func (app *kanbanBoardApp) deleteScoutChatThreadMessage(viewerEmail string, thre
 			if candidate.ID == messageID || candidate.ID == replyID {
 				if candidate.ID == replyID {
 					deletedIDs = append(deletedIDs, replyID)
+					deletedMessages = append(deletedMessages, candidate)
 				}
 				continue
 			}
@@ -2939,18 +3053,223 @@ func (app *kanbanBoardApp) deleteScoutChatThreadMessage(viewerEmail string, thre
 		thread.Messages = filtered
 		thread.OpeningOperation = nil
 	} else {
-		thread.Messages = append(thread.Messages[:index], thread.Messages[index+1:]...)
+		filtered := make([]scoutChatMessageRecord, 0, len(thread.Messages)-1)
+		for _, candidate := range thread.Messages {
+			ordinaryGeneratedAnswer := candidate.ID != messageID &&
+				strings.TrimSpace(candidate.CausedByMessageID) == messageID &&
+				(strings.EqualFold(candidate.Role, "scout") || strings.EqualFold(candidate.Role, "assistant")) &&
+				candidate.Kind == "message" && candidate.Thread == nil && candidate.Proposal == nil &&
+				candidate.Image == nil && candidate.Manifest == nil
+			if candidate.ID == messageID || ordinaryGeneratedAnswer {
+				if ordinaryGeneratedAnswer {
+					deletedIDs = append(deletedIDs, candidate.ID)
+					deletedMessages = append(deletedMessages, candidate)
+				}
+				continue
+			}
+			filtered = append(filtered, candidate)
+		}
+		thread.Messages = filtered
 	}
 	thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	thread.Preview = scoutChatThreadPreview(thread)
 	if err := app.saveScoutChatThread(thread); err != nil {
 		return scoutChatThreadRecord{}, err
 	}
-	app.observeSTRIDETeamChatMessage(thread, message, "delete", viewerEmail)
+	// Every removed source needs its own canonical delete event. Otherwise an
+	// ordinary generated answer can disappear from chat but survive in
+	// AmbientMind/search and relationship projections. Use the exact pre-delete
+	// record so the ledger can supersede the correct source revision.
+	for _, deletedMessage := range deletedMessages {
+		app.observeSTRIDETeamChatMessage(thread, deletedMessage, "delete", viewerEmail)
+	}
 	for _, deletedID := range deletedIDs {
 		deliverScoutChatThreadDeletion(thread, deletedID)
 	}
 	return thread, nil
+}
+
+// moderateScoutChatThreadMessage is the deliberately narrow recovery and
+// governance door for a company administrator to retract either a bad ordinary
+// agent answer or that administrator's own ordinary message from a public
+// channel. It never permits deleting another human's message, a private-thread
+// message, durable work, proposals, choices, manifests, images, or files.
+// The canonical conversation delete event records the acting human, and the
+// returned reason digest lets the operator bind the action to an external
+// approval/incident record without persisting potentially sensitive prose.
+func (app *kanbanBoardApp) moderateScoutChatThreadMessage(user *userAccount, threadID string, messageID string, reason string) (scoutChatThreadRecord, scoutChatModerationReceipt, error) {
+	if !isArtifactApprovalAdmin(user) {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, fmt.Errorf("agent message moderation is admin-only")
+	}
+	messageID = strings.TrimSpace(messageID)
+	reason = strings.Join(strings.Fields(reason), " ")
+	if messageID == "" {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, fmt.Errorf("message id is required")
+	}
+	if reason == "" || utf8.RuneCountInString(reason) > 500 {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, fmt.Errorf("a moderation reason of 1-500 characters is required")
+	}
+
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	thread, _, err := app.scoutChatThreadByID(user.Email, threadID)
+	if err != nil {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, err
+	}
+	if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, fmt.Errorf("moderation is limited to public agent replies")
+	}
+	reasonDigest := sha256Hex([]byte(reason))
+	for receiptIndex := range thread.ModerationReceipts {
+		receipt := thread.ModerationReceipts[receiptIndex]
+		if receipt.MessageID != messageID {
+			continue
+		}
+		if receipt.ActorEmail != normalizeAccountEmail(user.Email) || receipt.ReasonDigest != reasonDigest {
+			return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, fmt.Errorf("that moderation operation already exists with different authority")
+		}
+		if receipt.ProjectionState == scoutChatModerationComplete {
+			return thread, receipt, nil
+		}
+		updated, err := app.reconcileScoutChatModerationLocked(thread, receiptIndex)
+		if err != nil {
+			return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, err
+		}
+		return updated, updated.ModerationReceipts[receiptIndex], nil
+	}
+	index := scoutChatMessageIndex(thread, messageID)
+	if index < 0 {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, fmt.Errorf("chat message not found")
+	}
+	message := thread.Messages[index]
+	ordinaryAgentReply := (strings.EqualFold(message.Role, "scout") || strings.EqualFold(message.Role, "assistant")) &&
+		message.Kind == "message" && message.Thread == nil && message.Proposal == nil && message.Choices == nil &&
+		message.Manifest == nil && message.Image == nil && len(message.Files) == 0
+	ownOrdinaryHumanMessage := strings.EqualFold(message.Role, "user") && normalizeAccountEmail(message.AuthorEmail) == normalizeAccountEmail(user.Email) &&
+		message.Kind == "message" && message.Thread == nil && message.Proposal == nil && message.Choices == nil &&
+		message.Manifest == nil && message.Image == nil && len(message.Files) == 0
+	if !ordinaryAgentReply && !ownOrdinaryHumanMessage {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, fmt.Errorf("moderation is limited to public agent replies or your own public messages")
+	}
+
+	contentDigest, err := strideChatMessageContentDigest(false, message)
+	if err != nil {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, err
+	}
+	latest, projected, err := app.latestSTRIDETeamChatEvent(thread.ID, messageID)
+	if err != nil {
+		// Before the atomic source+outbox mutation, runtime unavailability is a
+		// clean refusal: the visible message remains and there is nothing to
+		// reconcile later.
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, err
+	}
+	if projected && latest.EventType != "delete" && latest.ContentDigest != contentDigest {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, ErrSTRIDEConversationConflict
+	}
+
+	thread.Messages = append(thread.Messages[:index], thread.Messages[index+1:]...)
+	deletedAt := time.Now().UTC()
+	thread.UpdatedAt = deletedAt.Format(time.RFC3339Nano)
+	thread.Preview = scoutChatThreadPreview(thread)
+	operationDigest := sha256Hex([]byte(strings.Join([]string{thread.ID, messageID, normalizeAccountEmail(user.Email), reasonDigest}, "\x00")))
+	target := scoutChatMessageRecord{
+		ID: message.ID, Kind: message.Kind, Role: message.Role, CreatedAt: message.CreatedAt,
+		AuthorName: message.AuthorName, AuthorEmail: message.AuthorEmail, Via: message.Via,
+		PostedOnBehalfOf: message.PostedOnBehalfOf, CausedByMessageID: message.CausedByMessageID,
+	}
+	receipt := scoutChatModerationReceipt{
+		OperationID: "chat_moderation_" + operationDigest[:24], ThreadID: thread.ID, MessageID: messageID,
+		ActorEmail: normalizeAccountEmail(user.Email), ReasonDigest: reasonDigest, TargetContentDigest: contentDigest,
+		DeletedAt: deletedAt.Format(time.RFC3339Nano), ProjectionState: scoutChatModerationPending, Target: target,
+	}
+	if projected {
+		receipt.TargetEventID = latest.Header.ID
+		receipt.TargetEventRevision = latest.ContentRevision
+	}
+	thread.ModerationReceipts = append(thread.ModerationReceipts, receipt)
+	if err := app.saveScoutChatThread(thread); err != nil {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, err
+	}
+	deliverScoutChatThreadDeletion(thread, messageID)
+	receiptIndex := len(thread.ModerationReceipts) - 1
+	updated, err := app.reconcileScoutChatModerationLocked(thread, receiptIndex)
+	if err != nil {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, err
+	}
+	return updated, updated.ModerationReceipts[receiptIndex], nil
+}
+
+func (app *kanbanBoardApp) reconcileScoutChatModerationLocked(thread scoutChatThreadRecord, receiptIndex int) (scoutChatThreadRecord, error) {
+	if receiptIndex < 0 || receiptIndex >= len(thread.ModerationReceipts) {
+		return scoutChatThreadRecord{}, fmt.Errorf("moderation receipt not found")
+	}
+	receipt := thread.ModerationReceipts[receiptIndex]
+	if receipt.ProjectionState == scoutChatModerationComplete {
+		return thread, nil
+	}
+	now := time.Now().UTC()
+	receipt.AttemptCount++
+	receipt.LastAttemptAt = now.Format(time.RFC3339Nano)
+	projectionErr := app.retractSTRIDETeamChatModeration(thread, receipt)
+	if projectionErr == nil {
+		receipt.ProjectionState = scoutChatModerationComplete
+		receipt.CompletedAt = now.Format(time.RFC3339Nano)
+	}
+	thread.ModerationReceipts[receiptIndex] = receipt
+	if err := app.saveScoutChatThread(thread); err != nil {
+		return scoutChatThreadRecord{}, err
+	}
+	if projectionErr != nil {
+		log.Errorf("Public agent moderation projection pending: thread=%s message=%s operation=%s attempt=%d error=%v", receipt.ThreadID, receipt.MessageID, receipt.OperationID, receipt.AttemptCount, projectionErr)
+		return thread, nil
+	}
+	log.Infof("Public agent message moderation complete: thread=%s message=%s actor=%s operation=%s reason_sha256=%s", receipt.ThreadID, receipt.MessageID, receipt.ActorEmail, receipt.OperationID, receipt.ReasonDigest)
+	return thread, nil
+}
+
+func (app *kanbanBoardApp) recoverScoutChatModerations() {
+	if app == nil || app.memory == nil {
+		return
+	}
+	for _, entry := range app.memory.snapshot(0) {
+		if entry.Kind != meetingMemoryKindScoutChat {
+			continue
+		}
+		thread, ok := decodeScoutChatThreadEntry(entry)
+		if !ok {
+			continue
+		}
+		pending := false
+		for _, receipt := range thread.ModerationReceipts {
+			if receipt.ProjectionState == scoutChatModerationPending {
+				pending = true
+				break
+			}
+		}
+		if !pending {
+			continue
+		}
+		lock := app.scoutChatThreadLock(thread.ID)
+		lock.Lock()
+		current, _, err := app.scoutChatThreadByID(artifactLibraryAdminEmail, thread.ID)
+		if err == nil {
+			for index := range current.ModerationReceipts {
+				if current.ModerationReceipts[index].ProjectionState != scoutChatModerationPending {
+					continue
+				}
+				current, err = app.reconcileScoutChatModerationLocked(current, index)
+				if err != nil {
+					break
+				}
+			}
+		}
+		lock.Unlock()
+		if err != nil {
+			log.Errorf("Public agent moderation recovery pending: thread=%s error=%v", thread.ID, err)
+		}
+	}
 }
 
 // normalizeChannelName strips a leading '#' and surrounding whitespace from a

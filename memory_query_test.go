@@ -204,8 +204,9 @@ func TestRelativeQueryTimeRangeBroadVocabulary(t *testing.T) {
 }
 
 // Item 1.6: board-query routing matches markers on word boundaries, so "know"
-// no longer trips "now" and "known" no longer trips "own", while inflected and
-// explicit forms ("owns", "cards", "currently") still route.
+// no longer trips "now" and ordinary strategy language such as "our own take"
+// or "owned IP" does not become a Kanban ownership lookup. Explicit assignment
+// questions and board nouns still route.
 func TestIsCurrentBoardQueryWordBoundary(t *testing.T) {
 	cases := []struct {
 		query string
@@ -214,6 +215,7 @@ func TestIsCurrentBoardQueryWordBoundary(t *testing.T) {
 		{"what is the current status?", true},
 		{"who owns the pricing sheet?", true},
 		{"are any cards blocked?", true},
+		{"which cards are backlog?", true},
 		{"what's currently in progress?", true},
 		{"where do we stand on the deadline?", true},
 		{"do you know what happened?", false},
@@ -221,6 +223,15 @@ func TestIsCurrentBoardQueryWordBoundary(t *testing.T) {
 		{"tell me about the startup pitch", false},
 		{"what is your current opinion on the team and company vision?", false},
 		{"what is the current date?", false},
+		{"form your own take as a member of our team", false},
+		{"which owned family IP strategy is more attainable?", false},
+		{"what needs to get done to attract capital and talent?", false},
+		{"what notes do you have on the two pitches?", false},
+		{"is our task to build a sports universe or a show?", false},
+		{"which ideas are blocked by the capital market?", false},
+		{"who is assigned to the pricing sheet?", true},
+		{"which tasks are assigned?", true},
+		{"is the pricing sheet owned by AJ?", true},
 	}
 	for _, tc := range cases {
 		if got := isCurrentBoardQuery(tc.query); got != tc.want {

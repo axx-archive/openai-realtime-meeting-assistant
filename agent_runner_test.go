@@ -988,6 +988,166 @@ func TestNoSidecarMigratesGlobalAndRoomContinuityFromDurableCursor(t *testing.T)
 	}
 }
 
+func TestWrongKindAmbientCheckpointCannotSkipInputs(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("EMBEDDINGS_DISABLED", "true")
+	t.Setenv("HELD_WINDOW_INTERVAL", "1h")
+	dir := t.TempDir()
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
+	var observed [][]string
+	agent := newHeldWindowTestAgent("wrong kind checkpoint", false, &observed)
+	seed := newKanbanBoardApp()
+	appendHeldWindowBrain(t, seed, "wrong-kind-input-a", officeRoomID)
+	if _, _, err := seed.memory.appendEntry(meetingMemoryKindDecision, "wrong-kind-baseline", "Unrelated later artifact.", map[string]string{"visibility": "organization"}); err != nil {
+		t.Fatalf("append unrelated artifact: %v", err)
+	}
+	appendHeldWindowBrain(t, seed, "wrong-kind-input-b", officeRoomID)
+	state := ambientHeldWindowState{Version: 1, Windows: map[string]ambientHeldWindow{
+		agent.name: {Agent: agent.name, RoomID: officeRoomID, BaselineID: "wrong-kind-baseline"},
+	}}
+	if err := persistAmbientHeldWindowState(seed.ambientHeldWindowPath(), state); err != nil {
+		t.Fatalf("persist bad checkpoint: %v", err)
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted := newKanbanBoardApp()
+	defer restarted.Close()
+	restarted.startAmbientAgent(agent, "injected-only")
+	calls := 0
+	_, err := restarted.invokeAmbientAgentGuarded(agent, context.Background(), "injected-only", func(context.Context, string, openAITextRequest) (string, error) {
+		calls++
+		return "injected", nil
+	}, 1, officeRoomID)
+	var circuitErr *ambientAgentCircuitOpenError
+	if !errors.As(err, &circuitErr) || !circuitErr.RestartRequired || calls != 0 || len(observed) != 0 {
+		t.Fatalf("wrong-kind checkpoint err=%v calls=%d observed=%v", err, calls, observed)
+	}
+	checkpoint, ok, checkpointErr := restarted.ambientScopeCheckpoint(agent.name)
+	if checkpointErr != nil || !ok || checkpoint.BlockedReason == "" {
+		t.Fatalf("blocked checkpoint=%+v ok=%v err=%v", checkpoint, ok, checkpointErr)
+	}
+}
+
+func TestInvalidNonHeldCheckpointRepairsFromDurableCursor(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("EMBEDDINGS_DISABLED", "true")
+	t.Setenv("HELD_WINDOW_INTERVAL", "1h")
+	dir := t.TempDir()
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
+	var observed [][]string
+	agent := newHeldWindowTestAgent("repair invalid checkpoint", false, &observed)
+	seed := newKanbanBoardApp()
+	appendHeldWindowBrain(t, seed, "repair-consumed", officeRoomID)
+	if _, _, err := seed.memory.appendEntry(agent.artifactKind, "repair-artifact", "Consumed cursor.", map[string]string{
+		"visibility": "organization", agent.cursorMetadataKey: "repair-consumed",
+	}); err != nil {
+		t.Fatalf("append durable cursor: %v", err)
+	}
+	appendHeldWindowBrain(t, seed, "repair-pending", officeRoomID)
+	state := ambientHeldWindowState{Version: 1, Windows: map[string]ambientHeldWindow{
+		agent.name: {Agent: agent.name, RoomID: officeRoomID, BaselineID: "missing-invalid-baseline"},
+	}}
+	if err := persistAmbientHeldWindowState(seed.ambientHeldWindowPath(), state); err != nil {
+		t.Fatalf("persist bad checkpoint: %v", err)
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted := newKanbanBoardApp()
+	defer restarted.Close()
+	restarted.startAmbientAgent(agent, "injected-only")
+	if _, err := restarted.invokeAmbientAgentGuarded(agent, context.Background(), "injected-only", nil, 1, officeRoomID); err != nil {
+		t.Fatalf("repaired pass: %v", err)
+	}
+	if len(observed) != 1 || strings.Join(observed[0], ",") != "repair-pending" {
+		t.Fatalf("repaired observed=%v, want only repair-pending", observed)
+	}
+	checkpoint, ok, checkpointErr := restarted.ambientScopeCheckpoint(agent.name)
+	if checkpointErr != nil || !ok || checkpoint.BaselineID != "repair-consumed" || checkpoint.BlockedReason != "" || checkpoint.InputKind != agent.inputKind || checkpoint.ArtifactKind != agent.artifactKind {
+		t.Fatalf("repaired checkpoint=%+v ok=%v err=%v", checkpoint, ok, checkpointErr)
+	}
+}
+
+func TestWrongKindHeldWindowFailsClosed(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("EMBEDDINGS_DISABLED", "true")
+	t.Setenv("HELD_WINDOW_INTERVAL", "1h")
+	dir := t.TempDir()
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
+	var observed [][]string
+	agent := newHeldWindowTestAgent("wrong held checkpoint", false, &observed)
+	seed := newKanbanBoardApp()
+	appendHeldWindowBrain(t, seed, "wrong-held-base", officeRoomID)
+	if _, _, err := seed.memory.appendEntry(agent.artifactKind, "wrong-held-artifact", "Not an input head.", map[string]string{
+		agent.cursorMetadataKey: "wrong-held-base", "visibility": "organization",
+	}); err != nil {
+		t.Fatalf("append worker artifact: %v", err)
+	}
+	state := ambientHeldWindowState{Version: 1, Windows: map[string]ambientHeldWindow{
+		agent.name: {Agent: agent.name, RoomID: officeRoomID, BaselineID: "wrong-held-base", WindowID: "wrong-held-artifact"},
+	}}
+	if err := persistAmbientHeldWindowState(seed.ambientHeldWindowPath(), state); err != nil {
+		t.Fatalf("persist bad held checkpoint: %v", err)
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted := newKanbanBoardApp()
+	defer restarted.Close()
+	restarted.startAmbientAgent(agent, "injected-only")
+	checkpoint, ok, checkpointErr := restarted.ambientScopeCheckpoint(agent.name)
+	if checkpointErr != nil || !ok || checkpoint.BlockedReason != ambientContinuityHeldWindowInvalid {
+		t.Fatalf("held checkpoint=%+v ok=%v err=%v", checkpoint, ok, checkpointErr)
+	}
+	restarted.mu.Lock()
+	appFailure := restarted.agentFailures[agent.name]
+	restarted.mu.Unlock()
+	if appFailure == nil || !appFailure.continuityOpen || len(observed) != 0 {
+		t.Fatalf("held continuity failure=%+v observed=%v", appFailure, observed)
+	}
+}
+
+func TestLegacyCursorlessArtifactNormalizesToInputCursor(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("EMBEDDINGS_DISABLED", "true")
+	t.Setenv("HELD_WINDOW_INTERVAL", "1h")
+	dir := t.TempDir()
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
+	var observed [][]string
+	agent := newHeldWindowTestAgent("legacy cursorless normalization", false, &observed)
+	seed := newKanbanBoardApp()
+	appendHeldWindowBrain(t, seed, "legacy-normalized-input", officeRoomID)
+	if _, _, err := seed.memory.appendEntry(agent.artifactKind, "legacy-cursorless-artifact", "Legacy artifact.", map[string]string{"visibility": "organization"}); err != nil {
+		t.Fatalf("append cursorless artifact: %v", err)
+	}
+	appendHeldWindowBrain(t, seed, "legacy-normalized-pending", officeRoomID)
+	if err := seed.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted := newKanbanBoardApp()
+	defer restarted.Close()
+	restarted.startAmbientAgent(agent, "injected-only")
+	checkpoint, ok, checkpointErr := restarted.ambientScopeCheckpoint(agent.name)
+	if checkpointErr != nil || !ok || checkpoint.BaselineID != "legacy-normalized-input" || checkpoint.BaselineID == "legacy-cursorless-artifact" {
+		t.Fatalf("normalized checkpoint=%+v ok=%v err=%v", checkpoint, ok, checkpointErr)
+	}
+	if _, err := restarted.invokeAmbientAgentGuarded(agent, context.Background(), "injected-only", nil, 1, officeRoomID); err != nil {
+		t.Fatalf("legacy normalized pass: %v", err)
+	}
+	if len(observed) != 1 || strings.Join(observed[0], ",") != "legacy-normalized-pending" {
+		t.Fatalf("legacy normalized observed=%v", observed)
+	}
+}
+
 func TestNoSidecarAmbiguousRawContinuityStaysFailClosedAcrossRestart(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("ANTHROPIC_API_KEY", "")
@@ -1097,12 +1257,16 @@ func TestNoSidecarSlopContinuityResumesFromDurablePassCursor(t *testing.T) {
 		t.Fatalf("Slop migrated baseline=%q", baseline)
 	}
 	calls := 0
+	pendingIDs := make([]string, 0, 8)
+	for index := 0; index < 8; index++ {
+		pendingIDs = append(pendingIDs, fmt.Sprintf("slop-migrated-pending-%d", index))
+	}
 	if err := restarted.runSlopClassifierOnce(agent, context.Background(), "injected-only", func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		calls++
 		if strings.Contains(request.Input, "slop-migrated-consumed") {
 			t.Fatalf("Slop migration re-fed consumed input: %s", request.Input)
 		}
-		return `[]`, nil
+		return slopKeepVerdictsJSON(t, pendingIDs), nil
 	}, 8); err != nil {
 		t.Fatalf("Slop migrated pass: %v", err)
 	}

@@ -206,6 +206,85 @@ func TestCapabilitySnapshotExposesEveryAmbientLaneAndCircuitTruth(t *testing.T) 
 	}
 }
 
+func TestAmbientWorkerHealthExposesSupervisorAndDisabledBackfillHazard(t *testing.T) {
+	resetCapabilityRuntimeForTest(t)
+	t.Setenv("OPENAI_API_KEY", "test-openai-key")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("EMBEDDINGS_DISABLED", "true")
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() {
+		_ = app.Close()
+		kanbanApp = previousApp
+	})
+
+	agent := meetingDigestAgent()
+	t.Setenv(agent.disabledEnv, "true")
+	t.Setenv(agent.backfillEnv, "1")
+	disabled := ambientWorkerCapabilitySnapshot(agent, time.Now().UTC(), providerOpenAI, true)
+	if disabled["status"] != "degraded" || disabled["enabled"] != false || disabled["backfillArmed"] != true || disabled["unsafeActivation"] != true {
+		t.Fatalf("disabled/backfill health=%v", disabled)
+	}
+	if disabled["supervisorRegistered"] != false || disabled["supervisorRunning"] != false {
+		t.Fatalf("disabled worker supervisor health=%v", disabled)
+	}
+
+	t.Setenv(agent.disabledEnv, "false")
+	t.Setenv(agent.backfillEnv, "false")
+	beforeStart := ambientWorkerCapabilitySnapshot(agent, time.Now().UTC(), providerOpenAI, true)
+	if beforeStart["supervisorError"] != true || beforeStart["status"] != "degraded" {
+		t.Fatalf("enabled worker without supervisor health=%v", beforeStart)
+	}
+	app.startAmbientAgent(agent, "test-openai-key")
+	afterStart := ambientWorkerCapabilitySnapshot(agent, time.Now().UTC(), providerOpenAI, true)
+	if afterStart["supervisorRegistered"] != true || afterStart["supervisorRunning"] != true || afterStart["supervisorError"] != nil {
+		t.Fatalf("started worker supervisor health=%v", afterStart)
+	}
+}
+
+func TestAmbientWorkerHealthValidatesCheckpointReferencesWithoutLeakingIDs(t *testing.T) {
+	resetCapabilityRuntimeForTest(t)
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+	agent := meetingBrainAgent()
+
+	appendTestTranscript(t, app, "checkpoint-transcript", "Authorized meeting context.")
+	if _, _, err := app.memory.appendBrainWriteUp("checkpoint-brain", "Prior brain.", map[string]string{
+		"roomId":                      officeRoomID,
+		meetingBrainCursorMetadataKey: "checkpoint-transcript",
+	}); err != nil {
+		t.Fatalf("append brain: %v", err)
+	}
+	appendTestTranscript(t, app, "checkpoint-held-transcript", "Pending authorized meeting context.")
+	state := ambientHeldWindowState{Version: 1, Windows: map[string]ambientHeldWindow{
+		agent.name: {Agent: agent.name, RoomID: officeRoomID, BaselineID: "checkpoint-brain", WindowID: "checkpoint-held-transcript"},
+	}}
+	if err := persistAmbientHeldWindowState(app.ambientHeldWindowPath(), state); err != nil {
+		t.Fatalf("persist valid checkpoint: %v", err)
+	}
+	valid := ambientWorkerCheckpointDiagnostics(app, agent)
+	if valid["checkpointStatus"] != "held" || valid["invalidScopeCount"] != 0 || valid["heldScopeCount"] != 1 {
+		t.Fatalf("valid legacy-artifact checkpoint diagnostics=%v", valid)
+	}
+
+	state.Windows[agent.name] = ambientHeldWindow{Agent: agent.name, RoomID: officeRoomID, BaselineID: "missing-baseline", WindowID: "checkpoint-brain"}
+	if err := persistAmbientHeldWindowState(app.ambientHeldWindowPath(), state); err != nil {
+		t.Fatalf("persist invalid checkpoint: %v", err)
+	}
+	invalid := ambientWorkerCheckpointDiagnostics(app, agent)
+	if invalid["checkpointStatus"] != "invalid" || invalid["invalidScopeCount"] != 1 {
+		t.Fatalf("invalid checkpoint diagnostics=%v", invalid)
+	}
+	for _, value := range invalid {
+		if strings.Contains(asString(value), "checkpoint-brain") || strings.Contains(asString(value), "missing-baseline") {
+			t.Fatalf("checkpoint diagnostics leaked raw ids: %v", invalid)
+		}
+	}
+}
+
 func TestSpecialtyWorkerHealthRequiresItsTypedArtifactSuccess(t *testing.T) {
 	resetCapabilityRuntimeForTest(t)
 	t.Setenv("OPENAI_API_KEY", "test-openai-key")

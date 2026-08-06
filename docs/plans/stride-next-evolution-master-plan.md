@@ -39,6 +39,354 @@ External reference, adopted selectively rather than introduced as a runtime depe
 
 Older model recommendations are historical baselines, not current authority. The current official model references for this plan are [GPT-5.6](https://developers.openai.com/api/docs/guides/latest-model.md), [GPT-Realtime-2.1](https://developers.openai.com/api/docs/models/gpt-realtime-2.1), [GPT Transcribe](https://developers.openai.com/api/docs/models/gpt-transcribe), and [GPT Live Transcribe](https://developers.openai.com/api/docs/models/gpt-live-transcribe).
 
+## 2026-08-06 AmbientMind / AgentMind / MyMind strategic-design delta
+
+This is the canonical design and execution delta for the Ball Dogs Scout
+failure and the wider company-intelligence/coworker objective. It extends the
+E3-E8 architecture below; it does not create a competing brain or workforce
+plan.
+
+### Decision 1: three minds, assembled but never collapsed
+
+- **AmbientMind** is the company brain: audience-authorized organizational
+  evidence plus rebuildable projections for conversations, transcripts,
+  decisions, commitments, blockers, alignments, storylines, entities,
+  artifacts, work receipts, freshness, coverage, and known gaps. It has no
+  personality and no single cumulative prose document.
+- **AgentMind** is one agent coworker's governed continuity projection:
+  independent positions, current-work state, relationship learning, reviewed
+  domain learning, and continuity checkpoints. It carries read-only revision
+  references to its canonical `TeamAgent`, `AgentCoreProfile`,
+  `AgentProfileOverlay`, `AgentAssignment`, and `AgentCapabilityManifest`;
+  role, eligibility, access, tools, budget, and assignments are not memory and
+  cannot be mutated by learning or conversation. It retrieves company truth
+  from AmbientMind and never forks its own divergent version of company facts.
+- **MyMind** is one human's evolving brain: private imports, explicit
+  preferences, collaboration patterns, corrections, personal continuity, and
+  user-controlled disclosures. Every human has a distinct MyMind. Private
+  MyMind evidence never becomes AmbientMind merely because an agent used it in
+  a private answer.
+
+MyMind belongs to the person, not the employer. The product's durable root is a
+global `PersonPrincipal` with one user account and one private MyMind; companies,
+clients, projects, and freelance practices are revocable `WorkspaceMemberships`
+layered onto that person. Joining, leaving, or switching workspaces changes the
+active AmbientMind, role, audience, and policy without resetting identity,
+private continuity, relationships, or the person's own contribution history.
+There is no organization-wide MyMind grant and no implicit cross-company
+retrieval. The person may keep portable preferences, skills, public work,
+self-authored reflections, and non-confidential career continuity while
+organization-confidential evidence remains bound to that organization's
+AmbientMind.
+
+This makes STRIDE the person's long-lived work identity: it should represent
+how they think, what they have learned, and what they have contributed across
+every company, client, and independent engagement they choose to connect. That
+continuity is user-controlled and evidence-backed, not a universal employer
+profile. A company can see only the workspace-scoped person projection and
+explicitly disclosed portable receipts; it cannot inspect the rest of MyMind,
+enumerate other memberships, or infer private work history from hidden graph
+edges.
+
+Each organization maintains an append-only, source-linked
+`ContributionAttestation` ledger for who originated, shaped, reviewed,
+decided, or completed work. The organization retains authorized company
+evidence and attribution after departure. By default the person's portable
+contribution receipt is opaque: organization signature, source-ledger digest,
+date range, and a non-confidential role/category code. Outcome text, project
+names, collaborator identities, customer identity, and source excerpts remain
+absent unless the organization explicitly approves those exact redacted fields
+and every named third party is public or separately authorized. Private source
+text, files, prompts, customer data, and internal conclusions never become
+portable implicitly. Freelance/client spaces follow the same contract. Public
+portfolio promotion is a deliberate field-level export, never a side effect of
+changing companies.
+
+At answer time every candidate MyMind source must pass the intersection of
+**subject principal × active workspace membership × destination audience ×
+declared purpose × source-level consent/revision**. Private MyMind may silently
+personalize phrasing in a private answer, but it cannot be quoted, cited,
+disclosed, or used as the asserted basis of a shared/public answer without a
+separate destination-specific disclosure authorization from the person. The
+organization can narrow that authorization but cannot widen it. STRIDE then
+assembles an ACL- and freshness-bound context envelope from the current
+conversation, relevant AmbientMind projections, read-only AgentMind continuity,
+and only the MyMind sources that passed that exact turn's intersection. The
+envelope is ephemeral and source-linked; assembly is not copying or widening
+memory.
+
+Account recovery, tenant membership, MyMind custody, organization export,
+departure, and deletion are separate authorities. Removing a membership revokes
+future organization access immediately, preserves attributable company history,
+and leaves the user's portable MyMind intact. Deleting a global account requires
+an explicit custody/export flow and cannot silently erase another
+organization's lawful shared record or leave orphaned authorship.
+
+The product shell is therefore person-first and workspace-scoped: signing in
+opens the same human account and MyMind, while switching company, client, or
+personal/freelance workspace changes the active AmbientMind, policy, and
+audience. A user who is between companies still retains their account, MyMind,
+private workspace, authorized portable receipts, and ability to do independent
+work. A MyMind home should let the person ask across their own authorized
+history and see a contribution graph by company, client, project, category,
+role, decision, and outcome. Every item must show one of three portability
+states: **private to me**, **shared inside this workspace**, or **portable
+receipt/public work**. This is an evidence-led record of a person's thinking
+and impact, not an employee productivity score; private reflection, message
+volume, and surveillance-derived activity are never converted into employer
+performance rankings.
+
+### Decision 2: continuity is a projection, not a larger prompt
+
+Scout is not currently equivalent to a long-running Codex conversation. Raw
+chat history is tail-bounded, and recent live meeting analysis is stale. Before
+older turns leave the raw window, STRIDE maintains a revisioned
+`ConversationContinuity` projection containing current intent, resolved and
+unresolved references, established positions, disagreements, corrections,
+open loops, active work, and source/high-water references. A correction,
+deletion, source revocation, or audience change invalidates and rebuilds the
+affected checkpoint.
+
+Typed workers maintain separate authoritative projections rather than one
+omniscient "need to knows" writer: meeting state, decisions, commitments,
+actions, blockers, alignments, storylines, entity relationships, conversation
+continuity, and company-state change. A thin company briefing may be generated
+from those projections, but it is disposable and never the authority.
+
+Every conversational agent turn receives, within a measured token budget:
+
+1. agent identity and independent-judgment constitution;
+2. recent verbatim turns and reply ancestry;
+3. the current `ConversationContinuity` checkpoint;
+4. targeted AmbientMind evidence and active work;
+5. relevant AgentMind and authorized MyMind relationship context;
+6. source revisions, ACL/audience, freshness, coverage, high-water marks, and
+   known gaps.
+
+### Decision 3: the Marketplace includes real onboarding
+
+Hiring does not create a second lifecycle beside `TeamAgent`. Marketplace
+`available` is a listing state outside TeamAgent; selecting it creates the
+existing authoritative TeamAgent lifecycle and uses its exact states:
+
+```text
+MarketplaceListing.available -> TeamAgent.draft_hire
+draft_hire -> trial_pending -> trial_active -> review_required -> active
+draft_hire ---------------------------------> review_required -> active
+active -> paused -> active
+active|paused -> offboarding -> offboarded
+any nonterminal -> quarantined
+```
+
+`onboarding | needs_correction | ready` are readiness results attached to the
+canonical `review_required` TeamAgent revision, not another seat state, and
+`ready` is required for `review_required -> active`. Decline, expiry, quarantine,
+and recovery retain the exact canonical transitions in §7.10. Only the canonical
+lifecycle service may transition TeamAgent states; AgentMind stores their signed
+revision references and cannot activate itself. During onboarding the agent
+receives only the approved AmbientMind scopes and
+builds a role-specific `AgentOnboardingPack`: company/role map, relevant active
+storylines, current decisions and blockers, vocabulary, important people and
+projects, initial hypotheses, explicit unknowns, and source references. It does
+not ingest the whole company into every prompt. The understanding review tests
+factual grounding, access boundaries, role judgment, contradiction handling,
+and disclosure of gaps. Humans may correct the pack; activation requires a
+passing current revision. Material access, role, or company changes can trigger
+a bounded refresh without erasing stable AgentMind identity or MyMind
+relationships.
+
+Marketplace cards and coworker detail show onboarding scope, progress,
+freshness, unresolved questions, last refresh, and readiness evidence. Hiring
+does not subscribe the coworker to every channel or meeting.
+
+### Decision 4: engagement follows conversation topology
+
+- Private Scout: every human turn is eligible.
+- Public top-level messages: `@Scout`, Ask Scout, or explicit assignment remains
+  the default written-response door.
+- A direct reply to Scout is automatically read without another tag and may
+  produce `reply`, `reaction`, or `no_action`.
+- AmbientMind ingests authorized public/project events continuously, but visible
+  proactive participation is a separate event-driven, rate-limited policy with
+  channel mode `off | quiet | active`, relevance, confidence, deduplication,
+  interruption cost, and per-agent assignment scope. Do not simulate blind
+  interval polling or let every hired agent lurk everywhere.
+
+Start with reactions/silence and quiet response suggestions. Autonomous written
+interjections remain gated until context correctness and interruption-cost
+evals pass.
+
+### Decision 5: useful disagreement is part of AgentMind
+
+Scout and every opinion-bearing coworker must treat truth and usefulness as
+higher priority than agreement; distinguish fact, inference, personal judgment,
+and ratified company decision; state the strongest counterargument; challenge
+the current framing when evidence warrants it; and change position when the
+evidence changes. This is not performative contrarianism. Candor/sycophancy
+fixtures are a seat-qualification gate.
+
+### Decision 6: work recedes; results arrive in chat
+
+After approval, one compact activity rail above the composer shows the agent,
+human-readable current action, real phase, elapsed time, and expansion control.
+Do not also post a permanent full run card. Do not show invented percentages;
+only measured stage progress may use a number.
+
+Completion posts a normal coworker message with outcome, preview, provenance,
+and **Open**, **Save to Drive**, and **Discard**. Save opens Recent, My Drive,
+Shared, folder selection, and New Folder, then creates one stable ACL-bound
+reference for everyone in the destination audience. Discard reauthorizes the
+artifact revision and audience, requires two confirmations for delete-for-all,
+tombstones the unsaved result, and retracts derived chat/search projections. A
+Drive-saved object is distinct: removing its chat result never silently deletes
+the saved Drive copy.
+
+Capability routing is provider-neutral: modality, required tools, evidence,
+privacy, output contract, budget, measured quality, and fallback choose the
+adapter. Web/X search, research, images, video, slides, documents, and code are
+capabilities, not model names exposed to coworkers. Grok/X and video remain
+separately qualified adapters, not assumptions.
+
+### Decision 7: Memory becomes Ask AmbientMind; Intelligence becomes attention
+
+**Memory** becomes **Ask AmbientMind**: a natural-language search across
+authorized meetings, public/project threads, decisions, artifacts, Drive,
+storylines, and work receipts. Answers lead with synthesis, citations,
+freshness, coverage, and known gaps. Browse sources remains secondary. Results
+can be continued privately, added to a new public/project thread, or added to an
+existing channel only after previewing and reauthorizing the evidence bundle
+for the destination audience.
+
+**Intelligence** answers "what requires attention and why": evolving
+storylines, blockers and alignments, decisions and commitments, contribution
+maps, active work/results, value/spend/latency by project/person/category, and a
+personalized "what changed since" view. Ingestion counters and worker health
+move to an admin/system-health surface.
+
+### Verified baseline and immediate defect
+
+- The live Ball Dogs reply was a deterministic Board misroute. The phrase
+  "form your own take" activated the broad ownership marker and "trying to do"
+  activated the raw `to do -> Backlog` classifier, producing the exact Backlog
+  card answer before the conversational model ran.
+- Public-channel retrieval also ranked the serialized channel envelope rather
+  than only the human-authored message, polluting recall with generic metadata.
+- Direct replies to Scout already auto-engage and can choose a no-response
+  marker; top-level untagged human conversation remains human-first.
+- Production raw transcription has recent speaker-attributed material, but
+  `meetingDigest` is disabled with dead letters and the meeting/day/company,
+  decision/entity, narrative, mission, brain, and recap projections are stale
+  or degraded. Recent meetings therefore do not currently have trustworthy
+  complete analysis.
+- Work activity and Drive save primitives exist, but duplicated work cards,
+  folder choice, and governed delete-for-all are not yet one coherent flow.
+
+### E10 nested change set — no second wave ledger
+
+The canonical wave remains **E10** in §18. These are dependency-ordered E10
+remediation/workstream checkpoints, not A-waves and not a competing release
+plan. Every live activation inherits E0/E9 integrity, exact-release,
+receipt/ledger agreement, rollback-bundle retention, and E10 acceptance gates.
+
+| Checkpoint | Outcome | Dependencies | Acceptance gate | Explicit rollback | Status |
+|---|---|---|---|---|---|
+| E10-R0 | Repair Ball Dogs routing, causal deletion, cleanup, and independent answer | current exact serving receipt and E10 release authority | focused/full tests; both public mention and direct reply call the model once; authored-only retrieval; caused answer retracts from chat and canonical projections; useful live answer | reactivate retained prior exact release; do not rewrite named-volume data | `in_progress` — local focused, focused-race, and full-suite gates pass; release, cleanup, and live answer pending |
+| E10-R1 | Restore meeting-intelligence truth and replay recent authorized meetings | R0 plus E10 provider/quota and source-custody authority | fresh source-anchored transcript/decision/action/blocker/storyline receipts; honest gap/coverage state | disable unhealthy worker, retain raw transcript and prior projections, replay from last verified high-water | `in_progress` — live gap verified; local continuity/health safety gates pass; exact release and bounded replay pending |
+| E10-R2 | Run canonical AmbientMind projections in shadow | R1 and E1 canonical contracts | rebuild/revoke/restart parity, high-water/freshness agreement, zero ACL leakage | turn off shadow consumers and rebuild from immutable evidence | pending |
+| E10-R3 | Establish person identity, tenant membership, MyMind custody, purpose, and destination-disclosure authority | E1 authority contracts plus E0 custody proof | principal × workspace × audience × purpose × consent tests; recovery/departure/export/delete; zero cross-company/private leakage | revoke disclosure tokens, stop MyMind context assembly, preserve private encrypted custody and company ledger | pending |
+| E10-R4 | Add `ConversationContinuity` and the three-mind context envelope | R2, R3 | long-thread correction/delete/revoke/rebuild tests; read-only authority refs; freshness/gap disclosure | disable continuity/context-envelope consumers and fall back to bounded raw turns plus authorized AmbientMind retrieval | pending |
+| E10-R5 | Add AgentMind candor and reply/react/no-action participation | R4 | sycophancy, context, rate-limit, interruption, audience, and channel-policy corpus | restore explicit-invocation-only policy and prior signed profile revision | pending |
+| E10-R6 | Add Marketplace onboarding packs to canonical TeamAgent lifecycle | R3, R4 and E8 package/lifecycle receipts | scoped access, factual grounding, gap disclosure, correction, refresh, pause/quarantine/offboard gates | pause seat, revoke runtime principal/pack, restore prior package/profile/capability revisions | pending |
+| E10-R7 | Collapse work UI to one activity rail and complete Open/Save/Discard | R0 and E4/E6 artifact/Drive authority | desktop/mobile rendered QA; stable Drive reference; revision-bound, double-confirmed discard and projection retraction | restore prior renderer; keep artifacts/Drive copies intact and hide new discard action | pending |
+| E10-R8 | Ship Ask AmbientMind, attention-led Intelligence, and scoped contribution views | R2-R5, especially R3 disclosure authority | cited authorized answers, destination reauthorization, freshness/gaps, non-surveillance contribution truth | disable new views/queries and retain source systems plus admin health | pending |
+| E10-R9 | Make MyMind portable with opaque contribution attestations | R3, R8 and explicit organization export policy | signed/redacted receipt validation; third-party field authorization; departure/recovery/export/delete; zero confidential content | revoke export key/receipt visibility; retain tenant evidence and private MyMind separately | pending |
+
+### Current E10 substate, authority queue, and resume point
+
+Current canonical wave is E10; the active nested checkpoint is E10-R0. Local
+code separates public-channel retrieval text from the structured model
+envelope, narrows Board routing to explicit surfaces/constrained field intent,
+and causally retracts an ordinary generated reply with its deleted source from
+both chat and canonical projections. Focused regression tests pass.
+The fresh full repository suite and focused race gate also pass on this
+candidate; independent architecture Critic verdict is `PASS`.
+
+Production message cleanup is explicitly authorized by the user, but a code
+release, Git push, service restart, or direct named-volume rewrite is not
+silently implied. Do not hot-patch `/opt/meetingassist`, edit the stale
+`/opt/meetingassist/data`, or mutate unrelated live records. The full local
+suite and focused race gates are complete; resume by obtaining/using the
+separate exact-release authority. After the exact release is verified, delete
+only the failed Ball Dogs retry messages/replies, resend the intended AJ
+question, and keep the
+exchange only when Scout gives a grounded independent comparison.
+
+The 2026-08-06 read-only pre-release checkpoint still shows exact release
+`563c630199e82995119f1e061ccc6aafe5368ec1` serving, ledger generation 14,
+with retained rollback release `f12059ecceb7a8eeb8642fd8890471cad66b854d`;
+the local candidate is not live. The Ball Dogs source record still contains
+the three failed ordinary Scout answers
+`scout-chat-message-1786027750564553399`,
+`scout-chat-message-1786029957954345465`, and
+`scout-chat-message-1786030523466265206`, plus AJ retries
+`scout-chat-message-1786029957618540812` and
+`scout-chat-message-1786030507747939629`. These legacy replies predate the
+causal stamp, so source deletion alone cannot prove or retract them.
+
+The candidate therefore adds a separate admin-only `moderate-delete` operation
+for an exact ordinary agent text reply or AJ's own ordinary public message. It requires a
+bounded reason and a healthy canonical preflight; rejects private threads,
+other humans' messages, files, proposals, choices, images, manifests, and durable work;
+and atomically removes the chat source while adding a private durable
+moderation outbox receipt containing target identity/revision, acting
+principal, and reason digest. It does not report completion until the canonical
+delete event and authenticated runtime snapshot are durable. Projection/save
+failure returns a pending receipt; the same request and the restart recovery
+loop retry that exact operation idempotently. Viewer projections never expose
+the private receipt or its sanitized target. This is not ordinary
+coworker-message deletion authority. After an exact verified release,
+moderate-delete exactly the three failed Scout IDs and the two AJ retry IDs,
+then verify all five are
+absent from both the thread and canonical projection. Then post one corrected
+AJ question. Any newly generated ordinary answer now carries
+`CausedByMessageID`, so deleting a further failed retry atomically retracts the
+pair without another moderation action.
+
+Unrelated `stride-site/` work remains untouched.
+
+E10-R1's 2026-08-06 live read-only audit proves transcription is current but
+analysis is not. The authoritative volume contains fresh consent-bound
+transcripts through August 6, while the latest brain/decision/narrative outputs
+stop around August 4 and meeting/day/company digest continuity stops around July
+11. `MEETING_DIGEST_DISABLED=true` coexists with
+`MEETING_DIGEST_BACKFILL=1`; that disabled-plus-full-backfill state is an unsafe
+activation, not permission to flip the worker on. The 51 meeting-digest dead
+letters are 17 repeated failed passes over each of three older meetings, not 51
+distinct recent meetings. Raw transcripts and prior projections remain intact;
+no production data or runtime setting was changed.
+
+The local E10-R1 repair now makes the missing proof explicit and closes a
+restart loss-risk. Ambient checkpoints carry their input/artifact/cursor
+contract; baseline and held-window IDs must resolve to the correct input kind,
+room, and order; legacy cursorless artifacts normalize to a real input cursor;
+an invalid held window fails closed; and an invalid non-held checkpoint repairs
+only from an unambiguous durable worker cursor. Readiness now distinguishes
+configuration from a running supervisor, records real poll liveness, reports
+continuity scope health without raw message IDs, exposes `analysisReady`, and
+degrades the exact disabled-with-backfill-armed state. Focused, broader ambient,
+and focused race tests pass locally.
+
+Replay remains a separate governed operation. Before any provider call, produce
+one dry-run manifest containing the exact authorized meeting/source IDs, start
+and end high-water marks, projected calls/tokens/cost, current artifact cursors,
+consent/revision checks, excluded sources, and rollback floor. Activate one
+exact reviewed release with broad backfill flags off, prove each supervisor and
+checkpoint healthy, then replay a bounded oldest-first slice and require fresh
+source-linked brain, decision, action, blocker, narrative, and digest receipts
+before widening. A stale downstream artifact may continue to consume previously
+durable upstream work, but it cannot claim the newest meeting is incorporated
+while an upstream continuity gap remains.
+
 ### Country+Golf release carrier — 2026-08-05
 
 - The implementation baseline is

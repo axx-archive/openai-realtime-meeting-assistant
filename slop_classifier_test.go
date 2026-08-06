@@ -13,6 +13,19 @@ import (
 	"time"
 )
 
+func slopKeepVerdictsJSON(t *testing.T, ids []string) string {
+	t.Helper()
+	verdicts := make([]slopVerdict, 0, len(ids))
+	for _, id := range ids {
+		verdicts = append(verdicts, slopVerdict{EntryID: id, Verdict: "keep", Confidence: 0.99, Reason: "retain", Evidence: "still potentially useful"})
+	}
+	raw, err := json.Marshal(verdicts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
 func TestSlopClassifierAgentContract(t *testing.T) {
 	agent := slopClassifierAgent()
 	if agent.name != "slop_classifier" {
@@ -94,7 +107,10 @@ func TestApplySlopVerdictThresholds(t *testing.T) {
 				t.Fatalf("append: ok=%v err=%v", ok, err)
 			}
 			entry, _ := app.memory.entryByID("t-verdict")
-			got := app.applySlopVerdict(entry, slopVerdict{EntryID: "t-verdict", Verdict: tc.verdict, Confidence: tc.confidence, Reason: "r", Evidence: "e"})
+			got, err := app.applySlopVerdict(entry, slopVerdict{EntryID: "t-verdict", Verdict: tc.verdict, Confidence: tc.confidence, Reason: "r", Evidence: "e"})
+			if err != nil {
+				t.Fatalf("applySlopVerdict: %v", err)
+			}
 			if got != tc.want {
 				t.Fatalf("applySlopVerdict returned %q, want %q", got, tc.want)
 			}
@@ -203,9 +219,10 @@ func TestRunSlopClassifierIdempotent(t *testing.T) {
 	}
 
 	calls := 0
+	ids := []string{"t-idem-a", "t-idem-b", "t-idem-c", "t-idem-d", "t-idem-e", "t-idem-f", "t-idem-g", "t-idem-h"}
 	responder := func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
 		calls++
-		return "[]", nil // valid empty pass: keeps everything, advances the cursor.
+		return slopKeepVerdictsJSON(t, ids), nil
 	}
 
 	if err := app.runSlopClassifierOnce(slopClassifierAgent(), context.Background(), "test-key", responder, 8); err != nil {
@@ -219,6 +236,111 @@ func TestRunSlopClassifierIdempotent(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("second pass must not re-classify the consumed window; model calls=%d, want 1", calls)
+	}
+}
+
+func TestSlopIncompleteVerdictSetsHoldCursor(t *testing.T) {
+	ids := []string{"slop-set-a", "slop-set-b", "slop-set-c", "slop-set-d", "slop-set-e", "slop-set-f", "slop-set-g", "slop-set-h"}
+	valid := make([]slopVerdict, 0, len(ids))
+	for _, id := range ids {
+		valid = append(valid, slopVerdict{EntryID: id, Verdict: "keep", Confidence: 0.99, Reason: "retain", Evidence: "still potentially useful"})
+	}
+	encode := func(t *testing.T, verdicts []slopVerdict) string {
+		t.Helper()
+		raw, err := json.Marshal(verdicts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	duplicate := append([]slopVerdict(nil), valid...)
+	duplicate[len(duplicate)-1].EntryID = duplicate[0].EntryID
+	invented := append([]slopVerdict(nil), valid...)
+	invented[len(invented)-1].EntryID = "invented-slop-id"
+	unknownVerdict := append([]slopVerdict(nil), valid...)
+	unknownVerdict[0].Verdict = "defer"
+	missingVerdict := append([]slopVerdict(nil), valid...)
+	missingVerdict[0].Verdict = ""
+	negativeConfidence := append([]slopVerdict(nil), valid...)
+	negativeConfidence[0].Confidence = -0.1
+	overConfidence := append([]slopVerdict(nil), valid...)
+	overConfidence[0].Confidence = 1.1
+	missingReason := append([]slopVerdict(nil), valid...)
+	missingReason[0].Reason = ""
+	missingEvidence := append([]slopVerdict(nil), valid...)
+	missingEvidence[0].Evidence = ""
+	for _, test := range []struct {
+		name   string
+		output string
+	}{
+		{name: "empty", output: `[]`},
+		{name: "partial", output: encode(t, valid[:1])},
+		{name: "duplicate", output: encode(t, duplicate)},
+		{name: "invented", output: encode(t, invented)},
+		{name: "unknown verdict", output: encode(t, unknownVerdict)},
+		{name: "missing verdict", output: encode(t, missingVerdict)},
+		{name: "negative confidence", output: encode(t, negativeConfidence)},
+		{name: "over one confidence", output: encode(t, overConfidence)},
+		{name: "missing reason", output: encode(t, missingReason)},
+		{name: "missing evidence", output: encode(t, missingEvidence)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			app := newIsolatedKanbanBoardApp(t)
+			for _, id := range ids {
+				if _, ok, err := app.memory.appendTranscript(id, "", "Settled candidate "+id+" about obsolete logistics."); err != nil || !ok {
+					t.Fatalf("append %s: ok=%v err=%v", id, ok, err)
+				}
+				backdateMemoryEntry(app.memory, id, 10*24*time.Hour)
+			}
+			agent := slopClassifierAgent()
+			err := app.runSlopClassifierOnce(agent, context.Background(), "test-key", func(context.Context, string, openAITextRequest) (string, error) {
+				return test.output, nil
+			}, len(ids))
+			if err == nil {
+				t.Fatal("incomplete verdict set unexpectedly succeeded")
+			}
+			if cursor := app.newestSlopCursor(); cursor != "" {
+				t.Fatalf("incomplete verdict set advanced cursor=%q", cursor)
+			}
+			for _, id := range ids {
+				entry, found := app.memory.entryByID(id)
+				if !found || strings.TrimSpace(entry.Metadata["classifierVerdict"]) != "" {
+					t.Fatalf("invalid output mutated candidate %s: found=%v metadata=%v", id, found, entry.Metadata)
+				}
+			}
+			held, ok, heldErr := app.ambientHeldWindow(agent.name)
+			if heldErr != nil || !ok || held.WindowID != agent.name+":provider-window" {
+				t.Fatalf("held checkpoint=%+v ok=%v err=%v", held, ok, heldErr)
+			}
+		})
+	}
+}
+
+func TestSlopVerdictPersistenceFailureKeepsHeldWindowAndCursor(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	ids := []string{"slop-write-a", "slop-write-b", "slop-write-c", "slop-write-d", "slop-write-e", "slop-write-f", "slop-write-g", "slop-write-h"}
+	for _, id := range ids {
+		if _, ok, err := app.memory.appendTranscript(id, "", "Settled candidate "+id+" about obsolete logistics."); err != nil || !ok {
+			t.Fatalf("append %s: ok=%v err=%v", id, ok, err)
+		}
+		backdateMemoryEntry(app.memory, id, 10*24*time.Hour)
+	}
+	agent := slopClassifierAgent()
+	originalPath := app.memory.path
+	app.memory.path = t.TempDir() // rewrite target is a directory; verdict persistence must fail
+	defer func() { app.memory.path = originalPath }()
+	err := app.runSlopClassifierOnce(agent, context.Background(), "test-key", func(context.Context, string, openAITextRequest) (string, error) {
+		return slopKeepVerdictsJSON(t, ids), nil
+	}, len(ids))
+	if err == nil {
+		t.Fatal("verdict persistence failure unexpectedly succeeded")
+	}
+	if cursor := app.newestSlopCursor(); cursor != "" {
+		t.Fatalf("verdict persistence failure advanced cursor=%q", cursor)
+	}
+	held, ok, heldErr := app.ambientHeldWindow(agent.name)
+	if heldErr != nil || !ok || held.WindowID != agent.name+":provider-window" {
+		t.Fatalf("held checkpoint=%+v ok=%v err=%v", held, ok, heldErr)
 	}
 }
 
@@ -321,7 +443,7 @@ func TestSlopHeldWindowSurvivesSameProcessAndProcessRestart(t *testing.T) {
 	if err := restarted.runSlopClassifierOnce(agent, context.Background(), "test-key", func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		calls++
 		seenInput = request.Input
-		return `[]`, nil
+		return slopKeepVerdictsJSON(t, heldIDs), nil
 	}, len(heldIDs)); err != nil {
 		t.Fatalf("process-restart Slop retry: %v", err)
 	}
@@ -357,7 +479,29 @@ func TestRunSlopClassifierQuarantinesFromVerdict(t *testing.T) {
 	}
 
 	responder := func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
-		return `[{"entry_id":"t-q-a","verdict":"quarantine","confidence":0.92,"reason":"orphaned logistics chatter","evidence":"never attached to a package"}]`, nil
+		verdicts := make([]slopVerdict, 0, 8)
+		for i := 0; i < 8; i++ {
+			id := "t-q-" + string(rune('a'+i))
+			verdicts = append(verdicts, slopVerdict{
+				EntryID:    id,
+				Verdict:    "keep",
+				Confidence: 0.99,
+				Reason:     "retain",
+				Evidence:   "still potentially useful",
+			})
+		}
+		verdicts[0] = slopVerdict{
+			EntryID:    "t-q-a",
+			Verdict:    "quarantine",
+			Confidence: 0.92,
+			Reason:     "orphaned logistics chatter",
+			Evidence:   "never attached to a package",
+		}
+		raw, err := json.Marshal(verdicts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw), nil
 	}
 	if err := app.runSlopClassifierOnce(slopClassifierAgent(), context.Background(), "test-key", responder, 8); err != nil {
 		t.Fatalf("pass: %v", err)

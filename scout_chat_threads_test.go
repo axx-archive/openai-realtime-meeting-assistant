@@ -1202,7 +1202,11 @@ func TestScoutChatRouterSkipsPublicChannels(t *testing.T) {
 		t.Fatal("the router must not run for channel messages")
 		return anthropicMessagesResponse{}, nil
 	})
-	swapOpenAITextResponder(t, func(context.Context, string, openAITextRequest) (string, error) {
+	var capturedAnswerInput string
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Workflow == "scout_chat" {
+			capturedAnswerInput = request.Input
+		}
 		return "channel answer.", nil
 	})
 
@@ -1220,6 +1224,88 @@ func TestScoutChatRouterSkipsPublicChannels(t *testing.T) {
 	}
 	if _, proposed := response["proposal"]; proposed {
 		t.Fatalf("response keys=%v, want no proposal in channels", responseKeys(response))
+	}
+
+	// Regression: "form your own take" used to trip the generic `own` board
+	// marker and answer with a Backlog card before the conversational model ran.
+	strategyPrompt := "@Scout if you're just approaching it from first principles and analyzing the two pitches against each other, what would be your take on what the company would be trying to do? Which feels more attainable? What's the path each would take to capital and talent? No need to be agreeable either; you're free to form your own take as a member of our team."
+	response, err = kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, strategyPrompt, nil, "")
+	if err != nil {
+		t.Fatalf("append channel strategy mention: %v", err)
+	}
+	answer, ok := response["answer"].(scoutChatMessageRecord)
+	if !ok || answer.Text != "channel answer." {
+		t.Fatalf("answer=%#v, want conversational model response", response["answer"])
+	}
+	if !strings.Contains(capturedAnswerInput, strategyPrompt) {
+		t.Fatalf("model input omitted strategy prompt: %s", capturedAnswerInput)
+	}
+	if !strings.Contains(capturedAnswerInput, "Omitted because the user did not ask about board") {
+		t.Fatalf("strategy input leaked onto Board path: %s", capturedAnswerInput)
+	}
+
+	// A direct reply to Scout is the same conversational lane without another
+	// @mention. Even a quoted Scout ancestor that literally contains Backlog
+	// card text must stay model context, never become the new turn's intent.
+	boardParent := scoutChatMessageRecord{
+		ID:        "scout-chat-message-board-parent",
+		Kind:      "message",
+		Role:      "scout",
+		Text:      "Backlog cards: Fix long-press reply composer on iPhone (AJ).",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if _, err := kanbanApp.commitScoutChatThreadMessages(user.Email, channel.ID, boardParent); err != nil {
+		t.Fatalf("seed Scout board parent: %v", err)
+	}
+	directPrompt := "if you're just approaching it from first principles, what would be your take on what the company would be trying to do? No need to be agreeable; form your own take."
+	response, err = kanbanApp.appendScoutChatThreadMessageWithReplyAndTool(context.Background(), user, channel.ID, directPrompt, nil, "", boardParent.ID, "")
+	if err != nil {
+		t.Fatalf("append direct reply to Scout: %v", err)
+	}
+	directAnswer, ok := response["answer"].(scoutChatMessageRecord)
+	if !ok || directAnswer.Text != "channel answer." {
+		t.Fatalf("direct answer=%#v, want threaded conversational model response", response["answer"])
+	}
+	if !strings.Contains(capturedAnswerInput, directPrompt) || !strings.Contains(capturedAnswerInput, "Omitted because the user did not ask about board") {
+		t.Fatalf("direct-reply strategy input reopened Board path: %s", capturedAnswerInput)
+	}
+}
+
+func TestScoutChatPublicChannelExactCardTitleCanUseBoardShortcut(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("OPENAI_API_KEY", "openai-core-test")
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "openai-core-test"
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Workflow == "scout_chat" {
+			t.Fatal("an exact card-title query should use the deterministic Board answer")
+		}
+		return "unexpected model answer", nil
+	})
+	const title = "Fix long-press reply composer on iPhone"
+	if _, changed, err := kanbanApp.createTicket(map[string]any{
+		"title": title, "status": "Backlog", "owner": "AJ",
+	}); err != nil || !changed {
+		t.Fatalf("seed exact-title card changed=%v err=%v", changed, err)
+	}
+	channel, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "warroom", "public")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	user := accountStore().findUser("tim@shareability.com")
+	if user == nil {
+		t.Fatal("seed user tim@shareability.com missing")
+	}
+	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, "@Scout what is happening with "+title+"?", nil, "")
+	if err != nil {
+		t.Fatalf("append exact-title query: %v", err)
+	}
+	answer, ok := response["answer"].(scoutChatMessageRecord)
+	if !ok || !strings.Contains(answer.Text, title+" is currently Backlog") {
+		t.Fatalf("answer=%#v, want deterministic exact-card answer", response["answer"])
 	}
 }
 

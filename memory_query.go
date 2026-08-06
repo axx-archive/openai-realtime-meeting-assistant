@@ -176,10 +176,11 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachmen
 	if query == "" {
 		return assistantQueryResult{}, fmt.Errorf("query is required")
 	}
+	recallQuery := assistantRecallQuery(ctx, query)
 
-	if answer, ok := ambiguousClarificationAnswer(query, history); ok {
+	if answer, ok := ambiguousClarificationAnswer(recallQuery, history); ok {
 		return assistantQueryResult{
-			query:  query,
+			query:  recallQuery,
 			answer: answer,
 			source: "clarification",
 		}, nil
@@ -193,10 +194,10 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachmen
 	recallApp := app.scopedRecallApp(ctx, principal)
 	// Guests are admitted to a live room, not the company board. Their ask bar
 	// can use only the already room/sitting-filtered memory store.
-	if !assistantBoardShortcutDisabled(ctx) && principal.Audience != "guest" && len(attachments) == 0 && !recallApp.queryPrefersArtifactContext(query) {
-		if answer, matchedCards, ok := app.answerCurrentBoardQuestion(query); ok {
+	if !assistantBoardShortcutDisabled(ctx) && principal.Audience != "guest" && len(attachments) == 0 && !recallApp.queryPrefersArtifactContext(recallQuery) {
+		if answer, matchedCards, ok := app.answerCurrentBoardQuestion(recallQuery); ok {
 			return assistantQueryResult{
-				query:        query,
+				query:        recallQuery,
 				answer:       answer,
 				source:       "board",
 				matchedCards: matchedCards,
@@ -204,12 +205,12 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachmen
 		}
 	}
 
-	matches, contextEntries := recallApp.memoryMatchesAndContext(query)
+	matches, contextEntries := recallApp.memoryMatchesAndContext(recallQuery)
 	// Files is a first-class Scout source, not just a visual tab. Relevance
 	// search remains useful for broad company recall, but an exact file ref
 	// selected by chat (or an explicit Files/catalog question) is pinned ahead
 	// of the fuzzy lane after the same principal-scoped authorization pass.
-	contextEntries = appendUniqueFileContextEntries(app.assistantFileContextEntries(ctx, principal, query), contextEntries)
+	contextEntries = appendUniqueFileContextEntries(app.assistantFileContextEntries(ctx, principal, recallQuery), contextEntries)
 	if recallModelContextProbe != nil {
 		recallModelContextProbe(contextEntries)
 	}
@@ -226,17 +227,17 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachmen
 		// digest/ledger briefing (then on-demand map-reduce over raw memory);
 		// A5 keeps current-state questions on the deterministic ledger fold.
 		// Only queries neither lane serves keep the 8-keyword-hit last resort.
-		if briefingAnswer, ok := recallApp.rangedBriefingAnswer(query); ok {
+		if briefingAnswer, ok := recallApp.rangedBriefingAnswer(recallQuery); ok {
 			answer = briefingAnswer
-		} else if ledgerAnswer, ok := recallApp.ledgerStatusAnswer(query); ok {
+		} else if ledgerAnswer, ok := recallApp.ledgerStatusAnswer(recallQuery); ok {
 			answer = ledgerAnswer
 		} else {
-			answer = buildMemoryAnswer(query, matches)
+			answer = buildMemoryAnswer(recallQuery, matches)
 		}
 	}
 
 	return assistantQueryResult{
-		query:       query,
+		query:       recallQuery,
 		answer:      answer,
 		source:      "assistant",
 		matches:     len(matches),
@@ -247,6 +248,32 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachmen
 type assistantModelSuccessRequiredContextKey struct{}
 
 type assistantBoardShortcutDisabledContextKey struct{}
+type assistantRecallQueryContextKey struct{}
+
+// withAssistantRecallQuery keeps structured channel-turn metadata in the
+// answer model input while giving retrieval and deterministic intent routing
+// only the human-authored message. Metadata keys such as author_name,
+// channel_norm, and message_id are useful conversational context but terrible
+// search terms: they can drown a project question in unrelated company memory.
+func withAssistantRecallQuery(ctx context.Context, query string) context.Context {
+	query = canonicalizeBoardText(query)
+	if query == "" {
+		return ctx
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, assistantRecallQueryContextKey{}, query)
+}
+
+func assistantRecallQuery(ctx context.Context, fallback string) string {
+	if ctx != nil {
+		if query, _ := ctx.Value(assistantRecallQueryContextKey{}).(string); strings.TrimSpace(query) != "" {
+			return canonicalizeBoardText(query)
+		}
+	}
+	return canonicalizeBoardText(fallback)
+}
 
 // withAssistantBoardShortcutDisabled keeps a request on the current Scout
 // model-and-recall path. A public room @Scout mention is a conversational act,
@@ -377,7 +404,7 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModelAttachments(ctx context.
 	ctx, cancel := context.WithTimeout(ctx, assistantQueryRequestTimeout)
 	defer cancel()
 
-	includeBoard := !assistantBoardShortcutDisabled(ctx) && shouldIncludeBoardContextForAssistant(query, history)
+	includeBoard := !assistantBoardShortcutDisabled(ctx) && shouldIncludeBoardContextForAssistant(assistantRecallQuery(ctx, query), history)
 	input := buildAssistantQueryInput(query, cards, entries, app.activeDecisionEntries(decisionContextLimit), app.activeNarrativeEntries(narrativeStorylineContextLimit), history, time.Now(), includeBoard, app.pinnedProfileNotes(requester)...)
 	instructions := assistantQueryInstructionsForContext(ctx, strings.TrimSpace(apiKey) != "")
 	recordCapabilityPoll(capabilityTypedScoutAnswer, time.Now().UTC())
@@ -2511,19 +2538,11 @@ func compactSearchText(value string) string {
 	return strings.Join(memoryTokenPattern.FindAllString(strings.ToLower(value), -1), "")
 }
 
-// currentBoardQueryMarkers are the single-token cues that route a question to
-// the live board, pre-stemmed for word-boundary membership matching (item
-// 1.6): the query's stemmed token set is checked against them instead of raw
-// substrings, so "know" no longer trips "now" and "download" no longer trips
-// "own". Inflections the light stemmer folds ("cards"→card, "owners"→owner)
-// route automatically; the short forms it can't fold without dropping below the
-// 4-char stem floor ("owns"/"owned"/"currently") are listed explicitly so the
-// common "who owns X" / "currently" phrasings keep routing.
-var currentBoardQueryMarkers = buildStemmedMarkerSet(
-	"status", "owner", "own", "owns", "owned", "assigned",
-	"blocked", "done", "progress", "backlog", "board", "card", "ticket", "notes",
-	"tags", "task", "due", "deadline", "milestone",
-)
+// currentBoardSurfaceMarkers are unambiguous references to the product's work
+// surface. Status, task, notes, ownership, and completion words are deliberately
+// absent: each is ordinary company/strategy language and needs a constrained
+// phrase below (or an exact card title/id resolved by answerCurrentBoardQuestion).
+var currentBoardSurfaceMarkers = buildStemmedMarkerSet("board", "card", "ticket")
 
 func buildStemmedMarkerSet(markers ...string) map[string]struct{} {
 	set := make(map[string]struct{}, len(markers))
@@ -2535,11 +2554,40 @@ func buildStemmedMarkerSet(markers ...string) map[string]struct{} {
 
 func isCurrentBoardQuery(query string) bool {
 	for _, stem := range stemMemoryTokens(uniqueMemoryTokens(query)) {
-		if _, ok := currentBoardQueryMarkers[stem]; ok {
+		if _, ok := currentBoardSurfaceMarkers[stem]; ok {
 			return true
 		}
 	}
 
+	// Constrained field/status questions preserve useful board shorthand without
+	// letting phrases such as "our own take", "get done to attract talent", or
+	// "notes on the pitch" hijack a conversational turn.
+	normalized := strings.ToLower(query)
+	containsAny := func(phrases ...string) bool {
+		for _, phrase := range phrases {
+			if containsWordBoundedPhrase(normalized, phrase) {
+				return true
+			}
+		}
+		return false
+	}
+	if containsAny(
+		"who owns", "who own", "owned by", "assigned to", "who is assigned", "who's assigned",
+		"what is assigned", "what's assigned", "which tasks are assigned", "what tasks are assigned",
+		"current status", "status of", "status for", "task status",
+		"currently in progress", "what is in progress", "what's in progress",
+		"what is in the backlog", "what's in the backlog", "what is in backlog", "what's in backlog",
+		"what is blocked", "what's blocked", "anything blocked",
+		"due date for", "deadline for", "milestone for",
+	) {
+		return true
+	}
+	if containsAny("where do we stand") && containsAny("status", "progress", "blocked", "deadline", "due", "milestone") {
+		return true
+	}
+	if containsAny("when is", "when's", "what is the date for", "what's the date for") && containsAny("due", "deadline", "milestone") {
+		return true
+	}
 	return false
 }
 
