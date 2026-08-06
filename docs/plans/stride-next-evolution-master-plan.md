@@ -290,8 +290,8 @@ receipt/ledger agreement, rollback-bundle retention, and E10 acceptance gates.
 
 | Checkpoint | Outcome | Dependencies | Acceptance gate | Explicit rollback | Status |
 |---|---|---|---|---|---|
-| E10-R0 | Repair Ball Dogs routing, causal deletion, cleanup, and independent answer | current exact serving receipt and E10 release authority | focused/full tests; both public mention and direct reply call the model once; authored-only retrieval; caused answer retracts from chat and canonical projections; useful live answer | reactivate retained prior exact release; do not rewrite named-volume data | `in_progress` — local focused, focused-race, and full-suite gates pass; release, cleanup, and live answer pending |
-| E10-R1 | Restore meeting-intelligence truth and replay recent authorized meetings | R0 plus E10 provider/quota and source-custody authority | fresh source-anchored transcript/decision/action/blocker/storyline receipts; honest gap/coverage state | disable unhealthy worker, retain raw transcript and prior projections, replay from last verified high-water | `in_progress` — live gap verified; local continuity/health safety gates pass; exact release and bounded replay pending |
+| E10-R0 | Repair Ball Dogs routing, causal deletion, cleanup, and independent answer | current exact serving receipt and E10 release authority | focused/full tests; both public mention and direct reply call the model once; authored-only retrieval; caused answer retracts from chat and canonical projections; useful live answer | reactivate retained prior exact release; do not rewrite named-volume data | `completed` — exact release `ba9bca4a0392085df93f5dcd0607cba547260289`, ledger generation 16, durable cleanup, accepted independent answer, and causal lineage verified live |
+| E10-R1 | Restore meeting-intelligence truth and replay recent authorized meetings | R0 plus E10 provider/quota and source-custody authority | fresh source-anchored transcript/decision/action/blocker/storyline receipts; honest gap/coverage state | disable unhealthy worker, retain raw transcript and prior projections, replay from last verified high-water | `in_progress` — continuity/health release is live with every broad backfill flag off; dry-run replay manifest and bounded execution door remain pending |
 | E10-R2 | Run canonical AmbientMind projections in shadow | R1 and E1 canonical contracts | rebuild/revoke/restart parity, high-water/freshness agreement, zero ACL leakage | turn off shadow consumers and rebuild from immutable evidence | pending |
 | E10-R3 | Establish person identity, tenant membership, MyMind custody, purpose, and destination-disclosure authority | E1 authority contracts plus E0 custody proof | principal × workspace × audience × purpose × consent tests; recovery/departure/export/delete; zero cross-company/private leakage | revoke disclosure tokens, stop MyMind context assembly, preserve private encrypted custody and company ledger | pending |
 | E10-R4 | Add `ConversationContinuity` and the three-mind context envelope | R2, R3 | long-thread correction/delete/revoke/rebuild tests; read-only authority refs; freshness/gap disclosure | disable continuity/context-envelope consumers and fall back to bounded raw turns plus authorized AmbientMind retrieval | pending |
@@ -303,69 +303,47 @@ receipt/ledger agreement, rollback-bundle retention, and E10 acceptance gates.
 
 ### Current E10 substate, authority queue, and resume point
 
-Current canonical wave is E10; the active nested checkpoint is E10-R0. Local
-code separates public-channel retrieval text from the structured model
-envelope, narrows Board routing to explicit surfaces/constrained field intent,
-and causally retracts an ordinary generated reply with its deleted source from
-both chat and canonical projections. Focused regression tests pass.
-The fresh full repository suite and focused race gate also pass on this
-candidate; independent architecture Critic verdict is `PASS`.
+Current canonical wave is E10; the active nested checkpoint is E10-R1. E10-R0
+is complete in production. Exact release
+`ba9bca4a0392085df93f5dcd0607cba547260289` is serving under ledger generation
+16 with `verified-local-unsigned` attestation and retained exact release
+`7970f0c78f4ea772046217b85e1e4960aa2391e0` as rollback. The full repository
+suite, focused race gate, exact-release activation verifier, and independent
+architecture Critic all passed.
 
-Production message cleanup is explicitly authorized by the user, but a code
-release, Git push, service restart, or direct named-volume rewrite is not
-silently implied. Do not hot-patch `/opt/meetingassist`, edit the stale
-`/opt/meetingassist/data`, or mutate unrelated live records. The full local
-suite and focused race gates are complete; resume by obtaining/using the
-separate exact-release authority. After the exact release is verified, delete
-only the failed Ball Dogs retry messages/replies, resend the intended AJ
-question, and keep the
-exchange only when Scout gives a grounded independent comparison.
+The live repair proved two independent failures. First, routing and retrieval
+were classifying the structured public-channel envelope rather than only the
+human-authored turn, which allowed ordinary strategic language to trigger the
+legacy Board shortcut. Second, the corrected strategic answer hit the former
+800-token Responses cap; public coworker chat then suppressed the
+`max_output_truncation` error and rendered fuzzy Memory hits as though they
+were Scout's answer. Conversational Scout now requires a real model result,
+never the raw-memory fallback, and has a 2,400-token shared reasoning/output
+budget for strategic answers.
 
-The 2026-08-06 read-only pre-release checkpoint still shows exact release
-`563c630199e82995119f1e061ccc6aafe5368ec1` serving, ledger generation 14,
-with retained rollback release `f12059ecceb7a8eeb8642fd8890471cad66b854d`;
-the local candidate is not live. The Ball Dogs source record still contains
-the three failed ordinary Scout answers
-`scout-chat-message-1786027750564553399`,
-`scout-chat-message-1786029957954345465`, and
-`scout-chat-message-1786030523466265206`, plus AJ retries
-`scout-chat-message-1786029957618540812` and
-`scout-chat-message-1786030507747939629`. These legacy replies predate the
-causal stamp, so source deletion alone cannot prove or retract them.
-
-The candidate therefore adds a separate admin-only `moderate-delete` operation
-for an exact ordinary agent text reply or AJ's own ordinary public message. It requires a
-bounded reason and a healthy canonical preflight; rejects private threads,
-other humans' messages, files, proposals, choices, images, manifests, and durable work;
-and atomically removes the chat source while adding a private durable
-moderation outbox receipt containing target identity/revision, acting
-principal, and reason digest. It does not report completion until the canonical
-delete event and authenticated runtime snapshot are durable. Projection/save
-failure returns a pending receipt; the same request and the restart recovery
-loop retry that exact operation idempotently. Viewer projections never expose
-the private receipt or its sanitized target. This is not ordinary
-coworker-message deletion authority. After an exact verified release,
-moderate-delete exactly the three failed Scout IDs and the two AJ retry IDs,
-then verify all five are
-absent from both the thread and canonical projection. Then post one corrected
-AJ question. Any newly generated ordinary answer now carries
-`CausedByMessageID`, so deleting a further failed retry atomically retracts the
-pair without another moderation action.
-
-Unrelated `stride-site/` work remains untouched.
+Seven failed messages were removed through exact, admin-only, durable
+moderation receipts: the original five-message failed exchange plus the first
+post-release retry and its memory fallback. No named-volume record was edited
+directly. The accepted AJ prompt is
+`scout-chat-message-1786042346580793902`; Scout's grounded independent answer
+is `scout-chat-message-1786042364030812344` and durably carries the former as
+`CausedByMessageID`. Scout treated the pitches as two different companies,
+separated near-term attainability from owned-IP upside, mapped distinct capital
+and talent paths, and challenged licensing, altcast, Fanatics, and proof-point
+assumptions. Unrelated production records and `stride-site/` remain untouched.
 
 E10-R1's 2026-08-06 live read-only audit proves transcription is current but
 analysis is not. The authoritative volume contains fresh consent-bound
 transcripts through August 6, while the latest brain/decision/narrative outputs
 stop around August 4 and meeting/day/company digest continuity stops around July
-11. `MEETING_DIGEST_DISABLED=true` coexists with
-`MEETING_DIGEST_BACKFILL=1`; that disabled-plus-full-backfill state is an unsafe
-activation, not permission to flip the worker on. The 51 meeting-digest dead
+11. The pre-release environment had `MEETING_DIGEST_DISABLED=true` together
+with `MEETING_DIGEST_BACKFILL=1`; the exact release disarmed that broad backfill
+flag before activation while leaving the worker disabled. The 51 meeting-digest dead
 letters are 17 repeated failed passes over each of three older meetings, not 51
 distinct recent meetings. Raw transcripts and prior projections remain intact;
-no production data or runtime setting was changed.
+only the unsafe broad-backfill runtime flags were disarmed.
 
-The local E10-R1 repair now makes the missing proof explicit and closes a
+The deployed E10-R1 safety repair makes the missing proof explicit and closes a
 restart loss-risk. Ambient checkpoints carry their input/artifact/cursor
 contract; baseline and held-window IDs must resolve to the correct input kind,
 room, and order; legacy cursorless artifacts normalize to a real input cursor;
@@ -374,7 +352,11 @@ only from an unambiguous durable worker cursor. Readiness now distinguishes
 configuration from a running supervisor, records real poll liveness, reports
 continuity scope health without raw message IDs, exposes `analysisReady`, and
 degrades the exact disabled-with-backfill-armed state. Focused, broader ambient,
-and focused race tests pass locally.
+focused race, and full repository tests passed before release. Live readiness
+now honestly reports `analysisReady=false`: brain continuity is structurally
+healthy but stale, meeting digest remains disabled, and ambiguous legacy
+cursors keep the affected Board/Narrative scopes fail-closed instead of
+silently skipping evidence.
 
 Replay remains a separate governed operation. Before any provider call, produce
 one dry-run manifest containing the exact authorized meeting/source IDs, start
@@ -386,6 +368,32 @@ source-linked brain, decision, action, blocker, narrative, and digest receipts
 before widening. A stale downstream artifact may continue to consume previously
 durable upstream work, but it cannot claim the newest meeting is incorporated
 while an upstream continuity gap remains.
+
+The post-release replay audit confirms that no safe bounded execution door
+exists yet. `/api/admin/brain-projection/backfill` rebuilds only the canonical
+sanitized projection; it does not regenerate brain, decision, narrative, or
+digest artifacts. Every `*_BACKFILL` flag resets that worker to unbounded
+history, `runAmbientAgentOnceLimited` limits batch size but cannot bind an
+explicit start/end fence, and the close-flush chain follows live cursors and
+includes Board mutation. None is an E10-R1 replay mechanism.
+
+Implement E10-R1 as an admin-only, two-phase
+`ambient-intelligence-replay/v1` planner/executor. The provider-free planner
+freezes one digest-bound manifest with release identity, tenant/room/sitting,
+oldest-first source IDs, start-after/end-at high-waters, content revisions and
+digests, ACL/consent/purge state, exclusions, artifact/sidecar cursor digests,
+selected DAG stages, prompt/model/output ceilings, call/token/cost ceilings,
+authorization TTL, and rollback floor. The executor accepts only that approved
+manifest digest, uses an isolated replay cursor namespace, revalidates every
+source and authority fence before each provider call, rejects drift, and lets
+downstream stages consume only artifacts produced by that manifest. Board is
+excluded by default. The first production slice is one oldest stale authorized
+sitting with brain windows of at most 48, followed by decision, mission,
+narrative, meeting digest, deterministic day fold, entity ledger, and company
+digest; every stage must leave a source-linked receipt before widening. If a
+distinct blocker receipt remains an acceptance requirement, add a typed
+blocker/status projection instead of treating an inferred narrative sentence
+as proof.
 
 ### Country+Golf release carrier — 2026-08-05
 
