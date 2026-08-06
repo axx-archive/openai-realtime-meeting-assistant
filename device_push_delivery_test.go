@@ -50,6 +50,9 @@ func TestOrdinaryTablePostReachesTeammateDeviceWithoutBuzzingAuthor(t *testing.T
 	if len(*captured) != 1 || (*captured)[0].To != "ExponentPushToken[aj-phone]" {
 		t.Fatalf("captured=%+v, want exactly AJ's device and never the author's", *captured)
 	}
+	if (*captured)[0].Badge == nil || *(*captured)[0].Badge != 1 {
+		t.Fatalf("badge=%v, want the recipient's one unread notification", (*captured)[0].Badge)
+	}
 	if got := kanbanApp.unreadNotificationsFor("tim@shareability.com", notificationListLimit); len(got) != 0 {
 		t.Fatalf("author bell=%#v, want no self-notification", got)
 	}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { api, BonfireApiError } from '../api/client';
 import {
@@ -27,6 +27,38 @@ import {
   pushAuthorityLedger,
   type PushRegistrationAuthority,
 } from './PushAuthorityLedger';
+import { useOfficeEvents } from '../realtime/OfficeEventsContext';
+
+let badgeSyncGeneration = 0;
+
+function unreadNotificationCount(notifications: unknown[]): number {
+  return notifications.reduce<number>((count, item) => (
+    item && typeof item === 'object' && !Array.isArray(item) && (item as { read?: unknown }).read !== true
+      ? count + 1
+      : count
+  ), 0);
+}
+
+/** Keeps asynchronous refreshes from restoring an older account's badge. */
+export async function syncNotificationBadge(sessionToken: string): Promise<void> {
+  const generation = ++badgeSyncGeneration;
+  try {
+    const response = await api.notifications(sessionToken);
+    if (generation !== badgeSyncGeneration) return;
+    await Notifications.setBadgeCountAsync(unreadNotificationCount(response.notifications));
+  } catch {
+    // Badge refresh is best-effort; durable notification state stays server-side.
+  }
+}
+
+export async function setNotificationBadge(count: number): Promise<void> {
+  ++badgeSyncGeneration;
+  try {
+    await Notifications.setBadgeCountAsync(Math.max(0, count));
+  } catch {
+    // Badge permission can be denied independently of alerts.
+  }
+}
 
 function bindingAuthority(
   authority: PushRegistrationAuthority,
@@ -148,6 +180,7 @@ export function usePushRegistration({
   bootstrapping,
   onOpenTarget,
 }: PushRegistrationOptions) {
+  const office = useOfficeEvents();
   // Kept in a ref so the listener effect does not re-subscribe every time the
   // navigation callback is re-created.
   const openRef = useRef(onOpenTarget);
@@ -189,7 +222,8 @@ export function usePushRegistration({
       const existing = await Notifications.getPermissionsAsync();
       if (!registrationIsCurrent()) return;
       let granted = existing.granted;
-      if (!granted) {
+      const badgeGranted = Platform.OS !== 'ios' || existing.ios?.allowsBadge === true;
+      if (!granted || !badgeGranted) {
         const requested = await Notifications.requestPermissionsAsync({
           ios: { allowAlert: true, allowBadge: true, allowSound: true },
         });
@@ -259,8 +293,26 @@ export function usePushRegistration({
   // Badge cleanup is local. AuthContext clears authority synchronously, then
   // performs bounded server cleanup with its captured old session token.
   useEffect(() => {
-    if (sessionToken) return;
-    void Notifications.setBadgeCountAsync(0).catch(() => {});
+    if (sessionToken) {
+      void syncNotificationBadge(sessionToken);
+      return;
+    }
+    void setNotificationBadge(0);
+  }, [sessionToken]);
+
+  useEffect(() => {
+    if (!sessionToken) return;
+    if (office.event === 'notification' || office.event === 'notification_backlog' || office.event === 'chat_thread') {
+      void syncNotificationBadge(sessionToken);
+    }
+  }, [office.event, office.version, sessionToken]);
+
+  useEffect(() => {
+    if (!sessionToken) return undefined;
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void syncNotificationBadge(sessionToken);
+    });
+    return () => subscription.remove();
   }, [sessionToken]);
 
   const validateAndOpen = useCallback(async (
@@ -352,13 +404,4 @@ export function usePushRegistration({
  */
 export async function unregisterPushDevice(sessionToken: string, token: string): Promise<void> {
   await api.unregisterPushDevice(sessionToken, token);
-}
-
-/** Direct mentions only — matches the chat circle's dot rule (§6). */
-export async function setMentionBadge(count: number): Promise<void> {
-  try {
-    await Notifications.setBadgeCountAsync(Math.max(0, count));
-  } catch {
-    // Badge permission can be denied independently of alerts.
-  }
 }

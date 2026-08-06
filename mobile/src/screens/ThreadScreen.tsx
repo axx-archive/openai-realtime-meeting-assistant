@@ -27,6 +27,7 @@ import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { api, BonfireApiError } from '../api/client';
 import type { ChatMentionCandidate, GiphySearchResult, ScoutFileAttachment, ScoutMessage, ThreadDigestResponse } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
+import { syncNotificationBadge } from '../push/usePushRegistration';
 import { MessageBubble } from '../messaging/MessageBubble';
 import { firstUnreadIndex } from '../messaging/unreadBoundary';
 import { buildTimelineMarkers } from '../messaging/timelineMarkers';
@@ -698,7 +699,10 @@ export function ThreadScreen({ route, navigation }: Props) {
 	if (lastMarkedMessageIDRef.current === messageID || markingMessageIDRef.current === messageID) return;
 	markingMessageIDRef.current = messageID;
 	void api.markThreadRead(sessionToken, route.params.threadId, messageID)
-		.then(() => { lastMarkedMessageIDRef.current = messageID; })
+		.then(() => {
+			lastMarkedMessageIDRef.current = messageID;
+			void syncNotificationBadge(sessionToken);
+		})
 		.catch(() => {
 			// Best-effort: a failed mark just means the thread still shows unread,
 			// which is the safe direction to fail in.
@@ -1204,6 +1208,26 @@ export function ThreadScreen({ route, navigation }: Props) {
   const listening = dictation.state === 'listening';
   const dictationActive = dictation.state !== 'idle';
   const dictationCanCommit = listening || dictation.state === 'held' || dictation.state === 'error';
+  const renderMessageActionSheet = (contained = false) => (
+    <MessageActionSheet
+      visible={Boolean(actionMessage)}
+      contained={contained}
+      own={Boolean(actionMessage?.own)}
+      snippet={String(actionMessage?.message.text ?? actionMessage?.message.content ?? '')}
+      reactions={actionMessage?.message.reactions ?? []}
+      onClose={() => setActionMessage(null)}
+      onReact={(emoji) => {
+        if (!actionMessage) return;
+        const current = groupMessageReactions(actionMessage.message.reactions, email)
+          .find((reaction) => reaction.emoji === emoji);
+        void toggleReaction(actionMessage.message, emoji, !current?.reactedByViewer);
+      }}
+      onCopy={() => { if (actionMessage) copyMessage(actionMessage.message); }}
+      onReply={() => { if (actionMessage) beginReply(actionMessage.message); }}
+      onEdit={() => { if (actionMessage) beginEdit(actionMessage.message); }}
+      onDelete={() => { if (actionMessage) confirmDelete(actionMessage.message); }}
+    />
+  );
 
   return (
     <SafeAreaView
@@ -1341,6 +1365,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         resolvingProposalID={resolvingProposalID}
         onOpenLongMessage={openLongMessage}
         onOpenWorkArtifact={openWorkArtifact}
+        actionOverlay={renderMessageActionSheet(true)}
       />
 
       <AttachmentSourceSheet
@@ -1358,23 +1383,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         onSelect={(gif) => addGiphyGif(gif, attachmentTarget)}
       />
 
-      <MessageActionSheet
-        visible={Boolean(actionMessage)}
-        own={Boolean(actionMessage?.own)}
-        snippet={String(actionMessage?.message.text ?? actionMessage?.message.content ?? '')}
-        reactions={actionMessage?.message.reactions ?? []}
-        onClose={() => setActionMessage(null)}
-        onReact={(emoji) => {
-          if (!actionMessage) return;
-          const current = groupMessageReactions(actionMessage.message.reactions, email)
-            .find((reaction) => reaction.emoji === emoji);
-          void toggleReaction(actionMessage.message, emoji, !current?.reactedByViewer);
-        }}
-        onCopy={() => { if (actionMessage) copyMessage(actionMessage.message); }}
-        onReply={() => { if (actionMessage) beginReply(actionMessage.message); }}
-        onEdit={() => { if (actionMessage) beginEdit(actionMessage.message); }}
-        onDelete={() => { if (actionMessage) confirmDelete(actionMessage.message); }}
-      />
+      {threadContextRoot ? null : renderMessageActionSheet()}
 
       <KeyboardAvoidingView
         style={styles.fill}

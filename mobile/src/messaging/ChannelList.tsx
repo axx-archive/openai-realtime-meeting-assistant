@@ -173,92 +173,111 @@ export function ChannelList() {
     return <Text style={styles.empty}>No threads yet. Hold the mic and say something.</Text>;
   }
 
+  const orderedThreads = pinBonfireChatFirst(threads);
+  const sections = [
+    { label: 'CHANNELS', threads: orderedThreads.filter((thread) => thread.visibility === 'public') },
+    { label: 'PRIVATE', threads: orderedThreads.filter((thread) => thread.visibility !== 'public') },
+  ].filter((section) => section.threads.length > 0);
+
   return (
     <View>
       {renameError ? <Text accessibilityRole="alert" style={styles.renameError}>{renameError}</Text> : null}
-      {pinBonfireChatFirst(threads).map((thread) => {
-        const body = preview(thread);
-		const unread = Math.max(0, Number(thread.unreadCount ?? 0));
-        const threadID = String(thread.id);
-        const editing = editingThreadID === threadID;
-        const working = activeWork(thread);
-        const bonfire = isBonfireChat(thread);
-        return (
-          <Pressable
-            key={threadID}
-            accessibilityRole="button"
-            accessibilityLabel={`${channelDisplayName(thread)}${bonfire ? ', pinned Stride channel' : ''}`}
-            accessibilityHint={thread.visibility === 'public' ? undefined : 'Touch and hold to rename this thread'}
-            onLongPress={thread.visibility === 'public' ? undefined : () => beginRename(thread)}
-            onPress={() => {
-              if (longPressedThreadRef.current === threadID) {
-                longPressedThreadRef.current = null;
-                return;
-              }
-              if (editing) {
-                Keyboard.dismiss();
-                return;
-              }
-              navigation.navigate('Thread', {
-                threadId: threadID,
-                title: channelDisplayName(thread),
-              })
-            }}
-            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
-          >
-            <View style={styles.rowText}>
-              {editing ? (
-                <TextInput
-                  accessibilityLabel="Edit thread name"
-                  autoFocus
-                  editable={renameInFlightRef.current !== threadID}
-                  enterKeyHint="done"
-                  onBlur={() => { void commitRename(thread); }}
-                  onChangeText={setTitleDraft}
-                  onSubmitEditing={() => { void commitRename(thread); }}
-                  returnKeyType="done"
-                  selectTextOnFocus
-                  selectionColor={colors.info}
-                  submitBehavior="blurAndSubmit"
-                  style={styles.nameInput}
-                  value={titleDraft}
-                />
-              ) : (
-                <View style={styles.nameRow}>
-                  <Text style={[styles.name, bonfire && styles.nameBonfire]} numberOfLines={1}>
-                    {channelDisplayName(thread)}
-                  </Text>
-                  {bonfire ? (
-                    <View accessibilityLabel="Stride channel, pinned" style={styles.bonfireTag}>
-                      <SymbolView name="pin.fill" tintColor={colors.emberText} size={9} />
-                      <Text style={styles.bonfireTagText}>STRIDE</Text>
+      {sections.map((section) => (
+        <View key={section.label} style={styles.section}>
+          <Text accessibilityRole="header" style={styles.sectionLabel}>{section.label}</Text>
+          {section.threads.map((thread) => {
+            const body = preview(thread);
+            const unread = Math.max(0, Number(thread.unreadCount ?? 0));
+            const threadID = String(thread.id);
+            const editing = editingThreadID === threadID;
+            const working = activeWork(thread);
+            const bonfire = isBonfireChat(thread);
+            return (
+              <Pressable
+                key={threadID}
+                accessibilityRole="button"
+                accessibilityLabel={`${channelDisplayName(thread)}${bonfire ? ', pinned channel' : ''}`}
+                accessibilityHint={thread.visibility === 'public' ? undefined : 'Touch and hold to rename this thread'}
+                onLongPress={thread.visibility === 'public' ? undefined : () => beginRename(thread)}
+                onPress={() => {
+                  if (longPressedThreadRef.current === threadID) {
+                    longPressedThreadRef.current = null;
+                    return;
+                  }
+                  if (editing) {
+                    Keyboard.dismiss();
+                    return;
+                  }
+                  navigation.navigate('Thread', {
+                    threadId: threadID,
+                    title: channelDisplayName(thread),
+                  });
+                }}
+                style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+              >
+                <View style={styles.rowText}>
+                  {editing ? (
+                    <TextInput
+                      accessibilityLabel="Edit thread name"
+                      autoFocus
+                      editable={renameInFlightRef.current !== threadID}
+                      enterKeyHint="done"
+                      onBlur={() => { void commitRename(thread); }}
+                      onChangeText={setTitleDraft}
+                      onSubmitEditing={() => { void commitRename(thread); }}
+                      returnKeyType="done"
+                      selectTextOnFocus
+                      selectionColor={colors.info}
+                      submitBehavior="blurAndSubmit"
+                      style={styles.nameInput}
+                      value={titleDraft}
+                    />
+                  ) : (
+                    <View style={styles.nameRow}>
+                      <Text style={[styles.name, bonfire && styles.nameBonfire]} numberOfLines={1}>
+                        {channelDisplayName(thread)}
+                      </Text>
+                      {bonfire ? (
+                        <View accessibilityLabel="Pinned channel" style={styles.bonfireTag}>
+                          <SymbolView name="pin.fill" tintColor={colors.emberText} size={9} />
+                        </View>
+                      ) : null}
+                    </View>
+                  )}
+                  {body ? (
+                    <Text style={styles.preview} numberOfLines={1}>
+                      {body}
+                    </Text>
+                  ) : null}
+                </View>
+                <View style={styles.meta}>
+                  {working ? <ActiveWorkTimer active={working} /> : <Text style={styles.time}>{timeAgo(thread.updatedAt)}</Text>}
+                  {unread > 0 ? (
+                    <View style={styles.unreadBadge}>
+                      <Text style={styles.unreadText}>{unread > 99 ? '99+' : unread}</Text>
                     </View>
                   ) : null}
                 </View>
-              )}
-              {body ? (
-                <Text style={styles.preview} numberOfLines={1}>
-                  {body}
-                </Text>
-              ) : null}
-            </View>
-			<View style={styles.meta}>
-				{working ? <ActiveWorkTimer active={working} /> : <Text style={styles.time}>{timeAgo(thread.updatedAt)}</Text>}
-				{unread > 0 ? (
-					<View style={styles.unreadBadge}>
-						<Text style={styles.unreadText}>{unread > 99 ? '99+' : unread}</Text>
-					</View>
-				) : null}
-			</View>
-          </Pressable>
-        );
-      })}
+              </Pressable>
+            );
+          })}
+        </View>
+      ))}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   loading: { paddingVertical: space[8] },
+  section: { gap: 1 },
+  sectionLabel: {
+    ...type.label,
+    color: colors.text3,
+    paddingHorizontal: space[4],
+    paddingTop: space[4],
+    paddingBottom: space[1],
+    letterSpacing: 0.8,
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -276,8 +295,7 @@ const styles = StyleSheet.create({
     color: colors.text1,
   },
   nameBonfire: { color: colors.emberText },
-  bonfireTag: { minHeight: 20, flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, borderRadius: radius.full, backgroundColor: colors.emberSoft },
-  bonfireTagText: { ...type.label, color: colors.emberText, fontSize: 9, lineHeight: 11, letterSpacing: 0.5 },
+  bonfireTag: { width: 20, height: 20, alignItems: 'center', justifyContent: 'center', borderRadius: radius.full, backgroundColor: colors.emberSoft },
   nameInput: {
     ...type.bodyMedium,
     minHeight: 34,

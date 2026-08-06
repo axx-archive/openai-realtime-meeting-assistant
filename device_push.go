@@ -303,16 +303,16 @@ func chunkExpoPushMessages(tokens []string, size int) [][]string {
 	return batches
 }
 
-// expoPushMessagesFor builds one message per token.
+// expoPushMessagesFor builds one message per authorized device target.
 //
 // The body carries the message text. A chat banner reading "New message" is
 // worse than no banner — the whole reason a phone buzzes is so you can decide
 // whether to look. Note this is NOT the "titles only" boundary that
 // pushNotificationRecordOS enforces: that guards the in-app OS event stream, a
 // different surface with a different threat model.
-func expoPushMessagesFor(record notificationRecord, tokens []string) []expoPushMessage {
+func expoPushMessagesFor(record notificationRecord, targets []devicePushTarget) []expoPushMessage {
 	body := strings.TrimSpace(record.Text)
-	if body == "" || len(tokens) == 0 {
+	if body == "" || len(targets) == 0 {
 		return nil
 	}
 
@@ -332,13 +332,18 @@ func expoPushMessagesFor(record notificationRecord, tokens []string) []expoPushM
 		data["tool"] = tool
 	}
 
-	messages := make([]expoPushMessage, 0, len(tokens))
-	for _, token := range tokens {
+	messages := make([]expoPushMessage, 0, len(targets))
+	for _, target := range targets {
+		badge := 0
+		if kanbanApp != nil {
+			badge = len(kanbanApp.unreadNotificationsForTenant(target.TenantID, target.UserEmail, notificationListLimit))
+		}
 		messages = append(messages, expoPushMessage{
-			To:    token,
+			To:    target.Token,
 			Body:  body,
 			Data:  data,
 			Sound: "default",
+			Badge: &badge,
 		})
 	}
 	return messages
@@ -454,7 +459,6 @@ func deliverDevicePushForRecord(record notificationRecord) {
 			}
 			resolvedBatch := targets[start:end]
 			batch := make([]devicePushTarget, 0, len(resolvedBatch))
-			tokens := make([]string, 0, len(resolvedBatch))
 			for _, target := range resolvedBatch {
 				// Recheck immediately before the external effect so a session that
 				// expired while preferences/mutes or an earlier batch resolved cannot
@@ -464,9 +468,8 @@ func deliverDevicePushForRecord(record notificationRecord) {
 					continue
 				}
 				batch = append(batch, target)
-				tokens = append(tokens, target.Token)
 			}
-			messages := expoPushMessagesFor(record, tokens)
+			messages := expoPushMessagesFor(record, batch)
 			if len(messages) == 0 {
 				continue
 			}

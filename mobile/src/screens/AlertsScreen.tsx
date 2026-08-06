@@ -16,6 +16,7 @@ import { api, BonfireApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { Screen } from '../components/Screen';
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
+import { setNotificationBadge } from '../push/usePushRegistration';
 import { colors, hitMin, radius, shadow, space, type } from '../theme/tokens';
 
 type ActivityItem = {
@@ -245,7 +246,9 @@ export function AlertsScreen() {
     try {
       const response = await api.notifications(sessionToken);
       if (version !== loadVersion.current) return;
-      setItems(normalizeNotifications(response));
+      const notifications = normalizeNotifications(response);
+      setItems(notifications);
+      void setNotificationBadge(notifications.filter((item) => !item.read).length);
       loaded.current = true;
     } catch (loadError) {
       if (version === loadVersion.current) {
@@ -279,6 +282,7 @@ export function AlertsScreen() {
     try {
       await api.markNotificationsRead(sessionToken, [id]);
       setItems((current) => current.map((item) => item.id === id ? { ...item, read: true } : item));
+      void setNotificationBadge(Math.max(0, unreadIds.length - 1));
     } catch (markError) {
       setError(errorMessage(markError, 'That activity could not be marked as read.'));
     } finally {
@@ -288,7 +292,7 @@ export function AlertsScreen() {
         return next;
       });
     }
-  }, [sessionToken]);
+  }, [sessionToken, unreadIds.length]);
 
   const markAllRead = useCallback(async () => {
     if (!sessionToken || unreadIds.length === 0) return;
@@ -298,6 +302,7 @@ export function AlertsScreen() {
     try {
       await api.markNotificationsRead(sessionToken, unreadIds);
       setItems((current) => current.map((item) => ({ ...item, read: true })));
+      void setNotificationBadge(0);
     } catch (markError) {
       setError(errorMessage(markError, 'Activity could not be marked as read.'));
     } finally {

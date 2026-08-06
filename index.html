@@ -12899,12 +12899,34 @@
           min-height: 22px;
           align-items: center;
           gap: 6px;
-          order: 3;
+          position: absolute;
+          top: -18px;
+          left: 4px;
+          z-index: 2;
           padding-inline: 4px;
           color: var(--text-3);
           font: var(--type-label);
           letter-spacing: var(--track-label);
           font-variant-numeric: tabular-nums;
+          opacity: 0;
+          pointer-events: none;
+          transform: translateY(3px);
+          transition-property: opacity, transform;
+          transition-duration: var(--dur-fast);
+          transition-timing-function: var(--ease);
+        }
+
+        #chatTool .scout-chat-msg:hover .desktop-chat-state,
+        #chatTool .scout-chat-msg:focus-within .desktop-chat-state {
+          opacity: 1;
+          transform: translateY(0);
+        }
+
+        #chatTool .scout-chat-msg[data-delivery] .desktop-chat-state {
+          position: static;
+          order: 3;
+          opacity: 1;
+          transform: none;
         }
 
         #chatTool .scout-chat-msg[data-delivery="sending"] .desktop-chat-state::before {
@@ -28216,7 +28238,6 @@
             </header>
             <div id="chatContextBody" class="chat-context-rail__body"></div>
             <form id="chatContextReplyForm" class="chat-context-reply" hidden>
-              <label class="chat-context-reply__label" for="chatContextReplyInput">Reply in thread</label>
               <div id="chatContextMentionPopover" class="scout-mention-popover" hidden>
                 <div id="chatContextMentionList" class="scout-mention-popover__list" role="listbox" aria-label="Mention a teammate"></div>
               </div>
@@ -28226,7 +28247,7 @@
                 <button id="chatContextReplyAttach" class="chat-context-reply__attach" type="button" aria-label="Attach files to reply" title="Attach files">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 1 1-2.8-2.8l8.5-8.5"></path></svg>
                 </button>
-                <textarea id="chatContextReplyInput" rows="1" maxlength="12000" placeholder="Reply without losing the channel…"></textarea>
+                <textarea id="chatContextReplyInput" rows="1" maxlength="12000" placeholder="Message the thread…" aria-label="Message the thread"></textarea>
                 <button id="chatContextReplySend" type="submit" aria-label="Send threaded reply">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"></path><path d="m5 12 7-7 7 7"></path></svg>
                 </button>
@@ -54685,6 +54706,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          reaction.addEventListener('click', () => updateDesktopChatReaction(message.id, emoji, !mine, { contextOnly: true }))
 	          messageActions.appendChild(reaction)
 	        })
+	        const reply = bfEl('button', 'chat-context-card__message-action', 'reply')
+	        reply.type = 'button'
+	        reply.setAttribute('aria-label', 'Reply in this thread')
+	        reply.addEventListener('click', () => chatContextReplyInput?.focus())
+	        messageActions.appendChild(reply)
 	        let moreControl = null
 	        if (desktopChatMessageIsOwn(thread, message)) {
 	          moreControl = desktopChatMoreMenuControl({
@@ -54779,7 +54805,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		        fragment.appendChild(desktopContextMessageCard(thread, resolvedRoot, { root: true }))
 		        replies.forEach(reply => fragment.appendChild(desktopContextMessageCard(thread, reply)))
 		        chatContextBody.replaceChildren(fragment)
-		        chatContextMeta.textContent = `${replies.length} ${replies.length === 1 ? 'reply' : 'replies'} · reply without losing your place`
+		        chatContextMeta.textContent = `${replies.length} ${replies.length === 1 ? 'reply' : 'replies'}`
 		        if (options.scrollToBottom || wasNearBottom) {
 		          chatContextBody.scrollTop = chatContextBody.scrollHeight
 		        } else {
@@ -54927,7 +54953,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          reply: true
 	        })) return
 	        chatContextState = { mode: 'thread', threadId: String(thread?.id || ''), rootMessageId: String(root.id) }
-	        renderDesktopMessageContext(thread, root)
+	        renderDesktopMessageContext(thread, root, { scrollToBottom: true })
 	        ensureDesktopChatParticipantDirectory()
 	      }
 
@@ -55233,9 +55259,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const stateLabels = []
 	        if (message.editedAt) {
 	          stateLabels.push(`edited ${scoutChatTimeLabel(message.editedAt)}`)
-	        }
-	        if (String(message?.via || '').trim()) {
-	          stateLabels.push(`via ${String(message.via).replaceAll('_', ' ')}`)
 	        }
 	        if (stateLabels.length) {
 	          stack.appendChild(bfEl('span', 'desktop-chat-state', stateLabels.join(' · ')))

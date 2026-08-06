@@ -189,7 +189,7 @@ func TestExpoPushMessagesCarryTheBody(t *testing.T) {
 		Text:     "Dana: pushed the pricing memo",
 		ThreadID: "table-1",
 	}
-	messages := expoPushMessagesFor(record, []string{"tok"})
+	messages := expoPushMessagesFor(record, []devicePushTarget{{Token: "tok", UserEmail: "aj@shareability.com", TenantID: canonicalTenantID()}})
 	if len(messages) != 1 {
 		t.Fatalf("messages = %d, want 1", len(messages))
 	}
@@ -208,7 +208,7 @@ func TestExpoPushMessagesCarryTheBody(t *testing.T) {
 
 func TestExpoPushMessagesSkipEmptyText(t *testing.T) {
 	record := notificationRecord{Kind: notificationKindChat, Text: "   "}
-	if got := len(expoPushMessagesFor(record, []string{"tok"})); got != 0 {
+	if got := len(expoPushMessagesFor(record, []devicePushTarget{{Token: "tok"}})); got != 0 {
 		t.Fatalf("messages = %d, want 0 for an empty body", got)
 	}
 }

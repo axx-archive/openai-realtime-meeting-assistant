@@ -189,11 +189,21 @@ func TestDesktopThreadReplyKeepsDraftAndOmitsRedundantEmptyState(t *testing.T) {
 	if strings.Contains(html, "No replies yet. Start the side conversation here.") {
 		t.Fatal("desktop thread rail still renders the redundant empty-state instruction")
 	}
+	if strings.Contains(html, "· reply without losing your place") {
+		t.Fatal("desktop thread rail still renders the redundant header instruction")
+	}
+	if strings.Contains(html, `class="chat-context-reply__label"`) {
+		t.Fatal("desktop thread composer still renders a redundant visible label")
+	}
+	if !strings.Contains(html, `placeholder="Message the thread…" aria-label="Message the thread"`) {
+		t.Fatal("desktop thread composer does not mirror the channel composer language")
+	}
 	for _, want := range []string{
 		"Connection interrupted — your reply is still here. Try again.",
 		"Service briefly unavailable — your reply is still here. Check the thread, then try again.",
 		"Reply status could not be confirmed — your text is still here. Refresh the thread before retrying.",
 		"chatContextReplySend.disabled = false",
+		"renderDesktopMessageContext(thread, root, { scrollToBottom: true })",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("desktop thread reply recovery missing %q", want)
@@ -210,6 +220,8 @@ func TestDesktopThreadRepliesExposeOwnedEditAndDeleteActions(t *testing.T) {
 		"function deleteDesktopContextMessage(thread, message, control)",
 		"function desktopChatMoreMenuControl({ label = 'More actions', onEdit, onDelete } = {})",
 		"label: 'More reply actions'",
+		"reply.setAttribute('aria-label', 'Reply in this thread')",
+		"chatContextReplyInput?.focus()",
 		"onEdit: () => beginDesktopContextMessageEdit(thread, message, card)",
 		"onDelete: remove => deleteDesktopContextMessage(thread, message, remove)",
 		"menu.setAttribute('role', 'menu')",
@@ -237,6 +249,22 @@ func TestDesktopThreadRepliesExposeOwnedEditAndDeleteActions(t *testing.T) {
 	}
 	if strings.Contains(css, "transition: all") {
 		t.Fatal("desktop reply actions must not use transition: all")
+	}
+}
+
+func TestDesktopEditedMetadataNeverPushesReactionPillsOffTheBubble(t *testing.T) {
+	html := desktopChatQualityHTML(t)
+	css := desktopChatQualitySection(t, html)
+	for _, want := range []string{
+		"#chatTool .desktop-chat-state",
+		"position: absolute;",
+		"#chatTool .scout-chat-msg:hover .desktop-chat-state",
+		"#chatTool .scout-chat-msg[data-delivery] .desktop-chat-state",
+		"margin-top: -12px;",
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("stable edited/reaction layout missing %q", want)
+		}
 	}
 }
 

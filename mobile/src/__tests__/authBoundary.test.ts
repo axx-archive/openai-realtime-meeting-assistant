@@ -308,6 +308,11 @@ test('push registration and pending navigation cannot cross an account boundary'
   assert.doesNotMatch(authUnregister, /status === 401/);
   assert.match(push, /const response = await api\.notifications\(validationSessionToken\)/);
   assert.match(push, /resolveAuthorizedPushTarget\(/);
+  assert.match(push, /allowBadge: true/);
+  assert.match(push, /existing\.ios\?\.allowsBadge === true/);
+  assert.match(push, /syncNotificationBadge\(sessionToken\)/);
+  assert.match(push, /AppState\.addEventListener\('change'/);
+  assert.match(push, /generation !== badgeSyncGeneration/);
   assert.match(push, /pendingColdCandidateRef\.current = bootstrappingRef\.current \? candidate : null/);
 
   const navigator = source('src', 'navigation', 'RootNavigator.tsx');

@@ -14,6 +14,7 @@ import {
 
 type Props = {
   visible: boolean;
+  contained?: boolean;
   own: boolean;
   snippet: string;
   reactions: ScoutMessageReaction[];
@@ -25,7 +26,7 @@ type Props = {
   onDelete: () => void;
 };
 
-export function MessageActionSheet({ visible, own, snippet, reactions, onClose, onReact, onCopy, onReply, onEdit, onDelete }: Props) {
+export function MessageActionSheet({ visible, contained = false, own, snippet, reactions, onClose, onReact, onCopy, onReply, onEdit, onDelete }: Props) {
   const reduced = useReduceMotion();
   const progress = useRef(new Animated.Value(0)).current;
   const visibleReactions = useMemo(() => reactions.slice(0, 12), [reactions]);
@@ -42,12 +43,11 @@ export function MessageActionSheet({ visible, own, snippet, reactions, onClose, 
     }).start();
   }, [progress, reduced, visible]);
 
-  return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
-      <View style={styles.modal}>
-        <Pressable accessibilityLabel="Close message actions" onPress={onClose} style={StyleSheet.absoluteFill}>
-          <Animated.View style={[StyleSheet.absoluteFill, styles.scrim, { opacity: progress }]} />
-        </Pressable>
+  const content = (
+    <View style={[styles.modal, contained && styles.containedModal]}>
+      <Pressable accessibilityLabel="Close message actions" onPress={onClose} style={StyleSheet.absoluteFill}>
+        <Animated.View style={[StyleSheet.absoluteFill, styles.scrim, { opacity: progress }]} />
+      </Pressable>
         <View style={styles.sheet}>
           <Animated.View
             style={{
@@ -158,13 +158,25 @@ export function MessageActionSheet({ visible, own, snippet, reactions, onClose, 
               ) : null}
           </Animated.View>
         </View>
-      </View>
+    </View>
+  );
+
+  // A thread is already hosted inside an iOS page-sheet Modal. Presenting a
+  // second sibling Modal from the screen underneath it is unreliable on iOS
+  // and can leave the action surface invisible. Keep reply actions inside the
+  // currently presented sheet; the main feed still uses the native Modal.
+  if (contained) return visible ? content : null;
+
+  return (
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+      {content}
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   modal: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: space[4], paddingBottom: space[8] },
+  containedModal: { position: 'absolute', inset: 0, zIndex: 100, elevation: 100 },
   scrim: { backgroundColor: colors.scrim },
   sheet: { ...shadow.glass, gap: space[3] },
   snippet: {

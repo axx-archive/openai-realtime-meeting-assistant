@@ -506,7 +506,6 @@ export const MessageBubble = React.memo(function MessageBubble({
                 {latestThreadReply ? `Latest ${timeOf(latestThreadReply)}` : 'Open thread'}
               </Text>
             </View>
-            <SymbolView name="chevron.up" tintColor={colors.text3} size={11} />
           </Pressable>
         ) : null}
 

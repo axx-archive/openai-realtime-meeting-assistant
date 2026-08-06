@@ -49,6 +49,7 @@ type Props = {
   resolvingProposalID?: string | null;
   onOpenLongMessage: (text: string, authorName: string, scout: boolean) => void;
   onOpenWorkArtifact: (message: ScoutMessage) => void;
+  actionOverlay?: React.ReactNode;
 };
 
 export function ThreadDetailSheet({
@@ -79,11 +80,13 @@ export function ThreadDetailSheet({
   resolvingProposalID,
   onOpenLongMessage,
   onOpenWorkArtifact,
+  actionOverlay,
 }: Props) {
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<ScrollView>(null);
   const timestampReveal = useRef(new Animated.Value(0)).current;
   const previousReplyCountRef = useRef(0);
+  const initialScrollCompleteRef = useRef(false);
 
   const conversation = useMemo(() => root ? [root, ...replies] : [], [replies, root]);
 
@@ -91,8 +94,10 @@ export function ThreadDetailSheet({
     if (!visible) {
       setDraft('');
       previousReplyCountRef.current = 0;
+      initialScrollCompleteRef.current = false;
       return;
     }
+    initialScrollCompleteRef.current = false;
     previousReplyCountRef.current = replies.length;
   }, [root?.id, visible]);
 
@@ -150,6 +155,11 @@ export function ThreadDetailSheet({
             contentInsetAdjustmentBehavior="automatic"
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={styles.conversation}
+            onContentSizeChange={() => {
+              if (!visible || initialScrollCompleteRef.current) return;
+              initialScrollCompleteRef.current = true;
+              requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: false }));
+            }}
           >
             {conversation.map((message, index) => {
               const own = isOwnMessageForViewer(message, {
@@ -260,6 +270,7 @@ export function ThreadDetailSheet({
               </Pressable>
             </View>
           </Glass>
+          {actionOverlay}
         </KeyboardAvoidingView>
       </SafeAreaView>
     </Modal>
