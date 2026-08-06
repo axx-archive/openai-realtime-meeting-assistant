@@ -1703,7 +1703,10 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	if replyTargetsScout {
 		responseStyle = scoutDirectReplyResponseStyle(responseStyle)
 	}
-	answerContext := withAssistantResponseStyle(ctx, responseStyle)
+	// Coworker chat must never turn a provider failure into an unrelated list
+	// of fuzzy memory hits. Legacy ask-bar callers may still use that fallback;
+	// a conversational Scout turn requires an actual model answer.
+	answerContext := withAssistantModelSuccessRequired(withAssistantResponseStyle(ctx, responseStyle))
 	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
 		// Public-channel turns carry a structured identity/lineage envelope for
 		// the model, but retrieval must rank against what the person actually

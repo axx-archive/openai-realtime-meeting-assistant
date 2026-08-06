@@ -702,7 +702,7 @@ func TestAnswerAssistantQueryIgnoresAnthropicKeyAndUsesTerra(t *testing.T) {
 	if got.Model != defaultScoutChatModel {
 		t.Fatalf("model=%q, want %s", got.Model, defaultScoutChatModel)
 	}
-	if got.MaxOutputTokens != 800 || got.ReasoningEffort != "low" || got.Seat != seatChat || got.Workflow != "scout_chat" {
+	if got.MaxOutputTokens != scoutChatMaxOutputTokens || got.ReasoningEffort != "low" || got.Seat != seatChat || got.Workflow != "scout_chat" {
 		t.Fatalf("chat request=%+v, want Terra/low chat seat", got)
 	}
 	if got.Instructions != assistantQueryInstructionsForCoreAvailability(true) {
@@ -737,8 +737,8 @@ func TestAnswerAssistantQueryKeylessAnthropicUsesTerra(t *testing.T) {
 	if got.Model != defaultScoutChatModel {
 		t.Fatalf("model=%q, want Scout Terra", got.Model)
 	}
-	if got.MaxOutputTokens != 800 || got.ReasoningEffort != "low" {
-		t.Fatalf("openai budget=%d/%q, want 800/low", got.MaxOutputTokens, got.ReasoningEffort)
+	if got.MaxOutputTokens != scoutChatMaxOutputTokens || got.ReasoningEffort != "low" {
+		t.Fatalf("openai budget=%d/%q, want %d/low", got.MaxOutputTokens, got.ReasoningEffort, scoutChatMaxOutputTokens)
 	}
 }
 

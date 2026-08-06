@@ -16,6 +16,7 @@ const (
 	defaultMemoryQuestionContextLimit = 60
 	memoryQuestionRequestTimeout      = 45 * time.Second
 	assistantQueryRequestTimeout      = 25 * time.Second
+	scoutChatMaxOutputTokens          = 2400
 	defaultMeetingTimeZone            = "America/Los_Angeles"
 	goalWorkflowStageMetadata         = "identify_and_set_goal,decompose_work,assign_right_agent,coordinate_dependencies,execute_in_order,review_against_original_goal,gate_before_shipping,save_what_worked,report_only_what_matters,verify_goal_completed"
 )
@@ -222,6 +223,9 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachmen
 			return assistantQueryResult{}, modelErr
 		}
 	}
+	if strings.TrimSpace(answer) == "" && assistantModelSuccessRequired(ctx) {
+		return assistantQueryResult{}, fmt.Errorf("Scout did not return a complete answer")
+	}
 	if strings.TrimSpace(answer) == "" {
 		// Wave 6: a time-ranged briefing question degrades to the composed
 		// digest/ledger briefing (then on-demand map-reduce over raw memory);
@@ -416,7 +420,10 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModelAttachments(ctx context.
 		Input:           input,
 		ReasoningEffort: "low",
 		Verbosity:       "low",
-		MaxOutputTokens: 800,
+		// Responses reasoning tokens share this budget with visible text. The
+		// former 800-token cap could truncate a healthy strategic answer and
+		// accidentally activate the legacy raw-memory fallback.
+		MaxOutputTokens: scoutChatMaxOutputTokens,
 		Attachments:     attachments,
 	})
 	if err != nil {

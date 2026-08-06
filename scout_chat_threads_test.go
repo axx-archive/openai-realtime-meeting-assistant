@@ -1114,9 +1114,9 @@ func TestScoutChatRouterDefaultsToInlineAnswer(t *testing.T) {
 	}
 }
 
-// Keyless: no OpenAI key means no router turn — deterministic fallback, never a
-// proposal, never an error (the launchGoalThread 503 posture).
-func TestScoutChatRouterKeylessSkipsRouterTurn(t *testing.T) {
+// Keyless: no OpenAI key means no router turn and no fabricated fuzzy-memory
+// answer. Conversational Scout turns require an actual model answer.
+func TestScoutChatRouterKeylessDoesNotFabricateInlineAnswer(t *testing.T) {
 	setupAuthTestEnv(t)
 	t.Setenv("OPENAI_API_KEY", "")
 	previousApp := kanbanApp
@@ -1139,15 +1139,11 @@ func TestScoutChatRouterKeylessSkipsRouterTurn(t *testing.T) {
 	}
 
 	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, private.ID, "research the market and draft a one-pager for the buyer", nil, "")
-	if err != nil {
-		t.Fatalf("keyless append must degrade to plain Q&A, got error: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "OPENAI_API_KEY") {
+		t.Fatalf("keyless append err=%v, want explicit model configuration failure", err)
 	}
-	if _, proposed := response["proposal"]; proposed {
-		t.Fatalf("response keys=%v, want no proposal keyless", responseKeys(response))
-	}
-	answer, ok := response["answer"].(scoutChatMessageRecord)
-	if !ok || strings.TrimSpace(answer.Text) == "" {
-		t.Fatalf("answer=%#v, want deterministic fallback text", response["answer"])
+	if response != nil {
+		t.Fatalf("response=%#v, want no fabricated inline answer", response)
 	}
 }
 
@@ -1268,6 +1264,51 @@ func TestScoutChatRouterSkipsPublicChannels(t *testing.T) {
 	}
 	if !strings.Contains(capturedAnswerInput, directPrompt) || !strings.Contains(capturedAnswerInput, "Omitted because the user did not ask about board") {
 		t.Fatalf("direct-reply strategy input reopened Board path: %s", capturedAnswerInput)
+	}
+}
+
+func TestScoutChatPublicConversationNeverFallsBackToMemoryHitsAfterModelFailure(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("OPENAI_API_KEY", "openai-core-test")
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	kanbanApp.apiKey = "openai-core-test"
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	var captured openAITextRequest
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		captured = request
+		return "", &openAIOutputRejection{reason: "max_output_truncation"}
+	})
+
+	channel, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Ball Dogs", "public")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seed user aj@shareability.com missing")
+	}
+	prompt := "@Scout from first principles, compare the two Ball Dogs pitches and the strategies behind them. What do you think the company is actually trying to build in each version? Which is more attainable? What path would each take to capital and talent? Please challenge the team's framing where you think we're wrong."
+	response, err := kanbanApp.appendScoutChatThreadMessage(context.Background(), user, channel.ID, prompt, nil, "")
+	if err == nil || !strings.Contains(err.Error(), "max_output_truncation") {
+		t.Fatalf("append err=%v, want model truncation failure", err)
+	}
+	if response != nil {
+		t.Fatalf("response=%#v, want no fabricated answer", response)
+	}
+	if captured.Workflow != "scout_chat" || captured.MaxOutputTokens != scoutChatMaxOutputTokens {
+		t.Fatalf("request=%+v, want bounded Scout chat request", captured)
+	}
+
+	saved, _, err := kanbanApp.scoutChatThreadByID(user.Email, channel.ID)
+	if err != nil {
+		t.Fatalf("read saved channel: %v", err)
+	}
+	for _, message := range saved.Messages {
+		if message.Role == "scout" && strings.Contains(message.Text, "relevant memory item") {
+			t.Fatalf("conversational model failure leaked fuzzy-memory fallback: %q", message.Text)
+		}
 	}
 }
 
