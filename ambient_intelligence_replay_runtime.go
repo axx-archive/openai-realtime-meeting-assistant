@@ -76,13 +76,21 @@ func configureAmbientReplayRuntime(app *kanbanBoardApp) AmbientReplayRuntimeStat
 				status.Error = "ambient replay recovery is unavailable"
 			} else {
 				engine = &AmbientReplayEngine{Authority: authority, Store: store}
+				if runner := newProductionAmbientReplayStageRunner(app); runner != nil {
+					engine.Runner = runner
+					status.ExecutorConfigured = true
+				}
 			}
 			status.Database = true
 			status.PlannerConfigured = engine != nil
 			if status.Error != "" {
 				status.Ready = false
 			} else if mode == "execute" {
-				status.Error = "replay executor adapter has not been installed"
+				if engine == nil || engine.Runner == nil {
+					status.Error = "replay executor adapter has not been installed"
+				} else {
+					status.Ready = true
+				}
 			} else {
 				status.Ready = true
 			}

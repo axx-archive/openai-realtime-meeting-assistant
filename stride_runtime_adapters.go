@@ -54,6 +54,15 @@ func (app *kanbanBoardApp) observeSTRIDETeamChatMessage(thread scoutChatThreadRe
 			log.Errorf("STRIDE team-chat snapshot unavailable: %v", err)
 		}
 	}
+	// Proactive attention is event-driven. The durable conversation projection
+	// is the admission edge; the worker re-reads the current public source and
+	// reauthorizes it before any classifier call or visible action.
+	if eventType == "message" || eventType == "edit" {
+		app.nudgeScoutProactiveAttention(thread, message, "")
+	}
+	if _, _, continuityErr := app.rebuildConversationContinuity(thread, eventType); continuityErr != nil {
+		log.Errorf("ConversationContinuity rebuild unavailable: %v", continuityErr)
+	}
 	if eventType == "edit" || eventType == "delete" {
 		app.reconcileSTRIDERelationshipSourceMutation(actorEmail)
 	}

@@ -175,7 +175,7 @@ func (app *kanbanBoardApp) runSlopClassifierOnce(agent ambientAgentConfig, ctx c
 		Seat:            seatSlop,
 		Instructions:    slopClassifierInstructions(),
 		Input:           app.buildSlopClassifierInput(candidates, time.Now().UTC()),
-		ReasoningEffort: "low",
+		ReasoningEffort: meetingBrainReasoningEffort(),
 		Verbosity:       "low",
 		MaxOutputTokens: 1200,
 	})

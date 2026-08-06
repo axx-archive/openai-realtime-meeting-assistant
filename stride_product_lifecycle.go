@@ -833,7 +833,7 @@ func validateSTRIDEProductCandidate(record STRIDEProductMarketplaceCandidate) er
 	if personaRich && (strings.TrimSpace(record.RoleTitle) == "" || strings.TrimSpace(record.VoiceSummary) == "" || strings.TrimSpace(record.WorkingStyle) == "" || !validSTRIDEProductDisplayList(record.PersonalityTraits) || validateSTRIDEProductCoreMemories(record.CoreMemories) != nil) {
 		return ErrSTRIDEProductInvalid
 	}
-	if (record.DefaultPersonalityNotes == "") != (record.DefaultProactivity == "") || record.DefaultProactivity != "" && !oneOf(record.DefaultProactivity, "disabled", "quiet") {
+	if (record.DefaultPersonalityNotes == "") != (record.DefaultProactivity == "") || record.DefaultProactivity != "" && !oneOf(record.DefaultProactivity, "disabled", "quiet", "active") {
 		return ErrSTRIDEProductInvalid
 	}
 	return nil

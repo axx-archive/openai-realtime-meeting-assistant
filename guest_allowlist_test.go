@@ -190,6 +190,7 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 		"/assistant/board/cards/":                        {handler: assistantBoardCardsHandler, memberGated: true, path: "/assistant/board/cards/card-1"},
 		"/assistant/board/drafts/":                       {handler: assistantBoardDraftActionHandler, memberGated: true, path: "/assistant/board/drafts/draft-1"},
 		"/assistant/memory":                              {handler: assistantMemoryHandler, memberGated: true},
+		"/assistant/agent-mind":                          {handler: assistantAgentMindHandler, memberGated: true},
 		"/assistant/files":                               {handler: assistantFilesHandler, memberGated: true},
 		"/assistant/files/upload":                        {handler: assistantFileUploadHandler, memberGated: true},
 		"/assistant/files/folders":                       {handler: assistantFileFoldersHandler, memberGated: true},

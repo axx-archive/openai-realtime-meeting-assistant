@@ -1,16 +1,14 @@
 # STRIDE Next Evolution — Master Architecture and Execution Ledger
 
-**Status:** Active E10 remediation. Behavior carrier
-`7c71a6821eb2576cc12644d668166f1f5840cdc7` is on `axx/main` and was activated
-under exact-release ledger generation 18 with
-`verified-local-unsigned` evidence and retained release
-`3541c6c69566c122c600a362105858c73943e869` as rollback. The exact active SHA
-after any later docs-only ledger checkpoint is authoritative in public
-`/healthz` and `/readyz` plus `/opt/meetingassist-releases/active-release.json`;
-the implementation behavior remains bound to the carrier above unless a later
-entry says otherwise. iOS Build 46 remains the internal `Team (Expo)` build and
-still binds to `3541c6c69566c122c600a362105858c73943e869`, the mobile source did
-not change in the server-only foundation release. The screen-share camera-off
+**Status:** Active E10 remediation. The current reviewed source is
+`941f44e18fc9c01025b4401662e3a400f84232ee` on `axx/main`; the behavior carrier
+for the prior server-only foundation remains
+`7c71a6821eb2576cc12644d668166f1f5840cdc7`. The current exact release is
+serving under ledger generation 20 with `verified-local-unsigned` evidence and
+retained release `7d766b2ae566ba6a84dd0fe99301658fdb90943e` as rollback. The
+exact active SHA after any later docs-only ledger checkpoint is authoritative in
+public `/healthz` and `/readyz` plus
+`/opt/meetingassist-releases/active-release.json`. The screen-share camera-off
 repair, transfer timing telemetry, default-off governed replay, canonical
 AmbientMind shadow schema, person/MyMind authority, artifact disposition
 authority, and removal of activity-volume contribution ranking are deployed.
@@ -25,7 +23,7 @@ provider/model/voice/config qualification and external anchor are available.
 Release authority does not waive canonical-repair confirmation, consent,
 custody, physical-device, HA/DR, pilot, soak, or independent evidence gates.
 
-**Date:** 2026-07-28
+**Date:** 2026-08-06
 
 **Naming:** **STRIDE** is the long-term operating-system name. **Bonfire OS** is the current application and repository implementation. Repository, GitHub, package, host, and code-identifier renaming are explicitly outside this plan and remain a separate future workstream.
 
@@ -215,10 +213,11 @@ does not subscribe the coworker to every channel or meeting.
 - A direct reply to Scout is automatically read without another tag and may
   produce `reply`, `reaction`, or `no_action`.
 - AmbientMind ingests authorized public/project events continuously, but visible
-  proactive participation is a separate event-driven, rate-limited policy with
-  channel mode `off | quiet | active`, relevance, confidence, deduplication,
-  interruption cost, and per-agent assignment scope. Do not simulate blind
-  interval polling or let every hired agent lurk everywhere.
+  proactive participation is a separate event-driven policy with channel mode
+  `off | quiet | active`, relevance, confidence, deduplication, interruption
+  cost, per-agent assignment scope, and ordinary provider-usage accounting. Do
+  not simulate blind interval polling, impose arbitrary per-agent hourly caps,
+  or let every hired agent lurk everywhere.
 
 Start with reactions/silence and quiet response suggestions. Autonomous written
 interjections remain gated until context correctness and interruption-cost
@@ -312,24 +311,27 @@ anything that cannot yet be turned on.
 | Checkpoint | Outcome | Dependencies | Acceptance gate | Explicit rollback | Status |
 |---|---|---|---|---|---|
 | E10-R0 | Repair Ball Dogs routing, causal deletion, cleanup, and independent answer | current exact serving receipt and E10 release authority | focused/full tests; both public mention and direct reply call the model once; authored-only retrieval; caused answer retracts from chat and canonical projections; useful live answer | reactivate retained prior exact release; do not rewrite named-volume data | `completed` — exact release `ba9bca4a0392085df93f5dcd0607cba547260289`, ledger generation 16, durable cleanup, accepted independent answer, and causal lineage verified live |
-| E10-R1 | Restore meeting-intelligence truth and replay recent authorized meetings | R0 plus E10 provider/quota and source-custody authority | fresh source-anchored transcript/decision/action/blocker/storyline receipts; honest gap/coverage state | disable unhealthy worker, retain raw transcript and prior projections, replay from last verified high-water | `in_progress` — the deployed runtime is `mode=off`; the admin-only, digest-bound planner/executor foundation passes normal/race/PostgreSQL/DR gates, but production planning remains fail-closed until authenticated approval/rollback fence authority is installed and execution remains fail-closed until the reviewed stage runner is installed; no provider replay has run |
+| E10-R1 | Restore meeting-intelligence truth and replay recent authorized meetings | R0 plus E10 provider/quota and source-custody authority | fresh source-anchored transcript/decision/action/blocker/storyline receipts; honest gap/coverage state | disable unhealthy worker, retain raw transcript and prior projections, replay from last verified high-water | `in_progress` — the deployed runtime is `mode=off`; the admin-only, digest-bound planner/executor foundation and non-mutating reviewed stage-runner adapter pass focused normal/race/PostgreSQL/DR gates, but production planning remains fail-closed until authenticated approval/rollback fence authority is installed; no provider replay or canonical projection promotion has run |
 | E10-R2 | Run canonical AmbientMind projections in shadow | R1 and E1 canonical contracts | rebuild/revoke/restart parity, high-water/freshness agreement, zero ACL leakage | turn off shadow consumers and rebuild from immutable evidence | `engineering_complete_default_off` — immutable typed event/source/node/edge/state/checkpoint persistence and deterministic revoke/supersede/rebuild/restart/ACL tests pass in memory and disposable PostgreSQL; migration 13 is live with `ambient_mind_projection_shadow=false`, and no product reader or production shadow worker is active |
 | E10-R3 | Establish person identity, tenant membership, MyMind custody, purpose, and destination-disclosure authority | E1 authority contracts plus E0 custody proof | principal × workspace × audience × purpose × consent tests; recovery/departure/export/delete; zero cross-company/private leakage | revoke disclosure tokens, stop MyMind context assembly, preserve private encrypted custody and company ledger | `engineering_complete_default_off` — global person identity, multi-workspace membership, purpose/destination disclosure, recovery, departure, optional export, and exact external custody-deletion receipt gates pass normal/race/PostgreSQL/DR tests; canonical migrations through 13 are live with `person_mymind_context=false`, while encrypted body custody and MyMind context assembly remain external/disabled gates |
-| E10-R4 | Add `ConversationContinuity` and the three-mind context envelope | R2, R3 | long-thread correction/delete/revoke/rebuild tests; read-only authority refs; freshness/gap disclosure | disable continuity/context-envelope consumers and fall back to bounded raw turns plus authorized AmbientMind retrieval | pending |
-| E10-R5 | Add AgentMind candor and reply/react/no-action participation | R4 | sycophancy, context, rate-limit, interruption, audience, and channel-policy corpus | restore explicit-invocation-only policy and prior signed profile revision | pending |
+| E10-R4 | Add `ConversationContinuity` and the three-mind context envelope | R2, R3 | long-thread correction/delete/revoke/rebuild tests; read-only authority refs; freshness/gap disclosure | disable continuity/context-envelope consumers and fall back to bounded raw turns plus authorized AmbientMind retrieval | `engineering_complete_default_off` — body-free revisioned checkpoints, source/audience invalidation and rebuild, private-thread ACL handling, boot-safe UI-state persistence, and read-only context-envelope integration pass focused normal/race/full tests; production R2/R3 authority and real-surface acceptance remain external gates |
+| E10-R5 | Add AgentMind candor and reply/react/no-action participation | R4 | sycophancy, context, confidence, interruption, audience, and channel-policy corpus | restore explicit-invocation-only policy and prior signed profile revision | `engineering_complete_default_off` — source-linked AgentMind positions, human resolution states, inspection route, shared coworker constitution, Luna/max routing, event-driven quiet/active attention, strict classification, source revalidation, durable dedupe, lifecycle cleanup, and usage receipts pass focused/race/full tests; no arbitrary hourly agent throttle is imposed, while provider qualification, policy corpus, and real-surface activation remain external gates |
 | E10-R6 | Add Marketplace onboarding packs to canonical TeamAgent lifecycle | R3, R4 and E8 package/lifecycle receipts | scoped access, factual grounding, gap disclosure, correction, refresh, pause/quarantine/offboard gates | pause seat, revoke runtime principal/pack, restore prior package/profile/capability revisions | pending |
-| E10-R7 | Collapse work UI to one activity rail and complete Open/Save/Discard | R0 and E4/E6 artifact/Drive authority | desktop/mobile rendered QA; stable Drive reference; revision-bound, double-confirmed discard and projection retraction | restore prior renderer; keep artifacts/Drive copies intact and hide new discard action | `in_progress` — the deployed exact-revision Open/Save/Discard authority, stable Drive identity, durable pending intents, same-actor double confirmation, restart reconciliation, canonical delete authorization, and chat retraction backend pass normal/race/PostgreSQL/DR gates; both runtime activation fences are absent, and web/mobile action wiring plus rendered acceptance remain pending |
+| E10-R7 | Collapse work UI to one activity rail and complete Open/Save/Discard | R0 and E4/E6 artifact/Drive authority | desktop/mobile rendered QA; stable Drive reference; revision-bound, double-confirmed discard and projection retraction | restore prior renderer; keep artifacts/Drive copies intact and hide new discard action | `in_progress` — the deployed exact-revision Open/Save/Discard authority, stable Drive identity, durable pending intents, same-actor double confirmation, restart reconciliation, canonical delete authorization, and chat retraction backend pass normal/race/PostgreSQL/DR gates; the send-path scroll-stability transaction and source regression test are now local, but both runtime activation fences, web/mobile action wiring, and rendered acceptance remain pending |
 | E10-R8 | Ship Ask AmbientMind, attention-led Intelligence, and scoped contribution views | R2-R5, especially R3 disclosure authority | cited authorized answers, destination reauthorization, freshness/gaps, non-surveillance contribution truth | disable new views/queries and retain source systems plus admin health | `in_progress` — the surveillance-shaped activity-volume “contribution fuel” ranking is removed from the live member payload and UI; cited Ask AmbientMind, attention views, and evidence-backed scoped contribution attestations remain pending R4/R5 authority |
 | E10-R9 | Make MyMind portable with opaque contribution attestations | R3, R8 and explicit organization export policy | signed/redacted receipt validation; third-party field authorization; departure/recovery/export/delete; zero confidential content | revoke export key/receipt visibility; retain tenant evidence and private MyMind separately | pending |
 
 ### Current E10 substate, authority queue, and resume point
 
 Current canonical wave is E10. E10-R0 is complete in production. Exact release
-`3541c6c69566c122c600a362105858c73943e869` is serving under ledger generation
-17 with `verified-local-unsigned` attestation and retained exact release
-`ba9bca4a0392085df93f5dcd0607cba547260289` as rollback; iOS Build 46 is Apple
-`VALID`, unexpired, and available to internal `Team (Expo)`. R1 remains the live
-truth-restoration gate because no governed replay has executed. R2 and R3 are
+`941f44e18fc9c01025b4401662e3a400f84232ee` is serving under ledger generation
+20 with `verified-local-unsigned` attestation and retained exact release
+`7d766b2ae566ba6a84dd0fe99301658fdb90943e` as rollback. Public process health
+is green, but the release is not externally qualified; `/readyz` reports the
+canonical dirty high-water ahead of the reconciled/checkpoint high-water,
+analysis and replay off, and the STRIDE runtime activation fence closed. R1
+remains the live truth-restoration gate because no governed replay has executed.
+R2 and R3 are
 engineering-complete behind default-off switches, which unblocks local R4
 implementation but not production context consumption. R7 has a verified
 backend authority foundation but no user-facing action activation yet. Physical
@@ -393,13 +395,18 @@ before widening. A stale downstream artifact may continue to consume previously
 durable upstream work, but it cannot claim the newest meeting is incorporated
 while an upstream continuity gap remains.
 
-The post-release replay audit confirms that no safe bounded execution door
+The post-release replay audit confirms that no safe production execution door
 exists yet. `/api/admin/brain-projection/backfill` rebuilds only the canonical
 sanitized projection; it does not regenerate brain, decision, narrative, or
 digest artifacts. Every `*_BACKFILL` flag resets that worker to unbounded
 history, `runAmbientAgentOnceLimited` limits batch size but cannot bind an
 explicit start/end fence, and the close-flush chain follows live cursors and
-includes Board mutation. None is an E10-R1 replay mechanism.
+includes Board mutation. The reviewed replay stage runner now supplies the
+missing bounded, digest-bound, non-mutating provider/deterministic stage seam
+and source-linked output digest/usage receipts, but it cannot be reached by
+production configuration while authenticated approval/rollback authority is
+absent, and its execution-local output bodies are not yet canonical projection
+state. None of this is permission to run a provider replay.
 
 Implement E10-R1 as an admin-only, two-phase
 `ambient-intelligence-replay/v1` planner/executor. The provider-free planner
@@ -1905,7 +1912,7 @@ The Agent Marketplace addendum requires **no new E0 engineering and adds no E0 c
 - preserve public-channel `@scout` gate and private/direct always-answer semantics;
 - implement the response-mode policy for conversational text, text plus one GIF, GIF-only, file/artifact card, or safe refusal; preserve Scout's personality while deterministic sensitive-context and authority gates remain final;
 - implement audience-safe speech/post checks and private fallback;
-- make proactive suggestions quiet, deduplicated, rate-limited, and dismissible;
+- make proactive suggestions quiet, deduplicated, confidence-bound, usage-accounted, and dismissible;
 - expose listening, transcribing, thinking, answering, degraded, and privacy states truthfully;
 - retain typed and touch equivalents for every voice path;
 - perform rendered desktop, mobile, accessibility, reduced-motion, and actual device QA.

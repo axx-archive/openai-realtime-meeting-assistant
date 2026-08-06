@@ -648,8 +648,8 @@ func TestProduceDecisionLedgerDirectionalTier(t *testing.T) {
 		if !strings.Contains(request.Instructions, "DIRECTIONAL") || !strings.Contains(request.Instructions, "leaning toward Ball Dogs") {
 			t.Fatalf("instructions missing the directional contract + example: %q", request.Instructions)
 		}
-		if request.ReasoningEffort != "medium" {
-			t.Fatalf("reasoning effort=%q, want medium (doctrine floor)", request.ReasoningEffort)
+		if request.ReasoningEffort != meetingBrainReasoningEffort() {
+			t.Fatalf("reasoning effort=%q, want %s", request.ReasoningEffort, meetingBrainReasoningEffort())
 		}
 		return `{"decisions":[{"statement":"Grill tier is priced at $500 per month.","madeBy":"AJ","context":"pricing call","directional":false},{"statement":"The team is leaning toward Ball Dogs as the lead IP.","madeBy":"","context":"consensus forming","directional":true}]}`, nil
 	})

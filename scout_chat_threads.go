@@ -1633,6 +1633,10 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		return response, nil
 	}
 
+	// ConversationContinuity adds only body-free revision/source/gap metadata;
+	// raw turn bodies remain the current thread's ACL-governed history.
+	modelQuery = app.prepareConversationContinuityModelQuery(user.Email, thread, modelQuery)
+
 	// The signed, default-off coworker preview adds only body-free STRIDE
 	// authority/freshness lineage to the existing public-channel query. Chat
 	// history remains the sole body source, and a disabled/unavailable preview
@@ -1760,6 +1764,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	if err != nil {
 		return nil, err
 	}
+	app.maybeRecordScoutAgentMindPosition(saved, userMessage, assistantMessage)
 	response["answer"] = assistantMessage
 	response["thread"] = saved
 	return response, nil
@@ -2703,6 +2708,7 @@ func (app *kanbanBoardApp) commitScoutChatThreadMessages(viewerEmail string, thr
 		app.observeSTRIDETeamChatMessage(thread, message, "message", "")
 		deliverScoutChatThreadUpdate(thread, message)
 	}
+	app.rebuildPrivateConversationContinuity(thread, "message")
 	return thread, nil
 }
 
@@ -2918,6 +2924,7 @@ func (app *kanbanBoardApp) editScoutChatThreadMessage(ctx context.Context, user 
 		attachmentReservationActive = false
 	}
 	app.observeSTRIDETeamChatMessage(thread, message, "edit", user.Email)
+	app.rebuildPrivateConversationContinuity(thread, "edit")
 	deliverScoutChatThreadUpdate(thread, message)
 	if canceledOpeningReply {
 		app.sendScoutChatThreadUpdateToViewer(thread.OwnerEmail, thread, canceledReply)
@@ -3006,6 +3013,7 @@ func (app *kanbanBoardApp) updateScoutChatMessageReaction(user *userAccount, thr
 		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, err
 	}
 	app.observeSTRIDETeamChatMessage(thread, message, "reaction", user.Email)
+	app.rebuildPrivateConversationContinuity(thread, "reaction")
 	deliverScoutChatThreadUpdate(thread, message)
 	return thread, message, nil
 }
@@ -3086,6 +3094,7 @@ func (app *kanbanBoardApp) deleteScoutChatThreadMessage(viewerEmail string, thre
 	for _, deletedMessage := range deletedMessages {
 		app.observeSTRIDETeamChatMessage(thread, deletedMessage, "delete", viewerEmail)
 	}
+	app.rebuildPrivateConversationContinuity(thread, "delete")
 	for _, deletedID := range deletedIDs {
 		deliverScoutChatThreadDeletion(thread, deletedID)
 	}
@@ -3851,6 +3860,9 @@ func (app *kanbanBoardApp) setScoutChatThreadArchived(ownerEmail string, threadI
 	}
 	if err := app.saveScoutChatThread(thread); err != nil {
 		return scoutChatThreadRecord{}, err
+	}
+	if _, _, continuityErr := app.rebuildConversationContinuity(thread, "audience_change"); continuityErr != nil {
+		log.Errorf("ConversationContinuity audience rebuild unavailable: %v", continuityErr)
 	}
 	return thread, nil
 }

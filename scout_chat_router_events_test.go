@@ -94,8 +94,8 @@ func TestScoutRouterRequestUsesStrictTerraSeat(t *testing.T) {
 	if got.Model != defaultScoutRouterModel {
 		t.Fatalf("model=%q, want %s", got.Model, defaultScoutRouterModel)
 	}
-	if got.MaxOutputTokens != scoutRouterMaxTokens || got.ReasoningEffort != "low" || got.Seat != seatRouter || got.Workflow != "scout_route" {
-		t.Fatalf("router request=%+v, want Terra/low strict seat", got)
+	if got.MaxOutputTokens != scoutRouterMaxTokens || got.ReasoningEffort != scoutReasoningEffort() || got.Seat != seatRouter || got.Workflow != "scout_route" {
+		t.Fatalf("router request=%+v, want Luna/max strict seat", got)
 	}
 	if got.JSONSchema == nil || !strings.Contains(got.Instructions, "comps_precedent") || !strings.Contains(got.Instructions, "under-routes is trusted") {
 		t.Fatalf("router instructions/schema missing registry or trust contract: %+v", got)

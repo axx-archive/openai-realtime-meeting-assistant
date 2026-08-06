@@ -479,7 +479,7 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponder(run agentThreadFo
 				Seat:            seatFollowup,
 				Instructions:    instructions,
 				Input:           run.input,
-				ReasoningEffort: "low",
+				ReasoningEffort: meetingBrainReasoningEffort(),
 				Verbosity:       "medium",
 				MaxOutputTokens: 2600,
 			})

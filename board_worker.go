@@ -123,8 +123,9 @@ func (app *kanbanBoardApp) produceMeetingBoardUpdate(ctx context.Context, apiKey
 		Input:        buildMeetingBoardInput(summaries, app.snapshotState(), app.participantSnapshotForRoom(roomID), time.Now().UTC()),
 		// A2: the board step emits structured tool calls with exact args — the
 		// work low reasoning effort punishes most (dropped card_ids, invented
-		// statuses). Medium buys reliable argument fidelity for a cheap step.
-		ReasoningEffort: "medium",
+		// statuses). The shared maximum-by-default brain dial buys reliable
+		// argument fidelity for this state-changing step.
+		ReasoningEffort: meetingBrainReasoningEffort(),
 		Verbosity:       "low",
 		MaxOutputTokens: 1200,
 	})

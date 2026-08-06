@@ -697,23 +697,23 @@ func TestAnswerAssistantQueryIgnoresAnthropicKeyAndUsesTerra(t *testing.T) {
 		t.Fatalf("answerAssistantQueryWithModel: %v", err)
 	}
 	if answer != "Pricing locked at $99/mo." {
-		t.Fatalf("answer=%q, want the Sonnet answer", answer)
+		t.Fatalf("answer=%q, want the Luna answer", answer)
 	}
 	if got.Model != defaultScoutChatModel {
 		t.Fatalf("model=%q, want %s", got.Model, defaultScoutChatModel)
 	}
-	if got.MaxOutputTokens != scoutChatMaxOutputTokens || got.ReasoningEffort != "low" || got.Seat != seatChat || got.Workflow != "scout_chat" {
-		t.Fatalf("chat request=%+v, want Terra/low chat seat", got)
+	if got.MaxOutputTokens != scoutChatMaxOutputTokens || got.ReasoningEffort != scoutReasoningEffort() || got.Seat != seatChat || got.Workflow != "scout_chat" {
+		t.Fatalf("chat request=%+v, want Luna/max chat seat", got)
 	}
 	if got.Instructions != assistantQueryInstructionsForCoreAvailability(true) {
-		t.Fatal("Terra request must carry the core-available assistant-query instructions")
+		t.Fatal("Luna request must carry the core-available assistant-query instructions")
 	}
 	if !strings.Contains(got.Input, "what did we decide on pricing?") {
 		t.Fatalf("input missing the query: %q", got.Input)
 	}
 }
 
-func TestAnswerAssistantQueryKeylessAnthropicUsesTerra(t *testing.T) {
+func TestAnswerAssistantQueryKeylessAnthropicUsesLuna(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	app.apiKey = "openai-key"
 	t.Setenv("ANTHROPIC_API_KEY", "")
@@ -735,10 +735,10 @@ func TestAnswerAssistantQueryKeylessAnthropicUsesTerra(t *testing.T) {
 		t.Fatalf("answerAssistantQueryWithModel: %v", err)
 	}
 	if got.Model != defaultScoutChatModel {
-		t.Fatalf("model=%q, want Scout Terra", got.Model)
+		t.Fatalf("model=%q, want Scout Luna", got.Model)
 	}
-	if got.MaxOutputTokens != scoutChatMaxOutputTokens || got.ReasoningEffort != "low" {
-		t.Fatalf("openai budget=%d/%q, want %d/low", got.MaxOutputTokens, got.ReasoningEffort, scoutChatMaxOutputTokens)
+	if got.MaxOutputTokens != scoutChatMaxOutputTokens || got.ReasoningEffort != scoutReasoningEffort() {
+		t.Fatalf("openai budget=%d/%q, want %d/max", got.MaxOutputTokens, got.ReasoningEffort, scoutChatMaxOutputTokens)
 	}
 }
 
@@ -755,7 +755,7 @@ func TestAnswerAssistantQueryKeylessBothStillErrors(t *testing.T) {
 }
 
 // Spoken memory recall is also a required OpenAI core seat.
-func TestAnswerMemoryQuestionIgnoresAnthropicKeyAndUsesTerra(t *testing.T) {
+func TestAnswerMemoryQuestionIgnoresAnthropicKeyAndUsesLuna(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	app.apiKey = "openai-key"
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
@@ -783,20 +783,20 @@ func TestAnswerMemoryQuestionIgnoresAnthropicKeyAndUsesTerra(t *testing.T) {
 		t.Fatalf("answerMemoryQuestionWithModel: %v", err)
 	}
 	if answer != "We locked pricing at $99/mo." {
-		t.Fatalf("answer=%q, want the Sonnet answer", answer)
+		t.Fatalf("answer=%q, want the Luna answer", answer)
 	}
-	if got.Model != defaultScoutChatModel || got.MaxOutputTokens != 700 || got.ReasoningEffort != "low" || got.Workflow != "scout_voice_recall" {
-		t.Fatalf("memory Q&A request=%+v, want Terra 700/low voice-recall", got)
+	if got.Model != defaultScoutChatModel || got.MaxOutputTokens != 700 || got.ReasoningEffort != scoutReasoningEffort() || got.Workflow != "scout_voice_recall" {
+		t.Fatalf("memory Q&A request=%+v, want Luna 700/max voice-recall", got)
 	}
 	if got.Instructions != memoryQuestionInstructions() {
-		t.Fatal("Sonnet request must carry the same memory-question instructions as the OpenAI path")
+		t.Fatal("Luna request must carry the same memory-question instructions as the OpenAI path")
 	}
 	if !strings.Contains(got.Input, "We locked pricing at $99/mo with two design partners.") {
 		t.Fatalf("input missing the memory context: %q", got.Input)
 	}
 }
 
-// Keyless-Anthropic memory Q&A keeps the gpt-5.5 path unchanged (700-token
+// Keyless-Anthropic memory Q&A keeps the Luna path unchanged (700-token
 // budget), and the zero-entries early return survives on both routes.
 func TestAnswerMemoryQuestionKeylessAnthropicKeepsOpenAIPath(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
@@ -828,7 +828,7 @@ func TestAnswerMemoryQuestionKeylessAnthropicKeepsOpenAIPath(t *testing.T) {
 		t.Fatalf("answerMemoryQuestionWithModel: %v", err)
 	}
 	if got.MaxOutputTokens != 700 || got.Model != defaultScoutChatModel {
-		t.Fatalf("openai budget=%d model=%q, want 700/Scout Terra", got.MaxOutputTokens, got.Model)
+		t.Fatalf("openai budget=%d model=%q, want 700/Scout Luna", got.MaxOutputTokens, got.Model)
 	}
 }
 

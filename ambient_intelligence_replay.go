@@ -127,6 +127,11 @@ type AmbientReplayArtifact struct {
 	Digest               string `json:"digest"`
 	SourceManifestDigest string `json:"sourceManifestDigest"`
 	ManifestDigest       string `json:"manifestDigest"`
+	// Text is an execution-local hand-off between replay stages. It is never
+	// serialized into a manifest or receipt: durable replay authority is the
+	// source/artifact digest, while the stage runner keeps the bounded body in
+	// memory for the duration of one execution.
+	Text string `json:"-"`
 }
 
 type AmbientReplayUsage struct {
@@ -134,6 +139,7 @@ type AmbientReplayUsage struct {
 	InputTokens  int64 `json:"inputTokens"`
 	OutputTokens int64 `json:"outputTokens"`
 	CostMicros   int64 `json:"costMicros"`
+	Estimated    bool  `json:"estimated,omitempty"`
 }
 
 type AmbientReplayStageResult struct {

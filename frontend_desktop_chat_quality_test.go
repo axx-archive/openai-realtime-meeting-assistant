@@ -184,6 +184,41 @@ func TestDesktopChatInteractionTargetsAndComposerStates(t *testing.T) {
 	}
 }
 
+func TestDesktopChatSendRenderIsOneScrollStableTransaction(t *testing.T) {
+	html := desktopChatQualityHTML(t)
+	render := functionBody(html, "function renderActiveScoutThread()")
+	if render == "" {
+		t.Fatal("could not extract renderActiveScoutThread body")
+	}
+	for _, want := range []string{
+		"withScoutChatRenderTransaction(() => {",
+		"return withScoutChatRenderTransaction",
+	} {
+		if !strings.Contains(render, want) {
+			t.Errorf("chat render must be wrapped in one synchronous transaction: missing %q", want)
+		}
+	}
+	transaction := functionBody(html, "function withScoutChatRenderTransaction(render)")
+	if transaction == "" {
+		t.Fatal("missing chat render transaction helper")
+	}
+	for _, want := range []string{
+		"scoutChatRenderBatchDepth += 1",
+		"scoutChatRenderBatchDepth -= 1",
+		"if (wasNearBottom)",
+		"scoutChatThread.scrollTop = scoutChatThread.scrollHeight",
+		"scoutChatThread.scrollTop = previousScrollTop",
+	} {
+		if !strings.Contains(transaction, want) {
+			t.Errorf("chat render transaction missing scroll-stability guard %q", want)
+		}
+	}
+	appendNode := functionBody(html, "function appendScoutChatNode(node)")
+	if appendNode == "" || !strings.Contains(appendNode, "scoutChatRenderBatchDepth === 0 && scoutChatIsNearBottom()") {
+		t.Fatal("chat node append must not force scrollTop during a batched render")
+	}
+}
+
 func TestDesktopThreadReplyKeepsDraftAndOmitsRedundantEmptyState(t *testing.T) {
 	html := desktopChatQualityHTML(t)
 	if strings.Contains(html, "No replies yet. Start the side conversation here.") {

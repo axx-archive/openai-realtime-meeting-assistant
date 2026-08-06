@@ -350,9 +350,9 @@ func routerModel() string {
 }
 
 // routerEffort is retained for older evaluation call sites. The OpenAI route
-// uses low reasoning directly in its Responses request.
+// and its action-classification twin share Scout's explicit reasoning dial.
 func routerEffort() string {
-	return "low"
+	return scoutReasoningEffort()
 }
 
 // scoutRouterProposal is the wire/storage shape of one proposal card: enough
@@ -793,7 +793,7 @@ func (app *kanbanBoardApp) routeScoutChatTurn(ctx context.Context, text string, 
 		Workflow:        "scout_route",
 		Instructions:    scoutRouterInstructions(),
 		Input:           scoutRouterInput(text, history),
-		ReasoningEffort: "low",
+		ReasoningEffort: scoutReasoningEffort(),
 		Verbosity:       "low",
 		MaxOutputTokens: scoutRouterMaxTokens,
 		JSONSchema:      scoutRouterJSONSchema(),

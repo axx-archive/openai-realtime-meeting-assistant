@@ -210,7 +210,7 @@ func (app *kanbanBoardApp) mapMeetingForBriefing(ctx context.Context, apiKey str
 			Seat:            seatRecallMapReduce,
 			Instructions:    meetingDigestInstructions(),
 			Input:           buildBriefingMapInput(meetingKey, title, carryJSON, chunk, time.Now().UTC()),
-			ReasoningEffort: "low",
+			ReasoningEffort: meetingBrainReasoningEffort(),
 			Verbosity:       "low",
 			MaxOutputTokens: meetingDigestMaxOutputTokens,
 		})

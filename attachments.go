@@ -1053,7 +1053,7 @@ func deriveAttachmentText(ctx context.Context, apiKey string, files []scoutChatF
 		Workflow:        "attachment_extract",
 		Instructions:    attachmentDeriveInstructions,
 		Input:           "Transcribe the key facts, numbers, names, and claims in the attached files for the team's shared memory.",
-		ReasoningEffort: "low",
+		ReasoningEffort: scoutReasoningEffort(),
 		Verbosity:       "low",
 		MaxOutputTokens: attachmentDeriveMaxTokens,
 		Attachments:     attachments,

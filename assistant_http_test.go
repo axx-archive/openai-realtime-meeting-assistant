@@ -808,6 +808,7 @@ func TestAssistantBoardAndMemoryReadableWithoutRoomJoin(t *testing.T) {
 	}{
 		{name: "board", path: "/assistant/board", handler: assistantBoardHandler, key: "board"},
 		{name: "memory", path: "/assistant/memory", handler: assistantMemoryHandler, key: "memory"},
+		{name: "agent mind", path: "/assistant/agent-mind", handler: assistantAgentMindHandler, key: "positions"},
 		{name: "meetings", path: "/assistant/meetings", handler: assistantMeetingsHandler, key: "meetings"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

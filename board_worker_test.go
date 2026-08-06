@@ -259,9 +259,9 @@ func TestMeetingBoardInstructionsStateRequiredArgsPerTool(t *testing.T) {
 	}
 }
 
-// A2 item 5: the structured board step runs at medium reasoning effort — low
-// effort is what dropped card_ids and invented statuses in the first place.
-func TestMeetingBoardWorkerUsesMediumReasoningEffort(t *testing.T) {
+// A2 item 5: the structured board step runs at the maximum configured brain
+// reasoning effort so it does not drop card_ids or invent statuses.
+func TestMeetingBoardWorkerUsesMaxReasoningEffort(t *testing.T) {
 	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
 	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(t.TempDir(), "board.json"))
 	t.Setenv("MEETING_BOARD_MIN_SUMMARIES", "1")
@@ -278,8 +278,8 @@ func TestMeetingBoardWorkerUsesMediumReasoningEffort(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("runMeetingBoardOnce: %v", err)
 	}
-	if sawEffort != "medium" {
-		t.Fatalf("board worker reasoning effort=%q, want medium", sawEffort)
+	if sawEffort != meetingBrainReasoningEffort() {
+		t.Fatalf("board worker reasoning effort=%q, want %s", sawEffort, meetingBrainReasoningEffort())
 	}
 }
 

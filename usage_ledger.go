@@ -51,20 +51,21 @@ const (
 	seatGoalEngine   = "goal_engine"  // /goal decompose/panel/report single-shot calls
 	seatGoalReview   = "goal_review"  // /goal verify passes
 
-	// Sonnet worker seats (product voice, human-visible).
-	seatChat        = "chat"         // answerAssistantQueryWithModelAttachments
-	seatRouter      = "router"       // routeScoutChatTurn propose-confirm classifier
-	seatMemoryQA    = "memory_qa"    // ask-anything memory answers (typed)
-	seatVoiceRecall = "voice_recall" // answerMemoryQuestionWithModel (spoken turn)
-	seatFollowup    = "followup"     // agent_thread_followup rewrites
-	seatAttachments = "attachments"  // attachments.go vision transcription
-	seatNarrative   = "narrative"    // narrative_maintainer
-	seatTaste       = "taste"        // taste_analyst distiller
-	seatHouseStyle  = "house_style"  // house_style distiller
+	// Human-visible worker seats (provider/model selected by the explicit route).
+	seatChat               = "chat"                // answerAssistantQueryWithModelAttachments
+	seatRouter             = "router"              // routeScoutChatTurn propose-confirm classifier
+	seatProactiveAttention = "proactive_attention" // interval-based Scout feed decision classifier
+	seatMemoryQA           = "memory_qa"           // ask-anything memory answers (typed)
+	seatVoiceRecall        = "voice_recall"        // answerMemoryQuestionWithModel (spoken turn)
+	seatFollowup           = "followup"            // agent_thread_followup rewrites
+	seatAttachments        = "attachments"         // attachments.go vision transcription
+	seatNarrative          = "narrative"           // narrative_maintainer
+	seatTaste              = "taste"               // taste_analyst distiller
+	seatHouseStyle         = "house_style"         // house_style distiller
 
 	// OpenAI ambient extraction fleet (inherits OPENAI_BRAIN_MODEL unless pinned).
 	seatBrain           = "brain"             // brain_worker 5m tick
-	seatBoard           = "board"             // board_worker 2m tick (Terra pin lane)
+	seatBoard           = "board"             // board_worker 2m tick (explicit override lane)
 	seatSuggestion      = "suggestion"        // suggestion_agent 3m tick
 	seatDecisionLedger  = "decision_ledger"   // decision_ledger extraction
 	seatEntityLedger    = "entity_ledger"     // entity_ledger adjudication
@@ -97,7 +98,7 @@ const (
 var allLLMSeats = []string{
 	seatOrchestrator, seatDeliverable, seatReview, seatFallback,
 	seatGoalEngine, seatGoalReview,
-	seatChat, seatRouter, seatMemoryQA, seatVoiceRecall, seatFollowup,
+	seatChat, seatRouter, seatProactiveAttention, seatMemoryQA, seatVoiceRecall, seatFollowup,
 	seatAttachments, seatNarrative, seatTaste, seatHouseStyle,
 	seatBrain, seatBoard, seatSuggestion, seatDecisionLedger, seatEntityLedger,
 	seatMeetingDigest, seatCompanyDigest, seatMissionIntel, seatSlop,

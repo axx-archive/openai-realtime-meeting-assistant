@@ -54077,7 +54077,38 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return row
 	      }
 
+	      let scoutChatRenderBatchDepth = 0
+
+	      // A send can be acknowledged by both the HTTP response and the live
+	      // chat event. Rebuilding the feed once per acknowledgement used to
+	      // clear the scroll box, append each node while forcing scrollTop, and
+	      // let the browser paint the intermediate positions. Keep the existing
+	      // renderer, but make each rebuild one synchronous visual transaction.
+	      function withScoutChatRenderTransaction(render) {
+	        if (typeof render !== 'function') return
+	        const nested = scoutChatRenderBatchDepth > 0
+	        const wasNearBottom = nested ? false : scoutChatIsNearBottom()
+	        const previousScrollTop = nested ? 0 : scoutChatThread.scrollTop
+	        scoutChatRenderBatchDepth += 1
+	        try {
+	          return render()
+	        } finally {
+	          scoutChatRenderBatchDepth -= 1
+	          if (!nested) {
+	            // Restore only after the complete feed is mounted. This keeps
+	            // the newest turn pinned when the user was at the tail, while a
+	            // reader who scrolled up remains exactly where they were.
+	            if (wasNearBottom) {
+	              scoutChatThread.scrollTop = scoutChatThread.scrollHeight
+	            } else {
+	              scoutChatThread.scrollTop = previousScrollTop
+	            }
+	          }
+	        }
+	      }
+
 	      function renderActiveScoutThread() {
+	        return withScoutChatRenderTransaction(() => {
 	        // a rebuild from persisted state (reload, poll, socket echo) never
 	        // shows a shimmer — only a send still in flight THIS session may
 	        // keep it up
@@ -54168,7 +54199,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // replace running state immediately without closing the conversation.
 	        syncDesktopOpenChatContext()
 	        updateChatThreadItem(thread.preview || messages[messages.length - 1]?.text || 'chat thread', thread.updatedAt || messages[messages.length - 1]?.createdAt)
-	      }
+        })
+      }
 
 	      function scoutReplyLifecyclePresentation(message) {
 	        const reply = message?.reply
@@ -57385,8 +57417,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         appendScoutChatNode(chip)
       }
 
-      function appendScoutChatNode(node) {
-        const stick = scoutChatIsNearBottom()
+	      function appendScoutChatNode(node) {
+	        const stick = scoutChatRenderBatchDepth === 0 && scoutChatIsNearBottom()
         scoutChatThread.querySelectorAll('.scout-chat-empty, .scout-starters').forEach(function (n) { n.remove() })
         scoutChatThread.insertBefore(node, scoutChatThinking)
         // Cap the rendered thread; drop oldest so long sessions stay light.

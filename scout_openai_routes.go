@@ -15,10 +15,11 @@ const (
 	// stronger routine-reasoning seat. Anthropic may remain available to
 	// explicitly optional specialists, but an installed Anthropic key never
 	// changes either core route.
-	defaultScoutRouterModel     = "gpt-5.6-terra"
-	defaultScoutChatModel       = "gpt-5.6-terra"
+	defaultScoutRouterModel     = "gpt-5.6-luna"
+	defaultScoutChatModel       = "gpt-5.6-luna"
 	defaultScoutExtractionModel = "gpt-5.6-luna"
 	defaultRouterModel          = defaultScoutRouterModel
+	scoutMaxReasoningEffort     = "max"
 )
 
 func scoutRouterModel() string {
@@ -46,6 +47,16 @@ func scoutExtractionModel() string {
 		}
 	}
 	return defaultScoutExtractionModel
+}
+
+func scoutReasoningEffort() string {
+	if effort := strings.ToLower(strings.TrimSpace(os.Getenv("OPENAI_SCOUT_REASONING_EFFORT"))); effort != "" {
+		switch effort {
+		case "minimal", "low", "medium", "high", "xhigh", "max", "ultra":
+			return effort
+		}
+	}
+	return scoutMaxReasoningEffort
 }
 
 type openAIScoutRouterField struct {

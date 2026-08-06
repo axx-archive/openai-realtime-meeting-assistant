@@ -731,7 +731,7 @@ func (app *kanbanBoardApp) detectDecisionReversals(ctx context.Context, apiKey s
 		Seat:            seatDecisionLedger,
 		Instructions:    decisionReversalInstructions(),
 		Input:           buildDecisionReversalInput(pairs, time.Now().UTC()),
-		ReasoningEffort: "low",
+		ReasoningEffort: meetingBrainReasoningEffort(),
 		Verbosity:       "low",
 		MaxOutputTokens: 400,
 	})
@@ -769,10 +769,10 @@ func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey
 		Seat:         seatDecisionLedger,
 		Instructions: decisionLedgerInstructions(),
 		Input:        contextApp.buildDecisionLedgerInput(inputs, time.Now().UTC()),
-		// Effort raise to the doctrine floor (medium): the ledger judges firm vs
-		// directional commitment and emits exact-shape JSON — the discrimination
-		// low reasoning effort punishes most. Mirrors the board worker's raise.
-		ReasoningEffort: "medium",
+		// Use the shared maximum-by-default brain dial: the ledger judges firm vs
+		// directional commitment and emits exact-shape JSON, where low reasoning
+		// effort punishes discrimination most.
+		ReasoningEffort: meetingBrainReasoningEffort(),
 		Verbosity:       "low",
 		MaxOutputTokens: 700,
 	})

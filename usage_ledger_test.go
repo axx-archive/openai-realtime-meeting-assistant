@@ -452,10 +452,10 @@ func TestUsageLedgerDefaultPathSitsBesideMemoryStore(t *testing.T) {
 }
 
 func TestSeatVocabularyIsCompleteUniqueAndWellFormed(t *testing.T) {
-	// 35 as of 2026-07-27: seatDictation joined for hold-to-dictate uploads
-	// (transcribe_dictation.go). Duration-billed like the other STT lanes.
-	if len(allLLMSeats) != 35 {
-		t.Fatalf("seat vocabulary drifted: %d seats, want 35 (update the frozen contract deliberately)", len(allLLMSeats))
+	// 36 as of 2026-08-06: proactive_attention joined for governed Scout feed
+	// classification. The seat is separately metered from visible chat/router.
+	if len(allLLMSeats) != 36 {
+		t.Fatalf("seat vocabulary drifted: %d seats, want 36 (update the frozen contract deliberately)", len(allLLMSeats))
 	}
 	seen := map[string]bool{}
 	for _, seat := range allLLMSeats {
@@ -473,7 +473,7 @@ func TestSeatVocabularyIsCompleteUniqueAndWellFormed(t *testing.T) {
 	// Spot-check the constants downstream agents will grep for.
 	for _, want := range []string{
 		seatOrchestrator, seatDeliverable, seatReview, seatFallback, seatChat,
-		seatRouter, seatMemoryQA, seatVoiceRecall, seatFollowup, seatAttachments,
+		seatRouter, seatProactiveAttention, seatMemoryQA, seatVoiceRecall, seatFollowup, seatAttachments,
 		seatNarrative, seatTaste, seatHouseStyle, seatBrain, seatBoard,
 		seatSuggestion, seatDecisionLedger, seatEntityLedger, seatMeetingDigest,
 		seatCompanyDigest, seatMissionIntel, seatSlop, seatRecallMapReduce,

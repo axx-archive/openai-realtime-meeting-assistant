@@ -1031,7 +1031,7 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 			Workflow:        "meeting_digest",
 			Instructions:    instructions,
 			Input:           input,
-			ReasoningEffort: "low",
+			ReasoningEffort: meetingBrainReasoningEffort(),
 			Verbosity:       "low",
 			MaxOutputTokens: meetingDigestMaxOutputTokens,
 			JSONSchema:      meetingDigestJSONSchema(),
@@ -1579,7 +1579,7 @@ func (app *kanbanBoardApp) maybeEmitDailyReflection(ctx context.Context, apiKey 
 		Seat:            seatMeetingDigest,
 		Instructions:    reflectionInstructions(),
 		Input:           buildReflectionInput(day, digests, decisions, prior, hasPrior, now.UTC()),
-		ReasoningEffort: "low",
+		ReasoningEffort: meetingBrainReasoningEffort(),
 		Verbosity:       "low",
 		MaxOutputTokens: reflectionMaxOutputTokens,
 	})

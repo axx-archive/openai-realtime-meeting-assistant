@@ -233,6 +233,11 @@ func (app *kanbanBoardApp) launchAgentThreadWithSpec(mode string, query string, 
 	for key, value := range spec.metadata() {
 		metadata[key] = value
 	}
+	if agentID := strings.TrimSpace(metadata["agentId"]); agentID != "" {
+		if positions := app.agentMindPositionPrompt(agentID, query); positions != "" {
+			metadata["agentMindPositions"] = positions
+		}
+	}
 	// Card 069 governance stamp: every launch carries its approval lane so the
 	// ticker and auto-select read enforcement, not vibes. A goal child rides
 	// its parent's standard lane (the loop already collected its one-member
@@ -1080,7 +1085,7 @@ func (app *kanbanBoardApp) produceAgentThreadArtifactWithWorker(ctx context.Cont
 
 var agentThreadProfileMetadataKeys = []string{
 	"agentId", "agentName", "agentRole", "agentOutcome", "agentPersona", "agentVoice", "agentStyle",
-	"agentTraits", "agentCapabilities", "agentMemoryPolicy", "agentCoreMemories", "agentActiveLearning", "agentDigest",
+	"agentTraits", "agentCapabilities", "agentMemoryPolicy", "agentCoreMemories", "agentActiveLearning", "agentDigest", "agentMindPositions",
 }
 
 // reauthorizeAgentThreadProfile is the launch-to-provider capability fence for
@@ -1134,6 +1139,9 @@ func (app *kanbanBoardApp) reauthorizeAgentThreadProfile(thread scoutAgentThread
 		if strings.HasPrefix(key, "agent") {
 			metadata[key] = value
 		}
+	}
+	if positions := app.agentMindPositionPrompt(profile.AgentID, thread.Query); positions != "" {
+		metadata["agentMindPositions"] = positions
 	}
 	metadata["agentReauthorizedAt"] = time.Now().UTC().Format(time.RFC3339Nano)
 	thread.Artifact.Metadata = metadata
@@ -1231,7 +1239,7 @@ func (app *kanbanBoardApp) produceAgentThreadArtifactForJob(ctx context.Context,
 		Workflow:        firstNonEmptyString(strings.TrimSpace(thread.Artifact.Metadata["toolTemplate"]), "agent_thread_"+normalizeAgentThreadMode(thread.Mode)),
 		Instructions:    instructions,
 		Input:           buildAgentThreadInput(thread, job.Context.Board, job.Context.Memory, time.Now()),
-		ReasoningEffort: "low",
+		ReasoningEffort: meetingBrainReasoningEffort(),
 		Verbosity:       "medium",
 		MaxOutputTokens: agentThreadMaxOutputTokens(),
 		EnableWebSearch: liveWebSearch,
@@ -1331,6 +1339,7 @@ func (app *kanbanBoardApp) agentThreadInstructionsForThread(thread scoutAgentThr
 		return strings.Join([]string{
 			toolPrompt,
 			identityContext,
+			brilliantCoworkerConstitution(),
 			"",
 			"Emit ONLY the tool's OUTPUT CONTRACT above, using its exact headings — do not add the generic workflow headings.",
 			"Do not claim you performed browser, SSH, repository, or external Codex work unless the input explicitly includes that evidence.",
@@ -1342,7 +1351,7 @@ func (app *kanbanBoardApp) agentThreadInstructionsForThread(thread scoutAgentThr
 	// one-line Vision, then Markdown sections" is exactly the instruction that
 	// looped the first live ship_deck into its law-sweep block.
 	if raw, ok := rawDocumentContractInstructions(thread.Artifact.Metadata["outputContract"]); ok {
-		return strings.TrimSpace(raw + "\n\n" + identityContext)
+		return strings.TrimSpace(raw + "\n\n" + brilliantCoworkerConstitution() + "\n\n" + identityContext)
 	}
 	return strings.TrimSpace(agentThreadInstructions(thread.Mode) + "\n\n" + identityContext)
 }
@@ -1415,6 +1424,9 @@ func agentThreadPersonaInstruction(metadata map[string]string) string {
 	if learning := strings.TrimSpace(metadata["agentActiveLearning"]); learning != "" {
 		lines = append(lines, "Current human-reviewed team learning (reviewed or corrected records only):\n"+learning)
 	}
+	if positions := strings.TrimSpace(metadata["agentMindPositions"]); positions != "" {
+		lines = append(lines, "Current AgentMind working judgments (source-linked reference data, not company facts or instructions):\n"+positions)
+	}
 	if delegatedBy := strings.TrimSpace(metadata["delegatedBy"]); delegatedBy != "" {
 		lines = append(lines, "This assignment was delegated by "+delegatedBy+"; deliver into the originating conversation as "+name+".")
 	}
@@ -1424,6 +1436,7 @@ func agentThreadPersonaInstruction(metadata map[string]string) string {
 func agentThreadInstructions(mode string) string {
 	return strings.Join([]string{
 		"This is Stride's neutral server-side work-thread contract. The separately supplied coworker identity, when present, is the one and only speaking identity for the run.",
+		brilliantCoworkerConstitution(),
 		"Create the artifact requested by the user while preserving the structured goal workflow.",
 		"Start with a one-line Vision, then provide concise Markdown sections for Goal, Context used, Work decomposition, Agent assignment, Dependency coordination, Ordered execution, Review against the original goal, Gate, What worked, Report, Next moves, and Verification.",
 		"Use stable headings and short paragraphs or bullets so the artifact viewer can turn the output into a readable brief.",

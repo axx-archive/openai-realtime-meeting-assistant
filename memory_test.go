@@ -1297,6 +1297,33 @@ func TestBootResumeSkipsDigestEntries(t *testing.T) {
 	}
 }
 
+func TestBootResumeSkipsUIStateEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "memory.jsonl")
+	store, err := newMeetingMemoryStore(path)
+	if err != nil {
+		t.Fatalf("newMeetingMemoryStore: %v", err)
+	}
+
+	if _, _, err := store.appendEntry(meetingMemoryKindTranscript, "t1", "the sitting is still live", nil); err != nil {
+		t.Fatalf("append transcript: %v", err)
+	}
+	liveMeetingID := store.currentMeetingID(officeRoomID)
+	if liveMeetingID == "" {
+		t.Fatal("expected a minted meeting id")
+	}
+	if _, _, err := store.appendAmbientEntry(meetingMemoryKindConversationContinuity, "continuity-1", `{"threadId":"thread-1","revision":1}`, nil); err != nil {
+		t.Fatalf("append UI-state projection: %v", err)
+	}
+
+	reloaded, err := newMeetingMemoryStore(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got := reloaded.currentMeetingID(officeRoomID); got != liveMeetingID {
+		t.Fatalf("boot lost live meeting id after trailing UI-state entry: got %q want %q", got, liveMeetingID)
+	}
+}
+
 func TestUpsertDigestConcurrentSingleWinner(t *testing.T) {
 	store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "memory.jsonl"))
 	if err != nil {

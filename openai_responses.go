@@ -16,7 +16,12 @@ import (
 
 const (
 	defaultOpenAIResponsesBaseURL = "https://api.openai.com/v1"
-	defaultMeetingBrainModel      = "gpt-5.5"
+	// The company-brain and marketplace-worker OpenAI seat deliberately uses
+	// Luna at maximum reasoning by default. The environment dial remains an
+	// explicit operational override for cost/latency experiments, but a normal
+	// boot must not silently fall back to the old gpt-5.5/low-depth lane.
+	defaultMeetingBrainModel           = "gpt-5.6-luna"
+	defaultMeetingBrainReasoningEffort = "max"
 )
 
 // openAIResponsesURL resolves the Responses API endpoint. W1 item 14 of
@@ -223,6 +228,16 @@ func meetingBrainModel() string {
 	return defaultMeetingBrainModel
 }
 
+func meetingBrainReasoningEffort() string {
+	if effort := strings.ToLower(strings.TrimSpace(os.Getenv("OPENAI_BRAIN_REASONING_EFFORT"))); effort != "" {
+		switch effort {
+		case "minimal", "low", "medium", "high", "xhigh", "max", "ultra":
+			return effort
+		}
+	}
+	return defaultMeetingBrainReasoningEffort
+}
+
 func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request openAITextRequest) (string, error) {
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {
@@ -291,6 +306,7 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 	// Test-swapped responders never reach this seam, so tests stay silent.
 	started := time.Now()
 	recordWire := func(usage *openAIResponsesUsage, wireSuccess bool, accepted bool, reason string, serviceTier string, callErr error) {
+		captureAmbientReplayUsage(ctx, usage, accepted)
 		entry := llmUsageEntry{
 			Provider:             providerOpenAI,
 			Model:                model,

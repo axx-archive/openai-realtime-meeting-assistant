@@ -381,6 +381,15 @@ type kanbanBoardApp struct {
 	scoutReplyCancel    context.CancelFunc
 	scoutReplyQueue     chan string
 	scoutReplyWG        sync.WaitGroup
+	// scoutProactiveAttention is a separate, governed feed-reading lane. It
+	// never shares the direct-reply queue: quiet mode can classify without
+	// emitting a message, and active mode has its own stale-source/rate fence.
+	scoutProactiveStartOnce sync.Once
+	scoutProactiveMu        sync.Mutex
+	scoutProactiveCancel    context.CancelFunc
+	scoutProactiveDone      chan struct{}
+	scoutProactiveQueue     chan scoutProactiveEvent
+	scoutProactivePending   map[string]struct{}
 	// agentThreadRunLocks serializes follow-up validate+mark-running per
 	// artifact (agent_thread_followup.go); model calls stay outside.
 	agentThreadRunLocks map[string]*sync.Mutex
@@ -744,6 +753,7 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 	// (company_digest.go). Wakes only when the ledger changed (inputKind =
 	// ledger_event). Backfill OFF by default (COMPANY_DIGEST_BACKFILL).
 	app.startCompanyDigestWorker(apiKey)
+	app.startScoutProactiveWorker(apiKey)
 	// Card 067: the ~5-minute status re-scan that relaunches approved-but-stuck
 	// proposals and any auto_run-lane standing-approved work. Model-free, so it
 	// starts independent of the API key gate above.
@@ -1122,6 +1132,7 @@ func (app *kanbanBoardApp) Close() error {
 	var closeErr error
 	app.closeOnce.Do(func() {
 		app.stopScoutOpeningReplyWorkers()
+		app.stopScoutProactiveWorker()
 		if roomMixer != nil {
 			roomMixer.removeSink(realtimeMixedAudioSinkKey)
 		}

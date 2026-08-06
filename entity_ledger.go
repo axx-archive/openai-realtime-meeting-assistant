@@ -1012,7 +1012,7 @@ func (app *kanbanBoardApp) adjudicateLedgerAmbiguities(ctx context.Context, apiK
 		Seat:            seatEntityLedger,
 		Instructions:    ledgerAdjudicationInstructions(),
 		Input:           buildLedgerAdjudicationInput(pairs, working, now),
-		ReasoningEffort: "low",
+		ReasoningEffort: meetingBrainReasoningEffort(),
 		Verbosity:       "low",
 		MaxOutputTokens: entityLedgerMaxOutputTokens,
 	})

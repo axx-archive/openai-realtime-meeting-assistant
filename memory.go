@@ -26,6 +26,19 @@ const (
 	meetingMemoryKindArchive     = "archive"
 	meetingMemoryKindOSArtifact  = "os_artifact"
 	meetingMemoryKindScoutChat   = "scout_chat_thread"
+	// meetingMemoryKindAgentMindPosition is a source-linked judgment held by
+	// one coworker. It is durable AgentMind state, but UI/recall code must only
+	// read it through the bounded AgentMind projection rather than treating the
+	// raw JSON record as company knowledge.
+	meetingMemoryKindAgentMindPosition = "agent_mind_position"
+	// meetingMemoryKindScoutAttention is the append-only decision/dedupe book
+	// for event-driven Scout feed attention. It is never knowledge or a
+	// client timeline row; the worker uses it as its durable source cursor.
+	meetingMemoryKindScoutAttention = "scout_attention"
+	// meetingMemoryKindConversationContinuity is a revisioned, ACL-bound
+	// conversation projection. It is typed UI/context state, not company
+	// knowledge and never enters generic recall.
+	meetingMemoryKindConversationContinuity = "conversation_continuity"
 	// meetingMemoryKindCodexProposal is a board-worker-proposed agent task
 	// awaiting a human confirm/dismiss. Proposals are UI state, not knowledge:
 	// like scout_chat_thread they are excluded from Scout search context and
@@ -479,10 +492,24 @@ func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 	decided := map[string]struct{}{}
 	for index := len(store.entries) - 1; index >= 0; index-- {
 		last := store.entries[index]
+		// UI-state records are durable workspace projections, not meeting
+		// evidence. A projection written through an older meeting-aware path may
+		// still carry the sitting it belongs to; retain that association without
+		// ever minting one. A late projection without a meetingId must not hide
+		// an otherwise resumable sitting from the boot scan.
 		if isAmbientBookkeepingMemoryKind(last.Kind) || memoryEntryHiddenFromRecall(last) {
 			continue
 		}
 		roomID := normalizeRoomID(last.Metadata["roomId"])
+		if isUIStateMemoryKind(last.Kind) {
+			if _, ok := decided[roomID]; !ok {
+				if id := strings.TrimSpace(last.Metadata["meetingId"]); id != "" {
+					store.meetingIDs[roomID] = id
+					decided[roomID] = struct{}{}
+				}
+			}
+			continue
+		}
 		if _, ok := decided[roomID]; ok {
 			continue
 		}
@@ -2579,7 +2606,7 @@ func (store *meetingMemoryStore) deleteOSArtifactWithProjection(id string) (meet
 // deliberately absent: decision statements ARE knowledge and must ground
 // Scout's answers.
 func isUIStateMemoryKind(kind string) bool {
-	return kind == meetingMemoryKindScoutChat || kind == meetingMemoryKindCodexProposal || kind == meetingMemoryKindMissionInsight || kind == meetingMemoryKindDecisionPass || kind == meetingMemoryKindPackage || kind == meetingMemoryKindDealRoom || kind == meetingMemoryKindSlopPass || kind == meetingMemoryKindSignal || kind == meetingMemoryKindDayDigestPass || kind == meetingMemoryKindLedgerEvent || kind == meetingMemoryKindLedgerPass || kind == meetingMemoryKindDeadLetter || kind == meetingMemoryKindChatDelete
+	return kind == meetingMemoryKindScoutChat || kind == meetingMemoryKindAgentMindPosition || kind == meetingMemoryKindScoutAttention || kind == meetingMemoryKindConversationContinuity || kind == meetingMemoryKindCodexProposal || kind == meetingMemoryKindMissionInsight || kind == meetingMemoryKindDecisionPass || kind == meetingMemoryKindPackage || kind == meetingMemoryKindDealRoom || kind == meetingMemoryKindSlopPass || kind == meetingMemoryKindSignal || kind == meetingMemoryKindDayDigestPass || kind == meetingMemoryKindLedgerEvent || kind == meetingMemoryKindLedgerPass || kind == meetingMemoryKindDeadLetter || kind == meetingMemoryKindChatDelete
 }
 
 func (store *meetingMemoryStore) search(query string, limit int) []meetingMemoryMatch {
@@ -2777,7 +2804,7 @@ func normalizeMemoryText(value string) string {
 }
 
 func normalizeMemoryEntryText(kind string, value string) string {
-	if kind != meetingMemoryKindBrain && kind != meetingMemoryKindBoardUpdate && kind != meetingMemoryKindOSArtifact && kind != meetingMemoryKindScoutChat && kind != meetingMemoryKindMissionInsight && kind != meetingMemoryKindPackage && kind != meetingMemoryKindDealRoom && kind != meetingMemoryKindNarrative && kind != meetingMemoryKindReflection && kind != meetingMemoryKindLedgerEvent && !isMeetingDigestKind(kind) {
+	if kind != meetingMemoryKindBrain && kind != meetingMemoryKindBoardUpdate && kind != meetingMemoryKindOSArtifact && kind != meetingMemoryKindScoutChat && kind != meetingMemoryKindAgentMindPosition && kind != meetingMemoryKindScoutAttention && kind != meetingMemoryKindConversationContinuity && kind != meetingMemoryKindMissionInsight && kind != meetingMemoryKindPackage && kind != meetingMemoryKindDealRoom && kind != meetingMemoryKindNarrative && kind != meetingMemoryKindReflection && kind != meetingMemoryKindLedgerEvent && !isMeetingDigestKind(kind) {
 		// digest kinds and ledger events take the structure-preserving branch
 		// below: their bodies are strict JSON (like mission_insight) and the
 		// whitespace collapse would mutate content inside JSON string values;

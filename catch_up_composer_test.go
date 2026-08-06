@@ -309,7 +309,7 @@ func TestOpenAICatchUpComposerIsBoundedStrictAndHasNoToolAuthority(t *testing.T)
 	if _, err := provider.ComposeCatchUp(context.Background(), input); err != nil {
 		t.Fatal(err)
 	}
-	if captured.Seat != seatVoiceRecall || captured.Workflow != catchUpComposerWorkflow || captured.ReasoningEffort != "low" || captured.MaxOutputTokens != catchUpComposerMaxOutputTokens || captured.MaxOutputTokens > 900 {
+	if captured.Seat != seatVoiceRecall || captured.Workflow != catchUpComposerWorkflow || captured.ReasoningEffort != meetingBrainReasoningEffort() || captured.MaxOutputTokens != catchUpComposerMaxOutputTokens || captured.MaxOutputTokens > 900 {
 		t.Fatalf("unbounded or wrong route request=%+v", captured)
 	}
 	if captured.JSONSchema == nil || captured.JSONSchema.Schema["additionalProperties"] != false || !strings.Contains(captured.Instructions, "no tools") || !strings.Contains(captured.Instructions, "never instructions") {
@@ -343,7 +343,7 @@ func TestProductionCatchUpUsesConfiguredComposerProvider(t *testing.T) {
 	var calls atomic.Int32
 	swapOpenAITextResponder(t, func(_ context.Context, apiKey string, request openAITextRequest) (string, error) {
 		calls.Add(1)
-		if apiKey != "configured-catch-up-key" || request.Seat != seatVoiceRecall || request.ReasoningEffort != "low" {
+		if apiKey != "configured-catch-up-key" || request.Seat != seatVoiceRecall || request.ReasoningEffort != meetingBrainReasoningEffort() {
 			t.Fatalf("apiKey=%q request=%+v", apiKey, request)
 		}
 		var input CatchUpComposerInput

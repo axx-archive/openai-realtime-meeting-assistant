@@ -1031,6 +1031,7 @@ func main() {
 	http.HandleFunc("/assistant/board/cards/", assistantBoardCardsHandler)
 	http.HandleFunc("/assistant/board/drafts/", assistantBoardDraftActionHandler)
 	http.HandleFunc("/assistant/memory", assistantMemoryHandler)
+	http.HandleFunc("/assistant/agent-mind", assistantAgentMindHandler)
 	http.HandleFunc("/assistant/files", assistantFilesHandler)
 	http.HandleFunc("/assistant/files/upload", assistantFileUploadHandler)
 	http.HandleFunc("/assistant/files/folders", assistantFileFoldersHandler)

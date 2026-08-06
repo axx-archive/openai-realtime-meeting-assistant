@@ -144,7 +144,7 @@ func (app *kanbanBoardApp) produceMeetingBrainWriteUp(ctx context.Context, apiKe
 		Seat:            seatBrain,
 		Instructions:    meetingBrainInstructions(),
 		Input:           buildMeetingBrainInput(transcripts, app.snapshotState(), app.participantSnapshotForRoom(roomID), time.Now().UTC()),
-		ReasoningEffort: "low",
+		ReasoningEffort: meetingBrainReasoningEffort(),
 		Verbosity:       "low",
 		MaxOutputTokens: brainMaxOutputTokens(len(transcripts)),
 	})

@@ -154,9 +154,9 @@ func (app *kanbanBoardApp) produceResearchSuggestions(ctx context.Context, apiKe
 		Instructions: researchSuggestionInstructions(),
 		Input:        buildResearchSuggestionInput(summaries, known, app.participantSnapshotForRoom(roomID), time.Now().UTC()),
 		// A suggestion is lighter than a board mutation, but the output is still
-		// structured JSON the parse depends on; medium buys reliable shape for a
-		// cheap, infrequent step (the board worker's A2 reasoning about effort).
-		ReasoningEffort: "medium",
+		// structured JSON the parse depends on; the shared maximum-by-default
+		// brain dial buys reliable shape for this infrequent step.
+		ReasoningEffort: meetingBrainReasoningEffort(),
 		Verbosity:       "low",
 		MaxOutputTokens: 700,
 	})

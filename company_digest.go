@@ -331,7 +331,7 @@ func (app *kanbanBoardApp) runCompanyDigestPass(ctx context.Context, apiKey stri
 		Seat:            seatCompanyDigest,
 		Instructions:    companyDigestInstructions(),
 		Input:           buildCompanyDigestInput(state, deltas, priorNarrative, now.UTC()),
-		ReasoningEffort: "low",
+		ReasoningEffort: meetingBrainReasoningEffort(),
 		Verbosity:       "low",
 		MaxOutputTokens: companyDigestMaxOutputTokens,
 	})

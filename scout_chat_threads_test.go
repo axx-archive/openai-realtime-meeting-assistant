@@ -999,10 +999,10 @@ func TestScoutChatRouterProposesToolRunNeverLaunches(t *testing.T) {
 	}
 
 	if routed.Model != defaultScoutRouterModel {
-		t.Fatalf("router model=%q, want Terra", routed.Model)
+		t.Fatalf("router model=%q, want Luna", routed.Model)
 	}
-	if routed.ReasoningEffort != "low" || routed.JSONSchema == nil {
-		t.Fatalf("router request=%+v, want low + strict schema", routed)
+	if routed.ReasoningEffort != scoutReasoningEffort() || routed.JSONSchema == nil {
+		t.Fatalf("router request=%+v, want max + strict schema", routed)
 	}
 	if !strings.Contains(routed.Instructions, "under-routes is trusted") || !strings.Contains(routed.Instructions, "over-launches is muted") {
 		t.Fatalf("router prompt missing trust asymmetry: %s", routed.Instructions)
@@ -1063,15 +1063,15 @@ func TestRouterModelDialsRefuseNonOpenAI(t *testing.T) {
 	if got := routerModel(); got != defaultRouterModel {
 		t.Fatalf("routerModel() with Anthropic slug=%q, want %s", got, defaultRouterModel)
 	}
-	if defaultRouterModel != "gpt-5.6-terra" {
-		t.Fatalf("defaultRouterModel=%q, want gpt-5.6-terra", defaultRouterModel)
+	if defaultRouterModel != "gpt-5.6-luna" {
+		t.Fatalf("defaultRouterModel=%q, want gpt-5.6-luna", defaultRouterModel)
 	}
 	t.Setenv("OPENAI_SCOUT_ROUTER_MODEL", "gpt-5.6-terra")
 	if got := routerModel(); got != "gpt-5.6-terra" {
 		t.Fatalf("routerModel() OpenAI override=%q, want gpt-5.6-terra", got)
 	}
-	if got := routerEffort(); got != "low" {
-		t.Fatalf("routerEffort()=%q, want low", got)
+	if got := routerEffort(); got != scoutReasoningEffort() {
+		t.Fatalf("routerEffort()=%q, want max", got)
 	}
 }
 

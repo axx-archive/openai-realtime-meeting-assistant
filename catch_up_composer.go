@@ -120,7 +120,7 @@ func (provider *openAICatchUpComposer) ComposeCatchUp(ctx context.Context, input
 		Workflow:        catchUpComposerWorkflow,
 		Instructions:    catchUpComposerInstructions(),
 		Input:           string(rawInput),
-		ReasoningEffort: "low",
+		ReasoningEffort: meetingBrainReasoningEffort(),
 		Verbosity:       "low",
 		MaxOutputTokens: catchUpComposerMaxOutputTokens,
 		JSONSchema:      catchUpCompositionJSONSchema(),

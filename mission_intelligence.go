@@ -200,7 +200,7 @@ func (app *kanbanBoardApp) produceMissionInsight(ctx context.Context, apiKey str
 		Seat:            seatMissionIntel,
 		Instructions:    missionIntelInstructions(),
 		Input:           contextApp.buildMissionIntelInput(inputs, time.Now().UTC()),
-		ReasoningEffort: "low",
+		ReasoningEffort: meetingBrainReasoningEffort(),
 		Verbosity:       "low",
 		MaxOutputTokens: 900,
 	})
