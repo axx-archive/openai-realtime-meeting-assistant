@@ -49716,7 +49716,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        const directAgent = scoutChatDirectAgentName(thread)
 	        return chatThreadIsChannel(thread)
-	          ? (isPhone ? 'message…' : 'message the thread')
+	          ? (isPhone ? 'message…' : 'message the channel')
 	          : (isPhone ? 'ask…' : `ask ${directAgent || 'Scout'}, or tap + to run a task`)
 	      }
 
