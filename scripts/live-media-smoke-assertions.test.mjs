@@ -112,6 +112,34 @@ test('screen-share validator accepts the sharer placeholder and requires remote 
   assert.match(blackFailures.join('\n'), /remote stage decoded only black pixels/)
 })
 
+test('screen-share strip keeps video-on people and removes camera-off duplicates', () => {
+  const snapshot = {
+    name: 'AJ',
+    screenSharing: true,
+    activeScreenShareParticipant: 'Tyler',
+    roomLayout: 'screen-share',
+    screenStageLocalShare: false,
+    screenStagePlaceholder: hiddenRect,
+    screenStageVideo: renderedVideo,
+    screenStageFramePixels: colorfulScreenSharePixels,
+    screenShareStripTiles: [
+      { participant: 'Tyler', classes: 'video-tile is-sharing-screen', rect: hiddenRect },
+      { participant: 'AJ', classes: 'video-tile is-camera-off is-audio-only-presence', rect: hiddenRect },
+      { participant: 'Caitlyn', classes: 'video-tile is-camera-off is-audio-only-presence', rect: hiddenRect },
+      { participant: 'Joel', classes: 'video-tile', rect: visibleRect }
+    ]
+  }
+  assert.deepEqual(validateScreenShareSnapshot(snapshot, 'Tyler', ['Tyler', 'AJ', 'Caitlyn', 'Joel']), [])
+
+  const duplicateFailures = validateScreenShareSnapshot({
+    ...snapshot,
+    screenShareStripTiles: snapshot.screenShareStripTiles.map(tile => tile.participant === 'Caitlyn'
+      ? { ...tile, rect: visibleRect }
+      : tile)
+  }, 'Tyler', ['Tyler', 'AJ', 'Caitlyn', 'Joel'])
+  assert.match(duplicateFailures.join('\n'), /camera-off participant Caitlyn still occupies a video tile/)
+})
+
 test('mobile pinned mode keeps canonical hero and strip while desktop stays single-stage', () => {
   const heroRect = { clientRects: 1, rect: { top: 0, right: 366, bottom: 484, left: 0, width: 366, height: 484 } }
   const stripRect = { clientRects: 1, rect: { top: 492, right: 104, bottom: 596, left: 0, width: 104, height: 104 } }

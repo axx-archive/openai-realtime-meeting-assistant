@@ -3509,6 +3509,7 @@ func logClientMediaQualityReport(rawData string, participantName string, session
 	video := mapFromPayload(payload, "video")
 	remote := mapFromPayload(payload, "remote")
 	render := mapFromPayload(payload, "render")
+	joinTiming := mapFromPayload(payload, "joinTiming")
 	stats := mapFromPayload(payload, "stats")
 	deltas := mapFromPayload(payload, "deltas")
 	viewport := mapFromPayload(browser, "viewport")
@@ -3518,8 +3519,26 @@ func logClientMediaQualityReport(rawData string, participantName string, session
 	voiceFocusMetrics := mapFromPayload(audio, "voiceFocusMetrics")
 	videoSettings := mapFromPayload(video, "settings")
 	remoteAudioPlaybackPaths := mapFromPayload(remote, "remoteAudioPlaybackPaths")
+	joinTimingLog := ""
+	if mode := stringFromPayload(joinTiming, "mode"); mode != "" {
+		joinTimingLog = fmt.Sprintf(
+			" joinMode=%s joinPresenceLookupMs=%d joinPresenceDecisionMs=%d joinHumanDecisionMs=%d joinDialogCloseMs=%d joinMediaAcquireMs=%d joinMediaReused=%v joinWSDialOpenMs=%d joinWSOpenGrantMs=%d joinGrantReadyMs=%d joinAutomaticMs=%d joinTotalMs=%d",
+			mode,
+			int(floatFromPayload(joinTiming, "freshPresenceLookupMs")),
+			int(floatFromPayload(joinTiming, "freshPresenceDecisionMs")),
+			int(floatFromPayload(joinTiming, "humanDecisionMs")),
+			int(floatFromPayload(joinTiming, "transferDialogCloseMs")),
+			int(floatFromPayload(joinTiming, "localMediaAcquisitionMs")),
+			boolFromPayload(joinTiming, "localMediaReused"),
+			int(floatFromPayload(joinTiming, "websocketDialToOpenMs")),
+			int(floatFromPayload(joinTiming, "websocketOpenToAccessGrantedMs")),
+			int(floatFromPayload(joinTiming, "accessGrantedToRoomReadyMs")),
+			int(floatFromPayload(joinTiming, "totalAutomaticJoinMs")),
+			int(floatFromPayload(joinTiming, "totalElapsedMs")),
+		)
+	}
 	fmt.Printf(
-		"Client media quality participant=%q session=%s platform=%s clientVersion=%s safari=%v laggy=%v viewport=%dx%d visual=%dx%d orientation=%s/%d mobile=%v roomLayout=%s stageMode=%s boardExpanded=%v screenShare=%s attachmentRevision=%d auxTargets=%d constrained=%v audioMode=%s audioProfile=%s voiceFocus=%v processor=%s workletHealth=%s rnnoiseReady=%v sampleRate=%d frameSize=%d vfGain=%.3f vfSuppressionDb=%.1f vfBias=%.4f vfSpeech=%.2f localAudio=%s/%v localVideo=%s/%v cameraDeviceType=%s centerStageSupported=%v centerStageEnabled=%v centerStageActive=%v wideUprightSupported=%v wideUprightEnabled=%v framingDynamic=%dx%d framingReason=%s wideUprightReason=%s centerStageReason=%s webRTCCameraGuard=%v/%d/%s outAudioKbps=%.0f outVideoKbps=%.0f outAudioPackets=%d outVideoFrames=%d outVideo=%dx%d outVideoFps=%.1f targetVideoKbps=%.0f videoLimit=%s rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f inboundVideoLossPct=%.1f inboundAudioLossPct=%.1f localCandidate=%s remoteCandidate=%s protocol=%s network=%s remoteVideo=%d remoteAudio=%d remoteAudioLevel=%.5f remoteAudible=%d playbackElement=%d playbackWebAudio=%d playbackNone=%d audioCtx=%s missingVideo=%d missingAudio=%d duplicateVideo=%d duplicateAudio=%d placeholderVideo=%d placeholderAudio=%d stalledVideo=%d pendingAudio=%d\n",
+		"Client media quality participant=%q session=%s platform=%s clientVersion=%s safari=%v laggy=%v viewport=%dx%d visual=%dx%d orientation=%s/%d mobile=%v roomLayout=%s stageMode=%s boardExpanded=%v screenShare=%s attachmentRevision=%d auxTargets=%d constrained=%v audioMode=%s audioProfile=%s voiceFocus=%v processor=%s workletHealth=%s rnnoiseReady=%v sampleRate=%d frameSize=%d vfGain=%.3f vfSuppressionDb=%.1f vfBias=%.4f vfSpeech=%.2f localAudio=%s/%v localVideo=%s/%v cameraDeviceType=%s centerStageSupported=%v centerStageEnabled=%v centerStageActive=%v wideUprightSupported=%v wideUprightEnabled=%v framingDynamic=%dx%d framingReason=%s wideUprightReason=%s centerStageReason=%s webRTCCameraGuard=%v/%d/%s outAudioKbps=%.0f outVideoKbps=%.0f outAudioPackets=%d outVideoFrames=%d outVideo=%dx%d outVideoFps=%.1f targetVideoKbps=%.0f videoLimit=%s rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f inboundVideoLossPct=%.1f inboundAudioLossPct=%.1f localCandidate=%s remoteCandidate=%s protocol=%s network=%s remoteVideo=%d remoteAudio=%d remoteAudioLevel=%.5f remoteAudible=%d playbackElement=%d playbackWebAudio=%d playbackNone=%d audioCtx=%s missingVideo=%d missingAudio=%d duplicateVideo=%d duplicateAudio=%d placeholderVideo=%d placeholderAudio=%d stalledVideo=%d pendingAudio=%d%s\n",
 		participantName,
 		sessionID,
 		stringFromPayload(client, "platform"),
@@ -3604,6 +3623,7 @@ func logClientMediaQualityReport(rawData string, participantName string, session
 		int(floatFromPayload(remote, "placeholderAudioMonitors")),
 		arrayLenFromPayload(remote, "stalledVideoNames"),
 		int(floatFromPayload(remote, "audiblePendingRemotePlayback")),
+		joinTimingLog,
 	)
 }
 

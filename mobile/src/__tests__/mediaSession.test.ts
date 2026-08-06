@@ -143,13 +143,18 @@ test('iOS room audio forces built-in speaker while preserving external routes', 
   assert.match(room, /drainNativeRoomMediaTeardown\([\s\S]*deactivateVideoMeeting\(generation\)/);
 });
 
-test('multi-participant room composition renders one equal-sized self view', () => {
+test('multi-participant room composition renders one self view only while it has video', () => {
   const room = fs.readFileSync(
     path.join(mobileRoot, 'src', 'screens', 'RoomScreen.tsx'),
     'utf8',
   );
 
-  assert.match(room, /callParticipants\.length === 1 \? \([\s\S]*<LocalPreview/);
+  assert.match(
+    room,
+    /presentedParticipants\.length === 1[\s\S]*hasLocalVideo && !nativeRoom\.state\.cameraOff[\s\S]*<LocalPreview/,
+  );
+  assert.match(room, /localScreenSharing \|\| localVideoVisible \? \([\s\S]*<LocalPreview/);
+  assert.match(room, /videoStageParticipants\(callParticipants\)/);
   assert.doesNotMatch(room, /callParticipants\.length > 0 && callParticipants\.length < 4/);
   assert.match(room, /style=\{\[styles\.participantStripTile, landscape && styles\.participantStripTileLandscape\]\}/);
   assert.match(room, /fit=\{stageIsScreenShare \? 'contain' : 'cover'\}/);

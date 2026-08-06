@@ -28,6 +28,19 @@ export type PresentedVideoParticipant = PinnableVideoParticipant & {
   videoOff: boolean;
 };
 
+/**
+ * The call stage is a media surface, not a second copy of the People roster.
+ * Keep camera-off and temporarily unavailable participants in the authoritative
+ * presentation list so pins, endpoint handoff, audio presence, and the People
+ * sheet retain their identity, but only give an RTC stage slot to a feed that
+ * can actually render frames.
+ */
+export function videoStageParticipants<T extends PinnableVideoParticipant>(
+  participants: readonly T[],
+): T[] {
+  return participants.filter((participant) => Boolean(participant.streamURL));
+}
+
 export function participantVideoAccessibilityStatus(
   participant: Pick<PresentedVideoParticipant, 'screenSharing' | 'streamURL' | 'videoOff'>,
 ): 'screen sharing' | 'video off' | 'video on' | 'video unavailable' {

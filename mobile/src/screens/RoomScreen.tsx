@@ -50,6 +50,7 @@ import {
   presentRemoteParticipantDevices,
   presentRemoteVideoParticipants,
   type PresentedVideoParticipant,
+  videoStageParticipants,
 } from '../realtime/callPresentation';
 import { normalizedParticipantName } from '../realtime/participantMedia';
 import type { RootStackParamList } from '../navigation/types';
@@ -424,6 +425,7 @@ const CallControl = memo(function CallControl({
 
 type CallLayoutProps = {
   participants: CallParticipant[];
+  audioParticipantCount: number;
   pinnedParticipantKey: string | null;
   pictureInPictureParticipantKey: string | null;
   localName: string;
@@ -445,6 +447,7 @@ type CallLayoutProps = {
 
 const CallLayout = memo(function CallLayout({
   participants,
+  audioParticipantCount,
   pinnedParticipantKey,
   pictureInPictureParticipantKey,
   localName,
@@ -512,7 +515,23 @@ const CallLayout = memo(function CallLayout({
   ), [landscape, onSelectParticipant, pictureInPictureParticipantKey, pinnedParticipantKey]);
 
   if (remoteCount === 0) {
-    return <CallVideoTile key={localParticipant.key} fit={localScreenSharing ? 'contain' : 'cover'} mirror={!localScreenSharing} participant={localParticipant} style={styles.oneUpTile} />;
+    if (localParticipant.streamURL) {
+      return <CallVideoTile key={localParticipant.key} fit={localScreenSharing ? 'contain' : 'cover'} mirror={!localScreenSharing} participant={localParticipant} style={styles.oneUpTile} />;
+    }
+    return (
+      <View
+        accessible
+        accessibilityLabel={`Audio-only room, ${audioParticipantCount} ${audioParticipantCount === 1 ? 'participant' : 'participants'}. No participant video is on.`}
+        accessibilityRole="summary"
+        style={styles.audioOnlyStage}
+      >
+        <View style={styles.audioOnlyMark}>
+          <SymbolView name="waveform" tintColor="rgba(255,255,255,0.72)" size={28} />
+        </View>
+        <Text style={styles.audioOnlyTitle}>Audio only</Text>
+        <Text style={styles.audioOnlyCopy}>{audioParticipantCount} here · cameras are off</Text>
+      </View>
+    );
   }
 
   if (remoteCount === 1) {
@@ -563,18 +582,20 @@ const CallLayout = memo(function CallLayout({
         />
       </View>
       <View style={[styles.participantRail, landscape && styles.participantRailLandscape]}>
-        <LocalPreview
-          cameraOff={localCameraOff}
-          framingRevision={localCameraFramingRevision}
-          inline
-          name={localName}
-          onSwitchCamera={onSwitchCamera}
-          screenSharing={localScreenSharing}
-          streamURL={localScreenSharing ? localScreenShareURL : localStreamURL}
-          style={[styles.participantStripTile, landscape && styles.participantStripTileLandscape]}
-          suspended={localVideoSuspended}
-          videoTrackId={localScreenSharing ? localScreenShareTrackId : localVideoTrackId}
-        />
+        {localScreenSharing || localVideoVisible ? (
+          <LocalPreview
+            cameraOff={localCameraOff}
+            framingRevision={localCameraFramingRevision}
+            inline
+            name={localName}
+            onSwitchCamera={onSwitchCamera}
+            screenSharing={localScreenSharing}
+            streamURL={localScreenSharing ? localScreenShareURL : localStreamURL}
+            style={[styles.participantStripTile, landscape && styles.participantStripTileLandscape]}
+            suspended={localVideoSuspended}
+            videoTrackId={localScreenSharing ? localScreenShareTrackId : localVideoTrackId}
+          />
+        ) : null}
         <FlatList
           contentContainerStyle={[styles.participantStripContent, landscape && styles.participantStripContentLandscape]}
           data={participants.slice(1)}
@@ -845,10 +866,14 @@ export function RoomScreen({ route, navigation }: Props) {
   ]);
   const focusedParticipant = focusedVideoParticipant(callParticipants, pinnedParticipantKey);
   const presentedParticipants = useMemo(() => {
-    if (!focusedParticipant) return callParticipants;
+    const stageParticipants = videoStageParticipants(callParticipants);
+    const stageFocus = focusedParticipant?.streamURL
+      ? focusedParticipant
+      : focusedVideoParticipant(stageParticipants, null);
+    if (!stageFocus) return stageParticipants;
     return [
-      focusedParticipant,
-      ...callParticipants.filter((participant) => participant.key !== focusedParticipant.key),
+      stageFocus,
+      ...stageParticipants.filter((participant) => participant.key !== stageFocus.key),
     ];
   }, [callParticipants, focusedParticipant]);
   const pictureInPictureParticipantKey = useMemo(
@@ -1285,6 +1310,7 @@ export function RoomScreen({ route, navigation }: Props) {
           {hasVisibleCallVideo ? <LiveVideoWakeLock /> : null}
           <CallLayout
             agentBenchVisible={nativeRoom.state.agentParticipants.length > 0}
+            audioParticipantCount={liveParticipantCount}
             bottomInset={bottomInset}
             landscape={window.width > window.height}
             localCameraOff={nativeRoom.state.cameraOff}
@@ -1345,7 +1371,8 @@ export function RoomScreen({ route, navigation }: Props) {
               remote participants are present. Keep the floating preview only
               for the one-remote layout so the local camera is never rendered
               twice as two separate "You" tiles. */}
-          {callParticipants.length === 1 ? (
+          {presentedParticipants.length === 1
+            && (nativeRoom.state.screenSharing || (hasLocalVideo && !nativeRoom.state.cameraOff)) ? (
             <LocalPreview
               bottom={bottomInset + 96 + (nativeRoom.state.agentParticipants.length > 0 ? 70 : 0)}
               cameraOff={nativeRoom.state.cameraOff}
@@ -1551,6 +1578,26 @@ const styles = StyleSheet.create({
   callVideoTilePressed: { opacity: 0.9, transform: [{ scale: 0.99 }] },
   callVideo: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: ink[900] },
   oneUpTile: { flex: 1, borderRadius: 0 },
+  audioOnlyStage: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space[2],
+    backgroundColor: ink[900],
+  },
+  audioOnlyMark: {
+    width: 68,
+    height: 68,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: space[2],
+    borderRadius: 34,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.07)',
+  },
+  audioOnlyTitle: { ...type.headline, color: '#FFFFFF' },
+  audioOnlyCopy: { ...type.caption, color: 'rgba(255,255,255,0.56)' },
   oneUpStageSlot: { flex: 1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   oneUpPrimaryTile: { flex: 0, borderRadius: 0 },
   videoPlaceholder: {

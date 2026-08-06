@@ -1759,9 +1759,12 @@
 
       /* Camera-off people remain audible in the room presence bar; their
          parked media element stays mounted for instant camera recovery but
-         never consumes a black gallery seat. */
+         never consumes a black gallery seat. This is a display invariant:
+         later grid, pinned, screen-share, and mobile layout rules all assign
+         display values to canonical seats, so this narrow state must win the
+         cascade while the element remains mounted. */
       .video-tile.is-audio-only-presence {
-        display: none;
+        display: none !important;
       }
 
       .tile-avatar .owner-avatar {
@@ -30435,6 +30438,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
       let roomTransferDecisionResolve = null
       let roomTransferRestoreFocusEl = null
       let roomTransferCloseTimer = 0
+      // One bounded diagnostic record follows an explicit device transfer from
+      // the fresh presence check through the first in-room quality report. It
+      // never changes admission and is consumed after one successful send.
+      let activeRoomJoinTiming = null
+      let pendingRoomJoinTimingReport = null
       let screenShareStream
       let screenShareStartInFlight = false
       let isReplacingLocalAudio = false
@@ -30928,6 +30936,64 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // single-slot behaviour.
       const endpointIdStorageKey = 'bonfire.endpoint.id.v1'
       let cachedEndpointId = ''
+
+      function roomJoinTimingNow() {
+        return typeof performance !== 'undefined' && typeof performance.now === 'function'
+          ? performance.now()
+          : Date.now()
+      }
+
+      function roomJoinTimingDuration(startedAt, endedAt) {
+        if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt) || endedAt < startedAt) {
+          return 0
+        }
+        // A tab can remain parked at the human decision dialog indefinitely.
+        // Bound every emitted value to one day so a single report stays sane.
+        return Math.min(24 * 60 * 60 * 1000, Math.round(endedAt - startedAt))
+      }
+
+      function beginRoomJoinTiming() {
+        pendingRoomJoinTimingReport = null
+        activeRoomJoinTiming = {
+          schema: 'room_join_timing_v1',
+          startedAt: roomJoinTimingNow(),
+          startedAtISO: new Date().toISOString(),
+          explicitTransfer: false
+        }
+      }
+
+      function discardRoomJoinTiming() {
+        activeRoomJoinTiming = null
+      }
+
+      function completeRoomJoinTiming() {
+        const timing = activeRoomJoinTiming
+        if (!timing?.explicitTransfer) {
+          activeRoomJoinTiming = null
+          return
+        }
+        const roomReadyAt = roomJoinTimingNow()
+        const totalElapsedMs = roomJoinTimingDuration(timing.startedAt, roomReadyAt)
+        const humanDecisionMs = roomJoinTimingDuration(timing.transferDialogOpenedAt, timing.transferDecisionAt)
+        pendingRoomJoinTimingReport = {
+          schema: timing.schema,
+          mode: 'explicit_transfer',
+          startedAt: timing.startedAtISO,
+          freshPresenceLookupMs: roomJoinTimingDuration(timing.freshPresenceLookupStartedAt, timing.freshPresenceLookupEndedAt),
+          freshPresenceDecisionMs: roomJoinTimingDuration(timing.freshPresenceDecisionStartedAt, timing.freshPresenceDecisionEndedAt),
+          humanDecisionMs,
+          transferDialogCloseMs: roomJoinTimingDuration(timing.transferDialogCloseStartedAt, timing.transferDialogClosedAt),
+          localMediaAcquisitionMs: roomJoinTimingDuration(timing.localMediaStartedAt, timing.localMediaEndedAt),
+          localMediaReused: Boolean(timing.localMediaReused),
+          websocketDialToOpenMs: roomJoinTimingDuration(timing.websocketDialStartedAt, timing.websocketOpenedAt),
+          websocketOpenToAccessGrantedMs: roomJoinTimingDuration(timing.websocketOpenedAt, timing.accessGrantedAt),
+          accessGrantedToRoomReadyMs: roomJoinTimingDuration(timing.accessGrantedAt, roomReadyAt),
+          totalAutomaticJoinMs: Math.max(0, totalElapsedMs - humanDecisionMs),
+          totalElapsedMs
+        }
+        activeRoomJoinTiming = null
+      }
+
       function ensureEndpointId() {
         if (cachedEndpointId) {
           return cachedEndpointId
@@ -34579,17 +34645,33 @@ Wrap the entire export in one code block. After the code block, say whether the 
           return 'keep'
         }
         try {
+          if (activeRoomJoinTiming) {
+            activeRoomJoinTiming.freshPresenceLookupStartedAt = roomJoinTimingNow()
+          }
           const payload = await fetchSelectedRoomSnapshot()
+          if (activeRoomJoinTiming) {
+            activeRoomJoinTiming.freshPresenceLookupEndedAt = roomJoinTimingNow()
+            activeRoomJoinTiming.freshPresenceDecisionStartedAt = roomJoinTimingNow()
+          }
           if (!payload) {
+            if (activeRoomJoinTiming) {
+              activeRoomJoinTiming.freshPresenceDecisionEndedAt = roomJoinTimingNow()
+            }
             return 'keep'
           }
           participantPreview = applyRoomSnapshot(payload)
           updateParticipantPreviewText()
           const participantName = participantNameFromAccount(authedUser)
           if (!roomSnapshotHasOtherAccountEndpoint(payload, participantName, ensureEndpointId())) {
+            if (activeRoomJoinTiming) {
+              activeRoomJoinTiming.freshPresenceDecisionEndedAt = roomJoinTimingNow()
+            }
             return 'keep'
           }
           const roomName = String(activeJoinRoomRecord()?.name || '').trim() || 'this room'
+          if (activeRoomJoinTiming) {
+            activeRoomJoinTiming.freshPresenceDecisionEndedAt = roomJoinTimingNow()
+          }
           return promptRoomTransferDecision(roomName)
         } catch {
           // Presence is advisory UX, not an admission dependency. A transient
@@ -34610,6 +34692,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
         roomTransferRoomName.textContent = String(roomName || '').trim() || 'this room'
         roomTransferDialog.classList.remove('is-open', 'is-leaving')
         roomTransferDialog.hidden = false
+        if (activeRoomJoinTiming) {
+          activeRoomJoinTiming.transferDialogOpenedAt = roomJoinTimingNow()
+        }
         const decision = new Promise(resolve => {
           roomTransferDecisionResolve = resolve
         })
@@ -34628,6 +34713,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
         const resolve = roomTransferDecisionResolve
         roomTransferDecisionResolve = null
+        if (activeRoomJoinTiming) {
+          activeRoomJoinTiming.transferDecisionAt = roomJoinTimingNow()
+          activeRoomJoinTiming.transferDialogCloseStartedAt = activeRoomJoinTiming.transferDecisionAt
+        }
         roomTransferDialog.classList.add('is-leaving')
         roomTransferDialog.classList.remove('is-open')
         const delay = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 220
@@ -34635,6 +34724,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
           roomTransferCloseTimer = 0
           roomTransferDialog.hidden = true
           roomTransferDialog.classList.remove('is-leaving')
+          if (activeRoomJoinTiming) {
+            activeRoomJoinTiming.transferDialogClosedAt = roomJoinTimingNow()
+          }
           if (decision === 'cancel') {
             roomTransferRestoreFocusEl?.focus?.()
           }
@@ -41739,6 +41831,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           setLog('joining the room…')
           return
         }
+        beginRoomJoinTiming()
         const voiceOnly = Boolean(options.voiceOnly)
         // A room join must park a local dictated clip. It must never upload or
         // discard it merely because meeting media won foreground focus.
@@ -41755,6 +41848,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         if (await joinBlockedByStaleBuild()) {
           // the intent is parked and the tab reloads — seat on fresh JS instead
           setRoomEntryInProgress(false)
+          discardRoomJoinTiming()
           syncOSAssistantAvailability()
           return
         }
@@ -41767,6 +41861,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         if (!validateAccess()) {
           setLog('choose your name and enter your password')
           setRoomEntryInProgress(false)
+          discardRoomJoinTiming()
           syncOSAssistantAvailability()
           if (voiceOnly) {
             setRealtimeVoiceMode('idle')
@@ -41809,6 +41904,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             accessHint.textContent = error.message || 'sign-in failed.'
             setLog(error.message || 'sign-in failed')
             setRoomEntryInProgress(false)
+            discardRoomJoinTiming()
             syncOSAssistantAvailability()
             if (voiceOnly) {
               setRealtimeVoiceMode('idle')
@@ -41827,6 +41923,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         if (deviceJoinDecision === 'cancel') {
           setConnectionState('idle', 'not connected')
           setRoomEntryInProgress(false)
+          discardRoomJoinTiming()
           syncOSAssistantAvailability()
           joinButton.disabled = false
           joinAccessButton.disabled = false
@@ -41841,6 +41938,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
           return
         }
         const transferExisting = deviceJoinDecision === 'transfer'
+        if (activeRoomJoinTiming) {
+          activeRoomJoinTiming.explicitTransfer = transferExisting
+        }
+        if (!transferExisting) {
+          discardRoomJoinTiming()
+        }
 
         // the server forces the "Guest " prefix + dedupe suffix at admission;
         // this local guess is corrected by the access_granted seat name
@@ -41856,6 +41959,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // is only taken after media resolves. The green-room preview releases
         // first so it never fights the join for the device.
         stopGreenRoomPreview()
+        if (activeRoomJoinTiming) {
+          activeRoomJoinTiming.localMediaStartedAt = roomJoinTimingNow()
+          activeRoomJoinTiming.localMediaReused = Boolean(localStream?.getTracks?.().some(liveTrack))
+        }
         if (!localStream?.getTracks?.().some(liveTrack)) {
           setLog(voiceOnly ? 'requesting microphone' : 'requesting camera and microphone')
           let captureStream
@@ -41869,6 +41976,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
             failRoomEntryForMedia(error, { voiceOnly })
             return
           }
+        }
+        if (activeRoomJoinTiming) {
+          activeRoomJoinTiming.localMediaEndedAt = roomJoinTimingNow()
         }
         // Pre-join AV intent — read AFTER media resolves, applied through
         // the real mute machinery so the meeting bar reflects it. Tracks are
@@ -41928,6 +42038,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const message = "couldn't reach your camera or microphone — check permissions and try again."
         console.warn('Join media acquisition failed', error)
         reportClientMediaError('join_media_acquire', error)
+        discardRoomJoinTiming()
         setConnectionState('idle', 'not connected')
         roomEntryMediaFailed = true
         setRoomEntryInProgress(false)
@@ -41972,6 +42083,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // prompt. Every signaling reconnect intentionally recomputes this as
         // false, so recovering transport can never evict a newly joined device.
         const initialTransferExisting = !reconnect && options.transferExisting === true
+        if (initialTransferExisting && activeRoomJoinTiming) {
+          activeRoomJoinTiming.websocketDialStartedAt = roomJoinTimingNow()
+        }
         const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
         // the room identity rides the dial; a reconnect re-dials the SAME room.
         // A guest tab dials as=guest so the server seats it on its GUEST
@@ -41989,6 +42103,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
           socket.__everOpened = true
           if (ws !== socket) {
             return
+          }
+          if (initialTransferExisting && activeRoomJoinTiming) {
+            activeRoomJoinTiming.websocketOpenedAt = roomJoinTimingNow()
           }
           accessState.textContent = reconnect ? 'restoring' : 'checking'
           accessHint.textContent = reconnect ? 'restoring room connection.' : 'checking room access.'
@@ -43384,6 +43501,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           return
         }
         lastMediaQualityReportAt = now
+        const joinTiming = pendingRoomJoinTimingReport
         const payload = {
           sentAt: new Date().toISOString(),
           laggy: Boolean(laggy),
@@ -43418,6 +43536,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           },
           remote: remoteHealth,
           render: renderMediaDiagnosticsSnapshot(remoteHealth),
+          joinTiming: joinTiming || undefined,
           stats: snapshot,
           deltas: mediaQualityDelta(snapshot, previous)
         }
@@ -43426,6 +43545,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
             event: 'media_quality',
             data: JSON.stringify(payload)
           }))
+          if (joinTiming && pendingRoomJoinTimingReport === joinTiming) {
+            pendingRoomJoinTimingReport = null
+          }
         } catch (error) {
           console.warn('Could not publish media quality report', error)
         }
@@ -48675,6 +48797,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // seat-duel breaker stamp: a close arriving within seconds of this
         // grant counts as a replace-eviction, not a network blip
         roomSessionGrantedAt = Date.now()
+        if (!reconnectingSignal && activeRoomJoinTiming?.explicitTransfer) {
+          activeRoomJoinTiming.accessGrantedAt = roomJoinTimingNow()
+        }
         if (!guestMode) {
           // guest seat names never pollute the member identity cache
           saveCachedIdentity(name)
@@ -48695,6 +48820,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         try {
           await beginMediaSession({ voiceOnly, reuseLocalMedia: reconnectingSignal })
           setRoomView(true)
+          if (!reconnectingSignal) {
+            completeRoomJoinTiming()
+          }
           consentToggleButton.hidden = !guestMode
           consentToggleButton.disabled = !guestMode
           loadConsentStatus({ openIfMissing: guestMode && !reconnectingSignal })
@@ -48727,6 +48855,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           addAssistantMessage({ kind: 'error', text: message })
           setLog(message)
           setRoomEntryInProgress(false)
+          discardRoomJoinTiming()
           syncOSAssistantAvailability()
           if (roomRealtimeVoiceActive() || voiceOnly) {
             setRealtimeVoiceMode('idle')

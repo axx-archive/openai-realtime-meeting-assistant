@@ -358,8 +358,16 @@ export function validateScreenShareSnapshot(snapshot, sharerName, expectedNames 
     }
   }
 
-  const visibleStripTiles = snapshot.screenShareStripTiles.filter(tile => rectProbeVisible(tile.rect))
-  const expectedStripNames = expectedNames.filter(name => name && name !== sharerName)
+  const stripTiles = Array.isArray(snapshot.screenShareStripTiles) ? snapshot.screenShareStripTiles : []
+  const audioPresenceTiles = stripTiles.filter(tile => classNames(tile.classes).includes('is-audio-only-presence'))
+  for (const tile of audioPresenceTiles) {
+    if (rectProbeVisible(tile.rect)) {
+      failures.push(`${prefix} camera-off participant ${tile.participant || 'unknown'} still occupies a video tile`)
+    }
+  }
+  const audioPresenceNames = new Set(audioPresenceTiles.map(tile => tile.participant).filter(Boolean))
+  const visibleStripTiles = stripTiles.filter(tile => rectProbeVisible(tile.rect))
+  const expectedStripNames = expectedNames.filter(name => name && name !== sharerName && !audioPresenceNames.has(name))
   if (visibleStripTiles.length !== expectedStripNames.length) {
     failures.push(`${prefix} participant strip has ${visibleStripTiles.length} visible tiles, expected ${expectedStripNames.length}`)
   }

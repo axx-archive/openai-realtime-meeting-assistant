@@ -8,6 +8,7 @@ import {
   presentRemoteParticipantDevices,
   presentRemoteVideoParticipants,
   remoteVideoPresentationKey,
+  videoStageParticipants,
 } from '../realtime/callPresentation';
 import {
   parseParticipantMediaStates,
@@ -279,5 +280,56 @@ describe('native participant presentation', () => {
     assert.equal(devices[1]?.micMuted, true);
     assert.equal(devices[1]?.videoOff, true);
     assert.equal(devices[1]?.streamURL, undefined);
+  });
+
+  it('keeps camera-off identities and pins without assigning them empty video-stage slots', () => {
+    const participants = presentRemoteVideoParticipants({
+      activeSpeaker: 'Caitlyn',
+      feeds: [
+        {
+          trackId: 'tyler-screen',
+          participant: 'Tyler',
+          endpointId: 'tyler-desktop',
+          streamURL: 'stream://screen',
+        },
+        {
+          trackId: 'caitlyn-camera',
+          participant: 'Caitlyn',
+          endpointId: 'caitlyn-phone',
+          streamURL: 'stream://camera',
+        },
+      ],
+      localNames: ['AJ'],
+      mediaStates: {
+        tyler: { micMuted: false, cameraOff: true, screenSharing: true },
+        caitlyn: { micMuted: true, cameraOff: true, screenSharing: false },
+      },
+      endpointMediaStates: {
+        tyler: {
+          'tyler-desktop': { micMuted: false, cameraOff: true, screenSharing: true },
+        },
+        caitlyn: {
+          'caitlyn-phone': { micMuted: true, cameraOff: true, screenSharing: false },
+        },
+      },
+      roster: ['AJ', 'Tyler', 'Caitlyn'],
+    });
+    const caitlyn = participants.find((participant) => participant.name === 'Caitlyn');
+    const pinnedKey = caitlyn?.key ?? null;
+
+    assert.equal(participants.length, 2, 'the authoritative roster keeps both people');
+    assert.equal(caitlyn?.videoOff, true);
+    assert.equal(pinnedVideoParticipantIsStale(pinnedKey, participants), false);
+    assert.deepEqual(
+      videoStageParticipants(participants).map((participant) => participant.name),
+      ['Tyler'],
+      'only the live screen share receives a video tile',
+    );
+
+    const restored = participants.map((participant) => participant.key === pinnedKey
+      ? { ...participant, streamURL: 'stream://restored-camera', videoOff: false }
+      : participant);
+    assert.equal(videoStageParticipants(restored).some((participant) => participant.key === pinnedKey), true);
+    assert.equal(focusedVideoParticipant(restored, pinnedKey)?.key, pinnedKey);
   });
 });

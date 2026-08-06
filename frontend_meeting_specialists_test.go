@@ -121,6 +121,46 @@ func TestFrontendProjectsAgentsAndCameraOffHumansIntoAudioPresenceBar(t *testing
 	}
 }
 
+func TestFrontendAudioPresenceAlwaysWinsParticipantTileLayoutCascade(t *testing.T) {
+	source, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(source)
+	selector := `.video-tile.is-audio-only-presence {`
+	start := strings.Index(html, selector)
+	if start == -1 {
+		t.Fatalf("missing %q CSS rule", selector)
+	}
+	block := html[start:]
+	if end := strings.Index(block, "}"); end != -1 {
+		block = block[:end]
+	}
+	if !strings.Contains(block, "display: none !important") {
+		t.Fatal("audio-only participant tiles must win later grid, pinned, screen-share, and mobile display rules")
+	}
+
+	for _, laterDisplayRule := range []string{
+		`.hearth-stage[data-room-layout="pinned"] .hearth-seat.is-on-stage {`,
+		`#appShell.is-in-room[data-tool="room"] .presentation-tile.is-screen-sharing .hearth-seat {`,
+	} {
+		if later := strings.LastIndex(html, laterDisplayRule); later <= start {
+			t.Fatalf("test precondition failed: expected later participant layout rule %q", laterDisplayRule)
+		}
+	}
+
+	for _, behavior := range []string{
+		`return Boolean(state.cameraOff && !state.screenSharing)`,
+		`tile.hidden = audioOnly`,
+		`tile.classList.toggle('is-audio-only-presence', audioOnly)`,
+		`member.setAttribute('aria-label'`,
+	} {
+		if !strings.Contains(html, behavior) {
+			t.Fatalf("audio-presence projection is missing %q", behavior)
+		}
+	}
+}
+
 func TestFrontendDeclaresMeetingSpecialistBusyGuardBeforeBootstrapProjection(t *testing.T) {
 	source, err := os.ReadFile("index.html")
 	if err != nil {
