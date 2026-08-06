@@ -19,9 +19,10 @@ func TestFrontendAgentTeamReachesAuthenticatedFencedProductLifecycles(t *testing
 		`/api/stride/v1/roster`,
 		`/api/stride/v1/marketplace`,
 		`/api/stride/v1/work`,
-		`Start preview`,
-		`'reviewed preview'`,
-		`Hire with approval`,
+		`profiles are read-only`,
+		`Best used for`,
+		`usageGuidance`,
+		`const teamListings = strideMarketplaceRecords.filter`,
 		`IDs are transport identifiers, not display copy`,
 		`const id = String(`,
 		`function scoutChatDirectAgentName(thread)`,
@@ -36,6 +37,20 @@ func TestFrontendAgentTeamReachesAuthenticatedFencedProductLifecycles(t *testing
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("agent team surface is missing %q", want)
+		}
+	}
+	cardStart := strings.Index(html, "function strideAgentCard(record, kind)")
+	if cardStart < 0 {
+		t.Fatal("could not isolate member-facing agent card")
+	}
+	cardEnd := strings.Index(html[cardStart:], "function strideList(value)")
+	if cardEnd < 0 {
+		t.Fatal("could not isolate member-facing agent card")
+	}
+	card := html[cardStart : cardStart+cardEnd]
+	for _, forbidden := range []string{`Start preview`, `Hire with approval`, `Create private agent`} {
+		if strings.Contains(card, forbidden) {
+			t.Fatalf("member-facing team surface retained workforce control %q", forbidden)
 		}
 	}
 	for _, forbidden := range []string{
@@ -72,7 +87,7 @@ func TestFrontendAgentTeamUsesTextNodesForRuntimeRecords(t *testing.T) {
 	}
 }
 
-func TestFrontendAgentTeamSurfacesRichProfilesAndHumanControlledLifecycle(t *testing.T) {
+func TestFrontendAgentTeamSurfacesRichReadOnlyProfiles(t *testing.T) {
 	source, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatal(err)
@@ -81,71 +96,48 @@ func TestFrontendAgentTeamSurfacesRichProfilesAndHumanControlledLifecycle(t *tes
 	for _, want := range []string{
 		`id="strideAgentDetail"`,
 		`Details`,
+		`Best used for`,
 		`Personality`,
 		`Skills`,
 		`Access`,
 		`Memory`,
 		`Sample outcomes`,
-		`Cost and package`,
+		`Identity and provenance`,
 		`Responsibilities`,
 		`Identity and authority`,
-		`Semantic diff`,
-		`Propose update`,
-		`Approve update`,
-		`Rollback`,
-		`Assign responsibility`,
-		`Record reviewed learning`,
-		`Correct`,
-		`Forget`,
-		`Clean export receipt`,
 		`Open private chat`,
-		`/updates/`,
-		`/assign`,
-		`/learning/`,
-		`/export`,
+		`future administrator surface`,
+		`strideMarketplaceCanManage = false`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("rich agent details are missing %q", want)
 		}
 	}
-	if strings.Contains(html, `/api/stride/v1/roster/${encodeURIComponent(id)}/configure`) {
-		t.Fatal("material profile changes must be proposed with a semantic diff, never applied through direct configure")
+	detailStart := strings.Index(html, "function openStrideAgentDetail(record, kind)")
+	if detailStart < 0 {
+		t.Fatal("could not isolate read-only agent detail")
+	}
+	detailEnd := strings.Index(html[detailStart:], "strideAgentDetailClose?.addEventListener")
+	if detailEnd < 0 {
+		t.Fatal("could not isolate read-only agent detail")
+	}
+	detail := html[detailStart : detailStart+detailEnd]
+	for _, forbidden := range []string{`appendStrideMarketplaceControls`, `appendStrideRosterControls`, `Propose update`, `Pause coworker`, `Offboard coworker`} {
+		if strings.Contains(detail, forbidden) {
+			t.Fatalf("read-only agent detail retained control %q", forbidden)
+		}
 	}
 }
 
-func TestFrontendPrivateAgentTemplateIsAdminGatedAndClosed(t *testing.T) {
+func TestFrontendMemberSurfaceDoesNotExposePrivateAgentAuthoring(t *testing.T) {
 	source, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatal(err)
 	}
 	html := string(source)
-	for _, want := range []string{
-		`id="stridePrivateAgentCreate"`,
-		`id="stridePrivateAgentDialog"`,
-		`strideMarketplaceCanManage = strideField(marketplacePayload, 'canManage', 'CanManage') === true`,
-		`stridePrivateAgentCreate.hidden = !strideMarketplaceCanManage`,
-		`if (!strideMarketplaceCanManage) return`,
-		`/api/stride/v1/marketplace/templates`,
-		`requestedCapabilities`,
-		`requiredAccess`,
-		`provider execution fenced`,
-	} {
-		if !strings.Contains(html, want) {
-			t.Fatalf("private agent authoring is missing %q", want)
-		}
-	}
-	start := strings.Index(html, `stridePrivateAgentForm?.addEventListener('submit'`)
-	if start < 0 {
-		t.Fatal("could not isolate the private agent request builder")
-	}
-	end := strings.Index(html[start:], `function strideWorkCard`)
-	if end < 0 {
-		t.Fatal("could not isolate the private agent request builder")
-	}
-	requestBuilder := html[start : start+end]
-	for _, forbidden := range []string{`code:`, `command:`, `hook:`, `credential:`, `environment:`, `mcp:`} {
-		if strings.Contains(strings.ToLower(requestBuilder), forbidden) {
-			t.Fatalf("private template request exposes unsafe field %q", forbidden)
+	for _, forbidden := range []string{`id="stridePrivateAgentCreate"`, `Create private agent`} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("member-facing surface exposes private agent authoring %q", forbidden)
 		}
 	}
 }

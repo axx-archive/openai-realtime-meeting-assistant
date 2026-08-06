@@ -19,7 +19,6 @@ import { api, BonfireApiError } from '../api/client';
 import type {
   StrideMarketplaceListing,
   StrideMarketplaceResponse,
-  StridePrivateAgentTemplateInput,
   StrideRosterResponse,
   StrideRuntimeStatusResponse,
   StrideTeamSeat,
@@ -59,7 +58,6 @@ export function AgentTeamScreen({ navigation }: Props) {
   const [threads, setThreads] = useState<ScoutThread[]>([]);
   const [destinationWork, setDestinationWork] = useState<StrideWorkSuggestion | null>(null);
   const [detailRecord, setDetailRecord] = useState<AgentRecord | null>(null);
-  const [templateOpen, setTemplateOpen] = useState(false);
 
   const load = useCallback(async (refresh = false) => {
     if (!sessionToken) return;
@@ -102,12 +100,24 @@ export function AgentTeamScreen({ navigation }: Props) {
   }, [busyKey, load, sessionToken]);
 
   const records = useMemo<SurfaceRecord[]>(() => {
-    if (segment === 'team') return roster?.seats ?? [];
-    if (segment === 'marketplace') return marketplace?.listings ?? [];
+    if (segment === 'team') return (roster?.seats ?? []).filter((seat) => seat.status === 'hired_fenced' && !seat.accessRevoked);
+    if (segment === 'marketplace') {
+      const hiredListingIDs = new Set((roster?.seats ?? [])
+        .filter((seat) => seat.status === 'hired_fenced' && !seat.accessRevoked)
+        .map((seat) => seat.listingId));
+      return (marketplace?.listings ?? []).filter((listing) => listing.id === 'scout' || hiredListingIDs.has(listing.id));
+    }
     return work?.suggestions ?? [];
   }, [marketplace?.listings, roster?.seats, segment, work?.suggestions]);
   const reason = segment === 'team' ? roster?.reason : segment === 'marketplace' ? marketplace?.reason : work?.reason;
   const runtimeState = words(status?.runtime?.state, error ? 'unavailable' : 'checking');
+  const sectionNote = records.length
+    ? segment === 'team'
+      ? `${records.length} active ${records.length === 1 ? 'coworker' : 'coworkers'}`
+      : segment === 'marketplace'
+        ? `${records.length} ${records.length === 1 ? 'teammate' : 'teammates'} · profiles are read-only`
+        : `${records.length} ${records.length === 1 ? 'outcome' : 'outcomes'} · each requires approval`
+    : words(reason, 'Nothing needs your attention.');
   const projectThreads = useMemo(() => threads.filter((thread) => {
     const title = words(thread.title).toLowerCase().replace(/^#/, '');
     return !thread.archived && !thread.archivedAt && thread.visibility === 'public' && thread.table !== true && title !== 'team' && title !== 'general';
@@ -117,8 +127,8 @@ export function AgentTeamScreen({ navigation }: Props) {
     <>
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>YOUR AGENT TEAM</Text>
-        <Text style={styles.title}>Coworkers with names, context, and accountable jobs.</Text>
-        <Text style={styles.intro}>Scout remains your chief-of-staff front door. People approve every hire and work outcome; provider execution stays fenced until E10.</Text>
+        <Text style={styles.title}>People you can talk to directly—and the work they’re best at.</Text>
+        <Text style={styles.intro}>Scout is the chief-of-staff front door. Every specialist here is already on your team, has a fixed identity, and can join the conversation when their expertise fits.</Text>
         <View accessibilityRole="text" accessibilityLabel={`Runtime ${runtimeState}, activation fenced`} style={styles.statusPill}>
           <View style={[styles.statusDot, runtimeState === 'standby' && styles.statusDotStandby, runtimeState === 'unavailable' && styles.statusDotError]} />
           <Text style={styles.statusText}>{runtimeState} · activation fenced</Text>
@@ -136,9 +146,8 @@ export function AgentTeamScreen({ navigation }: Props) {
       </View>
       <View style={styles.sectionHead}>
         <Text style={styles.sectionKicker}>{segment === 'team' ? 'ROSTER' : segment === 'marketplace' ? 'CURATED MARKETPLACE' : 'SUGGESTED WORK'}</Text>
-        <Text style={styles.sectionTitle}>{segment === 'team' ? 'The people Scout can bring in' : segment === 'marketplace' ? 'Find the next teammate' : 'Outcomes waiting for your decision'}</Text>
-        <Text style={styles.sectionNote}>{records.length ? `${records.length} ${records.length === 1 ? 'record' : 'records'} · provider fenced` : words(reason, 'Nothing needs your attention.')}</Text>
-        {segment === 'marketplace' && marketplace?.canManage ? <Action label="Create private agent" onPress={() => setTemplateOpen(true)} /> : null}
+        <Text style={styles.sectionTitle}>{segment === 'team' ? 'The teammates working with you now' : segment === 'marketplace' ? 'Meet your AI teammates' : 'Outcomes waiting for your decision'}</Text>
+        <Text style={styles.sectionNote}>{sectionNote}</Text>
       </View>
     </>
   );
@@ -158,11 +167,11 @@ export function AgentTeamScreen({ navigation }: Props) {
         keyExtractor={(item, index) => ('id' in item && item.id) || String(index)}
         renderItem={({ item }) => segment === 'work'
           ? <WorkCard record={item as StrideWorkSuggestion} busy={Boolean(busyKey)} navigation={navigation} onChooseDestination={() => setDestinationWork(item as StrideWorkSuggestion)} run={run} sessionToken={sessionToken ?? ''} />
-          : <AgentCard record={item as AgentRecord} marketplace={segment === 'marketplace'} seats={roster?.seats ?? []} busy={Boolean(busyKey)} navigation={navigation} onDetails={() => setDetailRecord(item as AgentRecord)} run={run} sessionToken={sessionToken ?? ''} />}
+          : <AgentCard record={item as AgentRecord} marketplace={segment === 'marketplace'} seats={roster?.seats ?? []} busy={Boolean(busyKey)} navigation={navigation} onDetails={() => setDetailRecord(item as AgentRecord)} />}
         ItemSeparatorComponent={() => <View style={styles.cardGap} />}
         ListHeaderComponent={header}
         ListEmptyComponent={loading ? <View style={styles.loading}><ActivityIndicator color={colors.text2} /><Text style={styles.loadingText}>Reading the durable record…</Text></View> : <EmptyState segment={segment} reason={error ?? reason} />}
-        ListFooterComponent={<View style={styles.trustGrid}><TrustCard title="Human-approved" copy="Scout can recommend and prepare. A person confirms every hire and material action." /><TrustCard title="Company-owned memory" copy="Agents receive permission-filtered context, never a hidden copy of the company brain." /><TrustCard title="Easy to pause" copy="Pausing revokes new work and access while preserving clear authorship." /></View>}
+        ListFooterComponent={<View style={styles.trustGrid}><TrustCard title="Fixed identities" copy="Members can understand and work with each teammate, but cannot rewrite who they are." /><TrustCard title="Permission-bound context" copy="Teammates receive only the conversation, project, and memory they are authorized to use." /><TrustCard title="Admin-governed roster" copy="Hiring, removal, access, and configuration belong to a future administrator surface—not this directory." /></View>}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} />}
@@ -184,77 +193,55 @@ export function AgentTeamScreen({ navigation }: Props) {
           }}
         />
       ) : null}
-      {detailRecord ? <AgentDetailModal busy={Boolean(busyKey)} listing={marketplace?.listings.find((candidate) => candidate.id === ('listingId' in detailRecord ? detailRecord.listingId : detailRecord.id))} marketplace={!('listingId' in detailRecord)} navigation={navigation} onClose={() => setDetailRecord(null)} record={detailRecord} run={run} sessionToken={sessionToken ?? ''} /> : null}
-      {templateOpen ? <PrivateAgentTemplateModal busy={Boolean(busyKey)} onClose={() => setTemplateOpen(false)} onCreate={async (body) => {
-        let created = false;
-        await run(`private-template:${body.templateId}`, async () => { await api.strideCreatePrivateAgentTemplate(sessionToken ?? '', body); created = true; });
-        if (created) setTemplateOpen(false);
-      }} /> : null}
+      {detailRecord ? <AgentDetailModal listing={marketplace?.listings.find((candidate) => candidate.id === ('listingId' in detailRecord ? detailRecord.listingId : detailRecord.id))} marketplace={!('listingId' in detailRecord)} navigation={navigation} onClose={() => setDetailRecord(null)} record={detailRecord} /> : null}
     </>
   );
 }
 
-function AgentCard({ record, marketplace, seats, busy, navigation, onDetails, run, sessionToken }: { record: AgentRecord; marketplace: boolean; seats: StrideTeamSeat[]; busy: boolean; navigation: Props['navigation']; onDetails: () => void; run: (key: string, action: () => Promise<unknown>) => Promise<void>; sessionToken: string }) {
+function AgentCard({ record, marketplace, seats, busy, navigation, onDetails }: { record: AgentRecord; marketplace: boolean; seats: StrideTeamSeat[]; busy: boolean; navigation: Props['navigation']; onDetails: () => void }) {
   const listing = record as StrideMarketplaceListing;
   const seatRecord = record as StrideTeamSeat;
   const id = marketplace ? listing.id : seatRecord.id;
   const name = words(record.displayName, id);
-  const role = words(record.category, marketplace ? 'specialist' : 'agent coworker');
   const seat = marketplace ? seats.find((candidate) => candidate.listingId === id) : seatRecord;
-  const state = marketplace ? (listing.id === 'scout' ? 'included' : words(listing.availability, 'internal preview')) : words(seatRecord.status, 'unavailable');
+  const role = words((marketplace ? listing.roleTitle : seatRecord.roleTitle) ?? record.category, 'AI teammate');
+  const state = marketplace ? 'on your team' : words(seatRecord.status === 'hired_fenced' ? 'on your team' : seatRecord.status, 'unavailable');
   const outcome = marketplace ? words(listing.outcomeSummary, listing.personalitySummary) : 'Identity, assignments, learning, and access remain in the durable team record.';
-  const action = marketplace
-    ? listing.id === 'scout' ? { label: 'Included with STRIDE', press: undefined }
-      : !seat ? { label: 'Start preview', press: () => run(`trial:${id}`, () => api.strideStartTrial(sessionToken, id)) }
-      : seat.status === 'trial' ? { label: 'Hire with approval', press: () => run(`hire:${id}`, () => api.strideHire(sessionToken, id, seat.revision)) }
-        : { label: 'On your team', press: undefined }
-    : seatRecord.status === 'hired_fenced' ? { label: 'Pause', press: () => run(`pause:${id}`, () => api.strideSeatAction(sessionToken, id, 'pause', seatRecord.revision)) }
-      : { label: 'Offboard', press: seatRecord.status === 'offboarded' ? undefined : () => Alert.alert('Offboard teammate?', 'Their history stays attributable.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Offboard', style: 'destructive', onPress: () => void run(`offboard:${id}`, () => api.strideSeatAction(sessionToken, id, 'offboard', seatRecord.revision)) }]) };
+  const directThreadId = marketplace ? seat?.directThreadId : seatRecord.directThreadId;
   return (
     <View style={styles.agentCard} accessibilityLabel={`${name}, ${role}, ${state}`}>
       <View style={styles.agentTop}><View style={styles.avatar}><Text style={styles.avatarText}>{initials(name)}</Text></View><View style={styles.agentIdentity}><Text style={styles.agentName} numberOfLines={1}>{name}</Text><Text style={styles.agentRole}>{role}</Text></View></View>
       <Text style={styles.agentBody}>{outcome}</Text>
-      {marketplace ? <Text style={styles.agentPersonality}>{listing.personalitySummary}</Text> : null}
-      <View style={styles.agentFoot}><Text style={styles.agentState}>{state.toUpperCase()}</Text><View style={styles.actions}><Action label="Details" disabled={busy} onPress={onDetails} />{!marketplace && seatRecord.directThreadId ? <Action label="Open chat" disabled={busy} onPress={() => navigation.navigate('Thread', { threadId: seatRecord.directThreadId!, title: name })} /> : null}<Action label={action.label} disabled={busy || !action.press} onPress={action.press} /></View></View>
+      {marketplace ? <View style={styles.bestUse}><Text style={styles.bestUseLabel}>BEST USED FOR</Text><Text style={styles.bestUseBody}>{words(listing.usageGuidance, listing.workingStyle)}</Text></View> : null}
+      <View style={styles.agentFoot}><Text style={styles.agentState}>{state.toUpperCase()}</Text><View style={styles.actions}><Action label="Details" disabled={busy} onPress={onDetails} />{directThreadId ? <Action label="Open chat" disabled={busy} onPress={() => navigation.navigate('Thread', { threadId: directThreadId, title: name })} /> : null}</View></View>
     </View>
   );
 }
 
 type DetailSectionRecord = { id: string; title: string; body: string };
 
-function AgentDetailModal({ busy, listing, marketplace, navigation, onClose, record, run, sessionToken }: {
-  busy: boolean;
+function AgentDetailModal({ listing, marketplace, navigation, onClose, record }: {
   listing?: StrideMarketplaceListing;
   marketplace: boolean;
   navigation: Props['navigation'];
   onClose: () => void;
   record: AgentRecord;
-  run: (key: string, action: () => Promise<unknown>) => Promise<void>;
-  sessionToken: string;
 }) {
   const candidate = (marketplace ? record : listing) as StrideMarketplaceListing | undefined;
   const seat = marketplace ? undefined : record as StrideTeamSeat;
   const name = words(record.displayName, record.id);
-  const [personality, setPersonality] = useState(seat?.config.personalityNotes ?? '');
-  const [memberships, setMemberships] = useState((seat?.config.memberships ?? ['team']).join(', '));
-  const [perRunBudget, setPerRunBudget] = useState(String(seat?.config.perRunBudgetCents ?? 0));
-  const [dailyBudget, setDailyBudget] = useState(String(seat?.config.dailyBudgetCents ?? 0));
-  const [learningText, setLearningText] = useState('');
-  const [project, setProject] = useState('');
-  const [destination, setDestination] = useState('');
-  const [responsibility, setResponsibility] = useState('');
   const latestUpdate = seat?.updates[seat.updates.length - 1];
-  const latestLearning = seat?.learning[seat.learning.length - 1];
   const sections = useMemo<DetailSectionRecord[]>(() => {
     if (marketplace && candidate) {
       return [
+        { id: 'best-use', title: 'Best used for', body: words(candidate.usageGuidance, candidate.workingStyle) },
         { id: 'about', title: 'About', body: candidate.outcomeSummary },
         { id: 'personality', title: 'Personality', body: candidate.personalitySummary },
         { id: 'skills', title: 'Skills', body: (candidate.capabilities ?? []).map((item) => words(item)).join(' · ') || 'Capabilities are not published for this legacy preview.' },
         { id: 'access', title: 'Access', body: `${words(candidate.accessSummary, 'Access remains explicitly assigned and provider-fenced.')}\nRequires: ${(candidate.requiredAccess ?? []).map((item) => words(item)).join(', ') || 'review pending'}` },
         { id: 'memory', title: 'Memory & growth', body: words(candidate.memoryPolicy, 'Company-owned learning with human review.') },
         { id: 'results', title: 'Sample outcomes', body: (candidate.sampleOutputs ?? []).join(' · ') },
-        { id: 'package', title: 'Package & cost', body: `${candidate.publisher} · ${candidate.version} · ${words(candidate.costBand)}\n${words(candidate.provenance)} · ${words(candidate.visibility)} · updates require human approval` },
+        { id: 'package', title: 'Identity & provenance', body: `${candidate.publisher} · ${candidate.version}\n${words(candidate.provenance)} · ${words(candidate.visibility)} · profile is read-only` },
         { id: 'evidence', title: 'Verification', body: `Package, deterministic sample, and rollback receipts are present. Live quality and human admission remain pending E10.\nPackage ${words(candidate.packageDigest).slice(0, 16) || 'legacy preview'}…` },
       ];
     }
@@ -263,97 +250,19 @@ function AgentDetailModal({ busy, listing, marketplace, navigation, onClose, rec
       { id: 'responsibilities', title: 'Responsibilities', body: seat.assignments.length ? seat.assignments.map((item) => `${words(item.role)} · ${item.responsibility}\n${words(item.projectOrChannel)} → ${words(item.destination)}`).join('\n\n') : 'No project or channel assignment yet.' },
       { id: 'access', title: 'Access', body: `${seat.accessRevoked ? 'Revoked' : 'Human-approved and provider-fenced'} · ${(seat.config.memberships ?? []).map((item) => words(item)).join(', ') || 'no memberships'}` },
       { id: 'memory', title: 'Memory & learning', body: seat.learning.length ? seat.learning.map((item) => `${words(item.status)} · ${item.summary}${item.artifactId ? `\nSource: ${item.artifactId}${item.runId ? ` · ${item.runId}` : ''}${item.confidence ? ` · ${Math.round(item.confidence * 100)}% candidate confidence` : ''}` : ''}`).join('\n\n') : 'No reviewed learning records yet.' },
-      { id: 'growth', title: 'Growth & versions', body: latestUpdate ? `${words(latestUpdate.status)} · ${latestUpdate.summary}\n${latestUpdate.semanticDiff ? semanticDiffSummary(latestUpdate.semanticDiff) : 'Legacy update; semantic diff unavailable.'}` : 'No profile updates proposed. Every material change remains opt-in.' },
+      { id: 'growth', title: 'Growth & versions', body: latestUpdate ? `${words(latestUpdate.status)} · ${latestUpdate.summary}` : 'No profile updates recorded.' },
       { id: 'activity', title: 'Activity', body: seat.lifecycle?.slice(-6).map((item) => `• ${words(item)}`).join('\n') || 'No lifecycle activity.' },
-      { id: 'cost', title: 'Cost controls', body: `${seat.config.perRunBudgetCents}¢ per run · ${seat.config.dailyBudgetCents}¢ daily · ${words(seat.config.proactivity)} proactivity` },
-      { id: 'identity', title: 'Identity', body: `${seat.listingId} · team revision ${seat.revision}\nAuthored history remains attributable after pause or offboarding.` },
+      { id: 'identity', title: 'Identity', body: `${seat.listingId} · team revision ${seat.revision}\nFixed teammate profile · organization-administered roster` },
     ];
   }, [candidate, latestUpdate, marketplace, seat]);
-
-  const proposeUpdate = () => {
-    if (!seat) return;
-    const candidateConfig = {
-      personalityNotes: personality.trim(),
-      memberships: memberships.split(',').map((item) => item.trim()).filter(Boolean),
-      perRunBudgetCents: Number(perRunBudget) || 0,
-      dailyBudgetCents: Number(dailyBudget) || 0,
-      proactivity: seat.config.proactivity,
-    };
-    onClose();
-    void run(`update:${seat.id}`, () => api.strideProposeAgentUpdate(sessionToken, seat.id, { revision: seat.revision, summary: 'Human-requested profile, access, and budget review.', candidate: candidateConfig }));
-  };
-
-  const footer = !seat ? <View style={styles.detailSafety}><Text style={styles.detailSafetyTitle}>{candidate?.id === 'scout' ? 'Included with STRIDE' : 'Admission stays closed'}</Text><Text style={styles.detailSafetyBody}>{candidate?.id === 'scout' ? 'Scout’s personality, memory, and authority contract are inspectable here. There is no duplicate seat or separate hire.' : 'This preview can be inspected and trialed locally. It cannot start a provider session or inherit standing authority.'}</Text></View> : (
-    <View style={styles.detailControls}>
-      <Text style={styles.detailControlTitle}>Propose a profile update</Text>
-      <Text style={styles.detailControlHint}>Nothing changes until the semantic diff is reviewed and approved.</Text>
-      <TextInput accessibilityLabel="Personality notes" editable={!busy} onChangeText={setPersonality} placeholder="Personality notes" placeholderTextColor={colors.text3} style={styles.detailInput} value={personality} />
-      <TextInput accessibilityLabel="Channel and project memberships" autoCapitalize="none" editable={!busy} onChangeText={setMemberships} placeholder="team, dog_perfect" placeholderTextColor={colors.text3} style={styles.detailInput} value={memberships} />
-      <View style={styles.detailInputRow}><TextInput accessibilityLabel="Per-run budget cents" editable={!busy} inputMode="numeric" onChangeText={setPerRunBudget} placeholder="Per run ¢" placeholderTextColor={colors.text3} style={[styles.detailInput, styles.detailInputHalf]} value={perRunBudget} /><TextInput accessibilityLabel="Daily budget cents" editable={!busy} inputMode="numeric" onChangeText={setDailyBudget} placeholder="Daily ¢" placeholderTextColor={colors.text3} style={[styles.detailInput, styles.detailInputHalf]} value={dailyBudget} /></View>
-      <Action label="Preview semantic diff" disabled={busy} onPress={proposeUpdate} />
-      {latestUpdate?.status === 'pending' ? <View style={styles.detailActionRow}><Action label="Approve update" disabled={busy} onPress={() => { onClose(); void run(`approve-update:${seat.id}`, () => api.strideResolveAgentUpdate(sessionToken, seat.id, latestUpdate.id, 'approve', seat.revision)); }} /><Action label="Reject & roll back" disabled={busy} onPress={() => { onClose(); void run(`rollback-update:${seat.id}`, () => api.strideResolveAgentUpdate(sessionToken, seat.id, latestUpdate.id, 'rollback', seat.revision)); }} /></View> : null}
-
-      <Text style={styles.detailControlTitle}>Assign a responsibility</Text>
-      <View style={styles.detailInputRow}><TextInput accessibilityLabel="Project or channel" autoCapitalize="none" editable={!busy} onChangeText={setProject} placeholder="Project" placeholderTextColor={colors.text3} style={[styles.detailInput, styles.detailInputHalf]} value={project} /><TextInput accessibilityLabel="Destination thread" autoCapitalize="none" editable={!busy} onChangeText={setDestination} placeholder="Thread" placeholderTextColor={colors.text3} style={[styles.detailInput, styles.detailInputHalf]} value={destination} /></View>
-      <TextInput accessibilityLabel="Responsibility" editable={!busy} onChangeText={setResponsibility} placeholder="What this coworker owns" placeholderTextColor={colors.text3} style={styles.detailInput} value={responsibility} />
-      <Action label="Add assignment" disabled={busy || !project.trim() || !destination.trim() || !responsibility.trim()} onPress={() => { onClose(); void run(`assign:${seat.id}`, () => api.strideAssignAgent(sessionToken, seat.id, { revision: seat.revision, projectOrChannel: project.trim(), role: `${seat.category}_partner`, responsibility: responsibility.trim(), destination: destination.trim() })); }} />
-
-      <Text style={styles.detailControlTitle}>Memory & growth</Text>
-      {latestLearning?.status === 'pending' ? <View style={styles.detailActionRow}><Action label="Approve proposed learning" disabled={busy} onPress={() => { onClose(); void run(`approve-learning:${seat.id}`, () => api.strideResolveAgentLearning(sessionToken, seat.id, latestLearning.id, 'approve', { revision: seat.revision, summary: '' })); }} /></View> : null}
-      <TextInput accessibilityLabel="Learning or correction" editable={!busy} multiline onChangeText={setLearningText} placeholder="Add a source-linked lesson or correct the latest one" placeholderTextColor={colors.text3} style={[styles.detailInput, styles.detailInputMultiline]} value={learningText} />
-      <View style={styles.detailActionRow}><Action label="Record" disabled={busy || !learningText.trim()} onPress={() => { onClose(); void run(`learn:${seat.id}`, () => api.strideRecordAgentLearning(sessionToken, seat.id, { revision: seat.revision, subject: seat.category, scope: 'team', summary: learningText.trim() })); }} />{latestLearning ? <Action label="Correct latest" disabled={busy || !learningText.trim()} onPress={() => { onClose(); void run(`correct:${seat.id}`, () => api.strideResolveAgentLearning(sessionToken, seat.id, latestLearning.id, 'correct', { revision: seat.revision, summary: learningText.trim() })); }} /> : null}{latestLearning && latestLearning.status !== 'forgotten' ? <Action label="Forget latest" disabled={busy} onPress={() => { onClose(); void run(`forget:${seat.id}`, () => api.strideResolveAgentLearning(sessionToken, seat.id, latestLearning.id, 'forget', { revision: seat.revision, summary: '' })); }} /> : null}</View>
-
-      <View style={styles.detailActionRow}>{seat.directThreadId ? <Action label="Open chat" disabled={busy} onPress={() => { onClose(); navigation.navigate('Thread', { threadId: seat.directThreadId!, title: name }); }} /> : null}<Action label="Clean export receipt" disabled={busy} onPress={() => { onClose(); void run(`export:${seat.id}`, async () => { const response = await api.strideExportAgent(sessionToken, seat.id); Alert.alert('Clean export ready', String(response.export.historicalAttributionHash ?? 'Attribution receipt created.')); }); }} /></View>
-    </View>
-  );
+  const directThreadId = seat?.directThreadId;
+  const footer = <View style={styles.detailSafety}><Text style={styles.detailSafetyTitle}>Read-only teammate profile</Text><Text style={styles.detailSafetyBody}>Talk to {name} directly or tag them in a channel. Members cannot hire, remove, reconfigure, or rewrite AI teammates; that belongs to a future administrator surface.</Text>{directThreadId ? <View style={styles.detailActionRow}><Action label="Open chat" onPress={() => { onClose(); navigation.navigate('Thread', { threadId: directThreadId, title: name }); }} /></View> : null}</View>;
 
   return (
     <Modal visible animationType="slide" presentationStyle="formSheet" onRequestClose={onClose}>
       <SafeAreaView style={styles.pickerSafe} edges={['top', 'bottom', 'left', 'right']}>
-        <View style={styles.pickerHead}><View style={styles.pickerHeading}><Text style={styles.pickerEyebrow}>{marketplace ? 'MARKETPLACE PROFILE' : 'TEAM COWORKER'}</Text><Text style={styles.pickerTitle}>{name}</Text><Text style={styles.detailSubtitle}>{words(record.category)} · {candidate?.id === 'scout' ? 'included' : words(marketplace ? candidate?.availability : seat?.status)}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Close agent details" hitSlop={8} onPress={onClose} style={({ pressed }) => [styles.pickerClose, pressed && styles.pressed]}><SymbolView name="xmark" size={15} tintColor={colors.text2} /></Pressable></View>
+        <View style={styles.pickerHead}><View style={styles.pickerHeading}><Text style={styles.pickerEyebrow}>{marketplace ? 'AI TEAMMATE' : 'TEAM COWORKER'}</Text><Text style={styles.pickerTitle}>{name}</Text><Text style={styles.detailSubtitle}>{words(candidate?.roleTitle ?? seat?.roleTitle ?? record.category)} · on your team</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Close agent details" hitSlop={8} onPress={onClose} style={({ pressed }) => [styles.pickerClose, pressed && styles.pressed]}><SymbolView name="xmark" size={15} tintColor={colors.text2} /></Pressable></View>
         <FlatList data={sections} keyExtractor={(item) => item.id} renderItem={({ item }) => <View style={styles.detailSection}><Text style={styles.detailSectionTitle}>{item.title}</Text><Text style={styles.detailSectionBody}>{item.body}</Text></View>} ItemSeparatorComponent={() => <View style={styles.detailDivider} />} ListFooterComponent={footer} contentContainerStyle={styles.detailList} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} />
-      </SafeAreaView>
-    </Modal>
-  );
-}
-
-function semanticDiffSummary(diff: NonNullable<StrideTeamSeat['updates'][number]['semanticDiff']>): string {
-  const changes = [
-    diff.personalityChanged && 'personality',
-    diff.permissionChanged && `access (${[...diff.membershipsAdded, ...diff.membershipsRemoved].map((item) => words(item)).join(', ')})`,
-    diff.costChanged && `cost (${diff.perRunBudgetDeltaCents >= 0 ? '+' : ''}${diff.perRunBudgetDeltaCents}¢/run)`,
-    diff.proactivityChanged && 'proactivity',
-    diff.runtimeChanged ? 'runtime' : 'runtime unchanged',
-  ].filter(Boolean);
-  return `${changes.join(' · ')}\n${diff.runtimeSummary}\n${diff.migrationSummary}`;
-}
-
-function PrivateAgentTemplateModal({ busy, onClose, onCreate }: { busy: boolean; onClose: () => void; onCreate: (body: StridePrivateAgentTemplateInput) => Promise<void> }) {
-  const [name, setName] = useState('');
-  const [category, setCategory] = useState('');
-  const [outcome, setOutcome] = useState('');
-  const [personality, setPersonality] = useState('');
-  const [capabilities, setCapabilities] = useState('');
-  const [access, setAccess] = useState('approved_project_context');
-  const [samples, setSamples] = useState('');
-  const split = (value: string) => value.split(',').map((item) => item.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '')).filter(Boolean);
-  const templateId = name.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48);
-  const valid = templateId && split(category).length === 1 && outcome.trim() && personality.trim() && split(capabilities).length && split(access).length && samples.split(',').some((item) => item.trim());
-  const fields = [
-    { id: 'name', label: 'Name', value: name, set: setName, placeholder: 'Lane' },
-    { id: 'category', label: 'Role category', value: category, set: setCategory, placeholder: 'launch' },
-    { id: 'outcome', label: 'What they deliver', value: outcome, set: setOutcome, placeholder: 'Turns approved launch context into bounded briefs.' },
-    { id: 'personality', label: 'Personality', value: personality, set: setPersonality, placeholder: 'Candid, calm, and concise.' },
-    { id: 'capabilities', label: 'Capabilities', value: capabilities, set: setCapabilities, placeholder: 'approved_project_brief' },
-    { id: 'access', label: 'Required access', value: access, set: setAccess, placeholder: 'approved_project_context' },
-    { id: 'samples', label: 'Sample outcomes', value: samples, set: setSamples, placeholder: 'Launch brief, Risk review' },
-  ];
-  return (
-    <Modal visible animationType="slide" presentationStyle="formSheet" onRequestClose={onClose}>
-      <SafeAreaView style={styles.pickerSafe} edges={['top', 'bottom', 'left', 'right']}>
-        <View style={styles.pickerHead}><View style={styles.pickerHeading}><Text style={styles.pickerEyebrow}>ORGANIZATION-PRIVATE TEMPLATE</Text><Text style={styles.pickerTitle}>Create a teammate, safely.</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Close private agent template" hitSlop={8} onPress={onClose} style={({ pressed }) => [styles.pickerClose, pressed && styles.pressed]}><SymbolView name="xmark" size={15} tintColor={colors.text2} /></Pressable></View>
-        <Text style={styles.pickerCopy}>Describe the role, outcomes, personality, and bounded access. Templates cannot contain code, commands, credentials, environment values, hooks, or raw tool-server configuration.</Text>
-        <FlatList data={fields} keyExtractor={(item) => item.id} renderItem={({ item }) => <View style={styles.templateField}><Text style={styles.templateLabel}>{item.label.toUpperCase()}</Text><TextInput accessibilityLabel={item.label} editable={!busy} multiline={item.id === 'outcome' || item.id === 'personality'} onChangeText={item.set} placeholder={item.placeholder} placeholderTextColor={colors.text3} style={[styles.detailInput, (item.id === 'outcome' || item.id === 'personality') && styles.detailInputMultiline]} value={item.value} /></View>} ListFooterComponent={<View style={styles.templateFooter}><Text style={styles.detailControlHint}>Private preview · human approval · provider execution fenced · 25¢ per-run ceiling · disabled proactivity</Text><Action label="Create fenced preview" disabled={busy || !valid} onPress={() => void onCreate({ templateId, displayName: name.trim(), category: split(category)[0], outcomeSummary: outcome.trim(), personalitySummary: personality.trim(), sampleOutputs: samples.split(',').map((item) => item.trim()).filter(Boolean), requestedCapabilities: split(capabilities), requiredAccess: split(access), costBand: 'low', memberships: ['team'], perRunBudgetCents: 25, dailyBudgetCents: 100, monthlyBudgetCents: 500, concurrency: 1, proactivity: 'disabled' })} /></View>} contentContainerStyle={styles.detailList} keyboardShouldPersistTaps="handled" />
       </SafeAreaView>
     </Modal>
   );
@@ -494,7 +403,9 @@ const styles = StyleSheet.create({
   agentName: { ...type.headline, color: colors.text1 },
   agentRole: { ...type.label, marginTop: 3, color: colors.text3, textTransform: 'capitalize' },
   agentBody: { ...type.bodySm, marginVertical: space[5], color: colors.text2 },
-  agentPersonality: { ...type.caption, marginTop: -space[3], marginBottom: space[5], color: colors.text3, fontStyle: 'italic' },
+  bestUse: { gap: space[1], marginTop: -space[2], marginBottom: space[5], paddingHorizontal: space[3], paddingVertical: space[3], borderWidth: StyleSheet.hairlineWidth, borderColor: colors.ember, borderRadius: radius.md, backgroundColor: colors.emberSoft },
+  bestUseLabel: { ...type.label, color: colors.emberText, letterSpacing: 0.8 },
+  bestUseBody: { ...type.caption, color: colors.text2 },
   timeline: { ...type.caption, marginBottom: space[4], color: colors.text3, lineHeight: 20 },
   projectMeta: { ...type.label, marginBottom: space[3], color: colors.text3, letterSpacing: 0.7 },
   agentFoot: { paddingTop: space[4], flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space[3], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line1 },

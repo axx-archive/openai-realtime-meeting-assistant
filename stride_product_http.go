@@ -1242,12 +1242,13 @@ func strideProductMarketplaceHandle(w http.ResponseWriter, r *http.Request) {
 	if len(parts) == 1 && r.Method == http.MethodGet {
 		var candidate STRIDEProductMarketplaceCandidate
 		err := runtime.WithProductContext(canonicalTenantID(), STRIDEProductScopeMarketplace, func(ctx STRIDEProductContext) error {
-			var found bool
-			candidate, found = ctx.Product.candidate(id)
-			if !found {
-				return ErrSTRIDEProductUnknown
+			for _, visible := range ctx.Product.candidateCatalogForViewer(isArtifactApprovalAdmin(user)) {
+				if visible.ID == id {
+					candidate = visible
+					return nil
+				}
 			}
-			return nil
+			return ErrSTRIDEProductUnknown
 		})
 		if err != nil {
 			writeSTRIDEProductError(w, err)

@@ -220,6 +220,7 @@ export type ChatMentionCandidate = {
   handle?: string;
   email?: string;
   agentId?: string;
+  roleTitle?: string;
   avatarDataURL?: string;
   kind: 'person' | 'scout' | 'agent';
 };
@@ -421,6 +422,7 @@ export type StrideTeamSeat = {
   listingId: string;
   displayName: string;
   category: string;
+  roleTitle?: string;
   status: string;
   ownerId: string;
   directThreadId?: string;
@@ -490,6 +492,9 @@ export type StrideMarketplaceListing = {
   packageId: string;
   displayName: string;
   category: string;
+  roleTitle?: string;
+  usageGuidance?: string;
+  workingStyle?: string;
   outcomeSummary: string;
   personalitySummary: string;
   sampleOutputs: string[];

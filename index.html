@@ -27124,6 +27124,26 @@
         text-wrap: pretty;
       }
       .stride-agent-card__personality { margin: -9px 0 17px; color: var(--ink-3); font: italic 400 12px/1.5 var(--sans); text-wrap: pretty; }
+      .stride-agent-card__best-use {
+        position: relative;
+        margin: -4px 0 18px;
+        padding: 12px 13px 12px 16px;
+        border: 1px solid color-mix(in srgb, var(--ember) 22%, var(--line));
+        border-radius: 13px;
+        color: var(--ink-2);
+        background: color-mix(in srgb, var(--ember) 6%, var(--surface-2));
+        font: 500 12px/1.5 var(--sans);
+        text-wrap: pretty;
+      }
+      .stride-agent-card__best-use::before {
+        content: '';
+        position: absolute;
+        inset: 12px auto 12px 7px;
+        width: 2px;
+        border-radius: 999px;
+        background: var(--ember);
+      }
+      .stride-agent-card__best-use b { display: block; margin-bottom: 4px; color: var(--ember); font: 700 9px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
       .stride-agent-card__chips { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 17px; }
       .stride-agent-card__chip { padding: 6px 9px; border-radius: 999px; color: var(--ink-2); background: var(--surface-2); font: 600 10px/1 var(--mono); text-transform: lowercase; }
       .stride-agent-card__foot {
@@ -28546,8 +28566,8 @@
             <header class="stride-team__hero">
               <div>
                 <p class="stride-team__eyebrow">your agent team</p>
-                <h2 class="stride-team__title">Coworkers with names, context, and accountable jobs.</h2>
-                <p class="stride-team__intro">Scout remains your chief-of-staff front door. Specialists join the team only after their skills, access, cost, and identity have been reviewed—and no conversation can hire one by itself.</p>
+                <h2 class="stride-team__title">People you can talk to directly—and the work they’re best at.</h2>
+                <p class="stride-team__intro">Scout is the chief-of-staff front door. Every specialist here is already on your team, has a fixed identity, and can join the conversation when their expertise fits.</p>
               </div>
               <span id="strideTeamRuntime" class="stride-team__runtime" data-state="loading" role="status" aria-live="polite">
                 <span class="stride-team__runtime-dot" aria-hidden="true"></span>
@@ -28565,7 +28585,7 @@
               <header class="stride-team__section-head">
                 <div>
                   <p class="stride-team__section-kicker">roster</p>
-                  <h3 class="stride-team__section-title">The people Scout can bring in</h3>
+                  <h3 class="stride-team__section-title">The teammates working with you now</h3>
                 </div>
                 <p id="strideRosterNote" class="stride-team__section-note">Loading durable roster…</p>
               </header>
@@ -28576,11 +28596,10 @@
               <header class="stride-team__section-head">
                 <div>
                   <p class="stride-team__section-kicker">curated marketplace</p>
-                  <h3 class="stride-team__section-title">Find the next teammate</h3>
+                  <h3 class="stride-team__section-title">Meet your AI teammates</h3>
                 </div>
                 <div class="stride-team__section-actions">
                   <p id="strideMarketplaceNote" class="stride-team__section-note">Internal previews stay token-free until E10 qualification.</p>
-                  <button id="stridePrivateAgentCreate" class="stride-agent-card__action" type="button" hidden>Create private agent</button>
                 </div>
               </header>
               <div id="strideMarketplaceList" class="stride-team__grid" aria-live="polite"></div>
@@ -28597,10 +28616,10 @@
               <div id="strideWorkList" class="stride-team__grid" aria-live="polite"></div>
             </section>
 
-            <div class="stride-team__trust" aria-label="Agent workforce controls">
-              <article><b>Human-approved</b><span>Scout can recommend and prepare a teammate. An eligible person confirms every hire and material access change.</span></article>
-              <article><b>Company-owned memory</b><span>Agents receive permission-filtered context. They do not keep a hidden copy of the company brain.</span></article>
-              <article><b>Easy to pause</b><span>Pausing revokes new work and runtime access while keeping authored messages and artifacts attributable.</span></article>
+            <div class="stride-team__trust" aria-label="Agent workforce principles">
+              <article><b>Fixed identities</b><span>Members can understand and work with each teammate, but cannot rewrite who they are.</span></article>
+              <article><b>Permission-bound context</b><span>Teammates receive only the conversation, project, and memory they are authorized to use.</span></article>
+              <article><b>Admin-governed roster</b><span>Hiring, removal, access, and configuration belong to a future administrator surface—not this directory.</span></article>
             </div>
           </div>
         </section>
@@ -35224,12 +35243,16 @@ Wrap the entire export in one code block. After the code block, say whether the 
           strideField(record, 'category', 'Category') || strideField(listing, 'category', 'Category'),
           kind === 'marketplace' ? 'specialist' : 'agent coworker'
         )
+        const roleTitle = strideWords(
+          strideField(record, 'roleTitle', 'RoleTitle') || strideField(listing, 'roleTitle', 'RoleTitle'),
+          category
+        )
         const displayName = strideWords(
           strideField(record, 'displayName', 'DisplayName', 'name', 'Name') ||
           strideField(listing, 'displayName', 'DisplayName', 'name', 'Name'),
           id.replace(/^agent\s+/i, '')
         )
-        const rawState = id === 'scout' ? 'included' : strideWords(
+        const rawState = id === 'scout' ? 'on your team' : strideWords(
           strideField(record, 'state', 'State', 'status', 'Status', 'activationStage', 'ActivationStage', 'availability', 'Availability'),
           'unavailable'
         )
@@ -35268,16 +35291,22 @@ Wrap the entire export in one code block. After the code block, say whether the 
         name.textContent = displayName
         const role = document.createElement('p')
         role.className = 'stride-agent-card__role'
-        role.textContent = category
+        role.textContent = roleTitle
         identity.append(name, role)
         top.append(avatar, identity)
         const body = document.createElement('p')
         body.className = 'stride-agent-card__body'
         body.textContent = outcome.length > 220 ? `${outcome.slice(0, 217)}…` : outcome
-        const personalityLine = document.createElement('p')
-        personalityLine.className = 'stride-agent-card__personality'
-        personalityLine.textContent = personality ? `“${personality.length > 150 ? `${personality.slice(0, 147)}…` : personality}”` : ''
-        personalityLine.hidden = !personality
+        const bestUse = strideWords(
+          strideField(record, 'usageGuidance', 'UsageGuidance') || strideField(listing, 'usageGuidance', 'UsageGuidance') || strideField(listing, 'workingStyle', 'WorkingStyle'),
+          personality
+        )
+        const bestUseLine = document.createElement('p')
+        bestUseLine.className = 'stride-agent-card__best-use'
+        const bestUseLabel = document.createElement('b')
+        bestUseLabel.textContent = 'Best used for'
+        bestUseLine.append(bestUseLabel, document.createTextNode(bestUse))
+        bestUseLine.hidden = !bestUse
         const chips = document.createElement('div')
         chips.className = 'stride-agent-card__chips'
         capabilities.slice(0, 3).forEach(capability => {
@@ -35291,32 +35320,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
         foot.className = 'stride-agent-card__foot'
         const status = document.createElement('span')
         status.className = 'stride-agent-card__state'
-        status.textContent = id === 'scout' ? 'Included with STRIDE' : `${state} · ${costBand}`
+        status.textContent = kind === 'marketplace' ? 'On your team' : state
         const actions = document.createElement('div')
         actions.className = 'stride-agent-card__actions'
         actions.append(strideAction('Details', async () => openStrideAgentDetail(record, kind)))
-        if (kind === 'marketplace' && strideMarketplaceCanManage) {
-          if (id === 'scout') {
-            foot.append(status, actions)
-            card.append(top, body, personalityLine, chips, foot)
-            return card
-          }
-          const seat = strideRosterRecords.find(item => strideField(item, 'listingId', 'ListingID') === id)
-          const seatStatus = strideField(seat, 'status', 'Status')
-          if (!seat) {
-            actions.append(strideAction('Start preview', async () => {
-              await strideTeamJSON(`/api/stride/v1/marketplace/${encodeURIComponent(id)}/trial`, { method: 'POST', body: {} })
-              await loadStrideTeamSurface()
-            }))
-          } else if (seatStatus === 'trial') {
-            actions.append(strideAction('Hire with approval', async () => {
-              await strideTeamJSON(`/api/stride/v1/marketplace/${encodeURIComponent(id)}/hire`, { method: 'POST', body: { revision: strideField(seat, 'revision', 'Revision') } })
-              await loadStrideTeamSurface()
-            }))
-          } else {
-            actions.append(strideAction('On your team', async () => {}, true))
-          }
-        } else if (kind === 'roster') {
+        if (kind === 'roster') {
           const directThreadId = String(strideField(record, 'directThreadId', 'DirectThreadID') || '')
           if (directThreadId) actions.append(strideAction('Open chat', async () => {
             applyToolState('chat')
@@ -35325,7 +35333,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           }))
         }
         foot.append(status, actions)
-        card.append(top, body, personalityLine, chips, foot)
+        card.append(top, body, bestUseLine, chips, foot)
         return card
       }
 
@@ -35369,6 +35377,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           listing,
           listingID,
           category,
+          roleTitle: strideWords(strideField(record, 'roleTitle', 'RoleTitle') || strideField(listing, 'roleTitle', 'RoleTitle'), category),
           displayName,
           rawState,
           state: strideWords(rawState, 'unavailable'),
@@ -35381,6 +35390,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
               ? 'Capabilities remain sealed until their evidence and access have been reviewed.'
               : 'Responsibilities and current assignments are governed by the durable team record.'
           ),
+          usageGuidance: strideWords(strideField(record, 'usageGuidance', 'UsageGuidance') || strideField(listing, 'usageGuidance', 'UsageGuidance') || strideField(listing, 'workingStyle', 'WorkingStyle')),
           personality: strideWords(
             strideField(record, 'personalitySummary', 'PersonalitySummary') ||
             strideField(listing, 'personalitySummary', 'PersonalitySummary') ||
@@ -35864,9 +35874,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
         if (!strideAgentDetail || !strideAgentDetailBody) return
         const profile = strideAgentProfile(record, kind)
         strideAgentDetailContext = { id: profile.id, kind }
-        if (strideAgentDetailEyebrow) strideAgentDetailEyebrow.textContent = kind === 'marketplace' ? 'marketplace candidate' : 'team coworker'
+        if (strideAgentDetailEyebrow) strideAgentDetailEyebrow.textContent = 'AI teammate'
         if (strideAgentDetailTitle) strideAgentDetailTitle.textContent = profile.displayName
-        if (strideAgentDetailMeta) strideAgentDetailMeta.textContent = profile.category + ' · ' + profile.state + ' · ' + profile.costBand
+        if (strideAgentDetailMeta) strideAgentDetailMeta.textContent = profile.roleTitle + ' · on your team'
         strideAgentDetailBody.replaceChildren()
 
         const summary = document.createElement('p')
@@ -35875,6 +35885,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const grid = document.createElement('div')
         grid.className = 'stride-agent-dialog__grid'
         grid.append(
+          strideDetailSection('Best used for', profile.usageGuidance || profile.outcome),
           strideDetailSection('Personality', profile.personality || 'No organization-specific personality guidance yet.'),
           strideDetailSection('Skills', profile.capabilities.length ? profile.capabilities.map(value => '• ' + value) : ['No admitted capabilities yet.']),
           strideDetailSection('Access', [
@@ -35883,12 +35894,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
           ]),
           strideDetailSection('Memory', profile.memoryPolicy || 'Company-owned, inspectable, correctable, and forgettable.'),
           strideDetailSection('Sample outcomes', profile.sampleOutputs.length ? profile.sampleOutputs.map(value => '• ' + value) : ['No sample outcomes recorded.']),
-          strideDetailSection('Cost and package', [
-            'Cost: ' + profile.costBand,
+          strideDetailSection('Identity and provenance', [
             'Publisher: ' + strideWords(strideField(profile.listing, 'publisher', 'Publisher'), 'STRIDE'),
             'Version: ' + strideWords(strideField(profile.listing, 'version', 'Version'), 'preview'),
             'Visibility: ' + strideWords(strideField(profile.listing, 'visibility', 'Visibility'), 'organization'),
-            'Update policy: ' + strideWords(strideField(profile.listing, 'updatePolicy', 'UpdatePolicy'), 'human approval'),
+            'Profile: read-only for members',
             'Provenance: ' + strideWords(strideField(profile.listing, 'provenance', 'Provenance'), 'not recorded'),
             'Package receipt: ' + strideWords(strideField(profile.listing, 'packageDigest', 'PackageDigest'), 'pending')
           ])
@@ -35942,8 +35952,16 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
         const controls = document.createElement('div')
         controls.className = 'stride-agent-dialog__controls'
-        if (kind === 'marketplace') appendStrideMarketplaceControls(controls, record, profile)
-        else appendStrideRosterControls(controls, record, profile)
+        const safety = document.createElement('p')
+        safety.className = 'stride-agent-dialog__safety'
+        safety.textContent = 'Members can talk to this teammate directly or tag them in a channel. Hiring, removal, access, personality, budgets, assignments, and memory controls belong to a future administrator surface.'
+        controls.append(safety)
+        if (profile.directThreadID) {
+          const chatButtons = document.createElement('div')
+          chatButtons.className = 'stride-agent-dialog__buttons'
+          chatButtons.append(strideAction('Open private chat', async () => openStrideAgentChat(profile.directThreadID)))
+          controls.append(chatButtons)
+        }
         strideAgentDetailBody.append(controls)
         if (!strideAgentDetail.open) strideAgentDetail.showModal()
         strideAgentDetailBody.scrollTo({ top: 0, left: 0, behavior: 'instant' })
@@ -36160,22 +36178,31 @@ Wrap the entire export in one code block. After the code block, say whether the 
           const work = strideField(workPayload, 'suggestions', 'Suggestions')
           strideRosterRecords = Array.isArray(seats) ? seats : []
           strideMarketplaceRecords = Array.isArray(listings) ? listings : []
-          strideMarketplaceCanManage = strideField(marketplacePayload, 'canManage', 'CanManage') === true
-          if (stridePrivateAgentCreate) stridePrivateAgentCreate.hidden = !strideMarketplaceCanManage
-          renderStrideTeamCollection(strideRosterList, seats, 'roster', rosterReason)
-          renderStrideTeamCollection(strideMarketplaceList, listings, 'marketplace', marketplaceReason)
+          // Member-facing Team is a read-only directory. The server retains
+          // its administrator-gated lifecycle APIs for a future admin surface.
+          strideMarketplaceCanManage = false
+          const activeSeats = strideRosterRecords.filter(seat => strideField(seat, 'status', 'Status') === 'hired_fenced' && strideField(seat, 'accessRevoked', 'AccessRevoked') !== true)
+          renderStrideTeamCollection(strideRosterList, activeSeats, 'roster', rosterReason)
+          const hiredListingIDs = new Set(strideRosterRecords
+            .filter(seat => strideField(seat, 'status', 'Status') === 'hired_fenced' && strideField(seat, 'accessRevoked', 'AccessRevoked') !== true)
+            .map(seat => String(strideField(seat, 'listingId', 'ListingID') || '')))
+          const teamListings = strideMarketplaceRecords.filter(listing => {
+            const id = String(strideField(listing, 'id', 'ID') || '')
+            return id === 'scout' || hiredListingIDs.has(id)
+          })
+          renderStrideTeamCollection(strideMarketplaceList, teamListings, 'marketplace', marketplaceReason)
           if (strideWorkList) {
             strideWorkList.replaceChildren()
             if (Array.isArray(work) && work.length) work.forEach(record => strideWorkList.append(strideWorkCard(record)))
             else strideEmptyState(strideWorkList, 'No suggested work right now.', 'When a conversation reveals a concrete outcome, Scout can prepare it here for human approval.')
           }
           if (strideRosterNote) {
-            const count = Array.isArray(seats) ? seats.length : 0
+            const count = activeSeats.length
             strideRosterNote.textContent = count ? `${count} durable ${count === 1 ? 'coworker' : 'coworkers'}` : (rosterReason || 'No active seats')
           }
           if (strideMarketplaceNote) {
-            const count = Array.isArray(listings) ? listings.length : 0
-            strideMarketplaceNote.textContent = count ? `${count} reviewed ${count === 1 ? 'candidate' : 'candidates'}` : (marketplaceReason || 'No qualified listings')
+            const count = teamListings.length
+            strideMarketplaceNote.textContent = count ? `${count} ${count === 1 ? 'teammate' : 'teammates'} · profiles are read-only` : (marketplaceReason || 'No teammates are available')
           }
           if (strideWorkNote) {
             const count = Array.isArray(work) ? work.length : 0
@@ -51685,7 +51712,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const byName = new Map()
         ;[...participantNames(), 'Scout'].forEach(name => {
           const clean = String(name || '').trim()
-          if (clean) byName.set(clean.toLowerCase(), { name: clean, handle: clean.replace(/\s+/g, '-'), kind: clean.toLowerCase() === 'scout' ? 'scout' : 'person' })
+          if (clean) byName.set(clean.toLowerCase(), {
+            name: clean,
+            handle: clean.replace(/\s+/g, '-'),
+            kind: clean.toLowerCase() === 'scout' ? 'scout' : 'person',
+            roleTitle: clean.toLowerCase() === 'scout' ? 'Chief of staff' : ''
+          })
         })
         desktopChatMentionCandidates.forEach(candidate => {
           const name = String(candidate?.name || '').trim()
@@ -51741,7 +51773,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!desktopChatParticipantDirectoryLoaded) void ensureDesktopChatParticipantDirectory()
         const prefix = token.prefix.toLowerCase()
         const candidates = input === roomChatInput
-          ? [{ name: 'Scout', handle: 'Scout', kind: 'scout' }]
+          ? [{ name: 'Scout', handle: 'Scout', kind: 'scout', roleTitle: 'Chief of staff' }]
           : mentionRosterCandidates()
         const matches = candidates.filter(candidate => (
           String(candidate?.name || '').toLowerCase().startsWith(prefix) ||
@@ -51768,6 +51800,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const name = String(candidate?.name || '')
           const handle = String(candidate?.handle || name).replace(/\s+/g, '-')
           const kind = String(candidate?.kind || 'person').toLowerCase()
+          const roleTitle = String(candidate?.roleTitle || '').trim()
           const item = document.createElement('button')
           item.type = 'button'
           item.className = 'scout-mention-popover__item'
@@ -51783,12 +51816,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const label = document.createElement('span')
           label.textContent = '@' + handle
           item.append(disc, label)
-          if (kind === 'scout' || kind === 'agent') {
-            const hint = document.createElement('span')
-            hint.className = 'scout-mention-popover__hint'
-            hint.textContent = kind === 'agent' ? 'agent · confirm work' : 'scout'
-            item.appendChild(hint)
-          }
+          const hint = document.createElement('span')
+          hint.className = 'scout-mention-popover__hint'
+          hint.textContent = kind === 'scout'
+            ? `${roleTitle || 'Chief of staff'} · AI`
+            : kind === 'agent'
+              ? `${roleTitle || 'Specialist'} · AI`
+              : roleTitle || 'Teammate'
+          item.appendChild(hint)
           // mousedown would blur the composer and close the popover before the
           // click lands — swallow it so the click can complete the mention
           item.addEventListener('mousedown', event => event.preventDefault())

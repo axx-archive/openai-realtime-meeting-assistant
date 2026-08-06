@@ -73,13 +73,17 @@ func strideRuntimeMarketplaceHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	listings := []STRIDEProductMarketplaceCandidate{}
 	reason := "product_preview_disabled"
-	err := runtime.WithProductContext(canonicalTenantID(), STRIDEProductScopeMarketplace, func(ctx STRIDEProductContext) error { listings = ctx.Product.candidateCatalog(); return nil })
+	canManage := isArtifactApprovalAdmin(user)
+	err := runtime.WithProductContext(canonicalTenantID(), STRIDEProductScopeMarketplace, func(ctx STRIDEProductContext) error {
+		listings = ctx.Product.candidateCatalogForViewer(canManage)
+		return nil
+	})
 	if err == nil {
 		reason = "internal_preview_only"
 	} else {
 		reason = strideProductRuntimeUnavailableReason(runtime, reason)
 	}
-	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "available": false, "productReachable": err == nil, "reason": reason, "catalogMode": "internal_preview", "liveAdmissionFenced": true, "canManage": isArtifactApprovalAdmin(user), "listings": listings})
+	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "available": false, "productReachable": err == nil, "reason": reason, "catalogMode": "internal_preview", "liveAdmissionFenced": true, "canManage": canManage, "listings": listings})
 }
 
 func strideRuntimeRosterHandler(w http.ResponseWriter, r *http.Request) {

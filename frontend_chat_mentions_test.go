@@ -41,6 +41,10 @@ func TestIndexMentionAutocompleteWiring(t *testing.T) {
 		// open/steer/select machinery
 		"function updateMentionAutocomplete(input = scoutChatInput)",
 		"function renderMentionPopover()",
+		"roleTitle: clean.toLowerCase() === 'scout' ? 'Chief of staff' : ''",
+		"`${roleTitle || 'Chief of staff'} · AI`",
+		"`${roleTitle || 'Specialist'} · AI`",
+		"roleTitle || 'Teammate'",
 		"function applyMentionCompletion(candidate)",
 		"function mentionPopoverIsOpen()",
 		"scout-mention-popover__item",
@@ -55,6 +59,20 @@ func TestIndexMentionAutocompleteWiring(t *testing.T) {
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing mention autocomplete hook %q", want)
+		}
+	}
+	popoverStart := strings.Index(html, "function renderMentionPopover()")
+	if popoverStart < 0 {
+		t.Fatal("could not isolate mention popover renderer")
+	}
+	popoverEnd := strings.Index(html[popoverStart:], "function applyMentionCompletion(candidate)")
+	if popoverEnd < 0 {
+		t.Fatal("could not isolate mention popover renderer")
+	}
+	popover := html[popoverStart : popoverStart+popoverEnd]
+	for _, forbidden := range []string{"agent · confirm work", "AI teammate"} {
+		if strings.Contains(popover, forbidden) {
+			t.Fatalf("mention popover retained obsolete role label %q", forbidden)
 		}
 	}
 	for _, want := range []string{

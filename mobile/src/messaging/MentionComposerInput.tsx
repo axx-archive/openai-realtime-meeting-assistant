@@ -50,6 +50,13 @@ function draftSegments(value: string, candidates: ChatMentionCandidate[]): Draft
   return result;
 }
 
+function mentionCandidateSubtitle(candidate: ChatMentionCandidate): string {
+  const roleTitle = candidate.roleTitle?.trim();
+  if (candidate.kind === 'scout') return `${roleTitle || 'Chief of staff'} · AI`;
+  if (candidate.kind === 'agent') return `${roleTitle || 'Specialist'} · AI`;
+  return roleTitle || 'Teammate';
+}
+
 export const MentionComposerInput = forwardRef<MentionComposerInputHandle, Props>(function MentionComposerInput({
   value,
   onChangeText,
@@ -120,7 +127,7 @@ export const MentionComposerInput = forwardRef<MentionComposerInputHandle, Props
                 <SymbolView name={candidate.kind !== 'person' ? 'sparkles' : 'person.fill'} tintColor={candidate.kind !== 'person' ? colors.emberText : colors.info} size={13} />
               </View>
               <Text style={[styles.suggestionName, candidate.kind !== 'person' && styles.suggestionScout]}>{candidate.name}</Text>
-              <Text style={styles.suggestionKind}>{candidate.kind === 'scout' ? 'AI teammate' : candidate.kind === 'agent' ? 'Agent · confirm work' : 'Notify'}</Text>
+              <Text style={styles.suggestionKind}>{mentionCandidateSubtitle(candidate)}</Text>
             </Pressable>
           ))}
         </View>

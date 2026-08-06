@@ -40,11 +40,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and remain the fallback if this bundle is ever rejected.
       // Regenerate both with `npm run brand:regen` from the repo root.
       icon: './assets/Stride.icon',
-      // Build 42 fixes reply actions inside the native thread sheet, adds
-      // bottom-first reply entry and notification badges, and separates the
-      // pinned channel list from private work.
+      // Build 44 adds the contained full-response reader for reply threads and
+      // the read-only, hired-teammate directory shared with the web app.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '43',
+      buildNumber: '44',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

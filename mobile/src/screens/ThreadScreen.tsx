@@ -1228,6 +1228,18 @@ export function ThreadScreen({ route, navigation }: Props) {
       onDelete={() => { if (actionMessage) confirmDelete(actionMessage.message); }}
     />
   );
+  const renderLongMessageSheet = (contained = false) => (
+    <LongMessageSheet
+      visible={Boolean(expandedMessage)}
+      contained={contained}
+      text={expandedMessage?.text ?? ''}
+      authorName={expandedMessage?.authorName ?? ''}
+      scout={Boolean(expandedMessage?.scout)}
+      activity={Boolean(expandedMessage?.activity)}
+      report={expandedMessage?.report}
+      onClose={() => setExpandedMessage(null)}
+    />
+  );
 
   return (
     <SafeAreaView
@@ -1327,15 +1339,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         onClose={() => setPreviewFile(null)}
       />
 
-      <LongMessageSheet
-        visible={Boolean(expandedMessage)}
-        text={expandedMessage?.text ?? ''}
-        authorName={expandedMessage?.authorName ?? ''}
-        scout={Boolean(expandedMessage?.scout)}
-        activity={Boolean(expandedMessage?.activity)}
-        report={expandedMessage?.report}
-        onClose={() => setExpandedMessage(null)}
-      />
+      {threadContextRoot ? null : renderLongMessageSheet()}
 
       <ThreadDetailSheet
         visible={Boolean(threadContextRoot)}
@@ -1365,7 +1369,12 @@ export function ThreadScreen({ route, navigation }: Props) {
         resolvingProposalID={resolvingProposalID}
         onOpenLongMessage={openLongMessage}
         onOpenWorkArtifact={openWorkArtifact}
-        actionOverlay={renderMessageActionSheet(true)}
+        actionOverlay={(
+          <>
+            {renderLongMessageSheet(true)}
+            {renderMessageActionSheet(true)}
+          </>
+        )}
       />
 
       <AttachmentSourceSheet

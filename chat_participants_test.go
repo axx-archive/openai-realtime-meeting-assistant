@@ -18,6 +18,9 @@ func TestChatMentionCandidatesIncludeScoutAndOtherRosterMembers(t *testing.T) {
 	if candidates[0].Handle != "Scout" {
 		t.Fatalf("Scout handle=%q, want Scout", candidates[0].Handle)
 	}
+	if candidates[0].RoleTitle != "Chief of staff" {
+		t.Fatalf("Scout role title=%q, want Chief of staff", candidates[0].RoleTitle)
+	}
 	for _, candidate := range candidates {
 		if candidate.Email == "aj@shareability.com" {
 			t.Fatal("viewer should not be suggested as their own mention target")
@@ -48,7 +51,7 @@ func TestChatMentionCandidatesIncludeOnlyCurrentlyHiredValidAgents(t *testing.T)
 		if candidate.AgentID != hired.ID {
 			continue
 		}
-		found = candidate.Kind == "agent" && candidate.Name == hired.DisplayName && candidate.Handle == chatMentionHandle(hired.DisplayName) && candidate.Email == ""
+		found = candidate.Kind == "agent" && candidate.Name == hired.DisplayName && candidate.Handle == chatMentionHandle(hired.DisplayName) && candidate.Email == "" && candidate.RoleTitle == "Research Partner"
 	}
 	if !found {
 		t.Fatalf("hired Colton missing from agent mention candidates: %+v", candidates)

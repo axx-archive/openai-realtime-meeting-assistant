@@ -22,6 +22,7 @@ func TestSTRIDEProductColtonAndMarvinAreDistinctInspectableResearchCoworkers(t *
 		}
 	}
 	if colton.RoleTitle == marvin.RoleTitle || colton.PersonalitySummary == marvin.PersonalitySummary || colton.WorkingStyle == marvin.WorkingStyle ||
+		colton.UsageGuidance == "" ||
 		strings.Join(colton.PersonalityTraits, "\x00") == strings.Join(marvin.PersonalityTraits, "\x00") ||
 		strings.Join(colton.Capabilities, "\x00") == strings.Join(marvin.Capabilities, "\x00") {
 		t.Fatalf("Colton and Marvin collapsed to the same identity: colton=%#v marvin=%#v", colton, marvin)
@@ -31,7 +32,7 @@ func TestSTRIDEProductColtonAndMarvinAreDistinctInspectableResearchCoworkers(t *
 func TestSTRIDEProductScoutProfileIsInspectableIncludedAndNotHireable(t *testing.T) {
 	state := NewSTRIDEProductState()
 	scout, found := state.candidate("scout")
-	if !found || scout.DisplayName != "Scout" || scout.RoleTitle != "Team Partner" || len(scout.PersonalityTraits) < 3 || len(scout.CoreMemories) < 2 ||
+	if !found || scout.DisplayName != "Scout" || scout.RoleTitle != "Chief of Staff" || scout.UsageGuidance == "" || len(scout.PersonalityTraits) < 3 || len(scout.CoreMemories) < 2 ||
 		!strings.Contains(scout.VoiceSummary, "first-person") || !strings.Contains(scout.MemoryPolicy, "human correction") || !containsSTRIDEID(scout.Capabilities, "agent_delegation") {
 		t.Fatalf("Scout marketplace identity is incomplete: %#v found=%v", scout, found)
 	}
@@ -50,6 +51,38 @@ func TestSTRIDEProductMarketplaceLeadsWithCurrentTeamIdentities(t *testing.T) {
 			}
 			return ids
 		}())
+	}
+}
+
+func TestSTRIDEProductMemberMarketplaceContainsOnlyCurrentTeam(t *testing.T) {
+	state := NewSTRIDEProductState()
+	if catalog := state.candidateCatalogForViewer(false); len(catalog) != 1 || catalog[0].ID != "scout" {
+		t.Fatalf("member catalog before hire=%v, want included Scout only", catalog)
+	}
+	if adminCatalog := state.candidateCatalogForViewer(true); len(adminCatalog) < 3 {
+		t.Fatalf("administrator catalog unexpectedly filtered: %v", adminCatalog)
+	}
+
+	now := time.Date(2026, 8, 5, 20, 0, 0, 0, time.UTC)
+	trial, err := state.beginTrial("colton-research", "member_aj", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if catalog := state.candidateCatalogForViewer(false); len(catalog) != 1 || catalog[0].ID != "scout" {
+		t.Fatalf("trial seat leaked into member catalog: %v", catalog)
+	}
+	_, err = state.mutateAgent(trial.ID, trial.Revision, func(agent *STRIDEProductTeamAgent) error {
+		agent.Status = "hired_fenced"
+		agent.DirectThreadID = "stride_agent_direct_colton_directory"
+		agent.AccessRevoked = false
+		return nil
+	}, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := state.candidateCatalogForViewer(false)
+	if len(catalog) != 2 || catalog[0].ID != "scout" || catalog[1].ID != "colton-research" {
+		t.Fatalf("member catalog after hire=%v, want Scout and Colton", catalog)
 	}
 }
 

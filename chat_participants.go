@@ -10,6 +10,7 @@ type chatMentionCandidate struct {
 	Handle        string `json:"handle,omitempty"`
 	Email         string `json:"email,omitempty"`
 	AgentID       string `json:"agentId,omitempty"`
+	RoleTitle     string `json:"roleTitle,omitempty"`
 	Kind          string `json:"kind"`
 	AvatarDataURL string `json:"avatarDataURL,omitempty"`
 }
@@ -20,7 +21,7 @@ func chatMentionHandle(name string) string {
 
 func chatMentionCandidates(viewerEmail string) []chatMentionCandidate {
 	viewerEmail = normalizeAccountEmail(viewerEmail)
-	candidates := []chatMentionCandidate{{Name: "Scout", Handle: "Scout", Kind: "scout"}}
+	candidates := []chatMentionCandidate{{Name: "Scout", Handle: "Scout", RoleTitle: "Chief of staff", Kind: "scout"}}
 	for _, seed := range seededAccounts {
 		email := normalizeAccountEmail(seed.Email)
 		if email == "" || email == viewerEmail {
@@ -48,10 +49,11 @@ func (app *kanbanBoardApp) chatMentionCandidatesForViewer(viewerEmail string) []
 	candidates := chatMentionCandidates(viewerEmail)
 	for _, profile := range app.strideMentionableAgentProfiles() {
 		candidates = append(candidates, chatMentionCandidate{
-			Name:    profile.DisplayName,
-			Handle:  chatMentionHandle(profile.DisplayName),
-			AgentID: profile.AgentID,
-			Kind:    "agent",
+			Name:      profile.DisplayName,
+			Handle:    chatMentionHandle(profile.DisplayName),
+			AgentID:   profile.AgentID,
+			RoleTitle: profile.RoleTitle,
+			Kind:      "agent",
 		})
 	}
 	return candidates

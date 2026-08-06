@@ -10,6 +10,7 @@ import { ScoutRichText } from './ScoutRichText';
 
 type Props = {
   visible: boolean;
+  contained?: boolean;
   text: string;
   authorName: string;
   scout: boolean;
@@ -46,44 +47,55 @@ function reportBodyWithoutDuplicateTitle(text: string, title: string): string {
     : text;
 }
 
-export function LongMessageSheet({ visible, text, authorName, scout, activity = false, report, onClose }: Props) {
+export function LongMessageSheet({ visible, contained = false, text, authorName, scout, activity = false, report, onClose }: Props) {
   const displayedText = useMemo(
     () => report ? reportBodyWithoutDuplicateTitle(text, authorName) : text,
     [authorName, report, text],
   );
+  const sheet = (
+    <SafeAreaView style={[styles.sheet, contained && styles.containedSheet]} edges={['left', 'right', 'bottom']}>
+      <View style={styles.handle} />
+      <View style={styles.header}>
+        <View style={styles.headerCopy}>
+          <Text style={[styles.eyebrow, scout && styles.eyebrowScout]}>{report ? 'STRIDE · DELIVERABLE' : activity ? 'SCOUT · ACTIVITY' : scout ? 'SCOUT RESPONSE' : 'MESSAGE'}</Text>
+          <Text numberOfLines={1} style={styles.title}>{report ? `${report.agentName} · ${report.status}` : authorName}</Text>
+        </View>
+        <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} hitSlop={8} style={({ pressed }) => [styles.close, pressed && styles.closePressed]}>
+          <SymbolView name="xmark" size={15} tintColor={colors.text2} />
+        </Pressable>
+      </View>
+      <ScrollView contentInsetAdjustmentBehavior="automatic" showsVerticalScrollIndicator contentContainerStyle={[styles.content, report && styles.reportContent]}>
+        {report ? (
+          <View style={styles.reportHero}>
+            <View style={styles.reportModeRow}>
+              <View style={styles.reportSignal} />
+              <Text style={styles.reportMode}>{report.mode.toUpperCase()} REPORT</Text>
+            </View>
+            <Text style={styles.reportTitle}>{authorName}</Text>
+            <Text style={styles.reportByline}>Prepared by {report.agentName} · delivered to this conversation</Text>
+          </View>
+        ) : null}
+        {scout ? <ScoutRichText text={displayedText} variant={report ? 'report' : 'message'} /> : <PlainRichText text={displayedText} />}
+      </ScrollView>
+    </SafeAreaView>
+  );
+
+  // Thread replies already live inside an iOS page-sheet Modal. Presenting a
+  // sibling Modal from the screen underneath it can leave the full response
+  // hidden behind the thread. Keep this reader inside the presented sheet;
+  // the main channel continues to use a native page sheet.
+  if (contained) return visible ? sheet : null;
+
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <SafeAreaView style={styles.sheet} edges={['left', 'right', 'bottom']}>
-        <View style={styles.handle} />
-        <View style={styles.header}>
-          <View style={styles.headerCopy}>
-            <Text style={[styles.eyebrow, scout && styles.eyebrowScout]}>{report ? 'STRIDE · DELIVERABLE' : activity ? 'SCOUT · ACTIVITY' : scout ? 'SCOUT RESPONSE' : 'MESSAGE'}</Text>
-            <Text numberOfLines={1} style={styles.title}>{report ? `${report.agentName} · ${report.status}` : authorName}</Text>
-          </View>
-          <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} hitSlop={8} style={({ pressed }) => [styles.close, pressed && styles.closePressed]}>
-            <SymbolView name="xmark" size={15} tintColor={colors.text2} />
-          </Pressable>
-        </View>
-        <ScrollView contentInsetAdjustmentBehavior="automatic" showsVerticalScrollIndicator contentContainerStyle={[styles.content, report && styles.reportContent]}>
-          {report ? (
-            <View style={styles.reportHero}>
-              <View style={styles.reportModeRow}>
-                <View style={styles.reportSignal} />
-                <Text style={styles.reportMode}>{report.mode.toUpperCase()} REPORT</Text>
-              </View>
-              <Text style={styles.reportTitle}>{authorName}</Text>
-              <Text style={styles.reportByline}>Prepared by {report.agentName} · delivered to this conversation</Text>
-            </View>
-          ) : null}
-          {scout ? <ScoutRichText text={displayedText} variant={report ? 'report' : 'message'} /> : <PlainRichText text={displayedText} />}
-        </ScrollView>
-      </SafeAreaView>
+      {sheet}
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   sheet: { flex: 1, overflow: 'hidden', backgroundColor: colors.bgApp },
+  containedSheet: { position: 'absolute', inset: 0, zIndex: 120, elevation: 120 },
   handle: { alignSelf: 'center', width: 36, height: 5, marginTop: space[2], borderRadius: radius.full, backgroundColor: colors.line2 },
   header: { minHeight: 70, flexDirection: 'row', alignItems: 'center', gap: space[3], paddingHorizontal: space[5], borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line1 },
   headerCopy: { flex: 1 },

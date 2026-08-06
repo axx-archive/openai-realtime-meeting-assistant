@@ -8,6 +8,7 @@ const screenSource = fs.readFileSync(path.resolve(import.meta.dirname, '..', 'sc
 const sheetSource = fs.readFileSync(path.join(messagingRoot, 'ThreadDetailSheet.tsx'), 'utf8');
 const actionSource = fs.readFileSync(path.join(messagingRoot, 'MessageActionSheet.tsx'), 'utf8');
 const activitySource = fs.readFileSync(path.join(messagingRoot, 'LongMessageSheet.tsx'), 'utf8');
+const mentionSource = fs.readFileSync(path.join(messagingRoot, 'MentionComposerInput.tsx'), 'utf8');
 const bubbleSource = fs.readFileSync(path.join(messagingRoot, 'MessageBubble.tsx'), 'utf8');
 const apiSource = fs.readFileSync(path.resolve(import.meta.dirname, '..', 'api', 'client.ts'), 'utf8');
 
@@ -42,7 +43,9 @@ test('thread replies use a native dismissible page sheet with their own composer
   assert.match(screenSource, /addGiphyGif\(gif, attachmentTarget\)/);
   assert.match(sheetSource, /onLongPress=\{onLongPress\}/);
   assert.match(sheetSource, /\{actionOverlay\}/);
-  assert.match(screenSource, /actionOverlay=\{renderMessageActionSheet\(true\)\}/);
+  assert.match(screenSource, /actionOverlay=\{\(/);
+  assert.match(screenSource, /renderLongMessageSheet\(true\)/);
+  assert.match(screenSource, /renderMessageActionSheet\(true\)/);
   assert.match(screenSource, /\{threadContextRoot \? null : renderMessageActionSheet\(\)\}/);
   assert.match(actionSource, /if \(contained\) return visible \? content : null/);
   assert.match(actionSource, /containedModal: \{ position: 'absolute', inset: 0/);
@@ -69,6 +72,22 @@ test('mobile work activity uses the same native page-sheet behavior', () => {
   assert.match(activitySource, /SCOUT · ACTIVITY/);
   assert.match(activitySource, /STRIDE · DELIVERABLE/);
   assert.match(activitySource, /variant=\{report \? 'report' : 'message'\}/);
+});
+
+test('full responses opened from a reply stay inside the visible iOS thread sheet', () => {
+  assert.match(activitySource, /contained\?: boolean/);
+  assert.match(activitySource, /if \(contained\) return visible \? sheet : null/);
+  assert.match(activitySource, /containedSheet: \{ position: 'absolute', inset: 0/);
+  assert.match(screenSource, /\{threadContextRoot \? null : renderLongMessageSheet\(\)\}/);
+  assert.match(screenSource, /renderLongMessageSheet\(true\)/);
+});
+
+test('mention suggestions describe every AI worker as a role-specific teammate', () => {
+  assert.match(mentionSource, /Chief of staff/);
+  assert.match(mentionSource, /Specialist/);
+  assert.match(mentionSource, /Teammate/);
+  assert.doesNotMatch(mentionSource, /Agent · confirm work/);
+  assert.doesNotMatch(mentionSource, /AI teammate/);
 });
 
 test('work cards use the available narrow-screen width without a fixed minimum', () => {

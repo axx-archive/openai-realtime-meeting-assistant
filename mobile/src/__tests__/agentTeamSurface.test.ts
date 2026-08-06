@@ -26,11 +26,18 @@ test('agent team surface reaches authenticated STRIDE product lifecycles', () =>
   assert.match(client, /\/api\/stride\/v1\/work/);
 });
 
-test('marketplace and suggested work stay visibly provider-fenced but human-actionable', () => {
+test('member marketplace is a read-only directory while suggested work stays actionable', () => {
   const screen = source('src', 'screens', 'AgentTeamScreen.tsx');
   assert.match(screen, /activation fenced/);
-  assert.match(screen, /Start preview/);
-  assert.match(screen, /Hire with approval/);
+  assert.match(screen, /profiles are read-only/);
+  assert.match(screen, /each requires approval/);
+  assert.match(screen, /BEST USED FOR/);
+  assert.match(screen, /usageGuidance/);
+  assert.match(screen, /listing\.id === 'scout' \|\| hiredListingIDs\.has\(listing\.id\)/);
+  assert.doesNotMatch(screen, /Start preview/);
+  assert.doesNotMatch(screen, /Hire with approval/);
+  assert.doesNotMatch(screen, /Pause/);
+  assert.doesNotMatch(screen, /Offboard/);
   assert.match(screen, /Approve & run/);
   assert.match(screen, /Dismiss/);
   assert.match(screen, /FlatList/);
@@ -38,34 +45,15 @@ test('marketplace and suggested work stay visibly provider-fenced but human-acti
   assert.doesNotMatch(screen, /Mary|Marketing Agent|Research Agent|Design Agent|Builder Agent/);
 });
 
-test('agent team exposes inspectable coworkers, opt-in growth, and a closed private template', () => {
+test('agent team exposes inspectable coworkers without member configuration controls', () => {
   const screen = source('src', 'screens', 'AgentTeamScreen.tsx');
-  const client = source('src', 'api', 'client.ts');
-
-  for (const label of [
-    'Create private agent',
-    'Details',
-    'Preview semantic diff',
-    'Approve update',
-    'Reject & roll back',
-    'Add assignment',
-    'Correct latest',
-    'Forget latest',
-    'Clean export receipt',
-  ]) {
-    assert.match(screen, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(screen, /Details/);
+  assert.match(screen, /Read-only teammate profile/);
+  assert.match(screen, /future administrator surface/);
+  assert.match(screen, /Open chat/);
+  for (const forbidden of ['Create private agent', 'Preview semantic diff', 'Approve update', 'Add assignment', 'Correct latest', 'Forget latest', 'Clean export receipt']) {
+    assert.doesNotMatch(screen, new RegExp(forbidden));
   }
-  assert.match(screen, /Nothing changes until the semantic diff is reviewed and approved/);
-  assert.match(screen, /Templates cannot contain code, commands, credentials, environment values, hooks, or raw tool-server configuration/);
-  assert.match(screen, /marketplace\?\.canManage/);
-  assert.match(client, /strideCreatePrivateAgentTemplate/);
-  assert.match(client, /strideProposeAgentUpdate/);
-  assert.match(client, /strideResolveAgentUpdate/);
-  assert.match(client, /strideAssignAgent/);
-  assert.match(client, /strideRecordAgentLearning/);
-  assert.match(client, /strideResolveAgentLearning/);
-  assert.match(client, /strideExportAgent/);
-  assert.doesNotMatch(client, /\/configure/);
 });
 
 test('suggested work requires an explicit eligible project destination', () => {

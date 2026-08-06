@@ -53,7 +53,7 @@ test('threaded replies keep edit and delete in the same long-press action sheet 
   assert.doesNotMatch(detail, /accessibilityLabel="Edit reply"/);
   assert.doesNotMatch(detail, /accessibilityLabel="Delete reply"/);
   assert.match(thread, /onLongPress=\{openMessageActions\}/);
-  assert.match(thread, /actionOverlay=\{renderMessageActionSheet\(true\)\}/);
+  assert.match(thread, /renderMessageActionSheet\(true\)/);
   assert.match(actions, /contained\?: boolean/);
   assert.match(actions, /if \(contained\) return visible \? content : null/);
   assert.match(actions, />Edit message</);
@@ -69,6 +69,7 @@ test('the thread owns one full-message sheet instead of mounting one per recycle
   assert.match(bubble, /onOpenLongMessage\?\./);
   assert.match(thread, /<LongMessageSheet/);
   assert.match(thread, /visible=\{Boolean\(expandedMessage\)\}/);
+  assert.match(thread, /renderLongMessageSheet\(true\)/);
 });
 
 test('private thread names save inline on Done or blur', () => {
