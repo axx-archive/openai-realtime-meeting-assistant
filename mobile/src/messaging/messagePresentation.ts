@@ -179,7 +179,7 @@ export function isOwnMessageForViewer(
 
 /** Returns the mention fragment currently being typed at the end of a draft. */
 export function activeMentionQuery(text: string): ActiveMentionQuery | null {
-  const match = /(?:^|\s)@([\p{L}\p{N}]*)$/u.exec(text);
+  const match = /(?:^|\s)@([\p{L}\p{N}._-]*)$/u.exec(text);
   if (!match || match.index === undefined) return null;
   const at = match.index + (match[0].startsWith('@') ? 0 : 1);
   return { start: at, query: match[1] ?? '' };

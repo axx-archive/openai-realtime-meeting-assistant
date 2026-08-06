@@ -152,6 +152,51 @@ func TestUnflaggedTeamThreadIsAdoptedAndFlagged(t *testing.T) {
 	}
 }
 
+func TestLegacyTeamTableMigratesToCanonicalBonfireChat(t *testing.T) {
+	newTableTestApp(t)
+
+	legacy, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", legacyTableThreadTitle, scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy.Table = true
+	legacy.ArchivedAt = "2026-08-01T00:00:00Z"
+	legacy.Preview = "archived"
+	if err := kanbanApp.saveScoutChatThread(legacy); err != nil {
+		t.Fatal(err)
+	}
+
+	table, err := kanbanApp.ensureTable("aj@shareability.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if table.ID != legacy.ID || table.Title != tableThreadTitle || table.ArchivedAt != "" || !table.Table {
+		t.Fatalf("canonicalized table=%+v", table)
+	}
+	persisted, _, err := kanbanApp.scoutChatThreadByID("aj@shareability.com", table.ID)
+	if err != nil || persisted.Title != tableThreadTitle || persisted.ArchivedAt != "" || !persisted.Table {
+		t.Fatalf("persisted canonical table=%+v err=%v", persisted, err)
+	}
+}
+
+func TestTableRejectsRenameAndArchive(t *testing.T) {
+	newTableTestApp(t)
+	table, err := kanbanApp.ensureTable("aj@shareability.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kanbanApp.renameScoutChatThread("aj@shareability.com", table.ID, "General"); err == nil || !strings.Contains(err.Error(), "cannot be renamed") {
+		t.Fatalf("rename err=%v", err)
+	}
+	if _, err := kanbanApp.setScoutChatThreadArchived("aj@shareability.com", table.ID, true); err == nil || !strings.Contains(err.Error(), "cannot be archived") {
+		t.Fatalf("archive err=%v", err)
+	}
+	persisted, _, err := kanbanApp.scoutChatThreadByID("aj@shareability.com", table.ID)
+	if err != nil || persisted.Title != tableThreadTitle || persisted.ArchivedAt != "" || !persisted.Table {
+		t.Fatalf("permanent table mutated=%+v err=%v", persisted, err)
+	}
+}
+
 // Two devices hitting the thread list simultaneously on a fresh deployment is
 // the exact moment this races. Two Tables would split the team permanently and
 // there is no natural repair.

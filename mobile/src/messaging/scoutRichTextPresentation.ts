@@ -6,13 +6,15 @@ export type ScoutInline = {
 };
 
 export type ScoutBlock = {
-  kind: 'paragraph' | 'heading' | 'bullet' | 'number' | 'quote' | 'code';
+  kind: 'paragraph' | 'heading' | 'bullet' | 'number' | 'quote' | 'code' | 'rule';
   inlines: ScoutInline[];
   marker?: string;
   level?: number;
+  depth?: number;
+  checked?: boolean;
 };
 
-const inlineToken = /(\[[^\]]+\]\(https?:\/\/[^\s)]+\)|\*\*[^*]+\*\*|__[^_]+__|`[^`]+`|(?<!\w)\*[^*\n]+\*|(?<!\w)_[^_\n]+_|https?:\/\/[^\s<>"']+|@[\p{L}\p{N}]+)/giu;
+const inlineToken = /(\[[^\]]+\]\(https?:\/\/[^\s)]+\)|\*\*[^*]+\*\*|__[^_]+__|`[^`]+`|(?<!\w)\*[^*\n]+\*|(?<!\w)_[^_\n]+_|https?:\/\/[^\s<>"']+|@[\p{L}\p{N}](?:[\p{L}\p{N}._-]*[\p{L}\p{N}_-])?)/giu;
 
 function cleanLiteral(value: string): string {
   return value
@@ -98,19 +100,32 @@ export function parseScoutMarkdown(value: string): ScoutBlock[] {
     }
     if (!line) continue;
 
+    if (/^(?:-{3,}|\*{3,}|_{3,})$/u.test(line)) {
+      blocks.push({ kind: 'rule', inlines: [] });
+      continue;
+    }
+
     const heading = /^(#{1,6})\s+(.+)$/u.exec(line);
     if (heading) {
       push('heading', heading[2], { level: heading[1].length });
       continue;
     }
-    const bullet = /^[-*+]\s+(.+)$/u.exec(line);
+    const bullet = /^(\s*)[-*+]\s+(?:\[([ xX])\]\s+)?(.+)$/u.exec(rawLine);
     if (bullet) {
-      push('bullet', bullet[1], { marker: '•' });
+      const checked = bullet[2] ? bullet[2].toLowerCase() === 'x' : undefined;
+      push('bullet', bullet[3], {
+        marker: checked === undefined ? '•' : checked ? '✓' : '○',
+        depth: Math.min(3, Math.floor(bullet[1].replace(/\t/gu, '  ').length / 2)),
+        checked,
+      });
       continue;
     }
-    const numbered = /^(\d+)[.)]\s+(.+)$/u.exec(line);
+    const numbered = /^(\s*)(\d+)[.)]\s+(.+)$/u.exec(rawLine);
     if (numbered) {
-      push('number', numbered[2], { marker: `${numbered[1]}.` });
+      push('number', numbered[3], {
+        marker: `${numbered[2]}.`,
+        depth: Math.min(3, Math.floor(numbered[1].replace(/\t/gu, '  ').length / 2)),
+      });
       continue;
     }
     const quote = /^>\s?(.+)$/u.exec(line);

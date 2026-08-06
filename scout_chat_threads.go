@@ -134,7 +134,7 @@ func scoutChatThreadMetadataAllowsViewer(metadata map[string]string, viewerEmail
 	return false
 }
 
-const tableScoutChatResponseStyle = "You are replying in #team, a casual group chat with coworkers. Sound like a smart teammate joining the thread, not a report or assistant dashboard. Answer the person who tagged you directly. Default to one to three short paragraphs; use a few bullets only when they genuinely improve clarity. Use contractions and natural language. Do not add a title, preamble, summary heading, or mention that you are an AI. Keep the same factual grounding, permission boundaries, and honesty."
+const tableScoutChatResponseStyle = "You are replying in #Bonfire Chat, a casual group chat with coworkers. Sound like a smart teammate joining the thread, not a report or assistant dashboard. Answer the person who tagged you directly. Default to one to three short paragraphs; use a few bullets only when they genuinely improve clarity. Use contractions and natural language. Do not add a title, preamble, summary heading, or mention that you are an AI. Keep the same factual grounding, permission boundaries, and honesty."
 
 func scoutChatResponseStyle(thread scoutChatThreadRecord) string {
 	if thread.Table && scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
@@ -913,7 +913,8 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	coworkerProfile, coworkerProfileAvailable := app.strideAgentDirectThreadContext(thread.ID)
 	coworkerResearchBridge := coworkerProfileAvailable && containsSTRIDEID(coworkerProfile.Capabilities, "deep_research")
 	plainCoworkerThreadReply := coworkerResearchBridge && replyTo != nil && strings.TrimSpace(followUpArtifactID) == "" && strings.TrimSpace(toolTemplate) == ""
-	deferAttachmentDerivation := plainCoworkerThreadReply || (coworkerProviderFenced && !coworkerResearchBridge) || (shouldDeferScoutChatAttachmentDerivation(thread, text, files, followUpArtifactID, toolTemplate) && !replyTargetsScout)
+	targetedAgent, targetedAgentMode, targetedAgentWork := app.strideTargetedAgentWorkRequest(thread, text, files, replyTo)
+	deferAttachmentDerivation := plainCoworkerThreadReply || (coworkerProviderFenced && !coworkerResearchBridge) || (shouldDeferScoutChatAttachmentDerivation(thread, text, files, followUpArtifactID, toolTemplate) && !replyTargetsScout && !targetedAgentWork)
 
 	// Binary attachments (card 085): build the provider-native content once,
 	// then run the bounded derived-text pass BEFORE any commit so file.Text
@@ -1042,7 +1043,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// its authorized chat source or the requester's Files catalog.
 	sourceNeed := scoutChatSourceNeed{}
 	explicitScoutEngagement := scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic ||
-		scoutChatMessageMentionsScout(userMessage) || replyTargetsScout ||
+		scoutChatMessageMentionsScout(userMessage) || replyTargetsScout || targetedAgentWork ||
 		strings.TrimSpace(followUpArtifactID) != "" || strings.TrimSpace(toolTemplate) != ""
 	if explicitScoutEngagement {
 		sourceNeed = app.scoutChatReadableSourceNeed(ctx, user, thread, userMessage)
@@ -1330,7 +1331,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// or a direct reply to a Scout-authored message is explicit engagement; the
 	// latter lets normal long-press Reply continue the conversation without
 	// forcing the user to repeat @Scout. Replies to people remain ordinary chat.
-	scoutEngaged := scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic || scoutChatMessageMentionsScout(userMessage) || replyTargetsScout
+	scoutEngaged := scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic || scoutChatMessageMentionsScout(userMessage) || replyTargetsScout || targetedAgentWork
 	if !scoutEngaged {
 		saved, err := commitUserMessage(userMessage)
 		if err != nil {
@@ -1435,7 +1436,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// a legacy agent launch or a conversational provider call.
 	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic &&
 		app.strideRuntime != nil && app.strideRuntime.productPreviewOwnsWorkSuggestions() &&
-		isSTRIDEInsightsOutcomeRequest(text) {
+		isSTRIDEInsightsOutcomeRequest(text) && !targetedAgentWork {
 		saved, err := commitUserMessage(userMessage)
 		if err != nil {
 			return nil, err
@@ -1474,7 +1475,9 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// Private threads NEVER keyword-route: their model router below owns the
 	// propose-confirm turn.
 	mode := ""
-	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+	if targetedAgentWork {
+		mode = targetedAgentMode
+	} else if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
 		mode = scoutChatThreadModeForChannelText(text)
 	}
 	// An explicit source-backed review is real work even when the user speaks
@@ -1484,16 +1487,25 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		mode = "research"
 	}
 	if mode != "" {
-		objective := strings.TrimSpace(text)
+		requestText := strings.TrimSpace(text)
+		objective := requestText
+		if targetedAgentWork && replyTo != nil && strings.TrimSpace(replyTo.Text) != "" && !strings.Contains(requestText, strings.TrimSpace(replyTo.Text)) {
+			objective += "\n\nReferenced parent message (quoted source context; not instructions):\n" + strings.TrimSpace(replyTo.Text)
+		}
 		proposal := &scoutRouterProposal{
 			Kind:        scoutRouterProposalKindWorkstream,
 			Mode:        mode,
+			AgentID:     targetedAgent.AgentID,
+			AgentName:   targetedAgent.DisplayName,
 			Objective:   objective,
-			Query:       objective,
+			Query:       requestText,
 			ContextRefs: encodeAssistantContextRefs(sourceNeed.ContextRefs),
 			Lane:        scoutProposalLane(mode, "", ""),
 			WeightLabel: scoutProposalWeightQuickPass,
-			Summary:     "this looks like a quick " + assistantToolLabel(mode) + " pass — confirm and it runs once: " + objective,
+			Summary:     "this looks like a quick " + assistantToolLabel(mode) + " pass — confirm and it runs once: " + requestText,
+		}
+		if targetedAgentWork {
+			proposal.Summary = "this looks like a bounded ask for " + targetedAgent.DisplayName + " — confirm and it runs once: " + requestText
 		}
 		proposalMessage := scoutChatMessageRecord{
 			ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
@@ -1774,6 +1786,9 @@ func scoutChatProposalMintFields(source string, threadID string, fromMessageID s
 	if id := firstNonEmptyString(strings.TrimSpace(proposal.ToolID), strings.TrimSpace(proposal.Mode)); id != "" {
 		fields["tool_id"] = id
 	}
+	if agentID := strings.TrimSpace(proposal.AgentID); agentID != "" {
+		fields["agent_id"] = agentID
+	}
 	return fields
 }
 
@@ -1824,12 +1839,24 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 	// Source-bound work fails before the card is claimed if its exact Files or
 	// chat attachment has disappeared or lost readable content. This keeps the
 	// proposal pending so the user can restore the source and retry.
-	pending, err := app.pendingScoutChatProposal(threadID, user.Email, messageID)
+	pending, proposalReplyTo, err := app.pendingScoutChatProposalContext(threadID, user.Email, messageID)
 	if err != nil {
 		return nil, err
 	}
 	if verb == "accepted" && !app.assistantContextRefsReadable(ctx, user, pending.ContextRefs) {
 		return nil, fmt.Errorf("a source file changed or is no longer readable; attach it again before launching")
+	}
+	selectedAgentProfile := STRIDEProductAgentContextProfile{}
+	selectedAgent := false
+	if verb == "accepted" && strings.TrimSpace(pending.AgentID) != "" {
+		proposalThread, _, threadErr := app.scoutChatThreadByID(user.Email, threadID)
+		if threadErr != nil {
+			return nil, threadErr
+		}
+		selectedAgentProfile, selectedAgent = app.strideAgentContextForChatWork(pending.AgentID, proposalThread, pending.Mode)
+		if !selectedAgent {
+			return nil, fmt.Errorf("the selected agent is no longer eligible for this channel or work; update the assignment before confirming")
+		}
 	}
 
 	// Atomically flip the still-pending card to its verdict and read back the
@@ -1912,7 +1939,14 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 				},
 			}
 			delegatedProfile, delegated := STRIDEProductAgentContextProfile{}, false
-			if mode == "research" {
+			directlyTargeted := selectedAgent && strings.TrimSpace(proposal.AgentID) != ""
+			if directlyTargeted {
+				delegatedProfile, delegated = selectedAgentProfile, true
+				identity := agentThreadGoalSpecForProfile(delegatedProfile, "")
+				identity.ContextRefs = spec.ContextRefs
+				identity.Launch = spec.Launch
+				spec = identity
+			} else if mode == "research" {
 				delegatedProfile, delegated = app.stridePreferredResearchAgentContext()
 				if delegated {
 					identity := agentThreadGoalSpecForProfile(delegatedProfile, scoutParticipantName)
@@ -1935,6 +1969,7 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 				Role:      "scout",
 				Text:      assistantToolLabel(mode) + " workstream confirmed — running now",
 				CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+				ReplyTo:   proposalReplyTo,
 				Thread: &scoutChatThreadRef{
 					ID:         agentThread.ID,
 					Mode:       agentThread.Mode,
@@ -1944,8 +1979,14 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 				},
 			}
 			if delegated {
-				assistantMessage.Text = "I tapped " + delegatedProfile.DisplayName + " for this — research is running now and the finished brief will land here"
-				assistantMessage.Thread = scoutChatThreadRefForAgent(agentThread, delegatedProfile, scoutParticipantName)
+				if directlyTargeted {
+					assistantMessage.AuthorName = delegatedProfile.DisplayName
+					assistantMessage.Text = "I’m on it — the work is running now and I’ll bring the finished result back here"
+					assistantMessage.Thread = scoutChatThreadRefForAgent(agentThread, delegatedProfile, "")
+				} else {
+					assistantMessage.Text = "I tapped " + delegatedProfile.DisplayName + " for this — research is running now and the finished brief will land here"
+					assistantMessage.Thread = scoutChatThreadRefForAgent(agentThread, delegatedProfile, scoutParticipantName)
+				}
 			}
 			saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, assistantMessage)
 			if err != nil {
@@ -1972,6 +2013,7 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 				Role:      "scout",
 				Text:      "concept render started — it lands here when it's finished",
 				CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+				ReplyTo:   proposalReplyTo,
 			}
 			saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, statusMessage)
 			if err != nil {
@@ -2014,6 +2056,7 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 		Role:      "scout",
 		Text:      answer,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		ReplyTo:   proposalReplyTo,
 	}
 	saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, assistantMessage)
 	if err != nil {
@@ -2189,24 +2232,38 @@ func (app *kanbanBoardApp) claimScoutChatChoice(threadID string, viewerEmail str
 	return scoutChatChoiceOption{}, scoutChatChoices{}, fmt.Errorf("choice message not found")
 }
 
-func (app *kanbanBoardApp) pendingScoutChatProposal(threadID string, viewerEmail string, messageID string) (scoutRouterProposal, error) {
+// pendingScoutChatProposalContext resolves both the persisted proposal and its
+// immutable reply ancestry. Confirmation happens in a later HTTP request, so
+// the accepted work card cannot rely on the original append closure to copy
+// ReplyTo; it must recover topology from the stored proposal card itself.
+func (app *kanbanBoardApp) pendingScoutChatProposalContext(threadID string, viewerEmail string, messageID string) (scoutRouterProposal, *scoutChatReplyRef, error) {
 	thread, _, err := app.scoutChatThreadByID(viewerEmail, threadID)
 	if err != nil {
-		return scoutRouterProposal{}, err
+		return scoutRouterProposal{}, nil, err
 	}
 	if thread.ArchivedAt != "" {
-		return scoutRouterProposal{}, fmt.Errorf("chat thread is archived")
+		return scoutRouterProposal{}, nil, fmt.Errorf("chat thread is archived")
 	}
 	for _, message := range thread.Messages {
 		if message.ID != messageID || message.Proposal == nil {
 			continue
 		}
 		if message.Proposal.Status != "" {
-			return scoutRouterProposal{}, fmt.Errorf("proposal was already %s", message.Proposal.Status)
+			return scoutRouterProposal{}, nil, fmt.Errorf("proposal was already %s", message.Proposal.Status)
 		}
-		return *message.Proposal, nil
+		var replyTo *scoutChatReplyRef
+		if message.ReplyTo != nil {
+			copy := *message.ReplyTo
+			replyTo = &copy
+		}
+		return *message.Proposal, replyTo, nil
 	}
-	return scoutRouterProposal{}, fmt.Errorf("proposal message not found")
+	return scoutRouterProposal{}, nil, fmt.Errorf("proposal message not found")
+}
+
+func (app *kanbanBoardApp) pendingScoutChatProposal(threadID string, viewerEmail string, messageID string) (scoutRouterProposal, error) {
+	proposal, _, err := app.pendingScoutChatProposalContext(threadID, viewerEmail, messageID)
+	return proposal, err
 }
 
 // claimScoutChatProposal atomically resolves one persisted proposal card
@@ -3421,6 +3478,9 @@ func (app *kanbanBoardApp) renameScoutChatThread(viewerEmail string, threadID st
 	if thread.ArchivedAt != "" {
 		return scoutChatThreadRecord{}, fmt.Errorf("chat thread is archived")
 	}
+	if thread.Table {
+		return scoutChatThreadRecord{}, fmt.Errorf("Bonfire Chat is permanent and cannot be renamed")
+	}
 	if thread.Title == title {
 		return thread, nil
 	}
@@ -3444,6 +3504,9 @@ func (app *kanbanBoardApp) setScoutChatThreadArchived(ownerEmail string, threadI
 	thread, _, err := app.scoutChatThreadByID(ownerEmail, threadID)
 	if err != nil {
 		return scoutChatThreadRecord{}, err
+	}
+	if thread.Table {
+		return scoutChatThreadRecord{}, fmt.Errorf("Bonfire Chat is permanent and cannot be archived")
 	}
 	// Any signed-in user can read a public channel, but only its creator or the
 	// workspace administrator may archive (or restore) it.

@@ -101,6 +101,144 @@ func TestScoutDeepResearchDelegatesToHiredColtonWithDurableAttribution(t *testin
 	}
 }
 
+func TestPublicAgentMentionRequiresExplicitWorkAndConfirmation(t *testing.T) {
+	fixture := newSTRIDEProjectAuthorityFixture(t)
+	hired := hireResearchAgentForBridgeTest(t, fixture, "colton-research", strideProductAgentDirectThreadPrefix+"public_mention")
+	table, err := fixture.app.ensureTable(fixture.user.Email)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousRunner := startAgentThreadAsync
+	var launches atomic.Int64
+	var launched scoutAgentThread
+	startAgentThreadAsync = func(_ *kanbanBoardApp, thread scoutAgentThread) {
+		launches.Add(1)
+		launched = thread
+	}
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	social, err := fixture.app.appendScoutChatThreadMessage(context.Background(), fixture.user, table.ID, "@Colton loved your note on that article", nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if social["proposal"] != nil || social["answer"] != nil || launches.Load() != 0 {
+		t.Fatalf("social mention became work: response=%v launches=%d", social, launches.Load())
+	}
+
+	root := scoutChatMessageRecord{
+		ID: "article-root", Kind: "message", Role: "user", Text: "https://example.com/disney-tiktok",
+		CreatedAt: time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano), AuthorName: "Tyler", AuthorEmail: "tyler@shareability.com",
+	}
+	if _, err := fixture.app.commitScoutChatThreadMessages(fixture.user.Email, table.ID, root); err != nil {
+		t.Fatal(err)
+	}
+	response, err := fixture.app.appendScoutChatThreadMessageWithReplyAndTool(
+		context.Background(), fixture.user, table.ID,
+		"@Colton can you dig into that article, search the web, and analyze the market implications?",
+		nil, "", root.ID, "",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, ok := response["proposal"].(*scoutRouterProposal)
+	if !ok || proposal.AgentID != hired.ID || proposal.AgentName != hired.DisplayName || proposal.Mode != "research" || proposal.Status != "" {
+		t.Fatalf("targeted proposal=%#v", response["proposal"])
+	}
+	if !strings.Contains(proposal.Objective, root.Text) || strings.Contains(proposal.Query, root.Text) || strings.Contains(proposal.Summary, root.Text) {
+		t.Fatalf("reply context was not bound only to the worker objective: objective=%q query=%q summary=%q", proposal.Objective, proposal.Query, proposal.Summary)
+	}
+	if response["approvalRequired"] != true || response["providerCalls"] != 0 || launches.Load() != 0 {
+		t.Fatalf("proposal crossed confirmation gate: response=%v launches=%d", response, launches.Load())
+	}
+	saved := response["thread"].(scoutChatThreadRecord)
+	card := saved.Messages[len(saved.Messages)-1]
+	if card.Proposal == nil || card.Proposal.AgentID != hired.ID || card.ReplyTo == nil || card.ReplyTo.MessageID != root.ID {
+		t.Fatalf("persisted targeted card=%+v", card)
+	}
+
+	accepted, err := fixture.app.resolveScoutChatProposal(context.Background(), fixture.user, table.ID, scoutChatProposalAction{Action: "accepted", MessageID: card.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if launches.Load() != 1 || !strings.Contains(launched.Query, root.Text) || launched.Artifact.Metadata["agentId"] != hired.ID || launched.Artifact.Metadata["agentName"] != hired.DisplayName || launched.Artifact.Metadata["delegatedBy"] != "" {
+		t.Fatalf("targeted launch=%+v metadata=%v launches=%d", launched, launched.Artifact.Metadata, launches.Load())
+	}
+	answer := accepted["answer"].(scoutChatMessageRecord)
+	if answer.AuthorName != hired.DisplayName || answer.ReplyTo == nil || answer.ReplyTo.MessageID != root.ID || answer.Thread == nil || answer.Thread.AgentID != hired.ID || answer.Thread.AgentName != hired.DisplayName || answer.Thread.DelegatedBy != "" {
+		t.Fatalf("targeted attribution=%+v", answer)
+	}
+	fixture.app.updateScoutChatThreadRefs(launched.ID, "complete", launched.Artifact.ID)
+	reloaded, _, err := fixture.app.scoutChatThreadByID(fixture.user.Email, table.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workCards := 0
+	for _, message := range reloaded.Messages {
+		if message.Thread == nil || message.Thread.ID != launched.ID {
+			continue
+		}
+		workCards++
+		if message.ID != answer.ID || message.ReplyTo == nil || message.ReplyTo.MessageID != root.ID || message.Thread.Status != "complete" {
+			t.Fatalf("reloaded reply-local work card=%+v", message)
+		}
+	}
+	if workCards != 1 {
+		t.Fatalf("reply-local completion produced %d work cards, want exactly one", workCards)
+	}
+	if _, err := fixture.app.resolveScoutChatProposal(context.Background(), fixture.user, table.ID, scoutChatProposalAction{Action: "accepted", MessageID: card.ID}); err == nil || !strings.Contains(err.Error(), "already") {
+		t.Fatalf("duplicate accept err=%v", err)
+	}
+	if launches.Load() != 1 {
+		t.Fatalf("duplicate accept launched %d workstreams, want exactly one", launches.Load())
+	}
+}
+
+func TestTargetedAgentProposalRechecksEligibilityBeforeClaim(t *testing.T) {
+	fixture := newSTRIDEProjectAuthorityFixture(t)
+	hired := hireResearchAgentForBridgeTest(t, fixture, "colton-research", strideProductAgentDirectThreadPrefix+"eligibility_recheck")
+	table, err := fixture.app.ensureTable(fixture.user.Email)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := fixture.app.appendScoutChatThreadMessage(context.Background(), fixture.user, table.ID, "@Colton research the Disney and TikTok market implications", nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal := response["proposal"].(*scoutRouterProposal)
+	saved := response["thread"].(scoutChatThreadRecord)
+	cardID := saved.Messages[len(saved.Messages)-1].ID
+	if proposal.AgentID != hired.ID {
+		t.Fatalf("proposal target=%+v", proposal)
+	}
+
+	err = fixture.runtime.WithProductContext(canonicalTenantID(), STRIDEProductScopeMarketplace, func(ctx STRIDEProductContext) error {
+		_, err := ctx.Product.mutateAgent(hired.ID, hired.Revision, func(agent *STRIDEProductTeamAgent) error {
+			agent.Status = "paused"
+			agent.AccessRevoked = true
+			return nil
+		}, fixture.config.Now())
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousRunner := startAgentThreadAsync
+	var launches atomic.Int64
+	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) { launches.Add(1) }
+	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
+
+	if _, err := fixture.app.resolveScoutChatProposal(context.Background(), fixture.user, table.ID, scoutChatProposalAction{Action: "accepted", MessageID: cardID}); err == nil || !strings.Contains(err.Error(), "no longer eligible") {
+		t.Fatalf("eligibility recheck err=%v", err)
+	}
+	if launches.Load() != 0 {
+		t.Fatalf("ineligible agent launched %d workstreams", launches.Load())
+	}
+	pending, err := fixture.app.pendingScoutChatProposal(table.ID, fixture.user.Email, cardID)
+	if err != nil || pending.Status != "" {
+		t.Fatalf("failed preclaim changed proposal: pending=%+v err=%v", pending, err)
+	}
+}
+
 func TestDirectResearchCoworkerRequestsMissingInputWithoutLaunchingProvider(t *testing.T) {
 	fixture := newSTRIDEProjectAuthorityFixture(t)
 	directThreadID := strideProductAgentDirectThreadPrefix + "colton_missing_input_test"

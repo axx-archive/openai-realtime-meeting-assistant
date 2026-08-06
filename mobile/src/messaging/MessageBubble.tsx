@@ -39,6 +39,8 @@ export type MessageBubbleProps = {
   onRetryReply?: (message: ScoutMessage) => void;
   onOpenLongMessage?: (text: string, authorName: string, scout: boolean) => void;
   onOpenWorkArtifact?: (message: ScoutMessage) => void;
+  onResolveProposal?: (message: ScoutMessage, action: 'accepted' | 'dismissed') => void;
+  resolvingProposal?: boolean;
   retryingReply?: boolean;
 };
 
@@ -140,10 +142,16 @@ export const MessageBubble = React.memo(function MessageBubble({
   onRetryReply,
   onOpenLongMessage,
   onOpenWorkArtifact,
+  onResolveProposal,
+  resolvingProposal = false,
   retryingReply = false,
 }: MessageBubbleProps) {
   const lifecycle = scoutReplyLifecyclePresentation(message);
   const workThread = workThreadPresentation(message);
+  const proposal = message.proposal;
+  const workProposal = String(proposal?.kind ?? '').toLowerCase() === 'workstream';
+  const proposalStatus = String(proposal?.status ?? '').toLowerCase();
+  const proposalPending = workProposal && !proposalStatus;
   const rawBody = bodyOf(message);
   const body = rawBody || (!lifecycle?.active ? lifecycle?.fallbackText ?? '' : '');
   const { getMappingKey } = useMappingHelper();
@@ -199,7 +207,7 @@ export const MessageBubble = React.memo(function MessageBubble({
           ) : null}
         </View>
       ) : null}
-      <Animated.View style={[styles.stack, own && styles.stackOwn, translated]}>
+      <Animated.View style={[styles.stack, (workThread || workProposal) && styles.stackWork, own && styles.stackOwn, translated]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`${own ? 'You' : authorName}: ${body || lifecycle?.label || workThread?.label || `${files.length} attachment${files.length === 1 ? '' : 's'}`}. ${message.editedAt ? 'Edited. ' : ''}${timeLabel}`}
@@ -215,6 +223,7 @@ export const MessageBubble = React.memo(function MessageBubble({
             styles.bubble,
             own ? styles.bubbleOwn : styles.bubbleOther,
             scout && styles.bubbleScout,
+            (workThread || workProposal) && styles.bubbleWork,
             standaloneLinkPreview && styles.bubbleLinkOnly,
             attachmentOnly && styles.bubbleAttachmentOnly,
           ]}
@@ -256,7 +265,44 @@ export const MessageBubble = React.memo(function MessageBubble({
             </View>
           ) : null}
 
-          {workThread ? (
+          {workProposal ? (
+            <View accessibilityLabel={`${proposal?.agentName || 'Agent'} proposed work. ${proposal?.summary || body}`} style={styles.proposalCard}>
+              <View style={styles.proposalHead}>
+                <View style={styles.workIcon}>
+                  <SymbolView name="sparkles" tintColor={colors.emberText} size={13} />
+                </View>
+                <Text style={styles.proposalKicker}>{proposal?.agentName || 'Scout'} · proposed work</Text>
+              </View>
+              <Text style={styles.proposalSummary}>{proposal?.summary || body}</Text>
+              <Text style={styles.proposalSafety}>
+                {proposalPending ? 'Nothing runs until you confirm.' : proposalStatus === 'accepted' ? 'Confirmed · launched once' : 'Dismissed'}
+              </Text>
+              {proposalPending ? (
+                <View style={styles.proposalActions}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Run ${proposal?.agentName || 'agent'} work once`}
+                    accessibilityState={{ disabled: resolvingProposal }}
+                    disabled={resolvingProposal}
+                    onPress={() => onResolveProposal?.(message, 'accepted')}
+                    style={({ pressed }) => [styles.proposalRun, (pressed || resolvingProposal) && styles.proposalPressed]}
+                  >
+                    {resolvingProposal ? <ActivityIndicator color={colors.onAccent} size="small" /> : <Text style={styles.proposalRunText}>Run once</Text>}
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Dismiss proposed work"
+                    accessibilityState={{ disabled: resolvingProposal }}
+                    disabled={resolvingProposal}
+                    onPress={() => onResolveProposal?.(message, 'dismissed')}
+                    style={({ pressed }) => [styles.proposalDismiss, (pressed || resolvingProposal) && styles.proposalPressed]}
+                  >
+                    <Text style={styles.proposalDismissText}>Not now</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+            </View>
+          ) : workThread ? (
             <View
               accessibilityLabel={`${workThread.mode} workstream. ${workThread.label}. ${workThread.query}`}
               accessibilityLiveRegion="polite"
@@ -283,22 +329,22 @@ export const MessageBubble = React.memo(function MessageBubble({
 				  <Text style={[styles.workStatusText, workThread.needsInput && styles.workStatusTextNeedsInput, workThread.failed && styles.workStatusTextFailed]}>{workThread.label}</Text>
                 </View>
               </View>
-              <Text numberOfLines={3} style={styles.workQuery}>{workThread.query}</Text>
-	      {workThread.progress !== undefined ? (
+              <Text numberOfLines={2} style={styles.workQuery}>{workThread.query}</Text>
+	      {workThread.progress !== undefined && !workThread.complete ? (
 	        <View style={styles.workProgress}>
 	          <View style={[styles.workProgressFill, { width: `${workThread.progress}%` }]} />
 	        </View>
 	      ) : null}
               <View style={styles.workFoot}>
-			    <View style={[styles.workDot, workThread.active && styles.workDotActive, workThread.complete && styles.workDotComplete, workThread.needsInput && styles.workDotNeedsInput, workThread.failed && styles.workDotFailed]} />
                 <Text style={styles.workFootText}>
-                  {workThread.active ? `${workThread.phase} · Tap to view activity` : workThread.complete ? 'Delivered here · Tap to open the report' : 'Open the work details to inspect the run'}
+                  {workThread.active ? `View activity · ${workThread.phase}` : workThread.complete ? 'Open report' : 'Open work details'}
                 </Text>
+                <SymbolView name="chevron.right" tintColor={workThread.complete ? colors.success : colors.text3} size={12} />
               </View>
             </View>
           ) : null}
 
-          {!workThread && body && lifecycle?.state === 'canceled' ? (
+          {!workProposal && !workThread && body && lifecycle?.state === 'canceled' ? (
             <Text style={styles.lifecycleCanceled}>{body}</Text>
           ) : !workThread && body && !linkOnly && scout ? (
             <ScoutRichText text={body} maxCharacters={longMessage ? 560 : undefined} />
@@ -496,8 +542,10 @@ const styles = StyleSheet.create({
   time: { fontSize: 11, lineHeight: 13, fontVariant: ['tabular-nums'], color: colors.text3, textAlign: 'right' },
   editedLabel: { fontSize: 10, lineHeight: 12, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', color: colors.text3, textAlign: 'right' },
   stack: { maxWidth: '82%', alignItems: 'flex-start' },
+  stackWork: { width: '100%', maxWidth: '100%', alignSelf: 'stretch' },
   stackOwn: { alignItems: 'flex-end' },
   bubble: { paddingHorizontal: space[4], paddingVertical: 10, borderRadius: radius.lg, gap: 2 },
+  bubbleWork: { width: '100%', maxWidth: 372, alignSelf: 'stretch' },
   bubbleOther: { backgroundColor: colors.surface1, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line1, borderBottomLeftRadius: radius.sm },
   bubbleOwn: { backgroundColor: colors.accent, borderBottomRightRadius: radius.sm },
   bubbleScout: { backgroundColor: colors.surface1, borderColor: colors.ember },
@@ -526,28 +574,39 @@ const styles = StyleSheet.create({
   lifecycleRetry: { minHeight: 34, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: space[2], paddingHorizontal: 10, borderRadius: radius.full, backgroundColor: colors.emberSoft },
   lifecycleRetryPressed: { opacity: 0.68, transform: [{ scale: 0.98 }] },
   lifecycleRetryText: { ...type.captionMedium, color: colors.emberText },
-  workCard: { minWidth: 248, maxWidth: 292, gap: space[3], paddingVertical: 4 },
-  workHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space[2] },
-  workIdentity: { minWidth: 0, flex: 1, flexDirection: 'row', alignItems: 'center', gap: 7 },
+  workCard: { width: '100%', minWidth: 0, maxWidth: 340, alignSelf: 'stretch', gap: space[3], paddingVertical: 5 },
+  proposalCard: { width: '100%', minWidth: 0, alignSelf: 'stretch', gap: space[3], paddingVertical: 5 },
+  proposalHead: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  proposalKicker: { ...type.captionMedium, color: colors.emberText, flex: 1 },
+  proposalSummary: { ...type.bodyMedium, color: colors.text1, fontSize: 16, lineHeight: 22 },
+  proposalSafety: { ...type.caption, color: colors.text3 },
+  proposalActions: { flexDirection: 'row', alignItems: 'center', gap: space[2], paddingTop: space[1] },
+  proposalRun: { minHeight: 42, flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: radius.full, backgroundColor: colors.accent },
+  proposalRunText: { ...type.captionMedium, color: colors.onAccent },
+  proposalDismiss: { minHeight: 42, flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: radius.full, backgroundColor: colors.surface3 },
+  proposalDismissText: { ...type.captionMedium, color: colors.text2 },
+  proposalPressed: { opacity: 0.64, transform: [{ scale: 0.98 }] },
+  workHead: { alignItems: 'flex-start', gap: space[2] },
+  workIdentity: { minWidth: 0, alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: 7 },
   workIcon: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center', borderRadius: radius.full, backgroundColor: colors.emberSoft },
   workKicker: { ...type.captionMedium, color: colors.emberText, textTransform: 'capitalize', flexShrink: 1 },
-  workStatus: { minHeight: 26, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, borderRadius: radius.full, backgroundColor: colors.emberSoft },
+  workStatus: { minHeight: 26, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, borderRadius: radius.full, backgroundColor: colors.emberSoft },
   workStatusComplete: { backgroundColor: colors.liveSoft },
 	workStatusNeedsInput: { backgroundColor: colors.emberSoft },
   workStatusFailed: { backgroundColor: colors.dangerSoft },
   workStatusText: { ...type.captionMedium, color: colors.emberText },
 	workStatusTextNeedsInput: { color: colors.emberText },
   workStatusTextFailed: { color: colors.danger },
-  workQuery: { ...type.bodyMedium, color: colors.text1 },
+  workQuery: { ...type.bodyMedium, color: colors.text1, fontSize: 16, lineHeight: 22 },
 	workProgress: { height: 4, overflow: 'hidden', borderRadius: radius.full, backgroundColor: colors.surface3 },
 	workProgressFill: { height: '100%', borderRadius: radius.full, backgroundColor: colors.ember },
-  workFoot: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingTop: 2 },
+  workFoot: { minHeight: 30, flexDirection: 'row', alignItems: 'center', gap: 7, paddingTop: space[2], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line1 },
   workDot: { width: 7, height: 7, borderRadius: radius.full, backgroundColor: colors.text3 },
   workDotActive: { backgroundColor: colors.ember },
   workDotComplete: { backgroundColor: colors.success },
 	workDotNeedsInput: { backgroundColor: colors.ember },
   workDotFailed: { backgroundColor: colors.danger },
-  workFootText: { ...type.caption, color: colors.text3, flex: 1 },
+  workFootText: { ...type.captionMedium, color: colors.text2, flex: 1 },
   link: { color: colors.info, textDecorationLine: 'underline' },
   linkOwn: { color: colors.onAccent, textDecorationColor: 'rgba(14,14,16,0.45)' },
   mention: { ...type.bodyMedium, color: colors.info },

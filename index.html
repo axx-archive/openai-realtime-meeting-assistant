@@ -9064,7 +9064,26 @@
       }
 
       .chat-thread-item__title--bonfire-chat {
-        color: var(--accent);
+        color: var(--ember);
+      }
+
+      .chat-thread-item__stride-tag {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 6px;
+        border-radius: var(--r-full);
+        background: color-mix(in srgb, var(--ember) 13%, transparent);
+        color: var(--ember);
+        font: 700 8px/1.4 var(--font-mono);
+        letter-spacing: 0.08em;
+      }
+
+      .chat-thread-item__stride-tag::before {
+        content: "\2022";
+        font-size: 12px;
+        line-height: 0;
       }
 
       /* kit ThreadItem meta — right-aligned mono timestamp on the title row */
@@ -9612,6 +9631,119 @@
         border: 1px solid var(--line-1);
         border-radius: var(--r-lg, 12px);
         background: var(--surface-2);
+      }
+
+      .scout-chat-image__preview {
+        position: relative;
+        display: block;
+        width: fit-content;
+        max-width: 100%;
+        padding: 0;
+        border: 0;
+        border-radius: var(--r-lg, 12px);
+        background: transparent;
+        color: inherit;
+        cursor: zoom-in;
+        overflow: hidden;
+      }
+
+      .scout-chat-image__expand {
+        position: absolute;
+        right: 10px;
+        bottom: 10px;
+        display: inline-flex;
+        align-items: center;
+        min-height: 30px;
+        padding: 0 10px;
+        border-radius: var(--r-full);
+        background: rgba(0, 0, 0, 0.72);
+        color: #fff;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.24), 0 8px 24px rgba(0, 0, 0, 0.18);
+        font: var(--type-label-sm, var(--type-label-lg));
+        letter-spacing: var(--track-label);
+        opacity: 0;
+        transform: translateY(4px);
+        transition-property: opacity, transform;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
+        pointer-events: none;
+      }
+
+      .scout-chat-image__preview:hover .scout-chat-image__expand,
+      .scout-chat-image__preview:focus-visible .scout-chat-image__expand {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      .scout-chat-image__preview:active {
+        transform: scale(0.96);
+      }
+
+      .scout-chat-image-viewer {
+        width: auto;
+        max-width: none;
+        max-height: none;
+        margin: auto;
+        padding: 0;
+        border: 0;
+        overflow: visible;
+        background: transparent;
+        color: #fff;
+      }
+
+      .scout-chat-image-viewer::backdrop {
+        background: rgba(0, 0, 0, 0.82);
+        backdrop-filter: blur(10px);
+      }
+
+      .scout-chat-image-viewer__frame {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: min(92vw, 1440px);
+        height: 90vh;
+      }
+
+      .scout-chat-image-viewer__image {
+        display: block;
+        max-width: 100%;
+        max-height: 100%;
+        width: auto;
+        height: auto;
+        object-fit: contain;
+        border-radius: 16px;
+        outline: 1px solid rgba(255, 255, 255, 0.14);
+        outline-offset: -1px;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
+      }
+
+      .scout-chat-image-viewer__close {
+        position: fixed;
+        top: max(18px, env(safe-area-inset-top));
+        right: max(18px, env(safe-area-inset-right));
+        display: grid;
+        place-items: center;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        border: 0;
+        border-radius: var(--r-full);
+        background: rgba(255, 255, 255, 0.14);
+        color: #fff;
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 8px 28px rgba(0, 0, 0, 0.24);
+        font: 400 25px/1 var(--font-sans);
+        cursor: pointer;
+        transition-property: background-color, transform;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
+      }
+
+      .scout-chat-image-viewer__close:hover {
+        background: rgba(255, 255, 255, 0.22);
+      }
+
+      .scout-chat-image-viewer__close:active {
+        transform: scale(0.96);
       }
 
       .scout-chat-image__open {
@@ -10526,9 +10658,11 @@
 	      }
 
       /* card 085: ref'd binaries — inline image thumbnails + tappable chips */
-      a.scout-chat-file {
+      a.scout-chat-file,
+      button.scout-chat-file {
         text-decoration: none;
         color: inherit;
+        font: inherit;
         cursor: pointer;
       }
 
@@ -10538,6 +10672,7 @@
       }
 
       .scout-chat-file--image {
+        position: relative;
         display: inline-flex;
         align-self: flex-end;
         padding: 4px;
@@ -11534,6 +11669,7 @@
         #chatTool {
           --desktop-chat-measure: 760px;
           --desktop-chat-media-measure: 920px;
+          --desktop-chat-image-preview-measure: 420px;
           --desktop-chat-work-measure: 820px;
           --desktop-chat-gutter: clamp(22px, 2.4vw, 48px);
           --chat-thread-rail-width: 308px;
@@ -11781,6 +11917,7 @@
           min-width: 0;
           display: grid;
           gap: 5px;
+          position: relative;
         }
 
         #chatTool .chat-context-card__identity {
@@ -11801,20 +11938,92 @@
           white-space: nowrap;
         }
 
-        #chatTool .chat-context-card--message .chat-context-card__body {
-          width: fit-content;
-          max-width: 100%;
+	        #chatTool .chat-context-card--message .chat-context-card__body {
+	          width: fit-content;
+	          max-width: 100%;
           padding: 10px 12px;
           border-radius: 4px 15px 15px 15px;
           background: var(--surface-2);
-          box-shadow: 0 0 0 1px var(--line-1), 0 5px 16px rgba(0, 0, 0, 0.045);
+	          box-shadow: 0 0 0 1px var(--line-1), 0 5px 16px rgba(0, 0, 0, 0.045);
+	        }
+
+	        /* A proposal authored as a reply stays actionable in the reply rail.
+	           The nested card is the existing router trust surface — this wrapper
+	           only lets it use the rail's available measure. */
+	        #chatTool .chat-context-card--proposal .scout-proposal-card {
+	          width: 100%;
+	          max-width: none;
+	          margin: 2px 0 0;
+	          align-self: stretch;
+	        }
+
+        #chatTool .chat-context-card--message .scout-chat-files {
+          width: 100%;
+          max-width: 100%;
+          align-self: stretch;
+          margin: 2px 0 0;
+        }
+
+        #chatTool .chat-context-card--message .scout-chat-file--image {
+          max-width: min(320px, 100%);
+          max-height: 240px;
+          align-self: flex-start;
+        }
+
+        #chatTool .chat-context-card--message .desktop-chat-link-preview {
+          width: 100%;
+          min-height: 132px;
+          grid-template-columns: minmax(0, 1fr) minmax(120px, 34%);
+          margin-top: 2px;
+        }
+
+        #chatTool .chat-context-card--message .desktop-chat-link-preview__visual {
+          min-height: 132px;
+        }
+
+        #chatTool .chat-context-card--message .desktop-chat-link-preview[data-kind="tiktok_video"],
+        #chatTool .chat-context-card--message .desktop-chat-link-preview[data-kind^="instagram_"] {
+          min-height: 240px;
+          grid-template-columns: minmax(0, 1fr) minmax(150px, 38%);
+        }
+
+        #chatTool .chat-context-card--message .desktop-chat-link-preview[data-kind="tiktok_video"] .desktop-chat-link-preview__visual,
+        #chatTool .chat-context-card--message .desktop-chat-link-preview[data-kind^="instagram_"] .desktop-chat-link-preview__visual {
+          min-height: 240px;
+        }
+
+        #chatTool .chat-context-card__content.desktop-chat-stack--link-only .chat-context-card__body {
+          display: none;
         }
 
         #chatTool .chat-context-card__message-actions {
+          position: absolute;
+          top: 22px;
+          right: 0;
+          z-index: 4;
           display: inline-flex;
           align-items: center;
           gap: 2px;
-          margin: -10px -8px -10px auto;
+          padding: 3px;
+          border-radius: var(--r-full);
+          background: var(--glass-chrome);
+          -webkit-backdrop-filter: var(--glass-blur-chrome) saturate(1.2);
+          backdrop-filter: var(--glass-blur-chrome) saturate(1.2);
+          box-shadow: 0 0 0 1px var(--glass-border), 0 8px 22px rgba(0, 0, 0, 0.14);
+          opacity: 0;
+          pointer-events: none;
+          transform: translateY(3px);
+          transition-property: opacity, transform;
+          transition-duration: var(--dur-fast);
+          transition-timing-function: var(--ease);
+        }
+
+        #chatTool .chat-context-card--message:hover .chat-context-card__message-actions,
+        #chatTool .chat-context-card--message:focus-within .chat-context-card__message-actions,
+        #chatTool .chat-context-card--message.show-actions .chat-context-card__message-actions {
+          opacity: 1;
+          pointer-events: auto;
+          transform: translateY(0);
         }
 
         #chatTool .chat-context-card__message-action {
@@ -11841,9 +12050,100 @@
           background: var(--surface-3);
         }
 
+        #chatTool .desktop-chat-more {
+          position: relative;
+          display: inline-flex;
+        }
+
+        #chatTool .desktop-chat-more__menu {
+          position: absolute;
+          top: calc(100% + 7px);
+          right: 0;
+          z-index: 8;
+          width: 164px;
+          display: grid;
+          gap: 2px;
+          padding: 5px;
+          border-radius: 13px;
+          background: color-mix(in srgb, var(--surface-1) 94%, transparent);
+          -webkit-backdrop-filter: var(--glass-blur-chrome) saturate(1.25);
+          backdrop-filter: var(--glass-blur-chrome) saturate(1.25);
+          box-shadow: 0 0 0 1px var(--glass-border), 0 16px 38px rgba(0, 0, 0, 0.22);
+        }
+
+        #chatTool .desktop-chat-more__menu[hidden] {
+          display: none;
+        }
+
+        #chatTool .desktop-chat-more .desktop-chat-more__menu button {
+          width: 100%;
+          min-width: 0;
+          min-height: 40px;
+          display: flex;
+          align-items: center;
+          justify-content: flex-start;
+          padding: 0 11px;
+          border: 0;
+          border-radius: 9px;
+          background: transparent;
+          color: var(--text-1);
+          box-shadow: none;
+          font: var(--type-body-sm);
+          cursor: pointer;
+        }
+
+        #chatTool .desktop-chat-more .desktop-chat-more__menu button:hover,
+        #chatTool .desktop-chat-more .desktop-chat-more__menu button:focus-visible {
+          background: var(--surface-3);
+        }
+
+        #chatTool .desktop-chat-more .desktop-chat-more__menu button[data-danger="true"] {
+          color: var(--danger);
+        }
+
         #chatTool .chat-context-card__message-action[data-armed="1"] {
           color: var(--danger);
           background: color-mix(in srgb, var(--danger) 10%, transparent);
+        }
+
+        #chatTool .chat-context-card__reactions {
+          display: inline-flex;
+          width: fit-content;
+          max-width: 100%;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 2px;
+          margin-top: -2px;
+          padding: 3px;
+          border-radius: var(--r-full);
+          background: var(--glass-chrome);
+          box-shadow: 0 0 0 1px var(--glass-border);
+        }
+
+        #chatTool .chat-context-card__reaction {
+          min-width: 36px;
+          min-height: 32px;
+          padding: 0 8px;
+          border: 0;
+          border-radius: var(--r-full);
+          background: transparent;
+          color: var(--text-2);
+          font: var(--type-label-lg);
+          cursor: pointer;
+          transition-property: background-color, color, transform;
+          transition-duration: var(--dur-fast);
+          transition-timing-function: var(--ease);
+        }
+
+        #chatTool .chat-context-card__reaction:hover,
+        #chatTool .chat-context-card__reaction:focus-visible,
+        #chatTool .chat-context-card__reaction[aria-pressed="true"] {
+          background: var(--surface-3);
+          color: var(--text-1);
+        }
+
+        #chatTool .chat-context-card__reaction:active {
+          transform: scale(0.96);
         }
 
         #chatTool .chat-context-card__message-action:active {
@@ -12137,9 +12437,34 @@
           letter-spacing: var(--track-label);
         }
 
+        #chatTool .chat-context-reply .scout-mention-popover {
+          margin: 0;
+        }
+
+        #chatTool .chat-context-reply .scout-mention-popover__list {
+          left: 12px;
+          bottom: 6px;
+          width: min(280px, calc(100% - 24px));
+        }
+
+        #chatTool .chat-context-reply__pending {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+        }
+
+        #chatTool .chat-context-reply__pending[hidden] {
+          display: none;
+        }
+
+        #chatTool .chat-context-reply__pending .scout-chat-pending-file {
+          width: 100%;
+          margin: 0;
+        }
+
         #chatTool .chat-context-reply__composer {
           display: grid;
-          grid-template-columns: minmax(0, 1fr) 40px;
+          grid-template-columns: 40px minmax(0, 1fr) 40px;
           align-items: end;
           gap: 8px;
           padding: 7px 8px 7px 12px;
@@ -12161,7 +12486,7 @@
           font: 400 14px/1.45 var(--font-sans);
         }
 
-        #chatTool .chat-context-reply button {
+        #chatTool .chat-context-reply__composer > button {
           width: 40px;
           height: 40px;
           display: inline-grid;
@@ -12177,11 +12502,23 @@
           transition-timing-function: var(--ease);
         }
 
-        #chatTool .chat-context-reply button:active {
+        #chatTool .chat-context-reply__composer > .chat-context-reply__attach {
+          background: transparent;
+          color: var(--text-2);
+          box-shadow: 0 0 0 1px var(--line-1);
+        }
+
+        #chatTool .chat-context-reply__composer > .chat-context-reply__attach:hover,
+        #chatTool .chat-context-reply__composer > .chat-context-reply__attach:focus-visible {
+          color: var(--text-1);
+          background: var(--surface-2);
+        }
+
+        #chatTool .chat-context-reply__composer > button:active {
           transform: scale(0.96);
         }
 
-        #chatTool .chat-context-reply button[disabled] {
+        #chatTool .chat-context-reply__composer > button[disabled] {
           opacity: 0.42;
           cursor: default;
         }
@@ -12713,6 +13050,12 @@
           transform: translateY(0);
         }
 
+        /* Desktop ownership actions live in the same Slack-like More menu as
+           reactions. The legacy standalone delete stays only for touch/mobile. */
+        #chatTool .scout-chat-msg > .scout-chat-msg__delete {
+          display: none;
+        }
+
         /* the unread boundary speaks in ember — debt the reader owes the room.
            Mobile-parity: mirrors the shipped Table boundary (unreadBoundary +
            ThreadScreen: ember hairline / "n new messages" / ember hairline). */
@@ -13142,20 +13485,41 @@
         }
 
         #chatTool .scout-chat-file--image {
-          width: min(var(--desktop-chat-media-measure), 100%);
+          width: fit-content;
+          max-width: min(var(--desktop-chat-image-preview-measure), 100%);
           min-height: 0;
-          max-height: min(68vh, 760px);
+          max-height: 300px;
           padding: 0;
-          border-radius: 18px;
+          border-radius: 16px;
           background: var(--surface-3);
+          cursor: zoom-in;
         }
 
         #chatTool .scout-chat-file__thumb,
-        #chatTool .scout-chat-image__img,
         #chatTool .artifact-asset__image {
           width: 100%;
           height: 100%;
           max-height: none;
+          object-fit: contain;
+          border: 0;
+          outline: 1px solid rgba(0, 0, 0, 0.1);
+          outline-offset: -1px;
+        }
+
+        #chatTool .scout-chat-file__thumb {
+          width: auto;
+          max-width: 100%;
+          height: auto;
+          max-height: 300px;
+          border-radius: 16px;
+          object-fit: contain;
+        }
+
+        #chatTool .scout-chat-image__img {
+          width: auto;
+          max-width: 100%;
+          height: auto;
+          max-height: 300px;
           object-fit: contain;
           border: 0;
           outline: 1px solid rgba(0, 0, 0, 0.1);
@@ -13169,12 +13533,11 @@
         }
 
         #chatTool .scout-chat-image {
-          width: min(var(--desktop-chat-media-measure), 100%);
-          max-width: min(var(--desktop-chat-media-measure), 100%);
+          width: fit-content;
+          max-width: min(var(--desktop-chat-image-preview-measure), 100%);
         }
 
         #chatTool .scout-chat-image__img {
-          max-height: min(68vh, 760px);
           border-radius: 16px;
           background: var(--surface-3);
         }
@@ -13190,8 +13553,8 @@
         #chatTool .scout-chat-form,
         #chatTool .scout-chat-hint,
         #chatTool .scout-chat-brain-note {
-          width: min(var(--desktop-chat-measure), calc(100% - (var(--desktop-chat-gutter) * 2)));
-          max-width: var(--desktop-chat-measure);
+          width: calc(100% - (var(--desktop-chat-gutter) * 2));
+          max-width: none;
           margin-left: auto;
           margin-right: auto;
         }
@@ -13658,41 +14021,8 @@
         margin: 0 0 var(--sp-2);
       }
 
-      .room-chat__scout-mention {
-        min-width: 72px;
-        height: 40px;
-        flex: none;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        padding: 0 10px;
-        border: 0;
-        border-radius: var(--r-full);
-        background: var(--accent-soft);
-        box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent);
-        color: var(--text-1);
-        font: 650 12px/1 var(--font-sans);
-        letter-spacing: -0.01em;
-        cursor: pointer;
-        transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
-      }
-
-      .room-chat__scout-mention:hover:not([disabled]) {
-        background: color-mix(in srgb, var(--accent) 18%, var(--surface-3));
-        box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 58%, transparent);
-      }
-
-      .room-chat__scout-mention:active:not([disabled]) {
-        transform: scale(0.96);
-      }
-
-      .room-chat__scout-mention[disabled] {
-        color: var(--text-disabled);
-        cursor: default;
-      }
-
-      #appShell.is-guest .room-chat__scout-mention {
-        display: none;
+      .room-chat > .scout-mention-popover {
+        margin: 0 4px;
       }
 
       .room-chat-msg--scout .scout-chat-meta {
@@ -26313,6 +26643,35 @@
         overflow-wrap: anywhere;
         text-wrap: pretty;
       }
+      .artifact-report__body strong,
+      .artifact-read__section-body strong {
+        color: var(--text-1);
+        font-weight: 700;
+      }
+      .artifact-report__body ul,
+      .artifact-report__body ol,
+      .artifact-read__section-body ul,
+      .artifact-read__section-body ol {
+        display: grid;
+        gap: 7px;
+        margin: 2px 0 4px;
+        padding-left: 1.35em;
+      }
+      .artifact-report__body li::marker,
+      .artifact-read__section-body li::marker {
+        color: var(--ember);
+        font-weight: 700;
+      }
+      .artifact-read__list-item--nested {
+        margin-left: 1em;
+      }
+      .artifact-read__task-marker {
+        display: inline-grid;
+        width: 1.25em;
+        margin-left: -1.25em;
+        color: var(--ember);
+        font-weight: 700;
+      }
       .artifact-report__abstract { margin: 0 0 var(--sp-6); }
       .artifact-report__abstract p { color: var(--text-1); }
       /* counterarguments carry a subtle amber left rule — flagged, not alarmed */
@@ -27479,8 +27838,10 @@
             <div id="roomChatThread" class="scout-chat-thread room-chat__thread" role="log" aria-label="Room chat messages">
               <p class="scout-chat-empty">messages here reach everyone in the room and land in meeting memory</p>
             </div>
+            <div id="roomChatMentionPopover" class="scout-mention-popover" hidden>
+              <div id="roomChatMentionList" class="scout-mention-popover__list" role="listbox" aria-label="Mention Scout"></div>
+            </div>
             <form id="roomChatForm" class="scout-chat-form room-chat__form">
-              <button id="roomChatScoutMention" class="room-chat__scout-mention" type="button" aria-label="Mention Scout and ask the room AI" title="Ask Scout in room chat" disabled>@Scout</button>
               <textarea id="roomChatInput" class="scout-chat-input" rows="1" autocomplete="off" placeholder="message the room or @Scout…" aria-label="Message the room or mention Scout" disabled></textarea>
               <button id="roomChatSend" class="scout-chat-send" type="submit" aria-label="Send" title="Send" disabled>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -27830,7 +28191,6 @@
                   <path d="M4 7a2 2 0 0 1 2-2h3l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"></path>
                 </svg>
               </button>
-              <button id="scoutChatScoutMention" class="room-chat__scout-mention" type="button" aria-label="Mention Scout in this channel" title="Ask Scout in this channel" hidden disabled>@Scout</button>
               <textarea id="scoutChatInput" class="scout-chat-input" rows="1" autocomplete="off" placeholder="ask Scout about any meeting" aria-label="Message Scout privately" disabled></textarea>
               <button id="scoutChatSend" class="scout-chat-send" type="submit" aria-label="Send" title="Send" disabled>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -27857,7 +28217,15 @@
             <div id="chatContextBody" class="chat-context-rail__body"></div>
             <form id="chatContextReplyForm" class="chat-context-reply" hidden>
               <label class="chat-context-reply__label" for="chatContextReplyInput">Reply in thread</label>
+              <div id="chatContextMentionPopover" class="scout-mention-popover" hidden>
+                <div id="chatContextMentionList" class="scout-mention-popover__list" role="listbox" aria-label="Mention a teammate"></div>
+              </div>
+              <div id="chatContextReplyPending" class="chat-context-reply__pending" hidden></div>
               <div class="chat-context-reply__composer">
+                <input id="chatContextReplyFileInput" type="file" multiple hidden>
+                <button id="chatContextReplyAttach" class="chat-context-reply__attach" type="button" aria-label="Attach files to reply" title="Attach files">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 1 1-2.8-2.8l8.5-8.5"></path></svg>
+                </button>
                 <textarea id="chatContextReplyInput" rows="1" maxlength="12000" placeholder="Reply without losing the channel…"></textarea>
                 <button id="chatContextReplySend" type="submit" aria-label="Send threaded reply">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"></path><path d="m5 12 7-7 7 7"></path></svg>
@@ -29737,7 +30105,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      const scoutChatPendingFiles = document.getElementById('scoutChatPendingFiles')
 	      const scoutFollowUpTargetEl = document.getElementById('scoutFollowUpTarget')
 	      const scoutChatDestination = document.getElementById('scoutChatDestination')
-	      const scoutChatScoutMention = document.getElementById('scoutChatScoutMention')
 	      const scoutChatInput = document.getElementById('scoutChatInput')
 	      const scoutChatSend = document.getElementById('scoutChatSend')
 	      const scoutChatToolsBtn = document.getElementById('scoutChatToolsBtn')
@@ -29771,6 +30138,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      const chatContextReplyForm = document.getElementById('chatContextReplyForm')
 	      const chatContextReplyInput = document.getElementById('chatContextReplyInput')
 	      const chatContextReplySend = document.getElementById('chatContextReplySend')
+	      const chatContextReplyFileInput = document.getElementById('chatContextReplyFileInput')
+	      const chatContextReplyAttach = document.getElementById('chatContextReplyAttach')
+	      const chatContextReplyPending = document.getElementById('chatContextReplyPending')
+	      const chatContextMentionPopover = document.getElementById('chatContextMentionPopover')
+	      const chatContextMentionList = document.getElementById('chatContextMentionList')
 	      const chatWorkIndicator = document.getElementById('chatWorkIndicator')
 	      const chatWorkIndicatorOpen = document.getElementById('chatWorkIndicatorOpen')
 	      const chatWorkIndicatorText = document.getElementById('chatWorkIndicatorText')
@@ -29781,7 +30153,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const roomChatForm = document.getElementById('roomChatForm')
       const roomChatInput = document.getElementById('roomChatInput')
       const roomChatSend = document.getElementById('roomChatSend')
-      const roomChatScoutMention = document.getElementById('roomChatScoutMention')
+      const roomChatMentionPopover = document.getElementById('roomChatMentionPopover')
+      const roomChatMentionList = document.getElementById('roomChatMentionList')
       const roomChatToggle = document.getElementById('roomChatToggle')
       const roomChatUnread = document.getElementById('roomChatUnread')
       const roomRailUnread = document.getElementById('roomRailUnread')
@@ -30064,6 +30437,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      let chatContextReturnFocus = null
 	      let chatContextGeneration = 0
 	      let pendingScoutFiles = []
+	      let pendingDesktopReplyFiles = []
 	      // armed follow-up: {artifactId, mode, query, version, threadId} — the
 	      // next send re-runs that artifact in place via followUpArtifactId
 	      let scoutFollowUpTarget = null
@@ -31176,8 +31550,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      chatContextReplyInput?.addEventListener('input', () => {
 	        chatContextReplyInput.style.height = 'auto'
 	        chatContextReplyInput.style.height = `${Math.min(128, Math.max(40, chatContextReplyInput.scrollHeight))}px`
-	        chatContextReplySend.disabled = !chatContextReplyInput.value.trim()
+	        syncDesktopReplyComposerState()
 	      })
+	      chatContextReplyAttach?.addEventListener('click', () => chatContextReplyFileInput?.click())
+	      chatContextReplyFileInput?.addEventListener('change', addPendingDesktopReplyFiles)
 	      chatContextReplyForm?.addEventListener('submit', submitDesktopThreadReply)
 	      document.addEventListener('keydown', event => {
 	        if (event.key === 'Escape' && !chatContextRail?.hidden) {
@@ -31371,9 +31747,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
       })
       roomChatForm.addEventListener('submit', sendRoomChatFromForm)
-      roomChatScoutMention?.addEventListener('click', insertRoomScoutMention)
-      scoutChatScoutMention?.addEventListener('click', insertChannelScoutMention)
-      roomChatInput.addEventListener('input', resizeRoomChatInput)
+      roomChatInput.addEventListener('input', () => {
+        resizeRoomChatInput()
+        updateMentionAutocomplete(roomChatInput)
+      })
       roomChatInput.addEventListener('keydown', event => {
         if (event.isComposing || event.keyCode === 229) {
           return
@@ -37740,20 +38117,30 @@ Wrap the entire export in one code block. After the code block, say whether the 
             index += 1
             continue
           }
-          const listMatch = /^\s*(?:[-*]|\d+\.)\s+(.+)$/.exec(line)
+          const listPattern = /^(\s*)(?:[-*+]|\d+[.)])\s+(.+)$/
+          const listMatch = listPattern.exec(line)
           if (listMatch) {
             flushParagraph()
-            const ordered = /^\s*\d+\./.test(line)
+            const ordered = /^\s*\d+[.)]/.test(line)
             const list = document.createElement(ordered ? 'ol' : 'ul')
             list.className = 'artifact-read__list'
             while (index < lines.length) {
               const next = lines[index]
-              const match = /^\s*(?:[-*]|\d+\.)\s+(.+)$/.exec(next)
-              if (!match || /^\s*\d+\./.test(next) !== ordered) {
+              const match = listPattern.exec(next)
+              if (!match || /^\s*\d+[.)]/.test(next) !== ordered) {
                 break
               }
               const item = document.createElement('li')
-              appendArtifactInlineNodes(item, match[1].trim())
+              if (match[1].replace(/\t/g, '  ').length >= 2) item.classList.add('artifact-read__list-item--nested')
+              const task = /^\[([ xX])\]\s+(.+)$/.exec(match[2].trim())
+              if (task) {
+                const marker = bfEl('span', 'artifact-read__task-marker', task[1].toLowerCase() === 'x' ? '✓' : '○')
+                marker.setAttribute('aria-hidden', 'true')
+                item.appendChild(marker)
+                appendArtifactInlineNodes(item, task[2])
+              } else {
+                appendArtifactInlineNodes(item, match[2].trim())
+              }
               list.appendChild(item)
               index += 1
             }
@@ -48609,9 +48996,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (scoutChatDeliverables) {
 	          scoutChatDeliverables.disabled = !Boolean(authedUser)
 	        }
-	        if (scoutChatScoutMention) {
-	          scoutChatScoutMention.disabled = !available
-	        }
 	        scoutChatHint.hidden = available
 	        if (!available) {
 	          scoutChatHint.textContent = 'sign in to ask Scout'
@@ -48708,6 +49092,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!thread.archivedAt) {
 	          scoutChatThreads.unshift(thread)
 	        }
+	        scoutChatThreads.sort((left, right) => Number(chatThreadIsTeam(right)) - Number(chatThreadIsTeam(left)))
 	        if (options.select !== false && !thread.archivedAt) {
 	          activeScoutThreadId = id
 	        } else if (thread.archivedAt && activeScoutThreadId === id) {
@@ -48875,10 +49260,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            // status just flipped to complete) replaces it in place.
 	            existing.messages = messages.map((candidate, index) => index === messageIndex ? message : candidate)
 	          }
-	        }
-	        upsertScoutChatThread(existing, { select: false })
-	        if (activeScoutThreadId === id) {
-	          // a scout reply arriving over the socket respects the thinking
+		        }
+		        upsertScoutChatThread(existing, { select: false })
+		        if (activeScoutThreadId === id) {
+		          if (desktopChatLayoutQuery.matches && message?.replyTo?.messageId) {
+		            const root = desktopChatReplyTopology(existing.messages).rootFor(message)
+		            syncDesktopReplySurfaces(existing, root?.id || message.replyTo.messageId)
+		            return
+		          }
+		          // a scout reply arriving over the socket respects the thinking
 	          // indicator's 1.7s minimum display — data lands now, render waits.
 	          // A turn can resolve into a CARD instead of a scout bubble
 	          // (kind proposal/choices/manifest/thread) — those count as the
@@ -48903,15 +49293,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      // card 073: drop one message from local thread state and re-render —
 	      // shared by the sender's own DELETE response and the chat_thread
 	      // deletion broadcast every other tab receives. Idempotent.
-	      function removeScoutChatThreadMessage(threadId, messageId) {
-	        const thread = scoutChatThreads.find(candidate => String(candidate?.id || '') === String(threadId))
+		      function removeScoutChatThreadMessage(threadId, messageId) {
+		        const thread = scoutChatThreads.find(candidate => String(candidate?.id || '') === String(threadId))
 	        if (!thread) {
 	          return
 	        }
-	        const messages = Array.isArray(thread.messages) ? thread.messages : []
-	        thread.messages = messages.filter(candidate => String(candidate?.id || '') !== String(messageId))
-	        upsertScoutChatThread(thread, { select: false })
-	        if (activeScoutThreadId === String(threadId)) {
+		        const messages = Array.isArray(thread.messages) ? thread.messages : []
+		        const removed = messages.find(candidate => String(candidate?.id || '') === String(messageId))
+		        const replyRoot = removed?.replyTo?.messageId
+		          ? desktopChatReplyTopology(messages).rootFor(removed)
+		          : null
+		        thread.messages = messages.filter(candidate => String(candidate?.id || '') !== String(messageId))
+		        upsertScoutChatThread(thread, { select: false })
+		        if (activeScoutThreadId === String(threadId)) {
+		          if (desktopChatLayoutQuery.matches && replyRoot?.id) {
+		            syncDesktopReplySurfaces(thread, replyRoot.id)
+		            return
+		          }
 	          // deleting re-renders the whole feed; a reader scrolled up (the
 	          // find-and-delete flow this exists for) must not get yanked to the
 	          // bottom by the re-append stick checks
@@ -49228,7 +49626,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        scoutChatForm?.classList.toggle('scout-chat-form--has-files', pendingScoutFiles.length > 0)
 	        scoutChatPendingFiles.hidden = pendingScoutFiles.length === 0
-	        scoutChatPendingFiles.replaceChildren(...pendingScoutFiles.map((file, index) => {
+	        scoutChatPendingFiles.replaceChildren(...pendingScoutFiles.map((file, index) => scoutChatPendingFileNode(file, () => {
+	          pendingScoutFiles.splice(index, 1)
+	          renderPendingScoutFiles()
+	        })))
+	      }
+
+	      function scoutChatPendingFileNode(file, onRemove) {
 	          const chip = document.createElement('span')
 	          chip.className = 'scout-chat-pending-file'
 	          const name = document.createElement('span')
@@ -49248,13 +49652,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          remove.setAttribute('aria-label', `Remove ${file.name || 'file'}`)
 	          remove.title = 'remove'
 	          remove.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>'
-	          remove.addEventListener('click', () => {
-	            pendingScoutFiles.splice(index, 1)
-	            renderPendingScoutFiles()
-	          })
+	          remove.addEventListener('click', onRemove)
 	          chip.append(body, remove)
 	          return chip
-	        }))
 	      }
 
 	      function scoutChatDefaultPlaceholder() {
@@ -49301,10 +49701,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          ? `→ #${title} · everyone in the office`
 	          : `→ ${privateTarget} · private to you`
 	        scoutChatDestination.hidden = false
-	        if (scoutChatScoutMention) {
-	          scoutChatScoutMention.hidden = !isChannel
-	          scoutChatScoutMention.disabled = !isChannel || Boolean(scoutChatInput?.disabled)
-	        }
 	        if (scoutChatInput) {
 	          scoutChatInput.setAttribute('aria-label', isChannel
 	            ? `Message #${title} — everyone in the office`
@@ -51254,48 +51650,82 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       let mentionMatches = []
       let mentionActiveIndex = 0
       let mentionAnchor = -1 // composer index of the '@' being completed
+      let mentionComposerInput = null
 
       function mentionPopoverIsOpen() {
-        return Boolean(scoutMentionPopover && !scoutMentionPopover.hidden)
+        return Boolean(
+          (scoutMentionPopover && !scoutMentionPopover.hidden) ||
+          (chatContextMentionPopover && !chatContextMentionPopover.hidden) ||
+          (roomChatMentionPopover && !roomChatMentionPopover.hidden)
+        )
+      }
+
+      function mentionRosterCandidates() {
+        const byName = new Map()
+        ;[...participantNames(), 'Scout'].forEach(name => {
+          const clean = String(name || '').trim()
+          if (clean) byName.set(clean.toLowerCase(), { name: clean, handle: clean.replace(/\s+/g, '-'), kind: clean.toLowerCase() === 'scout' ? 'scout' : 'person' })
+        })
+        desktopChatMentionCandidates.forEach(candidate => {
+          const name = String(candidate?.name || '').trim()
+          if (name) byName.set(name.toLowerCase(), candidate)
+        })
+        return Array.from(byName.values())
       }
 
       function mentionRosterNames() {
-        return [...participantNames(), 'scout']
+        return Array.from(new Set(mentionRosterCandidates().flatMap(candidate => [candidate?.name, candidate?.handle]).map(value => String(value || '').trim()).filter(Boolean)))
       }
 
       function closeMentionPopover() {
         if (scoutMentionPopover) {
           scoutMentionPopover.hidden = true
         }
+        if (chatContextMentionPopover) {
+          chatContextMentionPopover.hidden = true
+        }
+        if (roomChatMentionPopover) {
+          roomChatMentionPopover.hidden = true
+        }
         mentionMatches = []
         mentionActiveIndex = 0
         mentionAnchor = -1
+        mentionComposerInput = null
       }
 
       // the "@prefix" token ending at the caret, or null when the caret is not
       // completing a mention. The rune before the '@' must not be a name rune,
       // mirroring the server's chatMentionNames boundary (emails never count).
-      function mentionTokenAtCaret() {
-        if (!scoutChatInput || !chatThreadIsChannel(selectedScoutChatThread())) {
+      function mentionTokenAtCaret(input) {
+        const roomComposer = input === roomChatInput
+        if (!input || (roomComposer ? input.disabled || guestMode : !chatThreadIsChannel(selectedScoutChatThread()))) {
           return null
         }
-        const caret = scoutChatInput.selectionStart ?? scoutChatInput.value.length
-        const head = scoutChatInput.value.slice(0, caret)
-        const match = /(^|[^A-Za-z0-9])@([A-Za-z0-9]*)$/.exec(head)
+        const caret = input.selectionStart ?? input.value.length
+        const head = input.value.slice(0, caret)
+        const match = /(^|[^A-Za-z0-9])@([A-Za-z0-9._-]*)$/.exec(head)
         if (!match) {
           return null
         }
         return { anchor: caret - match[2].length - 1, prefix: match[2] }
       }
 
-      function updateMentionAutocomplete() {
-        const token = mentionTokenAtCaret()
+      function updateMentionAutocomplete(input = scoutChatInput) {
+        const token = mentionTokenAtCaret(input)
         if (!token) {
           closeMentionPopover()
           return
         }
+        mentionComposerInput = input
+        if (!desktopChatParticipantDirectoryLoaded) void ensureDesktopChatParticipantDirectory()
         const prefix = token.prefix.toLowerCase()
-        const matches = mentionRosterNames().filter(name => name.toLowerCase().startsWith(prefix))
+        const candidates = input === roomChatInput
+          ? [{ name: 'Scout', handle: 'Scout', kind: 'scout' }]
+          : mentionRosterCandidates()
+        const matches = candidates.filter(candidate => (
+          String(candidate?.name || '').toLowerCase().startsWith(prefix) ||
+          String(candidate?.handle || '').toLowerCase().startsWith(prefix)
+        ))
         if (!matches.length) {
           closeMentionPopover()
           return
@@ -51307,9 +51737,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       function renderMentionPopover() {
-        if (!scoutMentionPopover || !scoutMentionList) return
-        scoutMentionList.innerHTML = ''
-        mentionMatches.forEach((name, index) => {
+        const inReply = mentionComposerInput === chatContextReplyInput
+        const inRoom = mentionComposerInput === roomChatInput
+        const popover = inRoom ? roomChatMentionPopover : inReply ? chatContextMentionPopover : scoutMentionPopover
+        const list = inRoom ? roomChatMentionList : inReply ? chatContextMentionList : scoutMentionList
+        if (!popover || !list) return
+        list.innerHTML = ''
+        mentionMatches.forEach((candidate, index) => {
+          const name = String(candidate?.name || '')
+          const handle = String(candidate?.handle || name).replace(/\s+/g, '-')
+          const kind = String(candidate?.kind || 'person').toLowerCase()
           const item = document.createElement('button')
           item.type = 'button'
           item.className = 'scout-mention-popover__item'
@@ -51321,46 +51758,60 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const disc = document.createElement('span')
           disc.className = 'scout-mention-popover__disc'
           disc.setAttribute('aria-hidden', 'true')
-          disc.textContent = name === 'scout' ? '✦' : chatPeerInitials(name)
+          disc.textContent = kind === 'scout' || kind === 'agent' ? '✦' : chatPeerInitials(name)
           const label = document.createElement('span')
-          label.textContent = '@' + name
+          label.textContent = '@' + handle
           item.append(disc, label)
-          if (name === 'scout') {
+          if (kind === 'scout' || kind === 'agent') {
             const hint = document.createElement('span')
             hint.className = 'scout-mention-popover__hint'
-            hint.textContent = 'summon scout'
+            hint.textContent = kind === 'agent' ? 'agent · confirm work' : 'scout'
             item.appendChild(hint)
           }
           // mousedown would blur the composer and close the popover before the
           // click lands — swallow it so the click can complete the mention
           item.addEventListener('mousedown', event => event.preventDefault())
-          item.addEventListener('click', () => applyMentionCompletion(name))
-          scoutMentionList.appendChild(item)
+          item.addEventListener('click', () => applyMentionCompletion(candidate))
+          list.appendChild(item)
         })
-        scoutMentionPopover.hidden = false
+        if (scoutMentionPopover) scoutMentionPopover.hidden = inReply || inRoom
+        if (chatContextMentionPopover) chatContextMentionPopover.hidden = !inReply
+        if (roomChatMentionPopover) roomChatMentionPopover.hidden = !inRoom
+        popover.hidden = false
       }
 
-      function applyMentionCompletion(name) {
-        if (!scoutChatInput || mentionAnchor < 0 || !name) {
+      function applyMentionCompletion(candidate) {
+        const input = mentionComposerInput
+        const handle = String(candidate?.handle || candidate?.name || '').replace(/\s+/g, '-')
+        if (!input || mentionAnchor < 0 || !handle) {
           closeMentionPopover()
           return
         }
-        const value = scoutChatInput.value
-        const caret = scoutChatInput.selectionStart ?? value.length
-        const inserted = '@' + name + ' '
-        scoutChatInput.value = value.slice(0, mentionAnchor) + inserted + value.slice(caret)
+        const value = input.value
+        const caret = input.selectionStart ?? value.length
+        const inserted = '@' + handle + ' '
+        input.value = value.slice(0, mentionAnchor) + inserted + value.slice(caret)
         const end = mentionAnchor + inserted.length
         closeMentionPopover()
-        scoutChatInput.focus()
-        scoutChatInput.setSelectionRange(end, end)
-        resizeScoutChatInput()
+        input.focus()
+        input.setSelectionRange(end, end)
+        if (input === scoutChatInput) resizeScoutChatInput()
+        if (input === roomChatInput) resizeRoomChatInput()
+        if (input === chatContextReplyInput) {
+          input.style.height = 'auto'
+          input.style.height = `${Math.min(128, Math.max(40, input.scrollHeight))}px`
+          chatContextReplySend.disabled = !input.value.trim()
+        }
       }
 
-      scoutChatInput?.addEventListener('input', updateMentionAutocomplete)
+      scoutChatInput?.addEventListener('input', () => updateMentionAutocomplete(scoutChatInput))
+      chatContextReplyInput?.addEventListener('input', () => updateMentionAutocomplete(chatContextReplyInput))
+      roomChatInput?.addEventListener('blur', closeMentionPopover)
       scoutChatInput?.addEventListener('blur', closeMentionPopover)
+      chatContextReplyInput?.addEventListener('blur', closeMentionPopover)
       // capture phase so ↑/↓/↵/Tab steer the popover before the Enter-send
       // handler fires — same pattern as the inline palette keydown above.
-      scoutChatInput?.addEventListener('keydown', event => {
+      function handleMentionKeydown(event) {
         if (!mentionPopoverIsOpen()) return
         if (event.key === 'Escape') {
           event.preventDefault()
@@ -51380,7 +51831,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           event.stopPropagation()
           applyMentionCompletion(mentionMatches[mentionActiveIndex] || mentionMatches[0])
         }
-      }, true)
+      }
+      scoutChatInput?.addEventListener('keydown', handleMentionKeydown, true)
+      chatContextReplyInput?.addEventListener('keydown', handleMentionKeydown, true)
+      roomChatInput?.addEventListener('keydown', handleMentionKeydown, true)
 
       // rich consumer: progress/completion events drive the stage rail + return
       // cards. No second board refetch — osEventsRoute already re-reads the board
@@ -52451,9 +52905,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const joined = appShell.classList.contains('is-in-room') && ws?.readyState === WebSocket.OPEN
         roomChatInput.disabled = !joined
         roomChatSend.disabled = !joined
-        if (roomChatScoutMention) {
-          roomChatScoutMention.disabled = !joined || guestMode
-        }
         roomChatToggle.disabled = !joined
         if (roomBoardToggleButton) {
           roomBoardToggleButton.disabled = !joined
@@ -52682,44 +53133,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
-      function insertRoomScoutMention() {
-        if (!roomChatInput || roomChatInput.disabled || guestMode) {
-          return
-        }
-        const value = roomChatInput.value
-        const start = roomChatInput.selectionStart ?? value.length
-        const end = roomChatInput.selectionEnd ?? start
-        const before = value.slice(0, start)
-        const after = value.slice(end)
-        const leading = before && !/\s$/.test(before) ? ' ' : ''
-        const trailing = after && !/^\s/.test(after) ? ' ' : ''
-        const inserted = `${leading}@Scout ${trailing}`
-        roomChatInput.value = before + inserted + after
-        const caret = before.length + inserted.length
-        roomChatInput.focus()
-        roomChatInput.setSelectionRange(caret, caret)
-        resizeRoomChatInput()
-      }
-
-	      function insertChannelScoutMention() {
-	        if (!scoutChatInput || scoutChatInput.disabled || !chatThreadIsChannel(selectedScoutChatThread())) {
-	          return
-	        }
-	        const value = scoutChatInput.value
-	        const start = scoutChatInput.selectionStart ?? value.length
-	        const end = scoutChatInput.selectionEnd ?? start
-	        const before = value.slice(0, start)
-	        const after = value.slice(end)
-	        const leading = before && !/\s$/.test(before) ? ' ' : ''
-	        const trailing = after && !/^\s/.test(after) ? ' ' : ''
-	        const inserted = `${leading}@Scout ${trailing}`
-	        scoutChatInput.value = before + inserted + after
-	        const caret = before.length + inserted.length
-	        scoutChatInput.focus()
-	        scoutChatInput.setSelectionRange(caret, caret)
-	        resizeScoutChatInput()
-	      }
-
       function resizeRoomChatInput() {
         if (!roomChatInput.value) {
           roomChatInput.style.height = ''
@@ -52836,7 +53249,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          return false
 	        }
 	        const title = String(thread?.title || '').trim().toLowerCase()
-	        return Boolean(thread?.table) || title === 'team' || title === 'general'
+	        return Boolean(thread?.table) || title === 'team' || title === 'general' || title === 'bonfire chat'
 	      }
 
 	      function chatThreadIsProject(thread) {
@@ -53107,19 +53520,26 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        titleEl.className = 'chat-thread-item__title'
 	        titleEl.classList.toggle('chat-thread-item__title--bonfire-chat', chatThreadIsTeam(thread))
 	        titleEl.textContent = title
+	        const strideTag = chatThreadIsTeam(thread) ? bfEl('span', 'chat-thread-item__stride-tag', 'STRIDE') : null
 	        const activeWork = chatThreadActiveWork(thread)
+	        const isBonfireChat = chatThreadIsTeam(thread)
 	        const time = activeWork ? chatThreadWorkTimer(thread, activeWork) : document.createElement('span')
 	        if (!activeWork) {
 	          time.className = 'chat-thread-item__time'
-	          time.textContent = chatThreadTimeLabel(thread.updatedAt || thread.createdAt)
+	          time.textContent = isBonfireChat ? '' : chatThreadTimeLabel(thread.updatedAt || thread.createdAt)
+	          time.hidden = isBonfireChat
 	        }
 	        if (!active && chatThreadHasUnread(thread)) {
 	          const unreadDot = document.createElement('span')
 	          unreadDot.className = 'chat-thread-item__unread-dot'
 	          unreadDot.setAttribute('aria-label', 'unread activity')
-	          row.append(unreadDot, titleEl, time)
+	          row.append(unreadDot, titleEl)
+	          if (strideTag) row.appendChild(strideTag)
+	          row.appendChild(time)
 	        } else {
-	          row.append(titleEl, time)
+	          row.appendChild(titleEl)
+	          if (strideTag) row.appendChild(strideTag)
+	          row.appendChild(time)
 	        }
 	        const previewEl = document.createElement('span')
 	        previewEl.className = 'chat-thread-item__preview'
@@ -53133,7 +53553,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const ownEmail = String(authedUser?.email || '').toLowerCase()
 	        const ownerEmail = String(thread.ownerEmail || '').toLowerCase()
 	        const canAdminArchive = ownEmail === 'aj@shareability.com'
-	        if (!isChannel || (ownEmail && ownerEmail === ownEmail) || canAdminArchive) {
+	        if (!chatThreadIsTeam(thread) && (!isChannel || (ownEmail && ownerEmail === ownEmail) || canAdminArchive)) {
 	          const archive = document.createElement('button')
 	          archive.type = 'button'
 	          archive.className = 'chat-thread-item__archive'
@@ -53160,6 +53580,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // Scout). The per-row search filter (chat-thread-item--hidden) still
 	        // spans both lists.
 	        const channels = scoutChatThreads.filter(thread => chatThreadIsChannel(thread))
+	        channels.sort((left, right) => Number(chatThreadIsTeam(right)) - Number(chatThreadIsTeam(left)))
 	        const privates = scoutChatThreads.filter(thread => !chatThreadIsChannel(thread))
 	        if (chatDefaultThread) {
 	          // the default "new thread" row is the private section's empty state:
@@ -53244,7 +53665,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (chatConvoRename) {
 	          // renamable on public + private threads alike; nothing to rename
 	          // before the first persisted thread exists
-	          chatConvoRename.hidden = !thread || chatRenameActive
+	          chatConvoRename.hidden = !thread || chatRenameActive || chatThreadIsTeam(thread)
 	        }
 	        if (chatConvoMeta) {
 	          chatConvoMeta.textContent = isChannel
@@ -53253,7 +53674,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        if (chatConvoContext) {
 	          const isTeam = chatThreadIsTeam(thread)
-	          const scope = !isChannel ? 'private' : isTeam ? 'pinned · #team' : 'project channel'
+	          const scope = !isChannel ? 'private' : isTeam ? 'pinned · Stride' : 'project channel'
 	          const policy = !isChannel ? `only you + ${privateTarget}` : isTeam ? 'whole office · shared memory' : 'members · project memory'
 	          chatConvoScope.textContent = scope
 	          chatConvoPolicy.textContent = policy
@@ -53867,6 +54288,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	      const desktopChatReplyTopologyCache = new WeakMap()
 	      const desktopChatParticipantDirectory = new Map()
+	      let desktopChatMentionCandidates = []
 	      let desktopChatParticipantDirectoryPromise = null
 	      let desktopChatParticipantDirectoryLoaded = false
 	      let desktopChatParticipantDirectoryViewer = ''
@@ -53922,6 +54344,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (desktopChatParticipantDirectoryViewer !== viewer) {
 	          desktopChatParticipantDirectoryGeneration += 1
 	          desktopChatParticipantDirectory.clear()
+	          desktopChatMentionCandidates = []
 	          desktopChatParticipantDirectoryLoaded = false
 	          desktopChatParticipantDirectoryViewer = viewer
 	          desktopChatParticipantDirectoryPromise = null
@@ -53936,12 +54359,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          .then(payload => {
 	            if (desktopChatParticipantDirectoryViewer !== requestViewer ||
 	                desktopChatParticipantDirectoryGeneration !== requestGeneration) return
-	            ;(Array.isArray(payload?.participants) ? payload.participants : []).forEach(participant => {
+	            desktopChatMentionCandidates = Array.isArray(payload?.participants) ? payload.participants : []
+	            desktopChatMentionCandidates.forEach(participant => {
 	              const email = String(participant?.email || '').trim().toLowerCase()
 	              if (email) desktopChatParticipantDirectory.set(email, participant)
 	            })
 	            desktopChatParticipantDirectoryLoaded = true
 	            syncDesktopOpenChatContext()
+	            if (mentionComposerInput) updateMentionAutocomplete(mentionComposerInput)
 	          })
 	          .catch(() => {})
 	          .finally(() => {
@@ -53988,11 +54413,155 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return !chatThreadIsChannel(thread)
 	      }
 
+	      function desktopChatMoreMenuControl({ label = 'More actions', onEdit, onDelete } = {}) {
+	        const wrap = bfEl('span', 'desktop-chat-more')
+	        const trigger = bfEl('button', 'chat-context-card__message-action', '•••')
+	        trigger.type = 'button'
+	        trigger.setAttribute('aria-label', label)
+	        trigger.setAttribute('aria-haspopup', 'menu')
+	        trigger.setAttribute('aria-expanded', 'false')
+	        const menu = bfEl('span', 'desktop-chat-more__menu')
+	        menu.setAttribute('role', 'menu')
+	        menu.hidden = true
+	        let outsideBound = false
+	        const onOutsidePointerDown = () => {
+	          outsideBound = false
+	          close()
+	        }
+	        const close = ({ restoreFocus = false } = {}) => {
+	          menu.hidden = true
+	          trigger.setAttribute('aria-expanded', 'false')
+	          if (outsideBound) {
+	            document.removeEventListener('pointerdown', onOutsidePointerDown)
+	            outsideBound = false
+	          }
+	          if (restoreFocus) trigger.focus({ preventScroll: true })
+	        }
+	        const open = () => {
+	          menu.hidden = false
+	          trigger.setAttribute('aria-expanded', 'true')
+	          if (!outsideBound) {
+	            outsideBound = true
+	            window.setTimeout(() => {
+	              if (outsideBound) document.addEventListener('pointerdown', onOutsidePointerDown)
+	            }, 0)
+	          }
+	          window.requestAnimationFrame(() => menu.querySelector('button')?.focus({ preventScroll: true }))
+	        }
+	        trigger.addEventListener('click', event => {
+	          event.stopPropagation()
+	          if (menu.hidden) open()
+	          else close()
+	        })
+	        wrap.addEventListener('pointerdown', event => event.stopPropagation())
+	        if (onEdit) {
+	          const edit = bfEl('button', '', 'Edit message')
+	          edit.type = 'button'
+	          edit.setAttribute('role', 'menuitem')
+	          edit.addEventListener('click', () => {
+	            close()
+	            onEdit()
+	          })
+	          menu.appendChild(edit)
+	        }
+	        if (onDelete) {
+	          const remove = bfEl('button', '', 'Delete message…')
+	          remove.type = 'button'
+	          remove.dataset.danger = 'true'
+	          remove.setAttribute('role', 'menuitem')
+	          remove.addEventListener('click', () => onDelete(remove, close))
+	          menu.appendChild(remove)
+	        }
+	        menu.addEventListener('keydown', event => {
+	          if (event.key === 'Escape') {
+	            event.preventDefault()
+	            close({ restoreFocus: true })
+	          }
+	        })
+	        wrap.append(trigger, menu)
+	        return { node: wrap, open, close, trigger }
+	      }
+
+	      function beginDesktopFeedMessageEdit(thread, message, node) {
+	        if (!desktopChatMessageIsOwn(thread, message) || node.querySelector('.chat-context-card__editor')) return
+	        const stack = node.querySelector('.scout-chat-msg__stack')
+	        const body = node.querySelector('.scout-chat-text')
+	        if (!stack || !body) return
+	        const bodyWasHidden = body.hidden
+	        body.hidden = true
+	        node.querySelector('.desktop-chat-actions')?.setAttribute('hidden', '')
+	        const editor = document.createElement('form')
+	        editor.className = 'chat-context-card__editor'
+	        const input = document.createElement('textarea')
+	        input.className = 'chat-context-card__editor-input'
+	        input.setAttribute('aria-label', 'Edit message')
+	        input.value = String(message?.text || message?.content || '')
+	        const controls = bfEl('div', 'chat-context-card__editor-actions')
+	        const cancel = bfEl('button', 'chat-context-card__editor-action', 'Cancel')
+	        cancel.type = 'button'
+	        const save = bfEl('button', 'chat-context-card__editor-action', 'Save')
+	        save.type = 'submit'
+	        save.dataset.primary = 'true'
+	        const canSave = () => Boolean(input.value.trim() || (Array.isArray(message?.files) && message.files.length))
+	        const syncSaveState = () => { save.disabled = !canSave() }
+	        const restore = () => {
+	          editor.remove()
+	          body.hidden = bodyWasHidden
+	          node.querySelector('.desktop-chat-actions')?.removeAttribute('hidden')
+	        }
+	        input.addEventListener('input', syncSaveState)
+	        cancel.addEventListener('click', restore)
+	        editor.addEventListener('submit', async event => {
+	          event.preventDefault()
+	          if (!canSave()) return
+	          save.disabled = true
+	          cancel.disabled = true
+	          try {
+	            const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(thread.id)}/messages/${encodeURIComponent(message.id)}`, {
+	              method: 'PATCH',
+	              headers: { 'Content-Type': 'application/json' },
+	              body: JSON.stringify({ text: input.value.trim() })
+	            })
+	            const payload = await response.json().catch(() => ({}))
+	            if (!response.ok || !payload?.thread) throw new Error(payload?.error || 'message could not be edited')
+	            upsertScoutChatThread(payload.thread, { select: false })
+	            renderActiveScoutThread()
+	          } catch (error) {
+	            save.disabled = false
+	            cancel.disabled = false
+	            syncSaveState()
+	            showToast({ text: error?.message || 'message could not be edited', kind: 'error' })
+	          }
+	        })
+	        controls.append(cancel, save)
+	        editor.append(input, controls)
+	        stack.appendChild(editor)
+	        syncSaveState()
+	        input.focus()
+	        input.setSelectionRange(input.value.length, input.value.length)
+	      }
+
+	      function confirmDesktopFeedMessageDelete(messageId, control, close) {
+	        if (control.dataset.armed !== '1') {
+	          control.dataset.armed = '1'
+	          control.textContent = 'Delete message?'
+	          window.setTimeout(() => {
+	            if (!control.isConnected) return
+	            delete control.dataset.armed
+	            control.textContent = 'Delete message…'
+	          }, 2600)
+	          return
+	        }
+	        close()
+	        deleteScoutChatMessage(String(messageId || ''))
+	      }
+
 	      function beginDesktopContextMessageEdit(thread, message, card) {
 	        if (!desktopChatMessageIsOwn(thread, message) || card.querySelector('.chat-context-card__editor')) return
 	        const content = card.querySelector('.chat-context-card__content')
 	        const body = card.querySelector('.chat-context-card__body')
 	        if (!content || !body) return
+	        const bodyWasHidden = body.hidden
 	        body.hidden = true
 	        card.querySelector('.chat-context-card__message-actions')?.setAttribute('hidden', '')
 	        const editor = document.createElement('form')
@@ -54011,7 +54580,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const syncSaveState = () => { save.disabled = !canSave() }
 	        const restore = () => {
 	          editor.remove()
-	          body.hidden = false
+	          body.hidden = bodyWasHidden
 	          card.querySelector('.chat-context-card__message-actions')?.removeAttribute('hidden')
 	        }
 	        input.addEventListener('input', syncSaveState)
@@ -54027,11 +54596,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	              headers: { 'Content-Type': 'application/json' },
 	              body: JSON.stringify({ text: input.value.trim() })
 	            })
-	            const payload = await response.json().catch(() => ({}))
-	            if (!response.ok || !payload?.thread) throw new Error(payload?.error || 'reply could not be edited')
-	            upsertScoutChatThread(payload.thread, { select: false })
-	            renderActiveScoutThread()
-	            syncDesktopOpenChatContext()
+		            const payload = await response.json().catch(() => ({}))
+		            if (!response.ok || !payload?.thread) throw new Error(payload?.error || 'reply could not be edited')
+		            upsertScoutChatThread(payload.thread, { select: false })
+		            const root = desktopChatReplyTopology(payload.thread.messages).rootFor(message)
+		            syncDesktopReplySurfaces(payload.thread, root?.id || message?.replyTo?.messageId)
 	          } catch (error) {
 	            save.disabled = false
 	            cancel.disabled = false
@@ -54062,11 +54631,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        control.disabled = true
 	        try {
 	          const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(thread.id)}/messages/${encodeURIComponent(message.id)}`, { method: 'DELETE' })
-	          const payload = await response.json().catch(() => ({}))
-	          if (!response.ok || !payload?.thread) throw new Error(payload?.error || 'reply could not be deleted')
-	          upsertScoutChatThread(payload.thread, { select: false })
-	          renderActiveScoutThread()
-	          syncDesktopOpenChatContext()
+		          const payload = await response.json().catch(() => ({}))
+		          if (!response.ok || !payload?.thread) throw new Error(payload?.error || 'reply could not be deleted')
+		          upsertScoutChatThread(payload.thread, { select: false })
+		          const root = desktopChatReplyTopology(thread.messages).rootFor(message)
+		          syncDesktopReplySurfaces(payload.thread, root?.id || message?.replyTo?.messageId)
 	        } catch (error) {
 	          control.disabled = false
 	          delete control.dataset.armed
@@ -54075,58 +54644,253 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	      }
 
+	      function desktopContextReactionRowNode(message) {
+	        const reactions = Array.isArray(message?.reactions) ? message.reactions : []
+	        if (!reactions.length) return null
+	        const grouped = new Map()
+	        reactions.forEach(reaction => {
+	          const emoji = String(reaction?.emoji || '')
+	          if (!emoji) return
+	          const summary = grouped.get(emoji) || { count: 0, mine: false, names: [] }
+	          summary.count += 1
+	          summary.mine = summary.mine || String(reaction?.actorEmail || '').toLowerCase() === String(authedUser?.email || '').toLowerCase()
+	          if (reaction?.actorName) summary.names.push(String(reaction.actorName))
+	          grouped.set(emoji, summary)
+	        })
+	        const row = bfEl('div', 'chat-context-card__reactions')
+	        row.setAttribute('aria-label', 'Reply reactions')
+	        grouped.forEach((summary, emoji) => {
+	          const button = bfEl('button', 'chat-context-card__reaction', `${emoji} ${summary.count}`)
+	          button.type = 'button'
+	          button.setAttribute('aria-pressed', String(summary.mine))
+	          button.setAttribute('aria-label', `${summary.mine ? 'Remove' : 'Add'} ${emoji} reaction; ${summary.count} total`)
+	          button.title = summary.names.length ? summary.names.join(', ') : `${summary.count} reaction${summary.count === 1 ? '' : 's'}`
+	          button.addEventListener('click', () => updateDesktopChatReaction(message.id, emoji, !summary.mine, { contextOnly: true }))
+	          row.appendChild(button)
+	        })
+	        return row
+	      }
+
+	      function attachDesktopContextMessageActions(thread, message, card, options = {}) {
+	        if (options.root || !message?.id) return null
+	        const messageActions = bfEl('span', 'chat-context-card__message-actions')
+	        messageActions.setAttribute('aria-label', 'Reply actions')
+	        const reactions = Array.isArray(message?.reactions) ? message.reactions : []
+	        ;['👍', '❤️', '🔥'].forEach(emoji => {
+	          const mine = reactions.some(reaction => String(reaction?.emoji || '') === emoji && String(reaction?.actorEmail || '').toLowerCase() === String(authedUser?.email || '').toLowerCase())
+	          const reaction = bfEl('button', 'chat-context-card__message-action', emoji)
+	          reaction.type = 'button'
+	          reaction.setAttribute('aria-label', `${mine ? 'Remove' : 'Add'} ${emoji} reaction`)
+	          reaction.setAttribute('aria-pressed', String(mine))
+	          reaction.addEventListener('click', () => updateDesktopChatReaction(message.id, emoji, !mine, { contextOnly: true }))
+	          messageActions.appendChild(reaction)
+	        })
+	        let moreControl = null
+	        if (desktopChatMessageIsOwn(thread, message)) {
+	          moreControl = desktopChatMoreMenuControl({
+	            label: 'More reply actions',
+	            onEdit: () => beginDesktopContextMessageEdit(thread, message, card),
+	            onDelete: remove => deleteDesktopContextMessage(thread, message, remove)
+	          })
+	          messageActions.appendChild(moreControl.node)
+	        }
+	        let pressTimer = 0
+	        const cancelPress = () => {
+	          if (!pressTimer) return
+	          window.clearTimeout(pressTimer)
+	          pressTimer = 0
+	        }
+	        card.addEventListener('pointerdown', event => {
+	          if (event.pointerType !== 'touch') return
+	          cancelPress()
+	          pressTimer = window.setTimeout(() => {
+	            card.classList.add('show-actions')
+	            if (moreControl) moreControl.open()
+	          }, 550)
+	        })
+	        card.addEventListener('pointerup', cancelPress)
+	        card.addEventListener('pointercancel', cancelPress)
+	        return messageActions
+	      }
+
 	      function desktopContextMessageCard(thread, message, options = {}) {
 	        const card = document.createElement('article')
 	        card.className = 'chat-context-card chat-context-card--message'
 	        if (options.root) card.dataset.root = 'true'
+	        // Root proposal cards already own their one cached/actionable node in
+	        // the main feed. Reply proposals are absent from that root-only feed,
+	        // so the reply rail is their sole trust surface and may mount the same
+	        // cached card without creating a second set of accept/dismiss handlers.
+	        const actionableProposal = !options.root && String(message?.kind || '') === 'proposal' && Boolean(message?.proposal)
+	        if (actionableProposal) card.classList.add('chat-context-card--proposal')
 	        const content = bfEl('span', 'chat-context-card__content')
 	        const identity = bfEl('span', 'chat-context-card__identity')
 	        identity.append(
 	          bfEl('span', 'chat-context-card__author', desktopChatAuthorLabel(message)),
 	          bfEl('span', 'chat-context-card__meta', `${scoutChatTimeLabel(message?.createdAt)}${message?.editedAt ? ' · edited' : ''}`)
 	        )
-	        if (!options.root && desktopChatMessageIsOwn(thread, message)) {
-	          const messageActions = bfEl('span', 'chat-context-card__message-actions')
-	          const edit = bfEl('button', 'chat-context-card__message-action', 'Edit')
-	          edit.type = 'button'
-	          edit.setAttribute('aria-label', 'Edit reply')
-	          edit.addEventListener('click', () => beginDesktopContextMessageEdit(thread, message, card))
-	          const remove = bfEl('button', 'chat-context-card__message-action', 'Delete')
-	          remove.type = 'button'
-	          remove.setAttribute('aria-label', 'Delete reply')
-	          remove.addEventListener('click', () => deleteDesktopContextMessage(thread, message, remove))
-	          messageActions.append(edit, remove)
-	          identity.appendChild(messageActions)
+	        content.appendChild(identity)
+	        const actions = attachDesktopContextMessageActions(thread, message, card, options)
+	        if (actions) content.appendChild(actions)
+	        if (actionableProposal) {
+	          content.appendChild(scoutProposalCardNode(message))
+	        } else {
+	          const files = Array.isArray(message?.files) ? message.files : []
+	          if (files.length) content.appendChild(scoutChatFilesNode(files))
+	          const rawText = String(message?.text || message?.content || '')
+	          const role = String(message?.role || '').toLowerCase()
+	          const body = document.createElement('div')
+	          body.className = `chat-context-card__body${['assistant', 'scout', 'error'].includes(role) ? ' chat-rich' : ''}`
+	          if (['assistant', 'scout', 'error'].includes(role)) appendChatRichTextNodes(body, rawText)
+	          else appendChatMentionTextNodes(body, rawText)
+	          body.hidden = !rawText && files.length > 0
+	          content.appendChild(body)
+	          const sources = Array.isArray(message?.sources) ? message.sources : []
+	          if (sources.length) {
+	            const sourceRow = bfEl('div', 'desktop-chat-sources')
+	            sourceRow.setAttribute('aria-label', 'Reply sources')
+	            sources.slice(0, 4).forEach((source, index) => {
+	              const sourceButton = bfEl('button', 'desktop-chat-source', `source ${index + 1} · ${source.author || 'thread'}`)
+	              sourceButton.type = 'button'
+	              sourceButton.title = String(source.quote || 'Open source message')
+	              sourceButton.addEventListener('click', () => desktopChatScrollToMessage(source.messageId))
+	              sourceRow.appendChild(sourceButton)
+	            })
+	            content.appendChild(sourceRow)
+	          }
+	          const reactionRow = desktopContextReactionRowNode(message)
+	          if (reactionRow) content.appendChild(reactionRow)
+	          mountDesktopChatLinkPreview(content, rawText)
 	        }
-	        content.append(
-	          identity,
-	          bfEl('p', 'chat-context-card__body', String(message?.text || message?.content || attachedFilesPreview(message?.files) || 'Attachment'))
-	        )
 	        card.append(desktopChatAvatarNode(message), content)
 	        return card
 	      }
 
-	      function renderDesktopMessageContext(thread, root) {
-	        const messages = Array.isArray(thread?.messages) ? thread.messages : []
-	        const topology = desktopChatReplyTopology(messages)
-	        const resolvedRoot = topology.rootFor(root)
-	        const replies = topology.repliesFor(resolvedRoot)
-	        const fragment = document.createDocumentFragment()
-	        fragment.appendChild(desktopContextMessageCard(thread, resolvedRoot, { root: true }))
-	        replies.forEach(reply => fragment.appendChild(desktopContextMessageCard(thread, reply)))
-	        chatContextBody.replaceChildren(fragment)
-	        chatContextMeta.textContent = `${replies.length} ${replies.length === 1 ? 'reply' : 'replies'} · reply without losing your place`
-	      }
+		      function renderDesktopMessageContext(thread, root, options = {}) {
+		        const messages = Array.isArray(thread?.messages) ? thread.messages : []
+		        const topology = desktopChatReplyTopology(messages)
+		        const resolvedRoot = topology.rootFor(root)
+		        const replies = topology.repliesFor(resolvedRoot)
+		        const priorScrollTop = chatContextBody?.scrollTop || 0
+		        const wasNearBottom = chatContextBody
+		          ? chatContextBody.scrollHeight - chatContextBody.scrollTop - chatContextBody.clientHeight < 48
+		          : false
+		        const fragment = document.createDocumentFragment()
+		        fragment.appendChild(desktopContextMessageCard(thread, resolvedRoot, { root: true }))
+		        replies.forEach(reply => fragment.appendChild(desktopContextMessageCard(thread, reply)))
+		        chatContextBody.replaceChildren(fragment)
+		        chatContextMeta.textContent = `${replies.length} ${replies.length === 1 ? 'reply' : 'replies'} · reply without losing your place`
+		        if (options.scrollToBottom || wasNearBottom) {
+		          chatContextBody.scrollTop = chatContextBody.scrollHeight
+		        } else {
+		          chatContextBody.scrollTop = priorScrollTop
+		        }
+		      }
+
+		      function desktopChatThreadSummaryNode(message, threadMessages) {
+		        const replyTopology = desktopChatReplyTopology(threadMessages)
+		        const threadReplies = message?.replyTo?.messageId ? [] : replyTopology.repliesFor(message)
+		        if (!threadReplies.length) return null
+		        const summary = document.createElement('button')
+		        summary.type = 'button'
+		        summary.className = 'desktop-chat-thread-summary'
+		        const latest = threadReplies[threadReplies.length - 1]
+		        summary.setAttribute('aria-label', `Open ${threadReplies.length} ${threadReplies.length === 1 ? 'reply' : 'replies'}; latest ${scoutChatTimeLabel(latest?.createdAt)}`)
+		        const avatars = bfEl('span', 'desktop-chat-thread-summary__avatars')
+		        const seen = new Set()
+		        threadReplies.slice().reverse().forEach(replyMessage => {
+		          const key = String(replyMessage?.authorEmail || replyMessage?.authorName || replyMessage?.role || '').toLowerCase()
+		          if (!key || seen.has(key) || seen.size >= 3) return
+		          seen.add(key)
+		          avatars.prepend(desktopChatAvatarNode(replyMessage, 'desktop-chat-thread-summary__avatar'))
+		        })
+		        const copy = bfEl('span', 'desktop-chat-thread-summary__copy')
+		        copy.append(
+		          bfEl('span', 'desktop-chat-thread-summary__count', `${threadReplies.length} ${threadReplies.length === 1 ? 'reply' : 'replies'}`),
+		          bfEl('span', 'desktop-chat-thread-summary__latest', `latest ${scoutChatTimeLabel(latest?.createdAt)}`)
+		        )
+		        summary.append(avatars, copy)
+		        summary.addEventListener('click', () => openDesktopMessageContext(message, summary))
+		        return summary
+		      }
+
+		      // Thread-rail activity owns only the rail and the root's compact reply
+		      // summary. It never rebuilds the main feed, so the center pane keeps its
+		      // DOM identity, scroll anchor, loaded media, and exact visual position.
+		      function syncDesktopReplySurfaces(thread, rootMessageId, options = {}) {
+		        if (!desktopChatLayoutQuery.matches || String(thread?.id || '') !== String(activeScoutThreadId || '')) return
+		        const messages = Array.isArray(thread?.messages) ? thread.messages : []
+		        const root = messages.find(candidate => String(candidate?.id || '') === String(rootMessageId || ''))
+		        if (!root) return
+		        const rootNode = scoutChatThread?.querySelector(`.scout-chat-msg[data-message-id="${selectorEscape(String(root.id))}"]`)
+		        const stack = rootNode?.querySelector('.scout-chat-msg__stack')
+		        if (stack) {
+		          const current = stack.querySelector('.desktop-chat-thread-summary')
+		          const next = desktopChatThreadSummaryNode(root, messages)
+		          if (current && next) current.replaceWith(next)
+		          else if (current) current.remove()
+		          else if (next) stack.insertBefore(next, stack.querySelector('.desktop-chat-actions, .desktop-chat-link-preview'))
+		        }
+		        if (chatContextState?.mode === 'thread' &&
+		          String(chatContextState.threadId || '') === String(thread.id || '') &&
+		          String(chatContextState.rootMessageId || '') === String(root.id || '')) {
+		          renderDesktopMessageContext(thread, root, { scrollToBottom: options.scrollRailToBottom })
+	          if (options.clearComposer && chatContextReplyInput) {
+	            chatContextReplyInput.value = ''
+	            chatContextReplyInput.style.height = 'auto'
+	            clearPendingDesktopReplyFiles()
+	            syncDesktopReplyComposerState()
+	          }
+		        }
+		      }
 
 	      function closeDesktopChatContext(options = {}) {
 	        chatContextGeneration += 1
 	        chatContextState = null
+	        closeMentionPopover()
 	        if (chatContextRail) chatContextRail.hidden = true
 	        if (chatContextResize) chatContextResize.hidden = true
 	        if (chatContextReplyForm) chatContextReplyForm.hidden = true
 	        if (chatContextBody) chatContextBody.replaceChildren()
 	        if (options.restoreFocus !== false) chatContextReturnFocus?.focus?.({ preventScroll: true })
 	        chatContextReturnFocus = null
+	      }
+
+	      function syncDesktopReplyComposerState() {
+	        if (chatContextReplySend) {
+	          chatContextReplySend.disabled = !String(chatContextReplyInput?.value || '').trim() && pendingDesktopReplyFiles.length === 0
+	        }
+	      }
+
+	      function clearPendingDesktopReplyFiles() {
+	        pendingDesktopReplyFiles = []
+	        if (chatContextReplyFileInput) chatContextReplyFileInput.value = ''
+	        renderPendingDesktopReplyFiles()
+	      }
+
+	      async function addPendingDesktopReplyFiles() {
+	        const files = Array.from(chatContextReplyFileInput?.files || [])
+	        if (!files.length) return
+	        const remaining = Math.max(0, 6 - pendingDesktopReplyFiles.length)
+	        const selected = files.slice(0, remaining)
+	        for (const file of selected) {
+	          pendingDesktopReplyFiles.push(await scoutChatFilePayload(file))
+	        }
+	        if (files.length > selected.length) {
+	          showToast({ text: 'up to 6 files per reply', kind: 'note' })
+	        }
+	        if (chatContextReplyFileInput) chatContextReplyFileInput.value = ''
+	        renderPendingDesktopReplyFiles()
+	      }
+
+	      function renderPendingDesktopReplyFiles() {
+	        if (!chatContextReplyPending) return
+	        chatContextReplyPending.hidden = pendingDesktopReplyFiles.length === 0
+	        chatContextReplyPending.replaceChildren(...pendingDesktopReplyFiles.map((file, index) => scoutChatPendingFileNode(file, () => {
+	          pendingDesktopReplyFiles.splice(index, 1)
+	          renderPendingDesktopReplyFiles()
+	        })))
+	        syncDesktopReplyComposerState()
 	      }
 
 	      function showDesktopChatContext({ mode, title, meta, trigger, reply = false }) {
@@ -54141,7 +54905,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (reply) {
 	          chatContextReplyInput.value = ''
 	          chatContextReplyInput.style.height = 'auto'
-	          chatContextReplySend.disabled = true
+	          clearPendingDesktopReplyFiles()
+	          syncDesktopReplyComposerState()
 	        }
 	        // Move assistive focus into the rail without painting a keyboard ring
 	        // around Close after a pointer click. The first Tab still lands on
@@ -54156,7 +54921,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const root = desktopChatReplyTopology(messages).rootFor(message)
 	        if (!root?.id || !showDesktopChatContext({
 	          mode: 'thread',
-	          title: String(thread?.title || 'Conversation'),
+	          title: chatThreadDisplayTitle(thread),
 	          meta: 'Reply without losing your place',
 	          trigger,
 	          reply: true
@@ -54170,7 +54935,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        event.preventDefault()
 	        const state = chatContextState
 	        const text = String(chatContextReplyInput?.value || '').trim()
-	        if (!text || state?.mode !== 'thread' || !state.threadId || !state.rootMessageId) return
+	        const files = pendingDesktopReplyFiles.slice()
+	        if ((!text && !files.length) || state?.mode !== 'thread' || !state.threadId || !state.rootMessageId) return
 	        chatContextReplySend.disabled = true
 	        try {
 	          let response
@@ -54178,7 +54944,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            response = await fetch(`/assistant/chat-threads/${encodeURIComponent(state.threadId)}/messages`, {
 	              method: 'POST',
 	              headers: { 'Content-Type': 'application/json' },
-	              body: JSON.stringify({ text, replyToMessageId: state.rootMessageId })
+	              body: JSON.stringify({ text, files, replyToMessageId: state.rootMessageId })
 	            })
 	          } catch {
 	            throw new Error('Connection interrupted — your reply is still here. Try again.')
@@ -54193,12 +54959,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          if (!payload?.thread) {
 	            throw new Error('Reply status could not be confirmed — your text is still here. Refresh the thread before retrying.')
 	          }
-	          upsertScoutChatThread(payload.thread, { select: false })
-	          if (activeScoutThreadId === state.threadId) {
-	            const root = payload.thread.messages?.find(candidate => String(candidate?.id || '') === state.rootMessageId)
-	            renderActiveScoutThread()
-	            if (root) openDesktopMessageContext(root, chatContextReturnFocus)
-	          }
+		          upsertScoutChatThread(payload.thread, { select: false })
+		          syncDesktopReplySurfaces(payload.thread, state.rootMessageId, { clearComposer: true, scrollRailToBottom: true })
 	        } catch (error) {
 	          showToast({ text: error?.message || 'reply could not be sent', kind: 'error' })
 	          chatContextReplySend.disabled = false
@@ -54519,30 +55281,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          stack.appendChild(reactionRow)
 	        }
 
-	        const threadReplies = message?.replyTo?.messageId ? [] : replyTopology.repliesFor(message)
-	        if (threadReplies.length) {
-	          const summary = document.createElement('button')
-	          summary.type = 'button'
-	          summary.className = 'desktop-chat-thread-summary'
-	          const latest = threadReplies[threadReplies.length - 1]
-	          summary.setAttribute('aria-label', `Open ${threadReplies.length} ${threadReplies.length === 1 ? 'reply' : 'replies'}; latest ${scoutChatTimeLabel(latest?.createdAt)}`)
-	          const avatars = bfEl('span', 'desktop-chat-thread-summary__avatars')
-	          const seen = new Set()
-	          threadReplies.slice().reverse().forEach(replyMessage => {
-	            const key = String(replyMessage?.authorEmail || replyMessage?.authorName || replyMessage?.role || '').toLowerCase()
-	            if (!key || seen.has(key) || seen.size >= 3) return
-	            seen.add(key)
-	            avatars.prepend(desktopChatAvatarNode(replyMessage, 'desktop-chat-thread-summary__avatar'))
-	          })
-	          const copy = bfEl('span', 'desktop-chat-thread-summary__copy')
-	          copy.append(
-	            bfEl('span', 'desktop-chat-thread-summary__count', `${threadReplies.length} ${threadReplies.length === 1 ? 'reply' : 'replies'}`),
-	            bfEl('span', 'desktop-chat-thread-summary__latest', `latest ${scoutChatTimeLabel(latest?.createdAt)}`)
-	          )
-	          summary.append(avatars, copy)
-	          summary.addEventListener('click', () => openDesktopMessageContext(message, summary))
-	          stack.appendChild(summary)
-	        }
+		        const threadSummary = desktopChatThreadSummaryNode(message, threadMessages)
+		        if (threadSummary) stack.appendChild(threadSummary)
 
 	        if (message.id && kind !== 'error' && messageActionsReady) {
 	          const actions = bfEl('div', 'desktop-chat-actions')
@@ -54550,7 +55290,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const replyButton = bfEl('button', '', 'reply')
 	          replyButton.type = 'button'
 	          replyButton.addEventListener('click', () => openDesktopMessageContext(message, replyButton))
-	          actions.appendChild(replyButton)
 	          ;['👍', '❤️', '🔥'].forEach(emoji => {
 	            const mine = reactions.some(reaction => String(reaction?.emoji || '') === emoji && String(reaction?.actorEmail || '').toLowerCase() === String(authedUser?.email || '').toLowerCase())
 	            const reactionButton = bfEl('button', '', emoji)
@@ -54560,6 +55299,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            reactionButton.addEventListener('click', () => updateDesktopChatReaction(message.id, emoji, !mine))
 	            actions.appendChild(reactionButton)
 	          })
+	          actions.appendChild(replyButton)
+	          const activeThread = selectedScoutChatThread()
+	          if (desktopChatMessageIsOwn(activeThread, message)) {
+	            const more = desktopChatMoreMenuControl({
+	              label: 'More message actions',
+	              onEdit: () => beginDesktopFeedMessageEdit(activeThread, message, node),
+	              onDelete: (control, close) => confirmDesktopFeedMessageDelete(message.id, control, close)
+	            })
+	            actions.appendChild(more.node)
+	          }
 	          stack.appendChild(actions)
 	        }
 
@@ -54582,7 +55331,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        target.focus?.({ preventScroll: true })
 	      }
 
-	      async function updateDesktopChatReaction(messageId, emoji, set) {
+	      async function updateDesktopChatReaction(messageId, emoji, set, options = {}) {
 	        const threadId = String(activeScoutThreadId || '')
 	        if (!desktopChatLayoutQuery.matches || !threadId || !messageId || !authedUser) {
 	          return
@@ -54600,7 +55349,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          }
 	          if (payload.thread) {
 	            upsertScoutChatThread(payload.thread, { select: false })
-	            renderActiveScoutThread()
+	            const updatedMessage = payload.thread.messages?.find(candidate => String(candidate?.id || '') === String(messageId || ''))
+	            if (updatedMessage && (options.contextOnly || updatedMessage?.replyTo?.messageId)) {
+	              const root = desktopChatReplyTopology(payload.thread.messages).rootFor(updatedMessage)
+	              syncDesktopReplySurfaces(payload.thread, root?.id || updatedMessage?.replyTo?.messageId)
+	            } else {
+	              renderActiveScoutThread()
+	            }
 	          }
 	        } catch (error) {
 	          showToast({ text: error.message || 'reaction could not be saved', kind: 'error' })
@@ -55127,7 +55882,40 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return card
 	      }
 
-	      // ---- the concept render (card 096) ----
+		      function openScoutChatImagePreview(src, alt) {
+		        src = String(src || '').trim()
+		        if (!src) return
+		        let dialog = document.getElementById('scoutChatImageViewer')
+		        if (!dialog) {
+		          dialog = document.createElement('dialog')
+		          dialog.id = 'scoutChatImageViewer'
+		          dialog.className = 'scout-chat-image-viewer'
+		          dialog.setAttribute('aria-label', 'Expanded image preview')
+
+		          const frame = document.createElement('div')
+		          frame.className = 'scout-chat-image-viewer__frame'
+		          const image = document.createElement('img')
+		          image.className = 'scout-chat-image-viewer__image'
+		          const close = bfEl('button', 'scout-chat-image-viewer__close', '×')
+		          close.type = 'button'
+		          close.setAttribute('aria-label', 'Close expanded image')
+		          close.addEventListener('click', () => dialog.close())
+		          frame.append(image, close)
+		          dialog.appendChild(frame)
+		          dialog.addEventListener('click', event => {
+		            if (event.target === dialog) dialog.close()
+		          })
+		          document.body.appendChild(dialog)
+		        }
+		        const image = dialog.querySelector('.scout-chat-image-viewer__image')
+		        if (!image) return
+		        image.src = src
+		        image.alt = String(alt || 'Expanded image')
+		        if (!dialog.open) dialog.showModal()
+		        dialog.querySelector('.scout-chat-image-viewer__close')?.focus()
+		      }
+
+		      // ---- the concept render (card 096) ----
 	      // A Kind="image" message is a generated picture Scout filed after an
 	      // image confirm: a scout caption bubble, the picture itself (served
 	      // inline by the session-gated /artifacts/blob route), and an action
@@ -55147,10 +55935,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        figure.className = 'scout-chat-image'
 	        const img = document.createElement('img')
 	        img.className = 'scout-chat-image__img'
-	        img.loading = 'lazy'
-	        img.alt = String(image.prompt || 'concept render')
-	        img.src = artifactBlobUrl({ ref, name: image.name })
-	        figure.appendChild(img)
+		        img.loading = 'lazy'
+		        img.alt = String(image.prompt || 'concept render')
+		        img.src = artifactBlobUrl({ ref, name: image.name })
+		        const preview = document.createElement('button')
+		        preview.type = 'button'
+		        preview.className = 'scout-chat-image__preview'
+		        preview.setAttribute('aria-label', `Expand ${img.alt}`)
+		        preview.addEventListener('click', () => openScoutChatImagePreview(img.src, img.alt))
+		        preview.append(img, bfEl('span', 'scout-chat-image__expand', 'expand'))
+		        figure.appendChild(preview)
 	        const artifactId = String(image.artifactId || '')
 	        if (artifactId) {
 	          const open = bfEl('button', 'scout-chat-image__open', 'open artifact ▸')
@@ -55934,21 +56728,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           // card 085: ref'd images render inline — /artifacts/blob is
           // session-gated (the same-origin cookie rides the <img> fetch)
           // and immutable-cached, so re-opens cost one conditional request
-          if (blobHref && mime.startsWith('image/')) {
-            const frame = document.createElement('a')
-            frame.className = 'scout-chat-file scout-chat-file--image'
-	            frame.classList.toggle('scout-chat-file--gif', mime === 'image/gif')
-            frame.href = blobHref
-            frame.target = '_blank'
-            frame.rel = 'noopener'
-	            frame.setAttribute('aria-label', `Open ${file.name || (mime === 'image/gif' ? 'GIF' : 'image')} in a new tab`)
-            const img = document.createElement('img')
-            img.className = 'scout-chat-file__thumb'
-            img.src = blobHref
-            img.alt = file.name || 'image attachment'
-            img.loading = 'lazy'
-            frame.appendChild(img)
-            wrap.appendChild(frame)
+	          if (blobHref && mime.startsWith('image/')) {
+	            const frame = document.createElement('button')
+	            frame.className = 'scout-chat-file scout-chat-file--image'
+		            frame.classList.toggle('scout-chat-file--gif', mime === 'image/gif')
+	            frame.type = 'button'
+		            frame.setAttribute('aria-label', `Expand ${file.name || (mime === 'image/gif' ? 'GIF' : 'image')}`)
+	            const img = document.createElement('img')
+	            img.className = 'scout-chat-file__thumb'
+	            img.src = blobHref
+	            img.alt = file.name || 'image attachment'
+	            img.loading = 'lazy'
+	            frame.addEventListener('click', () => openScoutChatImagePreview(blobHref, img.alt))
+	            frame.append(img, bfEl('span', 'scout-chat-image__expand', 'expand'))
+	            wrap.appendChild(frame)
             return
           }
           // ref'd PDFs open the browser's viewer in a new tab; plain files

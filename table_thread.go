@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 )
 
 // The Table — the deployment's single permanent team thread.
@@ -15,9 +16,13 @@ import (
 // `visibility: "public"` with no new code (scout_chat_threads.go:1620).
 
 // tableThreadTitle is stored WITHOUT the "#" — clients add the prefix when
-// rendering a public thread (see mobile ChannelList.channelName), so storing
-// "#team" would render as "##team".
-const tableThreadTitle = "team"
+// rendering a public thread. legacyTableThreadTitle remains an adoption-only
+// migration key so deployments with the former "team" record converge on one
+// canonical permanent Bonfire Chat instead of minting a duplicate.
+const (
+	tableThreadTitle       = "Bonfire Chat"
+	legacyTableThreadTitle = "team"
+)
 
 // ensureTableMu serializes provisioning. Two devices hitting the thread list at
 // the same moment on a fresh deployment is exactly when this races, and two
@@ -39,15 +44,17 @@ func (app *kanbanBoardApp) findTableThread() (scoutChatThreadRecord, bool) {
 
 	for _, entry := range app.memory.snapshot(0) {
 		thread, ok := decodeScoutChatThreadEntry(entry)
-		if !ok || thread.ArchivedAt != "" {
+		if !ok {
 			continue
 		}
 		if thread.Table {
 			return thread, true
 		}
 		if !foundAdoptable &&
+			thread.ArchivedAt == "" &&
 			scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic &&
-			strings.EqualFold(strings.TrimSpace(thread.Title), tableThreadTitle) {
+			(strings.EqualFold(strings.TrimSpace(thread.Title), tableThreadTitle) ||
+				strings.EqualFold(strings.TrimSpace(thread.Title), legacyTableThreadTitle)) {
 			adoptable = thread
 			foundAdoptable = true
 		}
@@ -62,7 +69,17 @@ func (app *kanbanBoardApp) findTableThread() (scoutChatThreadRecord, bool) {
 // no-ops on an id it has already seen, returning appended=false rather than an
 // error. Writing the flag with append looks like it worked and does nothing.
 func (app *kanbanBoardApp) flagAsTable(thread scoutChatThreadRecord) (scoutChatThreadRecord, error) {
+	changed := !thread.Table || thread.Title != tableThreadTitle || thread.ArchivedAt != ""
 	thread.Table = true
+	thread.Title = tableThreadTitle
+	thread.ArchivedAt = ""
+	if thread.Preview == "archived" {
+		thread.Preview = scoutChatThreadPreview(thread)
+	}
+	if !changed {
+		return thread, nil
+	}
+	thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	entryText, err := encodeScoutChatThread(thread)
 	if err != nil {
 		return scoutChatThreadRecord{}, err
@@ -89,9 +106,6 @@ func (app *kanbanBoardApp) ensureTable(ownerEmail string) (scoutChatThreadRecord
 	defer ensureTableMu.Unlock()
 
 	if existing, ok := app.findTableThread(); ok {
-		if existing.Table {
-			return existing, nil
-		}
 		return app.flagAsTable(existing)
 	}
 

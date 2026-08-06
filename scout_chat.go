@@ -365,7 +365,13 @@ type scoutRouterProposal struct {
 	ToolName   string `json:"toolName,omitempty"`
 	GroupLabel string `json:"groupLabel,omitempty"`
 	Mode       string `json:"mode,omitempty"` // workstream proposals only
-	Objective  string `json:"objective"`
+	// AgentID/AgentName bind a targeted @Agent work request to the exact hired
+	// seat selected when the proposal was minted. The confirm route trusts the
+	// persisted id, never client-supplied identity, and reauthorizes it before
+	// launching the bounded runner.
+	AgentID   string `json:"agentId,omitempty"`
+	AgentName string `json:"agentName,omitempty"`
+	Objective string `json:"objective"`
 	// Query is the user message that produced this proposal — the "just
 	// answer instead" escape re-asks it as Tier 0.
 	Query string `json:"query,omitempty"`

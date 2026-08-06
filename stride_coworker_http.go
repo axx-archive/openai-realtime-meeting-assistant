@@ -92,7 +92,7 @@ func inspectSTRIDERelationshipPreferences(store *durableSTRIDECollaborationStore
 func chatThreadDisplayTitleServer(thread scoutChatThreadRecord) string {
 	title := strings.TrimSpace(thread.Title)
 	if thread.Table {
-		return "#team"
+		return "#" + tableThreadTitle
 	}
 	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic && title != "" {
 		return "#" + strings.TrimPrefix(title, "#")

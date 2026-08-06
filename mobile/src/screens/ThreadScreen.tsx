@@ -34,7 +34,8 @@ import { CatchUpSheet } from '../messaging/CatchUpSheet';
 import { MessageActionSheet } from '../messaging/MessageActionSheet';
 import { LongMessageSheet } from '../messaging/LongMessageSheet';
 import { ThreadDetailSheet } from '../messaging/ThreadDetailSheet';
-import { MentionComposerInput, type MentionComposerInputHandle } from '../messaging/MentionComposerInput';
+import { MentionComposerInput } from '../messaging/MentionComposerInput';
+import { channelDisplayName } from '../messaging/channelPresentation';
 import { AttachmentSourceSheet } from '../messaging/AttachmentSourceSheet';
 import { GifPickerSheet } from '../messaging/GifPickerSheet';
 import {
@@ -103,11 +104,13 @@ type ThreadMessageRowProps = {
   viewerEmail: string;
   timestampReveal: Animated.Value;
   retryingReply: boolean;
+  resolvingProposal: boolean;
   onOpenSource: (messageId: string) => void;
   onOpenAttachment: (file: ScoutFileAttachment) => void;
   onLongPress: (message: ScoutMessage, own: boolean) => void;
   onToggleReaction: (message: ScoutMessage, emoji: string, active: boolean) => void;
   onRetryReply: (message: ScoutMessage) => void;
+  onResolveProposal: (message: ScoutMessage, action: 'accepted' | 'dismissed') => void;
   onOpenCatchUp: () => void;
   onOpenLongMessage: (text: string, authorName: string, scout: boolean) => void;
   onOpenWorkArtifact: (message: ScoutMessage) => void;
@@ -120,11 +123,13 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
   viewerEmail,
   timestampReveal,
   retryingReply,
+  resolvingProposal,
   onOpenSource,
   onOpenAttachment,
   onLongPress,
   onToggleReaction,
   onRetryReply,
+  onResolveProposal,
   onOpenCatchUp,
   onOpenLongMessage,
   onOpenWorkArtifact,
@@ -176,6 +181,8 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
         onLongPress={onLongPress}
         onToggleReaction={onToggleReaction}
         onRetryReply={onRetryReply}
+        onResolveProposal={onResolveProposal}
+        resolvingProposal={resolvingProposal}
         onOpenLongMessage={onOpenLongMessage}
         onOpenWorkArtifact={onOpenWorkArtifact}
         retryingReply={retryingReply}
@@ -188,11 +195,13 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
   && previous.viewerEmail === next.viewerEmail
   && previous.timestampReveal === next.timestampReveal
   && previous.retryingReply === next.retryingReply
+  && previous.resolvingProposal === next.resolvingProposal
   && previous.onOpenSource === next.onOpenSource
   && previous.onOpenAttachment === next.onOpenAttachment
   && previous.onLongPress === next.onLongPress
   && previous.onToggleReaction === next.onToggleReaction
   && previous.onRetryReply === next.onRetryReply
+  && previous.onResolveProposal === next.onResolveProposal
   && previous.onOpenCatchUp === next.onOpenCatchUp
   && previous.onOpenLongMessage === next.onOpenLongMessage
   && previous.onOpenWorkArtifact === next.onOpenWorkArtifact
@@ -229,10 +238,18 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [uploading, setUploading] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<ScoutFileAttachment[]>([]);
   const [stagingFiles, setStagingFiles] = useState<Array<{ id: string; name: string; mime: string; uri?: string }>>([]);
+  const [threadReplyFiles, setThreadReplyFiles] = useState<ScoutFileAttachment[]>([]);
+  const [threadReplyStagingFiles, setThreadReplyStagingFiles] = useState<Array<{ id: string; name: string; mime: string; uri?: string }>>([]);
   const [editingMessage, setEditingMessage] = useState<ScoutMessage | null>(null);
   const [actionMessage, setActionMessage] = useState<{ message: ScoutMessage; own: boolean } | null>(null);
   const [previewFile, setPreviewFile] = useState<ScoutFileAttachment | null>(null);
-  const [expandedMessage, setExpandedMessage] = useState<{ text: string; authorName: string; scout: boolean; activity?: boolean } | null>(null);
+  const [expandedMessage, setExpandedMessage] = useState<{
+    text: string;
+    authorName: string;
+    scout: boolean;
+    activity?: boolean;
+    report?: { agentName: string; mode: string; status: string };
+  } | null>(null);
   const [participants, setParticipants] = useState<ChatMentionCandidate[]>([{ name: 'Scout', kind: 'scout' }]);
   const [threadVisibility, setThreadVisibility] = useState('private');
   const [threadOwnerEmail, setThreadOwnerEmail] = useState('');
@@ -244,17 +261,17 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [notificationBusy, setNotificationBusy] = useState(false);
   const [attachmentSourceOpen, setAttachmentSourceOpen] = useState(false);
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
+  const [attachmentTarget, setAttachmentTarget] = useState<'message' | 'reply'>('message');
   const [typingParticipants, setTypingParticipants] = useState<TypingParticipant[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [retryingReplyID, setRetryingReplyID] = useState<string | null>(null);
+  const [resolvingProposalID, setResolvingProposalID] = useState<string | null>(null);
   const [threadContextRootID, setThreadContextRootID] = useState<string | null>(null);
-  const [threadContextFocusComposer, setThreadContextFocusComposer] = useState(false);
   const [threadReplySending, setThreadReplySending] = useState(false);
   const [threadReplyError, setThreadReplyError] = useState('');
   // null means "not yet loaded" — distinct from "" which means never read.
   const [readAt, setReadAt] = useState<string | null>(null);
   const listRef = useRef<FlashListRef<ThreadRow>>(null);
-  const composerInputRef = useRef<MentionComposerInputHandle>(null);
   const messagesRef = useRef<ScoutMessage[]>([]);
   messagesRef.current = messages;
   const replyTopology = useMemo(() => buildThreadReplyTopology(messages), [messages]);
@@ -322,7 +339,6 @@ export function ThreadScreen({ route, navigation }: Props) {
       if (!message) return;
       const root = replyTopologyRef.current.rootFor(message);
       if (root && String(root.id) !== String(message.id)) {
-        setThreadContextFocusComposer(false);
         setThreadReplyError('');
         setThreadContextRootID(String(root.id));
         return;
@@ -333,21 +349,21 @@ export function ThreadScreen({ route, navigation }: Props) {
     [],
   );
 
-  const openThreadContext = useCallback((message: ScoutMessage, focusComposer = false) => {
+  const openThreadContext = useCallback((message: ScoutMessage) => {
     const root = replyTopologyRef.current.rootFor(message);
     if (!root?.id) return;
     setActionMessage(null);
     setEditingMessage(null);
     setThreadReplyError('');
-    setThreadContextFocusComposer(focusComposer);
     setThreadContextRootID(String(root.id));
     void Haptics.selectionAsync();
   }, []);
 
   const closeThreadContext = useCallback(() => {
     setThreadContextRootID(null);
-    setThreadContextFocusComposer(false);
     setThreadReplyError('');
+    setThreadReplyFiles([]);
+    setThreadReplyStagingFiles([]);
   }, []);
 
   useEffect(() => {
@@ -369,6 +385,12 @@ export function ThreadScreen({ route, navigation }: Props) {
       const response = await api.scoutThread(sessionToken, route.params.threadId);
       const next = response.thread?.messages ?? response.messages ?? [];
       applyTranscriptSnapshot(generationAtRequest, next);
+      if (response.thread) {
+        const displayTitle = channelDisplayName(response.thread);
+        setThreadTitle(displayTitle);
+        setThreadTitleDraft(displayTitle);
+        navigation.setParams({ title: displayTitle });
+      }
       setThreadVisibility(String(response.thread?.visibility ?? 'private'));
       setThreadOwnerEmail(String(response.thread?.ownerEmail ?? ''));
       const level = String(response.notificationLevel ?? (response.muted ? 'mentions' : 'all'));
@@ -384,7 +406,7 @@ export function ThreadScreen({ route, navigation }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [applyTranscriptSnapshot, route.params.threadId, sessionToken]);
+  }, [applyTranscriptSnapshot, navigation, route.params.threadId, sessionToken]);
 
   useFocusEffect(useCallback(() => {
     void load();
@@ -489,18 +511,21 @@ export function ThreadScreen({ route, navigation }: Props) {
 
   const email = user?.email?.trim().toLowerCase() ?? '';
   const participantByEmail = useMemo(() => new Map(
-    participants
+    [
+      ...participants,
+      ...(user?.email ? [{ name: user.name, email: user.email, avatarDataURL: user.avatarDataURL, kind: 'person' as const }] : []),
+    ]
       .filter((participant) => participant.email)
       .map((participant) => [String(participant.email).trim().toLowerCase(), participant]),
-  ), [participants]);
+  ), [participants, user?.avatarDataURL, user?.email, user?.name]);
   const participantAvatars = useMemo(() => new Map(
-    participants
+    Array.from(participantByEmail.values())
       .filter((participant) => participant.email && participant.avatarDataURL)
       .map((participant) => [
         String(participant.email).trim().toLowerCase(),
         String(participant.avatarDataURL),
       ]),
-  ), [participants]);
+  ), [participantByEmail]);
 
   useEffect(() => {
     if (office.event !== 'chat_typing') return;
@@ -588,17 +613,6 @@ export function ThreadScreen({ route, navigation }: Props) {
 		}
 	}, [navigation]);
 
-	const insertScoutMention = useCallback(() => {
-		if (threadVisibility !== 'public' || editingMessage) return;
-		const next = /(^|[^\p{L}\p{N}])@scout(?![\p{L}\p{N}])/iu.test(draft)
-			? draft
-			: draft
-				? `${draft}${/\s$/u.test(draft) ? '' : ' '}@Scout `
-				: '@Scout ';
-		changeDraft(next);
-		requestAnimationFrame(() => composerInputRef.current?.focus());
-	}, [changeDraft, draft, editingMessage, threadVisibility]);
-
   useEffect(() => () => stopTyping(), [stopTyping]);
 
   useEffect(() => {
@@ -652,7 +666,12 @@ export function ThreadScreen({ route, navigation }: Props) {
         const unreadCount = isBoundary ? feedMessages.length - boundary : 0;
         return {
           message,
-          threadReplies: replyTopology.repliesFor(message),
+          threadReplies: replyTopology.repliesFor(message).map((reply) => {
+            const replyParticipant = participantByEmail.get(String(reply.authorEmail ?? '').trim().toLowerCase());
+            return reply.avatarDataURL || !replyParticipant?.avatarDataURL
+              ? reply
+              : { ...reply, avatarDataURL: replyParticipant.avatarDataURL };
+          }),
           own,
           showAuthor,
           showAvatar,
@@ -742,9 +761,9 @@ export function ThreadScreen({ route, navigation }: Props) {
     }
   }
 
-  const sendThreadReply = useCallback(async (text: string): Promise<boolean> => {
+  const sendThreadReply = useCallback(async (text: string, files: readonly ScoutFileAttachment[]): Promise<boolean> => {
     const rootID = String(threadContextRootID ?? '').trim();
-    if (!sessionToken || !rootID || !text.trim() || threadReplySending) return false;
+    if (!sessionToken || !rootID || (!text.trim() && files.length === 0) || threadReplySending || uploading) return false;
     const generationAtRequest = transcriptGenerationRef.current;
     setThreadReplySending(true);
     setThreadReplyError('');
@@ -753,11 +772,13 @@ export function ThreadScreen({ route, navigation }: Props) {
         sessionToken,
         route.params.threadId,
         text.trim(),
-        [],
+        [...files],
         rootID,
       );
       applyTranscriptSnapshot(generationAtRequest, response.thread?.messages ?? response.messages ?? []);
 	  applyScoutActions(response.actions);
+      setThreadReplyFiles([]);
+      setThreadReplyStagingFiles([]);
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       return true;
     } catch (caught) {
@@ -766,7 +787,7 @@ export function ThreadScreen({ route, navigation }: Props) {
     } finally {
       setThreadReplySending(false);
     }
-  }, [applyScoutActions, applyTranscriptSnapshot, route.params.threadId, sessionToken, threadContextRootID, threadReplySending]);
+  }, [applyScoutActions, applyTranscriptSnapshot, route.params.threadId, sessionToken, threadContextRootID, threadReplySending, uploading]);
 
   const retryScoutReply = useCallback(async (message: ScoutMessage) => {
     const replyID = String(message.id ?? '').trim();
@@ -792,9 +813,42 @@ export function ThreadScreen({ route, navigation }: Props) {
     }
   }, [applyTranscriptSnapshot, retryingReplyID, route.params.threadId, sessionToken]);
 
-  async function uploadAttachmentAssets(assets: readonly AttachmentAssetInput[]): Promise<boolean> {
+  const resolveProposal = useCallback(async (message: ScoutMessage, action: 'accepted' | 'dismissed') => {
+    const messageID = String(message.id ?? '').trim();
+    if (!sessionToken || !messageID || resolvingProposalID) return;
+    const generationAtRequest = transcriptGenerationRef.current;
+    setResolvingProposalID(messageID);
+    setError(null);
+    setThreadReplyError('');
+    try {
+      const response = await api.resolveScoutProposal(
+        sessionToken,
+        route.params.threadId,
+        messageID,
+        action,
+        String(message.proposal?.objective ?? '').trim(),
+      );
+      applyTranscriptSnapshot(generationAtRequest, response.thread?.messages ?? response.messages ?? []);
+      applyScoutActions(response.actions);
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (caught) {
+      const detail = caught instanceof BonfireApiError ? caught.message : 'Could not update that proposed work.';
+      setError(detail);
+      setThreadReplyError(detail);
+    } finally {
+      setResolvingProposalID(null);
+    }
+  }, [applyScoutActions, applyTranscriptSnapshot, resolvingProposalID, route.params.threadId, sessionToken]);
+
+  function openAttachmentSource(target: 'message' | 'reply') {
+    setAttachmentTarget(target);
+    setAttachmentSourceOpen(true);
+  }
+
+  async function uploadAttachmentAssets(assets: readonly AttachmentAssetInput[], target: 'message' | 'reply'): Promise<boolean> {
     if (!sessionToken || uploading) return false;
-    const remaining = maxMessageAttachments - pendingFiles.length;
+    const targetFiles = target === 'reply' ? threadReplyFiles : pendingFiles;
+    const remaining = maxMessageAttachments - targetFiles.length;
     const batch = prepareAttachmentBatch(assets, remaining);
     const issues = attachmentBatchMessage(batch);
     if (batch.accepted.length === 0) {
@@ -810,7 +864,9 @@ export function ThreadScreen({ route, navigation }: Props) {
       mime: asset.mime,
       uri: asset.uri,
     }));
-    setStagingFiles((current) => [...current, ...staging]);
+    const setTargetStaging = target === 'reply' ? setThreadReplyStagingFiles : setStagingFiles;
+    const setTargetFiles = target === 'reply' ? setThreadReplyFiles : setPendingFiles;
+    setTargetStaging((current) => [...current, ...staging]);
     try {
       const outcomes: Array<{ file: ScoutFileAttachment | null; error: string }> = [];
       for (let index = 0; index < batch.accepted.length; index += maxConcurrentAttachmentUploads) {
@@ -829,7 +885,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       const uploaded = outcomes.flatMap((outcome) => outcome.file ? [outcome.file] : []);
       const failures = outcomes.map((outcome) => outcome.error).filter(Boolean);
       if (uploaded.length > 0) {
-        setPendingFiles((current) => [...current, ...uploaded].slice(0, maxMessageAttachments));
+        setTargetFiles((current) => [...current, ...uploaded].slice(0, maxMessageAttachments));
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
       const message = [issues, ...failures].filter(Boolean).join(' ');
@@ -837,13 +893,14 @@ export function ThreadScreen({ route, navigation }: Props) {
       return uploaded.length > 0 && failures.length === 0;
     } finally {
       const stagingIDs = new Set(staging.map((file) => file.id));
-      setStagingFiles((current) => current.filter((file) => !stagingIDs.has(file.id)));
+      setTargetStaging((current) => current.filter((file) => !stagingIDs.has(file.id)));
       setUploading(false);
     }
   }
 
-  async function pickFiles() {
-    if (uploading || pendingFiles.length >= maxMessageAttachments) return;
+  async function pickFiles(target: 'message' | 'reply') {
+    const targetFiles = target === 'reply' ? threadReplyFiles : pendingFiles;
+    if (uploading || targetFiles.length >= maxMessageAttachments) return;
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf'],
@@ -856,19 +913,20 @@ export function ThreadScreen({ route, navigation }: Props) {
         name: asset.name,
         mime: asset.mimeType,
         size: asset.size,
-      })));
+      })), target);
     } catch {
       setError('Could not open Files. Please try again.');
     }
   }
 
-  async function pickPhotos() {
-    if (uploading || pendingFiles.length >= maxMessageAttachments) return;
+  async function pickPhotos(target: 'message' | 'reply') {
+    const targetFiles = target === 'reply' ? threadReplyFiles : pendingFiles;
+    if (uploading || targetFiles.length >= maxMessageAttachments) return;
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         allowsMultipleSelection: true,
-        selectionLimit: maxMessageAttachments - pendingFiles.length,
+        selectionLimit: maxMessageAttachments - targetFiles.length,
         // Photo-library images are message previews, not archival masters. A
         // modest JPEG compression keeps staging responsive while preserving
         // enough resolution for the full-screen viewer.
@@ -882,18 +940,21 @@ export function ThreadScreen({ route, navigation }: Props) {
         name: asset.fileName || `Photo ${index + 1}.jpg`,
         mime: asset.mimeType,
         size: asset.fileSize,
-      })));
+      })), target);
     } catch {
       setError('Could not open your photo library. Please try again.');
     }
   }
 
-  async function addGiphyGif(gif: GiphySearchResult): Promise<boolean> {
-    if (!sessionToken || uploading || pendingFiles.length >= maxMessageAttachments) return false;
+  async function addGiphyGif(gif: GiphySearchResult, target: 'message' | 'reply'): Promise<boolean> {
+    const targetFiles = target === 'reply' ? threadReplyFiles : pendingFiles;
+    if (!sessionToken || uploading || targetFiles.length >= maxMessageAttachments) return false;
     setUploading(true);
     setError(null);
     const stagingID = `giphy-${gif.id}-${Date.now()}`;
-    setStagingFiles((current) => [...current, {
+    const setTargetStaging = target === 'reply' ? setThreadReplyStagingFiles : setStagingFiles;
+    const setTargetFiles = target === 'reply' ? setThreadReplyFiles : setPendingFiles;
+    setTargetStaging((current) => [...current, {
       id: stagingID,
       name: `${gif.title?.trim() || 'GIPHY'}.gif`,
       mime: 'image/gif',
@@ -904,7 +965,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       // a device download followed by a second upload makes selection feel
       // immediate and avoids holding the animation twice on mobile data.
       const attachment = await api.importGiphy(sessionToken, route.params.threadId, gif);
-      setPendingFiles((current) => [...current, attachment].slice(0, maxMessageAttachments));
+      setTargetFiles((current) => [...current, attachment].slice(0, maxMessageAttachments));
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       return true;
     } catch (caught) {
@@ -912,7 +973,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       setError(message);
       throw new Error(message);
     } finally {
-      setStagingFiles((current) => current.filter((file) => file.id !== stagingID));
+      setTargetStaging((current) => current.filter((file) => file.id !== stagingID));
       setUploading(false);
     }
   }
@@ -935,7 +996,7 @@ export function ThreadScreen({ route, navigation }: Props) {
   }
 
   function beginReply(message: ScoutMessage) {
-    openThreadContext(message, true);
+    openThreadContext(message);
   }
 
   function copyMessage(message: ScoutMessage) {
@@ -1064,7 +1125,16 @@ export function ThreadScreen({ route, navigation }: Props) {
       const text = String(artifact?.text ?? '').trim();
       if (terminal && text) {
         const title = String(artifact?.metadata?.title ?? message.thread?.query ?? `${agentName} deliverable`).trim();
-        setExpandedMessage({ text, authorName: title || `${agentName} deliverable`, scout: true });
+        setExpandedMessage({
+          text,
+          authorName: title || `${agentName} deliverable`,
+          scout: true,
+          report: {
+            agentName,
+            mode: String(message.thread?.mode ?? artifact?.metadata?.mode ?? 'work').trim() || 'work',
+            status: 'Delivered',
+          },
+        });
         return;
       }
       const phase = workThreadPhase({
@@ -1101,11 +1171,13 @@ export function ThreadScreen({ route, navigation }: Props) {
       viewerEmail={email}
       timestampReveal={timestampReveal}
       retryingReply={retryingReplyID === String(item.message.id)}
+      resolvingProposal={resolvingProposalID === String(item.message.id)}
       onOpenSource={scrollToMessage}
       onOpenAttachment={openAttachment}
       onLongPress={openMessageActions}
       onToggleReaction={toggleReaction}
       onRetryReply={retryScoutReply}
+      onResolveProposal={resolveProposal}
       onOpenCatchUp={openCatchUp}
       onOpenLongMessage={openLongMessage}
       onOpenWorkArtifact={openWorkArtifact}
@@ -1121,6 +1193,8 @@ export function ThreadScreen({ route, navigation }: Props) {
     openThreadContext,
     retryScoutReply,
     retryingReplyID,
+    resolveProposal,
+    resolvingProposalID,
     scrollToMessage,
     sessionToken,
     timestampReveal,
@@ -1235,6 +1309,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         authorName={expandedMessage?.authorName ?? ''}
         scout={Boolean(expandedMessage?.scout)}
         activity={Boolean(expandedMessage?.activity)}
+        report={expandedMessage?.report}
         onClose={() => setExpandedMessage(null)}
       />
 
@@ -1248,17 +1323,22 @@ export function ThreadScreen({ route, navigation }: Props) {
         threadOwnerEmail={threadOwnerEmail}
         sessionToken={sessionToken ?? ''}
         participantAvatars={participantAvatars}
-        focusComposer={threadContextFocusComposer}
+        mentionCandidates={participants}
         sending={threadReplySending}
+        uploading={uploading}
         error={threadReplyError}
+        pendingFiles={threadReplyFiles}
+        stagingFiles={threadReplyStagingFiles}
         onClose={closeThreadContext}
         onSend={sendThreadReply}
+        onAddAttachment={() => openAttachmentSource('reply')}
+        onRemoveAttachment={(file) => setThreadReplyFiles((current) => current.filter((candidate) => candidate.ref !== file.ref))}
         onOpenAttachment={openAttachment}
         onLongPress={openMessageActions}
-        onEdit={beginEdit}
-        onDelete={confirmDelete}
         onToggleReaction={toggleReaction}
         onRetryReply={retryScoutReply}
+        onResolveProposal={resolveProposal}
+        resolvingProposalID={resolvingProposalID}
         onOpenLongMessage={openLongMessage}
         onOpenWorkArtifact={openWorkArtifact}
       />
@@ -1266,8 +1346,8 @@ export function ThreadScreen({ route, navigation }: Props) {
       <AttachmentSourceSheet
         visible={attachmentSourceOpen}
         onClose={() => setAttachmentSourceOpen(false)}
-        onPhotos={() => void pickPhotos()}
-        onFiles={() => void pickFiles()}
+        onPhotos={() => void pickPhotos(attachmentTarget)}
+        onFiles={() => void pickFiles(attachmentTarget)}
         onGifs={() => setGifPickerOpen(true)}
       />
 
@@ -1275,7 +1355,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         visible={gifPickerOpen}
         sessionToken={sessionToken ?? ''}
         onClose={() => setGifPickerOpen(false)}
-        onSelect={addGiphyGif}
+        onSelect={(gif) => addGiphyGif(gif, attachmentTarget)}
       />
 
       <MessageActionSheet
@@ -1527,21 +1607,7 @@ export function ThreadScreen({ route, navigation }: Props) {
               </Text>
             </View>
           ) : (
-            <>
-              {threadVisibility === 'public' && !/(^|[^\p{L}\p{N}])@scout(?![\p{L}\p{N}])/iu.test(draft) ? (
-                <Pressable
-                  accessibilityHint="Inserts a Scout mention without sending"
-                  accessibilityLabel="Ask Scout in this channel"
-                  accessibilityRole="button"
-                  onPress={insertScoutMention}
-                  style={({ pressed }) => [styles.scoutMentionShortcut, pressed && styles.scoutMentionShortcutPressed]}
-                >
-                  <SymbolView name="sparkles" tintColor={colors.emberText} size={13} />
-                  <Text style={styles.scoutMentionShortcutLabel}>@Scout</Text>
-                </Pressable>
-              ) : null}
             <MentionComposerInput
-              ref={composerInputRef}
               placeholder={
                 threadTitle.length > 22
                   ? `Message ${threadTitle.slice(0, 21).trimEnd()}…`
@@ -1553,7 +1619,6 @@ export function ThreadScreen({ route, navigation }: Props) {
               candidates={participants}
               editable
             />
-            </>
           )}
 
           <View style={styles.composerActions}>
@@ -1562,7 +1627,7 @@ export function ThreadScreen({ route, navigation }: Props) {
               accessibilityLabel="Add attachment"
               accessibilityState={{ disabled: dictationActive || uploading || pendingFiles.length >= maxMessageAttachments }}
               disabled={dictationActive || uploading || pendingFiles.length >= maxMessageAttachments}
-              onPress={() => setAttachmentSourceOpen(true)}
+              onPress={() => openAttachmentSource('message')}
               style={({ pressed }) => [styles.mic, pressed && styles.micPressed, (dictationActive || uploading || pendingFiles.length >= maxMessageAttachments) && styles.sendDim]}
             >
               <SymbolView name="plus" tintColor={colors.text2} size={20} />
@@ -1818,9 +1883,6 @@ const styles = StyleSheet.create({
     ...type.caption,
     color: colors.emberText,
   },
-  scoutMentionShortcut: { minHeight: hitMin, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: space[2], paddingHorizontal: 13, borderRadius: hitMin / 2, backgroundColor: colors.emberSoft },
-  scoutMentionShortcutPressed: { opacity: 0.86, transform: [{ scale: 0.96 }] },
-  scoutMentionShortcutLabel: { ...type.captionMedium, color: colors.emberText },
   composerActions: {
     flexDirection: 'row',
     alignItems: 'center',

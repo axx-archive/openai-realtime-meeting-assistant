@@ -650,6 +650,19 @@ export const api = {
     );
   },
 
+  resolveScoutProposal(
+    sessionToken: string,
+    threadId: string,
+    messageId: string,
+    action: 'accepted' | 'dismissed',
+    objective = '',
+  ): Promise<ScoutThreadDetailResponse> {
+    return request<ScoutThreadDetailResponse>(
+      `/assistant/chat-threads/${encodeURIComponent(threadId)}/proposal`,
+      { method: 'POST', body: { messageId, action, objective }, sessionToken },
+    );
+  },
+
   updateScoutThread(
     sessionToken: string,
     threadId: string,

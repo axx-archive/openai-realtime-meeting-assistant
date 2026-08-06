@@ -7,6 +7,8 @@ const messagingRoot = path.resolve(import.meta.dirname, '..', 'messaging');
 const screenSource = fs.readFileSync(path.resolve(import.meta.dirname, '..', 'screens', 'ThreadScreen.tsx'), 'utf8');
 const sheetSource = fs.readFileSync(path.join(messagingRoot, 'ThreadDetailSheet.tsx'), 'utf8');
 const activitySource = fs.readFileSync(path.join(messagingRoot, 'LongMessageSheet.tsx'), 'utf8');
+const bubbleSource = fs.readFileSync(path.join(messagingRoot, 'MessageBubble.tsx'), 'utf8');
+const apiSource = fs.readFileSync(path.resolve(import.meta.dirname, '..', 'api', 'client.ts'), 'utf8');
 
 test('mobile channel rows render only topology roots with one persistent reply affordance', () => {
   assert.match(screenSource, /buildThreadReplyTopology\(messages\)/);
@@ -24,10 +26,27 @@ test('thread replies use a native dismissible page sheet with their own composer
   assert.match(sheetSource, /name="xmark"/);
   assert.match(sheetSource, /contentInsetAdjustmentBehavior="automatic"/);
   assert.match(sheetSource, /showReplyContext=\{false\}/);
-  assert.match(sheetSource, /measureComposerHeight\(/);
-  assert.match(sheetSource, /setMeasuredComposerHeight\(compactComposerHeight\)/);
+  assert.match(sheetSource, /<MentionComposerInput/);
+  assert.match(sheetSource, /candidates=\{mentionCandidates\}/);
   assert.match(sheetSource, /accessibilityLabel="Reply in thread"/);
-  assert.match(sheetSource, /onSend\(text\)/);
+  assert.match(sheetSource, /onSend\(text, pendingFiles\)/);
+  assert.match(sheetSource, /accessibilityLabel="Add attachment to reply"/);
+  assert.match(sheetSource, /accessibilityLabel="Reply attachments"/);
+  assert.match(screenSource, /text\.trim\(\),\s*\[\.\.\.files\],\s*rootID/s);
+  assert.match(screenSource, /onGifs=\{\(\) => setGifPickerOpen\(true\)\}/);
+  assert.match(screenSource, /addGiphyGif\(gif, attachmentTarget\)/);
+  assert.match(sheetSource, /onLongPress=\{onLongPress\}/);
+  assert.doesNotMatch(sheetSource, /accessibilityLabel="Edit reply"/);
+  assert.doesNotMatch(sheetSource, /accessibilityLabel="Delete reply"/);
+  assert.doesNotMatch(sheetSource, /\.focus\(\)/);
+  assert.doesNotMatch(sheetSource, /autoFocus/);
+  assert.doesNotMatch(screenSource, /focusComposer/);
+});
+
+test('reply summaries resolve current participant avatars instead of initials-only placeholders', () => {
+  assert.match(screenSource, /participantByEmail\.get\(String\(reply\.authorEmail/);
+  assert.match(screenSource, /avatarDataURL: replyParticipant\.avatarDataURL/);
+  assert.match(screenSource, /Array\.from\(participantByEmail\.values\(\)\)/);
 });
 
 test('mobile work activity uses the same native page-sheet behavior', () => {
@@ -35,4 +54,22 @@ test('mobile work activity uses the same native page-sheet behavior', () => {
   assert.match(activitySource, /onRequestClose=\{onClose\}/);
   assert.match(activitySource, /name="xmark"/);
   assert.match(activitySource, /SCOUT · ACTIVITY/);
+  assert.match(activitySource, /STRIDE · DELIVERABLE/);
+  assert.match(activitySource, /variant=\{report \? 'report' : 'message'\}/);
+});
+
+test('work cards use the available narrow-screen width without a fixed minimum', () => {
+  assert.match(bubbleSource, /\(workThread \|\| workProposal\) && styles\.stackWork/);
+  assert.match(bubbleSource, /stackWork:\s*\{[^}]*width:\s*'100%'[^}]*maxWidth:\s*'100%'/s);
+  assert.match(bubbleSource, /workCard:\s*\{[^}]*width:\s*'100%'[^}]*minWidth:\s*0/s);
+  assert.doesNotMatch(bubbleSource, /workCard:\s*\{[^}]*minWidth:\s*2(?:48|60)/s);
+});
+
+test('reply-origin agent proposals can be confirmed or dismissed in the native thread sheet', () => {
+  assert.match(bubbleSource, /proposalPending[\s\S]*Run once[\s\S]*Not now/);
+  assert.match(bubbleSource, /onResolveProposal\?\.\(message, 'accepted'\)/);
+  assert.match(bubbleSource, /onResolveProposal\?\.\(message, 'dismissed'\)/);
+  assert.match(sheetSource, /onResolveProposal=\{onResolveProposal\}/);
+  assert.match(screenSource, /api\.resolveScoutProposal\(/);
+  assert.match(apiSource, /chat-threads\/\$\{encodeURIComponent\(threadId\)\}\/proposal/);
 });

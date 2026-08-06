@@ -69,6 +69,8 @@ func TestIndexAttachmentRenderWiring(t *testing.T) {
 		"/artifacts/blob?ref=${encodeURIComponent(ref)}&name=${encodeURIComponent(name || 'file')}",
 		// ref'd images render as inline thumbnails
 		"scout-chat-file scout-chat-file--image",
+		"openScoutChatImagePreview(blobHref, img.alt)",
+		"scout-chat-image__expand",
 		"img.className = 'scout-chat-file__thumb'",
 		"img.loading = 'lazy'",
 		// ref'd PDFs (and other ref'd non-images) open in a new tab
@@ -76,15 +78,16 @@ func TestIndexAttachmentRenderWiring(t *testing.T) {
 		// css for the thumbnail frame, beside the existing chip kit
 		".scout-chat-file--image {",
 		".scout-chat-file__thumb {",
-		"max-height: 180px;",
+		"--desktop-chat-image-preview-measure: 420px;",
+		"max-height: 300px;",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing attachment render hook %q", want)
 		}
 	}
 
-	// The ref branches live inside scoutChatFilesNode, and every ref'd
-	// surface opens with noopener (the blob route carries session authority).
+	// The ref branches live inside scoutChatFilesNode. Image previews stay in the
+	// app's accessible lightbox; non-images that open a tab keep noopener.
 	start := strings.Index(html, "function scoutChatFilesNode(files)")
 	end := strings.Index(html, "function scoutChatFileMeta(file)")
 	if start < 0 || end < 0 || end <= start {
@@ -93,7 +96,8 @@ func TestIndexAttachmentRenderWiring(t *testing.T) {
 	filesNode := html[start:end]
 	for _, want := range []string{
 		"mime.startsWith('image/')",
-		"frame.rel = 'noopener'",
+		"const frame = document.createElement('button')",
+		"frame.setAttribute('aria-label', `Expand ${file.name",
 		"chip.rel = 'noopener'",
 	} {
 		if !strings.Contains(filesNode, want) {

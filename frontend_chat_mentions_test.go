@@ -27,45 +27,65 @@ func TestIndexMentionAutocompleteWiring(t *testing.T) {
 		// the popover element + its listbox
 		`id="scoutMentionPopover"`,
 		`id="scoutMentionList"`,
+		`id="chatContextMentionPopover"`,
+		`id="chatContextMentionList"`,
+		`id="roomChatMentionPopover"`,
+		`id="roomChatMentionList"`,
 		`role="listbox"`,
 		// channel-gated token detection: private threads never open the popover
-		"function mentionTokenAtCaret()",
+		"function mentionTokenAtCaret(input)",
 		"chatThreadIsChannel(selectedScoutChatThread())",
 		// roster + scout as the candidate set
-		"function mentionRosterNames()",
-		"[...participantNames(), 'scout']",
+		"function mentionRosterCandidates()",
+		"desktopChatMentionCandidates",
 		// open/steer/select machinery
-		"function updateMentionAutocomplete()",
+		"function updateMentionAutocomplete(input = scoutChatInput)",
 		"function renderMentionPopover()",
-		"function applyMentionCompletion(name)",
+		"function applyMentionCompletion(candidate)",
 		"function mentionPopoverIsOpen()",
 		"scout-mention-popover__item",
 		// completion inserts "@Name " and re-seats the caret
-		"const inserted = '@' + name + ' '",
-		"scoutChatInput.setSelectionRange(end, end)",
+		"const inserted = '@' + handle + ' '",
+		"input.setSelectionRange(end, end)",
 		// composer wiring: input opens/filters, blur closes
-		"scoutChatInput?.addEventListener('input', updateMentionAutocomplete)",
+		"scoutChatInput?.addEventListener('input', () => updateMentionAutocomplete(scoutChatInput))",
+		"chatContextReplyInput?.addEventListener('input', () => updateMentionAutocomplete(chatContextReplyInput))",
+		"updateMentionAutocomplete(roomChatInput)",
 		"scoutChatInput?.addEventListener('blur', closeMentionPopover)",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing mention autocomplete hook %q", want)
 		}
 	}
+	for _, want := range []string{
+		"candidate?.handle",
+		"replace(/\\s+/g, '-')",
+		"@([A-Za-z0-9._-]*)$",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("multiword mention handle support missing %q", want)
+		}
+	}
 
-	// The steering keydown must run in capture phase (trailing `, true)`) so
-	// Enter completes the mention instead of sending the half-typed message.
-	keydownStart := strings.Index(html, "if (!mentionPopoverIsOpen()) return")
+	// The shared steering handler must be installed in capture phase on both
+	// composers so Enter completes a mention before either submit path runs.
+	keydownStart := strings.Index(html, "function handleMentionKeydown(event)")
 	if keydownStart < 0 {
-		t.Fatal("mention keydown guard missing")
+		t.Fatal("shared mention keydown handler missing")
 	}
 	keydownTail := html[keydownStart:]
-	end := strings.Index(keydownTail, "}, true)")
-	if end < 0 || end > 1600 {
-		t.Fatal("mention keydown handler must register in capture phase (`, true`) like the palette handler")
-	}
 	for _, want := range []string{"'ArrowDown'", "'ArrowUp'", "'Enter' || event.key === 'Tab'", "'Escape'"} {
-		if !strings.Contains(keydownTail[:end], want) {
+		if !strings.Contains(keydownTail[:1800], want) {
 			t.Fatalf("mention keydown handler missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		"scoutChatInput?.addEventListener('keydown', handleMentionKeydown, true)",
+		"chatContextReplyInput?.addEventListener('keydown', handleMentionKeydown, true)",
+		"roomChatInput?.addEventListener('keydown', handleMentionKeydown, true)",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("mention keydown capture wiring missing %q", want)
 		}
 	}
 }
@@ -94,31 +114,11 @@ func TestIndexMentionHighlightInMessageRenderer(t *testing.T) {
 	}
 }
 
-func TestIndexPublicChannelHasVisibleScoutMentionShortcut(t *testing.T) {
+func TestIndexChatComposersUseTypedMentionsWithoutPersistentScoutShortcuts(t *testing.T) {
 	html := readIndexForChatMentions(t)
-	for _, want := range []string{
-		`id="scoutChatScoutMention"`,
-		`>@Scout</button>`,
-		"scoutChatScoutMention?.addEventListener('click', insertChannelScoutMention)",
-		"function insertChannelScoutMention()",
-		"!chatThreadIsChannel(selectedScoutChatThread())",
-		"scoutChatScoutMention.hidden = !isChannel",
-		"scoutChatInput.focus()",
-		"scoutChatInput.setSelectionRange(caret, caret)",
-	} {
-		if !strings.Contains(html, want) {
-			t.Fatalf("index.html missing public-channel Scout shortcut hook %q", want)
+	for _, forbidden := range []string{`id="scoutChatScoutMention"`, "insertChannelScoutMention", `id="roomChatScoutMention"`, "insertRoomScoutMention"} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("channel composer retained obsolete Scout shortcut %q", forbidden)
 		}
-	}
-	start := strings.Index(html, "function insertChannelScoutMention()")
-	end := strings.Index(html[start:], "function resizeRoomChatInput()")
-	if start < 0 || end < 0 {
-		t.Fatal("cannot scope channel Scout mention insertion")
-	}
-	if strings.Contains(html[start:start+end], "sendScoutChatFromForm") || strings.Contains(html[start:start+end], ".submit(") {
-		t.Fatal("Scout mention shortcut must insert and focus without sending")
-	}
-	if strings.Contains(html, "message the thread — @scout to ask") {
-		t.Fatal("the visible @Scout shortcut must not be duplicated by instructional placeholder copy")
 	}
 }

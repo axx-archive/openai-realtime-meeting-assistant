@@ -21,6 +21,7 @@ test('Scout markdown becomes native semantic blocks without visible syntax', () 
   assert.equal(visible.includes('@'), false);
   assert.equal(blocks[1].inlines.some((inline) => inline.kind === 'strong' && inline.text === 'Ship Friday'), true);
   assert.equal(blocks[1].inlines.some((inline) => inline.kind === 'mention' && inline.scout && inline.text === 'scout'), true);
+  assert.equal(parseScoutMarkdown('@Insights-Analyst review this')[0].inlines.some((inline) => inline.kind === 'mention' && inline.text === 'Insights-Analyst'), true);
   assert.equal(blocks[1].inlines.some((inline) => inline.kind === 'link' && inline.url === 'https://example.com/plan'), true);
 });
 
@@ -38,4 +39,26 @@ test('long Scout responses truncate on a word and end with one ellipsis', () => 
   assert.equal(visible.endsWith('…'), true);
   assert.equal(visible.includes('…') && visible.indexOf('…') === visible.lastIndexOf('…'), true);
   assert.ok(visible.length <= 121);
+});
+
+test('reports preserve heading levels, nested lists, task state, and rules', () => {
+  const blocks = parseScoutMarkdown([
+    '# Market read',
+    '## Evidence',
+    '- **Strong signal** from the primary source',
+    '  - [x] Verified at source',
+    '  - [ ] Confirm market size',
+    '---',
+    '1. Review the implication',
+  ].join('\n'));
+
+  assert.deepEqual(blocks.map((block) => block.kind), ['heading', 'heading', 'bullet', 'bullet', 'bullet', 'rule', 'number']);
+  assert.equal(blocks[0].level, 1);
+  assert.equal(blocks[1].level, 2);
+  assert.equal(blocks[3].depth, 1);
+  assert.equal(blocks[3].checked, true);
+  assert.equal(blocks[3].marker, '✓');
+  assert.equal(blocks[4].checked, false);
+  assert.equal(blocks[4].marker, '○');
+  assert.equal(blocks[2].inlines.some((inline) => inline.kind === 'strong'), true);
 });

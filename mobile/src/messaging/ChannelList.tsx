@@ -8,7 +8,9 @@ import type { ScoutMessage, ScoutThread } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
 import type { RootStackParamList } from '../navigation/types';
+import { SymbolView } from 'expo-symbols';
 import { colors, radius, space, type } from '../theme/tokens';
+import { channelDisplayName, isBonfireChat, pinBonfireChatFirst } from './channelPresentation';
 
 /**
  * The Threads segment — design §14.
@@ -19,11 +21,6 @@ import { colors, radius, space, type } from '../theme/tokens';
  */
 
 type ChannelNav = NativeStackNavigationProp<RootStackParamList>;
-
-function channelName(thread: ScoutThread): string {
-  const title = String(thread.title || thread.preview || 'Thread').trim();
-  return thread.visibility === 'public' ? `#${title.replace(/^#/, '')}` : title;
-}
 
 function preview(thread: ScoutThread): string {
   const last = thread.lastMessage?.text || thread.preview || '';
@@ -179,17 +176,18 @@ export function ChannelList() {
   return (
     <View>
       {renameError ? <Text accessibilityRole="alert" style={styles.renameError}>{renameError}</Text> : null}
-      {threads.map((thread) => {
+      {pinBonfireChatFirst(threads).map((thread) => {
         const body = preview(thread);
 		const unread = Math.max(0, Number(thread.unreadCount ?? 0));
         const threadID = String(thread.id);
         const editing = editingThreadID === threadID;
         const working = activeWork(thread);
+        const bonfire = isBonfireChat(thread);
         return (
           <Pressable
             key={threadID}
             accessibilityRole="button"
-            accessibilityLabel={channelName(thread)}
+            accessibilityLabel={`${channelDisplayName(thread)}${bonfire ? ', pinned Stride channel' : ''}`}
             accessibilityHint={thread.visibility === 'public' ? undefined : 'Touch and hold to rename this thread'}
             onLongPress={thread.visibility === 'public' ? undefined : () => beginRename(thread)}
             onPress={() => {
@@ -203,7 +201,7 @@ export function ChannelList() {
               }
               navigation.navigate('Thread', {
                 threadId: threadID,
-                title: channelName(thread),
+                title: channelDisplayName(thread),
               })
             }}
             style={({ pressed }) => [styles.row, pressed && styles.pressed]}
@@ -226,9 +224,17 @@ export function ChannelList() {
                   value={titleDraft}
                 />
               ) : (
-                <Text style={styles.name} numberOfLines={1}>
-                  {channelName(thread)}
-                </Text>
+                <View style={styles.nameRow}>
+                  <Text style={[styles.name, bonfire && styles.nameBonfire]} numberOfLines={1}>
+                    {channelDisplayName(thread)}
+                  </Text>
+                  {bonfire ? (
+                    <View accessibilityLabel="Stride channel, pinned" style={styles.bonfireTag}>
+                      <SymbolView name="pin.fill" tintColor={colors.emberText} size={9} />
+                      <Text style={styles.bonfireTagText}>STRIDE</Text>
+                    </View>
+                  ) : null}
+                </View>
               )}
               {body ? (
                 <Text style={styles.preview} numberOfLines={1}>
@@ -263,10 +269,15 @@ const styles = StyleSheet.create({
   },
   pressed: { backgroundColor: colors.accentSoft },
   rowText: { flex: 1, gap: 2 },
+  nameRow: { minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 7 },
   name: {
     ...type.bodyMedium,
+    flexShrink: 1,
     color: colors.text1,
   },
+  nameBonfire: { color: colors.emberText },
+  bonfireTag: { minHeight: 20, flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, borderRadius: radius.full, backgroundColor: colors.emberSoft },
+  bonfireTagText: { ...type.label, color: colors.emberText, fontSize: 9, lineHeight: 11, letterSpacing: 0.5 },
   nameInput: {
     ...type.bodyMedium,
     minHeight: 34,

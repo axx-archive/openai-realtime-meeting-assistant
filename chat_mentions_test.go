@@ -54,6 +54,7 @@ func TestScoutChatMentionParserAdversarialBoundaries(t *testing.T) {
 	}{
 		{"direct lowercase", "@scout catch me up", true},
 		{"direct mixed case", "hey @ScOuT, catch me up", true},
+		{"sentence terminal period", "ask @Scout.", true},
 		{"email domain", "send it to aj@scout.com", false},
 		{"email local punctuation", "send it to ops+alerts@scout.io", false},
 		{"longer underscore handle", "ask @scout_bot", false},
@@ -295,7 +296,7 @@ func TestTableScoutMentionAddsCasualStyleToModelInstructions(t *testing.T) {
 		t.Fatalf("append Table mention: %v", err)
 	}
 	if !strings.Contains(captured.Instructions, tableScoutChatResponseStyle) {
-		t.Fatalf("instructions=%q, want the #team-only casual style", captured.Instructions)
+		t.Fatalf("instructions=%q, want the Bonfire Chat-only casual style", captured.Instructions)
 	}
 }
 
@@ -339,6 +340,29 @@ func TestScoutChatPrivateThreadMentionsDoNotNotify(t *testing.T) {
 	for _, email := range []string{"tyler@shareability.com", "aj@shareability.com"} {
 		if unread := kanbanApp.unreadNotificationsFor(email, notificationListLimit); len(unread) != 0 {
 			t.Fatalf("%s unread=%#v, want no notifications from a private thread", email, unread)
+		}
+	}
+}
+
+func TestChatAgentExplicitWorkActionDistinguishesWorkFromSocialMentions(t *testing.T) {
+	handles := []string{"colton"}
+	for _, test := range []struct {
+		text string
+		want string
+	}{
+		{text: "@Colton research the Disney and TikTok market", want: "research"},
+		{text: "@Colton can you dig into that article?", want: "dig into"},
+		{text: "Could you look into the creator claims, @Colton?", want: "look into"},
+		{text: "@Colton please search the web for independent sources", want: "search the web"},
+		{text: "@Colton can you review this article?", want: "review"},
+		{text: "@Colton can you run a quick research report on this market?", want: "research"},
+		{text: "@Colton please analyze the market implications", want: "analyze"},
+		{text: "@Colton loved your note on that article", want: ""},
+		{text: "@Colton the research looks good", want: ""},
+		{text: "@Colton should we discuss the research?", want: ""},
+	} {
+		if got := chatAgentExplicitWorkAction(test.text, handles); got != test.want {
+			t.Errorf("chatAgentExplicitWorkAction(%q)=%q, want %q", test.text, got, test.want)
 		}
 	}
 }

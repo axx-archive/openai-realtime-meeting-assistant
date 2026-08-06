@@ -35,7 +35,8 @@ func TestDesktopChatQualityIsDesktopIsolatedAndResponsive(t *testing.T) {
 		"@media (min-width: 861px) and (max-width: 1279px)",
 		"--desktop-chat-measure: 760px;",
 		"padding: 30px var(--desktop-chat-gutter);",
-		"width: min(var(--desktop-chat-measure), calc(100% - (var(--desktop-chat-gutter) * 2)));",
+		"width: calc(100% - (var(--desktop-chat-gutter) * 2));",
+		"--desktop-chat-image-preview-measure: 420px;",
 		"@media (prefers-reduced-motion: reduce) and (min-width: 861px)",
 	} {
 		if !strings.Contains(css, want) {
@@ -56,10 +57,12 @@ func TestDesktopChatHeaderAndMessageHierarchyWiring(t *testing.T) {
 		`id="chatConvoContext" class="desktop-chat-context"`,
 		`id="chatConvoScope" class="desktop-chat-context__scope"`,
 		`id="chatConvoPolicy" class="desktop-chat-context__policy"`,
-		"const scope = !isChannel ? 'private' : isTeam ? 'pinned · #team' : 'project channel'",
+		"const scope = !isChannel ? 'private' : isTeam ? 'pinned · Stride' : 'project channel'",
 		"function chatThreadIsTeam(thread)",
 		"return 'Bonfire Chat'",
 		"chat-thread-item__title--bonfire-chat",
+		"chat-thread-item__stride-tag",
+		"Number(chatThreadIsTeam(right)) - Number(chatThreadIsTeam(left))",
 		"const policy = !isChannel ? `only you + ${privateTarget}` : isTeam ? 'whole office · shared memory' : 'members · project memory'",
 		"if (appShell?.dataset.tool === 'chat') syncToolTopbar()",
 		"? `Channel chat ${chatThreadDisplayTitle(thread)}`",
@@ -170,7 +173,7 @@ func TestDesktopChatInteractionTargetsAndComposerStates(t *testing.T) {
 	for _, want := range []string{
 		"optimisticMessage.dataset.delivery = 'sending'",
 		"optimisticState.textContent = 'not sent'",
-		"function updateDesktopChatReaction(messageId, emoji, set)",
+		"function updateDesktopChatReaction(messageId, emoji, set, options = {})",
 		"method: set ? 'PUT' : 'DELETE'",
 		"openDesktopMessageContext(message, replyButton)",
 		"submitDesktopThreadReply",
@@ -205,9 +208,13 @@ func TestDesktopThreadRepliesExposeOwnedEditAndDeleteActions(t *testing.T) {
 		"function desktopChatMessageIsOwn(thread, message)",
 		"function beginDesktopContextMessageEdit(thread, message, card)",
 		"function deleteDesktopContextMessage(thread, message, control)",
-		"if (!options.root && desktopChatMessageIsOwn(thread, message))",
-		"edit.setAttribute('aria-label', 'Edit reply')",
-		"remove.setAttribute('aria-label', 'Delete reply')",
+		"function desktopChatMoreMenuControl({ label = 'More actions', onEdit, onDelete } = {})",
+		"label: 'More reply actions'",
+		"onEdit: () => beginDesktopContextMessageEdit(thread, message, card)",
+		"onDelete: remove => deleteDesktopContextMessage(thread, message, remove)",
+		"menu.setAttribute('role', 'menu')",
+		"pressTimer = window.setTimeout(() => {",
+		"if (moreControl) moreControl.open()",
 		"method: 'PATCH'",
 		"method: 'DELETE'",
 		"body: JSON.stringify({ text: input.value.trim() })",
@@ -233,6 +240,154 @@ func TestDesktopThreadRepliesExposeOwnedEditAndDeleteActions(t *testing.T) {
 	}
 }
 
+func TestDesktopThreadReplyRailMatchesFeedMediaAndComposerCapabilities(t *testing.T) {
+	html := desktopChatQualityHTML(t)
+	css := desktopChatQualitySection(t, html)
+	card := functionBodyAfterSignature(html, "function desktopContextMessageCard(thread, message, options = {})")
+	for _, want := range []string{
+		`id="chatContextReplyFileInput" type="file" multiple hidden`,
+		`id="chatContextReplyAttach"`,
+		`id="chatContextReplyPending"`,
+		"function addPendingDesktopReplyFiles()",
+		"pendingDesktopReplyFiles.push(await scoutChatFilePayload(file))",
+		"JSON.stringify({ text, files, replyToMessageId: state.rootMessageId })",
+		"up to 6 files per reply",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("desktop reply composer parity missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		"scoutChatFilesNode(files)",
+		"appendChatRichTextNodes(body, rawText)",
+		"appendChatMentionTextNodes(body, rawText)",
+		"mountDesktopChatLinkPreview(content, rawText)",
+		"desktopContextReactionRowNode(message)",
+		"sourceRow.setAttribute('aria-label', 'Reply sources')",
+	} {
+		if !strings.Contains(card, want) {
+			t.Errorf("desktop reply rendering parity missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		".chat-context-card--message .scout-chat-files",
+		".chat-context-card--message .desktop-chat-link-preview",
+		".chat-context-card__reaction",
+		".chat-context-card__content.desktop-chat-stack--link-only .chat-context-card__body",
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("desktop reply media styling missing %q", want)
+		}
+	}
+}
+
+func TestDesktopMessageOwnershipActionsUseContextualMoreMenu(t *testing.T) {
+	html := desktopChatQualityHTML(t)
+	css := desktopChatQualitySection(t, html)
+	for _, want := range []string{
+		"function desktopChatMoreMenuControl({ label = 'More actions', onEdit, onDelete } = {})",
+		"trigger.setAttribute('aria-haspopup', 'menu')",
+		"menu.setAttribute('role', 'menu')",
+		"Edit message",
+		"Delete message…",
+		"label: 'More message actions'",
+		"label: 'More reply actions'",
+		"pressTimer = window.setTimeout(() => {",
+		"if (moreControl) moreControl.open()",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("contextual ownership action model missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		".desktop-chat-more__menu",
+		".chat-context-card--message:hover .chat-context-card__message-actions",
+		".chat-context-card--message.show-actions .chat-context-card__message-actions",
+		"#chatTool .scout-chat-msg > .scout-chat-msg__delete",
+		"display: none;",
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("contextual ownership action styling missing %q", want)
+		}
+	}
+}
+
+func TestDesktopReplyMutationsDoNotRebuildMainFeed(t *testing.T) {
+	html := desktopChatQualityHTML(t)
+	sync := functionBodyAfterSignature(html, "function syncDesktopReplySurfaces(thread, rootMessageId, options = {})")
+	if sync == "" {
+		t.Fatal("syncDesktopReplySurfaces not found")
+	}
+	for _, want := range []string{
+		"rootNode = scoutChatThread?.querySelector",
+		"current.replaceWith(next)",
+		"renderDesktopMessageContext(thread, root",
+		"scrollRailToBottom",
+	} {
+		if !strings.Contains(sync, want) {
+			t.Errorf("targeted reply surface sync missing %q", want)
+		}
+	}
+	if strings.Contains(sync, "renderActiveScoutThread()") {
+		t.Fatal("targeted reply sync must never rebuild the main feed")
+	}
+
+	for signature, wants := range map[string][]string{
+		"function submitDesktopThreadReply(event)": {
+			"syncDesktopReplySurfaces(payload.thread, state.rootMessageId",
+		},
+		"function beginDesktopContextMessageEdit(thread, message, card)": {
+			"syncDesktopReplySurfaces(payload.thread, root?.id",
+		},
+		"function deleteDesktopContextMessage(thread, message, control)": {
+			"syncDesktopReplySurfaces(payload.thread, root?.id",
+		},
+	} {
+		body := functionBody(html, signature)
+		for _, want := range wants {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s missing isolated sync %q", signature, want)
+			}
+		}
+		if strings.Contains(body, "renderActiveScoutThread()") || strings.Contains(body, "openDesktopMessageContext(") {
+			t.Errorf("%s still rebuilds or reopens the center/thread surfaces", signature)
+		}
+	}
+
+	reaction := functionBodyAfterSignature(html, "function updateDesktopChatReaction(messageId, emoji, set, options = {})")
+	for _, want := range []string{
+		"options.contextOnly || updatedMessage?.replyTo?.messageId",
+		"syncDesktopReplySurfaces(payload.thread, root?.id",
+	} {
+		if !strings.Contains(reaction, want) {
+			t.Errorf("reply reaction isolation missing %q", want)
+		}
+	}
+	for signature, wants := range map[string][]string{
+		"function handleChatThreadEvent(payload)": {
+			"desktopChatLayoutQuery.matches && message?.replyTo?.messageId",
+			"syncDesktopReplySurfaces(existing, root?.id || message.replyTo.messageId)",
+		},
+		"function removeScoutChatThreadMessage(threadId, messageId)": {
+			"desktopChatLayoutQuery.matches && replyRoot?.id",
+			"syncDesktopReplySurfaces(thread, replyRoot.id)",
+		},
+	} {
+		body := functionBody(html, signature)
+		for _, want := range wants {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s missing live isolated reply update %q", signature, want)
+			}
+		}
+	}
+	renderRail := functionBodyAfterSignature(html, "function renderDesktopMessageContext(thread, root, options = {})")
+	for _, want := range []string{"const priorScrollTop", "const wasNearBottom", "chatContextBody.scrollTop = priorScrollTop"} {
+		if !strings.Contains(renderRail, want) {
+			t.Errorf("reply rail scroll stability missing %q", want)
+		}
+	}
+}
+
 func TestDesktopThreadRepliesStayDiscoverableAndAvatarLed(t *testing.T) {
 	html := desktopChatQualityHTML(t)
 	css := desktopChatQualitySection(t, html)
@@ -249,7 +404,7 @@ func TestDesktopThreadRepliesStayDiscoverableAndAvatarLed(t *testing.T) {
 	for _, want := range []string{
 		"function desktopChatReplyTopology(messages)",
 		"const desktopChatReplyTopologyCache = new WeakMap()",
-		"function renderDesktopMessageContext(thread, root)",
+		"function renderDesktopMessageContext(thread, root, options = {})",
 		"function desktopChatAvatarNode(message, className = 'chat-context-card__avatar')",
 		"fetch('/assistant/chat-participants', { cache: 'no-store' })",
 		"desktopChatParticipantDirectoryViewer !== viewer",

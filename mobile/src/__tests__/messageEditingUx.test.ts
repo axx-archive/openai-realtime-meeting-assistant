@@ -30,33 +30,30 @@ test('focused drafting uses the native text layer and editing gets a full-height
   assert.match(thread, /\{editingMessage \? \(/);
 });
 
-test('public channels expose an explicit Scout mention shortcut that inserts and focuses without sending', () => {
+test('public channels use typed mention autocomplete without a persistent Scout shortcut', () => {
   const composer = source('src', 'messaging', 'MentionComposerInput.tsx');
   const thread = source('src', 'screens', 'ThreadScreen.tsx');
 
-  assert.match(composer, /export type MentionComposerInputHandle/);
-  assert.match(composer, /focus: \(\) => textInputRef\.current\?\.focus\(\)/);
-  assert.match(thread, /threadVisibility === 'public'/);
-  assert.match(thread, /accessibilityLabel="Ask Scout in this channel"/);
-  assert.match(thread, /changeDraft\(next\)/);
-  assert.match(thread, /composerInputRef\.current\?\.focus\(\)/);
-  const start = thread.indexOf('const insertScoutMention = useCallback');
-  const end = thread.indexOf('useEffect(() => () => stopTyping()', start);
-  assert.ok(start >= 0 && end > start);
-  assert.doesNotMatch(thread.slice(start, end), /\bsend\(/);
+  assert.match(composer, /activeMentionQuery\(value\)/);
+  assert.match(composer, /candidates\.filter/);
+  assert.match(thread, /<MentionComposerInput/);
+  assert.match(thread, /candidates=\{participants\}/);
+  assert.doesNotMatch(thread, /accessibilityLabel="Ask Scout in this channel"/);
+  assert.doesNotMatch(thread, /insertScoutMention/);
+  assert.doesNotMatch(thread, /scoutMentionShortcut/);
 });
 
-test('threaded replies expose owned edit and delete actions without relying on a hidden long press', () => {
+test('threaded replies keep edit and delete in the same long-press action sheet as the feed', () => {
   const detail = source('src', 'messaging', 'ThreadDetailSheet.tsx');
   const thread = source('src', 'screens', 'ThreadScreen.tsx');
+  const actions = source('src', 'messaging', 'MessageActionSheet.tsx');
 
-  assert.match(detail, /index > 0 && own/);
-  assert.match(detail, /accessibilityLabel="Edit reply"/);
-  assert.match(detail, /onPress=\{\(\) => onEdit\(message\)\}/);
-  assert.match(detail, /accessibilityLabel="Delete reply"/);
-  assert.match(detail, /onPress=\{\(\) => onDelete\(message\)\}/);
-  assert.match(thread, /onEdit=\{beginEdit\}/);
-  assert.match(thread, /onDelete=\{confirmDelete\}/);
+  assert.match(detail, /onLongPress=\{onLongPress\}/);
+  assert.doesNotMatch(detail, /accessibilityLabel="Edit reply"/);
+  assert.doesNotMatch(detail, /accessibilityLabel="Delete reply"/);
+  assert.match(thread, /onLongPress=\{openMessageActions\}/);
+  assert.match(actions, />Edit message</);
+  assert.match(actions, />Delete message</);
 });
 
 test('the thread owns one full-message sheet instead of mounting one per recycled bubble', () => {

@@ -129,10 +129,23 @@ export type ScoutMessage = {
   reactions?: ScoutMessageReaction[];
   replyTo?: ScoutMessageReplyRef;
   sources?: ScoutAnswerSource[];
-  proposal?: Record<string, unknown>;
+  proposal?: ScoutProposal;
   choices?: Array<Record<string, unknown>>;
   reply?: ScoutReplyLifecycle;
   thread?: ScoutWorkThreadRef;
+  [key: string]: unknown;
+};
+
+export type ScoutProposal = {
+  kind?: string;
+  mode?: string;
+  agentId?: string;
+  agentName?: string;
+  objective?: string;
+  summary?: string;
+  lane?: string;
+  weightLabel?: string;
+  status?: string;
   [key: string]: unknown;
 };
 
@@ -204,9 +217,11 @@ export type GiphySearchResult = {
 
 export type ChatMentionCandidate = {
   name: string;
+  handle?: string;
   email?: string;
+  agentId?: string;
   avatarDataURL?: string;
-  kind: 'person' | 'scout';
+  kind: 'person' | 'scout' | 'agent';
 };
 
 export type BoardCard = {

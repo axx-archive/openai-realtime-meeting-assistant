@@ -39,7 +39,7 @@ func TestDesignP0MarkdownRendersNotLeaks(t *testing.T) {
 	if body == "" {
 		t.Fatal("appendArtifactBodyNodes not found")
 	}
-	for _, want := range []string{`#{1,6}`, "artifact-read__subhead"} {
+	for _, want := range []string{`#{1,6}`, "artifact-read__subhead", "listPattern", "artifact-read__task-marker", "artifact-read__list-item--nested"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("appendArtifactBodyNodes missing %q — a raw ## heading would leak its hashes", want)
 		}
@@ -61,7 +61,7 @@ func TestDesignP0MarkdownRendersNotLeaks(t *testing.T) {
 	}
 
 	// The stylesheet carries the two new inline classes.
-	for _, want := range []string{".artifact-read__code {", ".artifact-read__subhead {"} {
+	for _, want := range []string{".artifact-read__code {", ".artifact-read__subhead {", ".artifact-report__body strong", ".artifact-read__task-marker {"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("stylesheet missing %q", want)
 		}

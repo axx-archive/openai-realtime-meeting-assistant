@@ -17,6 +17,13 @@ test('a plain mention is split out of the surrounding text', () => {
   ]);
 });
 
+test('a canonical multiword agent handle renders as one mention', () => {
+  assert.deepEqual(parseMentions('@Insights-Analyst review this'), [
+    { kind: 'mention', text: '@Insights-Analyst', name: 'Insights-Analyst', scout: false },
+    { kind: 'text', text: ' review this' },
+  ]);
+});
+
 test('an email address is never a mention', () => {
   // The Go side requires a word boundary before "@" precisely so that
   // aj@shareability.com does not page a user named "shareability".
@@ -30,6 +37,13 @@ test('trailing punctuation ends a mention but a longer word does not', () => {
   const punctuated = parseMentions('@tyler, ping');
   assert.equal(punctuated[0].kind, 'mention');
   assert.equal((punctuated[0] as { name: string }).name, 'tyler');
+
+  const sentence = parseMentions('@scout.');
+  assert.deepEqual(sentence, [
+    { kind: 'mention', text: '@scout', name: 'scout', scout: true },
+    { kind: 'text', text: '.' },
+  ]);
+  assert.equal((parseMentions('@scout.dev')[0] as { name: string }).name, 'scout.dev');
 
   const longer = parseMentions('@tylerish');
   assert.equal(longer[0].kind, 'mention');

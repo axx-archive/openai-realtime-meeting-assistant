@@ -9,22 +9,17 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { SymbolView } from 'expo-symbols';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import type { ScoutFileAttachment, ScoutMessage } from '../api/types';
+import type { ChatMentionCandidate, ScoutFileAttachment, ScoutMessage } from '../api/types';
 import { Glass } from '../theme/glass';
 import { colors, hitMin, radius, space, type } from '../theme/tokens';
 import { isOwnMessageForViewer } from './messagePresentation';
 import { MessageBubble } from './MessageBubble';
-import {
-  compactComposerHeight,
-  composerHeight as measureComposerHeight,
-  expandedComposerMaxHeight,
-} from './composerMeasurement';
+import { MentionComposerInput } from './MentionComposerInput';
 
 type Props = {
   visible: boolean;
@@ -36,17 +31,22 @@ type Props = {
   threadOwnerEmail: string;
   sessionToken: string;
   participantAvatars: ReadonlyMap<string, string>;
-  focusComposer: boolean;
+  mentionCandidates: ChatMentionCandidate[];
   sending: boolean;
+  uploading: boolean;
   error?: string;
+  pendingFiles: readonly ScoutFileAttachment[];
+  stagingFiles: ReadonlyArray<{ id: string; name: string; mime: string }>;
   onClose: () => void;
-  onSend: (text: string) => Promise<boolean>;
+  onSend: (text: string, files: readonly ScoutFileAttachment[]) => Promise<boolean>;
+  onAddAttachment: () => void;
+  onRemoveAttachment: (file: ScoutFileAttachment) => void;
   onOpenAttachment: (file: ScoutFileAttachment) => void;
   onLongPress: (message: ScoutMessage, own: boolean) => void;
-  onEdit: (message: ScoutMessage) => void;
-  onDelete: (message: ScoutMessage) => void;
   onToggleReaction: (message: ScoutMessage, emoji: string, active: boolean) => void;
   onRetryReply: (message: ScoutMessage) => void;
+  onResolveProposal: (message: ScoutMessage, action: 'accepted' | 'dismissed') => void;
+  resolvingProposalID?: string | null;
   onOpenLongMessage: (text: string, authorName: string, scout: boolean) => void;
   onOpenWorkArtifact: (message: ScoutMessage) => void;
 };
@@ -61,37 +61,31 @@ export function ThreadDetailSheet({
   threadOwnerEmail,
   sessionToken,
   participantAvatars,
-  focusComposer,
+  mentionCandidates,
   sending,
+  uploading,
   error,
+  pendingFiles,
+  stagingFiles,
   onClose,
   onSend,
+  onAddAttachment,
+  onRemoveAttachment,
   onOpenAttachment,
   onLongPress,
-  onEdit,
-  onDelete,
   onToggleReaction,
   onRetryReply,
+  onResolveProposal,
+  resolvingProposalID,
   onOpenLongMessage,
   onOpenWorkArtifact,
 }: Props) {
   const [draft, setDraft] = useState('');
-  const inputRef = useRef<TextInput>(null);
   const scrollRef = useRef<ScrollView>(null);
-  const inputWidthRef = useRef(0);
-  const nativeContentHeightRef = useRef(compactComposerHeight);
-  const [measuredComposerHeight, setMeasuredComposerHeight] = useState(compactComposerHeight);
   const timestampReveal = useRef(new Animated.Value(0)).current;
   const previousReplyCountRef = useRef(0);
 
   const conversation = useMemo(() => root ? [root, ...replies] : [], [replies, root]);
-
-  useEffect(() => {
-    if (!draft) {
-      nativeContentHeightRef.current = compactComposerHeight;
-      setMeasuredComposerHeight(compactComposerHeight);
-    }
-  }, [draft]);
 
   useEffect(() => {
     if (!visible) {
@@ -100,8 +94,7 @@ export function ThreadDetailSheet({
       return;
     }
     previousReplyCountRef.current = replies.length;
-    if (focusComposer) requestAnimationFrame(() => inputRef.current?.focus());
-  }, [focusComposer, root?.id, visible]);
+  }, [root?.id, visible]);
 
   useEffect(() => {
     if (!visible) return;
@@ -113,10 +106,9 @@ export function ThreadDetailSheet({
 
   const submit = async () => {
     const text = draft.trim();
-    if (!text || sending) return;
-    if (await onSend(text)) {
+    if ((!text && pendingFiles.length === 0) || sending || uploading) return;
+    if (await onSend(text, pendingFiles)) {
       setDraft('');
-      requestAnimationFrame(() => inputRef.current?.focus());
     }
   };
 
@@ -193,29 +185,11 @@ export function ThreadDetailSheet({
                       onLongPress={onLongPress}
                       onToggleReaction={onToggleReaction}
                       onRetryReply={onRetryReply}
+                      onResolveProposal={onResolveProposal}
+                      resolvingProposal={resolvingProposalID === String(message.id)}
                       onOpenLongMessage={onOpenLongMessage}
                       onOpenWorkArtifact={onOpenWorkArtifact}
                     />
-                    {index > 0 && own ? (
-                      <View accessibilityLabel="Reply actions" style={styles.replyActions}>
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel="Edit reply"
-                          onPress={() => onEdit(message)}
-                          style={({ pressed }) => [styles.replyAction, pressed && styles.pressed]}
-                        >
-                          <SymbolView name="pencil" size={14} tintColor={colors.text2} />
-                        </Pressable>
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel="Delete reply"
-                          onPress={() => onDelete(message)}
-                          style={({ pressed }) => [styles.replyAction, styles.replyActionDanger, pressed && styles.pressed]}
-                        >
-                          <SymbolView name="trash" size={14} tintColor={colors.danger} />
-                        </Pressable>
-                      </View>
-                    ) : null}
                   </View>
                 </React.Fragment>
               );
@@ -225,63 +199,66 @@ export function ThreadDetailSheet({
 
           {error ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
           <Glass radius={radius.xl} style={styles.composer}>
-            <TextInput
-              ref={inputRef}
-              accessibilityLabel="Reply in thread"
-              editable={!sending}
-              multiline
-              onChangeText={(nextValue) => {
-                if (!nextValue) nativeContentHeightRef.current = compactComposerHeight;
-                setMeasuredComposerHeight(measureComposerHeight(
-                  nextValue,
-                  nativeContentHeightRef.current,
-                  expandedComposerMaxHeight,
-                  inputWidthRef.current,
-                ));
-                setDraft(nextValue);
-              }}
-              onContentSizeChange={(event) => {
-                nativeContentHeightRef.current = event.nativeEvent.contentSize.height;
-                setMeasuredComposerHeight(measureComposerHeight(
-                  draft,
-                  nativeContentHeightRef.current,
-                  expandedComposerMaxHeight,
-                  inputWidthRef.current,
-                ));
-              }}
-              onLayout={(event) => {
-                inputWidthRef.current = event.nativeEvent.layout.width;
-                setMeasuredComposerHeight(measureComposerHeight(
-                  draft,
-                  nativeContentHeightRef.current,
-                  expandedComposerMaxHeight,
-                  inputWidthRef.current,
-                ));
-              }}
-              onSubmitEditing={() => { void submit(); }}
-              placeholder="Reply in thread…"
-              placeholderTextColor={colors.text3}
-              returnKeyType="default"
-              scrollEnabled={measuredComposerHeight >= expandedComposerMaxHeight}
-              selectionColor={colors.info}
-              style={[styles.input, { height: measuredComposerHeight }]}
-              textAlignVertical="center"
-              value={draft}
-            />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Send threaded reply"
-              accessibilityState={{ disabled: sending || !draft.trim() }}
-              disabled={sending || !draft.trim()}
-              onPress={() => { void submit(); }}
-              style={({ pressed }) => [styles.send, (pressed || sending || !draft.trim()) && styles.sendDim]}
-            >
-              {sending ? (
-                <ActivityIndicator color={colors.onAccent} size="small" />
-              ) : (
-                <SymbolView name="arrow.up" size={18} tintColor={colors.onAccent} />
-              )}
-            </Pressable>
+            {pendingFiles.length > 0 || stagingFiles.length > 0 ? (
+              <View accessibilityLabel="Reply attachments" style={styles.pendingFiles}>
+                {stagingFiles.map((file) => (
+                  <View key={file.id} style={[styles.pendingFile, styles.stagingFile]}>
+                    <Text numberOfLines={1} style={styles.pendingFileText}>{file.name}</Text>
+                    <ActivityIndicator color={colors.text2} size="small" />
+                  </View>
+                ))}
+                {pendingFiles.map((file) => (
+                  <View key={`${file.ref}-${file.name}`} style={styles.pendingFile}>
+                    <SymbolView name={file.mime.startsWith('image/') ? 'photo' : 'doc.richtext'} tintColor={colors.text2} size={14} />
+                    <Text numberOfLines={1} style={styles.pendingFileText}>{file.name}</Text>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${file.name}`}
+                      onPress={() => onRemoveAttachment(file)}
+                      style={({ pressed }) => [styles.pendingRemove, pressed && styles.pressed]}
+                    >
+                      <SymbolView name="xmark" tintColor={colors.text3} size={10} />
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+            <View style={styles.composerRow}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Add attachment to reply"
+                accessibilityState={{ disabled: sending || uploading }}
+                disabled={sending || uploading}
+                onPress={onAddAttachment}
+                style={({ pressed }) => [styles.attachment, (pressed || sending || uploading) && styles.sendDim]}
+              >
+                <SymbolView name="plus" size={20} tintColor={colors.text2} />
+              </Pressable>
+              <View style={styles.input}>
+                <MentionComposerInput
+                  accessibilityLabel="Reply in thread"
+                  candidates={mentionCandidates}
+                  editable={!sending && !uploading}
+                  onChangeText={setDraft}
+                  placeholder="Reply in thread…"
+                  value={draft}
+                />
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Send threaded reply"
+                accessibilityState={{ disabled: sending || uploading || (!draft.trim() && pendingFiles.length === 0) }}
+                disabled={sending || uploading || (!draft.trim() && pendingFiles.length === 0)}
+                onPress={() => { void submit(); }}
+                style={({ pressed }) => [styles.send, (pressed || sending || uploading || (!draft.trim() && pendingFiles.length === 0)) && styles.sendDim]}
+              >
+                {sending ? (
+                  <ActivityIndicator color={colors.onAccent} size="small" />
+                ) : (
+                  <SymbolView name="arrow.up" size={18} tintColor={colors.onAccent} />
+                )}
+              </Pressable>
+            </View>
           </Glass>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -302,16 +279,20 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.72, transform: [{ scale: 0.96 }] },
   conversation: { paddingTop: space[3], paddingBottom: space[8] },
   messageRow: { position: 'relative' },
-  replyActions: { alignSelf: 'flex-end', flexDirection: 'row', gap: 2, marginTop: -2, marginRight: space[4], marginBottom: space[2], padding: 2, borderRadius: radius.lg, backgroundColor: colors.surface2 },
-  replyAction: { width: hitMin, height: hitMin, alignItems: 'center', justifyContent: 'center', borderRadius: radius.md },
-  replyActionDanger: { backgroundColor: colors.dangerSoft },
   replyDivider: { flexDirection: 'row', alignItems: 'center', gap: space[3], marginHorizontal: space[4], marginTop: space[5], marginBottom: space[2] },
   rule: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.line1 },
   replyDividerText: { ...type.label, color: colors.text3 },
   emptyBreath: { height: space[10] },
   error: { ...type.caption, color: colors.danger, paddingHorizontal: space[5], paddingBottom: space[2] },
-  composer: { minHeight: 58, maxHeight: 164, flexDirection: 'row', alignItems: 'flex-end', gap: space[2], marginHorizontal: space[4], marginTop: space[2], marginBottom: space[3], paddingLeft: space[4], paddingRight: 7, paddingVertical: 7 },
-  input: { ...type.body, flex: 1, minHeight: hitMin, maxHeight: 132, paddingTop: 10, paddingBottom: 10, color: colors.text1 },
+  composer: { minHeight: 58, maxHeight: 360, gap: space[2], marginHorizontal: space[4], marginTop: space[2], marginBottom: space[3], padding: 7 },
+  composerRow: { flexDirection: 'row', alignItems: 'flex-end', gap: space[2] },
+  attachment: { width: hitMin, height: hitMin, alignItems: 'center', justifyContent: 'center', borderRadius: radius.full },
+  input: { flex: 1, minHeight: hitMin, maxHeight: 328, justifyContent: 'center', paddingTop: 10, paddingBottom: 4 },
+  pendingFiles: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 },
+  pendingFile: { minHeight: 34, maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 10, paddingRight: 4, borderRadius: radius.full, backgroundColor: colors.surface3 },
+  stagingFile: { opacity: 0.72, paddingRight: 10 },
+  pendingFileText: { ...type.captionMedium, minWidth: 0, maxWidth: 220, flexShrink: 1, color: colors.text1 },
+  pendingRemove: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center', borderRadius: radius.full },
   send: { width: hitMin, height: hitMin, flex: 0, alignItems: 'center', justifyContent: 'center', borderRadius: radius.full, backgroundColor: colors.accent },
   sendDim: { opacity: 0.46, transform: [{ scale: 0.96 }] },
 });

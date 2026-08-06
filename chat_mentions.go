@@ -72,10 +72,14 @@ func parseChatMentionTokens(text string) []chatMentionToken {
 		for end < len(runes) && isChatMentionHandleRune(runes[end]) {
 			end++
 		}
-		if end == index+1 {
+		handleEnd := end
+		for handleEnd > index+1 && runes[handleEnd-1] == '.' {
+			handleEnd--
+		}
+		if handleEnd == index+1 {
 			continue
 		}
-		mentions = append(mentions, chatMentionToken{handle: strings.ToLower(string(runes[index+1 : end]))})
+		mentions = append(mentions, chatMentionToken{handle: strings.ToLower(string(runes[index+1 : handleEnd]))})
 		index = end - 1
 	}
 	return mentions
@@ -168,6 +172,140 @@ func chatMentionNames(text string) []string {
 
 func isChatMentionNameRune(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
+func strideAgentMentionHandles(name string) []string {
+	parts := strings.Fields(strings.ToLower(strings.TrimSpace(name)))
+	if len(parts) == 0 {
+		return nil
+	}
+	handles := []string{parts[0]}
+	if len(parts) > 1 {
+		handles = append(handles, strings.Join(parts, "-"), strings.Join(parts, "_"), strings.Join(parts, ""))
+	}
+	return uniqueSortedStrings(handles)
+}
+
+func chatAgentWorkWords(text string) []string {
+	return strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	})
+}
+
+// chatAgentExplicitWorkAction recognizes explicit authored work verbs without
+// treating a social mention or a noun such as "the research looks good" as
+// launch intent. The result is still only proposal intent; this function never
+// grants execution authority.
+func chatAgentExplicitWorkAction(text string, targetHandles []string) string {
+	words := chatAgentWorkWords(text)
+	handle := map[string]bool{}
+	for _, value := range targetHandles {
+		handle[value] = true
+	}
+	for index, word := range words {
+		if (word == "dig" || word == "look") && index+1 < len(words) && words[index+1] == "into" {
+			return word + " into"
+		}
+		if word == "search" && index+1 < len(words) && (words[index+1] == "web" || words[index+1] == "the" && index+2 < len(words) && words[index+2] == "web") {
+			return "search the web"
+		}
+		if word != "research" && word != "investigate" && word != "review" && word != "analyze" && word != "analyse" {
+			continue
+		}
+		if index+1 < len(words) && (words[index+1] == "is" || words[index+1] == "was" || words[index+1] == "looks" || words[index+1] == "looked" || words[index+1] == "seems" || words[index+1] == "moved" || words[index+1] == "finished") {
+			continue
+		}
+		imperative := index == 0
+		if index > 0 {
+			previous := words[index-1]
+			imperative = handle[previous] || previous == "please" || previous == "you" || previous == "to"
+		}
+		if !imperative && index > 1 {
+			previous := words[index-2]
+			imperative = previous == "can" || previous == "could" || previous == "would" || previous == "will" || previous == "should"
+		}
+		// Natural teammate asks often put a small verb phrase between the modal
+		// and the exact capability word: "@Colton can you run a quick research
+		// report". Keep the window bounded and, for the ambiguous noun
+		// "research", require an authored execution verb so "should we discuss
+		// the research?" stays conversational.
+		if !imperative {
+			windowStart := index - 8
+			if windowStart < 0 {
+				windowStart = 0
+			}
+			modal := false
+			researchVerb := word != "research"
+			for _, prior := range words[windowStart:index] {
+				if prior == "can" || prior == "could" || prior == "would" || prior == "will" || prior == "should" {
+					modal = true
+				}
+				if prior == "do" || prior == "run" || prior == "conduct" || prior == "prepare" || prior == "create" || prior == "produce" || prior == "write" || prior == "compile" || prior == "pull" {
+					researchVerb = true
+				}
+			}
+			imperative = modal && researchVerb
+		}
+		if imperative {
+			return word
+		}
+	}
+	return ""
+}
+
+func chatAgentWorkRequestIsBounded(text string, files []scoutChatFileAttachment, replyTo *scoutChatReplyRef) bool {
+	if len(files) > 0 || replyTo != nil || strings.Contains(strings.ToLower(text), "http://") || strings.Contains(strings.ToLower(text), "https://") {
+		return true
+	}
+	objectWords := map[string]bool{
+		"article": true, "brief": true, "company": true, "competitor": true, "document": true, "industry": true,
+		"link": true, "market": true, "opportunity": true, "page": true, "post": true, "report": true, "source": true, "topic": true,
+	}
+	for _, word := range chatAgentWorkWords(text) {
+		if objectWords[word] {
+			return true
+		}
+	}
+	return !directResearchRequestNeedsInput(text, files, nil)
+}
+
+// strideTargetedAgentWorkRequest resolves an authored @Agent mention into a
+// currently valid, channel-authorized profile only when the same message also
+// contains an explicit bounded work ask. Social mentions intentionally return
+// false and continue down the ordinary human-chat path.
+func (app *kanbanBoardApp) strideTargetedAgentWorkRequest(thread scoutChatThreadRecord, text string, files []scoutChatFileAttachment, replyTo *scoutChatReplyRef) (STRIDEProductAgentContextProfile, string, bool) {
+	mentions := parseChatMentionTokens(text)
+	if len(mentions) == 0 || !chatAgentWorkRequestIsBounded(text, files, replyTo) {
+		return STRIDEProductAgentContextProfile{}, "", false
+	}
+	profilesByHandle := map[string][]STRIDEProductAgentContextProfile{}
+	for _, profile := range app.strideMentionableAgentProfiles() {
+		for _, handle := range strideAgentMentionHandles(profile.DisplayName) {
+			profilesByHandle[handle] = append(profilesByHandle[handle], profile)
+		}
+	}
+	for _, mention := range mentions {
+		matches := profilesByHandle[mention.handle]
+		if len(matches) != 1 {
+			continue
+		}
+		profile := matches[0]
+		handles := strideAgentMentionHandles(profile.DisplayName)
+		action := chatAgentExplicitWorkAction(text, handles)
+		if action == "" {
+			return STRIDEProductAgentContextProfile{}, "", false
+		}
+		mode := "research"
+		if !containsSTRIDEID(profile.Capabilities, "deep_research") && (action == "review" || action == "analyze" || action == "analyse") {
+			mode = "design"
+		}
+		current, ok := app.strideAgentContextForChatWork(profile.AgentID, thread, mode)
+		if !ok {
+			return STRIDEProductAgentContextProfile{}, "", false
+		}
+		return current, mode, true
+	}
+	return STRIDEProductAgentContextProfile{}, "", false
 }
 
 // notifyScoutChatTargets posts targeted, thread-deep-linked bell notifications

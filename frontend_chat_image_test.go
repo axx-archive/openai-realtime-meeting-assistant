@@ -37,6 +37,9 @@ func TestIndexChatImageRenderBranch(t *testing.T) {
 		// the picture is served inline by the blob route via artifactBlobUrl
 		"img.src = artifactBlobUrl({ ref, name: image.name })",
 		"scout-chat-image__img",
+		"function openScoutChatImagePreview(src, alt)",
+		"preview.addEventListener('click', () => openScoutChatImagePreview(img.src, img.alt))",
+		"scout-chat-image-viewer__close",
 		// the open-artifact action
 		"openArtifactStage(artifactId, String(image.prompt || 'Concept render'))",
 		// the shimmer resolves on the image kind too

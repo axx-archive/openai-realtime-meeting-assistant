@@ -174,6 +174,8 @@ test('active mention completion replaces only the current trailing token', () =>
   assert.deepEqual(activeMentionQuery('Can you ask @ty'), { start: 12, query: 'ty' });
   assert.equal(completeMention('Can you ask @ty', 'Tyler'), 'Can you ask @Tyler ');
   assert.equal(completeMention('@sc', '@Scout'), '@Scout ');
+  assert.deepEqual(activeMentionQuery('Ask @Insights-An'), { start: 4, query: 'Insights-An' });
+  assert.equal(completeMention('Ask @Insights-An', 'Insights-Analyst'), 'Ask @Insights-Analyst ');
   assert.equal(activeMentionQuery('email aj@example.com'), null);
   assert.equal(completeMention('nothing active', 'Tyler'), 'nothing active');
 });

@@ -1762,6 +1762,86 @@ func (app *kanbanBoardApp) stridePreferredResearchAgentContext() (STRIDEProductA
 	return profile, err == nil && found
 }
 
+// strideMentionableAgentProfiles returns only durable, currently hired seats
+// whose signed product records still validate. It deliberately does not widen
+// execution authority: these profiles power chat discovery, while a concrete
+// channel and requested capability are checked separately before proposal
+// minting and again at confirmation/runner admission.
+func (app *kanbanBoardApp) strideMentionableAgentProfiles() []STRIDEProductAgentContextProfile {
+	if app == nil || app.strideRuntime == nil {
+		return nil
+	}
+	profiles := []STRIDEProductAgentContextProfile{}
+	err := app.strideRuntime.WithProductContext(canonicalTenantID(), STRIDEProductScopeMarketplace, func(ctx STRIDEProductContext) error {
+		for _, agent := range ctx.Product.agentRoster() {
+			profile, ok := ctx.Product.agentContextProfile(agent.ID)
+			if ok {
+				profiles = append(profiles, profile)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil
+	}
+	sort.Slice(profiles, func(i, j int) bool {
+		if profiles[i].DisplayName != profiles[j].DisplayName {
+			return profiles[i].DisplayName < profiles[j].DisplayName
+		}
+		return profiles[i].AgentID < profiles[j].AgentID
+	})
+	return profiles
+}
+
+func strideAgentProfileAllowsChatThread(profile STRIDEProductAgentContextProfile, thread scoutChatThreadRecord) bool {
+	if profile.AgentID == "" || scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
+		return false
+	}
+	for _, membership := range profile.Memberships {
+		membership = strings.TrimSpace(membership)
+		if thread.Table && membership == "team" {
+			return true
+		}
+		if membership == strings.TrimSpace(thread.ID) {
+			return true
+		}
+	}
+	return false
+}
+
+// strideAgentContextForChatWork is the confirmation-time ACL/capability gate
+// for a targeted chat proposal. Research uses the same bounded Scout research
+// runner as direct hired-coworker threads; the coworker's own provider remains
+// fenced and the runner reauthorizes the profile again before provider use.
+func (app *kanbanBoardApp) strideAgentContextForChatWork(agentID string, thread scoutChatThreadRecord, mode string) (STRIDEProductAgentContextProfile, bool) {
+	agentID = strings.TrimSpace(agentID)
+	if app == nil || app.strideRuntime == nil || agentID == "" {
+		return STRIDEProductAgentContextProfile{}, false
+	}
+	var profile STRIDEProductAgentContextProfile
+	found := false
+	err := app.strideRuntime.WithProductContext(canonicalTenantID(), STRIDEProductScopeMarketplace, func(ctx STRIDEProductContext) error {
+		profile, found = ctx.Product.agentContextProfile(agentID)
+		return nil
+	})
+	if err != nil || !found || !strideAgentProfileAllowsChatThread(profile, thread) {
+		return STRIDEProductAgentContextProfile{}, false
+	}
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "research":
+		if !containsSTRIDEID(profile.Capabilities, "deep_research") {
+			return STRIDEProductAgentContextProfile{}, false
+		}
+	case "design":
+		if !containsSTRIDEID(profile.Capabilities, "design_brief") && !containsSTRIDEID(profile.Capabilities, "interaction_critique") {
+			return STRIDEProductAgentContextProfile{}, false
+		}
+	default:
+		return STRIDEProductAgentContextProfile{}, false
+	}
+	return profile, true
+}
+
 // strideAgentDirectThreadProviderFenced keeps a hired coworker's private
 // thread durable and human-writable while its model seat remains unqualified.
 // Reserved coworker thread IDs fail closed when the signed product runtime or
