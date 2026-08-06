@@ -1,7 +1,9 @@
 # STRIDE Next Evolution — Master Architecture and Execution Ledger
 
 **Status:** Active E10 remediation. The current reviewed source is
-`941f44e18fc9c01025b4401662e3a400f84232ee` on `axx/main`; the behavior carrier
+`949ff79db630ed6e1ba0eb3798b631d99fd2ec77` on `axx/main`; the exact release
+still serving is the prior reviewed source under the retained release ledger.
+The behavior carrier
 for the prior server-only foundation remains
 `7c71a6821eb2576cc12644d668166f1f5840cdc7`. The current exact release is
 serving under ledger generation 20 with `verified-local-unsigned` evidence and
