@@ -1,17 +1,19 @@
 # STRIDE Next Evolution — Master Architecture and Execution Ledger
 
 **Status:** Active E10 remediation. Exact release
-`976e6784d0b58faf6011ea8dfe31f71322b56205` is serving under the retained
-release ledger with `verified-local-unsigned` process evidence; public
-`/healthz` and `/readyz` are the current release-identity authority. Native
-Build 47 from that same commit is Apple `VALID` and available to the internal
-Team group. A later candidate based on that release is still under integration.
-Its earlier test evidence was invalidated by subsequent continuity, routing,
-proactivity, and client changes; no final-tree gate result is claimed here.
-The complete Go suite, required ConversationContinuity/AgentMind/proactivity/
+`1188281b9197b5f6a2e654f236b1a51bc4a5ba95` is serving under release-ledger
+generation 25 with `verified-local-unsigned` process evidence; public
+`/healthz` and `/readyz` agree with both receipted application images and the
+retained rollback release `ca47c27614f53a354634b82673698a6059fa9280`.
+Native Build 48 was built from
+`7689bead6b8365c14e67a11dfa06063b23cf058b`, uploaded successfully through EAS,
+and submitted to Apple; App Store Connect `VALID`, internal Team availability,
+and intended-device access still require an authenticated Apple observation.
+The integrated Go suite, required ConversationContinuity/AgentMind/proactivity/
 web-scroll race gate, `go vet`, native readiness contract checks, client tests,
-`git diff --check`, and independent critic must all pass again on one frozen
-commit before it can be pushed, activated, or described as repaired.
+`git diff --check`, and independent critic all passed before release. The later
+exact-release-only queue migration was additionally proven by the 34 release
+contract checks and an actual confined-container ownership/mode test.
 
 The current serving release remains unqualified externally. Production
 `/readyz` truthfully reports canonical shadow health behind the dirty
@@ -56,7 +58,7 @@ External reference, adopted selectively rather than introduced as a runtime depe
 
 Older model recommendations are historical baselines, not current authority. The current official model references for this plan are [GPT-5.6](https://developers.openai.com/api/docs/guides/latest-model.md), [GPT-Realtime-2.1](https://developers.openai.com/api/docs/models/gpt-realtime-2.1), [GPT Transcribe](https://developers.openai.com/api/docs/models/gpt-transcribe), and [GPT Live Transcribe](https://developers.openai.com/api/docs/models/gpt-live-transcribe).
 
-## Active completion checkpoint — 2026-08-07 10:10 PT
+## Active completion checkpoint — 2026-08-07 13:40 PT
 
 This is the compact-safe resume ledger for the current goal. A checked item is
 complete only at the scope named; local implementation is not release proof.
@@ -139,26 +141,40 @@ complete only at the scope named; local implementation is not release proof.
   private/project Drive audience widening, post-commit source revalidation,
   reaction-only proactive visibility, route-documentation truth, and staged
   mobile-source completeness; no blocker or major finding remains.
-- [ ] Commit the intended combined tree and push without force to `axx/main`.
-- [ ] Build the next native build after 47, upload it, and separately verify App
-  Store Connect `VALID`, internal Team availability, and intended-device access.
-- [ ] Activate that exact commit through `/opt/meetingassist-releases/<sha>`;
+- [x] Committed the intended combined tree and pushed without force to
+  `axx/main`; `stride-site/` remained untracked and untouched.
+- [x] Built native Build 48 from exact commit `7689bea`, uploaded it through
+  EAS, and submitted it successfully to Apple.
+- [ ] Separately verify Build 48 is App Store Connect `VALID`, available to the
+  internal Team group, and accessible on the intended physical device. Neither
+  available browser session is currently authenticated to App Store Connect.
+- [x] Activated exact server commit `1188281` through
+  `/opt/meetingassist-releases/<sha>`;
   require ledger, receipt, all Compose image IDs, Caddy, `/healthz`, `/readyz`,
-  rollback retention, and `verified-local-unsigned` to agree.
-- [ ] After activation, verify the existing Country Golf report gains a PDF
-  asset and that an authenticated user can download it; verify direct image
-  analysis and Bonfire Chat TL;DR sharing against the exact source document.
-- [ ] Create and verify `axx-archive/STRIDE`, push the exact `main` history,
-  make it the primary local remote, and preserve the old repository as legacy.
+  rollback retention, and `verified-local-unsigned` all agree at ledger
+  generation 25.
+- [x] The existing Country Golf report render job was repaired from root-owned
+  `0600` to `65532:65532 0660`, completed as a 9-page 141,120-byte PDF, stored
+  a durable PDF blob plus page images, and emitted `pdf_exported`.
+- [ ] Verify an authenticated user can download that exact Country Golf PDF in
+  the rendered product; verify direct image analysis answers conversationally
+  without a workstream and Bonfire Chat TL;DR sharing uses the exact document.
+- [ ] Create and verify the new primary STRIDE repository. Discovery found an
+  existing, unrelated private `axx-archive/stride` repository, so no repository
+  was overwritten, renamed, deleted, or made primary without a user decision.
 - [ ] Reconcile the rest of this master ledger. Provider qualification,
   physical-device acceptance, canonical replay/promotion, HA/DR custody,
   real-workforce pilots, and soak remain external acceptance gates unless their
   full evidence is actually produced.
 
-**Exact resume point:** freeze the integrated server/web/native tree, run the
-complete gate matrix and rendered client QA, then obtain a fresh independent
-critic verdict. Do not commit, push, build TestFlight, activate the VPS, or
-create the new primary GitHub repository before that frozen review passes.
+**Exact resume point:** obtain the authenticated Apple observation for Build 48,
+then use an authenticated STRIDE session to prove the existing Country Golf PDF
+download, ordinary image analysis, exact-source TL;DR sharing to pinned Bonfire
+Chat, and desktop/mobile rendered UX. Resolve the pre-existing
+`axx-archive/stride` naming collision before creating or changing a primary
+remote. After those gates, continue the explicitly unresolved external E10
+qualification, physical-device, replay/promotion, HA/DR, pilot, and soak work;
+do not infer completion from the current process-qualified release.
 
 ## 2026-08-06 AmbientMind / AgentMind / MyMind strategic-design delta
 
