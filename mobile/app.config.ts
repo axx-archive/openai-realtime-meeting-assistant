@@ -40,10 +40,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and remain the fallback if this bundle is ever rejected.
       // Regenerate both with `npm run brand:regen` from the repo root.
       icon: './assets/Stride.icon',
-      // Build 46 removes camera-off people from video-stage slots while keeping
-      // their audio presence, roster identity, pins, and endpoint handoff.
+      // Build 47 adds durable generated-image rendering and actions to native
+      // chat while retaining the camera/roster fixes shipped in build 46.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '46',
+      buildNumber: '47',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',
