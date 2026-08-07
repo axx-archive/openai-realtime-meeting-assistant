@@ -50,6 +50,8 @@ const (
 
 	// Landscape deck plates by default — the shape the 1920×1080 deck chassis
 	// crops least. Quality "high": these are client-facing concept renders.
+	// gpt-image-2 exposes image quality rather than a separate reasoning-effort
+	// dial; Scout's prompt-optimization turn independently runs at max effort.
 	defaultOpenAIImageSize    = "1536x1024"
 	defaultOpenAIImageQuality = "high"
 

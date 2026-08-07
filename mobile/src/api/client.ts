@@ -663,6 +663,27 @@ export const api = {
     );
   },
 
+  regenerateScoutImage(
+    sessionToken: string,
+    threadId: string,
+    messageId: string,
+    prompt: string,
+  ): Promise<ScoutThreadDetailResponse> {
+    return request<ScoutThreadDetailResponse>(
+      `/assistant/chat-threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}/regenerate`,
+      { method: 'POST', body: { prompt }, sessionToken },
+    );
+  },
+
+  saveArtifactToFiles(
+    sessionToken: string,
+    artifactId: string,
+  ): Promise<{ ok: boolean; file?: Record<string, unknown> }> {
+    return request('/assistant/files/save', {
+      method: 'POST', body: { artifactId }, sessionToken,
+    });
+  },
+
   updateScoutThread(
     sessionToken: string,
     threadId: string,

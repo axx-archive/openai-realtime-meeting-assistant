@@ -9631,9 +9631,15 @@
         display: block;
         width: 100%;
         height: auto;
-        border: 1px solid var(--line-1);
+        border: 0;
+        outline: 1px solid rgba(0, 0, 0, 0.1);
+        outline-offset: -1px;
         border-radius: var(--r-lg, 12px);
         background: var(--surface-2);
+      }
+
+      [data-theme="dark"] .scout-chat-image__img {
+        outline-color: rgba(255, 255, 255, 0.1);
       }
 
       .scout-chat-image__preview {
@@ -9751,7 +9757,8 @@
 
       .scout-chat-image__open {
         align-self: flex-start;
-        padding: 4px 12px;
+        min-height: 40px;
+        padding: 0 12px;
         border: 1px solid var(--line-2);
         border-radius: var(--r-full);
         background: transparent;
@@ -9759,12 +9766,204 @@
         font: var(--type-label-sm, var(--type-label-lg));
         letter-spacing: var(--track-label);
         cursor: pointer;
-        transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+        transition-property: border-color, color, background-color, transform;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
       }
 
       .scout-chat-image__open:hover {
         border-color: var(--text-3);
         color: var(--text-1);
+        background: var(--surface-2);
+      }
+
+      .scout-chat-image__open:active {
+        transform: scale(0.96);
+      }
+
+      .scout-chat-image__actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .scout-chat-image__save,
+      .scout-chat-image__regenerate {
+        min-height: 40px;
+        padding: 0 12px;
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-full);
+        background: transparent;
+        color: var(--text-2);
+        font: var(--type-label-sm, var(--type-label-lg));
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+        transition-property: border-color, color, background-color, transform, opacity;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
+      }
+
+      .scout-chat-image__save:hover,
+      .scout-chat-image__regenerate:hover,
+      .scout-chat-image__save:focus-visible,
+      .scout-chat-image__regenerate:focus-visible {
+        border-color: var(--text-3);
+        color: var(--text-1);
+        background: var(--surface-2);
+      }
+
+      .scout-chat-image__save:active,
+      .scout-chat-image__regenerate:active {
+        transform: scale(0.96);
+      }
+
+      .scout-chat-image__save[data-state="saved"] {
+        border-color: color-mix(in srgb, var(--live) 46%, var(--line-2));
+        color: var(--text-1);
+      }
+
+      .scout-chat-image__editor {
+        display: grid;
+        gap: 8px;
+        width: min(560px, 100%);
+        padding: 12px;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-md, 10px);
+        background: var(--surface-2);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+      }
+
+      .scout-chat-image__editor-label {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      .scout-chat-image__editor-input {
+        width: 100%;
+        min-height: 112px;
+        max-height: 280px;
+        resize: vertical;
+        padding: 10px 12px;
+        border: 0;
+        border-radius: var(--r-md, 10px);
+        outline: 1px solid var(--line-2);
+        outline-offset: -1px;
+        background: var(--surface-1);
+        color: var(--text-1);
+        font: var(--type-body-sm);
+        text-wrap: pretty;
+        transition-property: outline-color, box-shadow;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
+      }
+
+      .scout-chat-image__editor-input:focus {
+        outline-color: var(--text-3);
+        box-shadow: 0 0 0 3px var(--ring);
+      }
+
+      .scout-chat-image__editor-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 6px;
+      }
+
+      .scout-chat-image__editor-action {
+        min-height: 40px;
+        padding: 0 12px;
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-full);
+        background: transparent;
+        color: var(--text-2);
+        font: var(--type-label-lg);
+        cursor: pointer;
+        transition-property: border-color, color, background-color, transform;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
+      }
+
+      .scout-chat-image__editor-action[data-primary="true"] {
+        border-color: transparent;
+        background: var(--text-1);
+        color: var(--surface-1);
+      }
+
+      .scout-chat-image__editor-action:hover,
+      .scout-chat-image__editor-action:focus-visible {
+        border-color: var(--text-3);
+        color: var(--text-1);
+      }
+
+      .scout-chat-image__editor-action[data-primary="true"]:hover,
+      .scout-chat-image__editor-action[data-primary="true"]:focus-visible {
+        border-color: transparent;
+        background: var(--text-2);
+        color: var(--surface-1);
+      }
+
+      .scout-chat-image__editor-action:active {
+        transform: scale(0.96);
+      }
+
+      .scout-chat-image-pending {
+        align-self: flex-start;
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        min-height: 40px;
+        margin: 6px 0 8px;
+        padding: 0 13px;
+        border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line-1));
+        border-radius: var(--r-full);
+        background: color-mix(in srgb, var(--accent) 7%, var(--surface-2));
+        color: var(--text-2);
+        font: var(--type-label-lg);
+        letter-spacing: var(--track-label);
+      }
+
+      .scout-chat-image-pending__pulse {
+        width: 8px;
+        height: 8px;
+        flex: none;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 34%, transparent);
+        animation: scoutImageGeneratingPulse 1.6s var(--ease) infinite;
+      }
+
+      .scout-chat-image-pending[data-status="failed"] {
+        border-color: color-mix(in srgb, var(--danger) 36%, var(--line-1));
+        background: color-mix(in srgb, var(--danger) 7%, var(--surface-2));
+      }
+
+      .scout-chat-image-pending[data-status="failed"] .scout-chat-image-pending__pulse {
+        background: var(--danger);
+        animation: none;
+      }
+
+      .scout-chat-image__regenerate {
+        opacity: 0;
+        transform: translateY(4px);
+        pointer-events: none;
+      }
+
+      .scout-chat-image:hover .scout-chat-image__regenerate,
+      .scout-chat-image:focus-within .scout-chat-image__regenerate,
+      .scout-chat-image.show-regenerate .scout-chat-image__regenerate {
+        opacity: 1;
+        transform: translateY(0);
+        pointer-events: auto;
+      }
+
+      @keyframes scoutImageGeneratingPulse {
+        0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 30%, transparent); opacity: 0.72; }
+        50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 0%, transparent); opacity: 1; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .scout-chat-image-pending__pulse { animation: none; }
       }
 
       /* Inline image assets on a filed artifact (concept renders, imagery
@@ -37997,7 +38196,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
          state when the entry is already saved. */
       function artifactQualifiesForFiles(entry) {
         const meta = entry?.metadata || {}
-        const provenance = String(meta.source || '').trim() === 'scout_thread'
+        const provenance = ['scout_thread', 'chat_image'].includes(String(meta.source || '').trim())
           || String(meta.goalPlan || '').trim() !== ''
           || String(meta.goalDeliverable || '').trim().toLowerCase() === 'true'
         if (!provenance) return false
@@ -49456,8 +49655,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          // committed reply too, so the shimmer must resolve on them.
 	          const role = String(message?.role || '').toLowerCase()
 	          const recordKind = String(message?.kind || '')
-	          const isScoutReply = role === 'scout' || role === 'error' ||
-	            ['proposal', 'choices', 'manifest', 'thread', 'artifact', 'image'].includes(recordKind)
+          const isScoutReply = role === 'scout' || role === 'error' ||
+            ['proposal', 'choices', 'manifest', 'thread', 'artifact', 'image', 'image_pending'].includes(recordKind)
 	          if (isScoutReply && !scoutChatThinking.hidden) {
 	            withScoutChatThinkingHold(() => {
 	              hideScoutChatThinking()
@@ -53962,7 +54161,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function clearScoutChatThreadNodes() {
-	        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research, .runlog, .scout-chat-daybreak, .desktop-chat-unread, .scout-choices, .scout-proposal-card, .manifest-card').forEach(node => node.remove())
+        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research, .scout-chat-image, .scout-chat-image-pending, .runlog, .scout-chat-daybreak, .desktop-chat-unread, .scout-choices, .scout-proposal-card, .manifest-card').forEach(node => node.remove())
 	      }
 
 	      /* §1/§2/§3 render-pass state — var, not let: renderActiveScoutThread can
@@ -54331,16 +54530,27 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          feedPrevMsgKey = ''
 	          return scoutChoicesNode(message)
 	        }
-	        if (recordKind === 'manifest' && message.manifest) {
-	          runlogMarkerGoalId = ''
-	          feedPrevMsgKey = ''
-	          return scoutManifestCardNode(message)
-	        }
-	        if (recordKind === 'image' && message.image) {
-	          runlogMarkerGoalId = ''
-	          feedPrevMsgKey = ''
-	          return scoutChatImageNode(message)
-	        }
+        if (recordKind === 'manifest' && message.manifest) {
+          runlogMarkerGoalId = ''
+          feedPrevMsgKey = ''
+          return scoutManifestCardNode(message)
+        }
+        if (recordKind === 'image_pending') {
+          runlogMarkerGoalId = ''
+          feedPrevMsgKey = ''
+          return scoutChatImagePendingNode(message)
+        }
+        if (recordKind === 'image' && message.image) {
+          runlogMarkerGoalId = ''
+          feedPrevMsgKey = ''
+          const imageNode = scoutChatImageNode(message)
+          const captionNode = imageNode?.querySelector?.('.scout-chat-msg')
+          if (captionNode) {
+            captionNode.dataset.messageId = String(message?.id || '')
+            decorateDesktopChatMessage(captionNode, message, 'scout', String(message?.authorName || 'scout'))
+          }
+          return imageNode
+        }
 	        if (recordKind === 'thread' && message.thread) {
 	          feedPrevMsgKey = ''
 	          const run = scoutThreadFromChatMessage(message)
@@ -54634,7 +54844,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return !chatThreadIsChannel(thread)
 	      }
 
-	      function desktopChatMoreMenuControl({ label = 'More actions', onEdit, onDelete } = {}) {
+      function desktopChatMoreMenuControl({ label = 'More actions', onEdit, onDelete, onRegenerate } = {}) {
 	        const wrap = bfEl('span', 'desktop-chat-more')
 	        const trigger = bfEl('button', 'chat-context-card__message-action', '•••')
 	        trigger.type = 'button'
@@ -54675,7 +54885,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          else close()
 	        })
 	        wrap.addEventListener('pointerdown', event => event.stopPropagation())
-	        if (onEdit) {
+        if (onEdit) {
 	          const edit = bfEl('button', '', 'Edit message')
 	          edit.type = 'button'
 	          edit.setAttribute('role', 'menuitem')
@@ -54683,9 +54893,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            close()
 	            onEdit()
 	          })
-	          menu.appendChild(edit)
-	        }
-	        if (onDelete) {
+          menu.appendChild(edit)
+        }
+        if (onRegenerate) {
+          const regenerate = bfEl('button', '', 'Regenerate image')
+          regenerate.type = 'button'
+          regenerate.setAttribute('role', 'menuitem')
+          regenerate.addEventListener('click', () => {
+            close()
+            onRegenerate()
+          })
+          menu.appendChild(regenerate)
+        }
+        if (onDelete) {
 	          const remove = bfEl('button', '', 'Delete message…')
 	          remove.type = 'button'
 	          remove.dataset.danger = 'true'
@@ -55524,12 +55744,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          })
 	          actions.appendChild(replyButton)
 	          const activeThread = selectedScoutChatThread()
-	          if (desktopChatMessageIsOwn(activeThread, message)) {
+	          const generatedImage = String(message?.kind || '') === 'image' && String(message?.image?.prompt || '').trim()
+	          if (desktopChatMessageIsOwn(activeThread, message) || generatedImage) {
 	            const more = desktopChatMoreMenuControl({
-	              label: 'More message actions',
-	              onEdit: () => beginDesktopFeedMessageEdit(activeThread, message, node),
-	              onDelete: (control, close) => confirmDesktopFeedMessageDelete(message.id, control, close)
-	            })
+	              label: generatedImage ? 'More image actions' : 'More message actions',
+	              onEdit: generatedImage ? null : () => beginDesktopFeedMessageEdit(activeThread, message, node),
+	              onRegenerate: generatedImage ? () => beginScoutChatImageRegenerate(message) : null,
+	              onDelete: desktopChatMessageIsOwn(activeThread, message)
+	                ? (control, close) => confirmDesktopFeedMessageDelete(message.id, control, close)
+	                : null
+            })
 	            actions.appendChild(more.node)
 	          }
 	          stack.appendChild(actions)
@@ -56138,13 +56362,159 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		        dialog.querySelector('.scout-chat-image-viewer__close')?.focus()
 		      }
 
-		      // ---- the concept render (card 096) ----
+	      // ---- the concept render (card 096) ----
+	      function scoutChatImagePendingNode(message) {
+	        const state = String(message?.imageGeneration?.status || 'generating').toLowerCase()
+	        const pill = bfEl('div', 'scout-chat-image-pending')
+	        pill.dataset.messageId = String(message?.id || '')
+	        pill.dataset.status = state
+	        pill.setAttribute('role', 'status')
+	        pill.setAttribute('aria-live', 'polite')
+	        pill.setAttribute('aria-atomic', 'true')
+	        const pulse = bfEl('span', 'scout-chat-image-pending__pulse')
+	        pulse.setAttribute('aria-hidden', 'true')
+	        const label = state === 'failed' ? 'image generation failed' : 'generating image…'
+	        pill.append(pulse, bfEl('span', 'scout-chat-image-pending__label', label))
+	        return pill
+	      }
+
+	      function scoutChatImageSaveControl(image) {
+	        const artifactId = String(image?.artifactId || '').trim()
+	        if (!artifactId) return null
+	        const button = bfEl('button', 'scout-chat-image__save', 'Save to Drive')
+	        button.type = 'button'
+	        button.setAttribute('aria-label', 'Save this image to Drive')
+	        const artifact = typeof artifactEntries !== 'undefined' && Array.isArray(artifactEntries)
+	          ? artifactEntries.find(entry => String(entry?.id || '') === artifactId)
+	          : null
+        const settleSaved = () => {
+          button.dataset.state = 'saved'
+          button.disabled = true
+          button.textContent = 'Saved to Drive'
+          button.setAttribute('aria-label', 'Image saved to Drive')
+          button.title = 'This image is saved in the company Drive'
+        }
+        if (image?.savedToFiles === true || String(artifact?.metadata?.savedToFiles || '').toLowerCase() === 'true') {
+          settleSaved()
+          return button
+        }
+        button.title = 'Save this image to the company Drive'
+        button.addEventListener('click', async () => {
+          button.disabled = true
+          button.textContent = 'Saving…'
+          try {
+            const response = await fetch('/assistant/files/save', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ artifactId })
+            })
+            const payload = await response.json().catch(() => ({}))
+            if (!response.ok) throw new Error(payload?.error || 'could not save image to Drive')
+            image.savedToFiles = true
+            if (artifact?.metadata) artifact.metadata.savedToFiles = 'true'
+            settleSaved()
+            showToast({ text: 'Saved to Drive', kind: 'done' })
+            if (typeof loadFilesSurface === 'function') loadFilesSurface(true)
+          } catch (error) {
+            button.disabled = false
+            button.textContent = 'Save to Drive'
+            showToast({ text: error?.message || 'could not save image to Drive', kind: 'error' })
+          }
+        })
+        return button
+      }
+
+	      function beginScoutChatImageRegenerate(message, figure) {
+	        const messageId = String(message?.id || '').trim()
+	        const threadId = String(activeScoutThreadId || '').trim()
+	        const prompt = String(message?.image?.prompt || '').trim()
+	        if (!messageId || !threadId || !prompt) {
+	          showToast({ text: 'the image prompt is unavailable', kind: 'note' })
+	          return
+	        }
+	        const target = figure || Array.from(scoutChatThread?.querySelectorAll('.scout-chat-image') || [])
+	          .find(candidate => String(candidate?.dataset?.messageId || '') === messageId)
+	        if (!target || target.querySelector('.scout-chat-image__editor')) return
+	        const editor = document.createElement('form')
+	        editor.className = 'scout-chat-image__editor'
+	        const label = bfEl('label', 'scout-chat-image__editor-label', 'Prompt used')
+	        const input = document.createElement('textarea')
+	        input.className = 'scout-chat-image__editor-input'
+	        input.id = `scout-chat-image-prompt-${messageId}`
+	        label.htmlFor = input.id
+	        input.setAttribute('aria-label', 'Image prompt used for this render')
+	        input.value = prompt
+	        input.maxLength = 12000
+	        const actions = bfEl('div', 'scout-chat-image__editor-actions')
+	        const cancel = bfEl('button', 'scout-chat-image__editor-action', 'Cancel')
+	        cancel.type = 'button'
+	        const submit = bfEl('button', 'scout-chat-image__editor-action', 'Regenerate')
+	        submit.type = 'submit'
+	        submit.dataset.primary = 'true'
+	        const restore = () => editor.remove()
+	        cancel.addEventListener('click', restore)
+	        editor.addEventListener('submit', async event => {
+	          event.preventDefault()
+	          const nextPrompt = input.value.trim()
+	          if (!nextPrompt) return
+	          submit.disabled = true
+	          cancel.disabled = true
+	          try {
+	            const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}/regenerate`, {
+	              method: 'POST',
+	              headers: { 'Content-Type': 'application/json' },
+	              body: JSON.stringify({ prompt: nextPrompt })
+	            })
+	            const payload = await response.json().catch(() => ({}))
+	            if (!response.ok || !payload?.thread) throw new Error(payload?.error || 'image could not be regenerated')
+	            upsertScoutChatThread(payload.thread, { select: false })
+	            editor.remove()
+	            renderActiveScoutThread()
+	          } catch (error) {
+	            submit.disabled = false
+	            cancel.disabled = false
+	            showToast({ text: error?.message || 'image could not be regenerated', kind: 'error' })
+	          }
+	        })
+	        actions.append(cancel, submit)
+	        editor.append(label, input, actions)
+	        target.appendChild(editor)
+	        input.focus()
+	        input.setSelectionRange(input.value.length, input.value.length)
+	      }
+
+	      function attachScoutChatImageRegenerateControl(message, figure) {
+	        const control = bfEl('button', 'scout-chat-image__regenerate', 'Regenerate')
+	        control.type = 'button'
+	        control.setAttribute('aria-label', 'Regenerate image')
+	        control.title = 'Show the prompt and regenerate this image'
+	        control.addEventListener('click', event => {
+	          event.preventDefault()
+	          event.stopPropagation()
+	          beginScoutChatImageRegenerate(message, figure)
+	        })
+	        let pressTimer = 0
+	        const cancelPress = () => {
+	          if (!pressTimer) return
+	          window.clearTimeout(pressTimer)
+	          pressTimer = 0
+	        }
+	        figure.addEventListener('pointerdown', event => {
+	          if (event.pointerType !== 'touch') return
+	          cancelPress()
+	          pressTimer = window.setTimeout(() => figure.classList.add('show-regenerate'), 550)
+	        })
+	        figure.addEventListener('pointerup', cancelPress)
+	        figure.addEventListener('pointercancel', cancelPress)
+	        return control
+	      }
+
 	      // A Kind="image" message is a generated picture Scout filed after an
-	      // image confirm: a scout caption bubble, the picture itself (served
-	      // inline by the session-gated /artifacts/blob route), and an action
-	      // that opens the filed design artifact. The ref is validated with the
-	      // same 64-hex pattern artifactAssetEntries uses — a malformed ref
-	      // renders the caption alone, never a broken <img>.
+	      // image request: a scout caption bubble, the picture itself (served
+	      // inline by the session-gated /artifacts/blob route), and explicit
+	      // save/regenerate controls. The ref is validated with the same 64-hex
+	      // pattern artifactAssetEntries uses — a malformed ref renders the
+	      // caption alone, never a broken <img>.
 	      function scoutChatImageNode(message) {
 	        const image = message.image || {}
 	        const group = document.createDocumentFragment()
@@ -56156,6 +56526,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        const figure = document.createElement('figure')
 	        figure.className = 'scout-chat-image'
+	        figure.dataset.messageId = String(message?.id || '')
 	        const img = document.createElement('img')
 	        img.className = 'scout-chat-image__img'
 		        img.loading = 'lazy'
@@ -56164,17 +56535,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		        const preview = document.createElement('button')
 		        preview.type = 'button'
 		        preview.className = 'scout-chat-image__preview'
-		        preview.setAttribute('aria-label', `Expand ${img.alt}`)
-		        preview.addEventListener('click', () => openScoutChatImagePreview(img.src, img.alt))
-		        preview.append(img, bfEl('span', 'scout-chat-image__expand', 'expand'))
-		        figure.appendChild(preview)
+	        preview.setAttribute('aria-label', `Expand ${img.alt}`)
+	        preview.addEventListener('click', () => openScoutChatImagePreview(img.src, img.alt))
+	        preview.append(img, bfEl('span', 'scout-chat-image__expand', 'expand'))
+	        figure.appendChild(preview)
+	        const actions = bfEl('div', 'scout-chat-image__actions')
 	        const artifactId = String(image.artifactId || '')
 	        if (artifactId) {
 	          const open = bfEl('button', 'scout-chat-image__open', 'open artifact ▸')
 	          open.type = 'button'
 	          open.addEventListener('click', () => openArtifactStage(artifactId, String(image.prompt || 'Concept render')))
-	          figure.appendChild(open)
+	          actions.appendChild(open)
 	        }
+	        const save = scoutChatImageSaveControl(image)
+	        if (save) actions.appendChild(save)
+	        if (String(image.prompt || '').trim()) actions.appendChild(attachScoutChatImageRegenerateControl(message, figure))
+	        if (actions.childElementCount) figure.appendChild(actions)
 	        group.appendChild(figure)
 	        return group
 	      }

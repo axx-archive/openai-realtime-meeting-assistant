@@ -375,6 +375,11 @@ type scoutChatMessageRecord struct {
 	// renders inline via the session-gated /artifacts/blob route on every
 	// reload. Persisted DATA, the Proposal/Choices/Manifest pattern.
 	Image *scoutChatImageRef `json:"image,omitempty"`
+	// ImageGeneration carries the durable state for an in-flight image request.
+	// Prompt is an internal handoff field: attachments.go redacts it from viewer
+	// projections while status is generating, then the completed Image ref is the
+	// user-facing prompt record available to the explicit Regenerate action.
+	ImageGeneration *scoutChatImageGenerationState `json:"imageGeneration,omitempty"`
 	// Reply is the durable lifecycle for an asynchronous Scout answer. Lease
 	// fields persist for crash recovery but are stripped from every viewer
 	// projection.
@@ -626,6 +631,23 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeAuthJSON(w, http.StatusOK, kanbanApp.projectScoutChatResponseForViewer(user.Email, threadID, response))
+		return
+	}
+
+	if len(parts) == 4 && parts[1] == "messages" && parts[3] == "regenerate" && r.Method == http.MethodPost {
+		payload := struct {
+			Prompt string `json:"prompt"`
+		}{}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, scoutChatThreadRequestLimit)).Decode(&payload); err != nil {
+			writeAuthError(w, http.StatusBadRequest, "could not read image regeneration request")
+			return
+		}
+		response, err := kanbanApp.regenerateScoutChatImage(r.Context(), user, threadID, parts[2], payload.Prompt)
+		if err != nil {
+			writeScoutChatThreadError(w, err)
+			return
+		}
+		writeAuthJSON(w, http.StatusAccepted, kanbanApp.projectScoutChatResponseForViewer(user.Email, threadID, response))
 		return
 	}
 
@@ -1089,6 +1111,38 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		"message": userMessage,
 	}
 
+	// Image requests use the router's proposal-shaped output only as an internal
+	// prompt-optimization result. The user gets one generating pill immediately;
+	// no confirmation card or duplicate prompt echo is persisted.
+	startDirectImage := func(proposal *scoutRouterProposal) (scoutChatMessageRecord, scoutChatThreadRecord, error) {
+		if proposal == nil {
+			return scoutChatMessageRecord{}, scoutChatThreadRecord{}, fmt.Errorf("image prompt is required")
+		}
+		prompt := strings.TrimSpace(proposal.Objective)
+		if prompt == "" {
+			return scoutChatMessageRecord{}, scoutChatThreadRecord{}, fmt.Errorf("image prompt is required")
+		}
+		pending := scoutChatMessageRecord{
+			ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+			Kind:      scoutChatMessageKindImagePending,
+			Role:      "scout",
+			Text:      "generating image…",
+			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			ImageGeneration: &scoutChatImageGenerationState{
+				Status:           scoutChatImageGenerationStatusGenerating,
+				Prompt:           prompt,
+				RequestedByEmail: normalizeAccountEmail(user.Email),
+				RequestedByName:  strings.TrimSpace(user.Name),
+			},
+		}
+		saved, err := commitUserMessage(userMessage, pending)
+		if err != nil {
+			return scoutChatMessageRecord{}, scoutChatThreadRecord{}, err
+		}
+		startScoutChatImageAsyncWithPending(app, threadID, user.Email, prompt, user.Name, pending.ID)
+		return pending, saved, nil
+	}
+
 	// A curated coworker can have an identity, durable private thread, and
 	// human-authored history before its model seat is provider-qualified. Keep
 	// that thread useful for capture without silently routing the turn through
@@ -1475,7 +1529,8 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		return richResponse, richErr
 	}
 
-	modelQuery := scoutChatMessageModelText(userMessage)
+	intentQuery := scoutChatMessageModelText(userMessage)
+	modelQuery := intentQuery
 	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
 		modelQuery = scoutChatContextTurnModelText(scoutChatContextTurnFromMessage(thread, userMessage))
 	}
@@ -1486,8 +1541,8 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	// Only the execution receipt earns completion language—ordinary app controls
 	// never become a Codex proposal, goal, or worker artifact.
 	var routedVerdict *scoutRouterVerdict
-	if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic || (scoutEngaged && scoutMessageMayRequestNativeAction(text)) {
-		routedVerdict = app.routeScoutChatTurn(ctx, modelQuery, history)
+	if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic || (scoutEngaged && (scoutMessageMayRequestNativeAction(text) || scoutChatImageRequestDetected(text))) {
+		routedVerdict = app.routeScoutChatTurnWithIntent(ctx, modelQuery, intentQuery, history)
 	}
 	if routedVerdict != nil && routedVerdict.action != nil {
 		result, changed, actionErr := app.executeScoutNativeAction(ctx, user, *routedVerdict.action)
@@ -1523,6 +1578,27 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			broadcastSignedInKanbanEvent("undo_available", app.canUndoDelete())
 			app.refreshRealtimeBoardContext(routedVerdict.action.ToolID)
 		}
+		return response, nil
+	}
+
+	// A model-routed image proposal is an execution instruction after the hidden
+	// prompt-optimization step, not a user-facing proposal card. This runs for a
+	// private Scout feed and for an explicit @Scout request in a public channel.
+	if routedVerdict != nil && routedVerdict.proposal != nil &&
+		strings.EqualFold(strings.TrimSpace(routedVerdict.proposal.Kind), scoutRouterProposalKindImage) {
+		pending, saved, imageErr := startDirectImage(routedVerdict.proposal)
+		if imageErr != nil {
+			return nil, imageErr
+		}
+		response["answer"] = pending
+		response["thread"] = saved
+		response["imageGeneration"] = map[string]any{
+			"status":    scoutChatImageGenerationStatusGenerating,
+			"messageId": pending.ID,
+		}
+		// The synchronous prompt-optimization router already made one provider
+		// call. The image call is asynchronous and records its own usage receipt.
+		response["providerCalls"] = 1
 		return response, nil
 	}
 

@@ -381,6 +381,15 @@ type kanbanBoardApp struct {
 	scoutReplyCancel    context.CancelFunc
 	scoutReplyQueue     chan string
 	scoutReplyWG        sync.WaitGroup
+	// scoutImage workers own direct chat-image generation independently from
+	// reply workers. Pending messages are the durable recovery source; this
+	// process state only deduplicates live work and joins it during shutdown.
+	scoutImageStartOnce sync.Once
+	scoutImageMu        sync.Mutex
+	scoutImageCtx       context.Context
+	scoutImageCancel    context.CancelFunc
+	scoutImageInFlight  map[string]struct{}
+	scoutImageWG        sync.WaitGroup
 	// scoutProactiveAttention is a separate, governed feed-reading lane. It
 	// never shares the direct-reply queue: quiet mode can classify without
 	// emitting a message, and active mode has its own stale-source/rate fence.
@@ -1131,6 +1140,7 @@ func (app *kanbanBoardApp) restartRealtimePeer(reason string) {
 func (app *kanbanBoardApp) Close() error {
 	var closeErr error
 	app.closeOnce.Do(func() {
+		app.stopScoutChatImageWorkers()
 		app.stopScoutOpeningReplyWorkers()
 		app.stopScoutProactiveWorker()
 		if roomMixer != nil {

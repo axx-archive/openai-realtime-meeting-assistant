@@ -266,6 +266,8 @@ func (app *kanbanBoardApp) fileRecordsFromThread(viewerEmail string, thread scou
 // status must be terminally good (complete/published — running scaffolds and
 // error/needs_attention bodies never qualify); and UI-state-ish artifacts
 // (taste profiles, the house-style doc, quarantined entries) stay out. The
+// chat_image renders are also terminal deliverables: they carry source
+// chat_image and an image asset that the Files row can download/preview. The
 // grandfather migration stamps exactly the entries that pass this, and
 // fileDeliverableRecord layers the savedToFiles gate on top.
 func deliverableRecordQualifies(entry meetingMemoryEntry) bool {
@@ -274,6 +276,7 @@ func deliverableRecordQualifies(entry meetingMemoryEntry) bool {
 		return false
 	}
 	if strings.TrimSpace(metadata["source"]) != "scout_thread" &&
+		strings.TrimSpace(metadata["source"]) != "chat_image" &&
 		strings.TrimSpace(metadata["goalPlan"]) == "" &&
 		!strings.EqualFold(strings.TrimSpace(metadata["goalDeliverable"]), "true") {
 		return false
@@ -316,11 +319,26 @@ func fileDeliverableRecord(entry meetingMemoryEntry) (assistantFileRecord, bool)
 	if artifactType(entry) == artifactTypeHTMLDeck {
 		deliverableMime = "text/html"
 	}
+	var imageAsset *artifactAsset
+	if strings.TrimSpace(metadata["source"]) == "chat_image" {
+		assets := artifactAssets(entry)
+		for index := range assets {
+			if assets[index].Kind == "image" && validBlobRef(assets[index].Ref) {
+				asset := assets[index]
+				imageAsset = &asset
+				break
+			}
+		}
+		if imageAsset != nil {
+			name = firstNonEmptyString(strings.TrimSpace(imageAsset.Name), name)
+			deliverableMime = firstNonEmptyString(strings.TrimSpace(imageAsset.Mime), "image/png")
+		}
+	}
 	createdAt := ""
 	if !entry.CreatedAt.IsZero() {
 		createdAt = entry.CreatedAt.UTC().Format(time.RFC3339Nano)
 	}
-	return assistantFileRecord{
+	row := assistantFileRecord{
 		ID:           entry.ID,
 		ArtifactID:   entry.ID,
 		Name:         name,
@@ -332,7 +350,12 @@ func fileDeliverableRecord(entry meetingMemoryEntry) (assistantFileRecord, bool)
 		// brain.
 		BrainStatus: fileBrainStatusIngested,
 		Previewable: true,
-	}, true
+	}
+	if imageAsset != nil {
+		row.DownloadURL = fileBlobDownloadURL(imageAsset.Ref, name)
+		row.Previewable = blobInlineSafeMimes[deliverableMime]
+	}
+	return row, true
 }
 
 // assistantFilesForUser assembles the viewer's file list: every direct upload
@@ -802,10 +825,16 @@ func (app *kanbanBoardApp) saveDeliverableToFiles(artifactID string, folderID st
 }
 
 func (app *kanbanBoardApp) saveDeliverableSnapshotToFiles(entry meetingMemoryEntry, folderID string, actor string) (assistantFileRecord, error) {
+	if app == nil || app.memory == nil {
+		return assistantFileRecord{}, fmt.Errorf("files are unavailable")
+	}
 	artifactID := strings.TrimSpace(entry.ID)
 	if artifactID == "" {
 		return assistantFileRecord{}, errFileSaveArtifactID
 	}
+	lock := app.scoutChatThreadLock("artifact-files-" + artifactID)
+	lock.Lock()
+	defer lock.Unlock()
 	if !deliverableRecordQualifies(entry) {
 		return assistantFileRecord{}, errFileSaveNotDeliverable
 	}

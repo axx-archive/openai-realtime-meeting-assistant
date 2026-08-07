@@ -115,6 +115,22 @@ export type ScoutWorkThreadRef = {
   startedAt?: string;
 };
 
+export type ScoutImageRef = {
+  ref: string;
+  mime?: string;
+  name?: string;
+  artifactId?: string;
+  prompt?: string;
+  generationId?: string;
+  replacesMessageId?: string;
+  savedToFiles?: boolean;
+};
+
+export type ScoutImageGeneration = {
+  status: string;
+  replacesMessageId?: string;
+};
+
 export type ScoutMessage = {
   id: string;
   kind?: string;
@@ -133,6 +149,8 @@ export type ScoutMessage = {
   choices?: Array<Record<string, unknown>>;
   reply?: ScoutReplyLifecycle;
   thread?: ScoutWorkThreadRef;
+  image?: ScoutImageRef;
+  imageGeneration?: ScoutImageGeneration;
   [key: string]: unknown;
 };
 

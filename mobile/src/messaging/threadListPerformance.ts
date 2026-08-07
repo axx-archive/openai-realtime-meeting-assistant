@@ -22,7 +22,10 @@ function messageBody(message: ScoutMessage): string {
  * have substantially different measurement costs from ordinary text.
  */
 export function threadMessageContentFamily(message: ScoutMessage): string {
-  if (String(message.kind ?? '').toLowerCase() === 'thread' && message.thread) return 'work-thread';
+  const kind = String(message.kind ?? '').toLowerCase();
+  if (kind === 'thread' && message.thread) return 'work-thread';
+  if (kind === 'image' && message.image) return 'generated-image';
+  if (kind === 'image_pending') return 'image-pending';
 
   const files = Array.isArray(message.files) ? message.files : [];
   if (files.some((file) => String(file.mime ?? '').toLowerCase().startsWith('image/'))) return 'image';

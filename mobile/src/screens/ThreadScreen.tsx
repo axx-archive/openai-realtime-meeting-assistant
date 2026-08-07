@@ -106,12 +106,17 @@ type ThreadMessageRowProps = {
   timestampReveal: Animated.Value;
   retryingReply: boolean;
   resolvingProposal: boolean;
+  savingImage: boolean;
+  regeneratingImage: boolean;
+  imageSaved: boolean;
   onOpenSource: (messageId: string) => void;
   onOpenAttachment: (file: ScoutFileAttachment) => void;
   onLongPress: (message: ScoutMessage, own: boolean) => void;
   onToggleReaction: (message: ScoutMessage, emoji: string, active: boolean) => void;
   onRetryReply: (message: ScoutMessage) => void;
   onResolveProposal: (message: ScoutMessage, action: 'accepted' | 'dismissed') => void;
+  onSaveImage: (message: ScoutMessage) => void;
+  onRegenerateImage: (message: ScoutMessage) => void;
   onOpenCatchUp: () => void;
   onOpenLongMessage: (text: string, authorName: string, scout: boolean) => void;
   onOpenWorkArtifact: (message: ScoutMessage) => void;
@@ -125,12 +130,17 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
   timestampReveal,
   retryingReply,
   resolvingProposal,
+  savingImage,
+  regeneratingImage,
+  imageSaved,
   onOpenSource,
   onOpenAttachment,
   onLongPress,
   onToggleReaction,
   onRetryReply,
   onResolveProposal,
+  onSaveImage,
+  onRegenerateImage,
   onOpenCatchUp,
   onOpenLongMessage,
   onOpenWorkArtifact,
@@ -183,10 +193,15 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
         onToggleReaction={onToggleReaction}
         onRetryReply={onRetryReply}
         onResolveProposal={onResolveProposal}
+        onSaveImage={onSaveImage}
+        onRegenerateImage={onRegenerateImage}
         resolvingProposal={resolvingProposal}
         onOpenLongMessage={onOpenLongMessage}
         onOpenWorkArtifact={onOpenWorkArtifact}
         retryingReply={retryingReply}
+        savingImage={savingImage}
+        regeneratingImage={regeneratingImage}
+        imageSaved={imageSaved}
       />
     </>
   );
@@ -197,12 +212,17 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
   && previous.timestampReveal === next.timestampReveal
   && previous.retryingReply === next.retryingReply
   && previous.resolvingProposal === next.resolvingProposal
+  && previous.savingImage === next.savingImage
+  && previous.regeneratingImage === next.regeneratingImage
+  && previous.imageSaved === next.imageSaved
   && previous.onOpenSource === next.onOpenSource
   && previous.onOpenAttachment === next.onOpenAttachment
   && previous.onLongPress === next.onLongPress
   && previous.onToggleReaction === next.onToggleReaction
   && previous.onRetryReply === next.onRetryReply
   && previous.onResolveProposal === next.onResolveProposal
+  && previous.onSaveImage === next.onSaveImage
+  && previous.onRegenerateImage === next.onRegenerateImage
   && previous.onOpenCatchUp === next.onOpenCatchUp
   && previous.onOpenLongMessage === next.onOpenLongMessage
   && previous.onOpenWorkArtifact === next.onOpenWorkArtifact
@@ -267,6 +287,9 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [retryingReplyID, setRetryingReplyID] = useState<string | null>(null);
   const [resolvingProposalID, setResolvingProposalID] = useState<string | null>(null);
+  const [savingImageID, setSavingImageID] = useState<string | null>(null);
+  const [regeneratingImageID, setRegeneratingImageID] = useState<string | null>(null);
+  const [savedImageIDs, setSavedImageIDs] = useState<Set<string>>(() => new Set());
   const [threadContextRootID, setThreadContextRootID] = useState<string | null>(null);
   const [threadReplySending, setThreadReplySending] = useState(false);
   const [threadReplyError, setThreadReplyError] = useState('');
@@ -844,6 +867,87 @@ export function ThreadScreen({ route, navigation }: Props) {
     }
   }, [applyScoutActions, applyTranscriptSnapshot, resolvingProposalID, route.params.threadId, sessionToken]);
 
+  const saveGeneratedImage = useCallback(async (message: ScoutMessage) => {
+    const messageID = String(message.id ?? '').trim();
+    const artifactID = String(message.image?.artifactId ?? '').trim();
+    if (!sessionToken || !messageID || !artifactID || savingImageID) return;
+    setSavingImageID(messageID);
+    setError(null);
+    try {
+      await api.saveArtifactToFiles(sessionToken, artifactID);
+      setSavedImageIDs((current) => {
+        const next = new Set(current);
+        next.add(messageID);
+        return next;
+      });
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (caught) {
+      setError(caught instanceof BonfireApiError ? caught.message : 'Could not save that image to Drive.');
+    } finally {
+      setSavingImageID(null);
+    }
+  }, [savingImageID, sessionToken]);
+
+  const regenerateGeneratedImage = useCallback((message: ScoutMessage) => {
+    const messageID = String(message.id ?? '').trim();
+    const originalPrompt = String(message.image?.prompt ?? '').trim();
+    if (!sessionToken || !messageID || !originalPrompt || regeneratingImageID) return;
+
+    const submit = async (value?: string) => {
+      const prompt = String(value ?? '').trim();
+      if (!prompt) {
+        setError('Image prompt is required.');
+        return;
+      }
+      const generationAtRequest = transcriptGenerationRef.current;
+      setRegeneratingImageID(messageID);
+      setError(null);
+      try {
+        const response = await api.regenerateScoutImage(
+          sessionToken,
+          route.params.threadId,
+          messageID,
+          prompt,
+        );
+        applyTranscriptSnapshot(generationAtRequest, response.thread?.messages ?? response.messages ?? []);
+        applyScoutActions(response.actions);
+        setSavedImageIDs((current) => {
+          if (!current.has(messageID)) return current;
+          const next = new Set(current);
+          next.delete(messageID);
+          return next;
+        });
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch (caught) {
+        setError(caught instanceof BonfireApiError ? caught.message : 'Image could not be regenerated.');
+      } finally {
+        setRegeneratingImageID(null);
+      }
+    };
+
+    if (Platform.OS === 'ios') {
+      Alert.prompt(
+        'Regenerate image',
+        'Edit the prompt, then generate a replacement.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Regenerate', onPress: (value?: string) => { void submit(value); } },
+        ],
+        'plain-text',
+        originalPrompt,
+      );
+      return;
+    }
+    Alert.alert(
+      'Regenerate image?',
+      'This will generate a replacement using the same prompt.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Regenerate', onPress: () => { void submit(originalPrompt); } },
+      ],
+    );
+  }, [applyScoutActions, applyTranscriptSnapshot, regeneratingImageID, route.params.threadId, sessionToken]);
+
   function openAttachmentSource(target: 'message' | 'reply') {
     setAttachmentTarget(target);
     setAttachmentSourceOpen(true);
@@ -1176,12 +1280,17 @@ export function ThreadScreen({ route, navigation }: Props) {
       timestampReveal={timestampReveal}
       retryingReply={retryingReplyID === String(item.message.id)}
       resolvingProposal={resolvingProposalID === String(item.message.id)}
+      savingImage={savingImageID === String(item.message.id)}
+      regeneratingImage={regeneratingImageID === String(item.message.id)}
+      imageSaved={item.message.image?.savedToFiles === true || savedImageIDs.has(String(item.message.id))}
       onOpenSource={scrollToMessage}
       onOpenAttachment={openAttachment}
       onLongPress={openMessageActions}
       onToggleReaction={toggleReaction}
       onRetryReply={retryScoutReply}
       onResolveProposal={resolveProposal}
+      onSaveImage={saveGeneratedImage}
+      onRegenerateImage={regenerateGeneratedImage}
       onOpenCatchUp={openCatchUp}
       onOpenLongMessage={openLongMessage}
       onOpenWorkArtifact={openWorkArtifact}
@@ -1195,10 +1304,15 @@ export function ThreadScreen({ route, navigation }: Props) {
     openLongMessage,
     openWorkArtifact,
     openThreadContext,
+    regenerateGeneratedImage,
+    regeneratingImageID,
     retryScoutReply,
     retryingReplyID,
     resolveProposal,
     resolvingProposalID,
+    saveGeneratedImage,
+    savedImageIDs,
+    savingImageID,
     scrollToMessage,
     sessionToken,
     timestampReveal,

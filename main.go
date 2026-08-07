@@ -916,6 +916,7 @@ func main() {
 	defer roomMixer.close()
 	kanbanApp = newKanbanBoardApp()
 	kanbanApp.startScoutOpeningReplyWorkers()
+	kanbanApp.startScoutChatImageWorkers()
 	installLiveMediaSoakObserver(kanbanApp)
 	configureProductionCatchUpResolver(kanbanApp)
 	configureAmbientReplayRuntime(kanbanApp)

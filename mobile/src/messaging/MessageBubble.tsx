@@ -40,8 +40,13 @@ export type MessageBubbleProps = {
   onOpenLongMessage?: (text: string, authorName: string, scout: boolean) => void;
   onOpenWorkArtifact?: (message: ScoutMessage) => void;
   onResolveProposal?: (message: ScoutMessage, action: 'accepted' | 'dismissed') => void;
+  onSaveImage?: (message: ScoutMessage) => void;
+  onRegenerateImage?: (message: ScoutMessage) => void;
   resolvingProposal?: boolean;
   retryingReply?: boolean;
+  savingImage?: boolean;
+  regeneratingImage?: boolean;
+  imageSaved?: boolean;
 };
 
 function isScout(message: ScoutMessage): boolean {
@@ -122,6 +127,17 @@ function shortenedMessage(value: string, maxCharacters: number): string {
   return `${slice || value.slice(0, maxCharacters).trimEnd()}…`;
 }
 
+function generatedImageFile(message: ScoutMessage): ScoutFileAttachment | null {
+  const image = message.image;
+  const ref = String(image?.ref ?? '').trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/u.test(ref)) return null;
+  return {
+    ref,
+    name: String(image?.name ?? '').trim() || 'concept-render.png',
+    mime: String(image?.mime ?? '').trim().toLowerCase() || 'image/png',
+  };
+}
+
 export const MessageBubble = React.memo(function MessageBubble({
   message,
   own,
@@ -143,8 +159,13 @@ export const MessageBubble = React.memo(function MessageBubble({
   onOpenLongMessage,
   onOpenWorkArtifact,
   onResolveProposal,
+  onSaveImage,
+  onRegenerateImage,
   resolvingProposal = false,
   retryingReply = false,
+  savingImage = false,
+  regeneratingImage = false,
+  imageSaved = false,
 }: MessageBubbleProps) {
   const lifecycle = scoutReplyLifecyclePresentation(message);
   const workThread = workThreadPresentation(message);
@@ -154,6 +175,10 @@ export const MessageBubble = React.memo(function MessageBubble({
   const proposalPending = workProposal && !proposalStatus;
   const rawBody = bodyOf(message);
   const body = rawBody || (!lifecycle?.active ? lifecycle?.fallbackText ?? '' : '');
+  const messageKind = String(message.kind ?? '').toLowerCase();
+  const generatedImagePending = messageKind === 'image_pending';
+  const generatedImage = messageKind === 'image' ? generatedImageFile(message) : null;
+  const generatedImageUrl = generatedImage ? authenticatedFileUrl(generatedImage) : '';
   const { getMappingKey } = useMappingHelper();
   const files = Array.isArray(message.files) ? message.files : [];
   const scout = isScout(message);
@@ -192,7 +217,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   }), [timestampReveal]);
   const timestampOpacity = useMemo(() => ({ opacity: timestampReveal }), [timestampReveal]);
 
-  if (!body && files.length === 0 && !lifecycle && !workThread) return null;
+  if (!body && files.length === 0 && !lifecycle && !workThread && !generatedImage) return null;
 
   return (
     <View style={[styles.row, own && styles.rowOwn, showAuthor && styles.rowNewAuthor, reactions.length > 0 && styles.rowWithReactions]}>
@@ -262,6 +287,13 @@ export const MessageBubble = React.memo(function MessageBubble({
             <View accessibilityLiveRegion="polite" style={styles.lifecycleActive}>
               <ActivityIndicator color={colors.emberText} size="small" />
               <Text style={styles.lifecycleActiveText}>{lifecycle.label}</Text>
+            </View>
+          ) : null}
+
+          {generatedImagePending ? (
+            <View accessibilityLiveRegion="polite" style={styles.generatedImagePending}>
+              <ActivityIndicator color={colors.emberText} size="small" />
+              <Text style={styles.generatedImagePendingText}>Generating image…</Text>
             </View>
           ) : null}
 
@@ -344,11 +376,11 @@ export const MessageBubble = React.memo(function MessageBubble({
             </View>
           ) : null}
 
-          {!workProposal && !workThread && body && lifecycle?.state === 'canceled' ? (
+          {!generatedImagePending && !workProposal && !workThread && body && lifecycle?.state === 'canceled' ? (
             <Text style={styles.lifecycleCanceled}>{body}</Text>
-          ) : !workThread && body && !linkOnly && scout ? (
+          ) : !generatedImagePending && !workThread && body && !linkOnly && scout ? (
             <ScoutRichText text={body} maxCharacters={longMessage ? 560 : undefined} />
-          ) : !workThread && body && !linkOnly ? (
+          ) : !generatedImagePending && !workThread && body && !linkOnly ? (
             <Text style={[styles.body, own && styles.bodyOwn]}>
               {segments.map((segment, index) => {
                 const mappingKey = getMappingKey(`${segment.kind}-${segment.text}`, index);
@@ -381,6 +413,55 @@ export const MessageBubble = React.memo(function MessageBubble({
                 );
               })}
             </Text>
+          ) : null}
+
+          {generatedImage && generatedImageUrl ? (
+            <View style={styles.generatedImageCard}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Open ${message.image?.prompt || 'generated image'}`}
+                onPress={() => onOpenAttachment?.(generatedImage)}
+                style={({ pressed }) => [styles.generatedImagePreview, pressed && styles.generatedImagePressed]}
+              >
+                <Image
+                  source={{ uri: generatedImageUrl, headers: authenticatedFileHeaders(sessionToken, generatedImage.mime) }}
+                  cachePolicy="memory-disk"
+                  contentFit="cover"
+                  enforceEarlyResizing
+                  recyclingKey={generatedImage.ref}
+                  transition={180}
+                  style={styles.generatedImageVisual}
+                />
+              </Pressable>
+              <View style={styles.generatedImageActions}>
+                {message.image?.artifactId ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={imageSaved ? 'Image saved to Drive' : 'Save image to Drive'}
+                    accessibilityState={{ disabled: imageSaved || savingImage }}
+                    disabled={imageSaved || savingImage}
+                    onPress={() => onSaveImage?.(message)}
+                    style={({ pressed }) => [styles.generatedImageAction, pressed && styles.generatedImagePressed, (imageSaved || savingImage) && styles.generatedImageActionDisabled]}
+                  >
+                    {savingImage ? <ActivityIndicator color={colors.emberText} size="small" /> : null}
+                    <Text style={styles.generatedImageActionText}>{imageSaved ? 'Saved to Drive' : savingImage ? 'Saving…' : 'Save to Drive'}</Text>
+                  </Pressable>
+                ) : null}
+                {message.image?.prompt ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Edit prompt and regenerate image"
+                    accessibilityState={{ disabled: regeneratingImage }}
+                    disabled={regeneratingImage}
+                    onPress={() => onRegenerateImage?.(message)}
+                    style={({ pressed }) => [styles.generatedImageAction, pressed && styles.generatedImagePressed, regeneratingImage && styles.generatedImageActionDisabled]}
+                  >
+                    {regeneratingImage ? <ActivityIndicator color={colors.emberText} size="small" /> : null}
+                    <Text style={styles.generatedImageActionText}>{regeneratingImage ? 'Regenerating…' : 'Regenerate'}</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            </View>
           ) : null}
 
           {lifecycle?.state === 'failed' && lifecycle.retryable && onRetryReply ? (
@@ -570,6 +651,16 @@ const styles = StyleSheet.create({
   lifecycleActive: { minHeight: 28, flexDirection: 'row', alignItems: 'center', gap: space[2] },
   lifecycleActiveText: { ...type.bodySm, color: colors.text2 },
   lifecycleCanceled: { ...type.bodySm, color: colors.text3 },
+  generatedImagePending: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: space[2], paddingHorizontal: space[1] },
+  generatedImagePendingText: { ...type.bodySm, color: colors.emberText },
+  generatedImageCard: { width: 252, maxWidth: '100%', gap: space[2], marginTop: space[2] },
+  generatedImagePreview: { overflow: 'hidden', borderRadius: radius.lg, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line2, backgroundColor: colors.surface3 },
+  generatedImageVisual: { width: '100%', aspectRatio: 1, backgroundColor: colors.surface3 },
+  generatedImageActions: { flexDirection: 'row', flexWrap: 'wrap', gap: space[2] },
+  generatedImageAction: { minHeight: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: space[3], borderRadius: radius.full, borderCurve: 'continuous', backgroundColor: colors.emberSoft },
+  generatedImageActionDisabled: { opacity: 0.62 },
+  generatedImageActionText: { ...type.captionMedium, color: colors.emberText },
+  generatedImagePressed: { opacity: 0.74, transform: [{ scale: 0.98 }] },
   lifecycleRetry: { minHeight: 34, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: space[2], paddingHorizontal: 10, borderRadius: radius.full, backgroundColor: colors.emberSoft },
   lifecycleRetryPressed: { opacity: 0.68, transform: [{ scale: 0.98 }] },
   lifecycleRetryText: { ...type.captionMedium, color: colors.emberText },

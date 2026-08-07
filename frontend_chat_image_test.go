@@ -2,10 +2,10 @@ package main
 
 // Card 096 — the concept render's frontend contract. Grep-style pins (the
 // frontend_router_test.go pattern) holding the client half: a Kind=image
-// message renders the picture inline from a validated blob ref beside an
-// "open artifact" action, the shimmer resolves on the image kind, the image
-// proposal card confirms WITHOUT runGoalPipeline (the single-pass path), and
-// filed image assets render inline in the data room.
+// message renders the picture inline from a validated blob ref beside
+// save/regenerate actions, the generating pill resolves on the image path,
+// legacy proposal cards remain compatible, and filed image assets render
+// inline in the data room.
 
 import (
 	"os"
@@ -43,10 +43,36 @@ func TestIndexChatImageRenderBranch(t *testing.T) {
 		// the open-artifact action
 		"openArtifactStage(artifactId, String(image.prompt || 'Concept render'))",
 		// the shimmer resolves on the image kind too
-		"'artifact', 'image'].includes(recordKind)",
+		"'artifact', 'image', 'image_pending'].includes(recordKind)",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing concept-render hook %q", want)
+		}
+	}
+}
+
+func TestIndexDirectChatImageControls(t *testing.T) {
+	html := readIndexForChatImage(t)
+	for _, want := range []string{
+		"function scoutChatImagePendingNode(message)",
+		"generating image…",
+		"function scoutChatImageSaveControl(image)",
+		"/assistant/files/save",
+		"button.setAttribute('aria-label', 'Image saved to Drive')",
+		"function beginScoutChatImageRegenerate(message, figure)",
+		"Prompt used",
+		"/messages/${encodeURIComponent(messageId)}/regenerate",
+		"function attachScoutChatImageRegenerateControl(message, figure)",
+		"event.pointerType !== 'touch'",
+		"figure.classList.add('show-regenerate')",
+		"Regenerate image",
+		"More image actions",
+		"label.htmlFor = input.id",
+		"outline: 1px solid rgba(0, 0, 0, 0.1)",
+		"outline-color: rgba(255, 255, 255, 0.1)",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("index.html missing direct image-generation hook %q", want)
 		}
 	}
 }

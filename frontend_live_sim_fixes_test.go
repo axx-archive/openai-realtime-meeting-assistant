@@ -132,7 +132,7 @@ func TestIndexThinkingShimmerResolvesIntoOneCommittedTurn(t *testing.T) {
 		t.Fatal("could not extract handleChatThreadEvent body")
 	}
 	for _, want := range []string{
-		"['proposal', 'choices', 'manifest', 'thread', 'artifact', 'image'].includes(recordKind)",
+		"['proposal', 'choices', 'manifest', 'thread', 'artifact', 'image', 'image_pending'].includes(recordKind)",
 		"!scoutChatThinking.hidden",
 		"withScoutChatThinkingHold",
 	} {

@@ -274,10 +274,11 @@ const (
 	// decomposes it into a gated loop. Signal-only on the accept route, exactly
 	// like scoutRouterProposalKindToolRun.
 	scoutRouterProposalKindGoalRun = "goal_run"
-	// scoutRouterProposalKindImage is the single-shot concept-render proposal
-	// (card 096): a direct gpt-image-2 call, NOT a contract-gated goal run, so
-	// its confirm generates one image and files a design artifact rather than
-	// launching the pipeline.
+	// scoutRouterProposalKindImage is the single-shot concept-render route. It
+	// remains a proposal-shaped internal router result so the model can turn the
+	// user's intent into a production-ready image prompt; private/public chat
+	// execution consumes it immediately rather than persisting a confirmation
+	// card.
 	scoutRouterProposalKindImage = "image"
 
 	// scoutChatMessageKindProposal marks a persisted proposal card among the
@@ -295,6 +296,10 @@ const (
 	// 096): the picture rides as DATA (scoutChatImageRef) that renders inline
 	// via the session-gated /artifacts/blob route, beside its filed artifact.
 	scoutChatMessageKindImage = "image"
+	// scoutChatMessageKindImagePending is the transient-but-durable feed pill
+	// shown while gpt-image-2 is running. The prompt is persisted server-side for
+	// crash-safe handoff but redacted from viewer projections until an image lands.
+	scoutChatMessageKindImagePending = "image_pending"
 
 	// Weight labels — the card's honest cost line (§2: the card is also the
 	// cost gate while concurrency limits are global).
@@ -467,7 +472,7 @@ func scoutRouterSystemPrompt() string {
 	// produce). The matching propose_image tool is gated the same way.
 	if openAIImageGenerationAvailable() {
 		lines = append(lines,
-			"- make / generate / draw / create an image, picture, poster, logo, or illustration of X -> propose_image with a prompt describing X; this is one direct render, not a research run.",
+			"- make / generate / draw / create an image, picture, poster, logo, or illustration of X -> propose_image as a hidden prompt-optimization step; write the final production-ready image prompt, not a repetition of the user's wording. This is one direct render, not a research run.",
 		)
 	}
 	lines = append(lines,
@@ -575,18 +580,18 @@ func scoutRouterTools() []anthropicTool {
 			},
 		},
 	}
-	// The concept-render door (card 096): a single gpt-image-2 call, offered
+	// The concept-render door: a single high-quality gpt-image-2 call, offered
 	// only when OpenAI image generation is configured so a keyless-OpenAI deploy
-	// never proposes a render it cannot produce. Appended LAST so the three
+	// never routes to a render it cannot produce. Appended LAST so the three
 	// text-route tools keep their pinned enum positions.
 	if openAIImageGenerationAvailable() {
 		tools = append(tools, anthropicTool{
 			Name:        "propose_image",
-			Description: "Propose generating ONE image — a concept render — for the user to confirm. Use when the user asks to make / generate / draw / create a picture, image, poster, logo, or illustration. This is a single direct render, not a contract-gated run; nothing generates without the user's tap.",
+			Description: "Prepare ONE image — a concept render — by optimizing the user's intent into a final production-ready prompt. Use when the user asks to make / generate / draw / create a picture, image, poster, logo, or illustration. Do not echo the request or add approval language; the app may execute this single direct render immediately.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"prompt": map[string]any{"type": "string", "description": "the image prompt: what to depict, in vivid concrete terms and the user's own subject"},
+					"prompt": map[string]any{"type": "string", "description": "the final image-generation prompt: vivid concrete subject, composition, mood, palette, lighting/material/style, and exact text only when requested; preserve the user's subject and intent"},
 					"title":  map[string]any{"type": "string", "description": "a short title for the filed artifact; optional"},
 				},
 				"required": []string{"prompt"},
@@ -633,22 +638,49 @@ var scoutRouterFullRunPhrases = []string{
 	"packaging studio",
 }
 
-// scoutRouterImagePhrases is the reviewed, capped phrase list the deterministic
-// pre-router guard matches to the single-shot concept render (card 096 — the
-// fix for AJ's "image request failed" complaint: the literal ask can never be
-// dragged off-route by the Sonnet-5 turn). Capped and code-reviewed like the
-// full-run list: only unambiguous "make a picture/image" imperatives, and a
-// match may only ever PROPOSE the concept-render card, never generate.
+// scoutRouterImagePhrases is the reviewed, capped phrase list used as a
+// deterministic image-intent fallback when the prompt-optimization router is
+// unavailable. Normal image asks go through the router first so the model can
+// produce the best final prompt; the fallback preserves direct execution rather
+// than returning the old confirmation card.
 var scoutRouterImagePhrases = []string{
 	"make an image",
 	"make me an image",
+	"show me an image",
 	"generate an image",
 	"create an image",
 	"draw an image",
 	"make a picture",
 	"make me a picture",
+	"show me a picture",
 	"generate a picture",
 	"create a picture",
+	"make a visual",
+	"generate a visual",
+	"create a visual",
+	"make a poster",
+	"make a logo",
+	"make an illustration",
+	"make a graphic",
+	"generate a graphic",
+	"create a graphic",
+	"render an image",
+	"render a picture",
+	"render a visual",
+	"visualize this",
+}
+
+func scoutChatImageRequestDetected(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	for _, phrase := range scoutRouterImagePhrases {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 // scoutGuardEligibleMessage returns true when a message is work-shaped enough
@@ -715,19 +747,6 @@ func deterministicRouterGuard(text string) *scoutRouterVerdict {
 		return nil
 	}
 	lower := strings.ToLower(text)
-	// Image asks route to the single-shot concept render BEFORE the model turn,
-	// but only when generation is actually configured (a keyless-OpenAI deploy
-	// can never generate, so it must never offer the card). Propose-only — the
-	// card's Run stays the only door.
-	if openAIImageGenerationAvailable() {
-		for _, phrase := range scoutRouterImagePhrases {
-			if strings.Contains(lower, phrase) {
-				if proposal := scoutRouterImageProposal(text, text); proposal != nil {
-					return &scoutRouterVerdict{proposal: proposal, source: proposalSourceDeterministicGuard}
-				}
-			}
-		}
-	}
 	// Full-run phrases are checked FIRST so end-to-end language always wins the
 	// flagship, even mid-thread about an existing package (the sim miss:
 	// package_assembly stole the verdict).
@@ -759,13 +778,28 @@ func deterministicRouterGuard(text string) *scoutRouterVerdict {
 }
 
 // routeScoutChatTurn runs the one OpenAI routing turn and returns a verdict — a
-// proposal card, a quick-reply question card — or nil for Tier 0 (answer
+// proposal-shaped route, a quick-reply question card — or nil for Tier 0 (answer
 // inline). nil is also every degraded path: keyless, router error,
-// undecodable/unknown tool call — the caller falls through to the normal Q&A,
-// so the router can only ever ADD a card, never break chat.
+// undecodable/unknown tool call — except for an explicit image ask, where the
+// deterministic fallback still executes one direct render with the user's
+// wording if prompt optimization is unavailable.
 func (app *kanbanBoardApp) routeScoutChatTurn(ctx context.Context, text string, history []scoutChatTurn) *scoutRouterVerdict {
+	return app.routeScoutChatTurnWithIntent(ctx, text, text, history)
+}
+
+// routeScoutChatTurnWithIntent separates the provider-facing context envelope
+// from the human-authored intent used by deterministic guards and degraded
+// fallbacks. Public-channel turns intentionally send structured identity and
+// lineage to the router, but that envelope must never become an image prompt,
+// proposal objective, or native-action query when the router is unavailable.
+func (app *kanbanBoardApp) routeScoutChatTurnWithIntent(ctx context.Context, modelText string, intentText string, history []scoutChatTurn) *scoutRouterVerdict {
 	if app == nil {
 		return nil
+	}
+	modelText = strings.TrimSpace(modelText)
+	intentText = strings.TrimSpace(intentText)
+	if intentText == "" {
+		intentText = modelText
 	}
 	app.mu.Lock()
 	apiKey := strings.TrimSpace(app.apiKey)
@@ -773,15 +807,19 @@ func (app *kanbanBoardApp) routeScoutChatTurn(ctx context.Context, text string, 
 	if apiKey == "" {
 		return nil // keyless: plain Q&A — never a proposal, never an error
 	}
+	imageRequest := openAIImageGenerationAvailable() && scoutChatImageRequestDetected(intentText)
 	// Deterministic pre-router guard: exact registry names + the reviewed
 	// full-run phrase list commit the matching proposal BEFORE the model turn,
 	// so thread-context gravity can never drag the literal words off the flagship
-	// again. Propose-only, never a launch (see deterministicRouterGuard).
-	if verdict := deterministicRouterGuard(text); verdict != nil {
-		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
-			"verdict": routerVerdictDeterministicGuard,
-		})
-		return verdict
+	// again. Image asks deliberately skip this guard: they need the router's
+	// informed prompt interpretation before the app starts generation.
+	if !imageRequest {
+		if verdict := deterministicRouterGuard(intentText); verdict != nil {
+			recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
+				"verdict": routerVerdictDeterministicGuard,
+			})
+			return verdict
+		}
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -792,7 +830,7 @@ func (app *kanbanBoardApp) routeScoutChatTurn(ctx context.Context, text string, 
 		Seat:            seatRouter,
 		Workflow:        "scout_route",
 		Instructions:    scoutRouterInstructions(),
-		Input:           scoutRouterInput(text, history),
+		Input:           scoutRouterInput(modelText, history),
 		ReasoningEffort: scoutReasoningEffort(),
 		Verbosity:       "low",
 		MaxOutputTokens: scoutRouterMaxTokens,
@@ -805,6 +843,9 @@ func (app *kanbanBoardApp) routeScoutChatTurn(ctx context.Context, text string, 
 			"verdict":  routerVerdictInline,
 			"degraded": "router_error", "provider": providerOpenAI, "model": routerModel(),
 		})
+		if imageRequest {
+			return &scoutRouterVerdict{proposal: scoutRouterImageProposal(intentText, intentText), source: proposalSourceDeterministicGuard}
+		}
 		return nil
 	}
 	output, err := decodeOpenAIScoutRouterOutput(response)
@@ -814,20 +855,34 @@ func (app *kanbanBoardApp) routeScoutChatTurn(ctx context.Context, text string, 
 		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
 			"verdict": routerVerdictInline, "degraded": "router_parse_error", "provider": providerOpenAI, "model": routerModel(),
 		})
+		if imageRequest {
+			return &scoutRouterVerdict{proposal: scoutRouterImageProposal(intentText, intentText), source: proposalSourceDeterministicGuard}
+		}
 		return nil
 	}
-	verdict, err := scoutRouterVerdictFromOpenAI(output, text)
+	verdict, err := scoutRouterVerdictFromOpenAI(output, intentText)
 	if err != nil {
 		recordRouterParseFailure(strings.TrimSpace(output.Route))
 		recordCapabilityFailure(capabilityTypedScoutRouter, time.Now().UTC(), err)
 		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
 			"verdict": routerVerdictInline, "degraded": "router_parse_error", "provider": providerOpenAI, "model": routerModel(),
 		})
+		if imageRequest {
+			return &scoutRouterVerdict{proposal: scoutRouterImageProposal(intentText, intentText), source: proposalSourceDeterministicGuard}
+		}
 		return nil
 	}
 	recordCapabilitySuccess(capabilityTypedScoutRouter, time.Now().UTC())
+	// An explicit image ask is a hard intent boundary. If the router returned a
+	// non-image route, keep the direct image behavior and use the ask as the
+	// conservative prompt fallback; a stray action/proposal must not steal it.
+	if imageRequest && (verdict == nil || verdict.proposal == nil || verdict.proposal.Kind != scoutRouterProposalKindImage) {
+		return &scoutRouterVerdict{proposal: scoutRouterImageProposal(intentText, intentText), source: proposalSourceDeterministicGuard}
+	}
 	if verdict != nil && verdict.choices != nil {
-		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{"verdict": routerVerdictChoicePills})
+		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{
+			"verdict": routerVerdictChoicePills,
+		})
 		return verdict
 	}
 	if verdict != nil && verdict.action != nil {

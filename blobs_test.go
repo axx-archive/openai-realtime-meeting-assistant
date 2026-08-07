@@ -330,6 +330,35 @@ func TestSweepUnreferencedBlobsDeletesOnlyOrphans(t *testing.T) {
 	}
 }
 
+func TestSweepUnreferencedBlobsKeepsCompletedChatImages(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	ref, err := putBlob([]byte("chat image without artifact asset fallback"), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Scout", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := scoutChatMessageRecord{
+		ID: "chat-image-gc-reference", Kind: scoutChatMessageKindImage, Role: "scout", Text: "render",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Image:     &scoutChatImageRef{Ref: ref, Mime: "image/png", Prompt: "a retained render"},
+	}
+	if _, err := app.commitScoutChatThreadMessages("aj@shareability.com", thread.ID, message); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := sweepUnreferencedBlobs(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range deleted {
+		if candidate == ref {
+			t.Fatal("blob sweep deleted a completed chat image still referenced by its message")
+		}
+	}
+}
+
 // The version-body seam is wired IN PRODUCTION (blobs.go init), not just in
 // tests: a body edit journals the superseded body as a recoverable blob, and
 // the GC treats version-body refs as referenced — an edit history never

@@ -1214,6 +1214,20 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, t
 		} else {
 			projected.Messages[messageIndex].Files = files
 		}
+		if original.ImageGeneration != nil && original.ImageGeneration.Status == scoutChatImageGenerationStatusGenerating {
+			generation := *original.ImageGeneration
+			generation.Prompt = ""
+			generation.RequestedByEmail = ""
+			generation.RequestedByName = ""
+			projected.Messages[messageIndex].ImageGeneration = &generation
+		}
+		if original.Image != nil {
+			image := *original.Image
+			if artifact, ok := app.osArtifactByID(strings.TrimSpace(image.ArtifactID)); ok {
+				image.SavedToFiles = strings.EqualFold(strings.TrimSpace(artifact.Metadata["savedToFiles"]), "true")
+			}
+			projected.Messages[messageIndex].Image = &image
+		}
 	}
 	return projected
 }

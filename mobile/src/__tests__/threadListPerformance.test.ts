@@ -60,6 +60,8 @@ test('separates marker, author, and content-shape recycle pools', () => {
   const scout = row({ message: { ...teammate.message, role: 'scout' } });
   const own = row({ own: true });
   const image = row({ message: { ...teammate.message, files: [{ ref: 'asset-1', name: 'photo.png', mime: 'image/png' }] } });
+  const generatedImage = row({ message: { ...scout.message, kind: 'image', image: { ref: 'a'.repeat(64), mime: 'image/png' } } });
+  const pendingImage = row({ message: { ...scout.message, kind: 'image_pending', imageGeneration: { status: 'generating' } } });
   const link = row({ message: { ...teammate.message, text: 'https://example.com/story' } });
   const work = row({
     message: {
@@ -74,6 +76,8 @@ test('separates marker, author, and content-shape recycle pools', () => {
   assert.equal(threadRowRecycleType(scout), 'scout-rich');
   assert.equal(threadRowRecycleType(own), 'own-text');
   assert.equal(threadRowRecycleType(image), 'teammate-image');
+  assert.equal(threadRowRecycleType(generatedImage), 'scout-generated-image');
+  assert.equal(threadRowRecycleType(pendingImage), 'scout-image-pending');
   assert.equal(threadRowRecycleType(link), 'teammate-link');
   assert.equal(threadRowRecycleType(work), 'scout-work-thread');
   assert.equal(threadRowRecycleType({ ...scout, timelineLabel: 'Today' }), 'marker-scout-rich');

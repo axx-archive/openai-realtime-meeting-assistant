@@ -137,7 +137,7 @@ func TestIndexStageArtifactRunlogContract(t *testing.T) {
 	}
 	// the record router still sends kind:"artifact" here, and the thread
 	// teardown removes the container with the other feed nodes
-	if !strings.Contains(html, ".scout-chat-msg, .scout-chat-system, .scout-chat-research, .runlog") {
+	if !strings.Contains(html, ".scout-chat-image-pending, .runlog, .scout-chat-daybreak") {
 		t.Error("clearScoutChatThreadNodes must tear down .runlog containers")
 	}
 }

@@ -409,6 +409,11 @@ func sweepUnreferencedBlobs(app *kanbanBoardApp) ([]string, error) {
 					referenced[ref] = struct{}{}
 				}
 			}
+			if message.Image != nil {
+				if ref := strings.TrimSpace(message.Image.Ref); validBlobRef(ref) {
+					referenced[ref] = struct{}{}
+				}
+			}
 		}
 	}
 	// A newly uploaded composer source is intentionally not yet present in a
