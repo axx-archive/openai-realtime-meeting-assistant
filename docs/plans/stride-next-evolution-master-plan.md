@@ -189,12 +189,13 @@ complete only at the scope named; local implementation is not release proof.
   real-workforce pilots, and soak remain external acceptance gates unless their
   full evidence is actually produced.
 
-**Exact resume point:** sign in to the preserved App Store Connect handoff page
-and prove Build 48 is `VALID`, assigned to the internal Team group, and
-available on the intended physical device. If live production test messages are
-authorized, prove ordinary image analysis and exact-source TL;DR sharing to the
-pinned Bonfire Chat; otherwise retain the current code/test proof without
-mutating production chat. Resolve the pre-existing
+**Exact resume point:** install/open Build 48 from internal `Team (Expo)` on the
+intended physical device and complete the focused native image/result acceptance
+matrix. Apple `VALID`, non-expiry, and internal-group availability are already
+proven and must not be reopened. If live production test messages are authorized,
+prove ordinary image analysis and exact-source TL;DR sharing to the pinned
+Bonfire Chat; otherwise retain the current code/test proof without mutating
+production chat. Resolve the pre-existing
 `axx-archive/stride` naming collision before creating or changing a primary
 remote. After those gates, continue the explicitly unresolved external E10
 qualification, physical-device, replay/promotion, HA/DR, pilot, and soak work;
