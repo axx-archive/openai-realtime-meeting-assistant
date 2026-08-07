@@ -40,10 +40,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and remain the fallback if this bundle is ever rejected.
       // Regenerate both with `npm run brand:regen` from the repo root.
       icon: './assets/Stride.icon',
-      // Build 47 adds durable generated-image rendering and actions to native
-      // chat while retaining the camera/roster fixes shipped in build 46.
+      // Build 48 adds Drive browsing and document tags, editable work prompts,
+      // and truthful Open/Save/Regenerate deliverable actions while retaining
+      // the generated-image and camera/roster fixes shipped in build 47.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '47',
+      buildNumber: '48',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',
