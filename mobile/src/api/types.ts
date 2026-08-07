@@ -113,6 +113,60 @@ export type ScoutWorkThreadRef = {
   progressPercent?: number;
   progressNote?: string;
   startedAt?: string;
+  resultTitle?: string;
+  resultPreview?: string;
+  provenance?: string;
+};
+
+export type ArtifactDispositionRef = {
+  tenantId: string;
+  artifactId: string;
+  contentRevision: number;
+  contentDigest: string;
+  aclVersion: number;
+  audienceDigest: string;
+};
+
+export type ArtifactDriveReference = {
+  id: string;
+  artifact: ArtifactDispositionRef;
+  createdAt: string;
+  createdBy: string;
+  folderId?: string;
+  sourceArtifactId: string;
+};
+
+export type ArtifactDispositionReceipt = {
+  operationId: string;
+  action: 'open' | 'save' | 'discard';
+  artifact: ArtifactDispositionRef;
+  outcome: string;
+  drive?: ArtifactDriveReference;
+};
+
+export type ArtifactResponse = {
+  ok: boolean;
+  artifacts: Array<{ id: string; text?: string; metadata?: Record<string, string> }>;
+  dispositionRef?: ArtifactDispositionRef;
+};
+
+export type DriveFileRecord = {
+  id: string;
+  name: string;
+  mime?: string;
+  size?: number;
+  folderId?: string;
+  artifactId?: string;
+  origin?: string;
+  downloadUrl?: string;
+  canRename?: boolean;
+};
+
+export type DriveFolderRecord = {
+  id: string;
+  name: string;
+  count?: number;
+  parentId?: string;
 };
 
 export type ScoutImageRef = {

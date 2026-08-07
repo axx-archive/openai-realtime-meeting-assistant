@@ -9506,13 +9506,14 @@
         align-self: center;
         width: min(var(--feed-measure), 100%);
         margin: 4px 0 6px;
-        padding: 14px;
-        border: 1px solid var(--line-1);
-        border-radius: var(--r-lg, 12px);
-        background: var(--surface-2);
+        padding: 20px;
+        border: 0;
+        border-radius: 18px;
+        background: linear-gradient(145deg, color-mix(in srgb, var(--surface-2) 96%, white 4%), var(--surface-2));
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--line-1) 78%, transparent), 0 18px 46px rgba(0, 0, 0, 0.14);
         display: flex;
         flex-direction: column;
-        gap: 10px;
+        gap: 14px;
       }
 
       .scout-proposal-card__head {
@@ -9528,6 +9529,13 @@
         color: var(--text-1);
       }
 
+      .scout-proposal-card__eyebrow {
+        color: var(--agent);
+        font: var(--type-label-sm, var(--type-label-lg));
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
       .scout-proposal-card__group {
         font: var(--type-label-sm, var(--type-label-lg));
         letter-spacing: var(--track-label);
@@ -9539,6 +9547,22 @@
         margin: 0;
         color: var(--text-2);
         line-height: 1.55;
+        text-wrap: pretty;
+      }
+
+      .scout-proposal-card .palette__form-field { gap: 8px; }
+      .scout-proposal-card .palette__form-label {
+        color: var(--text-3);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .scout-proposal-card .palette__field {
+        min-height: 116px;
+        padding: 14px 15px;
+        border-radius: 12px;
+        background: color-mix(in srgb, var(--surface-1) 84%, transparent);
+        line-height: 1.5;
+        resize: vertical;
       }
 
       .scout-proposal-card__meta {
@@ -9567,7 +9591,7 @@
       }
 
       .scout-proposal-card__run {
-        min-height: 38px;
+        min-height: 44px;
         padding: 0 16px;
         border: 0;
         border-radius: var(--r-full);
@@ -9587,7 +9611,7 @@
 
       /* sheet 2b: "just answer instead" is an outlined pill beside Run it */
       .scout-proposal-card__escape {
-        min-height: 38px;
+        min-height: 44px;
         padding: 0 16px;
         border: 1px solid var(--line-2);
         border-radius: var(--r-full);
@@ -9596,8 +9620,10 @@
         font: var(--type-label-lg);
         letter-spacing: var(--track-label);
         cursor: pointer;
-        transition: border-color var(--dur-fast) var(--ease);
+        transition: border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
       }
+
+      .scout-proposal-card__escape:active { transform: scale(0.96); }
 
       .scout-proposal-card__escape:hover {
         border-color: var(--text-3);
@@ -9611,8 +9637,96 @@
       }
 
       .scout-proposal-card.is-resolved {
-        opacity: 0.72;
+        padding: 11px 14px;
+        border-radius: 12px;
+        box-shadow: 0 0 0 1px var(--line-1);
+        opacity: 0.82;
       }
+
+      .drive-save-dialog {
+        width: min(440px, calc(100vw - 28px));
+        padding: 0;
+        border: 0;
+        border-radius: 18px;
+        background: var(--surface-2);
+        color: var(--text-1);
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34), 0 0 0 1px var(--line-1);
+      }
+      .drive-save-dialog::backdrop { background: rgba(0, 0, 0, 0.54); backdrop-filter: blur(7px); }
+      .drive-save-dialog__form { display: grid; gap: 16px; padding: 22px; }
+      .drive-save-dialog__eyebrow { color: var(--agent); font: var(--type-label-sm, var(--type-label-lg)); letter-spacing: .12em; text-transform: uppercase; }
+      .drive-save-dialog__title { margin: -8px 0 0; font: var(--type-title-sm, 600 20px/1.25 sans-serif); text-wrap: balance; }
+      .drive-save-dialog__field { display: grid; gap: 7px; color: var(--text-3); font: var(--type-label-sm, var(--type-label-lg)); letter-spacing: .06em; text-transform: uppercase; }
+      .drive-save-dialog__input {
+        min-height: 44px;
+        padding: 0 13px;
+        border: 1px solid var(--line-1);
+        border-radius: 11px;
+        background: var(--surface-1);
+        color: var(--text-1);
+        font: inherit;
+        letter-spacing: normal;
+        text-transform: none;
+      }
+      .drive-save-dialog__actions { display: flex; justify-content: flex-end; gap: 9px; }
+      .drive-save-dialog__button { min-height: 44px; padding: 0 16px; border: 1px solid var(--line-1); border-radius: 999px; background: transparent; color: var(--text-1); cursor: pointer; transition: transform var(--dur-fast) var(--ease); }
+      .drive-save-dialog__button[data-primary="true"] { border-color: transparent; background: var(--agent); color: white; }
+      .drive-save-dialog__button:active { transform: scale(.96); }
+
+      .chat-attachment-source-menu {
+        position: fixed;
+        z-index: 1200;
+        width: 228px;
+        padding: 7px;
+        border-radius: 14px;
+        background: var(--surface-2);
+        box-shadow: 0 18px 54px rgba(0, 0, 0, .28), 0 0 0 1px var(--line-1);
+      }
+      .chat-attachment-source-menu__item {
+        width: 100%; min-height: 44px; padding: 0 12px; border: 0; border-radius: 9px;
+        display: flex; align-items: center; gap: 10px; background: transparent; color: var(--text-1);
+        text-align: left; cursor: pointer; transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+      .chat-attachment-source-menu__item:hover { background: var(--surface-3); }
+      .chat-attachment-source-menu__item:active { transform: scale(.96); }
+      .drive-picker-dialog { width: min(620px, calc(100vw - 24px)); max-height: min(720px, calc(100vh - 24px)); }
+      .drive-picker-dialog__toolbar { display: flex; align-items: center; gap: 9px; }
+      .drive-picker-dialog__back { width: 40px; min-width: 40px; padding: 0; }
+      .drive-picker-dialog__path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+      .drive-picker-dialog__list { display: grid; gap: 6px; max-height: 430px; overflow: auto; }
+      .drive-picker-dialog__row {
+        min-height: 52px; padding: 9px 11px; border: 0; border-radius: 11px; display: grid;
+        grid-template-columns: 32px minmax(0, 1fr); align-items: center; gap: 10px;
+        background: transparent; color: var(--text-1); text-align: left; cursor: pointer;
+      }
+      .drive-picker-dialog__row:hover { background: var(--surface-3); }
+      .drive-picker-dialog__row:active { transform: scale(.98); }
+      .drive-picker-dialog__row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .drive-picker-dialog__row-meta { display: block; margin-top: 2px; color: var(--text-3); font: var(--type-label-sm, var(--type-label-lg)); }
+      .drive-picker-dialog__search { width: 100%; }
+      .drive-picker-dialog__empty { padding: 28px 12px; color: var(--text-3); text-align: center; }
+      .document-mention-popover {
+        position: fixed; z-index: 1200; width: min(430px, calc(100vw - 24px)); max-height: 292px;
+        overflow: auto; padding: 7px; border-radius: 14px; background: var(--surface-2);
+        box-shadow: 0 18px 54px rgba(0, 0, 0, .28), 0 0 0 1px var(--line-1);
+      }
+      .document-mention-popover__label { padding: 8px 10px 6px; color: var(--text-3); font: var(--type-label-sm, var(--type-label-lg)); text-transform: uppercase; letter-spacing: .1em; }
+      .document-mention-popover__item {
+        width: 100%; min-height: 48px; padding: 7px 10px; border: 0; border-radius: 10px;
+        display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 9px;
+        background: transparent; color: var(--text-1); text-align: left; cursor: pointer;
+      }
+      .document-mention-popover__item:hover,
+      .document-mention-popover__item.is-active { background: var(--surface-3); }
+      .document-mention-popover__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .document-mention-popover__meta { display: block; margin-top: 2px; color: var(--text-3); font: var(--type-label-sm, var(--type-label-lg)); }
+      .palette__drive-action {
+        width: 100%; min-height: 52px; padding: 9px 12px; border: 1px solid var(--line-1); border-radius: 12px;
+        display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 10px;
+        background: color-mix(in srgb, var(--surface-2) 92%, var(--agent) 8%); color: var(--text-1); text-align: left; cursor: pointer;
+      }
+      .palette__drive-action:hover { background: color-mix(in srgb, var(--surface-3) 88%, var(--agent) 12%); }
+      .palette__drive-action:active { transform: scale(.98); }
 
       /* ---------- Concept render (card 096) ----------
          A generated image lands as a scout bubble + this figure: the picture on
@@ -11191,6 +11305,23 @@
         flex-direction: column;
         gap: 12px;
       }
+
+      .scout-chat-research[data-state="complete"],
+      .scout-chat-research[data-state="published"] {
+        border-color: color-mix(in srgb, var(--live) 26%, var(--line-1));
+        box-shadow: 0 14px 38px rgba(0, 0, 0, .14);
+      }
+
+      .scout-chat-research__preview {
+        margin: 0; color: var(--text-2); font: var(--type-body); line-height: 1.5;
+        display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+      }
+      .scout-chat-research__preview[hidden],
+      .scout-chat-research__provenance[hidden] { display: none; }
+      .scout-chat-research__provenance { color: var(--text-3); font: var(--type-label); letter-spacing: var(--track-label); }
+      .scout-chat-research__live-line { display: flex; align-items: center; gap: 8px; color: var(--text-3); font: var(--type-label); letter-spacing: var(--track-label); }
+      .scout-chat-research__live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ember); animation: bf-think var(--pulse-cycle) var(--ease) infinite; }
+      .scout-chat-research:not([data-state="queued"]):not([data-state="running"]) .scout-chat-research__live-dot { display: none; }
 
       .scout-chat-research__flow {
         display: grid;
@@ -31848,7 +31979,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	        chatContextReplyInput.style.height = `${Math.min(128, Math.max(40, chatContextReplyInput.scrollHeight))}px`
 	        syncDesktopReplyComposerState()
 	      })
-	      chatContextReplyAttach?.addEventListener('click', () => chatContextReplyFileInput?.click())
+	      chatContextReplyAttach?.addEventListener('click', event => openChatAttachmentSourceMenu(event.currentTarget, 'reply'))
 	      chatContextReplyFileInput?.addEventListener('change', addPendingDesktopReplyFiles)
 	      chatContextReplyForm?.addEventListener('submit', submitDesktopThreadReply)
 	      document.addEventListener('keydown', event => {
@@ -31986,7 +32117,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	        }
 	      })
 	      chatConvoRenameInput?.addEventListener('blur', () => finishChatThreadRename(true))
-	      scoutChatAttach?.addEventListener('click', () => scoutChatFileInput?.click())
+	      scoutChatAttach?.addEventListener('click', event => openChatAttachmentSourceMenu(event.currentTarget, 'main'))
 	      scoutChatDeliverables?.addEventListener('click', event => { event.stopPropagation(); toggleDeliverablesDrawer() })
 	      document.addEventListener('click', event => {
 	        if (deliverablesDrawerIsOpen() && !scoutDeliverablesPopover.contains(event.target) && !scoutChatDeliverables?.contains(event.target)) {
@@ -38204,6 +38335,112 @@ Wrap the entire export in one code block. After the code block, say whether the 
         return status === 'complete' || status === 'published'
       }
 
+      function driveFolderOptionLabel(folder, byId) {
+        const names = [String(folder?.name || 'Folder')]
+        let parentId = String(folder?.parentId || '')
+        const seen = new Set()
+        while (parentId && !seen.has(parentId)) {
+          seen.add(parentId)
+          const parent = byId.get(parentId)
+          if (!parent) break
+          names.unshift(String(parent.name || 'Folder'))
+          parentId = String(parent.parentId || '')
+        }
+        return names.join(' / ')
+      }
+
+      async function chooseDriveSaveOptions(defaultName) {
+        if (typeof loadFilesSurface === 'function') {
+          await loadFilesSurface(true).catch(() => {})
+        }
+        const dialog = document.createElement('dialog')
+        dialog.className = 'drive-save-dialog'
+        const form = document.createElement('form')
+        form.method = 'dialog'
+        form.className = 'drive-save-dialog__form'
+        form.append(
+          bfEl('span', 'drive-save-dialog__eyebrow', 'Save to Drive'),
+          bfEl('h3', 'drive-save-dialog__title', 'Name it and choose where it belongs')
+        )
+        const nameLabel = bfEl('label', 'drive-save-dialog__field', 'File name')
+        const name = document.createElement('input')
+        name.className = 'drive-save-dialog__input'
+        name.maxLength = 160
+        name.required = true
+        name.value = String(defaultName || 'Deliverable').trim() || 'Deliverable'
+        nameLabel.appendChild(name)
+        const folderLabel = bfEl('label', 'drive-save-dialog__field', 'Folder')
+        const folder = document.createElement('select')
+        folder.className = 'drive-save-dialog__input'
+        folder.appendChild(new Option('My Drive', ''))
+        const byId = new Map((filesFolders || []).map(item => [String(item?.id || ''), item]))
+        ;(filesFolders || []).forEach(item => folder.appendChild(new Option(driveFolderOptionLabel(item, byId), String(item?.id || ''))))
+        folderLabel.appendChild(folder)
+        const actions = bfEl('div', 'drive-save-dialog__actions')
+        const cancel = bfEl('button', 'drive-save-dialog__button', 'Cancel')
+        cancel.type = 'button'
+        const save = bfEl('button', 'drive-save-dialog__button', 'Save')
+        save.type = 'submit'
+        save.dataset.primary = 'true'
+        actions.append(cancel, save)
+        form.append(nameLabel, folderLabel, actions)
+        dialog.appendChild(form)
+        document.body.appendChild(dialog)
+        return new Promise(resolve => {
+          let submitted = false
+          const finish = value => {
+            if (dialog.open) dialog.close()
+            dialog.remove()
+            resolve(value)
+          }
+          cancel.addEventListener('click', () => finish(null))
+          dialog.addEventListener('cancel', event => { event.preventDefault(); finish(null) })
+          form.addEventListener('submit', event => {
+            event.preventDefault()
+            if (submitted || !name.value.trim()) return
+            submitted = true
+            finish({ fileName: name.value.trim(), folderId: folder.value })
+          })
+          dialog.showModal()
+          name.focus()
+          name.select()
+        })
+      }
+
+      async function chooseDriveFileName(defaultName) {
+	    const dialog = document.createElement('dialog')
+	    dialog.className = 'drive-save-dialog'
+	    const form = document.createElement('form')
+	    form.className = 'drive-save-dialog__form'
+	    form.append(bfEl('span', 'drive-save-dialog__eyebrow', 'Drive'), bfEl('h3', 'drive-save-dialog__title', 'Rename file'))
+	    const label = bfEl('label', 'drive-save-dialog__field', 'File name')
+	    const input = document.createElement('input')
+	    input.className = 'drive-save-dialog__input'
+	    input.required = true
+	    input.maxLength = 160
+	    input.value = String(defaultName || 'File')
+	    label.appendChild(input)
+	    const actions = bfEl('div', 'drive-save-dialog__actions')
+	    const cancel = bfEl('button', 'drive-save-dialog__button', 'Cancel')
+	    cancel.type = 'button'
+	    const save = bfEl('button', 'drive-save-dialog__button', 'Rename')
+	    save.type = 'submit'
+	    save.dataset.primary = 'true'
+	    actions.append(cancel, save)
+	    form.append(label, actions)
+	    dialog.appendChild(form)
+	    document.body.appendChild(dialog)
+	    return new Promise(resolve => {
+	      const finish = value => { if (dialog.open) dialog.close(); dialog.remove(); resolve(value) }
+	      cancel.addEventListener('click', () => finish(''))
+	      dialog.addEventListener('cancel', event => { event.preventDefault(); finish('') })
+	      form.addEventListener('submit', event => { event.preventDefault(); if (input.value.trim()) finish(input.value.trim()) })
+	      dialog.showModal()
+	      input.focus()
+	      input.select()
+	    })
+      }
+
       function artifactSaveToFilesControl(entry, options = {}) {
         const artifactId = String(entry?.id || '').trim()
         if (!artifactId || !artifactQualifiesForFiles(entry)) return null
@@ -38229,6 +38466,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
         button.textContent = readyLabel
         button.title = readyTitle
         button.addEventListener('click', async () => {
+	      const destination = await chooseDriveSaveOptions(artifactDisplayTitle(entry))
+	      if (!destination) return
           button.disabled = true
           button.dataset.state = 'saving'
           button.textContent = savingLabel
@@ -38236,7 +38475,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             const response = await fetch('/assistant/files/save', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ artifactId })
+              body: JSON.stringify({ artifactId, fileName: destination.fileName, folderId: destination.folderId })
             })
             const payload = await response.json().catch(() => ({}))
             if (!response.ok) {
@@ -49910,6 +50149,269 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	      }
 
+	      let chatAttachmentSourceMenu = null
+	      let documentMentionPopover = null
+	      let documentMentionMatches = []
+	      let documentMentionActiveIndex = 0
+	      let documentMentionInput = null
+	      let documentMentionAnchor = -1
+
+	      function closeChatAttachmentSourceMenu() {
+	        chatAttachmentSourceMenu?.remove()
+	        chatAttachmentSourceMenu = null
+	      }
+
+	      function positionFloatingSurface(surface, anchor) {
+	        const rect = anchor?.getBoundingClientRect?.()
+	        if (!surface || !rect) return
+	        const width = surface.getBoundingClientRect().width || 228
+	        const left = Math.max(12, Math.min(window.innerWidth - width - 12, rect.left))
+	        surface.style.left = `${left}px`
+	        surface.style.top = `${Math.max(12, rect.top - surface.getBoundingClientRect().height - 8)}px`
+	      }
+
+	      function openChatAttachmentSourceMenu(anchor, target = 'main') {
+	        if (!authedUser || !activeScoutThreadId) return
+	        closeChatAttachmentSourceMenu()
+	        const menu = bfEl('div', 'chat-attachment-source-menu')
+	        menu.setAttribute('role', 'menu')
+	        menu.setAttribute('aria-label', 'Attach from')
+	        const upload = bfEl('button', 'chat-attachment-source-menu__item', 'Upload from computer')
+	        upload.type = 'button'
+	        upload.addEventListener('click', () => {
+	          closeChatAttachmentSourceMenu()
+	          ;(target === 'reply' ? chatContextReplyFileInput : scoutChatFileInput)?.click()
+	        })
+	        const drive = bfEl('button', 'chat-attachment-source-menu__item', 'Browse Drive')
+	        drive.type = 'button'
+	        drive.addEventListener('click', async () => {
+	          closeChatAttachmentSourceMenu()
+	          const file = await chooseDriveFile()
+	          if (file) await attachDriveFileToComposer(file, target)
+	        })
+	        menu.append(upload, drive)
+	        document.body.appendChild(menu)
+	        chatAttachmentSourceMenu = menu
+	        positionFloatingSurface(menu, anchor)
+	        drive.focus()
+	      }
+
+	      function driveFolderPath(folderId) {
+	        const byId = new Map((filesFolders || []).map(folder => [String(folder?.id || ''), folder]))
+	        const names = []
+	        const seen = new Set()
+	        let current = String(folderId || '')
+	        while (current && !seen.has(current)) {
+	          seen.add(current)
+	          const folder = byId.get(current)
+	          if (!folder) break
+	          names.unshift(String(folder.name || 'Folder'))
+	          current = String(folder.parentId || '')
+	        }
+	        return names.length ? `My Drive / ${names.join(' / ')}` : 'My Drive'
+	      }
+
+	      async function chooseDriveFile() {
+	        await loadFilesSurface(true)
+	        const dialog = document.createElement('dialog')
+	        dialog.className = 'drive-save-dialog drive-picker-dialog'
+	        const form = bfEl('form', 'drive-save-dialog__form')
+	        form.method = 'dialog'
+	        form.append(bfEl('span', 'drive-save-dialog__eyebrow', 'Attach from Drive'), bfEl('h3', 'drive-save-dialog__title', 'Choose the exact source'))
+	        const toolbar = bfEl('div', 'drive-picker-dialog__toolbar')
+	        const back = bfEl('button', 'drive-save-dialog__button drive-picker-dialog__back', '←')
+	        back.type = 'button'
+	        back.setAttribute('aria-label', 'Go to parent folder')
+	        const path = bfEl('span', 'drive-picker-dialog__path', 'My Drive')
+	        toolbar.append(back, path)
+	        const search = document.createElement('input')
+	        search.className = 'drive-save-dialog__input drive-picker-dialog__search'
+	        search.type = 'search'
+	        search.placeholder = 'Search this folder'
+	        search.setAttribute('aria-label', 'Search Drive files')
+	        const list = bfEl('div', 'drive-picker-dialog__list')
+	        list.setAttribute('role', 'listbox')
+	        const cancel = bfEl('button', 'drive-save-dialog__button', 'Cancel')
+	        cancel.type = 'button'
+	        const actions = bfEl('div', 'drive-save-dialog__actions')
+	        actions.appendChild(cancel)
+	        form.append(toolbar, search, list, actions)
+	        dialog.appendChild(form)
+	        document.body.appendChild(dialog)
+
+	        return new Promise(resolve => {
+	          let folderId = ''
+	          const finish = value => {
+	            if (dialog.open) dialog.close()
+	            dialog.remove()
+	            resolve(value)
+	          }
+	          const render = () => {
+	            const query = search.value.trim().toLowerCase()
+	            path.textContent = driveFolderPath(folderId)
+	            const byId = new Map((filesFolders || []).map(folder => [String(folder?.id || ''), folder]))
+	            const current = byId.get(folderId)
+	            back.disabled = !folderId
+	            back.dataset.parentId = String(current?.parentId || '')
+	            const folders = (filesFolders || []).filter(folder => String(folder?.parentId || '') === folderId && (!query || String(folder?.name || '').toLowerCase().includes(query)))
+	            const files = (filesEntries || []).filter(file => file?.authorized !== false && String(file?.folderId || '') === folderId && String(file?.id || '') && (!query || String(file?.name || '').toLowerCase().includes(query)))
+	            const nodes = []
+	            for (const folder of folders) {
+	              const row = bfEl('button', 'drive-picker-dialog__row')
+	              row.type = 'button'
+	              row.append(bfEl('span', '', '◇'))
+	              const copy = bfEl('span')
+	              copy.append(bfEl('span', 'drive-picker-dialog__row-name', String(folder.name || 'Folder')), bfEl('span', 'drive-picker-dialog__row-meta', 'Folder'))
+	              row.appendChild(copy)
+	              row.addEventListener('click', () => { folderId = String(folder.id || ''); search.value = ''; render() })
+	              nodes.push(row)
+	            }
+	            for (const file of files) {
+	              const row = bfEl('button', 'drive-picker-dialog__row')
+	              row.type = 'button'
+	              const icon = bfEl('span')
+	              icon.innerHTML = filesRowIconSvg(file)
+	              const copy = bfEl('span')
+	              copy.append(bfEl('span', 'drive-picker-dialog__row-name', String(file.name || 'File')), bfEl('span', 'drive-picker-dialog__row-meta', fileMetaParts(file)))
+	              row.append(icon, copy)
+	              row.addEventListener('click', () => finish(file))
+	              nodes.push(row)
+	            }
+	            list.replaceChildren(...(nodes.length ? nodes : [bfEl('div', 'drive-picker-dialog__empty', query ? 'No matches in this folder.' : 'This folder is empty.')]))
+	          }
+	          back.addEventListener('click', () => { folderId = String(back.dataset.parentId || ''); search.value = ''; render() })
+	          search.addEventListener('input', render)
+	          cancel.addEventListener('click', () => finish(null))
+	          dialog.addEventListener('cancel', event => { event.preventDefault(); finish(null) })
+	          dialog.showModal()
+	          render()
+	          search.focus()
+	        })
+	      }
+
+	      function exactAttachmentIdentity(file) {
+	        return `${String(file?.sourceId || '')}:${String(file?.sourceRevision || '')}:${String(file?.ref || '')}`
+	      }
+
+	      async function attachDriveFileToComposer(file, target = 'main') {
+	        const thread = await ensurePersistedScoutThread()
+	        const response = await fetch('/assistant/attachments/from-file', {
+	          method: 'POST',
+	          headers: { 'Content-Type': 'application/json' },
+	          body: JSON.stringify({ threadId: String(thread?.id || activeScoutThreadId || ''), fileId: String(file?.id || '') })
+	        })
+	        const payload = await response.json().catch(() => ({}))
+	        const attachment = payload?.attachment
+	        if (!response.ok || !attachment?.ref || !attachment?.sourceId || !attachment?.sourceRevision) {
+	          showToast({ text: payload?.error || 'Drive could not authorize that file for this chat', kind: 'error' })
+	          return false
+	        }
+	        const pending = target === 'reply' ? pendingDesktopReplyFiles : pendingScoutFiles
+	        if (pending.length >= 6) {
+	          showToast({ text: 'up to 6 files per message', kind: 'note' })
+	          return false
+	        }
+	        const identity = exactAttachmentIdentity(attachment)
+	        if (!pending.some(candidate => exactAttachmentIdentity(candidate) === identity)) pending.push(attachment)
+	        if (target === 'reply') renderPendingDesktopReplyFiles()
+	        else renderPendingScoutFiles()
+	        return true
+	      }
+
+	      function closeDocumentMentionPopover() {
+	        documentMentionPopover?.remove()
+	        documentMentionPopover = null
+	        documentMentionMatches = []
+	        documentMentionActiveIndex = 0
+	        documentMentionInput = null
+	        documentMentionAnchor = -1
+	      }
+
+	      function documentTokenAtCaret(input) {
+	        if (!input || input === roomChatInput || input.disabled) return null
+	        const caret = input.selectionStart ?? input.value.length
+	        const match = /(^|\s)#([^\n#]*)$/.exec(input.value.slice(0, caret))
+	        if (!match) return null
+	        return { anchor: caret - match[2].length - 1, query: match[2].trimStart() }
+	      }
+
+	      async function updateDocumentAutocomplete(input) {
+	        const token = documentTokenAtCaret(input)
+	        if (!token) { closeDocumentMentionPopover(); return }
+	        await loadFilesSurface()
+	        if (documentTokenAtCaret(input)?.anchor !== token.anchor) return
+	        const query = token.query.toLowerCase()
+	        const matches = (filesEntries || []).filter(file => file?.authorized !== false && String(file?.id || '') && String(file?.name || '') && (!query || String(file.name).toLowerCase().includes(query))).slice(0, 8)
+	        if (!matches.length) { closeDocumentMentionPopover(); return }
+	        closeMentionPopover()
+	        documentMentionMatches = matches
+	        documentMentionActiveIndex = Math.min(documentMentionActiveIndex, matches.length - 1)
+	        documentMentionInput = input
+	        documentMentionAnchor = token.anchor
+	        renderDocumentMentionPopover()
+	      }
+
+	      function renderDocumentMentionPopover() {
+	        documentMentionPopover?.remove()
+	        const popover = bfEl('div', 'document-mention-popover')
+	        popover.setAttribute('role', 'listbox')
+	        popover.appendChild(bfEl('div', 'document-mention-popover__label', 'Attach from Drive'))
+	        documentMentionMatches.forEach((file, index) => {
+	          const row = bfEl('button', `document-mention-popover__item${index === documentMentionActiveIndex ? ' is-active' : ''}`)
+	          row.type = 'button'
+	          row.setAttribute('role', 'option')
+	          row.setAttribute('aria-selected', String(index === documentMentionActiveIndex))
+	          const icon = bfEl('span')
+	          icon.innerHTML = filesRowIconSvg(file)
+	          const copy = bfEl('span')
+	          copy.append(bfEl('span', 'document-mention-popover__name', String(file.name || 'File')), bfEl('span', 'document-mention-popover__meta', driveFolderPath(file.folderId)))
+	          row.append(icon, copy)
+	          row.addEventListener('mousedown', event => event.preventDefault())
+	          row.addEventListener('click', () => applyDocumentCompletion(file))
+	          popover.appendChild(row)
+	        })
+	        document.body.appendChild(popover)
+	        documentMentionPopover = popover
+	        positionFloatingSurface(popover, documentMentionInput)
+	      }
+
+	      async function applyDocumentCompletion(file) {
+	        const input = documentMentionInput
+	        if (!input || documentMentionAnchor < 0) { closeDocumentMentionPopover(); return }
+	        const caret = input.selectionStart ?? input.value.length
+	        const inserted = `#${String(file?.name || 'Document').replace(/^#+/, '')} `
+	        input.value = input.value.slice(0, documentMentionAnchor) + inserted + input.value.slice(caret)
+	        const end = documentMentionAnchor + inserted.length
+	        const target = input === chatContextReplyInput ? 'reply' : 'main'
+	        closeDocumentMentionPopover()
+	        input.focus()
+	        input.setSelectionRange(end, end)
+	        if (target === 'main') resizeScoutChatInput()
+	        else syncDesktopReplyComposerState()
+	        await attachDriveFileToComposer(file, target)
+	      }
+
+	      function handleDocumentMentionKeydown(event) {
+	        if (!documentMentionPopover) return
+	        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeDocumentMentionPopover(); return }
+	        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+	          event.preventDefault()
+	          const step = event.key === 'ArrowDown' ? 1 : documentMentionMatches.length - 1
+	          documentMentionActiveIndex = (documentMentionActiveIndex + step) % documentMentionMatches.length
+	          renderDocumentMentionPopover()
+	          return
+	        }
+	        if (event.key === 'Enter' || event.key === 'Tab') {
+	          event.preventDefault(); event.stopPropagation()
+	          void applyDocumentCompletion(documentMentionMatches[documentMentionActiveIndex] || documentMentionMatches[0])
+	        }
+	      }
+
+	      document.addEventListener('pointerdown', event => {
+	        if (chatAttachmentSourceMenu && !(event.target instanceof Element && event.target.closest('.chat-attachment-source-menu'))) closeChatAttachmentSourceMenu()
+	        if (documentMentionPopover && !(event.target instanceof Element && event.target.closest('.document-mention-popover'))) closeDocumentMentionPopover()
+	      })
+
 	      async function addPendingScoutFiles() {
 	        const files = Array.from(scoutChatFileInput?.files || [])
 	        if (!files.length) {
@@ -50189,6 +50691,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          threadId: activeScoutThreadId || ''
 	        }
 	        renderScoutFollowUpTarget()
+	        if (opts.prefill && scoutChatInput) {
+	          scoutChatInput.value = String(opts.prompt || title || '').trim()
+	          resizeScoutChatInput()
+	          scoutChatInput.setSelectionRange(0, scoutChatInput.value.length)
+	        }
 	        scoutChatInput?.focus()
 	      }
 
@@ -50629,6 +51136,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           paletteBodyEl.appendChild(label)
         }
         if (!tokens.length) {
+	      const driveAction = bfEl('button', 'palette__drive-action')
+	      driveAction.type = 'button'
+	      driveAction.append(bfEl('span', 'palette__well', '◇'))
+	      const driveCopy = bfEl('span', 'palette__tile-text')
+	      driveCopy.append(bfEl('span', 'palette__tile-name', 'Attach from Drive'), bfEl('span', 'palette__tile-promise', 'Choose an authorized file or report for this chat'))
+	      driveAction.appendChild(driveCopy)
+	      driveAction.addEventListener('click', async () => {
+	        closeToolPalette({ restoreComposer: false })
+	        const file = await chooseDriveFile()
+	        if (file) await attachDriveFileToComposer(file, 'main')
+	        scoutChatInput?.focus()
+	      })
+	      paletteBodyEl.append(bfEl('div', 'palette__group-label', 'Attach'))
+	      paletteBodyEl.appendChild(driveAction)
           const recentIds = paletteRecentIds()
           const recentTools = recentIds.map(paletteToolById).filter(Boolean)
           if (recentTools.length) {
@@ -52192,8 +52713,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
-      scoutChatInput?.addEventListener('input', () => updateMentionAutocomplete(scoutChatInput))
-      chatContextReplyInput?.addEventListener('input', () => updateMentionAutocomplete(chatContextReplyInput))
+	      scoutChatInput?.addEventListener('input', () => {
+	        void updateDocumentAutocomplete(scoutChatInput)
+	        if (!documentTokenAtCaret(scoutChatInput)) updateMentionAutocomplete(scoutChatInput)
+	      })
+	      chatContextReplyInput?.addEventListener('input', () => {
+	        void updateDocumentAutocomplete(chatContextReplyInput)
+	        if (!documentTokenAtCaret(chatContextReplyInput)) updateMentionAutocomplete(chatContextReplyInput)
+	      })
       roomChatInput?.addEventListener('blur', closeMentionPopover)
       scoutChatInput?.addEventListener('blur', closeMentionPopover)
       chatContextReplyInput?.addEventListener('blur', closeMentionPopover)
@@ -52223,6 +52750,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       scoutChatInput?.addEventListener('keydown', handleMentionKeydown, true)
       chatContextReplyInput?.addEventListener('keydown', handleMentionKeydown, true)
       roomChatInput?.addEventListener('keydown', handleMentionKeydown, true)
+	      scoutChatInput?.addEventListener('keydown', handleDocumentMentionKeydown, true)
+	      chatContextReplyInput?.addEventListener('keydown', handleDocumentMentionKeydown, true)
 
       // rich consumer: progress/completion events drive the stage rail + return
       // cards. No second board refetch — osEventsRoute already re-reads the board
@@ -55449,42 +55978,29 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const status = String(ref.status || artifactStatusValue(artifact) || 'running').toLowerCase()
 	        const phase = desktopWorkPhase(artifact, status)
 	        const agentName = desktopWorkAgentName(message, artifact)
-	        const pctRaw = Number(artifact?.metadata?.progressPercent)
-	        const pct = Number.isFinite(pctRaw) ? clampDesktopChatWidth(pctRaw, 0, 100) : ['complete', 'published'].includes(status) ? 100 : status === 'queued' ? 12 : 35
 	        const terminalError = ['error', 'failed', 'rejected'].includes(status)
 	        const terminalComplete = ['complete', 'published'].includes(status)
 	        const note = terminalError
-	          ? `${agentName}'s run stopped before delivery. Inspect the work receipt, then retry or follow up from this conversation.`
+	          ? String(artifact?.metadata?.error || artifact?.metadata?.blocker || `${agentName}'s run stopped before delivery.`)
 	          : terminalComplete
-	            ? `${agentName} delivered this work and saved it durably in the conversation.`
-	            : String(artifact?.metadata?.progressNote || '').trim() || `${agentName} is moving this work toward a durable deliverable.`
+	            ? compactArtifactPreview(String(artifact?.text || `${agentName} delivered this work.`))
+	            : String(artifact?.metadata?.progressNote || ref.progressNote || '').trim() || `${agentName} is working on it.`
 	        const sources = artifact ? researchArtifactSources(artifact) : []
+	        const model = String(artifact?.metadata?.model || artifact?.metadata?.orchestratorModel || '').trim()
+	        const effort = String(artifact?.metadata?.reasoningEffort || '').trim()
 	        chatContextKicker.textContent = `${agentName} · work`
 	        chatContextTitle.textContent = String(ref.query || artifact?.metadata?.threadQuery || message?.text || 'Research workstream')
-	        chatContextMeta.textContent = `${phase.label} · ${Math.round(pct)}%${sources.length ? ` · ${sources.length} source${sources.length === 1 ? '' : 's'}` : ''}`
+	        chatContextMeta.textContent = [terminalComplete ? 'Delivered' : phase.label, model, effort ? `${effort} reasoning` : '', sources.length ? `${sources.length} source${sources.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')
 	        const summary = document.createElement('section')
 	        summary.className = 'chat-context-event'
 	        summary.append(
-	          bfEl('strong', 'chat-context-event__phase', `${agentName} · ${phase.label}`),
+	          bfEl('strong', 'chat-context-event__phase', `${agentName} · ${terminalComplete ? 'Delivered' : phase.label}`),
 	          bfEl('p', 'chat-context-event__note', note)
 	        )
-	        const progress = bfEl('div', 'chat-context-progress')
-	        const fill = bfEl('span', 'chat-context-progress__fill')
-	        fill.style.transform = `scaleX(${Math.max(0, Math.min(100, pct)) / 100})`
-	        progress.appendChild(fill)
-	        summary.appendChild(progress)
-	        summary.appendChild(bfEl('span', 'chat-context-event__meta', `${status.replaceAll('_', ' ')} · ${Math.round(pct)}%`))
-	        const phases = bfEl('div', 'chat-context-phases')
-	        ;['Understanding', 'Gathering evidence', 'Building', 'Verifying', 'Delivering'].forEach((label, index) => {
-	          const row = bfEl('span', 'chat-context-phase', label)
-	          if (index < phase.index || ['complete', 'published'].includes(status)) row.classList.add('is-done')
-	          else if (index === phase.index) row.classList.add('is-active')
-	          phases.appendChild(row)
-	        })
-	        summary.appendChild(phases)
+	        summary.appendChild(bfEl('span', 'chat-context-event__meta', status.replaceAll('_', ' ')))
 	        const actions = bfEl('div', 'chat-context-actions')
 	        if (artifact?.id && artifact?.text) {
-	          const view = bfEl('button', 'chat-context-action', ['complete', 'published'].includes(status) ? 'View' : 'Inspect work')
+	          const view = bfEl('button', 'chat-context-action', terminalComplete ? 'Open' : 'Inspect work')
 	          view.type = 'button'
 	          view.addEventListener('click', () => openArtifactStage(artifact.id, artifactDisplayTitle(artifact)))
 	          actions.appendChild(view)
@@ -55492,40 +56008,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (terminalComplete) {
 	          const save = desktopSaveToDriveControl(artifact)
 	          if (save) actions.appendChild(save)
+	          const pdf = artifactPdfControl(artifact, { compact: true, className: 'chat-context-action' })
+	          if (pdf) actions.appendChild(pdf)
+	          const regenerate = bfEl('button', 'chat-context-action', 'Regenerate')
+	          regenerate.type = 'button'
+	          regenerate.addEventListener('click', () => {
+	            armScoutFollowUpTarget(String(artifact?.id || ''), { entry: artifact, title: artifactDisplayTitle(artifact), prompt: String(artifact?.metadata?.threadQuery || ref.query || ''), prefill: true })
+	            closeDesktopChatContext({ restoreFocus: false })
+	            scoutChatInput?.focus()
+	          })
+	          actions.appendChild(regenerate)
 	        }
 	        if (actions.childNodes.length) summary.appendChild(actions)
 	        const worklog = document.createElement('section')
 	        worklog.className = 'chat-context-worklog'
-	        worklog.appendChild(bfEl('h3', 'chat-context-section-title', 'Work log'))
-	        const startedAt = String(artifact?.metadata?.startedAt || ref.startedAt || message?.createdAt || '')
-	        const completedAt = String(artifact?.metadata?.completedAt || '')
-	        const currentStage = String(artifact?.metadata?.currentStage || ref.currentStage || 'not reported').replaceAll('_', ' ')
-	        const eventRows = [
-	          { title: 'Request accepted', note: String(ref.query || artifact?.metadata?.threadQuery || message?.text || 'Work requested'), meta: startedAt ? `${scoutChatTimeLabel(startedAt)} · origin linked` : 'origin linked', state: 'complete' },
-	          { title: phase.label, note, meta: `${currentStage} · ${Math.round(pct)}%`, state: terminalComplete ? 'complete' : 'current' },
-	        ]
 	        if (sources.length) {
-	          eventRows.push({ title: 'Source trail', note: `${sources.length} source${sources.length === 1 ? '' : 's'} retained with the deliverable.`, meta: 'open below · exact URLs', state: terminalComplete ? 'complete' : '' })
-	        }
-	        if (artifact?.metadata?.reviewGate) {
-	          eventRows.push({ title: 'Review gate', note: `Gate ${String(artifact.metadata.reviewGate).replaceAll('_', ' ')}. Confidence and remaining gaps stay in the report.`, meta: String(artifact?.metadata?.goalStatus || 'reviewed').replaceAll('_', ' '), state: terminalComplete ? 'complete' : '' })
-	        }
-	        if (terminalComplete) {
-	          eventRows.push({ title: 'Delivered here', note: `${agentName} saved the completed work durably in this conversation.`, meta: completedAt ? scoutChatTimeLabel(completedAt) : 'delivery receipt retained', state: 'complete' })
-	        }
-	        eventRows.forEach(event => {
-	          const row = bfEl('div', `chat-context-log-entry${event.state ? ` is-${event.state}` : ''}`)
-	          const dot = bfEl('span', 'chat-context-log-entry__dot')
-	          const copy = bfEl('span', 'chat-context-log-entry__copy')
-	          copy.append(
-	            bfEl('strong', 'chat-context-log-entry__title', event.title),
-	            bfEl('p', 'chat-context-log-entry__note', event.note),
-	            bfEl('span', 'chat-context-log-entry__meta', event.meta)
-	          )
-	          row.append(dot, copy)
-	          worklog.appendChild(row)
-	        })
-	        if (sources.length) {
+	          worklog.appendChild(bfEl('h3', 'chat-context-section-title', 'Sources'))
 	          const sourceList = bfEl('div', 'chat-context-source-list')
 	          sources.slice(0, 8).forEach(source => {
 	            const link = document.createElement('a')
@@ -55544,7 +56042,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        technicalTitle.className = 'chat-context-card__author'
 	        technicalTitle.textContent = 'Technical details'
 	        technical.append(technicalTitle, bfEl('p', 'chat-context-card__body', `run ${ref.id || 'pending'} · artifact ${ref.artifactId || artifact?.id || 'pending'} · stage ${artifact?.metadata?.currentStage || 'not reported'} · worker ${artifact?.metadata?.worker || 'provider managed'}`))
-	        chatContextBody.replaceChildren(summary, worklog, technical)
+	        chatContextBody.replaceChildren(...[summary, sources.length ? worklog : null, technical].filter(Boolean))
 	      }
 
 	      function openDesktopWorkContext(message, trigger) {
@@ -55606,12 +56104,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const status = String(artifactStatusValue(artifact) || candidate.thread.status || '').toLowerCase()
 	          return ['queued', 'running', 'approval_required', 'needs_input', 'parked'].includes(status)
 	        })
-	        const terminalMessage = workMessages.slice().reverse().find(candidate => {
-	          const artifact = artifactEntries.find(entry => String(entry?.id || '') === String(candidate.thread.artifactId || ''))
-	          const status = String(artifactStatusValue(artifact) || candidate.thread.status || '').toLowerCase()
-	          return ['complete', 'published', 'failed', 'error', 'rejected'].includes(status)
-	        })
-	        const message = activeMessage || terminalMessage
+	        const message = activeMessage
 	        if (!message) {
 	          chatWorkIndicator.hidden = true
 	          delete chatWorkIndicator.dataset.messageId
@@ -56186,6 +56679,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        card.dataset.messageId = String(message.id || '')
 
 	        const head = bfEl('div', 'scout-proposal-card__head')
+	        head.appendChild(bfEl('span', 'scout-proposal-card__eyebrow', 'Scout interpretation'))
 	        const isWorkstream = String(proposal.kind || '') === 'workstream'
 	        // card 096: an image proposal is a single concept render, not a
 	        // contract-gated tool run — it keeps the editable objective, skips the
@@ -56210,8 +56704,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        card.appendChild(head)
 
-	        // one legible sentence of what will run
-	        card.appendChild(bfEl('p', 'scout-proposal-card__summary', String(message.text || proposal.summary || '')))
+	        // Never repeat the person's raw request. This is the trust surface for
+	        // Scout's interpreted execution prompt, followed by one quiet line
+	        // explaining that nothing runs until approval.
+	        card.appendChild(bfEl('p', 'scout-proposal-card__summary', String(proposal.summary || 'Review or edit Scout’s execution prompt before it runs.')))
 
 	        // editable pre-filled inputs — the palette form-card pattern reused:
 	        // form tools render their registry fields, conversational/workstream
@@ -56239,10 +56735,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          if (firstRequired) firstRequired.input.value = String(proposal.objective || '')
 	        } else {
 	          const wrap = bfEl('div', 'palette__form-field')
-	          wrap.appendChild(bfEl('label', 'palette__form-label', 'objective'))
+	          wrap.appendChild(bfEl('label', 'palette__form-label', isImage ? 'Image prompt' : 'Scout’s execution prompt'))
 	          objectiveInput = document.createElement('textarea')
 	          objectiveInput.className = 'palette__field'
-	          objectiveInput.rows = 2
+	          objectiveInput.rows = 5
 	          objectiveInput.value = String(proposal.objective || '')
 	          wrap.appendChild(objectiveInput)
 	          card.appendChild(wrap)
@@ -56278,7 +56774,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 
 	        const actions = bfEl('div', 'scout-proposal-card__actions')
-	        const run = bfEl('button', 'scout-proposal-card__run', 'Run ▸')
+	        const run = bfEl('button', 'scout-proposal-card__run', isImage ? 'Generate image' : 'Approve & run')
 	        run.type = 'button'
 	        run.addEventListener('click', () => {
 	          if (isWorkstream || isImage) {
@@ -56317,7 +56813,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            package: pkgField ? String(pkgField.select.value || '') : paletteDefaultPackageId()
 	          })
 	        })
-	        const escape = bfEl('button', 'scout-proposal-card__escape', 'just answer instead')
+	        const escape = bfEl('button', 'scout-proposal-card__escape', 'Keep it conversational')
 	        escape.type = 'button'
 	        escape.addEventListener('click', () => {
 	          markProposalCardResolved(card, 'dismissed')
@@ -56400,13 +56896,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         button.title = 'Save this image to the company Drive'
         button.addEventListener('click', async () => {
+	      const destination = await chooseDriveSaveOptions(String(image?.name || 'Concept render'))
+	      if (!destination) return
           button.disabled = true
           button.textContent = 'Saving…'
           try {
             const response = await fetch('/assistant/files/save', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ artifactId })
+              body: JSON.stringify({ artifactId, fileName: destination.fileName, folderId: destination.folderId })
             })
             const payload = await response.json().catch(() => ({}))
             if (!response.ok) throw new Error(payload?.error || 'could not save image to Drive')
@@ -56820,11 +57318,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // rebuilding (scoutProposalCardNodes)
 	        card.dataset.proposalStatus = status
 	        card.classList.add('is-resolved')
-	        card.querySelector('.scout-proposal-card__actions')?.remove()
-	        card.querySelectorAll('input, textarea, select').forEach(el => { el.disabled = true })
-	        if (!card.querySelector('.scout-proposal-card__resolved')) {
-	          card.appendChild(bfEl('p', 'scout-proposal-card__resolved', status === 'accepted' ? 'confirmed — running' : 'dismissed — answered instead'))
-	        }
+	        const label = status === 'accepted' ? 'Approved · Scout is starting the work' : 'Kept conversational · Scout will answer here'
+	        card.replaceChildren(bfEl('p', 'scout-proposal-card__resolved', label))
 	      }
 
 	      // posts the verdict on one proposal card: the server records the
@@ -57487,19 +57982,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             <span class="pill" data-research-pill><span class="pill__dot" aria-hidden="true"></span><span data-research-status></span></span>
           </div>
           <div class="scout-chat-research__body">
-            <div class="scout-chat-research__flow" data-research-flow aria-label="agent work progress"></div>
-            <div class="scout-chat-research__progress">
-              <span class="scout-chat-research__agents" data-research-agents></span>
-              <span class="scout-chat-research__track"><span class="scout-chat-research__fill" data-research-fill></span></span>
-              <span class="scout-chat-research__pct" data-research-pct></span>
-            </div>
+	        <p class="scout-chat-research__preview" data-research-preview hidden></p>
+	        <div class="scout-chat-research__live-line"><span class="scout-chat-research__live-dot" aria-hidden="true"></span><span data-research-agents></span></div>
+	        <span class="scout-chat-research__provenance" data-research-provenance hidden></span>
             <div class="scout-chat-research__actions">
               <button class="scout-chat-research__action" type="button" data-research-activity>view activity</button>
               <button class="scout-chat-research__artifact scout-chat-research__action" type="button" data-research-artifact hidden>view report</button>
+	          <span data-research-terminal-actions></span>
               <button class="scout-chat-research__action" type="button" data-research-download hidden>download .md</button>
               <button class="scout-chat-research__action" type="button" data-research-copy hidden>copy md</button>
               <button class="scout-chat-research__action" type="button" data-research-library hidden>open in library</button>
-              <button class="scout-chat-research__action" type="button" data-research-followup hidden>follow up</button>
+	          <button class="scout-chat-research__action" type="button" data-research-followup hidden>regenerate</button>
             </div>
           </div>
           <div class="scout-chat-research__report artifact-read" data-research-report hidden></div>`
@@ -57539,31 +58032,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           }
         })
         card.querySelector('[data-research-followup]')?.addEventListener('click', () => {
-          // arm the composer: the next send re-runs this artifact in place
           const entry = card.__scoutArtifact
           const meta = entry?.metadata || {}
-          scoutFollowUpTarget = {
-            artifactId: card.dataset.threadArtifactId || String(entry?.id || ''),
-            mode: card.dataset.threadMode || 'research',
-            query: String(meta.threadQuery || meta.title || thread?.query || '').trim(),
-            version: Number(meta.threadVersion || 1) || 1,
-            threadId: activeScoutThreadId || ''
-          }
-          renderScoutFollowUpTarget()
-          scoutChatInput?.focus()
+	      const prompt = String(meta.threadQuery || meta.title || thread?.query || '').trim()
+	      armScoutFollowUpTarget(card.dataset.threadArtifactId || String(entry?.id || ''), { entry, title: prompt, prompt, prefill: true })
         })
         updateScoutChatResearchNode(card, String(thread?.status || 'running'), thread?.artifact)
         return card
       }
-
-      const scoutChatThreadStages = [
-        ['identify_and_set_goal', 'goal'],
-        ['decompose_work', 'split'],
-        ['assign_right_agent', 'agents'],
-        ['execute_in_order', 'execute'],
-        ['gate_before_shipping', 'gate'],
-        ['verify_goal_completed', 'artifact']
-      ]
 
       function updateScoutChatResearchNode(card, status, artifact) {
         const value = String(status || artifact?.metadata?.threadStatus || artifact?.metadata?.status || 'running').toLowerCase()
@@ -57573,10 +58049,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const rejected = value === 'rejected'
         const error = value === 'error' || value === 'failed'
         const done = value === 'complete' || value === 'published'
-        const metadataPct = Number(artifact?.metadata?.progressPercent)
-        const pct = Number.isFinite(metadataPct) ? metadataPct : done ? 100 : approvalRequired ? 82 : rejected || error ? 72 : queued ? 12 : 35
         const humanPhase = desktopWorkPhase(artifact, value)
-        const stageIndex = done ? scoutChatThreadStages.length - 1 : approvalRequired || rejected || error ? 4 : queued ? 0 : Math.min(4, humanPhase.index)
         const active = queued || running
 
         // card-level state hook — the head's ember treatment keys off it
@@ -57584,9 +58057,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const pill = card.querySelector('[data-research-pill]')
         const statusText = card.querySelector('[data-research-status]')
         const agents = card.querySelector('[data-research-agents]')
-        const fill = card.querySelector('[data-research-fill]')
-        const pctEl = card.querySelector('[data-research-pct]')
-        const flow = card.querySelector('[data-research-flow]')
+	    const preview = card.querySelector('[data-research-preview]')
+	    const provenance = card.querySelector('[data-research-provenance]')
+	    const terminalActions = card.querySelector('[data-research-terminal-actions]')
         const artifactButton = card.querySelector('[data-research-artifact]')
         const downloadButton = card.querySelector('[data-research-download]')
         const copyButton = card.querySelector('[data-research-copy]')
@@ -57609,34 +58082,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const agentName = String(artifact?.metadata?.agentName || artifact?.metadata?.agentDisplayName || artifact?.metadata?.workerName || 'Scout').trim() || 'Scout'
           agents.textContent = queued ? `${agentName} · queued` : running ? `${agentName} · ${humanPhase.label}` : approvalRequired ? `${agentName} · needs approval` : rejected ? `${agentName} · gate rejected` : error ? `${agentName} · needs attention` : `${agentName} · delivered`
         }
-        if (fill) {
-          fill.style.transform = `translateX(${Math.max(0, Math.min(100, pct)) - 100}%)`
-        }
-        if (pctEl) {
-          pctEl.textContent = `${Math.round(Math.max(0, Math.min(100, pct)))}%`
-        }
-        if (flow) {
-          flow.replaceChildren(...scoutChatThreadStages.map(([stage, label], index) => {
-            const step = document.createElement('span')
-            step.className = 'scout-chat-research__step'
-            if (error && index === stageIndex) {
-              step.classList.add('is-error')
-            } else if (index < stageIndex || done) {
-              step.classList.add('is-done')
-            } else if (active && index === stageIndex) {
-              step.classList.add('is-active')
-            }
-            step.dataset.stage = stage
-            const dot = document.createElement('span')
-            dot.className = 'scout-chat-research__step-dot'
-            dot.setAttribute('aria-hidden', 'true')
-            const text = document.createElement('span')
-            text.className = 'scout-chat-research__step-label'
-            text.textContent = label
-            step.append(dot, text)
-            return step
-          }))
-        }
+	    if (preview) {
+	      const body = compactArtifactPreview(String(artifact?.text || ''))
+	      preview.hidden = !done || !body
+	      preview.textContent = body
+	    }
+	    if (provenance) {
+	      const meta = artifact?.metadata || {}
+	      const model = String(meta.model || meta.orchestratorModel || '').trim()
+	      const effort = String(meta.reasoningEffort || '').trim()
+	      const sourceCount = researchArtifactSources(artifact).length
+	      const bits = [model, effort ? `${effort} reasoning` : '', sourceCount ? `${sourceCount} source${sourceCount === 1 ? '' : 's'}` : ''].filter(Boolean)
+	      provenance.hidden = !done || !bits.length
+	      provenance.textContent = bits.join(' · ')
+	    }
         if (artifactButton) {
           const entry = card.__scoutArtifact
           const hasArtifact = Boolean(entry?.id && entry?.text)
@@ -57645,6 +58104,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         const entry = card.__scoutArtifact
         const hasMarkdown = Boolean(entry?.id && entry?.text)
+	    if (terminalActions) {
+	      terminalActions.replaceChildren()
+	      if (done && entry) {
+	        const pdf = artifactPdfControl(entry, { compact: true, className: 'scout-chat-research__action' })
+	        const save = desktopSaveToDriveControl(entry, 'scout-chat-research__action')
+	        if (pdf) terminalActions.appendChild(pdf)
+	        if (save) terminalActions.appendChild(save)
+	      }
+	    }
         if (downloadButton) {
           downloadButton.hidden = !hasMarkdown
         }
@@ -63775,12 +64243,36 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
+      async function renameDriveFile(file) {
+	    const fileId = String(file?.id || '')
+	    if (!fileId || !file?.canDelete) return
+	    const name = await chooseDriveFileName(String(file?.name || 'File'))
+	    if (!name || name === String(file?.name || '')) return
+	    filesRowMenuFor = ''
+	    try {
+	      const response = await fetch('/assistant/files', {
+	        method: 'PATCH',
+	        headers: { 'Content-Type': 'application/json' },
+	        body: JSON.stringify({ id: fileId, name })
+	      })
+	      const payload = await response.json().catch(() => ({}))
+	      if (!response.ok || !payload?.file) throw new Error(payload?.error || 'rename failed')
+	      const index = filesEntries.findIndex(candidate => String(candidate?.id || '') === fileId)
+	      if (index >= 0) filesEntries[index] = payload.file
+	      showToast({ text: 'File renamed', kind: 'done' })
+	      renderFilesSurface()
+	    } catch (error) {
+	      showToast({ text: error?.message || 'could not rename the file', kind: 'error' })
+	      loadFilesSurface(true)
+	    }
+      }
+
       async function createFilesFolder(name) {
         try {
           const response = await fetch('/assistant/files/folders', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name })
+	        body: JSON.stringify({ name, parentId: filesActiveFolderId })
           })
           const payload = await response.json().catch(() => null)
           if (!response.ok) {
@@ -63983,8 +64475,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         const chips = []
         let focusTarget = null
-        chips.push(filesFolderChipNode({ id: '', name: 'All files' }, scopeRows.length))
-        for (const folder of filesFolders) {
+	    chips.push(filesFolderChipNode({ id: '', name: 'All files' }, scopeRows.length))
+	    const byId = new Map(filesFolders.map(folder => [String(folder?.id || ''), folder]))
+	    const trail = []
+	    let cursor = filesActiveFolderId ? byId.get(filesActiveFolderId) : null
+	    const seen = new Set()
+	    while (cursor && !seen.has(String(cursor.id || ''))) {
+	      seen.add(String(cursor.id || ''))
+	      trail.unshift(cursor)
+	      cursor = byId.get(String(cursor.parentId || ''))
+	    }
+	    const children = filesFolders.filter(folder => String(folder?.parentId || '') === String(filesActiveFolderId || ''))
+	    const visibleFolders = [...trail, ...children.filter(folder => !trail.some(item => String(item.id) === String(folder.id)))]
+	    for (const folder of visibleFolders) {
           const id = String(folder?.id || '')
           if (filesFolderRenamingId === id) {
             const editor = filesFolderInputChip({
@@ -64014,7 +64517,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           pick.type = 'button'
           pick.className = 'files-folder-chip__pick'
           const label = document.createElement('span')
-          label.textContent = '+ New folder'
+	      label.textContent = filesActiveFolderId ? '+ New subfolder' : '+ New folder'
           pick.appendChild(label)
           pick.addEventListener('click', () => {
             filesFolderCreating = true
@@ -64043,7 +64546,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const kebab = document.createElement('button')
         kebab.type = 'button'
         kebab.className = 'files-row__kebab'
-        kebab.setAttribute('aria-label', 'move to folder')
+	    kebab.setAttribute('aria-label', 'file options')
         kebab.setAttribute('aria-haspopup', 'menu')
         kebab.title = 'Move to…'
         kebab.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>'
@@ -64062,6 +64565,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           label.className = 'files-folder-menu__label'
           label.textContent = 'Actions'
           menu.appendChild(label)
+	      if (file?.canDelete) {
+	        const rename = document.createElement('button')
+	        rename.type = 'button'
+	        rename.className = 'files-folder-menu__item'
+	        rename.textContent = 'Rename'
+	        rename.addEventListener('click', () => renameDriveFile(file))
+	        menu.appendChild(rename)
+	      }
           const currentFolderId = String(file?.folderId || '')
           const targets = [{ id: '', name: 'All files' }, ...filesFolders]
           let offered = 0

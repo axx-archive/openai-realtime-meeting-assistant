@@ -56,12 +56,13 @@ writeFileSync(resolve(fixture, "mobile/targets/screenshare/Info.plist"), "com.ap
 assert.equal(validateScreenShareTarget(fixture).every((item) => item.ok), true);
 
 for (const path of [
-  "mobile/src/screens/ThreadScreen.tsx", "mobile/src/messaging/MessageActionSheet.tsx", "mobile/src/messaging/MentionComposerInput.tsx", "mobile/src/voice/useDictation.ts", "mobile/src/push/deepLink.ts", "mobile/src/screens/RoomScreen.tsx",
+  "mobile/src/screens/ThreadScreen.tsx", "mobile/src/messaging/MessageActionSheet.tsx", "mobile/src/messaging/MentionComposerInput.tsx", "mobile/src/voice/useDictation.ts", "mobile/src/voice/useComposerDictation.ts", "mobile/src/push/deepLink.ts", "mobile/src/screens/RoomScreen.tsx",
 ]) mkdirSync(resolve(fixture, path, ".."), { recursive: true });
-writeFileSync(resolve(fixture, "mobile/src/screens/ThreadScreen.tsx"), "MessageActionSheet onLongPress useDictation audioFocusRuntime Haptics.\n");
+writeFileSync(resolve(fixture, "mobile/src/screens/ThreadScreen.tsx"), "MessageActionSheet onLongPress useComposerDictation Haptics.\n");
 writeFileSync(resolve(fixture, "mobile/src/messaging/MessageActionSheet.tsx"), "onReact onReply onEdit onDelete\n");
 writeFileSync(resolve(fixture, "mobile/src/messaging/MentionComposerInput.tsx"), "Haptics.selectionAsync TextInput\n");
 writeFileSync(resolve(fixture, "mobile/src/voice/useDictation.ts"), "Haptics. onTranscript\n");
+writeFileSync(resolve(fixture, "mobile/src/voice/useComposerDictation.ts"), "useDictation audioFocusRuntime\n");
 writeFileSync(resolve(fixture, "mobile/src/push/deepLink.ts"), "parsePushTarget threadId\n");
 writeFileSync(resolve(fixture, "mobile/src/screens/RoomScreen.tsx"), "screenShare stopScreenShare Haptics.\n");
 assert.equal(validateProtectedSourceContracts(fixture).every((item) => item.ok), true);
@@ -70,7 +71,7 @@ assert.equal(validateProtectedSourceContracts(fixture).find((item) => item.id ==
 
 // A manifest check is intentionally not a local readiness receipt. The exact
 // local gates must run and pass before localReady can become true.
-writeFileSync(resolve(fixture, "mobile/src/screens/ThreadScreen.tsx"), "MessageActionSheet onLongPress useDictation audioFocusRuntime Haptics.\n");
+writeFileSync(resolve(fixture, "mobile/src/screens/ThreadScreen.tsx"), "MessageActionSheet onLongPress useComposerDictation Haptics.\n");
 const defaultResult = buildResult({ runLocal: false, runSimulator: false, dryRun: false }, manifest, eas, fixture);
 assert.equal(defaultResult.manifestValid, true);
 assert.equal(defaultResult.localGateStatus, "not_run");

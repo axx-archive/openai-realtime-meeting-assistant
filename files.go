@@ -44,6 +44,7 @@ var (
 	errFileSaveArtifactID     = errors.New("artifactId is required")
 	errFileSaveNotFound       = errors.New("artifact not found")
 	errFileSaveNotDeliverable = errors.New("only a finished deliverable can be saved to Files")
+	errAssistantFileName      = errors.New("file name is required")
 )
 
 var fileSaveAfterArtifactStampProbe func()
@@ -314,7 +315,7 @@ func fileDeliverableRecord(entry meetingMemoryEntry) (assistantFileRecord, bool)
 		return assistantFileRecord{}, false
 	}
 
-	name := firstNonEmptyString(strings.TrimSpace(metadata["title"]), strings.TrimSpace(metadata["threadQuery"]), "Deliverable")
+	name := firstNonEmptyString(strings.TrimSpace(metadata["driveFileName"]), strings.TrimSpace(metadata["title"]), strings.TrimSpace(metadata["threadQuery"]), "Deliverable")
 	deliverableMime := "text/markdown"
 	if artifactType(entry) == artifactTypeHTMLDeck {
 		deliverableMime = "text/html"
@@ -403,6 +404,232 @@ func (app *kanbanBoardApp) assistantFilesForPrincipal(ctx context.Context, viewe
 		rows = rows[:assistantFilesListLimit]
 	}
 	return rows
+}
+
+// assistantFileAttachmentSource resolves one Drive row through its native ACL
+// and returns only a content-addressed attachment handle. The client never
+// receives a document body from this seam. Deliverables without a rendered
+// binary are materialized as immutable Markdown blobs so an exact report can
+// be attached and summarized while its PDF is still rendering.
+func (app *kanbanBoardApp) assistantFileAttachmentSource(ctx context.Context, viewer *userAccount, fileID string) (scoutChatFileAttachment, blobMeta, string, bool) {
+	if app == nil || app.memory == nil || viewer == nil {
+		return scoutChatFileAttachment{}, blobMeta{}, "", false
+	}
+	fileID = strings.TrimSpace(fileID)
+	if fileID == "" {
+		return scoutChatFileAttachment{}, blobMeta{}, "", false
+	}
+
+	if _, found := app.memory.artifactAuthorizationHeaderByID(fileID); found {
+		artifact, allowed := authorizedArtifactForActions(ctx, viewer, fileID, ACLReadContent)
+		if !allowed {
+			return scoutChatFileAttachment{}, blobMeta{}, "", false
+		}
+		row, visible := fileDeliverableRecord(artifact)
+		if !visible {
+			return scoutChatFileAttachment{}, blobMeta{}, "", false
+		}
+		ref := ""
+		for _, preferredKind := range []string{"pdf", "image", "export"} {
+			for _, asset := range artifactAssets(artifact) {
+				if strings.EqualFold(strings.TrimSpace(asset.Kind), preferredKind) && validBlobRef(asset.Ref) {
+					ref = asset.Ref
+					if strings.TrimSpace(asset.Name) != "" && preferredKind != "pdf" {
+						row.Name = strings.TrimSpace(asset.Name)
+					}
+					break
+				}
+			}
+			if ref != "" {
+				break
+			}
+		}
+		if ref == "" {
+			if strings.TrimSpace(artifact.Text) == "" {
+				return scoutChatFileAttachment{}, blobMeta{}, "", false
+			}
+			var err error
+			ref, err = putBlob([]byte(artifact.Text), "text/markdown")
+			if err != nil {
+				return scoutChatFileAttachment{}, blobMeta{}, "", false
+			}
+		}
+		meta, err := blobStatForRef(ref)
+		if err != nil {
+			return scoutChatFileAttachment{}, blobMeta{}, "", false
+		}
+		header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact))
+		revision, err := STRIDEContractDigest(struct {
+			FileID   string                      `json:"fileId"`
+			Artifact ArtifactAuthorizationHeader `json:"artifact"`
+			Ref      string                      `json:"ref"`
+			Mime     string                      `json:"mime"`
+			Size     int64                       `json:"size"`
+		}{fileID, header, ref, strings.ToLower(strings.TrimSpace(meta.Mime)), meta.Size})
+		if err != nil {
+			return scoutChatFileAttachment{}, blobMeta{}, "", false
+		}
+		return assistantFileAttachment(row.Name, ref, meta), meta, revision, true
+	}
+
+	if entry, found := app.memory.entryByKindAndID(meetingMemoryKindFile, fileID); found {
+		row := fileRecordFromEntry(entry)
+		ref := strings.TrimSpace(entry.Metadata["blobRef"])
+		meta, err := blobStatForRef(ref)
+		if err != nil {
+			return scoutChatFileAttachment{}, blobMeta{}, "", false
+		}
+		revision, err := STRIDEContractDigest(struct {
+			FileID string `json:"fileId"`
+			Ref    string `json:"ref"`
+			Mime   string `json:"mime"`
+			Size   int64  `json:"size"`
+		}{fileID, ref, strings.ToLower(strings.TrimSpace(meta.Mime)), meta.Size})
+		if err != nil {
+			return scoutChatFileAttachment{}, blobMeta{}, "", false
+		}
+		return assistantFileAttachment(row.Name, ref, meta), meta, revision, true
+	}
+
+	threadID, messageID, fileIndex, parsed := parseChatAttachmentFileID(fileID)
+	if !parsed {
+		return scoutChatFileAttachment{}, blobMeta{}, "", false
+	}
+	thread, _, err := app.scoutChatThreadByID(viewer.Email, threadID)
+	if err != nil {
+		return scoutChatFileAttachment{}, blobMeta{}, "", false
+	}
+	for _, message := range thread.Messages {
+		if message.ID != messageID || fileIndex >= len(message.Files) {
+			continue
+		}
+		source := message.Files[fileIndex]
+		if !app.committedChatAttachmentAuthorized(viewer.Email, thread.ID, message.ID, source) {
+			return scoutChatFileAttachment{}, blobMeta{}, "", false
+		}
+		ref := strings.TrimSpace(source.Ref)
+		if ref == "" && strings.TrimSpace(source.Text) != "" {
+			ref, err = putBlob([]byte(source.Text), "text/plain")
+			if err != nil {
+				return scoutChatFileAttachment{}, blobMeta{}, "", false
+			}
+		}
+		meta, statErr := blobStatForRef(ref)
+		if statErr != nil {
+			return scoutChatFileAttachment{}, blobMeta{}, "", false
+		}
+		revision, digestErr := STRIDEContractDigest(struct {
+			FileID              string `json:"fileId"`
+			Ref                 string `json:"ref"`
+			Mime                string `json:"mime"`
+			Size                int64  `json:"size"`
+			SourceID            string `json:"sourceId,omitempty"`
+			SourceRevision      string `json:"sourceRevision,omitempty"`
+			DestinationRevision string `json:"destinationRevision"`
+		}{fileID, ref, strings.ToLower(strings.TrimSpace(meta.Mime)), meta.Size, strings.TrimSpace(source.SourceID), strings.TrimSpace(source.SourceRevision), scoutChatAttachmentDestinationRevision(thread)})
+		if digestErr != nil {
+			return scoutChatFileAttachment{}, blobMeta{}, "", false
+		}
+		return assistantFileAttachment(firstNonEmptyString(source.Name, "file"), ref, meta), meta, revision, true
+	}
+	return scoutChatFileAttachment{}, blobMeta{}, "", false
+}
+
+func assistantFileAttachment(name, ref string, meta blobMeta) scoutChatFileAttachment {
+	name = firstNonEmptyString(strings.TrimSpace(name), "file")
+	return scoutChatFileAttachment{
+		Name: name,
+		Kind: strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), "."),
+		Size: meta.Size,
+		Ref:  strings.TrimSpace(ref),
+		Mime: strings.ToLower(strings.TrimSpace(meta.Mime)),
+	}
+}
+
+func (app *kanbanBoardApp) assistantFileSourceRevision(ctx context.Context, viewer *userAccount, fileID string) (string, bool) {
+	_, _, revision, ok := app.assistantFileAttachmentSource(ctx, viewer, fileID)
+	return revision, ok
+}
+
+// assistantFileSourceAllowsDestination is the audience-intersection gate for
+// Drive-to-chat attachments. Organization-visible sources may be narrowed into
+// any thread. A private source may only stay inside a private thread owned by
+// the same person; it can never be widened into a company channel merely
+// because its owner can post there.
+func (app *kanbanBoardApp) assistantFileSourceAllowsDestination(ctx context.Context, viewer *userAccount, fileID string, destination scoutChatThreadRecord) bool {
+	if app == nil || app.memory == nil || viewer == nil {
+		return false
+	}
+	fileID = strings.TrimSpace(fileID)
+	if fileID == "" {
+		return false
+	}
+	destinationPrivate := scoutChatThreadVisibility(destination) == scoutChatVisibilityPrivate
+	destinationOwner := normalizeAccountEmail(destination.OwnerEmail)
+	viewerEmail := normalizeAccountEmail(viewer.Email)
+
+	if header, found := app.memory.artifactAuthorizationHeaderByID(fileID); found {
+		header = resolveArtifactHeaderOwner(header)
+		if !artifactHeaderAuthorized(ctx, viewer, ACLReadContent, header) {
+			return false
+		}
+		if legacyArtifactHeaderOrganizationVisible(header) {
+			return true
+		}
+		return destinationPrivate && destinationOwner == viewerEmail && normalizeAccountEmail(header.OwnerEmail) == viewerEmail
+	}
+	// Direct uploads are the existing shared-company Drive contract.
+	if _, found := app.memory.entryByKindAndID(meetingMemoryKindFile, fileID); found {
+		return true
+	}
+
+	threadID, _, _, parsed := parseChatAttachmentFileID(fileID)
+	if !parsed {
+		return false
+	}
+	source, _, err := app.scoutChatThreadByID(viewer.Email, threadID)
+	if err != nil {
+		return false
+	}
+	if scoutChatThreadIsOrganizationPublic(source) {
+		return true
+	}
+	if scoutChatThreadVisibility(source) == scoutChatVisibilityPrivate {
+		return destinationPrivate && destinationOwner == viewerEmail && normalizeAccountEmail(source.OwnerEmail) == viewerEmail
+	}
+	// A project channel is public only to its explicit member set. The
+	// destination audience must be a subset of that set; a company-wide
+	// channel can never receive a project-restricted source.
+	sourceMembers := map[string]struct{}{}
+	for _, member := range scoutChatThreadMemberEmails(source) {
+		sourceMembers[member] = struct{}{}
+	}
+	if destinationPrivate {
+		_, allowed := sourceMembers[destinationOwner]
+		return allowed
+	}
+	destinationMembers := scoutChatThreadMemberEmails(destination)
+	if len(destinationMembers) == 0 {
+		return false
+	}
+	for _, member := range destinationMembers {
+		if _, allowed := sourceMembers[member]; !allowed {
+			return false
+		}
+	}
+	return true
+}
+
+func (app *kanbanBoardApp) assistantFileAttachmentSourceForDestination(ctx context.Context, viewer *userAccount, fileID string, destination scoutChatThreadRecord) (scoutChatFileAttachment, blobMeta, string, bool) {
+	if !app.assistantFileSourceAllowsDestination(ctx, viewer, fileID, destination) {
+		return scoutChatFileAttachment{}, blobMeta{}, "", false
+	}
+	return app.assistantFileAttachmentSource(ctx, viewer, fileID)
+}
+
+func (app *kanbanBoardApp) assistantFileSourceRevisionForDestination(ctx context.Context, viewer *userAccount, fileID string, destination scoutChatThreadRecord) (string, bool) {
+	_, _, revision, ok := app.assistantFileAttachmentSourceForDestination(ctx, viewer, fileID, destination)
+	return revision, ok
 }
 
 // authorizedFileDeliverableCandidates collects IDs only, then obtains each
@@ -522,7 +749,7 @@ func (app *kanbanBoardApp) grandfatherSavedToFilesAtBoot() {
 // assistantFilesHandler serves GET /assistant/files — the Files surface list.
 // Gate pattern of assistantMemoryHandler: method, origin, session, app.
 func assistantFilesHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodDelete {
+	if r.Method != http.MethodGet && r.Method != http.MethodDelete && r.Method != http.MethodPatch {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -543,6 +770,10 @@ func assistantFilesHandler(w http.ResponseWriter, r *http.Request) {
 		assistantFileDelete(w, r, user)
 		return
 	}
+	if r.Method == http.MethodPatch {
+		assistantFileRename(w, r, user)
+		return
+	}
 
 	rows := kanbanApp.assistantFilesForPrincipal(r.Context(), user)
 	folders := decorateAssistantFileFolders(rows)
@@ -551,6 +782,122 @@ func assistantFilesHandler(w http.ResponseWriter, r *http.Request) {
 		"files":   rows,
 		"folders": folders,
 	})
+}
+
+func assistantFileRename(w http.ResponseWriter, r *http.Request, user *userAccount) {
+	payload := struct {
+		ID     string `json:"id"`
+		FileID string `json:"fileId"`
+		Name   string `json:"name"`
+	}{}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read rename request")
+		return
+	}
+	fileID := firstNonEmptyString(strings.TrimSpace(payload.ID), strings.TrimSpace(payload.FileID))
+	if fileID == "" {
+		writeAuthError(w, http.StatusBadRequest, errFileFolderFileID.Error())
+		return
+	}
+	name, err := normalizeAssistantFileName(payload.Name)
+	if err != nil {
+		writeAuthError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	row, err := kanbanApp.renameAssistantFileForUser(r.Context(), user, fileID, name)
+	if err != nil {
+		if errors.Is(err, errFileSaveNotFound) {
+			writeAuthError(w, http.StatusNotFound, "file not found")
+			return
+		}
+		log.Errorf("Rename Drive file %s failed: %v", fileID, err)
+		writeAuthError(w, http.StatusInternalServerError, "could not rename the file")
+		return
+	}
+	broadcastSignedInKanbanEvent("file", map[string]any{"kind": "renamed", "file": row})
+	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "file": row})
+}
+
+func normalizeAssistantFileName(raw string) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return "", errAssistantFileName
+	}
+	name := assistantFileUploadName(raw)
+	if strings.TrimSpace(name) == "" {
+		return "", errAssistantFileName
+	}
+	return name, nil
+}
+
+func (app *kanbanBoardApp) renameAssistantFileForUser(ctx context.Context, user *userAccount, fileID string, name string) (assistantFileRecord, error) {
+	row, writable := authorizedFileRowForMove(ctx, user, fileID)
+	if row.ID == "" || !writable {
+		return assistantFileRecord{}, errFileSaveNotFound
+	}
+	switch row.Origin {
+	case "deliverable":
+		artifact, ok := authorizedArtifactForActions(ctx, user, row.ArtifactID, ACLReadContent, ACLWrite)
+		if !ok {
+			return assistantFileRecord{}, errFileSaveNotFound
+		}
+		header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact))
+		updated, matched, err := app.memory.updateOSArtifactMetadataIfHeaderMatches(header, artifact.ID, map[string]string{"driveFileName": name})
+		if err != nil || !matched {
+			if err != nil {
+				return assistantFileRecord{}, err
+			}
+			return assistantFileRecord{}, errFileSaveNotFound
+		}
+		row, _ = fileDeliverableRecord(updated)
+	case "chat":
+		threadID, messageID, fileIndex, ok := parseChatAttachmentFileID(fileID)
+		if !ok {
+			return assistantFileRecord{}, errFileSaveNotFound
+		}
+		thread, _, err := app.scoutChatThreadByID(user.Email, threadID)
+		if err != nil {
+			return assistantFileRecord{}, errFileSaveNotFound
+		}
+		messageIndex := -1
+		for index := range thread.Messages {
+			if thread.Messages[index].ID == messageID {
+				messageIndex = index
+				break
+			}
+		}
+		if messageIndex < 0 || fileIndex < 0 || fileIndex >= len(thread.Messages[messageIndex].Files) {
+			return assistantFileRecord{}, errFileSaveNotFound
+		}
+		thread.Messages[messageIndex].Files[fileIndex].Name = name
+		thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		if err := app.saveScoutChatThread(thread); err != nil {
+			return assistantFileRecord{}, err
+		}
+		rows := app.fileRecordsFromThread(user.Email, thread)
+		for _, candidate := range rows {
+			if candidate.ID == fileID {
+				row = candidate
+				break
+			}
+		}
+	default:
+		entry, ok := app.memory.entryByID(fileID)
+		if !ok || entry.Kind != meetingMemoryKindFile {
+			return assistantFileRecord{}, errFileSaveNotFound
+		}
+		updated, changed, err := app.memory.updateEntryWithMetadata(meetingMemoryKindFile, entry.ID, entry.Text, map[string]string{"name": name})
+		if err != nil {
+			return assistantFileRecord{}, err
+		}
+		if !changed && strings.TrimSpace(entry.Metadata["name"]) != name {
+			return assistantFileRecord{}, errFileSaveNotFound
+		}
+		row = fileRecordFromEntry(updated)
+	}
+	_, assignments := sharedFileFolderStore().snapshot()
+	row.FolderID = assignments[fileID]
+	row.CanDelete = true
+	return row, nil
 }
 
 // assistantFileDelete removes one row through its source-of-truth seam. A
@@ -810,6 +1157,10 @@ func assistantFileUploadHandler(w http.ResponseWriter, r *http.Request) {
 // which subsumes the UI-state exclusion — so a successful save always surfaces
 // the row instead of silently stamping a never-visible entry.
 func (app *kanbanBoardApp) saveDeliverableToFiles(artifactID string, folderID string, actor string) (assistantFileRecord, error) {
+	return app.saveDeliverableToFilesNamed(artifactID, folderID, "", actor)
+}
+
+func (app *kanbanBoardApp) saveDeliverableToFilesNamed(artifactID string, folderID string, fileName string, actor string) (assistantFileRecord, error) {
 	artifactID = strings.TrimSpace(artifactID)
 	if artifactID == "" {
 		return assistantFileRecord{}, errFileSaveArtifactID
@@ -821,10 +1172,14 @@ func (app *kanbanBoardApp) saveDeliverableToFiles(artifactID string, folderID st
 	if !ok {
 		return assistantFileRecord{}, errFileSaveNotFound
 	}
-	return app.saveDeliverableSnapshotToFiles(entry, folderID, actor)
+	return app.saveDeliverableSnapshotToFilesNamed(entry, folderID, fileName, actor)
 }
 
 func (app *kanbanBoardApp) saveDeliverableSnapshotToFiles(entry meetingMemoryEntry, folderID string, actor string) (assistantFileRecord, error) {
+	return app.saveDeliverableSnapshotToFilesNamed(entry, folderID, "", actor)
+}
+
+func (app *kanbanBoardApp) saveDeliverableSnapshotToFilesNamed(entry meetingMemoryEntry, folderID string, fileName string, actor string) (assistantFileRecord, error) {
 	if app == nil || app.memory == nil {
 		return assistantFileRecord{}, fmt.Errorf("files are unavailable")
 	}
@@ -843,11 +1198,19 @@ func (app *kanbanBoardApp) saveDeliverableSnapshotToFiles(entry meetingMemoryEnt
 		return assistantFileRecord{}, errFileFolderNotFound
 	}
 	expectedHeader := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(entry))
-	updated, matched, err := app.memory.updateOSArtifactMetadataIfHeaderMatches(expectedHeader, artifactID, map[string]string{
+	metadataUpdates := map[string]string{
 		"savedToFiles":   "true",
 		"savedToFilesBy": strings.TrimSpace(actor),
 		"savedToFilesAt": time.Now().UTC().Format(time.RFC3339Nano),
-	})
+	}
+	if strings.TrimSpace(fileName) != "" {
+		normalizedName, nameErr := normalizeAssistantFileName(fileName)
+		if nameErr != nil {
+			return assistantFileRecord{}, nameErr
+		}
+		metadataUpdates["driveFileName"] = normalizedName
+	}
+	updated, matched, err := app.memory.updateOSArtifactMetadataIfHeaderMatches(expectedHeader, artifactID, metadataUpdates)
 	if err != nil {
 		if !matched {
 			return assistantFileRecord{}, errFileSaveNotFound
@@ -866,7 +1229,7 @@ func (app *kanbanBoardApp) saveDeliverableSnapshotToFiles(entry meetingMemoryEnt
 			// the exact prior artifact metadata conditionally before returning.
 			updatedHeader := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(updated))
 			_, _, _ = app.memory.restoreOSArtifactMetadataIfHeaderMatches(updatedHeader, artifactID, entry.Metadata,
-				[]string{"savedToFiles", "savedToFilesBy", "savedToFilesAt"})
+				[]string{"savedToFiles", "savedToFilesBy", "savedToFilesAt", "driveFileName"})
 			return assistantFileRecord{}, err
 		}
 	}
@@ -929,6 +1292,7 @@ func assistantFileSaveHandler(w http.ResponseWriter, r *http.Request) {
 	payload := struct {
 		ArtifactID string `json:"artifactId"`
 		FolderID   string `json:"folderId"`
+		FileName   string `json:"fileName"`
 	}{}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&payload); err != nil {
 		writeAuthError(w, http.StatusBadRequest, "could not read save request")
@@ -945,7 +1309,7 @@ func assistantFileSaveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor := firstNonEmptyString(strings.TrimSpace(user.Name), normalizeAccountEmail(user.Email))
-	row, err := kanbanApp.saveDeliverableSnapshotToFiles(artifact, payload.FolderID, actor)
+	row, err := kanbanApp.saveDeliverableSnapshotToFilesNamed(artifact, payload.FolderID, payload.FileName, actor)
 	if err != nil {
 		status := fileSaveErrorStatus(err)
 		message := err.Error()

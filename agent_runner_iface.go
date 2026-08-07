@@ -245,11 +245,17 @@ func selectedExecutionRunnerName() string {
 // exactly as produceAgentThreadArtifact did.
 func (app *kanbanBoardApp) selectAgentRunner(job AgentJob, responder openAITextResponder) AgentRunner {
 	name := selectedAgentRunnerName()
+	// Research is an OpenAI execution seat. It must not inherit the legacy
+	// Anthropic orchestrator merely because an Anthropic key is present in the
+	// process environment; provenance shown to the user must match Sol/high.
+	if normalizeAgentThreadMode(job.Mode) == "research" {
+		name = agentRunnerOpenAIText
+	}
 	// A /goal subtask carries the concrete runner its capability match assigned
 	// (assignGoalRunners). Honoring it routes shell/repo subtasks to the
 	// execution runner while everything else stays on the orchestrator. Only
 	// goal children set this key, so non-goal threads are unchanged.
-	if override := resolveAssignedRunnerName(job.thread.Artifact.Metadata["assignedRunner"]); override != "" {
+	if override := resolveAssignedRunnerName(job.thread.Artifact.Metadata["assignedRunner"]); override != "" && normalizeAgentThreadMode(job.Mode) != "research" {
 		name = override
 	}
 	name = admittedAgentRunnerName(name)

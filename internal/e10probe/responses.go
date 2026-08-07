@@ -53,7 +53,7 @@ type responsesProfile struct {
 
 var responsesProfiles = map[string]responsesProfile{
 	"gpt-5.6-luna": {
-		Effort: "low", MaxOutputTokens: 256, HardMaxUSD: 0.005,
+		Effort: "max", MaxOutputTokens: 256, HardMaxUSD: 0.005,
 		InputUSDPerMillion: 0.20, CachedUSDPerMillion: 0.02, CacheWriteUSDPerMillion: 0.25, OutputUSDPerMillion: 1.20,
 	},
 	"gpt-5.6-terra": {

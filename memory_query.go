@@ -15,8 +15,9 @@ import (
 const (
 	defaultMemoryQuestionContextLimit = 60
 	memoryQuestionRequestTimeout      = 45 * time.Second
-	assistantQueryRequestTimeout      = 25 * time.Second
-	scoutChatMaxOutputTokens          = 2400
+	assistantQueryRequestTimeout      = 45 * time.Second
+	scoutChatMaxOutputTokens          = 8000
+	scoutChatRetryMaxOutputTokens     = 12000
 	defaultMeetingTimeZone            = "America/Los_Angeles"
 	goalWorkflowStageMetadata         = "identify_and_set_goal,decompose_work,assign_right_agent,coordinate_dependencies,execute_in_order,review_against_original_goal,gate_before_shipping,save_what_worked,report_only_what_matters,verify_goal_completed"
 )
@@ -420,7 +421,7 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModelAttachments(ctx context.
 	input := buildAssistantQueryInput(query, cards, entries, app.activeDecisionEntries(decisionContextLimit), app.activeNarrativeEntries(narrativeStorylineContextLimit), history, time.Now(), includeBoard, pinned...)
 	instructions := assistantQueryInstructionsForContext(ctx, strings.TrimSpace(apiKey) != "")
 	recordCapabilityPoll(capabilityTypedScoutAnswer, time.Now().UTC())
-	answer, err := createOpenAITextResponse(ctx, apiKey, openAITextRequest{
+	request := openAITextRequest{
 		Model:           scoutChatModel(),
 		Seat:            seatChat,
 		Workflow:        "scout_chat",
@@ -433,7 +434,16 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModelAttachments(ctx context.
 		// accidentally activate the legacy raw-memory fallback.
 		MaxOutputTokens: scoutChatMaxOutputTokens,
 		Attachments:     attachments,
-	})
+	}
+	answer, err := createOpenAITextResponse(ctx, apiKey, request)
+	if reason, rejected := openAIOutputRejectionReason(err); rejected && reason == "max_output_truncation" {
+		// Luna/max can legitimately spend much of the output allowance on
+		// reasoning before emitting visible text. Retry once with the same fixed
+		// reasoning policy and a larger output envelope; this is budget recovery,
+		// not an unreported change of model or reasoning effort.
+		request.MaxOutputTokens = scoutChatRetryMaxOutputTokens
+		answer, err = createOpenAITextResponse(ctx, apiKey, request)
+	}
 	if err != nil {
 		recordCapabilityFailure(capabilityTypedScoutAnswer, time.Now().UTC(), err)
 		return "", err
@@ -1402,6 +1412,7 @@ func assistantQueryInstructionsForCoreAvailability(coreAvailable bool) string {
 		"Voice: " + scout.VoiceSummary,
 		"Working style: " + scout.WorkingStyle,
 		brilliantCoworkerConstitution(),
+		scoutRuntimeSelfKnowledge(),
 		"Speak in first person about your own actions and commitments. Step into the conversation naturally; never narrate ‘Scout’ in third person, announce your personality, or sound like a status bot.",
 		"Keep your stable identity distinct from learned collaboration preferences. You may adapt to supplied human-reviewed relationship and company memory, but never invent a preference, treat repetition as permission, or let familiarity expand access.",
 		"Answer using the supplied current Kanban board, memory context, and conversation history only.",
@@ -1434,6 +1445,13 @@ func assistantQueryInstructionsForCoreAvailability(coreAvailable bool) string {
 	}
 	lines = append(lines, "Keep the answer concise and practical.")
 	return strings.Join(lines, " ")
+}
+
+func scoutRuntimeSelfKnowledge() string {
+	return fmt.Sprintf(
+		"Runtime self-knowledge: answer model: %s. Router model: %s. Extraction and attachment model: %s. Proactive-attention model: %s. Text reasoning effort for answer, router, extraction/attachment, and proactive-attention: %s. Voice model: %s. Voice reasoning effort: %s. These are separate server-resolved routes; equal values do not imply one shared route. Text reasoning effort is fixed by current server configuration, not adaptive per question. Other coworker and workflow calls use their own server-pinned seat and effort. When asked about model or reasoning configuration, report these server-supplied facts exactly and never infer a different setting from how difficult the question feels.",
+		scoutChatModel(), scoutRouterModel(), scoutExtractionModel(), scoutChatModel(), scoutReasoningEffort(), realtimeModel(), realtimeReasoningEffort(),
+	)
 }
 
 func buildAssistantQueryInput(query string, cards []kanbanCard, entries []meetingMemoryEntry, decisions []meetingMemoryEntry, storylines []meetingMemoryEntry, history []scoutChatTurn, now time.Time, includeBoard bool, pinned ...assistantPinnedNote) string {

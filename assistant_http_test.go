@@ -632,7 +632,8 @@ func TestArtifactsHandlerListTrimsLargeBodiesButIDReturnsFull(t *testing.T) {
 		t.Fatalf("id status=%d body=%s, want 200", idRec.Code, idRec.Body.String())
 	}
 	var idPayload struct {
-		Artifacts []meetingMemoryEntry `json:"artifacts"`
+		Artifacts      []meetingMemoryEntry   `json:"artifacts"`
+		DispositionRef ArtifactDispositionRef `json:"dispositionRef"`
 	}
 	if err := json.Unmarshal(idRec.Body.Bytes(), &idPayload); err != nil {
 		t.Fatalf("decode id: %v", err)
@@ -645,6 +646,9 @@ func TestArtifactsHandlerListTrimsLargeBodiesButIDReturnsFull(t *testing.T) {
 	}
 	if idPayload.Artifacts[0].Metadata["bodyTrimmed"] == "true" {
 		t.Fatalf("?id= must not flag bodyTrimmed")
+	}
+	if idPayload.DispositionRef.Validate() != nil || idPayload.DispositionRef.ArtifactID != big.ID {
+		t.Fatalf("?id= disposition ref=%+v", idPayload.DispositionRef)
 	}
 
 	// The stored entry is unmutated: still full body, no trim flag.

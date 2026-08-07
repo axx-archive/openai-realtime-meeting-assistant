@@ -282,7 +282,7 @@ function renderedComposeConfig(receipt = makeReceipt()) {
       },
       'render-queue-init': {
         profiles: ['render'], image: receipt.images.renderRunner.imageId, build: build('Dockerfile.render'), user: '0:0',
-        entrypoint: ['/bin/sh', '-eu', '-c'], command: ['install -d -o 65532 -g 65532 -m 0700 /app/render-queue /app/render-queue/jobs'],
+        entrypoint: ['/bin/sh', '-eu', '-c'], command: ["install -d -o 65532 -g 65532 -m 2770 /app/render-queue /app/render-queue/jobs && find /app/render-queue/jobs -xdev -maxdepth 1 -type f -name '*.json' -exec chown 65532:65532 {} + -exec chmod 0660 {} +"],
         volumes: [volume('render_queue', '/app/render-queue')], network_mode: 'none', cap_drop: ['ALL'],
         cap_add: ['CHOWN', 'DAC_OVERRIDE'], read_only: true, restart: 'no'
       },

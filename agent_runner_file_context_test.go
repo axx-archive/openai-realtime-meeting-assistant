@@ -29,8 +29,8 @@ func agentRunnerACLThreadFixture(t *testing.T) (*kanbanBoardApp, scoutAgentThrea
 	}
 	thread := scoutAgentThread{
 		ID:    "agent-thread-research-acl",
-		Mode:  "research",
-		Query: "Colton, synthesize the attached Country+Golf brief",
+		Mode:  "design",
+		Query: "Synthesize the attached Country+Golf brief into a positioning concept",
 		Artifact: meetingMemoryEntry{
 			ID: "os-artifact-agent-runner-acl",
 			Metadata: map[string]string{

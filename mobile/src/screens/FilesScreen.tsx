@@ -254,8 +254,7 @@ type FileRowProps = {
   sharing: boolean;
   disabled: boolean;
   onOpen: (file: FileRecord) => void;
-  onShare: (file: FileRecord) => void;
-  onMove: (file: FileRecord) => void;
+  onManage: (file: FileRecord) => void;
 };
 
 const FileRow = memo(function FileRow({
@@ -264,8 +263,7 @@ const FileRow = memo(function FileRow({
   sharing,
   disabled,
   onOpen,
-  onShare,
-  onMove,
+  onManage,
 }: FileRowProps) {
   const metadata = [
     formatBytes(file.size),
@@ -324,34 +322,18 @@ const FileRow = memo(function FileRow({
       </Pressable>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Share or save ${file.name}`}
-        accessibilityHint="Downloads the file securely and opens the system share sheet"
-        accessibilityState={{ disabled: disabled || !file.downloadUrl }}
-        disabled={disabled || !file.downloadUrl}
-        hitSlop={4}
-        onPress={() => onShare(file)}
-        style={({ pressed }) => [styles.fileAction, pressed && styles.pressed]}
-      >
-        {sharing ? (
-          <ActivityIndicator size="small" color={colors.text2} />
-        ) : (
-          <SymbolView name="square.and.arrow.up" tintColor={colors.text2} size={19} />
-        )}
-      </Pressable>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Move ${file.name}`}
-        accessibilityHint="Choose Root or a folder"
+        accessibilityLabel={`More actions for ${file.name}`}
+        accessibilityHint="Rename, move, or share this file"
         accessibilityState={{ disabled }}
         disabled={disabled}
         hitSlop={4}
-        onPress={() => onMove(file)}
+        onPress={() => onManage(file)}
         style={({ pressed }) => [styles.fileMenu, pressed && styles.pressed]}
       >
-        {moving ? (
-          <ActivityIndicator size="small" color={colors.text2} />
-        ) : (
-          <SymbolView name="folder.badge.gearshape" tintColor={colors.text2} size={19} />
+        {moving || sharing ? <ActivityIndicator size="small" color={colors.text2} /> : (
+          <View style={styles.verticalEllipsis}>
+            <SymbolView name="ellipsis" tintColor={colors.text2} size={19} />
+          </View>
         )}
       </Pressable>
     </View>
@@ -657,6 +639,46 @@ export function FilesScreen(_props: Props) {
     [busy, sessionToken],
   );
 
+  const renameFile = useCallback((file: FileRecord, rawName: string) => {
+    const name = rawName.trim();
+    if (!sessionToken || !name || name === file.name) return;
+    void runMutation(`rename-${file.id}`, async () => {
+      await api.renameFile(sessionToken, file.id, name);
+    });
+  }, [runMutation, sessionToken]);
+
+  const showFileMenu = useCallback((file: FileRecord) => {
+    if (busy) return;
+    const canShare = Boolean(file.downloadUrl);
+    const options = ['Rename', 'Move', ...(canShare ? ['Share or save'] : []), 'Cancel'];
+    const cancelButtonIndex = options.length - 1;
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        title: file.name,
+        options,
+        cancelButtonIndex,
+      },
+      (index) => {
+        if (index === 0) {
+          Alert.prompt(
+            'Rename file',
+            'Choose the name shown in Drive.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Save', onPress: (name?: string) => renameFile(file, name ?? '') },
+            ],
+            'plain-text',
+            file.name,
+          );
+        } else if (index === 1) {
+          showMoveMenu(file);
+        } else if (canShare && index === 2) {
+          shareFile(file);
+        }
+      },
+    );
+  }, [busy, renameFile, shareFile, showMoveMenu]);
+
   const openFolder = useCallback((folder: FolderDestination) => {
     setActiveFolderId(folder.id);
     setActionError(null);
@@ -683,11 +705,10 @@ export function FilesScreen(_props: Props) {
         sharing={busy === `share-${item.id}`}
         disabled={isBusy}
         onOpen={openFile}
-        onShare={shareFile}
-        onMove={showMoveMenu}
+        onManage={showFileMenu}
       />
     ),
-    [busy, isBusy, openFile, shareFile, showMoveMenu],
+    [busy, isBusy, openFile, showFileMenu],
   );
 
   const listHeader = (
@@ -1050,12 +1071,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  fileAction: {
-    width: hitMin,
-    minHeight: 92,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  verticalEllipsis: { transform: [{ rotate: '90deg' }] },
   empty: {
     alignItems: 'center',
     paddingHorizontal: space[8],

@@ -32,6 +32,9 @@ import type {
   RoomAgentsResponse,
   StridePrivateAgentTemplateInput,
   StrideRelationshipMemoryResponse,
+  ArtifactDispositionReceipt,
+  ArtifactDispositionRef,
+  ArtifactResponse,
 } from './types';
 import {
   buildConsentDecision,
@@ -399,11 +402,24 @@ export const api = {
     return request<BoardResponse>('/assistant/board', { sessionToken });
   },
 
-  artifact(sessionToken: string, artifactId: string): Promise<{
-    ok: boolean;
-    artifacts: Array<{ id: string; text?: string; metadata?: Record<string, string> }>;
-  }> {
+  artifact(sessionToken: string, artifactId: string): Promise<ArtifactResponse> {
     return request(`/artifacts?id=${encodeURIComponent(artifactId)}`, { sessionToken });
+  },
+
+  artifactDisposition(
+    sessionToken: string,
+    body: {
+      operationId: string;
+      action: 'open' | 'save' | 'discard';
+      artifact: ArtifactDispositionRef;
+      folderId?: string;
+      fileName?: string;
+      confirmationId?: string;
+    },
+  ): Promise<{ ok: boolean; receipt: ArtifactDispositionReceipt }> {
+    return request('/api/artifact-dispositions/v1', {
+      method: 'POST', body, sessionToken,
+    });
   },
 
   createBoardCard(sessionToken: string, card: BoardCardInput) {
@@ -505,6 +521,12 @@ export const api = {
   moveFile(sessionToken: string, fileId: string, folderId = '') {
     return request<{ ok: boolean }>('/assistant/files/move', {
       method: 'POST', body: { fileId, folderId }, sessionToken,
+    });
+  },
+
+  renameFile(sessionToken: string, id: string, name: string) {
+    return request<{ ok: boolean; file?: Record<string, unknown> }>('/assistant/files', {
+      method: 'PATCH', body: { id, name }, sessionToken,
     });
   },
 
@@ -661,6 +683,16 @@ export const api = {
       `/assistant/chat-threads/${encodeURIComponent(threadId)}/proposal`,
       { method: 'POST', body: { messageId, action, objective }, sessionToken },
     );
+  },
+
+  followUpArtifact(
+    sessionToken: string,
+    artifactId: string,
+    text: string,
+  ): Promise<{ ok: boolean; artifact?: Record<string, unknown> }> {
+    return request('/assistant/threads/follow-up', {
+      method: 'POST', body: { artifactId, text }, sessionToken,
+    });
   },
 
   regenerateScoutImage(
@@ -822,6 +854,24 @@ export const api = {
       sourceId: payload.sourceId,
       sourceRevision: payload.sourceRevision,
     };
+  },
+
+  async attachDriveFile(
+    sessionToken: string,
+    threadId: string,
+    fileId: string,
+  ): Promise<ScoutFileAttachment> {
+    const response = await request<{
+      ok: boolean;
+      attachment?: ScoutFileAttachment;
+    }>('/assistant/attachments/from-file', {
+      method: 'POST', body: { threadId, fileId }, sessionToken,
+    });
+    const attachment = response.attachment;
+    if (!attachment?.ref || !attachment.mime || !attachment.sourceId || !attachment.sourceRevision) {
+      throw new Error('Drive did not return an exact authorized attachment.');
+    }
+    return attachment;
   },
 
   /**

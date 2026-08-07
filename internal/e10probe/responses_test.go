@@ -415,7 +415,7 @@ func TestFrozenResponsesProfilesStayInsideHardCeilings(t *testing.T) {
 		outputPrice float64
 		worstCase   float64
 	}{
-		"gpt-5.6-luna":  {"low", 256, .005, .20, .02, .25, 1.20, .000512},
+		"gpt-5.6-luna":  {"max", 256, .005, .20, .02, .25, 1.20, .000512},
 		"gpt-5.6-terra": {"low", 384, .010, 2.00, .20, 2.50, 12.00, .006656},
 		"gpt-5.6-sol":   {"medium", 512, .025, 5.00, .50, 6.25, 30.00, .02048},
 	}

@@ -11,20 +11,22 @@ type Props = {
   onFiles: () => void;
   onPhotos: () => void;
   onGifs: () => void;
+  onDrive: () => void;
 };
 
 const sources: Array<{
-  key: 'files' | 'photos' | 'gifs';
+  key: 'files' | 'photos' | 'gifs' | 'drive';
   title: string;
   detail: string;
   icon: SFSymbol;
 }> = [
   { key: 'photos', title: 'Photos', detail: 'Camera Roll', icon: 'photo.on.rectangle.angled' },
   { key: 'files', title: 'Files', detail: 'Images or PDF', icon: 'folder.fill' },
+  { key: 'drive', title: 'Browse Drive', detail: 'Authorized files', icon: 'externaldrive.fill' },
   { key: 'gifs', title: 'GIFs', detail: 'Search GIPHY', icon: 'sparkles' },
 ];
 
-export function AttachmentSourceSheet({ visible, onClose, onFiles, onPhotos, onGifs }: Props) {
+export function AttachmentSourceSheet({ visible, onClose, onFiles, onPhotos, onGifs, onDrive }: Props) {
   const reduced = useReduceMotion();
   const progress = useRef(new Animated.Value(0)).current;
   const pendingSource = useRef<(typeof sources)[number]['key'] | null>(null);
@@ -59,6 +61,7 @@ export function AttachmentSourceSheet({ visible, onClose, onFiles, onPhotos, onG
     if (!source) return;
     if (source === 'photos') onPhotos();
     else if (source === 'files') onFiles();
+    else if (source === 'drive') onDrive();
     else onGifs();
   };
 
@@ -91,10 +94,10 @@ export function AttachmentSourceSheet({ visible, onClose, onFiles, onPhotos, onG
                 onPress={() => choose(source.key)}
                 style={({ pressed }) => [styles.option, pressed && styles.optionPressed]}
               >
-                <View style={[styles.icon, source.key === 'gifs' && styles.gifIcon]}>
+                <View style={[styles.icon, (source.key === 'gifs' || source.key === 'drive') && styles.gifIcon]}>
                   <SymbolView
                     name={source.icon}
-                    tintColor={source.key === 'gifs' ? colors.emberText : colors.text1}
+                    tintColor={source.key === 'gifs' || source.key === 'drive' ? colors.emberText : colors.text1}
                     size={22}
                   />
                 </View>
@@ -125,10 +128,10 @@ const styles = StyleSheet.create({
   },
   grabber: { alignSelf: 'center', width: 34, height: 4, borderRadius: 2, backgroundColor: colors.line2 },
   title: { ...type.headline, marginTop: space[3], marginBottom: space[4], color: colors.text1 },
-  options: { flexDirection: 'row', gap: space[2] },
+  options: { flexDirection: 'row', flexWrap: 'wrap', gap: space[2] },
   option: {
-    flex: 1,
-    minHeight: 128,
+    width: '48%',
+    minHeight: 116,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: space[2],
@@ -137,7 +140,7 @@ const styles = StyleSheet.create({
     borderColor: colors.line1,
     backgroundColor: colors.surface3,
   },
-  optionPressed: { opacity: 0.72, transform: [{ scale: 0.97 }] },
+  optionPressed: { opacity: 0.72, transform: [{ scale: 0.96 }] },
   icon: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center', borderRadius: 16, backgroundColor: colors.accentSoft },
   gifIcon: { backgroundColor: colors.emberSoft },
   optionTitle: { ...type.bodyMedium, marginTop: space[2], color: colors.text1 },

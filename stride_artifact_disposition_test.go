@@ -73,8 +73,8 @@ func (effects *artifactDispositionRetryEffects) Open(context.Context, ArtifactDi
 	return nil
 }
 
-func (effects *artifactDispositionRetryEffects) Save(_ context.Context, ref ArtifactDispositionRef, actor, folder string) (ArtifactDriveReference, error) {
-	return ArtifactDriveReference{ID: ref.ArtifactID, Artifact: ref, CreatedAt: time.Now().UTC(), CreatedBy: actor, FolderID: folder, SourceArtifactID: ref.ArtifactID}, nil
+func (effects *artifactDispositionRetryEffects) Save(_ context.Context, ref ArtifactDispositionRef, actor, folder, fileName string) (ArtifactDriveReference, error) {
+	return ArtifactDriveReference{ID: ref.ArtifactID, Name: fileName, Artifact: ref, CreatedAt: time.Now().UTC(), CreatedBy: actor, FolderID: folder, SourceArtifactID: ref.ArtifactID}, nil
 }
 
 func (effects *artifactDispositionRetryEffects) Discard(context.Context, ArtifactDispositionRef, bool) (int, error) {
@@ -102,7 +102,7 @@ func (effects *artifactDispositionFakeEffects) Open(context.Context, ArtifactDis
 	return nil
 }
 
-func (effects *artifactDispositionFakeEffects) Save(_ context.Context, ref ArtifactDispositionRef, actor, folderID string) (ArtifactDriveReference, error) {
+func (effects *artifactDispositionFakeEffects) Save(_ context.Context, ref ArtifactDispositionRef, actor, folderID, fileName string) (ArtifactDriveReference, error) {
 	effects.mu.Lock()
 	defer effects.mu.Unlock()
 	effects.saves++
@@ -110,7 +110,7 @@ func (effects *artifactDispositionFakeEffects) Save(_ context.Context, ref Artif
 	if created.IsZero() {
 		created = time.Date(2026, 8, 6, 20, 0, 0, 0, time.UTC)
 	}
-	return ArtifactDriveReference{ID: ref.ArtifactID, Artifact: ref, CreatedAt: created, CreatedBy: actor, FolderID: folderID, SourceArtifactID: ref.ArtifactID}, nil
+	return ArtifactDriveReference{ID: ref.ArtifactID, Name: fileName, Artifact: ref, CreatedAt: created, CreatedBy: actor, FolderID: folderID, SourceArtifactID: ref.ArtifactID}, nil
 }
 
 func (effects *artifactDispositionFakeEffects) Discard(_ context.Context, _ ArtifactDispositionRef, preserve bool) (int, error) {

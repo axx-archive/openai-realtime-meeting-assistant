@@ -230,7 +230,7 @@ func (store *renderRunnerJobStore) enqueue(job renderRunnerJob) (renderRunnerJob
 	if err := os.MkdirAll(store.dir, 0o755); err != nil {
 		return renderRunnerJob{}, fmt.Errorf("create render runner queue: %w", err)
 	}
-	if err := writeJSONFileAtomically(store.jobPath(job.ID), "render runner job", job); err != nil {
+	if err := writeRenderRunnerJobAtomically(store.jobPath(job.ID), job); err != nil {
 		return renderRunnerJob{}, err
 	}
 	return job, nil
@@ -285,7 +285,24 @@ func (store *renderRunnerJobStore) update(job renderRunnerJob) error {
 	if strings.TrimSpace(job.ID) == "" {
 		return fmt.Errorf("render runner job id is required")
 	}
-	return writeJSONFileAtomically(store.jobPath(job.ID), "render runner job", job)
+	return writeRenderRunnerJobAtomically(store.jobPath(job.ID), job)
+}
+
+// writeRenderRunnerJobAtomically is deliberately group-readable/writable.
+// The app process enqueues jobs while the isolated renderer runs as uid/gid
+// 65532 in a different container. The render_queue jobs directory is setgid
+// to 65532 by render-queue-init, so 0660 preserves the shared group across
+// every atomic replacement without making untrusted render payloads public.
+func writeRenderRunnerJobAtomically(path string, job renderRunnerJob) error {
+	rawJSON, err := json.MarshalIndent(job, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode render runner job: %w", err)
+	}
+	rawJSON = append(rawJSON, '\n')
+	if err := writeFileAtomicallyForCanonicalMode(path, rawJSON, 0o660); err != nil {
+		return fmt.Errorf("persist render runner job: %w", err)
+	}
+	return nil
 }
 
 func (store *renderRunnerJobStore) read(filename string) (*renderRunnerJob, error) {

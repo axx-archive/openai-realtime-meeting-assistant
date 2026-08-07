@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -173,5 +177,68 @@ func TestAgentMindPositionExpiryIsNotPrompted(t *testing.T) {
 	}
 	if got := app.agentMindPositions(agentMindScoutID, "ball"); len(got) != 0 || app.agentMindPositionPrompt(agentMindScoutID, "ball") != "" {
 		t.Fatalf("expired position leaked into projection: %#v", got)
+	}
+}
+
+func TestAgentMindReviewRouteIsAdminRevisionBoundAndSourceAuthorized(t *testing.T) {
+	setupAuthTestEnv(t)
+	timCookies := loginAs(t, "tim@shareability.com", "B0NFIRE!")
+	adminCookies := loginAs(t, artifactLibraryAdminEmail, "B0NFIRE!")
+	app := newIsolatedKanbanBoardApp(t)
+	previous := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previous })
+	thread, err := app.createScoutChatThread(artifactLibraryAdminEmail, "AJ", "agent-mind-review", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	question := scoutChatMessageRecord{ID: "review-question", Role: "user", AuthorEmail: artifactLibraryAdminEmail, Text: "What do you think is the better launch strategy?"}
+	answer := scoutChatMessageRecord{ID: "review-answer", Role: "scout", Text: "My read is to start with the narrow pilot because it provides a faster proof point and limits downside."}
+	thread.Messages = []scoutChatMessageRecord{question, answer}
+	if err := app.saveScoutChatThread(thread); err != nil {
+		t.Fatal(err)
+	}
+	app.maybeRecordScoutAgentMindPosition(thread, question, answer)
+	positions := app.agentMindPositionsForViewer(artifactLibraryAdminEmail, agentMindScoutID, "")
+	if len(positions) != 1 {
+		t.Fatalf("positions=%#v", positions)
+	}
+	body := []byte(fmt.Sprintf(`{"id":%q,"revision":%d,"action":"correct","summary":"The pilot remains preferred, but only after the source assumptions are revalidated."}`, positions[0].ID, positions[0].Revision))
+
+	request := httptest.NewRequest(http.MethodPost, "/assistant/agent-mind", bytes.NewReader(body))
+	for _, cookie := range timCookies {
+		request.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+	assistantAgentMindHandler(recorder, request)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("non-admin status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/assistant/agent-mind", bytes.NewReader(body))
+	for _, cookie := range adminCookies {
+		request.AddCookie(cookie)
+	}
+	if user := userFromRequest(request); user == nil || normalizeAccountEmail(user.Email) != artifactLibraryAdminEmail {
+		t.Fatalf("admin session resolved to %+v", user)
+	}
+	recorder = httptest.NewRecorder()
+	assistantAgentMindHandler(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("admin status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	latest := app.latestAgentMindPosition(positions[0].AgentID, positions[0].Subject, positions[0].Scope)
+	if latest.Revision != positions[0].Revision+1 || latest.Status != agentMindPositionStatusCorrected || latest.Origin != agentMindPositionOriginReview {
+		t.Fatalf("latest=%+v", latest)
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/assistant/agent-mind", bytes.NewReader(body))
+	for _, cookie := range adminCookies {
+		request.AddCookie(cookie)
+	}
+	recorder = httptest.NewRecorder()
+	assistantAgentMindHandler(recorder, request)
+	if recorder.Code != http.StatusNotFound && recorder.Code != http.StatusConflict {
+		t.Fatalf("stale review status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }

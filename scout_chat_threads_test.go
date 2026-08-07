@@ -1315,9 +1315,9 @@ func TestScoutChatPublicConversationNeverFallsBackToMemoryHitsAfterModelFailure(
 	kanbanApp.apiKey = "openai-core-test"
 	t.Cleanup(func() { kanbanApp = previousApp })
 
-	var captured openAITextRequest
+	var captured []openAITextRequest
 	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
-		captured = request
+		captured = append(captured, request)
 		return "", &openAIOutputRejection{reason: "max_output_truncation"}
 	})
 
@@ -1337,8 +1337,17 @@ func TestScoutChatPublicConversationNeverFallsBackToMemoryHitsAfterModelFailure(
 	if response != nil {
 		t.Fatalf("response=%#v, want no fabricated answer", response)
 	}
-	if captured.Workflow != "scout_chat" || captured.MaxOutputTokens != scoutChatMaxOutputTokens {
-		t.Fatalf("request=%+v, want bounded Scout chat request", captured)
+	if len(captured) != 2 {
+		t.Fatalf("requests=%d, want one bounded retry after truncation", len(captured))
+	}
+	if captured[0].Workflow != "scout_chat" || captured[0].MaxOutputTokens != scoutChatMaxOutputTokens {
+		t.Fatalf("first request=%+v, want bounded Scout chat request", captured[0])
+	}
+	if captured[1].Workflow != "scout_chat" || captured[1].MaxOutputTokens != scoutChatRetryMaxOutputTokens {
+		t.Fatalf("retry request=%+v, want bounded truncation retry", captured[1])
+	}
+	if captured[1].Model != captured[0].Model || captured[1].ReasoningEffort != captured[0].ReasoningEffort {
+		t.Fatalf("retry changed model/effort: first=%+v retry=%+v", captured[0], captured[1])
 	}
 
 	saved, _, err := kanbanApp.scoutChatThreadByID(user.Email, channel.ID)

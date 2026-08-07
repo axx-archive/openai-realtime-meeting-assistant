@@ -68,6 +68,7 @@ func (ref ArtifactDispositionRef) Equal(other ArtifactDispositionRef) bool {
 
 type ArtifactDriveReference struct {
 	ID               string                 `json:"id"`
+	Name             string                 `json:"name,omitempty"`
 	Artifact         ArtifactDispositionRef `json:"artifact"`
 	CreatedAt        time.Time              `json:"createdAt"`
 	CreatedBy        string                 `json:"createdBy"`
@@ -80,6 +81,11 @@ func (ref ArtifactDriveReference) Validate() error {
 		!strideIdentifier(ref.CreatedBy) || ref.SourceArtifactID != ref.Artifact.ArtifactID ||
 		(ref.FolderID != "" && !strideIdentifier(ref.FolderID)) {
 		return ErrArtifactDispositionInvalid
+	}
+	if ref.Name != "" {
+		if normalized, err := normalizeAssistantFileName(ref.Name); err != nil || normalized != ref.Name {
+			return ErrArtifactDispositionInvalid
+		}
 	}
 	return nil
 }
@@ -150,6 +156,7 @@ type ArtifactDispositionRequest struct {
 	ActorPrincipal string                    `json:"actorPrincipal"`
 	Artifact       ArtifactDispositionRef    `json:"artifact"`
 	FolderID       string                    `json:"folderId,omitempty"`
+	FileName       string                    `json:"fileName,omitempty"`
 	ConfirmationID string                    `json:"confirmationId,omitempty"`
 	At             time.Time                 `json:"-"`
 }
@@ -162,12 +169,20 @@ func (request ArtifactDispositionRequest) Validate() error {
 		(request.ConfirmationID != "" && !strideIdentifier(request.ConfirmationID)) {
 		return ErrArtifactDispositionInvalid
 	}
+	if request.FileName != "" {
+		if request.Action != ArtifactDispositionSave {
+			return ErrArtifactDispositionInvalid
+		}
+		if normalized, err := normalizeAssistantFileName(request.FileName); err != nil || normalized != request.FileName {
+			return ErrArtifactDispositionInvalid
+		}
+	}
 	return nil
 }
 
 type ArtifactDispositionEffects interface {
 	Open(context.Context, ArtifactDispositionRef) error
-	Save(context.Context, ArtifactDispositionRef, string, string) (ArtifactDriveReference, error)
+	Save(context.Context, ArtifactDispositionRef, string, string, string) (ArtifactDriveReference, error)
 	Discard(context.Context, ArtifactDispositionRef, bool) (int, error)
 }
 
@@ -341,7 +356,7 @@ func (store *ArtifactDispositionStore) Apply(ctx context.Context, request Artifa
 		}
 		receipt = newArtifactDispositionReceipt(request, "opened", nil, "", nil, 0, now)
 	case ArtifactDispositionSave:
-		drive := ArtifactDriveReference{ID: current.ArtifactID, Artifact: current, CreatedAt: now, CreatedBy: request.ActorPrincipal, FolderID: request.FolderID, SourceArtifactID: current.ArtifactID}
+		drive := ArtifactDriveReference{ID: current.ArtifactID, Name: request.FileName, Artifact: current, CreatedAt: now, CreatedBy: request.ActorPrincipal, FolderID: request.FolderID, SourceArtifactID: current.ArtifactID}
 		if state.Drive != nil {
 			// Re-saving (including to a different folder) reuses the one Drive
 			// identity and its original creation custody instead of manufacturing
@@ -432,18 +447,25 @@ func (store *ArtifactDispositionStore) Apply(ctx context.Context, request Artifa
 
 func artifactDispositionReceiptMatchesRequest(receipt ArtifactDispositionReceipt, request ArtifactDispositionRequest) bool {
 	return receipt.Action == request.Action && receipt.ActorPrincipal == request.ActorPrincipal && receipt.Artifact.Equal(request.Artifact) &&
-		receipt.ConfirmationID == request.ConfirmationID
+		receipt.ConfirmationID == request.ConfirmationID && receiptFolderAndNameMatchRequest(receipt, request)
+}
+
+func receiptFolderAndNameMatchRequest(receipt ArtifactDispositionReceipt, request ArtifactDispositionRequest) bool {
+	if request.Action != ArtifactDispositionSave {
+		return true
+	}
+	return receipt.Drive != nil && receipt.Drive.FolderID == request.FolderID && receipt.Drive.Name == request.FileName
 }
 
 func (store *ArtifactDispositionStore) completePendingSaveLocked(ctx context.Context, request ArtifactDispositionRequest, stateKey string, state artifactDispositionState, pending ArtifactDispositionReceipt, effects ArtifactDispositionEffects) (ArtifactDispositionReceipt, error) {
 	if pending.Outcome != "save_pending" || pending.Drive == nil || state.PendingOperationID != request.OperationID || !pending.Artifact.Equal(state.Artifact) {
 		return ArtifactDispositionReceipt{}, ErrArtifactDispositionConflict
 	}
-	drive, effectErr := effects.Save(ctx, pending.Artifact, request.ActorPrincipal, request.FolderID)
+	drive, effectErr := effects.Save(ctx, pending.Artifact, request.ActorPrincipal, request.FolderID, request.FileName)
 	if effectErr != nil && !errors.Is(effectErr, ErrArtifactDispositionConflict) {
 		return pending, effectErr
 	}
-	if effectErr == nil && (drive.Validate() != nil || drive.ID != pending.Drive.ID || !drive.Artifact.Equal(pending.Artifact)) {
+	if effectErr == nil && (drive.Validate() != nil || drive.ID != pending.Drive.ID || drive.Name != pending.Drive.Name || drive.FolderID != pending.Drive.FolderID || !drive.Artifact.Equal(pending.Artifact)) {
 		effectErr = ErrArtifactDispositionConflict
 	}
 	if errors.Is(effectErr, ErrArtifactDispositionConflict) {
@@ -600,15 +622,15 @@ func (effects appArtifactDispositionEffects) Open(_ context.Context, ref Artifac
 	return nil
 }
 
-func (effects appArtifactDispositionEffects) Save(_ context.Context, ref ArtifactDispositionRef, actor, folderID string) (ArtifactDriveReference, error) {
+func (effects appArtifactDispositionEffects) Save(_ context.Context, ref ArtifactDispositionRef, actor, folderID, fileName string) (ArtifactDriveReference, error) {
 	if err := effects.Open(context.Background(), ref); err != nil {
 		return ArtifactDriveReference{}, err
 	}
-	row, err := effects.app.saveDeliverableSnapshotToFiles(effects.artifact, folderID, actor)
+	row, err := effects.app.saveDeliverableSnapshotToFilesNamed(effects.artifact, folderID, fileName, actor)
 	if err != nil {
 		return ArtifactDriveReference{}, err
 	}
-	return ArtifactDriveReference{ID: row.ID, Artifact: ref, CreatedAt: time.Now().UTC(), CreatedBy: actor, FolderID: folderID, SourceArtifactID: ref.ArtifactID}, nil
+	return ArtifactDriveReference{ID: row.ID, Name: row.Name, Artifact: ref, CreatedAt: time.Now().UTC(), CreatedBy: actor, FolderID: folderID, SourceArtifactID: ref.ArtifactID}, nil
 }
 
 func (effects appArtifactDispositionEffects) Discard(ctx context.Context, ref ArtifactDispositionRef, preserveDrive bool) (int, error) {
@@ -800,6 +822,7 @@ func artifactDispositionHandler(w http.ResponseWriter, r *http.Request) {
 		Action         ArtifactDispositionAction `json:"action"`
 		Artifact       ArtifactDispositionRef    `json:"artifact"`
 		FolderID       string                    `json:"folderId,omitempty"`
+		FileName       string                    `json:"fileName,omitempty"`
 		ConfirmationID string                    `json:"confirmationId,omitempty"`
 	}{}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
@@ -808,7 +831,7 @@ func artifactDispositionHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, ErrArtifactDispositionInvalid.Error())
 		return
 	}
-	request := ArtifactDispositionRequest{OperationID: payload.OperationID, Action: payload.Action, ActorPrincipal: strideRuntimePrincipalForEmail(user.Email), Artifact: payload.Artifact, FolderID: payload.FolderID, ConfirmationID: payload.ConfirmationID}
+	request := ArtifactDispositionRequest{OperationID: payload.OperationID, Action: payload.Action, ActorPrincipal: strideRuntimePrincipalForEmail(user.Email), Artifact: payload.Artifact, FolderID: payload.FolderID, FileName: strings.TrimSpace(payload.FileName), ConfirmationID: payload.ConfirmationID}
 	if request.Validate() != nil {
 		writeAuthError(w, http.StatusBadRequest, ErrArtifactDispositionInvalid.Error())
 		return

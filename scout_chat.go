@@ -453,8 +453,9 @@ func scoutRouterSystemPrompt() string {
 		"You are the routing brain for Scout's typed chat at Bonfire, a packaging studio.",
 		"Classify the newest message into exactly one route.",
 		"Native app action — app_action: ALWAYS wins when the authenticated user is asking Scout to operate Stride itself: navigate, change the Board, create/rename/archive a channel, post a message, create/rename/delete a Drive folder, delete or organize a Drive file, or change another supported in-app control. An app action is not research, a deliverable, a workstream, or a goal, even when it takes several implementation steps. Use the conversation history to resolve short confirmations such as 'yes', 'do it', or 'remove it' against Scout's immediately preceding native-action discussion.",
-		"Tier 0 — answer inline: the heavily-biased default. Questions, recall, opinions, clarifications, and discussion are ALWAYS Tier 0 — 'what did we decide about the market?' is a question, not a research run. For Tier 0, call NO tool.",
+		"Tier 0 — answer inline: the heavily-biased default. Questions, recall, opinions, clarifications, discussion, and analysis of an image/file already in chat are ALWAYS Tier 0 — describing an image or reconstructing the likely image prompt is not research. 'what did we decide about the market?' is a question, not a research run. For Tier 0, call NO tool.",
 		"Tier 1 — propose_workstream: a bounded 'go do one thing' ask (research / design / grill / workflow) that does not match a registry tool.",
+		"For every proposal objective, write Scout's polished execution prompt: preserve the user's intent and constraints, remove @mentions and conversational filler, resolve obvious context from history, state the desired output and decision clearly, and never copy the request verbatim. The user will review or edit this prompt before anything runs.",
 		"Tier 2 — propose_tool_run: the ask matches a registry tool's contract — the user wants a deliverable someone will read (a brief, a one-pager, a scorecard, a memo).",
 		"Free-form goal — propose_goal: a real multi-step build/ship OBJECTIVE that spans SEVERAL deliverables and matches NO single registry tool ('package the Aurora IP into a one-pager AND a deck', 'take this from raw idea to a shipped pitch as one goal'). Scout decomposes it into a gated loop. A single deliverable that maps to a tool stays propose_tool_run; a full end-to-end packaging run stays packaging_studio.",
 		"Ambiguous work — offer_choices: the ask is clearly work but the route is genuinely ambiguous between 2-4 concrete options, or one decisive input is missing. Ask ONE short question and offer 2-4 quick-reply options (pill labels under ~6 words); set tool_id on any option that maps to a registry tool or process. Never offer choices when one route is obvious — propose it.",
@@ -527,14 +528,14 @@ func scoutRouterTools() []anthropicTool {
 		},
 		{
 			Name:        "propose_workstream",
-			Description: "Propose a quick single-pass workstream (research / design / grill / workflow) for the user to confirm — a bounded 'go do one thing' ask that does not match a registry tool.",
+			Description: "Propose a quick single-pass workstream (research / design / grill / workflow) for the user to confirm. Return Scout's polished execution prompt, not the user's raw wording.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"mode":  map[string]any{"type": "string", "enum": []string{"research", "design", "grill", "workflow"}},
-					"query": map[string]any{"type": "string", "description": "what the single pass should do"},
+					"mode":      map[string]any{"type": "string", "enum": []string{"research", "design", "grill", "workflow"}},
+					"objective": map[string]any{"type": "string", "description": "Scout's execution-ready prompt: intended outcome, key constraints, evidence or inputs to use, and the decision or deliverable to return; no @mention or conversational preamble"},
 				},
-				"required": []string{"mode", "query"},
+				"required": []string{"mode", "objective"},
 			},
 		},
 		{
@@ -808,6 +809,10 @@ func (app *kanbanBoardApp) routeScoutChatTurnWithIntent(ctx context.Context, mod
 		return nil // keyless: plain Q&A — never a proposal, never an error
 	}
 	imageRequest := openAIImageGenerationAvailable() && scoutChatImageRequestDetected(intentText)
+	if !imageRequest && scoutChatInlineAnalysisRequest(intentText) {
+		recordEvalEvent(seatRouter, evalKindRouterOutcome, map[string]any{"verdict": routerVerdictInline, "reason": "source_analysis"})
+		return nil
+	}
 	// Deterministic pre-router guard: exact registry names + the reviewed
 	// full-run phrase list commit the matching proposal BEFORE the model turn,
 	// so thread-context gravity can never drag the literal words off the flagship
@@ -897,6 +902,24 @@ func (app *kanbanBoardApp) routeScoutChatTurnWithIntent(ctx context.Context, mod
 		"verdict": routerVerdictInline,
 	})
 	return nil
+}
+
+func scoutChatInlineAnalysisRequest(text string) bool {
+	normalized := strings.ToLower(strings.Join(strings.Fields(text), " "))
+	if normalized == "" {
+		return false
+	}
+	for _, durable := range []string{"research:", "deep research", "research pass", "create a report", "produce a report", "prepare a deck", "full audit", "market research"} {
+		if strings.Contains(normalized, durable) {
+			return false
+		}
+	}
+	for _, ordinary := range []string{"analyze", "analyse", "describe", "what's in", "what is in", "look at", "critique", "assess", "reverse engineer", "reconstruct the prompt", "give me a prompt"} {
+		if strings.Contains(normalized, ordinary) {
+			return true
+		}
+	}
+	return false
 }
 
 // routerToolByID resolves a proposable id against the same set scoutRouterTools
@@ -1060,8 +1083,9 @@ func scoutRouterProposalFromToolUse(block anthropicBlock, query string) *scoutRo
 		return proposal
 	case "propose_workstream":
 		args := struct {
-			Mode  string `json:"mode"`
-			Query string `json:"query"`
+			Mode      string `json:"mode"`
+			Objective string `json:"objective"`
+			Query     string `json:"query"` // backward-compatible provider fixture
 		}{}
 		if err := json.Unmarshal(block.Input, &args); err != nil {
 			log.Errorf("Scout router propose_workstream input undecodable: %v", err)
@@ -1075,7 +1099,7 @@ func scoutRouterProposalFromToolUse(block anthropicBlock, query string) *scoutRo
 			log.Errorf("Scout router proposed unknown workstream mode %q", args.Mode)
 			return nil
 		}
-		objective := firstNonBlank(strings.TrimSpace(args.Query), strings.TrimSpace(query))
+		objective := polishedWorkstreamObjective(firstNonBlank(strings.TrimSpace(args.Objective), firstNonBlank(strings.TrimSpace(args.Query), strings.TrimSpace(query))))
 		return &scoutRouterProposal{
 			Kind:        scoutRouterProposalKindWorkstream,
 			Mode:        mode,
@@ -1083,7 +1107,7 @@ func scoutRouterProposalFromToolUse(block anthropicBlock, query string) *scoutRo
 			Query:       strings.TrimSpace(query),
 			Lane:        scoutProposalLane(mode, "", ""),
 			WeightLabel: scoutProposalWeightQuickPass,
-			Summary:     "this looks like a quick " + assistantToolLabel(mode) + " pass — confirm and it runs once: " + objective,
+			Summary:     "Scout prepared an execution-ready " + assistantToolLabel(mode) + " prompt. Review or edit it before this runs once.",
 		}
 	case "propose_goal":
 		args := struct {
@@ -1110,6 +1134,42 @@ func scoutRouterProposalFromToolUse(block anthropicBlock, query string) *scoutRo
 		return scoutRouterImageProposal(firstNonBlank(strings.TrimSpace(args.Prompt), strings.TrimSpace(query)), query)
 	}
 	return nil
+}
+
+// polishedWorkstreamObjective is the deterministic safety net for degraded or
+// older router outputs. The router normally authors the execution-ready prompt;
+// this helper only removes conversational addressing/filler so a raw fallback
+// never reproduces "@Scout can you..." inside the approval card.
+func polishedWorkstreamObjective(raw string) string {
+	value := strings.Join(strings.Fields(strings.TrimSpace(raw)), " ")
+	if value == "" {
+		return ""
+	}
+	if strings.HasPrefix(value, "@") {
+		if cut := strings.IndexAny(value, " \t"); cut > 1 {
+			value = strings.TrimSpace(value[cut+1:])
+		}
+	}
+	for {
+		lower := strings.ToLower(value)
+		trimmed := false
+		for _, prefix := range []string{"can you ", "could you ", "would you ", "please ", "i need you to ", "i'd like you to "} {
+			if strings.HasPrefix(lower, prefix) {
+				value = strings.TrimSpace(value[len(prefix):])
+				trimmed = true
+				break
+			}
+		}
+		if !trimmed {
+			break
+		}
+	}
+	value = strings.TrimLeft(value, ":,;—–- ")
+	runes := []rune(value)
+	if len(runes) > 0 {
+		runes[0] = unicode.ToUpper(runes[0])
+	}
+	return strings.TrimSpace(string(runes))
 }
 
 // scoutRouterImageProposal builds the single-shot concept-render proposal card

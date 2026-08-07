@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { ActivityIndicator, Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import * as Linking from 'expo-linking';
@@ -39,7 +39,11 @@ export type MessageBubbleProps = {
   onRetryReply?: (message: ScoutMessage) => void;
   onOpenLongMessage?: (text: string, authorName: string, scout: boolean) => void;
   onOpenWorkArtifact?: (message: ScoutMessage) => void;
-  onResolveProposal?: (message: ScoutMessage, action: 'accepted' | 'dismissed') => void;
+  onResolveProposal?: (message: ScoutMessage, action: 'accepted' | 'dismissed', objective: string) => void;
+  proposalObjective?: string;
+  onChangeProposalObjective?: (message: ScoutMessage, objective: string) => void;
+  onSaveWorkArtifact?: (message: ScoutMessage) => void;
+  onRegenerateWorkArtifact?: (message: ScoutMessage) => void;
   onSaveImage?: (message: ScoutMessage) => void;
   onRegenerateImage?: (message: ScoutMessage) => void;
   resolvingProposal?: boolean;
@@ -47,6 +51,9 @@ export type MessageBubbleProps = {
   savingImage?: boolean;
   regeneratingImage?: boolean;
   imageSaved?: boolean;
+  savingWork?: boolean;
+  regeneratingWork?: boolean;
+  workSaved?: boolean;
 };
 
 function isScout(message: ScoutMessage): boolean {
@@ -89,7 +96,6 @@ function workThreadPresentation(message: ScoutMessage) {
                 ? 'Queued'
                 : 'Understanding';
   const agentName = String(message.thread.agentName ?? 'Scout').trim() || 'Scout';
-  const progress = Number(message.thread.progressPercent);
   return {
     active,
     complete,
@@ -98,7 +104,6 @@ function workThreadPresentation(message: ScoutMessage) {
     agentName,
 	delegatedBy: String(message.thread.delegatedBy ?? '').trim(),
     phase,
-    progress: Number.isFinite(progress) ? Math.max(0, Math.min(100, progress)) : undefined,
     mode: String(message.thread.mode ?? 'work').trim() || 'work',
     query: String(message.thread.query ?? '').trim() || 'Scout workstream',
     label: status === 'queued'
@@ -159,6 +164,10 @@ export const MessageBubble = React.memo(function MessageBubble({
   onOpenLongMessage,
   onOpenWorkArtifact,
   onResolveProposal,
+  proposalObjective,
+  onChangeProposalObjective,
+  onSaveWorkArtifact,
+  onRegenerateWorkArtifact,
   onSaveImage,
   onRegenerateImage,
   resolvingProposal = false,
@@ -166,6 +175,9 @@ export const MessageBubble = React.memo(function MessageBubble({
   savingImage = false,
   regeneratingImage = false,
   imageSaved = false,
+  savingWork = false,
+  regeneratingWork = false,
+  workSaved = false,
 }: MessageBubbleProps) {
   const lifecycle = scoutReplyLifecyclePresentation(message);
   const workThread = workThreadPresentation(message);
@@ -217,6 +229,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   }), [timestampReveal]);
   const timestampOpacity = useMemo(() => ({ opacity: timestampReveal }), [timestampReveal]);
 
+  if (workThread?.active) return null;
   if (!body && files.length === 0 && !lifecycle && !workThread && !generatedImage) return null;
 
   return (
@@ -234,6 +247,7 @@ export const MessageBubble = React.memo(function MessageBubble({
       ) : null}
       <Animated.View style={[styles.stack, (workThread || workProposal) && styles.stackWork, own && styles.stackOwn, translated]}>
         <Pressable
+          accessible={!(workProposal || workThread?.complete)}
           accessibilityRole="button"
           accessibilityLabel={`${own ? 'You' : authorName}: ${body || lifecycle?.label || workThread?.label || `${files.length} attachment${files.length === 1 ? '' : 's'}`}. ${message.editedAt ? 'Edited. ' : ''}${timeLabel}`}
           accessibilityHint={workThread ? 'Opens live work details or the completed deliverable' : longMessage ? 'Opens the full message. Touch and hold for message actions' : 'Touch and hold for message actions'}
@@ -242,7 +256,7 @@ export const MessageBubble = React.memo(function MessageBubble({
           onAccessibilityAction={(event) => {
             if (event.nativeEvent.actionName === 'longpress') onLongPress?.(message, own);
           }}
-          onPress={workThread ? () => onOpenWorkArtifact?.(message) : longMessage ? () => onOpenLongMessage?.(body, authorName, scout) : undefined}
+          onPress={workThread && !workThread.complete ? () => onOpenWorkArtifact?.(message) : longMessage ? () => onOpenLongMessage?.(body, authorName, scout) : undefined}
           onLongPress={() => onLongPress?.(message, own)}
           style={[
             styles.bubble,
@@ -298,14 +312,30 @@ export const MessageBubble = React.memo(function MessageBubble({
           ) : null}
 
           {workProposal ? (
-            <View accessibilityLabel={`${proposal?.agentName || 'Agent'} proposed work. ${proposal?.summary || body}`} style={styles.proposalCard}>
+            <View accessibilityLabel={`${proposal?.agentName || 'Agent'} proposed work. ${proposalObjective || proposal?.objective || proposal?.summary || body}`} style={styles.proposalCard}>
               <View style={styles.proposalHead}>
                 <View style={styles.workIcon}>
                   <SymbolView name="sparkles" tintColor={colors.emberText} size={13} />
                 </View>
                 <Text style={styles.proposalKicker}>{proposal?.agentName || 'Scout'} · proposed work</Text>
               </View>
-              <Text style={styles.proposalSummary}>{proposal?.summary || body}</Text>
+              <Text style={styles.proposalLabel}>OBJECTIVE</Text>
+              {proposalPending ? (
+                <TextInput
+                  accessibilityLabel={`${proposal?.agentName || 'Scout'} work objective`}
+                  editable={!resolvingProposal}
+                  multiline
+                  onChangeText={(value) => onChangeProposalObjective?.(message, value)}
+                  placeholder="What should Scout accomplish?"
+                  placeholderTextColor={colors.text3}
+                  selectionColor={colors.info}
+                  style={styles.proposalInput}
+                  textAlignVertical="top"
+                  value={proposalObjective ?? String(proposal?.objective ?? proposal?.summary ?? body)}
+                />
+              ) : (
+                <Text style={styles.proposalSummary}>{proposalObjective || proposal?.objective || proposal?.summary || body}</Text>
+              )}
               <Text style={styles.proposalSafety}>
                 {proposalPending ? 'Nothing runs until you confirm.' : proposalStatus === 'accepted' ? 'Confirmed · launched once' : 'Dismissed'}
               </Text>
@@ -316,7 +346,7 @@ export const MessageBubble = React.memo(function MessageBubble({
                     accessibilityLabel={`Run ${proposal?.agentName || 'agent'} work once`}
                     accessibilityState={{ disabled: resolvingProposal }}
                     disabled={resolvingProposal}
-                    onPress={() => onResolveProposal?.(message, 'accepted')}
+                    onPress={() => onResolveProposal?.(message, 'accepted', String(proposalObjective ?? proposal?.objective ?? proposal?.summary ?? body).trim())}
                     style={({ pressed }) => [styles.proposalRun, (pressed || resolvingProposal) && styles.proposalPressed]}
                   >
                     {resolvingProposal ? <ActivityIndicator color={colors.onAccent} size="small" /> : <Text style={styles.proposalRunText}>Run once</Text>}
@@ -326,7 +356,7 @@ export const MessageBubble = React.memo(function MessageBubble({
                     accessibilityLabel="Dismiss proposed work"
                     accessibilityState={{ disabled: resolvingProposal }}
                     disabled={resolvingProposal}
-                    onPress={() => onResolveProposal?.(message, 'dismissed')}
+                    onPress={() => onResolveProposal?.(message, 'dismissed', String(proposalObjective ?? proposal?.objective ?? proposal?.summary ?? body).trim())}
                     style={({ pressed }) => [styles.proposalDismiss, (pressed || resolvingProposal) && styles.proposalPressed]}
                   >
                     <Text style={styles.proposalDismissText}>Not now</Text>
@@ -361,18 +391,30 @@ export const MessageBubble = React.memo(function MessageBubble({
 				  <Text style={[styles.workStatusText, workThread.needsInput && styles.workStatusTextNeedsInput, workThread.failed && styles.workStatusTextFailed]}>{workThread.label}</Text>
                 </View>
               </View>
-              <Text numberOfLines={2} style={styles.workQuery}>{workThread.query}</Text>
-	      {workThread.progress !== undefined && !workThread.complete ? (
-	        <View style={styles.workProgress}>
-	          <View style={[styles.workProgressFill, { width: `${workThread.progress}%` }]} />
-	        </View>
-	      ) : null}
-              <View style={styles.workFoot}>
-                <Text style={styles.workFootText}>
-                  {workThread.active ? `View activity · ${workThread.phase}` : workThread.complete ? 'Open report' : 'Open work details'}
-                </Text>
-                <SymbolView name="chevron.right" tintColor={workThread.complete ? colors.success : colors.text3} size={12} />
-              </View>
+              <Text numberOfLines={2} style={styles.workQuery}>{String(message.thread?.resultTitle ?? '').trim() || workThread.query}</Text>
+              {String(message.thread?.resultPreview ?? '').trim() ? <Text numberOfLines={3} style={styles.workPreview}>{String(message.thread?.resultPreview)}</Text> : null}
+              {String(message.thread?.provenance ?? '').trim() ? <Text numberOfLines={2} style={styles.workProvenance}>{String(message.thread?.provenance)}</Text> : null}
+              {workThread.complete ? (
+                <View style={styles.workResultActions}>
+                  <Pressable accessibilityRole="button" accessibilityLabel="Open deliverable" onPress={() => onOpenWorkArtifact?.(message)} style={({ pressed }) => [styles.workResultPrimary, pressed && styles.workResultPressed]}>
+                    <SymbolView name="doc.text.fill" tintColor={colors.onAccent} size={14} />
+                    <Text style={styles.workResultPrimaryText}>Open</Text>
+                  </Pressable>
+                  <Pressable accessibilityRole="button" accessibilityLabel={workSaved ? 'Deliverable saved to Drive' : 'Save deliverable to Drive'} accessibilityState={{ disabled: savingWork || workSaved }} disabled={savingWork || workSaved} onPress={() => onSaveWorkArtifact?.(message)} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed, (savingWork || workSaved) && styles.workResultDisabled]}>
+                    {savingWork ? <ActivityIndicator color={colors.emberText} size="small" /> : <SymbolView name="externaldrive.fill" tintColor={colors.emberText} size={14} />}
+                    <Text style={styles.workResultActionText}>{workSaved ? 'Saved' : savingWork ? 'Saving…' : 'Save'}</Text>
+                  </Pressable>
+                  <Pressable accessibilityRole="button" accessibilityLabel="Edit prompt and regenerate deliverable" accessibilityState={{ disabled: regeneratingWork }} disabled={regeneratingWork} onPress={() => onRegenerateWorkArtifact?.(message)} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed, regeneratingWork && styles.workResultDisabled]}>
+                    {regeneratingWork ? <ActivityIndicator color={colors.emberText} size="small" /> : <SymbolView name="arrow.clockwise" tintColor={colors.emberText} size={14} />}
+                    <Text style={styles.workResultActionText}>{regeneratingWork ? 'Starting…' : 'Regenerate'}</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <View style={styles.workFoot}>
+                  <Text style={styles.workFootText}>Open work details</Text>
+                  <SymbolView name="chevron.right" tintColor={colors.text3} size={12} />
+                </View>
+              )}
             </View>
           ) : null}
 
@@ -668,14 +710,16 @@ const styles = StyleSheet.create({
   proposalCard: { width: '100%', minWidth: 0, alignSelf: 'stretch', gap: space[3], paddingVertical: 5 },
   proposalHead: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   proposalKicker: { ...type.captionMedium, color: colors.emberText, flex: 1 },
+  proposalLabel: { ...type.label, color: colors.text3, letterSpacing: 0.5 },
+  proposalInput: { ...type.bodyMedium, minHeight: 86, padding: space[3], borderRadius: radius.lg, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line2, color: colors.text1, backgroundColor: colors.surface1 },
   proposalSummary: { ...type.bodyMedium, color: colors.text1, fontSize: 16, lineHeight: 22 },
   proposalSafety: { ...type.caption, color: colors.text3 },
   proposalActions: { flexDirection: 'row', alignItems: 'center', gap: space[2], paddingTop: space[1] },
-  proposalRun: { minHeight: 42, flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: radius.full, backgroundColor: colors.accent },
+  proposalRun: { minHeight: 44, flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: radius.full, backgroundColor: colors.accent },
   proposalRunText: { ...type.captionMedium, color: colors.onAccent },
-  proposalDismiss: { minHeight: 42, flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: radius.full, backgroundColor: colors.surface3 },
+  proposalDismiss: { minHeight: 44, flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: radius.full, backgroundColor: colors.surface3 },
   proposalDismissText: { ...type.captionMedium, color: colors.text2 },
-  proposalPressed: { opacity: 0.64, transform: [{ scale: 0.98 }] },
+  proposalPressed: { opacity: 0.64, transform: [{ scale: 0.96 }] },
   workHead: { alignItems: 'flex-start', gap: space[2] },
   workIdentity: { minWidth: 0, alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: 7 },
   workIcon: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center', borderRadius: radius.full, backgroundColor: colors.emberSoft },
@@ -688,8 +732,15 @@ const styles = StyleSheet.create({
 	workStatusTextNeedsInput: { color: colors.emberText },
   workStatusTextFailed: { color: colors.danger },
   workQuery: { ...type.bodyMedium, color: colors.text1, fontSize: 16, lineHeight: 22 },
-	workProgress: { height: 4, overflow: 'hidden', borderRadius: radius.full, backgroundColor: colors.surface3 },
-	workProgressFill: { height: '100%', borderRadius: radius.full, backgroundColor: colors.ember },
+  workPreview: { ...type.bodySm, color: colors.text2 },
+  workProvenance: { ...type.caption, color: colors.text3 },
+  workResultActions: { flexDirection: 'row', flexWrap: 'wrap', gap: space[2], paddingTop: space[1] },
+  workResultPrimary: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: space[3], borderRadius: radius.full, backgroundColor: colors.accent },
+  workResultPrimaryText: { ...type.captionMedium, color: colors.onAccent },
+  workResultAction: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: space[3], borderRadius: radius.full, backgroundColor: colors.emberSoft },
+  workResultActionText: { ...type.captionMedium, color: colors.emberText },
+  workResultPressed: { opacity: 0.72, transform: [{ scale: 0.96 }] },
+  workResultDisabled: { opacity: 0.48 },
   workFoot: { minHeight: 30, flexDirection: 'row', alignItems: 'center', gap: 7, paddingTop: space[2], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line1 },
   workDot: { width: 7, height: 7, borderRadius: radius.full, backgroundColor: colors.text3 },
   workDotActive: { backgroundColor: colors.ember },

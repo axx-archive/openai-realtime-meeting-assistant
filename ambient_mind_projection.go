@@ -379,7 +379,10 @@ func rebuildAmbientMindProjection(events []AmbientMindProjectionEvent, generatio
 			if state, ok := nodes[targetKey]; ok {
 				state.Status, state.Reason = AmbientMindProjectionRetracted, event.Reason
 				nodes[targetKey] = state
-				delete(current, event.TenantID+"\x00"+state.Node.LogicalID)
+				logicalKey := event.TenantID + "\x00" + state.Node.LogicalID
+				if current[logicalKey] == targetKey {
+					delete(current, logicalKey)
+				}
 				ambientMindRetractDescendants(targetKey, event.Reason, nodes, children)
 				continue
 			}
@@ -393,7 +396,10 @@ func rebuildAmbientMindProjection(events []AmbientMindProjectionEvent, generatio
 						found = true
 						state.Status, state.Reason = AmbientMindProjectionRetracted, event.Reason
 						nodes[nodeKey] = state
-						delete(current, event.TenantID+"\x00"+state.Node.LogicalID)
+						logicalKey := event.TenantID + "\x00" + state.Node.LogicalID
+						if current[logicalKey] == nodeKey {
+							delete(current, logicalKey)
+						}
 						ambientMindRetractDescendants(nodeKey, event.Reason, nodes, children)
 						break
 					}

@@ -1234,12 +1234,12 @@ func (app *kanbanBoardApp) produceAgentThreadArtifactForJob(ctx context.Context,
 		instructions += "\n\nLive research authority: Use the hosted web-search tool for every current or externally verifiable claim. Prefer primary or official sources, distinguish sourced fact from inference, and include the exact source URL for each material claim. If a claim cannot be verified with the tool in this run, label it unverified rather than filling the gap from recall."
 	}
 	output, err := responder(ctx, apiKey, openAITextRequest{
-		Model:           meetingBrainModel(),
+		Model:           agentThreadTextModel(thread),
 		Seat:            seatAgentThreadText,
 		Workflow:        firstNonEmptyString(strings.TrimSpace(thread.Artifact.Metadata["toolTemplate"]), "agent_thread_"+normalizeAgentThreadMode(thread.Mode)),
 		Instructions:    instructions,
 		Input:           buildAgentThreadInput(thread, job.Context.Board, job.Context.Memory, time.Now()),
-		ReasoningEffort: meetingBrainReasoningEffort(),
+		ReasoningEffort: agentThreadTextReasoningEffort(thread),
 		Verbosity:       "medium",
 		MaxOutputTokens: agentThreadMaxOutputTokens(),
 		EnableWebSearch: liveWebSearch,
@@ -1253,6 +1253,42 @@ func (app *kanbanBoardApp) produceAgentThreadArtifactForJob(ctx context.Context,
 	}
 
 	return output, nil
+}
+
+const (
+	defaultResearchModel           = "gpt-5.6-sol"
+	defaultResearchReasoningEffort = "high"
+)
+
+func researchModel() string {
+	if model := strings.TrimSpace(os.Getenv("OPENAI_RESEARCH_MODEL")); model != "" {
+		return model
+	}
+	return defaultResearchModel
+}
+
+func researchReasoningEffort() string {
+	if effort := strings.ToLower(strings.TrimSpace(os.Getenv("OPENAI_RESEARCH_REASONING_EFFORT"))); effort != "" {
+		switch effort {
+		case "minimal", "low", "medium", "high", "xhigh", "max", "ultra":
+			return effort
+		}
+	}
+	return defaultResearchReasoningEffort
+}
+
+func agentThreadTextModel(thread scoutAgentThread) string {
+	if agentThreadUsesLiveWebSearch(thread) {
+		return researchModel()
+	}
+	return meetingBrainModel()
+}
+
+func agentThreadTextReasoningEffort(thread scoutAgentThread) string {
+	if agentThreadUsesLiveWebSearch(thread) {
+		return researchReasoningEffort()
+	}
+	return meetingBrainReasoningEffort()
 }
 
 func agentThreadUsesLiveWebSearch(thread scoutAgentThread) bool {

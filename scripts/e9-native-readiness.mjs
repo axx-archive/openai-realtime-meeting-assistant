@@ -29,7 +29,12 @@ const protectedSourceContracts = [
   {
     id: "thread_chat_gestures_haptics_dictation",
     path: "mobile/src/screens/ThreadScreen.tsx",
-    required: ["MessageActionSheet", "onLongPress", "useDictation", "audioFocusRuntime", "Haptics."],
+    required: ["MessageActionSheet", "onLongPress", "useComposerDictation", "Haptics."],
+  },
+  {
+    id: "composer_dictation_audio_focus",
+    path: "mobile/src/voice/useComposerDictation.ts",
+    required: ["useDictation", "audioFocusRuntime"],
   },
   {
     id: "message_action_surface",

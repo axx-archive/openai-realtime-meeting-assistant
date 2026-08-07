@@ -198,7 +198,8 @@ func (runtime *STRIDEWorkforceRuntime) installFencedInternalPreviewSeat(actor ST
 			{"activate_identity", "trial_active", "trial_active"},
 			{"activate_capability", "trial_active", "trial_active"},
 			{"activate_profile", "trial_active", "trial_active"},
-			{"activate_route", "trial_active", "active"},
+			{"activate_route", "trial_active", "review_required"},
+			{"review", "review_required", "active"},
 		}
 		result := make([]STRIDEWorkforceReceipt, 0, len(transitions))
 		for _, transition := range transitions {
@@ -296,10 +297,10 @@ func (runtime *STRIDEWorkforceRuntime) Hire(actor STRIDEWorkforceActor, agentID,
 	return runtime.transition(actor, "hire", agentID, idempotencyKey, now, "trial_pending", "trial_active")
 }
 func (runtime *STRIDEWorkforceRuntime) Pause(actor STRIDEWorkforceActor, agentID, idempotencyKey string, now time.Time) (STRIDEWorkforceReceipt, error) {
-	return runtime.transitionAny(actor, "pause", agentID, idempotencyKey, now, []string{"trial_pending", "trial_active", "active", "quarantined"}, "paused")
+	return runtime.transitionAny(actor, "pause", agentID, idempotencyKey, now, []string{"trial_pending", "trial_active", "review_required", "active", "quarantined"}, "paused")
 }
 func (runtime *STRIDEWorkforceRuntime) Quarantine(actor STRIDEWorkforceActor, agentID, idempotencyKey string, now time.Time) (STRIDEWorkforceReceipt, error) {
-	return runtime.transitionAny(actor, "quarantine", agentID, idempotencyKey, now, []string{"draft_hire", "trial_pending", "trial_active", "active", "paused"}, "quarantined")
+	return runtime.transitionAny(actor, "quarantine", agentID, idempotencyKey, now, []string{"draft_hire", "trial_pending", "trial_active", "review_required", "active", "paused"}, "quarantined")
 }
 
 // Activate advances exactly one stage. Profile and route changes can never be
@@ -332,13 +333,44 @@ func (runtime *STRIDEWorkforceRuntime) Activate(actor STRIDEWorkforceActor, agen
 	case "profile":
 		seat.ActivationStage = "route"
 	case "route":
-		seat.ActivationStage = "complete"
-		seat.Status = "active"
-		seat.AccessRevoked = false
+		seat.ActivationStage = "review"
+		seat.Status = "review_required"
 	}
 	seat.UpdatedAt = now.UTC()
 	runtime.seats[agentID] = seat
 	receipt := newSTRIDEWorkforceReceipt("activate_"+stage, idempotencyKey, agentID, before, seat.Status, now)
+	runtime.receipts[receipt.Action+":"+receipt.IdempotencyKey] = receipt
+	return receipt, nil
+}
+
+// Review is the explicit human gate between a technically configured seat and
+// an active coworker. Route readiness never grants runtime access by itself.
+func (runtime *STRIDEWorkforceRuntime) Review(actor STRIDEWorkforceActor, agentID, idempotencyKey string, now time.Time) (STRIDEWorkforceReceipt, error) {
+	if runtime == nil || actor.Validate() != nil || !actor.IsAdmin {
+		return STRIDEWorkforceReceipt{}, ErrSTRIDEAdminRequired
+	}
+	if !strideIdentifier(agentID) || !strideIdentifier(idempotencyKey) || now.IsZero() {
+		return STRIDEWorkforceReceipt{}, ErrSTRIDEWorkforceInvalid
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if receipt, found, err := runtime.idempotentLocked("review", idempotencyKey, agentID); found || err != nil {
+		if err != nil {
+			return STRIDEWorkforceReceipt{}, err
+		}
+		return receipt, nil
+	}
+	seat, found := runtime.seats[agentID]
+	if !found || seat.Status != "review_required" || seat.ActivationStage != "review" || !seat.AccessRevoked {
+		return STRIDEWorkforceReceipt{}, ErrSTRIDEWorkforceState
+	}
+	before := seat.Status
+	seat.Status = "active"
+	seat.ActivationStage = "complete"
+	seat.AccessRevoked = false
+	seat.UpdatedAt = now.UTC()
+	runtime.seats[agentID] = seat
+	receipt := newSTRIDEWorkforceReceipt("review", idempotencyKey, agentID, before, seat.Status, now)
 	runtime.receipts[receipt.Action+":"+receipt.IdempotencyKey] = receipt
 	return receipt, nil
 }
@@ -911,19 +943,24 @@ func replayValidSTRIDEWorkforceLifecycle(seats map[string]STRIDEWorkforceSeat, r
 				case "profile":
 					stage = "route"
 				case "route":
-					stage, status, accessRevoked = "complete", "active", false
+					stage, status = "review", "review_required"
 				}
 				if receipt.After != status {
 					return false
 				}
 				updatedAt = receipt.At
+			case "review":
+				if status != "review_required" || stage != "review" || !accessRevoked || receipt.Before != status || receipt.After != "active" {
+					return false
+				}
+				stage, status, accessRevoked, updatedAt = "complete", "active", false, receipt.At
 			case "pause":
-				if !oneOf(status, "trial_pending", "trial_active", "active", "quarantined") || receipt.Before != status || receipt.After != "paused" {
+				if !oneOf(status, "trial_pending", "trial_active", "review_required", "active", "quarantined") || receipt.Before != status || receipt.After != "paused" {
 					return false
 				}
 				status, accessRevoked, updatedAt = "paused", true, receipt.At
 			case "quarantine":
-				if !oneOf(status, "draft_hire", "trial_pending", "trial_active", "active", "paused") || receipt.Before != status || receipt.After != "quarantined" {
+				if !oneOf(status, "draft_hire", "trial_pending", "trial_active", "review_required", "active", "paused") || receipt.Before != status || receipt.After != "quarantined" {
 					return false
 				}
 				status, accessRevoked, updatedAt = "quarantined", true, receipt.At
@@ -967,6 +1004,8 @@ func strideWorkforceActionOrder(action string) int {
 		return 50
 	case "activate_route":
 		return 60
+	case "review":
+		return 65
 	case "pause":
 		return 70
 	case "quarantine":
@@ -987,7 +1026,7 @@ func validSTRIDEUnavailableFixture(seat STRIDEWorkforceSeat) bool {
 	return seat.OrgIdentity == "org_agent:"+seat.ID && seat.DirectThread == "thread_"+seat.ID && seat.AccessRevoked && seat.ActivationStage == "" && seat.Owner == "" && len(seat.Memberships) == 0 && seat.CreatedAt.IsZero() && seat.UpdatedAt.IsZero() && seat.OffboardedAt == nil
 }
 func validSTRIDEWorkforceSeat(seat STRIDEWorkforceSeat) bool {
-	if !strideIdentifier(seat.ID) || !strideIdentifier(seat.OrgIdentity) || !strideIdentifier(seat.DirectThread) || !oneOf(seat.Status, "draft_hire", "trial_pending", "trial_active", "active", "paused", "quarantined", "offboarded", "unavailable") {
+	if !strideIdentifier(seat.ID) || !strideIdentifier(seat.OrgIdentity) || !strideIdentifier(seat.DirectThread) || !oneOf(seat.Status, "draft_hire", "trial_pending", "trial_active", "review_required", "active", "paused", "quarantined", "offboarded", "unavailable") {
 		return false
 	}
 	if seat.Status == "unavailable" {

@@ -12,6 +12,7 @@ import {
   expandedComposerMaxHeight,
 } from './composerMeasurement';
 import { useReduceMotion } from '../theme/motion';
+import { activeDocumentQuery } from '../drive/driveModels';
 
 type Props = {
   value: string;
@@ -22,6 +23,7 @@ type Props = {
   accessibilityLabel?: string;
   editable: boolean;
   maxHeight?: number;
+  onDocumentQuery?: (query: string) => void;
 };
 
 export type MentionComposerInputHandle = {
@@ -66,6 +68,7 @@ export const MentionComposerInput = forwardRef<MentionComposerInputHandle, Props
   accessibilityLabel = 'Message',
   editable,
   maxHeight = expandedComposerMaxHeight,
+  onDocumentQuery,
 }, ref) {
   const reduceMotion = useReduceMotion();
   const shimmer = useRef(new Animated.Value(1)).current;
@@ -155,6 +158,8 @@ export const MentionComposerInput = forwardRef<MentionComposerInputHandle, Props
             if (!nextValue) nativeContentHeightRef.current = compactComposerHeight;
             setMeasuredHeight(composerHeight(nextValue, nativeContentHeightRef.current, maxHeight, inputWidthRef.current));
             onChangeText(nextValue);
+            const documentQuery = activeDocumentQuery(nextValue);
+            if (documentQuery) onDocumentQuery?.(documentQuery.query);
           }}
           onFocus={() => setFocused(true)}
           onBlur={() => {

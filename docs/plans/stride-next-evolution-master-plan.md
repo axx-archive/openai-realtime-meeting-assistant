@@ -1,21 +1,26 @@
 # STRIDE Next Evolution — Master Architecture and Execution Ledger
 
-**Status:** Active E10 remediation. The current reviewed source is
-`949ff79db630ed6e1ba0eb3798b631d99fd2ec77` on `axx/main`; the exact release
-still serving is the prior reviewed source under the retained release ledger.
-The behavior carrier
-for the prior server-only foundation remains
-`7c71a6821eb2576cc12644d668166f1f5840cdc7`. The current exact release is
-serving under ledger generation 20 with `verified-local-unsigned` evidence and
-retained release `7d766b2ae566ba6a84dd0fe99301658fdb90943e` as rollback. The
-exact active SHA after any later docs-only ledger checkpoint is authoritative in
-public `/healthz` and `/readyz` plus
-`/opt/meetingassist-releases/active-release.json`. The screen-share camera-off
-repair, transfer timing telemetry, default-off governed replay, canonical
-AmbientMind shadow schema, person/MyMind authority, artifact disposition
-authority, and removal of activity-volume contribution ranking are deployed.
-This does not activate replay, MyMind context, AmbientMind readers, or artifact
-disposition actions and does not complete R1/R4-R9.
+**Status:** Active E10 remediation. Exact release
+`976e6784d0b58faf6011ea8dfe31f71322b56205` is serving under the retained
+release ledger with `verified-local-unsigned` process evidence; public
+`/healthz` and `/readyz` are the current release-identity authority. Native
+Build 47 from that same commit is Apple `VALID` and available to the internal
+Team group. A later candidate based on that release is still under integration.
+Its earlier test evidence was invalidated by subsequent continuity, routing,
+proactivity, and client changes; no final-tree gate result is claimed here.
+The complete Go suite, required ConversationContinuity/AgentMind/proactivity/
+web-scroll race gate, `go vet`, native readiness contract checks, client tests,
+`git diff --check`, and independent critic must all pass again on one frozen
+commit before it can be pushed, activated, or described as repaired.
+
+The current serving release remains unqualified externally. Production
+`/readyz` truthfully reports canonical shadow health behind the dirty
+high-water, governed replay off, STRIDE runtime activation-fenced, every E10
+feature switch off, and offsite backup dormant. No production replay, MyMind
+body custody/context assembly, AmbientMind compiler/worker or reader, artifact
+disposition action, provider qualification, physical-device acceptance,
+multi-room/TURN acceptance, HA/DR custody ceremony, pilot packet, or soak has
+been completed. Those are named unresolved gates, not implied by this candidate.
 Scout may be
 invited as a visible, attributed room participant only under current room,
 media-generation, audience, and unanimous capture/transcription/model-analysis
@@ -25,9 +30,13 @@ provider/model/voice/config qualification and external anchor are available.
 Release authority does not waive canonical-repair confirmation, consent,
 custody, physical-device, HA/DR, pilot, soak, or independent evidence gates.
 
-**Date:** 2026-08-06
+**Date:** 2026-08-07
 
-**Naming:** **STRIDE** is the long-term operating-system name. **Bonfire OS** is the current application and repository implementation. Repository, GitHub, package, host, and code-identifier renaming are explicitly outside this plan and remain a separate future workstream.
+**Naming:** **STRIDE** is the long-term operating-system name. **Bonfire OS** is
+the current application and code-identifier implementation. After the exact
+release is verified, the reviewed history will be published to a new primary
+`STRIDE` GitHub repository; the existing repository remains intact until the
+new remote and default branch are independently verified.
 
 **Source of truth:** This file is the single plan for the next evolution. It carries forward, rather than replaces, the proven foundations and evidence in:
 
@@ -46,6 +55,110 @@ custody, physical-device, HA/DR, pilot, soak, or independent evidence gates.
 External reference, adopted selectively rather than introduced as a runtime dependency: [Block Buzz at audited commit `90e058e`](https://github.com/block/buzz/tree/90e058ebf68137e048a409aec6616519379ff726). STRIDE adopts the useful separation of portable persona definition, runtime identity, and team membership; it does not adopt Buzz's collaboration substrate, permission defaults, prompt-only delegation, or agent-authored memory as organizational truth.
 
 Older model recommendations are historical baselines, not current authority. The current official model references for this plan are [GPT-5.6](https://developers.openai.com/api/docs/guides/latest-model.md), [GPT-Realtime-2.1](https://developers.openai.com/api/docs/models/gpt-realtime-2.1), [GPT Transcribe](https://developers.openai.com/api/docs/models/gpt-transcribe), and [GPT Live Transcribe](https://developers.openai.com/api/docs/models/gpt-live-transcribe).
+
+## Active completion checkpoint — 2026-08-07 10:10 PT
+
+This is the compact-safe resume ledger for the current goal. A checked item is
+complete only at the scope named; local implementation is not release proof.
+
+### Investigation and decisions
+
+- [x] Proved the Country Golf report itself completed with 14 sources.
+- [x] Proved that report used the legacy Anthropic Fable worker, despite the UI
+  expectation that research was OpenAI-only.
+- [x] Separated the later red `max_output_truncation` Scout-answer failure from
+  report completion and sharing.
+- [x] Proved the missing PDF is blocked by a stale render-queue job owned with
+  unreadable permissions; the newer report remains `renderStatus=queued` behind
+  that head-of-line job.
+- [x] Decided canonical Scout research routing: OpenAI Sol, high reasoning;
+  ordinary Scout chat/routing/extraction remain Luna, maximum reasoning.
+- [x] Decided that analysis, critique, description, or prompt reconstruction
+  from an already-authorized image/document is ordinary multimodal conversation,
+  not a research workstream. Explicit reports, audits, comparison/recommendation
+  passes, and external research remain governed durable work.
+- [x] Decided `main channel` resolves to the permanent pinned Bonfire Chat, but
+  posting there remains an explicit user-authorized action.
+
+### Current candidate implementation
+
+- [x] ConversationContinuity exact-revision, body-free rebuild/restart/delete/
+  edit corrections implemented locally; final frozen normal/race gates pending.
+- [x] AgentMind exact source-linked correction/supersession/forgetting and
+  signed-in inspection authorization implemented locally; final gates pending.
+- [x] Proactive reply/react/no-action, quiet/active behavior, dedupe,
+  revalidation, non-launching Colton consultation, and shutdown corrections
+  implemented locally; final gates pending.
+- [x] Research runner and research follow-up are forced to OpenAI Sol/high with
+  actual model/effort provenance; final route regression matrix pending.
+- [x] Scout-answer truncation receives one bounded larger-output retry and still
+  fails closed without a fuzzy fallback; final receipt tests pending.
+- [x] Render jobs are written atomically as `0660`; exact-release init repairs
+  existing queue JSON ownership/mode before the runner starts. Live repair and
+  exact Country Golf PDF verification remain pending deployment.
+- [x] Drive file rename and named Save-to-Drive server seams implemented.
+- [x] Hierarchical Drive folders (`parentId`, depth/cycle validation) implemented
+  additively over existing root folders; final tests pending.
+- [x] Destination-bound `POST /assistant/attachments/from-file` implemented with
+  exact Drive-source revision revalidation and no body-bearing response.
+- [x] Native thread-chat proposal editing, rich terminal actions, Browse Drive,
+  `#document`, exact source grants, file rename, and subfolder navigation
+  implemented; native typecheck and 423 tests passed on the current mobile diff.
+- [x] Replied-to generated images now enter the authorized OpenAI multimodal
+  answer turn, and prompt reconstruction bypasses workstream routing; focused
+  regression passes.
+- [x] Web proposal/result/Drive/document-tag UX is implemented locally: the
+  proposal is Scout's editable execution prompt, terminal work is a compact
+  in-feed result with actual preview/provenance and Open/PDF/named Save/
+  editable Regenerate actions, the persistent terminal rail and invented stage
+  log are gone, Drive has hierarchical browsing and Rename, and both the
+  paperclip and `+` palette can attach exact authorized Drive sources.
+- [x] Web `#document` autocomplete is implemented for the main and desktop
+  reply composers; selection mints and attaches an exact destination-bound
+  source grant instead of resolving by display name. Rendered QA remains part
+  of the frozen client gate below.
+- [ ] Canvas opening-turn and in-room Drive attachments need separate authority
+  contracts because neither currently has an existing Scout-thread destination
+  ID. They are not being faked through the thread-only grant endpoint.
+
+### Frozen-tree and release gates
+
+- [x] Added focused server regressions for Drive attachment auth/ACL/destination/
+  source revision, named-save idempotency, render-job `0660`, and folder
+  hierarchy/depth. Focused normal and race runs pass; intended files remain to
+  be staged with the final candidate.
+- [x] `go test ./... -count=1` passed on the post-critic staged candidate
+  (root package `424.495s`).
+- [x] Required ConversationContinuity/AgentMind/ScoutProactive/web-scroll race
+  command passed with `-count=1` on the integrated local candidate.
+- [x] `go vet ./...`, `git diff --check`, inline frontend JavaScript syntax,
+  frontend truth contracts, native typecheck, all 423 native tests, and the 34
+  native-readiness/exact-release harness tests passed on the integrated local
+  candidate. The final committed archive identity is still pending commit.
+- [x] Independent critic PASS obtained on the staged candidate after closing
+  private/project Drive audience widening, post-commit source revalidation,
+  reaction-only proactive visibility, route-documentation truth, and staged
+  mobile-source completeness; no blocker or major finding remains.
+- [ ] Commit the intended combined tree and push without force to `axx/main`.
+- [ ] Build the next native build after 47, upload it, and separately verify App
+  Store Connect `VALID`, internal Team availability, and intended-device access.
+- [ ] Activate that exact commit through `/opt/meetingassist-releases/<sha>`;
+  require ledger, receipt, all Compose image IDs, Caddy, `/healthz`, `/readyz`,
+  rollback retention, and `verified-local-unsigned` to agree.
+- [ ] After activation, verify the existing Country Golf report gains a PDF
+  asset and that an authenticated user can download it; verify direct image
+  analysis and Bonfire Chat TL;DR sharing against the exact source document.
+- [ ] Create and verify `axx-archive/STRIDE`, push the exact `main` history,
+  make it the primary local remote, and preserve the old repository as legacy.
+- [ ] Reconcile the rest of this master ledger. Provider qualification,
+  physical-device acceptance, canonical replay/promotion, HA/DR custody,
+  real-workforce pilots, and soak remain external acceptance gates unless their
+  full evidence is actually produced.
+
+**Exact resume point:** freeze the integrated server/web/native tree, run the
+complete gate matrix and rendered client QA, then obtain a fresh independent
+critic verdict. Do not commit, push, build TestFlight, activate the VPS, or
+create the new primary GitHub repository before that frozen review passes.
 
 ## 2026-08-06 AmbientMind / AgentMind / MyMind strategic-design delta
 
@@ -314,30 +427,32 @@ anything that cannot yet be turned on.
 |---|---|---|---|---|---|
 | E10-R0 | Repair Ball Dogs routing, causal deletion, cleanup, and independent answer | current exact serving receipt and E10 release authority | focused/full tests; both public mention and direct reply call the model once; authored-only retrieval; caused answer retracts from chat and canonical projections; useful live answer | reactivate retained prior exact release; do not rewrite named-volume data | `completed` — exact release `ba9bca4a0392085df93f5dcd0607cba547260289`, ledger generation 16, durable cleanup, accepted independent answer, and causal lineage verified live |
 | E10-R1 | Restore meeting-intelligence truth and replay recent authorized meetings | R0 plus E10 provider/quota and source-custody authority | fresh source-anchored transcript/decision/action/blocker/storyline receipts; honest gap/coverage state | disable unhealthy worker, retain raw transcript and prior projections, replay from last verified high-water | `in_progress` — the deployed runtime is `mode=off`; the admin-only, digest-bound planner/executor foundation and non-mutating reviewed stage-runner adapter pass focused normal/race/PostgreSQL/DR gates, but production planning remains fail-closed until authenticated approval/rollback fence authority is installed; no provider replay or canonical projection promotion has run |
-| E10-R2 | Run canonical AmbientMind projections in shadow | R1 and E1 canonical contracts | rebuild/revoke/restart parity, high-water/freshness agreement, zero ACL leakage | turn off shadow consumers and rebuild from immutable evidence | `engineering_complete_default_off` — immutable typed event/source/node/edge/state/checkpoint persistence and deterministic revoke/supersede/rebuild/restart/ACL tests pass in memory and disposable PostgreSQL; migration 13 is live with `ambient_mind_projection_shadow=false`, and no product reader or production shadow worker is active |
+| E10-R2 | Run canonical AmbientMind projections in shadow | R1 and E1 canonical contracts | rebuild/revoke/restart parity, high-water/freshness agreement, zero ACL leakage | turn off shadow consumers and rebuild from immutable evidence | `blocked_on_canonical_typed_source` — immutable typed event/source/node/edge/state/checkpoint persistence and deterministic revoke/supersede/rebuild/restart/ACL tests pass in memory and disposable PostgreSQL; historical-source revocation now preserves the newer logical revision. Production activation remains blocked because no globally ordered, authorized typed projection input provides stable logical ID, ACL snapshot, kind, freshness, supersession, and a cursor checksum for standalone invalidations. Raw chat and R1 execution-local output cannot safely fill that contract; migration 13 remains false and no reader/writer is active. |
 | E10-R3 | Establish person identity, tenant membership, MyMind custody, purpose, and destination-disclosure authority | E1 authority contracts plus E0 custody proof | principal × workspace × audience × purpose × consent tests; recovery/departure/export/delete; zero cross-company/private leakage | revoke disclosure tokens, stop MyMind context assembly, preserve private encrypted custody and company ledger | `engineering_complete_default_off` — global person identity, multi-workspace membership, purpose/destination disclosure, recovery, departure, optional export, and exact external custody-deletion receipt gates pass normal/race/PostgreSQL/DR tests; canonical migrations through 13 are live with `person_mymind_context=false`, while encrypted body custody and MyMind context assembly remain external/disabled gates |
 | E10-R4 | Add `ConversationContinuity` and the three-mind context envelope | R2, R3 | long-thread correction/delete/revoke/rebuild tests; read-only authority refs; freshness/gap disclosure | disable continuity/context-envelope consumers and fall back to bounded raw turns plus authorized AmbientMind retrieval | `engineering_complete_default_off` — body-free revisioned checkpoints, source/audience invalidation and rebuild, private-thread ACL handling, boot-safe UI-state persistence, and read-only context-envelope integration pass focused normal/race/full tests; production R2/R3 authority and real-surface acceptance remain external gates |
-| E10-R5 | Add AgentMind candor and reply/react/no-action participation | R4 | sycophancy, context, confidence, interruption, audience, and channel-policy corpus | restore explicit-invocation-only policy and prior signed profile revision | `engineering_complete_default_off` — source-linked AgentMind positions, human resolution states, inspection route, shared coworker constitution, Luna/max routing, event-driven quiet/active attention, strict classification, source revalidation, durable dedupe, lifecycle cleanup, and usage receipts pass focused/race/full tests; no arbitrary hourly agent throttle is imposed, while provider qualification, policy corpus, and real-surface activation remain external gates |
-| E10-R6 | Add Marketplace onboarding packs to canonical TeamAgent lifecycle | R3, R4 and E8 package/lifecycle receipts | scoped access, factual grounding, gap disclosure, correction, refresh, pause/quarantine/offboard gates | pause seat, revoke runtime principal/pack, restore prior package/profile/capability revisions | pending |
-| E10-R7 | Collapse work UI to one activity rail and complete Open/Save/Discard | R0 and E4/E6 artifact/Drive authority | desktop/mobile rendered QA; stable Drive reference; revision-bound, double-confirmed discard and projection retraction | restore prior renderer; keep artifacts/Drive copies intact and hide new discard action | `in_progress` — the deployed exact-revision Open/Save/Discard authority, stable Drive identity, durable pending intents, same-actor double confirmation, restart reconciliation, canonical delete authorization, and chat retraction backend pass normal/race/PostgreSQL/DR gates; the send-path scroll-stability transaction and source regression test are now local, but both runtime activation fences, web/mobile action wiring, and rendered acceptance remain pending |
+| E10-R5 | Add AgentMind candor and reply/react/no-action participation | R4 | sycophancy, context, confidence, interruption, audience, and channel-policy corpus | restore explicit-invocation-only policy and prior signed profile revision | `engineering_complete_default_off` — source-linked AgentMind positions, admin-only exact-revision correction/supersession/forgetting, shared coworker constitution, Luna/max routing, truthful fixed-effort self-knowledge, event-driven quiet/active attention, strict classification, source revalidation, persistent dedupe, low-cost-only unsolicited replies, per-thread interruption spacing, lifecycle cleanup, and usage receipts pass focused/race/full tests. Provider qualification, the policy corpus, and rendered active-mode acceptance remain external gates. |
+| E10-R6 | Add Marketplace onboarding packs to canonical TeamAgent lifecycle | R3, R4 and E8 package/lifecycle receipts | scoped access, factual grounding, gap disclosure, correction, refresh, pause/quarantine/offboard gates | pause seat, revoke runtime principal/pack, restore prior package/profile/capability revisions | `in_progress` — the canonical workforce runtime now stops route activation at `review_required`, keeps access revoked, and requires a separate idempotent human review receipt before `active`; replay/restore and internal-preview receipt chains preserve that state. The product preview's simplified lifecycle mirror, onboarding-pack compiler, readiness refresh, and real UI/provider activation remain pending. |
+| E10-R7 | Collapse work UI to one activity rail and complete Open/Save/Discard | R0 and E4/E6 artifact/Drive authority | desktop/mobile rendered QA; stable Drive reference; revision-bound, double-confirmed discard and projection retraction | restore prior renderer; keep artifacts/Drive copies intact and hide new discard action | `in_progress` — exact-revision Open/Save/Discard authority, stable Drive identity, durable pending intents, same-actor double confirmation, restart reconciliation, canonical delete authorization, and chat retraction backend pass normal/race/PostgreSQL/DR gates. The authorized single-artifact response now supplies the server-computed body-free disposition reference and desktop work activity no longer invents numeric progress. Runtime activation, one-rail terminal-result rendering, web/mobile Open/Save/Discard wiring, folder choice, and rendered acceptance remain pending. |
 | E10-R8 | Ship Ask AmbientMind, attention-led Intelligence, and scoped contribution views | R2-R5, especially R3 disclosure authority | cited authorized answers, destination reauthorization, freshness/gaps, non-surveillance contribution truth | disable new views/queries and retain source systems plus admin health | `in_progress` — the surveillance-shaped activity-volume “contribution fuel” ranking is removed from the live member payload and UI; cited Ask AmbientMind, attention views, and evidence-backed scoped contribution attestations remain pending R4/R5 authority |
 | E10-R9 | Make MyMind portable with opaque contribution attestations | R3, R8 and explicit organization export policy | signed/redacted receipt validation; third-party field authorization; departure/recovery/export/delete; zero confidential content | revoke export key/receipt visibility; retain tenant evidence and private MyMind separately | pending |
 
 ### Current E10 substate, authority queue, and resume point
 
 Current canonical wave is E10. E10-R0 is complete in production. Exact release
-`941f44e18fc9c01025b4401662e3a400f84232ee` is serving under ledger generation
-20 with `verified-local-unsigned` attestation and retained exact release
-`7d766b2ae566ba6a84dd0fe99301658fdb90943e` as rollback. Public process health
-is green, but the release is not externally qualified; `/readyz` reports the
-canonical dirty high-water ahead of the reconciled/checkpoint high-water,
-analysis and replay off, and the STRIDE runtime activation fence closed. R1
-remains the live truth-restoration gate because no governed replay has executed.
-R2 and R3 are
-engineering-complete behind default-off switches, which unblocks local R4
-implementation but not production context consumption. R7 has a verified
-backend authority foundation but no user-facing action activation yet. Physical
-device acceptance for Build 46 remains external.
+`976e6784d0b58faf6011ea8dfe31f71322b56205` is serving with
+`verified-local-unsigned` process evidence and a retained exact rollback bundle;
+Build 47 from the same commit is Apple `VALID` in the internal Team group.
+Public process health is green, but the release is not externally qualified.
+`/readyz` reports canonical dirty high-water 25992 ahead of reconciled/checkpoint
+high-water 8532, replay off, STRIDE runtime unavailable and activation-fenced,
+all E10 feature switches false, offsite backup dormant, and a stale legacy
+Codex-runner heartbeat. R1 remains the truth-restoration gate because no
+governed production replay has executed. R2's reducer/store is verified but its
+production compiler is blocked on a canonical typed source contract. R3 remains
+metadata-only/default-off without encrypted body custody or context assembly.
+R4/R5 candidate repairs pass the full and required race suites but await exact
+release activation. R6 and R7 are still partial as recorded above; R8/R9 and
+the external provider/device/media/HA/custody/pilot/soak gates remain pending.
 
 The live repair proved two independent failures. First, routing and retrieval
 were classifying the structured public-channel envelope rather than only the

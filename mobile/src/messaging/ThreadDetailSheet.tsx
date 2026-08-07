@@ -21,6 +21,7 @@ import { colors, hitMin, radius, space, type } from '../theme/tokens';
 import { isOwnMessageForViewer } from './messagePresentation';
 import { MessageBubble } from './MessageBubble';
 import { MentionComposerInput } from './MentionComposerInput';
+import { completeDocumentReference } from '../drive/driveModels';
 
 type Props = {
   visible: boolean;
@@ -41,15 +42,25 @@ type Props = {
   onClose: () => void;
   onSend: (text: string, files: readonly ScoutFileAttachment[]) => Promise<boolean>;
   onAddAttachment: () => void;
+  onBrowseDrive: (query?: string) => void;
+  documentSelection?: { key: number; name: string } | null;
+  onDocumentSelectionApplied: () => void;
   onRemoveAttachment: (file: ScoutFileAttachment) => void;
   onOpenAttachment: (file: ScoutFileAttachment) => void;
   onLongPress: (message: ScoutMessage, own: boolean) => void;
   onToggleReaction: (message: ScoutMessage, emoji: string, active: boolean) => void;
   onRetryReply: (message: ScoutMessage) => void;
-  onResolveProposal: (message: ScoutMessage, action: 'accepted' | 'dismissed') => void;
+  onResolveProposal: (message: ScoutMessage, action: 'accepted' | 'dismissed', objective: string) => void;
+  proposalObjectives: Readonly<Record<string, string>>;
+  onChangeProposalObjective: (message: ScoutMessage, objective: string) => void;
   resolvingProposalID?: string | null;
   onOpenLongMessage: (text: string, authorName: string, scout: boolean) => void;
   onOpenWorkArtifact: (message: ScoutMessage) => void;
+  onSaveWorkArtifact: (message: ScoutMessage) => void;
+  onRegenerateWorkArtifact: (message: ScoutMessage) => void;
+  savingWorkID?: string | null;
+  regeneratingWorkID?: string | null;
+  savedWorkIDs: ReadonlySet<string>;
   actionOverlay?: React.ReactNode;
 };
 
@@ -72,15 +83,25 @@ export function ThreadDetailSheet({
   onClose,
   onSend,
   onAddAttachment,
+  onBrowseDrive,
+  documentSelection,
+  onDocumentSelectionApplied,
   onRemoveAttachment,
   onOpenAttachment,
   onLongPress,
   onToggleReaction,
   onRetryReply,
   onResolveProposal,
+  proposalObjectives,
+  onChangeProposalObjective,
   resolvingProposalID,
   onOpenLongMessage,
   onOpenWorkArtifact,
+  onSaveWorkArtifact,
+  onRegenerateWorkArtifact,
+  savingWorkID,
+  regeneratingWorkID,
+  savedWorkIDs,
   actionOverlay,
 }: Props) {
   const [draft, setDraft] = useState('');
@@ -89,6 +110,7 @@ export function ThreadDetailSheet({
   const timestampReveal = useRef(new Animated.Value(0)).current;
   const previousReplyCountRef = useRef(0);
   const initialScrollCompleteRef = useRef(false);
+  const lastDocumentSelectionRef = useRef(0);
   const [keyboardOffset, setKeyboardOffset] = useState(8);
 
   const conversation = useMemo(() => root ? [root, ...replies] : [], [replies, root]);
@@ -125,6 +147,13 @@ export function ThreadDetailSheet({
     }
     previousReplyCountRef.current = replies.length;
   }, [replies.length, visible]);
+
+  useEffect(() => {
+    if (!visible || !documentSelection || lastDocumentSelectionRef.current === documentSelection.key) return;
+    lastDocumentSelectionRef.current = documentSelection.key;
+    setDraft((current) => completeDocumentReference(current, documentSelection.name));
+    onDocumentSelectionApplied();
+  }, [documentSelection, onDocumentSelectionApplied, visible]);
 
   const submit = async () => {
     const text = draft.trim();
@@ -219,9 +248,16 @@ export function ThreadDetailSheet({
                       onToggleReaction={onToggleReaction}
                       onRetryReply={onRetryReply}
                       onResolveProposal={onResolveProposal}
+                      proposalObjective={proposalObjectives[String(message.id)]}
+                      onChangeProposalObjective={onChangeProposalObjective}
                       resolvingProposal={resolvingProposalID === String(message.id)}
                       onOpenLongMessage={onOpenLongMessage}
                       onOpenWorkArtifact={onOpenWorkArtifact}
+                      onSaveWorkArtifact={onSaveWorkArtifact}
+                      onRegenerateWorkArtifact={onRegenerateWorkArtifact}
+                      savingWork={savingWorkID === String(message.id)}
+                      regeneratingWork={regeneratingWorkID === String(message.id)}
+                      workSaved={savedWorkIDs.has(String(message.id))}
                     />
                   </View>
                 </React.Fragment>
@@ -273,6 +309,7 @@ export function ThreadDetailSheet({
                   candidates={mentionCandidates}
                   editable={!sending && !uploading}
                   onChangeText={setDraft}
+                  onDocumentQuery={(query) => onBrowseDrive(query)}
                   placeholder="Reply in thread…"
                   value={draft}
                 />

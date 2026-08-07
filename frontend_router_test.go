@@ -47,7 +47,9 @@ func TestIndexRouterConfirmationCardContract(t *testing.T) {
 		"toolTemplate: String(proposal.toolId || '')",
 		"authorityHint: String(proposal.authority || tool?.authority || '')",
 		// the escape hatch: Tier 0 + dismissal signal
-		"'just answer instead'",
+		"'Scout interpretation'",
+		"'Scout’s execution prompt'",
+		"'Keep it conversational'",
 		"postScoutProposalAction('dismissed', proposal, message, {})",
 		// the verdict route (accept/dismiss signals + workstream launch)
 		"}/proposal`",

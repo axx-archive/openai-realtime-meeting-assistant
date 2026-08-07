@@ -31,8 +31,10 @@ func (r *openAITextAgentRunner) RunJob(ctx context.Context, job AgentJob) (<-cha
 			Text:     output,
 			Err:      err,
 			Metadata: map[string]string{
-				"worker":         "openai_text_response",
-				"workerBoundary": "responses_artifact_writer",
+				"worker":          "openai_text_response",
+				"workerBoundary":  "responses_artifact_writer",
+				"model":           agentThreadTextModel(job.thread),
+				"reasoningEffort": agentThreadTextReasoningEffort(job.thread),
 			},
 		}
 	}()

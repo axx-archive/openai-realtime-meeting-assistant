@@ -456,7 +456,7 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponder(run agentThreadFo
 		// Sonnet 5 fronts follow-ups whenever an Anthropic key is present
 		// (packaging-os §1 role matrix, Wave 2 item 7); keyless-Anthropic keeps
 		// the gpt-5.5 responder path below byte-for-byte.
-		if anthropicKey := currentAnthropicAPIKey(); anthropicKey != "" {
+		if anthropicKey := currentAnthropicAPIKey(); anthropicKey != "" && normalizeAgentThreadMode(run.thread.Mode) != "research" {
 			worker = agentThreadWorkerAnthropic
 			workerBoundary = "anthropic_messages_artifact_writer"
 			raw, responderErr = createAnthropicTextResponse(ctx, anthropicKey, anthropicTextRequest{
@@ -473,13 +473,13 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponder(run agentThreadFo
 				return "", fmt.Errorf("OPENAI_API_KEY is not configured")
 			}
 			raw, responderErr = responder(ctx, apiKey, openAITextRequest{
-				Model: meetingBrainModel(),
+				Model: agentThreadTextModel(run.thread),
 				// Keyless-fallback twin: same seat as the keyed follow-up
 				// path, provider openai recorded at the wire seam (W0 item 4).
 				Seat:            seatFollowup,
 				Instructions:    instructions,
 				Input:           run.input,
-				ReasoningEffort: meetingBrainReasoningEffort(),
+				ReasoningEffort: agentThreadTextReasoningEffort(run.thread),
 				Verbosity:       "medium",
 				MaxOutputTokens: 2600,
 			})

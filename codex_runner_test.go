@@ -187,16 +187,16 @@ func TestAgentThreadQueuesCodexSidecarJobByDefault(t *testing.T) {
 	t.Setenv("BONFIRE_AGENT_THREAD_WORKER", "codex_exec")
 	t.Setenv("BONFIRE_CODEX_QUEUE_PATH", queueDir)
 
-	artifact, _, err := app.createOSArtifactWithMetadata("research", "Map the market", "queued", "tester", map[string]string{
+	artifact, _, err := app.createOSArtifactWithMetadata("workflow", "Map the market", "queued", "tester", map[string]string{
 		"title": "Market map",
 	})
 	if err != nil {
 		t.Fatalf("createOSArtifactWithMetadata: %v", err)
 	}
 	thread := scoutAgentThread{
-		ID:       "agent-thread-research-test",
-		Mode:     "research",
-		Query:    "research the current market and write a sourced report",
+		ID:       "agent-thread-workflow-test",
+		Mode:     "workflow",
+		Query:    "research the current market and deliver a sourced report",
 		Artifact: artifact,
 	}
 

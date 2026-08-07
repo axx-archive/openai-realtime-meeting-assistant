@@ -146,6 +146,53 @@ func TestAmbientMindProjectionRebuildRevocationAndFreshnessParity(t *testing.T) 
 	}
 }
 
+func TestAmbientMindProjectionRevokingSupersededSourcePreservesCurrentRevision(t *testing.T) {
+	base := time.Date(2026, 8, 7, 1, 0, 0, 0, time.UTC)
+	audience := STRIDEAudience{Visibility: "channel", Principals: []string{"aj"}}
+	projector := NewAmbientMindProjector()
+
+	sourceOneRef := ambientProjectionRef(STRIDEContractConversationEvent, "source_old", "source-old", 1)
+	sourceOne := ambientProjectionSource(sourceOneRef, audience.Principals, 1, base)
+	one := AmbientMindProjectionNode{
+		Ref: ambientProjectionRef(STRIDEContractAnalysisProjection, "decision_old", "decision-old", 1), LogicalID: "decision_release", Kind: AmbientMindDecision,
+		SourceRefs: []STRIDEReference{sourceOneRef}, Audience: audience, ACLVersion: 1, SourceHighWater: 1, FreshThrough: base,
+	}
+	if _, err := projector.Apply(ambientProjectionUpsert("bonfire", "event_old", "key_old", 1, 1, one, sourceOne)); err != nil {
+		t.Fatal(err)
+	}
+
+	sourceTwoRef := ambientProjectionRef(STRIDEContractConversationEvent, "source_current", "source-current", 2)
+	sourceTwo := ambientProjectionSource(sourceTwoRef, audience.Principals, 2, base.Add(time.Minute))
+	two := AmbientMindProjectionNode{
+		Ref: ambientProjectionRef(STRIDEContractAnalysisProjection, "decision_current", "decision-current", 2), LogicalID: one.LogicalID, Kind: AmbientMindDecision,
+		SourceRefs: []STRIDEReference{sourceTwoRef}, Audience: audience, ACLVersion: 2, SourceHighWater: 2, FreshThrough: sourceTwo.FreshThrough, SupersedesRef: &one.Ref,
+	}
+	if _, err := projector.Apply(ambientProjectionUpsert("bonfire", "event_current", "key_current", 2, 2, two, sourceTwo)); err != nil {
+		t.Fatal(err)
+	}
+
+	revokeOld := AmbientMindProjectionEvent{TenantID: "bonfire", EventID: "event_revoke_old", IdempotencyKey: "key_revoke_old", Sequence: 3, SourceHighWater: 3,
+		Operation: AmbientMindProjectionRevoke, TargetRef: &sourceOneRef, Reason: "source_revoked", OccurredAt: base.Add(2 * time.Minute)}
+	if _, err := projector.Apply(revokeOld); err != nil {
+		t.Fatal(err)
+	}
+
+	sourceThreeRef := ambientProjectionRef(STRIDEContractConversationEvent, "source_next", "source-next", 3)
+	sourceThree := ambientProjectionSource(sourceThreeRef, audience.Principals, 4, base.Add(3*time.Minute))
+	three := AmbientMindProjectionNode{
+		Ref: ambientProjectionRef(STRIDEContractAnalysisProjection, "decision_next", "decision-next", 3), LogicalID: one.LogicalID, Kind: AmbientMindDecision,
+		SourceRefs: []STRIDEReference{sourceThreeRef}, Audience: audience, ACLVersion: 3, SourceHighWater: 4, FreshThrough: sourceThree.FreshThrough, SupersedesRef: &two.Ref,
+	}
+	if _, err := projector.Apply(ambientProjectionUpsert("bonfire", "event_next", "key_next", 4, 4, three, sourceThree)); err != nil {
+		t.Fatalf("supersede current after revoking historical source: %v", err)
+	}
+
+	current, _, err := projector.QueryForPrincipal("bonfire", "aj")
+	if err != nil || len(current) != 1 || current[0].Ref != three.Ref {
+		t.Fatalf("current=%+v err=%v, want third revision", current, err)
+	}
+}
+
 func TestPostgresAmbientMindProjectionShadowIsDefaultOffAndRestartSafe(t *testing.T) {
 	ctx, canonical, _ := migratedPostgresCanonicalStore(t)
 	var enabled bool

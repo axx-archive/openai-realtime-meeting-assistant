@@ -590,6 +590,7 @@ func newKanbanBoardApp() *kanbanBoardApp {
 	}
 	app.meetingSpecialists = initializeMeetingSpecialistProduct(app, app.strideRuntime)
 	app.replaySTRIDETeamChatProjection()
+	app.reconcileConversationContinuityAtStartup()
 
 	return app
 }

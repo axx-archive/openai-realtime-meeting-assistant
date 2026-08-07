@@ -52,8 +52,10 @@ func TestIndexMentionAutocompleteWiring(t *testing.T) {
 		"const inserted = '@' + handle + ' '",
 		"input.setSelectionRange(end, end)",
 		// composer wiring: input opens/filters, blur closes
-		"scoutChatInput?.addEventListener('input', () => updateMentionAutocomplete(scoutChatInput))",
-		"chatContextReplyInput?.addEventListener('input', () => updateMentionAutocomplete(chatContextReplyInput))",
+		"void updateDocumentAutocomplete(scoutChatInput)",
+		"if (!documentTokenAtCaret(scoutChatInput)) updateMentionAutocomplete(scoutChatInput)",
+		"void updateDocumentAutocomplete(chatContextReplyInput)",
+		"if (!documentTokenAtCaret(chatContextReplyInput)) updateMentionAutocomplete(chatContextReplyInput)",
 		"updateMentionAutocomplete(roomChatInput)",
 		"scoutChatInput?.addEventListener('blur', closeMentionPopover)",
 	} {

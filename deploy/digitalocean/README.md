@@ -48,11 +48,15 @@ BONFIRE_CANONICAL_TENANT_ID=bonfire
 BONFIRE_CANONICAL_MODE=shadow
 MEETING_BRAIN_INTERVAL=5m
 OPENAI_BRAIN_MODEL=gpt-5.6-luna
+OPENAI_BRAIN_REASONING_EFFORT=max
+OPENAI_RESEARCH_MODEL=gpt-5.6-sol
+OPENAI_RESEARCH_REASONING_EFFORT=high
 OPENAI_BOARD_MODEL=gpt-5.6-terra
 OPENAI_SUGGESTION_MODEL=gpt-5.6-luna
-OPENAI_SCOUT_ROUTER_MODEL=gpt-5.6-terra
-OPENAI_SCOUT_CHAT_MODEL=gpt-5.6-terra
+OPENAI_SCOUT_ROUTER_MODEL=gpt-5.6-luna
+OPENAI_SCOUT_CHAT_MODEL=gpt-5.6-luna
 OPENAI_SCOUT_EXTRACTION_MODEL=gpt-5.6-luna
+OPENAI_SCOUT_REASONING_EFFORT=max
 MEETING_BRAIN_BACKFILL=false
 MEETING_TIME_ZONE=America/Los_Angeles
 PION_NAT1TO1_IP=<droplet-public-ip>
@@ -64,6 +68,14 @@ MEETING_TURN_SECRET=<openssl-rand-hex-32>
 MEETING_TURN_REALM=<domain>
 MEETING_HOST=<droplet-public-ip>.nip.io
 ```
+
+Research and deep-research deliverables resolve through the dedicated
+`OPENAI_RESEARCH_MODEL` and `OPENAI_RESEARCH_REASONING_EFFORT` accessors and
+are pinned above to Sol/high. The ambient brain and ordinary marketplace-worker
+fleet remain independently pinned to Luna/max through `OPENAI_BRAIN_MODEL` and
+`OPENAI_BRAIN_REASONING_EFFORT`; changing the research seat must never silently
+up-route that fleet. The OpenAI worker does not consume the job-level
+`BONFIRE_DELIVERABLE_EFFORT` value.
 
 Codex-style server-side execution is disabled in the production-style Compose
 candidate. The former reusable `codex-runner` image/profile was not a qualified

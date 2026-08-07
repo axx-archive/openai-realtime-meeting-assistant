@@ -41,7 +41,17 @@ func (app *kanbanBoardApp) replaySTRIDETeamChatProjection() {
 }
 
 func (app *kanbanBoardApp) observeSTRIDETeamChatMessage(thread scoutChatThreadRecord, message scoutChatMessageRecord, eventType, actorEmail string) {
-	if app == nil || app.strideRuntime == nil || app.strideRuntime.Health().State != STRIDERuntimeStandby || scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
+	if app == nil || scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
+		return
+	}
+	// Continuity is the fail-closed conversational projection, not a child of
+	// the default-off STRIDE shadow runtime. Keep it current even while that
+	// runtime is degraded or unavailable so edits/deletes cannot leave a stale
+	// checkpoint eligible for the next model prompt.
+	if _, _, continuityErr := app.rebuildConversationContinuity(thread, eventType); continuityErr != nil {
+		log.Errorf("ConversationContinuity rebuild unavailable: %v", continuityErr)
+	}
+	if app.strideRuntime == nil || app.strideRuntime.Health().State != STRIDERuntimeStandby {
 		return
 	}
 	changed, err := app.projectSTRIDETeamChatMessage(thread, message, eventType, actorEmail)
@@ -54,17 +64,17 @@ func (app *kanbanBoardApp) observeSTRIDETeamChatMessage(thread scoutChatThreadRe
 			log.Errorf("STRIDE team-chat snapshot unavailable: %v", err)
 		}
 	}
+	// Reconcile only after the conversation ledger has accepted the edit/delete.
+	// Before this edge the superseded source still projects as live, so the
+	// collaboration store truthfully has nothing to retract yet.
+	if eventType == "edit" || eventType == "delete" {
+		app.reconcileSTRIDERelationshipSourceMutation(actorEmail)
+	}
 	// Proactive attention is event-driven. The durable conversation projection
 	// is the admission edge; the worker re-reads the current public source and
 	// reauthorizes it before any classifier call or visible action.
 	if eventType == "message" || eventType == "edit" {
 		app.nudgeScoutProactiveAttention(thread, message, "")
-	}
-	if _, _, continuityErr := app.rebuildConversationContinuity(thread, eventType); continuityErr != nil {
-		log.Errorf("ConversationContinuity rebuild unavailable: %v", continuityErr)
-	}
-	if eventType == "edit" || eventType == "delete" {
-		app.reconcileSTRIDERelationshipSourceMutation(actorEmail)
 	}
 }
 

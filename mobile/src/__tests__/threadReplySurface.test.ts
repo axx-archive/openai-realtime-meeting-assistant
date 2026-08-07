@@ -99,8 +99,8 @@ test('work cards use the available narrow-screen width without a fixed minimum',
 
 test('reply-origin agent proposals can be confirmed or dismissed in the native thread sheet', () => {
   assert.match(bubbleSource, /proposalPending[\s\S]*Run once[\s\S]*Not now/);
-  assert.match(bubbleSource, /onResolveProposal\?\.\(message, 'accepted'\)/);
-  assert.match(bubbleSource, /onResolveProposal\?\.\(message, 'dismissed'\)/);
+  assert.match(bubbleSource, /onResolveProposal\?\.\(message, 'accepted',[\s\S]*\.trim\(\)\)/);
+  assert.match(bubbleSource, /onResolveProposal\?\.\(message, 'dismissed',[\s\S]*\.trim\(\)\)/);
   assert.match(sheetSource, /onResolveProposal=\{onResolveProposal\}/);
   assert.match(screenSource, /api\.resolveScoutProposal\(/);
   assert.match(apiSource, /chat-threads\/\$\{encodeURIComponent\(threadId\)\}\/proposal/);

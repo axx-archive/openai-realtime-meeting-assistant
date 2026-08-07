@@ -70,7 +70,11 @@ func scoutChatRequestNeedsReadableSource(text string) bool {
 
 func scoutChatRequestIsFileWork(text string) bool {
 	normalized := strings.ToLower(strings.Join(strings.Fields(text), " "))
-	for _, marker := range []string{"review", "analyze", "analyse", "audit", "critique", "assess", "compare", "recommend", "strategy", "template", "work on", "create", "produce", "prepare"} {
+	// Reading, describing, analyzing, critiquing, and reconstructing a prompt
+	// from an already-authorized source are ordinary multimodal conversation.
+	// Durable work begins only when the user asks for a broader decision pass or
+	// an output that should survive as its own artifact.
+	for _, marker := range []string{"audit", "compare", "recommend", "strategy", "template", "work on", "create a report", "produce", "prepare", "deep research", "research pass"} {
 		if strings.Contains(normalized, marker) {
 			return true
 		}

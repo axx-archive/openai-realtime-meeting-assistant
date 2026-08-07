@@ -120,6 +120,29 @@ func TestScoutRouterStrictOutputBuildsProposalAndRejectsInvalidOutput(t *testing
 	}
 }
 
+func TestScoutImageAnalysisRoutesInlineWithoutWorkstream(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "openai-core-key"
+	calls := 0
+	swapOpenAITextResponder(t, func(context.Context, string, openAITextRequest) (string, error) {
+		calls++
+		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{Route: "workstream", Mode: "research", Objective: "wrong"}), nil
+	})
+
+	if verdict := app.routeScoutChatTurn(context.Background(), "Can you analyze this image and reverse engineer the likely prompt?", nil); verdict != nil {
+		t.Fatalf("image analysis verdict=%#v, want ordinary inline answer", verdict)
+	}
+	if calls != 0 {
+		t.Fatalf("router calls=%d, want deterministic inline route", calls)
+	}
+	if scoutChatRequestIsFileWork("analyze this image and reverse engineer the prompt") {
+		t.Fatal("ordinary source analysis must not mint durable work")
+	}
+	if !scoutChatRequestIsFileWork("analyze this image and produce a report with recommendations") {
+		t.Fatal("explicit report/recommendation must remain durable work")
+	}
+}
+
 func TestPrivateRealtimeMilestoneHealthContract(t *testing.T) {
 	setupAuthTestEnv(t)
 	resetCapabilityRuntimeForTest(t)

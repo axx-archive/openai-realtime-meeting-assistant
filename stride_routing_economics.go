@@ -652,7 +652,7 @@ func E8PreparedRoutingEconomicsManifest() (E8RoutingEconomicsManifest, error) {
 		return NewE8RouteDescriptor(E8RouteDescriptor{Seat: seat, Provider: provider, Model: model, Effort: effort, PromptDigest: hash(seat + ":prompt:v1"), SchemaDigest: hash(seat + ":schema:v1"), SafetyDigest: hash(seat + ":safety:v1"), RouteRevision: seat + "-incumbent-r1", PriceRevisionDigest: prices.Digest, StrictOutputSchema: true, ReadOnlyTools: true})
 	}
 	routes := make([]E8RouteDescriptor, 0, 7)
-	for _, spec := range [][4]string{{seatBrain, providerOpenAI, "gpt-5.6-luna", "low"}, {seatBoard, providerOpenAI, "gpt-5.6-terra", "low"}, {seatOrchestrator, providerOpenAI, "gpt-5.6-sol", "medium"}, {seatReview, providerAnthropic, "claude-opus-4-8", "high"}, {seatCodex, "codex", "gpt-5.6-sol", "high"}, {seatVoiceRoom, providerOpenAI, "gpt-realtime-2", "high"}, {seatTranscriptionLane, providerOpenAI, "gpt-realtime-whisper", "none"}} {
+	for _, spec := range [][4]string{{seatBrain, providerOpenAI, "gpt-5.6-luna", "max"}, {seatBoard, providerOpenAI, "gpt-5.6-luna", "max"}, {seatOrchestrator, providerOpenAI, "gpt-5.6-sol", "medium"}, {seatReview, providerAnthropic, "claude-opus-4-8", "high"}, {seatCodex, "codex", "gpt-5.6-sol", "high"}, {seatVoiceRoom, providerOpenAI, "gpt-realtime-2.1", "high"}, {seatTranscriptionLane, providerOpenAI, "gpt-transcribe", "none"}} {
 		route, routeErr := newRoute(spec[0], spec[1], spec[2], spec[3])
 		if routeErr != nil {
 			return E8RoutingEconomicsManifest{}, routeErr
@@ -685,8 +685,8 @@ func E8PreparedRoutingEconomicsManifest() (E8RoutingEconomicsManifest, error) {
 		{"orchestrator-low-reasoning", seatOrchestrator, E8ExperimentReasoning, func(r *E8RouteDescriptor) { r.Effort = "low" }},
 		{"critic-xhigh-reasoning", seatReview, E8ExperimentReasoning, func(r *E8RouteDescriptor) { r.Effort = "xhigh" }},
 		{"codex-terra-model", seatCodex, E8ExperimentModel, func(r *E8RouteDescriptor) { r.Model = "gpt-5.6-terra" }},
-		{"voice-realtime-2_1-model", seatVoiceRoom, E8ExperimentModel, func(r *E8RouteDescriptor) { r.Model = "gpt-realtime-2.1" }},
-		{"stt-gpt-transcribe-model", seatTranscriptionLane, E8ExperimentModel, func(r *E8RouteDescriptor) { r.Model = "gpt-transcribe" }},
+		{"voice-realtime-2-model", seatVoiceRoom, E8ExperimentModel, func(r *E8RouteDescriptor) { r.Model = "gpt-realtime-2" }},
+		{"stt-gpt-live-transcribe-model", seatTranscriptionLane, E8ExperimentModel, func(r *E8RouteDescriptor) { r.Model = "gpt-live-transcribe" }},
 		{"brain-prompt-cache", seatBrain, E8ExperimentPromptCache, func(r *E8RouteDescriptor) { r.PromptCache = true }},
 		{"brain-persisted-reasoning", seatBrain, E8ExperimentPersistedReasoning, func(r *E8RouteDescriptor) { r.PersistedReasoning = true }},
 		{"brain-programmatic-tools", seatBrain, E8ExperimentProgrammaticTools, func(r *E8RouteDescriptor) { r.ProgrammaticTools = true }},

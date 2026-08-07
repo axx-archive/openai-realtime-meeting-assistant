@@ -328,7 +328,7 @@ func (app *kanbanBoardApp) agentMindPositionPrompt(agentID, query string) string
 // judgments only; raw UI-state entries and company-memory projections remain
 // on their own authorized surfaces.
 func assistantAgentMindHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -345,6 +345,10 @@ func assistantAgentMindHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusServiceUnavailable, "AgentMind is unavailable")
 		return
 	}
+	if r.Method == http.MethodPost {
+		resolveAssistantAgentMindPosition(w, r, user)
+		return
+	}
 	positions := kanbanApp.agentMindPositionsForViewer(user.Email, agentMindScoutID, r.URL.Query().Get("q"))
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok":        true,
@@ -352,6 +356,54 @@ func assistantAgentMindHandler(w http.ResponseWriter, r *http.Request) {
 		"positions": positions,
 		"count":     len(positions),
 	})
+}
+
+func resolveAssistantAgentMindPosition(w http.ResponseWriter, r *http.Request, user *userAccount) {
+	if !isArtifactApprovalAdmin(user) {
+		writeAuthError(w, http.StatusForbidden, "AgentMind review requires an organization administrator")
+		return
+	}
+	var body struct {
+		ID       string `json:"id"`
+		Revision int64  `json:"revision"`
+		Action   string `json:"action"`
+		Summary  string `json:"summary,omitempty"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&body) != nil || ensureJSONEOF(decoder) != nil {
+		writeAuthError(w, http.StatusBadRequest, "invalid AgentMind review")
+		return
+	}
+	body.ID = strings.TrimSpace(body.ID)
+	body.Action = strings.ToLower(strings.TrimSpace(body.Action))
+	body.Summary = compactAssistantLine(body.Summary)
+	status := map[string]string{"correct": agentMindPositionStatusCorrected, "supersede": agentMindPositionStatusSuperseded, "forget": agentMindPositionStatusForgotten}[body.Action]
+	if !strideIdentifier(body.ID) || body.Revision < 1 || status == "" || body.Action == "correct" && body.Summary == "" || len([]rune(body.Summary)) > 1400 {
+		writeAuthError(w, http.StatusBadRequest, "invalid AgentMind review")
+		return
+	}
+	var prior agentMindPositionRecord
+	for _, entry := range kanbanApp.memory.entriesOfKind(meetingMemoryKindAgentMindPosition, 0) {
+		if position, ok := decodeAgentMindPosition(entry); ok && position.ID == body.ID && position.AgentID == agentMindScoutID {
+			prior = position
+		}
+	}
+	if prior.ID == "" || !kanbanApp.agentMindPositionSourceCurrent(prior, user.Email) {
+		writeAuthError(w, http.StatusNotFound, "AgentMind position is unavailable")
+		return
+	}
+	if prior.Revision != body.Revision {
+		writeAuthError(w, http.StatusConflict, "AgentMind position changed; reload before reviewing it")
+		return
+	}
+	sourceRef := "agent-mind-review-" + temporalDigest(body.ID + "\x00" + fmt.Sprint(body.Revision) + "\x00" + body.Action + "\x00" + normalizeAccountEmail(user.Email))[:24]
+	record, changed, err := kanbanApp.resolveAgentMindPosition(prior, status, body.Summary, normalizeAccountEmail(user.Email), sourceRef)
+	if err != nil {
+		writeAuthError(w, http.StatusConflict, err.Error())
+		return
+	}
+	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "changed": changed, "position": record})
 }
 
 func (app *kanbanBoardApp) maybeRecordScoutAgentMindPosition(thread scoutChatThreadRecord, userMessage, assistantMessage scoutChatMessageRecord) {

@@ -17,6 +17,34 @@ func TestScoutDictationUsesConversationContract(t *testing.T) {
 	}
 }
 
+func TestScoutRuntimeSelfKnowledgeUsesCurrentPinnedRoutes(t *testing.T) {
+	t.Setenv("OPENAI_SCOUT_CHAT_MODEL", "gpt-answer-route")
+	t.Setenv("OPENAI_SCOUT_ROUTER_MODEL", "gpt-router-route")
+	t.Setenv("OPENAI_SCOUT_EXTRACTION_MODEL", "gpt-extraction-route")
+	t.Setenv("OPENAI_SCOUT_REASONING_EFFORT", "xhigh")
+	t.Setenv("OPENAI_REALTIME_MODEL", "gpt-realtime-route")
+	t.Setenv("OPENAI_REALTIME_REASONING_EFFORT", "medium")
+	instructions := strings.ToLower(assistantQueryInstructionsForCoreAvailability(true))
+	for _, required := range []string{
+		"answer model: gpt-answer-route",
+		"router model: gpt-router-route",
+		"extraction and attachment model: gpt-extraction-route",
+		"proactive-attention model: gpt-answer-route",
+		"text reasoning effort for answer, router, extraction/attachment, and proactive-attention: xhigh",
+		"voice model: gpt-realtime-route",
+		"voice reasoning effort: medium",
+		"separate server-resolved routes",
+		"not adaptive per question",
+	} {
+		if !strings.Contains(instructions, required) {
+			t.Fatalf("Scout runtime self-knowledge missing %q: %q", required, instructions)
+		}
+	}
+	if strings.Contains(instructions, "answer, routing, extraction, attachment, memory, and proactive-attention calls use") {
+		t.Fatalf("Scout runtime self-knowledge still claims one shared text route: %q", instructions)
+	}
+}
+
 func TestContextEntriesForQueryIncludesMentionedParticipantsAndYesterday(t *testing.T) {
 	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
 	store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "memory.jsonl"))

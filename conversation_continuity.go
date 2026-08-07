@@ -118,6 +118,10 @@ func (app *kanbanBoardApp) conversationContinuityForViewer(viewerEmail string, t
 	if checkpoint.AudienceDigest != currentAudienceDigest {
 		return conversationContinuityCheckpoint{}, false
 	}
+	currentSourceDigest, _, _ := conversationContinuitySourceDigest(thread, currentAudienceDigest)
+	if currentSourceDigest == "" || checkpoint.SourceDigest != currentSourceDigest {
+		return conversationContinuityCheckpoint{}, false
+	}
 	return checkpoint, true
 }
 
@@ -336,7 +340,7 @@ func (app *kanbanBoardApp) rebuildConversationContinuity(thread scoutChatThreadR
 	}
 	prior := app.latestConversationContinuity(thread.ID)
 	currentAudience := conversationContinuityAudienceDigest(thread)
-	currentSource, _, _ := conversationContinuitySourceDigest(thread, currentAudience)
+	currentSource, sources, _ := conversationContinuitySourceDigest(thread, currentAudience)
 	if prior.Status == conversationContinuityStatusActive && prior.AudienceDigest == currentAudience && prior.SourceDigest == currentSource {
 		return prior, false, nil
 	}
@@ -352,6 +356,12 @@ func (app *kanbanBoardApp) rebuildConversationContinuity(thread scoutChatThreadR
 		if _, err := app.appendConversationContinuity(invalidated); err != nil {
 			return conversationContinuityCheckpoint{}, false, err
 		}
+		if len(sources) == 0 {
+			return invalidated, true, nil
+		}
+	}
+	if len(sources) == 0 {
+		return prior, false, nil
 	}
 	checkpoint, err := app.buildConversationContinuityCheckpoint(thread, reason, prior)
 	if err != nil {
@@ -359,6 +369,38 @@ func (app *kanbanBoardApp) rebuildConversationContinuity(thread scoutChatThreadR
 	}
 	appended, err := app.appendConversationContinuity(checkpoint)
 	return checkpoint, appended, err
+}
+
+// reconcileConversationContinuityAtStartup closes the crash window between
+// durable thread persistence and its derived checkpoint append. It rebuilds
+// from the latest ACL-governed thread snapshot only; it never promotes private
+// content into the organization conversation ledger.
+func (app *kanbanBoardApp) reconcileConversationContinuityAtStartup() {
+	if app == nil || app.memory == nil {
+		return
+	}
+	latest := map[string]scoutChatThreadRecord{}
+	for _, entry := range app.memory.snapshot(0) {
+		thread, ok := decodeScoutChatThreadEntry(entry)
+		if !ok || !strideIdentifier(thread.ID) {
+			continue
+		}
+		latest[thread.ID] = thread
+	}
+	threadIDs := make([]string, 0, len(latest))
+	for threadID := range latest {
+		threadIDs = append(threadIDs, threadID)
+	}
+	sort.Strings(threadIDs)
+	for _, threadID := range threadIDs {
+		thread := latest[threadID]
+		if strings.TrimSpace(thread.ArchivedAt) != "" || len(thread.Messages) == 0 || !scoutChatThreadAllowsViewer(thread, thread.OwnerEmail) {
+			continue
+		}
+		if _, _, err := app.rebuildConversationContinuity(thread, "startup_reconcile"); err != nil {
+			log.Errorf("ConversationContinuity startup reconciliation unavailable for %s: %v", thread.ID, err)
+		}
+	}
 }
 
 // Private threads do not enter the organization STRIDE conversation ledger,

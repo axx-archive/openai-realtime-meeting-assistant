@@ -65,6 +65,22 @@ func TestSTRIDEWorkforceLifecycleIsIdempotentAndRuntimeDefaultOff(t *testing.T) 
 			t.Fatalf("activate %s: %v", stage, err)
 		}
 	}
+	reviewView := runtime.ScoutRosterView()
+	var reviewSeat STRIDEWorkforceSeat
+	for _, candidate := range reviewView.Seats {
+		if candidate.ID == seat.ID {
+			reviewSeat = candidate
+		}
+	}
+	if reviewSeat.Status != "review_required" || reviewSeat.ActivationStage != "review" || !reviewSeat.AccessRevoked {
+		t.Fatalf("route activation bypassed human review: %#v", reviewSeat)
+	}
+	if _, err := runtime.IssueRuntimeGrant(strideWorkforceAdmin(), seat.ID, now); !errors.Is(err, ErrSTRIDEWorkforceAuthority) {
+		t.Fatalf("pre-review runtime grant error=%v", err)
+	}
+	if _, err := runtime.Review(strideWorkforceAdmin(), seat.ID, "review_mary", now.Add(4*time.Minute)); err != nil {
+		t.Fatalf("review: %v", err)
+	}
 	view := runtime.ScoutRosterView()
 	var mary STRIDEWorkforceSeat
 	for _, candidate := range view.Seats {
@@ -153,10 +169,10 @@ func TestSTRIDEWorkforceInternalPreviewSeatSurvivesAuthenticatedRestore(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Receipts) != 7 {
-		t.Fatalf("preview receipt chain length=%d, want 7", len(snapshot.Receipts))
+	if len(snapshot.Receipts) != 8 {
+		t.Fatalf("preview receipt chain length=%d, want 8", len(snapshot.Receipts))
 	}
-	createReceipts := 0
+	createReceipts, reviewReceipts := 0, 0
 	for _, lifecycleReceipt := range snapshot.Receipts {
 		if lifecycleReceipt.Action == "create" {
 			createReceipts++
@@ -164,9 +180,15 @@ func TestSTRIDEWorkforceInternalPreviewSeatSurvivesAuthenticatedRestore(t *testi
 				t.Fatalf("preview create request digest=%q", lifecycleReceipt.RequestDigest)
 			}
 		}
+		if lifecycleReceipt.Action == "review" && lifecycleReceipt.Before == "review_required" && lifecycleReceipt.After == "active" {
+			reviewReceipts++
+		}
 	}
 	if createReceipts != 1 {
 		t.Fatalf("preview create receipt count=%d, want 1", createReceipts)
+	}
+	if reviewReceipts != 1 {
+		t.Fatalf("preview review receipt count=%d, want 1", reviewReceipts)
 	}
 	restored, err := RestoreSTRIDEWorkforceRuntime(snapshot, STRIDESnapshotRestorePolicy{Authority: strideSnapshotAuthorityForTest(), MinimumGeneration: 1})
 	if err != nil {

@@ -658,6 +658,32 @@ func TestAttachmentDestinationRevisionFenceRejectsAudienceRaceAtCommit(t *testin
 	}
 }
 
+func TestOpenAIReplyMediaContentCarriesAuthorizedGeneratedImage(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	thread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "private image", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	ref, err := putBlob(tinyPNG(t), "image/png")
+	if err != nil {
+		t.Fatalf("put image: %v", err)
+	}
+	thread.Messages = append(thread.Messages, scoutChatMessageRecord{
+		ID: "generated-image-message", Kind: scoutChatMessageKindImage, Role: "scout",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Image: &scoutChatImageRef{Ref: ref, Mime: "image/png", Name: "concept.png"},
+	})
+	if err := app.saveScoutChatThread(thread); err != nil {
+		t.Fatalf("save thread: %v", err)
+	}
+	content := app.openAIReplyMediaContent("aj@shareability.com", thread.ID, "generated-image-message")
+	if len(content) != 1 || content[0].Type != "input_image" || !strings.HasPrefix(content[0].ImageURL, "data:image/png;base64,") {
+		t.Fatalf("reply media=%+v, want one inline image", content)
+	}
+	if leaked := app.openAIReplyMediaContent("outsider@example.com", thread.ID, "generated-image-message"); len(leaked) != 0 {
+		t.Fatalf("unauthorized reply media leaked: %+v", leaked)
+	}
+}
+
 func TestSanitizeScoutChatFilesDoesNotWidenPrivateArtifactIntoPublicChannel(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp

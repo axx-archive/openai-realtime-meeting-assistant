@@ -28,9 +28,9 @@ import (
 )
 
 const (
-	// fileFolderMaxCount caps the tree flat: a drive with more than 100
-	// top-level folders is a filing failure, not a feature.
+	// fileFolderMaxCount caps the complete tree.
 	fileFolderMaxCount = 100
+	fileFolderMaxDepth = 5
 	// fileFolderNameMaxLen bounds a folder name after whitespace collapse.
 	fileFolderNameMaxLen = 60
 )
@@ -47,6 +47,7 @@ var (
 type fileFolderRecord struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
+	ParentID  string `json:"parentId,omitempty"`
 	CreatedBy string `json:"createdBy,omitempty"`
 	CreatedAt string `json:"createdAt,omitempty"`
 }
@@ -78,6 +79,9 @@ func newFileFolderStore(path string) *fileFolderStore {
 			if state.Assignments != nil {
 				store.assignments = state.Assignments
 			}
+			if !store.folderTreeValidLocked() {
+				store.loadErr = fmt.Errorf("file-folder store is malformed")
+			}
 		}
 	} else if !os.IsNotExist(err) {
 		store.loadErr = fmt.Errorf("file-folder store is unavailable")
@@ -98,6 +102,10 @@ func (s *fileFolderStore) reloadVisibleStateLocked() error {
 	}
 	s.folders = append([]fileFolderRecord(nil), state.Folders...)
 	s.assignments = cloneFileFolderAssignments(state.Assignments)
+	if !s.folderTreeValidLocked() {
+		s.loadErr = fmt.Errorf("file-folder store is malformed")
+		return s.loadErr
+	}
 	s.loadErr = nil
 	return nil
 }
@@ -143,9 +151,9 @@ func (s *fileFolderStore) folderIndexLocked(id string) int {
 	return -1
 }
 
-func (s *fileFolderStore) nameTakenLocked(name string, excludeID string) bool {
+func (s *fileFolderStore) nameTakenLocked(name string, excludeID string, parentID string) bool {
 	for _, folder := range s.folders {
-		if folder.ID != excludeID && strings.EqualFold(folder.Name, name) {
+		if folder.ID != excludeID && folder.ParentID == parentID && strings.EqualFold(folder.Name, name) {
 			return true
 		}
 	}
@@ -153,6 +161,10 @@ func (s *fileFolderStore) nameTakenLocked(name string, excludeID string) bool {
 }
 
 func (s *fileFolderStore) create(name string, createdBy string) (fileFolderRecord, error) {
+	return s.createInParent(name, "", createdBy)
+}
+
+func (s *fileFolderStore) createInParent(name string, parentID string, createdBy string) (fileFolderRecord, error) {
 	normalized, err := normalizeFileFolderName(name)
 	if err != nil {
 		return fileFolderRecord{}, err
@@ -165,12 +177,22 @@ func (s *fileFolderStore) create(name string, createdBy string) (fileFolderRecor
 	if len(s.folders) >= fileFolderMaxCount {
 		return fileFolderRecord{}, errFileFolderLimit
 	}
-	if s.nameTakenLocked(normalized, "") {
+	parentID = strings.TrimSpace(parentID)
+	if parentID != "" {
+		if s.folderIndexLocked(parentID) < 0 {
+			return fileFolderRecord{}, errFileFolderNotFound
+		}
+		if s.folderDepthLocked(parentID) >= fileFolderMaxDepth {
+			return fileFolderRecord{}, errFileFolderLimit
+		}
+	}
+	if s.nameTakenLocked(normalized, "", parentID) {
 		return fileFolderRecord{}, errFileFolderDuplicate
 	}
 	folder := fileFolderRecord{
 		ID:        fmt.Sprintf("folder-%d", time.Now().UnixNano()),
 		Name:      normalized,
+		ParentID:  parentID,
 		CreatedBy: strings.TrimSpace(createdBy),
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
@@ -200,7 +222,7 @@ func (s *fileFolderStore) rename(id string, name string) (fileFolderRecord, erro
 	if index < 0 {
 		return fileFolderRecord{}, errFileFolderNotFound
 	}
-	if s.nameTakenLocked(normalized, s.folders[index].ID) {
+	if s.nameTakenLocked(normalized, s.folders[index].ID, s.folders[index].ParentID) {
 		return fileFolderRecord{}, errFileFolderDuplicate
 	}
 	prior := s.folders[index].Name
@@ -231,7 +253,13 @@ func (s *fileFolderStore) remove(id string) error {
 	priorFolders := append([]fileFolderRecord(nil), s.folders...)
 	priorAssignments := cloneFileFolderAssignments(s.assignments)
 	folderID := s.folders[index].ID
+	parentID := s.folders[index].ParentID
 	s.folders = append(s.folders[:index], s.folders[index+1:]...)
+	for child := range s.folders {
+		if s.folders[child].ParentID == folderID {
+			s.folders[child].ParentID = parentID
+		}
+	}
 	for fileID, assigned := range s.assignments {
 		if assigned == folderID {
 			delete(s.assignments, fileID)
@@ -247,6 +275,48 @@ func (s *fileFolderStore) remove(id string) error {
 		return err
 	}
 	return nil
+}
+
+func (s *fileFolderStore) folderDepthLocked(id string) int {
+	depth := 0
+	seen := map[string]bool{}
+	for id != "" {
+		if seen[id] {
+			return fileFolderMaxDepth + 1
+		}
+		seen[id] = true
+		index := s.folderIndexLocked(id)
+		if index < 0 {
+			return fileFolderMaxDepth + 1
+		}
+		depth++
+		id = s.folders[index].ParentID
+	}
+	return depth
+}
+
+func (s *fileFolderStore) folderTreeValidLocked() bool {
+	ids := make(map[string]bool, len(s.folders))
+	for _, folder := range s.folders {
+		if strings.TrimSpace(folder.ID) == "" || ids[folder.ID] {
+			return false
+		}
+		ids[folder.ID] = true
+	}
+	for index, folder := range s.folders {
+		if folder.ParentID != "" && !ids[folder.ParentID] {
+			return false
+		}
+		if s.folderDepthLocked(folder.ID) > fileFolderMaxDepth {
+			return false
+		}
+		for prior := 0; prior < index; prior++ {
+			if s.folders[prior].ParentID == folder.ParentID && strings.EqualFold(s.folders[prior].Name, folder.Name) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // assign files a row under a folder; an empty folderID moves it back to root.
@@ -364,9 +434,10 @@ func moveFileToFolder(fileID string, folderID string) error {
 // assistantFileFolderPayload is one folder chip on the Files surface: the
 // stored record plus the count of visible rows filed under it.
 type assistantFileFolderPayload struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Count int    `json:"count"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	ParentID string `json:"parentId,omitempty"`
+	Count    int    `json:"count"`
 }
 
 // decorateAssistantFileFolders stamps each visible row's folderId from the
@@ -389,7 +460,7 @@ func decorateAssistantFileFolders(rows []assistantFileRecord) []assistantFileFol
 	}
 	payload := make([]assistantFileFolderPayload, 0, len(folders))
 	for _, folder := range folders {
-		payload = append(payload, assistantFileFolderPayload{ID: folder.ID, Name: folder.Name, Count: counts[folder.ID]})
+		payload = append(payload, assistantFileFolderPayload{ID: folder.ID, Name: folder.Name, ParentID: folder.ParentID, Count: counts[folder.ID]})
 	}
 	return payload
 }
@@ -442,14 +513,19 @@ func assistantFileFoldersHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
 		payload := struct {
-			Name string `json:"name"`
+			Name     string `json:"name"`
+			ParentID string `json:"parentId,omitempty"`
 		}{}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&payload); err != nil {
 			writeAuthError(w, http.StatusBadRequest, "could not read folder request")
 			return
 		}
 		createdBy := normalizeAccountEmail(user.Email)
-		folder, err := store.create(payload.Name, createdBy)
+		if payload.ParentID != "" && !fileFolderManagedByUser(payload.ParentID, user) {
+			writeAuthError(w, http.StatusNotFound, "folder not found")
+			return
+		}
+		folder, err := store.createInParent(payload.Name, payload.ParentID, createdBy)
 		if err != nil {
 			status, message := fileFolderPublicError(err)
 			writeAuthError(w, status, message)

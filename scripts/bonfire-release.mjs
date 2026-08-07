@@ -1217,7 +1217,7 @@ export function validateRenderedComposeConfig(config, receipt, suppliedTopology 
     'rendered candidate Compose canonical-postgres command', { ordered: true })
   exactStringSequence(config.services['render-queue-init'].entrypoint, ['/bin/sh', '-eu', '-c'], 'rendered candidate Compose render-queue-init entrypoint', { ordered: true })
   exactStringSequence(config.services['render-queue-init'].command,
-    ['install -d -o 65532 -g 65532 -m 0700 /app/render-queue /app/render-queue/jobs'],
+    ["install -d -o 65532 -g 65532 -m 2770 /app/render-queue /app/render-queue/jobs && find /app/render-queue/jobs -xdev -maxdepth 1 -type f -name '*.json' -exec chown 65532:65532 {} + -exec chmod 0660 {} +"],
     'rendered candidate Compose render-queue-init command', { ordered: true })
   for (const serviceName of ['render-runner', 'caddy']) {
     requireInheritedImageField(config.services[serviceName].command, `rendered candidate Compose ${serviceName} command`)

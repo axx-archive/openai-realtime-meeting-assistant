@@ -92,6 +92,8 @@ type pendingAttachmentUploadGrant struct {
 	Size                int64     `json:"size"`
 	DestinationID       string    `json:"destinationId"`
 	DestinationRevision string    `json:"destinationRevision"`
+	OriginFileID        string    `json:"originFileId,omitempty"`
+	OriginRevision      string    `json:"originRevision,omitempty"`
 	State               string    `json:"state"`
 	ReservationID       string    `json:"reservationId,omitempty"`
 	ReservedAt          time.Time `json:"reservedAt,omitempty"`
@@ -246,12 +248,18 @@ func newPendingAttachmentSourceID() (string, error) {
 }
 
 func (app *kanbanBoardApp) grantPendingAttachmentUpload(user *userAccount, destination scoutChatThreadRecord, ref string, meta blobMeta) (pendingAttachmentUploadGrant, error) {
+	return app.grantPendingAttachmentUploadFromFile(user, destination, ref, meta, "", "")
+}
+
+func (app *kanbanBoardApp) grantPendingAttachmentUploadFromFile(user *userAccount, destination scoutChatThreadRecord, ref string, meta blobMeta, originFileID, originRevision string) (pendingAttachmentUploadGrant, error) {
 	if app == nil || user == nil || !validBlobRef(ref) || strings.TrimSpace(destination.ID) == "" {
 		return pendingAttachmentUploadGrant{}, fmt.Errorf("attachment source grant is unavailable")
 	}
 	email := normalizeAccountEmail(user.Email)
 	mime := strings.ToLower(strings.TrimSpace(meta.Mime))
-	if email == "" || !attachmentUploadSafeMimes[mime] || meta.Size < 1 {
+	originFileID = strings.TrimSpace(originFileID)
+	originRevision = strings.TrimSpace(originRevision)
+	if email == "" || !attachmentUploadSafeMimes[mime] || meta.Size < 1 || (originFileID == "") != (originRevision == "") {
 		return pendingAttachmentUploadGrant{}, fmt.Errorf("attachment source metadata is invalid")
 	}
 	if destination.ArchivedAt != "" {
@@ -271,6 +279,8 @@ func (app *kanbanBoardApp) grantPendingAttachmentUpload(user *userAccount, desti
 		Size:                meta.Size,
 		DestinationID:       strings.TrimSpace(destination.ID),
 		DestinationRevision: scoutChatAttachmentDestinationRevision(destination),
+		OriginFileID:        originFileID,
+		OriginRevision:      originRevision,
 		State:               attachmentSourcePending,
 		CreatedAt:           now,
 		ExpiresAt:           now.Add(pendingAttachmentUploadTTL),
@@ -309,6 +319,15 @@ func (app *kanbanBoardApp) reservePendingAttachmentUpload(user *userAccount, des
 	}
 	now := time.Now().UTC()
 	app.pendingAttachmentUploadsMu.Lock()
+	originGrant, originOK := app.pendingAttachmentUploads[sourceID]
+	app.pendingAttachmentUploadsMu.Unlock()
+	if originOK && originGrant.OriginFileID != "" {
+		current, ok := app.assistantFileSourceRevisionForDestination(context.Background(), user, originGrant.OriginFileID, destination)
+		if !ok || current != originGrant.OriginRevision {
+			return fmt.Errorf("attachment source changed; attach the file again")
+		}
+	}
+	app.pendingAttachmentUploadsMu.Lock()
 	defer app.pendingAttachmentUploadsMu.Unlock()
 	if app.attachmentSourceStoreErr != nil {
 		return fmt.Errorf("attachment source authority is unavailable")
@@ -333,7 +352,8 @@ func (app *kanbanBoardApp) reservePendingAttachmentUpload(user *userAccount, des
 		grant.Mime == strings.ToLower(strings.TrimSpace(meta.Mime)) &&
 		grant.Size == meta.Size &&
 		grant.DestinationID == strings.TrimSpace(destination.ID) &&
-		grant.DestinationRevision == scoutChatAttachmentDestinationRevision(destination)
+		grant.DestinationRevision == scoutChatAttachmentDestinationRevision(destination) &&
+		grant.OriginFileID == originGrant.OriginFileID && grant.OriginRevision == originGrant.OriginRevision
 	if !valid {
 		return fmt.Errorf("attachment source authorization does not match this destination")
 	}
@@ -416,10 +436,17 @@ func (app *kanbanBoardApp) attachmentSourceAuthorizedForRead(user *userAccount, 
 		return false
 	}
 	app.pendingAttachmentUploadsMu.Lock()
-	defer app.pendingAttachmentUploadsMu.Unlock()
 	grant, ok := app.pendingAttachmentUploads[strings.TrimSpace(file.SourceID)]
-	if !ok || app.attachmentSourceStoreErr != nil {
+	storeHealthy := app.attachmentSourceStoreErr == nil
+	app.pendingAttachmentUploadsMu.Unlock()
+	if !ok || !storeHealthy {
 		return false
+	}
+	if grant.OriginFileID != "" {
+		current, currentOK := app.assistantFileSourceRevisionForDestination(context.Background(), user, grant.OriginFileID, destination)
+		if !currentOK || current != grant.OriginRevision {
+			return false
+		}
 	}
 	valid := grant.State == attachmentSourceReserved && grant.ReservationID == strings.TrimSpace(reservationID) &&
 		grant.OwnerEmail == normalizeAccountEmail(user.Email) && grant.SourceRevision == strings.TrimSpace(file.SourceRevision) &&
@@ -515,6 +542,8 @@ var attachmentUploadSafeMimes = map[string]bool{
 	"image/webp":      true,
 	"image/gif":       true,
 	"application/pdf": true,
+	"text/plain":      true,
+	"text/markdown":   true,
 }
 
 var attachmentModelSafeMimes = map[string]bool{
@@ -522,6 +551,15 @@ var attachmentModelSafeMimes = map[string]bool{
 	"image/jpeg":      true,
 	"image/webp":      true,
 	"application/pdf": true,
+}
+
+var openAIAttachmentModelSafeMimes = map[string]bool{
+	"image/png":       true,
+	"image/jpeg":      true,
+	"image/webp":      true,
+	"application/pdf": true,
+	"text/plain":      true,
+	"text/markdown":   true,
 }
 
 // attachmentUploadMime normalizes a Content-Type header down to its bare
@@ -710,6 +748,73 @@ func assistantAttachmentUploadHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// assistantAttachmentFromFileHandler mints a fresh, single-use attachment
+// authority for an already-authorized Drive row. It binds the immutable blob,
+// the current source revision, and the exact destination audience. The source
+// is revalidated when the message is reserved/read; deleting, unsaving, or
+// changing its ACL therefore fails closed instead of leaving a bearer file ID.
+func assistantAttachmentFromFileHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if kanbanApp == nil || kanbanApp.memory == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "attachments are unavailable")
+		return
+	}
+	payload := struct {
+		ThreadID string `json:"threadId"`
+		FileID   string `json:"fileId"`
+	}{}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil || ensureJSONEOF(decoder) != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read Drive attachment request")
+		return
+	}
+	payload.ThreadID = strings.TrimSpace(payload.ThreadID)
+	payload.FileID = strings.TrimSpace(payload.FileID)
+	if payload.ThreadID == "" || payload.FileID == "" {
+		writeAuthError(w, http.StatusBadRequest, "threadId and fileId are required")
+		return
+	}
+	destination, _, err := kanbanApp.scoutChatThreadByID(user.Email, payload.ThreadID)
+	if err != nil {
+		writeAuthError(w, http.StatusNotFound, "chat thread not found")
+		return
+	}
+	if destination.ArchivedAt != "" {
+		writeAuthError(w, http.StatusConflict, "chat thread is archived")
+		return
+	}
+	file, meta, originRevision, ok := kanbanApp.assistantFileAttachmentSourceForDestination(r.Context(), user, payload.FileID, destination)
+	if !ok {
+		writeAuthError(w, http.StatusNotFound, "file not found")
+		return
+	}
+	if !attachmentUploadSafeMimes[strings.ToLower(strings.TrimSpace(meta.Mime))] || meta.Size < 1 || meta.Size > attachmentUploadMaxBytes {
+		writeAuthError(w, http.StatusUnsupportedMediaType, "this Drive file type cannot be attached to chat yet")
+		return
+	}
+	grant, err := kanbanApp.grantPendingAttachmentUploadFromFile(user, destination, file.Ref, meta, payload.FileID, originRevision)
+	if err != nil {
+		writeAuthError(w, http.StatusInternalServerError, "could not authorize the Drive attachment")
+		return
+	}
+	file.SourceID = grant.SourceID
+	file.SourceRevision = grant.SourceRevision
+	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "attachment": file})
+}
+
 // validateAttachmentBytes refuses type-confused and malformed files before
 // they are persisted or forwarded to a model. DecodeConfig reads dimensions
 // without expanding full raster pixel buffers, and the pixel ceiling blocks
@@ -735,6 +840,11 @@ func validateAttachmentBytes(mime string, data []byte) error {
 	case "application/pdf":
 		if len(data) < 8 || !bytes.HasPrefix(data, []byte("%PDF-")) {
 			return fmt.Errorf("invalid pdf")
+		}
+		return nil
+	case "text/plain", "text/markdown":
+		if len(data) == 0 || !utf8.Valid(data) || bytesContainsNUL(data) {
+			return fmt.Errorf("invalid text attachment")
 		}
 		return nil
 	default:
@@ -860,17 +970,24 @@ func openAIAttachmentContentWithReader(files []scoutChatFileAttachment, read fun
 			continue
 		}
 		mime := strings.ToLower(strings.TrimSpace(meta.Mime))
-		if !attachmentModelSafeMimes[mime] || imageBytes+pdfBytes+len(data) > attachmentMaxRequestBytes {
+		if !openAIAttachmentModelSafeMimes[mime] || imageBytes+pdfBytes+len(data) > attachmentMaxRequestBytes {
 			continue
 		}
 		dataURL := "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
-		if mime == "application/pdf" {
+		if mime == "application/pdf" || strings.HasPrefix(mime, "text/") {
 			if pdfs+1 > attachmentMaxPDFBlocks || pdfBytes+len(data) > attachmentMaxPDFBytes {
 				continue
 			}
 			filename := filepath.Base(strings.TrimSpace(file.Name))
-			if filename == "." || filename == string(filepath.Separator) || !strings.EqualFold(filepath.Ext(filename), ".pdf") {
-				filename = "attachment.pdf"
+			if filename == "." || filename == string(filepath.Separator) || filename == "" {
+				filename = "attachment"
+			}
+			if mime == "application/pdf" && !strings.EqualFold(filepath.Ext(filename), ".pdf") {
+				filename += ".pdf"
+			} else if mime == "text/markdown" && filepath.Ext(filename) == "" {
+				filename += ".md"
+			} else if mime == "text/plain" && filepath.Ext(filename) == "" {
+				filename += ".txt"
 			}
 			pdfs++
 			pdfBytes += len(data)
@@ -1112,6 +1229,16 @@ func (app *kanbanBoardApp) committedChatAttachmentAuthorized(viewerEmail string,
 	if err != nil || scoutChatAttachmentDestinationRevision(thread) != grant.DestinationRevision {
 		return false
 	}
+	if grant.OriginFileID != "" {
+		viewer := accountStore().findUser(viewerEmail)
+		if viewer == nil {
+			return false
+		}
+		current, ok := app.assistantFileSourceRevisionForDestination(context.Background(), viewer, grant.OriginFileID, thread)
+		if !ok || current != grant.OriginRevision {
+			return false
+		}
+	}
 	index := scoutChatMessageIndex(thread, messageID)
 	if index < 0 {
 		return false
@@ -1156,6 +1283,37 @@ func (app *kanbanBoardApp) committedOpenAIAttachmentContent(viewerEmail string, 
 		}
 		return data, meta, true
 	})
+}
+
+// openAIReplyMediaContent carries the exact image/file from the message being
+// replied to into the current multimodal answer. Reply snippets alone are not
+// visual context. The thread is re-read through its viewer ACL, committed file
+// grants are revalidated, and generated-image blobs are digest-checked before
+// any bytes reach OpenAI.
+func (app *kanbanBoardApp) openAIReplyMediaContent(viewerEmail, threadID, messageID string) []openAIInputContent {
+	thread, _, err := app.scoutChatThreadByID(viewerEmail, threadID)
+	if err != nil {
+		return nil
+	}
+	index := scoutChatMessageIndex(thread, strings.TrimSpace(messageID))
+	if index < 0 {
+		return nil
+	}
+	message := thread.Messages[index]
+	content := app.committedOpenAIAttachmentContent(viewerEmail, threadID, message.ID, message.Files)
+	if message.Image == nil || !validBlobRef(message.Image.Ref) {
+		return content
+	}
+	data, meta, err := getBlob(message.Image.Ref)
+	if err != nil || len(data) > attachmentMaxRequestBytes {
+		return content
+	}
+	mime := strings.ToLower(strings.TrimSpace(meta.Mime))
+	if !oneOf(mime, "image/png", "image/jpeg", "image/webp") {
+		return content
+	}
+	content = append(content, openAIInputContent{Type: "input_image", ImageURL: "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)})
+	return content
 }
 
 func (app *kanbanBoardApp) committedAttachmentsAuthorized(viewerEmail string, threadID string, messageID string, files []scoutChatFileAttachment) bool {

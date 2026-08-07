@@ -69,6 +69,24 @@ func TestSelectedAgentRunnerNameMatrix(t *testing.T) {
 	}
 }
 
+func TestResearchRunnerIsAlwaysOpenAISolHigh(t *testing.T) {
+	clearAgentRunnerEnv(t)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("BONFIRE_AGENT_RUNNER", agentRunnerAnthropicFable)
+	app := newIsolatedKanbanBoardApp(t)
+	thread := scoutAgentThread{Mode: "research", Artifact: meetingMemoryEntry{Metadata: map[string]string{"assignedRunner": agentRunnerCodexSidecar}}}
+	job := app.newAgentJob(thread)
+	if runner := app.selectAgentRunner(job, nil); runner.Name() != agentRunnerOpenAIText {
+		t.Fatalf("research runner=%q, want %q", runner.Name(), agentRunnerOpenAIText)
+	}
+	if got := agentThreadTextModel(thread); got != defaultResearchModel {
+		t.Fatalf("research model=%q, want %q", got, defaultResearchModel)
+	}
+	if got := agentThreadTextReasoningEffort(thread); got != defaultResearchReasoningEffort {
+		t.Fatalf("research effort=%q, want %q", got, defaultResearchReasoningEffort)
+	}
+}
+
 func TestSelectedExecutionRunnerNameMatrix(t *testing.T) {
 	cases := []struct {
 		name        string

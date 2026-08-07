@@ -25,7 +25,7 @@ import * as Linking from 'expo-linking';
 import * as Clipboard from 'expo-clipboard';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { api, BonfireApiError } from '../api/client';
-import type { ChatMentionCandidate, GiphySearchResult, ScoutFileAttachment, ScoutMessage, ThreadDigestResponse } from '../api/types';
+import type { ChatMentionCandidate, DriveFileRecord, GiphySearchResult, ScoutFileAttachment, ScoutMessage, ThreadDigestResponse } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { syncNotificationBadge } from '../push/usePushRegistration';
 import { MessageBubble } from '../messaging/MessageBubble';
@@ -79,6 +79,10 @@ import { useComposerDictation } from '../voice/useComposerDictation';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, hitMin, radius, shadow, space, type } from '../theme/tokens';
 import { useReduceMotion } from '../theme/motion';
+import { ArtifactSaveSheet, DriveFilePickerSheet } from '../drive/DrivePickerSheet';
+import { completeDocumentReference, mergeExactAttachmentGrants } from '../drive/driveModels';
+import { createDispositionOperationId, validDispositionRef } from '../artifacts/artifactDisposition';
+import { RegenerateWorkSheet } from '../artifacts/RegenerateWorkSheet';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Thread'>;
 
@@ -109,12 +113,19 @@ type ThreadMessageRowProps = {
   savingImage: boolean;
   regeneratingImage: boolean;
   imageSaved: boolean;
+  proposalObjective?: string;
+  savingWork: boolean;
+  regeneratingWork: boolean;
+  workSaved: boolean;
   onOpenSource: (messageId: string) => void;
   onOpenAttachment: (file: ScoutFileAttachment) => void;
   onLongPress: (message: ScoutMessage, own: boolean) => void;
   onToggleReaction: (message: ScoutMessage, emoji: string, active: boolean) => void;
   onRetryReply: (message: ScoutMessage) => void;
-  onResolveProposal: (message: ScoutMessage, action: 'accepted' | 'dismissed') => void;
+  onResolveProposal: (message: ScoutMessage, action: 'accepted' | 'dismissed', objective: string) => void;
+  onChangeProposalObjective: (message: ScoutMessage, objective: string) => void;
+  onSaveWorkArtifact: (message: ScoutMessage) => void;
+  onRegenerateWorkArtifact: (message: ScoutMessage) => void;
   onSaveImage: (message: ScoutMessage) => void;
   onRegenerateImage: (message: ScoutMessage) => void;
   onOpenCatchUp: () => void;
@@ -133,12 +144,19 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
   savingImage,
   regeneratingImage,
   imageSaved,
+  proposalObjective,
+  savingWork,
+  regeneratingWork,
+  workSaved,
   onOpenSource,
   onOpenAttachment,
   onLongPress,
   onToggleReaction,
   onRetryReply,
   onResolveProposal,
+  onChangeProposalObjective,
+  onSaveWorkArtifact,
+  onRegenerateWorkArtifact,
   onSaveImage,
   onRegenerateImage,
   onOpenCatchUp,
@@ -193,6 +211,10 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
         onToggleReaction={onToggleReaction}
         onRetryReply={onRetryReply}
         onResolveProposal={onResolveProposal}
+        proposalObjective={proposalObjective}
+        onChangeProposalObjective={onChangeProposalObjective}
+        onSaveWorkArtifact={onSaveWorkArtifact}
+        onRegenerateWorkArtifact={onRegenerateWorkArtifact}
         onSaveImage={onSaveImage}
         onRegenerateImage={onRegenerateImage}
         resolvingProposal={resolvingProposal}
@@ -202,6 +224,9 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
         savingImage={savingImage}
         regeneratingImage={regeneratingImage}
         imageSaved={imageSaved}
+        savingWork={savingWork}
+        regeneratingWork={regeneratingWork}
+        workSaved={workSaved}
       />
     </>
   );
@@ -215,12 +240,19 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
   && previous.savingImage === next.savingImage
   && previous.regeneratingImage === next.regeneratingImage
   && previous.imageSaved === next.imageSaved
+  && previous.proposalObjective === next.proposalObjective
+  && previous.savingWork === next.savingWork
+  && previous.regeneratingWork === next.regeneratingWork
+  && previous.workSaved === next.workSaved
   && previous.onOpenSource === next.onOpenSource
   && previous.onOpenAttachment === next.onOpenAttachment
   && previous.onLongPress === next.onLongPress
   && previous.onToggleReaction === next.onToggleReaction
   && previous.onRetryReply === next.onRetryReply
   && previous.onResolveProposal === next.onResolveProposal
+  && previous.onChangeProposalObjective === next.onChangeProposalObjective
+  && previous.onSaveWorkArtifact === next.onSaveWorkArtifact
+  && previous.onRegenerateWorkArtifact === next.onRegenerateWorkArtifact
   && previous.onSaveImage === next.onSaveImage
   && previous.onRegenerateImage === next.onRegenerateImage
   && previous.onOpenCatchUp === next.onOpenCatchUp
@@ -283,6 +315,16 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [attachmentSourceOpen, setAttachmentSourceOpen] = useState(false);
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
   const [attachmentTarget, setAttachmentTarget] = useState<'message' | 'reply'>('message');
+  const [drivePicker, setDrivePicker] = useState<{ target: 'message' | 'reply'; query: string; fromHash: boolean } | null>(null);
+  const [threadReplyDocumentSelection, setThreadReplyDocumentSelection] = useState<{ key: number; name: string } | null>(null);
+  const [proposalObjectives, setProposalObjectives] = useState<Record<string, string>>({});
+  const [workSaveTarget, setWorkSaveTarget] = useState<ScoutMessage | null>(null);
+  const [savingWorkID, setSavingWorkID] = useState<string | null>(null);
+  const [savedWorkIDs, setSavedWorkIDs] = useState<Set<string>>(() => new Set());
+  const [workSaveError, setWorkSaveError] = useState('');
+  const [regenerateWorkTarget, setRegenerateWorkTarget] = useState<ScoutMessage | null>(null);
+  const [regeneratingWorkID, setRegeneratingWorkID] = useState<string | null>(null);
+  const [regenerateWorkError, setRegenerateWorkError] = useState('');
   const [typingParticipants, setTypingParticipants] = useState<TypingParticipant[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [retryingReplyID, setRetryingReplyID] = useState<string | null>(null);
@@ -324,6 +366,7 @@ export function ThreadScreen({ route, navigation }: Props) {
   const threadTitleRenameInFlightRef = useRef(false);
   const transcriptGenerationRef = useRef(0);
   const transcriptEventJournalRef = useRef<SequencedChatThreadEvent[]>([]);
+  const workSaveAttemptRef = useRef<{ artifactId: string; fileName: string; folderId: string; operationId: string } | null>(null);
   const applyTranscriptSnapshot = useCallback((generationAtRequest: number, next: ScoutMessage[]) => {
     const currentGeneration = transcriptGenerationRef.current;
     const journal = [...transcriptEventJournalRef.current];
@@ -840,9 +883,21 @@ export function ThreadScreen({ route, navigation }: Props) {
     }
   }, [applyTranscriptSnapshot, retryingReplyID, route.params.threadId, sessionToken]);
 
-  const resolveProposal = useCallback(async (message: ScoutMessage, action: 'accepted' | 'dismissed') => {
+  const changeProposalObjective = useCallback((message: ScoutMessage, objective: string) => {
+    const messageID = String(message.id ?? '').trim();
+    if (!messageID) return;
+    setProposalObjectives((current) => ({ ...current, [messageID]: objective }));
+  }, []);
+
+  const resolveProposal = useCallback(async (message: ScoutMessage, action: 'accepted' | 'dismissed', editedObjective: string) => {
     const messageID = String(message.id ?? '').trim();
     if (!sessionToken || !messageID || resolvingProposalID) return;
+    const objective = String(editedObjective ?? '').trim();
+    if (action === 'accepted' && !objective) {
+      setError('Add a clear objective before running this work.');
+      setThreadReplyError('Add a clear objective before running this work.');
+      return;
+    }
     const generationAtRequest = transcriptGenerationRef.current;
     setResolvingProposalID(messageID);
     setError(null);
@@ -853,10 +908,16 @@ export function ThreadScreen({ route, navigation }: Props) {
         route.params.threadId,
         messageID,
         action,
-        String(message.proposal?.objective ?? '').trim(),
+        objective,
       );
       applyTranscriptSnapshot(generationAtRequest, response.thread?.messages ?? response.messages ?? []);
       applyScoutActions(response.actions);
+      setProposalObjectives((current) => {
+        if (!(messageID in current)) return current;
+        const next = { ...current };
+        delete next[messageID];
+        return next;
+      });
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (caught) {
       const detail = caught instanceof BonfireApiError ? caught.message : 'Could not update that proposed work.';
@@ -952,6 +1013,52 @@ export function ThreadScreen({ route, navigation }: Props) {
     setAttachmentTarget(target);
     setAttachmentSourceOpen(true);
   }
+
+  const openDrivePicker = useCallback((target: 'message' | 'reply', query = '', fromHash = false) => {
+    setAttachmentTarget(target);
+    setDrivePicker({ target, query, fromHash });
+  }, []);
+
+  const chooseDriveFiles = useCallback(async (files: DriveFileRecord[]) => {
+    const intent = drivePicker;
+    if (!intent || !sessionToken || uploading || files.length === 0) return;
+    const currentFiles = intent.target === 'reply' ? threadReplyFiles : pendingFiles;
+    const available = Math.max(0, maxMessageAttachments - currentFiles.length);
+    const selected = files.slice(0, intent.fromHash ? 1 : available);
+    if (selected.length === 0) {
+      setDrivePicker(null);
+      return;
+    }
+    setDrivePicker(null);
+    setUploading(true);
+    setError(null);
+    setThreadReplyError('');
+    try {
+      const grants: ScoutFileAttachment[] = [];
+      for (const file of selected) {
+        grants.push(await api.attachDriveFile(sessionToken, route.params.threadId, file.id));
+      }
+      const setTargetFiles = intent.target === 'reply' ? setThreadReplyFiles : setPendingFiles;
+      setTargetFiles((current) => mergeExactAttachmentGrants(current, grants, maxMessageAttachments));
+      if (intent.fromHash) {
+        const fileName = selected[0]?.name ?? grants[0]?.name;
+        if (fileName) {
+          if (intent.target === 'reply') {
+            setThreadReplyDocumentSelection({ key: Date.now(), name: fileName });
+          } else {
+            setDraft((current) => completeDocumentReference(current, fileName));
+          }
+        }
+      }
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (caught) {
+      const detail = caught instanceof BonfireApiError ? caught.message : caught instanceof Error ? caught.message : 'Could not attach that Drive file.';
+      setError(detail);
+      setThreadReplyError(detail);
+    } finally {
+      setUploading(false);
+    }
+  }, [drivePicker, pendingFiles, route.params.threadId, sessionToken, threadReplyFiles, uploading]);
 
   async function uploadAttachmentAssets(assets: readonly AttachmentAssetInput[], target: 'message' | 'reply'): Promise<boolean> {
     if (!sessionToken || uploading) return false;
@@ -1218,9 +1325,12 @@ export function ThreadScreen({ route, navigation }: Props) {
     const agentName = String(message.thread?.agentName ?? 'Scout').trim() || 'Scout';
     const status = String(message.thread?.status ?? 'running').toLowerCase();
     const terminal = status === 'complete' || status === 'published';
-    if (!sessionToken || !artifactId) {
+    if (!sessionToken) return;
+    if (!artifactId) {
+      const note = String(message.thread?.progressNote ?? '').trim();
+      const stage = String(message.thread?.currentStage ?? '').trim().replaceAll('_', ' ');
       setExpandedMessage({
-        text: `# ${workThreadPhase(message)}\n\n${String(message.thread?.progressNote ?? '').trim() || `${agentName} is working. Updates and the finished deliverable will land durably in this conversation.`}\n\n## Work log\n\n- Request accepted from this conversation\n- Current stage: ${String(message.thread?.currentStage ?? 'working').replaceAll('_', ' ')}\n- Delivery: the finished work will land durably here`,
+        text: note || (stage ? `Current stage: ${stage}` : 'No detailed update is available yet.'),
         authorName: `${agentName} · work activity`,
         scout: true,
         activity: true,
@@ -1232,6 +1342,12 @@ export function ThreadScreen({ route, navigation }: Props) {
       const artifact = response.artifacts[0];
       const text = String(artifact?.text ?? '').trim();
       if (terminal && text) {
+        if (!validDispositionRef(response.dispositionRef)) throw new Error('The deliverable authority changed. Refresh and try again.');
+        await api.artifactDisposition(sessionToken, {
+          operationId: createDispositionOperationId('open'),
+          action: 'open',
+          artifact: response.dispositionRef,
+        });
         const title = String(artifact?.metadata?.title ?? message.thread?.query ?? `${agentName} deliverable`).trim();
         setExpandedMessage({
           text,
@@ -1245,19 +1361,10 @@ export function ThreadScreen({ route, navigation }: Props) {
         });
         return;
       }
-      const phase = workThreadPhase({
-        ...message,
-        thread: {
-          ...message.thread!,
-          currentStage: String(artifact?.metadata?.currentStage ?? message.thread?.currentStage ?? ''),
-          progressNote: String(artifact?.metadata?.progressNote ?? message.thread?.progressNote ?? ''),
-          progressPercent: Number(artifact?.metadata?.progressPercent ?? message.thread?.progressPercent),
-        },
-      });
-      const progress = Number(artifact?.metadata?.progressPercent ?? message.thread?.progressPercent);
       const note = String(artifact?.metadata?.progressNote ?? message.thread?.progressNote ?? '').trim();
+      const currentStage = String(artifact?.metadata?.currentStage ?? message.thread?.currentStage ?? '').trim().replaceAll('_', ' ');
       setExpandedMessage({
-        text: `# ${phase}${Number.isFinite(progress) ? ` · ${Math.round(progress)}%` : ''}\n\n${note || `${agentName} is working. Updates and the finished deliverable will land durably in this conversation.`}\n\n## Work log\n\n- Request accepted from this conversation\n- Current stage: ${String(artifact?.metadata?.currentStage ?? message.thread?.currentStage ?? 'working').replaceAll('_', ' ')}\n- Source trail and review receipts remain attached to the completed report\n- Delivery: the finished work will land durably here\n\n## Technical details\n\nRun ${String(message.thread?.id ?? 'pending')} · artifact ${artifactId}`,
+        text: note || (currentStage ? `Current stage: ${currentStage}` : 'No detailed update is available yet.'),
         authorName: `${agentName} · work activity`,
         scout: true,
         activity: true,
@@ -1266,6 +1373,79 @@ export function ThreadScreen({ route, navigation }: Props) {
       setError(caught instanceof BonfireApiError ? caught.message : caught instanceof Error ? caught.message : 'Could not open that deliverable.');
     }
   }, [sessionToken]);
+
+  const beginSaveWorkArtifact = useCallback((message: ScoutMessage) => {
+    if (!String(message.thread?.artifactId ?? '').trim()) {
+      setError('This deliverable is not available to save yet.');
+      return;
+    }
+    setWorkSaveError('');
+    workSaveAttemptRef.current = null;
+    setWorkSaveTarget(message);
+  }, []);
+
+  const saveWorkArtifact = useCallback(async (fileName: string, folderId: string) => {
+    const target = workSaveTarget;
+    const messageID = String(target?.id ?? '').trim();
+    const artifactId = String(target?.thread?.artifactId ?? '').trim();
+    if (!target || !sessionToken || !messageID || !artifactId || savingWorkID) return;
+    const normalizedName = fileName.trim();
+    const prior = workSaveAttemptRef.current;
+    const attempt = prior && prior.artifactId === artifactId && prior.fileName === normalizedName && prior.folderId === folderId
+      ? prior
+      : { artifactId, fileName: normalizedName, folderId, operationId: createDispositionOperationId('save') };
+    workSaveAttemptRef.current = attempt;
+    setSavingWorkID(messageID);
+    setWorkSaveError('');
+    try {
+      const artifact = await api.artifact(sessionToken, artifactId);
+      if (!validDispositionRef(artifact.dispositionRef)) throw new Error('The deliverable authority changed. Refresh and try again.');
+      const response = await api.artifactDisposition(sessionToken, {
+        operationId: attempt.operationId,
+        action: 'save',
+        artifact: artifact.dispositionRef,
+        folderId,
+        fileName: normalizedName,
+      });
+      if (response.receipt.outcome !== 'saved') throw new Error('Drive did not confirm the save.');
+      setSavedWorkIDs((current) => new Set(current).add(messageID));
+      setWorkSaveTarget(null);
+      workSaveAttemptRef.current = null;
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (caught) {
+      if (caught instanceof BonfireApiError && caught.status === 409) workSaveAttemptRef.current = null;
+      setWorkSaveError(caught instanceof BonfireApiError ? caught.message : caught instanceof Error ? caught.message : 'Could not save that deliverable.');
+    } finally {
+      setSavingWorkID(null);
+    }
+  }, [savingWorkID, sessionToken, workSaveTarget]);
+
+  const beginRegenerateWorkArtifact = useCallback((message: ScoutMessage) => {
+    if (!String(message.thread?.artifactId ?? '').trim()) {
+      setError('This deliverable is not available to regenerate yet.');
+      return;
+    }
+    setRegenerateWorkError('');
+    setRegenerateWorkTarget(message);
+  }, []);
+
+  const regenerateWorkArtifact = useCallback(async (prompt: string) => {
+    const target = regenerateWorkTarget;
+    const messageID = String(target?.id ?? '').trim();
+    const artifactId = String(target?.thread?.artifactId ?? '').trim();
+    if (!target || !sessionToken || !messageID || !artifactId || regeneratingWorkID) return;
+    setRegeneratingWorkID(messageID);
+    setRegenerateWorkError('');
+    try {
+      await api.followUpArtifact(sessionToken, artifactId, prompt.trim());
+      setRegenerateWorkTarget(null);
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch (caught) {
+      setRegenerateWorkError(caught instanceof BonfireApiError ? caught.message : caught instanceof Error ? caught.message : 'Could not start that regeneration.');
+    } finally {
+      setRegeneratingWorkID(null);
+    }
+  }, [regenerateWorkTarget, regeneratingWorkID, sessionToken]);
   const typingFooter = useMemo(
     () => typingParticipants.length > 0
       ? <TypingIndicator participants={typingParticipants} />
@@ -1283,12 +1463,19 @@ export function ThreadScreen({ route, navigation }: Props) {
       savingImage={savingImageID === String(item.message.id)}
       regeneratingImage={regeneratingImageID === String(item.message.id)}
       imageSaved={item.message.image?.savedToFiles === true || savedImageIDs.has(String(item.message.id))}
+      proposalObjective={proposalObjectives[String(item.message.id)]}
+      savingWork={savingWorkID === String(item.message.id)}
+      regeneratingWork={regeneratingWorkID === String(item.message.id)}
+      workSaved={savedWorkIDs.has(String(item.message.id))}
       onOpenSource={scrollToMessage}
       onOpenAttachment={openAttachment}
       onLongPress={openMessageActions}
       onToggleReaction={toggleReaction}
       onRetryReply={retryScoutReply}
       onResolveProposal={resolveProposal}
+      onChangeProposalObjective={changeProposalObjective}
+      onSaveWorkArtifact={beginSaveWorkArtifact}
+      onRegenerateWorkArtifact={beginRegenerateWorkArtifact}
       onSaveImage={saveGeneratedImage}
       onRegenerateImage={regenerateGeneratedImage}
       onOpenCatchUp={openCatchUp}
@@ -1298,6 +1485,9 @@ export function ThreadScreen({ route, navigation }: Props) {
     />
   ), [
     email,
+    beginRegenerateWorkArtifact,
+    beginSaveWorkArtifact,
+    changeProposalObjective,
     openAttachment,
     openCatchUp,
     openMessageActions,
@@ -1306,6 +1496,7 @@ export function ThreadScreen({ route, navigation }: Props) {
     openThreadContext,
     regenerateGeneratedImage,
     regeneratingImageID,
+    regeneratingWorkID,
     retryScoutReply,
     retryingReplyID,
     resolveProposal,
@@ -1313,6 +1504,9 @@ export function ThreadScreen({ route, navigation }: Props) {
     saveGeneratedImage,
     savedImageIDs,
     savingImageID,
+    savingWorkID,
+    savedWorkIDs,
+    proposalObjectives,
     scrollToMessage,
     sessionToken,
     timestampReveal,
@@ -1474,15 +1668,25 @@ export function ThreadScreen({ route, navigation }: Props) {
         onClose={closeThreadContext}
         onSend={sendThreadReply}
         onAddAttachment={() => openAttachmentSource('reply')}
+        onBrowseDrive={(query = '') => openDrivePicker('reply', query, true)}
+        documentSelection={threadReplyDocumentSelection}
+        onDocumentSelectionApplied={() => setThreadReplyDocumentSelection(null)}
         onRemoveAttachment={(file) => setThreadReplyFiles((current) => current.filter((candidate) => candidate.ref !== file.ref))}
         onOpenAttachment={openAttachment}
         onLongPress={openMessageActions}
         onToggleReaction={toggleReaction}
         onRetryReply={retryScoutReply}
         onResolveProposal={resolveProposal}
+        proposalObjectives={proposalObjectives}
+        onChangeProposalObjective={changeProposalObjective}
         resolvingProposalID={resolvingProposalID}
         onOpenLongMessage={openLongMessage}
         onOpenWorkArtifact={openWorkArtifact}
+        onSaveWorkArtifact={beginSaveWorkArtifact}
+        onRegenerateWorkArtifact={beginRegenerateWorkArtifact}
+        savingWorkID={savingWorkID}
+        regeneratingWorkID={regeneratingWorkID}
+        savedWorkIDs={savedWorkIDs}
         actionOverlay={(
           <>
             {renderLongMessageSheet(true)}
@@ -1497,6 +1701,37 @@ export function ThreadScreen({ route, navigation }: Props) {
         onPhotos={() => void pickPhotos(attachmentTarget)}
         onFiles={() => void pickFiles(attachmentTarget)}
         onGifs={() => setGifPickerOpen(true)}
+        onDrive={() => openDrivePicker(attachmentTarget)}
+      />
+
+      <DriveFilePickerSheet
+        visible={Boolean(drivePicker)}
+        sessionToken={sessionToken ?? ''}
+        initialQuery={drivePicker?.query ?? ''}
+        selectionMode={drivePicker?.fromHash ? 'single' : 'multiple'}
+        maxSelection={Math.max(0, maxMessageAttachments - (drivePicker?.target === 'reply' ? threadReplyFiles.length : pendingFiles.length))}
+        onClose={() => setDrivePicker(null)}
+        onChoose={(files) => { void chooseDriveFiles(files); }}
+      />
+
+      <ArtifactSaveSheet
+        visible={Boolean(workSaveTarget)}
+        sessionToken={sessionToken ?? ''}
+        defaultName={String(workSaveTarget?.thread?.resultTitle ?? workSaveTarget?.thread?.query ?? 'Scout deliverable').trim() || 'Scout deliverable'}
+        saving={Boolean(savingWorkID)}
+        error={workSaveError}
+        onClose={() => { if (!savingWorkID) setWorkSaveTarget(null); }}
+        onSave={(fileName, folderId) => { void saveWorkArtifact(fileName, folderId); }}
+      />
+
+      <RegenerateWorkSheet
+        visible={Boolean(regenerateWorkTarget)}
+        agentName={String(regenerateWorkTarget?.thread?.agentName ?? 'Scout')}
+        initialPrompt={String(regenerateWorkTarget?.thread?.query ?? '')}
+        busy={Boolean(regeneratingWorkID)}
+        error={regenerateWorkError}
+        onClose={() => { if (!regeneratingWorkID) setRegenerateWorkTarget(null); }}
+        onSubmit={(prompt) => { void regenerateWorkArtifact(prompt); }}
       />
 
       <GifPickerSheet
@@ -1681,7 +1916,6 @@ export function ThreadScreen({ route, navigation }: Props) {
 	    </View>
 	    <Text numberOfLines={1} style={styles.activeWorkText}>
 	      {String(activeWorkMessage.thread?.agentName ?? 'Scout')} · {workThreadPhase(activeWorkMessage)}
-	      {Number.isFinite(Number(activeWorkMessage.thread?.progressPercent)) ? ` · ${Math.round(Number(activeWorkMessage.thread?.progressPercent))}%` : ''}
 	    </Text>
 	    <Text style={styles.activeWorkAction}>View activity</Text>
 	  </Pressable>
@@ -1747,6 +1981,7 @@ export function ThreadScreen({ route, navigation }: Props) {
               }
               value={draft}
               onChangeText={changeDraft}
+              onDocumentQuery={(query) => openDrivePicker('message', query, true)}
               onBlur={() => stopTyping()}
               candidates={participants}
               editable
@@ -1936,7 +2171,7 @@ const styles = StyleSheet.create({
 	  borderColor: colors.line1,
 	  backgroundColor: colors.surface2,
 	},
-	activeWorkPressed: { opacity: 0.76, transform: [{ scale: 0.99 }] },
+	activeWorkPressed: { opacity: 0.76, transform: [{ scale: 0.96 }] },
 	activeWorkSignal: { width: 26, height: 26, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 2, borderRadius: radius.sm, backgroundColor: colors.emberSoft },
 	activeWorkBarShort: { width: 2, height: 7, borderRadius: radius.full, backgroundColor: colors.emberText },
 	activeWorkBarTall: { width: 2, height: 13, borderRadius: radius.full, backgroundColor: colors.emberText },

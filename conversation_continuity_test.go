@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -101,6 +102,88 @@ func TestConversationContinuityValidationAllowsEmptyOptionalListsButRequiresSour
 	base.SourceMessageIDs = nil
 	if err := base.validate(); err == nil {
 		t.Fatal("active continuity without source was accepted")
+	}
+}
+
+func TestConversationContinuityStartupReconcilesPersistedPublicAndPrivateThreads(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for index, visibility := range []string{scoutChatVisibilityPublic, scoutChatVisibilityPrivate} {
+		thread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "restart continuity", visibility)
+		if err != nil {
+			t.Fatal(err)
+		}
+		thread.Messages = []scoutChatMessageRecord{{ID: "restart-source-" + fmt.Sprint(index), Role: "user", AuthorEmail: "aj@shareability.com", Text: "Persist this before the checkpoint.", CreatedAt: now}}
+		thread.UpdatedAt = now
+		if err := app.saveScoutChatThread(thread); err != nil {
+			t.Fatal(err)
+		}
+		if got := app.latestConversationContinuity(thread.ID); got.ID != "" {
+			t.Fatalf("continuity existed before reconciliation: %+v", got)
+		}
+	}
+
+	app.reconcileConversationContinuityAtStartup()
+	for _, entry := range app.memory.snapshot(0) {
+		thread, ok := decodeScoutChatThreadEntry(entry)
+		if !ok || len(thread.Messages) == 0 {
+			continue
+		}
+		if got := app.latestConversationContinuity(thread.ID); got.Status != conversationContinuityStatusActive || got.Revision != 1 {
+			t.Fatalf("startup continuity for %s=%+v", thread.ID, got)
+		}
+	}
+}
+
+func TestConversationContinuityInvalidatesWhenFinalSourceIsDeleted(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	thread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "empty continuity", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread.Messages = []scoutChatMessageRecord{{ID: "only-source", Role: "user", AuthorEmail: "aj@shareability.com", Text: "Delete me.", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}}
+	if _, appended, err := app.rebuildConversationContinuity(thread, "message"); err != nil || !appended {
+		t.Fatalf("initial continuity appended=%v err=%v", appended, err)
+	}
+	thread.Messages = nil
+	invalidated, appended, err := app.rebuildConversationContinuity(thread, "delete")
+	if err != nil || !appended || invalidated.Status != conversationContinuityStatusInvalidated {
+		t.Fatalf("empty-source invalidation=%+v appended=%v err=%v", invalidated, appended, err)
+	}
+	if _, ok := app.conversationContinuityForViewer("aj@shareability.com", thread); ok {
+		t.Fatal("empty thread retained active continuity")
+	}
+}
+
+func TestConversationContinuityFailsClosedOnUnobservedSourceChange(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	thread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "stale continuity", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread.Messages = []scoutChatMessageRecord{{ID: "stale-source", Role: "user", AuthorEmail: "aj@shareability.com", Text: "Original body.", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}}
+	if _, appended, err := app.rebuildConversationContinuity(thread, "message"); err != nil || !appended {
+		t.Fatalf("initial continuity appended=%v err=%v", appended, err)
+	}
+	thread.Messages[0].Text = "Edited without the observer running."
+	thread.Messages[0].EditedAt = time.Now().UTC().Add(time.Second).Format(time.RFC3339Nano)
+	if _, ok := app.conversationContinuityForViewer("aj@shareability.com", thread); ok {
+		t.Fatal("stale checkpoint remained eligible after source digest changed")
+	}
+}
+
+func TestConversationContinuityObserverSurvivesSTRIDERuntimeOutage(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	app.strideRuntime = nil
+	thread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "degraded continuity", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := scoutChatMessageRecord{ID: "degraded-source", Role: "user", AuthorEmail: "aj@shareability.com", Text: "Keep continuity current.", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	thread.Messages = []scoutChatMessageRecord{message}
+	app.observeSTRIDETeamChatMessage(thread, message, "message", message.AuthorEmail)
+	if checkpoint, ok := app.conversationContinuityForViewer(message.AuthorEmail, thread); !ok || checkpoint.SourceDigest == "" {
+		t.Fatalf("continuity unavailable during STRIDE outage: %+v ok=%v", checkpoint, ok)
 	}
 }
 

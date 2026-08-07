@@ -159,12 +159,12 @@ func TestE8PreparedRoutingEconomicsSeedsAllRequiredDefaultOffExperiments(t *test
 		if !canary.DefaultOff || !canary.E10Only || canary.Availability != "unverified" {
 			t.Fatalf("prepared canary made an availability claim: %#v", canary)
 		}
-		if canary.ID == "stt-gpt-transcribe-model" {
-			foundSTT = canary.Seat == seatTranscriptionLane && canary.Candidate.Model == "gpt-transcribe"
+		if canary.ID == "stt-gpt-live-transcribe-model" {
+			foundSTT = canary.Seat == seatTranscriptionLane && canary.Candidate.Model == "gpt-live-transcribe"
 		}
 	}
 	if !foundSTT {
-		t.Fatal("priced gpt-transcribe candidate is missing from the default-off E10 canaries")
+		t.Fatal("priced gpt-live-transcribe candidate is missing from the default-off E10 canaries")
 	}
 	plan, err := NewE8PreparedRoutingEconomicsPlan()
 	if err != nil || plan.Manifest.Digest != manifest.Digest || plan.Replay.FinalRouteMapDigest != manifest.Digest || plan.Soak.MinimumDuration != 24*time.Hour || plan.Soak.MinimumSittings != 10 {

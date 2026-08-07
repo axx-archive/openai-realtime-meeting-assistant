@@ -606,7 +606,12 @@ func TestDesktopWorkContextReconcilesDurableTerminalState(t *testing.T) {
 		"function syncDesktopOpenChatContext()",
 		"syncDesktopOpenChatContext()",
 		"run stopped before delivery",
-		"delivered this work and saved it durably",
+		"compactArtifactPreview(String(artifact?.text",
+		"researchArtifactSources(artifact)",
+		"metadata?.reasoningEffort",
+		"desktopSaveToDriveControl(artifact)",
+		"artifactPdfControl(artifact",
+		"'Regenerate'",
 		"Terminal socket/poll updates must",
 	} {
 		if !strings.Contains(html, want) {

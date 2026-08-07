@@ -1003,6 +1003,7 @@ func main() {
 	http.HandleFunc("/assistant/chat-threads", assistantChatThreadsHandler)
 	http.HandleFunc("/assistant/chat-threads/", assistantChatThreadHandler)
 	http.HandleFunc("/assistant/attachments", assistantAttachmentUploadHandler)
+	http.HandleFunc("/assistant/attachments/from-file", assistantAttachmentFromFileHandler)
 	http.HandleFunc("/assistant/link-preview", assistantLinkPreviewHandler)
 	http.HandleFunc("/assistant/link-preview/image", assistantLinkPreviewImageHandler)
 	http.HandleFunc("/assistant/giphy/search", assistantGiphySearchHandler)
@@ -2614,9 +2615,15 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, http.StatusNotFound, "artifact not found")
 			return
 		}
+		dispositionRef := artifactDispositionRefFromHeader(resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact)))
+		if dispositionRef.Validate() != nil {
+			writeAuthError(w, http.StatusConflict, "artifact authority changed")
+			return
+		}
 		writeAuthJSON(w, http.StatusOK, map[string]any{
-			"ok":        true,
-			"artifacts": []meetingMemoryEntry{artifact},
+			"ok":             true,
+			"artifacts":      []meetingMemoryEntry{artifact},
+			"dispositionRef": dispositionRef,
 		})
 		return
 	}
