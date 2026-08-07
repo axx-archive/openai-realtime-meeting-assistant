@@ -121,7 +121,7 @@ services:
     user: "0:0"
     entrypoint: ["/bin/sh", "-eu", "-c"]
     command:
-      - mkdir -p /app/render-queue/jobs && chown 0:0 /app/render-queue /app/render-queue/jobs && chmod 2770 /app/render-queue /app/render-queue/jobs && chown 65532:65532 /app/render-queue /app/render-queue/jobs && find /app/render-queue/jobs -xdev -maxdepth 1 -type f -name '*.json' -exec chown 0:0 {} + -exec chmod 0660 {} + -exec chown 65532:65532 {} +
+      - install -d -o 65532 -g 65532 -m 0700 /app/render-queue /app/render-queue/jobs
     volumes:
       - render_queue:/app/render-queue
     network_mode: none
