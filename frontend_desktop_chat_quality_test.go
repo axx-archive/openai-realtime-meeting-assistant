@@ -217,6 +217,17 @@ func TestDesktopChatSendRenderIsOneScrollStableTransaction(t *testing.T) {
 	if appendNode == "" || !strings.Contains(appendNode, "scoutChatRenderBatchDepth === 0 && scoutChatIsNearBottom()") {
 		t.Fatal("chat node append must not force scrollTop during a batched render")
 	}
+	upsert := functionBodyAfterSignature(html, "function upsertScoutChatThread(thread, options = {})")
+	for _, want := range []string{
+		"const incomingUpdatedAt = String(thread.updatedAt || '')",
+		"const currentUpdatedAt = String(current?.updatedAt || '')",
+		"incomingRevision < currentRevision",
+		"return current",
+	} {
+		if !strings.Contains(upsert, want) {
+			t.Errorf("HTTP/socket reconciliation must reject stale thread snapshots: missing %q", want)
+		}
+	}
 }
 
 func TestDesktopThreadReplyKeepsDraftAndOmitsRedundantEmptyState(t *testing.T) {

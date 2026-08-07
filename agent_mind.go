@@ -38,6 +38,8 @@ type agentMindPositionRecord struct {
 	Origin        string     `json:"origin"`
 	SourceThread  string     `json:"sourceThreadId"`
 	SourceMessage string     `json:"sourceMessageId"`
+	SourceAnswer  string     `json:"sourceAnswerId"`
+	SourceDigest  string     `json:"sourceDigest"`
 	SourceRefs    []string   `json:"sourceRefs,omitempty"`
 	Confidence    float64    `json:"confidence"`
 	Revision      int64      `json:"revision"`
@@ -55,7 +57,8 @@ func (record agentMindPositionRecord) validate() error {
 		return fmt.Errorf("invalid AgentMind position")
 	}
 	if record.Status == agentMindPositionStatusActive || record.Status == agentMindPositionStatusCorrected {
-		if !strideIdentifier(record.SourceThread) || !strideIdentifier(record.SourceMessage) || len(record.SourceRefs) == 0 {
+		if !strideIdentifier(record.SourceThread) || !strideIdentifier(record.SourceMessage) || !strideIdentifier(record.SourceAnswer) ||
+			!isHexDigest(record.SourceDigest) || len(record.SourceRefs) == 0 {
 			return fmt.Errorf("active AgentMind position is missing source")
 		}
 	}
@@ -66,7 +69,7 @@ func agentMindPositionKey(agentID, subject, scope string) string {
 	return strings.TrimSpace(agentID) + ":" + strings.TrimSpace(subject) + ":" + strings.TrimSpace(scope)
 }
 
-func (app *kanbanBoardApp) recordAgentMindPosition(agentID, subject, scope, summary, sourceThread, sourceMessage string, sourceRefs []string, confidence float64, expiresAt *time.Time) (agentMindPositionRecord, bool, error) {
+func (app *kanbanBoardApp) recordAgentMindPosition(agentID, subject, scope, summary, sourceThread, sourceMessage, sourceAnswer, sourceDigest string, sourceRefs []string, confidence float64, expiresAt *time.Time) (agentMindPositionRecord, bool, error) {
 	if app == nil || app.memory == nil {
 		return agentMindPositionRecord{}, false, fmt.Errorf("AgentMind is unavailable")
 	}
@@ -82,7 +85,8 @@ func (app *kanbanBoardApp) recordAgentMindPosition(agentID, subject, scope, summ
 		return agentMindPositionRecord{}, false, fmt.Errorf("invalid AgentMind position key")
 	}
 	latest := app.latestAgentMindPosition(agentID, subject, scope)
-	if latest.Status == agentMindPositionStatusActive && latest.Summary == summary && latest.SourceMessage == strings.TrimSpace(sourceMessage) {
+	if (latest.Status == agentMindPositionStatusActive || latest.Status == agentMindPositionStatusCorrected) && latest.Summary == summary &&
+		latest.SourceMessage == strings.TrimSpace(sourceMessage) && latest.SourceAnswer == strings.TrimSpace(sourceAnswer) && latest.SourceDigest == strings.TrimSpace(sourceDigest) {
 		return latest, false, nil
 	}
 	now := time.Now().UTC()
@@ -107,6 +111,8 @@ func (app *kanbanBoardApp) recordAgentMindPosition(agentID, subject, scope, summ
 		Origin:        agentMindPositionOriginConversation,
 		SourceThread:  strings.TrimSpace(sourceThread),
 		SourceMessage: strings.TrimSpace(sourceMessage),
+		SourceAnswer:  strings.TrimSpace(sourceAnswer),
+		SourceDigest:  strings.TrimSpace(sourceDigest),
 		SourceRefs:    uniqueAgentMindSourceRefs(sourceRefs),
 		Confidence:    confidence,
 		Revision:      revision,
@@ -177,22 +183,26 @@ func (app *kanbanBoardApp) agentMindPositions(agentID, query string) []agentMind
 		if !ok || record.AgentID != agentID {
 			continue
 		}
-		if record.ExpiresAt != nil && !record.ExpiresAt.After(time.Now().UTC()) {
-			continue
-		}
-		if query != "" && !agentMindPositionMatchesQuery(record, query) {
-			continue
-		}
 		prior, found := latest[record.PositionKey]
-		if !found || record.Revision > prior.Revision || record.UpdatedAt.After(prior.UpdatedAt) {
+		if !found || record.Revision > prior.Revision || record.Revision == prior.Revision && record.UpdatedAt.After(prior.UpdatedAt) {
 			latest[record.PositionKey] = record
 		}
 	}
 	positions := make([]agentMindPositionRecord, 0, len(latest))
 	for _, record := range latest {
-		if record.Status == agentMindPositionStatusActive || record.Status == agentMindPositionStatusCorrected {
-			positions = append(positions, record)
+		if record.Status != agentMindPositionStatusActive && record.Status != agentMindPositionStatusCorrected {
+			continue
 		}
+		if record.ExpiresAt != nil && !record.ExpiresAt.After(time.Now().UTC()) {
+			continue
+		}
+		if !app.agentMindPositionSourceCurrent(record, "") {
+			continue
+		}
+		if query != "" && !agentMindPositionMatchesQuery(record, query) {
+			continue
+		}
+		positions = append(positions, record)
 	}
 	sort.SliceStable(positions, func(i, j int) bool {
 		if !positions[i].UpdatedAt.Equal(positions[j].UpdatedAt) {
@@ -204,25 +214,82 @@ func (app *kanbanBoardApp) agentMindPositions(agentID, query string) []agentMind
 }
 
 func (app *kanbanBoardApp) latestAgentMindPosition(agentID, subject, scope string) agentMindPositionRecord {
-	positions := app.agentMindPositions(agentID, "")
 	key := agentMindPositionKey(agentID, subject, scope)
-	for _, position := range positions {
-		if position.PositionKey == key {
-			return position
-		}
-	}
-	// Superseded/forgotten records still matter for revision numbering.
 	if app == nil || app.memory == nil {
 		return agentMindPositionRecord{}
 	}
 	var latest agentMindPositionRecord
 	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindAgentMindPosition, 0) {
 		record, ok := decodeAgentMindPosition(entry)
-		if ok && record.PositionKey == key && record.Revision > latest.Revision {
+		if ok && record.PositionKey == key && (record.Revision > latest.Revision || record.Revision == latest.Revision && record.UpdatedAt.After(latest.UpdatedAt)) {
 			latest = record
 		}
 	}
 	return latest
+}
+
+func agentMindSourceDigest(thread scoutChatThreadRecord, question, answer scoutChatMessageRecord) (string, error) {
+	questionDigest, err := agentMindSourceMessageDigest(question)
+	if err != nil {
+		return "", err
+	}
+	answerDigest, err := agentMindSourceMessageDigest(answer)
+	if err != nil {
+		return "", err
+	}
+	return STRIDEContractDigest(struct {
+		ThreadID       string `json:"threadId"`
+		AudienceDigest string `json:"audienceDigest"`
+		QuestionID     string `json:"questionId"`
+		QuestionDigest string `json:"questionDigest"`
+		AnswerID       string `json:"answerId"`
+		AnswerDigest   string `json:"answerDigest"`
+	}{thread.ID, conversationContinuityAudienceDigest(thread), question.ID, questionDigest, answer.ID, answerDigest})
+}
+
+// Reactions are independent annotations, not revisions of the authored source
+// that supports an AgentMind judgment. Text, files, and reply topology remain
+// exact: any change to those fields retracts the projection until a new
+// judgment revision is recorded.
+func agentMindSourceMessageDigest(message scoutChatMessageRecord) (string, error) {
+	message.Reactions = nil
+	return strideChatMessageContentDigest(false, message)
+}
+
+// AgentMind references are context, not bearer grants. Every projection read
+// resolves the current public source and exact question/answer revision again;
+// edits, deletion, archival, or audience drift therefore retract stale working
+// judgments without erasing their append-only review history.
+func (app *kanbanBoardApp) agentMindPositionSourceCurrent(record agentMindPositionRecord, viewerEmail string) bool {
+	if app == nil || app.memory == nil || !strideIdentifier(record.SourceThread) {
+		return false
+	}
+	principal := normalizeAccountEmail(viewerEmail)
+	if principal == "" {
+		principal = artifactLibraryAdminEmail
+	}
+	thread, _, err := app.scoutChatThreadByID(principal, record.SourceThread)
+	if err != nil || thread.ArchivedAt != "" || !scoutChatThreadIsOrganizationPublic(thread) {
+		return false
+	}
+	questionIndex := scoutChatMessageIndex(thread, record.SourceMessage)
+	answerIndex := scoutChatMessageIndex(thread, record.SourceAnswer)
+	if questionIndex < 0 || answerIndex < 0 {
+		return false
+	}
+	digest, err := agentMindSourceDigest(thread, thread.Messages[questionIndex], thread.Messages[answerIndex])
+	return err == nil && digest == record.SourceDigest
+}
+
+func (app *kanbanBoardApp) agentMindPositionsForViewer(viewerEmail, agentID, query string) []agentMindPositionRecord {
+	positions := app.agentMindPositions(agentID, query)
+	allowed := positions[:0]
+	for _, position := range positions {
+		if app.agentMindPositionSourceCurrent(position, viewerEmail) {
+			allowed = append(allowed, position)
+		}
+	}
+	return allowed
 }
 
 func agentMindPositionMatchesQuery(record agentMindPositionRecord, query string) bool {
@@ -278,7 +345,7 @@ func assistantAgentMindHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusServiceUnavailable, "AgentMind is unavailable")
 		return
 	}
-	positions := kanbanApp.agentMindPositions(agentMindScoutID, r.URL.Query().Get("q"))
+	positions := kanbanApp.agentMindPositionsForViewer(user.Email, agentMindScoutID, r.URL.Query().Get("q"))
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok":        true,
 		"agentId":   agentMindScoutID,
@@ -303,7 +370,12 @@ func (app *kanbanBoardApp) maybeRecordScoutAgentMindPosition(thread scoutChatThr
 	// The source thread is retained separately; the organization scope makes a
 	// repeated judgment about the same subject evolve across public threads
 	// instead of creating one isolated belief per conversation.
-	_, _, err := app.recordAgentMindPosition(agentMindScoutID, subject, "organization", answer, thread.ID, userMessage.ID, []string{"thread:" + thread.ID, "message:" + userMessage.ID, "answer:" + assistantMessage.ID}, 0.82, nil)
+	sourceDigest, digestErr := agentMindSourceDigest(thread, userMessage, assistantMessage)
+	if digestErr != nil {
+		log.Errorf("AgentMind source binding failed: %v", digestErr)
+		return
+	}
+	_, _, err := app.recordAgentMindPosition(agentMindScoutID, subject, "organization", answer, thread.ID, userMessage.ID, assistantMessage.ID, sourceDigest, []string{"thread:" + thread.ID, "message:" + userMessage.ID, "answer:" + assistantMessage.ID}, 0.82, nil)
 	if err != nil {
 		log.Errorf("AgentMind position write failed: %v", err)
 	}
@@ -377,6 +449,10 @@ func (app *kanbanBoardApp) resolveAgentMindPosition(prior agentMindPositionRecor
 	if err := prior.validate(); err != nil {
 		return agentMindPositionRecord{}, false, fmt.Errorf("invalid prior AgentMind position: %w", err)
 	}
+	current := app.latestAgentMindPosition(prior.AgentID, prior.Subject, prior.Scope)
+	if current.ID != prior.ID || current.Revision != prior.Revision {
+		return agentMindPositionRecord{}, false, fmt.Errorf("AgentMind position changed; reload before resolving it")
+	}
 	if prior.ExpiresAt != nil && !prior.ExpiresAt.After(time.Now().UTC()) {
 		return agentMindPositionRecord{}, false, fmt.Errorf("AgentMind position has expired")
 	}
@@ -399,6 +475,8 @@ func (app *kanbanBoardApp) resolveAgentMindPosition(prior agentMindPositionRecor
 		Origin:        agentMindPositionOriginReview,
 		SourceThread:  prior.SourceThread,
 		SourceMessage: prior.SourceMessage,
+		SourceAnswer:  prior.SourceAnswer,
+		SourceDigest:  prior.SourceDigest,
 		SourceRefs:    uniqueAgentMindSourceRefs(reviewRefs),
 		Confidence:    prior.Confidence,
 		Revision:      revision,

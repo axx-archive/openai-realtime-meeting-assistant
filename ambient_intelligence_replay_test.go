@@ -184,7 +184,11 @@ func (r *replayTestRunner) RunAmbientReplayStage(_ context.Context, m AmbientRep
 		return AmbientReplayStageResult{}, r.err
 	}
 	digest := digestBrainString(m.Digest + ":" + stage.Name)
-	return AmbientReplayStageResult{Artifacts: []AmbientReplayArtifact{{ID: "artifact-" + stage.Name, Kind: stage.Name, Digest: digest, SourceManifestDigest: m.SourceManifestDigest, ManifestDigest: m.Digest}}, Usage: r.usage}, nil
+	usage := r.usage
+	if !stage.Deterministic && usage == (AmbientReplayUsage{}) {
+		usage.Calls = 1
+	}
+	return AmbientReplayStageResult{Artifacts: []AmbientReplayArtifact{{ID: "artifact-" + stage.Name, Kind: stage.Name, Digest: digest, SourceManifestDigest: m.SourceManifestDigest, ManifestDigest: m.Digest}}, Usage: usage}, nil
 }
 
 var (
@@ -376,6 +380,17 @@ func TestAmbientReplayCeilingFailsClosedAndRestartIsIdempotent(t *testing.T) {
 	restarted := &AmbientReplayEngine{Authority: engine.Authority, Store: store, Runner: engine.Runner, Now: engine.Now}
 	if _, err := restarted.Execute(context.Background(), manifest.Digest, manifest.AuthorizedBy); !errors.Is(err, ErrAmbientReplayUnauthorized) {
 		t.Fatalf("restart err=%v", err)
+	}
+}
+
+func TestAmbientReplayEstimatedProviderUsageFailsClosed(t *testing.T) {
+	engine, _, store, manifest := replayPlanForTest(t, []string{"brain"})
+	engine.Runner = &replayTestRunner{inputs: map[string][]AmbientReplayArtifact{}, usage: AmbientReplayUsage{Calls: 1, InputTokens: 10, OutputTokens: 4, Estimated: true}}
+	if _, err := engine.Execute(context.Background(), manifest.Digest, manifest.AuthorizedBy); !errors.Is(err, ErrAmbientReplayUnavailable) {
+		t.Fatalf("estimated usage err=%v", err)
+	}
+	if store.status[manifest.Digest] != "failed" {
+		t.Fatalf("status=%s, want failed", store.status[manifest.Digest])
 	}
 }
 

@@ -16,6 +16,8 @@ func TestDecodeScoutProactiveDecisionRejectsUnsafeOrIncompleteActions(t *testing
 	for _, raw := range []string{
 		`{"decision":"reply","confidence":0.91,"reason":"missing reply","reply":"","reaction":"","consultAgentId":"","consultQuery":""}`,
 		`{"decision":"react","confidence":0.91,"reason":"unknown emoji","reply":"","reaction":"not-allowed","consultAgentId":"","consultQuery":""}`,
+		`{"decision":"reply","confidence":0.91,"reason":"mixed action","reply":"ok","reaction":"👍","consultAgentId":"","consultQuery":""}`,
+		`{"decision":"react","confidence":0.91,"reason":"mixed action","reply":"also reply","reaction":"👍","consultAgentId":"","consultQuery":""}`,
 		`{"decision":"reply","confidence":0.91,"reason":"extra field","reply":"ok","reaction":"","consultAgentId":"","consultQuery":"","extra":true}`,
 	} {
 		if _, err := decodeScoutProactiveDecision(raw); err == nil {
@@ -42,6 +44,12 @@ func TestScoutProactiveNudgeIsEventDrivenAndCoalescesPendingMessages(t *testing.
 	event := <-app.scoutProactiveQueue
 	if event.ThreadID != thread.ID || event.MessageID != message.ID || event.EventRef != "event-1" {
 		t.Fatalf("event=%+v", event)
+	}
+	message.Text = "An edited, materially different update"
+	message.EditedAt = "2026-08-06T22:00:00Z"
+	app.nudgeScoutProactiveAttention(thread, message, "event-2")
+	if got := len(app.scoutProactiveQueue); got != 1 {
+		t.Fatalf("edited source queued events=%d, want a distinct event", got)
 	}
 }
 

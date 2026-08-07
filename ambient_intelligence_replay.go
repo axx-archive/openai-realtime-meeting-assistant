@@ -459,6 +459,9 @@ func (engine *AmbientReplayEngine) Execute(ctx context.Context, digest, actor st
 		if runErr != nil {
 			return execution, engine.failStage(ctx, &execution, prepared, runErr)
 		}
+		if len(result.Artifacts) == 0 {
+			return execution, engine.failStage(ctx, &execution, prepared, ErrAmbientReplayDrift)
+		}
 		for _, artifact := range result.Artifacts {
 			if artifact.ID == "" || artifact.Kind == "" || !isHexDigest(artifact.Digest) || artifact.SourceManifestDigest != manifest.SourceManifestDigest || artifact.ManifestDigest != manifest.Digest {
 				return execution, engine.failStage(ctx, &execution, prepared, ErrAmbientReplayDrift)
@@ -468,10 +471,17 @@ func (engine *AmbientReplayEngine) Execute(ctx context.Context, digest, actor st
 			result.Usage.Calls > stage.CallCap || result.Usage.InputTokens > stage.PromptTokenCap || result.Usage.OutputTokens > stage.OutputTokenCap || result.Usage.CostMicros > stage.CostMicrosCap {
 			return execution, engine.failStage(ctx, &execution, prepared, ErrAmbientReplayCeiling)
 		}
+		// A paid stage cannot enforce its reviewed ceilings from an estimate or a
+		// zero-call receipt. Deterministic stages are the only valid zero-usage
+		// stages; provider execution fails closed unless the wire reports usage.
+		if !stage.Deterministic && (result.Usage.Calls != 1 || result.Usage.Estimated) {
+			return execution, engine.failStage(ctx, &execution, prepared, ErrAmbientReplayUnavailable)
+		}
 		execution.Usage.Calls += result.Usage.Calls
 		execution.Usage.InputTokens += result.Usage.InputTokens
 		execution.Usage.OutputTokens += result.Usage.OutputTokens
 		execution.Usage.CostMicros += result.Usage.CostMicros
+		execution.Usage.Estimated = execution.Usage.Estimated || result.Usage.Estimated
 		if execution.Usage.Calls > manifest.MaxCalls || execution.Usage.InputTokens+execution.Usage.OutputTokens > manifest.MaxTokens || execution.Usage.CostMicros > manifest.MaxCostMicros {
 			return execution, engine.failStage(ctx, &execution, prepared, ErrAmbientReplayCeiling)
 		}

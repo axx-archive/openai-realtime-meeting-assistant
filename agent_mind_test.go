@@ -10,17 +10,19 @@ import (
 
 func TestAgentMindPositionPersistsEvolvesAndCanBeHumanResolved(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
-	thread := scoutChatThreadRecord{
-		ID:           "ball-dogs",
-		OwnerEmail:   "aj@shareability.com",
-		Visibility:   scoutChatVisibilityPublic,
-		MemberEmails: nil,
+	thread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "ball-dogs", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatal(err)
 	}
 	question := scoutChatMessageRecord{ID: "message-question-1", Role: "user", Text: "What do you think is the more attainable Ball Dogs strategy?"}
 	firstAnswer := scoutChatMessageRecord{
 		ID:   "message-answer-1",
 		Role: "scout",
 		Text: "My read is that the repeatable sports-pet short-form format is the more attainable wedge because it can prove audience and partner value before the company funds a larger character universe.",
+	}
+	thread.Messages = []scoutChatMessageRecord{question, firstAnswer}
+	if err := app.saveScoutChatThread(thread); err != nil {
+		t.Fatal(err)
 	}
 	app.maybeRecordScoutAgentMindPosition(thread, question, firstAnswer)
 
@@ -41,8 +43,14 @@ func TestAgentMindPositionPersistsEvolvesAndCanBeHumanResolved(t *testing.T) {
 	secondAnswer := firstAnswer
 	secondAnswer.ID = "message-answer-2"
 	secondAnswer.Text = "My read has changed: start with the athlete-led game-day format, because a named first talent path is a cheaper proof point than asking a partner to underwrite a whole franchise thesis."
-	secondThread := thread
-	secondThread.ID = "ball-dogs-follow-up"
+	secondThread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "ball-dogs-follow-up", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondThread.Messages = []scoutChatMessageRecord{secondQuestion, secondAnswer}
+	if err := app.saveScoutChatThread(secondThread); err != nil {
+		t.Fatal(err)
+	}
 	app.maybeRecordScoutAgentMindPosition(secondThread, secondQuestion, secondAnswer)
 
 	positions = app.agentMindPositions(agentMindScoutID, "strategy")
@@ -85,6 +93,54 @@ func TestAgentMindIgnoresNonJudgmentTurns(t *testing.T) {
 	}
 }
 
+func TestAgentMindLatestRevisionCannotBeResurrectedByQueryExpiryOrForgetting(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	thread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "agent-mind-revisions", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	question := scoutChatMessageRecord{ID: "question-1", Role: "user", AuthorEmail: "aj@shareability.com", Text: "What do you think is the better launch strategy?"}
+	firstAnswer := scoutChatMessageRecord{ID: "answer-1", Role: "scout", Text: "My read is to lead with the old lighthouse concept because it gives the launch one memorable image and a clear proof point."}
+	thread.Messages = []scoutChatMessageRecord{question, firstAnswer}
+	if err := app.saveScoutChatThread(thread); err != nil {
+		t.Fatal(err)
+	}
+	app.maybeRecordScoutAgentMindPosition(thread, question, firstAnswer)
+
+	secondAnswer := scoutChatMessageRecord{ID: "answer-2", Role: "scout", Text: "My read has changed: lead with the athlete-led game-day format because it has a named distribution path and cheaper proof."}
+	thread.Messages = []scoutChatMessageRecord{question, secondAnswer}
+	if err := app.saveScoutChatThread(thread); err != nil {
+		t.Fatal(err)
+	}
+	app.maybeRecordScoutAgentMindPosition(thread, question, secondAnswer)
+	if got := app.agentMindPositions(agentMindScoutID, "lighthouse"); len(got) != 0 {
+		t.Fatalf("old summary query resurrected stale revision: %#v", got)
+	}
+	positions := app.agentMindPositions(agentMindScoutID, "athlete")
+	if len(positions) != 1 || positions[0].Revision != 2 {
+		t.Fatalf("latest position=%#v, want revision 2", positions)
+	}
+	thread.Messages[0].Reactions = []scoutChatMessageReaction{{
+		Emoji:      "👍",
+		ActorEmail: "reviewer@example.com",
+		ActorName:  "Reviewer",
+		CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+	}}
+	if err := app.saveScoutChatThread(thread); err != nil {
+		t.Fatal(err)
+	}
+	if got := app.agentMindPositions(agentMindScoutID, "athlete"); len(got) != 1 || got[0].Revision != 2 {
+		t.Fatalf("reaction invalidated unchanged source content: %#v", got)
+	}
+	forgotten, appended, err := app.resolveAgentMindPosition(positions[0], agentMindPositionStatusForgotten, "Human review withdrew this working judgment.", "AJ", "review-1")
+	if err != nil || !appended || forgotten.Status != agentMindPositionStatusForgotten {
+		t.Fatalf("forget position=%+v appended=%v err=%v", forgotten, appended, err)
+	}
+	if got := app.agentMindPositions(agentMindScoutID, "lighthouse athlete"); len(got) != 0 {
+		t.Fatalf("forgotten latest revision exposed an older position: %#v", got)
+	}
+}
+
 func TestAgentMindPositionExpiryIsNotPrompted(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	expires := time.Now().UTC().Add(-time.Minute)
@@ -99,6 +155,8 @@ func TestAgentMindPositionExpiryIsNotPrompted(t *testing.T) {
 		Origin:        agentMindPositionOriginConversation,
 		SourceThread:  "ball-dogs",
 		SourceMessage: "message-1",
+		SourceAnswer:  "answer-1",
+		SourceDigest:  strings.Repeat("c", 64),
 		SourceRefs:    []string{"thread:ball-dogs"},
 		Confidence:    0.7,
 		Revision:      1,

@@ -49251,12 +49251,25 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return scoutChatThreads.find(thread => String(thread?.id || '') === activeScoutThreadId) || null
 	      }
 
-	      function upsertScoutChatThread(thread, options = {}) {
-	        if (!thread?.id) {
-	          return null
-	        }
-	        const id = String(thread.id)
-	        scoutChatThreads = scoutChatThreads.filter(candidate => String(candidate?.id || '') !== id)
+		      function upsertScoutChatThread(thread, options = {}) {
+		        if (!thread?.id) {
+		          return null
+		        }
+		        const id = String(thread.id)
+		        const current = scoutChatThreads.find(candidate => String(candidate?.id || '') === id)
+		        const incomingUpdatedAt = String(thread.updatedAt || '')
+		        const currentUpdatedAt = String(current?.updatedAt || '')
+		        const revisionKey = value => value.replace(/(?:\.(\d+))?Z$/, (_, fraction = '') => `.${fraction.padEnd(9, '0').slice(0, 9)}Z`)
+		        const incomingRevision = revisionKey(incomingUpdatedAt)
+		        const currentRevision = revisionKey(currentUpdatedAt)
+		        // HTTP responses and socket frames race independently. updatedAt is
+		        // the server-owned thread revision, so a delayed response must never
+		        // replace a newer socket projection (or resurrect an edited/deleted
+		        // message) merely because it arrived last in this tab.
+		        if (current && incomingUpdatedAt && currentUpdatedAt && incomingRevision < currentRevision) {
+		          return current
+		        }
+		        scoutChatThreads = scoutChatThreads.filter(candidate => String(candidate?.id || '') !== id)
 	        if (!thread.archivedAt) {
 	          scoutChatThreads.unshift(thread)
 	        }

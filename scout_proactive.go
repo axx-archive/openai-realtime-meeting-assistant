@@ -29,9 +29,10 @@ const (
 )
 
 type scoutProactiveEvent struct {
-	ThreadID  string
-	MessageID string
-	EventRef  string
+	ThreadID   string
+	MessageID  string
+	EventRef   string
+	PendingKey string
 }
 
 type scoutProactiveCandidate struct {
@@ -183,9 +184,14 @@ func decodeScoutProactiveDecision(raw string) (scoutProactiveDecision, error) {
 	if decision.Decision == "reply" && decision.Reply == "" || decision.Decision == "react" && decision.Reaction == "" {
 		return scoutProactiveDecision{}, fmt.Errorf("Scout proactive decision is missing its selected action")
 	}
+	if decision.Decision == "reply" && decision.Reaction != "" || decision.Decision == "react" && decision.Reply != "" {
+		return scoutProactiveDecision{}, fmt.Errorf("Scout proactive decision selected more than one visible action")
+	}
 	if decision.Decision == "no_action" {
 		decision.Reply = ""
 		decision.Reaction = ""
+		decision.ConsultAgentID = ""
+		decision.ConsultQuery = ""
 	}
 	return decision, nil
 }
@@ -383,6 +389,10 @@ func (app *kanbanBoardApp) revalidateScoutProactiveCandidate(candidate scoutProa
 }
 
 func (app *kanbanBoardApp) commitScoutProactiveReply(candidate scoutProactiveCandidate, reply string) (scoutChatThreadRecord, bool, error) {
+	lock := app.scoutChatThreadLock(candidate.Thread.ID)
+	lock.Lock()
+	defer lock.Unlock()
+
 	thread, source, ok := app.revalidateScoutProactiveCandidate(candidate)
 	if !ok {
 		return scoutChatThreadRecord{}, false, fmt.Errorf("Scout source changed before proactive reply")
@@ -406,25 +416,27 @@ func (app *kanbanBoardApp) commitScoutProactiveReply(candidate scoutProactiveCan
 		CausedByMessageID: source.ID,
 		Sources:           groundAnswerInMessages(reply, thread.Messages, 3),
 	}
-	saved, err := app.commitScoutChatThreadMessages(thread.OwnerEmail, thread.ID, message)
-	return saved, err == nil, err
+	thread.Messages = append(thread.Messages, message)
+	updateScoutChatThreadSummary(&thread, scoutChatMessageRecord{}, message)
+	if err := app.saveScoutChatThread(thread); err != nil {
+		return scoutChatThreadRecord{}, false, err
+	}
+	app.observeSTRIDETeamChatMessage(thread, message, "message", "")
+	deliverScoutChatThreadUpdate(thread, message)
+	return thread, true, nil
 }
 
 func (app *kanbanBoardApp) commitScoutProactiveReaction(candidate scoutProactiveCandidate, emoji string) error {
-	thread, source, ok := app.revalidateScoutProactiveCandidate(candidate)
-	if !ok {
-		return fmt.Errorf("Scout source changed before proactive reaction")
-	}
 	emoji, err := normalizeScoutChatReactionEmoji(emoji)
 	if err != nil {
 		return err
 	}
-	lock := app.scoutChatThreadLock(thread.ID)
+	lock := app.scoutChatThreadLock(candidate.Thread.ID)
 	lock.Lock()
 	defer lock.Unlock()
-	latest, _, err := app.scoutChatThreadByID(thread.OwnerEmail, thread.ID)
-	if err != nil {
-		return err
+	latest, source, ok := app.revalidateScoutProactiveCandidate(candidate)
+	if !ok {
+		return fmt.Errorf("Scout source changed before proactive reaction")
 	}
 	index := scoutChatMessageIndex(latest, source.ID)
 	if index < 0 {
@@ -447,7 +459,14 @@ func (app *kanbanBoardApp) commitScoutProactiveReaction(candidate scoutProactive
 	return nil
 }
 
-func (app *kanbanBoardApp) launchScoutProactiveConsult(thread scoutChatThreadRecord, objective string) (scoutAgentThread, error) {
+func (app *kanbanBoardApp) launchScoutProactiveConsult(candidate scoutProactiveCandidate, objective string) (scoutAgentThread, error) {
+	lock := app.scoutChatThreadLock(candidate.Thread.ID)
+	lock.Lock()
+	defer lock.Unlock()
+	thread, _, ok := app.revalidateScoutProactiveCandidate(candidate)
+	if !ok {
+		return scoutAgentThread{}, fmt.Errorf("Scout source changed before proactive consult")
+	}
 	profile, ok := app.strideAgentContextForChatWork(candidateAgentID("colton-research"), thread, "research")
 	if !ok {
 		return scoutAgentThread{}, fmt.Errorf("Colton is not currently hired, active, and authorized for this channel")
@@ -499,22 +518,26 @@ func (app *kanbanBoardApp) runScoutProactiveCandidates(ctx context.Context, apiK
 		}
 		status := "suggested"
 		if mode == scoutProactiveModeActive && decision.Decision != "no_action" && decision.Confidence >= scoutProactiveConfidenceFloor {
-			if decision.ConsultAgentID != "" {
-				if _, consultErr := app.launchScoutProactiveConsult(candidate.Thread, decision.ConsultQuery); consultErr == nil {
+			_, _, sourceCurrent := app.revalidateScoutProactiveCandidate(candidate)
+			if !sourceCurrent {
+				status = "stale_source"
+				decision.Reason = firstNonEmptyString(decision.Reason, "Scout source changed before proactive action")
+			} else if decision.ConsultAgentID != "" {
+				if _, consultErr := app.launchScoutProactiveConsult(candidate, decision.ConsultQuery); consultErr == nil {
 					status = "consult_launched"
 				} else {
 					status = "consult_unavailable"
 					decision.Reason = firstNonEmptyString(decision.Reason, consultErr.Error())
 				}
 			}
-			if decision.Decision == "reply" {
+			if sourceCurrent && decision.Decision == "reply" {
 				if _, posted, postErr := app.commitScoutProactiveReply(candidate, decision.Reply); postErr != nil {
 					status = "stale_source"
 					decision.Reason = firstNonEmptyString(decision.Reason, postErr.Error())
 				} else if posted {
 					status = "posted"
 				}
-			} else if decision.Decision == "react" {
+			} else if sourceCurrent && decision.Decision == "react" {
 				if _, _, stillCurrent := app.revalidateScoutProactiveCandidate(candidate); !stillCurrent {
 					status = "stale_source"
 				} else if reactionErr := app.commitScoutProactiveReaction(candidate, decision.Reaction); reactionErr != nil {
@@ -549,13 +572,13 @@ func (app *kanbanBoardApp) nudgeScoutProactiveAttention(thread scoutChatThreadRe
 	if app.scoutProactivePending == nil {
 		app.scoutProactivePending = map[string]struct{}{}
 	}
-	key := thread.ID + "\x00" + message.ID
+	key := scoutProactivePendingKey(thread, message)
 	if _, exists := app.scoutProactivePending[key]; exists {
 		app.scoutProactiveMu.Unlock()
 		return
 	}
 	app.scoutProactivePending[key] = struct{}{}
-	event := scoutProactiveEvent{ThreadID: thread.ID, MessageID: message.ID, EventRef: strings.TrimSpace(eventRef)}
+	event := scoutProactiveEvent{ThreadID: thread.ID, MessageID: message.ID, EventRef: strings.TrimSpace(eventRef), PendingKey: key}
 	select {
 	case queue <- event:
 	default:
@@ -564,10 +587,22 @@ func (app *kanbanBoardApp) nudgeScoutProactiveAttention(thread scoutChatThreadRe
 	app.scoutProactiveMu.Unlock()
 }
 
+func scoutProactivePendingKey(thread scoutChatThreadRecord, message scoutChatMessageRecord) string {
+	digest, err := strideChatMessageContentDigest(false, message)
+	if err != nil {
+		digest = sha256Hex([]byte(message.Text + "\x00" + message.EditedAt))
+	}
+	return thread.ID + "\x00" + message.ID + "\x00" + digest
+}
+
 func (app *kanbanBoardApp) processScoutProactiveEvent(ctx context.Context, apiKey string, responder openAITextResponder, event scoutProactiveEvent) (int, error) {
 	defer func() {
 		app.scoutProactiveMu.Lock()
-		delete(app.scoutProactivePending, event.ThreadID+"\x00"+event.MessageID)
+		key := event.PendingKey
+		if key == "" {
+			key = event.ThreadID + "\x00" + event.MessageID
+		}
+		delete(app.scoutProactivePending, key)
 		app.scoutProactiveMu.Unlock()
 	}()
 	candidate, ok := app.scoutProactiveCandidateForEvent(event)
