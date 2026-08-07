@@ -720,6 +720,17 @@ function exactStringSequence(value, expected, label, { ordered = false } = {}) {
   if (JSON.stringify(normalizedActual) !== JSON.stringify(normalizedExpected)) throw new Error(`${label} differs from the approved topology`)
 }
 
+function exactStringSequenceOneOf(value, approved, label, { ordered = false } = {}) {
+  const actual = value === undefined || value === null ? [] : value
+  if (!Array.isArray(actual) || actual.some(item => typeof item !== 'string')) throw new Error(`${label} is invalid`)
+  const normalizedActual = ordered ? actual : [...actual].sort()
+  const matches = approved.some(expected => {
+    const normalizedExpected = ordered ? expected : [...expected].sort()
+    return JSON.stringify(normalizedActual) === JSON.stringify(normalizedExpected)
+  })
+  if (!matches) throw new Error(`${label} differs from the approved topology`)
+}
+
 function requireInheritedImageField(value, label) {
   if (value !== undefined && value !== null) {
     throw new Error(`${label} must remain inherited from the receipted image`)
@@ -1216,8 +1227,11 @@ export function validateRenderedComposeConfig(config, receipt, suppliedTopology 
     ['postgres', '-c', 'max_connections=30', '-c', 'shared_buffers=64MB', '-c', 'effective_cache_size=128MB', '-c', 'work_mem=2MB', '-c', 'maintenance_work_mem=32MB'],
     'rendered candidate Compose canonical-postgres command', { ordered: true })
   exactStringSequence(config.services['render-queue-init'].entrypoint, ['/bin/sh', '-eu', '-c'], 'rendered candidate Compose render-queue-init entrypoint', { ordered: true })
-  exactStringSequence(config.services['render-queue-init'].command,
-    ["install -d -o 65532 -g 65532 -m 2770 /app/render-queue /app/render-queue/jobs && find /app/render-queue/jobs -xdev -maxdepth 1 -type f -name '*.json' -exec chown 65532:65532 {} + -exec chmod 0660 {} +"],
+  exactStringSequenceOneOf(config.services['render-queue-init'].command,
+    [
+      ['install -d -o 65532 -g 65532 -m 0700 /app/render-queue /app/render-queue/jobs'],
+      ["install -d -o 65532 -g 65532 -m 2770 /app/render-queue /app/render-queue/jobs && find /app/render-queue/jobs -xdev -maxdepth 1 -type f -name '*.json' -exec chown 65532:65532 {} + -exec chmod 0660 {} +"]
+    ],
     'rendered candidate Compose render-queue-init command', { ordered: true })
   for (const serviceName of ['render-runner', 'caddy']) {
     requireInheritedImageField(config.services[serviceName].command, `rendered candidate Compose ${serviceName} command`)
