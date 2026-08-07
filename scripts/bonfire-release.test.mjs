@@ -813,6 +813,10 @@ test('rendered candidate Compose is an exact singleton topology before mutation'
     'seccomp=/etc/docker/seccomp/bonfire-render-runner-v1.json'
   ]
   assert.equal(validate(normalizedSecuritySpelling), normalizedSecuritySpelling)
+
+  const migratedQueueOwnership = structuredClone(exact)
+  migratedQueueOwnership.services['render-queue-init'].command = ["install -d -o 65532 -g 65532 -m 2770 /app/render-queue /app/render-queue/jobs && find /app/render-queue/jobs -xdev -maxdepth 1 -type f -name '*.json' -exec chown 65532:65532 {} + -exec chmod 0660 {} +"]
+  assert.equal(validate(migratedQueueOwnership), migratedQueueOwnership)
 })
 
 test('rendered candidate Compose rejects security, storage, network, port, and lifecycle widening', () => {
