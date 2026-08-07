@@ -514,6 +514,8 @@ func (app *kanbanBoardApp) runScoutProactiveCandidates(ctx context.Context, apiK
 			decision.Decision = "no_action"
 			decision.Reply = ""
 			decision.Reaction = ""
+			decision.ConsultAgentID = ""
+			decision.ConsultQuery = ""
 			decision.Reason = firstNonEmptyString(decision.Reason, "confidence below the proactive-entry floor")
 		}
 		status := "suggested"

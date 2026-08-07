@@ -84,6 +84,34 @@ func TestScoutProactiveQuietModeClassifiesWithoutVisibleAction(t *testing.T) {
 	}
 }
 
+func TestScoutProactiveConfidenceDemotionClearsEveryActionField(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	t.Setenv("SCOUT_PROACTIVE_MODE", scoutProactiveModeQuiet)
+	candidate := scoutProactiveCandidate{
+		Thread:       scoutChatThreadRecord{ID: "team", Title: "Team"},
+		Message:      scoutChatMessageRecord{ID: "message-low-confidence", Role: "user", Text: "Should Scout add anything?"},
+		SourceDigest: strings.Repeat("c", 64),
+		EventRef:     "event-low-confidence",
+	}
+	responder := func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
+		return `{"decision":"reply","confidence":0.4,"reason":"uncertain","reply":"Maybe.","reaction":"","consultAgentId":"colton-research","consultQuery":"Investigate this."}`, nil
+	}
+	if evaluated, err := app.runScoutProactiveCandidates(context.Background(), "", responder, []scoutProactiveCandidate{candidate}); err != nil || evaluated != 1 {
+		t.Fatalf("evaluated=%d err=%v", evaluated, err)
+	}
+	entries := app.memory.entriesOfKind(meetingMemoryKindScoutAttention, 0)
+	if len(entries) != 1 {
+		t.Fatalf("attention entries=%d", len(entries))
+	}
+	var record scoutProactiveAttentionRecord
+	if err := json.Unmarshal([]byte(entries[0].Text), &record); err != nil {
+		t.Fatal(err)
+	}
+	if record.Decision != "no_action" || record.Reply != "" || record.Reaction != "" || record.ConsultAgentID != "" || record.ConsultQuery != "" {
+		t.Fatalf("confidence-demoted no_action retained action fields: %+v", record)
+	}
+}
+
 func TestScoutProactiveClassifierUsesLunaMaxAndConstitution(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	candidate := scoutProactiveCandidate{
