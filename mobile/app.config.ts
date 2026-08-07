@@ -44,7 +44,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and truthful Open/Save/Regenerate deliverable actions while retaining
       // the generated-image and camera/roster fixes shipped in build 47.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '48',
+      buildNumber: '49',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

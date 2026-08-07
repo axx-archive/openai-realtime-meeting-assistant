@@ -278,7 +278,7 @@ export function ArtifactSaveSheet({ visible, sessionToken, defaultName, saving, 
             accessibilityLabel="Drive file name"
             editable={!saving}
             onChangeText={setFileName}
-            placeholder="Untitled deliverable"
+            placeholder="File name"
             placeholderTextColor={colors.text3}
             selectionColor={colors.info}
             selectTextOnFocus
@@ -308,7 +308,7 @@ export function ArtifactSaveSheet({ visible, sessionToken, defaultName, saving, 
           {browser.error || error ? <Text accessibilityRole="alert" style={styles.error}>{browser.error || error}</Text> : null}
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Save ${cleanName || 'deliverable'} to ${locationName(browser.folders, folderId)}`}
+            accessibilityLabel={`Save ${cleanName || 'file'} to ${locationName(browser.folders, folderId)}`}
             accessibilityState={{ disabled: saving || !cleanName }}
             disabled={saving || !cleanName}
             onPress={() => onSave(cleanName, folderId)}

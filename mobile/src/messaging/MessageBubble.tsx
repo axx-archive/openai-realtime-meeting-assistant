@@ -33,7 +33,7 @@ export type MessageBubbleProps = {
   showReplyContext?: boolean;
   threadReplies?: readonly ScoutMessage[];
   onOpenThread?: (message: ScoutMessage) => void;
-  onLongPress?: (message: ScoutMessage, own: boolean) => void;
+  onLongPress?: (message: ScoutMessage, own: boolean, attachment?: { file: ScoutFileAttachment; index: number }) => void;
   onOpenAttachment?: (file: ScoutFileAttachment) => void;
   onToggleReaction?: (message: ScoutMessage, emoji: string, active: boolean) => void;
   onRetryReply?: (message: ScoutMessage) => void;
@@ -541,7 +541,7 @@ export const MessageBubble = React.memo(function MessageBubble({
                 accessibilityRole="button"
                 accessibilityLabel={`Open ${file.name}`}
                 onPress={() => onOpenAttachment?.(file)}
-                onLongPress={() => onLongPress?.(message, own)}
+                onLongPress={() => onLongPress?.(message, own, { file, index })}
                 delayLongPress={messageLongPressDelayMs}
                 style={({ pressed }) => [
                   styles.attachment,

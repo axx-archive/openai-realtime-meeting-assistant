@@ -124,5 +124,9 @@ test('in-room chat and transcript use the same non-jittery tail-follow contract'
   assert.match(source, /useConversationTailFollow\(chatListRef, visible && mode === 'chat'\)/);
   assert.match(source, /useConversationTailFollow\(transcriptListRef, visible && mode === 'transcript'\)/);
   assert.match(source, /shouldFollowThreadTail\(atBottomRef\.current, interactingRef\.current\)/);
+  assert.match(source, /measureSheetKeyboardOffset/);
+  assert.match(source, /measureInWindow/);
+  assert.match(source, /screenHeight - height/);
+  assert.match(source, /keyboardVerticalOffset=\{keyboardOffset\}/);
   assert.doesNotMatch(source, /scrollToEnd\(\{ animated: true \}\)/);
 });

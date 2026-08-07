@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -461,7 +462,7 @@ func TestAssistantFileUploadRunsIngestionSeamOnce(t *testing.T) {
 	}
 }
 
-func TestAssistantFilesListsChatAttachmentsWithVisibility(t *testing.T) {
+func TestAssistantFilesRequireExplicitChatAttachmentSave(t *testing.T) {
 	setupAuthTestEnv(t)
 	app := newIsolatedKanbanBoardApp(t)
 
@@ -522,41 +523,43 @@ func TestAssistantFilesListsChatAttachmentsWithVisibility(t *testing.T) {
 		t.Fatalf("commit channel message: %v", err)
 	}
 
-	// The owner sees both; newest (channel) first.
+	// Chat attachments remain in chat and do not clutter Drive for either an
+	// owner or a teammate, even when the channel itself is readable.
 	rows := app.assistantFilesForUser("aj@shareability.com")
-	if len(rows) != 2 {
-		t.Fatalf("owner rows=%d (%+v), want private + channel files", len(rows), rows)
+	if len(rows) != 0 {
+		t.Fatalf("owner rows=%+v, want no implicit chat attachments", rows)
 	}
-	if rows[0].Name != "onesheet.pdf" || rows[1].Name != "deck.png" {
-		t.Fatalf("order=%q,%q, want newest first", rows[0].Name, rows[1].Name)
-	}
-	channelRow, privateRow := rows[0], rows[1]
-	if channelRow.Origin != "chat" || channelRow.OriginThreadID != channel.ID || channelRow.OriginThreadTitle != "standup" {
-		t.Fatalf("channel row=%+v, want chat origin with the thread chip data", channelRow)
-	}
-	if channelRow.BrainStatus != fileBrainStatusStored || !channelRow.Previewable {
-		t.Fatalf("channel row=%+v, want stored (no text yet) + inline pdf preview", channelRow)
-	}
-	// card-103 folded fix: a PRIVATE thread attachment's derived text rides only
-	// that 1:1's context, never company recall — so it earns the honest
-	// thread-scoped badge, not the company-wide "ingested".
-	if privateRow.BrainStatus != fileBrainStatusThread {
-		t.Fatalf("private row=%+v, want thread-scoped badge (private text never enters company recall)", privateRow)
-	}
-	if !strings.HasPrefix(privateRow.DownloadURL, "/artifacts/blob?ref=") || privateRow.UploaderEmail != "aj@shareability.com" {
-		t.Fatalf("private row=%+v, want blob download + uploader stamp", privateRow)
-	}
-
-	// A teammate sees ONLY the public channel's file — private threads stay
-	// the owner's.
 	teammateRows := app.assistantFilesForUser("tom@shareability.com")
-	if len(teammateRows) != 1 || teammateRows[0].Name != "onesheet.pdf" {
-		t.Fatalf("teammate rows=%+v, want only the channel file", teammateRows)
+	if len(teammateRows) != 0 {
+		t.Fatalf("teammate rows=%+v, want no implicit channel attachments", teammateRows)
 	}
 
-	// The other side of the folded fix: a PUBLIC channel attachment WITH derived
-	// text keeps the company-wide "ingested" badge — only private threads scope
-	// down to "in this chat".
+	// A reader can explicitly promote the public-channel attachment, choose a
+	// Drive name, and get an independently owned first-class file row.
+	publicSourceID := fmt.Sprintf("%s:%s:%d", channel.ID, "msg-channel-1", 0)
+	saved, err := app.saveChatAttachmentToFiles(aj, publicSourceID, "", "Country Golf report.pdf")
+	if err != nil {
+		t.Fatalf("save channel attachment: %v", err)
+	}
+	if saved.Name != "Country Golf report.pdf" || saved.Origin != "files" || saved.UploaderEmail != "aj@shareability.com" {
+		t.Fatalf("saved row=%+v, want named AJ-owned Drive copy", saved)
+	}
+	rows = app.assistantFilesForUser("aj@shareability.com")
+	if len(rows) != 1 || rows[0].ID != saved.ID {
+		t.Fatalf("owner rows=%+v, want only the explicit Drive copy", rows)
+	}
+	if _, _, err := getBlob(publicRef); err != nil {
+		t.Fatalf("shared blob missing after promotion: %v", err)
+	}
+
+	// Readability remains the source authority: a teammate cannot promote AJ's
+	// private attachment merely by guessing its virtual source id.
+	privateSourceID := fmt.Sprintf("%s:%s:%d", private.ID, "msg-private-1", 0)
+	if _, err := app.saveChatAttachmentToFiles(tom, privateSourceID, "", "stolen.png"); !errors.Is(err, errFileSaveSourceNotFound) {
+		t.Fatalf("private save err=%v, want not found", err)
+	}
+
+	// Derived text does not bypass the explicit-save boundary either.
 	notesReservation := "files-notes-reservation"
 	notesFile := reserveTestAttachment(t, app, tom, channel, scoutChatFileAttachment{Name: "notes.pdf", Kind: "pdf", Ref: publicRef, Text: "channel derived facts"}, notesReservation)
 	if _, err := app.commitScoutChatThreadMessages("tom@shareability.com", channel.ID, scoutChatMessageRecord{
@@ -574,15 +577,13 @@ func TestAssistantFilesListsChatAttachmentsWithVisibility(t *testing.T) {
 		t.Fatalf("commit second channel message: %v", err)
 	}
 	notesFound := false
-	notesStatus := ""
 	for _, row := range app.assistantFilesForUser("tom@shareability.com") {
 		if row.Name == "notes.pdf" {
 			notesFound = true
-			notesStatus = row.BrainStatus
 		}
 	}
-	if !notesFound || notesStatus != fileBrainStatusIngested {
-		t.Fatalf("public channel row with text: found=%v status=%q, want ingested (company recall)", notesFound, notesStatus)
+	if notesFound {
+		t.Fatal("a later channel attachment must also stay out of Drive until explicitly saved")
 	}
 }
 
@@ -898,6 +899,48 @@ func TestAssistantFileSaveHandler(t *testing.T) {
 	}
 	if !fileRowVisible(kanbanApp, "aj@shareability.com", report.ID) {
 		t.Fatal("a saved deliverable must surface on the Files list")
+	}
+
+	// The same HTTP door accepts an exact chat attachment source and returns an
+	// independently named Drive row filed in the requested folder.
+	owner := accountStore().findUser("aj@shareability.com")
+	thread, err := kanbanApp.createScoutChatThread(owner.Email, owner.Name, "Launch assets", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatalf("create source thread: %v", err)
+	}
+	ref, err := putBlob([]byte("photo bytes"), "image/png")
+	if err != nil {
+		t.Fatalf("put source blob: %v", err)
+	}
+	reservation := "file-save-handler-reservation"
+	file := reserveTestAttachment(t, kanbanApp, owner, thread, scoutChatFileAttachment{Name: "photo.png", Kind: "png", Ref: ref}, reservation)
+	if _, err := kanbanApp.commitScoutChatThreadMessages(owner.Email, thread.ID, scoutChatMessageRecord{
+		ID:                            "message-with-photo",
+		Kind:                          "message",
+		Role:                          "user",
+		Text:                          "photo",
+		CreatedAt:                     time.Now().UTC().Format(time.RFC3339Nano),
+		AuthorName:                    owner.Name,
+		AuthorEmail:                   owner.Email,
+		Files:                         []scoutChatFileAttachment{file},
+		attachmentDestinationRevision: scoutChatAttachmentDestinationRevision(thread),
+		attachmentReservationID:       reservation,
+	}); err != nil {
+		t.Fatalf("commit source attachment: %v", err)
+	}
+	sourceFileID := fmt.Sprintf("%s:%s:0", thread.ID, "message-with-photo")
+	rec = postFileSave(t, cookies, fmt.Sprintf(`{"sourceFileId":%q,"fileName":"Board photo.png","folderId":%q}`, sourceFileID, folder.ID))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save attachment status=%d body=%s, want 200", rec.Code, rec.Body.String())
+	}
+	var attachmentPayload struct {
+		File assistantFileRecord `json:"file"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &attachmentPayload); err != nil {
+		t.Fatalf("decode attachment save: %v", err)
+	}
+	if attachmentPayload.File.Name != "Board photo.png" || attachmentPayload.File.Origin != "files" || attachmentPayload.File.FolderID != folder.ID {
+		t.Fatalf("saved attachment=%+v, want named filed Drive copy", attachmentPayload.File)
 	}
 }
 

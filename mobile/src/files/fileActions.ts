@@ -2,6 +2,7 @@ import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { API_BASE_URL, NATIVE_CLIENT_HEADER } from '../config';
 import { buildApiUrl, buildAuthHeaders } from '../api/requestHelpers';
+import { localFileName } from './fileNames';
 
 export type RemoteFile = {
   name: string;
@@ -9,14 +10,6 @@ export type RemoteFile = {
   downloadUrl?: string;
   ref?: string;
 };
-
-function safeLocalName(name: string): string {
-  const trimmed = name.trim() || 'Stride file';
-  return trimmed
-    .replace(/[\x00-\x1f\x7f/\\:?*"<>|]/g, '-')
-    .replace(/^\.+/, '')
-    .slice(0, 140) || 'Stride file';
-}
 
 function stableCacheKey(value: string): string {
   let hash = 0x811c9dc5;
@@ -66,7 +59,7 @@ export async function downloadRemoteFile(
 
   const destination = new File(
     Paths.cache,
-    `bonfire-preview-${stableCacheKey(remoteFilePath(file))}-${safeLocalName(file.name)}`,
+    `bonfire-preview-${stableCacheKey(remoteFilePath(file))}-${localFileName(file.name, file.mime)}`,
   );
   if (destination.exists && destination.size > 0) return destination;
   return File.downloadFileAsync(url, destination, {

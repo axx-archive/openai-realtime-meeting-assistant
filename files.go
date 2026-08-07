@@ -1,16 +1,16 @@
 package main
 
-// Files surface (card 095) — the Google-Drive-like door over everything the
-// team has uploaded. One list, three sources:
+// Files surface (card 095) — the Google-Drive-like door over durable files the
+// team has deliberately filed. One list, two persisted sources plus an
+// explicit chat-promotion seam:
 //
 //  1. Direct uploads: POST /assistant/files/upload stores the bytes through
 //     putBlob and appends a first-class kind=file memory entry whose Text is
 //     the file's name + the 085 derived transcript, so a direct upload feeds
 //     answer_memory_question exactly like a chat upload feeds thread context.
-//  2. Chat attachments: GET /assistant/files adapts the scoutChatFileAttachment
-//     records 085 already persists inside thread messages — no double-write,
-//     and thread visibility (private vs public channel) keeps governing who
-//     sees which files.
+//  2. Chat attachments stay in chat by default. POST /assistant/files/save can
+//     explicitly copy one readable attachment into a first-class kind=file
+//     entry, preserving the source message while avoiding Drive clutter.
 //  3. Agent deliverables: terminal, good-status os_artifact work products
 //     (research reports, decks, goal outputs) adapt into rows that open in the
 //     artifact stage via ArtifactID — no bytes to download, the artifact IS
@@ -42,7 +42,9 @@ import (
 
 var (
 	errFileSaveArtifactID     = errors.New("artifactId is required")
+	errFileSaveSourceID       = errors.New("sourceFileId is required")
 	errFileSaveNotFound       = errors.New("artifact not found")
+	errFileSaveSourceNotFound = errors.New("attachment not found")
 	errFileSaveNotDeliverable = errors.New("only a finished deliverable can be saved to Files")
 	errAssistantFileName      = errors.New("file name is required")
 )
@@ -360,10 +362,9 @@ func fileDeliverableRecord(entry meetingMemoryEntry) (assistantFileRecord, bool)
 }
 
 // assistantFilesForUser assembles the viewer's file list: every direct upload
-// (team-wide, like a shared drive), the chat attachments the viewer may
-// read — their own threads and public channels, the same visibility law
-// scoutChatThreadsSnapshot already enforces — plus the finished agent
-// deliverables. Newest first, capped after the merge.
+// (including chat attachments explicitly promoted to Drive) plus the finished
+// agent deliverables. Ordinary chat attachments remain in their conversation
+// and never appear here implicitly. Newest first, capped after the merge.
 func (app *kanbanBoardApp) assistantFilesForUser(viewerEmail string) []assistantFileRecord {
 	return app.assistantFilesForPrincipal(context.Background(), &userAccount{Email: normalizeAccountEmail(viewerEmail)})
 }
@@ -372,24 +373,11 @@ func (app *kanbanBoardApp) assistantFilesForPrincipal(ctx context.Context, viewe
 	if app == nil || app.memory == nil {
 		return nil
 	}
-	viewerEmail := ""
-	if viewer != nil {
-		viewerEmail = viewer.Email
-	}
 	rows := make([]assistantFileRecord, 0, 32)
 	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindFile, 0) {
 		row := fileRecordFromEntry(entry)
 		row.CanDelete = viewer != nil && (isArtifactApprovalAdmin(viewer) || normalizeAccountEmail(row.UploaderEmail) == normalizeAccountEmail(viewer.Email))
 		rows = append(rows, row)
-	}
-	for _, thread := range app.scoutChatThreadsSnapshot(viewerEmail, true, 0) {
-		threadRows := app.fileRecordsFromThread(viewerEmail, thread)
-		for index := range threadRows {
-			threadRows[index].CanDelete = viewer != nil && (isArtifactApprovalAdmin(viewer) ||
-				normalizeAccountEmail(threadRows[index].UploaderEmail) == normalizeAccountEmail(viewer.Email) ||
-				normalizeAccountEmail(thread.OwnerEmail) == normalizeAccountEmail(viewer.Email))
-		}
-		rows = append(rows, threadRows...)
 	}
 	for _, entry := range app.authorizedFileDeliverableCandidates(ctx, viewer, ACLReadContent) {
 		if row, ok := fileDeliverableRecord(entry); ok {
@@ -1160,6 +1148,123 @@ func (app *kanbanBoardApp) saveDeliverableToFiles(artifactID string, folderID st
 	return app.saveDeliverableToFilesNamed(artifactID, folderID, "", actor)
 }
 
+// saveChatAttachmentToFiles explicitly promotes one readable chat attachment
+// into Drive. The new kind=file entry owns its Drive name/folder lifecycle but
+// points at the same immutable blob, so renaming or deleting it never mutates
+// the source message.
+func (app *kanbanBoardApp) saveChatAttachmentToFiles(user *userAccount, sourceFileID string, folderID string, fileName string) (assistantFileRecord, error) {
+	if app == nil || app.memory == nil || user == nil {
+		return assistantFileRecord{}, fmt.Errorf("files are unavailable")
+	}
+	sourceFileID = strings.TrimSpace(sourceFileID)
+	threadID, messageID, fileIndex, parsed := parseChatAttachmentFileID(sourceFileID)
+	if !parsed {
+		return assistantFileRecord{}, errFileSaveSourceID
+	}
+
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	// Resolve the thread metadata ACL before decoding its body, then authorize the
+	// exact attachment through the current source-grant/blob authority. Saving is
+	// a copy operation, so readable public-channel attachments may be promoted by
+	// a teammate even when that teammate cannot mutate the message.
+	var threadEntry meetingMemoryEntry
+	app.memory.mu.Lock()
+	for index := len(app.memory.entries) - 1; index >= 0; index-- {
+		entry := &app.memory.entries[index]
+		if entry.Kind != meetingMemoryKindScoutChat || entry.ID != threadID {
+			continue
+		}
+		if normalizeAccountEmail(entry.Metadata["ownerEmail"]) == "" || !scoutChatThreadMetadataAllowsViewer(entry.Metadata, user.Email) {
+			app.memory.mu.Unlock()
+			return assistantFileRecord{}, errFileSaveSourceNotFound
+		}
+		threadEntry = cloneMemoryEntry(*entry)
+		break
+	}
+	app.memory.mu.Unlock()
+	if threadEntry.ID == "" {
+		return assistantFileRecord{}, errFileSaveSourceNotFound
+	}
+	thread, decoded := decodeScoutChatThreadEntry(threadEntry)
+	if !decoded {
+		return assistantFileRecord{}, errFileSaveSourceNotFound
+	}
+	var source scoutChatFileAttachment
+	found := false
+	for _, message := range thread.Messages {
+		if message.ID != messageID || fileIndex >= len(message.Files) {
+			continue
+		}
+		source = message.Files[fileIndex]
+		found = strings.TrimSpace(source.Ref) != "" || strings.TrimSpace(source.Text) != ""
+		break
+	}
+	if !found {
+		return assistantFileRecord{}, errFileSaveSourceNotFound
+	}
+	if !app.committedChatAttachmentAuthorized(user.Email, threadID, messageID, source) {
+		return assistantFileRecord{}, errFileSaveSourceNotFound
+	}
+
+	name := firstNonEmptyString(strings.TrimSpace(fileName), strings.TrimSpace(source.Name), "file")
+	name, err := normalizeAssistantFileName(name)
+	if err != nil {
+		return assistantFileRecord{}, err
+	}
+	folderID = strings.TrimSpace(folderID)
+	if folderID != "" && !fileFolderExists(folderID) {
+		return assistantFileRecord{}, errFileFolderNotFound
+	}
+
+	now := time.Now().UTC()
+	entryID := fmt.Sprintf("file-%d", now.UnixNano())
+	actorEmail := normalizeAccountEmail(user.Email)
+	actorName := firstNonEmptyString(strings.TrimSpace(user.Name), actorEmail)
+	brainStatus := fileBrainStatusStored
+	entryText := fmt.Sprintf("File %s saved to Drive by %s.", name, actorName)
+	if transcript := strings.TrimSpace(source.Text); transcript != "" {
+		brainStatus = fileBrainStatusIngested
+		entryText += " " + transcript
+	}
+	metadata := map[string]string{
+		"name":               name,
+		"blobRef":            strings.TrimSpace(source.Ref),
+		"mime":               strings.TrimSpace(source.Mime),
+		"size":               strconv.FormatInt(source.Size, 10),
+		"uploaderEmail":      actorEmail,
+		"uploaderName":       actorName,
+		"origin":             "files",
+		"brainStatus":        brainStatus,
+		"sourceChatFileId":   sourceFileID,
+		"sourceThreadId":     threadID,
+		"sourceMessageId":    messageID,
+		"sourceFileRevision": strings.TrimSpace(source.SourceRevision),
+	}
+	if brainStatus == fileBrainStatusIngested {
+		metadata["ingestedAt"] = now.Format(time.RFC3339Nano)
+	}
+	entry, _, err := app.memory.appendEntry(meetingMemoryKindFile, entryID, entryText, metadata)
+	if err != nil {
+		return assistantFileRecord{}, err
+	}
+	if folderID != "" {
+		if err := moveFileToFolder(entryID, folderID); err != nil {
+			// The folder may disappear after validation. Remove the unannounced
+			// Drive copy so the failed operation cannot leave a surprise root row.
+			if _, deleted, deleteErr := app.memory.deleteEntryByID(entryID); deleteErr != nil || !deleted {
+				return assistantFileRecord{}, fmt.Errorf("assign saved chat attachment: %w (rollback failed: %v)", err, deleteErr)
+			}
+			return assistantFileRecord{}, err
+		}
+	}
+	row := fileRecordFromEntry(entry)
+	row.FolderID = folderID
+	return row, nil
+}
+
 func (app *kanbanBoardApp) saveDeliverableToFilesNamed(artifactID string, folderID string, fileName string, actor string) (assistantFileRecord, error) {
 	artifactID = strings.TrimSpace(artifactID)
 	if artifactID == "" {
@@ -1256,9 +1361,9 @@ func fileFolderExists(folderID string) bool {
 // fileSaveErrorStatus maps saveDeliverableToFiles errors onto honest statuses.
 func fileSaveErrorStatus(err error) int {
 	switch {
-	case errors.Is(err, errFileSaveArtifactID), errors.Is(err, errFileSaveNotDeliverable):
+	case errors.Is(err, errFileSaveArtifactID), errors.Is(err, errFileSaveSourceID), errors.Is(err, errFileSaveNotDeliverable), errors.Is(err, errAssistantFileName):
 		return http.StatusBadRequest
-	case errors.Is(err, errFileSaveNotFound):
+	case errors.Is(err, errFileSaveNotFound), errors.Is(err, errFileSaveSourceNotFound):
 		return http.StatusNotFound
 	case errors.Is(err, errFileFolderNotFound), errors.Is(err, errFileFolderDuplicate):
 		return fileFolderErrorStatus(err)
@@ -1269,7 +1374,8 @@ func fileSaveErrorStatus(err error) int {
 
 // assistantFileSaveHandler serves POST /assistant/files/save — the explicit
 // save door (kanban-card-110). Same gate stack as assistantFileMoveHandler
-// (method, origin, session, app, MaxBytesReader); body {artifactId, folderId?}.
+// (method, origin, session, app, MaxBytesReader). It accepts either a terminal
+// {artifactId} or a readable chat {sourceFileId}, plus fileName/folderId.
 func assistantFileSaveHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1290,26 +1396,34 @@ func assistantFileSaveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	payload := struct {
-		ArtifactID string `json:"artifactId"`
-		FolderID   string `json:"folderId"`
-		FileName   string `json:"fileName"`
+		ArtifactID   string `json:"artifactId"`
+		SourceFileID string `json:"sourceFileId"`
+		FolderID     string `json:"folderId"`
+		FileName     string `json:"fileName"`
 	}{}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&payload); err != nil {
 		writeAuthError(w, http.StatusBadRequest, "could not read save request")
 		return
 	}
 	payload.ArtifactID = strings.TrimSpace(payload.ArtifactID)
-	if payload.ArtifactID == "" {
+	payload.SourceFileID = strings.TrimSpace(payload.SourceFileID)
+	if payload.ArtifactID == "" && payload.SourceFileID == "" {
 		writeAuthError(w, http.StatusBadRequest, errFileSaveArtifactID.Error())
 		return
 	}
-	artifact, ok := authorizedArtifactForActions(r.Context(), user, payload.ArtifactID, ACLReadContent, ACLWrite)
-	if !ok {
-		writeAuthError(w, http.StatusNotFound, "artifact not found")
-		return
+	var row assistantFileRecord
+	var err error
+	if payload.SourceFileID != "" {
+		row, err = kanbanApp.saveChatAttachmentToFiles(user, payload.SourceFileID, payload.FolderID, payload.FileName)
+	} else {
+		artifact, ok := authorizedArtifactForActions(r.Context(), user, payload.ArtifactID, ACLReadContent, ACLWrite)
+		if !ok {
+			writeAuthError(w, http.StatusNotFound, "artifact not found")
+			return
+		}
+		actor := firstNonEmptyString(strings.TrimSpace(user.Name), normalizeAccountEmail(user.Email))
+		row, err = kanbanApp.saveDeliverableSnapshotToFilesNamed(artifact, payload.FolderID, payload.FileName, actor)
 	}
-	actor := firstNonEmptyString(strings.TrimSpace(user.Name), normalizeAccountEmail(user.Email))
-	row, err := kanbanApp.saveDeliverableSnapshotToFilesNamed(artifact, payload.FolderID, payload.FileName, actor)
 	if err != nil {
 		status := fileSaveErrorStatus(err)
 		message := err.Error()

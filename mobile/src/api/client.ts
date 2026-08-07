@@ -716,6 +716,17 @@ export const api = {
     });
   },
 
+  saveChatAttachmentToFiles(
+    sessionToken: string,
+    sourceFileId: string,
+    fileName: string,
+    folderId: string,
+  ): Promise<{ ok: boolean; file?: Record<string, unknown> }> {
+    return request('/assistant/files/save', {
+      method: 'POST', body: { sourceFileId, fileName, folderId }, sessionToken,
+    });
+  },
+
   updateScoutThread(
     sessionToken: string,
     threadId: string,

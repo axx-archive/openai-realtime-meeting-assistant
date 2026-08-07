@@ -2,6 +2,7 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -217,8 +218,23 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
   const chatTail = useConversationTailFollow(chatListRef, visible && mode === 'chat');
   const transcriptTail = useConversationTailFollow(transcriptListRef, visible && mode === 'transcript');
   const composerInputRef = useRef<TextInput>(null);
+  const sheetRef = useRef<View>(null);
   const [draft, setDraft] = useState('');
   const [composerError, setComposerError] = useState<string | null>(null);
+  const [keyboardOffset, setKeyboardOffset] = useState(8);
+
+  const measureSheetKeyboardOffset = useCallback(() => {
+    requestAnimationFrame(() => {
+      sheetRef.current?.measureInWindow((_x, y, _width, height) => {
+        // Keep the room composer on the same page-sheet keyboard contract as
+        // threads: sheet layout is local, but iOS keyboard bounds are global.
+        const screenHeight = Dimensions.get('screen').height;
+        const sheetTop = Math.max(0, y, screenHeight - height);
+        const nextOffset = Math.max(8, Math.round(sheetTop) + 8);
+        setKeyboardOffset((current) => current === nextOffset ? current : nextOffset);
+      });
+    });
+  }, []);
 
   const sendComposerText = useCallback((candidate: string): boolean => {
     const text = candidate.trim();
@@ -330,15 +346,21 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
   return (
     <Modal
       animationType="slide"
+      onShow={measureSheetKeyboardOffset}
       onRequestClose={onClose}
       presentationStyle="pageSheet"
       visible={visible}
     >
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={0}
+      <View
+        ref={sheetRef}
         style={styles.sheet}
+        onLayout={measureSheetKeyboardOffset}
       >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={keyboardOffset}
+          style={styles.fill}
+        >
         <View style={[styles.header, { paddingTop: Math.max(safeArea.top, space[3]) }]}>
           <View style={styles.headerCopy}>
             <Text numberOfLines={1} style={styles.title}>{roomName}</Text>
@@ -538,13 +560,15 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
             style={styles.list}
           />
         )}
-      </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 });
 
 const styles = StyleSheet.create({
   sheet: { flex: 1, backgroundColor: ink[950] },
+  fill: { flex: 1 },
   header: {
     minHeight: 72,
     flexDirection: 'row',

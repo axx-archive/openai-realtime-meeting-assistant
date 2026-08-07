@@ -4,6 +4,7 @@ import {
   Alert,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -135,24 +136,39 @@ export function FilePreviewModal({ file, sessionToken, onClose }: Props) {
         </View>
         <View style={[styles.preview, image && styles.mediaPreview]}>
           {file && localPreviewUrl && image ? (
-            <Image
-              source={{ uri: localPreviewUrl }}
-              accessibilityLabel={`Preview of ${file.name}`}
-              cachePolicy="memory-disk"
-              contentFit="contain"
-              recyclingKey={`${file.ref}-full-preview`}
-              onLoadStart={() => {
-                setLoading(true);
-                setError(null);
-              }}
-              onLoad={() => setLoading(false)}
-              onDisplay={() => setLoading(false)}
-              onError={() => {
-                setLoading(false);
-                setError('The image preview could not be loaded. You can still share or save the file.');
-              }}
-              style={styles.image}
-            />
+            <ScrollView
+              key={`${file.ref}-zoom-preview`}
+              accessibilityLabel={`Zoomable preview of ${file.name}`}
+              bouncesZoom
+              centerContent
+              contentContainerStyle={styles.imageZoomContent}
+              contentInsetAdjustmentBehavior="never"
+              maximumZoomScale={4}
+              minimumZoomScale={1}
+              pinchGestureEnabled
+              showsHorizontalScrollIndicator={false}
+              showsVerticalScrollIndicator={false}
+              style={styles.imageZoom}
+            >
+              <Image
+                source={{ uri: localPreviewUrl }}
+                accessibilityLabel={`Preview of ${file.name}`}
+                cachePolicy="memory-disk"
+                contentFit="contain"
+                recyclingKey={`${file.ref}-full-preview`}
+                onLoadStart={() => {
+                  setLoading(true);
+                  setError(null);
+                }}
+                onLoad={() => setLoading(false)}
+                onDisplay={() => setLoading(false)}
+                onError={() => {
+                  setLoading(false);
+                  setError('The image preview could not be loaded. You can still share or save the file.');
+                }}
+                style={styles.image}
+              />
+            </ScrollView>
           ) : file && localPreviewUrl ? (
             <WebView
               source={{ uri: localPreviewUrl }}
@@ -245,10 +261,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.surface3,
   },
-  image: {
+  imageZoom: {
     flex: 1,
     backgroundColor: '#000000',
   },
+  imageZoomContent: { flexGrow: 1 },
+  image: { width: '100%', height: '100%', backgroundColor: '#000000' },
   loading: {
     ...StyleSheet.absoluteFill,
     alignItems: 'center',

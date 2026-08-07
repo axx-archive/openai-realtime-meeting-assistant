@@ -21,12 +21,13 @@ type Props = {
   onClose: () => void;
   onReact: (emoji: string) => void;
   onCopy: () => void;
+  onSaveAttachment?: () => void;
   onReply: () => void;
   onEdit: () => void;
   onDelete: () => void;
 };
 
-export function MessageActionSheet({ visible, contained = false, own, snippet, reactions, onClose, onReact, onCopy, onReply, onEdit, onDelete }: Props) {
+export function MessageActionSheet({ visible, contained = false, own, snippet, reactions, onClose, onReact, onCopy, onSaveAttachment, onReply, onEdit, onDelete }: Props) {
   const reduced = useReduceMotion();
   const progress = useRef(new Animated.Value(0)).current;
   const visibleReactions = useMemo(() => reactions.slice(0, 12), [reactions]);
@@ -129,11 +130,20 @@ export function MessageActionSheet({ visible, contained = false, own, snippet, r
             },
           ]}
           >
-              {snippet.trim() ? (
+              {snippet.trim() && !onSaveAttachment ? (
                 <>
                   <Pressable accessibilityRole="button" accessibilityLabel="Copy message" onPress={onCopy} style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}>
                     <SymbolView name="doc.on.doc" tintColor={colors.text1} size={18} />
                     <Text style={styles.actionText}>Copy message</Text>
+                  </Pressable>
+                  <View style={styles.rule} />
+                </>
+              ) : null}
+              {onSaveAttachment ? (
+                <>
+                  <Pressable accessibilityRole="button" accessibilityLabel="Save attachment to Drive" onPress={onSaveAttachment} style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}>
+                    <SymbolView name="externaldrive.fill" tintColor={colors.text1} size={18} />
+                    <Text style={styles.actionText}>Save to Drive</Text>
                   </Pressable>
                   <View style={styles.rule} />
                 </>

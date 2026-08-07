@@ -119,7 +119,7 @@ type ThreadMessageRowProps = {
   workSaved: boolean;
   onOpenSource: (messageId: string) => void;
   onOpenAttachment: (file: ScoutFileAttachment) => void;
-  onLongPress: (message: ScoutMessage, own: boolean) => void;
+  onLongPress: (message: ScoutMessage, own: boolean, attachment?: { file: ScoutFileAttachment; index: number }) => void;
   onToggleReaction: (message: ScoutMessage, emoji: string, active: boolean) => void;
   onRetryReply: (message: ScoutMessage) => void;
   onResolveProposal: (message: ScoutMessage, action: 'accepted' | 'dismissed', objective: string) => void;
@@ -294,7 +294,11 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [threadReplyFiles, setThreadReplyFiles] = useState<ScoutFileAttachment[]>([]);
   const [threadReplyStagingFiles, setThreadReplyStagingFiles] = useState<Array<{ id: string; name: string; mime: string; uri?: string }>>([]);
   const [editingMessage, setEditingMessage] = useState<ScoutMessage | null>(null);
-  const [actionMessage, setActionMessage] = useState<{ message: ScoutMessage; own: boolean } | null>(null);
+  const [actionMessage, setActionMessage] = useState<{
+    message: ScoutMessage;
+    own: boolean;
+    attachment?: { file: ScoutFileAttachment; index: number };
+  } | null>(null);
   const [previewFile, setPreviewFile] = useState<ScoutFileAttachment | null>(null);
   const [expandedMessage, setExpandedMessage] = useState<{
     text: string;
@@ -322,6 +326,13 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [savingWorkID, setSavingWorkID] = useState<string | null>(null);
   const [savedWorkIDs, setSavedWorkIDs] = useState<Set<string>>(() => new Set());
   const [workSaveError, setWorkSaveError] = useState('');
+  const [attachmentSaveTarget, setAttachmentSaveTarget] = useState<{
+    message: ScoutMessage;
+    file: ScoutFileAttachment;
+    index: number;
+  } | null>(null);
+  const [savingAttachment, setSavingAttachment] = useState(false);
+  const [attachmentSaveError, setAttachmentSaveError] = useState('');
   const [regenerateWorkTarget, setRegenerateWorkTarget] = useState<ScoutMessage | null>(null);
   const [regeneratingWorkID, setRegeneratingWorkID] = useState<string | null>(null);
   const [regenerateWorkError, setRegenerateWorkError] = useState('');
@@ -1307,9 +1318,13 @@ export function ThreadScreen({ route, navigation }: Props) {
     }
   }
 
-  const openMessageActions = useCallback((message: ScoutMessage, own: boolean) => {
+  const openMessageActions = useCallback((
+    message: ScoutMessage,
+    own: boolean,
+    attachment?: { file: ScoutFileAttachment; index: number },
+  ) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setActionMessage({ message, own });
+    setActionMessage({ message, own, attachment });
   }, []);
   const openAttachment = useCallback((file: ScoutFileAttachment) => {
     setPreviewFile(file);
@@ -1383,6 +1398,32 @@ export function ThreadScreen({ route, navigation }: Props) {
     workSaveAttemptRef.current = null;
     setWorkSaveTarget(message);
   }, []);
+
+  const beginSaveChatAttachment = useCallback(() => {
+    const target = actionMessage?.attachment;
+    if (!target) return;
+    setAttachmentSaveError('');
+    setAttachmentSaveTarget({ message: actionMessage.message, file: target.file, index: target.index });
+    setActionMessage(null);
+  }, [actionMessage]);
+
+  const saveChatAttachment = useCallback(async (fileName: string, folderId: string) => {
+    const target = attachmentSaveTarget;
+    const messageID = String(target?.message.id ?? '').trim();
+    if (!target || !sessionToken || !messageID || savingAttachment) return;
+    setSavingAttachment(true);
+    setAttachmentSaveError('');
+    try {
+      const sourceFileId = `${route.params.threadId}:${messageID}:${target.index}`;
+      await api.saveChatAttachmentToFiles(sessionToken, sourceFileId, fileName.trim(), folderId);
+      setAttachmentSaveTarget(null);
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (caught) {
+      setAttachmentSaveError(caught instanceof BonfireApiError ? caught.message : 'Could not save that attachment to Drive.');
+    } finally {
+      setSavingAttachment(false);
+    }
+  }, [attachmentSaveTarget, route.params.threadId, savingAttachment, sessionToken]);
 
   const saveWorkArtifact = useCallback(async (fileName: string, folderId: string) => {
     const target = workSaveTarget;
@@ -1521,7 +1562,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       visible={Boolean(actionMessage)}
       contained={contained}
       own={Boolean(actionMessage?.own)}
-      snippet={String(actionMessage?.message.text ?? actionMessage?.message.content ?? '')}
+      snippet={actionMessage?.attachment?.file.name ?? String(actionMessage?.message.text ?? actionMessage?.message.content ?? '')}
       reactions={actionMessage?.message.reactions ?? []}
       onClose={() => setActionMessage(null)}
       onReact={(emoji) => {
@@ -1531,6 +1572,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         void toggleReaction(actionMessage.message, emoji, !current?.reactedByViewer);
       }}
       onCopy={() => { if (actionMessage) copyMessage(actionMessage.message); }}
+      onSaveAttachment={actionMessage?.attachment ? beginSaveChatAttachment : undefined}
       onReply={() => { if (actionMessage) beginReply(actionMessage.message); }}
       onEdit={() => { if (actionMessage) beginEdit(actionMessage.message); }}
       onDelete={() => { if (actionMessage) confirmDelete(actionMessage.message); }}
@@ -1722,6 +1764,16 @@ export function ThreadScreen({ route, navigation }: Props) {
         error={workSaveError}
         onClose={() => { if (!savingWorkID) setWorkSaveTarget(null); }}
         onSave={(fileName, folderId) => { void saveWorkArtifact(fileName, folderId); }}
+      />
+
+      <ArtifactSaveSheet
+        visible={Boolean(attachmentSaveTarget)}
+        sessionToken={sessionToken ?? ''}
+        defaultName={attachmentSaveTarget?.file.name ?? 'Attachment'}
+        saving={savingAttachment}
+        error={attachmentSaveError}
+        onClose={() => { if (!savingAttachment) setAttachmentSaveTarget(null); }}
+        onSave={(fileName, folderId) => { void saveChatAttachment(fileName, folderId); }}
       />
 
       <RegenerateWorkSheet
