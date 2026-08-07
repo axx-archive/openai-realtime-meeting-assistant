@@ -1230,7 +1230,7 @@ export function validateRenderedComposeConfig(config, receipt, suppliedTopology 
   exactStringSequenceOneOf(config.services['render-queue-init'].command,
     [
       ['install -d -o 65532 -g 65532 -m 0700 /app/render-queue /app/render-queue/jobs'],
-      ["install -d -o 65532 -g 65532 -m 2770 /app/render-queue /app/render-queue/jobs && find /app/render-queue/jobs -xdev -maxdepth 1 -type f -name '*.json' -exec chown 65532:65532 {} + -exec chmod 0660 {} +"]
+      ["mkdir -p /app/render-queue/jobs && chown 0:0 /app/render-queue /app/render-queue/jobs && chmod 2770 /app/render-queue /app/render-queue/jobs && chown 65532:65532 /app/render-queue /app/render-queue/jobs && find /app/render-queue/jobs -xdev -maxdepth 1 -type f -name '*.json' -exec chown 0:0 {} + -exec chmod 0660 {} + -exec chown 65532:65532 {} +"]
     ],
     'rendered candidate Compose render-queue-init command', { ordered: true })
   for (const serviceName of ['render-runner', 'caddy']) {

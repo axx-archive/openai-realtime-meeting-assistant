@@ -815,7 +815,7 @@ test('rendered candidate Compose is an exact singleton topology before mutation'
   assert.equal(validate(normalizedSecuritySpelling), normalizedSecuritySpelling)
 
   const migratedQueueOwnership = structuredClone(exact)
-  migratedQueueOwnership.services['render-queue-init'].command = ["install -d -o 65532 -g 65532 -m 2770 /app/render-queue /app/render-queue/jobs && find /app/render-queue/jobs -xdev -maxdepth 1 -type f -name '*.json' -exec chown 65532:65532 {} + -exec chmod 0660 {} +"]
+  migratedQueueOwnership.services['render-queue-init'].command = ["mkdir -p /app/render-queue/jobs && chown 0:0 /app/render-queue /app/render-queue/jobs && chmod 2770 /app/render-queue /app/render-queue/jobs && chown 65532:65532 /app/render-queue /app/render-queue/jobs && find /app/render-queue/jobs -xdev -maxdepth 1 -type f -name '*.json' -exec chown 0:0 {} + -exec chmod 0660 {} + -exec chown 65532:65532 {} +"]
   assert.equal(validate(migratedQueueOwnership), migratedQueueOwnership)
 })
 
