@@ -3389,11 +3389,31 @@ func (app *kanbanBoardApp) publicChannelByName(name string) (scoutChatThreadReco
 		}
 		titles = append(titles, thread.Title)
 	}
+	// People naturally refer to the one permanent pinned team conversation as
+	// "main" even though its visible title is Bonfire Chat. Exact visible names
+	// win above, so an intentionally created #main channel is never shadowed;
+	// only otherwise-unresolved semantic aliases bind to the flagged Table.
+	if tableChannelAlias(wanted) {
+		if table, ok := app.findTableThread(); ok && table.ArchivedAt == "" && scoutChatThreadIsOrganizationPublic(table) {
+			return table, nil
+		}
+	}
 	joined := "none exist yet — use create_channel"
 	if len(titles) > 0 {
 		joined = strings.Join(titles, ", ")
 	}
 	return scoutChatThreadRecord{}, fmt.Errorf("no channel named %q; channels: %s", wanted, joined)
+}
+
+func tableChannelAlias(name string) bool {
+	normalized := strings.ToLower(strings.Join(strings.Fields(normalizeChannelName(name)), " "))
+	normalized = strings.TrimPrefix(normalized, "the ")
+	switch normalized {
+	case "main", "main channel", "main chat", "main bonfire chat", "bonfire main chat", "pinned bonfire chat", "pinned chat", "table":
+		return true
+	default:
+		return false
+	}
 }
 
 // postToChannel executes the post_to_channel voice tool: relay the user's

@@ -319,6 +319,22 @@ func hasScoutChatImageMessage(messages []scoutChatMessageRecord) bool {
 	return false
 }
 
+func TestScoutChatImageTimeoutIsFriendlyAndRetryable(t *testing.T) {
+	err := fmt.Errorf("create OpenAI image: Post %q: %w", openAIImagesURL, context.DeadlineExceeded)
+	detail := scoutChatImageErrorDetail(err)
+	if detail != "image generation took too long; please try the request again" {
+		t.Fatalf("timeout detail=%q, want the retryable user message", detail)
+	}
+	for _, leaked := range []string{"api.openai.com", "context deadline exceeded", "Post \""} {
+		if strings.Contains(detail, leaked) {
+			t.Fatalf("timeout detail leaked transport text %q: %s", leaked, detail)
+		}
+	}
+	if scoutChatImageGenerationTimeout <= openAIImageProviderTimeout {
+		t.Fatalf("outer image timeout=%s must exceed provider timeout=%s", scoutChatImageGenerationTimeout, openAIImageProviderTimeout)
+	}
+}
+
 func TestScoutChatImageRegenerateReplacesUnsavedRender(t *testing.T) {
 	setupAuthTestEnv(t)
 	t.Setenv("OPENAI_API_KEY", "test-image-key")

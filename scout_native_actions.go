@@ -32,7 +32,7 @@ var scoutNativeActionSpecs = []scoutNativeActionSpec{
 	{ID: "create_channel", Description: "Create a public Bonfire Chat channel. fields: name.", Required: []string{"name"}, Allowed: []string{"name"}},
 	{ID: "archive_channel", Description: "Archive an existing Bonfire Chat channel by exact visible name. fields: channel.", Required: []string{"channel"}, Allowed: []string{"channel"}},
 	{ID: "rename_channel", Description: "Rename an existing Bonfire Chat channel. fields: channel, new_name.", Required: []string{"channel", "new_name"}, Allowed: []string{"channel", "new_name"}},
-	{ID: "post_to_channel", Description: "Post the user's exact message to a public channel. fields: channel, text, optional mention.", Required: []string{"channel", "text"}, Allowed: []string{"channel", "text", "mention"}},
+	{ID: "post_to_channel", Description: "Post the user's exact message to a public channel. The main channel, main chat, or pinned Bonfire chat means the permanent Bonfire Chat. fields: channel, text, optional mention.", Required: []string{"channel", "text"}, Allowed: []string{"channel", "text", "mention"}},
 	{ID: "create_file_folder", Description: "Create a Drive folder. fields: name.", Required: []string{"name"}, Allowed: []string{"name"}},
 	{ID: "rename_file_folder", Description: "Rename a Drive folder by exact visible name. fields: folder, new_name.", Required: []string{"folder", "new_name"}, Allowed: []string{"folder", "new_name"}},
 	{ID: "delete_file_folder", Description: "Delete a Drive folder label; its files return to All files. fields: folder.", Required: []string{"folder"}, Allowed: []string{"folder"}},

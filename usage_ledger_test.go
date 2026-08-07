@@ -104,7 +104,7 @@ func TestSharedAIProviderSeamsDenyNonLoopback(t *testing.T) {
 		{name: "openai-responses", client: aiProviderHTTPClient(45 * time.Second), url: "https://api.openai.com/v1/responses"},
 		{name: "openai-realtime-http", client: realtimeHTTPClient, url: "https://api.openai.com/v1/realtime/calls"},
 		{name: "openai-embeddings", client: aiProviderHTTPClient(time.Second), url: "https://api.openai.com/v1/embeddings"},
-		{name: "openai-images", client: aiProviderHTTPClient(120 * time.Second), url: "https://api.openai.com/v1/images/generations"},
+		{name: "openai-images", client: aiProviderHTTPClient(openAIImageProviderTimeout), url: "https://api.openai.com/v1/images/generations"},
 		{name: "openai-dictation", client: dictationHTTPClient, url: "https://api.openai.com/v1/audio/transcriptions"},
 		{name: "anthropic-messages", client: aiProviderHTTPClient(0), url: "https://api.anthropic.com/v1/messages"},
 		{name: "fiscal-mcp", client: aiProviderHTTPClient(fiscalRequestTimeout), url: "https://api.fiscal.ai/mcp"},

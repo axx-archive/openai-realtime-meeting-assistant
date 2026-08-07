@@ -20,7 +20,7 @@ func TestAIProviderSourceInventoryUsesSharedNetworkBoundary(t *testing.T) {
 		"meeting_specialist_realtime_adapter.go": {"aiProviderRealtimeWebSocketDialer()"},
 		"transcribe_dictation.go":                {"dictationHTTPClient = aiProviderHTTPClient(90 * time.Second)"},
 		"openai_responses.go":                    {"timeout := openAIResponsesRequestTimeout(request)", "aiProviderHTTPClient(timeout).Do(httpRequest)"},
-		"openai_images.go":                       {"aiProviderHTTPClient(120 * time.Second).Do(httpRequest)"},
+		"openai_images.go":                       {"aiProviderHTTPClient(openAIImageProviderTimeout).Do(httpRequest)"},
 		"embeddings.go":                          {"aiProviderHTTPClient(embeddingRequestTimeout).Do(httpRequest)"},
 		"agent_runner_anthropic.go":              {"aiProviderHTTPClient(0).Do(httpRequest)"},
 		"fiscal_client.go":                       {"client := aiProviderHTTPClient(fiscalRequestTimeout)"},

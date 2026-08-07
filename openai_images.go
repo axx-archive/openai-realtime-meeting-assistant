@@ -54,6 +54,10 @@ const (
 	// dial; Scout's prompt-optimization turn independently runs at max effort.
 	defaultOpenAIImageSize    = "1536x1024"
 	defaultOpenAIImageQuality = "high"
+	// High-quality landscape renders regularly exceed two minutes under real
+	// provider load. Keep one bounded five-minute wire window: long enough for a
+	// legitimate render, still finite if the provider or connection wedges.
+	openAIImageProviderTimeout = 5 * time.Minute
 
 	// imageryBoardMaxShots bounds one board at the contract's ceiling (4-6
 	// shots) so a runaway caller can never burn an unbounded image budget.
@@ -210,9 +214,10 @@ func createOpenAIImage(ctx context.Context, prompt string, opts openAIImageOptio
 		recordLLMUsage(entry)
 	}()
 
-	// Image generation is the slowest OpenAI call the OS makes; 120s is the
-	// generous ceiling (the Responses neighbor runs text at 45s).
-	response, err := aiProviderHTTPClient(120 * time.Second).Do(httpRequest)
+	// Image generation is the slowest OpenAI call the OS makes. The provider can
+	// legitimately spend more than two minutes on a high-quality landscape, so
+	// it owns a wider bounded client than the Responses text neighbor.
+	response, err := aiProviderHTTPClient(openAIImageProviderTimeout).Do(httpRequest)
 	if err != nil {
 		return "", "", fmt.Errorf("create OpenAI image: %w", err)
 	}

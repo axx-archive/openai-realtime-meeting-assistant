@@ -750,6 +750,46 @@ func TestPostToChannelPersistsAndNotifiesWithoutInvokingScout(t *testing.T) {
 	}
 }
 
+func TestPostToChannelResolvesMainChatAliasToPermanentBonfireChat(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	table, err := app.ensureTable("aj@shareability.com")
+	if err != nil {
+		t.Fatalf("ensure Bonfire Chat: %v", err)
+	}
+	if _, err := app.createScoutChatThread("aj@shareability.com", "AJ", "Ball Dogs", scoutChatVisibilityPublic); err != nil {
+		t.Fatalf("create Ball Dogs channel: %v", err)
+	}
+
+	for _, alias := range []string{"main bonfire chat", "the main channel", "pinned chat"} {
+		resolved, err := app.publicChannelByName(alias)
+		if err != nil {
+			t.Fatalf("resolve %q: %v", alias, err)
+		}
+		if resolved.ID != table.ID || !resolved.Table || resolved.Title != tableThreadTitle {
+			t.Fatalf("resolve %q=%+v, want permanent Bonfire Chat %s", alias, resolved, table.ID)
+		}
+	}
+
+	result, _, err := app.applyPrivateRealtimeVoiceTool("aj@shareability.com", "post_to_channel", map[string]any{
+		"channel": "main bonfire chat",
+		"text":    "The Ball Dogs group had a healthy back-and-forth and would like others to weigh in.",
+	})
+	if err != nil {
+		t.Fatalf("post to semantic main channel: %v", err)
+	}
+	if result["threadId"] != table.ID || result["channel"] != tableThreadTitle {
+		t.Fatalf("result=%#v, want the permanent Bonfire Chat", result)
+	}
+
+	saved, _, err := app.scoutChatThreadByID("aj@shareability.com", table.ID)
+	if err != nil {
+		t.Fatalf("reload Bonfire Chat: %v", err)
+	}
+	if len(saved.Messages) != 1 || saved.Messages[0].Text != "The Ball Dogs group had a healthy back-and-forth and would like others to weigh in." {
+		t.Fatalf("Bonfire Chat messages=%#v, want the relayed post", saved.Messages)
+	}
+}
+
 // Unknown channels error with the available names so the voice model can
 // self-correct aloud; private threads are never postable.
 func TestPostToChannelUnknownAndPrivateThreadsRejected(t *testing.T) {

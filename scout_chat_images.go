@@ -24,10 +24,10 @@ import (
 	"time"
 )
 
-// scoutChatImageGenerationTimeout bounds one async render. The provider's own
-// HTTP client caps at 120s; this outer ceiling covers the blob store + the
+// scoutChatImageGenerationTimeout bounds one async render. The provider owns a
+// five-minute wire window; this outer ceiling leaves time for the blob store +
 // artifact + message commits around it.
-const scoutChatImageGenerationTimeout = 3 * time.Minute
+const scoutChatImageGenerationTimeout = openAIImageProviderTimeout + time.Minute
 
 // scoutChatImageRef is the persisted image payload on a Kind="image" chat
 // message: the content-addressed blob ref the /artifacts/blob route serves
@@ -274,7 +274,7 @@ func (app *kanbanBoardApp) runScoutChatImageGenerationForPendingContext(parent c
 // rate limit) uses openAIAPIRequestUserMessage so the raw upstream body never
 // reaches the user; anything else uses the compacted error line.
 func (app *kanbanBoardApp) commitScoutChatImageError(threadID string, ownerEmail string, err error) {
-	detail := compactAssistantLine(err.Error())
+	detail := scoutChatImageErrorDetail(err)
 	if friendly, _, ok := openAIAPIRequestUserMessage(err); ok && strings.TrimSpace(friendly) != "" {
 		detail = friendly
 	}
@@ -288,6 +288,19 @@ func (app *kanbanBoardApp) commitScoutChatImageError(threadID string, ownerEmail
 	if _, commitErr := app.commitScoutChatThreadMessages(ownerEmail, threadID, message); commitErr != nil {
 		log.Errorf("scout chat image: commit error message on thread %s failed: %v", threadID, commitErr)
 	}
+}
+
+func scoutChatImageErrorDetail(err error) string {
+	if err == nil {
+		return "image generation failed"
+	}
+	// Do not expose the provider URL or Go's transport wording in the feed. A
+	// timeout is safe to retry manually; automatic retry could double-bill when
+	// the provider completed the image but the response arrived too late.
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(strings.ToLower(err.Error()), "timeout") {
+		return "image generation took too long; please try the request again"
+	}
+	return compactAssistantLine(err.Error())
 }
 
 func (app *kanbanBoardApp) scoutChatImagePending(ownerEmail, threadID, pendingMessageID string) (scoutChatMessageRecord, bool) {
