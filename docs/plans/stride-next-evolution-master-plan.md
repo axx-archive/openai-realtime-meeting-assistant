@@ -2,16 +2,18 @@
 
 **Status:** Active E10 remediation. The exact `axx/main` HEAD release is serving
 under the immutable release ledger with `verified-local-unsigned` process
-evidence. At the 2026-08-07 13:45 PT checkpoint that identity was
+evidence. At the 2026-08-07 13:45 PT release checkpoint that identity was
 `b95794fe4a04e3f0bcfe5b2dad20e4d2c67576ac`, ledger generation 26; public
 `/healthz` and `/readyz` agreed with both receipted application images and the
 retained rollback release `1188281b9197b5f6a2e654f236b1a51bc4a5ba95`.
 Native Build 48 was built from
 `7689bead6b8365c14e67a11dfa06063b23cf058b`, uploaded successfully through EAS,
 and submitted to Apple. EAS submission
-`8c5ed1d9-d449-4959-8d93-f2ba5aaa9e68` is `FINISHED` with no error; App Store
-Connect `VALID`, internal Team availability, and intended-device access still
-require an authenticated Apple observation.
+`8c5ed1d9-d449-4959-8d93-f2ba5aaa9e68` is `FINISHED` with no error. A fresh
+authenticated App Store Connect API observation at 2026-08-07 14:08 PT proves
+Apple build `2ce3d1b3-a21a-4700-9c20-fce1d5377450` is `VALID`, unexpired, and
+available to internal `Team (Expo)`; intended physical-device acceptance remains
+separate.
 The integrated Go suite, required ConversationContinuity/AgentMind/proactivity/
 web-scroll race gate, `go vet`, native readiness contract checks, client tests,
 `git diff --check`, and independent critic all passed before release. The later
@@ -61,7 +63,7 @@ External reference, adopted selectively rather than introduced as a runtime depe
 
 Older model recommendations are historical baselines, not current authority. The current official model references for this plan are [GPT-5.6](https://developers.openai.com/api/docs/guides/latest-model.md), [GPT-Realtime-2.1](https://developers.openai.com/api/docs/models/gpt-realtime-2.1), [GPT Transcribe](https://developers.openai.com/api/docs/models/gpt-transcribe), and [GPT Live Transcribe](https://developers.openai.com/api/docs/models/gpt-live-transcribe).
 
-## Active completion checkpoint — 2026-08-07 13:45 PT
+## Active completion checkpoint — 2026-08-07 14:08 PT
 
 This is the compact-safe resume ledger for the current goal. A checked item is
 complete only at the scope named; local implementation is not release proof.
@@ -154,9 +156,13 @@ complete only at the scope named; local implementation is not release proof.
 - [x] Built native Build 48 from exact commit `7689bea`, uploaded it through
   EAS, and submitted it successfully to Apple. EAS now reports both the build
   and submission `FINISHED`, with no submission error.
-- [ ] Separately verify Build 48 is App Store Connect `VALID`, available to the
-  internal Team group, and accessible on the intended physical device. Neither
-  available browser session is currently authenticated to App Store Connect.
+- [x] Verified through an authenticated App Store Connect API observation that
+  Build 48 is `VALID`, unexpired through 2026-11-05, and available to internal
+  `Team (Expo)`; the exact Apple build ID is
+  `2ce3d1b3-a21a-4700-9c20-fce1d5377450`.
+- [ ] Install/open Build 48 from TestFlight on the intended physical device and
+  complete the focused native acceptance matrix, including inline generated
+  images and their Open, Save to Drive, and editable Regenerate controls.
 - [x] Activated the exact reviewed `axx/main` HEAD through
   `/opt/meetingassist-releases/<sha>`; ledger, receipt, all Compose image IDs,
   Caddy, `/healthz`, `/readyz`, rollback retention, and
