@@ -1,14 +1,17 @@
 # STRIDE Next Evolution — Master Architecture and Execution Ledger
 
-**Status:** Active E10 remediation. Exact release
-`1188281b9197b5f6a2e654f236b1a51bc4a5ba95` is serving under release-ledger
-generation 25 with `verified-local-unsigned` process evidence; public
-`/healthz` and `/readyz` agree with both receipted application images and the
-retained rollback release `ca47c27614f53a354634b82673698a6059fa9280`.
+**Status:** Active E10 remediation. The exact `axx/main` HEAD release is serving
+under the immutable release ledger with `verified-local-unsigned` process
+evidence. At the 2026-08-07 13:45 PT checkpoint that identity was
+`b95794fe4a04e3f0bcfe5b2dad20e4d2c67576ac`, ledger generation 26; public
+`/healthz` and `/readyz` agreed with both receipted application images and the
+retained rollback release `1188281b9197b5f6a2e654f236b1a51bc4a5ba95`.
 Native Build 48 was built from
 `7689bead6b8365c14e67a11dfa06063b23cf058b`, uploaded successfully through EAS,
-and submitted to Apple; App Store Connect `VALID`, internal Team availability,
-and intended-device access still require an authenticated Apple observation.
+and submitted to Apple. EAS submission
+`8c5ed1d9-d449-4959-8d93-f2ba5aaa9e68` is `FINISHED` with no error; App Store
+Connect `VALID`, internal Team availability, and intended-device access still
+require an authenticated Apple observation.
 The integrated Go suite, required ConversationContinuity/AgentMind/proactivity/
 web-scroll race gate, `go vet`, native readiness contract checks, client tests,
 `git diff --check`, and independent critic all passed before release. The later
@@ -58,7 +61,7 @@ External reference, adopted selectively rather than introduced as a runtime depe
 
 Older model recommendations are historical baselines, not current authority. The current official model references for this plan are [GPT-5.6](https://developers.openai.com/api/docs/guides/latest-model.md), [GPT-Realtime-2.1](https://developers.openai.com/api/docs/models/gpt-realtime-2.1), [GPT Transcribe](https://developers.openai.com/api/docs/models/gpt-transcribe), and [GPT Live Transcribe](https://developers.openai.com/api/docs/models/gpt-live-transcribe).
 
-## Active completion checkpoint — 2026-08-07 13:40 PT
+## Active completion checkpoint — 2026-08-07 13:45 PT
 
 This is the compact-safe resume ledger for the current goal. A checked item is
 complete only at the scope named; local implementation is not release proof.
@@ -85,22 +88,24 @@ complete only at the scope named; local implementation is not release proof.
 ### Current candidate implementation
 
 - [x] ConversationContinuity exact-revision, body-free rebuild/restart/delete/
-  edit corrections implemented locally; final frozen normal/race gates pending.
+  edit corrections are released; frozen normal and race gates passed.
 - [x] AgentMind exact source-linked correction/supersession/forgetting and
-  signed-in inspection authorization implemented locally; final gates pending.
+  signed-in inspection authorization are released; frozen normal and race
+  gates passed.
 - [x] Proactive reply/react/no-action, quiet/active behavior, dedupe,
   revalidation, non-launching Colton consultation, and shutdown corrections
-  implemented locally; final gates pending.
+  are released; frozen normal and race gates passed.
 - [x] Research runner and research follow-up are forced to OpenAI Sol/high with
-  actual model/effort provenance; final route regression matrix pending.
+  actual model/effort provenance; the route regression matrix passed.
 - [x] Scout-answer truncation receives one bounded larger-output retry and still
-  fails closed without a fuzzy fallback; final receipt tests pending.
+  fails closed without a fuzzy fallback; receipt tests passed.
 - [x] Render jobs are written atomically as `0660`; exact-release init repairs
-  existing queue JSON ownership/mode before the runner starts. Live repair and
-  exact Country Golf PDF verification remain pending deployment.
+  existing queue JSON ownership/mode before the runner starts. The confined
+  repair is live and the exact Country Golf PDF completed.
 - [x] Drive file rename and named Save-to-Drive server seams implemented.
-- [x] Hierarchical Drive folders (`parentId`, depth/cycle validation) implemented
-  additively over existing root folders; final tests pending.
+- [x] Hierarchical Drive folders (`parentId`, depth/cycle validation) are live
+  additively over existing root folders; focused tests and rendered navigation
+  passed.
 - [x] Destination-bound `POST /assistant/attachments/from-file` implemented with
   exact Drive-source revision revalidation and no body-bearing response.
 - [x] Native thread-chat proposal editing, rich terminal actions, Browse Drive,
@@ -109,16 +114,19 @@ complete only at the scope named; local implementation is not release proof.
 - [x] Replied-to generated images now enter the authorized OpenAI multimodal
   answer turn, and prompt reconstruction bypasses workstream routing; focused
   regression passes.
-- [x] Web proposal/result/Drive/document-tag UX is implemented locally: the
+- [x] Web proposal/result/Drive/document-tag UX is live: the
   proposal is Scout's editable execution prompt, terminal work is a compact
   in-feed result with actual preview/provenance and Open/PDF/named Save/
   editable Regenerate actions, the persistent terminal rail and invented stage
   log are gone, Drive has hierarchical browsing and Rename, and both the
-  paperclip and `+` palette can attach exact authorized Drive sources.
+  paperclip and `+` palette can attach exact authorized Drive sources. Signed-in
+  production observation proved report PDF download, folder traversal, the
+  per-file Rename menu, and inline generated-image controls.
 - [x] Web `#document` autocomplete is implemented for the main and desktop
   reply composers; selection mints and attaches an exact destination-bound
-  source grant instead of resolving by display name. Rendered QA remains part
-  of the frozen client gate below.
+  source grant instead of resolving by display name. Signed-in production
+  observation found the exact Country Golf report via `#positioning` without
+  selecting or sending it.
 - [ ] Canvas opening-turn and in-room Drive attachments need separate authority
   contracts because neither currently has an existing Scout-thread destination
   ID. They are not being faked through the thread-only grant endpoint.
@@ -136,7 +144,7 @@ complete only at the scope named; local implementation is not release proof.
 - [x] `go vet ./...`, `git diff --check`, inline frontend JavaScript syntax,
   frontend truth contracts, native typecheck, all 423 native tests, and the 34
   native-readiness/exact-release harness tests passed on the integrated local
-  candidate. The final committed archive identity is still pending commit.
+  candidate and committed archive.
 - [x] Independent critic PASS obtained on the staged candidate after closing
   private/project Drive audience widening, post-commit source revalidation,
   reaction-only proactive visibility, route-documentation truth, and staged
@@ -144,21 +152,29 @@ complete only at the scope named; local implementation is not release proof.
 - [x] Committed the intended combined tree and pushed without force to
   `axx/main`; `stride-site/` remained untracked and untouched.
 - [x] Built native Build 48 from exact commit `7689bea`, uploaded it through
-  EAS, and submitted it successfully to Apple.
+  EAS, and submitted it successfully to Apple. EAS now reports both the build
+  and submission `FINISHED`, with no submission error.
 - [ ] Separately verify Build 48 is App Store Connect `VALID`, available to the
   internal Team group, and accessible on the intended physical device. Neither
   available browser session is currently authenticated to App Store Connect.
-- [x] Activated exact server commit `1188281` through
-  `/opt/meetingassist-releases/<sha>`;
-  require ledger, receipt, all Compose image IDs, Caddy, `/healthz`, `/readyz`,
-  rollback retention, and `verified-local-unsigned` all agree at ledger
-  generation 25.
+- [x] Activated the exact reviewed `axx/main` HEAD through
+  `/opt/meetingassist-releases/<sha>`; ledger, receipt, all Compose image IDs,
+  Caddy, `/healthz`, `/readyz`, rollback retention, and
+  `verified-local-unsigned` agree. The 13:45 PT observation was commit
+  `b95794f`, generation 26.
 - [x] The existing Country Golf report render job was repaired from root-owned
   `0600` to `65532:65532 0660`, completed as a 9-page 141,120-byte PDF, stored
   a durable PDF blob plus page images, and emitted `pdf_exported`.
-- [ ] Verify an authenticated user can download that exact Country Golf PDF in
-  the rendered product; verify direct image analysis answers conversationally
-  without a workstream and Bonfire Chat TL;DR sharing uses the exact document.
+- [x] Verified an authenticated user can download the exact Country Golf PDF in
+  the rendered product. The live report exposes the 141,120-byte PDF, all nine
+  rendered pages, and the 14-source research body.
+- [x] Verified signed-in production rendering for inline generated images,
+  Open, named Save-to-Drive, editable Regenerate, per-file Rename, hierarchical
+  Drive attachment browsing, and `#document` autocomplete.
+- [ ] Perform live send-path acceptance for direct image analysis and exact-
+  source Bonfire Chat TL;DR sharing. Code regressions pass, but this checkpoint
+  intentionally did not create production chat messages under the standing
+  no-production-data-mutation constraint.
 - [ ] Create and verify the new primary STRIDE repository. Discovery found an
   existing, unrelated private `axx-archive/stride` repository, so no repository
   was overwritten, renamed, deleted, or made primary without a user decision.
@@ -167,10 +183,12 @@ complete only at the scope named; local implementation is not release proof.
   real-workforce pilots, and soak remain external acceptance gates unless their
   full evidence is actually produced.
 
-**Exact resume point:** obtain the authenticated Apple observation for Build 48,
-then use an authenticated STRIDE session to prove the existing Country Golf PDF
-download, ordinary image analysis, exact-source TL;DR sharing to pinned Bonfire
-Chat, and desktop/mobile rendered UX. Resolve the pre-existing
+**Exact resume point:** sign in to the preserved App Store Connect handoff page
+and prove Build 48 is `VALID`, assigned to the internal Team group, and
+available on the intended physical device. If live production test messages are
+authorized, prove ordinary image analysis and exact-source TL;DR sharing to the
+pinned Bonfire Chat; otherwise retain the current code/test proof without
+mutating production chat. Resolve the pre-existing
 `axx-archive/stride` naming collision before creating or changing a primary
 remote. After those gates, continue the explicitly unresolved external E10
 qualification, physical-device, replay/promotion, HA/DR, pilot, and soak work;
