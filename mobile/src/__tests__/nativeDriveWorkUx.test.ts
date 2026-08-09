@@ -32,6 +32,13 @@ test('terminal work opens from the authorized read and receipts only mutating Sa
   assert.doesNotMatch(bubble, /workProgress|progressPercent/);
 });
 
+test('a failed revision stays openable but is labeled honestly', () => {
+  assert.match(bubble, /revisionNeedsAttention/);
+	assert.match(bubble, /followUpStatus === 'needs_attention'/);
+  assert.match(bubble, /Deliverable ready · revision needs attention/);
+  assert.match(bubble, /Delivered · revision needs attention/);
+});
+
 test('Drive browse and hash search mint exact destination-bound grants', () => {
   assert.match(attachmentSheet, /Browse Drive/);
   assert.match(composer, /activeDocumentQuery\(nextValue\)/);

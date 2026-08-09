@@ -44,6 +44,42 @@ func TestIndexScoutChatMessageRoutesGoalRefsAndStageArtifacts(t *testing.T) {
 	}
 }
 
+// Generic workstreams also carry goalStatus for lifecycle reporting. That
+// field must not classify research/design work as a goal or desktop will hide
+// the report card behind the compact goal transcript path.
+func TestIndexGenericWorkStatusDoesNotClassifyAsGoal(t *testing.T) {
+	html := readIndexForGoalThreadCards(t)
+	body := functionBody(html, "function isGoalArtifact(artifact)")
+	if body == "" {
+		t.Fatal("could not extract isGoalArtifact body")
+	}
+	if strings.Contains(body, "Boolean(m.goalStatus)") {
+		t.Fatal("generic goalStatus still classifies every workstream as a goal")
+	}
+	for _, want := range []string{"m.goalPlan", "m.goalId", "=== 'goal'"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("goal classification missing exact goal signal %q", want)
+		}
+	}
+}
+
+func TestIndexResearchCardKeepsLastAcceptedReportAndShowsFailedRevision(t *testing.T) {
+	html := readIndexForGoalThreadCards(t)
+	body := functionBody(html, "function updateScoutChatResearchNode(card, status, artifact)")
+	if body == "" {
+		t.Fatal("could not extract updateScoutChatResearchNode body")
+	}
+	for _, want := range []string{
+		"followUpStatus",
+		"delivered · revision needs attention",
+		"pill--offline",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("research revision state missing %q", want)
+		}
+	}
+}
+
 // Node cache: one module-level Map keyed by goal artifact id; the message
 // render path and the launcher's ghost card share the SAME node (no double
 // card), refreshed through updateGoalCard.

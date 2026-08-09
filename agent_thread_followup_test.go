@@ -196,7 +196,7 @@ func TestFollowUpSuccessAdvancesCardAttachesPackageAndDeliversOrigin(t *testing.
 	previousAsync := startAgentThreadFollowUpAsync
 	startAgentThreadFollowUpAsync = func(runApp *kanbanBoardApp, run agentThreadFollowUpRun) {
 		runApp.runAgentThreadFollowUpWithResponder(run, func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
-			return "Vision: recovered.\n\nWhat changed in v2: the worker error was resolved.", nil
+			return completeResearchArtifactForTest() + "\n\nWhat changed in v2: the worker error was resolved.", nil
 		})
 	}
 	t.Cleanup(func() { startAgentThreadFollowUpAsync = previousAsync })
@@ -416,8 +416,24 @@ func TestFollowUpErrorPreservesBodyAndStatus(t *testing.T) {
 	if !strings.Contains(stored.Metadata["followUpError"], "worker exploded") {
 		t.Fatalf("followUpError=%q, want the worker error", stored.Metadata["followUpError"])
 	}
+	if stored.Metadata["followUpStatus"] != "needs_attention" || !strings.Contains(stored.Metadata["progressNote"], "revision needs attention") {
+		t.Fatalf("failed revision was not projected honestly: status=%q note=%q", stored.Metadata["followUpStatus"], stored.Metadata["progressNote"])
+	}
 	if stored.Metadata["readinessScore"] != "6.2" {
 		t.Fatalf("readinessScore=%q, want the prior score untouched", stored.Metadata["readinessScore"])
+	}
+
+	startAgentThreadFollowUpAsync = func(runApp *kanbanBoardApp, run agentThreadFollowUpRun) {
+		runApp.runAgentThreadFollowUpWithResponder(run, func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
+			return "# Nimbus pressure test\n\nREADINESS: 7.1/10\n\nThe revision recovered successfully.", nil
+		})
+	}
+	if _, err := app.launchAgentThreadFollowUp(artifact.ID, "retry after recovery", "Tim", nil); err != nil {
+		t.Fatalf("launch successful retry: %v", err)
+	}
+	stored, _ = app.osArtifactByID(artifact.ID)
+	if stored.Metadata["followUpStatus"] != "complete" || stored.Metadata["progressNote"] != "" || stored.Metadata["followUpError"] != "" {
+		t.Fatalf("successful retry retained failed revision state: status=%q note=%q error=%q", stored.Metadata["followUpStatus"], stored.Metadata["progressNote"], stored.Metadata["followUpError"])
 	}
 }
 
@@ -907,7 +923,7 @@ func TestFollowUpAttachmentCommittedBeforeAsyncWorkerStillAuthorizes(t *testing.
 	providerCalls := 0
 	app.runAgentThreadFollowUpWithResponder(capturedRun, func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
 		providerCalls++
-		return "# Revised report\n\nI used the authorized attachment.", nil
+		return completeResearchArtifactForTest() + "\n\nI used the authorized attachment.", nil
 	})
 	stored, ok := app.osArtifactByID(artifact.ID)
 	if providerCalls != 1 || !ok || stored.Metadata["status"] != "complete" || !strings.Contains(stored.Text, "authorized attachment") {

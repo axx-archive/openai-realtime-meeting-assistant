@@ -294,6 +294,7 @@ func TestCreateOpenAITextResponseEnablesWebSearchAndPreservesCitationURLs(t *tes
 			t.Fatalf("decode request: %v", err)
 		}
 		w.Write([]byte(`{
+			"id":"resp_web_search_test",
 			"status":"completed",
 			"output":[{"type":"web_search_call"},{"type":"message","content":[{"type":"output_text","text":"The official release confirms the feature.","annotations":[
 				{"type":"url_citation","url":"https://docs.example.com/releases/2026","title":"Official 2026 release"},
@@ -320,6 +321,9 @@ func TestCreateOpenAITextResponseEnablesWebSearchAndPreservesCitationURLs(t *tes
 	}
 	if !strings.Contains(text, "Official 2026 release — https://docs.example.com/releases/2026") {
 		t.Fatalf("text=%q, want durable exact citation URL", text)
+	}
+	if !strings.Contains(text, "stride-web-citation-receipt:v1") {
+		t.Fatalf("text=%q, want server-owned citation receipt", text)
 	}
 	if strings.Contains(text, "javascript:") {
 		t.Fatalf("text=%q, unsafe citation URL was preserved", text)

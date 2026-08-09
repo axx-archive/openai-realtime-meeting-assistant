@@ -492,7 +492,7 @@ func TestAgentThreadCompletionNotifiesCreator(t *testing.T) {
 
 	originalResponder := createOpenAITextResponse
 	createOpenAITextResponse = func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
-		return "Vision: done.\n\nGoal: complete.\n\nVerification: verified.", nil
+		return completeResearchArtifactForTest(), nil
 	}
 	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
 

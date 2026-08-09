@@ -377,7 +377,7 @@ func TestDirectColtonFollowUpKeepsIdentityRelationshipLaneAndLearningLineage(t *
 		followUpRunID = run.runID
 		runApp.runAgentThreadFollowUpWithResponder(run, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 			captured = request
-			return "# Research brief\n\nWhat changed in v2: I tightened the recommendation around AJ's decision.\n\nVerified follow-up.", nil
+			return completeResearchArtifactForTest() + "\n\nWhat changed in v2: I tightened the recommendation around AJ's decision.\n\nVerified follow-up.", nil
 		})
 	}
 	t.Cleanup(func() { startAgentThreadFollowUpAsync = previousAsync })
@@ -479,7 +479,7 @@ func TestAgentProfileIsReauthorizedAndCorrectedLearningReachesProviderPrompt(t *
 	result, err := fixture.app.produceAgentThreadArtifactWithWorker(context.Background(), launched, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		providerCalls++
 		instructions = request.Instructions
-		return "# Research brief\n\nVerified.", nil
+		return completeResearchArtifactForTest(), nil
 	})
 	if err != nil || !result.Terminal || providerCalls != 1 {
 		t.Fatalf("reauthorized run result=%+v calls=%d err=%v", result, providerCalls, err)

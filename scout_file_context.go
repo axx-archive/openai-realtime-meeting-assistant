@@ -441,6 +441,93 @@ func (app *kanbanBoardApp) agentThreadMemory(ctx context.Context, requester stri
 	return appendUniqueFileContextEntries(pinned, base)
 }
 
+// agentThreadSourceConversationEntries resolves the exact, currently
+// authorized channel transcript ending at the human message that minted the
+// work proposal. It deliberately excludes later conversation: a run is bound
+// to what the requester could see and approved, not whatever happened to land
+// in the channel while the provider was working.
+func (app *kanbanBoardApp) agentThreadSourceConversationEntries(principal RecallPrincipal, metadata map[string]string) ([]meetingMemoryEntry, error) {
+	sourceMessageID := strings.TrimSpace(metadata["sourceMessageId"])
+	if sourceMessageID == "" {
+		return nil, nil
+	}
+	threadID := strings.TrimSpace(metadata["originId"])
+	if strings.TrimSpace(metadata["originKind"]) != agentThreadOriginChannel || threadID == "" || principal.ThreadID != threadID {
+		return nil, fmt.Errorf("%w: the originating conversation is unavailable", ErrAgentThreadSourceChanged)
+	}
+	if principal.User == nil || normalizeAccountEmail(principal.User.Email) == "" {
+		return nil, fmt.Errorf("%w: the originating requester is unavailable", ErrAgentThreadSourceChanged)
+	}
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	thread, _, threadErr := app.scoutChatThreadByID(principal.User.Email, threadID)
+	if threadErr != nil || thread.ArchivedAt != "" || scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
+		lock.Unlock()
+		return nil, fmt.Errorf("%w: the originating conversation is unavailable", ErrAgentThreadSourceChanged)
+	}
+	messages, binding, bindingErr := scoutChatSourceWindow(thread, sourceMessageID)
+	lock.Unlock()
+	if bindingErr != nil || binding.MessageDigest != strings.TrimSpace(metadata["sourceMessageDigest"]) || binding.WindowDigest != strings.TrimSpace(metadata["sourceWindowDigest"]) {
+		return nil, fmt.Errorf("%w: the approved source conversation changed", ErrAgentThreadSourceChanged)
+	}
+
+	window := make([]meetingMemoryEntry, 0, agentThreadSourceConversationWindow)
+	for _, message := range messages {
+		if strings.TrimSpace(message.ID) == "" {
+			continue
+		}
+		digest, digestErr := scoutChatSourceMessageDigest(thread, message)
+		if digestErr != nil {
+			return nil, fmt.Errorf("%w: a source message is invalid", ErrAgentThreadSourceChanged)
+		}
+		createdAt, timeErr := parseSTRIDEChatTime(message.CreatedAt)
+		if timeErr != nil {
+			return nil, fmt.Errorf("%w: a source message timestamp is invalid", ErrAgentThreadSourceChanged)
+		}
+		entry := strideConversationRecallEntry(thread, message, STRIDEConversationMessageProjection{
+			TenantID:   canonicalTenantID(),
+			ThreadID:   thread.ID,
+			SourceID:   message.ID,
+			AuthorName: message.AuthorName,
+			LatestEvent: STRIDEReference{
+				ID:     "chat-source-" + digest,
+				Digest: digest,
+			},
+		}, createdAt)
+		window = append(window, entry)
+	}
+	return append([]meetingMemoryEntry(nil), window...), nil
+}
+
+// withCurrentAgentThreadSource holds the originating chat's mutation lock from
+// the exact approval-digest recheck through the authoritative artifact write.
+// Provider admission alone is not enough: a rename, edit, delete, archive, or
+// audience change must not race between the final check and publication.
+func (app *kanbanBoardApp) withCurrentAgentThreadSource(thread scoutAgentThread, effect func() error) error {
+	metadata := thread.Artifact.Metadata
+	sourceMessageID := strings.TrimSpace(metadata["sourceMessageId"])
+	if sourceMessageID == "" {
+		return effect()
+	}
+	threadID := strings.TrimSpace(metadata["originId"])
+	requester := normalizeAccountEmail(metadata["requestedBy"])
+	if strings.TrimSpace(metadata["originKind"]) != agentThreadOriginChannel || threadID == "" || requester == "" {
+		return fmt.Errorf("%w: the originating conversation is unavailable", ErrAgentThreadSourceChanged)
+	}
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	defer lock.Unlock()
+	current, _, err := app.scoutChatThreadByID(requester, threadID)
+	if err != nil || current.ArchivedAt != "" || scoutChatThreadVisibility(current) != scoutChatVisibilityPublic {
+		return fmt.Errorf("%w: the originating conversation is unavailable", ErrAgentThreadSourceChanged)
+	}
+	_, binding, err := scoutChatSourceWindow(current, sourceMessageID)
+	if err != nil || binding.MessageDigest != strings.TrimSpace(metadata["sourceMessageDigest"]) || binding.WindowDigest != strings.TrimSpace(metadata["sourceWindowDigest"]) {
+		return fmt.Errorf("%w: the approved source conversation changed", ErrAgentThreadSourceChanged)
+	}
+	return effect()
+}
+
 // agentThreadEntryAuthorizedForDestination proves that a selected source can
 // be read by the audience that will receive the completed work. Requester read
 // access is necessary but not sufficient for a shared delivery: a private
@@ -534,6 +621,11 @@ func (app *kanbanBoardApp) agentThreadProviderContext(ctx context.Context, threa
 	var base []meetingMemoryEntry
 	if ok {
 		base = app.memorySnapshotForPrincipal(ctx, principal, 20)
+		sourceEntries, sourceErr := app.agentThreadSourceConversationEntries(principal, metadata)
+		if sourceErr != nil {
+			return AgentJobContext{}, sourceErr
+		}
+		base = appendUniqueFileContextEntries(sourceEntries, base)
 	}
 	context := AgentJobContext{Board: app.snapshotState(), Memory: base}
 	refs := decodeAssistantContextRefs(metadata["contextRefs"])

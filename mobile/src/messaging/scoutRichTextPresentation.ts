@@ -99,6 +99,9 @@ export function parseScoutMarkdown(value: string): ScoutBlock[] {
       continue;
     }
     if (!line) continue;
+	if (/^<!--\s*stride-web-citation-receipt:v1\s+count=\d+\s+domains=\d+\s+searches=\d+\s+response=[a-f0-9]{64}\s+digest=[a-f0-9]{64}\s*-->$/u.test(line)) {
+		continue;
+	}
 
     if (/^(?:-{3,}|\*{3,}|_{3,})$/u.test(line)) {
       blocks.push({ kind: 'rule', inlines: [] });

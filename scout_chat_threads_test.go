@@ -388,7 +388,7 @@ func TestScoutChatChannelScoutAnswersOnlyWhenMentioned(t *testing.T) {
 	if !ok || agentThread.Mode != "research" || launches != 1 {
 		t.Fatalf("accepted public proposal thread=%#v launches=%d", response["agentThread"], launches)
 	}
-	if meta := agentThread.Artifact.Metadata; meta["originKind"] != agentThreadOriginChannel || meta["originId"] != channel.ID || meta["requestedBy"] != "tim@shareability.com" {
+	if meta := agentThread.Artifact.Metadata; meta["originKind"] != agentThreadOriginChannel || meta["originId"] != channel.ID || meta["requestedBy"] != "tim@shareability.com" || meta["sourceMessageId"] != lineage[0].sourceMessageID || !isHexDigest(meta["sourceMessageDigest"]) || !isHexDigest(meta["sourceWindowDigest"]) {
 		t.Fatalf("accepted public proposal origin=%v", meta)
 	}
 	if modelCalls != 1 {
@@ -548,7 +548,7 @@ func TestAgentThreadCompletionUpdatesPersistedChatThreadRef(t *testing.T) {
 
 	originalResponder := createOpenAITextResponse
 	createOpenAITextResponse = func(_ context.Context, _ string, _ openAITextRequest) (string, error) {
-		return "Vision: rodeo creator market.\n\nGoal: research complete.\n\nVerification: artifact complete.", nil
+		return completeResearchArtifactForTest(), nil
 	}
 	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
 

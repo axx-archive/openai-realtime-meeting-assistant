@@ -126,6 +126,118 @@ func TestSTRIDECompanyConversationRecallUsesCurrentPublicSourceAndReactionState(
 	}
 }
 
+func TestAgentThreadResearchContextEndsAtExactRequestMessage(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	fixture := newSTRIDECoworkerTestFixture(t)
+	fixture.app.mu.Lock()
+	fixture.app.apiKey = ""
+	fixture.app.mu.Unlock()
+
+	messages := []scoutChatMessageRecord{
+		{ID: "bonfire-company-context", Kind: "message", Role: "user", Text: "Bonfire is the country culture experience network, built around original IP, community, and natural brand participation.", CreatedAt: time.Now().Add(-3 * time.Minute).UTC().Format(time.RFC3339Nano), AuthorName: "AJ", AuthorEmail: fixture.user.Email},
+		{ID: "bonfire-research-request", Kind: "message", Role: "user", Text: "That's interesting. Scout, research comparable companies and write the elevator pitch.", CreatedAt: time.Now().Add(-2 * time.Minute).UTC().Format(time.RFC3339Nano), AuthorName: "AJ", AuthorEmail: fixture.user.Email},
+		{ID: "later-unapproved-turn", Kind: "message", Role: "user", Text: "PRIVATE-LATER-DIRECTION-MUST-NOT-ENTER-APPROVED-RUN", CreatedAt: time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano), AuthorName: "AJ", AuthorEmail: fixture.user.Email},
+	}
+	if _, err := fixture.app.commitScoutChatThreadMessages(fixture.user.Email, fixture.table.ID, messages...); err != nil {
+		t.Fatal(err)
+	}
+	principal := recallPrincipalForUser(fixture.user)
+	principal.Audience = "shared_channel"
+	principal.ThreadID = fixture.table.ID
+	currentThread, _, err := fixture.app.scoutChatThreadByID(fixture.user.Email, fixture.table.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, sourceBinding, err := scoutChatSourceWindow(currentThread, "bonfire-research-request")
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := map[string]string{
+		"originKind":          agentThreadOriginChannel,
+		"originId":            fixture.table.ID,
+		"sourceMessageId":     sourceBinding.MessageID,
+		"sourceMessageDigest": sourceBinding.MessageDigest,
+		"sourceWindowDigest":  sourceBinding.WindowDigest,
+	}
+	entries, err := fixture.app.agentThreadSourceConversationEntries(principal, metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := ""
+	for _, entry := range entries {
+		joined += "\n" + entry.Text
+	}
+	if !strings.Contains(joined, "country culture experience network") || !strings.Contains(joined, "research comparable companies") {
+		t.Fatalf("source-bound context omitted company/request: %s", joined)
+	}
+	if strings.Contains(joined, "PRIVATE-LATER-DIRECTION") {
+		t.Fatalf("post-approval turn entered source-bound context: %s", joined)
+	}
+	currentThread.Title = "renamed after approval"
+	if err := fixture.app.saveScoutChatThread(currentThread); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.app.agentThreadSourceConversationEntries(principal, metadata); err == nil {
+		t.Fatal("channel-title change altered the provider projection without invalidating approval")
+	}
+	metadata["sourceWindowDigest"] = strings.Repeat("0", 64)
+	if _, err := fixture.app.agentThreadSourceConversationEntries(principal, metadata); err == nil {
+		t.Fatal("changed approved conversation window did not fail closed")
+	}
+	metadata["sourceWindowDigest"] = sourceBinding.WindowDigest
+	metadata["sourceMessageId"] = "missing-message"
+	if _, err := fixture.app.agentThreadSourceConversationEntries(principal, metadata); err == nil {
+		t.Fatal("missing exact request message did not fail closed")
+	}
+}
+
+func TestAgentThreadTerminalSourceAuthorityIsHeldThroughFinalEffect(t *testing.T) {
+	fixture := newSTRIDECoworkerTestFixture(t)
+	message := scoutChatMessageRecord{ID: "held-source", Kind: "message", Role: "user", Text: "Research the exact approved company context.", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), AuthorName: "AJ", AuthorEmail: fixture.user.Email}
+	if _, err := fixture.app.commitScoutChatThreadMessages(fixture.user.Email, fixture.table.ID, message); err != nil {
+		t.Fatal(err)
+	}
+	current, _, err := fixture.app.scoutChatThreadByID(fixture.user.Email, fixture.table.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, binding, err := scoutChatSourceWindow(current, message.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := scoutAgentThread{Artifact: meetingMemoryEntry{Metadata: map[string]string{
+		"originKind": agentThreadOriginChannel, "originId": fixture.table.ID, "requestedBy": fixture.user.Email,
+		"sourceMessageId": binding.MessageID, "sourceMessageDigest": binding.MessageDigest, "sourceWindowDigest": binding.WindowDigest,
+	}}}
+	entered, release, effectDone := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		effectDone <- fixture.app.withCurrentAgentThreadSource(thread, func() error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	<-entered
+	mutationDone := make(chan error, 1)
+	go func() {
+		_, mutationErr := fixture.app.commitScoutChatThreadMessages(fixture.user.Email, fixture.table.ID, scoutChatMessageRecord{ID: "post-approval-mutation", Kind: "message", Role: "user", Text: "must wait for terminal write", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), AuthorName: "AJ", AuthorEmail: fixture.user.Email})
+		mutationDone <- mutationErr
+	}()
+	select {
+	case mutationErr := <-mutationDone:
+		t.Fatalf("source mutation escaped terminal authority lock: %v", mutationErr)
+	case <-time.After(75 * time.Millisecond):
+	}
+	close(release)
+	if err := <-effectDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-mutationDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func strideConversationProjectionForTest(t *testing.T, runtime *STRIDERuntime, email, sourceID string) STRIDEConversationMessageProjection {
 	t.Helper()
 	var found STRIDEConversationMessageProjection

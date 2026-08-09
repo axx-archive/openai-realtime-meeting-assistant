@@ -62,3 +62,11 @@ test('reports preserve heading levels, nested lists, task state, and rules', () 
   assert.equal(blocks[4].marker, '○');
   assert.equal(blocks[2].inlines.some((inline) => inline.kind === 'strong'), true);
 });
+
+test('server citation evidence remains durable but invisible in native report prose', () => {
+  const marker = `<!-- stride-web-citation-receipt:v1 count=5 domains=4 searches=3 response=${'a'.repeat(64)} digest=${'b'.repeat(64)} -->`;
+  const blocks = parseScoutMarkdown(`# Sources\n- [Official source](https://example.com)\n${marker}`);
+  const visible = blocks.flatMap((block) => block.inlines.map((inline) => inline.text)).join(' ');
+  assert.equal(visible.includes('stride-web-citation-receipt'), false);
+  assert.equal(visible.includes('Official source'), true);
+});

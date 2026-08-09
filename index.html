@@ -51847,7 +51847,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       function isGoalArtifact(artifact) {
         const m = artifact?.metadata || {}
-        return Boolean(m.goalPlan) || Boolean(m.goalId) || String(m.mode || '') === 'goal' || Boolean(m.goalStatus)
+		// Every workstream carries goalStatus as lifecycle metadata. Treating that
+		// generic field as a goal hid completed research/design cards on desktop,
+		// leaving only the launch sentence in Bonfire Chat. A goal requires an
+		// actual goal identity/plan or explicit goal mode.
+		return Boolean(m.goalPlan) || Boolean(m.goalId) || String(m.mode || '') === 'goal'
       }
 
       function goalPlanFromArtifact(artifact) {
@@ -58435,6 +58439,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const rejected = value === 'rejected'
         const error = value === 'error' || value === 'failed'
         const done = value === 'complete' || value === 'published'
+		const revisionNeedsAttention = done && String(artifact?.metadata?.followUpStatus || '').toLowerCase() === 'needs_attention'
         const humanPhase = desktopWorkPhase(artifact, value)
         const active = queued || running
 
@@ -58459,14 +58464,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
 
         if (pill) {
-          pill.className = 'pill ' + (active ? 'pill--connecting pill--breathe' : approvalRequired || rejected || error ? 'pill--offline' : 'pill--listening')
+          pill.className = 'pill ' + (active ? 'pill--connecting pill--breathe' : approvalRequired || rejected || error || revisionNeedsAttention ? 'pill--offline' : 'pill--listening')
         }
         if (statusText) {
-          statusText.textContent = queued ? 'queued' : running ? 'running' : approvalRequired ? 'needs approval' : rejected ? 'rejected' : error ? 'needs attention' : 'complete'
+          statusText.textContent = queued ? 'queued' : running ? 'running' : approvalRequired ? 'needs approval' : rejected ? 'rejected' : error ? 'needs attention' : revisionNeedsAttention ? 'delivered · revision needs attention' : 'complete'
         }
         if (agents) {
           const agentName = String(artifact?.metadata?.agentName || artifact?.metadata?.agentDisplayName || artifact?.metadata?.workerName || 'Scout').trim() || 'Scout'
-          agents.textContent = queued ? `${agentName} · queued` : running ? `${agentName} · ${humanPhase.label}` : approvalRequired ? `${agentName} · needs approval` : rejected ? `${agentName} · gate rejected` : error ? `${agentName} · needs attention` : `${agentName} · delivered`
+          agents.textContent = queued ? `${agentName} · queued` : running ? `${agentName} · ${humanPhase.label}` : approvalRequired ? `${agentName} · needs approval` : rejected ? `${agentName} · gate rejected` : error ? `${agentName} · needs attention` : revisionNeedsAttention ? `${agentName} · delivered · revision needs attention` : `${agentName} · delivered`
         }
 	    if (preview) {
 	      const body = compactArtifactPreview(String(artifact?.text || ''))

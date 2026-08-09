@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -107,6 +108,7 @@ type openAIResponsesTool struct {
 }
 
 type openAIResponsesBody struct {
+	ID                string `json:"id,omitempty"`
 	Status            string `json:"status,omitempty"`
 	ServiceTier       string `json:"service_tier,omitempty"`
 	IncompleteDetails *struct {
@@ -388,7 +390,7 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 
 	text := extractOpenAIResponseText(body)
 	if request.EnableWebSearch && request.JSONSchema == nil {
-		text = appendOpenAIResponseWebSources(text, extractOpenAIResponseWebCitations(body))
+		text = appendOpenAIResponseWebSources(text, extractOpenAIResponseWebEvidence(body))
 	}
 	if text == "" {
 		emptyErr := &openAIOutputRejection{reason: "empty_output"}
@@ -480,10 +482,19 @@ type openAIResponseWebCitation struct {
 	URL   string
 }
 
-func extractOpenAIResponseWebCitations(body openAIResponsesBody) []openAIResponseWebCitation {
+type openAIResponseWebEvidence struct {
+	ResponseID  string
+	SearchCalls int
+	Citations   []openAIResponseWebCitation
+}
+
+func extractOpenAIResponseWebEvidence(body openAIResponsesBody) openAIResponseWebEvidence {
 	seen := map[string]bool{}
 	citations := make([]openAIResponseWebCitation, 0)
 	for _, output := range body.Output {
+		if output.Type == "web_search_call" {
+			continue
+		}
 		if output.Type != "" && output.Type != "message" {
 			continue
 		}
@@ -506,17 +517,28 @@ func extractOpenAIResponseWebCitations(body openAIResponsesBody) []openAIRespons
 			}
 		}
 	}
-	return citations
+	searchCalls := 0
+	for _, output := range body.Output {
+		if output.Type == "web_search_call" {
+			searchCalls++
+		}
+	}
+	return openAIResponseWebEvidence{ResponseID: strings.TrimSpace(body.ID), SearchCalls: searchCalls, Citations: citations}
 }
 
 // appendOpenAIResponseWebSources makes the provider's URL-citation receipt
 // durable in the saved artifact even when the model rendered citation markers
-// rather than literal URLs in its prose. URLs already present are not repeated.
-func appendOpenAIResponseWebSources(text string, citations []openAIResponseWebCitation) string {
-	text = strings.TrimSpace(text)
-	var lines []string
-	for _, citation := range citations {
-		if strings.Contains(text, citation.URL) {
+// rather than literal URLs in its prose. The model cannot self-mint this
+// receipt: any claimed block is stripped and the server rebuilds it only from
+// the provider response ID, hosted-search calls, and URL annotations.
+func appendOpenAIResponseWebSources(text string, evidence openAIResponseWebEvidence) string {
+	text = stripOpenAIWebCitationReceipt(text)
+	lines := make([]string, 0, len(evidence.Citations))
+	urls := make([]string, 0, len(evidence.Citations))
+	domains := map[string]bool{}
+	for _, citation := range evidence.Citations {
+		parsed, err := url.Parse(citation.URL)
+		if err != nil || parsed.Hostname() == "" {
 			continue
 		}
 		line := "- " + citation.URL
@@ -524,9 +546,18 @@ func appendOpenAIResponseWebSources(text string, citations []openAIResponseWebCi
 			line = "- " + citation.Title + " — " + citation.URL
 		}
 		lines = append(lines, line)
+		urls = append(urls, citation.URL)
+		domains[strings.ToLower(parsed.Hostname())] = true
 	}
-	if len(lines) == 0 {
+	if len(lines) == 0 || evidence.SearchCalls < 1 || evidence.ResponseID == "" {
 		return text
 	}
-	return strings.TrimSpace(text + "\n\nWeb sources used\n" + strings.Join(lines, "\n"))
+	receipt := fmt.Sprintf("<!-- stride-web-citation-receipt:v1 count=%d domains=%d searches=%d response=%s digest=%s -->", len(urls), len(domains), evidence.SearchCalls, sha256Hex([]byte(evidence.ResponseID)), sha256Hex([]byte(strings.Join(urls, "\n"))))
+	return strings.TrimSpace(text + "\n\n## Scout source receipt\n" + strings.Join(lines, "\n") + "\n" + receipt)
+}
+
+var openAIWebCitationReceiptBlockPattern = regexp.MustCompile(`(?is)\n*##\s+Scout source receipt\s*\n.*?(?:<!--\s*stride-web-citation-receipt:v1[^>]*-->|\z)`)
+
+func stripOpenAIWebCitationReceipt(text string) string {
+	return strings.TrimSpace(openAIWebCitationReceiptBlockPattern.ReplaceAllString(text, ""))
 }

@@ -93,9 +93,16 @@ func (app *kanbanBoardApp) launchAgentThread(mode string, query string, createdB
 // reproduces today's behavior exactly. Present fields become additive artifact
 // metadata the AgentRunner layer (and Wave 2's /goal engine) can read back.
 type agentThreadGoalSpec struct {
-	Objective           string
-	ToolTemplate        string
-	ContextRefs         string
+	Objective    string
+	ToolTemplate string
+	ContextRefs  string
+	// SourceMessageID binds chat-origin work to the exact human turn that
+	// requested it. Provider admission re-resolves that message and the
+	// authorized channel window ending at it; vague pronouns such as "this"
+	// therefore cannot silently fall back to unrelated ambient memory.
+	SourceMessageID     string
+	SourceMessageDigest string
+	SourceWindowDigest  string
 	OriginSurface       string
 	RequestedBy         string
 	Authority           string
@@ -158,6 +165,9 @@ func (spec agentThreadGoalSpec) metadata() map[string]string {
 		"objective":           spec.Objective,
 		"toolTemplate":        spec.ToolTemplate,
 		"contextRefs":         spec.ContextRefs,
+		"sourceMessageId":     spec.SourceMessageID,
+		"sourceMessageDigest": spec.SourceMessageDigest,
+		"sourceWindowDigest":  spec.SourceWindowDigest,
 		"originSurface":       spec.OriginSurface,
 		"requestedBy":         spec.RequestedBy,
 		"authority":           spec.Authority,
@@ -599,6 +609,17 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 		app.updateQueuedAgentThread(thread, workerResult)
 		return
 	}
+	if err == nil {
+		// Provider admission is not terminal authority. Re-resolve the exact
+		// request message, destination audience, and selected sources after the
+		// provider returns so a deletion/archive/revocation during research cannot
+		// be published as a current result.
+		if _, sourceErr := app.agentThreadProviderContext(ctx, thread); sourceErr != nil {
+			err = sourceErr
+		} else {
+			err = validateAgentThreadTerminalArtifact(thread, output)
+		}
+	}
 
 	status := "complete"
 	message := assistantToolLabel(thread.Mode) + " thread complete"
@@ -614,6 +635,11 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 	}
 	for key, value := range workerResult.Metadata {
 		if strings.TrimSpace(value) != "" {
+			metadata[key] = value
+		}
+	}
+	if err == nil {
+		for key, value := range researchArtifactEvidenceMetadata(thread, output) {
 			metadata[key] = value
 		}
 	}
@@ -650,7 +676,18 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 		appendThreadRunLog(thread.Artifact, metadata, thread.ID, version, thread.Artifact.Metadata["createdBy"])
 	}
 
-	artifact, _, updateErr := app.updateOSArtifactWithMetadata(thread.Artifact.ID, title, output, agentThreadArtifactWriter(thread, workerResult), metadata)
+	var artifact meetingMemoryEntry
+	writeArtifact := func() error {
+		var innerErr error
+		artifact, _, innerErr = app.updateOSArtifactWithMetadata(thread.Artifact.ID, title, output, agentThreadArtifactWriter(thread, workerResult), metadata)
+		return innerErr
+	}
+	updateErr := error(nil)
+	if err == nil {
+		updateErr = app.withCurrentAgentThreadSource(thread, writeArtifact)
+	} else {
+		updateErr = writeArtifact()
+	}
 	if updateErr != nil {
 		log.Errorf("Failed to update Scout thread artifact %s: %v", thread.ID, updateErr)
 		broadcastAssistantEvent("error", "Scout thread could not update its artifact", agentThreadBroadcastMetadata("launch_agent_thread", thread.ID, "error", ""))
@@ -1374,6 +1411,9 @@ func (app *kanbanBoardApp) produceAgentThreadArtifactForJob(ctx context.Context,
 		Verbosity:       "medium",
 		MaxOutputTokens: agentThreadMaxOutputTokens(),
 		EnableWebSearch: liveWebSearch,
+		ValidateOutput: func(text string) error {
+			return validateAgentThreadTerminalArtifact(thread, text)
+		},
 	})
 	if err != nil {
 		return "", err
@@ -1601,6 +1641,18 @@ func agentThreadPersonaInstruction(metadata map[string]string) string {
 }
 
 func agentThreadInstructions(mode string) string {
+	if normalizeAgentThreadMode(mode) == "research" {
+		return strings.Join([]string{
+			"This is Stride's evidence-grade Scout research contract.",
+			brilliantCoworkerConstitution(),
+			"Answer the user's actual question as a finished decision brief, not as a research plan, work log, request for clarification, or description of work that could be done.",
+			"Treat the source-bound conversation entries as the approved meaning of references such as this, that, it, the company, or above. Name the resolved subject explicitly in the title and Executive Summary.",
+			"Use a specific Markdown title, then the exact readable sections required below. Keep prose crisp, but make the evidence deep enough that a team can make a decision from the artifact alone.",
+			agentThreadModeContract(mode),
+			"Do not claim browser, SSH, repository, interview, or external work unless the input or fetched-source evidence proves it.",
+			"Mode: research.",
+		}, "\n")
+	}
 	return strings.Join([]string{
 		"This is Stride's neutral server-side work-thread contract. The separately supplied coworker identity, when present, is the one and only speaking identity for the run.",
 		brilliantCoworkerConstitution(),
@@ -1634,6 +1686,15 @@ func buildAgentThreadInput(thread scoutAgentThread, board kanbanBoardState, memo
 			builder.WriteString(" / ")
 			builder.WriteString(title)
 		}
+		if messageID := strings.TrimSpace(entry.Metadata["messageId"]); messageID != "" {
+			builder.WriteString(" [source message ")
+			builder.WriteString(messageID)
+			if eventRef := strings.TrimSpace(entry.Metadata["eventRef"]); eventRef != "" {
+				builder.WriteString("; authority event ")
+				builder.WriteString(eventRef)
+			}
+			builder.WriteByte(']')
+		}
 		builder.WriteString(": ")
 		builder.WriteString(compactAssistantLine(entry.Text))
 		builder.WriteByte('\n')
@@ -1665,7 +1726,7 @@ func agentThreadModeContract(mode string) string {
 		// sidecar — the latter two have no web tools, so the source-grading
 		// language talks about verification, not a specific tool that may not be
 		// present.
-		return "For research mode, use these exact readable headings when evidence exists: Executive Summary, Thesis, Evidence, Sources, Counterarguments, Recommendation, Open questions, Next checks, and Worker evidence. Add a short Search tags line near the top. When live source-fetching tools are available, use them for any time-sensitive or externally-verifiable claim, fetch the primary/official source, and cite every fetched URL under Sources. Cite only sources or tool evidence actually used. Give every decaying or comparative figure a value with units and a date, grade each source A (primary/official, verified against a source fetched this run) through D (recall only, nothing verified) — reserve grade A for sources actually fetched and verified this run, and flag any claim you could not verify this run as grade D. When peers are named lay the key metrics side by side in a benchmark table and compute the arithmetic the reader would compute (label it DERIVED). End the Recommendation with 2-3 what-would-change-our-mind triggers with thresholds, and number Next checks so each open question maps to the check that closes it."
+		return "Use these exact headings: Executive Summary, Thesis, Comparable Companies, Evidence, Sources, Counterarguments, Recommendation, Open Questions, Next Checks, and Worker Evidence. Add a one-line Search tags field below the title. If the request asks for positioning, include an Elevator Pitch subsection with final copy, not instructions for writing one. Use hosted web search for every current or externally verifiable claim; prefer primary/official sources and cite the exact fetched URL beside every material claim. Include at least five actually used sources across at least three domains. Give every decaying or comparative figure a value with units and a date. Grade each source A (primary/official, fetched this run) through D (unverified recall), never label an unfetched source A. Put named peers side by side in a real Markdown benchmark table and label derived arithmetic DERIVED. Separate fact from inference. End Recommendation with 2-3 thresholded what-would-change-our-mind triggers, and number Next Checks so each Open Question maps to a closing check. A blocked plan, undefined target, source-free summary, or request for more context fails the gate and must not be presented as completed research."
 	case "design":
 		return "For design mode, include these readable sections: Design intent, Context and research used, Core screens, Interaction states, Responsive behavior, Implementation handoff, Risks, and Next checks. If a relevant research brief appears in memory, explicitly say how it shaped the design."
 	case "grill":
@@ -1681,8 +1742,8 @@ func agentThreadModeMetadata(mode string) map[string]string {
 	switch normalizeAgentThreadMode(mode) {
 	case "research":
 		return map[string]string{
-			"artifactContract": "research_brief_v2",
-			"artifactHeadings": "executive summary thesis evidence sources counterarguments recommendation open questions next checks worker evidence",
+			"artifactContract": "research_brief_v3",
+			"artifactHeadings": "executive summary thesis comparable companies evidence sources counterarguments recommendation open questions next checks worker evidence",
 			"searchTags":       "required",
 		}
 	case "grill":

@@ -451,7 +451,7 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponder(run agentThreadFo
 func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponderAuthorized(run agentThreadFollowUpRun, responder openAITextResponder) {
 	// Always the default text-worker timeout — never codexExecConfigFromEnv():
 	// follow-ups do not consult the configured agent-thread worker mode.
-	ctx, cancel := context.WithTimeout(context.Background(), defaultAgentThreadRequestTimeout)
+	ctx, cancel := agentThreadRequestContext(context.Background(), run.thread)
 	defer cancel()
 
 	if responder == nil {
@@ -513,6 +513,7 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponderAuthorized(run age
 			if strings.TrimSpace(apiKey) == "" {
 				return "", fmt.Errorf("OPENAI_API_KEY is not configured")
 			}
+			liveWebSearch := agentThreadUsesLiveWebSearch(run.thread)
 			raw, responderErr = responder(ctx, apiKey, openAITextRequest{
 				Model: agentThreadTextModel(run.thread),
 				// Keyless-fallback twin: same seat as the keyed follow-up
@@ -522,7 +523,11 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponderAuthorized(run age
 				Input:           run.input,
 				ReasoningEffort: agentThreadTextReasoningEffort(run.thread),
 				Verbosity:       "medium",
-				MaxOutputTokens: 2600,
+				MaxOutputTokens: agentThreadMaxOutputTokens(),
+				EnableWebSearch: liveWebSearch,
+				ValidateOutput: func(text string) error {
+					return validateAgentThreadTerminalArtifact(run.thread, text)
+				},
 			})
 		}
 		if responderErr != nil {
@@ -531,6 +536,12 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponderAuthorized(run age
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
 			return "", fmt.Errorf("%s follow-up produced no artifact text", agentThreadArtifactWriter(run.thread, agentThreadWorkerResult{}))
+		}
+		if _, authErr := app.agentThreadProviderContext(ctx, run.thread); authErr != nil {
+			return "", authErr
+		}
+		if qualityErr := validateAgentThreadTerminalArtifact(run.thread, raw); qualityErr != nil {
+			return "", qualityErr
 		}
 		return raw, nil
 	}()
@@ -551,6 +562,9 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponderAuthorized(run age
 			metadata[key] = value
 		}
 		metadata["followUpError"] = err.Error()
+		metadata["followUpStatus"] = "needs_attention"
+		metadata["followUpErrorAt"] = time.Now().UTC().Format(time.RFC3339Nano)
+		metadata["progressNote"] = "Latest Scout revision needs attention — the last accepted deliverable is still available."
 		artifact, _, updateErr := app.updateOSArtifactWithMetadata(run.artifactID, "", prev.Text, agentThreadArtifactWriter(run.thread, agentThreadWorkerResult{}), metadata)
 		if updateErr != nil {
 			log.Errorf("Failed to restore follow-up artifact %s: %v", run.artifactID, updateErr)
@@ -579,11 +593,16 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponderAuthorized(run age
 		"worker":          worker,
 		"workerBoundary":  workerBoundary,
 		"followUpError":   "",
+		"followUpStatus":  "complete",
+		"progressNote":    "",
 	}
 	for _, key := range agentThreadProfileMetadataKeys {
 		if value := strings.TrimSpace(run.thread.Artifact.Metadata[key]); value != "" {
 			metadata[key] = value
 		}
+	}
+	for key, value := range researchArtifactEvidenceMetadata(run.thread, output) {
+		metadata[key] = value
 	}
 	if value := strings.TrimSpace(run.thread.Artifact.Metadata["agentReauthorizedAt"]); value != "" {
 		metadata["agentReauthorizedAt"] = value
@@ -591,7 +610,12 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponderAuthorized(run age
 	stampReadinessMetadata(prev, run.thread.Mode, output, metadata)
 	appendThreadRunLog(prev, metadata, run.runID, run.version, run.requestedBy)
 
-	artifact, _, updateErr := app.updateOSArtifactWithMetadata(run.artifactID, "", newText, agentThreadArtifactWriter(run.thread, agentThreadWorkerResult{}), metadata)
+	var artifact meetingMemoryEntry
+	updateErr := app.withCurrentAgentThreadSource(run.thread, func() error {
+		var innerErr error
+		artifact, _, innerErr = app.updateOSArtifactWithMetadata(run.artifactID, "", newText, agentThreadArtifactWriter(run.thread, agentThreadWorkerResult{}), metadata)
+		return innerErr
+	})
 	if updateErr != nil {
 		log.Errorf("Failed to update follow-up artifact %s: %v", run.artifactID, updateErr)
 		broadcastAssistantEvent("error", "Scout follow-up could not update its artifact", agentThreadBroadcastMetadata("launch_agent_thread", run.thread.ID, "error", ""))

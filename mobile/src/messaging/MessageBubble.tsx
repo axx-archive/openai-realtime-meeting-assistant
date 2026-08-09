@@ -77,11 +77,13 @@ function workThreadPresentation(message: ScoutMessage) {
   const status = String(message.thread.status ?? 'running').toLowerCase();
   const active = status === 'queued' || status === 'running';
   const complete = status === 'complete' || status === 'published';
+	const followUpStatus = String(message.thread.followUpStatus ?? '').toLowerCase();
+	const revisionNeedsAttention = complete && (followUpStatus === 'needs_attention' || (!followUpStatus && /revision needs attention/iu.test(String(message.thread.progressNote ?? ''))));
   const failed = status === 'failed' || status === 'error' || status === 'needs_attention' || status === 'rejected';
   const needsInput = status === 'approval_required' || status === 'needs_input' || status === 'parked';
   const stage = String(message.thread.currentStage ?? '').toLowerCase();
   const phase = complete
-    ? 'Delivered'
+    ? revisionNeedsAttention ? 'Delivered · revision needs attention' : 'Delivered'
     : needsInput
       ? 'Needs input'
       : failed
@@ -111,7 +113,7 @@ function workThreadPresentation(message: ScoutMessage) {
       : status === 'running'
         ? phase
         : complete
-          ? 'Deliverable ready'
+          ? revisionNeedsAttention ? 'Deliverable ready · revision needs attention' : 'Deliverable ready'
           : needsInput
             ? 'Needs input'
           : failed

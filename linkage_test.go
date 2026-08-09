@@ -122,7 +122,7 @@ func TestRunAgentThreadCompleteAdvancesLinkedCardToInProgress(t *testing.T) {
 	originalResponder := createOpenAITextResponse
 	defer func() { createOpenAITextResponse = originalResponder }()
 	createOpenAITextResponse = func(context.Context, string, openAITextRequest) (string, error) {
-		return "Vision: brief complete.\n\nGoal: done.", nil
+		return completeResearchArtifactForTest(), nil
 	}
 
 	thread, err := app.launchAgentThread("research", "Rodeo creator landscape brief", "AJ")
@@ -428,7 +428,7 @@ func TestProposalWithPackageIdAutoAttachesCompletedArtifact(t *testing.T) {
 	originalResponder := createOpenAITextResponse
 	defer func() { createOpenAITextResponse = originalResponder }()
 	createOpenAITextResponse = func(context.Context, string, openAITextRequest) (string, error) {
-		return "Vision: research complete.\n\nGoal: done.", nil
+		return completeResearchArtifactForTest(), nil
 	}
 
 	// propose with the package name — findPackageByNameOrID resolves it.

@@ -112,6 +112,7 @@ export type ScoutWorkThreadRef = {
   currentStage?: string;
   progressPercent?: number;
   progressNote?: string;
+  followUpStatus?: string;
   startedAt?: string;
   resultTitle?: string;
   resultPreview?: string;

@@ -172,6 +172,7 @@ type scoutChatThreadRef struct {
 	CurrentStage    string  `json:"currentStage,omitempty"`
 	ProgressPercent float64 `json:"progressPercent,omitempty"`
 	ProgressNote    string  `json:"progressNote,omitempty"`
+	FollowUpStatus  string  `json:"followUpStatus,omitempty"`
 	StartedAt       string  `json:"startedAt,omitempty"`
 }
 
@@ -2045,12 +2046,21 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 	// Source-bound work fails before the card is claimed if its exact Files or
 	// chat attachment has disappeared or lost readable content. This keeps the
 	// proposal pending so the user can restore the source and retry.
-	pending, proposalReplyTo, err := app.pendingScoutChatProposalContext(threadID, user.Email, messageID)
+	pending, proposalReplyTo, proposalSource, err := app.pendingScoutChatProposalContext(threadID, user.Email, messageID)
 	if err != nil {
 		return nil, err
 	}
 	if verb == "accepted" && !app.assistantContextRefsReadable(ctx, user, pending.ContextRefs) {
 		return nil, fmt.Errorf("a source file changed or is no longer readable; attach it again before launching")
+	}
+	if verb == "accepted" && strings.EqualFold(strings.TrimSpace(pending.Kind), scoutRouterProposalKindWorkstream) {
+		proposalThread, _, threadErr := app.scoutChatThreadByID(user.Email, threadID)
+		if threadErr != nil {
+			return nil, threadErr
+		}
+		if scoutChatThreadVisibility(proposalThread) == scoutChatVisibilityPublic && proposalSource.MessageID == "" {
+			return nil, fmt.Errorf("proposal source message is unavailable")
+		}
 	}
 	selectedAgentProfile := STRIDEProductAgentContextProfile{}
 	selectedAgent := false
@@ -2143,6 +2153,11 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 					ProposalID: messageID,
 					Path:       "chat_workstream",
 				},
+			}
+			if originKind == agentThreadOriginChannel {
+				spec.SourceMessageID = proposalSource.MessageID
+				spec.SourceMessageDigest = proposalSource.MessageDigest
+				spec.SourceWindowDigest = proposalSource.WindowDigest
 			}
 			delegatedProfile, delegated := STRIDEProductAgentContextProfile{}, false
 			directlyTargeted := selectedAgent && strings.TrimSpace(proposal.AgentID) != ""
@@ -2449,33 +2464,99 @@ func (app *kanbanBoardApp) claimScoutChatChoice(threadID string, viewerEmail str
 // immutable reply ancestry. Confirmation happens in a later HTTP request, so
 // the accepted work card cannot rely on the original append closure to copy
 // ReplyTo; it must recover topology from the stored proposal card itself.
-func (app *kanbanBoardApp) pendingScoutChatProposalContext(threadID string, viewerEmail string, messageID string) (scoutRouterProposal, *scoutChatReplyRef, error) {
+type scoutChatSourceBinding struct {
+	MessageID     string
+	MessageDigest string
+	WindowDigest  string
+}
+
+const agentThreadSourceConversationWindow = 16
+
+// scoutChatSourceMessageDigest binds the exact prompt projection Scout will
+// receive, not just the authored body. Channel title, resolved author, message
+// identity, timestamp, and content all influence the provider projection and
+// therefore all participate in the approval digest.
+func scoutChatSourceMessageDigest(thread scoutChatThreadRecord, message scoutChatMessageRecord) (string, error) {
+	contentDigest, err := strideChatMessageContentDigest(false, message)
+	if err != nil {
+		return "", err
+	}
+	return STRIDEContractDigest(struct {
+		ThreadID     string `json:"threadId"`
+		ChannelTitle string `json:"channelTitle"`
+		MessageID    string `json:"messageId"`
+		CreatedAt    string `json:"createdAt"`
+		Author       string `json:"author"`
+		Content      string `json:"contentDigest"`
+	}{
+		ThreadID:     strings.TrimSpace(thread.ID),
+		ChannelTitle: strings.TrimSpace(thread.Title),
+		MessageID:    strings.TrimSpace(message.ID),
+		CreatedAt:    strings.TrimSpace(message.CreatedAt),
+		Author:       firstNonEmptyString(strings.TrimSpace(message.AuthorName), participantNameForEmail(message.AuthorEmail), scoutParticipantName),
+		Content:      contentDigest,
+	})
+}
+
+func scoutChatSourceWindow(thread scoutChatThreadRecord, sourceMessageID string) ([]scoutChatMessageRecord, scoutChatSourceBinding, error) {
+	sourceMessageID = strings.TrimSpace(sourceMessageID)
+	if sourceMessageID == "" {
+		return nil, scoutChatSourceBinding{}, nil
+	}
+	window := make([]scoutChatMessageRecord, 0, agentThreadSourceConversationWindow)
+	digests := make([]string, 0, agentThreadSourceConversationWindow)
+	binding := scoutChatSourceBinding{MessageID: sourceMessageID}
+	for _, message := range thread.Messages {
+		digest, err := scoutChatSourceMessageDigest(thread, message)
+		if err != nil {
+			return nil, scoutChatSourceBinding{}, fmt.Errorf("source message is invalid")
+		}
+		window = append(window, message)
+		digests = append(digests, message.ID+":"+digest)
+		if len(window) > agentThreadSourceConversationWindow {
+			window = window[1:]
+			digests = digests[1:]
+		}
+		if strings.TrimSpace(message.ID) == sourceMessageID {
+			binding.MessageDigest = digest
+			binding.WindowDigest = sha256Hex([]byte(strings.Join(digests, "\n")))
+			return append([]scoutChatMessageRecord(nil), window...), binding, nil
+		}
+	}
+	return nil, scoutChatSourceBinding{}, fmt.Errorf("source message is unavailable")
+}
+
+func (app *kanbanBoardApp) pendingScoutChatProposalContext(threadID string, viewerEmail string, messageID string) (scoutRouterProposal, *scoutChatReplyRef, scoutChatSourceBinding, error) {
 	thread, _, err := app.scoutChatThreadByID(viewerEmail, threadID)
 	if err != nil {
-		return scoutRouterProposal{}, nil, err
+		return scoutRouterProposal{}, nil, scoutChatSourceBinding{}, err
 	}
 	if thread.ArchivedAt != "" {
-		return scoutRouterProposal{}, nil, fmt.Errorf("chat thread is archived")
+		return scoutRouterProposal{}, nil, scoutChatSourceBinding{}, fmt.Errorf("chat thread is archived")
 	}
 	for _, message := range thread.Messages {
 		if message.ID != messageID || message.Proposal == nil {
 			continue
 		}
 		if message.Proposal.Status != "" {
-			return scoutRouterProposal{}, nil, fmt.Errorf("proposal was already %s", message.Proposal.Status)
+			return scoutRouterProposal{}, nil, scoutChatSourceBinding{}, fmt.Errorf("proposal was already %s", message.Proposal.Status)
 		}
 		var replyTo *scoutChatReplyRef
 		if message.ReplyTo != nil {
 			copy := *message.ReplyTo
 			replyTo = &copy
 		}
-		return *message.Proposal, replyTo, nil
+		_, binding, bindingErr := scoutChatSourceWindow(thread, message.CausedByMessageID)
+		if bindingErr != nil {
+			return scoutRouterProposal{}, nil, scoutChatSourceBinding{}, bindingErr
+		}
+		return *message.Proposal, replyTo, binding, nil
 	}
-	return scoutRouterProposal{}, nil, fmt.Errorf("proposal message not found")
+	return scoutRouterProposal{}, nil, scoutChatSourceBinding{}, fmt.Errorf("proposal message not found")
 }
 
 func (app *kanbanBoardApp) pendingScoutChatProposal(threadID string, viewerEmail string, messageID string) (scoutRouterProposal, error) {
-	proposal, _, err := app.pendingScoutChatProposalContext(threadID, viewerEmail, messageID)
+	proposal, _, _, err := app.pendingScoutChatProposalContext(threadID, viewerEmail, messageID)
 	return proposal, err
 }
 
@@ -2638,6 +2719,7 @@ func (app *kanbanBoardApp) commitScoutChatThreadRefStatus(threadID string, owner
 			ref.DelegatedBy = firstNonBlank(artifact.Metadata["delegatedBy"], ref.DelegatedBy)
 			ref.CurrentStage = artifact.Metadata["currentStage"]
 			ref.ProgressNote = artifact.Metadata["progressNote"]
+			ref.FollowUpStatus = artifact.Metadata["followUpStatus"]
 			ref.StartedAt = firstNonBlank(artifact.Metadata["startedAt"], ref.StartedAt)
 			if progress, parseErr := strconv.ParseFloat(strings.TrimSpace(artifact.Metadata["progressPercent"]), 64); parseErr == nil {
 				ref.ProgressPercent = progress

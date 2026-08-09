@@ -146,15 +146,15 @@ func TestAgentThreadProducesStructuredArtifactWithResponder(t *testing.T) {
 			t.Fatalf("apiKey=%q, want test-key", apiKey)
 		}
 		captured = request
-		return "Vision: Realtime 2 is the operator UI.\n\nGoal: identify evidence.\n\nVerification: artifact complete.", nil
+		return completeResearchArtifactForTest(), nil
 	})
 	if err != nil {
 		t.Fatalf("produceAgentThreadArtifact: %v", err)
 	}
-	if !strings.Contains(output, "Vision: Realtime 2") {
+	if !strings.Contains(output, "Bonfire comparable-company map") {
 		t.Fatalf("output=%q, want responder output", output)
 	}
-	for _, want := range []string{"Vision", "Context used", "Review against the original goal", "Gate", "stable headings", "Executive Summary", "Search tags", "Thesis", "Sources", "Do not claim you performed browser"} {
+	for _, want := range []string{"finished decision brief", "source-bound conversation", "Executive Summary", "Search tags", "Thesis", "Comparable Companies", "Sources", "Do not claim browser"} {
 		if !strings.Contains(captured.Instructions, want) {
 			t.Fatalf("instructions missing %q: %s", want, captured.Instructions)
 		}
@@ -245,10 +245,10 @@ func TestAgentThreadModeContractsDifferentiateResearchAndDesign(t *testing.T) {
 
 func TestAgentThreadResearchModeCarriesArtifactContractMetadata(t *testing.T) {
 	metadata := agentThreadModeMetadata("research")
-	if metadata["artifactContract"] != "research_brief_v2" {
-		t.Fatalf("artifactContract=%q, want research_brief_v2", metadata["artifactContract"])
+	if metadata["artifactContract"] != "research_brief_v3" {
+		t.Fatalf("artifactContract=%q, want research_brief_v3", metadata["artifactContract"])
 	}
-	for _, want := range []string{"executive summary", "sources", "worker evidence"} {
+	for _, want := range []string{"executive summary", "comparable companies", "sources", "worker evidence"} {
 		if !strings.Contains(metadata["artifactHeadings"], want) {
 			t.Fatalf("artifactHeadings missing %q: %s", want, metadata["artifactHeadings"])
 		}
@@ -589,7 +589,7 @@ func TestNonOwnerRerunNeverPostsIntoPrivateOriginThread(t *testing.T) {
 	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
 	originalResponder := createOpenAITextResponse
 	createOpenAITextResponse = func(context.Context, string, openAITextRequest) (string, error) {
-		return "Vision: rerun complete.\n\nGoal: done.", nil
+		return completeResearchArtifactForTest(), nil
 	}
 	t.Cleanup(func() { createOpenAITextResponse = originalResponder })
 
