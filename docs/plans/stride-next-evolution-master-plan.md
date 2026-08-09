@@ -48,11 +48,14 @@ web-scroll race gate, `go vet`, native readiness contract checks, client tests,
 exact-release-only queue migration was additionally proven by the 34 release
 contract checks and an actual confined-container ownership/mode test.
 
-The current serving release remains unqualified externally. Production
-`/readyz` truthfully reports the separate canonical shadow unhealthy at
-dirty/high-water 29,396 versus reconciled/checkpoint 8,532 with 119 repair
-candidates and governed replay off. W4 does not read that shadow as product
-authority. Exactly these W4 features are active: person profile, organization
+The current serving release remains unqualified externally. The reconciliation
+observation below records exact current release
+`1cf3463cf30938e956e892a5cde5c9009eaad296`, ledger generation 43, and W4
+generation 103. Production `/readyz` truthfully reports the separate canonical
+shadow unhealthy at dirty/high-water 29,438 versus reconciled/checkpoint 8,532
+with governed replay off. The earlier 119-candidate count is historical and
+must be refreshed before any repair authority is considered. W4 does not read
+that shadow as product authority. Exactly these W4 features are active: person profile, organization
 read/write, active-organization session, Contribution Review, and private Work
 Record. Canonical migration 17 and its six private-custody tables are applied
 with all W5/W6 feature switches false. Public network publication,
@@ -97,7 +100,421 @@ External reference, adopted selectively rather than introduced as a runtime depe
 
 Older model recommendations are historical baselines, not current authority. The current official model references for this plan are [GPT-5.6](https://developers.openai.com/api/docs/guides/latest-model.md), [GPT-Realtime-2.1](https://developers.openai.com/api/docs/models/gpt-realtime-2.1), [GPT Transcribe](https://developers.openai.com/api/docs/models/gpt-transcribe), and [GPT Live Transcribe](https://developers.openai.com/api/docs/models/gpt-live-transcribe).
 
-## Active completion checkpoint — 2026-08-08 10:00 PT
+## 2026-08-09 unified E10 reconciliation and public-network revision 2
+
+This is the controlling goal and resume ledger. Later sections retain the
+decision history and exact evidence that produced the current state; headings
+that previously said “active” are historical unless this section points to
+them. A design, source file, route, test stub, migration, agent report, or local
+PASS is never promoted to implemented, deployed, activated, rendered,
+device-accepted, or externally accepted without the matching evidence.
+
+Normative inputs:
+
+- the original E0-E10 goal and all prior evidence in this plan;
+- the critic-approved public-network constitution revision 1 at
+  `/Users/ajhart/Documents/Codex/2026-08-09/stride-network-strategy-15/STRIDE_PUBLIC_NETWORK_CONSTITUTION.md`,
+  44,468 bytes, SHA-256
+  `9fdbf7ab215e3a5f80416b759212ab223be3b7a818d3dfd988c50863bb46e029`;
+- the founder alignment memo at
+  `/Users/ajhart/Documents/Codex/2026-07-24/realtime-voice-chat/STRIDE_FOUNDER_ALIGNMENT_MEMO.docx`,
+  44,445 bytes, SHA-256
+  `5f45af08f9e181753df9ca6b0d5770dd3ecefe7c909350dc7fe32183a00abe99`;
+- the 2026-08-09 user direction for one platform design language with equally
+  first-class desktop web, native iPhone, and native iPad expressions.
+
+The body-minimized reproducibility receipt is
+`docs/evidence/e10/stride-e10-pn0-normative-inputs-20260809.json`, with SHA-256
+sidecar `ed00751c59984d4080bd358edc314b602def12be03ad27b8c48a439f7a8820c1`.
+It binds both source paths, byte sizes, hashes, source-task identity,
+critic/render status, and authorization limits. The constitution remains a
+normative input to this single plan, not a second execution ledger.
+
+These inputs are adopted into this plan rather than copied into competing
+plans. Their planning authority does not authorize provider spend, pilot data
+collection, Apple/TestFlight mutation, production publication, cohort
+activation, or open-web exposure.
+
+### Cohesive goal contract
+
+Finish and prove the original STRIDE foundations, then evolve them into **the
+network where work happens**: real, permissioned conversation becomes governed
+action; action becomes attributable artifacts and outcomes; reviewed outcomes
+become a person-controlled Work Record; and only deliberately released public
+projections become collaboration and discovery surfaces. The product must be
+one cohesive system across desktop web, native iPhone, and native iPad while
+preserving voice-first Signal identity and platform-native interaction.
+
+The goal is complete only when evidence proves:
+
+1. the original meeting, chat, voice, Scout, Drive/artifact, organization,
+   Work Record/Search, agent, orchestration, resilience, and release promises at
+   their named evidence class;
+2. W5-W8 custody, consent, cohort, device, privacy, restore, HA, attestation,
+   and soak gates are genuinely satisfied for every completion or activation
+   claim that depends on them; a governed deferral may narrow a future wave but
+   can never make the corresponding product/release outcome complete;
+3. public-network revision 2 and PN0-PN5 preserve every revision-1 privacy,
+   ACL, named-party, approval, provenance, revalidation, synchronous-fence,
+   purge, recruiter, and default-off boundary;
+4. humans and agents are visible contributors but not interchangeable
+   citizens: humans retain identity, consent, governance, employment/legal
+   authority, and final accountability; agents require machine identity,
+   sponsor, delegation, provenance, and anti-synthetic-consensus controls;
+5. desktop web, native iPhone, and native iPad are each complete and excellent
+   expressions of one shared product language, not responsive substitutes for
+   one another; and
+6. product and funding claims are backed by consented, auditable end-to-end
+   traces and honest quantitative plus qualitative evidence, never private
+   employee surveillance, hidden scores, or reconstructed history.
+
+### Criterion-to-evidence matrix
+
+| Required outcome | Current evidence | Classification | Remaining proof |
+|---|---|---|---|
+| E0-E9 original foundations | historical receipts and full-suite gates in §§13-18 | `deterministic_verified` only for named local/default-off classes | provider, physical, HA/DR, pilot, and production claims remain separate |
+| E10-W0-W3 authority/product/shadow/migration | W0-W3 receipts and independent critics | `deterministic_verified_revision1_foundation` | identity, ACL, session, CAS/idempotency, opaque-denial, current-authority, synchronous-fence, purge, restore, and default-off guarantees remain inherited; every new PN object/action/store/switch needs a PN1 successor receipt |
+| E10-W4 private Bonfire authority | authenticated activation lineage; 1 org, 7 people, 7 memberships, 98 sessions; AJ sole owner | `production_private_live` | canonical global promotion remains separately blocked |
+| E10-W5 MyMind custody | migration 17, file/SQL custody, crypto-erasure and restart tests, default-off carrier | `deterministic_verified`; carrier deployed; production custody not installed | real managed provider, state/custody keys, external CAS high-water, destruction evidence, owners, consent, restore, live cohort |
+| E10-W6 Work Search/contact qualification | policy, exact-session search/contact, shadow/purge, sealed operator and adversarial tests | `deterministic_verified`; carrier deployed; operator locally verified | real five-person cohort, two reviewers, three independent approvers, sealed signer registry, current health/rollback receipt, activation authority |
+| E10-W7 physical/privacy/resilience | immutable-root validators and read-only reports | `deterministic_validator_verified` | exact current native build, intended groups, real iPhone+iPad, accessibility/privacy, TURN, offsite restore, HA, independent attestation |
+| E10-W8 final cohorts/soak | ordered-cohort and soak validator | `deterministic_validator_verified` | signed W5/W6/W7/rollback dependencies, actual kill-switch cohorts, unchanged-release >=24h and >=10 sittings |
+| Public-network constitution | exact source path/size/digest receipt and source critic PASS | `design_source_verified` | this exact revision-2 integration, contract freeze, impacted-test inventory, and fresh E10 critic PASS |
+| Platform Design Unification | user direction and founder memo | `approved_design_scope`; no implementation evidence | audit, research, thesis, IA/system, parity matrix, rendered references, migration, implementation, interaction/device acceptance |
+| Proof & Instrumentation | founder memo and existing event/receipt fragments | `approved_scope`; PI0-A and PI0-B not complete | PI0-A trace/taxonomy, baseline, privacy/consent contract before dogfood/PN1 migration; PI0-B dashboards/receipts/research protocol before design-partner/pilot collection |
+| PN1 safe public projections | constitution only | `not_started` | default-off contracts, migrations, authority, purge, deterministic fixtures, critic |
+| PN2 signed-in human pilot | none | `blocked_on_PN1_PD1pilot_PI0B_and_external_authority` | PN1 deterministic successor receipts; accepted desktop web/iPhone/iPad PD1 pilot subset; PI0-B collection gate; >=5 consenting profiles; 2 human-owned workspaces; named moderator plus legal/privacy/product approvals |
+| PN3 Explore | constitution only | `not_started` | PN2 evidence plus object-only policy/diversity/provenance/revocation proof; all people intent routes to Work Search |
+| PN4 public agent participation | constitution only | `not_started` | sponsored agent/delegation, explicit human invocation, separate safety/privacy approval, anti-consensus corpus |
+| PN5 open-web read | constitution only | `external_waiting` | legal/privacy/moderation, crawler/cache/CDN purge, incident response, exact preview, accessibility, deletion propagation |
+
+Earlier W2 static screenshots remain schema-admission evidence; later registered
+W1-backed captures remain evidence for the named W2 surfaces. Neither proves
+revision-2 public-network UX or the platform-design wave. Build 49 is historical
+Apple/TestFlight evidence from `d4c827c...`, not the final build for this
+revision. W7/W8 validators remain valid for their original contracts, but their
+future acceptance manifests must bind the PDU, PI0, and PN wave evidence they
+actually claim.
+
+#### Governed deferral contract
+
+A deferral never converts missing evidence into completion. It is valid only as
+a managed reduction of a later wave when a signed receipt names: the exact gate
+and capability; accountable human authority; independent reviewer where the
+gate requires one; rationale and accepted risk; start, expiry, and mandatory
+review date; user-visible limitation; switches/routes/jobs that remain disabled;
+claims that remain prohibited; rollback; and the exact re-entry evidence. An
+expired, unsigned, broadened, or revision-mismatched deferral fails closed.
+
+Physical iPhone acceptance, physical iPad acceptance, accessibility/privacy
+acceptance, current release-bound restore/HA evidence, and final W8 soak are
+non-deferrable for any claim that the corresponding three-platform product or
+production release is complete. MyMind, publication, discovery/search,
+contact, agent participation, pilot collection, and open-web publication may
+be omitted from a narrower release only while their server switches and every
+dependent surface remain off and the release makes no claim that those waves
+are complete.
+
+### E10-PN0 — public-network normative revision 2
+
+Revision 2 changes revision 1 only as follows; everything not named remains
+normative and unchanged:
+
+| Domain | Exact revision-2 decision |
+|---|---|
+| Network primitive | Add typed `PublicWorkObject` revisions and separately governed `PublicWorkspaceProjection`; public is never a private ACL mode |
+| Distribution | Add **Workstream** with reverse-chronological Following and Workspaces first; no engagement ranking, likes, repost counts, follower counts, or universal status composer |
+| Explore | Later PN3 only; retrieval universe is eligible public Work Objects; people/recruiter/contact/hire intent performs zero Explore retrieval and routes to governed Work Search |
+| Relationships | Add private-to-observer `Observe`, `SaveWorkspace`, purpose-bound `CollaborationRequest`, ACL-bound `WorkspaceContribution`, and contextual non-browsable `WorkedTogether`; no public social counts |
+| Public profiles | Extend person, organization, Public Workspace, and disclosed agent projections with only approved public fields, Work Objects, provenance, controls, and current authority |
+| Agent constitution | Add distinct `AgentPrincipal` and non-social `SystemPrincipal`; one sponsor, visible machine identity, exact package/runtime/delegation, no human rights/authority, votes, endorsements, DMs, follows, autonomous posting, or synthetic consensus |
+| Consensus | Add revisioned `ConsensusEligibilityManifest`; one current decision per eligible global `PersonPrincipal`; uncertain/linked/recovered/duplicate mappings fence fail-closed; agent/system activity never counts |
+| Public controls | Add View As, Why This, human-only/chronology filters, mute/block, public-presence dashboard, one-action public pause, correction/dispute/export/delete, and exact provenance history |
+| Moderation | Human-governed versioned policy, conflict separation, appeals, urgent automatic privacy/safety fence but no permanent agent decision |
+| Lifecycle | PN0 freeze -> PD0 and PI0-A in parallel -> PN1 safe default-off projections -> bounded PD1 pilot-surface acceptance -> PI0-B -> PN2 signed-in human pilot -> PN3 bounded Explore -> PN4 separately gated sponsored agent contribution -> PN5 separately gated open-web read |
+| Success | Useful work/collaboration/outcome integrity, provenance and purge health; never impressions, virality, follower growth, time spent, or agent message volume |
+
+Revision 2 adds independent server-authoritative switches for Public Workspace
+publication, Public Work Object admission, feed eligibility/read, Observe,
+typed responses, collaboration requests, consensus display, moderation,
+Explore, agent public visibility, agent public participation, and open-web
+rendering. Every switch defaults false. Disablement stops readers, writers,
+jobs, notifications, provider calls, and index admission at the server boundary.
+Source, ACL, consent, named-party, sponsor, package, delegation, dispute,
+correction, or purge drift fences affected public eligibility before
+acknowledgement and queues the exact derived-store purge generation.
+
+#### PN0 contract-freeze register
+
+The constitution sections below are incorporated by exact reference. AJ is the
+current product/constitutional owner. Legal, privacy, network-moderation,
+appeal, and incident-response humans are intentionally **unassigned external
+inputs**; no surrogate or application admin may fill those roles. PN0 remains
+`in_progress`, and every PN switch remains false, until those humans and the
+policy revision they sign are recorded in a managed trust registry.
+
+| Contract | Exact frozen decision | Mutation/controller authority | Switch and parent-off graph | Retention, purge, threat, and required negative |
+|---|---|---|---|---|
+| Public Work Objects (§§3, 8, 14-15) | Exactly `WorkBrief`, `WorkQuestion`, `EvidenceNote`, `DecisionRecord`, `WorkUpdate`, `ArtifactRelease`, `OutcomeRecord`, `Retrospective`, `ContributionPublication`; revisions move `draft -> review_required -> published <-> paused -> corrected \| superseded \| withdrawn`; typed responses are exactly `question \| answer \| evidence \| counterexample \| offer_to_help \| moderation_note` | human author/accountable owner; agent only later under exact sponsor/delegation and human release rule; field/named-party controllers retain veto | `pn_public_work_object_admission` requires `pn_public_workspace_publication`; `pn_typed_response` requires object admission and signed-in Workstream read | eligible only while current; synchronous fence before acknowledgement; applicable derived stores hard 5 min under the inherited active-card maximum; reject unknown type/state, body-only engagement post, stale source/ACL/consent/named party, client-selected authority, agent without delegation, and restart/restore resurrection |
+| Public Workspace (§§7, 14-15) | Separately governed projection; lifecycle `draft -> review_required -> published <-> paused -> archived \| withdrawn`; participation `observer -> applicant -> contributor \| declined \| removed`; public never grants private membership | current human workspace owner plus current moderators; exact field and named-party controllers; final owner cannot remove/transfer themself without a current successor | `pn_public_workspace_publication` requires current `pn_moderation`; every workspace-scoped object/read/reply/agent route depends on it | public copies reference approved immutable revisions only; source/owner/ACL/approval/sponsor drift fences before return, hard-5-minute derived purge; reject one-label private-to-public conversion, final-owner loss, stale moderator, private drill-down, member-role inference, and every public visibility path when moderation/policy/controller is unavailable or stale |
+| Workstream (§§9, 14-15) | Following and Workspaces are reverse chronological only; Explore is separate PN3; no engagement rank, counts, universal status composer, or private-person inference | server policy over current eligible revisions; observing human controls their private preferences | `pn_workstream_read` requires workspace publication and object admission; `pn_explore` requires PN2 acceptance plus its own policy; parent-off empties/503s and stops jobs/providers | feed rows live only while source eligible; hard-5-minute index/cache purge; test deterministic chronology, stable privacy-preserving Explore ties, prohibited signal zero-use, terminal authority fence, outage fail-closed, and restored stale-row exclusion |
+| Observe and Save (§§10, 14-15) | private to the observing human and body-minimized audit; revocable; excluded from public counts, reputation, consensus, and contact authority | observing `PersonPrincipal` under exact current session | `pn_observe` requires signed-in Workstream read; SaveWorkspace is governed by the same switch and workspace authority | retain until revoke/account deletion; fence immediately and hard-5-minute cache/index purge; block overrides Observe/Save and notifications; test observer isolation, no count leakage, revoke/block/restart/restore, and zero agent/system social edge |
+| Collaboration (§§7.3, 10, 14-15) | exact-purpose request between authenticated humans; recipient acceptance grants only the minimum public-workspace capability; typed response never grants contact/private source access | sender and recipient humans; current workspace moderator for contributor admission; recipient block is absolute | `pn_collaboration_request` requires signed-in typed response and current workspace; no public contact-channel disclosure | pending until terminal or 90 days, terminal metadata one year; delivery/notification fence before acknowledgement, hard-5-minute purge; test block/withdraw/expiry, no source/contact leakage, stale session/grant, duplicate/lost response, and no agent send |
+| Public profiles (§§11-12, 14) | person, organization, Public Workspace, and disclosed agent projections contain only exact approved current fields/objects/provenance and controls; no scalar reputation | person controls person fields; eligible org owner/admin controls org fields; workspace owners/moderators control workspace; sponsor plus organization controls agent, without overriding named parties | profile rendering depends on the exact underlying workspace/object/agent-visibility switches; `pn_agent_visibility` is independent from agent participation | active only while current; synchronous unlist plus hard-5-minute projection/index/cache purge; test View As all audiences, hidden/private source zero disclosure, correction/dispute/withdrawal, sponsor/package drift, and body-free export/tombstone behavior |
+| Agents (§§4-6, 13, 15-16) | `AgentPrincipal` is sponsored/revocable and never a human; `SystemPrincipal` is non-social; initial PN2 permits safe agent profiles but zero agent-authored public content; PN4 permits one curated agent in one workspace after explicit human invocation and no transitive delegation | one sponsoring organization, at least one current eligible human sponsor, exact approving human for `DelegationManifest`; agents/system have no controller authority | `pn_agent_visibility` requires workspace publication; `pn_agent_participation` requires agent visibility, typed responses, PN4 signed gate, current sponsor/package/runtime/delegation; all are independent kill switches | historical attribution remains, new acts fence immediately; hard-5-minute public/feed/index purge; test human impersonation, sponsor fleet, hidden/expired delegation, vote/react/follow/contact/moderate/govern attempts, agent-agent turn, consensus laundering, and offboard/restart/restore |
+| Consensus (§§3-4, 13.3) | one current decision per exact eligible global `PersonPrincipal` for one proposal revision; agent/system activity never counts; manifest states population, purpose, rule, times, authority, link/recovery generation | AJ-owned constitutional policy; each human controls their decision; duplicate/link/recovery adjudication by an independent eligible human reviewer who is not the affected principal, sponsor, proposal owner, or moderation subject | `pn_consensus_display` requires a current signed `ConsensusEligibilityManifest`; uncertain mapping disables display and aggregation | body-minimized decisions retained under governed audit policy; superseded decision loses current weight immediately; test linked/recovered/concurrent credentials, stale proposal, duplicate suspicion, indeterminate population, sponsor fleets, and restart/replay double count |
+| Moderation and appeal (§§13.4-15) | automated systems may slow/quarantine/fence a proven safety/privacy breach; permanent removal, sponsor sanction, unfence, and appeal are human decisions under versioned policy and conflict separation | named network moderator; separate named appeal reviewer; named privacy owner for privacy incidents; all currently unassigned and therefore feature-blocking | `pn_moderation` is a parent of every externally visible workspace/object/profile/agent publication, Workstream/Explore read, Observe/Save, typed response, collaboration, agent participation, and open-web switch; only private draft/preview and body-free incident fencing remain available while it is off; no permanent mutation without a current signed reviewer capability | urgent fence before acknowledgement; receipt/notice within 1 business day, initial human decision within 5 business days, appeal decision within 10 business days unless a signed stricter policy applies; case/tombstone max seven years with separately purgeable bodies; test self/conflicted review, hidden sanction, missed-SLA fail-closed expansion, appeal/unfence without authority, harassment/contact evasion, constitutional-status manipulation, and zero external visibility when the moderation switch/policy/controller is unavailable or stale |
+| Open web (§§14, 17-18) | read-only workspace/object projections only, never an implied people index or Work Search; exact preview precedes release | separate legal, privacy, moderation, incident, and product approvals; all named and current | `pn_open_web_read` requires workspace/object publication, moderation, PN4 completion, crawler/cache policy, and exact release gate | no CDN/crawler admission before PN5 retention and deletion-propagation policy is signed; test crawler/index/cache purge, stale preview, deletion propagation, abuse/incident rollback, accessibility, and zero human-profile/search widening |
+
+The exact derived-store inventory is: workspace projection; Work Object
+projection; agent projection; public profile projection; feed-eligibility row;
+Following index; Workspaces index; Explore index; typed-response index; Observe
+edge; saved-workspace edge; collaboration request; notification/outbox;
+public-presence dashboard; operational cache; export manifest/package; controlled
+render/CDN object; and backup purge manifest. Audit/signature/operation
+tombstones are body-minimized lineage, not eligibility stores. Every mutation,
+fence, purge, restart, restore, and rollback receipt enumerates all 18 stores and
+records `not_applicable` rather than omitting a store. Missing a hard purge
+target pages the named privacy/incident owners, keeps affected switches off,
+and blocks cohort expansion. The inherited retention table under revision 1
+sets maximums until a narrower signed PN policy exists; open-web cache/CDN
+retention remains unset and therefore disabled.
+
+Feature-switch activation is controlled only by the exact release/cohort
+operator under a signed policy and rollback receipt—never by route presence,
+migration state, application-admin role, environment fallback, model output, or
+client input. Human controllers authorize individual content/state mutations;
+they cannot turn a server feature switch on. Parent-off denies reads and writes,
+stops jobs/notifications/providers/index admission, and leaves body-free audit
+lineage plus private source work intact. `pn_moderation` is the mandatory parent
+of every externally visible PN path; its parent-off matrix must prove zero
+workspace, object, feed, profile, agent, Observe/Save, response, collaboration,
+Explore, or open-web visibility while private draft/preview and body-free
+incident fencing remain available.
+
+### E10-PD0/PD1 — Platform Design Unification
+
+PD0 is a decision-complete design wave and must PASS before broad public-network
+implementation. PD1 is the governed implementation/migration wave. This is a
+full-product uplevel, not a network reskin or responsive cleanup.
+
+Shared contract:
+
+- one ownable STRIDE product thesis, content model, trust/provenance language,
+  information architecture, token system, icon family, typography, color,
+  elevation, spacing/density, motion philosophy, component semantics, and
+  accessibility baseline;
+- three equally first-class platform expressions: desktop web, native iPhone,
+  and native iPad; capability may be equivalent or intentionally composed
+  differently, but route existence is not first-class evidence;
+- preserve the strongest ownable mobile/Signal patterns as evidence, not
+  immutable constraints; remove duplicate shells, navigation systems, and
+  inconsistent legacy generations;
+- redesign legacy and new network surfaces together: onboarding, home/Scout
+  voice, chat, meetings/video, Board/work, Drive/artifacts, organization/team,
+  Work Record/Search, profiles, settings/privacy, notifications, Public
+  Workspaces, Workstream, Explore, empty/loading/error/offline/revocation; and
+- governed cross-platform tokens/components with owners, semantic contracts,
+  migration rules, codemods or adapters where justified, a deprecation
+  inventory, and removal gates for legacy patterns.
+
+PD0 audits the rendered current product and current first-party products plus
+primary design documentation from Meta, LinkedIn, Codex, and a small
+best-in-class social/collaboration set. It must distinguish durable patterns
+from imitation, then produce unified IA/navigation, responsive shell, page
+hierarchy, content patterns, data visualization, interaction states, trust
+presentation, and high-fidelity interactive references for: join/onboard;
+home/voice; private team work; publish a Work Object; browse Workstream; enter a
+Public Workspace; inspect provenance; person/organization/workspace/agent
+profiles; offer help/collaborate; Work Search/contact; agent attribution and
+controls; settings/privacy; failure/revocation.
+
+The required parity matrix enumerates every current and planned surface on
+desktop web, native iPhone, and native iPad with exactly one status per platform:
+`equivalent_capability`, `intentional_platform_expression`, or
+`explicitly_deferred` with owner, rationale, dependency, and exit gate.
+
+Platform-native expression:
+
+- **Desktop web:** large canvas, keyboard/focus/hover, multi-pane density,
+  resizing, deep links, drag/drop, simultaneous work, deliberate wide-screen
+  composition, and representative 1024/1280/1440/1728 widths.
+- **Native iPhone:** one-handed reach, voice, gestures, bottom-reach
+  navigation, constrained space, portrait-first composition, sheets, touch,
+  interruption/resume, offline/background behavior, native share/files/push,
+  device media, orientation, Dynamic Type, VoiceOver, and reduced motion.
+- **Native iPad:** the same universal Expo/React Native app and shared system,
+  adaptively composed by available space/size class; sidebar/split-view or
+  multi-column navigation, useful persistent context/inspectors, rich
+  artifact/workspace/profile layouts, resizable regions, popover-vs-modal
+  correctness, portrait/landscape, Split View, Stage Manager widths, external
+  keyboard/focus/shortcuts, pointer/hover/context menus, drag/drop, native
+  share/files, safe areas, connect/disconnect/resume, and no stretched phone
+  cards, gratuitous whitespace, or web fallback.
+
+PD1 acceptance requires normal interaction rather than static screenshots:
+navigation, scrolling, loading, transitions, keyboard/focus, hover, touch
+targets, resize/orientation/multitasking, dynamic type, reduced motion,
+VoiceOver, offline/error/revocation, perceived performance, virtualized lists,
+media handling, and cross-platform continuation. Rendered evidence covers the
+same end-to-end journeys on all three expressions plus platform-specific tasks;
+release requires at least one real iPhone and one real iPad pass. Success is
+cohesion, task completion, learnability, quality, performance, and continuity,
+not pixel identity. PD0 and PD1 each require an independent design Critic Loop
+PASS.
+
+### E10-PI0-A/PI0-B — Proof & Instrumentation before pilots
+
+PI0-A runs in parallel with PD0 immediately after the PN0 contract freeze and
+completes before any dogfood evidence or PN1 data migration. PI0-B completes
+before any design-partner/pilot collection or PN2 activation. Neither phase
+authorizes collection by itself.
+
+- **PI0-A — contract and baseline:** freeze a canonical, body-minimized event
+  taxonomy and trace identity from
+  source conversation/chat -> Suggested Work -> edit/approve/dismiss -> run ->
+  intervention -> artifact -> review/verification -> Work Record -> any
+  separately authorized publication/collaboration. Every edge binds current
+  person/agent/system principal, audience, ACL/consent/policy revision,
+  provenance, correlation/idempotency, source/output digest, effective time,
+  and revocation/purge generation.
+- **PI0-A:** establish pre-migration baselines and definitions for time to useful outcome,
+  completion/correction, human intervention, artifact adoption, repeat use and
+  retention, reliability, provider/model cost, permission/attribution failure,
+  and qualitative trust/pull. Missing data stays unknown; no metric is inferred
+  retroactively from incomplete history.
+- **PI0-A:** keep private operational telemetry separate from public Work Record,
+  reputation, discovery, and ranking. Consent, notice, ACL, purpose,
+  minimization, retention, export, correction, deletion/purge, attribution,
+  evidence provenance, and cohort opt-out are explicit. No employee dossier,
+  productivity score, covert psychographic profile, or public ranking may be
+  derived.
+- **PI0-B — evidence and research:** build private, role-gated pilot dashboards and body-minimized evidence
+  receipts; a dashboard is not proof without source-resolvable case traces.
+  The qualitative protocol includes consented interviews, task completion,
+  trust/why/unknown comprehension, loss-of-access signal, counterevidence, and
+  several auditable end-to-end cases.
+- **PI0-B:** gate collection before the first real cohort, record data-quality and
+  instrumentation failure, preserves deletion/purge continuity through backup
+  restore, and requires independent privacy/security/product plus Critic PASS.
+
+### Exact impacted-test inventory before revision-2 implementation
+
+This inventory is normative. PN or PD implementation may add files, but no
+listed boundary may be silently skipped.
+
+| Boundary | Existing source/test inventory to extend | Required new proof |
+|---|---|---|
+| Core public authority/projections | `stride_contribution_network_contracts*.go`, `stride_contribution_authority*.go`, `stride_network_authority*.go`, `stride_network_shadow*.go`, migrations 0015-0017 | PublicWorkspace/WorkObject/agent/delegation/consensus/moderation contracts; controller separation; source/ACL/consent/named-party/sponsor/delegation drift; exact purge/restart/restore |
+| Product HTTP/actions | `stride_e10_product_http*.go`, `stride_e10_product_live*.go`, `stride_e10_product_authority_views*.go`, operation store | closed PN actions and values; server-minted targets; exact session/revision/idempotency; no client authority; lost-response recovery; parent-off matrix |
+| Tenant/session/ACL | `stride_e10_tenant_*`, `auth_http*`, WebSocket/room/Drive/artifact/notification tests | cross-org/anonymous/stale/switch/revoke opaque denial through final copy and write; no email authority |
+| Web product | `index.html`, `frontend_stride_w2_surfaces_test.go`, shell/chat/rooms/files/theme/router/design/frontend accessibility tests | one shell/IA; Workstream/workspaces/profiles/provenance/controls; 1024-1728, keyboard/focus/hover/resize/deep-link/drag-drop; loading/offline/revocation; interactive backend-backed QA |
+| Native shared/product | `mobile/src/stride/*`, navigation, theme/tokens, `StrideProductScreens.tsx`, `strideProductSurfaces.test.ts` | shared semantic components and three-platform parity contract; action/session recovery; no WebView fallback for native first-class surfaces |
+| iPhone | Canvas/home, Thread, Room, Files, Settings, voice/media and corresponding tests | bottom reach, sheets/gestures, interruption/background/offline, orientation, Dynamic Type, VoiceOver, reduced motion, real-device journey |
+| iPad universal app | `RootNavigator.tsx`, screens/components/theme, realtime/media, Expo/native configuration | size-class/adaptive split/multi-column, Stage Manager/Split View widths, pointer/keyboard/context menus/drag-drop, popover/modal rules, canvas utilization, real iPad pass |
+| Agents and Scout | `agent_thread_*`, room agent/Scout, TeamAgent/Marketplace/brain/workflow tests | machine identity/sponsor/delegation/provenance, no human authority/social edges/consensus, one-human-turn rule, public agent kill switches |
+| Proof instrumentation | ConversationEvent/work proposal/run/artifact/outcome/Work Record ledgers, usage/evidence/DR packages | end-to-end trace completeness, baseline freeze, consent/retention/export/correction/delete, cost/reliability, private-vs-public separation, backup/purge continuity, case receipts |
+| Operations | W5-W8 validators/operators, release tool, readiness, DR, native Apple proofpack | new switches default false; exact release/rollback; cohort/kill-switch/soak; real iPhone+iPad; offsite restore/HA; independent attestation; PN policy/approver bindings |
+
+### Unified dependency, ownership, and status map
+
+The controlling dependency DAG is:
+
+`PN0 -> {PD0, PI0-A in parallel} -> PN1 -> bounded PD1 pilot-surface acceptance -> PI0-B -> PN2 -> PN3 -> PN4 -> PN5`.
+
+The rest of PD1 may continue after the bounded pilot subset, but PN2 cannot
+start until desktop web, native iPhone, and native iPad each provide the exact
+pilot capabilities in the parity matrix. `explicitly_deferred` may alter a
+composition or omit a non-pilot surface; it cannot replace those three pilot
+expressions or their interaction/accessibility evidence.
+
+| Wave | Outcome and dependency | Exclusive mutable owner/scope | Verification and rollback | Authority | Exact status |
+|---|---|---|---|---|---|
+| W0-W3 | Frozen revision-1 authority, product, tenant/shadow, migration foundation | historical E10 owners; named receipt files | existing receipts/critics; switches off; PN1 successor receipts for new contracts | already exercised local authority | `deterministic_verified_revision1_foundation` |
+| W4 | Private Bonfire person/org/session/Contribution Review/Work Record | W4 runtime + release operator | authenticated lineage, exact release and retained rollback | AJ production authority used | `production_private_live` |
+| W5 | Install real private custody and consent | W5 custody/runtime only | managed preflight, crypto-erasure, restart/restore, switch kill | named custody/privacy owners + AJ cohort | `external_waiting`; adapter locally verified, provider absent |
+| W6 | Qualify Work Search/contact and any paid routes | W6 policy/qualification/shadow/search operator only | sealed signer/current-state receipt; publication/search/contact kill switches | 5 participants, 2 reviewers, legal/privacy/product, provider/spend if used | `external_waiting`; deterministic carrier verified |
+| W7 | Physical/privacy/resilience proof | W7 validator/operator, Apple proofpack, DR evidence only | immutable-root receipt and retained release | Apple/device/privacy/DR/attestation owners | `external_waiting` |
+| W8 | Ordered activation and soak | W8 activation operator only | per-cohort kill + rollback; >=24h/10 sittings | AJ exact activation + independent observer | `blocked_on_W5_W6_W7` |
+| PN0 | Adopt revision 2, exact diff/test inventory, contract freeze, threat/policy/switch owners | this canonical plan and PN0 evidence only | exact source receipt + fresh independent plan critic; no runtime rollback needed | plan integration authorized; external policy roles still unassigned; activation not authorized | `in_progress_external_policy_owners_waiting`; reconciliation critic PASS |
+| PD0 | Full-product audit/research/thesis/IA/system/parity/reference flows | design evidence and this plan; no product code | interactive reference QA + independent design critic | safe local design authorized after PN0 critic PASS | `ready_local` |
+| PI0-A | Freeze event taxonomy, trace identity, consent/privacy contract, and pre-migration baseline | telemetry contract/evidence files only; no collection | schema/trace completeness, privacy/purge/restore, synthetic fixtures, independent critic | safe local contract work after PN0; real collection not authorized | `ready_local` |
+| PN1 | Safe public projections/controls default off | new PN authority/storage/runtime/test files; no broad UI activation | normal/race/PG/restore/purge/render; revision-1 inheritance plus PN successor receipts; all PN switches false | local implementation after PN0+PD0+PI0-A PASS | `blocked_on_PN0_PD0_PI0A` |
+| PD1 pilot subset | Migrate exact PN2 journeys across web/iPhone/iPad using the unified system | `index.html`, `mobile/src`, shared semantic design contracts, owned tests | parity, rendered interaction, accessibility/performance, real-device gate remains external; rollback to prior shell by release | local implementation after PD0 and PN1 contracts | `blocked_on_PD0_PN1` |
+| PI0-B | Private dashboards, case receipts, qualitative research protocol, collection gate | private telemetry/evidence/DR/operator surfaces only | consented synthetic/dogfood-safe trace, privacy/purge/restore, research-protocol critic | real collection requires participant consent | `blocked_on_PI0A_PN1_PD1_pilot` |
+| PD1 remainder | Migrate every remaining legacy/planned surface across web/iPhone/iPad | same exclusive platform owners after pilot subset | full parity matrix, interactive/device/accessibility/performance acceptance | local implementation authorized; Apple/device/release external | `blocked_on_PD0`; may run after pilot subset without delaying PN2 unless it is a named pilot dependency |
+| PN2 | Signed-in human pilot | PN cohort config plus accepted pilot surfaces | >=5 people, 2 workspaces, typed objects, chronology, pause/block/dispute/purge, PI0-B receipts | participants, moderators, product/legal/privacy, deploy/activation | `blocked_on_PN1_PD1pilot_PI0B_and_external_authority` |
+| PN3 | Object-only Explore | Explore policy/index/UI only | prohibited people-intent zero retrieval, diversity/provenance/revocation, kill switch | separate cohort approval; provider/spend if any | `blocked_on_PN2` |
+| PN4 | One sponsored public agent in one workspace | agent public projection/delegation/floor only | sponsor/delegation/identity, no consensus/social authority, incident/kill | separate safety/privacy and exact sponsor/human approval | `blocked_on_PN3` |
+| PN5 | Open-web read-only public work | public renderer/cache/crawler/moderation/incident surfaces | exact View As, CDN/cache purge, deletion propagation, accessibility/abuse/rollback | separate legal/privacy/moderation/publication authority | `external_waiting_after_PN4` |
+
+### Operations and authority queues
+
+**Safe local queue:** PN0 reconciliation/critic is complete; conduct PD0 audit
+and primary-source design research; build the three-platform parity/deprecation
+inventory and interactive references; execute PI0-A event/metric/privacy
+contracts and pre-migration baseline; maintain W5-W8 default-off operator tests. Do not select cohort
+participants or create external signatures as local fixtures for production
+acceptance.
+
+**Externally blocked queue:** real W5 custody provider/owners/consent; W6 five
+participants, two reviewers, legal/privacy/product approvals and corpus; exact
+current EAS build and intentional TestFlight groups; real iPhone and real iPad;
+accessibility/privacy; restrictive TURN/WebRTC; encrypted offsite four-root
+restore; PostgreSQL/app/TURN/traffic HA; independent attestation; PI0 pilot
+consent/interviews; PN moderators/retention/rate/appeal owners; final soak.
+
+**Provider/spend queue:** no new paid call. Any parser/reranker, STT, voice,
+Responses, embedding, image, or external service requires exact project,
+billing owner, price/budget, route/corpus, and one-at-a-time authorization.
+
+**Git/release/deploy queue:** the user authorized shipping the already-reviewed
+default-off operator carrier and this plan reconciliation through the exact VPS
+release process. Later PN/PD/PI implementation requires a fresh reviewed tree
+and release evidence; this authorization does not activate a cohort or publish
+content.
+
+**Production/publication queue:** W4 private authority remains on. W5 MyMind,
+W6 publication/search/contact, every PN switch, open-web rendering, pilot data
+collection, and public agent participation stay off until their exact signed
+gate. Disablement and rollback must preserve private work and body-free lineage
+while purging derived eligibility.
+
+### Resume Here — compact completed evidence and exact next action
+
+Preserve W0-W4 and W5-W8 deterministic receipts at their named evidence class;
+do not reset progress to zero. Revision 2 does not change W4 private authority,
+W5 custody cryptography, W6 Work Search boundaries, or W7/W8 immutable-root
+validator semantics. It does require successor design/render/device/activation
+evidence wherever the public-network or unified-platform claim is new.
+
+Reconciliation observation: source revision before this plan edit is
+`31a5792` (the fail-closed W5-W8 operator carrier); unrelated `stride-site/`
+remains untracked and excluded. At 2026-08-09 current production is exact commit
+`1cf3463cf30938e956e892a5cde5c9009eaad296`, ledger generation 43, W4 schema 2
+generation 103 and ready, W5 configured/installed false, W6
+configured/installed/qualified false, and all W5/W6/public switches off.
+Canonical shadow remains non-authoritative/unhealthy at 29,438 versus 8,532;
+backup is local with offsite `dormant`. The reconciliation independent critic
+PASS is recorded below. The next ready actions are PD0 audit/research plus the
+three-platform parity/reference-flow package and PI0-A taxonomy/privacy/baseline
+contracts in parallel. No production mutation, user-data collection, or public
+activation is the next action.
+
+#### Reconciliation Critic Loop — PASS
+
+The independent review ran three bounded rounds. Initial findings required the
+PI0-A/PI0-B split and pre-migration ordering, corrected W8/PN2 dependencies, an
+exact PN0 contract/switch/controller/store/negative register, reproducible
+source receipts, revision-1 scoping for W0-W3, and a non-completing deferral
+contract. The second round required moderation to parent every external PN path
+and one consistent PN2 status. All findings are closed. Receipt JSON and
+sidecar validate; the plan diff is whitespace-clean. Verdict: **PASS**, with no
+remaining blocker, major, or minor finding. This PASS authorizes safe PD0 and
+PI0-A local work only; external policy roles remain unassigned and every PN
+switch remains false.
+
+## Historical completion checkpoint — 2026-08-08 10:00 PT
 
 This is the compact-safe resume ledger for the current goal. A checked item is
 complete only at the scope named; local implementation is not release proof.
@@ -3148,7 +3565,12 @@ or a qualifying earlier-wave receipt:
 
 ---
 
-## 18. Current wave and resume point
+## 18. Historical wave and resume evidence
+
+This section preserves the pre-revision-2 resume record for provenance. It is
+superseded as current execution authority by **Resume Here — compact completed
+evidence and exact next action** above; its evidence classifications remain
+valid only at the scopes they name.
 
 **Current wave:** E10-W5-W8 external qualification and acceptance after the
 default-off carrier and migration 17 production rollout. E10-W0 through E10-W3

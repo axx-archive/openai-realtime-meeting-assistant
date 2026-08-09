@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_pn0_normative_inputs",
+  "generatedAt": "2026-08-09T19:38:05Z",
+  "goal": "Complete STRIDE E10 and govern its evolution into the network where work happens",
+  "canonicalPlan": "docs/plans/stride-next-evolution-master-plan.md",
+  "sourceThread": {
+    "hostId": "slingshot:env_e_6a068c707c6c83319a6d272548808d37",
+    "threadId": "019f967e-4156-7961-bec4-e4eb2a6131c8"
+  },
+  "inputs": [
+    {
+      "id": "stride_public_network_constitution",
+      "revision": 1,
+      "sourcePath": "/Users/ajhart/Documents/Codex/2026-08-09/stride-network-strategy-15/STRIDE_PUBLIC_NETWORK_CONSTITUTION.md",
+      "bytes": 44468,
+      "sha256": "9fdbf7ab215e3a5f80416b759212ab223be3b7a818d3dfd988c50863bb46e029",
+      "authority": "design_only_e10_integration_authorized",
+      "critic": {
+        "mode": "independent_critic_loop",
+        "verdict": "PASS",
+        "remainingFindings": 0
+      }
+    },
+    {
+      "id": "stride_founder_alignment_memo",
+      "revision": 1,
+      "sourcePath": "/Users/ajhart/Documents/Codex/2026-07-24/realtime-voice-chat/STRIDE_FOUNDER_ALIGNMENT_MEMO.docx",
+      "bytes": 44445,
+      "sha256": "5f45af08f9e181753df9ca6b0d5770dd3ecefe7c909350dc7fe32183a00abe99",
+      "authority": "founder_intent_proof_and_instrumentation_integration_authorized",
+      "renderReview": {
+        "pages": 4,
+        "result": "PASS"
+      }
+    }
+  ],
+  "authorizationLimits": {
+    "providerSpend": false,
+    "pilotDataCollection": false,
+    "appleOrTestFlightMutation": false,
+    "productionPublication": false,
+    "cohortActivation": false,
+    "openWebExposure": false
+  }
+}
