@@ -56,7 +56,8 @@
       "global_tenant_cutover"
     ]
   },
-  "liveRelease": {
+  "applicationAcceptanceRelease": {
+    "classification": "exact release used for the signed-in W4 application acceptance; not a self-referential claim about the later docs-only carrier commit",
     "ledgerGeneration": 37,
     "releaseCommit": "cd9566ba32b9c967e59e4c6f8fa40ee2ec10b0d4",
     "bundleSha256": "89b1f109129695a7c2a3176d04eaad6993c48c7ec5fb4a1c406525cb81e6a64c",
@@ -68,6 +69,20 @@
     "attestation": "verified-local-unsigned",
     "health": "PASS",
     "readiness": "PASS"
+  },
+  "successorIdentityBoundary": {
+    "reason": "A committed evidence file cannot embed the hash of the commit that contains itself.",
+    "authoritativeCurrentSources": [
+      "/opt/meetingassist-releases/active-release.json",
+      "https://thebonfire.xyz/healthz",
+      "https://thebonfire.xyz/readyz"
+    ],
+    "requiredSuccessorProperties": [
+      "same reviewed 333-file application inventory",
+      "exact source archive and release receipt",
+      "verified-local-unsigned retained-tool verification",
+      "authenticated W4 activation lineage unchanged"
+    ]
   },
   "verification": {
     "activationReleaseFullGoSuite": "PASS: go test ./... -count=1; root package 463.924s",

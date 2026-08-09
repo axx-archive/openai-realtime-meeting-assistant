@@ -12,16 +12,22 @@ activation `275d8c25b06c2947ff0e85257f14090ce1fd75a8c045eb1d73c6b96b907719a6`
 and receipt digest
 `fafe4431517126f0807b159b919354ca75c27d8ecd5e7fe7a3514743a83729af`.
 
-The exact serving release at 2026-08-09 02:38 PT is ledger generation 37,
-commit `cd9566ba32b9c967e59e4c6f8fa40ee2ec10b0d4`, bundle
+The exact application release used for signed-in acceptance at 2026-08-09
+02:38 PT was ledger generation 37, commit
+`cd9566ba32b9c967e59e4c6f8fa40ee2ec10b0d4`, bundle
 `89b1f109129695a7c2a3176d04eaad6993c48c7ec5fb4a1c406525cb81e6a64c`,
 application image
 `sha256:005359bb6f43fb774933f750b59c762415f485c6d0fbe2eab34a0bf45062023e`,
 and renderer image
 `sha256:685bb0692af2ff2967ec0ad9b70c88b80dca93d8ce5caffe084e8e5b2b597735`.
-The retained verifier, running images, Caddy, `/healthz`, and `/readyz` agree
+The retained verifier, running images, Caddy, `/healthz`, and `/readyz` agreed
 with `verified-local-unsigned`; exact prior release
 `c34118fdcc55635eac073745e35b017fc97392cc` remains intact for rollback.
+This plan/evidence update is a docs-only successor and deliberately does not
+self-embed its own Git hash. The active-release ledger plus `/healthz` and
+`/readyz` are authoritative for the exact current successor; every docs-only
+successor must retain the same reviewed 333-file application inventory and pass
+the same release verifier before serving.
 The carrier remains `qualified=false` and `externallyAttested=false` because
 independent signing/off-host attestation is still a separate gate.
 
@@ -3110,9 +3116,10 @@ physical-device, HA, custody, pilot, soak, or later cohort-activation states.
 
 **Current owner and stop:** AJ authorized and completed the W4 implementation,
 migration acceptance, commit, push, and exact VPS activation. The 2026-08-09
-receipt proves ledger generation 37, exact live `cd9566b...`, retained rollback
-`c34118f...`, authenticated activation lineage, seven current Bonfire members,
-and 98 bound sessions. The canonical shadow's 119 repair candidates remain a
+receipt proves the signed-in application-acceptance release `cd9566b...`,
+authenticated activation lineage, seven current Bonfire members, and 98 bound
+sessions. Later docs-only carrier successors are identified by the live ledger
+and must retain the same reviewed application inventory. The canonical shadow's 119 repair candidates remain a
 separate read-only finding and are not authority to repair or promote it.
 Continue MyMind, publication/search/contact, and final cohorts in W5-W8 order
 only with their separately named product/privacy/custody authority. No further paid
