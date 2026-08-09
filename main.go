@@ -940,6 +940,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "STRIDE W4 runtime startup failed: %v\n", err)
 		os.Exit(2)
 	}
+	w5StartupCtx, cancelW5Startup := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelW5Startup()
+	if err := installStrideE10W5ProductionRuntimeFromEnvironment(w5StartupCtx); err != nil {
+		fmt.Fprintf(os.Stderr, "STRIDE W5 custody startup failed: %v\n", err)
+		os.Exit(2)
+	}
 
 	if *renderRunnerWorker {
 		if err := runRenderRunnerLoop(context.Background()); err != nil {

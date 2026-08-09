@@ -39,6 +39,13 @@ func InstallStrideE10W5ProductionRuntime(ctx context.Context, config StrideE10W5
 	if err := custody.VerifyRestore(ctx); err != nil {
 		return nil, err
 	}
+	// NewFileMyMindCustody performs boot recovery before returning. Repeat both
+	// resumptions with the caller's bounded startup context so the production
+	// composition explicitly proves that no prepared source/person destruction
+	// journal is left unresolved before the handler is installed.
+	if err := custody.ResumeSourceForgets(ctx); err != nil {
+		return nil, err
+	}
 	if err := custody.ResumeDeletions(ctx); err != nil {
 		return nil, err
 	}
