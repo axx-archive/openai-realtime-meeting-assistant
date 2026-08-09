@@ -1,24 +1,29 @@
 # STRIDE Next Evolution — Master Architecture and Execution Ledger
 
 **Status:** E10-W0 through E10-W3 are independently
-`deterministic_verified` for their named local/default-off evidence classes.
-E10-W3 proves the offline seven-person migration, published-only network shadow,
-durable purge/restart behavior, and the converted runtime authority paths while
-deliberately rejecting production cutover. E10-W4 is the exact resume point and
-remains blocked on AJ's explicit production authority, a fresh read-only live
-repair manifest, exact backups, and the production durability/cutover boundary.
-A read-only
-release verification at 2026-08-08 08:31 PT proves
-ledger generation 30, the retained release verifier, every expected running
-image, Caddy, and public/container-local `/healthz` and `/readyz` agree on exact
-commit `d4c827c2adc7e1c6258f843e20fd4f9256c7310b`, bundle
-`2226f1d3cf5d43c80dd093b11cb21f1938af826122ab40a212b4d57037dccb2d`,
-application image `sha256:de0533e15c8c4da6d729ae406d686ba1e310f6d6f72cd81e83544db44e8135ba`,
-renderer image `sha256:73f0323d1c6d498973bbfab151d41870a24c181c2441689392ea8dec613fe95c`,
-and `verified-local-unsigned`. Retained rollback is exact commit
-`cffe16b39c67e89572fb9389fff0b51838f7d995` with its bundle, receipts, and
-application/renderer images intact. The carrier remains `qualified=false` and
-`externallyAttested=false`.
+`deterministic_verified` for their named evidence classes. E10-W4's private
+person/organization/session, Contribution Review, Work Record, and private
+network-draft product is now `production_private_live`. The authenticated W4
+activation binds all seven current people to Bonfire, with seven active
+memberships, AJ as sole owner, all 98 current sessions bound to their canonical
+person and membership, seven private unlisted network drafts, and zero guest
+sessions. The production snapshot is schema v2 generation 48 and descends from
+activation `275d8c25b06c2947ff0e85257f14090ce1fd75a8c045eb1d73c6b96b907719a6`
+and receipt digest
+`fafe4431517126f0807b159b919354ca75c27d8ecd5e7fe7a3514743a83729af`.
+
+The exact serving release at 2026-08-09 02:38 PT is ledger generation 37,
+commit `cd9566ba32b9c967e59e4c6f8fa40ee2ec10b0d4`, bundle
+`89b1f109129695a7c2a3176d04eaad6993c48c7ec5fb4a1c406525cb81e6a64c`,
+application image
+`sha256:005359bb6f43fb774933f750b59c762415f485c6d0fbe2eab34a0bf45062023e`,
+and renderer image
+`sha256:685bb0692af2ff2967ec0ad9b70c88b80dca93d8ce5caffe084e8e5b2b597735`.
+The retained verifier, running images, Caddy, `/healthz`, and `/readyz` agree
+with `verified-local-unsigned`; exact prior release
+`c34118fdcc55635eac073745e35b017fc97392cc` remains intact for rollback.
+The carrier remains `qualified=false` and `externallyAttested=false` because
+independent signing/off-host attestation is still a separate gate.
 
 Native Build 49, not Build 48, is the newest exact mobile carrier. EAS build
 `d76f442c-29ee-4f55-b30d-bac0c7cfeeb3` and submission
@@ -36,12 +41,14 @@ exact-release-only queue migration was additionally proven by the 34 release
 contract checks and an actual confined-container ownership/mode test.
 
 The current serving release remains unqualified externally. Production
-`/readyz` truthfully reports canonical shadow unhealthy at dirty/high-water
-28,626 versus reconciled/checkpoint 8,532 with 119 repair candidates, governed
-replay off, and STRIDE runtime activation-fenced. All 32 existing runtime
-switches are off; the revision-1 organization, Work Record, network, talent,
-contact, and MyMind-specific switches below are not implemented in the serving
-configuration yet, rather than merely off. Offsite backup remains dormant. No production replay, MyMind
+`/readyz` truthfully reports the separate canonical shadow unhealthy at
+dirty/high-water 29,094 versus reconciled/checkpoint 8,532 with 119 repair
+candidates and governed replay off. W4 does not read that shadow as product
+authority. Exactly these W4 features are active: person profile, organization
+read/write, active-organization session, Contribution Review, and private Work
+Record. Public network publication, discovery/search, contact, semantic
+reranking, MyMind context, and global tenant cutover remain deliberately off
+pending W5-W8 qualification rather than being presented as completed. Offsite backup remains dormant. No production replay, MyMind
 body custody/context assembly, AmbientMind compiler/worker or reader, artifact
 disposition action, provider qualification, physical-device acceptance,
 multi-room/TURN acceptance, HA/DR custody ceremony, pilot packet, or soak has
@@ -55,7 +62,7 @@ provider/model/voice/config qualification and external anchor are available.
 Release authority does not waive canonical-repair confirmation, consent,
 custody, physical-device, HA/DR, pilot, soak, or independent evidence gates.
 
-**Date:** 2026-08-08
+**Date:** 2026-08-09
 
 **Naming:** **STRIDE** is the long-term operating-system name. **Bonfire OS** is
 the current application and code-identifier implementation. After the exact
@@ -800,12 +807,12 @@ revision and test the limits rather than relying on prose defaults.
 | Gate | Accountable decision | Required artifact | Current state |
 |---|---|---|---|
 | W0 local design freeze | Goal Loop coordinator; independent read-only critic | exact revision-1 section digest, W0 receipt, critic verdict | pending critic; no external product approval implied |
-| W4 Bonfire migration and canonical repair/promotion | AJ as production owner | exact generated seven-person manifest, private backup/rollback receipts, expected database/event delta, deterministic suite, critic verdict | not authorized |
+| W4 Bonfire migration and private product activation | AJ as production owner | exact generated seven-person manifest, private backup/rollback receipts, authenticated activation journal/receipt, exact release/rollback, deterministic suite, critic verdict | authorized and completed for the private W4 scope on 2026-08-09; canonical repair/promotion remains separately blocked and was not inferred |
 | W5 MyMind custody/consent | AJ plus named privacy/security and independent custody owners | encryption/key/data-flow policy, user copy, deletion/recovery ceremony, custody and restore receipts | not authorized; may be explicitly deferred by AJ only for overall completion |
 | W6 Work Record/network qualification | named product, legal, and privacy approvers | signed policy revision covering attribution/export, tiers/copy, named parties, dispute/revoke, recruiter limits, prohibited proxies, retention/purge, pilot cohort | not approved; qualification receipts must bind the approved revision |
 | W6 paid provider routes | AJ and intended OpenAI project/billing owner | exact project identity, spend limits, per-route paid-call authorization and usage receipt | not authorized |
 | W7 native/privacy/resilience | Apple/TestFlight owner, product/privacy/legal approvers, physical-device participants, custody/DR owners | final-build Apple/group evidence, iPhone/iPad matrix, accessibility/privacy sign-off, restrictive-network and restore/failover receipts | external waiting |
-| W8 Git/release/cohorts | AJ | separately explicit commit, push, deploy, and cohort decisions; exact release/rollback; per-cohort kill-switch receipt | not authorized |
+| W8 Git/release/cohorts | AJ | separately explicit commit, push, deploy, and cohort decisions; exact release/rollback; per-cohort kill-switch receipt | W4 commit/push/deploy explicitly authorized and completed; W5-W8 publication/search/contact/MyMind cohorts remain unactivated |
 
 No deadline is invented for an external approver. A missing decision keeps the
 dependent gate `external_waiting` or `blocked`; it cannot be inferred from a
@@ -830,7 +837,7 @@ decision is explicitly external rather than silently assumed.
 | E10-W1 | Canonical person, organization, contribution, network, session, and audit authority | transactional max-three/final-owner proofs; revision/CAS/idempotency; exact org/named-party field approval; user publication/pause/revoke; recruiter grant/query/contact audit; purge propagation; every route default-off | `deterministic_verified` — migrations 14-16, receipt, targeted normal/race/PostgreSQL/vet, independent critic PASS; all switches false and no route active |
 | E10-W2 | Organization, Work Record, and network product surfaces | web/native self/coworker/network projections; create/join/approve/switch/leave; evidence cards/tiers; organization contribution approvals; network preview/View-as-recruiter/contact/block; no discovery activation | `deterministic_verified` — receipt-bound local/default-off backend, web, native, persistent recovery, critic PASS, and registered-live W1-backed rendered QA; earlier static fixture evidence remains explicitly non-live |
 | E10-W3 | Tenant conversion, network shadow, and migration rehearsal | replace singleton/unconditional org ACL paths; build shadow network projection/index from published fields only; revalidation/revoke/purge parity; idempotent offline seven-person/Bonfire rehearsal with AJ owner; no production mutation | `deterministic_verified` — local/offline migration, shadow, durable purge, restart/rollback, and converted authority-path evidence plus three independent critic PASS verdicts; production cutover remains deliberately disabled and singleton-dependent surfaces are explicitly unavailable/pending |
-| E10-W4 | Authority-gated Bonfire migration, org/Work Record canary, and canonical repair | explicit production authority; exact backup/rollback; migrate Bonfire; restore R1/R2; high-water agreement; web/native org/profile plus private contribution draft/preview canary while network discovery and MyMind remain off | `blocked` on AJ authority, a freshly regenerated exact live repair manifest, exact production backups, and the production durable organization/operation-store cutover boundary |
+| E10-W4 | Authority-gated Bonfire migration and private org/Work Record/network activation; canonical repair remains separately gated | explicit production authority; exact backup/rollback; authenticated activation journal/receipt; seven people and memberships with AJ sole owner; all current sessions bound; cohesive web/native org/profile/private draft/preview while discovery and MyMind remain off | `production_private_live` — exact migration evidence retained without rerun; W4 activation and successor lineage verified; seven people/seven memberships/98 sessions live; registered signed-in desktop/mobile QA PASS; canonical repair/promotion deliberately not performed |
 | E10-W5 | Private MyMind custody and activation | independent encrypted custody/consent; inspect/correct/forget/export; restart/restore; exact disclosure and zero leakage; profiles/orgs do not depend on this wave | `external_waiting` |
 | E10-W6 | Network, provider, and real-work qualification | privacy/legal/product approval; at least five consenting profile participants and two search reviewers; labeled/adversarial recruiter corpus; explanation/unknown/prohibited-criteria/contact/exfiltration gates; qualify any parser/reranker plus STT, voice, Luna/Terra/Sol, I&O/workforce one variable at a time | `external_waiting` |
 | E10-W7 | Physical, privacy, and resilience acceptance | final exact native build containing org/Work Record/network changes on iPhone/iPad; publish/pause/search/evidence/contact/block/revoke rendered flows; restrictive-network TURN/WebRTC; signed restore; index purge; HA failover; accessibility and privacy/legal sign-off | `external_waiting` |
@@ -2630,7 +2637,7 @@ Rate metrics report numerator/denominator and a 95% Wilson interval. Latency rep
 | E7 | `insights_opportunities_v1` and its first named Insights coworker produce repeatedly useful, reviewed outcomes, learn from typed feedback, and seal the first marketplace-ready package | E6 | ten fixed-release pilots, two reviewers, stable attribution, zero invented assertions/unauthorized disclosure, package/eval/rollback receipt | `deterministic_verified` — complete durable fake-stage workflow; ten paid real-input pilots/two reviewers pending E10 |
 | E8 | Curated Agent Marketplace, organization-owned team agents, evidence-backed growth, chief-of-staff coordination, static seat routing, and spend controls are eval-proven | E2-E7 corpora and I&O proof | verified first-party packages one at a time; lifecycle/permission/export/continuity gates; quality non-regression, ledger agreement, and package/profile/route rollback | `deterministic_verified` — internal-preview lifecycle/default-off candidates; live capability/personality/voice/cost admission pending E10 |
 | E9 | HA/DR, security, native devices, operational readiness, and launch-readiness harnesses | token-free E1-E8 engineering | deterministic restore/failover/isolation/native/security evidence; production operations remain fenced | `deterministic_verified` — temp/loopback/local-simulator evidence only; production HA/RPO/RTO, real media, physical devices, release, and soak pending E10 |
-| E10 | Identity/organization/Work Record network productization, paid-provider qualification, integrated acceptance, and launch | E1-E9 engineering plus external E0 recovery/consent/custody/quota gates | W0-W8; cross-tenant identity/org/MyMind and contribution/search corpus; one-seat-at-a-time live canaries; immutable route map; integrated founder flows; production restore/failover/soak; exact-SHA launch and rollback | `product_carrier_live; external_acceptance_waiting` — public health reports exact carrier `d4c827c...`, but E10-W0-W8, organization/Work Record/network/MyMind activation, physical acceptance, real-corpus qualification, HA/DR, custody, pilots, and soak remain open. Earlier carrier and synthetic-provider receipts retain only their historical/narrow evidence meaning. |
+| E10 | Identity/organization/Work Record network productization, paid-provider qualification, integrated acceptance, and launch | E1-E9 engineering plus external E0 recovery/consent/custody/quota gates | W0-W8; cross-tenant identity/org/MyMind and contribution/search corpus; one-seat-at-a-time live canaries; immutable route map; integrated founder flows; production restore/failover/soak; exact-SHA launch and rollback | `production_private_live; external_acceptance_waiting` — exact carrier `cd9566b...` serves W4 person/org/session, Contribution Review, Work Record, and private network drafts for all seven current users. Publication/search/contact/MyMind, canonical promotion, physical acceptance, real-corpus qualification, HA/DR, custody, pilots, and soak remain open. |
 
 ---
 
@@ -3091,25 +3098,24 @@ or a qualifying earlier-wave receipt:
 
 ## 18. Current wave and resume point
 
-**Current wave:** E10-W4 intervention request — E10-W0 through E10-W3 are
-locally/default-off `deterministic_verified`; production migration, repair,
-promotion, and canary remain blocked on AJ's explicit authority and a fresh
-read-only exact manifest. External substate `external_acceptance_waiting`.
+**Current wave:** E10-W5/W6 qualification after W4 private production
+activation. E10-W0 through E10-W3 are `deterministic_verified`; W4 is
+`production_private_live`. External substate `external_acceptance_waiting`.
 E1-E9 remain
 `deterministic_verified` only for their named local/default-off evidence classes.
-The live product carrier does not promote organization/Work Record/network/MyMind,
-provider, real-corpus, physical-device, HA, custody, pilot, soak, or cohort-
-activation states.
+The live product carrier promotes only the receipted W4 person/organization/
+session, Contribution Review, Work Record, and private network-draft states. It
+does not promote publication/search/contact/MyMind, provider, real-corpus,
+physical-device, HA, custody, pilot, soak, or later cohort-activation states.
 
-**Current owner and stop:** AJ is the required production decision owner; the
-Goal Loop coordinator stops before W4 mutation. The 2026-08-08
-read-only refresh proves generation 30, exact live `d4c827c...`, current images,
-retained rollback `cffe16b...`, verifier agreement, canonical high-waters, and
-the absent E10-specific switch inventory in the W0 receipt. Its 119 repair-
-candidate count must be freshly regenerated as an exact read-only row manifest
-before any W4 approval; it is not itself authority to repair. Continue the
-People, Work Record, network, MyMind, and multi-organization checkpoint above in
-W4-W8 order only with the separately named authority. No further paid
+**Current owner and stop:** AJ authorized and completed the W4 implementation,
+migration acceptance, commit, push, and exact VPS activation. The 2026-08-09
+receipt proves ledger generation 37, exact live `cd9566b...`, retained rollback
+`c34118f...`, authenticated activation lineage, seven current Bonfire members,
+and 98 bound sessions. The canonical shadow's 119 repair candidates remain a
+separate read-only finding and are not authority to repair or promote it.
+Continue MyMind, publication/search/contact, and final cohorts in W5-W8 order
+only with their separately named product/privacy/custody authority. No further paid
 qualification retry, canonical production repair/promotion, production data or
 configuration mutation, Git shipping/deployment, active specialist route,
 repository rename, or cohort activation is authorized by this plan alone.

@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_w4_network_live_receipt",
+  "status": "verified_production_private_network_live",
+  "completedAt": "2026-08-09T09:38:25Z",
+  "authorization": {
+    "owner": "AJ",
+    "scope": "W4 implementation, migrations as required, commit and push to main, exact VPS deployment, and live product acceptance",
+    "received": true
+  },
+  "git": {
+    "compatibilityRelease": "e85df5bc1a18908d1aa470355a448ae4a191f9f9",
+    "w4ActivationRelease": "c34118fdcc55635eac073745e35b017fc97392cc",
+    "liveDraftCorrectionRelease": "cd9566ba32b9c967e59e4c6f8fa40ee2ec10b0d4",
+    "remote": "axx/main",
+    "unrelatedStrideSiteIncluded": false
+  },
+  "migration": {
+    "rerun": false,
+    "reason": "Existing managed-MAC migration artifacts and exact target readback were valid and already bound the seven-person plus fifteen-row migration; rerunning would have been an unsafe duplicate ceremony.",
+    "persons": 7,
+    "organizations": 1,
+    "activeMemberships": 7,
+    "soleInitialOwner": "AJ",
+    "currentSessions": 98,
+    "boundMemberSessions": 98,
+    "guestSessions": 0,
+    "profiles": 7,
+    "privateNetworkDrafts": 7,
+    "recruiterGrants": 1,
+    "canonicalDatabaseSchemaVersions": 16
+  },
+  "activation": {
+    "mode": "bonfire_network_live",
+    "activationId": "275d8c25b06c2947ff0e85257f14090ce1fd75a8c045eb1d73c6b96b907719a6",
+    "activationReceiptDigest": "fafe4431517126f0807b159b919354ca75c27d8ecd5e7fe7a3514743a83729af",
+    "initialSnapshotGeneration": 23,
+    "observedSuccessorSnapshotGeneration": 48,
+    "snapshotSchemaVersion": 2,
+    "journalState": "committed",
+    "enabledFeatures": [
+      "person_profile_authority",
+      "organization_authority_read",
+      "organization_authority_write",
+      "active_organization_session",
+      "contribution_review",
+      "work_record_private"
+    ],
+    "deliberatelyNotActivated": [
+      "network_profile_publication",
+      "network_projection_shadow",
+      "network_search",
+      "network_contact",
+      "semantic_reranking",
+      "person_mymind_context",
+      "global_tenant_cutover"
+    ]
+  },
+  "liveRelease": {
+    "ledgerGeneration": 37,
+    "releaseCommit": "cd9566ba32b9c967e59e4c6f8fa40ee2ec10b0d4",
+    "bundleSha256": "89b1f109129695a7c2a3176d04eaad6993c48c7ec5fb4a1c406525cb81e6a64c",
+    "sourceArchiveSha256": "9b80248931fd5791ea4509a1dc28bd447ca11f68ec59cdce0fd5785e2b59e8ac",
+    "sourceReceiptSha256": "ebf45916d5fca2d74715178370e6b5c8d2cb6649e8b8fedd3d52106cd32dd139",
+    "meetingassistImageId": "sha256:005359bb6f43fb774933f750b59c762415f485c6d0fbe2eab34a0bf45062023e",
+    "renderRunnerImageId": "sha256:685bb0692af2ff2967ec0ad9b70c88b80dca93d8ce5caffe084e8e5b2b597735",
+    "retainedRollbackCommit": "c34118fdcc55635eac073745e35b017fc97392cc",
+    "attestation": "verified-local-unsigned",
+    "health": "PASS",
+    "readiness": "PASS"
+  },
+  "verification": {
+    "activationReleaseFullGoSuite": "PASS: go test ./... -count=1; root package 463.924s",
+    "activationReleaseFocusedRace": "PASS: 38.496s",
+    "releaseTool": "PASS: 42/42",
+    "mobileTypecheck": "PASS",
+    "mobileTests": "PASS: 457/457",
+    "draftCorrectionNormal": "PASS: go test . -run '^TestStrideW2' -count=1; 0.596s",
+    "draftCorrectionRace": "PASS: go test -race . -run '^TestStrideW2' -count=1; 2.078s",
+    "goVet": "PASS",
+    "diffCheck": "PASS",
+    "liveSignedInProfile": "PASS: Bonfire owner, one active organization, server-minted profile update",
+    "liveSignedInWorkRecord": "PASS: all six private sections, Bonfire owner role, Open to off by default",
+    "liveSignedInNetworkDraft": "PASS: server-minted private draft action, draft state, person-controlled profile detail",
+    "liveSignedInNetworkPreview": "PASS: exact draft/private projection",
+    "mobileViewport": "PASS: 390x844, document and body widths exactly 390, no horizontal overflow",
+    "applicationConsoleErrors": 0,
+    "applicationConsoleWarnings": 0,
+    "externalConsoleErrors": 1,
+    "externalConsoleClassification": "Chrome wallet extension attempted to redefine window.ethereum; no Bonfire source URL or application effect"
+  },
+  "selectedFileDigests": {
+    "index.html": "541ae1bb9deb2e098ece0da8f9aa46f03c666e61e367348a6b1b385b672e18be",
+    "frontend_stride_w2_surfaces_test.go": "a0c3c6d7291dc8b28a67dea76cbafe3710daac7786d4381096481db48d159f03",
+    "stride_e10_w4_network_activation.go": "f0dfc3e6adc4567d79056dcc1bedd53f6fbceb9bdaedd04dcc94fc24ade5c3ae",
+    "stride_e10_w4_runtime.go": "11aa5b91f51457ed6ace68deecaad6f4fa38cb1249de621413b89a45019644a5",
+    "deploy/digitalocean/docker-compose.yml": "4252fd9ca917bfc0b3323cd1febfa28fa4fab7060b5a2921d6cef87e549019b0",
+    "scripts/bonfire-release.mjs": "395c44c8b81c3b019f115422057ca09cdf7714892fc8e18ad426b2cbc2488dd7",
+    "docs/evidence/e10/stride-e10-w4-live-canary-20260809.json": "f73465adb1ca24c960e3c26eb89f043a4d294ad1a1c749d83205251edbe3ee61"
+  },
+  "renderedEvidence": [
+    {
+      "surface": "profile_desktop",
+      "path": "/Users/ajhart/.codex/visualizations/2026/08/08/019fe1fc-ee80-7e92-a889-1e14e91f693e/w4-live-me-desktop.png",
+      "sha256": "1c495734586dd9b93ec71b8b22f86bb137f66583cdf005b411d8e4ee1996b900"
+    },
+    {
+      "surface": "work_record_desktop",
+      "path": "/Users/ajhart/.codex/visualizations/2026/08/08/019fe1fc-ee80-7e92-a889-1e14e91f693e/w4-live-work-record-desktop.png",
+      "sha256": "7bd749efebaef266c20de8a82be514fedf1358c55754b75644426804738a1769"
+    },
+    {
+      "surface": "network_draft_desktop",
+      "path": "/Users/ajhart/.codex/visualizations/2026/08/08/019fe1fc-ee80-7e92-a889-1e14e91f693e/w4-live-network-draft-desktop.png",
+      "sha256": "73dbe994fceb3a03ff0db51a0c551f11dd53d8f931e406702fa9ff38f0108bba"
+    },
+    {
+      "surface": "network_draft_mobile",
+      "path": "/Users/ajhart/.codex/visualizations/2026/08/08/019fe1fc-ee80-7e92-a889-1e14e91f693e/w4-live-network-draft-390x844-real.png",
+      "width": 390,
+      "height": 844,
+      "sha256": "90c88a9d12603fdc332b2f5813482abbe963c6d95e6863cede93a0dbb91fdd83"
+    }
+  ],
+  "knownSeparateGate": {
+    "canonicalMode": "shadow",
+    "canonicalRequired": false,
+    "canonicalHealthy": false,
+    "dirtyHighWater": 29094,
+    "reconciledHighWater": 8532,
+    "repairCandidates": 119,
+    "effectOnW4PrivateAuthority": "none",
+    "promotionClaimed": false
+  }
+}
