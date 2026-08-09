@@ -2723,17 +2723,20 @@ func canonicalRepairDatabaseFingerprint(ctx context.Context, store *PostgresCano
 	if err != nil {
 		return "", err
 	}
-	if err := store.pool.QueryRow(ctx, `SELECT COALESCE(jsonb_agg(to_jsonb(q) ORDER BY q.object_type,q.object_id)::text,'[]') FROM (
+	objects, err = canonicalRepairOrderedJSONRows(ctx, store, `SELECT to_jsonb(q)::text FROM (
 		SELECT o.object_type,o.object_id,o.state_revision,o.content_revision,o.owner_principal_type,o.owner_principal_id,
 			o.room_id,o.meeting_id,o.classification,o.state,encode(o.content_sha256,'hex') AS content_sha256,o.acl_version,
 			e.event_id::text AS last_event_id,o.deleted_at,o.retain_until,o.legal_hold
-		FROM objects o JOIN canonical_events e ON e.sequence=o.last_event_sequence WHERE o.tenant_id=$1) q`, tenantID).Scan(&objects); err != nil {
+		FROM objects o JOIN canonical_events e ON e.sequence=o.last_event_sequence WHERE o.tenant_id=$1) q
+		ORDER BY q.object_type,q.object_id`, tenantID)
+	if err != nil {
 		return "", err
 	}
-	if err := store.pool.QueryRow(ctx, `SELECT COALESCE(jsonb_agg(to_jsonb(q) ORDER BY q.grant_id)::text,'[]') FROM (
+	grants, err = canonicalRepairOrderedJSONRows(ctx, store, `SELECT to_jsonb(q)::text FROM (
 		SELECT grant_id::text,object_type,object_id,acl_version,revision,subject_type,subject_id,action,room_id,sitting_id,
 			granted_by_type,granted_by_id,expires_at,revoked_at,conditions
-		FROM object_grants WHERE tenant_id=$1) q`, tenantID).Scan(&grants); err != nil {
+		FROM object_grants WHERE tenant_id=$1) q ORDER BY q.grant_id`, tenantID)
+	if err != nil {
 		return "", err
 	}
 	outboxSHA, err := canonicalRepairOutboxFingerprint(ctx, store, tenantID)
@@ -2763,6 +2766,41 @@ func canonicalRepairDatabaseFingerprint(ctx context.Context, store *PostgresCano
 		"event_fingerprints": eventFingerprints, "objects": objects, "grants": grants, "outbox_sha256": outboxSHA,
 	})
 	return sha256Hex(raw), err
+}
+
+// canonicalRepairOrderedJSONRows preserves the former jsonb_agg(... ORDER BY
+// ...) textual contract without asking PostgreSQL to materialize a potentially
+// unbounded aggregate inside its resource-capped process. Each bounded row is
+// rendered by PostgreSQL as jsonb, then the application assembles the ordered
+// array while performing the read-only fingerprint.
+func canonicalRepairOrderedJSONRows(ctx context.Context, store *PostgresCanonicalStore, query string, args ...any) (string, error) {
+	rows, err := store.pool.Query(ctx, query, args...)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	var result strings.Builder
+	result.WriteByte('[')
+	first := true
+	for rows.Next() {
+		var row string
+		if err := rows.Scan(&row); err != nil {
+			return "", err
+		}
+		if !json.Valid([]byte(row)) {
+			return "", errors.New("canonical database fingerprint row is not valid JSON")
+		}
+		if !first {
+			result.WriteString(", ")
+		}
+		first = false
+		result.WriteString(row)
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	result.WriteByte(']')
+	return result.String(), nil
 }
 
 func canonicalRepairOutboxFingerprint(ctx context.Context, store *PostgresCanonicalStore, tenantID string) (string, error) {

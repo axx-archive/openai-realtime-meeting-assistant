@@ -366,6 +366,31 @@ func setupRealCanonicalRepairFixture(t *testing.T) (context.Context, *postgresCa
 	return ctx, engine, targets, journalBefore
 }
 
+func TestCanonicalRepairOrderedJSONRowsMatchesBoundedPostgresAggregate(t *testing.T) {
+	ctx, engine, _, _ := setupRealCanonicalRepairFixture(t)
+	const rowsQuery = `SELECT to_jsonb(q)::text FROM (
+		SELECT o.object_type,o.object_id,o.state_revision,o.content_revision,o.owner_principal_type,o.owner_principal_id,
+			o.room_id,o.meeting_id,o.classification,o.state,encode(o.content_sha256,'hex') AS content_sha256,o.acl_version,
+			e.event_id::text AS last_event_id,o.deleted_at,o.retain_until,o.legal_hold
+		FROM objects o JOIN canonical_events e ON e.sequence=o.last_event_sequence WHERE o.tenant_id=$1) q
+		ORDER BY q.object_type,q.object_id`
+	streamed, err := canonicalRepairOrderedJSONRows(ctx, engine.store, rowsQuery, engine.manifest.TenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var aggregated string
+	if err := engine.store.pool.QueryRow(ctx, `SELECT COALESCE(jsonb_agg(to_jsonb(q) ORDER BY q.object_type,q.object_id)::text,'[]') FROM (
+		SELECT o.object_type,o.object_id,o.state_revision,o.content_revision,o.owner_principal_type,o.owner_principal_id,
+			o.room_id,o.meeting_id,o.classification,o.state,encode(o.content_sha256,'hex') AS content_sha256,o.acl_version,
+			e.event_id::text AS last_event_id,o.deleted_at,o.retain_until,o.legal_hold
+		FROM objects o JOIN canonical_events e ON e.sequence=o.last_event_sequence WHERE o.tenant_id=$1) q`, engine.manifest.TenantID).Scan(&aggregated); err != nil {
+		t.Fatal(err)
+	}
+	if streamed != aggregated {
+		t.Fatalf("streamed ordered JSON does not preserve the aggregate contract")
+	}
+}
+
 func TestReadOptionalCanonicalLifecycleJournalTreatsLegacyAbsenceAsEmpty(t *testing.T) {
 	dir := canonicalRepairTestTempDir(t)
 	path := filepath.Join(dir, "deleted-objects.jsonl")
