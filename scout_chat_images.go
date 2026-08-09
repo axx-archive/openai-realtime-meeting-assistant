@@ -46,18 +46,32 @@ type scoutChatImageRef struct {
 
 type scoutChatImageGenerationState struct {
 	Status            string `json:"status"`
+	Phase             string `json:"phase,omitempty"`
+	PhaseGeneration   int64  `json:"phaseGeneration,omitempty"`
 	ReplacesMessageID string `json:"replacesMessageId,omitempty"`
 	RequestedByEmail  string `json:"requestedByEmail,omitempty"`
 	RequestedByName   string `json:"requestedByName,omitempty"`
 	// Prompt is intentionally not rendered by the normal feed. It remains
 	// durable so an in-flight request can be diagnosed/recovered without asking
 	// the user to repeat the optimized prompt.
-	Prompt string `json:"prompt,omitempty"`
+	Prompt       string `json:"prompt,omitempty"`
+	ResultRef    string `json:"resultRef,omitempty"`
+	ResultMime   string `json:"resultMime,omitempty"`
+	ArtifactID   string `json:"artifactId,omitempty"`
+	FailureClass string `json:"failureClass,omitempty"`
+	FailureText  string `json:"failureText,omitempty"`
 }
 
 const (
 	scoutChatImageGenerationStatusGenerating = "generating"
 	scoutChatImageGenerationStatusFailed     = "failed"
+
+	scoutChatImagePhaseQueued          = "queued"
+	scoutChatImagePhaseProviderStarted = "provider_started"
+	scoutChatImagePhaseGenerated       = "generated"
+	scoutChatImagePhaseArtifactFiled   = "artifact_filed"
+	scoutChatImagePhaseProviderFailed  = "provider_failed"
+	scoutChatImagePhaseCleanupRequired = "cleanup_required"
 )
 
 // openAIImageGenerationAvailable reports whether image generation is
@@ -85,6 +99,18 @@ var startScoutChatImageAsyncWithPending = func(app *kanbanBoardApp, threadID str
 }
 
 var createScoutChatImage = createOpenAIImage
+
+var saveScoutChatImageThread = func(app *kanbanBoardApp, thread scoutChatThreadRecord) error {
+	return app.saveScoutChatThread(thread)
+}
+
+var deleteScoutChatImageArtifact = func(app *kanbanBoardApp, artifactID string) (meetingMemoryEntry, []scopedRoomDeliveryAcknowledgement, bool, error) {
+	return app.deleteOSArtifactAndEmit(artifactID)
+}
+
+var appendScoutChatImageAsset = func(app *kanbanBoardApp, artifactID string, asset artifactAsset) (meetingMemoryEntry, error) {
+	return app.appendArtifactAsset(artifactID, asset)
+}
 
 func (app *kanbanBoardApp) startScoutChatImageWorkers() {
 	if app == nil {
@@ -174,44 +200,119 @@ func (app *kanbanBoardApp) runScoutChatImageGenerationForPendingContext(parent c
 	defer cancel()
 
 	prompt = strings.TrimSpace(prompt)
-	if pendingMessageID != "" && !app.scoutChatImagePendingCurrent(ownerEmail, threadID, pendingMessageID, prompt) {
+	if pendingMessageID == "" {
+		app.runLegacyScoutChatImageGeneration(ctx, threadID, ownerEmail, prompt, createdBy)
+		return
+	}
+	thread, _, threadErr := app.scoutChatThreadByID(ownerEmail, threadID)
+	if threadErr != nil || thread.ArchivedAt != "" {
+		return
+	}
+	commitOwner := firstNonEmptyString(normalizeAccountEmail(thread.OwnerEmail), normalizeAccountEmail(ownerEmail))
+	claimed, err := app.transitionScoutChatImagePending(commitOwner, threadID, pendingMessageID, prompt, []string{scoutChatImagePhaseQueued}, func(state *scoutChatImageGenerationState) {
+		state.Phase = scoutChatImagePhaseProviderStarted
+	})
+	if err != nil || !claimed {
 		return
 	}
 	ref, mime, err := createScoutChatImage(ctx, prompt, openAIImageOptions{})
 	if err != nil {
-		// App shutdown deliberately leaves the durable pending message intact; the
-		// next process recovers it. Provider failures and timeouts are terminal and
-		// earn the normal user-visible error.
+		failureClass := "provider_error"
+		failureText := scoutChatImageFriendlyDetail(err)
 		if errors.Is(ctx.Err(), context.Canceled) && !errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return
+			failureClass = "provider_ambiguous"
+			failureText = "the render was interrupted before its result could be verified; please start a new render"
 		}
-		if pendingMessageID != "" {
-			_ = app.removeScoutChatImagePending(ownerEmail, threadID, pendingMessageID)
-		}
-		app.commitScoutChatImageError(threadID, ownerEmail, err)
+		_, _ = app.transitionScoutChatImagePending(commitOwner, threadID, pendingMessageID, prompt, []string{scoutChatImagePhaseProviderStarted}, func(state *scoutChatImageGenerationState) {
+			state.Phase = scoutChatImagePhaseProviderFailed
+			state.FailureClass = failureClass
+			state.FailureText = failureText
+		})
+		app.resumeScoutChatImagePending(commitOwner, threadID, pendingMessageID, createdBy)
 		return
 	}
-	if pendingMessageID != "" && !app.scoutChatImagePendingCurrent(ownerEmail, threadID, pendingMessageID, prompt) {
+	stored, storeErr := app.transitionScoutChatImagePending(commitOwner, threadID, pendingMessageID, prompt, []string{scoutChatImagePhaseProviderStarted}, func(state *scoutChatImageGenerationState) {
+		state.Phase = scoutChatImagePhaseGenerated
+		state.ResultRef = strings.TrimSpace(ref)
+		state.ResultMime = strings.TrimSpace(mime)
+	})
+	if storeErr != nil || !stored {
+		// The provider may have completed, but without a durable result checkpoint
+		// recovery must never guess or invoke it again. The provider_started phase is
+		// intentionally left ambiguous for restart reconciliation.
 		return
+	}
+	app.resumeScoutChatImagePending(commitOwner, threadID, pendingMessageID, createdBy)
+}
+
+func (app *kanbanBoardApp) runLegacyScoutChatImageGeneration(ctx context.Context, threadID, ownerEmail, prompt, createdBy string) {
+	ref, mime, err := createScoutChatImage(ctx, prompt, openAIImageOptions{})
+	if err != nil {
+		app.commitScoutChatImageError(threadID, ownerEmail, nil, err)
+		return
+	}
+	thread, _, err := app.scoutChatThreadByID(ownerEmail, threadID)
+	if err != nil || thread.ArchivedAt != "" {
+		return
+	}
+	artifact, asset, err := app.fileScoutChatImageArtifact(thread, "", prompt, ref, mime, createdBy)
+	if err != nil {
+		app.commitScoutChatImageError(threadID, ownerEmail, nil, err)
+		return
+	}
+	message := scoutChatMessageRecord{ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: scoutChatMessageKindImage, Role: "scout", Text: "here's the concept render.", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Image: &scoutChatImageRef{Ref: ref, Mime: mime, Name: asset.Name, ArtifactID: artifact.ID, Prompt: prompt}}
+	if _, err := app.commitScoutChatThreadMessages(ownerEmail, threadID, message); err != nil {
+		log.Errorf("scout chat image: commit legacy image on thread %s failed: %v", threadID, err)
+	}
+}
+
+func (app *kanbanBoardApp) fileScoutChatImageArtifact(thread scoutChatThreadRecord, generationID, prompt, ref, mime, createdBy string) (meetingMemoryEntry, artifactAsset, error) {
+	if generationID != "" {
+		// The thread-scoped filing lane is bounded by durable chat threads. A
+		// generation-scoped key would leak one retained mutex for every render.
+		lock := app.scoutChatThreadLock("image-file:" + thread.ID)
+		lock.Lock()
+		defer lock.Unlock()
+	}
+	if generationID != "" {
+		for _, entry := range app.memory.snapshot(0) {
+			if entry.Kind == meetingMemoryKindOSArtifact && entry.Metadata["source"] == "chat_image" && entry.Metadata["generationId"] == generationID {
+				if entry.Metadata["originSurface"] != "chat:"+thread.ID ||
+					normalizeAccountEmail(entry.Metadata["ownerEmail"]) != normalizeAccountEmail(thread.OwnerEmail) ||
+					entry.Metadata["visibility"] != normalizeScoutChatVisibility(thread.Visibility) ||
+					artifactIsPublished(entry) || entry.Metadata["imagePrompt"] != prompt ||
+					entry.Metadata["status"] != artifactStatusComplete || entry.Metadata["type"] != artifactTypeMarkdown ||
+					entry.Text != scoutChatImageArtifactBody(prompt, ref, mime) {
+					return meetingMemoryEntry{}, artifactAsset{}, errScoutChatImageArtifactBinding
+				}
+				assets := artifactAssets(entry)
+				for _, candidate := range assets {
+					if candidate.Ref == ref && candidate.Mime == mime && candidate.Kind == "image" {
+						return entry, candidate, nil
+					}
+				}
+				return meetingMemoryEntry{}, artifactAsset{}, errScoutChatImageArtifactBinding
+			}
+		}
 	}
 
 	// File the render as a design artifact. The asset (not just the chat
 	// message's ref) is what keeps the blob live under sweepUnreferencedBlobs,
 	// so file the artifact + attach the asset BEFORE committing the message.
 	metadata := map[string]string{
-		"type":        artifactTypeMarkdown,
-		"source":      "chat_image",
-		"imagePrompt": prompt,
-		"status":      artifactStatusComplete,
-		"published":   "true",
+		"type":          artifactTypeMarkdown,
+		"source":        "chat_image",
+		"imagePrompt":   prompt,
+		"status":        artifactStatusComplete,
+		"published":     "false",
+		"originSurface": "chat:" + thread.ID,
+		"visibility":    normalizeScoutChatVisibility(thread.Visibility),
+		"ownerEmail":    normalizeAccountEmail(thread.OwnerEmail),
+		"generationId":  strings.TrimSpace(generationID),
 	}
 	artifact, appended, err := app.createOSArtifactWithMetadata("design", scoutChatImageTitle(prompt), scoutChatImageArtifactBody(prompt, ref, mime), createdBy, metadata)
 	if err != nil || !appended || strings.TrimSpace(artifact.ID) == "" {
-		if pendingMessageID != "" {
-			_ = app.removeScoutChatImagePending(ownerEmail, threadID, pendingMessageID)
-		}
-		app.commitScoutChatImageError(threadID, ownerEmail, fmt.Errorf("the render generated but could not be filed"))
-		return
+		return meetingMemoryEntry{}, artifactAsset{}, fmt.Errorf("the render generated but could not be filed")
 	}
 	asset := artifactAsset{
 		Ref:  ref,
@@ -219,53 +320,185 @@ func (app *kanbanBoardApp) runScoutChatImageGenerationForPendingContext(parent c
 		Name: "concept-render" + imageryAssetExtension(mime),
 		Kind: "image",
 	}
-	updated, attachErr := app.appendArtifactAsset(artifact.ID, asset)
+	updated, attachErr := appendScoutChatImageAsset(app, artifact.ID, asset)
 	if attachErr != nil {
-		_, _, _, _ = app.deleteOSArtifactAndEmit(artifact.ID)
-		if pendingMessageID != "" {
-			_ = app.removeScoutChatImagePending(ownerEmail, threadID, pendingMessageID)
+		_, _, _, _ = deleteScoutChatImageArtifact(app, artifact.ID)
+		if _, stillPresent := app.osArtifactByID(artifact.ID); stillPresent {
+			return artifact, asset, fmt.Errorf("the render generated but its partial artifact requires cleanup")
 		}
-		app.commitScoutChatImageError(threadID, ownerEmail, fmt.Errorf("the render generated but could not be filed"))
+		return meetingMemoryEntry{}, artifactAsset{}, fmt.Errorf("the render generated but could not be filed")
+	}
+	return updated, asset, nil
+}
+
+var errScoutChatImageAuthorityChanged = errors.New("image destination authority changed")
+var errScoutChatImageArtifactBinding = errors.New("image artifact generation binding changed")
+
+func scoutChatImagePhase(state *scoutChatImageGenerationState) string {
+	if state == nil {
+		return ""
+	}
+	phase := strings.TrimSpace(state.Phase)
+	if phase == "" && state.Status == scoutChatImageGenerationStatusGenerating {
+		// Legacy rows may have crossed the provider boundary before this journal
+		// existed. Never reinterpret them as queued and double-call the provider.
+		return scoutChatImagePhaseProviderStarted
+	}
+	return phase
+}
+
+func (app *kanbanBoardApp) transitionScoutChatImagePending(ownerEmail, threadID, pendingMessageID, prompt string, expected []string, mutate func(*scoutChatImageGenerationState)) (bool, error) {
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	defer lock.Unlock()
+	thread, _, err := app.scoutChatThreadByID(ownerEmail, threadID)
+	if err != nil {
+		return false, err
+	}
+	index := scoutChatMessageIndex(thread, pendingMessageID)
+	if index < 0 || thread.Messages[index].Kind != scoutChatMessageKindImagePending || thread.Messages[index].ImageGeneration == nil {
+		return false, nil
+	}
+	state := thread.Messages[index].ImageGeneration
+	if strings.TrimSpace(state.Prompt) != strings.TrimSpace(prompt) {
+		return false, errScoutChatImageAuthorityChanged
+	}
+	phase := scoutChatImagePhase(state)
+	allowed := false
+	for _, candidate := range expected {
+		if phase == candidate {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return false, nil
+	}
+	mutate(state)
+	state.PhaseGeneration++
+	thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	if err := saveScoutChatImageThread(app, thread); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (app *kanbanBoardApp) resumeScoutChatImagePending(ownerEmail, threadID, pendingMessageID, createdBy string) {
+	pending, ok := app.scoutChatImagePending(ownerEmail, threadID, pendingMessageID)
+	if !ok || pending.ImageGeneration == nil {
 		return
 	}
-	artifact = updated
-
-	// Refresh every signed-in library so the new design artifact appears (the
-	// launchAgentThreadWithSpec precedent).
-	broadcastSignedInKanbanEvent("memory", nil)
-
-	message := scoutChatMessageRecord{
-		ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
-		Kind:      scoutChatMessageKindImage,
-		Role:      "scout",
-		Text:      "here's the concept render.",
-		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
-		Image: &scoutChatImageRef{
-			Ref:          ref,
-			Mime:         mime,
-			Name:         asset.Name,
-			ArtifactID:   artifact.ID,
-			Prompt:       prompt,
-			GenerationID: strings.TrimSpace(pendingMessageID),
-		},
-	}
-	if pending, ok := app.scoutChatImagePending(ownerEmail, threadID, pendingMessageID); ok && pending.ImageGeneration != nil {
-		message.Image.ReplacesMessageID = strings.TrimSpace(pending.ImageGeneration.ReplacesMessageID)
-	}
-	if _, err := app.commitScoutChatThreadMessages(ownerEmail, threadID, message); err != nil {
-		log.Errorf("scout chat image: commit image message on thread %s failed: %v", threadID, err)
-		if pendingMessageID != "" {
-			_ = app.removeScoutChatImagePending(ownerEmail, threadID, pendingMessageID)
-			app.commitScoutChatImageError(threadID, ownerEmail, fmt.Errorf("the render generated but could not be delivered"))
+	state := pending.ImageGeneration
+	prompt := strings.TrimSpace(state.Prompt)
+	requesterEmail := firstNonEmptyString(normalizeAccountEmail(state.RequestedByEmail), normalizeAccountEmail(ownerEmail))
+	switch scoutChatImagePhase(state) {
+	case scoutChatImagePhaseProviderStarted:
+		// The process cannot distinguish a provider-side success from a lost
+		// response. Seal an honest terminal error instead of spending twice.
+		changed, _ := app.transitionScoutChatImagePending(ownerEmail, threadID, pendingMessageID, prompt, []string{scoutChatImagePhaseProviderStarted}, func(current *scoutChatImageGenerationState) {
+			current.Phase = scoutChatImagePhaseProviderFailed
+			current.FailureClass = "provider_ambiguous"
+			current.FailureText = "the prior render was interrupted before its result could be verified; please start a new render"
+		})
+		if changed {
+			app.resumeScoutChatImagePending(ownerEmail, threadID, pendingMessageID, createdBy)
 		}
-		return
-	}
-	if pendingMessageID != "" {
-		// The image is committed first so a live client never sees the generating
-		// pill disappear before it has the replacement content.
-		if finalizeErr := app.completeScoutChatImagePending(ownerEmail, threadID, pendingMessageID); finalizeErr != nil {
-			log.Errorf("scout chat image: finalize pending %s failed: %v", pendingMessageID, finalizeErr)
+	case scoutChatImagePhaseGenerated:
+		thread, _, err := app.scoutChatThreadByID(ownerEmail, threadID)
+		if err != nil {
+			return
 		}
+		artifact, asset, err := app.fileScoutChatImageArtifact(thread, pendingMessageID, prompt, state.ResultRef, state.ResultMime, createdBy)
+		if err != nil {
+			if errors.Is(err, errScoutChatImageArtifactBinding) {
+				log.Errorf("scout chat image: quarantined mismatched generation artifact for %s", pendingMessageID)
+				return
+			}
+			if strings.TrimSpace(artifact.ID) != "" {
+				_, _ = app.transitionScoutChatImagePending(ownerEmail, threadID, pendingMessageID, prompt, []string{scoutChatImagePhaseGenerated}, func(current *scoutChatImageGenerationState) {
+					current.Phase = scoutChatImagePhaseCleanupRequired
+					current.ArtifactID = artifact.ID
+					current.FailureClass = "filing_failed"
+					current.FailureText = "the render generated but could not be filed"
+				})
+				app.resumeScoutChatImagePending(ownerEmail, threadID, pendingMessageID, createdBy)
+				return
+			}
+			_, _ = app.transitionScoutChatImagePending(ownerEmail, threadID, pendingMessageID, prompt, []string{scoutChatImagePhaseGenerated}, func(current *scoutChatImageGenerationState) {
+				current.Phase = scoutChatImagePhaseProviderFailed
+				current.FailureClass = "filing_failed"
+				current.FailureText = "the render generated but could not be filed"
+			})
+			app.resumeScoutChatImagePending(ownerEmail, threadID, pendingMessageID, createdBy)
+			return
+		}
+		stored, _ := app.transitionScoutChatImagePending(ownerEmail, threadID, pendingMessageID, prompt, []string{scoutChatImagePhaseGenerated}, func(current *scoutChatImageGenerationState) {
+			current.Phase = scoutChatImagePhaseArtifactFiled
+			current.ArtifactID = artifact.ID
+			current.ResultRef = asset.Ref
+			current.ResultMime = asset.Mime
+		})
+		if stored {
+			app.resumeScoutChatImagePending(ownerEmail, threadID, pendingMessageID, createdBy)
+		}
+	case scoutChatImagePhaseArtifactFiled:
+		var replyTo *scoutChatReplyRef
+		if pending.ReplyTo != nil {
+			copy := *pending.ReplyTo
+			replyTo = &copy
+		}
+		message := scoutChatMessageRecord{ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: scoutChatMessageKindImage, Role: "scout", Text: "here's the concept render.", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), ReplyTo: replyTo, Image: &scoutChatImageRef{Ref: state.ResultRef, Mime: state.ResultMime, Name: "concept-render" + imageryAssetExtension(state.ResultMime), ArtifactID: state.ArtifactID, Prompt: prompt, GenerationID: pendingMessageID, ReplacesMessageID: state.ReplacesMessageID}}
+		if _, err := app.commitScoutChatImageCompletion(requesterEmail, threadID, pendingMessageID, prompt, replyTo, message); err != nil {
+			if errors.Is(err, errScoutChatImageAuthorityChanged) {
+				_, _ = app.transitionScoutChatImagePending(ownerEmail, threadID, pendingMessageID, prompt, []string{scoutChatImagePhaseArtifactFiled}, func(current *scoutChatImageGenerationState) {
+					current.Phase = scoutChatImagePhaseCleanupRequired
+					current.FailureClass = "authority_denied"
+				})
+				app.resumeScoutChatImagePending(ownerEmail, threadID, pendingMessageID, createdBy)
+			}
+		}
+	case scoutChatImagePhaseProviderFailed:
+		var replyTo *scoutChatReplyRef
+		if pending.ReplyTo != nil {
+			copy := *pending.ReplyTo
+			replyTo = &copy
+		}
+		message := scoutChatImageErrorMessage(replyTo, errors.New(firstNonEmptyString(state.FailureText, "image generation failed")))
+		if _, err := app.commitScoutChatImageCompletion(requesterEmail, threadID, pendingMessageID, prompt, replyTo, message); err != nil && errors.Is(err, errScoutChatImageAuthorityChanged) {
+			_, _ = app.transitionScoutChatImagePending(ownerEmail, threadID, pendingMessageID, prompt, []string{scoutChatImagePhaseProviderFailed}, func(current *scoutChatImageGenerationState) { current.Phase = scoutChatImagePhaseCleanupRequired })
+			app.resumeScoutChatImagePending(ownerEmail, threadID, pendingMessageID, createdBy)
+		}
+	case scoutChatImagePhaseCleanupRequired:
+		artifactID := strings.TrimSpace(state.ArtifactID)
+		if artifactID != "" {
+			thread, _, err := app.scoutChatThreadByID(ownerEmail, threadID)
+			if err != nil {
+				return
+			}
+			if artifact, stillPresent := app.osArtifactByID(artifactID); stillPresent {
+				if artifact.Metadata["source"] != "chat_image" || artifact.Metadata["generationId"] != pendingMessageID ||
+					artifact.Metadata["originSurface"] != "chat:"+threadID || normalizeAccountEmail(artifact.Metadata["ownerEmail"]) != normalizeAccountEmail(thread.OwnerEmail) ||
+					artifact.Metadata["visibility"] != normalizeScoutChatVisibility(thread.Visibility) || artifactIsPublished(artifact) {
+					log.Errorf("scout chat image: refusing cleanup of mismatched artifact %s", artifactID)
+					return
+				}
+			}
+			_, _, _, _ = deleteScoutChatImageArtifact(app, artifactID)
+			if _, stillPresent := app.osArtifactByID(artifactID); stillPresent {
+				return
+			}
+		}
+		if state.FailureClass == "filing_failed" {
+			changed, _ := app.transitionScoutChatImagePending(ownerEmail, threadID, pendingMessageID, prompt, []string{scoutChatImagePhaseCleanupRequired}, func(current *scoutChatImageGenerationState) {
+				current.Phase = scoutChatImagePhaseProviderFailed
+				current.ArtifactID = ""
+			})
+			if changed {
+				app.resumeScoutChatImagePending(ownerEmail, threadID, pendingMessageID, createdBy)
+			}
+			return
+		}
+		_ = app.removeScoutChatImagePending(ownerEmail, threadID, pendingMessageID)
 	}
 }
 
@@ -273,21 +506,46 @@ func (app *kanbanBoardApp) runScoutChatImageGenerationForPendingContext(parent c
 // earns. A mapped OpenAI failure (the live prod 429 insufficient_quota, or a
 // rate limit) uses openAIAPIRequestUserMessage so the raw upstream body never
 // reaches the user; anything else uses the compacted error line.
-func (app *kanbanBoardApp) commitScoutChatImageError(threadID string, ownerEmail string, err error) {
-	detail := scoutChatImageErrorDetail(err)
-	if friendly, _, ok := openAIAPIRequestUserMessage(err); ok && strings.TrimSpace(friendly) != "" {
-		detail = friendly
+func (app *kanbanBoardApp) commitScoutChatImageError(threadID string, ownerEmail string, replyTo *scoutChatReplyRef, err error) {
+	message := scoutChatImageErrorMessage(replyTo, err)
+	if _, commitErr := app.commitScoutChatThreadMessages(ownerEmail, threadID, message); commitErr != nil {
+		log.Errorf("scout chat image: commit error message on thread %s failed: %v", threadID, commitErr)
 	}
-	message := scoutChatMessageRecord{
+}
+
+func scoutChatImageErrorMessage(replyTo *scoutChatReplyRef, err error) scoutChatMessageRecord {
+	detail := scoutChatImageFriendlyDetail(err)
+	return scoutChatMessageRecord{
 		ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
 		Kind:      "message",
 		Role:      "error",
 		Text:      "the concept render didn't go through — " + detail + ".",
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		ReplyTo:   replyTo,
 	}
-	if _, commitErr := app.commitScoutChatThreadMessages(ownerEmail, threadID, message); commitErr != nil {
-		log.Errorf("scout chat image: commit error message on thread %s failed: %v", threadID, commitErr)
+
+}
+
+func scoutChatImageFriendlyDetail(err error) string {
+	detail := scoutChatImageErrorDetail(err)
+	if friendly, _, ok := openAIAPIRequestUserMessage(err); ok && strings.TrimSpace(friendly) != "" {
+		return friendly
 	}
+	return detail
+}
+
+func (app *kanbanBoardApp) finishScoutChatImageError(requesterEmail, commitOwner, threadID, pendingMessageID, prompt string, replyTo *scoutChatReplyRef, err error) {
+	message := scoutChatImageErrorMessage(replyTo, err)
+	if pendingMessageID == "" {
+		app.commitScoutChatImageError(threadID, requesterEmail, replyTo, err)
+		return
+	}
+	if _, commitErr := app.commitScoutChatImageCompletion(requesterEmail, threadID, pendingMessageID, prompt, replyTo, message); commitErr != nil {
+		log.Errorf("scout chat image: final error authority changed on thread %s: %v", threadID, commitErr)
+		_ = app.removeScoutChatImagePending(commitOwner, threadID, pendingMessageID)
+		return
+	}
+	_ = app.removeScoutChatImagePending(commitOwner, threadID, pendingMessageID)
 }
 
 func scoutChatImageErrorDetail(err error) string {
@@ -321,6 +579,86 @@ func (app *kanbanBoardApp) scoutChatImagePending(ownerEmail, threadID, pendingMe
 func (app *kanbanBoardApp) scoutChatImagePendingCurrent(ownerEmail, threadID, pendingMessageID, prompt string) bool {
 	pending, ok := app.scoutChatImagePending(ownerEmail, threadID, pendingMessageID)
 	return ok && pending.ImageGeneration.Status == scoutChatImageGenerationStatusGenerating && strings.TrimSpace(pending.ImageGeneration.Prompt) == strings.TrimSpace(prompt)
+}
+
+func scoutChatImageReplyEqual(left, right *scoutChatReplyRef) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
+// commitScoutChatImageCompletion is the final-use authority boundary. It
+// holds the exact chat lock while re-reading the pending request, requester
+// membership, archive state, and reply target, then persists and publishes the
+// image before releasing that authority. A late provider response can never
+// escape into a channel top level after its thread or audience changed.
+func (app *kanbanBoardApp) commitScoutChatImageCompletion(requesterEmail, threadID, pendingMessageID, prompt string, replyTo *scoutChatReplyRef, message scoutChatMessageRecord) (scoutChatThreadRecord, error) {
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+
+	thread, _, err := app.scoutChatThreadByID(requesterEmail, threadID)
+	if err != nil || thread.ArchivedAt != "" || !scoutChatThreadAllowsViewer(thread, requesterEmail) {
+		lock.Unlock()
+		return scoutChatThreadRecord{}, errScoutChatImageAuthorityChanged
+	}
+	pendingIndex := scoutChatMessageIndex(thread, pendingMessageID)
+	if pendingIndex < 0 {
+		lock.Unlock()
+		return scoutChatThreadRecord{}, errScoutChatImageAuthorityChanged
+	}
+	pending := thread.Messages[pendingIndex]
+	phase := scoutChatImagePhase(pending.ImageGeneration)
+	wantPhase := scoutChatImagePhaseProviderFailed
+	if message.Kind == scoutChatMessageKindImage {
+		wantPhase = scoutChatImagePhaseArtifactFiled
+	}
+	if pending.Kind != scoutChatMessageKindImagePending || pending.ImageGeneration == nil ||
+		pending.ImageGeneration.Status != scoutChatImageGenerationStatusGenerating ||
+		phase != wantPhase ||
+		strings.TrimSpace(pending.ImageGeneration.Prompt) != strings.TrimSpace(prompt) ||
+		normalizeAccountEmail(pending.ImageGeneration.RequestedByEmail) != normalizeAccountEmail(requesterEmail) ||
+		!scoutChatImageReplyEqual(pending.ReplyTo, replyTo) {
+		lock.Unlock()
+		return scoutChatThreadRecord{}, errScoutChatImageAuthorityChanged
+	}
+	if replyTo != nil && scoutChatMessageIndex(thread, replyTo.MessageID) < 0 {
+		lock.Unlock()
+		return scoutChatThreadRecord{}, errScoutChatImageAuthorityChanged
+	}
+	message.ReplyTo = replyTo
+	removed := []scoutChatMessageRecord{pending}
+	filtered := make([]scoutChatMessageRecord, 0, len(thread.Messages))
+	for _, candidate := range thread.Messages {
+		if candidate.ID == pendingMessageID {
+			continue
+		}
+		if message.Kind == scoutChatMessageKindImage && pending.ImageGeneration.ReplacesMessageID != "" && candidate.ID == pending.ImageGeneration.ReplacesMessageID && candidate.Kind == scoutChatMessageKindImage && candidate.Image != nil {
+			removed = append(removed, candidate)
+			continue
+		}
+		filtered = append(filtered, candidate)
+	}
+	thread.Messages = append(filtered, message)
+	updateScoutChatThreadSummary(&thread, scoutChatMessageRecord{}, message)
+	if err := saveScoutChatImageThread(app, thread); err != nil {
+		lock.Unlock()
+		return scoutChatThreadRecord{}, err
+	}
+	for _, removedMessage := range removed {
+		app.observeSTRIDETeamChatMessage(thread, removedMessage, "delete", requesterEmail)
+		deliverScoutChatThreadDeletion(thread, removedMessage.ID)
+	}
+	app.observeSTRIDETeamChatMessage(thread, message, "message", "")
+	deliverScoutChatThreadUpdate(thread, message)
+	app.rebuildPrivateConversationContinuity(thread, "message")
+	lock.Unlock()
+	for _, removedMessage := range removed {
+		if removedMessage.Kind == scoutChatMessageKindImage {
+			app.discardUnsavedScoutChatImageArtifact(removedMessage.Image)
+		}
+	}
+	return thread, nil
 }
 
 // completeScoutChatImagePending makes successful regeneration lossless. The
@@ -388,17 +726,16 @@ func (app *kanbanBoardApp) completeScoutChatImagePending(ownerEmail, threadID, p
 // finishes cleanup; otherwise the persisted, viewer-redacted prompt is queued
 // through the normal in-process dedupe and shutdown lifecycle.
 func (app *kanbanBoardApp) recoverScoutChatImageGenerations() {
-	if app == nil || app.memory == nil || !openAIImageGenerationAvailable() {
+	if app == nil || app.memory == nil {
 		return
 	}
 	for _, entry := range app.memory.snapshot(0) {
 		thread, ok := decodeScoutChatThreadEntry(entry)
-		if !ok || thread.ArchivedAt != "" {
+		if !ok {
 			continue
 		}
 		for _, message := range thread.Messages {
-			if message.Kind != scoutChatMessageKindImagePending || message.ImageGeneration == nil ||
-				message.ImageGeneration.Status != scoutChatImageGenerationStatusGenerating || strings.TrimSpace(message.ImageGeneration.Prompt) == "" {
+			if message.Kind != scoutChatMessageKindImagePending || message.ImageGeneration == nil || strings.TrimSpace(message.ImageGeneration.Prompt) == "" {
 				continue
 			}
 			completed := false
@@ -415,13 +752,13 @@ func (app *kanbanBoardApp) recoverScoutChatImageGenerations() {
 				continue
 			}
 			requesterEmail := firstNonEmptyString(normalizeAccountEmail(message.ImageGeneration.RequestedByEmail), normalizeAccountEmail(thread.OwnerEmail))
-			if !scoutChatThreadAllowsViewer(thread, requesterEmail) {
-				_ = app.removeScoutChatImagePending(thread.OwnerEmail, thread.ID, message.ID)
-				app.commitScoutChatImageError(thread.ID, thread.OwnerEmail, fmt.Errorf("the original requester is no longer authorized for this channel"))
+			requesterName := firstNonEmptyString(strings.TrimSpace(message.ImageGeneration.RequestedByName), thread.CreatedBy, requesterEmail)
+			phase := scoutChatImagePhase(message.ImageGeneration)
+			if phase == scoutChatImagePhaseQueued && openAIImageGenerationAvailable() {
+				app.startScoutChatImageGeneration(thread.ID, requesterEmail, message.ImageGeneration.Prompt, requesterName, message.ID)
 				continue
 			}
-			requesterName := firstNonEmptyString(strings.TrimSpace(message.ImageGeneration.RequestedByName), thread.CreatedBy, requesterEmail)
-			app.startScoutChatImageGeneration(thread.ID, requesterEmail, message.ImageGeneration.Prompt, requesterName, message.ID)
+			app.resumeScoutChatImagePending(thread.OwnerEmail, thread.ID, message.ID, requesterName)
 		}
 	}
 }
@@ -451,7 +788,7 @@ func (app *kanbanBoardApp) removeScoutChatImagePending(ownerEmail string, thread
 	thread.Messages = append(thread.Messages[:index], thread.Messages[index+1:]...)
 	thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	thread.Preview = scoutChatThreadPreview(thread)
-	if err := app.saveScoutChatThread(thread); err != nil {
+	if err := saveScoutChatImageThread(app, thread); err != nil {
 		return err
 	}
 	app.observeSTRIDETeamChatMessage(thread, removed, "delete", ownerEmail)
@@ -532,14 +869,21 @@ func (app *kanbanBoardApp) regenerateScoutChatImage(ctx context.Context, user *u
 		return nil, fmt.Errorf("generated image not found")
 	}
 	oldMessage := thread.Messages[index]
+	var replyTo *scoutChatReplyRef
+	if oldMessage.ReplyTo != nil {
+		copy := *oldMessage.ReplyTo
+		replyTo = &copy
+	}
 	pending := scoutChatMessageRecord{
 		ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
 		Kind:      scoutChatMessageKindImagePending,
 		Role:      "scout",
 		Text:      "generating image…",
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		ReplyTo:   replyTo,
 		ImageGeneration: &scoutChatImageGenerationState{
 			Status:            scoutChatImageGenerationStatusGenerating,
+			Phase:             scoutChatImagePhaseQueued,
 			Prompt:            prompt,
 			ReplacesMessageID: oldMessage.ID,
 			RequestedByEmail:  normalizeAccountEmail(user.Email),

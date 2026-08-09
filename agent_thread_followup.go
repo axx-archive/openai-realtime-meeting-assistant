@@ -397,13 +397,7 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUpWithTenantAuthoritySnapshot(
 	})
 
 	broadcastSignedInKanbanEvent("memory", nil)
-	broadcastAssistantEvent("action", assistantToolLabel(mode)+" follow-up running", map[string]any{
-		"tool":       "launch_agent_thread",
-		"thread":     thread,
-		"artifact":   updated,
-		"actions":    actions,
-		"voiceState": "listening",
-	})
+	broadcastAssistantEvent("action", assistantToolLabel(mode)+" follow-up running", agentThreadBroadcastMetadata("launch_agent_thread", thread.ID, thread.Status, "listening"))
 	app.updateScoutChatThreadRefs(thread.ID, "running", updated.ID)
 
 	startAgentThreadFollowUpAsync(app, agentThreadFollowUpRun{
@@ -563,16 +557,9 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponderAuthorized(run age
 			return
 		}
 		message := assistantToolLabel(run.thread.Mode) + " follow-up needs attention"
-		actions := app.osAssistantActions(run.thread.Query, run.thread.Mode, artifact)
 		prevRefStatus := firstNonEmptyString(run.prevStatus["threadStatus"], run.prevStatus["status"], "complete")
 		broadcastSignedInKanbanEvent("memory", nil)
-		broadcastAssistantEvent("action", message, map[string]any{
-			"tool":       "launch_agent_thread",
-			"thread":     scoutAgentThread{ID: run.thread.ID, Mode: run.thread.Mode, Query: run.thread.Query, Status: prevRefStatus, Artifact: artifact, Actions: actions},
-			"artifact":   artifact,
-			"actions":    actions,
-			"voiceState": "listening",
-		})
+		broadcastAssistantEvent("action", message, agentThreadBroadcastMetadata("launch_agent_thread", run.thread.ID, prevRefStatus, "listening"))
 		app.updateScoutChatThreadRefs(run.thread.ID, prevRefStatus, artifact.ID)
 		app.notifyAgentThreadFollowUp(artifact, message)
 		return
@@ -607,11 +594,7 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponderAuthorized(run age
 	artifact, _, updateErr := app.updateOSArtifactWithMetadata(run.artifactID, "", newText, agentThreadArtifactWriter(run.thread, agentThreadWorkerResult{}), metadata)
 	if updateErr != nil {
 		log.Errorf("Failed to update follow-up artifact %s: %v", run.artifactID, updateErr)
-		broadcastAssistantEvent("error", "Scout follow-up could not update its artifact", map[string]any{
-			"tool":     "launch_agent_thread",
-			"threadId": run.thread.ID,
-			"artifact": prev,
-		})
+		broadcastAssistantEvent("error", "Scout follow-up could not update its artifact", agentThreadBroadcastMetadata("launch_agent_thread", run.thread.ID, "error", ""))
 		return
 	}
 	// A follow-up is its own attributable terminal run. Give the ledger and
@@ -624,15 +607,8 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponderAuthorized(run age
 	app.appendAgentRunLogEntry(terminalRun, artifact, "complete", output)
 
 	message := assistantToolLabel(run.thread.Mode) + " follow-up complete"
-	actions := app.osAssistantActions(run.thread.Query, run.thread.Mode, artifact)
 	broadcastSignedInKanbanEvent("memory", nil)
-	broadcastAssistantEvent("action", message, map[string]any{
-		"tool":       "launch_agent_thread",
-		"thread":     scoutAgentThread{ID: run.thread.ID, Mode: run.thread.Mode, Query: run.thread.Query, Status: "complete", Artifact: artifact, Actions: actions},
-		"artifact":   artifact,
-		"actions":    actions,
-		"voiceState": "listening",
-	})
+	broadcastAssistantEvent("action", message, agentThreadBroadcastMetadata("launch_agent_thread", run.thread.ID, "complete", "listening"))
 	app.updateScoutChatThreadRefs(run.thread.ID, "complete", artifact.ID)
 	// Same terminal contract as the primary seam (runAgentThread): the board
 	// card advances (idempotent — moveTicket reports changed=false when the

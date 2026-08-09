@@ -31,6 +31,23 @@ const (
 // work landed in a given channel.
 var agentThreadOriginMetadataKeys = []string{"originKind", "originId", "originMeetingId", "routeNote"}
 
+// agentThreadBroadcastMetadata is the body-free office telemetry projection.
+// Artifact bodies, prompts, actions, and chat origins travel only through the
+// per-principal memory snapshot and exact chat/room delivery paths.
+func agentThreadBroadcastMetadata(tool, threadID, status, voiceState string) map[string]any {
+	metadata := map[string]any{"tool": strings.TrimSpace(tool)}
+	if threadID = strings.TrimSpace(threadID); threadID != "" {
+		metadata["threadId"] = threadID
+	}
+	if status = strings.TrimSpace(status); status != "" {
+		metadata["status"] = status
+	}
+	if voiceState = strings.TrimSpace(voiceState); voiceState != "" {
+		metadata["voiceState"] = voiceState
+	}
+	return metadata
+}
+
 // broadcastNavigationActions decides whether a room-wide assistant_event may
 // carry navigation actions (open_tool: chat, etc). A channel-origin launch is
 // background, fire-and-forget work in a public thread — approving a Scout
@@ -329,15 +346,7 @@ func (app *kanbanBoardApp) launchAgentThreadWithSpecBound(mode string, query str
 	// A channel-origin launch drops navigation actions BOTH at the top level and
 	// inside the nested thread, so no client — present or future — can read a
 	// navigation action off this room-wide broadcast and yank the tab.
-	broadcastThread := thread
-	broadcastThread.Actions = broadcastNavigationActions(metadata["originKind"], actions)
-	broadcastAssistantEvent("action", assistantToolLabel(mode)+" thread launched", map[string]any{
-		"tool":       "launch_agent_thread",
-		"thread":     broadcastThread,
-		"artifact":   artifact,
-		"actions":    broadcastThread.Actions,
-		"voiceState": "listening",
-	})
+	broadcastAssistantEvent("action", assistantToolLabel(mode)+" thread launched", agentThreadBroadcastMetadata("launch_agent_thread", thread.ID, thread.Status, "listening"))
 
 	// W0 items 7+8: every thread launch — all callers route through this one
 	// seam — records workflow-run provenance plus THE proposal-chain launched
@@ -644,11 +653,7 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 	artifact, _, updateErr := app.updateOSArtifactWithMetadata(thread.Artifact.ID, title, output, agentThreadArtifactWriter(thread, workerResult), metadata)
 	if updateErr != nil {
 		log.Errorf("Failed to update Scout thread artifact %s: %v", thread.ID, updateErr)
-		broadcastAssistantEvent("error", "Scout thread could not update its artifact", map[string]any{
-			"tool":     "launch_agent_thread",
-			"threadId": thread.ID,
-			"artifact": thread.Artifact,
-		})
+		broadcastAssistantEvent("error", "Scout thread could not update its artifact", agentThreadBroadcastMetadata("launch_agent_thread", thread.ID, "error", ""))
 		return
 	}
 
@@ -658,16 +663,8 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 	// only; the signal discipline applies (a ledger write never fails the run).
 	app.appendAgentRunLogEntry(thread, artifact, status, output)
 
-	actions := app.osAssistantActions(thread.Query, thread.Mode, artifact)
-	broadcastActions := broadcastNavigationActions(artifact.Metadata["originKind"], actions)
 	broadcastSignedInKanbanEvent("memory", nil)
-	broadcastAssistantEvent("action", message, map[string]any{
-		"tool":       "launch_agent_thread",
-		"thread":     scoutAgentThread{ID: thread.ID, Mode: thread.Mode, Query: thread.Query, Status: status, Artifact: artifact, Actions: broadcastActions},
-		"artifact":   artifact,
-		"actions":    broadcastActions,
-		"voiceState": "listening",
-	})
+	broadcastAssistantEvent("action", message, agentThreadBroadcastMetadata("launch_agent_thread", thread.ID, status, "listening"))
 	// Terminal status must reach requesters who launched from chat: the ref
 	// commit pushes a chat_thread event over the office socket (channel
 	// broadcast or owner-targeted for private threads); the 12s chat poll
@@ -1100,24 +1097,12 @@ func (app *kanbanBoardApp) updateQueuedAgentThread(thread scoutAgentThread, work
 	artifact, _, updateErr := app.updateOSArtifactWithMetadata(thread.Artifact.ID, title, output, agentThreadArtifactWriter(thread, workerResult), metadata)
 	if updateErr != nil {
 		log.Errorf("Failed to update queued Scout thread artifact %s: %v", thread.ID, updateErr)
-		broadcastAssistantEvent("error", "Scout thread could not update its queued artifact", map[string]any{
-			"tool":     "launch_agent_thread",
-			"threadId": thread.ID,
-			"artifact": thread.Artifact,
-		})
+		broadcastAssistantEvent("error", "Scout thread could not update its queued artifact", agentThreadBroadcastMetadata("launch_agent_thread", thread.ID, "error", ""))
 		return
 	}
 
-	actions := app.osAssistantActions(thread.Query, thread.Mode, artifact)
-	broadcastActions := broadcastNavigationActions(artifact.Metadata["originKind"], actions)
 	broadcastSignedInKanbanEvent("memory", nil)
-	broadcastAssistantEvent("action", message, map[string]any{
-		"tool":       "launch_agent_thread",
-		"thread":     scoutAgentThread{ID: thread.ID, Mode: thread.Mode, Query: thread.Query, Status: status, Artifact: artifact, Actions: broadcastActions},
-		"artifact":   artifact,
-		"actions":    broadcastActions,
-		"voiceState": "listening",
-	})
+	broadcastAssistantEvent("action", message, agentThreadBroadcastMetadata("launch_agent_thread", thread.ID, status, "listening"))
 	// Keep chat-side thread cards in step with queued/approval states too.
 	app.updateScoutChatThreadRefs(thread.ID, status, artifact.ID)
 	// Approval gates stall silently otherwise: the creator gets a durable

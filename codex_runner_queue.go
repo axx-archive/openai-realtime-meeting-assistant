@@ -1641,12 +1641,7 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 
 	actions := kanbanApp.osAssistantActions(firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["title"]), artifact.Metadata["mode"], artifact)
 	broadcastSignedInKanbanEvent("memory", nil)
-	broadcastAssistantEvent("action", statusMessage, map[string]any{
-		"tool":       "codex_runner",
-		"artifact":   artifact,
-		"actions":    actions,
-		"voiceState": "listening",
-	})
+	broadcastAssistantEvent("action", statusMessage, agentThreadBroadcastMetadata("codex_runner", artifact.Metadata["threadId"], payload.Status, "listening"))
 	writeSystemStatusJSON(w, r, http.StatusOK, map[string]any{
 		"ok":       true,
 		"artifact": artifact,
@@ -2008,12 +2003,7 @@ func (app *kanbanBoardApp) rejectCodexArtifactGate(artifact meetingMemoryEntry, 
 	}
 	actions := app.osAssistantActions(updated.Metadata["title"], updated.Kind, updated)
 	broadcastSignedInKanbanEvent("memory", nil)
-	broadcastAssistantEvent("action", assistantToolLabel(updated.Kind)+" thread rejected", map[string]any{
-		"tool":       "codex_runner",
-		"artifact":   updated,
-		"actions":    actions,
-		"voiceState": "listening",
-	})
+	broadcastAssistantEvent("action", assistantToolLabel(updated.Kind)+" thread rejected", agentThreadBroadcastMetadata("codex_runner", updated.Metadata["threadId"], "rejected", "listening"))
 	return updated, actions, nil
 }
 

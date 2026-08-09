@@ -1357,12 +1357,6 @@ export function ThreadScreen({ route, navigation }: Props) {
       const artifact = response.artifacts[0];
       const text = String(artifact?.text ?? '').trim();
       if (terminal && text) {
-        if (!validDispositionRef(response.dispositionRef)) throw new Error('The deliverable authority changed. Refresh and try again.');
-        await api.artifactDisposition(sessionToken, {
-          operationId: createDispositionOperationId('open'),
-          action: 'open',
-          artifact: response.dispositionRef,
-        });
         const title = String(artifact?.metadata?.title ?? message.thread?.query ?? `${agentName} deliverable`).trim();
         setExpandedMessage({
           text,

@@ -40,11 +40,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and remain the fallback if this bundle is ever rejected.
       // Regenerate both with `npm run brand:regen` from the repo root.
       icon: './assets/Stride.icon',
-      // Build 48 adds Drive browsing and document tags, editable work prompts,
-      // and truthful Open/Save/Regenerate deliverable actions while retaining
-      // the generated-image and camera/roster fixes shipped in build 47.
+      // Build 50 opens an already-authorized Scout deliverable without making
+      // a second, disposition-gated mutation. Save remains separately gated.
+      // It also retains the generated-image topology and recovery fixes.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '49',
+      buildNumber: '50',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

@@ -1372,11 +1372,18 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewer(viewerEmail string, t
 		} else {
 			projected.Messages[messageIndex].Files = files
 		}
-		if original.ImageGeneration != nil && original.ImageGeneration.Status == scoutChatImageGenerationStatusGenerating {
+		if original.ImageGeneration != nil {
 			generation := *original.ImageGeneration
 			generation.Prompt = ""
 			generation.RequestedByEmail = ""
 			generation.RequestedByName = ""
+			generation.Phase = ""
+			generation.PhaseGeneration = 0
+			generation.ResultRef = ""
+			generation.ResultMime = ""
+			generation.ArtifactID = ""
+			generation.FailureClass = ""
+			generation.FailureText = ""
 			projected.Messages[messageIndex].ImageGeneration = &generation
 		}
 		if original.Image != nil {

@@ -19,11 +19,12 @@ test('proposal approval submits the human-edited objective once', () => {
   assert.match(screen, /api\.resolveScoutProposal\([\s\S]*objective/);
 });
 
-test('terminal work uses receipted Open and Save plus the existing follow-up seam', () => {
+test('terminal work opens from the authorized read and receipts only mutating Save', () => {
   assert.match(bubble, /Open deliverable/);
   assert.match(bubble, /Save deliverable to Drive/);
   assert.match(bubble, /Edit prompt and regenerate deliverable/);
-  assert.match(screen, /action: 'open'/);
+  assert.doesNotMatch(screen, /action: 'open'/);
+  assert.match(screen, /const response = await api\.artifact\(sessionToken, artifactId\)/);
   assert.match(screen, /action: 'save'/);
   assert.match(screen, /fileName: normalizedName/);
   assert.match(client, /assistant\/threads\/follow-up/);

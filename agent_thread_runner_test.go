@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -820,6 +821,22 @@ func TestBroadcastNavigationActionsDropsChannelOriginNav(t *testing.T) {
 	}
 	if got := broadcastNavigationActions("", actions); len(got) != 1 {
 		t.Fatalf("empty origin should keep its actions (today's default), got %+v", got)
+	}
+}
+
+func TestAgentThreadOfficeTelemetryIsBodyFree(t *testing.T) {
+	metadata := agentThreadBroadcastMetadata("launch_agent_thread", "agent-thread-private-1", "complete", "listening")
+	if len(metadata) != 4 || metadata["tool"] != "launch_agent_thread" || metadata["threadId"] != "agent-thread-private-1" || metadata["status"] != "complete" || metadata["voiceState"] != "listening" {
+		t.Fatalf("metadata=%#v, want exact body-free status projection", metadata)
+	}
+	raw, err := json.Marshal(metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"artifact", "actions", "originId", "originSurface", "threadQuery", "text"} {
+		if strings.Contains(string(raw), forbidden) {
+			t.Fatalf("office telemetry leaked %q: %s", forbidden, raw)
+		}
 	}
 }
 

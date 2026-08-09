@@ -812,11 +812,6 @@ func artifactDispositionHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusUnauthorized, "not signed in")
 		return
 	}
-	store, err := artifactDispositionStoreForRequest()
-	if err != nil || store == nil {
-		writeAuthError(w, http.StatusServiceUnavailable, ErrArtifactDispositionDisabled.Error())
-		return
-	}
 	payload := struct {
 		OperationID    string                    `json:"operationId"`
 		Action         ArtifactDispositionAction `json:"action"`
@@ -836,10 +831,31 @@ func artifactDispositionHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, ErrArtifactDispositionInvalid.Error())
 		return
 	}
+	actions := []ACLAction{ACLReadContent}
+	switch payload.Action {
+	case ArtifactDispositionSave:
+		actions = append(actions, ACLWrite)
+	case ArtifactDispositionDiscard:
+		actions = append(actions, ACLDelete)
+	case ArtifactDispositionOpen:
+	default:
+		writeAuthError(w, http.StatusBadRequest, ErrArtifactDispositionInvalid.Error())
+		return
+	}
+	store, storeErr := artifactDispositionStoreForRequest()
+	// Opening is an authorized content read, not a disposition mutation. Older
+	// native clients still post this acknowledgement after their exact GET, so
+	// keep that read working while the receipt-backed Save/Discard feature is
+	// deliberately default-off. No receipt or state is minted on this path.
+	readOnlyOpen := payload.Action == ArtifactDispositionOpen && (storeErr != nil || store == nil)
+	if !readOnlyOpen && (storeErr != nil || store == nil) {
+		writeAuthError(w, http.StatusServiceUnavailable, ErrArtifactDispositionDisabled.Error())
+		return
+	}
 	// Once the second confirmation's pending receipt is durable, it is the
 	// commit authority. Resume must not depend on a body that may already have
 	// been deleted by the first attempt.
-	if store.HasPendingDiscard(request) {
+	if store != nil && store.HasPendingDiscard(request) {
 		receipt, err := store.ResumePendingDiscard(r.Context(), request, appArtifactDispositionEffects{app: kanbanApp, user: user})
 		if err != nil {
 			if errors.Is(err, ErrArtifactDispositionConflict) {
@@ -850,17 +866,6 @@ func artifactDispositionHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "receipt": receipt})
-		return
-	}
-	actions := []ACLAction{ACLReadContent}
-	switch payload.Action {
-	case ArtifactDispositionSave:
-		actions = append(actions, ACLWrite)
-	case ArtifactDispositionDiscard:
-		actions = append(actions, ACLDelete)
-	case ArtifactDispositionOpen:
-	default:
-		writeAuthError(w, http.StatusBadRequest, ErrArtifactDispositionInvalid.Error())
 		return
 	}
 	var artifact meetingMemoryEntry
@@ -878,6 +883,14 @@ func artifactDispositionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	current := artifactDispositionRefFromHeader(resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact)))
+	if readOnlyOpen {
+		if !current.Equal(request.Artifact) {
+			writeAuthError(w, http.StatusConflict, ErrArtifactDispositionConflict.Error())
+			return
+		}
+		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "outcome": "opened"})
+		return
+	}
 	receipt, err := store.Apply(r.Context(), request, current, appArtifactDispositionEffects{app: kanbanApp, user: user, artifact: artifact})
 	status := http.StatusOK
 	if err != nil {

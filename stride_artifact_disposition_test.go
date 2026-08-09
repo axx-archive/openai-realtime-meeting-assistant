@@ -368,6 +368,38 @@ func TestArtifactDispositionHandlerReauthorizesRevisionAudienceAndRevocation(t *
 	}
 }
 
+func TestArtifactDispositionHandlerKeepsAuthorizedOpenAvailableWhileMutationsAreDisabled(t *testing.T) {
+	cookies, artifact, _ := setupArtifactAuthorizationSlice(t)
+	previousStore := artifactDispositionStoreForRequest
+	artifactDispositionStoreForRequest = func() (*ArtifactDispositionStore, error) {
+		return nil, ErrArtifactDispositionDisabled
+	}
+	t.Cleanup(func() { artifactDispositionStoreForRequest = previousStore })
+	ref := artifactDispositionRefFromHeader(resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact)))
+	body := func(operation string, action ArtifactDispositionAction, target ArtifactDispositionRef) string {
+		raw, err := json.Marshal(map[string]any{"operationId": operation, "action": action, "artifact": target})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+
+	opened := artifactAuthorizationRequest(t, http.MethodPost, "/api/artifact-dispositions/v1", body("read-only-open", ArtifactDispositionOpen, ref), cookies, artifactDispositionHandler)
+	if opened.Code != http.StatusOK || !strings.Contains(opened.Body.String(), `"outcome":"opened"`) {
+		t.Fatalf("open status=%d body=%s", opened.Code, opened.Body.String())
+	}
+	stale := ref
+	stale.ContentRevision++
+	staleOpen := artifactAuthorizationRequest(t, http.MethodPost, "/api/artifact-dispositions/v1", body("read-only-stale", ArtifactDispositionOpen, stale), cookies, artifactDispositionHandler)
+	if staleOpen.Code != http.StatusConflict {
+		t.Fatalf("stale open status=%d body=%s", staleOpen.Code, staleOpen.Body.String())
+	}
+	save := artifactAuthorizationRequest(t, http.MethodPost, "/api/artifact-dispositions/v1", body("disabled-save", ArtifactDispositionSave, ref), cookies, artifactDispositionHandler)
+	if save.Code != http.StatusServiceUnavailable || !strings.Contains(save.Body.String(), ErrArtifactDispositionDisabled.Error()) {
+		t.Fatalf("save status=%d body=%s", save.Code, save.Body.String())
+	}
+}
+
 func TestArtifactDispositionUnsavedDiscardRetractsChatAndRecall(t *testing.T) {
 	setupAuthTestEnv(t)
 	previousApp := kanbanApp

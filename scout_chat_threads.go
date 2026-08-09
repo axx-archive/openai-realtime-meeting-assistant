@@ -1125,14 +1125,21 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		if prompt == "" {
 			return scoutChatMessageRecord{}, scoutChatThreadRecord{}, fmt.Errorf("image prompt is required")
 		}
+		var replyTo *scoutChatReplyRef
+		if userMessage.ReplyTo != nil {
+			copy := *userMessage.ReplyTo
+			replyTo = &copy
+		}
 		pending := scoutChatMessageRecord{
 			ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
 			Kind:      scoutChatMessageKindImagePending,
 			Role:      "scout",
 			Text:      "generating image…",
 			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			ReplyTo:   replyTo,
 			ImageGeneration: &scoutChatImageGenerationState{
 				Status:           scoutChatImageGenerationStatusGenerating,
+				Phase:            scoutChatImagePhaseQueued,
 				Prompt:           prompt,
 				RequestedByEmail: normalizeAccountEmail(user.Email),
 				RequestedByName:  strings.TrimSpace(user.Name),
@@ -2208,17 +2215,24 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 			}
 			statusMessage := scoutChatMessageRecord{
 				ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
-				Kind:      "message",
+				Kind:      scoutChatMessageKindImagePending,
 				Role:      "scout",
-				Text:      "concept render started — it lands here when it's finished",
+				Text:      "generating image…",
 				CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 				ReplyTo:   proposalReplyTo,
+				ImageGeneration: &scoutChatImageGenerationState{
+					Status:           scoutChatImageGenerationStatusGenerating,
+					Phase:            scoutChatImagePhaseQueued,
+					Prompt:           objective,
+					RequestedByEmail: normalizeAccountEmail(user.Email),
+					RequestedByName:  strings.TrimSpace(user.Name),
+				},
 			}
 			saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, statusMessage)
 			if err != nil {
 				return nil, err
 			}
-			startScoutChatImageAsync(app, threadID, user.Email, objective, user.Name)
+			startScoutChatImageAsyncWithPending(app, threadID, user.Email, objective, user.Name, statusMessage.ID)
 			// W0 item 7: the concept-render confirm is the explicit generate —
 			// the launch leg of this card's funnel (tool_run/goal_run confirms
 			// launch via POST /assistant/goal, stamped by that door instead).
