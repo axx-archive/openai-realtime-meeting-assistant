@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "receiptKind": "stride_e10_pd0_pi0_bounded_contract_checkpoint",
+  "observedAt": "2026-08-09T17:30:00-07:00",
+  "reviewedParentCommit": "84bc0cc6b99ea89dcc0cbdcad00c3d06d4dd3cb0",
+  "artifacts": [
+    {
+      "path": "docs/design/stride-pd0-current-product-parity-audit-20260809.md",
+      "sha256": "da54564d784179c6e4552a774f0c9585d1a42eb92f0e512b45f7d34916b1091a",
+      "evidenceClass": "current_product_three_platform_audit"
+    },
+    {
+      "path": "docs/design/stride-pd0-semantic-system-contract-20260809.md",
+      "sha256": "df5081f6f2f6d4a06275a2cd4b8fb4280f01c64d23b07e6212341bdbd41353aa",
+      "evidenceClass": "decision_complete_semantic_system_contract"
+    },
+    {
+      "path": "docs/design/stride-pd0-reference-flow-contract-20260809.md",
+      "sha256": "475d220dddb96f32f170a8b8a24b68f98ff79a72bd53b805b30c2f98d7abca7c",
+      "evidenceClass": "decision_complete_interactive_reference_contract"
+    },
+    {
+      "path": "docs/evidence/e10/stride-e10-pd0-primary-source-research-20260809.md",
+      "sha256": "c9f3dc31960d6d12cd41ffc31efe7e9806eaa5e760b74fefcf5d0543ce913dd2",
+      "evidenceClass": "primary_source_pattern_research"
+    },
+    {
+      "path": "docs/evidence/e10/stride-pi0-a-instrumentation-contract-20260809.md",
+      "sha256": "befaaae01884791e200c79c32bd387c95d837f4d3b8d7643b43b1d6a64593877",
+      "evidenceClass": "decision_complete_instrumentation_contract"
+    }
+  ],
+  "critic": {
+    "independent": true,
+    "pd0ContractSet": {
+      "verdict": "PASS",
+      "rounds": 3,
+      "remainingBlockers": 0,
+      "remainingMajors": 0
+    },
+    "pi0AContract": {
+      "verdict": "PASS",
+      "rounds": 3,
+      "remainingBlockers": 0,
+      "remainingMajors": 0
+    }
+  },
+  "status": {
+    "pd0": "design_contract_verified_interactive_render_and_device_acceptance_pending",
+    "pi0A": "design_contract_verified_implementation_and_baseline_pending",
+    "pn1": "blocked_on_full_pd0_pi0a_and_external_pn0_policy_owners",
+    "collectionAuthorized": false,
+    "publicNetworkActivated": false,
+    "providerSpendAuthorized": false,
+    "deviceAccepted": false,
+    "productionChangedByThisCheckpoint": false
+  },
+  "nextSafeLocalGate": [
+    "build the executable body-minimized reference fixture and interaction harness",
+    "render and interact with J1-J13 on desktop web, native iPhone, and native iPad expressions",
+    "implement PI0-A schema, compound journal, synthetic trace verifier, metric manifest, and purge/restore tests without collecting real user data"
+  ],
+  "explicitlyNotProven": [
+    "PD0 implementation or legacy migration",
+    "desktop web, iPhone, or iPad rendered acceptance",
+    "real-device acceptance",
+    "PI0 instrumentation implementation or baseline capture",
+    "pilot consent or telemetry collection",
+    "PN1-PN5 implementation or activation",
+    "provider, Apple, legal, privacy, moderation, custody, restore, HA, or soak acceptance"
+  ]
+}

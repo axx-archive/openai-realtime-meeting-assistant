@@ -48,11 +48,13 @@ web-scroll race gate, `go vet`, native readiness contract checks, client tests,
 exact-release-only queue migration was additionally proven by the 34 release
 contract checks and an actual confined-container ownership/mode test.
 
-The current serving release remains unqualified externally. The reconciliation
+The current serving release remains unqualified externally. The post-release
 observation below records exact current release
-`1cf3463cf30938e956e892a5cde5c9009eaad296`, ledger generation 43, and W4
-generation 103. Production `/readyz` truthfully reports the separate canonical
-shadow unhealthy at dirty/high-water 29,438 versus reconciled/checkpoint 8,532
+`84bc0cc6b99ea89dcc0cbdcad00c3d06d4dd3cb0`, bundle
+`9ebd486f38cce682a56647afb444d79803e09399affc4dc7a7ca9fc08f010e40`,
+ledger generation 44, and W4 generation 106. Production `/readyz` truthfully
+reports the separate canonical shadow unhealthy at dirty/high-water 29,488
+versus reconciled/checkpoint 8,532
 with governed replay off. The earlier 119-candidate count is historical and
 must be refreshed before any repair authority is considered. W4 does not read
 that shadow as product authority. Exactly these W4 features are active: person profile, organization
@@ -180,8 +182,8 @@ The goal is complete only when evidence proves:
 | E10-W7 physical/privacy/resilience | immutable-root validators and read-only reports | `deterministic_validator_verified` | exact current native build, intended groups, real iPhone+iPad, accessibility/privacy, TURN, offsite restore, HA, independent attestation |
 | E10-W8 final cohorts/soak | ordered-cohort and soak validator | `deterministic_validator_verified` | signed W5/W6/W7/rollback dependencies, actual kill-switch cohorts, unchanged-release >=24h and >=10 sittings |
 | Public-network constitution | exact source path/size/digest receipt and source critic PASS | `design_source_verified` | this exact revision-2 integration, contract freeze, impacted-test inventory, and fresh E10 critic PASS |
-| Platform Design Unification | user direction and founder memo | `approved_design_scope`; no implementation evidence | audit, research, thesis, IA/system, parity matrix, rendered references, migration, implementation, interaction/device acceptance |
-| Proof & Instrumentation | founder memo and existing event/receipt fragments | `approved_scope`; PI0-A and PI0-B not complete | PI0-A trace/taxonomy, baseline, privacy/consent contract before dogfood/PN1 migration; PI0-B dashboards/receipts/research protocol before design-partner/pilot collection |
+| Platform Design Unification | current-product three-platform audit, primary-source research, governed semantic system, and J1-J13 interactive-reference contract; bounded independent critic PASS | `design_contract_verified`; PD0 remains incomplete | executable fixture, high-fidelity rendered interaction, complete migration inventory, accessibility/performance proof, implementation, real iPhone+iPad and desktop acceptance |
+| Proof & Instrumentation | founder memo plus decision-complete PI0-A event/trace/privacy/metric/recovery contract; bounded independent critic PASS | `design_contract_verified`; implementation/baseline/PI0-B not complete | implement trace schema and crash-safe journal, synthetic verifier, metric manifest and frozen prior baseline before PN1 data migration; PI0-B dashboards/receipts/research protocol before pilot collection |
 | PN1 safe public projections | constitution only | `not_started` | default-off contracts, migrations, authority, purge, deterministic fixtures, critic |
 | PN2 signed-in human pilot | none | `blocked_on_PN1_PD1pilot_PI0B_and_external_authority` | PN1 deterministic successor receipts; accepted desktop web/iPhone/iPad PD1 pilot subset; PI0-B collection gate; >=5 consenting profiles; 2 human-owned workspaces; named moderator plus legal/privacy/product approvals |
 | PN3 Explore | constitution only | `not_started` | PN2 evidence plus object-only policy/diversity/provenance/revocation proof; all people intent routes to Work Search |
@@ -437,8 +439,8 @@ expressions or their interaction/accessibility evidence.
 | W7 | Physical/privacy/resilience proof | W7 validator/operator, Apple proofpack, DR evidence only | immutable-root receipt and retained release | Apple/device/privacy/DR/attestation owners | `external_waiting` |
 | W8 | Ordered activation and soak | W8 activation operator only | per-cohort kill + rollback; >=24h/10 sittings | AJ exact activation + independent observer | `blocked_on_W5_W6_W7` |
 | PN0 | Adopt revision 2, exact diff/test inventory, contract freeze, threat/policy/switch owners | this canonical plan and PN0 evidence only | exact source receipt + fresh independent plan critic; no runtime rollback needed | plan integration authorized; external policy roles still unassigned; activation not authorized | `in_progress_external_policy_owners_waiting`; reconciliation critic PASS |
-| PD0 | Full-product audit/research/thesis/IA/system/parity/reference flows | design evidence and this plan; no product code | interactive reference QA + independent design critic | safe local design authorized after PN0 critic PASS | `ready_local` |
-| PI0-A | Freeze event taxonomy, trace identity, consent/privacy contract, and pre-migration baseline | telemetry contract/evidence files only; no collection | schema/trace completeness, privacy/purge/restore, synthetic fixtures, independent critic | safe local contract work after PN0; real collection not authorized | `ready_local` |
+| PD0 | Full-product audit/research/thesis/IA/system/parity/reference flows | design evidence and this plan; no production behavior | contracts passed bounded critic; remaining interactive render/accessibility/performance/device QA + final PD0 critic | safe local design/reference implementation authorized; activation absent | `design_contract_verified_interactive_acceptance_in_progress` |
+| PI0-A | Freeze and implement event taxonomy, trace identity, consent/privacy contract, compound recovery, and pre-migration baseline | telemetry schema/journal/metric/evidence files only; no collection | contract critic PASS; remaining implementation, synthetic crash/purge/restore, baseline freeze and independent implementation critic | safe local implementation authorized; real collection not authorized | `design_contract_verified_implementation_pending` |
 | PN1 | Safe public projections/controls default off | new PN authority/storage/runtime/test files; no broad UI activation | normal/race/PG/restore/purge/render; revision-1 inheritance plus PN successor receipts; all PN switches false | local implementation after PN0+PD0+PI0-A PASS | `blocked_on_PN0_PD0_PI0A` |
 | PD1 pilot subset | Migrate exact PN2 journeys across web/iPhone/iPad using the unified system | `index.html`, `mobile/src`, shared semantic design contracts, owned tests | parity, rendered interaction, accessibility/performance, real-device gate remains external; rollback to prior shell by release | local implementation after PD0 and PN1 contracts | `blocked_on_PD0_PN1` |
 | PI0-B | Private dashboards, case receipts, qualitative research protocol, collection gate | private telemetry/evidence/DR/operator surfaces only | consented synthetic/dogfood-safe trace, privacy/purge/restore, research-protocol critic | real collection requires participant consent | `blocked_on_PI0A_PN1_PD1_pilot` |
@@ -450,10 +452,14 @@ expressions or their interaction/accessibility evidence.
 
 ### Operations and authority queues
 
-**Safe local queue:** PN0 reconciliation/critic is complete; conduct PD0 audit
-and primary-source design research; build the three-platform parity/deprecation
-inventory and interactive references; execute PI0-A event/metric/privacy
-contracts and pre-migration baseline; maintain W5-W8 default-off operator tests. Do not select cohort
+**Safe local queue:** PN0 reconciliation/critic is complete. PD0 audit,
+primary-source research, three-platform parity, semantic-system, and interactive-
+reference contracts have bounded critic PASS; build their executable fixture,
+rendered interaction evidence, migration inventory, and accessibility/
+performance proofs. PI0-A's taxonomy, metric/privacy, compound-recovery, and
+baseline contract has bounded critic PASS; implement the schema, journal,
+synthetic verifier, purge/restore tests, and frozen pre-migration baseline
+without collecting real-user data. Maintain W5-W8 default-off operator tests. Do not select cohort
 participants or create external signatures as local fixtures for production
 acceptance.
 
@@ -488,18 +494,29 @@ W5 custody cryptography, W6 Work Search boundaries, or W7/W8 immutable-root
 validator semantics. It does require successor design/render/device/activation
 evidence wherever the public-network or unified-platform claim is new.
 
-Reconciliation observation: source revision before this plan edit is
-`31a5792` (the fail-closed W5-W8 operator carrier); unrelated `stride-site/`
-remains untracked and excluded. At 2026-08-09 current production is exact commit
-`1cf3463cf30938e956e892a5cde5c9009eaad296`, ledger generation 43, W4 schema 2
-generation 103 and ready, W5 configured/installed false, W6
+Reconciliation parent revision is `31a5792` (the fail-closed W5-W8 operator
+carrier); the critic-passed plan and carrier shipped together as exact commit
+`84bc0cc6b99ea89dcc0cbdcad00c3d06d4dd3cb0`. Unrelated `stride-site/` remains
+untracked and excluded. At 2026-08-09 current production is that exact commit,
+bundle `9ebd486f38cce682a56647afb444d79803e09399affc4dc7a7ca9fc08f010e40`,
+ledger generation 44, W4 schema 2 generation 106 and ready, W5 configured/installed false, W6
 configured/installed/qualified false, and all W5/W6/public switches off.
-Canonical shadow remains non-authoritative/unhealthy at 29,438 versus 8,532;
+The body-minimized release observation is
+`docs/evidence/e10/stride-e10-w5-w8-operator-live-20260809.json`, SHA-256
+`bc758fc7802db6a2d4a8f82342d0d9208ee96a5e3892f5cfa60792837eae7d7b`.
+Canonical shadow remains non-authoritative/unhealthy at 29,488 versus 8,532;
 backup is local with offsite `dormant`. The reconciliation independent critic
-PASS is recorded below. The next ready actions are PD0 audit/research plus the
-three-platform parity/reference-flow package and PI0-A taxonomy/privacy/baseline
-contracts in parallel. No production mutation, user-data collection, or public
-activation is the next action.
+PASS is recorded below. The first safe-local PD0/PI0-A contract checkpoint is
+`docs/evidence/e10/stride-e10-pd0-pi0-contracts-20260809.json`, SHA-256
+`d966d745b801b7b537451cbc91e8f3ee49cd9b0a166b48e678a3e769ea83a680`.
+Its independently reviewed contract set includes the 28-row three-platform
+audit, primary-source product thesis/IA, governed tokens/domain components,
+J1-J13 platform and PN/default-off flows, reproducible performance protocol,
+and body-minimized PI0-A trace/privacy/metric/compound-recovery contract. This
+is not rendered/device acceptance or instrumentation implementation. The next
+ready actions are the executable PD0 fixture/interaction harness and PI0-A
+schema/journal/synthetic baseline implementation in parallel. No production
+mutation, user-data collection, or public activation is the next action.
 
 #### Reconciliation Critic Loop — PASS
 
@@ -513,6 +530,28 @@ sidecar validate; the plan diff is whitespace-clean. Verdict: **PASS**, with no
 remaining blocker, major, or minor finding. This PASS authorizes safe PD0 and
 PI0-A local work only; external policy roles remain unassigned and every PN
 switch remains false.
+
+#### PD0/PI0-A bounded contract Critic Loops — PASS
+
+PD0 required three revision rounds. The audit added omitted moderation/appeal,
+consensus, open-web, and public-presence rows; the reference contract added
+explicit desktop/iPhone/iPad composition, exact PN1-PN5/default-off parents,
+feature-off states, and reproducible device/fixture/network/sampling budgets;
+the semantic system raised web hit targets to 40 CSS pixels and froze distinct
+domain components so human, agent, system, Suggested Work, artifact, evidence,
+public-work, search/contact, moderation, and consensus semantics cannot collapse
+into generic UI. Final bounded verdict: **PASS** with zero blocker/major.
+
+PI0-A required three revision rounds. It removed passive source observation,
+added outcome/adoption and closed metric baselines, separated audit from
+aggregate analytics, froze managed commitments and deletion/restore ownership,
+and made product+event effects one authenticated journal. Final recovery handles
+both post-seal and pre-seal crashes: an exact adapter receipt and destination
+can atomically prove/seal an already-applied effect without replay; revoked
+callers are fenced/repaired then independently denied. Final bounded verdict:
+**PASS** with zero blocker/major. Both verdicts are contract-only and do not
+claim implementation, collection, rendered interaction, device, or release
+acceptance.
 
 ## Historical completion checkpoint — 2026-08-08 10:00 PT
 

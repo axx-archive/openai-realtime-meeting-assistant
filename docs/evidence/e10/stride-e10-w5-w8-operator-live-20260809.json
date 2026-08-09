@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_w5_w8_default_off_operator_live",
+  "observedAt": "2026-08-09T19:52:48Z",
+  "release": {
+    "commit": "84bc0cc6b99ea89dcc0cbdcad00c3d06d4dd3cb0",
+    "bundleSha256": "9ebd486f38cce682a56647afb444d79803e09399affc4dc7a7ca9fc08f010e40",
+    "ledgerGeneration": 44,
+    "meetingassistImageId": "sha256:1b79577158c29604d956f1eb08fc5dd338fdd12181d19be1499e22ee81f0a02a",
+    "renderRunnerImageId": "sha256:bb2f101f1a348a8cef14111ce37b1450c603efe53a5b625cd2b9ff5a93954daf",
+    "verifier": "verified-local-unsigned",
+    "processQualified": true,
+    "externallyAttested": false,
+    "qualified": false,
+    "retainedRollbackCommit": "1cf3463cf30938e956e892a5cde5c9009eaad296"
+  },
+  "w4": {
+    "mode": "bonfire_network_live",
+    "ready": true,
+    "schemaVersion": 2,
+    "generation": 106,
+    "activationId": "275d8c25b06c2947ff0e85257f14090ce1fd75a8c045eb1d73c6b96b907719a6",
+    "activationReceiptDigest": "fafe4431517126f0807b159b919354ca75c27d8ecd5e7fe7a3514743a83729af",
+    "organization": "Bonfire",
+    "organizations": 1,
+    "persons": 7,
+    "activeMemberships": 7,
+    "soleOwners": 1,
+    "activeOrganizationSessions": 98,
+    "privateNetworkDrafts": 7,
+    "allMembershipsBoundToBonfire": true,
+    "allCurrentPeopleBound": true
+  },
+  "w5": {
+    "operatorCarrierDeployed": true,
+    "configured": false,
+    "installed": false,
+    "personMyMindContextEnabled": false,
+    "productionCustodyProvisioned": false
+  },
+  "w6": {
+    "operatorCarrierDeployed": true,
+    "configured": false,
+    "installed": false,
+    "cohortQualified": false,
+    "canonicalBound": false,
+    "queryParserProviderEnabled": false,
+    "semanticRerankerEnabled": false,
+    "publicationSearchContactEnabled": false
+  },
+  "w7w8": {
+    "readOnlyOperatorCarrierDeployed": true,
+    "physicalIPhoneAccepted": false,
+    "physicalIPadAccepted": false,
+    "privacyAccessibilityAccepted": false,
+    "restrictiveTurnAccepted": false,
+    "offsiteRestoreAccepted": false,
+    "haFailoverAccepted": false,
+    "independentlyAttested": false,
+    "soakAccepted": false
+  },
+  "publicNetwork": {
+    "runtimeImplemented": false,
+    "switchesEnabled": 0,
+    "publicationAuthorized": false,
+    "pilotCollectionAuthorized": false,
+    "openWebAuthorized": false
+  },
+  "knownExternalGates": {
+    "canonicalMode": "shadow",
+    "canonicalHealthy": false,
+    "canonicalHighWater": 29488,
+    "canonicalReconciledHighWater": 8532,
+    "offsiteBackup": "dormant",
+    "restoreVerified": false
+  },
+  "mutations": {
+    "gitPush": true,
+    "exactReleaseActivation": true,
+    "w5Activation": false,
+    "w6Activation": false,
+    "publicNetworkActivation": false,
+    "providerCall": false,
+    "pilotDataCollection": false
+  }
+}
