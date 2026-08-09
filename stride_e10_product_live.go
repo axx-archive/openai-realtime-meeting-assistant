@@ -35,6 +35,7 @@ type StrideE10ProductLiveRuntime struct {
 	purges         map[string]map[string]any
 	idempotency    map[string]strideE10LiveIdempotency
 	now            func() time.Time
+	persistRuntime func(*StrideE10ProductLiveRuntime) error
 }
 
 type StrideE10LiveActionBinding struct {
@@ -404,6 +405,9 @@ func (r *StrideE10ProductLiveRuntime) Execute(ctx context.Context, principal Str
 	}
 	if command.Operation == "network.preview" && command.Method == http.MethodPost {
 		value, err := r.project(principal, "network-preview")
+		if err == nil && r.persistRuntime != nil {
+			err = r.persistRuntime(r)
+		}
 		return value, false, err
 	}
 	if command.Method == http.MethodGet {
@@ -415,6 +419,9 @@ func (r *StrideE10ProductLiveRuntime) Execute(ctx context.Context, principal Str
 			return nil, false, ErrStrideE10NotFound
 		}
 		value, err := r.projectTarget(principal, surface, command.TargetID)
+		if err == nil && r.persistRuntime != nil {
+			err = r.persistRuntime(r)
+		}
 		return value, false, err
 	}
 	if !strings.HasPrefix(command.Path, "/api/stride/v1/mobile/actions/") {
@@ -497,6 +504,9 @@ func (r *StrideE10ProductLiveRuntime) Execute(ctx context.Context, principal Str
 			if projectErr != nil {
 				return nil, true, projectErr
 			}
+			if r.persistRuntime != nil && r.persistRuntime(r) != nil {
+				return nil, true, ErrStrideE10Invalid
+			}
 			if r.operationStore.Complete(operationKey, fingerprint, value, r.now().UTC()) != nil {
 				return nil, true, ErrStrideE10Invalid
 			}
@@ -527,12 +537,20 @@ func (r *StrideE10ProductLiveRuntime) Execute(ctx context.Context, principal Str
 			return nil, replayed, executeErr
 		}
 	}
+	if r.persistRuntime != nil {
+		if err := r.persistRuntime(r); err != nil {
+			return nil, replayed, ErrStrideE10Invalid
+		}
+	}
 	if r.operationStore.Commit(operationKey, fingerprint, r.now().UTC()) != nil {
 		return nil, replayed, ErrStrideE10Invalid
 	}
 	value, err := r.project(principal, binding.Surface)
 	if err != nil {
 		return nil, replayed, err
+	}
+	if r.persistRuntime != nil && r.persistRuntime(r) != nil {
+		return nil, replayed, ErrStrideE10Invalid
 	}
 	if r.operationStore.Complete(operationKey, fingerprint, value, r.now().UTC()) != nil {
 		return nil, replayed, ErrStrideE10Invalid

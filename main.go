@@ -830,6 +830,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Release identity startup failed: %v\n", err)
 		os.Exit(2)
 	}
+	if *strideE10W4MigrateFlag {
+		if err := runStrideE10W4MigrationCLI(context.Background()); err != nil {
+			fmt.Fprintf(os.Stderr, "STRIDE W4 migration failed: %v\n", err)
+			os.Exit(2)
+		}
+		return
+	}
 	if *repairCanonical {
 		if *renderRunnerWorker || *observeRepair || *normalizeCanonical || *generateRepairManifest || *repairObservation != "" || *normalizationInput != "" || *normalizationInputSHA != "" || *normalizationReceipt != "" || *repairEvidenceDir != "" || *repairEvidenceDescriptor != "" {
 			fmt.Fprintln(os.Stderr, "Canonical repair mode cannot be combined with another maintenance mode")
@@ -894,6 +901,10 @@ func main() {
 	}
 	_ = canonicalRuntime
 	defer closeCanonicalRuntime()
+	if err := installStrideE10W4ProductionRuntimeFromEnvironment(); err != nil {
+		fmt.Fprintf(os.Stderr, "STRIDE W4 runtime startup failed: %v\n", err)
+		os.Exit(2)
+	}
 
 	if *renderRunnerWorker {
 		if err := runRenderRunnerLoop(context.Background()); err != nil {

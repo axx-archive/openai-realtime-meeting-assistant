@@ -119,7 +119,7 @@ func strideE10TenantProductionBootstrapConfigFromEnvironment() (strideE10TenantP
 	// W3 production composition is observation-only. W4 must install durable
 	// canonical organization and product-operation stores before cutover can be
 	// a valid process mode.
-	if config.mode != string(StrideE10TenantConversionShadow) {
+	if config.mode != string(StrideE10TenantConversionShadow) && !(config.mode == string(StrideE10TenantConversionCutover) && strideE10W4ProductionRuntimeReady()) {
 		return strideE10TenantProductionBootstrapConfig{}, ErrStrideE10TenantAuthorityInvalid
 	}
 	receiptVersion, receiptErr := strconv.ParseInt(strings.TrimSpace(os.Getenv(strideE10TenantReceiptKeyVersionEnv)), 10, 64)
@@ -145,7 +145,7 @@ func installStrideE10TenantProductionRuntime(config strideE10TenantProductionBoo
 	if config.sessions == nil || config.organizations == nil {
 		return nil, ErrStrideE10TenantAuthorityInvalid
 	}
-	if config.mode == string(StrideE10TenantConversionCutover) {
+	if config.mode == string(StrideE10TenantConversionCutover) && !strideE10W4ProductionRuntimeReady() {
 		return nil, ErrStrideE10TenantAuthorityInvalid
 	}
 	gate := &strideE10TenantProductionGate{enabled: config.mode != "" && config.mode != strideE10TenantRuntimeModeOff}
@@ -161,7 +161,7 @@ func installStrideE10TenantProductionRuntime(config strideE10TenantProductionBoo
 		restoreEnvelope := InstallStrideE10TenantAuthorityEnvelopeRuntime(nil)
 		return func() { restoreEnvelope(); restoreConverter() }, nil
 	}
-	if config.mode != string(StrideE10TenantConversionShadow) || !filepath.IsAbs(config.receiptPath) || filepath.Clean(config.receiptPath) != config.receiptPath || !strideIdentifier(config.receiptKey.ID) || config.receiptKey.Version < 1 || len(config.receiptKey.Secret) < 32 || !validStrideE10TenantEnvelopeKey(config.envelopeKey) {
+	if !oneOf(config.mode, string(StrideE10TenantConversionShadow), string(StrideE10TenantConversionCutover)) || !filepath.IsAbs(config.receiptPath) || filepath.Clean(config.receiptPath) != config.receiptPath || !strideIdentifier(config.receiptKey.ID) || config.receiptKey.Version < 1 || len(config.receiptKey.Secret) < 32 || !validStrideE10TenantEnvelopeKey(config.envelopeKey) {
 		return nil, ErrStrideE10TenantAuthorityInvalid
 	}
 	sink := &strideE10TenantFileReceiptSink{path: config.receiptPath, key: config.receiptKey}

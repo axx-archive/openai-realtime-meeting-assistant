@@ -20,7 +20,7 @@ type strideE10MainTenantAuthorityResolver struct {
 }
 
 func strideE10CreateAuthenticatedSession(email string) (string, error) {
-	if !strideE10TenantCutoverEnabled() {
+	if !strideE10TenantCutoverEnabled() && !strideE10W4ProductionRuntimeReady() {
 		return userSessionStore().create(email)
 	}
 	email = normalizeAccountEmail(email)
