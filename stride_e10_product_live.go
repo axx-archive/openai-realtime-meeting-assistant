@@ -2603,15 +2603,25 @@ func (r *StrideE10ProductLiveRuntime) authorityProjectionItems(principal StrideE
 		}
 		items = append(items, map[string]any{"id": targetID, "title": profile.DisplayName, "kind": "coworker-profile-detail", "detail": map[string]any{"kind": "coworker-profile-detail", "displayName": profile.DisplayName, "role": membership.Role, "title": memberProfile.Title, "team": memberProfile.Team, "joinedAt": memberProfile.JoinedAt.UTC().Format(time.RFC3339)}})
 	case "work-record":
+		identity, identityErr := r.organization.ReadStrideE10SelfOrganizationView(principal.PersonID)
 		scope, ok := r.currentContributionViewScope(principal, false)
 		if !ok {
-			return nil, ErrStrideE10NotFound
+			if identityErr != nil {
+				return nil, ErrStrideE10NotFound
+			}
+			// A current person owns the private Work Record even before the first
+			// contribution controller is issued. Render the closed empty section
+			// vocabulary; do not invent a controller or expose contribution data.
+			items = append(items, strideE10WorkRecordProjectionItems(StrideE10ContributionView{}, identity, nil)...)
+			break
 		}
 		view, err := r.contribution.ReadStrideE10ContributionView(scope)
 		if err != nil {
 			return nil, ErrStrideE10NotFound
 		}
-		identity, _ := r.organization.ReadStrideE10SelfOrganizationView(principal.PersonID)
+		if identityErr != nil {
+			identity = StrideE10OrganizationSelfView{}
+		}
 		items = append(items, strideE10WorkRecordProjectionItems(view, identity, r.contribution.FieldEligible)...)
 	case "contribution-approvals":
 		authorized := false

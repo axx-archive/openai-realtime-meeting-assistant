@@ -1925,12 +1925,32 @@ func TestStrideE10ProductLiveCoworkerProjectionBindsExactSharedOrganizationTarge
 func TestStrideE10ProductLiveProjectionDenialsAreOpaqueNotEmptyAvailable(t *testing.T) {
 	runtime := NewStrideE10ProductLiveRuntime(nil)
 	if _, err := runtime.project(StrideE10ProductPrincipal{PersonID: "person-no-scope"}, "work-record"); !errors.Is(err, ErrStrideE10NotFound) {
-		t.Fatalf("missing contribution scope err=%v", err)
+		t.Fatalf("unknown person work record err=%v", err)
 	}
 	runtime.organization.memberships["membership-member"] = OrganizationMembership{Header: STRIDEContractHeader{ID: "membership-member", Revision: 1}, PersonID: "person-member", OrganizationID: "org-one", Role: "member", Status: "active"}
 	principal := StrideE10ProductPrincipal{PersonID: "person-member", ActiveOrganizationID: "org-one", OrganizationMembershipID: "membership-member", OrganizationMembershipRev: 1, ActiveOrganizationSessionRev: 1}
 	if _, err := runtime.project(principal, "organization-recruiting"); !errors.Is(err, ErrStrideE10NotFound) {
 		t.Fatalf("non-admin recruiting projection err=%v", err)
+	}
+}
+
+func TestStrideE10ProductLiveCurrentPersonOwnsEmptyPrivateWorkRecord(t *testing.T) {
+	runtime := NewStrideE10ProductLiveRuntime(nil)
+	runtime.organization.persons["person-empty-record"] = PersonPrincipal{Status: "active"}
+	runtime.organization.profiles["person-empty-record"] = PersonProfile{PersonID: "person-empty-record", DisplayName: "Current person", Status: "active"}
+	projection, err := runtime.project(StrideE10ProductPrincipal{PersonID: "person-empty-record"}, "work-record")
+	if err != nil || strideE10ValidateMobileProjection(projection, "work-record") != nil {
+		t.Fatalf("empty private work record err=%v projection=%+v", err, projection)
+	}
+	items, ok := projection["items"].([]map[string]any)
+	if !ok || len(items) != 6 {
+		t.Fatalf("empty private work record items=%T %+v", projection["items"], projection["items"])
+	}
+	for _, item := range items {
+		detail, ok := item["detail"].(map[string]any)
+		if !ok || detail["kind"] != "work-record-section" || len(detail["entries"].([]string)) != 0 {
+			t.Fatalf("nonempty or malformed private section: %+v", item)
+		}
 	}
 }
 
