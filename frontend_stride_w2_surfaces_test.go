@@ -266,6 +266,9 @@ func TestStrideW2RouteShellPreservesHistoryAndUsesNoProviderCalls(t *testing.T) 
 	if !strings.Contains(js, `['/network/draft','network-draft']`) || strings.Contains(js, `['/network/draft','profile']`) {
 		t.Fatal("private network draft must use its distinct server projection, never the public identity profile")
 	}
+	if !strings.Contains(js, `'network-profile-detail':['network-draft','network-preview','network-recruiter-view','network-search']`) {
+		t.Fatal("private network draft must admit the server-authored network profile detail used by the live runtime")
+	}
 	if !strings.Contains(js, `['/work-record','work-record']`) {
 		t.Fatal("work record must have its own route and server projection")
 	}

@@ -70005,7 +70005,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         function safeProjectionDetail(surfaceName, kind, detail) {
           if (!projectionIsBodyFree(detail) || !detail || detail.kind !== kind) return false
           const allowedSurface = {
-            'self-profile-detail':['profile'], 'coworker-profile-detail':['coworker-profile'], 'network-profile-detail':['network-preview','network-recruiter-view','network-search'],
+            'self-profile-detail':['profile'], 'coworker-profile-detail':['coworker-profile'], 'network-profile-detail':['network-draft','network-preview','network-recruiter-view','network-search'],
             'work-record-section':['work-record'], 'contribution-evidence':['work-record','network-preview','network-recruiter-view'], 'contribution-review':['contribution-approvals'],
             'network-state':['network-draft','network-preview'], 'recruiting-governance':['organization-recruiting'], 'organization-summary':['organizations'],
             'membership-detail':['organization-people'], 'join-request-detail':['organization-requests'], 'network-query-interpretation':['network-search'],
