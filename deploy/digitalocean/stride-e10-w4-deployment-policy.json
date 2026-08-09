@@ -1,6 +1,6 @@
 {
   "schema": "bonfire.stride-e10-w4-deployment-policy.v1",
-  "releaseMode": "canary",
+  "releaseMode": "bonfire_network_live",
   "liveMode": "bonfire_network_live",
   "snapshotPath": "/app/data/stride-e10/w4/runtime-snapshot.json",
   "activationBackupDir": "/app/data/stride-e10/w4/network-activation-backup",

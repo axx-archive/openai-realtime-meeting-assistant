@@ -837,6 +837,41 @@ func main() {
 		}
 		return
 	}
+	if *strideE10W4ActivateNetworkFlag {
+		if err := runStrideE10W4NetworkActivationCLI(context.Background()); err != nil {
+			fmt.Fprintf(os.Stderr, "STRIDE W4 network activation failed: %v\n", err)
+			os.Exit(2)
+		}
+		return
+	}
+	if *strideE10W4RollbackNetworkFlag {
+		if err := runStrideE10W4NetworkRollbackCLI(context.Background()); err != nil {
+			fmt.Fprintf(os.Stderr, "STRIDE W4 network rollback failed: %v\n", err)
+			os.Exit(2)
+		}
+		return
+	}
+	if *strideE10W4VerifyNetworkActivationFlag {
+		if err := runStrideE10W4NetworkActivationVerifyCLI(context.Background()); err != nil {
+			fmt.Fprintf(os.Stderr, "STRIDE W4 network activation verification failed: %v\n", err)
+			os.Exit(2)
+		}
+		return
+	}
+	if *strideE10W4VerifyNetworkRuntimeFlag {
+		if err := runStrideE10W4NetworkRuntimeVerifyCLI(context.Background()); err != nil {
+			fmt.Fprintf(os.Stderr, "STRIDE W4 network runtime verification failed: %v\n", err)
+			os.Exit(2)
+		}
+		return
+	}
+	if *strideE10W4VerifyNetworkRollbackFlag {
+		if err := runStrideE10W4NetworkRollbackVerifyCLI(context.Background()); err != nil {
+			fmt.Fprintf(os.Stderr, "STRIDE W4 network rollback verification failed: %v\n", err)
+			os.Exit(2)
+		}
+		return
+	}
 	if *repairCanonical {
 		if *renderRunnerWorker || *observeRepair || *normalizeCanonical || *generateRepairManifest || *repairObservation != "" || *normalizationInput != "" || *normalizationInputSHA != "" || *normalizationReceipt != "" || *repairEvidenceDir != "" || *repairEvidenceDescriptor != "" {
 			fmt.Fprintln(os.Stderr, "Canonical repair mode cannot be combined with another maintenance mode")

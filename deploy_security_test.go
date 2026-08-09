@@ -33,22 +33,30 @@ func TestProductionComposeExcludesInProcessCodexRunner(t *testing.T) {
 	}
 }
 
-func TestProductionComposePreservesFirstHopCanaryEnvironmentShape(t *testing.T) {
+func TestProductionComposeRequiresReceiptedW4LiveEnvironment(t *testing.T) {
 	raw, err := os.ReadFile("deploy/digitalocean/docker-compose.yml")
 	if err != nil {
 		t.Fatal(err)
 	}
 	compose := string(raw)
-	for _, forbidden := range []string{"STRIDE_E10_W4_RELEASE_MODE", "STRIDE_E10_W4_ACTIVATION_BACKUP_DIR", "STRIDE_E10_W4_ACTIVATION_RECEIPT_PATH"} {
-		if strings.Contains(compose, forbidden) {
-			t.Fatalf("compatibility canary widened the legacy Compose environment with %s", forbidden)
+	for _, required := range []string{
+		"STRIDE_E10_W4_MODE: ${STRIDE_E10_W4_RELEASE_MODE:?STRIDE_E10_W4_RELEASE_MODE is required}",
+		"STRIDE_E10_W4_SNAPSHOT_PATH: ${STRIDE_E10_W4_SNAPSHOT_PATH:?STRIDE_E10_W4_SNAPSHOT_PATH is required}",
+		"STRIDE_E10_W4_ACTIVATION_BACKUP_DIR: ${STRIDE_E10_W4_ACTIVATION_BACKUP_DIR:?STRIDE_E10_W4_ACTIVATION_BACKUP_DIR is required}",
+		"STRIDE_E10_W4_ACTIVATION_RECEIPT_PATH: ${STRIDE_E10_W4_ACTIVATION_RECEIPT_PATH:?STRIDE_E10_W4_ACTIVATION_RECEIPT_PATH is required}",
+	} {
+		if !strings.Contains(compose, required) {
+			t.Fatalf("production Compose is missing receipted W4 binding %q", required)
 		}
+	}
+	if strings.Contains(compose, ":-bonfire_network_live") {
+		t.Fatal("production Compose must not default into W4 live mode")
 	}
 	policyRaw, err := os.ReadFile("deploy/digitalocean/stride-e10-w4-deployment-policy.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(policyRaw), `"releaseMode": "canary"`) {
-		t.Fatal("first-hop deployment policy is not the compatibility canary")
+	if !strings.Contains(string(policyRaw), `"releaseMode": "bonfire_network_live"`) {
+		t.Fatal("second-hop deployment policy is not the receipted W4 live mode")
 	}
 }

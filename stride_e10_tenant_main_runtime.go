@@ -36,9 +36,9 @@ func strideE10CreateAuthenticatedSession(email string) (string, error) {
 	if !strideIdentifier(personID) || person.Validate() != nil || person.Status != "active" || person.AccountSubjectDigest != digest {
 		return "", ErrStrideE10TenantAuthorityStale
 	}
-	// A fresh authenticated session starts in the explicit person-only state.
-	// It gains organization authority only through the exact membership/session
-	// CAS rebind path; login never guesses an organization from email or count.
+	// Login creates only the global-person session. Existing sessions are
+	// migrated by the crash-journaled W4 activation; future organization
+	// binding continues through the durable organization-switch operation.
 	authorizePerson := func(wantPersonID, organizationID, membershipID string, membershipRevision int64) error {
 		if wantPersonID != personID || organizationID != "" || membershipID != "" || membershipRevision != 0 {
 			return ErrStrideE10TenantAuthorityStale

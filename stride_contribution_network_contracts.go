@@ -349,10 +349,19 @@ type NetworkProfileProjection struct {
 }
 
 func (v NetworkProfileProjection) Validate() error {
+	publicationBound := v.Publication != (STRIDEReference{})
 	if v.Header.Validate(STRIDEContractNetworkProfileProjection) != nil || v.Header.TenantID != STRIDEGlobalPersonTenant || !strideIdentifier(v.SubjectPersonID) ||
-		v.Publication.Validate() != nil || v.Publication.ContractType != STRIDEContractPublishedContributionClaim || len(v.Fields) == 0 || !uniqueNetworkFields(v.Fields) ||
+		(publicationBound && (v.Publication.Validate() != nil || v.Publication.ContractType != STRIDEContractPublishedContributionClaim)) || len(v.Fields) == 0 || !uniqueNetworkFields(v.Fields) ||
 		!isHexDigest(v.FieldsDigest) || !oneOf(v.Discoverability, "unlisted", "signed_in_network", "exact_link") || v.PurgeGeneration < 0 ||
 		v.Controller.Validate() != nil || v.Controller.PrincipalID != v.SubjectPersonID || !oneOf(v.State, "draft", "published", "paused", "off", "deleted") || v.StateChangedAt.IsZero() {
+		return ErrSTRIDEContractInvalid
+	}
+	for _, field := range v.Fields {
+		if !publicationBound && (field.EvidenceLabel != "self_described" || field.Claim != nil) {
+			return ErrSTRIDEContractInvalid
+		}
+	}
+	if !publicationBound && (v.State != "draft" || v.Discoverability != "unlisted") {
 		return ErrSTRIDEContractInvalid
 	}
 	digest, err := STRIDEContractDigest(v.Fields)

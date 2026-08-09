@@ -394,6 +394,17 @@ func networkProfileTransitionAllowed(from, to string) bool {
 }
 
 func (s *NetworkAuthority) validateProfileEvidenceLocked(profile NetworkProfileProjection) error {
+	if profile.Publication == (STRIDEReference{}) {
+		if profile.State != "draft" || profile.Discoverability != "unlisted" {
+			return ErrNetworkAuthorityDenied
+		}
+		for _, field := range networkVisiblePublishedFields(profile.Fields) {
+			if field.EvidenceLabel != "self_described" || field.Claim != nil {
+				return ErrNetworkAuthorityDenied
+			}
+		}
+		return nil
+	}
 	publication, ok := s.publications[profile.Publication.ID]
 	if !ok || publication.Header.Revision != profile.Publication.Revision || publication.Header.ContentDigest != profile.Publication.Digest ||
 		publication.SubjectPersonID != profile.SubjectPersonID || publication.State != "published" || publication.Visibility != "signed_in_network" {

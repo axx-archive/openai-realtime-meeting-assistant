@@ -809,6 +809,28 @@ func (r *StrideE10ProductLiveRuntime) hydrateLiveActionBinding(ctx context.Conte
 		if binding.NetworkActor == nil {
 			return StrideE10LiveActionBinding{}, ErrStrideE10Invalid
 		}
+		if binding.Type == "network-draft-save" && binding.Target.ContractType == STRIDEContractPersonProfile && binding.Profile != nil && binding.Publication == nil {
+			selfView, err := r.organization.ReadStrideE10SelfOrganizationView(principal.PersonID)
+			if err != nil || selfView.Profile == nil || selfView.Profile.Header.Revision != binding.Target.Revision || selfView.Profile.Header.ContentDigest != binding.Target.Digest {
+				return StrideE10LiveActionBinding{}, ErrStrideE10NotFound
+			}
+			values, err := strideE10LiveCommandValues(command)
+			if err != nil {
+				return StrideE10LiveActionBinding{}, err
+			}
+			fields := strideE10ApplyNetworkDraftValues(nil, values)
+			if len(fields) == 0 {
+				return StrideE10LiveActionBinding{}, ErrStrideE10Invalid
+			}
+			digest, _ := STRIDEContractDigest(fields)
+			seed := principal.PersonID + "\x00network-profile"
+			profile := NetworkProfileProjection{Header: strideE10LiveHeader(STRIDEContractNetworkProfileProjection, STRIDEGlobalPersonTenant, "network_profile_"+sha256Hex([]byte(seed))[:24], 1, seed, at), SubjectPersonID: principal.PersonID, Fields: fields, FieldsDigest: digest, Discoverability: "unlisted", Controller: *binding.NetworkActor, State: "draft", StateChangedAt: at}
+			if profile.Validate() != nil {
+				return StrideE10LiveActionBinding{}, ErrStrideE10Invalid
+			}
+			binding.NetworkProfile = &profile
+			break
+		}
 		if binding.Type == "network-draft-save" && binding.Target.ContractType == STRIDEContractPublishedContributionClaim && binding.Publication != nil {
 			if binding.Publication.Header.Revision != binding.Target.Revision || binding.Publication.Header.ContentDigest != binding.Target.Digest || binding.Publication.SubjectPersonID != principal.PersonID || binding.Publication.State != "published" {
 				return StrideE10LiveActionBinding{}, ErrStrideE10NotFound
@@ -2375,6 +2397,11 @@ func (r *StrideE10ProductLiveRuntime) mintProjectionActions(principal StrideE10P
 			if len(publications) == 1 {
 				actor := publications[0].Controller
 				issueBinding("network-draft-save", 1, refForHeader(publications[0].Header), StrideE10LiveActionBinding{NetworkActor: &actor, Publication: &publications[0]})
+			} else if actor := r.currentNetworkPersonController(principal.PersonID); actor != nil {
+				if selfView, profileErr := r.organization.ReadStrideE10SelfOrganizationView(principal.PersonID); profileErr == nil && selfView.Profile != nil {
+					profile := *selfView.Profile
+					issueBinding("network-draft-save", profile.Header.Revision, refForHeader(profile.Header), StrideE10LiveActionBinding{NetworkActor: actor, Profile: &profile})
+				}
 			}
 		}
 		for _, profile := range view.Profiles {
@@ -2914,7 +2941,6 @@ func strideE10HasActivePersonBlock(blocks []NetworkBlock, personID string) bool 
 
 func (r *StrideE10ProductLiveRuntime) currentNetworkPersonController(personID string) *STRIDEControllerRevision {
 	r.network.mu.Lock()
-	defer r.network.mu.Unlock()
 	var controller *STRIDEControllerRevision
 	for _, profile := range r.network.profiles {
 		if profile.SubjectPersonID != personID || profile.State == "deleted" || profile.Controller.Validate() != nil {
@@ -2926,7 +2952,25 @@ func (r *StrideE10ProductLiveRuntime) currentNetworkPersonController(personID st
 		value := profile.Controller
 		controller = &value
 	}
+	r.network.mu.Unlock()
+	if controller != nil {
+		return controller
+	}
+	r.contribution.mu.RLock()
+	for _, grant := range r.contribution.grants {
+		if grant.Role != "person_publisher" || grant.PersonID != personID || grant.Controller.Validate() != nil {
+			continue
+		}
+		value := grant.Controller
+		if controller != nil && *controller != value {
+			r.contribution.mu.RUnlock()
+			return nil
+		}
+		controller = &value
+	}
+	r.contribution.mu.RUnlock()
 	if controller == nil {
+		r.network.mu.Lock()
 		for _, grant := range r.network.grants {
 			if grant.SearcherPersonID != personID || grant.State != "active" {
 				continue
@@ -2937,6 +2981,7 @@ func (r *StrideE10ProductLiveRuntime) currentNetworkPersonController(personID st
 			}
 			controller = &value
 		}
+		r.network.mu.Unlock()
 	}
 	return controller
 }

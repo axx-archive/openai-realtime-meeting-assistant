@@ -27780,35 +27780,39 @@
       /* W2 contribution network product surfaces — route-aware, body-free,
          and intentionally unavailable until revision-1 APIs authorize them. */
       html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
-      .stride-w2 { position: fixed; inset: 0; z-index: 46; display: grid; grid-template-columns: 256px minmax(0, 1fr); background: var(--bg-app); color: var(--text-1); overflow: hidden; }
+      .stride-w2 { position: fixed; inset: 60px 0 0 72px; z-index: 46; display: block; background: var(--bg-app); color: var(--text-1); overflow-y: auto; }
       .stride-w2[hidden] { display: none; }
       body.stride-w2-open { overflow: hidden; }
       .stride-w2 h1, .stride-w2 h2, .stride-w2 h3 { text-wrap: balance; }
       .stride-w2 p, .stride-w2 li { text-wrap: pretty; }
-      .stride-w2__rail { padding: 24px 16px; background: var(--surface-1); box-shadow: 1px 0 0 var(--line-1), 12px 0 32px rgba(0,0,0,.04); overflow-y: auto; }
-      .stride-w2__brand { display: flex; align-items: center; justify-content: space-between; min-height: 44px; margin: 0 8px 24px; }
+      .stride-w2__rail { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px; padding: 14px clamp(20px,4vw,48px); overflow-x: auto; background: color-mix(in srgb,var(--bg-app) 88%,transparent); border-bottom: 1px solid var(--line-1); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+      .stride-w2__brand { display: none; }
       .stride-w2__brand strong { font-size: 17px; letter-spacing: -.02em; }
       .stride-w2__close, .stride-w2__nav, .stride-w2__button, .stride-w2__seg button, .stride-w2__person-action { min-width: 40px; min-height: 40px; }
       .stride-w2__close, .stride-w2__button, .stride-w2__seg button, .stride-w2__person-action { border: 0; color: inherit; font: inherit; cursor: pointer; transition-property: scale, background-color, box-shadow, opacity; transition-duration: 150ms; transition-timing-function: ease-out; }
       .stride-w2__close:active, .stride-w2__button:active, .stride-w2__seg button:active, .stride-w2__person-action:active { scale: .96; }
       .stride-w2__close { width: 40px; border-radius: 12px; background: transparent; }
       .stride-w2__close:hover { background: var(--surface-3); }
-      .stride-w2__group { display: grid; gap: 4px; margin-top: 18px; }
-      .stride-w2__group-label { padding: 0 12px 6px; color: var(--text-3); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+      .stride-w2__group { display: flex; align-items: center; gap: 4px; margin: 0; }
+      .stride-w2__group + .stride-w2__group { padding-left: 8px; border-left: 1px solid var(--line-1); }
+      .stride-w2__group-label { display: none; }
       .stride-w2__nav { display: flex; align-items: center; padding: 0 12px; border-radius: 12px; color: var(--text-2); text-decoration: none; font-size: 14px; font-weight: 600; transition-property: background-color, color, scale; transition-duration: 150ms; }
       .stride-w2__nav:hover { background: var(--surface-3); color: var(--text-1); }
       .stride-w2__nav:active { scale: .96; }
-      .stride-w2__nav[aria-current="page"] { background: var(--surface-3); color: var(--text-1); box-shadow: inset 3px 0 0 var(--ember-500); }
-      .stride-w2__main { overflow-y: auto; padding: clamp(24px, 5vw, 64px); }
+      .stride-w2__nav[aria-current="page"] { background: var(--surface-3); color: var(--text-1); box-shadow: inset 0 0 0 1px var(--line-1); }
+      .stride-w2__main { overflow: visible; padding: clamp(28px, 4vw, 56px); }
       .stride-w2__canvas { width: min(1080px, 100%); margin: 0 auto; }
       .stride-w2__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
       .stride-w2__eyebrow { margin: 0 0 8px; color: var(--text-3); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-      .stride-w2__title { margin: 0; max-width: 720px; font-size: clamp(30px, 4vw, 48px); line-height: 1.02; letter-spacing: -.045em; }
+      .stride-w2__title { margin: 0; max-width: 720px; font-size: clamp(30px, 4vw, 46px); line-height: 1.04; letter-spacing: -.04em; }
       .stride-w2__lede { max-width: 680px; margin: 12px 0 0; color: var(--text-2); font-size: 16px; line-height: 1.55; }
       .stride-w2__status { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 12px; border-radius: 999px; background: var(--surface-3); color: var(--text-2); font-size: 12px; font-weight: 700; white-space: nowrap; }
-      .stride-w2__status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--text-disabled); }
+      .stride-w2__status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
       .stride-w2__grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; }
       .stride-w2__card { grid-column: span 6; padding: 24px; border-radius: 24px; background: var(--surface-1); box-shadow: 0 0 0 1px rgba(0,0,0,.06), 0 2px 4px rgba(0,0,0,.04), 0 18px 48px rgba(0,0,0,.05); }
+      .stride-w2__card--action { grid-column: span 3; display: flex; align-items: center; min-height: 84px; padding: 16px; }
+      .stride-w2__card--action.stride-w2__card--form { grid-column: span 6; display: block; }
+      .stride-w2__card--action > .stride-w2__button { width: 100%; margin-top: 0; }
       [data-theme="dark"] .stride-w2__card { box-shadow: 0 0 0 1px rgba(255,255,255,.08); }
       .stride-w2__card--wide { grid-column: 1 / -1; }
       .stride-w2__card h2 { margin: 0; font-size: 19px; letter-spacing: -.02em; }
@@ -27871,17 +27875,19 @@
       .settings-organizations__card h3 { margin: 0; text-wrap: balance; }
       .settings-organizations__card p { margin: 7px 0 0; color: var(--text-2); text-wrap: pretty; }
       @media (max-width: 760px) {
-        .stride-w2 { display: block; overflow-y: auto; }
-        .stride-w2__rail { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; padding: max(10px, env(safe-area-inset-top)) 12px 10px; overflow-x: auto; box-shadow: 0 1px 0 var(--line-1), 0 8px 24px rgba(0,0,0,.05); }
+        .stride-w2 { inset: 60px 0 0; display: block; overflow-y: auto; padding-bottom: calc(82px + env(safe-area-inset-bottom)); }
+        .stride-w2__rail { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; padding: 10px 12px; overflow-x: auto; box-shadow: 0 1px 0 var(--line-1), 0 8px 24px rgba(0,0,0,.05); }
         .stride-w2__brand { position: sticky; left: 0; flex: 0 0 auto; min-height: 40px; margin: 0; background: var(--surface-1); }
         .stride-w2__brand strong { display: none; }
         .stride-w2__group { display: contents; }
+        .stride-w2__group + .stride-w2__group { padding-left: 0; border-left: 0; }
         .stride-w2__group-label { display: none; }
         .stride-w2__nav { flex: 0 0 auto; white-space: nowrap; }
         .stride-w2__main { overflow: visible; padding: 24px 16px calc(48px + env(safe-area-inset-bottom)); }
         .stride-w2__head { display: block; }
         .stride-w2__status { margin-top: 16px; }
         .stride-w2__card { grid-column: 1 / -1; padding: 20px; border-radius: 20px; }
+        .stride-w2__card--action { min-height: 72px; padding: 12px; }
         .stride-w2__profile { grid-template-columns: 64px 1fr; gap: 16px; }
         .stride-w2__avatar { width: 64px; height: 64px; border-radius: 20px; font-size: 20px; }
         .stride-w2__fields { grid-template-columns: 1fr; }
@@ -27967,6 +27973,12 @@
           <button class="tool-rail__tool" type="button" data-tool="files" aria-label="Drive" aria-pressed="false">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path></svg>
             <span class="tool-rail__label">drive</span>
+          </button>
+        </span>
+        <span class="tool-rail__slot">
+          <button class="tool-rail__tool" type="button" data-tool="network" aria-label="Work network" aria-pressed="false">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="6" r="3"></circle><circle cx="5" cy="17" r="3"></circle><circle cx="19" cy="17" r="3"></circle><path d="m10.4 8.6-3.8 5.8"></path><path d="m13.6 8.6 3.8 5.8"></path><path d="M8 17h8"></path></svg>
+            <span class="tool-rail__label">network</span>
           </button>
         </span>
         <span class="tool-rail__slot">
@@ -29502,12 +29514,12 @@
         <p id="consentStatus" class="consent-panel__status" role="status" aria-live="polite"></p>
       </section>
     </main>
-    <section id="strideW2Surface" class="stride-w2" aria-label="Contribution network workspace" hidden>
+    <section id="strideW2Surface" class="stride-w2" aria-label="Work network" hidden>
       <aside class="stride-w2__rail" aria-label="Contribution network navigation">
-        <div class="stride-w2__brand"><strong>Stride network</strong><button id="strideW2Close" class="stride-w2__close" type="button" aria-label="Close contribution network">×</button></div>
-        <div class="stride-w2__group"><span class="stride-w2__group-label">You</span><a class="stride-w2__nav" href="/me" data-stride-w2-route="/me">My profile</a><a class="stride-w2__nav" href="/work-record" data-stride-w2-route="/work-record">Work record</a><a class="stride-w2__nav" href="/network/draft" data-stride-w2-route="/network/draft">Network profile</a></div>
+        <div class="stride-w2__brand"><strong>Work network</strong><button id="strideW2Close" class="stride-w2__close" type="button" aria-label="Close work network">×</button></div>
+        <div class="stride-w2__group"><span class="stride-w2__group-label">You</span><a class="stride-w2__nav" href="/me" data-stride-w2-route="/me">Profile</a><a class="stride-w2__nav" href="/work-record" data-stride-w2-route="/work-record">Work record</a><a class="stride-w2__nav" href="/network/draft" data-stride-w2-route="/network/draft">Public profile</a></div>
         <div class="stride-w2__group"><span class="stride-w2__group-label">Organization</span><a class="stride-w2__nav" href="/org/people" data-stride-w2-route="/org/people">People</a><a class="stride-w2__nav" href="/org/requests" data-stride-w2-route="/org/requests">Requests</a><a class="stride-w2__nav" href="/org/contributions" data-stride-w2-route="/org/contributions">Approvals</a><a class="stride-w2__nav" href="/org/recruiting" data-stride-w2-route="/org/recruiting">Recruiting</a></div>
-        <div class="stride-w2__group"><span class="stride-w2__group-label">Network</span><a class="stride-w2__nav" href="/network/preview" data-stride-w2-route="/network/preview">Preview</a><a class="stride-w2__nav" href="/network/recruiter" data-stride-w2-route="/network/recruiter">View as recruiter</a><a class="stride-w2__nav" href="/network/search" data-stride-w2-route="/network/search">Search</a><a class="stride-w2__nav" href="/network/contact" data-stride-w2-route="/network/contact">Contact</a><a class="stride-w2__nav" href="/network/blocks" data-stride-w2-route="/network/blocks">Blocks</a></div>
+        <div class="stride-w2__group"><span class="stride-w2__group-label">Network</span><a class="stride-w2__nav" href="/network/preview" data-stride-w2-route="/network/preview">Preview</a><a class="stride-w2__nav" href="/network/recruiter" data-stride-w2-route="/network/recruiter">Public view</a><a class="stride-w2__nav" href="/network/search" data-stride-w2-route="/network/search">Find people</a><a class="stride-w2__nav" href="/network/contact" data-stride-w2-route="/network/contact">Requests</a><a class="stride-w2__nav" href="/network/blocks" data-stride-w2-route="/network/blocks">Privacy</a></div>
       </aside>
       <main class="stride-w2__main"><div id="strideW2Canvas" class="stride-w2__canvas" aria-live="polite"></div></main>
     </section>
@@ -30887,7 +30899,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const grillStageVerdict = document.getElementById('grillStageVerdict')
       const OSAssistantSpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
       const agentToolIds = ['research', 'design', 'grill']
-      const osToolIds = ['office', 'chat', 'artifacts', ...agentToolIds, 'memory', 'files', 'team']
+      const osToolIds = ['office', 'chat', 'artifacts', ...agentToolIds, 'memory', 'files', 'network', 'team']
       const agentToolForms = Array.from(document.querySelectorAll('[data-agent-tool-form]'))
       const agentTemplateButtons = Array.from(document.querySelectorAll('[data-agent-template]'))
       const researchArtifactSearch = document.getElementById('researchArtifactSearch')
@@ -31030,7 +31042,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // "what Scout did" — a reverse-chron record of this voice session's
       // actions, reachable from the island's ⋯ menu. Reset when a session ends.
       let scoutSessionLedger = []
-      const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory', 'files', 'team']
+      const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory', 'files', 'network', 'team']
 
       function canUseArtifactLibrary() {
         /* trust boundary = the signed-in team: every account reads, lists,
@@ -36857,6 +36869,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
           loadMeetingsForMemory()
         } else if (tool === 'files') {
           loadFilesSurface()
+        } else if (tool === 'network') {
+          // Route rendering owns the server projection; the global shell owns
+          // navigation, organization context, and product identity.
         } else if (tool === 'team') {
           loadStrideTeamSurface()
         } else if (tool === 'artifacts' || agentToolIds.includes(tool)) {
@@ -36935,6 +36950,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
             return 'memory starts when the room speaks.'
           case 'files':
             return 'company files'
+          case 'network':
+            return 'verified work · person-controlled visibility'
           case 'team':
             return 'named coworkers · human-approved authority'
           case 'research':
@@ -36987,6 +37004,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
             return 'the company brain'
           case 'files':
             return 'company drive'
+          case 'network':
+            return 'work network'
           case 'team':
             return 'your agent coworkers'
           case 'research':
@@ -37013,6 +37032,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           board: 'Board',
           memory: 'Memory',
           files: 'Drive',
+          network: 'Network',
           team: 'Team'
         }
         // the tab name owns the heading; the meeting name lives in the live
@@ -37076,6 +37096,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
         const prevTool = appShell.dataset.tool || 'office'
         const next = TOOL_IDS.includes(tool) ? tool : 'office'
+        if (prevTool === 'network' && next !== 'network' && window.closeStrideContributionSurface?.() === false) {
+          return
+        }
         if (next === 'board') {
           const selectedThread = selectedScoutChatThread()
           if (prevTool === 'chat' && chatThreadIsProject(selectedThread)) {
@@ -37093,6 +37116,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
           try { history.pushState({ view: 'tool', tool: next }, '') } catch (_) {}
         }
         applyToolState(next)
+        if (next === 'network') {
+          const path = location.pathname
+          const networkPath = path === '/me' || path === '/work-record' || path.startsWith('/people/') || path.startsWith('/org/') || path.startsWith('/network/')
+          window.openStrideContributionSurface?.(networkPath ? path : '/me')
+        }
         if (appShell.classList.contains('is-board-expanded')) {
           setBoardExpanded(false)
         }
@@ -69803,6 +69831,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const organizationName = document.getElementById('topbarOrganizationName')
         const organizationCount = document.getElementById('topbarOrganizationCount')
         const organizationPending = document.getElementById('topbarOrganizationPending')
+        const organizationSwitcherProjection = document.createElement('div')
         const routes = new Set(['/me','/work-record','/org/people','/org/requests','/org/contributions','/org/recruiting','/network/draft','/network/preview','/network/recruiter','/network/search','/network/contact','/network/blocks'])
         const coworkerRoutePattern = /^\/people\/[a-zA-Z0-9_-]+$/
         const isStrideRoute = path => routes.has(path) || coworkerRoutePattern.test(path)
@@ -69919,8 +69948,25 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (key) { try { localStorage.removeItem(key) } catch {} }
           pendingPersistenceInvalid = false
         }
-        const unavailable = '<div class="stride-w2__notice"><strong>Not available in this build.</strong> No data is read, published, searched, or sent until the exact authority API and feature switch are enabled.</div>'
-        const head = (eyebrow, title, lede) => `<header class="stride-w2__head"><div><p class="stride-w2__eyebrow">${eyebrow}</p><h1 class="stride-w2__title">${title}</h1><p class="stride-w2__lede">${lede}</p></div><span class="stride-w2__status">default off</span></header>`
+        const unavailable = '<div class="stride-w2__notice"><strong>Not available right now.</strong> Your private information stays private while this view reconnects to current authority.</div>'
+        const head = (eyebrow, title, lede, status = 'Private by default') => `<header class="stride-w2__head"><div><p class="stride-w2__eyebrow">${eyebrow}</p><h1 class="stride-w2__title">${title}</h1><p class="stride-w2__lede">${lede}</p></div><span class="stride-w2__status">${status}</span></header>`
+        const routePresentation = path => {
+          if (coworkerRoutePattern.test(path)) return ['People','Coworker profile','Only information shared with your current organization appears here.','Organization view']
+          return new Map([
+            ['/me',['You','Your profile','Keep your identity current. You control what can become part of your public network profile.','Private']],
+            ['/work-record',['You','Your work record','Review verified outcomes, contribution evidence, and what is ready to publish.','Private']],
+            ['/network/draft',['Public profile','Build your network profile','Choose the introduction and work preferences you want to share. Draft changes remain private.','Draft']],
+            ['/network/preview',['Public profile','Preview your public profile','See the exact fields and verified evidence other signed-in members would see.','Private preview']],
+            ['/network/recruiter',['Public profile','Public view','This is the exact published view available to authorized recruiters.','Published view']],
+            ['/network/search',['Network','Find people by their work','Search published evidence with clear filters and honest unknowns.','Recruiting access']],
+            ['/network/contact',['Network','Contact requests','Start with a visible purpose. Contact details remain hidden until acceptance.','Private']],
+            ['/network/blocks',['Privacy','Network privacy','Manage private person and organization boundaries before search or contact.','Private']],
+            ['/org/people',['Bonfire','People','Manage the current organization roster, roles, and ownership.','Organization']],
+            ['/org/requests',['Bonfire','Membership requests','Review explicit requests to join the organization.','Organization']],
+            ['/org/contributions',['Bonfire','Contribution approvals','Approve exact public fields and evidence—not hidden dossiers.','Organization']],
+            ['/org/recruiting',['Bonfire','Recruiting access','Manage expiring search grants, limits, and body-minimized receipts.','Organization']]
+          ]).get(path) || ['Network','Work network','Verified work with person-controlled visibility.','Private by default']
+        }
         const empty = (mark, title, copy) => `<div class="stride-w2__empty"><div class="stride-w2__empty-inner"><div class="stride-w2__empty-mark" aria-hidden="true">${mark}</div><h2>${title}</h2><p>${copy}</p></div></div>`
         const card = (title, copy, body = '', wide = false) => `<article class="stride-w2__card${wide ? ' stride-w2__card--wide' : ''}"><h2>${title}</h2><p>${copy}</p>${body}</article>`
         const metric = (label) => `<div class="stride-w2__metric">0</div><div class="stride-w2__metric-label">${label}</div>`
@@ -69935,7 +69981,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (path === '/network/draft') return head('Network profile · Draft','Make the work legible without making the person measurable.','Choose a small set of public profile fields and verified contributions. Drafts remain private and unsearchable.') + `<div class="stride-w2__grid">${card('Public introduction','Person-controlled and private while drafting.','<div class="stride-w2__fields"><div class="stride-w2__field"><span>Display name</span><strong>Not set</strong></div><div class="stride-w2__field"><span>Work mode</span><strong>Not set</strong></div><div class="stride-w2__field"><span>Problem classes</span><strong>None selected</strong></div><div class="stride-w2__field"><span>Open to</span><strong>Not set</strong></div></div>',true)}${card('Contribution evidence','Add only exact fields from active attestations.',metric('selected attestations'))}${card('Publication','No network projection exists.','<button class="stride-w2__button" type="button" disabled>Publish unavailable</button>')}</div>${unavailable}`
           if (path === '/network/preview') return head('Network profile · Preview','See exactly what would leave your private workspace.','Preview contains only declared profile fields and explicitly approved attestation fields. Unknown values stay unknown.') + card('Private preview','Nothing is published or discoverable.',empty('◌','Your preview is empty','Complete a private draft and select approved fields to see the publication-shaped result.'),true) + unavailable
           if (path === '/network/recruiter') return head('View as recruiter','The outside view, without inside information.','This view is limited to an active published projection. It cannot reveal private drafts, source bodies, contact channels, hidden memberships, or ranking scores.') + card('Recruiter view','No active publication is available.',empty('◐','Nothing to show','Recruiters would see only fields you publish, verification labels, and honest unknowns.'),true) + unavailable
-          if (path === '/network/search') return head('Network search','Search for work evidence, not proxies for people.','Queries are structured and confirmed before retrieval. Protected traits, prestige proxies, hidden activity, productivity signals, and opaque scoring are prohibited.') + card('Search the network','Search stays off until a current grant, membership, policy revision, and published projection index are available.','<label class="field"><span>What work are you looking for?</span><input type="search" placeholder="e.g. checkout reliability" disabled></label><button class="stride-w2__button" type="button" disabled>Search unavailable</button>',true) + unavailable
+          if (path === '/network/search') return head('Find people','Find people by the work they have chosen to show.','Search uses published work evidence and clear filters—never hidden activity, protected traits, prestige proxies, or opaque scores.','Recruiting access') + card('Search the network','A current recruiting grant controls access and visible limits.','<label class="field"><span>What work are you looking for?</span><input type="search" placeholder="e.g. checkout reliability" disabled></label><button class="stride-w2__button" type="button" disabled>Search unavailable</button>',true) + unavailable
           if (path === '/network/contact') return head('Contact requests','A request first. A private channel only after acceptance.','Send a visible purpose and collaboration type without exposing either person’s direct address or contact channel.') + `<div class="stride-w2__grid">${card('New request','No request will be sent from this build.','<div class="stride-w2__fields"><div class="stride-w2__field"><span>Recipient</span><strong>Not selected</strong></div><div class="stride-w2__field"><span>Purpose</span><strong>Not set</strong></div></div><button class="stride-w2__button" type="button" disabled>Send unavailable</button>')}${card('Requests','No contact requests are available.',metric('pending requests'))}</div>${unavailable}`
           return head('Network blocks','Your boundary applies before search or contact.','Blocks are person-controlled and private. They prevent matching and requests without announcing the block or disclosing a reason.') + card('Blocked people and organizations','No block records are available.',empty('—','No visible blocks','When authority is enabled, you can add or withdraw a block here. Bulk actions remain unavailable.'),true) + unavailable
         }
@@ -70093,10 +70139,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           envelope.items.forEach(item => {
             const article = document.createElement('article')
             article.className = target === canvas ? 'stride-w2__card' : 'settings-organizations__card'
-            const title = document.createElement('h2'); title.textContent = item.title
-            article.append(title)
+            const actionOnly = target === canvas && item.title === 'Authorized action' && (item.actions || []).length === 1
+            const actionHasForm = actionOnly && actionValueSchemas.has(item.actions[0].type)
+            if (actionOnly) article.classList.add('stride-w2__card--action')
+            if (actionHasForm) article.classList.add('stride-w2__card--form')
+            if (!actionOnly || actionHasForm) {
+              const title = document.createElement('h2'); title.textContent = actionHasForm ? item.actions[0].label : item.title
+              article.append(title)
+            }
             if (item.summary) { const summary = document.createElement('p'); summary.textContent = item.summary; article.append(summary) }
-            if (item.status || item.context || item.updatedAt) {
+            if (!actionOnly && (item.status || item.context || item.updatedAt)) {
               const meta = document.createElement('p'); meta.className = 'stride-w2__metric-label'; meta.textContent = [item.status,item.context,item.updatedAt].filter(Boolean).join(' · '); article.append(meta)
             }
             appendProjectionDetail(article,item)
@@ -70122,14 +70174,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
               }
               const button = document.createElement('button')
               button.className = target === canvas ? 'stride-w2__button' : 'btn btn--ghost'
-              button.type = 'button'; button.textContent = action.label
+              button.type = 'button'; button.textContent = actionHasForm ? 'Apply' : action.label
               button.dataset.strideW2ActionId = action.id; button.dataset.strideW2ActionType = action.type
               button.dataset.strideW2ExpectedRevision = String(action.expectedRevision); button.dataset.strideW2Surface = envelope.surface
               article.append(button)
             })
             shell.append(article)
           })
-          if (target === canvas) target.innerHTML = head(path === '/me' ? 'My profile' : 'Authorized surface', envelope.items.length ? 'Current authorized view' : 'Nothing available yet', 'Rendered from the current server-minted projection. No hidden or optimistic fields are added by the browser.')
+          if (target === canvas) {
+            const [eyebrow,title,lede,status] = routePresentation(path)
+            target.innerHTML = head(eyebrow,title,lede,status)
+          }
           else target.replaceChildren()
           if (!envelope.items.length) shell.append(Object.assign(document.createElement('div'),{className:'stride-w2__empty stride-w2__empty--compact',textContent:'No current server-authorized items are available.'}))
           target.append(shell); target.dataset.state = 'available'; target.dataset.revision = String(envelope.revision)
@@ -70257,9 +70312,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         function renderOrganizationSwitcher(envelope) {
           if (!organizationSwitcher) return
           const items = envelope?.availability === 'available' && envelope.surface === 'organizations' ? envelope.items : []
-          const active = items.filter(item => item.status === 'active' || item.status === 'current')
-          const current = items.find(item => item.status === 'current')
-          const pending = items.filter(item => item.status === 'pending').length
+          const organizations = items.filter(item => item.kind === 'organization-summary')
+          const active = organizations.filter(item => item.status === 'active' || item.status === 'current')
+          const current = organizations.find(item => item.status === 'current')
+          const pending = organizations.reduce((total,item) => total + Number(item.detail?.pendingCount || 0),0)
           if (active.length > 3) return renderOrganizationSwitcher(null)
           organizationName.textContent = current?.title || (envelope?.availability === 'available' ? (active.length ? 'Choose organization' : 'Choose or create organization') : 'Organization unavailable')
           organizationRole.textContent = current?.context || (envelope?.availability === 'available' && !active.length ? 'No active organization' : 'role unavailable')
@@ -70394,6 +70450,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           canvas.innerHTML = routeMarkup(path)
           surface.hidden = false
           document.body.classList.add('stride-w2-open')
+          if ((appShell.dataset.tool || '') !== 'network') applyToolState('network')
           surface.querySelectorAll('[data-stride-w2-route]').forEach(link => link.setAttribute('aria-current', link.getAttribute('href') === path ? 'page' : 'false'))
           surface.querySelector('.stride-w2__main')?.scrollTo({ top: 0, behavior: 'auto' })
           canvas.querySelector('h1')?.setAttribute('tabindex', '-1')
@@ -70402,10 +70459,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           return true
         }
         function closeRoute(options = {}) {
-          if (blockPendingNavigation()) return
+          if (blockPendingNavigation()) return false
           surface.hidden = true
           document.body.classList.remove('stride-w2-open')
           if (options.push !== false && isStrideRoute(location.pathname)) history.pushState({ view: 'tool', tool: 'office' }, '', '/')
+          if ((appShell.dataset.tool || '') === 'network') applyToolState('office')
+          return true
         }
         window.__strideW2FenceAuthority = (previousIdentity, nextIdentity) => {
           authorityGeneration += 1
@@ -70419,6 +70478,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           pendingActionOperation = pendingPersistenceInvalid ? null : persistedOperation || pendingActionOperationsByAccount.get(nextFingerprint) || null
           document.querySelectorAll('[data-stride-w2-action-id],[data-stride-w2-value-key]').forEach(control => { control.disabled = false })
           renderOrganizationSwitcher(null)
+          if (authedUser) loadProjection('organizations', organizationSwitcherProjection, '/settings/organizations')
           if (!surface.hidden && isStrideRoute(location.pathname)) {
             projectionUnavailable(canvas, location.pathname)
             if (authedUser) loadProjection(surfaceForPath(location.pathname), canvas, location.pathname)
@@ -70439,12 +70499,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (settingsSurface && !blockPendingNavigation()) loadProjection(settingsSurface.dataset.strideW2SettingsSurface, document.getElementById('settingsOrganizationsProjection'), '/settings/organizations')
         })
         close.addEventListener('click', () => closeRoute())
-        organizationSwitcher?.addEventListener('click', () => { if (blockPendingNavigation()) return; if (typeof openSettings === 'function') openSettings({ section: 'organizations', restoreFocusTo: organizationSwitcher }); loadProjection('organizations', document.getElementById('settingsOrganizationsProjection'), '/settings/organizations') })
+        organizationSwitcher?.addEventListener('click', () => { if (blockPendingNavigation()) return; if (typeof openSettings === 'function') openSettings({ section: 'organizations', restoreFocusTo: organizationSwitcher }); loadProjection('organizations', document.getElementById('settingsOrganizationsProjection') || organizationSwitcherProjection, '/settings/organizations') })
         surface.addEventListener('keydown', event => { if (event.key === 'Escape') closeRoute() })
         window.addEventListener('popstate', () => { if (!renderRoute(location.pathname, { push: false })) closeRoute({ push: false }) })
         window.openStrideContributionSurface = path => renderRoute(path)
+        window.closeStrideContributionSurface = () => closeRoute()
         renderRoute(location.pathname, { push: false })
-        loadProjection('organizations', document.getElementById('settingsOrganizationsProjection'), '/settings/organizations')
+        loadProjection('organizations', document.getElementById('settingsOrganizationsProjection') || organizationSwitcherProjection, '/settings/organizations')
       })()
     </script>
   </body>

@@ -223,6 +223,7 @@ const w4LivePolicy = {
   activationBackupDir: '/app/data/stride-e10/w4/network-activation-backup',
   activationReceiptPath: '/app/data/stride-e10/w4/network-activation-receipt.json'
 }
+const w4CanaryPolicy = { ...w4LivePolicy, releaseMode: 'canary' }
 
 function makeReceipt(w4Policy = null) {
   const sourceReceiptSha256 = digest('7')
@@ -425,7 +426,7 @@ async function fixtureFiles() {
     'deploy/digitalocean/bonfire-render-runner-v1.apparmor': 'profile fixture {}\n',
     'deploy/digitalocean/bonfire-render-runner-v1.seccomp.json': '{"defaultAction":"SCMP_ACT_ERRNO"}\n',
     'deploy/digitalocean/release-build-inputs.json': `${JSON.stringify(buildInputs, null, 2)}\n`,
-    'deploy/digitalocean/stride-e10-w4-deployment-policy.json': await readFile(join(repoRoot, 'deploy/digitalocean/stride-e10-w4-deployment-policy.json'), 'utf8'),
+    'deploy/digitalocean/stride-e10-w4-deployment-policy.json': `${JSON.stringify(w4CanaryPolicy, null, 2)}\n`,
     'deploy/digitalocean/release-scope-policy.json': `${JSON.stringify(policy, null, 2)}\n`,
     'scripts/bonfire-release.mjs': await readFile(releaseToolPath, 'utf8'),
     'stride-site/secret.txt': 'not a release input\n', 'data/kanban-board.json': '{}\n',

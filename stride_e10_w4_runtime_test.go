@@ -1,14 +1,29 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func strideE10W4SetRuntimeTestEnvironment(t *testing.T, paths strideE10W4ActivationPaths, keys *strideE10W4Keyring, operationPath string) {
+	t.Helper()
+	t.Setenv(strideE10W4SnapshotPathEnv, paths.Snapshot)
+	t.Setenv(strideE10W4OperationPathEnv, operationPath)
+	t.Setenv(strideE10W4ActivationBackupDirEnv, paths.BackupDir)
+	t.Setenv(strideE10W4ActivationReceiptPathEnv, paths.Receipt)
+	t.Setenv(strideE10W4KeyIDEnv, keys.key.ID)
+	t.Setenv(strideE10W4KeyVersionEnv, "1")
+	t.Setenv(strideE10W4KeySecretEnv, base64.StdEncoding.EncodeToString(keys.key.Secret))
+}
 
 func strideE10W4TestKeyring() *strideE10W4Keyring {
 	return &strideE10W4Keyring{key: StrideE10MigrationMACKey{ID: "w4-test-key", Version: 1, Secret: []byte(strings.Repeat("k", 32))}}
@@ -103,13 +118,14 @@ func TestStrideE10W4ProductionInstallUsesOnlyClosedCanaryFeatures(t *testing.T) 
 	t.Setenv(strideE10W4KeyVersionEnv, "1")
 	t.Setenv(strideE10W4KeySecretEnv, base64.StdEncoding.EncodeToString(keys.key.Secret))
 	prior := strideE10LiveProductRuntime
+	priorReady := strideE10W4ProductionRuntimeReady()
 	strideE10W4RuntimeState.Lock()
 	strideE10W4RuntimeState.ready = false
 	strideE10W4RuntimeState.Unlock()
 	t.Cleanup(func() {
 		strideE10LiveProductRuntime = prior
 		strideE10W4RuntimeState.Lock()
-		strideE10W4RuntimeState.ready = false
+		strideE10W4RuntimeState.ready = priorReady
 		strideE10W4RuntimeState.Unlock()
 	})
 	if err := installStrideE10W4ProductionRuntimeFromEnvironment(); err != nil {
@@ -129,7 +145,7 @@ func TestStrideE10W4ProductionInstallUsesOnlyClosedCanaryFeatures(t *testing.T) 
 		t.Fatal(err)
 	}
 	record, ok := userSessionStore().lookupRecord(token)
-	if !ok || record.PersonID == "" || record.ActiveOrganizationID != "" || record.AuthorityGeneration != 1 {
+	if !ok || record.PersonID == "" || record.ActiveOrganizationID != "" || record.OrganizationMembershipID != "" || record.OrganizationMembershipRev != 0 || record.ActiveOrganizationSessionRev != 0 || record.AuthorityGeneration != 1 {
 		t.Fatalf("W4 canary login record=%+v ok=%t", record, ok)
 	}
 	person := record.PersonID
@@ -139,6 +155,28 @@ func TestStrideE10W4ProductionInstallUsesOnlyClosedCanaryFeatures(t *testing.T) 
 	persisted, _, err := loadStrideE10W4Snapshot(snapshot, keys)
 	if err != nil || len(persisted.Actions) == 0 {
 		t.Fatalf("server-minted actions not durable actions=%d err=%v", len(persisted.Actions), err)
+	}
+}
+
+func TestStrideE10W4NetworkModeEnablesOnlyReviewedProductDependencies(t *testing.T) {
+	features, err := strideE10W4FeaturesForMode(strideE10W4NetworkMode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[STRIDEFeature]bool{}
+	for _, feature := range strideE10W4NetworkFeatures {
+		want[feature] = true
+	}
+	if len(features) != len(want) {
+		t.Fatalf("network feature count=%d want=%d", len(features), len(want))
+	}
+	for _, feature := range allSTRIDEFeatures {
+		if containsSTRIDEString([]string{string(STRIDEFeatureNetworkQueryParserProvider), string(STRIDEFeatureNetworkSemanticReranker), string(STRIDEFeaturePersonMyMindContext)}, string(feature)) && want[feature] {
+			t.Fatalf("unqualified provider or MyMind dependency enabled: %s", feature)
+		}
+	}
+	if _, err := strideE10W4FeaturesForMode("unknown"); err == nil {
+		t.Fatal("unknown W4 mode accepted")
 	}
 }
 
@@ -164,5 +202,296 @@ func TestStrideE10W4SessionBindingPreservesTokensAndUsesZeroOrganization(t *test
 	reloaded := newSessionStore(filepath.Join(dir, "sessions.json"))
 	if _, ok := reloaded.sessions[before]; !ok {
 		t.Fatal("bound session did not persist under exact token hash")
+	}
+}
+
+func TestStrideE10W4NetworkLiveStartupUsesLineageAndCurrentSessionSemantics(t *testing.T) {
+	paths, keys, _, _ := strideE10W4ActivationTestFiles(t)
+	if _, err := strideE10W4RunActivation(context.Background(), paths, keys, time.Unix(1_780_100_000, 0).UTC(), strideE10W4ActivationCommitted); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, envelope, err := loadStrideE10W4SnapshotEnvelope(paths.Snapshot, keys)
+	if err != nil || envelope.ActivationID == "" || envelope.ActivationReceiptDigest == "" {
+		t.Fatalf("activation lineage=%+v err=%v", envelope, err)
+	}
+	runtime := runtimeFromStrideE10W4Snapshot(snapshot, newStrideE10MemoryOperationStore())
+	updatedProfileID := ""
+	for id, current := range runtime.network.profiles {
+		updated := cloneNetworkProjection(current)
+		updated.Header = nextAuthorityHeader(current.Header, "private-edit", time.Unix(1_780_100_100, 0).UTC())
+		updated.Fields[0].VisibleValue = json.RawMessage(`"Updated Person"`)
+		updated.Fields[0].ValueDigest = sha256Hex(updated.Fields[0].VisibleValue)
+		updated.FieldsDigest, _ = STRIDEContractDigest(updated.Fields)
+		updated.StateChangedAt = time.Unix(1_780_100_100, 0).UTC()
+		if _, _, _, err := runtime.network.PutProfile(updated.Controller, updated, current.Header.Revision, sha256Hex([]byte("w4-private-edit"))); err != nil {
+			t.Fatal(err)
+		}
+		updatedProfileID = id
+		break
+	}
+	for id := range runtime.network.profiles {
+		if id != updatedProfileID {
+			delete(runtime.network.profiles, id)
+			break
+		}
+	}
+	for id, grant := range runtime.network.grants {
+		revokedAt := time.Unix(1_780_100_120, 0).UTC()
+		grant.Header = nextAuthorityHeader(grant.Header, "revoke", revokedAt)
+		grant.State, grant.RevokedAt = "revoked", &revokedAt
+		runtime.network.grants[id] = grant
+		runtime.network.grantVersions[networkVersionKey(id, grant.Header.Revision)] = grant
+		break
+	}
+	var currentOwner OrganizationMembership
+	for _, membership := range runtime.organization.memberships {
+		if membership.Status == "active" && membership.Role == "owner" {
+			currentOwner = membership
+			break
+		}
+	}
+	secondOrganization, secondOwner, _ := organizationTestCreate(currentOwner.PersonID, 1, time.Unix(1_780_100_130, 0).UTC())
+	runtime.organization.organizations[secondOrganization.Header.ID] = secondOrganization
+	runtime.organization.memberships[secondOwner.Header.ID] = secondOwner
+	runtime.network.membershipAuthorities[secondOwner.Header.ID] = NetworkMembershipAuthority{MembershipID: secondOwner.Header.ID, OrganizationID: secondOwner.OrganizationID, PersonID: secondOwner.PersonID, Revision: secondOwner.Header.Revision, Active: true}
+	var revokedMembership OrganizationMembership
+	for id, membership := range runtime.organization.memberships {
+		if membership.OrganizationID == currentOwner.OrganizationID && membership.Role != "owner" && membership.Status == "active" {
+			endedAt := time.Unix(1_780_100_140, 0).UTC()
+			membership.Header = nextAuthorityHeader(membership.Header, "revoke", endedAt)
+			membership.Status, membership.EndedAt = "revoked", &endedAt
+			runtime.organization.memberships[id] = membership
+			runtime.network.membershipAuthorities[id] = NetworkMembershipAuthority{MembershipID: id, OrganizationID: membership.OrganizationID, PersonID: membership.PersonID, Revision: membership.Header.Revision, Active: false}
+			revokedMembership = membership
+			break
+		}
+	}
+	sessionsBody, _ := os.ReadFile(paths.Sessions)
+	var sessions map[string]sessionRecord
+	_ = json.Unmarshal(sessionsBody, &sessions)
+	for hash, record := range sessions {
+		if record.PersonID == revokedMembership.PersonID {
+			delete(sessions, hash)
+			delete(runtime.organization.sessions, hash)
+		}
+	}
+	var person PersonPrincipal
+	for _, candidate := range snapshot.Organization.Persons {
+		person = candidate
+		break
+	}
+	newHash := sha256Hex([]byte("successor-zero-org-session"))
+	sessions[newHash] = sessionRecord{Email: "successor@example.com", Expires: time.Now().UTC().Add(time.Hour), PersonID: person.Header.ID, AccountSubjectDigest: person.AccountSubjectDigest, AuthorityGeneration: 1}
+	if err := writeStrideE10W4RuntimeSnapshotWithLineage(paths.Snapshot, envelope.Generation+1, keys, runtime, envelope.ActivationID, envelope.ActivationReceiptDigest); err != nil {
+		t.Fatal(err)
+	}
+	updatedSessions, _ := json.MarshalIndent(sessions, "", "  ")
+	if err := writeFileAtomicallyDurable(paths.Sessions, updatedSessions, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A later exact release inherits the signed activation lineage. Its own code
+	// identity is enforced independently; it must not rewrite live user state.
+	verifiedEnvelope, verifiedJournal, err := strideE10W4VerifySuccessorRuntime(paths, keys, strings.Repeat("b", 40))
+	if err != nil || verifiedEnvelope.Generation != envelope.Generation+1 || verifiedJournal.ReleaseCommit != strings.Repeat("a", 40) {
+		t.Fatalf("successor runtime verification envelope=%+v journal=%+v err=%v", verifiedEnvelope, verifiedJournal, err)
+	}
+	strideE10W4SetRuntimeTestEnvironment(t, paths, keys, filepath.Join(t.TempDir(), "operations.json"))
+	prior := strideE10LiveProductRuntime
+	priorReady := strideE10W4ProductionRuntimeReady()
+	t.Cleanup(func() {
+		strideE10LiveProductRuntime = prior
+		strideE10W4RuntimeState.Lock()
+		strideE10W4RuntimeState.ready = priorReady
+		strideE10W4RuntimeState.Unlock()
+	})
+	// An explicit live-to-canary downgrade authenticates the evolved lineage but
+	// never runs rollback: member, profile, organization, and session evolution
+	// remains byte-for-byte intact for the canary runtime.
+	beforeDowngrade := map[string][]byte{}
+	for _, path := range []string{paths.Snapshot, paths.Sessions, paths.Journal, paths.Receipt} {
+		beforeDowngrade[path], _ = os.ReadFile(path)
+	}
+	if sha256Hex(beforeDowngrade[paths.Snapshot]) == verifiedJournal.TargetSnapshotDigest || sha256Hex(beforeDowngrade[paths.Sessions]) == verifiedJournal.TargetSessionsDigest {
+		t.Fatal("evolved state unexpectedly equals the initial activation postimage")
+	}
+	if err := strideE10W4RollbackActivation(context.Background(), paths, keys); !errors.Is(err, ErrStrideE10Conflict) {
+		t.Fatalf("evolved live state entered initial-failure rollback: %v", err)
+	}
+	t.Setenv("BONFIRE_RELEASE_COMMIT", strings.Repeat("b", 40))
+	t.Setenv(strideE10W4ModeEnv, strideE10W4CanaryMode)
+	if err := installStrideE10W4ProductionRuntimeFromEnvironment(); err != nil {
+		t.Fatalf("evolved v2 canary install: %v", err)
+	}
+	for path, want := range beforeDowngrade {
+		got, readErr := os.ReadFile(path)
+		if readErr != nil || !bytes.Equal(got, want) {
+			t.Fatalf("live-to-canary mutated %s: %v", path, readErr)
+		}
+	}
+	afterDowngradeJournal, err := strideE10W4LoadJournal(paths.Journal, keys)
+	if err != nil || afterDowngradeJournal.Phase != strideE10W4ActivationCommitted {
+		t.Fatalf("live-to-canary invoked rollback journal=%+v err=%v", afterDowngradeJournal, err)
+	}
+	if strideE10LiveProductRuntime.Enabled(STRIDEFeatureContributionReview) || strideE10LiveProductRuntime.Enabled(STRIDEFeatureNetworkProfilePublication) || strideE10LiveProductRuntime.Enabled(STRIDEFeatureNetworkSearch) || strideE10LiveProductRuntime.Enabled(STRIDEFeatureNetworkContact) {
+		t.Fatal("canary downgrade enabled live-only or W6 features")
+	}
+	t.Setenv(strideE10W4ModeEnv, strideE10W4NetworkMode)
+	if err := installStrideE10W4ProductionRuntimeFromEnvironment(); err != nil {
+		t.Fatal(err)
+	}
+	if strideE10LiveProductRuntime.Enabled(STRIDEFeatureNetworkProfilePublication) || strideE10LiveProductRuntime.Enabled(STRIDEFeatureNetworkSearch) || strideE10LiveProductRuntime.Enabled(STRIDEFeatureNetworkContact) {
+		t.Fatal("W4 live enabled W6 publication/discovery/contact")
+	}
+	if err := strideE10LiveProductRuntime.persistRuntime(strideE10LiveProductRuntime); err != nil {
+		t.Fatal(err)
+	}
+	_, persistedEnvelope, err := loadStrideE10W4SnapshotEnvelope(paths.Snapshot, keys)
+	if err != nil || persistedEnvelope.Generation <= envelope.Generation || persistedEnvelope.ActivationID != envelope.ActivationID || persistedEnvelope.ActivationReceiptDigest != envelope.ActivationReceiptDigest {
+		t.Fatalf("persisted lineage=%+v err=%v", persistedEnvelope, err)
+	}
+	correctSnapshot, _ := os.ReadFile(paths.Snapshot)
+	wrongLineage := strings.Repeat("c", 64)
+	currentSnapshot, _, _ := loadStrideE10W4SnapshotEnvelope(paths.Snapshot, keys)
+	if err := writeStrideE10W4RuntimeSnapshotWithLineage(paths.Snapshot, persistedEnvelope.Generation+1, keys, runtimeFromStrideE10W4Snapshot(currentSnapshot, newStrideE10MemoryOperationStore()), envelope.ActivationID, wrongLineage); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := strideE10W4VerifySuccessorRuntime(paths, keys, strings.Repeat("b", 40)); !errors.Is(err, ErrStrideE10Denied) {
+		t.Fatalf("tampered lineage successor verification err=%v", err)
+	}
+	if err := installStrideE10W4ProductionRuntimeFromEnvironment(); !errors.Is(err, ErrStrideE10Denied) {
+		t.Fatalf("tampered lineage startup err=%v", err)
+	}
+	_ = writeFileAtomicallyDurable(paths.Snapshot, correctSnapshot, 0o600)
+	sessions[newHash] = sessionRecord{Email: "successor@example.com", Expires: time.Now().UTC().Add(time.Hour), PersonID: person.Header.ID, AccountSubjectDigest: person.AccountSubjectDigest, AuthorityGeneration: 2, ActiveOrganizationID: "organization_wrong", OrganizationMembershipID: "membership_wrong", OrganizationMembershipRev: 1, ActiveOrganizationSessionRev: 1}
+	unbound, _ := json.MarshalIndent(sessions, "", "  ")
+	_ = writeFileAtomicallyDurable(paths.Sessions, unbound, 0o600)
+	if _, _, err := strideE10W4VerifySuccessorRuntime(paths, keys, strings.Repeat("b", 40)); !errors.Is(err, ErrStrideE10Denied) {
+		t.Fatalf("unbound session successor verification err=%v", err)
+	}
+	if err := installStrideE10W4ProductionRuntimeFromEnvironment(); !errors.Is(err, ErrStrideE10Denied) {
+		t.Fatalf("unbound session startup err=%v", err)
+	}
+	_ = writeFileAtomicallyDurable(paths.Sessions, updatedSessions, 0o600)
+	validSnapshot, validEnvelope, _ := loadStrideE10W4SnapshotEnvelope(paths.Snapshot, keys)
+	for id, profile := range validSnapshot.Network.Profiles {
+		profile.State, profile.Discoverability = "published", "signed_in_network"
+		validSnapshot.Network.Profiles[id] = profile
+		break
+	}
+	malformedRuntime := runtimeFromStrideE10W4Snapshot(validSnapshot, newStrideE10MemoryOperationStore())
+	if err := writeStrideE10W4RuntimeSnapshotWithLineage(paths.Snapshot, validEnvelope.Generation+1, keys, malformedRuntime, validEnvelope.ActivationID, validEnvelope.ActivationReceiptDigest); err != nil {
+		t.Fatal(err)
+	}
+	if err := installStrideE10W4ProductionRuntimeFromEnvironment(); !errors.Is(err, ErrStrideE10Denied) {
+		t.Fatalf("published/private-canary state startup err=%v", err)
+	}
+}
+
+func TestStrideE10W4CanaryLoadsV1SnapshotWithoutMutationAndRestarts(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BONFIRE_USERS_PATH", filepath.Join(dir, "users.json"))
+	t.Setenv("BONFIRE_SESSIONS_PATH", filepath.Join(dir, "sessions.json"))
+	service, err := strideE10W4OrganizationFromMigration(strideE10W4TestManifest(), time.Unix(1_780_000_000, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := newStrideE10ProductLiveRuntimeWithStores(nil, newStrideE10MemoryPortableDeletionStore(), newStrideE10MemoryOperationStore())
+	runtime.organization = service
+	snapshot, err := captureStrideE10W4RuntimeSnapshot(runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := strideE10W4TestKeyring()
+	payload, _ := json.Marshal(snapshot)
+	v1 := strideE10W4SnapshotEnvelope{SchemaVersion: 1, Generation: 1, KeyID: keys.key.ID, KeyVersion: keys.key.Version, Payload: payload}
+	v1.MAC = strideE10W4SnapshotMACV1(keys.key, v1.Generation, payload)
+	body, _ := json.MarshalIndent(v1, "", "  ")
+	path := filepath.Join(dir, "runtime-v1.json")
+	if err := writeFileAtomicallyDurable(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	paths := strideE10W4ActivationPaths{Snapshot: path, Sessions: filepath.Join(dir, "sessions.json"), BackupDir: filepath.Join(dir, "backup"), Receipt: filepath.Join(dir, "receipt.json"), Journal: filepath.Join(dir, "backup", "activation.journal.json")}
+	t.Setenv(strideE10W4ModeEnv, strideE10W4CanaryMode)
+	strideE10W4SetRuntimeTestEnvironment(t, paths, keys, filepath.Join(dir, "operations.json"))
+	prior := strideE10LiveProductRuntime
+	priorReady := strideE10W4ProductionRuntimeReady()
+	t.Cleanup(func() {
+		strideE10LiveProductRuntime = prior
+		strideE10W4RuntimeState.Lock()
+		strideE10W4RuntimeState.ready = priorReady
+		strideE10W4RuntimeState.Unlock()
+	})
+	if err := installStrideE10W4ProductionRuntimeFromEnvironment(); err != nil {
+		t.Fatal(err)
+	}
+	afterFirstStart, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(afterFirstStart, body) {
+		t.Fatalf("first-hop canary rewrote retained-compatible v1 snapshot: %v", err)
+	}
+	_, loaded, err := loadStrideE10W4SnapshotEnvelope(path, keys)
+	if err != nil || loaded.SchemaVersion != 1 || loaded.ActivationID != "" {
+		t.Fatalf("loaded=%+v err=%v", loaded, err)
+	}
+	personID := ""
+	for id := range snapshot.Organization.Persons {
+		personID = id
+		break
+	}
+	principal := StrideE10ProductPrincipal{PersonID: personID}
+	serverMintedAction := func(surface, action string) (string, int64) {
+		t.Helper()
+		value, _, executeErr := strideE10LiveProductRuntime.Execute(context.Background(), principal, StrideE10ProductCommand{Operation: "identity.self_profile", Method: http.MethodGet, Path: "/api/stride/v1/mobile/surfaces/" + surface, ResourceID: surface})
+		if executeErr != nil {
+			t.Fatalf("GET %s: %v", surface, executeErr)
+		}
+		encoded, _ := json.Marshal(value)
+		var projection struct {
+			Items []struct {
+				Actions []struct {
+					ID               string `json:"id"`
+					Type             string `json:"type"`
+					ExpectedRevision int64  `json:"expectedRevision"`
+				} `json:"actions"`
+			} `json:"items"`
+		}
+		if json.Unmarshal(encoded, &projection) != nil {
+			t.Fatalf("invalid %s projection", surface)
+		}
+		for _, item := range projection.Items {
+			for _, candidate := range item.Actions {
+				if candidate.Type == action {
+					return candidate.ID, candidate.ExpectedRevision
+				}
+			}
+		}
+		t.Fatalf("%s did not mint %s", surface, action)
+		return "", 0
+	}
+	executeAction := func(surface, action, id string, revision int64, values map[string]any) {
+		t.Helper()
+		actionBody, _ := json.Marshal(map[string]any{"action": action, "surface": surface, "expectedRevision": revision, "values": values})
+		if _, _, executeErr := strideE10LiveProductRuntime.Execute(context.Background(), principal, StrideE10ProductCommand{Operation: "identity.self_profile", Method: http.MethodPost, Path: "/api/stride/v1/mobile/actions/" + id, ResourceID: id, ExpectedRevision: revision, IdempotencyKey: "v1-" + action, Body: actionBody}); executeErr != nil {
+			t.Fatalf("POST %s: %v", action, executeErr)
+		}
+	}
+	profileAction, profileRevision := serverMintedAction("profile", "profile-update")
+	executeAction("profile", "profile-update", profileAction, profileRevision, map[string]any{"displayName": "Retained Compatible"})
+	organizationAction, organizationRevision := serverMintedAction("organizations", "organization-create")
+	executeAction("organizations", "organization-create", organizationAction, organizationRevision, map[string]any{"name": "Second Organization", "slug": "second-organization"})
+	persisted, persistedEnvelope, err := loadStrideE10W4SnapshotEnvelope(path, keys)
+	if err != nil || persistedEnvelope.SchemaVersion != 1 || persistedEnvelope.ActivationID != "" || persistedEnvelope.ActivationReceiptDigest != "" || persistedEnvelope.Generation <= loaded.Generation || len(persisted.Organization.Organizations) != 2 {
+		t.Fatalf("v1 canary mutation persistence envelope=%+v organizations=%d err=%v", persistedEnvelope, len(persisted.Organization.Organizations), err)
+	}
+	beforeRestart, _ := os.ReadFile(path)
+	if err := installStrideE10W4ProductionRuntimeFromEnvironment(); err != nil {
+		t.Fatalf("v1 canary restart: %v", err)
+	}
+	afterRestart, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(afterRestart, beforeRestart) {
+		t.Fatalf("v1 canary restart changed persisted retained-compatible snapshot: %v", err)
+	}
+	_, restartedEnvelope, err := loadStrideE10W4SnapshotEnvelope(path, keys)
+	if err != nil || restartedEnvelope.SchemaVersion != 1 || restartedEnvelope.ActivationID != "" || restartedEnvelope.Generation != persistedEnvelope.Generation {
+		t.Fatalf("v1 mutation restart envelope=%+v err=%v", restartedEnvelope, err)
 	}
 }

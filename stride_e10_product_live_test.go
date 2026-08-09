@@ -328,9 +328,12 @@ func TestStrideE10OrganizationSwitchPreparedLossReconcilesBothSessionStores(t *t
 	sessionHash := hashResetToken(token)
 	email := "switch-restart@example.com"
 	userSessionStore().mu.Lock()
-	userSessionStore().sessions[sessionHash] = sessionRecord{Email: email, Expires: now.Add(12 * time.Hour), PersonID: membership.PersonID, AccountSubjectDigest: sha256Hex([]byte(email)), AuthorityGeneration: 1}
+	userSessionStore().sessions[sessionHash] = sessionRecord{Email: email, Expires: now.Add(7 * 24 * time.Hour), PersonID: membership.PersonID, AccountSubjectDigest: sha256Hex([]byte(email)), AuthorityGeneration: 1}
 	userSessionStore().persistLocked()
 	userSessionStore().mu.Unlock()
+	if stored, ok := userSessionStore().lookupMemberRecordByHash(sessionHash, now); !ok || stored.PersonID != membership.PersonID || stored.AuthorityGeneration != 1 {
+		t.Fatalf("prepared switch session unavailable before hydration: %+v ok=%t", stored, ok)
+	}
 	binding := StrideE10LiveActionBinding{
 		ID: "action_switch_restart", Type: "organization-switch", Surface: "organizations", PersonID: membership.PersonID,
 		ExpectedRevision: 1, ExpiresAt: now.Add(time.Hour),

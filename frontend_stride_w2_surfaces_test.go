@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestStrideW2ContributionNetworkSurfacesRemainDefaultOffAndBodyFree(t *testing.T) {
+func TestStrideW2ContributionNetworkSurfacesStayPrivateAndBodyFree(t *testing.T) {
 	raw, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatal(err)
@@ -20,7 +20,7 @@ func TestStrideW2ContributionNetworkSurfacesRemainDefaultOffAndBodyFree(t *testi
 		`'/network/search'`, `'/network/contact'`, `'/network/blocks'`,
 		`coworkerRoutePattern`, `coworker-profile`, `organization-recruiting`,
 		`View as recruiter`, `Contribution approvals`, `Search unavailable`,
-		`No data is read, published, searched, or sent`,
+		`Your private information stays private`,
 		`private drafts, source bodies, contact channels, hidden memberships, or ranking scores`,
 	} {
 		if !strings.Contains(html, marker) {
@@ -52,6 +52,29 @@ func TestStrideW2ContributionNetworkSurfacesRemainDefaultOffAndBodyFree(t *testi
 	}
 	if strings.Contains(css, "transition: all") || strings.Contains(css, "will-change: all") {
 		t.Fatal("W2 CSS uses a prohibited broad transition/compositing hint")
+	}
+}
+
+func TestStrideW2UsesTheMainProductShellAndDirectNetworkNavigation(t *testing.T) {
+	raw, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(raw)
+	for _, marker := range []string{
+		`data-tool="network"`, `aria-label="Work network"`, `network: 'Network'`,
+		`verified work · person-controlled visibility`, `applyToolState('network')`,
+		`window.closeStrideContributionSurface`, `inset: 60px 0 0 72px`,
+		`Find people by the work they have chosen to show`, `Private by default`,
+	} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("cohesive network shell missing %q", marker)
+		}
+	}
+	for _, stale := range []string{`<strong>Stride network</strong>`, `Current authorized view`, `Authorized surface`, `default off</span>`} {
+		if strings.Contains(html, stale) {
+			t.Errorf("detached/technical network chrome remains: %q", stale)
+		}
 	}
 }
 
@@ -365,7 +388,7 @@ func TestStrideW2OrganizationSwitcherIsServerProjectedAndHonest(t *testing.T) {
 		`id="topbarOrganizationSwitcher"`, `min-height: 40px`,
 		`id="topbarOrganizationName"`, `Organization unavailable`, `0 of 3 active`,
 		`renderOrganizationSwitcher(envelope)`, `item.status === 'current'`,
-		`item.status === 'pending'`, `active.length > 3`,
+		`item.detail?.pendingCount`, `active.length > 3`,
 		`loadProjection('organizations'`, `openSettings({ section: 'organizations'`,
 		`window.__strideCurrentOrganizationLabel`,
 	} {
