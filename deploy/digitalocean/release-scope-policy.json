@@ -78,6 +78,10 @@
     },
     {
       "kind": "exact",
+      "path": "deploy/digitalocean/stride-e10-w4-deployment-policy.json"
+    },
+    {
+      "kind": "exact",
       "path": "deploy/digitalocean/release-scope-policy.json"
     },
     {
@@ -101,6 +105,7 @@
     "deploy/digitalocean/bonfire-render-runner-v1.apparmor",
     "deploy/digitalocean/bonfire-render-runner-v1.seccomp.json",
     "deploy/digitalocean/release-build-inputs.json",
+    "deploy/digitalocean/stride-e10-w4-deployment-policy.json",
     "deploy/digitalocean/release-scope-policy.json",
     "scripts/bonfire-release.mjs"
   ],

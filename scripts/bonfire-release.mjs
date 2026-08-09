@@ -19,14 +19,20 @@ const scopeSchema = 'bonfire.release-scope-policy.v1'
 const buildInputsSchema = 'bonfire.release-build-inputs.v2'
 const buildManifestSchema = 'bonfire.release-build-manifest.v2'
 const receiptSchema = 'bonfire.release-receipt.v3'
+const receiptSchemaW4 = 'bonfire.release-receipt.v4'
 const candidateBundleSchema = 'bonfire.candidate-deployment-bundle.v1'
 const activeReleaseLedgerSchema = 'bonfire.active-release-ledger.v1'
 const releaseOperationLockSchema = 'bonfire.release-operation-lock.v1'
+const releaseTransactionSchema = 'bonfire.release-transaction.v1'
 const shaPattern = /^[0-9a-f]{64}$/
 const commitPattern = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/
 const imageRefPattern = /^.+@sha256:[0-9a-f]{64}$/
 const localImageIdPattern = /^sha256:[0-9a-f]{64}$/
 const scopePolicyPath = 'deploy/digitalocean/release-scope-policy.json'
+const strideE10W4DeploymentPolicyPath = 'deploy/digitalocean/stride-e10-w4-deployment-policy.json'
+const strideE10W4DeploymentPolicySchema = 'bonfire.stride-e10-w4-deployment-policy.v1'
+const strideE10W4CanaryMode = 'canary'
+const strideE10W4NetworkMode = 'bonfire_network_live'
 const requiredExcludedPrefixes = ['stride-site/', 'data/', 'docs/evidence/']
 const requiredConfigPaths = [
   '.dockerignore', 'Dockerfile', 'Dockerfile.render', 'go.mod', 'go.sum',
@@ -77,7 +83,7 @@ export function computeEnvironmentMarker(value) {
 }
 
 export function computeBundleSha256(value) {
-  return sha256(canonical({
+  const identity = {
     schema: 'bonfire.whole-deployment-identity.v1',
     releaseCommit: value.source.releaseCommit,
     sourceReceiptSha256: value.sourceReceiptSha256,
@@ -90,7 +96,45 @@ export function computeBundleSha256(value) {
     sidecars: Object.fromEntries(Object.entries(value.sidecars).map(([name, image]) => [name, {
       imageReference: image.imageReference, imageId: image.imageId
     }]))
-  }))
+  }
+  if (value.strideE10W4) identity.strideE10W4 = value.strideE10W4
+  return sha256(canonical(identity))
+}
+
+export function validateStrideE10W4DeploymentPolicy(policy) {
+  const keys = Object.keys(policy || {}).sort()
+  const expectedKeys = ['activationBackupDir', 'activationReceiptPath', 'liveMode', 'releaseMode', 'schema', 'snapshotPath'].sort()
+  if (policy?.schema !== strideE10W4DeploymentPolicySchema || JSON.stringify(keys) !== JSON.stringify(expectedKeys) ||
+      policy.liveMode !== strideE10W4NetworkMode || ![strideE10W4CanaryMode, strideE10W4NetworkMode].includes(policy.releaseMode)) {
+    throw new Error('STRIDE E10 W4 deployment policy is invalid')
+  }
+  const paths = [policy.snapshotPath, policy.activationBackupDir, policy.activationReceiptPath]
+  if (paths.some(path => !isAbsolute(String(path || '')) || resolve(path) !== path || !path.startsWith('/app/data/')) ||
+      new Set(paths).size !== paths.length || paths.some((path, index) => paths.some((other, otherIndex) => index !== otherIndex && other.startsWith(`${path}/`)))) {
+    throw new Error('STRIDE E10 W4 deployment policy paths are invalid')
+  }
+  return policy
+}
+
+export function validateStrideE10W4ComposeSource(body, policy) {
+  policy = validateStrideE10W4DeploymentPolicy(policy)
+  const source = String(body || '')
+  const required = [
+    'STRIDE_E10_W4_MODE: ${STRIDE_E10_W4_RELEASE_MODE:?STRIDE_E10_W4_RELEASE_MODE is required}',
+    'STRIDE_E10_W4_SNAPSHOT_PATH: ${STRIDE_E10_W4_SNAPSHOT_PATH:?STRIDE_E10_W4_SNAPSHOT_PATH is required}',
+    'STRIDE_E10_W4_ACTIVATION_BACKUP_DIR: ${STRIDE_E10_W4_ACTIVATION_BACKUP_DIR:?STRIDE_E10_W4_ACTIVATION_BACKUP_DIR is required}',
+    'STRIDE_E10_W4_ACTIVATION_RECEIPT_PATH: ${STRIDE_E10_W4_ACTIVATION_RECEIPT_PATH:?STRIDE_E10_W4_ACTIVATION_RECEIPT_PATH is required}'
+  ]
+  if (policy.releaseMode === strideE10W4CanaryMode) {
+    if (required.some(marker => source.includes(marker)) || source.includes('STRIDE_E10_W4_RELEASE_MODE')) {
+      throw new Error('compatibility canary Compose must preserve the legacy environment shape')
+    }
+    return policy
+  }
+  if (required.some(marker => !source.includes(marker)) || source.includes(':-bonfire_network_live')) {
+    throw new Error('live STRIDE E10 W4 Compose binding is not exact')
+  }
+  return policy
 }
 
 export function validateReleaseScopePolicy(policy) {
@@ -229,8 +273,15 @@ export function validateCandidateBundleManifest(manifest, source) {
 }
 
 export function validateReleaseReceipt(receipt) {
-  if (receipt?.schema !== receiptSchema || receipt.attestation !== 'unsigned-local-v1') {
+  if (![receiptSchema, receiptSchemaW4].includes(receipt?.schema) || receipt.attestation !== 'unsigned-local-v1') {
     throw new Error('release receipt schema/attestation is invalid')
+  }
+  if (receipt.schema === receiptSchema && receipt.strideE10W4 !== undefined) {
+    throw new Error('legacy release receipt cannot claim STRIDE E10 W4 policy')
+  }
+  if (receipt.schema === receiptSchemaW4) {
+    const policy = validateStrideE10W4DeploymentPolicy(receipt.strideE10W4)
+    if (policy.releaseMode !== strideE10W4NetworkMode) throw new Error('W4 release receipt must bind the live network mode')
   }
   validateSourceReceipt(receipt.source)
   for (const name of ['sourceReceiptSha256', 'buildInputManifestSha256', 'buildManifestSha256', 'candidateBundleManifestSha256', 'bundleSha256', 'environmentMarker']) {
@@ -278,7 +329,8 @@ export function validateReleaseReceipt(receipt) {
     }
   }
   const dependencyPaths = buildInputs.dependencyLocks.concat(['Dockerfile', 'Dockerfile.render', '.dockerignore',
-    'deploy/digitalocean/release-build-inputs.json', scopePolicyPath])
+    'deploy/digitalocean/release-build-inputs.json', scopePolicyPath],
+  receipt.schema === receiptSchemaW4 ? [strideE10W4DeploymentPolicyPath] : [])
   const dependencyInputs = manifest.buildInputs?.dependencyInputs || {}
   if (JSON.stringify(manifest.buildArgs) !== JSON.stringify(expectedBuildArgs) ||
       JSON.stringify(manifest.buildInvocations) !== JSON.stringify({
@@ -460,6 +512,9 @@ async function build(options) {
     await extractArchive(archive, sourceRoot)
     const archiveIdentity = await inspectExtractedArchive(sourceRoot)
     verifyArchiveIdentity(archiveIdentity, source)
+    const strideE10W4PolicyRaw = await readFile(join(sourceRoot, strideE10W4DeploymentPolicyPath))
+    const strideE10W4Policy = validateStrideE10W4DeploymentPolicy(parseJSON(strideE10W4PolicyRaw, 'STRIDE E10 W4 deployment policy'))
+    validateStrideE10W4ComposeSource(await readFile(join(sourceRoot, 'deploy/digitalocean/docker-compose.yml'), 'utf8'), strideE10W4Policy)
     const buildInputsRaw = await readFile(join(sourceRoot, 'deploy/digitalocean/release-build-inputs.json'))
     const buildInputs = validateBuildInputs(parseJSON(buildInputsRaw, 'release build-input manifest'))
     const buildInputManifestSha256 = sha256(buildInputsRaw)
@@ -490,7 +545,8 @@ async function build(options) {
       execFileAsync('docker', ['compose', 'version', '--format', 'json'], { maxBuffer: 4 << 20 })
     ])
     const dependencyPaths = buildInputs.dependencyLocks.concat(['Dockerfile', 'Dockerfile.render', '.dockerignore',
-      'deploy/digitalocean/release-build-inputs.json', scopePolicyPath])
+      'deploy/digitalocean/release-build-inputs.json', scopePolicyPath],
+    strideE10W4Policy.releaseMode === strideE10W4NetworkMode ? [strideE10W4DeploymentPolicyPath] : [])
     const dependencyInputs = Object.fromEntries(dependencyPaths.map(path => [path,
       archiveIdentity.entries.find(entry => entry.path === path)?.sha256 || 'missing']))
     if (Object.values(dependencyInputs).includes('missing')) throw new Error('build dependency inventory is incomplete')
@@ -516,10 +572,12 @@ async function build(options) {
     const environmentMarker = computeEnvironmentMarker({ ...source, buildInputManifestSha256, buildManifestSha256,
       binarySha256: images.meetingassist.binarySha256, imageDigest: images.meetingassist.imageDigest })
     const receiptBase = {
-      schema: receiptSchema, attestation: 'unsigned-local-v1', source, sourceReceiptSha256,
+      schema: strideE10W4Policy.releaseMode === strideE10W4NetworkMode ? receiptSchemaW4 : receiptSchema,
+      attestation: 'unsigned-local-v1', source, sourceReceiptSha256,
       buildInputManifestSha256, buildManifest, buildManifestSha256,
       candidateBundleManifestSha256, images, sidecars, environmentMarker
     }
+    if (strideE10W4Policy.releaseMode === strideE10W4NetworkMode) receiptBase.strideE10W4 = strideE10W4Policy
     const receipt = validateReleaseReceipt({ ...receiptBase, bundleSha256: computeBundleSha256(receiptBase) })
     await writeExclusive(resolve(options.buildManifest), buildManifestRaw, 0o600)
     await writeExclusive(resolve(options.releaseReceipt), jsonLine(receipt), 0o600)
@@ -1804,7 +1862,7 @@ export function verifyProbeRelease(payload, receipt, probe) {
 }
 
 export function environmentValues(receipt) {
-  return {
+  const values = {
     BONFIRE_RELEASE_IDENTITY_REQUIRED: 'true',
     BONFIRE_RELEASE_COMMIT: receipt.source.releaseCommit,
     BONFIRE_GIT_TREE_DIGEST: receipt.source.gitTreeDigest,
@@ -1818,10 +1876,18 @@ export function environmentValues(receipt) {
     BONFIRE_RELEASE_ENVIRONMENT_MARKER: receipt.environmentMarker,
     BONFIRE_BUILD_VERSION: receipt.source.releaseCommit
   }
+  if (receipt.schema === receiptSchemaW4) {
+    const policy = validateStrideE10W4DeploymentPolicy(receipt.strideE10W4)
+    values.STRIDE_E10_W4_MODE = policy.releaseMode
+    values.STRIDE_E10_W4_SNAPSHOT_PATH = policy.snapshotPath
+    values.STRIDE_E10_W4_ACTIVATION_BACKUP_DIR = policy.activationBackupDir
+    values.STRIDE_E10_W4_ACTIVATION_RECEIPT_PATH = policy.activationReceiptPath
+  }
+  return values
 }
 
 export function releaseEnvironmentValues(receipt) {
-  return {
+  const values = {
     BONFIRE_MEETINGASSIST_IMAGE: receipt.images.meetingassist.imageId,
     BONFIRE_RENDER_IMAGE: receipt.images.renderRunner.imageId,
     BONFIRE_POSTGRES_IMAGE: receipt.sidecars.canonicalPostgres.imageReference,
@@ -1830,6 +1896,11 @@ export function releaseEnvironmentValues(receipt) {
     BONFIRE_RELEASE_BUNDLE_SHA256: receipt.bundleSha256,
     ...environmentValues(receipt)
   }
+  if (receipt.schema === receiptSchemaW4) {
+    values.STRIDE_E10_W4_RELEASE_MODE = receipt.strideE10W4.releaseMode
+    delete values.STRIDE_E10_W4_MODE
+  }
+  return values
 }
 
 function runtimeEnvironment(receipt) {
@@ -1870,8 +1941,18 @@ async function assertReleaseOperationLock(lock) {
     throw new Error('release operation lock is not a private regular directory')
   }
   const ownerPath = join(path, 'owner.json')
-  if (JSON.stringify((await readdir(path)).sort()) !== JSON.stringify(['owner.json'])) {
+  const entries = (await readdir(path)).sort()
+  const stableEntries = entries.filter(name => !/^\.transaction\.json\.[0-9a-f-]{36}\.tmp$/.test(name))
+  if (JSON.stringify(stableEntries) !== JSON.stringify(['owner.json']) &&
+      JSON.stringify(stableEntries) !== JSON.stringify(['owner.json', 'transaction.json'])) {
     throw new Error('release operation lock contains unexpected state')
+  }
+  for (const name of entries.filter(name => name.startsWith('.transaction.json.'))) {
+    if (!/^\.transaction\.json\.[0-9a-f-]{36}\.tmp$/.test(name)) throw new Error('release operation lock contains unexpected state')
+    const temporaryInfo = await lstat(join(path, name))
+    if (!temporaryInfo.isFile() || temporaryInfo.isSymbolicLink() || (temporaryInfo.mode & 0o777) !== 0o600) {
+      throw new Error('release transaction temporary journal is not private')
+    }
   }
   const ownerInfo = await lstat(ownerPath)
   if (!ownerInfo.isFile() || ownerInfo.isSymbolicLink() || (ownerInfo.mode & 0o777) !== 0o600) {
@@ -1887,9 +1968,89 @@ async function assertReleaseOperationLock(lock) {
   return owner
 }
 
-// A deliberately stale lock fails closed after an operator crash. Recovery is
-// an explicit inspection/removal ceremony; silently stealing by PID or age
-// could permit two Compose mutations to interleave.
+const releaseTransactionPhases = [
+  'prepared', 'ingress_stopped', 'data_transition_started', 'data_ready', 'private_started',
+  'private_verified', 'ledger_written', 'ingress_opened', 'external_verified',
+  'recovery_started', 'recovery_data_restored', 'recovery_private_started',
+  'recovery_private_verified', 'recovery_ledger_restored', 'recovery_ingress_opened', 'recovery_external_verified'
+]
+
+function releaseTransactionPath(lock) { return join(resolve(lock.path), 'transaction.json') }
+
+export function validateReleaseTransactionJournal(value, lock) {
+  const keys = Object.keys(value || {}).sort()
+  const expected = ['action', 'baselineProjectContainers', 'baselineProjectResources', 'createdAt', 'nextLedger', 'phase',
+    'priorLedger', 'rollbackBundleSha256', 'rollbackRenderedComposeSha256', 'schema', 'targetBundleSha256',
+    'targetRenderedComposeSha256', 'token', 'updatedAt'].sort()
+  if (value?.schema !== releaseTransactionSchema || JSON.stringify(keys) !== JSON.stringify(expected) ||
+      value.token !== lock.token || !['activated', 'rolledBack'].includes(value.action) ||
+      !releaseTransactionPhases.includes(value.phase) || !shaPattern.test(String(value.targetBundleSha256 || '')) ||
+      !shaPattern.test(String(value.rollbackBundleSha256 || '')) || !shaPattern.test(String(value.targetRenderedComposeSha256 || '')) ||
+      !shaPattern.test(String(value.rollbackRenderedComposeSha256 || '')) || Number.isNaN(Date.parse(value.createdAt)) ||
+      Number.isNaN(Date.parse(value.updatedAt)) || !Array.isArray(value.baselineProjectContainers) ||
+      !value.baselineProjectResources || !Array.isArray(value.baselineProjectResources.networks) ||
+      !Array.isArray(value.baselineProjectResources.volumes)) throw new Error('release transaction journal is invalid')
+  validateActiveReleaseLedger(value.nextLedger)
+  if (value.priorLedger !== null) validateActiveReleaseLedger(value.priorLedger)
+  return value
+}
+
+async function readReleaseTransactionJournal(lock) {
+  await assertReleaseOperationLock(lock)
+  const path = releaseTransactionPath(lock)
+  const info = await lstat(path)
+  if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o777) !== 0o600) throw new Error('release transaction journal must be a private regular file')
+  return validateReleaseTransactionJournal(parseJSON(await readFile(path), 'release transaction journal'), lock)
+}
+
+async function cleanReleaseTransactionTemps(lock) {
+  await assertReleaseOperationLock(lock)
+  for (const name of await readdir(lock.path)) {
+    if (/^\.transaction\.json\.[0-9a-f-]{36}\.tmp$/.test(name)) await unlink(join(lock.path, name))
+  }
+  await syncDirectory(lock.path)
+  await assertReleaseOperationLock(lock)
+}
+
+async function writeReleaseTransactionJournal(lock, journal, phase = journal.phase) {
+  const next = validateReleaseTransactionJournal({ ...journal, phase, updatedAt: new Date().toISOString() }, lock)
+  await writeAtomicReplace(releaseTransactionPath(lock), jsonLine(next), 0o600)
+  await assertReleaseOperationLock(lock)
+  return next
+}
+
+async function loadReleaseOperationLockForResume(targetReleaseDir) {
+  const targetDir = resolve(targetReleaseDir)
+  const path = releaseOperationLockPath(targetDir)
+  const ownerPath = join(path, 'owner.json')
+  const ownerInfo = await lstat(ownerPath)
+  if (!ownerInfo.isFile() || ownerInfo.isSymbolicLink() || (ownerInfo.mode & 0o777) !== 0o600) {
+    throw new Error('release resume lock owner is invalid')
+  }
+  const owner = parseJSON(await readFile(ownerPath), 'release operation lock owner')
+  const lock = { path, token: owner.token, targetDir: owner.targetDir, rollbackDir: owner.rollbackDir, startedAt: owner.startedAt }
+  if (resolve(owner.targetDir) !== targetDir) throw new Error('release resume target differs from the durable operation lock')
+  await assertReleaseOperationLock(lock)
+  let released = false
+  return { ...lock, release: async () => {
+    if (released) return
+    await releaseOperationLockDirectory(lock)
+    released = true
+  } }
+}
+
+async function releaseOperationLockDirectory(lock) {
+  await assertReleaseOperationLock(lock)
+  const completedPath = `${lock.path}.completed-${lock.token}`
+  await rename(lock.path, completedPath)
+  await syncDirectory(dirname(lock.path))
+  await rm(completedPath, { recursive: true })
+  await syncDirectory(dirname(lock.path))
+}
+
+// A durable lock fails closed after an operator crash. The receipted resume or
+// recover commands reuse its exact token and journal; PID/age never steals it
+// and operators never delete it by hand.
 export async function acquireReleaseOperationLock(targetReleaseDir, rollbackReleaseDir) {
   const targetDir = resolve(targetReleaseDir)
   const rollbackDir = resolve(rollbackReleaseDir)
@@ -1926,9 +2087,7 @@ export async function acquireReleaseOperationLock(targetReleaseDir, rollbackRele
     ...lock,
     release: async () => {
       if (released) return
-      await assertReleaseOperationLock(lock)
-      await rm(path, { recursive: true })
-      await syncDirectory(dirname(path))
+      await releaseOperationLockDirectory(lock)
       released = true
     }
   }
@@ -2037,6 +2196,41 @@ export function composeActivationArgs(baseEnv, runtimeEnv, candidateCompose, pro
     'up', '-d', '--no-build', '--wait', '--wait-timeout', '360']
 }
 
+export function composePrivateActivationArgs(baseEnv, runtimeEnv, candidateCompose, projectName = 'digitalocean') {
+  return [...composeCommandPrefix(baseEnv, runtimeEnv, candidateCompose, projectName),
+    'up', '-d', '--no-build', '--wait', '--wait-timeout', '360',
+    'meetingassist', 'canonical-postgres', 'render-runner', 'coturn']
+}
+
+export function composeIngressArgs(baseEnv, runtimeEnv, candidateCompose, operation, projectName = 'digitalocean') {
+  const prefix = composeCommandPrefix(baseEnv, runtimeEnv, candidateCompose, projectName)
+  if (operation === 'stop') return [...prefix, 'stop', '--timeout', '30', 'caddy']
+  if (operation === 'start') return [...prefix, 'up', '-d', '--no-build', '--wait', '--wait-timeout', '60', 'caddy']
+  throw new Error('release ingress operation is invalid')
+}
+
+export function strideE10W4MaintenanceArgs(baseEnv, runtimeEnv, candidateCompose, operation, projectName = 'digitalocean', imageID = '') {
+  const flags = {
+    activate: '-stride-e10-w4-activate-network',
+    verify: '-stride-e10-w4-verify-network-activation',
+    verifyRuntime: '-stride-e10-w4-verify-network-runtime',
+    rollback: '-stride-e10-w4-rollback-network',
+    verifyRollback: '-stride-e10-w4-verify-network-rollback'
+  }
+  if (!Object.hasOwn(flags, operation)) throw new Error('STRIDE E10 W4 maintenance operation is invalid')
+  if (operation === 'verify' || operation === 'verifyRuntime' || operation === 'verifyRollback') {
+    if (!localImageIdPattern.test(String(imageID))) throw new Error('STRIDE E10 W4 verifier image is invalid')
+    return ['run', '--rm', '--read-only', '--network', 'none', '--env-file', resolve(baseEnv), '--env-file', resolve(runtimeEnv),
+      '--volume', 'digitalocean_meeting_data:/app/data:ro',
+      '--volume', 'digitalocean_usage_ledger:/app/data/usage:ro',
+      '--volume', 'digitalocean_codex_queue:/app/codex-queue:ro',
+      '--volume', 'digitalocean_render_queue:/app/render-queue:ro',
+      '--entrypoint', '/app/meetingassist', imageID, flags[operation]]
+  }
+  const args = [...composeCommandPrefix(baseEnv, runtimeEnv, candidateCompose, projectName), 'run', '--rm', '--no-deps']
+  return [...args, '--entrypoint', '/app/meetingassist', 'meetingassist', flags[operation]]
+}
+
 export function releaseActivationProgress(releaseCommit, state, startedAt, now = Date.now()) {
   return {
     schema: 'bonfire.release-activation-progress.v1', phase: 'candidate_startup', state,
@@ -2099,13 +2293,120 @@ async function verifyReleaseImages(receipt) {
   }
 }
 
-async function applyReleaseBundle(options, bundle) {
+function releaseBundleUsesStrideE10W4Network(bundle) {
+  return bundle?.receipt?.schema === receiptSchemaW4 &&
+    validateStrideE10W4DeploymentPolicy(bundle.receipt.strideE10W4).releaseMode === strideE10W4NetworkMode
+}
+
+export function strideE10W4ReleaseTransitionPlan(action, targetReceipt, rollbackReceipt) {
+  if (!['activated', 'rolledBack'].includes(action)) throw new Error('release transition action is invalid')
+  const live = receipt => receipt?.schema === receiptSchemaW4 &&
+    validateStrideE10W4DeploymentPolicy(receipt.strideE10W4).releaseMode === strideE10W4NetworkMode
+  const targetLive = live(targetReceipt)
+  const rollbackLive = live(rollbackReceipt)
+  return {
+    activateTargetBeforeStart: targetLive && !rollbackLive,
+    verifyTargetRuntimeBeforeStart: rollbackLive,
+    rollbackCurrentBeforeExplicitRollback: false,
+    rollbackTargetBeforeRecovery: targetLive && !rollbackLive,
+    verifyRollbackRuntimeBeforeRecovery: rollbackLive,
+    reactivateRollbackBeforeRecovery: false
+  }
+}
+
+async function runStrideE10W4Maintenance(options, bundle, operation) {
+  if (!releaseBundleUsesStrideE10W4Network(bundle) && operation !== 'verifyRuntime') return
+  await execFileAsync('docker', strideE10W4MaintenanceArgs(options.baseEnv, bundle.paths.runtimeEnv,
+    bundle.paths.candidateCompose, operation, options.projectName, bundle.receipt.images.meetingassist.imageId), {
+    cwd: dirname(bundle.paths.candidateCompose), env: releaseComposeEnvironment(process.env, options.baseEnv), maxBuffer: 32 << 20
+  })
+}
+
+async function stopReleaseApplication(options, bundle) {
+  await execFileAsync('docker', [...composeCommandPrefix(options.baseEnv, bundle.paths.runtimeEnv,
+    bundle.paths.candidateCompose, options.projectName), 'stop', '--timeout', '30', 'meetingassist'], {
+    cwd: dirname(bundle.paths.candidateCompose), env: releaseComposeEnvironment(process.env, options.baseEnv), maxBuffer: 32 << 20
+  })
+}
+
+async function setReleaseIngress(options, bundle, operation) {
+  await execFileAsync('docker', composeIngressArgs(options.baseEnv, bundle.paths.runtimeEnv,
+    bundle.paths.candidateCompose, operation, options.projectName), {
+    cwd: dirname(bundle.paths.candidateCompose), env: releaseComposeEnvironment(process.env, options.baseEnv), maxBuffer: 32 << 20
+  })
+}
+
+async function startReleaseApplicationPrivately(options, bundle) {
+  await execFileAsync('docker', composePrivateActivationArgs(options.baseEnv, bundle.paths.runtimeEnv,
+    bundle.paths.candidateCompose, options.projectName), {
+    cwd: dirname(bundle.paths.candidateCompose), env: releaseComposeEnvironment(process.env, options.baseEnv), maxBuffer: 32 << 20
+  })
+}
+
+async function verifyPrivateRelease(options, bundle, expectedRenderedComposeSha256 = '') {
+  const preflight = await preflightComposeBundle(options, bundle, expectedRenderedComposeSha256)
+  const containers = await inspectProjectServiceInventory(true)
+  const { stdout: caddyRaw } = await execFileAsync('docker', ['container', 'inspect', containers.caddy], { maxBuffer: 16 << 20 })
+  if (parseJSON(caddyRaw, 'private Docker caddy container inspect')[0]?.State?.Status === 'running') {
+    throw new Error('public Caddy ingress is running during private candidate verification')
+  }
+  const expectedImages = {
+    meetingassist: bundle.receipt.images.meetingassist,
+    'render-runner': bundle.receipt.images.renderRunner,
+    'render-queue-init': bundle.receipt.images.renderRunner,
+    'canonical-postgres': bundle.receipt.sidecars.canonicalPostgres,
+    coturn: bundle.receipt.sidecars.coturn
+  }
+  let appContainer = ''
+  for (const [service, image] of Object.entries(expectedImages)) {
+    const container = containers[service]
+    const { stdout: raw } = await execFileAsync('docker', ['container', 'inspect', container], { maxBuffer: 16 << 20 })
+    const inspected = parseJSON(raw, `private Docker ${service} container inspect`)[0]
+    if (String(inspected?.Image || '').toLowerCase() !== image.imageId) throw new Error(`private candidate ${service} image differs from release receipt`)
+    if (service === 'render-queue-init') {
+      if (inspected?.State?.Status !== 'exited' || inspected?.State?.ExitCode !== 0) throw new Error('private render-queue-init did not complete')
+    } else if (inspected?.State?.Status !== 'running') throw new Error(`private candidate ${service} is not running`)
+    if (service === 'meetingassist') {
+      verifyRuntimeEnvironment(environmentFromInspect(inspected), bundle.receipt)
+      appContainer = container
+    }
+  }
+  for (const [path, probe] of [['/healthz', 'health'], ['/readyz', 'readiness']]) {
+    const { stdout } = await execFileAsync('docker', ['exec', appContainer, 'curl', '-fsS', `http://127.0.0.1:3000${path}`], { maxBuffer: 4 << 20 })
+    verifyProbeRelease(parseJSON(stdout, `private ${probe} probe`), bundle.receipt, probe)
+  }
+  return { verified: true, renderedComposeSha256: preflight.sha256 }
+}
+
+async function activateStrideE10W4Network(options, bundle) {
+  if (!releaseBundleUsesStrideE10W4Network(bundle)) return
+  await stopReleaseApplication(options, bundle)
+  await runStrideE10W4Maintenance(options, bundle, 'activate')
+  await runStrideE10W4Maintenance(options, bundle, 'verify')
+}
+
+async function rollbackStrideE10W4Network(options, bundle) {
+  if (!releaseBundleUsesStrideE10W4Network(bundle)) return
+  await stopReleaseApplication(options, bundle)
+  await runStrideE10W4Maintenance(options, bundle, 'rollback')
+  await runStrideE10W4Maintenance(options, bundle, 'verifyRollback')
+}
+
+async function applyReleaseBundle(options, bundle, strideE10W4Transition = 'activate') {
+  if (!['activate', 'verifyRuntime'].includes(strideE10W4Transition)) {
+    throw new Error('STRIDE E10 W4 apply transition is invalid')
+  }
   const startedAt = Date.now()
   const releaseCommit = bundle.source?.releaseCommit || 'unknown'
   const progress = state => process.stderr.write(`${JSON.stringify(releaseActivationProgress(releaseCommit, state, startedAt))}\n`)
   progress('starting')
   const heartbeat = setInterval(() => progress('waiting_for_ready'), 15_000)
   try {
+    if (strideE10W4Transition === 'activate') {
+      await activateStrideE10W4Network(options, bundle)
+    } else {
+      await runStrideE10W4Maintenance(options, bundle, 'verifyRuntime')
+    }
     await execFileAsync('docker', composeActivationArgs(options.baseEnv, bundle.paths.runtimeEnv, bundle.paths.candidateCompose, options.projectName), {
       cwd: dirname(bundle.paths.candidateCompose), env: releaseComposeEnvironment(process.env, options.baseEnv), maxBuffer: 32 << 20
     })
@@ -2243,6 +2544,9 @@ export async function restoreReleaseBundleAfterFailedActivation(options) {
   if (!Array.isArray(options.baselineProjectContainers)) throw new Error('--baseline-project-containers is required')
   if (!options.baselineProjectResources || !Array.isArray(options.baselineProjectResources.networks) ||
       !Array.isArray(options.baselineProjectResources.volumes)) throw new Error('--baseline-project-resources is required')
+  if (options.verifyStrideE10W4RuntimeLineage !== undefined && options.verifyStrideE10W4RuntimeLineage !== true) {
+    throw new Error('--verify-stride-e10-w4-runtime-lineage must be exactly true when supplied')
+  }
   const releaseDir = resolve(options.releaseDir)
   const failedReleaseDir = resolve(options.failedReleaseDir)
   const lock = {
@@ -2263,7 +2567,7 @@ export async function restoreReleaseBundleAfterFailedActivation(options) {
     releasePaths(failedReleaseDir).candidateCompose)
   await removeFailedTargetProjectResources(lock, options.baselineProjectResources, resourceClaims)
   await assertReleaseOperationLock(lock)
-  await applyReleaseBundle(options, bundle)
+  await applyReleaseBundle(options, bundle, options.verifyStrideE10W4RuntimeLineage === true ? 'verifyRuntime' : 'activate')
   const verified = await verifyRunning(options, false, {
     verifyTool: false,
     verifyLedger: false,
@@ -2273,6 +2577,144 @@ export async function restoreReleaseBundleAfterFailedActivation(options) {
     throw new Error('retained rollback did not restore the exact pre-transaction Compose project resources')
   }
   return verified
+}
+
+const forwardReleasePhases = ['prepared', 'ingress_stopped', 'data_transition_started', 'data_ready',
+  'private_started', 'private_verified', 'ledger_written', 'ingress_opened', 'external_verified']
+
+function releasePhaseAtLeast(phase, expected) {
+  const actualIndex = forwardReleasePhases.indexOf(phase)
+  const expectedIndex = forwardReleasePhases.indexOf(expected)
+  if (actualIndex < 0 || expectedIndex < 0) throw new Error('release transaction phase is not forward-resumable')
+  return actualIndex >= expectedIndex
+}
+
+export function strideE10W4RecoveryPlan(phase, transition) {
+  if (!forwardReleasePhases.includes(phase) || !transition) throw new Error('release recovery plan is invalid')
+  const ingressWasOpened = releasePhaseAtLeast(phase, 'ingress_opened')
+  const privateAppMayHaveRun = releasePhaseAtLeast(phase, 'private_started')
+  const activationMayHaveStarted = releasePhaseAtLeast(phase, 'data_transition_started')
+  return {
+    rollbackUnexposedInitialActivation: Boolean(transition.rollbackTargetBeforeRecovery && activationMayHaveStarted && !privateAppMayHaveRun),
+    verifyRetainedRuntimeWithoutMutation: Boolean(transition.verifyRollbackRuntimeBeforeRecovery ||
+      (transition.rollbackTargetBeforeRecovery && privateAppMayHaveRun)),
+    preserveEvolvedBytes: privateAppMayHaveRun || ingressWasOpened
+  }
+}
+
+export async function executeDurableReleasePhaseMachine({ phase, transition, effects, advance }) {
+  if (!forwardReleasePhases.includes(phase) || !transition || typeof effects !== 'object' || typeof advance !== 'function') {
+    throw new Error('durable release phase machine input is invalid')
+  }
+  for (const name of ['stopIngress', 'activateTarget', 'verifyTargetRuntime', 'startTargetPrivate', 'verifyTargetPrivate',
+    'writeTargetLedger', 'openTargetIngress', 'verifyTargetExternal']) {
+    if (typeof effects[name] !== 'function') throw new Error(`durable release phase effect ${name} is invalid`)
+  }
+  let current = phase
+  const move = async next => { await advance(next); current = next }
+  if (!releasePhaseAtLeast(current, 'ingress_stopped')) {
+    await effects.stopIngress(); await move('ingress_stopped')
+  }
+  if (!releasePhaseAtLeast(current, 'data_ready')) {
+    if (transition.activateTargetBeforeStart) {
+      if (!releasePhaseAtLeast(current, 'data_transition_started')) await move('data_transition_started')
+      await effects.activateTarget()
+    } else if (transition.verifyTargetRuntimeBeforeStart) await effects.verifyTargetRuntime()
+    await move('data_ready')
+  }
+  if (!releasePhaseAtLeast(current, 'private_started')) { await effects.startTargetPrivate(); await move('private_started') }
+  if (!releasePhaseAtLeast(current, 'private_verified')) { await effects.verifyTargetPrivate(); await move('private_verified') }
+  if (!releasePhaseAtLeast(current, 'ledger_written')) { await effects.writeTargetLedger(); await move('ledger_written') }
+  if (!releasePhaseAtLeast(current, 'ingress_opened')) { await effects.openTargetIngress(); await move('ingress_opened') }
+  if (!releasePhaseAtLeast(current, 'external_verified')) { await effects.verifyTargetExternal(); await move('external_verified') }
+  return current
+}
+
+async function loadDurableReleaseContext(options, operationLock, journal) {
+  const targetDir = resolve(operationLock.targetDir)
+  const rollbackDir = resolve(operationLock.rollbackDir)
+  const targetOptions = { ...options, releaseDir: targetDir, rollbackReleaseDir: rollbackDir }
+  const rollbackOptions = { ...options, releaseDir: rollbackDir, rollbackReleaseDir: targetDir }
+  const target = await loadReleaseBundle(targetOptions, { verifyTool: false })
+  const rollback = await loadReleaseBundle(rollbackOptions, { verifyTool: false })
+  await verifyRetainedReleaseActivator(process.argv[1], rollback.paths, rollback.source)
+  await loadRetainedRollbackTool(rollback.paths.releaseTool, rollback.source.configFiles['scripts/bonfire-release.mjs'])
+  if (target.receipt.bundleSha256 !== journal.targetBundleSha256 || rollback.receipt.bundleSha256 !== journal.rollbackBundleSha256) {
+    throw new Error('release transaction bundles differ from the durable receipt binding')
+  }
+  verifyReleaseEnvironmentFile(await readFile(target.paths.runtimeEnv, 'utf8'), target.receipt)
+  verifyReleaseEnvironmentFile(await readFile(rollback.paths.runtimeEnv, 'utf8'), rollback.receipt)
+  await verifyReleaseImages(target.receipt)
+  await verifyReleaseImages(rollback.receipt)
+  await preflightComposeBundle(targetOptions, target, journal.targetRenderedComposeSha256)
+  await preflightComposeBundle(rollbackOptions, rollback, journal.rollbackRenderedComposeSha256)
+  return { targetDir, rollbackDir, targetOptions, rollbackOptions, target, rollback,
+    transition: strideE10W4ReleaseTransitionPlan(journal.action, target.receipt, rollback.receipt) }
+}
+
+async function resumeDurableReleaseTransaction(options, operationLock, journal) {
+  const context = await loadDurableReleaseContext(options, operationLock, journal)
+  let current = journal
+  const advance = async phase => { current = await writeReleaseTransactionJournal(operationLock, current, phase) }
+  await executeDurableReleasePhaseMachine({ phase: current.phase, transition: context.transition, advance, effects: {
+    stopIngress: () => setReleaseIngress(context.rollbackOptions, context.rollback, 'stop'),
+    activateTarget: () => activateStrideE10W4Network(context.targetOptions, context.target),
+    verifyTargetRuntime: () => runStrideE10W4Maintenance(context.targetOptions, context.target, 'verifyRuntime'),
+    startTargetPrivate: () => startReleaseApplicationPrivately(context.targetOptions, context.target),
+    verifyTargetPrivate: () => verifyPrivateRelease(context.targetOptions, context.target, current.targetRenderedComposeSha256),
+    writeTargetLedger: async () => {
+    // Reassert the ingress fence at the ledger linearization point. This is
+    // idempotent and prevents a privately verified candidate from becoming
+    // ledger-active after an out-of-band Caddy restart.
+    await setReleaseIngress(context.rollbackOptions, context.rollback, 'stop')
+    const ledger = await readActiveReleaseLedger(context.targetDir)
+    if (sha256(canonical(ledger)) === sha256(canonical(current.priorLedger))) {
+      await writeActiveReleaseLedger(context.targetDir, current.nextLedger)
+    } else if (sha256(canonical(ledger)) !== sha256(canonical(current.nextLedger))) {
+      throw new Error('release ledger is neither durable prior nor target state during resume')
+    }
+    },
+    openTargetIngress: () => setReleaseIngress(context.targetOptions, context.target, 'start'),
+    verifyTargetExternal: () => verifyRunning(context.targetOptions, false, { verifyTool: false, verifyLedger: true,
+      expectedRenderedComposeSha256: current.targetRenderedComposeSha256 })
+  } })
+  await operationLock.release()
+  return { action: current.action, ledgerGeneration: current.nextLedger.generation, resumed: journal.phase !== 'prepared' }
+}
+
+async function recoverDurableReleaseTransaction(options, operationLock, journal) {
+  const context = await loadDurableReleaseContext(options, operationLock, journal)
+  const recoveryPlan = strideE10W4RecoveryPlan(journal.phase, context.transition)
+  await setReleaseIngress(context.rollbackOptions, context.rollback, 'stop')
+  if (recoveryPlan.rollbackUnexposedInitialActivation) {
+    // A crash can occur after the durable intent but before activation writes
+    // its terminal phase. Resume activation to a committed state, then use the
+    // authenticated rollback CLI; both are idempotent behind the ingress fence.
+    await activateStrideE10W4Network(context.targetOptions, context.target)
+    await rollbackStrideE10W4Network(context.targetOptions, context.target)
+  }
+  const resourceClaims = await removeFailedTargetProjectContainers(operationLock, journal.baselineProjectContainers,
+    context.target.paths.candidateCompose)
+  await removeFailedTargetProjectResources(operationLock, journal.baselineProjectResources, resourceClaims)
+  if (recoveryPlan.verifyRetainedRuntimeWithoutMutation) {
+    await runStrideE10W4Maintenance(context.rollbackOptions, context.rollback, 'verifyRuntime')
+  }
+  await startReleaseApplicationPrivately(context.rollbackOptions, context.rollback)
+  await verifyPrivateRelease(context.rollbackOptions, context.rollback, journal.rollbackRenderedComposeSha256)
+  const ledger = await readActiveReleaseLedger(context.targetDir)
+  if (sha256(canonical(ledger)) === sha256(canonical(journal.nextLedger))) {
+    await writeActiveReleaseLedger(context.targetDir, journal.priorLedger)
+  } else if (sha256(canonical(ledger)) !== sha256(canonical(journal.priorLedger))) {
+    throw new Error('release ledger is neither durable prior nor target state during recovery')
+  }
+  await setReleaseIngress(context.rollbackOptions, context.rollback, 'start')
+  await verifyRunning(context.rollbackOptions, false, { verifyTool: false, verifyLedger: true,
+    expectedRenderedComposeSha256: journal.rollbackRenderedComposeSha256 })
+  if (projectResourceSnapshotSha256(await inspectProjectResources()) !== projectResourceSnapshotSha256(journal.baselineProjectResources)) {
+    throw new Error('release recovery did not restore exact pre-transaction project resources')
+  }
+  await operationLock.release()
+  return { recovered: true, action: journal.action, ledgerGeneration: journal.priorLedger.generation }
 }
 
 async function activateRelease(options, action) {
@@ -2291,7 +2733,7 @@ async function activateRelease(options, action) {
     const rollbackOptions = { ...options, releaseDir: rollbackDir }
     const rollback = await loadReleaseBundle(rollbackOptions, { verifyTool: false })
     await verifyRetainedReleaseActivator(process.argv[1], rollback.paths, rollback.source)
-    const retainedTool = await loadRetainedRollbackTool(rollback.paths.releaseTool, rollback.source.configFiles['scripts/bonfire-release.mjs'])
+    await loadRetainedRollbackTool(rollback.paths.releaseTool, rollback.source.configFiles['scripts/bonfire-release.mjs'])
     verifyReleaseEnvironmentFile(await readFile(target.paths.runtimeEnv, 'utf8'), target.receipt)
     verifyReleaseEnvironmentFile(await readFile(rollback.paths.runtimeEnv, 'utf8'), rollback.receipt)
     await verifyReleaseImages(target.receipt)
@@ -2315,57 +2757,59 @@ async function activateRelease(options, action) {
     validateReleaseTransition(action, ledger, targetDir, target.receipt, rollbackDir, rollback.receipt)
     await assertActiveReleaseLedgerUnchanged(targetDir, ledger)
     const nextLedger = nextActiveReleaseLedger(targetDir, target.receipt, rollbackDir, rollback.receipt, ledger)
-    let targetRenderedComposeSha256 = ''
+    const targetPreflight = await preflightComposeBundle(options, target)
     transactionStarted = true
-    const verified = await executeReleaseTransaction({
-      operationLock,
-      priorLedger: ledger,
-      nextLedger,
-      readLedger: async () => {
-        await assertReleaseOperationLock(operationLock)
-        return readActiveReleaseLedger(targetDir)
-      },
-      preflightTarget: async () => {
-        await assertReleaseOperationLock(operationLock)
-        const preflight = await preflightComposeBundle(options, target)
-        targetRenderedComposeSha256 = preflight.sha256
-      },
-      applyTarget: async () => {
-        await assertReleaseOperationLock(operationLock)
-        return applyReleaseBundle(options, target)
-      },
-      verifyTarget: async () => verifyRunning(options, false, {
-        verifyTool: false,
-        verifyLedger: false,
-        expectedRenderedComposeSha256: targetRenderedComposeSha256
-      }),
-      writeLedger: async value => {
-        await assertReleaseOperationLock(operationLock)
-        return writeActiveReleaseLedger(targetDir, value)
-      },
-      restoreRollback: async () => {
-        await verifyExecutingReleaseTool(rollback.source.configFiles['scripts/bonfire-release.mjs'], rollback.paths.releaseTool)
-        return retainedTool.restoreReleaseBundleAfterFailedActivation({
-          ...rollbackOptions,
-          failedReleaseDir: targetDir,
-          executingToolPath: rollback.paths.releaseTool,
-          operationLockPath: operationLock.path,
-          operationLockToken: operationLock.token,
-          operationLockStartedAt: operationLock.startedAt,
-          rollbackRenderedComposeSha256: rollbackVerified.renderedComposeSha256,
-          baselineProjectContainers,
-          baselineProjectResources
-        })
-      },
-      restoreLedger: async (value, recovery) => {
-        await assertReleaseOperationLock(operationLock)
-        return restoreActiveReleaseLedger(targetDir, value, recovery.nextLedger, recovery.ledgerCommitAttempted)
-      }
+    const now = new Date().toISOString()
+    const journal = await writeReleaseTransactionJournal(operationLock, {
+      schema: releaseTransactionSchema, token: operationLock.token, action, phase: 'prepared',
+      targetBundleSha256: target.receipt.bundleSha256, rollbackBundleSha256: rollback.receipt.bundleSha256,
+      targetRenderedComposeSha256: targetPreflight.sha256, rollbackRenderedComposeSha256: rollbackVerified.renderedComposeSha256,
+      priorLedger: ledger, nextLedger, baselineProjectContainers, baselineProjectResources, createdAt: now, updatedAt: now
     })
-    process.stdout.write(`${JSON.stringify({ [action]: true, ledgerGeneration: nextLedger.generation, ...verified })}\n`)
+    try {
+      const completed = await resumeDurableReleaseTransaction(options, operationLock, journal)
+      process.stdout.write(`${JSON.stringify({ [action]: true, ...completed })}\n`)
+    } catch (error) {
+      try {
+        await recoverDurableReleaseTransaction(options, operationLock, await readReleaseTransactionJournal(operationLock))
+      } catch (recoveryError) {
+        throw new AggregateError([error, recoveryError], 'release transaction failed and durable recovery remains resumable under the retained lock')
+      }
+      throw new Error(`release transaction failed; durable recovery restored the prior release: ${error?.message || error}`, { cause: error })
+    }
   } finally {
     if (!transactionStarted) await operationLock.release()
   }
+}
+
+async function resumeRelease(options, recover = false) {
+  for (const [name, value] of [['--release-dir', options.releaseDir], ['--base-env', options.baseEnv],
+    ['--health-url', options.healthUrl], ['--ready-url', options.readyUrl]]) required(name, value)
+  const operationLock = await loadReleaseOperationLockForResume(options.releaseDir)
+  const retainedOptions = { ...options, releaseDir: operationLock.rollbackDir }
+  const retained = await loadReleaseBundle(retainedOptions, { verifyTool: false })
+  // Identity is proven before cleaning even a private interrupted temp file;
+  // an arbitrary candidate tool gets zero resume/recovery side effects.
+  await verifyRetainedReleaseActivator(process.argv[1], retained.paths, retained.source)
+  await loadRetainedRollbackTool(retained.paths.releaseTool, retained.source.configFiles['scripts/bonfire-release.mjs'])
+  await cleanReleaseTransactionTemps(operationLock)
+  let journal
+  try {
+    journal = await readReleaseTransactionJournal(operationLock)
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+    // The durable journal is created before ingress or application mutation.
+    // A crash in that pre-journal window is recoverable by proving the exact
+    // retained bundle still serves, then atomically retiring the lock.
+    await verifyRunning(retainedOptions, false, { verifyTool: false, verifyLedger: true })
+    await operationLock.release()
+    process.stdout.write(`${JSON.stringify({ recovered: true, phase: 'pre_journal', noMutation: true })}\n`)
+    return
+  }
+  const result = recover
+    ? await recoverDurableReleaseTransaction(options, operationLock, journal)
+    : await resumeDurableReleaseTransaction(options, operationLock, journal)
+  process.stdout.write(`${JSON.stringify(result)}\n`)
 }
 
 function commonBuildArgs(source, buildInputs, buildInputManifestSha256) {
@@ -2518,7 +2962,9 @@ async function main() {
   else if (options.command === 'verify') await verifyRunning(options)
   else if (options.command === 'activate') await activateRelease(options, 'activated')
   else if (options.command === 'rollback') await activateRelease(options, 'rolledBack')
-  else throw new Error('command must be scope, prepare, build, verify, activate, or rollback')
+  else if (options.command === 'resume') await resumeRelease(options, false)
+  else if (options.command === 'recover') await resumeRelease(options, true)
+  else throw new Error('command must be scope, prepare, build, verify, activate, rollback, resume, or recover')
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

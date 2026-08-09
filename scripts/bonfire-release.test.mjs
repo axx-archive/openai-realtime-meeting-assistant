@@ -9,7 +9,8 @@ import { promisify } from 'node:util'
 import test from 'node:test'
 
 import {
-  acquireReleaseOperationLock, composeActivationArgs, computeBundleSha256, computeEnvironmentMarker, environmentValues,
+  acquireReleaseOperationLock, composeActivationArgs, composeIngressArgs, composePrivateActivationArgs,
+  computeBundleSha256, computeEnvironmentMarker, environmentValues,
   executeReleaseTransaction, inspectExtractedArchive, releaseActivationProgress, releaseComposeEnvironment, releaseEnvironmentValues, releasePathOwned,
   loadRetainedRollbackTool, restoreReleaseBundleAfterFailedActivation,
   planRollbackProjectCleanup, planRollbackProjectResourceCleanup, projectContainerSnapshotSha256,
@@ -19,7 +20,10 @@ import {
   validateReleaseTransition, validateRenderedComposeConfig, validateRendererRuntimeConfinement, validateReviewedInventory, validateSourceReceipt,
   verifyArchiveIdentity, verifyCandidateConfig, verifyLabels, verifyProbeRelease,
   verifyExecutingReleaseTool, verifyReleaseEnvironmentFile, verifyRenderRunnerHeartbeat,
-  verifyRetainedReleaseActivator, verifyRuntimeEnvironment
+  verifyRetainedReleaseActivator, verifyRuntimeEnvironment,
+  executeDurableReleasePhaseMachine, strideE10W4MaintenanceArgs, strideE10W4RecoveryPlan, strideE10W4ReleaseTransitionPlan,
+  validateReleaseTransactionJournal,
+  validateStrideE10W4ComposeSource, validateStrideE10W4DeploymentPolicy
 } from './bonfire-release.mjs'
 
 const digest = char => char.repeat(64)
@@ -77,6 +81,36 @@ async function makeTreeWritable(path) {
   if (!info || info.isSymbolicLink() || !info.isDirectory()) return
   await chmod(path, 0o700)
   for (const name of await readdir(path)) await makeTreeWritable(join(path, name))
+}
+const retained7ac93bContract = Object.freeze({
+  toolSha256: '29b13c2597eb9ec34cd65851ad5c24b3281cdc8ea66df8ad572e4b14ae0dce3e',
+  receiptSchema: 'bonfire.release-receipt.v3',
+  releaseEnvironmentKeys: [
+    'BONFIRE_BINARY_SHA256', 'BONFIRE_BUILD_CONFIG_SHA256', 'BONFIRE_BUILD_INPUT_MANIFEST_SHA256',
+    'BONFIRE_BUILD_MANIFEST_SHA256', 'BONFIRE_BUILD_TRANSITIVE_INPUTS_SHA256', 'BONFIRE_BUILD_VERSION',
+    'BONFIRE_CADDY_IMAGE', 'BONFIRE_COTURN_IMAGE', 'BONFIRE_GIT_TREE_DIGEST', 'BONFIRE_IMAGE_DIGEST',
+    'BONFIRE_MEETINGASSIST_IMAGE', 'BONFIRE_POSTGRES_IMAGE', 'BONFIRE_RELEASE_BUNDLE_SHA256',
+    'BONFIRE_RELEASE_COMMIT', 'BONFIRE_RELEASE_ENVIRONMENT_MARKER', 'BONFIRE_RELEASE_IDENTITY_REQUIRED',
+    'BONFIRE_RENDER_IMAGE', 'BONFIRE_SOURCE_ARCHIVE_SHA256'
+  ].sort(),
+  meetingassistEnvironmentKeys: [
+    'BONFIRE_BINARY_SHA256', 'BONFIRE_BUILD_CONFIG_SHA256', 'BONFIRE_BUILD_INPUT_MANIFEST_SHA256',
+    'BONFIRE_BUILD_MANIFEST_SHA256', 'BONFIRE_BUILD_TRANSITIVE_INPUTS_SHA256', 'BONFIRE_BUILD_VERSION',
+    'BONFIRE_CODEX_HEARTBEAT_PATH', 'BONFIRE_CODEX_QUEUE_PATH', 'BONFIRE_GIT_TREE_DIGEST',
+    'BONFIRE_IMAGE_DIGEST', 'BONFIRE_RELEASE_BUNDLE_SHA256', 'BONFIRE_RELEASE_COMMIT',
+    'BONFIRE_RELEASE_ENVIRONMENT_MARKER', 'BONFIRE_RELEASE_IDENTITY_REQUIRED', 'BONFIRE_RENDER_HEARTBEAT_PATH',
+    'BONFIRE_RENDER_QUEUE_PATH', 'BONFIRE_SOURCE_ARCHIVE_SHA256'
+  ].sort()
+})
+
+function verifyRetained7ac93bCompatibility(receipt, releaseEnvironmentBody, renderedConfig) {
+  assert.equal(retained7ac93bContract.toolSha256, '29b13c2597eb9ec34cd65851ad5c24b3281cdc8ea66df8ad572e4b14ae0dce3e')
+  assert.equal(receipt.schema, retained7ac93bContract.receiptSchema)
+  assert.equal(receipt.strideE10W4, undefined)
+  const releaseKeys = String(releaseEnvironmentBody).trim().split('\n').map(line => line.slice(0, line.indexOf('='))).sort()
+  assert.deepEqual(releaseKeys, retained7ac93bContract.releaseEnvironmentKeys)
+  assert.deepEqual(Object.keys(renderedConfig.services.meetingassist.environment).sort(), retained7ac93bContract.meetingassistEnvironmentKeys)
+  assert.equal(Object.keys(receipt.buildManifest.buildInputs.dependencyInputs).includes('deploy/digitalocean/stride-e10-w4-deployment-policy.json'), false)
 }
 function builtImage(name, char) {
   return {
@@ -183,7 +217,14 @@ test('running renderer confinement requires exact profiles, zero capabilities, N
   assert.throws(() => validateRendererRuntimeConfinement(inspect, status.replace('CapBnd:\t0000000000000000', 'CapBnd:\t0000000000200000'), seccomp))
   assert.throws(() => validateRendererRuntimeConfinement(inspect, status, { ...seccomp, defaultAction: 'SCMP_ACT_ALLOW' }))
 })
-function makeReceipt() {
+const w4LivePolicy = {
+  schema: 'bonfire.stride-e10-w4-deployment-policy.v1', releaseMode: 'bonfire_network_live', liveMode: 'bonfire_network_live',
+  snapshotPath: '/app/data/stride-e10/w4/runtime-snapshot.json',
+  activationBackupDir: '/app/data/stride-e10/w4/network-activation-backup',
+  activationReceiptPath: '/app/data/stride-e10/w4/network-activation-receipt.json'
+}
+
+function makeReceipt(w4Policy = null) {
   const sourceReceiptSha256 = digest('7')
   const buildInputManifestSha256 = digest('8')
   const common = commonBuildArgs(buildInputManifestSha256)
@@ -196,7 +237,8 @@ function makeReceipt() {
   }
   const dependencyInputs = Object.fromEntries([
     'go.mod', 'go.sum', 'Dockerfile', 'Dockerfile.render', '.dockerignore',
-    'deploy/digitalocean/release-build-inputs.json', 'deploy/digitalocean/release-scope-policy.json'
+    'deploy/digitalocean/release-build-inputs.json', 'deploy/digitalocean/release-scope-policy.json',
+    ...(w4Policy ? ['deploy/digitalocean/stride-e10-w4-deployment-policy.json'] : [])
   ].map(path => [path, digest('d')]))
   const buildManifest = {
     schema: 'bonfire.release-build-manifest.v2', sourceReceiptSha256, source,
@@ -221,10 +263,11 @@ function makeReceipt() {
   const environmentMarker = computeEnvironmentMarker({ ...source, buildInputManifestSha256, buildManifestSha256,
     binarySha256: images.meetingassist.binarySha256, imageDigest: images.meetingassist.imageDigest })
   const base = {
-    schema: 'bonfire.release-receipt.v3', attestation: 'unsigned-local-v1', source, sourceReceiptSha256,
+    schema: w4Policy ? 'bonfire.release-receipt.v4' : 'bonfire.release-receipt.v3', attestation: 'unsigned-local-v1', source, sourceReceiptSha256,
     buildInputManifestSha256, buildManifest, buildManifestSha256, candidateBundleManifestSha256,
     images, sidecars, environmentMarker
   }
+  if (w4Policy) base.strideE10W4 = structuredClone(w4Policy)
   return { ...base, bundleSha256: computeBundleSha256(base) }
 }
 
@@ -382,6 +425,7 @@ async function fixtureFiles() {
     'deploy/digitalocean/bonfire-render-runner-v1.apparmor': 'profile fixture {}\n',
     'deploy/digitalocean/bonfire-render-runner-v1.seccomp.json': '{"defaultAction":"SCMP_ACT_ERRNO"}\n',
     'deploy/digitalocean/release-build-inputs.json': `${JSON.stringify(buildInputs, null, 2)}\n`,
+    'deploy/digitalocean/stride-e10-w4-deployment-policy.json': await readFile(join(repoRoot, 'deploy/digitalocean/stride-e10-w4-deployment-policy.json'), 'utf8'),
     'deploy/digitalocean/release-scope-policy.json': `${JSON.stringify(policy, null, 2)}\n`,
     'scripts/bonfire-release.mjs': await readFile(releaseToolPath, 'utf8'),
     'stride-site/secret.txt': 'not a release input\n', 'data/kanban-board.json': '{}\n',
@@ -588,12 +632,45 @@ test('build end to end uses a hermetic Docker fake for both owned images and pin
       '--build-manifest', join(releaseDir, 'build-manifest.json'), '--release-receipt', join(releaseDir, 'release-receipt.json'),
       '--runtime-env', join(releaseDir, 'release.env')], { cwd: repo, env })
     const receipt = validateReleaseReceipt(JSON.parse(await readFile(join(releaseDir, 'release-receipt.json'), 'utf8')))
+    assert.equal(receipt.schema, 'bonfire.release-receipt.v3')
+    assert.equal(receipt.strideE10W4, undefined)
     assert.equal(receipt.images.meetingassist.imageId, `sha256:${digest('9')}`)
     assert.equal(receipt.images.renderRunner.imageId, `sha256:${digest('f')}`)
     assert.equal(receipt.images.meetingassist.binarySha256, receipt.images.renderRunner.binarySha256)
     assert.equal(receipt.sidecars.caddy.imageReference, sidecarRefs.caddy)
-    assert.match(await readFile(join(releaseDir, 'release.env'), 'utf8'), new RegExp(`BONFIRE_RENDER_IMAGE=sha256:${digest('f')}`))
+    const releaseEnvironmentBody = await readFile(join(releaseDir, 'release.env'), 'utf8')
+    assert.match(releaseEnvironmentBody, new RegExp(`BONFIRE_RENDER_IMAGE=sha256:${digest('f')}`))
+    assert.doesNotMatch(releaseEnvironmentBody, /STRIDE_E10_W4_/)
     assert.equal(await readFile(join(releaseDir, 'sealed-candidate/deploy/digitalocean/Caddyfile'), 'utf8'), ':80\n')
+    verifyRetained7ac93bCompatibility(receipt, releaseEnvironmentBody, renderedComposeConfig(receipt))
+
+    const liveReleaseDir = join(root, 'release-live')
+    await mkdir(liveReleaseDir)
+    await writeFile(join(repo, 'deploy/digitalocean/stride-e10-w4-deployment-policy.json'), `${JSON.stringify(w4LivePolicy, null, 2)}\n`)
+    await writeFile(join(repo, 'deploy/digitalocean/docker-compose.yml'), `services: {}\n# ${[
+      'STRIDE_E10_W4_MODE: ${STRIDE_E10_W4_RELEASE_MODE:?STRIDE_E10_W4_RELEASE_MODE is required}',
+      'STRIDE_E10_W4_SNAPSHOT_PATH: ${STRIDE_E10_W4_SNAPSHOT_PATH:?STRIDE_E10_W4_SNAPSHOT_PATH is required}',
+      'STRIDE_E10_W4_ACTIVATION_BACKUP_DIR: ${STRIDE_E10_W4_ACTIVATION_BACKUP_DIR:?STRIDE_E10_W4_ACTIVATION_BACKUP_DIR is required}',
+      'STRIDE_E10_W4_ACTIVATION_RECEIPT_PATH: ${STRIDE_E10_W4_ACTIVATION_RECEIPT_PATH:?STRIDE_E10_W4_ACTIVATION_RECEIPT_PATH is required}'
+    ].join('\n# ')}\n`)
+    await execFileAsync('git', ['add', 'deploy/digitalocean/docker-compose.yml', 'deploy/digitalocean/stride-e10-w4-deployment-policy.json'], { cwd: repo })
+    await execFileAsync('git', ['commit', '-q', '-m', 'live policy'], { cwd: repo })
+    const { stdout: liveCommitRaw } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repo })
+    const liveCommit = liveCommitRaw.trim()
+    await execFileAsync(process.execPath, [releaseToolPath, 'prepare', '--reviewed-ref', liveCommit,
+      '--archive', join(liveReleaseDir, 'source.tar'), '--source-receipt', join(liveReleaseDir, 'source-receipt.json')], { cwd: repo })
+    await execFileAsync(process.execPath, [releaseToolPath, 'build',
+      '--archive', join(liveReleaseDir, 'source.tar'), '--source-receipt', join(liveReleaseDir, 'source-receipt.json'),
+      '--image', `meetingassist:release-${liveCommit}`, '--render-image', `meetingassist-render:release-${liveCommit}`,
+      '--build-manifest', join(liveReleaseDir, 'build-manifest.json'), '--release-receipt', join(liveReleaseDir, 'release-receipt.json'),
+      '--runtime-env', join(liveReleaseDir, 'release.env')], { cwd: repo, env })
+    const liveReceipt = validateReleaseReceipt(JSON.parse(await readFile(join(liveReleaseDir, 'release-receipt.json'), 'utf8')))
+    const liveEnvironmentBody = await readFile(join(liveReleaseDir, 'release.env'), 'utf8')
+    assert.equal(liveReceipt.schema, 'bonfire.release-receipt.v4')
+    assert.deepEqual(liveReceipt.strideE10W4, w4LivePolicy)
+    assert.doesNotThrow(() => verifyReleaseEnvironmentFile(liveEnvironmentBody, liveReceipt))
+    assert.match(liveEnvironmentBody, /STRIDE_E10_W4_RELEASE_MODE=bonfire_network_live/)
+    assert.match(liveEnvironmentBody, /STRIDE_E10_W4_SNAPSHOT_PATH=\/app\/data\/stride-e10\/w4\/runtime-snapshot\.json/)
   } finally {
     await makeTreeWritable(root)
     await rm(root, { recursive: true, force: true })
@@ -1065,7 +1142,12 @@ test('release mutations use one fail-closed sibling lock and a verified retained
     await writeFile(targetPaths.releaseTool, toolBody)
     const rollbackSource = { configFiles: { 'scripts/bonfire-release.mjs': sha256(toolBody) } }
     await verifyRetainedReleaseActivator(rollbackPaths.releaseTool, rollbackPaths, rollbackSource)
-    await assert.rejects(verifyRetainedReleaseActivator(targetPaths.releaseTool, rollbackPaths, rollbackSource), /currently serving retained release tool/)
+    let resumeMutation = false
+    await assert.rejects((async () => {
+      await verifyRetainedReleaseActivator(targetPaths.releaseTool, rollbackPaths, rollbackSource)
+      resumeMutation = true
+    })(), /currently serving retained release tool/)
+    assert.equal(resumeMutation, false)
   } finally {
     await rm(parent, { recursive: true, force: true })
   }
@@ -1292,6 +1374,164 @@ test('labels, runtime environment, probes, and exact release env fail on drift',
   assert.throws(() => verifyProbeRelease({ ...probe, release: { ...release, qualified: true } }, receipt, 'health'), /not honest/)
 })
 
+test('W4 deployment policy preserves legacy canary and binds the live receipt environment exactly', () => {
+  const canary = validateStrideE10W4DeploymentPolicy({ ...w4LivePolicy, releaseMode: 'canary' })
+  assert.equal(canary.releaseMode, 'canary')
+  assert.doesNotThrow(() => validateStrideE10W4ComposeSource('services: {}\n', canary))
+  assert.throws(() => validateStrideE10W4ComposeSource('STRIDE_E10_W4_RELEASE_MODE=x\n', canary), /legacy environment shape/)
+  for (const mutate of [
+    value => { value.releaseMode = 'unknown' },
+    value => { value.snapshotPath = 'relative' },
+    value => { value.activationReceiptPath = value.snapshotPath },
+    value => { value.extra = true }
+  ]) {
+    const value = structuredClone(w4LivePolicy); mutate(value)
+    assert.throws(() => validateStrideE10W4DeploymentPolicy(value))
+  }
+
+  const liveCompose = [
+    'STRIDE_E10_W4_MODE: ${STRIDE_E10_W4_RELEASE_MODE:?STRIDE_E10_W4_RELEASE_MODE is required}',
+    'STRIDE_E10_W4_SNAPSHOT_PATH: ${STRIDE_E10_W4_SNAPSHOT_PATH:?STRIDE_E10_W4_SNAPSHOT_PATH is required}',
+    'STRIDE_E10_W4_ACTIVATION_BACKUP_DIR: ${STRIDE_E10_W4_ACTIVATION_BACKUP_DIR:?STRIDE_E10_W4_ACTIVATION_BACKUP_DIR is required}',
+    'STRIDE_E10_W4_ACTIVATION_RECEIPT_PATH: ${STRIDE_E10_W4_ACTIVATION_RECEIPT_PATH:?STRIDE_E10_W4_ACTIVATION_RECEIPT_PATH is required}'
+  ].join('\n')
+  assert.doesNotThrow(() => validateStrideE10W4ComposeSource(liveCompose, w4LivePolicy))
+  assert.throws(() => validateStrideE10W4ComposeSource(liveCompose.replace(':?', ':-'), w4LivePolicy), /not exact/)
+
+  const legacy = makeReceipt()
+  assert.equal(Object.keys(releaseEnvironmentValues(legacy)).some(name => name.startsWith('STRIDE_E10_W4_')), false)
+  assert.doesNotThrow(() => validateRenderedComposeConfig(renderedComposeConfig(legacy), legacy, topologyContext))
+  const live = makeReceipt(w4LivePolicy)
+  assert.equal(validateReleaseReceipt(live), live)
+  const releaseEnvironment = releaseEnvironmentValues(live)
+  assert.equal(releaseEnvironment.STRIDE_E10_W4_RELEASE_MODE, 'bonfire_network_live')
+  assert.equal(releaseEnvironment.STRIDE_E10_W4_SNAPSHOT_PATH, w4LivePolicy.snapshotPath)
+  assert.equal(releaseEnvironment.STRIDE_E10_W4_ACTIVATION_BACKUP_DIR, w4LivePolicy.activationBackupDir)
+  assert.equal(releaseEnvironment.STRIDE_E10_W4_ACTIVATION_RECEIPT_PATH, w4LivePolicy.activationReceiptPath)
+  assert.equal(releaseEnvironment.STRIDE_E10_W4_MODE, undefined)
+  assert.doesNotThrow(() => verifyReleaseEnvironmentFile(`${Object.entries(releaseEnvironment).map(([name, value]) => `${name}=${value}`).join('\n')}\n`, live))
+  const running = environmentValues(live)
+  assert.equal(running.STRIDE_E10_W4_MODE, 'bonfire_network_live')
+  assert.doesNotThrow(() => verifyRuntimeEnvironment(running, live))
+  assert.doesNotThrow(() => validateRenderedComposeConfig(renderedComposeConfig(live), live, topologyContext))
+  assert.throws(() => verifyRuntimeEnvironment({ ...running, STRIDE_E10_W4_MODE: 'canary' }, live), /environment/)
+})
+
+test('W4 live activation, explicit rollback, and automatic recovery use closed maintenance commands', () => {
+  const candidate = '/opt/meetingassist-releases/live/sealed-candidate/deploy/digitalocean/docker-compose.yml'
+  const runtimeEnv = '/opt/meetingassist-releases/live/release.env'
+  const baseEnv = '/opt/meetingassist/deploy/digitalocean/.env'
+  const imageID = `sha256:${digest('9')}`
+  for (const [operation, flag, readOnly] of [
+    ['activate', '-stride-e10-w4-activate-network', false],
+    ['verify', '-stride-e10-w4-verify-network-activation', true],
+    ['verifyRuntime', '-stride-e10-w4-verify-network-runtime', true],
+    ['rollback', '-stride-e10-w4-rollback-network', false],
+    ['verifyRollback', '-stride-e10-w4-verify-network-rollback', true]
+  ]) {
+    const args = strideE10W4MaintenanceArgs(baseEnv, runtimeEnv, candidate, operation, 'digitalocean', imageID)
+    assert.equal(args.at(-1), flag)
+    assert.equal(args.includes('--read-only'), readOnly)
+    assert.ok(args.includes(runtimeEnv))
+    assert.equal(args.includes(candidate), !readOnly)
+    assert.equal(args.includes('--no-deps'), !readOnly)
+    assert.equal(args.includes('--network') && args.includes('none') && args.includes(imageID), readOnly)
+    for (const mount of ['digitalocean_meeting_data:/app/data:ro', 'digitalocean_usage_ledger:/app/data/usage:ro',
+      'digitalocean_codex_queue:/app/codex-queue:ro', 'digitalocean_render_queue:/app/render-queue:ro']) {
+      assert.equal(args.includes(mount), readOnly)
+    }
+  }
+  assert.throws(() => strideE10W4MaintenanceArgs(baseEnv, runtimeEnv, candidate, 'shell'), /invalid/)
+  assert.throws(() => strideE10W4MaintenanceArgs(baseEnv, runtimeEnv, candidate, 'verify'), /image/)
+  const canary = makeReceipt()
+  const live = makeReceipt(w4LivePolicy)
+  assert.deepEqual(strideE10W4ReleaseTransitionPlan('activated', live, canary), {
+    activateTargetBeforeStart: true, verifyTargetRuntimeBeforeStart: false,
+    rollbackCurrentBeforeExplicitRollback: false, rollbackTargetBeforeRecovery: true,
+    verifyRollbackRuntimeBeforeRecovery: false,
+    reactivateRollbackBeforeRecovery: false
+  })
+  assert.deepEqual(strideE10W4ReleaseTransitionPlan('rolledBack', canary, live), {
+    activateTargetBeforeStart: false, verifyTargetRuntimeBeforeStart: true,
+    rollbackCurrentBeforeExplicitRollback: false, rollbackTargetBeforeRecovery: false,
+    verifyRollbackRuntimeBeforeRecovery: true,
+    reactivateRollbackBeforeRecovery: false
+  })
+  assert.deepEqual(strideE10W4ReleaseTransitionPlan('activated', live, live), {
+    activateTargetBeforeStart: false, verifyTargetRuntimeBeforeStart: true,
+    rollbackCurrentBeforeExplicitRollback: false, rollbackTargetBeforeRecovery: false,
+    verifyRollbackRuntimeBeforeRecovery: true,
+    reactivateRollbackBeforeRecovery: false
+  })
+  assert.deepEqual(strideE10W4ReleaseTransitionPlan('rolledBack', live, live), {
+    activateTargetBeforeStart: false, verifyTargetRuntimeBeforeStart: true,
+    rollbackCurrentBeforeExplicitRollback: false, rollbackTargetBeforeRecovery: false,
+    verifyRollbackRuntimeBeforeRecovery: true,
+    reactivateRollbackBeforeRecovery: false
+  })
+  assert.throws(() => strideE10W4ReleaseTransitionPlan('recover', live, canary), /invalid/)
+})
+
+test('live successor failure verifies lineage and restores retained live without data mutation', async () => {
+  const plan = strideE10W4ReleaseTransitionPlan('activated', makeReceipt(w4LivePolicy), makeReceipt(w4LivePolicy))
+  const calls = []
+  const priorLedger = { generation: 1 }
+  await assert.rejects(executeReleaseTransaction({
+    operationLock: { release: async () => { calls.push('unlock') } }, priorLedger, nextLedger: { generation: 2 },
+    readLedger: async () => priorLedger,
+    preflightTarget: async () => { calls.push('preflight-successor') },
+    applyTarget: async () => {
+      if (plan.verifyTargetRuntimeBeforeStart) calls.push('verify-successor-lineage')
+      calls.push('start-successor')
+      throw new Error('successor startup failed')
+    },
+    verifyTarget: async () => { throw new Error('unreachable') },
+    writeLedger: async () => {},
+    restoreRollback: async () => {
+      if (plan.rollbackTargetBeforeRecovery) calls.push('rollback-successor-data')
+      if (plan.reactivateRollbackBeforeRecovery) calls.push('reactivate-retained-data')
+      if (plan.verifyRollbackRuntimeBeforeRecovery) calls.push('verify-retained-lineage')
+      calls.push('start-retained-live')
+    },
+    restoreLedger: async () => { calls.push('restore-ledger') }
+  }), /restored the prior release/)
+  assert.deepEqual(calls, [
+    'preflight-successor', 'verify-successor-lineage', 'start-successor',
+    'verify-retained-lineage', 'start-retained-live', 'restore-ledger', 'unlock'
+  ])
+  assert.equal(calls.includes('rollback-successor-data'), false)
+  assert.equal(calls.includes('reactivate-retained-data'), false)
+})
+
+test('explicit live to canary downgrade and failure recovery never mutate evolved data', async () => {
+  const plan = strideE10W4ReleaseTransitionPlan('rolledBack', makeReceipt(), makeReceipt(w4LivePolicy))
+  const calls = []
+  const priorLedger = { generation: 1 }
+  await assert.rejects(executeReleaseTransaction({
+    operationLock: { release: async () => { calls.push('unlock') } }, priorLedger, nextLedger: { generation: 2 },
+    readLedger: async () => priorLedger,
+    preflightTarget: async () => { calls.push('preflight-canary') },
+    applyTarget: async () => {
+      if (plan.verifyTargetRuntimeBeforeStart) calls.push('verify-evolved-runtime-read-only')
+      calls.push('start-canary')
+      throw new Error('canary startup failed')
+    },
+    verifyTarget: async () => { throw new Error('unreachable') },
+    writeLedger: async () => {},
+    restoreRollback: async () => {
+      if (plan.verifyRollbackRuntimeBeforeRecovery) calls.push('verify-retained-runtime-read-only')
+      calls.push('retained-live-restore')
+    },
+    restoreLedger: async () => { calls.push('restore-ledger') }
+  }), /restored the prior release/)
+  assert.deepEqual(calls.slice(0, -1), [
+    'preflight-canary', 'verify-evolved-runtime-read-only', 'start-canary',
+    'verify-retained-runtime-read-only', 'retained-live-restore', 'restore-ledger'
+  ])
+  assert.equal(calls.some(call => call.includes('rollback') || call.includes('reactivate')), false)
+  assert.equal(calls.at(-1), 'unlock')
+})
+
 test('activation and rollback pin candidate Compose, project, render profile, and no-build', () => {
   const candidate = '/opt/meetingassist-releases/abc/sealed-candidate/deploy/digitalocean/docker-compose.yml'
   const args = composeActivationArgs('/opt/meetingassist/deploy/digitalocean/.env', '/opt/meetingassist-releases/abc/release.env', candidate)
@@ -1303,6 +1543,103 @@ test('activation and rollback pin candidate Compose, project, render profile, an
   assert.deepEqual(args.slice(-6), ['up', '-d', '--no-build', '--wait', '--wait-timeout', '360'])
   assert.equal(args.includes('--build'), false)
   assert.throws(() => composeActivationArgs('/tmp/base.env', '/tmp/release.env', candidate, 'attacker'), /preserve named volumes/)
+})
+
+test('durable release ingress fence and private start commands exclude public exposure until ledger commit', () => {
+  const candidate = '/opt/meetingassist-releases/abc/sealed-candidate/deploy/digitalocean/docker-compose.yml'
+  const base = '/opt/meetingassist/deploy/digitalocean/.env'
+  const runtime = '/opt/meetingassist-releases/abc/release.env'
+  const privateArgs = composePrivateActivationArgs(base, runtime, candidate)
+  assert.deepEqual(privateArgs.slice(-4), ['meetingassist', 'canonical-postgres', 'render-runner', 'coturn'])
+  assert.equal(privateArgs.includes('caddy'), false)
+  assert.deepEqual(composeIngressArgs(base, runtime, candidate, 'stop').slice(-4), ['stop', '--timeout', '30', 'caddy'])
+  assert.deepEqual(composeIngressArgs(base, runtime, candidate, 'start').slice(-7),
+    ['up', '-d', '--no-build', '--wait', '--wait-timeout', '60', 'caddy'])
+  assert.throws(() => composeIngressArgs(base, runtime, candidate, 'reload'), /invalid/)
+})
+
+test('receipt-bound private journal rejects drift and permits every resumable phase', () => {
+  const entry = char => ({ releaseDir: `/opt/meetingassist-releases/${char.repeat(40)}`,
+    releaseCommit: char.repeat(40), bundleSha256: digest(char), meetingassistImageId: `sha256:${digest(char)}`,
+    renderRunnerImageId: `sha256:${digest(char === 'a' ? 'b' : 'a')}` })
+  const ledger = generation => ({ schema: 'bonfire.active-release-ledger.v1', generation,
+    updatedAt: '2026-08-09T12:00:00.000Z', active: entry('a'), previous: entry('b') })
+  const lock = { token: 'transaction-token' }
+  const base = { schema: 'bonfire.release-transaction.v1', token: lock.token, action: 'activated', phase: 'prepared',
+    targetBundleSha256: digest('c'), rollbackBundleSha256: digest('d'), targetRenderedComposeSha256: digest('e'),
+    rollbackRenderedComposeSha256: digest('f'), priorLedger: ledger(1), nextLedger: ledger(2),
+    baselineProjectContainers: [], baselineProjectResources: { networks: [], volumes: [] },
+    createdAt: '2026-08-09T12:00:00.000Z', updatedAt: '2026-08-09T12:00:00.000Z' }
+  for (const phase of ['prepared', 'ingress_stopped', 'data_transition_started', 'data_ready', 'private_started',
+    'private_verified', 'ledger_written', 'ingress_opened', 'external_verified']) {
+    assert.equal(validateReleaseTransactionJournal({ ...base, phase }, lock).phase, phase)
+  }
+  assert.throws(() => validateReleaseTransactionJournal({ ...base, targetBundleSha256: digest('9') }, { token: 'other' }), /invalid/)
+  assert.throws(() => validateReleaseTransactionJournal({ ...base, attacker: true }, lock), /invalid/)
+})
+
+test('abrupt death resumes every fenced phase without opening ingress before durable ledger', async () => {
+  const transition = { activateTargetBeforeStart: true, verifyTargetRuntimeBeforeStart: false }
+  const terminalOrder = ['stop-ingress', 'activate', 'start-private', 'verify-private', 'write-ledger', 'open-ingress', 'verify-external']
+  for (const crashPhase of ['ingress_stopped', 'data_transition_started', 'data_ready', 'private_started',
+    'private_verified', 'ledger_written', 'ingress_opened']) {
+    let durablePhase = 'prepared'
+    const calls = []
+    let crashed = false
+    const effects = {
+      stopIngress: async () => calls.push('stop-ingress'), activateTarget: async () => calls.push('activate'),
+      verifyTargetRuntime: async () => calls.push('verify-runtime'), startTargetPrivate: async () => calls.push('start-private'),
+      verifyTargetPrivate: async () => calls.push('verify-private'), writeTargetLedger: async () => calls.push('write-ledger'),
+      openTargetIngress: async () => calls.push('open-ingress'), verifyTargetExternal: async () => calls.push('verify-external')
+    }
+    await assert.rejects(executeDurableReleasePhaseMachine({ phase: durablePhase, transition, effects, advance: async phase => {
+      durablePhase = phase
+      if (!crashed && phase === crashPhase) { crashed = true; throw new Error('abrupt death') }
+    } }), /abrupt death/)
+    await executeDurableReleasePhaseMachine({ phase: durablePhase, transition, effects, advance: async phase => { durablePhase = phase } })
+    assert.equal(durablePhase, 'external_verified')
+    assert.ok(calls.indexOf('stop-ingress') < calls.indexOf('activate'))
+    assert.ok(calls.indexOf('write-ledger') < calls.indexOf('open-ingress'))
+    assert.deepEqual([...new Set(calls)], terminalOrder)
+  }
+})
+
+test('explicit live to canary phase machine preserves evolved bytes and uses lineage only', async () => {
+  const evolved = Buffer.from('v2-snapshot-and-sessions-evolved-after-activation')
+  const before = Buffer.from(evolved)
+  const calls = []
+  await executeDurableReleasePhaseMachine({ phase: 'prepared',
+    transition: strideE10W4ReleaseTransitionPlan('rolledBack', makeReceipt(), makeReceipt(w4LivePolicy)),
+    advance: async () => {}, effects: {
+      stopIngress: async () => calls.push('stop-ingress'), activateTarget: async () => { evolved.fill(0); calls.push('MUTATED') },
+      verifyTargetRuntime: async () => calls.push('verify-runtime-read-only'), startTargetPrivate: async () => calls.push('start-canary-private'),
+      verifyTargetPrivate: async () => calls.push('verify-canary-private'), writeTargetLedger: async () => calls.push('write-ledger'),
+      openTargetIngress: async () => calls.push('open-canary-ingress'), verifyTargetExternal: async () => calls.push('verify-canary-external')
+    } })
+  assert.deepEqual(evolved, before)
+  assert.equal(calls.includes('MUTATED'), false)
+  assert.deepEqual(calls.slice(0, 3), ['stop-ingress', 'verify-runtime-read-only', 'start-canary-private'])
+})
+
+test('post-ingress initial activation failure preserves public evolved bytes and restores canary read-only', () => {
+  const initial = strideE10W4ReleaseTransitionPlan('activated', makeReceipt(w4LivePolicy), makeReceipt())
+  assert.deepEqual(strideE10W4RecoveryPlan('data_transition_started', initial), {
+    rollbackUnexposedInitialActivation: true, verifyRetainedRuntimeWithoutMutation: false, preserveEvolvedBytes: false
+  })
+  assert.deepEqual(strideE10W4RecoveryPlan('private_verified', initial), {
+    rollbackUnexposedInitialActivation: false, verifyRetainedRuntimeWithoutMutation: true, preserveEvolvedBytes: true
+  })
+  assert.deepEqual(strideE10W4RecoveryPlan('ingress_opened', initial), {
+    rollbackUnexposedInitialActivation: false, verifyRetainedRuntimeWithoutMutation: true, preserveEvolvedBytes: true
+  })
+  assert.deepEqual(strideE10W4RecoveryPlan('external_verified', initial), {
+    rollbackUnexposedInitialActivation: false, verifyRetainedRuntimeWithoutMutation: true, preserveEvolvedBytes: true
+  })
+  const publicBytes = Buffer.from('governed-write-after-caddy-open')
+  const before = Buffer.from(publicBytes)
+  const plan = strideE10W4RecoveryPlan('ingress_opened', initial)
+  if (plan.rollbackUnexposedInitialActivation) publicBytes.fill(0)
+  assert.deepEqual(publicBytes, before)
 })
 
 test('activation progress identifies the candidate and elapsed bounded wait', () => {

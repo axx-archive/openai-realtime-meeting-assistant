@@ -32,3 +32,23 @@ func TestProductionComposeExcludesInProcessCodexRunner(t *testing.T) {
 		}
 	}
 }
+
+func TestProductionComposePreservesFirstHopCanaryEnvironmentShape(t *testing.T) {
+	raw, err := os.ReadFile("deploy/digitalocean/docker-compose.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	compose := string(raw)
+	for _, forbidden := range []string{"STRIDE_E10_W4_RELEASE_MODE", "STRIDE_E10_W4_ACTIVATION_BACKUP_DIR", "STRIDE_E10_W4_ACTIVATION_RECEIPT_PATH"} {
+		if strings.Contains(compose, forbidden) {
+			t.Fatalf("compatibility canary widened the legacy Compose environment with %s", forbidden)
+		}
+	}
+	policyRaw, err := os.ReadFile("deploy/digitalocean/stride-e10-w4-deployment-policy.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(policyRaw), `"releaseMode": "canary"`) {
+		t.Fatal("first-hop deployment policy is not the compatibility canary")
+	}
+}
