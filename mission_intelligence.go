@@ -192,6 +192,9 @@ func (app *kanbanBoardApp) buildMissionIntelInput(inputs []meetingMemoryEntry, g
 }
 
 func (app *kanbanBoardApp) produceMissionInsight(ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
+	if strideE10TenantCutoverEnabled() {
+		return meetingMemoryEntry{}, ErrStrideE10TenantAuthorityStale
+	}
 	roomID := ambientWindowRoomID(inputs)
 	contextApp := app.scopedRecallApp(ctx, ambientServicePrincipalForInputs(inputs))
 	model := meetingBrainModel()
@@ -461,22 +464,6 @@ func missionInsightEventPayload(entry meetingMemoryEntry, insight missionInsight
 
 /* ---------- aggregation ---------- */
 
-type missionContributionRow struct {
-	Name               string `json:"name"`
-	Spoken             int    `json:"spoken"`
-	Chat               int    `json:"chat"`
-	ChannelMessages    int    `json:"channelMessages"`
-	ThreadsStarted     int    `json:"threadsStarted"`
-	ProposalsConfirmed int    `json:"proposalsConfirmed"`
-	ArtifactsCreated   int    `json:"artifactsCreated"`
-	BoardCardsOwned    int    `json:"boardCardsOwned"`
-	Fuel               int    `json:"fuel"`
-}
-
-func missionContributionFuel(row missionContributionRow) int {
-	return row.Spoken + row.Chat + row.ChannelMessages + 3*row.ThreadsStarted + 3*row.ProposalsConfirmed + 5*row.ArtifactsCreated
-}
-
 // missionPulseHistogramBuckets × missionPulseHistogramBucket = the rolling
 // window the ingestion pulse chart draws (36 five-minute bars, last 3h).
 const (
@@ -568,106 +555,6 @@ func missionPulseWindow(entries []meetingMemoryEntry, since time.Time) map[strin
 	}
 
 	return counts
-}
-
-// missionContributions attributes counts to canonical participants. Hard
-// rule: private-thread message contents AND counts stay private — only
-// public-channel messages are counted, and only as counts, never text.
-func missionContributions(entries []meetingMemoryEntry, board kanbanBoardState) ([]missionContributionRow, int, int) {
-	byName := make(map[string]*missionContributionRow, len(meetingParticipantNames))
-	for _, name := range meetingParticipantNames {
-		byName[name] = &missionContributionRow{Name: name}
-	}
-	credit := func(name string) *missionContributionRow {
-		return byName[canonicalParticipantName(name)]
-	}
-
-	unattributed := 0
-	for _, entry := range entries {
-		switch entry.Kind {
-		case meetingMemoryKindTranscript:
-			speaker := strings.TrimSpace(entry.Metadata["speaker"])
-			if entry.Metadata["source"] == transcriptSourceRoomChat {
-				if row := credit(speaker); row != nil {
-					row.Chat++
-				}
-				continue
-			}
-			if speaker == "" {
-				unattributed++
-				continue
-			}
-			// "A + B" composite attributions credit every named speaker.
-			for _, part := range strings.Split(speaker, "+") {
-				if row := credit(strings.TrimSpace(part)); row != nil {
-					row.Spoken++
-				} else {
-					unattributed++
-				}
-			}
-		case meetingMemoryKindScoutChat:
-			thread, ok := decodeScoutChatThreadEntry(entry)
-			if !ok {
-				continue
-			}
-			starter := credit(thread.CreatedBy)
-			if starter == nil {
-				starter = credit(participantNameForEmail(thread.OwnerEmail))
-			}
-			if starter != nil {
-				starter.ThreadsStarted++
-			}
-			if !scoutChatThreadIsOrganizationPublic(thread) {
-				continue
-			}
-			for _, message := range thread.Messages {
-				if message.Role != "user" {
-					continue
-				}
-				author := credit(message.AuthorName)
-				if author == nil {
-					author = credit(participantNameForEmail(message.AuthorEmail))
-				}
-				if author != nil {
-					author.ChannelMessages++
-				}
-			}
-		case meetingMemoryKindCodexProposal:
-			if row := credit(entry.Metadata["confirmedBy"]); row != nil {
-				row.ProposalsConfirmed++
-			}
-		case meetingMemoryKindOSArtifact:
-			if row := credit(entry.Metadata["createdBy"]); row != nil {
-				row.ArtifactsCreated++
-			}
-		}
-	}
-	for _, card := range board.Cards {
-		if row := credit(card.Owner); row != nil {
-			row.BoardCardsOwned++
-		}
-	}
-
-	fuelMax := 0
-	rows := make([]missionContributionRow, 0, len(byName))
-	for _, name := range meetingParticipantNames {
-		row := byName[name]
-		row.Fuel = missionContributionFuel(*row)
-		if row.Fuel > fuelMax {
-			fuelMax = row.Fuel
-		}
-		rows = append(rows, *row)
-	}
-	// fuel desc, roster order as the stable tiebreak — counts, not rankings.
-	for outer := 0; outer < len(rows); outer++ {
-		for inner := outer + 1; inner < len(rows); inner++ {
-			if rows[inner].Fuel > rows[outer].Fuel {
-				rows[outer], rows[inner] = rows[inner], rows[outer]
-			}
-		}
-	}
-
-	return rows, unattributed, fuelMax
 }
 
 // latestMissionInsight returns the newest parseable mission_insight entry

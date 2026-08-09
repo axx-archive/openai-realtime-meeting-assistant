@@ -31,8 +31,13 @@ const webPushTTLSeconds = 300
 type pushSubscriptionRecord struct {
 	UserEmail string `json:"userEmail"`
 	TenantID  string `json:"tenantId,omitempty"`
-	Endpoint  string `json:"endpoint"`
-	Keys      struct {
+	PersonID  string `json:"personId,omitempty"`
+	// SessionHash is the server-derived SHA-256 lookup key, never a raw token.
+	// It is written only by cutover admission; legacy rows fail closed until a
+	// device re-subscribes under current canonical authority.
+	SessionHash string `json:"sessionHash,omitempty"`
+	Endpoint    string `json:"endpoint"`
+	Keys        struct {
 		P256dh string `json:"p256dh"`
 		Auth   string `json:"auth"`
 	} `json:"keys"`
@@ -406,12 +411,6 @@ func deliverWebPushForRecordWithSender(ctx context.Context, record notificationR
 		return nil
 	}
 
-	keys, err := vapidKeys()
-	if err != nil {
-		log.Errorf("Web push send skipped, no VAPID keys: %v", err)
-		return err
-	}
-
 	payload, err := json.Marshal(map[string]any{
 		"title": osNotificationEventTitle(record),
 		"body":  record.Text,
@@ -424,18 +423,41 @@ func deliverWebPushForRecordWithSender(ctx context.Context, record notificationR
 	}
 
 	subscriber := webPushSubscriber()
+	var keys vapidKeyPair
+	keysReady := false
 	var stale []string
 	var firstErr error
 	for _, t := range targets {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		response, err := send(ctx, payload, t.sub.toWebpush(), &webpush.Options{
-			Subscriber:      subscriber,
-			VAPIDPublicKey:  keys.Public,
-			VAPIDPrivateKey: keys.Private,
-			TTL:             webPushTTLSeconds,
-		})
+		var response *http.Response
+		sendEffect := func() error {
+			if !keysReady {
+				resolved, keyErr := vapidKeys()
+				if keyErr != nil {
+					log.Errorf("Web push send skipped, no VAPID keys: %v", keyErr)
+					return keyErr
+				}
+				keys, keysReady = resolved, true
+			}
+			var sendErr error
+			response, sendErr = send(ctx, payload, t.sub.toWebpush(), &webpush.Options{
+				Subscriber:      subscriber,
+				VAPIDPublicKey:  keys.Public,
+				VAPIDPrivateKey: keys.Private,
+				TTL:             webPushTTLSeconds,
+			})
+			return sendErr
+		}
+		err := withStrideE10TenantRuntimeAuthority(ctx, StrideE10TenantSurfacePushDelivery, t.sub.SessionHash,
+			sendEffect,
+			func(principal StrideE10TenantPrincipal) error {
+				if t.sub.TenantID == "" || t.sub.TenantID != principal.TenantID || t.sub.PersonID == "" || t.sub.PersonID != principal.PersonID || !notificationVisibleToExactTenant(record, principal.TenantID, principal.PersonID) {
+					return ErrStrideE10TenantAuthorityStale
+				}
+				return sendEffect()
+			})
 		if err != nil {
 			log.Errorf("Web push send failed for %s: %v", t.sub.UserEmail, err)
 			if firstErr == nil {
@@ -480,6 +502,16 @@ func assistantPushConfigHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusServiceUnavailable, "push is unavailable")
 		return
 	}
+	if !strideE10TenantSurfaceUseBound(r.Context(), StrideE10TenantSurfacePushDelivery) {
+		err := withStrideE10TenantRequestUse(r, StrideE10TenantSurfacePushDelivery, func(ctx context.Context, _ *StrideE10TenantPrincipal) error {
+			assistantPushConfigHandler(w, r.WithContext(ctx))
+			return nil
+		})
+		if err != nil {
+			writeStrideE10TenantHookError(w, err, "push is unavailable")
+		}
+		return
+	}
 
 	keys, err := vapidKeys()
 	if err != nil {
@@ -489,8 +521,13 @@ func assistantPushConfigHandler(w http.ResponseWriter, r *http.Request) {
 	state := snapshotPushStore()
 	prefs := resolvePushPrefs(state, user.Email)
 	subscribed := false
+	tenantID := canonicalTenantID()
+	personID := ""
+	if principal, canonical := strideE10TenantPrincipalFromContext(r.Context()); canonical {
+		tenantID, personID = principal.TenantID, principal.PersonID
+	}
 	for _, sub := range state.Subscriptions {
-		if sub.UserEmail == normalizeAccountEmail(user.Email) && sub.TenantID == canonicalTenantID() {
+		if sub.UserEmail == normalizeAccountEmail(user.Email) && sub.TenantID == tenantID && (personID == "" || sub.PersonID == personID) {
 			subscribed = true
 			break
 		}
@@ -524,6 +561,16 @@ func assistantPushSubscribeHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusServiceUnavailable, "push is unavailable")
 		return
 	}
+	if !strideE10TenantSurfaceUseBound(r.Context(), StrideE10TenantSurfacePushDelivery) {
+		err := withStrideE10TenantRequestUse(r, StrideE10TenantSurfacePushDelivery, func(ctx context.Context, _ *StrideE10TenantPrincipal) error {
+			assistantPushSubscribeHandler(w, r.WithContext(ctx))
+			return nil
+		})
+		if err != nil {
+			writeStrideE10TenantHookError(w, err, "push is unavailable")
+		}
+		return
+	}
 
 	var body struct {
 		Endpoint string `json:"endpoint"`
@@ -548,6 +595,11 @@ func assistantPushSubscribeHandler(w http.ResponseWriter, r *http.Request) {
 		Endpoint:  endpoint,
 		UserAgent: trimForStorage(r.Header.Get("User-Agent"), 200),
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if principal, canonical := strideE10TenantPrincipalFromContext(r.Context()); canonical {
+		record.TenantID = principal.TenantID
+		record.PersonID = principal.PersonID
+		record.SessionHash = strideE10SessionHashFromRequest(r)
 	}
 	record.Keys.P256dh = strings.TrimSpace(body.Keys.P256dh)
 	record.Keys.Auth = strings.TrimSpace(body.Keys.Auth)
@@ -576,6 +628,16 @@ func assistantPushUnsubscribeHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusServiceUnavailable, "push is unavailable")
 		return
 	}
+	if !strideE10TenantSurfaceUseBound(r.Context(), StrideE10TenantSurfacePushDelivery) {
+		err := withStrideE10TenantRequestUse(r, StrideE10TenantSurfacePushDelivery, func(ctx context.Context, _ *StrideE10TenantPrincipal) error {
+			assistantPushUnsubscribeHandler(w, r.WithContext(ctx))
+			return nil
+		})
+		if err != nil {
+			writeStrideE10TenantHookError(w, err, "push is unavailable")
+		}
+		return
+	}
 
 	var body struct {
 		Endpoint string `json:"endpoint"`
@@ -588,7 +650,11 @@ func assistantPushUnsubscribeHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, "endpoint is required")
 		return
 	}
-	if err := removePushSubscription(canonicalTenantID(), user.Email, body.Endpoint); err != nil {
+	tenantID := canonicalTenantID()
+	if principal, canonical := strideE10TenantPrincipalFromContext(r.Context()); canonical {
+		tenantID = principal.TenantID
+	}
+	if err := removePushSubscription(tenantID, user.Email, body.Endpoint); err != nil {
 		writeAuthError(w, http.StatusInternalServerError, "could not remove subscription")
 		return
 	}
@@ -611,6 +677,16 @@ func assistantPushPrefsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if kanbanApp == nil {
 		writeAuthError(w, http.StatusServiceUnavailable, "push is unavailable")
+		return
+	}
+	if !strideE10TenantSurfaceUseBound(r.Context(), StrideE10TenantSurfacePushDelivery) {
+		err := withStrideE10TenantRequestUse(r, StrideE10TenantSurfacePushDelivery, func(ctx context.Context, _ *StrideE10TenantPrincipal) error {
+			assistantPushPrefsHandler(w, r.WithContext(ctx))
+			return nil
+		})
+		if err != nil {
+			writeStrideE10TenantHookError(w, err, "push is unavailable")
+		}
 		return
 	}
 

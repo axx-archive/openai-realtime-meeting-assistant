@@ -676,6 +676,9 @@ func buildDecisionReversalInput(pairs []decisionReversalPair, generatedAt time.T
 // Directional leans are excluded (they become positions, not reversals), and a
 // restatement (>= dedupe Jaccard) never reaches here — dedupe drops it first.
 func (app *kanbanBoardApp) detectDecisionReversals(ctx context.Context, apiKey string, responder openAITextResponder, decisions []extractedDecision, activeEntries []meetingMemoryEntry, activeKeys []string, pendingReversalKeys []string) map[int]string {
+	if strideE10TenantCutoverEnabled() {
+		return nil
+	}
 	if app == nil || len(decisions) == 0 || len(activeEntries) == 0 {
 		return nil
 	}
@@ -762,6 +765,9 @@ func (app *kanbanBoardApp) detectDecisionReversals(ctx context.Context, apiKey s
 }
 
 func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
+	if strideE10TenantCutoverEnabled() {
+		return meetingMemoryEntry{}, ErrStrideE10TenantAuthorityStale
+	}
 	contextApp := app.scopedRecallApp(ctx, ambientServicePrincipalForInputs(inputs))
 	model := meetingBrainModel()
 	text, err := responder(ctx, apiKey, openAITextRequest{

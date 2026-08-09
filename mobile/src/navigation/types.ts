@@ -22,4 +22,18 @@ export type RootStackParamList = {
   Board: undefined;
   Alerts: undefined;
   Settings: undefined;
+  Profile: undefined;
+  WorkRecord: undefined;
+  Organizations: undefined;
+  OrganizationPeople: undefined;
+  CoworkerProfile: { person: string };
+  OrganizationRequests: undefined;
+  OrganizationRecruiting: undefined;
+  ContributionApprovals: undefined;
+  NetworkDraft: undefined;
+  NetworkPreview: undefined;
+  NetworkRecruiterView: undefined;
+  NetworkSearch: undefined;
+  ContactInbox: undefined;
+  NetworkBlocks: undefined;
 };

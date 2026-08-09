@@ -115,6 +115,9 @@ func (app *kanbanBoardApp) startResearchSuggestionWorker(apiKey string) {
 // runResearchSuggestionOnce runs a single pass with an injectable responder —
 // the test seam mirroring runMeetingBoardOnce.
 func (app *kanbanBoardApp) runResearchSuggestionOnce(ctx context.Context, apiKey string, responder openAITextResponder) (meetingMemoryEntry, error) {
+	if strideE10TenantCutoverEnabled() {
+		return meetingMemoryEntry{}, ErrStrideE10TenantAuthorityStale
+	}
 	if app != nil && app.strideRuntime != nil && app.strideRuntime.productPreviewOwnsWorkSuggestions() {
 		return meetingMemoryEntry{}, nil
 	}
@@ -123,6 +126,9 @@ func (app *kanbanBoardApp) runResearchSuggestionOnce(ctx context.Context, apiKey
 }
 
 func (app *kanbanBoardApp) produceResearchSuggestions(ctx context.Context, apiKey string, summaries []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
+	if strideE10TenantCutoverEnabled() {
+		return meetingMemoryEntry{}, ErrStrideE10TenantAuthorityStale
+	}
 	if app != nil && app.strideRuntime != nil && app.strideRuntime.productPreviewOwnsWorkSuggestions() {
 		return meetingMemoryEntry{}, nil
 	}

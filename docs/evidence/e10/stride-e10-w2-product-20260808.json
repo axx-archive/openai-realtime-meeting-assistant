@@ -1,0 +1,266 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_w2_product_surfaces",
+  "observedAt": "2026-08-08T22:54:41Z",
+  "status": "deterministic_verified",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "d4c827c2adc7e1c6258f843e20fd4f9256c7310b",
+    "dirtyWorktreeCheckpoint": true,
+    "selectedFileSha256ManifestIsAuthoritative": true,
+    "gitStatusPorcelainV1Sha256BeforeReceipt": "912f0d432c0eadee48ecb6c535b36f1be8830bc98d221f91a0613349efe090b2",
+    "trackedBinaryDiffSha256BeforeReceipt": "e865b2505fdbc241fe15e49902b7d309e587a5aea923fcec525f27f59b21a09d",
+    "untrackedPathListSha256BeforeReceipt": "0d4059f58263acc16a65e6619f2a43708ac129accfdc745c334d51ee6500e5fe",
+    "worktreeCheckpointOnly": true,
+    "gitCommitPushDeployOrProductionMutationPerformed": false
+  },
+  "scope": {
+    "registeredHTTPRuntime": "StrideE10ProductLiveRuntime",
+    "projectionPath": "StrideE10ProductLiveRuntime.project",
+    "actionMintPath": "StrideE10ProductLiveRuntime.mintProjectionActions",
+    "closedServerMintedActions": 38,
+    "manualBindRequired": false,
+    "webAndNativeParity": true,
+    "surfaces": [
+      "profile",
+      "coworker-profile",
+      "organizations",
+      "organization-people",
+      "organization-requests",
+      "contribution-approvals",
+      "work-record",
+      "network-draft",
+      "network-preview",
+      "network-recruiter-view",
+      "network-search",
+      "contact-inbox",
+      "network-blocks",
+      "organization-recruiting"
+    ],
+    "authorityAndPrivacy": {
+      "principalServerDerived": true,
+      "activeOrganizationServerDerived": true,
+      "crossTenantOpaque404": true,
+      "staleRevision409": true,
+      "disabledDependency503": true,
+      "recursiveAuthorityAndPrivateBodyKeysRejected": true,
+      "typedProjectionDeepSchemaBodyFree": true,
+      "concreteW1AuthorityReadersAndCommands": true,
+      "exportDeletePurgeSemantics": true,
+      "capacityAndFinalOwnerConflicts": true,
+      "recruitingSixLaneGovernance": true
+    }
+  },
+  "featureSwitches": {
+    "allDefaultFalse": true,
+    "productionOrDiscoveryActivationPerformed": false,
+    "exactRevision1Switches": [
+      "person_profile_authority",
+      "organization_authority_write",
+      "organization_authority_read",
+      "active_organization_session",
+      "contribution_candidate_detection",
+      "contribution_review",
+      "work_record_private",
+      "network_profile_publication",
+      "network_projection_shadow",
+      "network_search",
+      "network_contact",
+      "network_query_parser_provider",
+      "network_semantic_reranker"
+    ]
+  },
+  "verification": {
+    "focusedNormal": {
+      "command": "go test . -count=1 -run '^(TestStrideE10Product|TestStrideE10OrganizationViews|TestStrideE10ContributionViews|TestStrideE10OrganizationContributionView|TestStrideE10NetworkViews|TestStrideE10RecruitingAdminView|TestStrideE10AuthorityViews|TestStrideW2)'",
+      "result": "PASS",
+      "packageElapsedSeconds": 1.078
+    },
+    "focusedRace": {
+      "command": "go test -race . -count=1 -run '^(TestStrideE10Product|TestStrideE10OrganizationViews|TestStrideE10ContributionViews|TestStrideE10OrganizationContributionView|TestStrideE10NetworkViews|TestStrideE10RecruitingAdminView|TestStrideE10AuthorityViews|TestStrideW2)'",
+      "result": "PASS",
+      "packageElapsedSeconds": 3.144
+    },
+    "disposablePostgres": {
+      "command": "go test . -count=1 -run '^(TestPostgresCanonicalMigrationsAreIdempotentAndRefuseDrift|TestPostgresCanonicalMigrationsRefuseUnknownFutureVersion|TestPostgresSTRIDEMigrationsRejectNestedBodiesCredentialsAndMalformedReferences)$' -v",
+      "result": "PASS",
+      "skipped": false,
+      "topLevelTestsPassed": 3,
+      "forbiddenShapeSubtestsPassed": 11,
+      "packageElapsedSeconds": 4.425
+    },
+    "goVetAll": {
+      "command": "go vet ./...",
+      "result": "PASS"
+    },
+    "mobileTests": {
+      "command": "npm test -- --test-reporter=spec",
+      "workingDirectory": "mobile",
+      "result": "PASS",
+      "tests": 457,
+      "passed": 457,
+      "failed": 0,
+      "suites": 13,
+      "durationMilliseconds": 743.552375
+    },
+    "mobileTypecheck": {
+      "command": "npm run typecheck",
+      "workingDirectory": "mobile",
+      "result": "PASS"
+    },
+    "webJavaScriptVM": {
+      "command": "node vm.Script compile of every non-empty inline index.html script",
+      "result": "PASS",
+      "inlineScriptsCompiled": 4
+    },
+    "webW2ContractTests": {
+      "result": "PASS",
+      "testFunctions": 8,
+      "includedInFocusedNormalAndRace": true
+    },
+    "fullRepositorySuite": {
+      "command": "go test ./... -count=1",
+      "result": "PASS",
+      "rootPackageElapsedSeconds": 443.976
+    },
+    "diffCheck": "PASS"
+  },
+  "persistentMutationRecovery": {
+    "web": {
+      "accountScopedLocalStorageEnvelope": true,
+      "persistedBeforeSend": true,
+      "closedValidatedValuesOnly": true,
+      "noTokenOrAuthorityPersisted": true,
+      "sameAccountTokenRefreshPreserved": true,
+      "crossAccountIsolation": true,
+      "tamperAndUnknownSchemaFailClosed": true,
+      "onlyRetryReconcileDiscardWhileUnresolved": true,
+      "tests": [
+        "TestStrideW2PendingMutationRecoveryIsAccountScopedAndAlwaysReachable",
+        "TestStrideW2PendingMutationPersistsClosedAccountScopedEnvelopeBeforeSend"
+      ]
+    },
+    "native": {
+      "restartRehydration": true,
+      "sameIdempotencyKeyExactRetry": true,
+      "accountAndSessionGenerationFence": true,
+      "lateResponseQuarantine": true,
+      "authoritative400And409Settlement": true,
+      "tamperAndUnknownSchemaFailClosed": true,
+      "navigationFrozenUntilRetryReconcileOrDiscard": true
+    },
+    "backend": {
+      "authenticatedOperationStore": true,
+      "managedKeyRotationAndTamperRejection": true,
+      "preparedLostResponseRestartReconciliation": true,
+      "compoundContributionNetworkFenceRecovery": true
+    }
+  },
+  "renderedQA": {
+    "classification": "registered_live_runtime_w1_backed",
+    "authenticatedLoopbackHarness": "TestStrideE10ProductLiveRenderedQAHarness",
+    "manifestPath": "/Users/ajhart/.codex/visualizations/2026/08/08/019fe1fc-ee80-7e92-a889-1e14e91f693e/w2-browser-qa-evidence.json",
+    "manifestSha256": "fab1201d9a101a79b65c105b6349735022c27f780c5c56e3367ce4741f68435c",
+    "applicationConsoleErrorsOrWarnings": 0,
+    "externalExtensionErrorsExcluded": 1,
+    "screenshots": [
+      {
+        "surface": "work-record",
+        "viewport": "1440x1000",
+        "path": "/Users/ajhart/.codex/visualizations/2026/08/08/019fe1fc-ee80-7e92-a889-1e14e91f693e/w2-registered-live-work-record-1440x1000.png",
+        "sha256": "44449855de5ab5a43107b4230e63b033ad1bf7e4f27f615d913b1e8f9d4a213d"
+      },
+      {
+        "surface": "network-preview",
+        "viewport": "1440x1000",
+        "path": "/Users/ajhart/.codex/visualizations/2026/08/08/019fe1fc-ee80-7e92-a889-1e14e91f693e/w2-registered-live-network-preview-1440x1000.png",
+        "sha256": "9e8365ca4c775dde3c1fa3f1ebf237b1f96972c571de4eab0a902230ff9a318b"
+      },
+      {
+        "surface": "organization-recruiting",
+        "viewport": "1440x1000",
+        "path": "/Users/ajhart/.codex/visualizations/2026/08/08/019fe1fc-ee80-7e92-a889-1e14e91f693e/w2-registered-live-org-recruiting-1440x1000.png",
+        "sha256": "049734a8cf2e2bfc07deba0c1502f1c5ed862d700a120c44177b6d18d952c2c1",
+        "routeTopCapture": true
+      },
+      {
+        "surface": "organization-people",
+        "viewport": "1440x1000",
+        "path": "/Users/ajhart/.codex/visualizations/2026/08/08/019fe1fc-ee80-7e92-a889-1e14e91f693e/w2-registered-live-org-people-1440x1000.png",
+        "sha256": "299bd0dbe4e827c5220b27254c20d7419144738316a5df9d6c06c66c7151284b"
+      },
+      {
+        "surface": "network-recruiter-view",
+        "viewport": "390x844",
+        "path": "/Users/ajhart/.codex/visualizations/2026/08/08/019fe1fc-ee80-7e92-a889-1e14e91f693e/w2-registered-live-network-recruiter-390x844.png",
+        "sha256": "f7a5007913cb8aec685b0fe7656fc4e07fbf63ba3dc42c0de18ca0cd4db2fe05"
+      }
+    ],
+    "staticFixtureDistinction": {
+      "earlierClassification": "static_fake_backend_schema_admitted",
+      "earlierEvidenceIsCanonicalLiveProof": false,
+      "registeredLiveEvidenceSupersedesForRenderedAcceptance": true
+    }
+  },
+  "independentReview": {
+    "mode": "critic_loop",
+    "verdict": "PASS",
+    "blockersRemaining": 0,
+    "majorFindingsRemaining": 0,
+    "separateRenderedLiveGate": "PASS"
+  },
+  "immutableCompatibilityBoundary": {
+    "file": "stride_product_http.go",
+    "sha256": "3c05febf447a1db0e8c8add19d99d561ae0c722fc8d7ecdf7f14c2fd3882fab1",
+    "modifiedByW2": false
+  },
+  "fileSha256": {
+    "docs/plans/stride-next-evolution-master-plan.md": "f24dea843dac549ae388a81ec8793467b1636a3a1b5cd5592787bf79eec8b37d",
+    "stride_contracts.go": "30839f60baaf747798693969c261e957f3115ac5b6d34f6ec85cc8c501e91785",
+    "stride_registry.go": "6cd9c1de78910344eef99c08124d7455c0072d017f55651e1c3eeeedd9a3f262",
+    "stride_registry_test.go": "2186c23cea8e4c6167552550004f6e5ed25858e585b9833331947903f7603051",
+    "canonical_migrations_test.go": "0b548bee0c8aa26bd5b9c7f0af2b2e24668964119a88f6fb1925258219fa3539",
+    "canonical_postgres_test.go": "252de652994a22540a2d59c69a2029e7ada84dd5c72c42763d4368a3244a0ff9",
+    "migrations/0014_stride_people_organizations.sql": "ed9ba57352514fae433e0ea319d33aa125419180a818c9222b2b22aa79c00131",
+    "migrations/0015_stride_contributions.sql": "29ad7cff6b79a823770fae6275f06032cfaa13eb034fd116cb10ba6fd7e970f2",
+    "migrations/0016_stride_network.sql": "8a4dd4f1b735f6faedf07652ee0135edebec9f2aaddd1c90a61b65ac46ca20e9",
+    "stride_identity_organization_contracts.go": "aa57940c511e863ae5f827ae8f230b72a12e2d6ddbfdc87d7f01978a91158cc9",
+    "stride_identity_organization_contracts_test.go": "ada20d185cfca847ff57ff126e1b8844bec3e101e109a77a9709cdb38e9d2bf2",
+    "stride_organization_authority.go": "3e7fa723e640f80adbd1498607aa459fe151a2e50cd7490049ca09688279b4fd",
+    "stride_organization_authority_test.go": "d8b128d868ec3e91266169e5e02a7af984c0daa22f5e02c8b281d77e3d477f2c",
+    "stride_contribution_network_contracts.go": "81129fe6db5f497690ca2c34aeb3ab590cb1851044e722dd7d565d0301a45e66",
+    "stride_contribution_network_contracts_test.go": "79c8896ac1bfcff8d38441c595daf9846dadfb8d2506ada626a3f8a9d7147273",
+    "stride_contribution_authority.go": "eebb17084912154abbb136008be18e1911ccffd1cc53b24839049864dfeb893a",
+    "stride_contribution_authority_test.go": "50b133438bcd4b3a4781468ec971a453ab47e33ab9aadf468c4b583300864b20",
+    "stride_network_authority.go": "92311fe4c928d7b4171b32dc043986db1f3d90955480085bf06f8bccade51ddf",
+    "stride_network_authority_test.go": "492de248b117e8d9d99270bad6e709da1c2eb38080792bdc0b96a89ee263a880",
+    "stride_e10_product_authority_views.go": "1eef314a2f138843dbf8a3d34d77995b2c2c0a50c27a8175fbc6d9d6f9ff3a05",
+    "stride_e10_product_authority_views_test.go": "02ecef7f2d9a7cf93d5a1eafbe8f3514021d1152e6cf1047b8b66aa90a6980f3",
+    "stride_e10_product_http.go": "f01b5e10af960def469322528729f444c1db075b064ef69505c24a3a7d56540c",
+    "stride_e10_product_http_test.go": "6b7ea2a6575a6f04a3f8d1ff8b87a0d157c8700338bc5554ecd03660d280b7d3",
+    "stride_e10_product_live.go": "2004b4c68acf3fb2abcc630e5ae57555eb048888b32cbbf98223b5fa742d0f8b",
+    "stride_e10_product_live_test.go": "0deee0b7c75a9d38c5532feafafc488fcbbefa784ee8393816e11a4969718019",
+    "stride_e10_product_operation_store.go": "038a39ae2c9ddeec80baae8862a7c7f228b98668c170e947afbec7d844aa029b",
+    "stride_e10_product_qa_harness_test.go": "8d859179ec9d0023ec83b1bc15ad721e3842bb9d93f017cdadffb433c1d302a6",
+    "index.html": "d9bd3d3f0b975e6b8143606319fa5f214336690db380861c0ef9d01d217a17b9",
+    "frontend_stride_w2_surfaces_test.go": "42054394e0d72dc2e4f73bcb38816c102503abc558375519f5ee2bc55fb5dc82",
+    "mobile/src/stride/models.ts": "5f081528d953c2b8bfab5d209ff395b97a4bd7c9a91d9ffd290af2af323d9b16",
+    "mobile/src/stride/api.ts": "d911cf496f73c72a51b61b67e2a11d5b84811380b0b53bc15399073359cff6f6",
+    "mobile/src/stride/mutationAuthority.ts": "c03eba521f1931c8086ca47cfae538365abc238348d80f7fc606b9f03ad802d2",
+    "mobile/src/stride/mutationPersistence.ts": "7a5591e7ccd3f159654d7e86a08d1ffdef15aed2a365c69921ecd472f85f6641",
+    "mobile/src/stride/surfaceSelector.ts": "eaa8ff998e8cdeaf97dc9c6339dff0eb1f0a76dae560914983e91d4a70eb15c6",
+    "mobile/src/screens/StrideProductScreens.tsx": "dda7f1fac34708e5aa34cfe56d1775b69e2996710861f7c43d9cfc694ea640cd",
+    "mobile/src/__tests__/strideProductSurfaces.test.ts": "217ae74d58d9876b0b3ad9a0f699510764568df6501db49e53c25dc04e0b3b04",
+    "mobile/src/navigation/RootNavigator.tsx": "a0d24fe17879c39aebf80df0ae3c96e000f9b3b54ace2c1474da4bd590834b52",
+    "mobile/src/navigation/types.ts": "0569cfeddfda7a9d8340df43af0bd366c6c537545c91cf42fa6a46f9cf9e27e7",
+    "mobile/src/screens/DeckScreen.tsx": "28ea1abeb4d27df6fa682b0a3a825e7ad76bc40b6cae97002860b2db2711e42c"
+  },
+  "externalBoundaries": {
+    "paidProviderCallsPerformed": false,
+    "productionDataOrConfigurationMutationPerformed": false,
+    "productionMigrationOrRouteActivationPerformed": false,
+    "gitCommitPushOrDeployPerformed": false,
+    "physicalDeviceOrTestFlightAcceptancePerformed": false,
+    "cohortOrNetworkDiscoveryActivationPerformed": false
+  }
+}

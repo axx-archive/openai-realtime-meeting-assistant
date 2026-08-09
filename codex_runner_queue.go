@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -38,6 +39,7 @@ const (
 )
 
 var errCodexRunnerClaimLost = errors.New("Codex runner claim ownership was lost")
+var writeCodexRunnerClaimAtomically = writeJSONFileAtomically
 
 type codexRunnerJob struct {
 	ID         string `json:"id"`
@@ -51,21 +53,22 @@ type codexRunnerJob struct {
 	// context; the sidecar reauthorizes these refs and builds the prompt only
 	// after claiming the job. Legacy/source-free jobs keep Prompt for backwards
 	// compatibility.
-	ThreadMetadata  map[string]string `json:"thread_metadata,omitempty"`
-	Authority       string            `json:"authority"`
-	Status          string            `json:"status"`
-	CreatedAt       time.Time         `json:"created_at"`
-	StartedAt       time.Time         `json:"started_at,omitempty"`
-	CompletedAt     time.Time         `json:"completed_at,omitempty"`
-	Attempts        int               `json:"attempts"`
-	RunnerID        string            `json:"runner_id,omitempty"`
-	ClaimGeneration uint64            `json:"claim_generation,omitempty"`
-	FencingToken    string            `json:"fencing_token,omitempty"`
-	LeaseExpiresAt  time.Time         `json:"lease_expires_at,omitempty"`
-	HeartbeatAt     time.Time         `json:"heartbeat_at,omitempty"`
-	Error           string            `json:"error,omitempty"`
-	RunnerEvidence  string            `json:"runner_evidence,omitempty"`
-	Metadata        map[string]string `json:"metadata,omitempty"`
+	ThreadMetadata  map[string]string                 `json:"thread_metadata,omitempty"`
+	Authority       string                            `json:"authority"`
+	Status          string                            `json:"status"`
+	CreatedAt       time.Time                         `json:"created_at"`
+	StartedAt       time.Time                         `json:"started_at,omitempty"`
+	CompletedAt     time.Time                         `json:"completed_at,omitempty"`
+	Attempts        int                               `json:"attempts"`
+	RunnerID        string                            `json:"runner_id,omitempty"`
+	ClaimGeneration uint64                            `json:"claim_generation,omitempty"`
+	FencingToken    string                            `json:"fencing_token,omitempty"`
+	LeaseExpiresAt  time.Time                         `json:"lease_expires_at,omitempty"`
+	HeartbeatAt     time.Time                         `json:"heartbeat_at,omitempty"`
+	Error           string                            `json:"error,omitempty"`
+	RunnerEvidence  string                            `json:"runner_evidence,omitempty"`
+	Metadata        map[string]string                 `json:"metadata,omitempty"`
+	TenantAuthority *StrideE10TenantAuthorityEnvelope `json:"tenant_authority,omitempty"`
 }
 
 type codexRunnerJobStore struct {
@@ -85,6 +88,8 @@ type codexRunnerCallbackPayload struct {
 	ClaimGeneration uint64            `json:"claim_generation,omitempty"`
 	FencingToken    string            `json:"fencing_token,omitempty"`
 }
+
+type strideE10CodexRunnerCallbackAuthorityContextKey struct{}
 
 func codexRunnerQueuePath() string {
 	if path := strings.TrimSpace(os.Getenv("BONFIRE_CODEX_QUEUE_PATH")); path != "" {
@@ -139,6 +144,20 @@ func (store *codexRunnerJobStore) enqueue(job codexRunnerJob) (codexRunnerJob, e
 	if job.Metadata == nil {
 		job.Metadata = map[string]string{}
 	}
+	if job.TenantAuthority != nil && !strideE10TenantCutoverEnabled() {
+		return codexRunnerJob{}, ErrStrideE10TenantAuthorityStale
+	}
+	if strideE10TenantCutoverEnabled() {
+		if job.TenantAuthority == nil || validateStrideE10TenantAuthorityEnvelope(context.Background(), *job.TenantAuthority, time.Now().UTC()) != nil {
+			return codexRunnerJob{}, ErrStrideE10TenantAuthorityStale
+		}
+		if job.TenantAuthority.Purpose != StrideE10TenantAuthorityPurposeForCodexJob(job.ArtifactID, job.ThreadID, job.Mode, job.Query, job.Authority) {
+			return codexRunnerJob{}, ErrStrideE10TenantAuthorityStale
+		}
+		if raw, err := json.Marshal(job); err != nil || strideE10TenantEnvelopeContainsPrivateAuthority(raw) || strideE10CodexJobContainsLegacyAuthority(job) {
+			return codexRunnerJob{}, ErrStrideE10TenantAuthorityInvalid
+		}
+	}
 
 	if err := os.MkdirAll(store.dir, 0o755); err != nil {
 		return codexRunnerJob{}, fmt.Errorf("create Codex runner queue: %w", err)
@@ -168,6 +187,16 @@ func (store *codexRunnerJobStore) enqueue(job codexRunnerJob) (codexRunnerJob, e
 		return codexRunnerJob{}, err
 	}
 	return result, nil
+}
+
+func strideE10CodexJobContainsLegacyAuthority(job codexRunnerJob) bool {
+	for key := range job.ThreadMetadata {
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "requestedby", "createdby", "owneremail", "useremail", "sessiontoken", "authorization":
+			return true
+		}
+	}
+	return false
 }
 
 func (store *codexRunnerJobStore) withQueueLock(fn func() error) (resultErr error) {
@@ -214,7 +243,8 @@ func sameCodexRunnerActionBinding(existing codexRunnerJob, reserved codexRunnerJ
 		strings.TrimSpace(existing.ThreadID) == strings.TrimSpace(reserved.ThreadID) &&
 		strings.TrimSpace(existing.Mode) == strings.TrimSpace(reserved.Mode) &&
 		strings.TrimSpace(existing.Query) == strings.TrimSpace(reserved.Query) &&
-		normalizeCodexJobAuthority(existing.Authority) == normalizeCodexJobAuthority(reserved.Authority)
+		normalizeCodexJobAuthority(existing.Authority) == normalizeCodexJobAuthority(reserved.Authority) &&
+		strideE10TenantEnvelopeBindingEqual(existing.TenantAuthority, reserved.TenantAuthority)
 }
 
 // findByActionBinding discovers a legacy random-ID job from the immutable
@@ -302,38 +332,56 @@ func (store *codexRunnerJobStore) claimNextAt(runnerID string, now time.Time, le
 			default:
 				continue
 			}
-			fencingToken, tokenErr := newCodexRunnerFencingToken()
-			if tokenErr != nil {
-				return tokenErr
+			if job.TenantAuthority != nil && !strideE10TenantCutoverEnabled() {
+				job.Status, job.CompletedAt, job.Error = codexJobStatusFailed, now, ErrStrideE10TenantAuthorityStale.Error()
+				job.Metadata = mergeStringMaps(job.Metadata, map[string]string{"status": "error", "threadStatus": "error", "goalStatus": "needs_attention", "currentStage": "tenant_authority_quarantine", "progressPercent": "0", "reviewGate": "blocked", "completedAt": now.Format(time.RFC3339Nano), "error": ErrStrideE10TenantAuthorityStale.Error()})
+				return writeCodexRunnerClaimAtomically(store.jobPath(job.ID), "Codex runner quarantined job", *job)
 			}
-			job.Status = codexJobStatusRunning
-			job.StartedAt = now
-			job.Attempts++
-			job.RunnerID = runnerID
-			job.ClaimGeneration++
-			job.FencingToken = fencingToken
-			job.HeartbeatAt = now
-			job.LeaseExpiresAt = now.Add(leaseDuration)
-			job.CompletedAt = time.Time{}
-			job.Error = ""
-			job.RunnerEvidence = ""
-			if job.Metadata == nil {
-				job.Metadata = map[string]string{}
+			persistClaim := func() error {
+				fencingToken, tokenErr := newCodexRunnerFencingToken()
+				if tokenErr != nil {
+					return tokenErr
+				}
+				job.Status = codexJobStatusRunning
+				job.StartedAt = now
+				job.Attempts++
+				job.RunnerID = runnerID
+				job.ClaimGeneration++
+				job.FencingToken = fencingToken
+				job.HeartbeatAt = now
+				job.LeaseExpiresAt = now.Add(leaseDuration)
+				job.CompletedAt = time.Time{}
+				job.Error = ""
+				job.RunnerEvidence = ""
+				if job.Metadata == nil {
+					job.Metadata = map[string]string{}
+				}
+				job.Metadata["claimedAt"] = now.Format(time.RFC3339Nano)
+				job.Metadata["heartbeatAt"] = now.Format(time.RFC3339Nano)
+				job.Metadata["leaseExpiresAt"] = job.LeaseExpiresAt.Format(time.RFC3339Nano)
+				job.Metadata["runnerId"] = runnerID
+				job.Metadata["claimGeneration"] = strconv.FormatUint(job.ClaimGeneration, 10)
+				if recovered {
+					job.Metadata["recoveredExpiredClaimAt"] = now.Format(time.RFC3339Nano)
+				}
+				if writeErr := writeCodexRunnerClaimAtomically(store.jobPath(job.ID), "Codex runner job", *job); writeErr != nil {
+					return writeErr
+				}
+				copy := *job
+				claimed = &copy
+				return nil
 			}
-			job.Metadata["claimedAt"] = now.Format(time.RFC3339Nano)
-			job.Metadata["heartbeatAt"] = now.Format(time.RFC3339Nano)
-			job.Metadata["leaseExpiresAt"] = job.LeaseExpiresAt.Format(time.RFC3339Nano)
-			job.Metadata["runnerId"] = runnerID
-			job.Metadata["claimGeneration"] = strconv.FormatUint(job.ClaimGeneration, 10)
-			if recovered {
-				job.Metadata["recoveredExpiredClaimAt"] = now.Format(time.RFC3339Nano)
+			if strideE10TenantCutoverEnabled() {
+				authErr := withStrideE10TenantEnvelopeAuthority(context.Background(), job.TenantAuthority, StrideE10TenantSurfaceWorkQueue, now, func(StrideE10TenantPrincipal) error { return persistClaim() })
+				if authErr == nil {
+					return nil
+				}
+				job.Status, job.CompletedAt, job.Error = codexJobStatusFailed, now, ErrStrideE10TenantAuthorityStale.Error()
+				job.RunnerID, job.FencingToken, job.LeaseExpiresAt = "", "", time.Time{}
+				job.Metadata = mergeStringMaps(job.Metadata, map[string]string{"status": "error", "threadStatus": "error", "goalStatus": "needs_attention", "currentStage": "tenant_authority_quarantine", "progressPercent": "0", "reviewGate": "blocked", "completedAt": now.Format(time.RFC3339Nano), "error": ErrStrideE10TenantAuthorityStale.Error()})
+				return writeCodexRunnerClaimAtomically(store.jobPath(job.ID), "Codex runner quarantined job", *job)
 			}
-			if writeErr := writeJSONFileAtomically(store.jobPath(job.ID), "Codex runner job", *job); writeErr != nil {
-				return writeErr
-			}
-			copy := *job
-			claimed = &copy
-			return nil
+			return persistClaim()
 		}
 		return nil
 	})
@@ -632,6 +680,25 @@ func (app *kanbanBoardApp) enqueueCodexAgentThreadJobWithID(thread scoutAgentThr
 }
 
 func (app *kanbanBoardApp) enqueueCodexAgentThreadJobWithContext(admittedJob AgentJob, authority string, reservedJobID string) (agentThreadWorkerResult, error) {
+	if strideE10TenantCutoverEnabled() {
+		threadEnvelope, err := strideE10ScoutThreadEnvelope(admittedJob.thread)
+		if err != nil {
+			return agentThreadWorkerResult{}, ErrStrideE10TenantAuthorityStale
+		}
+		purpose := StrideE10TenantAuthorityPurposeForCodexJob(admittedJob.thread.Artifact.ID, admittedJob.thread.ID, admittedJob.thread.Mode, admittedJob.thread.Query, authority)
+		queueEnvelope, err := MintStrideE10TenantAuthorityEnvelope(context.Background(), currentStrideE10TenantRuntimeConverter(), threadEnvelope.SessionSubjectDigest, purpose, threadEnvelope.ExpiresAt)
+		if err != nil {
+			return agentThreadWorkerResult{}, ErrStrideE10TenantAuthorityStale
+		}
+		return app.enqueueCodexAgentThreadJobWithContextAndTenantAuthority(admittedJob, authority, reservedJobID, &queueEnvelope)
+	}
+	return app.enqueueCodexAgentThreadJobWithContextAndTenantAuthority(admittedJob, authority, reservedJobID, nil)
+}
+
+func (app *kanbanBoardApp) enqueueCodexAgentThreadJobWithContextAndTenantAuthority(admittedJob AgentJob, authority string, reservedJobID string, envelope *StrideE10TenantAuthorityEnvelope) (agentThreadWorkerResult, error) {
+	if strideE10TenantCutoverEnabled() && envelope == nil {
+		return agentThreadWorkerResult{}, ErrStrideE10TenantAuthorityStale
+	}
 	thread := admittedJob.thread
 	authority = normalizeCodexJobAuthority(authority)
 	metadata := codexRunnerQueuedMetadata(thread, authority)
@@ -647,14 +714,15 @@ func (app *kanbanBoardApp) enqueueCodexAgentThreadJobWithContext(admittedJob Age
 		threadMetadata = cloneCodexThreadMetadata(thread.Artifact.Metadata)
 	}
 	queuedJob, err := store.enqueue(codexRunnerJob{
-		ID:             strings.TrimSpace(reservedJobID),
-		ArtifactID:     thread.Artifact.ID,
-		ThreadID:       thread.ID,
-		Mode:           thread.Mode,
-		Query:          thread.Query,
-		Prompt:         prompt,
-		ThreadMetadata: threadMetadata,
-		Authority:      authority,
+		ID:              strings.TrimSpace(reservedJobID),
+		ArtifactID:      thread.Artifact.ID,
+		ThreadID:        thread.ID,
+		Mode:            thread.Mode,
+		Query:           thread.Query,
+		Prompt:          prompt,
+		ThreadMetadata:  threadMetadata,
+		Authority:       authority,
+		TenantAuthority: envelope,
 		Metadata: map[string]string{
 			"toolRegistry":   codexToolRegistrySummary(),
 			"requestedTools": codexRequestedToolsForMode(thread.Mode),
@@ -869,7 +937,45 @@ func failCodexRunnerProviderAdmission(ctx context.Context, store *codexRunnerJob
 	})
 }
 
+func quarantineCodexRunnerTenantAuthority(store *codexRunnerJobStore, job codexRunnerJob) {
+	completedAt := time.Now().UTC()
+	job.Status = codexJobStatusFailed
+	job.CompletedAt = completedAt
+	job.Error = ErrStrideE10TenantAuthorityStale.Error()
+	job.Metadata = mergeStringMaps(job.Metadata, map[string]string{
+		"status": "error", "threadStatus": "error", "goalStatus": "needs_attention",
+		"currentStage": "tenant_authority_quarantine", "progressPercent": "0",
+		"reviewGate": "blocked", "completedAt": completedAt.Format(time.RFC3339Nano),
+		"error": ErrStrideE10TenantAuthorityStale.Error(),
+	})
+	if updateErr := store.update(job); updateErr != nil {
+		log.Errorf("Codex runner could not quarantine stale-authority job %s: %v", job.ID, updateErr)
+	}
+}
+
 func processCodexRunnerJob(ctx context.Context, store *codexRunnerJobStore, job codexRunnerJob) {
+	if !strideE10TenantCutoverEnabled() {
+		if job.TenantAuthority != nil {
+			quarantineCodexRunnerTenantAuthority(store, job)
+			return
+		}
+		processCodexRunnerJobAuthorized(ctx, store, job)
+		return
+	}
+	err := withStrideE10TenantEnvelopeAuthority(ctx, job.TenantAuthority, StrideE10TenantSurfaceWorker, time.Now().UTC(), func(StrideE10TenantPrincipal) error {
+		processCodexRunnerJobAuthorized(ctx, store, job)
+		return nil
+	})
+	if err != nil {
+		quarantineCodexRunnerTenantAuthority(store, job)
+	}
+}
+
+// processCodexRunnerJobAuthorized runs only inside the worker resolver callback
+// in cutover, holding current session/membership authority across the provider,
+// terminal queue write, and application callback. Off and shadow call it
+// directly, preserving the legacy execution path.
+func processCodexRunnerJobAuthorized(ctx context.Context, store *codexRunnerJobStore, job codexRunnerJob) {
 	authority := normalizeCodexJobAuthority(job.Authority)
 	cfg := codexExecConfigForAuthority(codexExecConfigFromEnv(), authority, job.Mode)
 	cfg.ScratchDir = filepath.Join(getenvDefault("BONFIRE_CODEX_SCRATCH_ROOT", "/runner-data/jobs"), filepath.Base(job.ID))
@@ -1207,7 +1313,9 @@ func codexWorkspaceHasGit(cwd string) bool {
 	return err == nil && info != nil
 }
 
-func sendCodexRunnerCallback(ctx context.Context, payload codexRunnerCallbackPayload) error {
+var sendCodexRunnerCallback = sendCodexRunnerCallbackContext
+
+func sendCodexRunnerCallbackContext(ctx context.Context, payload codexRunnerCallbackPayload) error {
 	callbackCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	callbackURL := strings.TrimSpace(os.Getenv("BONFIRE_RUNNER_CALLBACK_URL"))
@@ -1333,6 +1441,34 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 	if subtle.ConstantTimeCompare([]byte(strings.TrimSpace(payload.Capability)), []byte(expectedCapability)) != 1 {
 		writeSystemStatusJSON(w, r, http.StatusUnauthorized, map[string]any{"ok": false, "error": "runner capability does not match job binding"})
 		return
+	}
+	if strideE10TenantCutoverEnabled() {
+		_, authorityHeld := r.Context().Value(strideE10CodexRunnerCallbackAuthorityContextKey{}).(bool)
+		if !authorityHeld {
+			if queueErr != nil || queueJob.TenantAuthority == nil || queueJob.TenantAuthority.Purpose != StrideE10TenantAuthorityPurposeForCodexJob(queueJob.ArtifactID, queueJob.ThreadID, queueJob.Mode, queueJob.Query, queueJob.Authority) {
+				if queueErr == nil {
+					quarantineCodexRunnerTenantAuthority(queueStore, *queueJob)
+				}
+				writeSystemStatusJSON(w, r, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "tenant authority unavailable"})
+				return
+			}
+			callbackBody, marshalErr := json.Marshal(payload)
+			if marshalErr != nil {
+				writeSystemStatusJSON(w, r, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "tenant authority unavailable"})
+				return
+			}
+			authorityErr := withStrideE10TenantEnvelopeAuthority(r.Context(), queueJob.TenantAuthority, StrideE10TenantSurfaceWorker, time.Now().UTC(), func(StrideE10TenantPrincipal) error {
+				bound := r.Clone(context.WithValue(r.Context(), strideE10CodexRunnerCallbackAuthorityContextKey{}, true))
+				bound.Body = io.NopCloser(bytes.NewReader(callbackBody))
+				internalCodexRunnerResultHandler(w, bound)
+				return nil
+			})
+			if authorityErr != nil {
+				quarantineCodexRunnerTenantAuthority(queueStore, *queueJob)
+				writeSystemStatusJSON(w, r, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "tenant authority unavailable"})
+			}
+			return
+		}
 	}
 	existing, exists := kanbanApp.osArtifactByID(artifactID)
 	if !exists {
@@ -1491,7 +1627,13 @@ func internalCodexRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 			if parentID := strings.TrimSpace(artifact.Metadata["goalParentId"]); parentID != "" {
 				switch strings.ToLower(strings.TrimSpace(payload.Status)) {
 				case codexJobStatusComplete, codexJobStatusFailed:
-					foldGoalChildAsync(kanbanApp, parentID, artifact.Metadata["goalSubtaskId"], artifact, payload.Status)
+					if strideE10TenantCutoverEnabled() {
+						// The local cutover callback already holds current envelope
+						// authority; do not let this derived write escape it.
+						kanbanApp.foldGoalChildCompletion(parentID, artifact.Metadata["goalSubtaskId"], artifact, payload.Status)
+					} else {
+						foldGoalChildAsync(kanbanApp, parentID, artifact.Metadata["goalSubtaskId"], artifact, payload.Status)
+					}
 				}
 			}
 		}

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -27,6 +28,35 @@ func seedCompleteGrillArtifact(t *testing.T, app *kanbanBoardApp) meetingMemoryE
 		t.Fatalf("seed grill artifact: %v", err)
 	}
 	return artifact
+}
+
+func TestStrideE10ScoutFollowUpCutoverFailsBeforePrivateSourcesAndWrite(t *testing.T) {
+	converter, _, _, _, _ := strideE10TenantEnvelopeTestSetup(t)
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "test-key"
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	artifact := seedCompleteGrillArtifact(t, app)
+	mode, query := "grill", artifact.Metadata["threadQuery"]
+	runID := "agent-thread-grill-tenant-followup"
+	envelope, err := MintStrideE10TenantAuthorityEnvelopeForSurface(context.Background(), converter, strings.Repeat("a", 64), StrideE10TenantSurfaceScout, StrideE10TenantAuthorityPurposeForScoutThread(runID, mode, query), time.Now().UTC().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	asyncCalls := 0
+	priorAsync := startAgentThreadFollowUpAsync
+	startAgentThreadFollowUpAsync = func(_ *kanbanBoardApp, run agentThreadFollowUpRun) { asyncCalls++ }
+	t.Cleanup(func() { startAgentThreadFollowUpAsync = priorAsync })
+	before, _ := app.osArtifactByID(artifact.ID)
+	if _, err := app.launchAgentThreadFollowUpWithTenantAuthority(artifact, "recheck the bounded evidence", "person-attacker", []scoutChatMessageRecord{{AuthorName: "Other Org", Text: "private body"}}, &agentThreadFollowUpAttachmentScope{destinationID: "private-other-org", files: []scoutChatFileAttachment{{SourceID: "cross-org-private"}}}, runID, &envelope); !errors.Is(err, ErrStrideE10TenantAuthorityStale) {
+		t.Fatalf("cutover follow-up used legacy sources: %v", err)
+	}
+	if asyncCalls != 0 {
+		t.Fatalf("cutover follow-up reached async provider %d times", asyncCalls)
+	}
+	stored, ok := app.osArtifactByID(artifact.ID)
+	if !ok || stored.Text != before.Text || stored.Metadata["threadVersion"] != before.Metadata["threadVersion"] {
+		t.Fatalf("cutover follow-up changed destination controller: before=%+v after=%+v", before, stored)
+	}
 }
 
 // A follow-up run versions the SAME artifact in place: stable id, threadVersion

@@ -26,6 +26,22 @@ import {
   MemoryScreen,
 } from '../screens/LibraryScreens';
 import { SettingsScreen } from '../screens/SettingsScreen';
+import {
+  ContactInboxScreen,
+  ContributionApprovalsScreen,
+  CoworkerProfileScreen,
+  NetworkBlocksScreen,
+  NetworkDraftScreen,
+  NetworkPreviewScreen,
+  NetworkRecruiterViewScreen,
+  NetworkSearchScreen,
+  OrganizationPeopleScreen,
+  OrganizationRecruitingScreen,
+  OrganizationRequestsScreen,
+  OrganizationsScreen,
+  ProfileScreen,
+  WorkRecordScreen,
+} from '../screens/StrideProductScreens';
 import { LaunchCradle } from '../components/CanvasCradleComposition';
 import { duration, ease, useReduceMotion } from '../theme/motion';
 import { colors } from '../theme/tokens';
@@ -230,6 +246,20 @@ export function RootNavigator() {
             <Stack.Screen name="AgentTeam" component={AgentTeamScreen} />
             <Stack.Screen name="Alerts" component={AlertsScreen} />
             <Stack.Screen name="Settings" component={SettingsScreen} />
+            <Stack.Screen name="Profile" component={ProfileScreen} />
+            <Stack.Screen name="WorkRecord" component={WorkRecordScreen} />
+            <Stack.Screen name="Organizations" component={OrganizationsScreen} />
+            <Stack.Screen name="OrganizationPeople" component={OrganizationPeopleScreen} />
+            <Stack.Screen name="CoworkerProfile" component={CoworkerProfileScreen} />
+            <Stack.Screen name="OrganizationRequests" component={OrganizationRequestsScreen} />
+            <Stack.Screen name="OrganizationRecruiting" component={OrganizationRecruitingScreen} />
+            <Stack.Screen name="ContributionApprovals" component={ContributionApprovalsScreen} />
+            <Stack.Screen name="NetworkDraft" component={NetworkDraftScreen} />
+            <Stack.Screen name="NetworkPreview" component={NetworkPreviewScreen} />
+            <Stack.Screen name="NetworkRecruiterView" component={NetworkRecruiterViewScreen} />
+            <Stack.Screen name="NetworkSearch" component={NetworkSearchScreen} />
+            <Stack.Screen name="ContactInbox" component={ContactInboxScreen} />
+            <Stack.Screen name="NetworkBlocks" component={NetworkBlocksScreen} />
           </>
         ) : (
           <Stack.Screen name="Login" component={LoginScreen} />

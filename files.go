@@ -374,9 +374,18 @@ func (app *kanbanBoardApp) assistantFilesForPrincipal(ctx context.Context, viewe
 		return nil
 	}
 	rows := make([]assistantFileRecord, 0, 32)
+	principal, canonical := strideE10TenantPrincipalFromContext(ctx)
 	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindFile, 0) {
+		if canonical && strings.TrimSpace(entry.Metadata["tenantId"]) != principal.TenantID {
+			continue
+		}
 		row := fileRecordFromEntry(entry)
-		row.CanDelete = viewer != nil && (isArtifactApprovalAdmin(viewer) || normalizeAccountEmail(row.UploaderEmail) == normalizeAccountEmail(viewer.Email))
+		if canonical {
+			row.CanDelete = strings.TrimSpace(entry.Metadata["uploaderPersonId"]) == principal.PersonID
+			row.UploaderEmail = ""
+		} else {
+			row.CanDelete = viewer != nil && (isArtifactApprovalAdmin(viewer) || normalizeAccountEmail(row.UploaderEmail) == normalizeAccountEmail(viewer.Email))
+		}
 		rows = append(rows, row)
 	}
 	for _, entry := range app.authorizedFileDeliverableCandidates(ctx, viewer, ACLReadContent) {
@@ -754,6 +763,16 @@ func assistantFilesHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusServiceUnavailable, "files are unavailable")
 		return
 	}
+	if !strideE10TenantSurfaceUseBound(r.Context(), StrideE10TenantSurfaceDrive) {
+		err := withStrideE10TenantRequestUse(r, StrideE10TenantSurfaceDrive, func(ctx context.Context, _ *StrideE10TenantPrincipal) error {
+			assistantFilesHandler(w, r.WithContext(ctx))
+			return nil
+		})
+		if err != nil {
+			writeStrideE10TenantHookError(w, err, "files are unavailable")
+		}
+		return
+	}
 	if r.Method == http.MethodDelete {
 		assistantFileDelete(w, r, user)
 		return
@@ -764,7 +783,12 @@ func assistantFilesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows := kanbanApp.assistantFilesForPrincipal(r.Context(), user)
-	folders := decorateAssistantFileFolders(rows)
+	folders := []assistantFileFolderPayload{}
+	if principal, canonical := strideE10TenantPrincipalFromContext(r.Context()); canonical {
+		folders = decorateAssistantFileFoldersForTenant(rows, principal.TenantID)
+	} else {
+		folders = decorateAssistantFileFolders(rows)
+	}
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
 		"files":   rows,
@@ -1028,6 +1052,16 @@ func assistantFileUploadHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusServiceUnavailable, "files are unavailable")
 		return
 	}
+	if !strideE10TenantSurfaceUseBound(r.Context(), StrideE10TenantSurfaceDrive) {
+		err := withStrideE10TenantRequestUse(r, StrideE10TenantSurfaceDrive, func(ctx context.Context, _ *StrideE10TenantPrincipal) error {
+			assistantFileUploadHandler(w, r.WithContext(ctx))
+			return nil
+		})
+		if err != nil {
+			writeStrideE10TenantHookError(w, err, "files are unavailable")
+		}
+		return
+	}
 
 	// 1MB of multipart framing headroom over the blob cap; putBlob re-checks
 	// the decoded payload against blobMaxBytes exactly.
@@ -1120,6 +1154,10 @@ func assistantFileUploadHandler(w http.ResponseWriter, r *http.Request) {
 		"origin":        "files",
 		"brainStatus":   brainStatus,
 	}
+	if principal, canonical := strideE10TenantPrincipalFromContext(r.Context()); canonical {
+		metadata["tenantId"] = principal.TenantID
+		metadata["uploaderPersonId"] = principal.PersonID
+	}
 	if brainStatus == fileBrainStatusIngested {
 		metadata["ingestedAt"] = now.Format(time.RFC3339Nano)
 	}
@@ -1130,6 +1168,10 @@ func assistantFileUploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	row := fileRecordFromEntry(entry)
+	if _, canonical := strideE10TenantPrincipalFromContext(r.Context()); canonical {
+		row.UploaderEmail = ""
+		row.CanDelete = true
+	}
 	broadcastSignedInKanbanEvent("file", row)
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok":   true,
@@ -1153,6 +1195,14 @@ func (app *kanbanBoardApp) saveDeliverableToFiles(artifactID string, folderID st
 // points at the same immutable blob, so renaming or deleting it never mutates
 // the source message.
 func (app *kanbanBoardApp) saveChatAttachmentToFiles(user *userAccount, sourceFileID string, folderID string, fileName string) (assistantFileRecord, error) {
+	return app.saveChatAttachmentToFilesBound(context.Background(), user, nil, sourceFileID, folderID, fileName)
+}
+
+func (app *kanbanBoardApp) saveChatAttachmentToFilesForPrincipal(ctx context.Context, user *userAccount, principal StrideE10TenantPrincipal, sourceFileID string, folderID string, fileName string) (assistantFileRecord, error) {
+	return app.saveChatAttachmentToFilesBound(ctx, user, &principal, sourceFileID, folderID, fileName)
+}
+
+func (app *kanbanBoardApp) saveChatAttachmentToFilesBound(ctx context.Context, user *userAccount, principal *StrideE10TenantPrincipal, sourceFileID string, folderID string, fileName string) (assistantFileRecord, error) {
 	if app == nil || app.memory == nil || user == nil {
 		return assistantFileRecord{}, fmt.Errorf("files are unavailable")
 	}
@@ -1177,7 +1227,11 @@ func (app *kanbanBoardApp) saveChatAttachmentToFiles(user *userAccount, sourceFi
 		if entry.Kind != meetingMemoryKindScoutChat || entry.ID != threadID {
 			continue
 		}
-		if normalizeAccountEmail(entry.Metadata["ownerEmail"]) == "" || !scoutChatThreadMetadataAllowsViewer(entry.Metadata, user.Email) {
+		allowed := normalizeAccountEmail(entry.Metadata["ownerEmail"]) != "" && scoutChatThreadMetadataAllowsViewer(entry.Metadata, user.Email)
+		if principal != nil {
+			allowed = scoutChatThreadMetadataAllowsPrincipal(entry.Metadata, *principal)
+		}
+		if !allowed {
 			app.memory.mu.Unlock()
 			return assistantFileRecord{}, errFileSaveSourceNotFound
 		}
@@ -1205,7 +1259,11 @@ func (app *kanbanBoardApp) saveChatAttachmentToFiles(user *userAccount, sourceFi
 	if !found {
 		return assistantFileRecord{}, errFileSaveSourceNotFound
 	}
-	if !app.committedChatAttachmentAuthorized(user.Email, threadID, messageID, source) {
+	authorizedSource := app.committedChatAttachmentAuthorized(user.Email, threadID, messageID, source)
+	if principal != nil {
+		authorizedSource = app.committedChatAttachmentAuthorizedForPrincipal(ctx, *principal, thread, messageID, source)
+	}
+	if !authorizedSource {
 		return assistantFileRecord{}, errFileSaveSourceNotFound
 	}
 
@@ -1215,7 +1273,11 @@ func (app *kanbanBoardApp) saveChatAttachmentToFiles(user *userAccount, sourceFi
 		return assistantFileRecord{}, err
 	}
 	folderID = strings.TrimSpace(folderID)
-	if folderID != "" && !fileFolderExists(folderID) {
+	folderAllowed := folderID == "" || fileFolderExists(folderID)
+	if principal != nil {
+		folderAllowed = folderID == "" || fileFolderManagedByPrincipal(folderID, *principal)
+	}
+	if !folderAllowed {
 		return assistantFileRecord{}, errFileFolderNotFound
 	}
 
@@ -1243,6 +1305,10 @@ func (app *kanbanBoardApp) saveChatAttachmentToFiles(user *userAccount, sourceFi
 		"sourceMessageId":    messageID,
 		"sourceFileRevision": strings.TrimSpace(source.SourceRevision),
 	}
+	if principal != nil {
+		metadata["tenantId"] = principal.TenantID
+		metadata["uploaderPersonId"] = principal.PersonID
+	}
 	if brainStatus == fileBrainStatusIngested {
 		metadata["ingestedAt"] = now.Format(time.RFC3339Nano)
 	}
@@ -1261,8 +1327,50 @@ func (app *kanbanBoardApp) saveChatAttachmentToFiles(user *userAccount, sourceFi
 		}
 	}
 	row := fileRecordFromEntry(entry)
+	if principal != nil {
+		row.UploaderEmail = ""
+		row.CanDelete = true
+	}
 	row.FolderID = folderID
 	return row, nil
+}
+
+func scoutChatThreadMetadataAllowsPrincipal(metadata map[string]string, principal StrideE10TenantPrincipal) bool {
+	if metadata == nil || metadata["tenantId"] != principal.TenantID || !strideIdentifier(principal.PersonID) {
+		return false
+	}
+	visibility := normalizeScoutChatVisibility(metadata["visibility"])
+	owner := strings.TrimSpace(metadata["ownerPersonId"])
+	switch visibility {
+	case scoutChatVisibilityPrivate:
+		return owner == principal.PersonID
+	case scoutChatVisibilityPublic:
+		return true
+	default:
+		for _, member := range strings.FieldsFunc(metadata["memberPersonIds"], func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' }) {
+			if member == principal.PersonID {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+func (app *kanbanBoardApp) committedChatAttachmentAuthorizedForPrincipal(_ context.Context, principal StrideE10TenantPrincipal, thread scoutChatThreadRecord, messageID string, file scoutChatFileAttachment) bool {
+	if app == nil || !strideIdentifier(principal.PersonID) || strings.TrimSpace(file.SourceID) == "" || strings.TrimSpace(file.Ref) == "" {
+		return false
+	}
+	app.pendingAttachmentUploadsMu.Lock()
+	grant, ok := app.pendingAttachmentUploads[strings.TrimSpace(file.SourceID)]
+	storeHealthy := app.attachmentSourceStoreErr == nil
+	app.pendingAttachmentUploadsMu.Unlock()
+	if !storeHealthy || !ok || strings.TrimSpace(grant.OriginFileID) != "" || grant.State != attachmentSourceCommitted || grant.CommittedMessageID != strings.TrimSpace(messageID) ||
+		grant.SourceRevision != strings.TrimSpace(file.SourceRevision) || grant.Ref != strings.TrimSpace(file.Ref) || grant.DestinationID != strings.TrimSpace(thread.ID) ||
+		grant.DestinationRevision != scoutChatAttachmentDestinationRevision(thread) {
+		return false
+	}
+	meta, err := blobStatForRef(grant.Ref)
+	return err == nil && attachmentSourceRevision(grant.Ref, meta) == grant.SourceRevision && strings.ToLower(strings.TrimSpace(meta.Mime)) == grant.Mime && meta.Size == grant.Size
 }
 
 func (app *kanbanBoardApp) saveDeliverableToFilesNamed(artifactID string, folderID string, fileName string, actor string) (assistantFileRecord, error) {
@@ -1394,6 +1502,16 @@ func assistantFileSaveHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusServiceUnavailable, "files are unavailable")
 		return
 	}
+	if !strideE10TenantSurfaceUseBound(r.Context(), StrideE10TenantSurfaceDrive) {
+		err := withStrideE10TenantRequestUse(r, StrideE10TenantSurfaceDrive, func(ctx context.Context, _ *StrideE10TenantPrincipal) error {
+			assistantFileSaveHandler(w, r.WithContext(ctx))
+			return nil
+		})
+		if err != nil {
+			writeStrideE10TenantHookError(w, err, "files are unavailable")
+		}
+		return
+	}
 
 	payload := struct {
 		ArtifactID   string `json:"artifactId"`
@@ -1414,7 +1532,11 @@ func assistantFileSaveHandler(w http.ResponseWriter, r *http.Request) {
 	var row assistantFileRecord
 	var err error
 	if payload.SourceFileID != "" {
-		row, err = kanbanApp.saveChatAttachmentToFiles(user, payload.SourceFileID, payload.FolderID, payload.FileName)
+		if principal, canonical := strideE10TenantPrincipalFromContext(r.Context()); canonical {
+			row, err = kanbanApp.saveChatAttachmentToFilesForPrincipal(r.Context(), user, principal, payload.SourceFileID, payload.FolderID, payload.FileName)
+		} else {
+			row, err = kanbanApp.saveChatAttachmentToFiles(user, payload.SourceFileID, payload.FolderID, payload.FileName)
+		}
 	} else {
 		artifact, ok := authorizedArtifactForActions(r.Context(), user, payload.ArtifactID, ACLReadContent, ACLWrite)
 		if !ok {

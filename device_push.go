@@ -48,6 +48,7 @@ var expoPushSendURL = "https://exp.host/--/api/v2/push/send"
 
 type deviceTokenRecord struct {
 	TenantID    string `json:"tenantId,omitempty"`
+	PersonID    string `json:"personId,omitempty"`
 	UserEmail   string `json:"userEmail"`
 	Token       string `json:"token"`
 	Platform    string `json:"platform,omitempty"`
@@ -61,6 +62,7 @@ type deviceTokenRecord struct {
 // session/account in the meantime.
 type devicePushTarget struct {
 	TenantID    string
+	PersonID    string
 	UserEmail   string
 	Token       string
 	SessionHash string
@@ -136,6 +138,7 @@ func loadDeviceTokenStoreFile() deviceTokenStoreData {
 	}
 	for index := range state.Tokens {
 		state.Tokens[index].TenantID = strings.TrimSpace(state.Tokens[index].TenantID)
+		state.Tokens[index].PersonID = strings.TrimSpace(state.Tokens[index].PersonID)
 		state.Tokens[index].UserEmail = normalizeAccountEmail(state.Tokens[index].UserEmail)
 		state.Tokens[index].Token = strings.TrimSpace(state.Tokens[index].Token)
 		state.Tokens[index].SessionHash = strings.TrimSpace(state.Tokens[index].SessionHash)
@@ -172,6 +175,7 @@ func snapshotDeviceTokenStore() deviceTokenStoreData {
 // message out N times to a single phone.
 func upsertDeviceToken(record deviceTokenRecord) error {
 	record.TenantID = strings.TrimSpace(record.TenantID)
+	record.PersonID = strings.TrimSpace(record.PersonID)
 	record.UserEmail = normalizeAccountEmail(record.UserEmail)
 	record.Token = strings.TrimSpace(record.Token)
 	record.SessionHash = strings.TrimSpace(record.SessionHash)
@@ -184,21 +188,35 @@ func upsertDeviceToken(record deviceTokenRecord) error {
 	// cannot wait behind revocation and then insert a stale binding afterward.
 	devicePushAuthorityMu.Lock()
 	defer devicePushAuthorityMu.Unlock()
-	if !validExpoPushToken(record.Token) || !deviceSessionAuthorityMatches(record, time.Now().UTC()) {
+	if !validExpoPushToken(record.Token) {
 		return fmt.Errorf("device registration requires an exact live member session authority")
 	}
-	return mutateDeviceTokenStoreLocked(func(state *deviceTokenStoreData) {
-		for index, existing := range state.Tokens {
-			if existing.Token != record.Token {
-				continue
+	persist := func() error {
+		return mutateDeviceTokenStoreLocked(func(state *deviceTokenStoreData) {
+			for index, existing := range state.Tokens {
+				if existing.Token != record.Token {
+					continue
+				}
+				// A token that moved to a different account replaces the old
+				// binding outright — otherwise the previous user's messages keep
+				// arriving on a phone someone else has signed into.
+				state.Tokens[index] = record
+				return
 			}
-			// A token that moved to a different account replaces the old
-			// binding outright — otherwise the previous user's messages keep
-			// arriving on a phone someone else has signed into.
-			state.Tokens[index] = record
-			return
+			state.Tokens = append(state.Tokens, record)
+		})
+	}
+	return withStrideE10TenantRuntimeAuthority(context.Background(), StrideE10TenantSurfacePushDelivery, record.SessionHash, func() error {
+		if !deviceSessionAuthorityMatches(record, time.Now().UTC()) {
+			return fmt.Errorf("device registration requires an exact live member session authority")
 		}
-		state.Tokens = append(state.Tokens, record)
+		return persist()
+	}, func(principal StrideE10TenantPrincipal) error {
+		if record.TenantID != principal.TenantID || record.PersonID != "" && record.PersonID != principal.PersonID {
+			return ErrStrideE10TenantAuthorityStale
+		}
+		record.PersonID = principal.PersonID
+		return persist()
 	})
 }
 
@@ -253,12 +271,12 @@ func pruneDeviceTokenBindings(targets []devicePushTarget) {
 }
 
 func devicePushTargetFromRecord(record deviceTokenRecord) devicePushTarget {
-	return devicePushTarget{TenantID: strings.TrimSpace(record.TenantID), UserEmail: normalizeAccountEmail(record.UserEmail),
+	return devicePushTarget{TenantID: strings.TrimSpace(record.TenantID), PersonID: strings.TrimSpace(record.PersonID), UserEmail: normalizeAccountEmail(record.UserEmail),
 		Token: strings.TrimSpace(record.Token), SessionHash: strings.TrimSpace(record.SessionHash)}
 }
 
 func devicePushTargetKey(target devicePushTarget) string {
-	return target.TenantID + "\x00" + target.UserEmail + "\x00" + target.Token + "\x00" + target.SessionHash
+	return target.TenantID + "\x00" + target.PersonID + "\x00" + target.UserEmail + "\x00" + target.Token + "\x00" + target.SessionHash
 }
 
 // deviceSessionAuthorityMatches is the only eligibility rule for native push.
@@ -403,6 +421,34 @@ func deviceTargetsForRecord(record notificationRecord) []devicePushTarget {
 	return targets
 }
 
+// deviceTargetsForStrideE10Cutover deliberately refuses legacy targeted or
+// exclusion-by-email records. A cutover delivery can start only from a
+// canonical tenant-bound broadcast and a token carrying an opaque person ID;
+// the final current-session/membership decision is made later inside the
+// resolver callback immediately around the Expo effect.
+func deviceTargetsForStrideE10Cutover(record notificationRecord) []devicePushTarget {
+	tenantID := strings.TrimSpace(record.TenantID)
+	if !strideIdentifier(tenantID) || normalizeAccountEmail(record.UserEmail) != "" || len(record.ExcludedUserEmails) != 0 {
+		return nil
+	}
+	state := snapshotDeviceTokenStore()
+	pushState := snapshotPushStore()
+	targets := make([]devicePushTarget, 0, len(state.Tokens))
+	for _, token := range state.Tokens {
+		if strings.TrimSpace(token.TenantID) != tenantID || !strideIdentifier(strings.TrimSpace(token.PersonID)) {
+			continue
+		}
+		// Email-keyed preferences can only suppress a canonical candidate; they
+		// never establish tenant/person authority in cutover.
+		prefs := resolvePushPrefs(pushState, token.UserEmail)
+		if !prefs.Kinds[record.Kind] || deviceLaneHonorsOnlyWhenAway && prefs.OnlyWhenAway && userHasLiveKanbanSocket(token.UserEmail) || threadMutedForUser(token.UserEmail, record) {
+			continue
+		}
+		targets = append(targets, devicePushTargetFromRecord(token))
+	}
+	return targets
+}
+
 // sendExpoPushBatch posts one batch and returns its tickets.
 func sendExpoPushBatch(ctx context.Context, messages []expoPushMessage) ([]expoPushTicket, error) {
 	payload, err := json.Marshal(messages)
@@ -443,7 +489,14 @@ func deliverDevicePushForRecord(record notificationRecord) {
 	dead := func() []devicePushTarget {
 		devicePushAuthorityMu.RLock()
 		defer devicePushAuthorityMu.RUnlock()
-		targets := deviceTargetsForRecord(record)
+		converter := currentStrideE10TenantRuntimeConverter()
+		cutover := converter != nil && converter.gate != nil && converter.gate.Enabled() && converter.mode == StrideE10TenantConversionCutover
+		var targets []devicePushTarget
+		if cutover {
+			targets = deviceTargetsForStrideE10Cutover(record)
+		} else {
+			targets = deviceTargetsForRecord(record)
+		}
 		if len(targets) == 0 {
 			return nil
 		}
@@ -452,6 +505,34 @@ func deliverDevicePushForRecord(record notificationRecord) {
 		defer cancel()
 
 		dead := []devicePushTarget{}
+		if cutover {
+			for _, target := range targets {
+				target := target
+				_ = withStrideE10TenantRuntimeAuthority(ctx, StrideE10TenantSurfacePushDelivery, target.SessionHash, nil, func(principal StrideE10TenantPrincipal) error {
+					if principal.TenantID != target.TenantID || principal.PersonID != target.PersonID {
+						return ErrStrideE10TenantAuthorityStale
+					}
+					messages := expoPushMessagesFor(record, []devicePushTarget{target})
+					if len(messages) != 1 {
+						return ErrStrideE10TenantAuthorityStale
+					}
+					tickets, err := sendExpoPushBatch(ctx, messages)
+					if err != nil {
+						return err
+					}
+					dead = append(dead, applyExpoPushTickets([]devicePushTarget{target}, tickets)...)
+					return nil
+				})
+			}
+			return dead
+		}
+		if converter != nil && converter.gate != nil && converter.gate.Enabled() && converter.mode == StrideE10TenantConversionShadow {
+			for _, target := range targets {
+				// Observation failures never suppress, filter, or grant a legacy
+				// delivery. The unchanged legacy recheck below remains authority.
+				_, _ = converter.Resolve(ctx, StrideE10TenantSurfacePushDelivery, target.SessionHash)
+			}
+		}
 		for start := 0; start < len(targets); start += expoPushMaxBatch {
 			end := start + expoPushMaxBatch
 			if end > len(targets) {

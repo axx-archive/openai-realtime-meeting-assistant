@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -45,12 +47,13 @@ func broadcastNavigationActions(originKind string, actions []osAssistantAction) 
 }
 
 type scoutAgentThread struct {
-	ID       string              `json:"id"`
-	Mode     string              `json:"mode"`
-	Query    string              `json:"query"`
-	Status   string              `json:"status"`
-	Artifact meetingMemoryEntry  `json:"artifact"`
-	Actions  []osAssistantAction `json:"actions,omitempty"`
+	ID              string                            `json:"id"`
+	Mode            string                            `json:"mode"`
+	Query           string                            `json:"query"`
+	Status          string                            `json:"status"`
+	Artifact        meetingMemoryEntry                `json:"artifact"`
+	Actions         []osAssistantAction               `json:"actions,omitempty"`
+	TenantAuthority *StrideE10TenantAuthorityEnvelope `json:"-"`
 }
 
 // startAgentThreadAsync is assigned in init (not at declaration) to break the
@@ -183,6 +186,47 @@ func (app *kanbanBoardApp) launchAgentThreadWithOrigin(mode string, query string
 // goal-spec metadata. Existing callers route through the thin wrapper above with
 // an empty spec, so their behavior is unchanged.
 func (app *kanbanBoardApp) launchAgentThreadWithSpec(mode string, query string, createdBy string, origin map[string]string, spec agentThreadGoalSpec) (scoutAgentThread, error) {
+	if strideE10TenantCutoverEnabled() {
+		return scoutAgentThread{}, ErrStrideE10TenantAuthorityStale
+	}
+	return app.launchAgentThreadWithSpecBound(mode, query, createdBy, origin, spec, "", nil)
+}
+
+// launchAgentThreadWithSpecAndTenantAuthority is the server-ingress seam main
+// and tool adapters must use in cutover. runID is minted before the envelope so
+// its purpose MAC is bound to this exact durable work item.
+func (app *kanbanBoardApp) launchAgentThreadWithSpecAndTenantAuthority(mode string, query string, createdBy string, origin map[string]string, spec agentThreadGoalSpec, runID string, envelope *StrideE10TenantAuthorityEnvelope) (scoutAgentThread, error) {
+	mode, query, runID = normalizeAgentThreadMode(mode), canonicalizeBoardText(query), strings.TrimSpace(runID)
+	if !strideE10TenantCutoverEnabled() || envelope == nil || runID == "" || strings.Contains(createdBy, "@") || envelope.Purpose != StrideE10TenantAuthorityPurposeForScoutThread(runID, mode, query) {
+		return scoutAgentThread{}, ErrStrideE10TenantAuthorityStale
+	}
+	for key, value := range origin {
+		if strings.Contains(value, "@") || oneOf(strings.ToLower(strings.TrimSpace(key)), "requestedby", "createdby", "owneremail", "useremail") {
+			return scoutAgentThread{}, ErrStrideE10TenantAuthorityInvalid
+		}
+	}
+	var thread scoutAgentThread
+	err := withStrideE10TenantEnvelopeAuthority(context.Background(), envelope, StrideE10TenantSurfaceScout, time.Now().UTC(), func(principal StrideE10TenantPrincipal) error {
+		// The current legacy board, memory, File, chat, and artifact-controller
+		// stores cannot project an exact person+organization view. Do not turn a
+		// valid envelope into permission to read their singleton snapshots. Main
+		// ingress remains pending until it can install a canonical tenant-scoped
+		// source/controller adapter; fail before scaffold creation or broadcast.
+		return strideE10ScoutCanonicalExecutionUnavailable(principal, envelope)
+	})
+	return thread, err
+}
+
+func strideE10ScoutCanonicalExecutionUnavailable(principal StrideE10TenantPrincipal, envelope *StrideE10TenantAuthorityEnvelope) error {
+	if envelope == nil || principal.PersonID != envelope.PersonID || principal.ActiveOrganizationID != envelope.OrganizationID ||
+		principal.OrganizationMembershipID != envelope.MembershipID || principal.OrganizationMembershipRev != envelope.MembershipRevision ||
+		principal.ActiveOrganizationSessionRev != envelope.SessionRevision || principal.AuthorityGeneration != envelope.AuthorityGeneration {
+		return ErrStrideE10TenantAuthorityStale
+	}
+	return ErrStrideE10TenantAuthorityStale
+}
+
+func (app *kanbanBoardApp) launchAgentThreadWithSpecBound(mode string, query string, createdBy string, origin map[string]string, spec agentThreadGoalSpec, reservedRunID string, envelope *StrideE10TenantAuthorityEnvelope) (scoutAgentThread, error) {
 	mode = normalizeAgentThreadMode(mode)
 	if mode == "" {
 		return scoutAgentThread{}, fmt.Errorf("thread mode is required")
@@ -192,7 +236,10 @@ func (app *kanbanBoardApp) launchAgentThreadWithSpec(mode string, query string, 
 		return scoutAgentThread{}, fmt.Errorf("thread query is required")
 	}
 
-	threadID := fmt.Sprintf("agent-thread-%s-%d", mode, time.Now().UnixNano())
+	threadID := strings.TrimSpace(reservedRunID)
+	if threadID == "" {
+		threadID = fmt.Sprintf("agent-thread-%s-%d", mode, time.Now().UnixNano())
+	}
 	worker := configuredAgentThreadWorkerName()
 	requester := firstNonEmptyString(strings.TrimSpace(origin["requestedBy"]), createdBy)
 	content := buildAgentThreadScaffold(mode, query, app.snapshotState(), app.agentThreadMemory(context.Background(), requester, origin, spec.ContextRefs, 12))
@@ -216,6 +263,12 @@ func (app *kanbanBoardApp) launchAgentThreadWithSpec(mode string, query string, 
 		"workerBoundary":   agentThreadWorkerBoundary(worker),
 		"latestThreadRun":  threadID,
 		"workflowProfiles": strings.Join(coworkerWorkflowProfiles(query), ","),
+	}
+	if envelope != nil {
+		if err := app.persistStrideE10ScoutAuthority(threadID, envelope); err != nil {
+			return scoutAgentThread{}, err
+		}
+		metadata["tenantAuthorityRef"] = threadID
 	}
 	for key, value := range agentThreadModeMetadata(mode) {
 		metadata[key] = value
@@ -263,12 +316,13 @@ func (app *kanbanBoardApp) launchAgentThreadWithSpec(mode string, query string, 
 
 	actions := app.osAssistantActions(query, mode, artifact)
 	thread := scoutAgentThread{
-		ID:       threadID,
-		Mode:     mode,
-		Query:    query,
-		Status:   "running",
-		Artifact: artifact,
-		Actions:  actions,
+		ID:              threadID,
+		Mode:            mode,
+		Query:           query,
+		Status:          "running",
+		Artifact:        artifact,
+		Actions:         actions,
+		TenantAuthority: envelope,
 	}
 
 	broadcastSignedInKanbanEvent("memory", nil)
@@ -449,11 +503,88 @@ func agentThreadDisplayTitle(body string, fallback string) string {
 	return derived
 }
 
+func (app *kanbanBoardApp) strideE10ScoutAuthorityPath(runID string) (string, error) {
+	if app == nil || app.memory == nil || !strideIdentifier(runID) || strings.TrimSpace(app.memory.path) == "" {
+		return "", ErrStrideE10TenantAuthorityInvalid
+	}
+	return filepath.Join(filepath.Dir(app.memory.path), "stride-e10-scout-authority", runID+".json"), nil
+}
+
+func (app *kanbanBoardApp) persistStrideE10ScoutAuthority(runID string, envelope *StrideE10TenantAuthorityEnvelope) error {
+	path, err := app.strideE10ScoutAuthorityPath(runID)
+	if err != nil || envelope == nil || validateStrideE10TenantAuthorityEnvelope(context.Background(), *envelope, time.Now().UTC()) != nil {
+		return ErrStrideE10TenantAuthorityInvalid
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return ErrStrideE10TenantAuthorityInvalid
+	}
+	if err := writeJSONFileAtomically(path, "Scout tenant authority", envelope); err != nil {
+		return ErrStrideE10TenantAuthorityInvalid
+	}
+	return nil
+}
+
+func (app *kanbanBoardApp) strideE10ScoutThreadEnvelope(thread scoutAgentThread) (*StrideE10TenantAuthorityEnvelope, error) {
+	if thread.TenantAuthority != nil {
+		copy := *thread.TenantAuthority
+		return &copy, nil
+	}
+	ref := strings.TrimSpace(thread.Artifact.Metadata["tenantAuthorityRef"])
+	path, err := app.strideE10ScoutAuthorityPath(ref)
+	if err != nil {
+		return nil, ErrStrideE10TenantAuthorityStale
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, ErrStrideE10TenantAuthorityStale
+	}
+	var envelope StrideE10TenantAuthorityEnvelope
+	if json.Unmarshal([]byte(raw), &envelope) != nil {
+		return nil, ErrStrideE10TenantAuthorityStale
+	}
+	return &envelope, nil
+}
+
+// strideE10ScoutThreadEnvelope is the in-memory provider handoff used by the
+// existing Codex queue seam. Durable/restart reads must use the app method so
+// they resolve the private sidecar rather than public artifact metadata.
+func strideE10ScoutThreadEnvelope(thread scoutAgentThread) (*StrideE10TenantAuthorityEnvelope, error) {
+	if thread.TenantAuthority == nil {
+		return nil, ErrStrideE10TenantAuthorityStale
+	}
+	copy := *thread.TenantAuthority
+	return &copy, nil
+}
+
+func (app *kanbanBoardApp) quarantineScoutAgentThread(thread scoutAgentThread) {
+	if app == nil || strings.TrimSpace(thread.Artifact.ID) == "" {
+		return
+	}
+	_, _, _ = app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", thread.Artifact.Text, "tenant_authority_quarantine", map[string]string{
+		"status": "error", "threadStatus": "error", "goalStatus": "needs_attention", "currentStage": "tenant_authority_quarantine", "progressPercent": "0", "reviewGate": "blocked", "error": ErrStrideE10TenantAuthorityStale.Error(), "completedAt": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+}
+
 func (app *kanbanBoardApp) runAgentThread(thread scoutAgentThread) {
+	if !strideE10TenantCutoverEnabled() {
+		app.runAgentThreadAuthorized(thread)
+		return
+	}
+	envelope, err := app.strideE10ScoutThreadEnvelope(thread)
+	if err != nil || envelope.Purpose != StrideE10TenantAuthorityPurposeForScoutThread(thread.ID, thread.Mode, thread.Query) {
+		return
+	}
+	err = withStrideE10TenantEnvelopeAuthority(context.Background(), envelope, StrideE10TenantSurfaceScout, time.Now().UTC(), func(principal StrideE10TenantPrincipal) error {
+		return strideE10ScoutCanonicalExecutionUnavailable(principal, envelope)
+	})
+	_ = err
+}
+
+func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 	ctx, cancel := agentThreadRequestContext(context.Background(), thread)
 	defer cancel()
 
-	workerResult, err := app.produceAgentThreadArtifactWithWorker(ctx, thread, createOpenAITextResponse)
+	workerResult, err := app.produceAgentThreadArtifactWithWorkerAuthorized(ctx, thread, createOpenAITextResponse)
 	output := workerResult.Text
 	if err == nil && !workerResult.Terminal {
 		app.updateQueuedAgentThread(thread, workerResult)
@@ -1039,6 +1170,21 @@ type agentThreadWorkerResult struct {
 // wrapper providers emit their underlying result verbatim, so codex/openai
 // paths are byte-for-byte unchanged; only the anthropic path is new.
 func (app *kanbanBoardApp) produceAgentThreadArtifactWithWorker(ctx context.Context, thread scoutAgentThread, responder openAITextResponder) (agentThreadWorkerResult, error) {
+	if !strideE10TenantCutoverEnabled() {
+		return app.produceAgentThreadArtifactWithWorkerAuthorized(ctx, thread, responder)
+	}
+	envelope, err := app.strideE10ScoutThreadEnvelope(thread)
+	if err != nil || envelope.Purpose != StrideE10TenantAuthorityPurposeForScoutThread(thread.ID, thread.Mode, thread.Query) {
+		return agentThreadWorkerResult{}, ErrStrideE10TenantAuthorityStale
+	}
+	var result agentThreadWorkerResult
+	err = withStrideE10TenantEnvelopeAuthority(ctx, envelope, StrideE10TenantSurfaceScout, time.Now().UTC(), func(principal StrideE10TenantPrincipal) error {
+		return strideE10ScoutCanonicalExecutionUnavailable(principal, envelope)
+	})
+	return result, err
+}
+
+func (app *kanbanBoardApp) produceAgentThreadArtifactWithWorkerAuthorized(ctx context.Context, thread scoutAgentThread, responder openAITextResponder) (agentThreadWorkerResult, error) {
 	var err error
 	thread, err = app.reauthorizeAgentThreadProfile(thread)
 	if err != nil {

@@ -1,0 +1,176 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_w3_tenant_shadow_migration",
+  "observedAt": "2026-08-08T22:54:41Z",
+  "status": "deterministic_verified",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "d4c827c2adc7e1c6258f843e20fd4f9256c7310b",
+    "dirtyWorktreeCheckpoint": true,
+    "selectedFileSha256ManifestIsAuthoritative": true,
+    "strideSiteExcluded": true,
+    "gitCommitPushDeployProductionProviderTestFlightOrCohortMutationPerformed": false
+  },
+  "tenantRuntime": {
+    "productionBootstrapModesAccepted": ["off", "shadow"],
+    "productionCutoverRejectedUntilW4DurabilityBoundary": true,
+    "activeSurfaces": [
+      "auth_session",
+      "http_closed_canonical_w2_allowlist",
+      "drive",
+      "push_delivery",
+      "notification",
+      "artifact_acl"
+    ],
+    "pendingAndCutoverUnavailableSurfaces": [
+      "websocket",
+      "chat",
+      "room_admission",
+      "board",
+      "work_queue",
+      "worker",
+      "scout",
+      "brain",
+      "product_context",
+      "marketplace",
+      "cache"
+    ],
+    "authorityContract": {
+      "sessionPersonOrganizationMembershipAndGenerationServerResolved": true,
+      "bodyFreeManagedMACActionBoundEnvelope": true,
+      "synchronousUseHeldThroughFinalEffect": true,
+      "legacyEmailOrSingletonCutoverFallback": false,
+      "explicitZeroOrganizationSessionBoundedToAuthAndOnboarding": true,
+      "passwordNativeAndPasskeyCanonicalSessionMint": true,
+      "staleInternalWorkerCallbacksQuarantinedWithZeroEffects": true,
+      "renderCallbackWithoutEnvelopeUnavailable": true
+    }
+  },
+  "networkShadow": {
+    "publishedVisibleFieldsOnly": true,
+    "sharedW1SemanticKeys": [
+      "decoded_scalar",
+      "string_array_member",
+      "raw_visible_commitment",
+      "verification_label",
+      "server_time_freshness"
+    ],
+    "hiddenCommitmentsAffectEligibilityParityIndexOrResult": false,
+    "callerAndRowAuthorityHeldThroughFinalResultCopy": true,
+    "transientResolverFailurePurges": false,
+    "explicitTerminalAuthorityFencesSynchronously": true,
+    "snapshotManagedMACKeyVersionGenerationAndRestoreReconciliation": true,
+    "derivedPurge": {
+      "exactStores": 13,
+      "durableStates": ["queued", "running", "failed", "completed"],
+      "restartRetryAndBoundedEscalation": true
+    }
+  },
+  "offlineMigrationRehearsal": {
+    "productionCallsites": 0,
+    "explicitOfflineSourceAndDisposableTargetCapabilities": true,
+    "canonicalManifest": {
+      "organizations": 1,
+      "persons": 7,
+      "memberships": 7,
+      "totalTargetRows": 15,
+      "initialOwner": "AJ",
+      "initialOwnerCount": 1,
+      "stableOpaqueIdentifiers": true
+    },
+    "sourcePreservation": {
+      "credentialsProfilesAvatarsPasskeysSessionsAndExtras": true,
+      "guestAndOrphanSessionsPrivateAndByteExact": true
+    },
+    "pathSafety": {
+      "canonicalSymlinkAndHardlinkNonAliasGate": true,
+      "sourceStateBackupPublicJournalAndTargetSeparated": true,
+      "rejectionLeavesSourceAndTargetBytesUnchanged": true
+    },
+    "receipts": {
+      "privateStateManagedMAC": true,
+      "separateBodyMinimizedPublicDomainMAC": true,
+      "durableApplyReadbackRollback": true,
+      "lostResponseFreshInstanceReplayAppliesExactlyOnce": true,
+      "crashPhaseRestoreJournal": true,
+      "currentKeyResealAndRetiredKeyRecovery": true
+    }
+  },
+  "verification": {
+    "fullRepositorySuite": {
+      "command": "go test ./... -count=1",
+      "result": "PASS",
+      "rootPackageElapsedSeconds": 443.976
+    },
+    "tenantRuntimeFocusedNormal": "PASS",
+    "tenantRuntimeFocusedRace": "PASS",
+    "networkShadowFocusedNormal": "PASS",
+    "networkShadowFocusedRace": "PASS",
+    "migrationFocusedNormal": {
+      "result": "PASS",
+      "packageElapsedSeconds": 19.272
+    },
+    "migrationSelectedRace": {
+      "result": "PASS",
+      "packageElapsedSeconds": 117.463
+    },
+    "w1FocusedNormal": "PASS",
+    "w1FocusedRace": "PASS",
+    "w2FocusedNormal": "PASS",
+    "w2FocusedRace": "PASS",
+    "disposablePostgres": "PASS",
+    "mobileTests": "457/457 PASS",
+    "mobileTypecheck": "PASS",
+    "webInlineScripts": "4/4 PASS",
+    "goVetAll": "PASS",
+    "diffCheck": "PASS",
+    "immutableStrideProductHTTPSha256": "3c05febf447a1db0e8c8add19d99d561ae0c722fc8d7ecdf7f14c2fd3882fab1"
+  },
+  "independentReview": {
+    "mode": "critic_loop",
+    "tenantRuntimeVerdict": "PASS",
+    "networkShadowVerdict": "PASS",
+    "migrationVerdict": "PASS",
+    "blockersRemaining": 0,
+    "majorFindingsRemaining": 0
+  },
+  "activationBoundary": {
+    "productionTenantCutoverEnabled": false,
+    "pendingSingletonDependentSurfacesClaimedFunctional": false,
+    "nextWave": "E10-W4",
+    "requiresExplicitAJAuthority": true,
+    "requiresFreshExactLiveManifestAndBackups": true
+  },
+  "fileSha256": {
+    "docs/plans/stride-next-evolution-master-plan.md": "f24dea843dac549ae388a81ec8793467b1636a3a1b5cd5592787bf79eec8b37d",
+    "main.go": "99a9a3b6f742f174fcfc9bcbfb1cbe33a2f9742ad23fc5269175ff3819b4368f",
+    "auth_http.go": "e57e47ad2ab6db09240feb06d76e2a6ce977adbb3464c61f3aae2e136c317d25",
+    "passkeys.go": "cf712a597ffbb0cae9341864a142f404802da1caf41aec2d725fd70efa2d0fed",
+    "codex_runner_queue.go": "fe69a707b50f17990931230fa734d09114e402b18224e6d9bd9d61dbce2cf5c6",
+    "codex_runner_queue_test.go": "6dd53e993abdf4e7f7336659b2dac8511d86ef18e1d5221e0640c7ef27de02bc",
+    "device_push.go": "82553ffdd5ffcc9fc35c7d88920ff285ad9bebf29a0db029c83e587a582855ba",
+    "notifications.go": "d9165a57f0dbfdf36a3cf621543214452cf1cc313d470154cdbb5433de422a91",
+    "web_push.go": "b441dbc5029a635574745c9cd3ba8444aea990e028fd20635f587dc069d42617",
+    "files.go": "c00d3e2e7521ead3a36a4655328c373e753807e392d7b8a570c4144963119bc6",
+    "file_folders.go": "f5865e10490236e6b4f304e5af264e99bf05565c966d91a7e0aeac0f47beff3e",
+    "artifact_object_authorizer.go": "6325165b4b66b39a287535e9dd963eb250ca23990e115ef1b5e000b5b1387967",
+    "share_links.go": "a18a61ac5e53dbce66b1407cb6f741c8c34c9a5a422745f00ec1e076e19c354b",
+    "stride_e10_tenant_conversion.go": "bd6a05b3efaffd19ca81b804368bb0417e8bb8d5d7636548578efc2bc0d64ccf",
+    "stride_e10_tenant_authority_envelope.go": "662e99b068bbdb826fe2a07bfdce2becbe9672475426516dbe2e6dfe34c918e6",
+    "stride_e10_tenant_main_runtime.go": "218928172be10d161b55934670b61b7e59712d0601c18430238bec4eb366017a",
+    "stride_e10_tenant_runtime_bootstrap.go": "007f7014b3b31b32892b4d1e51ea35b047939afb68eb3aefa31aa2fc46fee064",
+    "stride_e10_tenant_runtime_hooks.go": "e64b92a1a8ad9000bedb1112b52eeb96628cbfbbfd6f1f8d0c8c577af07c7dac",
+    "stride_e10_tenant_main_runtime_test.go": "74f7fb86fd54677c4b0e39f3cdc387bde4e18933bb1bb67b006bf1404c07c85d",
+    "stride_e10_tenant_runtime_bootstrap_test.go": "0eed856e2790409aad97b6b5ae238df50960d9ca7e7eb2f3b6ecad9d241d2998",
+    "stride_e10_tenant_runtime_hooks_test.go": "a602e05c677111ab5de3779bf03fdb655eb03a5735ac8666d0cc106b37dbf72a",
+    "stride_network_authority.go": "92311fe4c928d7b4171b32dc043986db1f3d90955480085bf06f8bccade51ddf",
+    "stride_network_authority_test.go": "492de248b117e8d9d99270bad6e709da1c2eb38080792bdc0b96a89ee263a880",
+    "stride_network_shadow.go": "05e3150d774a41b718f4099a973b3a91219b890d271d49ab888dcb35d9669551",
+    "stride_network_shadow_test.go": "73a3726f2e2e4200d6cc55dd898b5e849349d84c212cf2e31942ec5765b8242b",
+    "stride_e10_migration_rehearsal.go": "b5d10e8e139d7c4010ea6d839d74bca8753f7d29e97a493882b04ff9529b3e87",
+    "stride_e10_migration_rehearsal_test.go": "94bd4826489514d564baee0447828a0166ee18e367a1785f82b0faf205cb1bb6",
+    "stride_e10_migration_disposable_target.go": "f8523e8dd22fbd56253351a94c6380ec3d0a8b2cfc5db01c684b599ebf603e3d",
+    "stride_e10_migration_disposable_target_test.go": "f96543a5ac0cf4c54ed6444f6258ce3d34f7531d5a461c9ddbf45f007a6ff30a",
+    "internal/dr/postgres.go": "d4afe3eeb3f44028870633636adde08462158582500422126ddb7ad91575e334"
+  }
+}

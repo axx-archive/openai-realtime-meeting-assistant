@@ -31,6 +31,7 @@ package main
 // model calls, no sidecar.
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -72,22 +73,27 @@ type shareLinkRecord struct {
 	ArtifactID string `json:"artifactId"`
 	// Token is legacy-only. Rows containing plaintext credentials fail closed;
 	// new credentials are returned once and only TokenHash is persisted.
-	Token         string `json:"token,omitempty"`
-	TokenHash     string `json:"tokenHash,omitempty"`
-	RawToken      string `json:"-"`
-	TenantID      string `json:"tenantId,omitempty"`
-	ObjectType    string `json:"objectType,omitempty"`
-	Revision      int    `json:"revision,omitempty"`
-	ContentDigest string `json:"contentDigest,omitempty"`
-	Action        string `json:"action,omitempty"`
-	Status        string `json:"status"`
-	CreatedBy     string `json:"createdBy"`
-	CreatedAt     string `json:"createdAt"`
-	ExpiresAt     string `json:"expiresAt"`
-	RevokedBy     string `json:"revokedBy,omitempty"`
-	RevokedAt     string `json:"revokedAt,omitempty"`
-	OpenCount     int    `json:"openCount,omitempty"`
-	LastOpenedAt  string `json:"lastOpenedAt,omitempty"`
+	Token             string `json:"token,omitempty"`
+	TokenHash         string `json:"tokenHash,omitempty"`
+	RawToken          string `json:"-"`
+	TenantID          string `json:"tenantId,omitempty"`
+	ObjectType        string `json:"objectType,omitempty"`
+	Revision          int    `json:"revision,omitempty"`
+	ACLGeneration     int64  `json:"aclGeneration,omitempty"`
+	KeyID             string `json:"keyId,omitempty"`
+	KeyVersion        uint64 `json:"keyVersion,omitempty"`
+	ContentDigest     string `json:"contentDigest,omitempty"`
+	Action            string `json:"action,omitempty"`
+	Status            string `json:"status"`
+	CreatedBy         string `json:"createdBy"`
+	CreatedByPersonID string `json:"createdByPersonId,omitempty"`
+	CreatedAt         string `json:"createdAt"`
+	ExpiresAt         string `json:"expiresAt"`
+	RevokedBy         string `json:"revokedBy,omitempty"`
+	RevokedByPersonID string `json:"revokedByPersonId,omitempty"`
+	RevokedAt         string `json:"revokedAt,omitempty"`
+	OpenCount         int    `json:"openCount,omitempty"`
+	LastOpenedAt      string `json:"lastOpenedAt,omitempty"`
 }
 
 // shareLinksMu serializes every read-modify-write of the share-links file.
@@ -192,6 +198,10 @@ func shareLinkLive(record shareLinkRecord, now time.Time) bool {
 	return record.Status == shareLinkStatusActive && record.Token == "" && validShareLinkBinding(record) && !shareLinkExpired(record, now)
 }
 
+func shareLinkLiveForTenant(record shareLinkRecord, now time.Time, tenantID string) bool {
+	return record.Status == shareLinkStatusActive && record.Token == "" && validShareLinkBindingForTenant(record, tenantID) && !shareLinkExpired(record, now)
+}
+
 func artifactCapabilityDigest(entry meetingMemoryEntry) string {
 	assets := artifactAssets(entry)
 	sort.Slice(assets, func(i, j int) bool {
@@ -228,7 +238,11 @@ func artifactCapabilityDigest(entry meetingMemoryEntry) string {
 }
 
 func validShareLinkBinding(record shareLinkRecord) bool {
-	return record.TokenHash != "" && isHexDigest(record.TokenHash) && record.TenantID == canonicalArtifactTenantID() && record.ObjectType == "artifact" &&
+	return validShareLinkBindingForTenant(record, canonicalArtifactTenantID())
+}
+
+func validShareLinkBindingForTenant(record shareLinkRecord, tenantID string) bool {
+	return record.TokenHash != "" && isHexDigest(record.TokenHash) && record.TenantID == strings.TrimSpace(tenantID) && record.ObjectType == "artifact" &&
 		record.ArtifactID != "" && record.Revision >= 1 && isHexDigest(record.ContentDigest) && record.Action == "read_content"
 }
 
@@ -262,18 +276,24 @@ func shareLinkByToken(token string) (shareLinkRecord, bool) {
 // The url is present only while the link is live (the token is the
 // capability, so a revoked/expired row exposes history without authority).
 func shareLinkPayload(record shareLinkRecord, now time.Time) map[string]any {
+	return shareLinkPayloadForTenant(record, now, canonicalArtifactTenantID())
+}
+
+func shareLinkPayloadForTenant(record shareLinkRecord, now time.Time, tenantID string) map[string]any {
 	payload := map[string]any{
 		"id":           record.ID,
 		"artifactId":   record.ArtifactID,
 		"status":       record.Status,
-		"createdBy":    record.CreatedBy,
 		"createdAt":    record.CreatedAt,
 		"expiresAt":    record.ExpiresAt,
 		"openCount":    record.OpenCount,
 		"lastOpenedAt": record.LastOpenedAt,
 		"expired":      record.Status == shareLinkStatusActive && shareLinkExpired(record, now),
 	}
-	if shareLinkLive(record, now) && record.RawToken != "" {
+	if record.KeyID == "" && record.CreatedBy != "" {
+		payload["createdBy"] = record.CreatedBy
+	}
+	if shareLinkLiveForTenant(record, now, tenantID) && record.RawToken != "" {
 		payload["url"] = "/a/" + record.RawToken
 	}
 	return payload
@@ -302,6 +322,16 @@ func artifactShareHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if kanbanApp == nil {
 		writeAuthError(w, http.StatusServiceUnavailable, "share links are unavailable")
+		return
+	}
+	if !strideE10TenantSurfaceUseBound(r.Context(), StrideE10TenantSurfaceArtifactACL) {
+		err := withStrideE10TenantRequestUse(r, StrideE10TenantSurfaceArtifactACL, func(ctx context.Context, _ *StrideE10TenantPrincipal) error {
+			artifactShareHandler(w, r.WithContext(ctx))
+			return nil
+		})
+		if err != nil {
+			writeStrideE10TenantHookError(w, err, "share links are unavailable")
+		}
 		return
 	}
 
@@ -346,24 +376,60 @@ func mintShareLinkHandler(w http.ResponseWriter, r *http.Request, user *userAcco
 		expiresDays = shareLinkMaxExpiryDays
 	}
 
-	token, err := newShareLinkToken()
-	if err != nil {
-		writeAuthError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
 	now := time.Now().UTC()
+	tenantID := canonicalArtifactTenantID()
+	canonical := false
+	if principal, ok := strideE10TenantPrincipalFromContext(r.Context()); ok {
+		tenantID = principal.TenantID
+		canonical = true
+	}
+	header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact))
 	record := shareLinkRecord{
 		ID:         durableTimestampID("share-link", now),
 		ArtifactID: artifact.ID,
-		TokenHash:  fmt.Sprintf("%x", sha256.Sum256([]byte(token))),
-		RawToken:   token,
-		TenantID:   canonicalArtifactTenantID(), ObjectType: "artifact", Revision: artifactVersion(artifact),
+		TenantID:   tenantID, ObjectType: "artifact", Revision: artifactVersion(artifact), ACLGeneration: header.ACLVersion,
 		ContentDigest: artifactCapabilityDigest(artifact), Action: "read_content",
 		Status:    shareLinkStatusActive,
 		CreatedBy: normalizeAccountEmail(user.Email),
 		CreatedAt: now.Format(time.RFC3339Nano),
 		ExpiresAt: now.AddDate(0, 0, expiresDays).Format(time.RFC3339Nano),
 	}
+	if canonical {
+		record.CreatedBy = ""
+		if principal, ok := strideE10TenantPrincipalFromContext(r.Context()); ok {
+			record.CreatedByPersonID = principal.PersonID
+		}
+	}
+	var token string
+	var err error
+	if canonical {
+		nonce, nonceErr := newShareLinkToken()
+		if nonceErr != nil {
+			writeAuthError(w, http.StatusInternalServerError, "could not mint share link")
+			return
+		}
+		expiresAt, _ := time.Parse(time.RFC3339Nano, record.ExpiresAt)
+		token, err = mintStrideE10AnonymousShareCapability(StrideE10AnonymousShareCapability{
+			LinkID: record.ID, TenantID: tenantID, ArtifactID: artifact.ID, Revision: record.Revision, ACLGeneration: record.ACLGeneration,
+			ContentDigest: record.ContentDigest, ExpiresUnix: expiresAt.Unix(), Nonce: sha256Hex([]byte(nonce))[:24],
+		})
+		if err == nil {
+			claims, resolveErr := resolveStrideE10AnonymousShareCapability(token, now)
+			if resolveErr != nil {
+				err = resolveErr
+			} else {
+				record.KeyID, record.KeyVersion = claims.KeyID, claims.KeyVersion
+			}
+		}
+	} else {
+		token, err = newShareLinkToken()
+	}
+	if err != nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "share links are unavailable")
+		return
+	}
+	record.TokenHash = fmt.Sprintf("%x", sha256.Sum256([]byte(token)))
+	record.RawToken = token
 
 	shareLinksMu.Lock()
 	defer shareLinksMu.Unlock()
@@ -380,7 +446,7 @@ func mintShareLinkHandler(w http.ResponseWriter, r *http.Request, user *userAcco
 
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok":   true,
-		"link": shareLinkPayload(record, now),
+		"link": shareLinkPayloadForTenant(record, now, tenantID),
 	})
 }
 
@@ -401,12 +467,25 @@ func listShareLinksHandler(w http.ResponseWriter, r *http.Request, user *userAcc
 		return
 	}
 	now := time.Now().UTC()
+	tenantID := canonicalArtifactTenantID()
+	exactTenant := false
+	if principal, canonical := strideE10TenantPrincipalFromContext(r.Context()); canonical {
+		tenantID = principal.TenantID
+		exactTenant = true
+	}
 	links := []map[string]any{}
 	for _, record := range records {
+		if exactTenant && record.TenantID != tenantID {
+			continue
+		}
 		if artifactID != "" && record.ArtifactID != artifactID {
 			continue
 		}
-		links = append(links, shareLinkPayload(record, now))
+		if exactTenant {
+			links = append(links, shareLinkPayloadForTenant(record, now, tenantID))
+		} else {
+			links = append(links, shareLinkPayload(record, now))
+		}
 	}
 	sort.SliceStable(links, func(left, right int) bool {
 		return fmt.Sprint(links[left]["createdAt"]) > fmt.Sprint(links[right]["createdAt"])
@@ -439,8 +518,17 @@ func revokeShareLinkHandler(w http.ResponseWriter, r *http.Request, user *userAc
 		return
 	}
 	now := time.Now().UTC()
+	tenantID := canonicalArtifactTenantID()
+	exactTenant := false
+	if principal, canonical := strideE10TenantPrincipalFromContext(r.Context()); canonical {
+		tenantID = principal.TenantID
+		exactTenant = true
+	}
 	for index, record := range records {
 		if record.ID != id {
+			continue
+		}
+		if exactTenant && record.TenantID != tenantID {
 			continue
 		}
 		header, found := kanbanApp.memory.artifactAuthorizationHeaderByID(record.ArtifactID)
@@ -450,7 +538,8 @@ func revokeShareLinkHandler(w http.ResponseWriter, r *http.Request, user *userAc
 		}
 		// The minter revokes their own link; the approval admin revokes any
 		// (the same authority that approves artifacts for external shipping).
-		if record.CreatedBy != normalizeAccountEmail(user.Email) && !isArtifactApprovalAdmin(user) {
+		_, canonical := strideE10TenantPrincipalFromContext(r.Context())
+		if !canonical && record.CreatedBy != normalizeAccountEmail(user.Email) && !isArtifactApprovalAdmin(user) {
 			writeAuthError(w, http.StatusForbidden, "only the link's creator or the approval admin may revoke it")
 			return
 		}
@@ -460,7 +549,11 @@ func revokeShareLinkHandler(w http.ResponseWriter, r *http.Request, user *userAc
 			// deal-room precedent).
 			record.Token = ""
 			record.TokenHash = ""
-			record.RevokedBy = normalizeAccountEmail(user.Email)
+			if principal, canonical := strideE10TenantPrincipalFromContext(r.Context()); canonical {
+				record.RevokedBy, record.RevokedByPersonID = "", principal.PersonID
+			} else {
+				record.RevokedBy = normalizeAccountEmail(user.Email)
+			}
 			record.RevokedAt = now.Format(time.RFC3339Nano)
 			records[index] = record
 			if err := saveShareLinks(records); err != nil {
@@ -468,10 +561,11 @@ func revokeShareLinkHandler(w http.ResponseWriter, r *http.Request, user *userAc
 				return
 			}
 		}
-		writeAuthJSON(w, http.StatusOK, map[string]any{
-			"ok":   true,
-			"link": shareLinkPayload(record, now),
-		})
+		link := shareLinkPayload(record, now)
+		if exactTenant {
+			link = shareLinkPayloadForTenant(record, now, tenantID)
+		}
+		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "link": link})
 		return
 	}
 	writeAuthError(w, http.StatusNotFound, "share link not found")
@@ -555,6 +649,20 @@ func shareLinkPublicHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if strideE10TenantCutoverEnabled() {
+		shareLinkPublicCutoverHandler(w, r)
+		return
+	}
+	if !strideE10TenantSurfaceUseBound(r.Context(), StrideE10TenantSurfaceArtifactACL) {
+		err := withStrideE10TenantRequestUse(r, StrideE10TenantSurfaceArtifactACL, func(ctx context.Context, _ *StrideE10TenantPrincipal) error {
+			shareLinkPublicHandler(w, r.WithContext(ctx))
+			return nil
+		})
+		if err != nil {
+			writeShareLinkNotFound(w)
+		}
+		return
+	}
 	token := strings.Trim(strings.TrimPrefix(r.URL.Path, "/a/"), "/")
 	if token == "" || strings.Contains(token, "/") || kanbanApp == nil {
 		writeShareLinkNotFound(w)
@@ -566,6 +674,48 @@ func shareLinkPublicHandler(w http.ResponseWriter, r *http.Request) {
 		writeShareLinkNotFound(w)
 		return
 	}
+	serveShareLinkRecord(w, record)
+}
+
+func shareLinkPublicCutoverHandler(w http.ResponseWriter, r *http.Request) {
+	token := strings.Trim(strings.TrimPrefix(r.URL.Path, "/a/"), "/")
+	claims, err := resolveStrideE10AnonymousShareCapability(token, time.Now().UTC())
+	if err != nil || kanbanApp == nil {
+		writeShareLinkNotFound(w)
+		return
+	}
+	providedHash := sha256.Sum256([]byte(token))
+	records, err := loadShareLinks()
+	if err != nil {
+		writeShareLinkNotFound(w)
+		return
+	}
+	var record shareLinkRecord
+	for _, candidate := range records {
+		candidateHash, decodeErr := hex.DecodeString(candidate.TokenHash)
+		if candidate.ID == claims.LinkID && decodeErr == nil && subtle.ConstantTimeCompare(providedHash[:], candidateHash) == 1 {
+			record = candidate
+			break
+		}
+	}
+	recordExpiry, expiryErr := time.Parse(time.RFC3339Nano, record.ExpiresAt)
+	if record.ID == "" || record.Status != shareLinkStatusActive || shareLinkExpired(record, time.Now().UTC()) || record.TenantID != claims.TenantID ||
+		record.ArtifactID != claims.ArtifactID || record.Revision != claims.Revision || record.ACLGeneration != claims.ACLGeneration ||
+		record.ContentDigest != claims.ContentDigest || record.KeyID != claims.KeyID || record.KeyVersion != claims.KeyVersion || expiryErr != nil || recordExpiry.Unix() != claims.ExpiresUnix {
+		writeShareLinkNotFound(w)
+		return
+	}
+	artifact, found := kanbanApp.osArtifactByID(record.ArtifactID)
+	header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(artifact))
+	if !found || header.TenantID != claims.TenantID || header.ObjectID != claims.ArtifactID || int(header.ContentRevision) != claims.Revision ||
+		header.ACLVersion != claims.ACLGeneration || !artifactShareEligible(artifact) || artifactCapabilityDigest(artifact) != claims.ContentDigest {
+		writeShareLinkNotFound(w)
+		return
+	}
+	serveShareLinkRecord(w, record)
+}
+
+func serveShareLinkRecord(w http.ResponseWriter, record shareLinkRecord) {
 	artifact, found := kanbanApp.osArtifactByID(record.ArtifactID)
 	// Re-check the status gate on EVERY open: pulling an artifact's approval
 	// revokes its live links without touching the records.

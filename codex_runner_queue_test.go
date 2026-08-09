@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -204,6 +206,175 @@ func TestCodexRunnerCallbackRejectsExpiredGenerationEvenWithValidOldSignature(t 
 	unchanged, _ := app.osArtifactByID(artifact.ID)
 	if unchanged.Metadata["threadStatus"] != codexJobStatusQueued {
 		t.Fatalf("stale callback mutated artifact: %v", unchanged.Metadata)
+	}
+}
+
+func TestCodexRunnerCallbackCutoverRejectsLegacyAndStaleAuthorityWithZeroApplicationEffects(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		stale bool
+	}{
+		{name: "legacy claimed before cutover"},
+		{name: "stale canonical envelope", stale: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			app := newIsolatedKanbanBoardApp(t)
+			previousApp := kanbanApp
+			kanbanApp = app
+			t.Cleanup(func() { kanbanApp = previousApp })
+			queueDir := t.TempDir()
+			t.Setenv("BONFIRE_CODEX_QUEUE_PATH", queueDir)
+			t.Setenv("BONFIRE_RUNNER_TOKEN", "runner-secret")
+			store := newCodexRunnerJobStore(queueDir)
+			jobID := "codex-job-cutover-" + strings.ReplaceAll(test.name, " ", "-")
+			artifact, _, err := app.createOSArtifactWithMetadata("workflow", "Build", "queued", "tester", map[string]string{
+				"threadId": "thread-cutover", "runnerJobId": jobID, "threadStatus": codexJobStatusQueued,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var envelope *StrideE10TenantAuthorityEnvelope
+			var resolver *strideE10TenantTestResolver
+			if test.stale {
+				converter, _, currentResolver, _, _ := strideE10TenantEnvelopeTestSetup(t)
+				resolver = currentResolver
+				purpose := StrideE10TenantAuthorityPurposeForCodexJob(artifact.ID, "thread-cutover", "research", "inspect the evidence", codexJobAuthorityReadOnly)
+				minted, mintErr := MintStrideE10TenantAuthorityEnvelope(context.Background(), converter, strings.Repeat("a", 64), purpose, time.Now().UTC().Add(time.Hour))
+				if mintErr != nil {
+					t.Fatal(mintErr)
+				}
+				envelope = &minted
+			} else {
+				off, _, _, _ := strideE10TenantTestConverter(time.Now().UTC(), false, StrideE10TenantConversionCutover)
+				restoreOff := InstallStrideE10TenantRuntimeConverter(off)
+				t.Cleanup(restoreOff)
+			}
+			queued, err := store.enqueue(codexRunnerJob{ID: jobID, ArtifactID: artifact.ID, ThreadID: "thread-cutover", Mode: "research", Query: "inspect the evidence", Authority: codexJobAuthorityReadOnly, TenantAuthority: envelope})
+			if err != nil {
+				t.Fatal(err)
+			}
+			claimed, err := store.claimNextAt("runner-one", time.Now().UTC(), time.Minute)
+			if err != nil || claimed == nil {
+				t.Fatalf("claim=%+v err=%v", claimed, err)
+			}
+			if !test.stale {
+				// Replace the disabled local valve only after the legacy job is
+				// durably running, reproducing an activation restart boundary.
+				_, _, resolver, _, _ = strideE10TenantEnvelopeTestSetup(t)
+			} else {
+				resolver.set(StrideE10TenantAuthoritySnapshot{}, errors.New("revoked"))
+			}
+			beforeNotifications := len(app.notifications)
+			payload := codexRunnerCallbackPayload{JobID: queued.ID, ArtifactID: artifact.ID, ThreadID: queued.ThreadID, Status: codexJobStatusRunning, ClaimGeneration: claimed.ClaimGeneration, FencingToken: claimed.FencingToken}
+			payload.Capability = codexRunnerCallbackCapabilityV2("runner-secret", payload.JobID, payload.ArtifactID, payload.ThreadID, payload.ClaimGeneration, payload.FencingToken)
+			body, _ := json.Marshal(payload)
+			req := httptest.NewRequest(http.MethodPost, "/internal/codex/jobs/result", bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer runner-secret")
+			recorder := httptest.NewRecorder()
+			internalCodexRunnerResultHandler(recorder, req)
+			if recorder.Code != http.StatusServiceUnavailable {
+				t.Fatalf("callback status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+			unchanged, _ := app.osArtifactByID(artifact.ID)
+			if unchanged.Metadata["threadStatus"] != codexJobStatusQueued || unchanged.Text != "queued" || len(app.notifications) != beforeNotifications {
+				t.Fatalf("rejected callback changed application state artifact=%+v notifications=%d/%d", unchanged, len(app.notifications), beforeNotifications)
+			}
+			quarantined, err := store.read(filepath.Base(store.jobPath(jobID)))
+			if err != nil || quarantined.Status != codexJobStatusFailed || quarantined.Error != ErrStrideE10TenantAuthorityStale.Error() {
+				t.Fatalf("callback was not body-free quarantined job=%+v err=%v", quarantined, err)
+			}
+		})
+	}
+}
+
+func TestCodexRunnerCallbackCutoverHoldsCurrentAuthorityThroughFinalEffects(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+	queueDir := t.TempDir()
+	t.Setenv("BONFIRE_CODEX_QUEUE_PATH", queueDir)
+	t.Setenv("BONFIRE_RUNNER_TOKEN", "runner-secret")
+	converter, _, resolver, _, _ := strideE10TenantEnvelopeTestSetup(t)
+	jobID := "codex-job-current-cutover-callback"
+	artifact, _, err := app.createOSArtifactWithMetadata("workflow", "Build", "queued", "tester", map[string]string{
+		"threadId": "thread-current-cutover", "runnerJobId": jobID, "threadStatus": codexJobStatusQueued,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	purpose := StrideE10TenantAuthorityPurposeForCodexJob(artifact.ID, "thread-current-cutover", "research", "inspect the evidence", codexJobAuthorityReadOnly)
+	envelope, err := MintStrideE10TenantAuthorityEnvelope(context.Background(), converter, strings.Repeat("a", 64), purpose, time.Now().UTC().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newCodexRunnerJobStore(queueDir)
+	queued, err := store.enqueue(codexRunnerJob{ID: jobID, ArtifactID: artifact.ID, ThreadID: "thread-current-cutover", Mode: "research", Query: "inspect the evidence", Authority: codexJobAuthorityReadOnly, TenantAuthority: &envelope})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.claimNextAt("runner-one", time.Now().UTC(), time.Minute)
+	if err != nil || claimed == nil {
+		t.Fatalf("claim=%+v err=%v", claimed, err)
+	}
+	payload := codexRunnerCallbackPayload{JobID: queued.ID, ArtifactID: artifact.ID, ThreadID: queued.ThreadID, Status: codexJobStatusRunning, ClaimGeneration: claimed.ClaimGeneration, FencingToken: claimed.FencingToken}
+	payload.Capability = codexRunnerCallbackCapabilityV2("runner-secret", payload.JobID, payload.ArtifactID, payload.ThreadID, payload.ClaimGeneration, payload.FencingToken)
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/internal/codex/jobs/result", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer runner-secret")
+
+	// Stop the recursive authorized handler at its first application read. The
+	// resolver writer must remain blocked until every callback effect completes.
+	app.memory.mu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			app.memory.mu.Unlock()
+		}
+	}()
+	baselineCalls := resolver.calls.Load()
+	recorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		internalCodexRunnerResultHandler(recorder, req)
+		close(done)
+	}()
+	deadline := time.Now().Add(time.Second)
+	for resolver.calls.Load() < baselineCalls+2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if resolver.calls.Load() < baselineCalls+2 {
+		t.Fatal("callback never entered current-authority resolver")
+	}
+	changed := make(chan struct{})
+	go func() {
+		resolver.set(StrideE10TenantAuthoritySnapshot{}, errors.New("revoked"))
+		close(changed)
+	}()
+	select {
+	case <-changed:
+		t.Fatal("authority changed before callback application effects completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+	app.memory.mu.Unlock()
+	locked = false
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("callback did not complete after application store resumed")
+	}
+	select {
+	case <-changed:
+	case <-time.After(time.Second):
+		t.Fatal("authority writer remained blocked after callback completion")
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("authorized callback status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	updated, _ := app.osArtifactByID(artifact.ID)
+	if updated.Metadata["threadStatus"] != codexJobStatusRunning {
+		t.Fatalf("authorized callback did not apply: %+v", updated.Metadata)
 	}
 }
 

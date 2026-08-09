@@ -9,6 +9,45 @@ import (
 	"time"
 )
 
+func TestStrideE10ScoutCutoverFailsBeforeSingletonSourcesProviderAndBroadcast(t *testing.T) {
+	converter, _, _, _, _ := strideE10TenantEnvelopeTestSetup(t)
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "test-key"
+	t.Setenv("BONFIRE_AGENT_RUNNER", agentRunnerOpenAIText)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	runID, mode, query := "agent-thread-research-tenant-one", "research", "map the bounded market"
+	purpose := StrideE10TenantAuthorityPurposeForScoutThread(runID, mode, query)
+	envelope, err := MintStrideE10TenantAuthorityEnvelopeForSurface(context.Background(), converter, strings.Repeat("a", 64), StrideE10TenantSurfaceScout, purpose, time.Now().UTC().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	priorAsync := startAgentThreadAsync
+	asyncCalls := 0
+	startAgentThreadAsync = func(*kanbanBoardApp, scoutAgentThread) { asyncCalls++ }
+	t.Cleanup(func() { startAgentThreadAsync = priorAsync })
+	before := len(app.memory.snapshot(0))
+	if _, err := app.launchAgentThreadWithSpecAndTenantAuthority(mode, query, "person-one", map[string]string{"originKind": agentThreadOriginChannel, "originId": "private-other-org"}, agentThreadGoalSpec{ContextRefs: "file:cross-org-private"}, runID, &envelope); !errors.Is(err, ErrStrideE10TenantAuthorityStale) {
+		t.Fatalf("cutover launch used singleton sources: %v", err)
+	}
+	if asyncCalls != 0 || len(app.memory.snapshot(0)) != before {
+		t.Fatalf("cutover launch persisted or broadcast work: async=%d before=%d after=%d", asyncCalls, before, len(app.memory.snapshot(0)))
+	}
+
+	thread := scoutAgentThread{ID: runID, Mode: mode, Query: query, TenantAuthority: &envelope, Artifact: meetingMemoryEntry{ID: "artifact-cross-org", Metadata: map[string]string{
+		"requestedBy": "person-attacker", "originKind": agentThreadOriginChannel, "originId": "private-other-org", "contextRefs": "file:cross-org-private",
+	}}}
+	providerCalls := 0
+	if _, err := app.produceAgentThreadArtifactWithWorker(context.Background(), thread, func(context.Context, string, openAITextRequest) (string, error) {
+		providerCalls++
+		return "must not run", nil
+	}); !errors.Is(err, ErrStrideE10TenantAuthorityStale) {
+		t.Fatalf("cross-org provider admission err=%v", err)
+	}
+	if providerCalls != 0 {
+		t.Fatalf("cross-org board/memory/File/private-channel context reached provider %d times", providerCalls)
+	}
+}
+
 // A /goal subtask child (goalParentId set) must NOT fire its own creator
 // notification — the parent goal engine notifies once on the terminal state, so
 // a revised subtask can't flood "Finished Recently" with v1/v2/v3 pings. A

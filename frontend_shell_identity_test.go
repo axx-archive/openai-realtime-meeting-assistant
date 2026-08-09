@@ -15,8 +15,12 @@ func TestDesktopShellNamesProductAndOrganization(t *testing.T) {
 	for _, marker := range []string{
 		`class="topbar__brand-lockup"`,
 		`class="wordmark topbar__brand-wordmark"`,
-		`class="topbar__organization-label">Organization`,
-		`class="topbar__organization-name">Bonfire`,
+		`id="topbarOrganizationSwitcher"`,
+		`id="topbarOrganizationRole" class="topbar__organization-label">not loaded`,
+		`id="topbarOrganizationName" class="topbar__organization-name">Organization unavailable`,
+		`id="topbarOrganizationCount" class="topbar__organization-meta">0 of 3 active`,
+		`id="topbarOrganizationPending"`,
+		`min-height: 40px`,
 		`--shell-topbar-height: 60px`,
 		`padding-left: 72px`,
 		`#appShell.is-authed .tool-rail > .topbar__mark`,
@@ -27,7 +31,10 @@ func TestDesktopShellNamesProductAndOrganization(t *testing.T) {
 			t.Fatalf("desktop shell missing %q", marker)
 		}
 	}
-	if !strings.Contains(source, `case 'office':`+"\n            return 'Bonfire'") {
-		t.Fatal("phone shell does not surface the Bonfire organization")
+	if !strings.Contains(source, `return window.__strideCurrentOrganizationLabel || 'Organization unavailable'`) {
+		t.Fatal("phone shell must use the same server-projected organization label")
+	}
+	if strings.Contains(source, `class="topbar__organization-name">Bonfire`) || strings.Contains(source, `Stride · Bonfire organization`) {
+		t.Fatal("top bar still treats a hardcoded organization name as authority")
 	}
 }

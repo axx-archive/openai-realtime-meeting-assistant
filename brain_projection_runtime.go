@@ -573,7 +573,9 @@ func configureProductionBrainProjectionRuntime(canonical *CanonicalRuntime) Brai
 		mode = brainProjectionRuntimeOff
 	}
 	runtime := &productionBrainProjectionRuntime{status: BrainProjectionRuntimeStatus{Mode: mode, AutomaticBaseline: false}}
-	if mode == brainProjectionRuntimeOff {
+	if strideE10TenantCutoverEnabled() && mode != brainProjectionRuntimeOff {
+		runtime.status.Error = "brain projection cutover requires originating canonical tenant authority"
+	} else if mode == brainProjectionRuntimeOff {
 		runtime.status.Ready, runtime.status.CaughtUp = true, true
 	} else if mode != brainProjectionRuntimeShadow {
 		runtime.status.Error = "invalid brain projection mode; want off or shadow"
@@ -681,6 +683,9 @@ func productionBrainProjectionAcceptsPool(pool *pgxpool.Pool) bool {
 }
 
 func registerBrainProjectionScopeDurably(ctx context.Context, tx pgx.Tx, pool *pgxpool.Pool, key BrainProjectionCheckpointKey) error {
+	if strideE10TenantCutoverEnabled() {
+		return ErrStrideE10TenantAuthorityStale
+	}
 	if key.Validate() != nil || !productionBrainProjectionAcceptsPool(pool) {
 		return nil
 	}
@@ -928,6 +933,9 @@ func (runtime *productionBrainProjectionRuntime) recoverExplicitRebuildWork(ctx 
 // baselines unrelated canonical scopes.
 func (runtime *productionBrainProjectionRuntime) ScheduleHistoricalBackfill(ctx context.Context, request BrainProjectionHistoricalBackfillRequest) (BrainProjectionHistoricalBackfillResult, error) {
 	result := BrainProjectionHistoricalBackfillResult{}
+	if strideE10TenantCutoverEnabled() {
+		return result, ErrStrideE10TenantAuthorityStale
+	}
 	now := time.Now().UTC()
 	if runtime == nil || runtime.canonicalPool == nil || runtime.checkpoints == nil || !runtime.snapshot().Enabled {
 		return result, ErrBrainProjectionCheckpointUnavailable
@@ -1020,6 +1028,10 @@ func (runtime *productionBrainProjectionRuntime) ScheduleHistoricalBackfill(ctx 
 func brainProjectionHistoricalBackfillHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeAuthError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if strideE10TenantCutoverEnabled() {
+		writeStrideE10TenantHookError(w, ErrStrideE10TenantAuthorityStale, "projection backfill is unavailable")
 		return
 	}
 	if !websocketOriginAllowed(r) {
@@ -1229,6 +1241,9 @@ func (runtime *productionBrainProjectionRuntime) loadBackfillAuditForCheckpoint(
 }
 
 func (runtime *productionBrainProjectionRuntime) projectScope(ctx context.Context, key BrainProjectionCheckpointKey) error {
+	if strideE10TenantCutoverEnabled() {
+		return ErrStrideE10TenantAuthorityStale
+	}
 	status, err := runtime.checkpoints.Status(ctx, key)
 	if err != nil {
 		return err

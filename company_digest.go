@@ -283,6 +283,9 @@ func buildCompanyDigestInput(state companyDigestState, deltas []string, priorNar
 // produceCompanyDigest is the company-digest agent's pass body; the wall clock
 // is injected via runCompanyDigestPass so tests pin stamps.
 func (app *kanbanBoardApp) produceCompanyDigest(ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
+	if strideE10TenantCutoverEnabled() {
+		return meetingMemoryEntry{}, ErrStrideE10TenantAuthorityStale
+	}
 	return app.runCompanyDigestPass(ctx, apiKey, inputs, responder, time.Now().UTC())
 }
 
@@ -295,6 +298,9 @@ func (app *kanbanBoardApp) produceCompanyDigest(ctx context.Context, apiKey stri
 // output must not block the state refresh — the prior narrative is carried and
 // the fresh state still lands.
 func (app *kanbanBoardApp) runCompanyDigestPass(ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder, now time.Time) (meetingMemoryEntry, error) {
+	if strideE10TenantCutoverEnabled() {
+		return meetingMemoryEntry{}, ErrStrideE10TenantAuthorityStale
+	}
 	if app == nil || app.memory == nil || len(inputs) == 0 {
 		// the runner's minBatch gate makes this unreachable on the ticker path;
 		// direct callers (boundary flushes) get a safe no-op.

@@ -93,6 +93,9 @@ func newProductionAmbientReplayStageRunner(app *kanbanBoardApp) *productionAmbie
 }
 
 func (runner *productionAmbientReplayStageRunner) RunAmbientReplayStage(ctx context.Context, manifest AmbientReplayManifest, stage AmbientReplayStageSpec, input []AmbientReplayArtifact) (AmbientReplayStageResult, error) {
+	if strideE10TenantCutoverEnabled() {
+		return AmbientReplayStageResult{}, ErrAmbientReplayUnavailable
+	}
 	if runner == nil || runner.app == nil || runner.app.memory == nil {
 		return AmbientReplayStageResult{}, ErrAmbientReplayUnavailable
 	}

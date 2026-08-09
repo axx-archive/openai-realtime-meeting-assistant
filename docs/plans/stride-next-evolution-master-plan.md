@@ -1,19 +1,34 @@
 # STRIDE Next Evolution — Master Architecture and Execution Ledger
 
-**Status:** Active E10 remediation. The exact `axx/main` HEAD release is serving
-under the immutable release ledger with `verified-local-unsigned` process
-evidence. At the 2026-08-07 13:45 PT release checkpoint that identity was
-`b95794fe4a04e3f0bcfe5b2dad20e4d2c67576ac`, ledger generation 26; public
-`/healthz` and `/readyz` agreed with both receipted application images and the
-retained rollback release `1188281b9197b5f6a2e654f236b1a51bc4a5ba95`.
-Native Build 48 was built from
-`7689bead6b8365c14e67a11dfa06063b23cf058b`, uploaded successfully through EAS,
-and submitted to Apple. EAS submission
-`8c5ed1d9-d449-4959-8d93-f2ba5aaa9e68` is `FINISHED` with no error. A fresh
-authenticated App Store Connect API observation at 2026-08-07 14:08 PT proves
-Apple build `2ce3d1b3-a21a-4700-9c20-fce1d5377450` is `VALID`, unexpired, and
-available to internal `Team (Expo)`; intended physical-device acceptance remains
-separate.
+**Status:** E10-W0 through E10-W3 are independently
+`deterministic_verified` for their named local/default-off evidence classes.
+E10-W3 proves the offline seven-person migration, published-only network shadow,
+durable purge/restart behavior, and the converted runtime authority paths while
+deliberately rejecting production cutover. E10-W4 is the exact resume point and
+remains blocked on AJ's explicit production authority, a fresh read-only live
+repair manifest, exact backups, and the production durability/cutover boundary.
+A read-only
+release verification at 2026-08-08 08:31 PT proves
+ledger generation 30, the retained release verifier, every expected running
+image, Caddy, and public/container-local `/healthz` and `/readyz` agree on exact
+commit `d4c827c2adc7e1c6258f843e20fd4f9256c7310b`, bundle
+`2226f1d3cf5d43c80dd093b11cb21f1938af826122ab40a212b4d57037dccb2d`,
+application image `sha256:de0533e15c8c4da6d729ae406d686ba1e310f6d6f72cd81e83544db44e8135ba`,
+renderer image `sha256:73f0323d1c6d498973bbfab151d41870a24c181c2441689392ea8dec613fe95c`,
+and `verified-local-unsigned`. Retained rollback is exact commit
+`cffe16b39c67e89572fb9389fff0b51838f7d995` with its bundle, receipts, and
+application/renderer images intact. The carrier remains `qualified=false` and
+`externallyAttested=false`.
+
+Native Build 49, not Build 48, is the newest exact mobile carrier. EAS build
+`d76f442c-29ee-4f55-b30d-bac0c7cfeeb3` and submission
+`b8d58ae6-c183-4072-8ee2-a7ef36190344` are `FINISHED` from exact commit
+`d4c827c...`; Apple build `9c63cf4a-ef1e-49bd-9110-ea5abbc56b9d` was freshly
+observed `VALID`, unexpired, and `IN_BETA_TESTING` at 2026-08-08 08:34 PT.
+Unexpectedly, both internal `Team (Expo)` and external `Bonfire` contain Build
+49, contradicting the prior “external testers unchanged” report and requiring
+provenance review before any further TestFlight action. Build 48 remains valid
+historical evidence only. No physical iPhone/iPad acceptance is proven.
 The integrated Go suite, required ConversationContinuity/AgentMind/proactivity/
 web-scroll race gate, `go vet`, native readiness contract checks, client tests,
 `git diff --check`, and independent critic all passed before release. The later
@@ -21,9 +36,12 @@ exact-release-only queue migration was additionally proven by the 34 release
 contract checks and an actual confined-container ownership/mode test.
 
 The current serving release remains unqualified externally. Production
-`/readyz` truthfully reports canonical shadow health behind the dirty
-high-water, governed replay off, STRIDE runtime activation-fenced, every E10
-feature switch off, and offsite backup dormant. No production replay, MyMind
+`/readyz` truthfully reports canonical shadow unhealthy at dirty/high-water
+28,626 versus reconciled/checkpoint 8,532 with 119 repair candidates, governed
+replay off, and STRIDE runtime activation-fenced. All 32 existing runtime
+switches are off; the revision-1 organization, Work Record, network, talent,
+contact, and MyMind-specific switches below are not implemented in the serving
+configuration yet, rather than merely off. Offsite backup remains dormant. No production replay, MyMind
 body custody/context assembly, AmbientMind compiler/worker or reader, artifact
 disposition action, provider qualification, physical-device acceptance,
 multi-room/TURN acceptance, HA/DR custody ceremony, pilot packet, or soak has
@@ -37,7 +55,7 @@ provider/model/voice/config qualification and external anchor are available.
 Release authority does not waive canonical-repair confirmation, consent,
 custody, physical-device, HA/DR, pilot, soak, or independent evidence gates.
 
-**Date:** 2026-08-07
+**Date:** 2026-08-08
 
 **Naming:** **STRIDE** is the long-term operating-system name. **Bonfire OS** is
 the current application and code-identifier implementation. After the exact
@@ -63,7 +81,7 @@ External reference, adopted selectively rather than introduced as a runtime depe
 
 Older model recommendations are historical baselines, not current authority. The current official model references for this plan are [GPT-5.6](https://developers.openai.com/api/docs/guides/latest-model.md), [GPT-Realtime-2.1](https://developers.openai.com/api/docs/models/gpt-realtime-2.1), [GPT Transcribe](https://developers.openai.com/api/docs/models/gpt-transcribe), and [GPT Live Transcribe](https://developers.openai.com/api/docs/models/gpt-live-transcribe).
 
-## Active completion checkpoint — 2026-08-07 14:08 PT
+## Active completion checkpoint — 2026-08-08 10:00 PT
 
 This is the compact-safe resume ledger for the current goal. A checked item is
 complete only at the scope named; local implementation is not release proof.
@@ -160,14 +178,28 @@ complete only at the scope named; local implementation is not release proof.
   Build 48 is `VALID`, unexpired through 2026-11-05, and available to internal
   `Team (Expo)`; the exact Apple build ID is
   `2ce3d1b3-a21a-4700-9c20-fce1d5377450`.
-- [ ] Install/open Build 48 from TestFlight on the intended physical device and
-  complete the focused native acceptance matrix, including inline generated
-  images and their Open, Save to Drive, and editable Regenerate controls.
+- [x] Freshly observed Build 49 as the newer exact `d4c827c...` native carrier:
+  EAS build `d76f442c-29ee-4f55-b30d-bac0c7cfeeb3`, EAS submission
+  `b8d58ae6-c183-4072-8ee2-a7ef36190344`, and Apple build
+  `9c63cf4a-ef1e-49bd-9110-ea5abbc56b9d` are complete/`VALID`.
+- [ ] Investigate, without mutating distribution, why Build 49 is currently in
+  both internal `Team (Expo)` and external `Bonfire`; this contradicts the prior
+  external-group baseline and is not accepted as intentional cohort activation.
+- [ ] Neither Build 48 nor Build 49 was physically accepted for this program.
+  Preserve their processing receipts as historical evidence, but run the
+  complete physical matrix on the final exact native build containing the new
+  organization/Work Record/network behavior, including generated-image Open,
+  Save to Drive, and editable Regenerate.
 - [x] Activated the exact reviewed `axx/main` HEAD through
   `/opt/meetingassist-releases/<sha>`; ledger, receipt, all Compose image IDs,
   Caddy, `/healthz`, `/readyz`, rollback retention, and
   `verified-local-unsigned` agree. The 13:45 PT observation was commit
   `b95794f`, generation 26.
+- [x] Refreshed the private exact-release proof at 2026-08-08 08:31 PT: ledger
+  generation 30, exact active `d4c827c...`, bundle `2226f1d3...`, application
+  image `de0533e1...`, renderer `73f0323d...`, all expected service images,
+  Caddy, public/container health/readiness, retained rollback `cffe16b...`, and
+  the official verifier agree on `verified-local-unsigned`.
 - [x] The existing Country Golf report render job was repaired from root-owned
   `0600` to `65532:65532 0660`, completed as a 9-page 141,120-byte PDF, stored
   a durable PDF blob plus page images, and emitted `pdf_exported`.
@@ -188,18 +220,694 @@ complete only at the scope named; local implementation is not release proof.
   physical-device acceptance, canonical replay/promotion, HA/DR custody,
   real-workforce pilots, and soak remain external acceptance gates unless their
   full evidence is actually produced.
+- [x] Completed read-only discovery for people/MyMind and multi-organization
+  productization. Basic name/avatar account profiles are live, but canonical
+  `PersonPrincipal`/MyMind and multi-organization membership are not user-ready.
+- [x] Froze the MVP identity, profile, organization, approval, maximum-three,
+  active-session, departure, migration, ACL, and acceptance contracts in the
+  strategic-design checkpoint below.
+- [x] Completed E10-W1 canonical authority locally: migrations 14-16, exact
+  person/organization/session/contribution/network contracts, serialized
+  capacity and owner safety, immutable histories/current pointers, exact
+  controller and named-party approvals, synchronous stale-evidence fencing,
+  bounded search/contact, and full derived-store purge receipts. Focused normal,
+  race, disposable-PostgreSQL, `go vet`, diff, and iterative independent critic
+  gates pass; all 13 new switches remain false and no HTTP route is active.
+- [x] Completed E10-W2 product surfaces locally/default-off: registered HTTP
+  routing and all 38 closed actions use concrete W1 authorities with durable
+  restart reconciliation; web and native render the exact self/coworker/network,
+  Work Record, organization-governance, recruiting, contact, block, export, and
+  deletion projections. Focused normal/race, disposable PostgreSQL, `go vet`,
+  457/457 native tests, native typecheck, web VM compilation, client recovery
+  tests, final independent code critic, and authenticated registered-live W1-
+  backed browser QA pass. Earlier static fixture screenshots remain labeled
+  static; the canonical receipt binds the later registered-live captures.
 
-**Exact resume point:** install/open Build 48 from internal `Team (Expo)` on the
-intended physical device and complete the focused native image/result acceptance
-matrix. Apple `VALID`, non-expiry, and internal-group availability are already
-proven and must not be reopened. If live production test messages are authorized,
-prove ordinary image analysis and exact-source TL;DR sharing to the pinned
-Bonfire Chat; otherwise retain the current code/test proof without mutating
-production chat. Resolve the pre-existing
+**Exact resume point:** request and, only if separately granted, execute
+**E10-W4** against the independently verified W0 freeze and W1-W3 receipts
+below. Before any mutation, regenerate the exact read-only production repair
+manifest; the W0 count of 119 candidates is an observation, not a current
+row-level mutation manifest.
+The private release proof is current for generation 30 and exact `d4c827c...`.
+Build 48 is historical; Build 49 is the newer exact carrier, but its unexpected
+external `Bonfire` group inclusion requires provenance review and physical-device
+acceptance is still open. Do not mutate production
+chat merely to prove image analysis or TL;DR sharing; do not begin paid calls,
+canonical repair/promotion, production data/config changes, deployment, or the
+repository rename without the separately named authority. Resolve the existing
 `axx-archive/stride` naming collision before creating or changing a primary
-remote. After those gates, continue the explicitly unresolved external E10
-qualification, physical-device, replay/promotion, HA/DR, pilot, and soak work;
-do not infer completion from the current process-qualified release.
+remote.
+
+## 2026-08-07 People, Work Record, network, and multi-organization strategic-design checkpoint
+
+This section is the decision-complete MVP contract for turning the existing
+person/MyMind authority proof into real individuals and allowing one person to
+belong to at most three organizations. It is part of E10, not a second roadmap.
+It does not weaken the canonical, consent, custody, provider, device, HA/DR,
+pilot, or soak gates later in this ledger.
+
+### Readiness verdict
+
+**Basic profiles are ready; canonical individuals/MyMind are not.** The current
+signed-in account can view and edit a display name and avatar on web and native,
+and passkey/theme state follows that fixed account. The app is still a seeded
+seven-person Bonfire roster: boot removes non-seeded accounts, sessions contain
+an email but no person, organization, or membership revision, `/auth/me` returns
+no organization context, and runtime callers use one process-global Bonfire
+tenant. AJ's current special-case approval authority is email-based and is not
+an organization-admin membership.
+
+The E10-R3 foundation is valuable but deliberately dormant. It defines and
+tests body-free `PersonPrincipal`, `WorkspaceMembership`, exact-purpose MyMind
+source/disclosure, departure, export, recovery, and custody-deletion authority.
+Its own source says no HTTP route, worker, provider, or fixed-user path consumes
+it; the compatibility adapter returns `ErrMyMindFeatureDisabled`; migration 10
+installs `person_mymind_context=false`. There is no production PostgreSQL
+reader/writer adapter, encrypted MyMind body custody, MyMind context consumer,
+profile/MyMind product page, organization creation/join flow, maximum-three
+constraint, or active-organization session. The separate **What STRIDE remembers
+about me** relationship-memory UI is not canonical MyMind and must not be
+presented as if it were.
+
+### Product thesis — the professional network where work actually happens
+
+AmbientMind, AgentMind, and MyMind are internal architecture, not the value
+proposition or primary navigation. Users should experience one coherent promise:
+**STRIDE is where work happens, so it is where the most credible professional
+identity is formed and where future coworkers are found.** The three minds make
+that experience intelligent behind the scenes; product copy speaks about the
+work, people, evidence, and controls rather than exposing memory-system names.
+
+LinkedIn's core object is a self-authored profile or feed post. STRIDE's core
+network object is a **source-bound contribution to real work**. The profile is
+not a static resume or an activity leaderboard: it is a living, portable work
+record that shows what problems a person helped solve, how they contributed,
+what outcomes and artifacts exist, which organizations verified the claim, and
+what they chose to make visible. STRIDE does not ship a performative public feed
+as the network MVP. Work creates the record; posting about work is optional.
+
+The compounding loop is:
+
+1. people and agents do work inside an authorized organization;
+2. STRIDE identifies a candidate contribution from exact work/outcome sources;
+3. the person and an eligible organization reviewer correct or confirm a concise
+   contribution statement;
+4. the organization issues, and the person accepts, a redacted portable
+   attestation without exporting confidential source material;
+5. the person chooses private, signed-in network, or direct-share visibility;
+   open-web publication is a later, separate choice rather than an MVP default;
+6. their work record becomes more useful across their career;
+7. teams and recruiters ask STRIDE for people who have actually contributed to
+   comparable problems, receive explainable evidence-backed matches, and invite
+   a conversation or organization join request;
+8. the next body of work creates new evidence rather than a new static resume.
+
+This is the network moat: STRIDE observes the collaboration and outcomes at the
+point of work, while a conventional professional network must ask users to
+reconstruct and advertise them later. It must never turn that advantage into
+surveillance, hidden employability scoring, or an employer-owned human memory.
+
+### User-facing professional identity
+
+The working product name is **Work Record**; implementation types use
+`ContributionGraph` and `ContributionAttestation`. The Work Record replaces a
+resume-first profile hierarchy with:
+
+- **Problems and outcomes:** selected verified contribution cards grouped by
+  problem/outcome class rather than chronological job-description prose;
+- **How I contribute:** person-approved work-style and contribution roles such
+  as builder, domain guide, decision owner, connector, reviewer, or facilitator;
+- **Organizations and roles:** only memberships the person has chosen to reveal,
+  with current membership never inferred from a private history;
+- **Work evidence:** authorized public artifacts, redacted outcome summaries,
+  and exact verification status, never confidential source links a viewer cannot
+  open;
+- **People and agents I helped:** optional, reviewed attestations describing how
+  a person's input improved a team or an organization's agent, without exposing
+  private AgentMind content or letting an agent self-certify the claim;
+- **Open to:** explicit collaboration, advisory, employment, or recruiting
+  preferences, off by default.
+
+The identity header remains simple—name, avatar, optional pronouns, short bio,
+and current visible organization context—but the Work Record is the core value.
+Traditional title, education, certifications, and resume import can be supported
+as user-authored context; they never outrank verified contribution evidence by
+default.
+
+### Canonical ownership and privacy decisions
+
+1. **Person is global; organization access is revocable.** `PersonPrincipal` is
+   the stable opaque root above credentials and memberships. Email is login data,
+   not identity or a tenant key. MyMind belongs to the person and survives an
+   organization departure subject to the person's custody/deletion choices.
+2. **One product noun.** User-facing copy and new APIs say `organization`.
+   Existing `workspace_id` remains a migration compatibility field only until
+   one canonical organization authority replaces the dual legacy
+   `org_memberships`/`stride_workspace_memberships` paths.
+3. **Profiles are work records, not dossiers.** `PersonProfile` owns self-edited
+   global identity and visibility preferences. `OrganizationMemberProfile` owns
+   title/team for one membership. `ContributionAttestation` supplies only
+   person-accepted, organization-verified portable work claims. Credentials,
+   hidden memberships, activity/productivity telemetry, unapproved personality
+   inference, MyMind values, private source graphs, account digests, and custody
+   references never enter the shared projection.
+4. **Visibility has separate projections.** Self can read/edit the global
+   profile. A person sharing the currently active organization can read only the
+   safe coworker projection plus that organization's role/title/team/joined
+   date. An authorized signed-in network user can read only an independently
+   opted-in `NetworkProfileProjection`. Owner/admin can edit only organization-
+   scoped member fields and governed roles. A caller with neither shared active
+   membership nor published-network authority, including a guest, departed, or
+   revoked caller, receives an opaque, indistinguishable 404. Admin never implies
+   MyMind custody, recruiter capability, or network-profile control.
+5. **The minds remain backstage.** No public or coworker profile exposes a
+   MyMind/AmbientMind/AgentMind card, source count, or graph. Private Settings may
+   offer plain-language **Personal context and memory** inspect/correct/forget/
+   export controls. An organization sees only exact revision-bound disclosures
+   or accepted contribution attestations. It cannot enumerate another
+   membership, private source, employment history, or hidden graph.
+6. **Avatar/media ACL follows profile ACL.** Store new avatars as authorized
+   blob references rather than duplicating data URLs in canonical records;
+   validate type/size/content and revoke reads with membership loss.
+
+### Organization and membership state machine
+
+- `Organization`: immutable opaque ID; mutable name/slug; `active | archived`;
+  creator; revision; timestamps; `private | listed` discoverability. Private is
+  the default. Exact links/codes can reach a private organization's request
+  page; only listed organizations appear in signed-in search.
+- `OrganizationMembership`: person + organization + `owner | admin | member`;
+  `active | departed | revoked`; revision and grant/end timestamps. Creating an
+  organization atomically creates the creator's owner membership or creates
+  nothing.
+- `OrganizationJoinRequest`: a separate object with
+  `pending -> approved | denied | cancelled | expired`. Pending grants zero
+  organization discovery, object, chat, Drive, room, brain, agent, push, or
+  profile authority. Replays are idempotent and stale decisions fail with 409.
+- **Three-organization maximum:** count active organization memberships, not
+  pending requests. Enforce it in the approval/create transaction under a
+  locked person membership root (or equivalently three unique active slots),
+  not in UI or with an unlocked count. A fourth create/approval fails without
+  an orphan organization or partial audit event. Leaving durably frees a slot.
+- **Approval:** the current revision of an active owner/admin membership may
+  approve or deny for that exact organization. Approval rechecks request,
+  administrator, organization, duplicate membership, and capacity in one
+  transaction. AJ is bootstrapped as Bonfire owner during migration; subsequent
+  authority comes from membership, never a permanent email exception.
+- **Departure and ownership safety:** leaving/revoking immediately revokes
+  sessions, sockets, push bindings, cached tenant views, and organization-bound
+  MyMind disclosures while retaining attributable organization history. Refuse
+  any leave/revoke/demotion that would leave no active owner; require an explicit
+  ownership transfer first. An organization may additionally require an admin,
+  but an admin never substitutes for its final owner. Concurrent departures
+  cannot create an ownerless organization.
+- **Audit:** create, request, approve, deny, cancel, expire, switch, role change,
+  transfer, leave, and revoke append body-free actor/org/person/prior/new
+  revision, reason, correlation, and idempotency evidence.
+
+### Contribution graph, portable proof, and network discovery
+
+The three memory systems may suggest a candidate, but they never become profile
+or recruiter APIs. Network truth is produced only through these explicit,
+revisioned contracts:
+
+- `ContributionClaim` is organization-private and source-bound: subject person,
+  `originated | shaped | reviewed | decided | delivered`, problem/outcome class,
+  bounded dates, exact source/artifact/outcome/agent-run revisions and digests,
+  ACL/purge generation, attribution method, and
+  `candidate | subject_review | disputed | verified | revalidation_required |
+  revoked`. It contains no portable body by default.
+  The exact repair path is `verified -> revalidation_required -> verified |
+  revoked | superseded`; re-verification always creates or binds a current
+  source/consent/field-approval revision and stale approval cannot revive an old
+  projection.
+- `ContributionAttestation` is an immutable organization-signed revision of a
+  verified claim with issuer, subject, evidence-manifest digest, policy revision,
+  confidentiality, exact released-field manifest, signature, and supersession/
+  revocation pointers. Default portable fields are coarse dates, category,
+  contribution role/verbs, verification tier, and issuer only when approved.
+  Customer, collaborator, project, excerpt, metric, and exact outcome fields
+  require field-specific rights and named-party approval.
+- `PublishedContributionClaim` is the person's concise narrative bound to one
+  or more active attestations. Its lifecycle is
+  `draft -> approval_required -> published -> superseded | withdrawn`; denial
+  returns exact fields to draft. The organization controls factual verification
+  and revocation; the person controls publication and may unpublish immediately.
+- `AgentInfluenceReceipt` may support “helped this agent/team improve” only when
+  it binds exact agent profile/runtime/model, human interaction, agent output,
+  human adoption/review, and resulting work/outcome. An agent suggestion,
+  self-report, prompt, token count, or interaction volume is not human impact
+  and cannot reduce human credit or produce an AI-dependence score.
+- `NetworkProfileProjection` is a separately opted-in global projection of
+  person-authored fields and currently published claims. It is never assembled
+  client-side from private person, organization, or memory records. Its states
+  are `draft -> published <-> paused -> deleted`; discoverability is
+  `unlisted | signed_in_network | exact_link`, with `exact_link` deferred from
+  MVP activation.
+- `TalentSearchGrant` gives an exact organization member a revocable, expiring
+  `talent_searcher` capability. Owner/admin does not imply recruiter access.
+  `NetworkSearchReceipt` records the human query, prohibited-criteria verdict,
+  transparent structured interpretation, published candidate IDs/reasons,
+  model/route, and audit metadata without copying hidden candidate data.
+- `ContactRequest` is purpose + note + requested collaboration type with
+  `pending -> accepted | declined | withdrawn | expired`. Contact information
+  remains hidden until the person accepts the exact channel. People can pause
+  discovery, decline, block a person/organization, and inspect their search/
+  contact receipts.
+
+Any source edit, deletion, ACL, purge-generation, source-consent revision/change,
+or named-party field-approval withdrawal moves the dependent claim to
+`revalidation_required` and synchronously fences its profile/search projection.
+Corrections create immutable superseding revisions. Revocation
+leaves a verifiable tombstone while removing discovery. Departure immediately
+ends source drill-down and new claims under the old membership; the organization
+retains its governed record, while the person retains already-issued signatures
+without gaining confidential source access. Pending, disputed, stale, denied,
+or revoked evidence grants zero network visibility.
+
+Recruiter discovery is a signed-in, opt-in network capability, not an employer
+dashboard. Natural language is compiled through prohibited-criteria policy into
+visible structured filters over `NetworkProfileProjection`; optional semantic
+reranking may use published text only. Results say **why surfaced** and **what is
+unknown**, distinguish `organization_verified_opaque`,
+`organization_verified_redacted`, `public_source_verified`, and
+`self_described`, and never call someone “best” or emit a quality/personality/
+fit score. Requests for “personality” may match only person-published work-mode
+preferences; STRIDE never infers psychographics, culture fit, loyalty,
+promotion readiness, compensation, availability, health, politics, protected
+traits, or proxies from work/memory/activity. Ordering may use declared-query
+match, evidence coverage, and freshness only—never engagement, network size,
+contact response, employer prestige, or hidden model judgment.
+
+The search index contains only the active published projection—never MyMind,
+AmbientMind, AgentMind, raw artifacts/messages, hidden organizations, private
+embeddings, or confidential evidence. Pause, withdrawal, revocation, and delete
+fence search synchronously and purge derived indexes asynchronously with a
+receipt. MVP forbids anonymous search, public SEO, bulk export/scraping, CRM
+sync, automated outreach, feed/posts/comments/likes/follows, follower or
+engagement counts, employee availability dashboards, productivity comparisons,
+global influence scores, and the legacy “contribution fuel/share” ranking and
+renderer. Scout may draft a claim or structured query, but cannot publish,
+approve, change visibility, contact a candidate, or use private context for
+ranking without a new explicit human action.
+
+### Session, tenant, and ACL contract
+
+Every member session selects exactly one active organization and binds
+`person_id`, `organization_id`, exact membership ID/revision, and session
+revision. The server derives tenant, teams, and role from that record; a client
+header, query, body, route ID, or cached selector cannot widen it. Switching
+validates the new active membership, bumps session revision, and tears down then
+rebinds organization-scoped WebSockets, push authority, caches, workers, and
+subscriptions. Revocation or departure invalidates the binding immediately and
+returns the user to another valid organization or the organization chooser.
+
+Before activation, replace unconditional `TeamIDs:[organization]`, fixed-roster
+participant discovery, and direct `canonicalTenantID()` authorization at every
+HTTP, WebSocket, chat, Drive, artifact, room, Board, brain, Scout, notification,
+push, Marketplace, work-queue, and worker boundary with one centralized
+membership-derived principal. Reconcile the two tenant environment sources and
+the two membership models into one authority. A cosmetic organization switcher
+before that conversion is forbidden because it would create cross-tenant leak
+risk.
+
+### MVP surfaces and APIs
+
+- Top-bar organization switcher: current organization/role, up to three active
+  memberships, pending badges, **Create organization**, **Join organization**,
+  and an honest `3 of 3` state. Zero-membership accounts enter this chooser.
+- Settings > Organizations: switch, leave, pending requests, capacity, and role.
+  Organization > People/Requests is owner/admin-only, with approve/deny,
+  role/removal, ownership transfer, conflict explanations, and an audit trail.
+- `/me` is the editable self identity plus Work Record. `/people/:personId` is
+  the safe current-organization coworker profile. `/network/:personId` is the
+  separately published signed-in network projection. Web and native use the
+  same server projections; no client independently joins global, organization,
+  contribution, or memory records.
+- Network settings provide Off/Draft/Live/Paused state, searchable-field preview,
+  **View as recruiter**, contribution-card review/publication, contact inbox,
+  blocks, and export/delete. Organization > Contribution approvals shows the
+  exact field diff, evidence digest, named-party approvals, decision, revocation,
+  and audit. Organization > Recruiting separately grants/revokes
+  `talent_searcher`, search/contact limits, and audit; it never shows which
+  current employees are open to work or who viewed/searched them.
+- `GET/PATCH /api/identity/v1/me/profile`; `GET
+  /api/identity/v1/people/{personId}`; and `GET/PATCH
+  /api/organizations/{orgId}/members/{membershipId}/profile` use revisions/CAS.
+- `GET/POST /api/organizations`; `POST/DELETE
+  /api/organizations/{orgId}/join-requests`; admin `GET` requests and revision-
+  bound `POST .../{requestId}/decision`; membership role/revoke; leave/transfer;
+  and `POST /api/session/active-organization` are idempotent and opaque across
+  tenant boundaries.
+- Revision-bound network APIs cover self draft/preview/publish/pause, candidate
+  claim review, exact field-release approval/revocation, signed receipt status,
+  authorized search with visible structured interpretation, contact request/
+  decision/block, and search/contact audit. Recruiter responses contain only the
+  published projection and evidence-safe explanation; no source or memory body.
+
+### Migration and activation
+
+Keep the existing credential store during the first migration, but stop deleting
+non-seeded accounts before enabling account creation. Idempotently mint stable
+random person IDs for the seven current accounts, preserve password/passkey/
+profile/avatar/session truth, create Bonfire, make AJ owner, and make the six
+other seeded users members from a reviewed mapping manifest. Do not activate a
+dual-write authority: shadow and compare legacy/canonical membership projections,
+then cut readers/writers together with rollback evidence. Keep
+`person_mymind_context=false` while profiles/organizations ship; encrypted body
+custody and private MyMind retrieval activate only after their own custody,
+consent, correction/forget/export, restart, and zero-leakage gates.
+
+### E10-W0 normative authority freeze — revision 1
+
+This subsection is the canonical W0 contract. Revision 1 is frozen for local
+implementation and deterministic verification on 2026-08-08; changing a
+normative rule below requires a new numbered revision, an exact diff, impacted-
+test inventory, and re-review. This design freeze does not constitute the later
+product/legal/privacy approval, production migration authority, signing-key
+custody, provider authorization, activation, or shipping authority.
+
+#### Contract registry and ownership
+
+| Contract | Revision | Governing rule | Controller | W0 verification |
+|---|---:|---|---|---|
+| `PersonPrincipal` and safe `PersonProfile` | 1 | global opaque person above credentials; email never acts as identity or tenant; self controls global profile | person; recovery and deletion remain separate exact authorities | validation, account-linking/takeover, recovery, deletion, and opaque-reader tests |
+| `Organization`, `OrganizationMembership`, `OrganizationJoinRequest`, active-organization session, and organization audit | 1 | private-by-default organization; transactional three-active-membership limit; owner/admin exact-revision decisions; no ownerless organization; server-derived active membership | current active membership, never an email exception | normal/race transaction, stale decision, cross-org, final-owner, session-rebind, restart/restore tests |
+| `ContributionClaim` | 1 | organization-private, exact-source-bound claim; no portable body; stale source/ACL/consent/field approval enters `revalidation_required` | subject review plus eligible organization reviewer | lifecycle, source-drift, dispute, supersession, correction, revoke, and body-leak tests |
+| `ContributionAttestation` | 1 | immutable signed organization revision bound to evidence-manifest and exact released-field manifest | eligible organization issuer under current policy/signing revision | signature, key rotation/revoke, field-minimization, forgery, and source-revalidation tests |
+| `PublishedContributionClaim` | 1 | person-authored narrative bound only to active attestations; person can withdraw immediately; denial returns exact fields to draft | person controls publication; organization controls verification/revocation | concurrent publish/revoke, withdrawal, stale attestation, and index-fence tests |
+| `AgentInfluenceReceipt` | 1 | exact agent run/output plus human adoption/review plus resulting outcome; no self-assessment or usage-volume credit | human subject and eligible outcome reviewer | missing-link, forged-output, non-adoption, revocation, and private-AgentMind exclusion tests |
+| `NetworkProfileProjection` | 1 | independently opted-in server projection containing only currently published fields | person | off/draft/live/paused/delete, field-preview, source-drift, and projection-minimization tests |
+| `TalentSearchGrant` | 1 | revocable, expiring, organization-member-specific `talent_searcher`; owner/admin grants no implied search access | current organization capability administrator under separate policy approval | expiry, revoke, role-change, session-switch, opaque denial, and rate-limit tests |
+| `NetworkSearchReceipt` | 1 | body-minimized audit of original-query digest, safely redacted policy decision, visible structured interpretation, surfaced projection revisions/reasons, route, and cost | server policy; recruiter cannot edit | prohibited-query, abstention, deterministic-filter, audit-redaction, replay, and extraction tests |
+| `ContactRequest` and block | 1 | purpose-bound request; no contact channel before exact acceptance; person/org block fences search and contact | recipient person; sender may withdraw only its own pending request | accept/decline/withdraw/expire/block, spam-limit, race, and channel-nondisclosure tests |
+
+The canonical implementation may split storage tables or service objects, but it
+must not merge controllers, infer one authority from another, or let a client
+assemble a broader projection. Every contract records schema/policy revision,
+actor, correlation, idempotency, prior/new revision, created/effective time, and
+body-free audit evidence where applicable.
+
+Revision 1 uses one narrowly privileged application-owned PostgreSQL writer and
+serializable transactions as the primary mutation boundary. Database roles must
+deny direct client, worker, renderer, and provider writes. Row-level security is
+required before any independently credentialed tenant writer is admitted; its
+absence in the single-writer phase is an explicit defense-in-depth limitation,
+not permission to trust caller-supplied tenant IDs. Cross-tenant transaction and
+connection-pool reuse tests remain hard gates in both phases.
+
+#### Disclosure and verification tiers
+
+Lifecycle state and evidence origin are independent. `draft`, `published`,
+`paused`, `revalidation_required`, `withdrawn`, `revoked`, and `superseded` never
+become verification labels. A viewer sees one of these evidence labels:
+
+| Label | Minimum evidence and issuer | Permitted released fields | Viewer copy and downgrade |
+|---|---|---|---|
+| `self_described` | person-authored statement; no organization signature | person-approved narrative, work modes, coarse dates, open-to preference | visibly “Self-described”; never “verified”; removed on person withdrawal |
+| `organization_verified_opaque` | active signed attestation whose evidence manifest remains current | category, contribution verbs/role, coarse date, verification status; issuer only with approval | “Organization verified; underlying evidence is private”; source drift fences immediately to unavailable, not self-described |
+| `organization_verified_redacted` | opaque requirements plus approved redacted outcome/artifact fields | only exact released-field manifest; every named detail satisfies the aggregation rule below | “Organization verified; details redacted”; any affected approval withdrawal fences the exact field and recomputes the card |
+| `public_source_verified` | exact current public source revision/digest and policy-approved verifier | only fields observable in that public source and person-approved narrative | “Verified from a public source”; source removal/drift fences immediately |
+
+Labels bind issuer/signing-policy revision, evidence-manifest digest, released-
+field manifest, approval-set revision, issued time, optional expiry, and current
+source/ACL/consent/purge generation. Expired or unverifiable evidence is not
+silently downgraded. Unknowns remain explicit, and no tier implies quality,
+seniority, productivity, employability, personality, or comparative rank.
+
+#### Named-party and field-release approval
+
+A named party is any identifiable customer, collaborator, partner, project,
+artifact owner, metric owner, outcome owner, quoted speaker, or person other
+than the subject whose identity, confidential work, words, or attributable
+result would be released. Each candidate field records its field key, normalized
+value digest, source revision, subject, organization, named-party set, required-
+approver rule, policy revision, requested expiry, and intended visibility.
+
+The approval lifecycle is `pending -> approved | denied | withdrawn | expired | superseded`.
+An approval is valid only for the exact field value digest, source/consent/purge
+generation, attestation revision, visibility, policy revision, approver identity
+and authority revision, and time window. Stale or concurrent decisions fail;
+approval of one field never approves a sibling field or later value.
+
+Release requires all of: subject approval; current eligible organization-
+reviewer approval; and every required named-party approval. Policy may allow an
+organization privacy owner to approve a coarse non-identifying replacement, but
+never to impersonate a named party's approval for an identifying field. Denial
+or missing approval returns the exact field to draft. Withdrawal, expiry, source
+drift, consent drift, ACL/purge drift, or approver-authority loss synchronously
+fences the exact field from profile and search before acknowledgement, then
+queues projection/index purge. Already issued receipts remain as body-free
+historical tombstones, but direct shares and rendered/exported copies are marked
+stale or revoked wherever STRIDE controls them; STRIDE never claims to recall an
+uncontrolled recipient copy.
+
+#### Retention, deletion, and derived-index purge policy
+
+The following are maximum defaults pending the named W6 policy approval; legal
+hold may retain governed organization evidence but can never keep a person
+searchable or disclose a withdrawn field. Production activation requires exact
+configured values no broader than this table.
+
+| Data class | Default retention | Synchronous action | Derived purge target | Durable receipt |
+|---|---|---|---|---|
+| private claim source links and manifests | governed source policy; no copied body | fence on source/ACL/consent/purge drift before mutation returns | caches and candidate projections queued immediately; p95 5 min, hard 30 min | source-fence receipt plus per-store purge attempts |
+| active attestation and published card | while active and current | withdraw/revoke/expiry removes card and search field before acknowledgement | projection/index/cache p95 60 s, hard 5 min | revision, affected fields/stores, completion or escalation |
+| network profile/search document and semantic material | only while profile is Live and source-current | Off/Paused/Delete/block makes it ineligible before acknowledgement | all lexical/vector/reranker caches p95 60 s, hard 5 min | purge-generation receipt; zero stale-hit replay |
+| contact request | pending until terminal or 90 days, whichever is earlier; terminal metadata 1 year | block/withdraw/revoke prevents new delivery before acknowledgement | notification queues and caches p95 60 s, hard 5 min | terminal/contact-channel nondisclosure receipt |
+| search receipt | 90 days for abuse/audit, then body-free aggregate only | store query digest and policy-safe redaction; never copy hidden candidate fields | operational caches p95 24 h | retention/purge receipt |
+| approval, dispute, correction, revocation, audit, and signature tombstone | 7 years or approved governed-record policy | never searchable; field bodies minimized or separately purgeable | no discovery material; detached bodies follow their source policy | immutable body-free lineage receipt |
+| person export | one-time encrypted package, 7-day server expiry | revoke download immediately on delete/correction where controllable | package/blob/cache p95 24 h, hard 72 h | export-expiry/deletion receipt |
+| backups | approved immutable-retention schedule; no activation before custody approval | live authority fences immediately despite backup retention | purge manifests applied on restore before serving; aged copies expire by schedule | restore-time purge-generation parity receipt |
+
+Client caches, CDN objects, push payloads, queued jobs, analytics/logs, test
+fixtures, exports, backups, lexical indexes, embeddings, and semantic/reranker
+caches are explicit stores, never “out of scope.” Purge is idempotent and
+restart-safe. Missing a hard target pages the privacy owner, keeps affected
+features fail-closed, records the failing store without private body material,
+and blocks cohort expansion. Legal hold preserves only the minimum governed
+record and cannot restore contact, profile, source drill-down, or search access.
+
+#### Prohibited-search policy — revision 1
+
+Policy runs deterministically before retrieval. It evaluates explicit terms,
+semantic/composite requests, exclusions, geographic or employer proxies, and
+attempts to reconstruct a prohibited criterion across multiple queries. The
+parser emits `allow`, `transform_with_confirmation`, `abstain`, or `reject` plus
+the visible structured interpretation. Any uncertainty that could alter the
+protected/sensitive verdict abstains before retrieval; the user must confirm a
+safe interpretation before search.
+
+Reject protected traits and proxies; health/disability; family/pregnancy;
+religion/politics; sexual orientation/gender identity; race/ethnicity/national
+origin/citizenship proxies; age or graduation-year proxies except a separately
+lawful explicit age requirement; compensation history; inferred availability;
+personality/psychographic/culture-fit/loyalty; promotion/termination risk;
+productivity/activity/meeting/message/token/response volume; social/network
+size; employer prestige; contact response; and any hidden quality or fit score.
+“Personality” may transform only to exact person-published work-mode preferences
+after confirmation. Free-text query bodies are not copied to candidate records;
+audit retains a digest and policy-safe classification unless an approved abuse-
+investigation policy requires encrypted restricted text.
+
+Allowed ordering inputs have closed definitions: declared-query match is the
+deterministic overlap between confirmed structured fields and published fields;
+evidence coverage is the fraction of matched fields with current visible
+evidence labels, never quantity of work/activity; freshness is age of the exact
+published claim revision within policy-bounded buckets, never tenure, age, or
+recent message/activity volume. Ties use a stable privacy-preserving shuffle.
+No model may add an unlisted factor. Adversarial acceptance requires zero
+retrieval on the frozen prohibited corpus and zero hidden-field influence on
+the allowed corpus.
+
+#### Network and organization feature switches — revision 1
+
+All switches are server-authoritative, default false, tenant/cohort scoped,
+audited, observable without private values, and fail closed when missing or
+stale. Disabling a parent synchronously disables every dependent reader,
+writer, job admission, provider call, queue consumer, projection, and index.
+
+| Switch | Depends on | Disabled behavior |
+|---|---|---|
+| `organization_authority_write` | canonical person mapping and migration parity | no create/join/approve/role/transfer/leave mutations |
+| `organization_authority_read` | canonical membership reader parity | no organization/member/coworker projection reads |
+| `active_organization_session` | organization authority read and session-revision invalidation | sessions remain on legacy single-tenant path; no client-selected tenant authority |
+| `contribution_candidate_detection` | active membership principal and exact-source authority | no detector/job admission or candidate creation |
+| `contribution_review` | candidate authority and approved policy revision | no subject/org/named-party review mutations |
+| `work_record_private` | active attestation resolver | no private draft/preview reader or writer |
+| `network_profile_publication` | approved disclosure policy and purge worker healthy | no publish/live mutation; existing material fenced when false |
+| `network_projection_shadow` | `network_profile_publication`; published fields only | no projection/index build, including background jobs |
+| `network_search` | Live projection, current `TalentSearchGrant`, policy engine, rate limiter, purge health | no parser/reranker/provider call or retrieval |
+| `network_contact` | search independent; current published recipient and limits | no contact admission or notification delivery |
+| `network_query_parser_provider` | network search plus separately qualified/authorized route | deterministic structured filters only; no paid call |
+| `network_semantic_reranker` | network search plus separately qualified/authorized route | no embeddings/vector/reranker generation or query |
+| `person_mymind_context` | separate W5 custody/consent approval | remains false and cannot gate organization, Work Record, or network functions |
+
+Publication, search, and contact remain independently kill-switchable. Turning
+off search does not unpublish a profile; turning off publication or a person's
+Live state fences that profile from search; turning off contact never reveals a
+channel. No switch may be enabled merely by database migration or registry
+presence.
+
+#### Seven-person Bonfire migration manifest — revision 1
+
+The migration input set is exactly the existing AJ, Joel, Caitlyn, Tyler, Tim,
+Erick, and Tom account records read from the authoritative credential store at
+rehearsal time. The private generated manifest must bind, per account, the
+normalized credential subject digest, newly minted stable random person ID,
+profile/avatar/passkey digests, prior session hashes and expiries, target Bonfire
+membership ID/revision/role, and no-extra-account proof. AJ receives `owner`;
+the other six receive `member`. It must also bind the Bonfire organization ID,
+slug/name, policy/schema/migration digests, source/target high-waters, feature-
+switch snapshot, backup identity, rollback identity, and operator/reviewer.
+
+The manifest contains no password, passkey secret/private material, raw session
+token, avatar body, or email in evidence packets; a private access-controlled
+mapping may retain the minimum normalized account identifier needed for exact
+execution. Rehearsal must prove idempotent second run; unchanged credential,
+passkey, profile, avatar, and session behavior; exactly seven person roots and
+memberships; AJ as sole initial owner; zero extra account deletion; shadow
+legacy/canonical parity; restart/restore; and rollback to the untouched input.
+Production execution requires AJ's approval of the exact generated manifest,
+not merely this transformation contract.
+
+#### Threat model and verification obligations — revision 1
+
+| Threat | Asset/boundary | Preventive control | Detection/response and required proof |
+|---|---|---|---|
+| account linking takeover or recovery confusion | credential -> global person | random opaque person ID; exact credential-subject digest; separate revisioned recovery authority; no email-as-identity | conflicting-link/recovery race tests; alert and fence both mappings |
+| tenant-switch race or confused deputy | session/socket/push/cache/worker -> organization | server-derived membership principal and revision; teardown-before-rebind; client tenant inputs non-authoritative | concurrent switch/revoke race tests across every enumerated surface; stale generation rejected |
+| forged attestation or signing-key compromise | organization evidence -> portable proof | signed exact manifest, issuer/policy/key revision, external custody, rotation and revocation | tamper/key-revoke/restart tests; fence all affected claims and publish key incident receipt |
+| malicious or complicit reviewer | field and claim approval | separation of subject/org/named-party controllers; exact field digest; immutable audit; dispute/correction | two-actor and stale-authority tests; revoke/supersede without erasing governed history |
+| re-identification from coarse fields | redacted portable projection | minimum fields, bucketed dates/metrics, preview/View-as-recruiter, named-party aggregation | k-anonymity/manual privacy review for pilot; remove exact field on risk finding |
+| enumeration or timing side channel | profile/org/search endpoints | opaque 404, normalized response shape/timing, signed-in capability, bounded pagination | cross-org/anonymous differential tests and audit alerts |
+| scraping, Sybil, or rate-limit evasion | signed-in network/search/contact | person/org/global budgets, velocity and breadth limits, no bulk export, grant revocation | extraction corpus, distributed-rate tests, quarantine and grant revoke |
+| prompt/query injection or index poisoning | query parser, public fields, semantic route | deterministic policy before retrieval; published-field schema; no hidden source/model tool; output schema | adversarial parser/index corpus; abstain/reject; quarantine poisoned revision |
+| stale cache/index resurrection | source/consent/purge -> derived stores | synchronous eligibility fence plus monotonic purge generation and rebuild filter | restart/restore/replay tests; stale-hit canary; keep search fail-closed on lag |
+| harassment, spam, or channel disclosure | contact | purpose/channel-bound acceptance, block, limits, no channel before acceptance | spam/race/blocked-contact tests; immediate sender/org quarantine |
+| defamation or dispute abuse | contribution narrative and verification label | source-bound claim, visible origin tier, correction/dispute/supersession, no “best” claims | dispute SLA and reviewer audit; fence contested fields when required |
+| deletion versus immutable signature | portable proof and governed record | separate searchable projection, purgeable bodies, and body-free signed tombstone | delete/export/restore tests prove no rediscovery while signature lineage remains |
+
+Pilot privacy `k`, normalized-response timing tolerance, person/organization/
+global search and contact budgets, and dispute-response SLA are required W6
+policy parameters. Unset, zero, expired, or revision-mismatched values fail
+closed: no network search/contact cohort may activate and contested fields stay
+fenced where policy requires. Qualification receipts bind the exact parameter
+revision and test the limits rather than relying on prose defaults.
+
+#### External approval ledger
+
+| Gate | Accountable decision | Required artifact | Current state |
+|---|---|---|---|
+| W0 local design freeze | Goal Loop coordinator; independent read-only critic | exact revision-1 section digest, W0 receipt, critic verdict | pending critic; no external product approval implied |
+| W4 Bonfire migration and canonical repair/promotion | AJ as production owner | exact generated seven-person manifest, private backup/rollback receipts, expected database/event delta, deterministic suite, critic verdict | not authorized |
+| W5 MyMind custody/consent | AJ plus named privacy/security and independent custody owners | encryption/key/data-flow policy, user copy, deletion/recovery ceremony, custody and restore receipts | not authorized; may be explicitly deferred by AJ only for overall completion |
+| W6 Work Record/network qualification | named product, legal, and privacy approvers | signed policy revision covering attribution/export, tiers/copy, named parties, dispute/revoke, recruiter limits, prohibited proxies, retention/purge, pilot cohort | not approved; qualification receipts must bind the approved revision |
+| W6 paid provider routes | AJ and intended OpenAI project/billing owner | exact project identity, spend limits, per-route paid-call authorization and usage receipt | not authorized |
+| W7 native/privacy/resilience | Apple/TestFlight owner, product/privacy/legal approvers, physical-device participants, custody/DR owners | final-build Apple/group evidence, iPhone/iPad matrix, accessibility/privacy sign-off, restrictive-network and restore/failover receipts | external waiting |
+| W8 Git/release/cohorts | AJ | separately explicit commit, push, deploy, and cohort decisions; exact release/rollback; per-cohort kill-switch receipt | not authorized |
+
+No deadline is invented for an external approver. A missing decision keeps the
+dependent gate `external_waiting` or `blocked`; it cannot be inferred from a
+local design freeze, older provider attempt, migration inclusion, release,
+TestFlight distribution, administrator role, or prior cohort state.
+
+The body-minimized live/local/native W0 receipt is
+`docs/evidence/e10/stride-e10-w0-freeze-20260808.json`; its status remains
+`deterministic_verified` after a two-round independent critic gate closed every
+blocker and major finding.
+
+W0 exits only when the live release/switch/high-water receipts and this revision
+are independently reviewed, the generated section/evidence digests are recorded,
+the exact local dirty-state boundary is frozen, and every unresolved later-wave
+decision is explicitly external rather than silently assumed.
+
+### E10 execution waves and status
+
+| Wave | Deliverable | Dependency and acceptance | Current state |
+|---|---|---|---|
+| E10-W0 | Reconcile ledger and freeze identity/network authority | refresh exact serving ledger/images/rollback/feature switches/high-waters; reconcile stale claims; freeze person/org plus contribution/attestation/network/search/contact contracts, disclosure tiers, prohibited-search policy, retention/deletion, threat model, and migration manifest | `deterministic_verified` — revision 1, receipt, exact digests, and independent critic PASS |
+| E10-W1 | Canonical person, organization, contribution, network, session, and audit authority | transactional max-three/final-owner proofs; revision/CAS/idempotency; exact org/named-party field approval; user publication/pause/revoke; recruiter grant/query/contact audit; purge propagation; every route default-off | `deterministic_verified` — migrations 14-16, receipt, targeted normal/race/PostgreSQL/vet, independent critic PASS; all switches false and no route active |
+| E10-W2 | Organization, Work Record, and network product surfaces | web/native self/coworker/network projections; create/join/approve/switch/leave; evidence cards/tiers; organization contribution approvals; network preview/View-as-recruiter/contact/block; no discovery activation | `deterministic_verified` — receipt-bound local/default-off backend, web, native, persistent recovery, critic PASS, and registered-live W1-backed rendered QA; earlier static fixture evidence remains explicitly non-live |
+| E10-W3 | Tenant conversion, network shadow, and migration rehearsal | replace singleton/unconditional org ACL paths; build shadow network projection/index from published fields only; revalidation/revoke/purge parity; idempotent offline seven-person/Bonfire rehearsal with AJ owner; no production mutation | `deterministic_verified` — local/offline migration, shadow, durable purge, restart/rollback, and converted authority-path evidence plus three independent critic PASS verdicts; production cutover remains deliberately disabled and singleton-dependent surfaces are explicitly unavailable/pending |
+| E10-W4 | Authority-gated Bonfire migration, org/Work Record canary, and canonical repair | explicit production authority; exact backup/rollback; migrate Bonfire; restore R1/R2; high-water agreement; web/native org/profile plus private contribution draft/preview canary while network discovery and MyMind remain off | `blocked` on AJ authority, a freshly regenerated exact live repair manifest, exact production backups, and the production durable organization/operation-store cutover boundary |
+| E10-W5 | Private MyMind custody and activation | independent encrypted custody/consent; inspect/correct/forget/export; restart/restore; exact disclosure and zero leakage; profiles/orgs do not depend on this wave | `external_waiting` |
+| E10-W6 | Network, provider, and real-work qualification | privacy/legal/product approval; at least five consenting profile participants and two search reviewers; labeled/adversarial recruiter corpus; explanation/unknown/prohibited-criteria/contact/exfiltration gates; qualify any parser/reranker plus STT, voice, Luna/Terra/Sol, I&O/workforce one variable at a time | `external_waiting` |
+| E10-W7 | Physical, privacy, and resilience acceptance | final exact native build containing org/Work Record/network changes on iPhone/iPad; publish/pause/search/evidence/contact/block/revoke rendered flows; restrictive-network TURN/WebRTC; signed restore; index purge; HA failover; accessibility and privacy/legal sign-off | `external_waiting` |
+| E10-W8 | Final activation | final route freeze and exact release/rollback; independently kill-switchable opt-in cohort order `draft/publish -> evidence search -> contact`; 24-hour/ten-sitting soak includes revoke/purge latency and prohibited-leakage audit; W5 must be complete or explicitly deferred by AJ, never silently pending | `blocked` on W0-W7 |
+
+The body-minimized W1 authority receipt is
+`docs/evidence/e10/stride-e10-w1-authority-20260808.json` (SHA-256
+`2b64d45b42ac7f4b61b991b0698588e7b4976043f5c14206a0c3b750fd1baaad`).
+It binds the 20-file worktree checkpoint, migrations 14-16, all 13 new switches
+false, focused normal/race/disposable-PostgreSQL and `go vet` passes, and a final
+independent critic PASS with zero blocker or major finding. It is local
+`deterministic_verified` authority evidence, not a commit, release, production
+migration, route activation, provider qualification, or cohort approval.
+
+The W2 product receipt is
+`docs/evidence/e10/stride-e10-w2-product-20260808.json`. It distinguishes the
+earlier static fake-backend schema-admission captures from the canonical
+authenticated `registered_live_runtime_w1_backed` browser run, binds all five
+registered-live screenshot digests, and records the final normal/race,
+disposable-PostgreSQL, vet, web VM, 457/457 native-test, native-typecheck,
+persistent-recovery, and independent-critic passes. It remains local/default-
+off evidence: no Git, provider, production data/configuration, deployment,
+release, physical-device, or cohort action is claimed.
+
+The W3 tenant/shadow/migration receipt is
+`docs/evidence/e10/stride-e10-w3-tenant-shadow-migration-20260808.json`. It
+binds the exact seven-person/AJ-owner and 15-row disposable migration proof,
+separate public/private signed receipts, crash-journal restore, published-only
+visible-field shadow parity, current-authority search admission, exact 13-store
+durable purge, default-off/shadow runtime bootstrap, converted active paths,
+explicitly unavailable pending paths, the full repository suite, and three
+independent critic PASS verdicts. This is a local/offline safety proof, not
+production cutover authority or proof that pending singleton-dependent paths are
+functional in cutover.
+
+The W4 intervention packet is
+`docs/evidence/e10/stride-e10-w4-intervention-20260808.json`. It records the
+required authority, backup, delta, canary, and rollback contract and explicitly
+refuses to treat the W0 count of 119 repair candidates as a fresh exact mutation
+manifest.
+
+### Required evidence and human interventions
+
+The implementation is incomplete unless: two concurrent capacity claims produce
+at most three active memberships; pending/denied requests grant zero access;
+create is atomic; stale/cross-org/non-admin approvals fail; concurrent owner
+transfer/departure cannot remove the final active owner; switch/revoke/leave invalidate old socket,
+push, cache, Drive, room, brain, Scout, and worker authority; profiles expose no
+private email/MyMind/hidden-membership data; restart/restore/replay reproduce the
+same authority; and web/native rendered flows pass at zero, one, and three
+organizations. Every Work Record card must resolve to an active signed
+attestation and exact released-field manifest; source/ACL/delete/purge drift must
+retract stale projections; any source-consent revision/change or named-party
+field-approval withdrawal must synchronously fence the exact card/search fields;
+opted-out/paused/departed/revoked people must not
+surface; concurrent publish/revoke must leave no stale searchable revision;
+blocked recruiters cannot search/contact; cross-org and anonymous requests remain
+opaque; protected criteria and proxies are rejected; bulk extraction is bounded;
+deletion purges derived indexes; agent influence requires exact adopted output;
+and contract/UI regressions ban rank, productivity, engagement, “contribution
+fuel/share,” fit, and personality-score fields.
+
+AJ intervention is required only at the named external gates: confirm the exact
+OpenAI billing project and spend controls before paid qualification; provide or
+approve AWS S3 Object Lock/KMS, recurring cost, and independent custody owners;
+approve the consent/privacy/product policies in §16; participate in physical
+iPhone/iPad and restrictive-network tests; identify two eligible reviewers and
+real meeting participants for pilots/soak; authorize the exact Bonfire migration,
+canonical production repair/promotion, production data/config changes, paid
+calls, Git shipping/deployment, and cohort activation when their preflights pass;
+and resolve the existing `axx-archive/stride` repository-name collision before
+any new primary remote is created. Before network qualification, AJ/product/
+legal/privacy must also approve contribution/export and named-party consent,
+dispute/revocation, recruiter capability/limits, prohibited search criteria,
+discovery/contact copy, retention/deletion, and the opt-in pilot cohort, with at
+least five consenting profile participants and two realistic recruiter/search
+reviewers.
 
 ## 2026-08-06 AmbientMind / AgentMind / MyMind strategic-design delta
 
@@ -284,17 +992,17 @@ and leaves the user's portable MyMind intact. Deleting a global account requires
 an explicit custody/export flow and cannot silently erase another
 organization's lawful shared record or leave orphaned authorship.
 
-The product shell is therefore person-first and workspace-scoped: signing in
-opens the same human account and MyMind, while switching company, client, or
-personal/freelance workspace changes the active AmbientMind, policy, and
-audience. A user who is between companies still retains their account, MyMind,
-private workspace, authorized portable receipts, and ability to do independent
-work. A MyMind home should let the person ask across their own authorized
-history and see a contribution graph by company, client, project, category,
-role, decision, and outcome. Every item must show one of three portability
-states: **private to me**, **shared inside this workspace**, or **portable
-receipt/public work**. This is an evidence-led record of a person's thinking
-and impact, not an employee productivity score; private reflection, message
+The product shell is therefore person-first and organization-scoped: signing in
+opens the same human account and private continuity, while switching company,
+client, or personal/freelance space changes the active organization policy and
+audience. A user who is between companies still retains their account, private
+context, authorized portable receipts, and ability to do independent work. The
+user-facing **Work Record** shows the contribution graph they chose to publish;
+plain-language Personal context and memory controls in Settings govern the
+behind-the-scenes private history. Every item must show one of three portability
+states: **private to me**, **shared inside this organization**, or **portable
+receipt/network-visible work**. This is an evidence-led record of a person's
+thinking and impact, not an employee productivity score; private reflection, message
 volume, and surveillance-derived activity are never converted into employer
 performance rankings.
 
@@ -410,15 +1118,16 @@ adapter. Web/X search, research, images, video, slides, documents, and code are
 capabilities, not model names exposed to coworkers. Grok/X and video remain
 separately qualified adapters, not assumptions.
 
-### Decision 7: Memory becomes Ask AmbientMind; Intelligence becomes attention
+### Decision 7: memory stays backstage; Work Search and attention are the product
 
-**Memory** becomes **Ask AmbientMind**: a natural-language search across
-authorized meetings, public/project threads, decisions, artifacts, Drive,
-storylines, and work receipts. Answers lead with synthesis, citations,
-freshness, coverage, and known gaps. Browse sources remains secondary. Results
-can be continued privately, added to a new public/project thread, or added to an
-existing channel only after previewing and reauthorizing the evidence bundle
-for the destination audience.
+The earlier user-facing name **Ask AmbientMind** is superseded. **Work Search**
+is the natural-language surface across authorized meetings, public/project
+threads, decisions, artifacts, Drive, storylines, and work receipts. AmbientMind
+remains an internal implementation boundary. Answers lead with synthesis,
+citations, freshness, coverage, and known gaps. Browse sources remains
+secondary. Results can be continued privately, added to a new public/project
+thread, or added to an existing channel only after previewing and reauthorizing
+the evidence bundle for the destination audience.
 
 **Intelligence** answers "what requires attention and why": evolving
 storylines, blockers and alignments, decisions and commitments, contribution
@@ -469,31 +1178,32 @@ anything that cannot yet be turned on.
 | E10-R0 | Repair Ball Dogs routing, causal deletion, cleanup, and independent answer | current exact serving receipt and E10 release authority | focused/full tests; both public mention and direct reply call the model once; authored-only retrieval; caused answer retracts from chat and canonical projections; useful live answer | reactivate retained prior exact release; do not rewrite named-volume data | `completed` — exact release `ba9bca4a0392085df93f5dcd0607cba547260289`, ledger generation 16, durable cleanup, accepted independent answer, and causal lineage verified live |
 | E10-R1 | Restore meeting-intelligence truth and replay recent authorized meetings | R0 plus E10 provider/quota and source-custody authority | fresh source-anchored transcript/decision/action/blocker/storyline receipts; honest gap/coverage state | disable unhealthy worker, retain raw transcript and prior projections, replay from last verified high-water | `in_progress` — the deployed runtime is `mode=off`; the admin-only, digest-bound planner/executor foundation and non-mutating reviewed stage-runner adapter pass focused normal/race/PostgreSQL/DR gates, but production planning remains fail-closed until authenticated approval/rollback fence authority is installed; no provider replay or canonical projection promotion has run |
 | E10-R2 | Run canonical AmbientMind projections in shadow | R1 and E1 canonical contracts | rebuild/revoke/restart parity, high-water/freshness agreement, zero ACL leakage | turn off shadow consumers and rebuild from immutable evidence | `blocked_on_canonical_typed_source` — immutable typed event/source/node/edge/state/checkpoint persistence and deterministic revoke/supersede/rebuild/restart/ACL tests pass in memory and disposable PostgreSQL; historical-source revocation now preserves the newer logical revision. Production activation remains blocked because no globally ordered, authorized typed projection input provides stable logical ID, ACL snapshot, kind, freshness, supersession, and a cursor checksum for standalone invalidations. Raw chat and R1 execution-local output cannot safely fill that contract; migration 13 remains false and no reader/writer is active. |
-| E10-R3 | Establish person identity, tenant membership, MyMind custody, purpose, and destination-disclosure authority | E1 authority contracts plus E0 custody proof | principal × workspace × audience × purpose × consent tests; recovery/departure/export/delete; zero cross-company/private leakage | revoke disclosure tokens, stop MyMind context assembly, preserve private encrypted custody and company ledger | `engineering_complete_default_off` — global person identity, multi-workspace membership, purpose/destination disclosure, recovery, departure, optional export, and exact external custody-deletion receipt gates pass normal/race/PostgreSQL/DR tests; canonical migrations through 13 are live with `person_mymind_context=false`, while encrypted body custody and MyMind context assembly remain external/disabled gates |
-| E10-R4 | Add `ConversationContinuity` and the three-mind context envelope | R2, R3 | long-thread correction/delete/revoke/rebuild tests; read-only authority refs; freshness/gap disclosure | disable continuity/context-envelope consumers and fall back to bounded raw turns plus authorized AmbientMind retrieval | `engineering_complete_default_off` — body-free revisioned checkpoints, source/audience invalidation and rebuild, private-thread ACL handling, boot-safe UI-state persistence, and read-only context-envelope integration pass focused normal/race/full tests; production R2/R3 authority and real-surface acceptance remain external gates |
-| E10-R5 | Add AgentMind candor and reply/react/no-action participation | R4 | sycophancy, context, confidence, interruption, audience, and channel-policy corpus | restore explicit-invocation-only policy and prior signed profile revision | `engineering_complete_default_off` — source-linked AgentMind positions, admin-only exact-revision correction/supersession/forgetting, shared coworker constitution, Luna/max routing, truthful fixed-effort self-knowledge, event-driven quiet/active attention, strict classification, source revalidation, persistent dedupe, low-cost-only unsolicited replies, per-thread interruption spacing, lifecycle cleanup, and usage receipts pass focused/race/full tests. Provider qualification, the policy corpus, and rendered active-mode acceptance remain external gates. |
+| E10-R3 | Prove person/membership/MyMind metadata authority | E1 authority contracts plus E0 custody proof | principal × workspace × audience × purpose × consent tests; recovery/departure/export/delete; zero cross-company/private leakage | keep every consumer fenced and preserve the legacy account path | `contract_verified_default_off` — body-free in-memory policy, schema, and tests exist, but no route/worker/provider/current account path consumes them and encrypted body custody is absent; this is not a user-ready individual or MyMind |
+| E10-R3a | Productize global people and safe profiles | R3 and W0 schema/migration freeze | stable person mapping; self/member/admin field ownership; no hidden-membership/MyMind leakage; web/native rendered proof | keep legacy profile projection; disable canonical profile readers | `not_started` |
+| E10-R3b | Productize governed multi-organization membership | R3a | create/join/approve/deny/switch/leave/transfer; transactional maximum three; final-owner-transfer and cross-tenant corpus | keep organization feature off; retain Bonfire legacy authority until one atomic cutover | `not_started` |
+| E10-R3c | Activate private MyMind custody and controls | R3a, R3b, independent custody/consent | encrypted body custody; inspect/correct/forget/export; restart/restore; exact disclosure and zero leakage | revoke MyMind consumer tokens; keep body-free metadata and person profile | `not_started` |
+| E10-R4 | Add `ConversationContinuity` and the three-mind context envelope | R2, R3c for activation | long-thread correction/delete/revoke/rebuild tests; read-only authority refs; freshness/gap disclosure | disable continuity/context-envelope consumers and fall back to bounded raw turns plus authorized AmbientMind retrieval | `split_state` — ConversationContinuity corrections are released; body-free context integration is verified, but the real three-mind envelope cannot activate before R2/R3c authority and real-surface acceptance |
+| E10-R5 | Add AgentMind candor and reply/react/no-action participation | R4 | sycophancy, context, confidence, interruption, audience, and channel-policy corpus | restore explicit-invocation-only policy and prior signed profile revision | `split_state` — source-linked AgentMind positions, correction/supersession/forgetting, coworker constitution, Luna/max routing, and quiet-mode proactive classification/revalidation/dedupe/lifecycle/usage are released. Provider qualification, the policy corpus, and rendered active-mode acceptance remain external gates. |
 | E10-R6 | Add Marketplace onboarding packs to canonical TeamAgent lifecycle | R3, R4 and E8 package/lifecycle receipts | scoped access, factual grounding, gap disclosure, correction, refresh, pause/quarantine/offboard gates | pause seat, revoke runtime principal/pack, restore prior package/profile/capability revisions | `in_progress` — the canonical workforce runtime now stops route activation at `review_required`, keeps access revoked, and requires a separate idempotent human review receipt before `active`; replay/restore and internal-preview receipt chains preserve that state. The product preview's simplified lifecycle mirror, onboarding-pack compiler, readiness refresh, and real UI/provider activation remain pending. |
-| E10-R7 | Collapse work UI to one activity rail and complete Open/Save/Discard | R0 and E4/E6 artifact/Drive authority | desktop/mobile rendered QA; stable Drive reference; revision-bound, double-confirmed discard and projection retraction | restore prior renderer; keep artifacts/Drive copies intact and hide new discard action | `in_progress` — exact-revision Open/Save/Discard authority, stable Drive identity, durable pending intents, same-actor double confirmation, restart reconciliation, canonical delete authorization, and chat retraction backend pass normal/race/PostgreSQL/DR gates. The authorized single-artifact response now supplies the server-computed body-free disposition reference and desktop work activity no longer invents numeric progress. Runtime activation, one-rail terminal-result rendering, web/mobile Open/Save/Discard wiring, folder choice, and rendered acceptance remain pending. |
-| E10-R8 | Ship Ask AmbientMind, attention-led Intelligence, and scoped contribution views | R2-R5, especially R3 disclosure authority | cited authorized answers, destination reauthorization, freshness/gaps, non-surveillance contribution truth | disable new views/queries and retain source systems plus admin health | `in_progress` — the surveillance-shaped activity-volume “contribution fuel” ranking is removed from the live member payload and UI; cited Ask AmbientMind, attention views, and evidence-backed scoped contribution attestations remain pending R4/R5 authority |
-| E10-R9 | Make MyMind portable with opaque contribution attestations | R3, R8 and explicit organization export policy | signed/redacted receipt validation; third-party field authorization; departure/recovery/export/delete; zero confidential content | revoke export key/receipt visibility; retain tenant evidence and private MyMind separately | pending |
+| E10-R7 | Collapse work UI to one result flow and complete Open/Save/Discard | R0 and E4/E6 artifact/Drive authority | desktop/mobile rendered QA; stable Drive reference; revision-bound, double-confirmed discard and projection retraction | restore prior renderer; keep artifacts/Drive copies intact and hide new discard action | `split_state` — web proposal/result/Drive/document-tag UX, Open/PDF, named Save, editable Regenerate, folder navigation, and file rename are live and signed-in verified. Backend disposition authority is verified. Remaining scope is Discard end-to-end activation, final native physical-device acceptance, and separate destination contracts for Canvas opening turns and in-room attachments. |
+| E10-R8 | Ship Work Search, attention-led Intelligence, and scoped contribution views | R2-R5, especially R3 disclosure authority | cited authorized answers, destination reauthorization, freshness/gaps, non-surveillance contribution truth | disable new views/queries and retain source systems plus admin health | `in_progress` — the surveillance-shaped activity-volume “contribution fuel” ranking is removed from the live member payload and UI; cited Work Search, attention views, and evidence-backed scoped contribution attestations remain pending R4/R5 authority |
+| E10-R9 | Ship the opt-in Work Record and evidence-backed people network | R3a-R3b, R8 contribution authority, and explicit organization/person/named-party disclosure policy; private MyMind activation is not a dependency | signed/redacted contribution attestations; source/consent/field-approval drift retraction; separate coworker/network projections; prohibited-query corpus; explainable search; consentful contact; departure/revoke/purge; zero confidential or mind content; no scoring/feed | independently disable publication, search, and contact; purge derived index; retain org evidence, private MyMind, and signed tombstones separately | `not_started` — no ContributionAttestation/NetworkProfile/search/contact contract exists yet; legacy contribution-fuel ranking code/renderer must be removed and regression-banned before launch |
 
-### Current E10 substate, authority queue, and resume point
+### Historical E10 substate and authority queue — superseded 2026-08-08
 
-Current canonical wave is E10. E10-R0 is complete in production. Exact release
-`976e6784d0b58faf6011ea8dfe31f71322b56205` is serving with
-`verified-local-unsigned` process evidence and a retained exact rollback bundle;
-Build 47 from the same commit is Apple `VALID` in the internal Team group.
-Public process health is green, but the release is not externally qualified.
-`/readyz` reports canonical dirty high-water 25992 ahead of reconciled/checkpoint
-high-water 8532, replay off, STRIDE runtime unavailable and activation-fenced,
-all E10 feature switches false, offsite backup dormant, and a stale legacy
-Codex-runner heartbeat. R1 remains the truth-restoration gate because no
-governed production replay has executed. R2's reducer/store is verified but its
-production compiler is blocked on a canonical typed source contract. R3 remains
-metadata-only/default-off without encrypted body custody or context assembly.
-R4/R5 candidate repairs pass the full and required race suites but await exact
-release activation. R6 and R7 are still partial as recorded above; R8/R9 and
-the external provider/device/media/HA/custody/pilot/soak gates remain pending.
+This 2026-08-07 substate is retained as historical evidence. It is superseded by
+the 2026-08-08 generation-30 W0 receipt and §18 resume point: exact live commit
+`d4c827c...`, current images, retained rollback, and canonical high-waters are
+now refreshed. Canonical shadow remains unhealthy at 28,626 versus 8,532 with
+119 repair candidates; replay remains off, STRIDE runtime/MyMind activation
+remains fenced, and offsite custody remains dormant. R1 remains the truth-restoration gate
+because no governed production replay has executed. R2's reducer/store is
+verified but its production compiler is blocked on a canonical typed source
+contract. R3 is a metadata-only authority proof; R3a-R3c are the productization
+work defined above. ConversationContinuity and AgentMind repairs are released,
+while the three-mind envelope, active proactive acceptance, remaining artifact
+actions, R6/R8/R9, and the external provider/device/media/HA/custody/pilot/soak
+gates remain pending at their exact scopes.
 
 The live repair proved two independent failures. First, routing and retrieval
 were classifying the structured public-channel envelope rather than only the
@@ -1920,7 +2630,7 @@ Rate metrics report numerator/denominator and a 95% Wilson interval. Latency rep
 | E7 | `insights_opportunities_v1` and its first named Insights coworker produce repeatedly useful, reviewed outcomes, learn from typed feedback, and seal the first marketplace-ready package | E6 | ten fixed-release pilots, two reviewers, stable attribution, zero invented assertions/unauthorized disclosure, package/eval/rollback receipt | `deterministic_verified` — complete durable fake-stage workflow; ten paid real-input pilots/two reviewers pending E10 |
 | E8 | Curated Agent Marketplace, organization-owned team agents, evidence-backed growth, chief-of-staff coordination, static seat routing, and spend controls are eval-proven | E2-E7 corpora and I&O proof | verified first-party packages one at a time; lifecycle/permission/export/continuity gates; quality non-regression, ledger agreement, and package/profile/route rollback | `deterministic_verified` — internal-preview lifecycle/default-off candidates; live capability/personality/voice/cost admission pending E10 |
 | E9 | HA/DR, security, native devices, operational readiness, and launch-readiness harnesses | token-free E1-E8 engineering | deterministic restore/failover/isolation/native/security evidence; production operations remain fenced | `deterministic_verified` — temp/loopback/local-simulator evidence only; production HA/RPO/RTO, real media, physical devices, release, and soak pending E10 |
-| E10 | Paid-provider qualification, integrated acceptance, and launch | E1-E9 engineering plus external E0 recovery/consent/custody/quota gates | one-seat-at-a-time live canaries, immutable route map, integrated founder flows, production restore/failover/soak, exact-SHA launch and rollback | `product_release; external_acceptance_waiting` — implementation `65c3948...` is sealed into the release carrier with Scout/Colton workflow proof and canonical Board repair excluded; Build 39 physical acceptance, multi-human room invocation/transcription attribution, Drive acceptance, real-corpus provider qualification, HA/DR, custody, and soak remain open. The earlier synthetic provider receipts keep their narrow contract meaning and do not qualify a seat. |
+| E10 | Identity/organization/Work Record network productization, paid-provider qualification, integrated acceptance, and launch | E1-E9 engineering plus external E0 recovery/consent/custody/quota gates | W0-W8; cross-tenant identity/org/MyMind and contribution/search corpus; one-seat-at-a-time live canaries; immutable route map; integrated founder flows; production restore/failover/soak; exact-SHA launch and rollback | `product_carrier_live; external_acceptance_waiting` — public health reports exact carrier `d4c827c...`, but E10-W0-W8, organization/Work Record/network/MyMind activation, physical acceptance, real-corpus qualification, HA/DR, custody, pilots, and soak remain open. Earlier carrier and synthetic-provider receipts retain only their historical/narrow evidence meaning. |
 
 ---
 
@@ -2205,15 +2915,57 @@ attempts; it is not a retroactive qualification waiver.
 
 **Ordered stop/resume queue:** this sequence is dependency-bound. A later item cannot be used to waive an earlier one.
 
-1. Freeze one local E1-E9 candidate and complete the deterministic normal, race, dependency, native/simulator, vertical-founder, failover/restore, authorization, and independent-critic gates.
-2. **STOP before every paid provider call, production mutation, Git integration, release, or deployment.** Resume only after the user confirms API quota/top-up and explicitly authorizes the applicable external operations.
-3. Reverify current official model access, endpoint/event/parameter compatibility, project attribution, reasoning controls, price tables, accepted-versus-rejected accounting, and bounded spend ceilings.
-4. Run the smallest exact provider probe per seat. Stop the affected lane on the first schema, policy, authority, pricing, quality, or ledger failure; do not hide it behind a fallback.
-5. Qualify authoritative meeting STT and composer dictation first; then personal/meeting Scout on `gpt-realtime-2.1`; then the separate invited-specialist Realtime voice lane. Optional `gpt-live-transcribe` ships only if a live provisional transcript consumer still justifies its extra lane.
-6. Qualify transcript analysis, temporal/company recall, `#team`, Suggested Work, I&O, Scout coordination, and Marketing/Research/Design/Builder seats one model, effort, prompt, or tool-policy variable at a time.
-7. Freeze the final route map, rerun every affected downstream corpus, run ten real I&O pilots with two eligible reviewers, and run the qualified founder/workforce flows.
-8. Complete the external immutable-custody, signed authenticated restore, production failover, TURN/real-WebRTC, physical iPhone/iPad/TestFlight, privacy/consent, and owner-approval gates.
-9. Only then reconcile an intentional release scope excluding `stride-site/` and unrelated user work; bind it to an exact commit/tree/build/image/config identity; commit/push/deploy when expressly authorized; observe production, prove rollback, run the 24-hour/ten-sitting soak, and selectively activate only passing cohorts.
+1. Execute E10-W0: freeze one local candidate, refresh the exact serving ledger/
+   images/rollback and canonical high-waters, reconcile stale ledger claims, and
+   complete deterministic normal, race, dependency, authorization, native/
+   simulator, founder, restore, and independent-critic gates.
+2. Complete E10-W1-W3 without production mutation: identity/organization/network
+   authority, product surfaces, tenant-principal conversion, cross-tenant
+   negatives, and an offline reviewed Bonfire migration rehearsal. Keep every
+   new authority and reader default-off.
+3. **STOP before every paid provider call, production data/config mutation,
+   canonical repair/promotion, Git integration, release, deployment, or cohort
+   activation.** Resume only with the exact applicable user authority.
+4. Before any real company/user corpus or provider qualification, complete the
+   §16 business/privacy/consent approvals, intended OpenAI project/billing/spend
+   reconciliation, immutable offsite retention, independent key/signing custody,
+   authenticated signed restore, and Work Record/network attribution/search/
+   contact/privacy approvals required by the entry gate. The narrow
+   synthetic contract exception above does not waive this item.
+5. With separate exact authority for each operation, execute E10-W4's Bonfire
+   migration/organization/Work Record private-draft canary and canonical repair/
+   promotion. Organization and private contribution preview may pass while
+   `person_mymind_context=false`; network discovery/contact remain off until W6,
+   and E10-W5 MyMind remains separately gated by encrypted custody and consent.
+6. Execute E10-W5 only after its independent custody/consent gate. Work Record
+   and network implementation must not read or wait on MyMind. W5 must either
+   complete with its own receipts or be explicitly deferred by AJ; it cannot
+   remain silently pending when W8 or the full plan is called complete.
+7. Reverify current official model access, endpoint/event/parameter compatibility,
+   reasoning controls, price tables, accepted-versus-rejected accounting, and
+   bounded spend; then run the smallest authorized exact probe per seat. Stop
+   that lane on the first schema, policy, authority, price, quality, or ledger
+   failure; do not hide it behind a fallback.
+8. Qualify authoritative meeting STT and composer dictation; personal/meeting
+   Scout on `gpt-realtime-2.1`; the separate invited-specialist voice lane; then
+   transcript analysis, recall, `#team`, Suggested Work, I&O, coordination, and
+   Marketing/Research/Design/Builder one model/effort/prompt/tool-policy variable
+   at a time. Separately qualify Work Record/search/contact on at least five
+   consenting profiles, two realistic reviewers, and the labeled/adversarial
+   prohibited-query, explanation, revocation, purge, exfiltration, and contact
+   corpus. `gpt-live-transcribe` ships only for a qualified consumer.
+9. Freeze the final route map, rerun every affected corpus, run ten real I&O
+   pilots with two eligible reviewers, complete the final exact native build's
+   physical iPhone/iPad/TestFlight organization/Work Record/publish/pause/search/
+   evidence/contact/block/revoke matrix,
+   restrictive-network TURN/real-WebRTC, production failover, and qualified
+   founder/workforce flows.
+10. Only then reconcile an intentional release scope excluding `stride-site/`
+   and unrelated user work; bind an exact commit/tree/build/image/config;
+   commit/push/deploy only when expressly authorized; observe production, prove
+   rollback, run the 24-hour/ten-sitting soak, and activate only passing cohorts
+   in order: organization/profile, contribution draft/publish, evidence search,
+   then contact—each independently kill-switchable.
 
 **2026-08-01 E10 contract checkpoint:** the user confirmed quota and authorized use of the existing OpenAI key for bounded provider checks. The independently gated harness froze candidate manifest `ffbb8ad389afdced67162cdb4987d64d6406eeb7c0ef2c235f30e3885440df26`, probe binary `b7c7e984c4489e8d5113f3b83e29d3231f2b3b1a2377b198034c21718a95d699`, a 5.509-second synthetic WAV, and its reference digest. Zero-generation model-object access passed for `gpt-realtime-2.1`, `gpt-transcribe`, `gpt-live-transcribe`, `gpt-5.6-luna`, `gpt-5.6-terra`, `gpt-5.6-sol`, `text-embedding-3-small`, and `gpt-image-2`. One `gpt-transcribe` file request passed the exact multipart and strict usage-union contract: HTTP 200, 1.647-second request latency, provider-reported 6.0 seconds, computed cost USD 0.00045 under a USD 0.001 admission ceiling, and non-empty output retained only as a hash/character count. The API returned no documented project echo and the connected Platform helper required reauthentication, so receipts truthfully record `project_scoped_api_key` / `project_credential_bound_unreconciled`; this permits contract observation only and cannot satisfy intended-project/billing reconciliation or any qualification/activation gate. The ten sanitized receipts and their original-file digests are in `docs/evidence/e10/openai-contract-receipts-20260801.jsonl`. No production, Git, route, configuration, feature, device, or release mutation occurred.
 
@@ -2250,6 +3002,8 @@ The first Scout contract attempt observed only `session.created` and `session.up
 | Scout feels like a coworker | stable core/personality and verified identity; multi-person conversational context; lexical mentions; in-character text/GIF judgment; visible memory sources/correction; no uninvoked replies, persona drift, impersonation, or sensitive inference |
 | rich `#team` actions | exact-revision Files search/drop; source and destination ACL intersection; no silent sharing; revocation/open reauthorization; restrained one-GIF responses; G-rated/provider/privacy/alt/provenance controls; desktop/mobile parity |
 | learns how people work | explicit and inferred low-risk preferences, sources/confidence/expiry, correction/forget, no sensitive inference/private leakage |
+| work builds a portable professional identity | every visible Work Record card resolves to an active signed attestation and exact released-field manifest; verification tier and unknowns are explicit; source/ACL/delete/purge drift retracts stale cards; person can unpublish; org can correct/revoke; departure preserves signatures but not source access; zero mind/confidential/hidden-membership leakage or productivity scoring |
+| future coworkers are discoverable from real work | opt-in signed-in network only; natural-language query becomes visible policy-checked filters over published projection; evidence-backed why/unknown explanations; no protected-trait/proxy/personality/fit ranking; pause/block/revoke/delete fence search/contact and purge indexes; no bulk export, automated outreach, public feed, or employer availability dashboard |
 | Scout participant | surface invocation matrix, visible engagement, natural follow-up/barge-in, low false response, meeting-chat cards, audience-safe speech |
 | Scout can bring in a specialist | member-only explicit invitation and disclosure; server-built transcript/analysis/brain brief; distinct verified agent roster/audio; one-agent floor lease; human interruption; natural dismissal and terminal usage; zero acoustic loops, unauthorized context, guest enablement, or human-media impact on failure |
 | people can hire and grow an agent team | curated outcome-first Marketplace; verified package/listing provenance; idempotent trial/hire/direct-thread/assignment/update/pause/offboard; organization-owned identities and local overlays; distinct personalities with continuity; evidence-backed relationship/domain/competency learning; inspect/correct/forget/purge; explicit permission/cost diffs; no package code/credential inheritance, seller access, silent update, memory export, or self-granted capability |
@@ -2286,6 +3040,7 @@ or a qualifying earlier-wave receipt:
 - before E8 activation, business/product/security approval of internal Agent Marketplace curation, hiring/admin roles, trial policy, first-party package authors/publishers, per-agent budgets, direct/channel membership defaults, personality/local-overlay controls, relationship/domain/competency learning semantics, memory inspection/correction/forget/export/purge, update approval, pause/quarantine/offboarding, and the initial Insights/Marketing/Research/Design/Builder listings;
 - a future public seller marketplace requires a separate Strategic Design and authority queue for publisher identity/signing, package review and revocation, licensing/IP, payments/royalties/refunds/tax, rankings/reviews, abuse/moderation, vulnerability response, support, privacy/telemetry, cross-organization reputation, regional/model-provider policy, and legal terms; none is an E0–E10 dependency or hidden feature;
 - business/legal/product approval of the GIF provider's terms, content/privacy policy, channel default, and the initial human-authored Scout/Insights coworker profiles;
+- before Work Record/network qualification, product/legal/privacy approval of contribution attribution and export policy, attestation language and verification tiers, named-party/customer/outcome disclosure, correction/dispute/revocation, recruiter capability and limits, prohibited criteria/proxies, search/contact copy, retention/deletion/index purge, and the opt-in pilot cohort; the pilot needs at least five consenting profiles and two realistic recruiter/search reviewers;
 - an AWS account/operator credential for the selected independent backup boundary: an S3 general-purpose bucket with Versioning plus Object Lock in Compliance mode, a default retention period, SSE-KMS under a customer-managed key, CloudTrail evidence, and separate least-privilege upload, restore, retention-administration, and key-custody roles; DigitalOcean Spaces is not an acceptable substitute because the observed Object Lock API is unavailable;
 - approval of the minimum recurring AWS S3/KMS retention cost, plus later managed PostgreSQL, redundant compute/TURN, cross-region replication, and independent signing costs;
 - independent key/custody owners and separate restore-host access;
@@ -2299,6 +3054,10 @@ or a qualifying earlier-wave receipt:
 | Risk | Control |
 |---|---|
 | “learning personality” feels creepy | collaboration preferences only; evidence/confidence/expiry; visible inspect/correct/forget; deny sensitive inferences |
+| Work Record becomes employer surveillance or a productivity score | claims describe bounded contribution to exact work; no activity-volume, responsiveness, meeting, message, token, “fuel/share,” influence, leaderboards, employee comparisons, or hidden performance rankings; candidate detection stays private until reviewed |
+| portable proof leaks organization or collaborator secrets | opaque signed receipt by default; exact field-release manifest; org, subject, and named-party approval; coarsen/redact customers, dates, metrics, and outcomes; source drift retracts projection |
+| recruiter AI recreates discriminatory “culture fit” ranking | signed-in revocable talent-search capability; prohibited-criteria/proxy policy before retrieval; only person-published work modes; transparent filters and why/unknown; no protected/sensitive/psychographic/compensation inference or quality score; audited, rate-limited, no bulk export |
+| agents take credit from humans or expose AgentMind | agent-influence claim requires exact run/output plus human adoption/review and outcome; agent self-report/usage volume grants nothing; public receipt contains no prompt, private memory, model judgment, or AI-dependence score |
 | personality drifts, becomes cringey, or manipulates | human-authored versioned core profile; bounded humor; channel norms; frozen social evals; learned memory cannot rewrite identity/policy; one-click correction/disable |
 | “learning and growing” becomes silent self-modification | separate package/core/overlay/capability/assignment/memory/performance layers; source-linked lessons; reviewed performance receipts; human-approved capability changes; model self-assessment grants nothing |
 | a marketplace listing overclaims competence | listing capabilities resolve to implemented tool/workflow roles and fixed eval receipts; samples are labeled; unavailable variants remain disabled; curator verdict and revocation; personality/popularity never substitute for evidence |
@@ -2332,35 +3091,41 @@ or a qualifying earlier-wave receipt:
 
 ## 18. Current wave and resume point
 
-**Current wave:** E10 — local substate `product_release`; external substate
-`external_acceptance_waiting`. E1-E9 have reached `deterministic_verified` only
-for the local/default-off evidence class described in the wave table and
-checkpoint above. Shipping the release carrier and Build 39 does not promote
-the separately gated provider, real-corpus, physical-device, HA, custody, or
-feature-activation states.
+**Current wave:** E10-W4 intervention request — E10-W0 through E10-W3 are
+locally/default-off `deterministic_verified`; production migration, repair,
+promotion, and canary remain blocked on AJ's explicit authority and a fresh
+read-only exact manifest. External substate `external_acceptance_waiting`.
+E1-E9 remain
+`deterministic_verified` only for their named local/default-off evidence classes.
+The live product carrier does not promote organization/Work Record/network/MyMind,
+provider, real-corpus, physical-device, HA, custody, pilot, soak, or cohort-
+activation states.
 
-**Current owner and stop:** Goal Loop coordinator. The Country+Golf integrated
-implementation is sealed at exact commit
-`65c3948bed19c3e469c62c762aa653e96bc76027`; the commit containing this ledger
-is the authorized release carrier for `axx/main`, the VPS, and Build 39.
-Canonical Board repair remains explicitly out of scope. The corrected synthetic
-Realtime transcription contract passed, but no further paid **qualification**
-retry is authorized. Colton's durable identity, recommendation/invitation seam,
-floor controls, and distinct configured voice are deterministic product wiring;
-live specialist speech remains unavailable until the separately listed E10
-provider/session, transport, accounting, and qualification gates pass. The next
-acceptance action after release is the focused physical Build 39 matrix.
-Do not run another provider-qualification call; enable a still-fenced
-specialist voice/model route; rename the repository/application; or claim live
-traffic, restore, physical-device, provider-quality, or HA acceptance without
-its separate authority and evidence.
+**Current owner and stop:** AJ is the required production decision owner; the
+Goal Loop coordinator stops before W4 mutation. The 2026-08-08
+read-only refresh proves generation 30, exact live `d4c827c...`, current images,
+retained rollback `cffe16b...`, verifier agreement, canonical high-waters, and
+the absent E10-specific switch inventory in the W0 receipt. Its 119 repair-
+candidate count must be freshly regenerated as an exact read-only row manifest
+before any W4 approval; it is not itself authority to repair. Continue the
+People, Work Record, network, MyMind, and multi-organization checkpoint above in
+W4-W8 order only with the separately named authority. No further paid
+qualification retry, canonical production repair/promotion, production data or
+configuration mutation, Git shipping/deployment, active specialist route,
+repository rename, or cohort activation is authorized by this plan alone.
+Build 49 is the current exact historical native carrier and is unexpectedly in
+external `Bonfire`; its provenance review plus physical iPhone and iPad
+acceptance remain open. Build 48 and older Build 39/47 notes are historical. Do
+not claim provider-quality, restore, physical-device, HA, MyMind,
+or multi-organization acceptance without its separate evidence.
 
-**Frozen local checkpoint:**
+**Historical E1-E9 frozen checkpoint — retained as evidence, not current resume
+truth:**
 
 1. The design lineage commits `889cf65`, `30996ca`, `a4789cd`, and `c7b4128` remain ancestors of local `HEAD`; `HEAD` and `axx/main` were both `c7b4128f0f45d1b6443c73cbae3e54feceb735d3` when the work resumed. No prior design work was reverted.
 2. The 324-file E1-E9 implementation manifest excluding this ledger and `stride-site/` is `057290ab5f8ac1e0f279d50bede9cf14189c02f91c986cc2430de15cb392e617`. It is a local dirty-candidate content identity, **not** a Git commit, release, or deployable exact-SHA claim.
 3. Full Go normal and race, Node/web, mobile/TypeScript, native/Xcode simulator, static/dependency, E9 vertical founder, local failover/restore, and focused authority/restart/tamper gates pass with the exact limitations recorded above. The independent final Critic verdict is the required final local sign-off.
-4. A fresh read-only production audit on 2026-08-01 confirmed the current,
+4. A read-only production audit on 2026-08-01 confirmed the then-current,
 unqualified migration baseline: personal/private Realtime voice uses
 `gpt-realtime-2` at `high` reasoning; authoritative meeting transcription uses
 `gpt-realtime-whisper`; composer dictation uses `gpt-4o-transcribe`;
@@ -2368,8 +3133,8 @@ unqualified migration baseline: personal/private Realtime voice uses
 transcription override remains unset. The target remains `gpt-realtime-2.1`
 for conversational voice, `gpt-transcribe` for bounded authoritative
 transcription/dictation, and optional `gpt-live-transcribe` only for a justified
-provisional live-transcript consumer. This audit proves current configuration,
-not model quality or migration readiness.
+provisional live-transcript consumer. This audit proved that date's
+configuration, not present configuration, model quality, or migration readiness.
 5. `private_share`, provider GIF actions, live specialist voice, visible Marketplace admission, external worker isolation, production failover/restore, and all other unqualified lanes remain disabled or unavailable. Human chat, current production behavior, and historical ACL-correct artifacts are unchanged by this checkpoint.
 6. The E10 contract candidate is separately frozen as manifest `ffbb8ad389afdced67162cdb4987d64d6406eeb7c0ef2c235f30e3885440df26` with probe binary `b7c7e984c4489e8d5113f3b83e29d3231f2b3b1a2377b198034c21718a95d699`. It includes the 328 then-current in-scope dirty candidate entries and excludes this live ledger and `stride-site/`; it remains a content identity, not a Git commit or deployable release.
 7. The OpenAI access matrix and one bounded `gpt-transcribe` file contract pass with private, body-free receipts. Receipt permissions, candidate bindings, and absence of raw key/project/request IDs, audio, reference text, and transcript fields were rechecked before the sanitized evidence packet was added.

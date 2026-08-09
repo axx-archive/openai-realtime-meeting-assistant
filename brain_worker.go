@@ -77,11 +77,17 @@ func (app *kanbanBoardApp) startMeetingBrainWorker(apiKey string) {
 }
 
 func (app *kanbanBoardApp) runMeetingBrainOnce(ctx context.Context, apiKey string, responder openAITextResponder) (meetingMemoryEntry, error) {
+	if strideE10TenantCutoverEnabled() {
+		return meetingMemoryEntry{}, ErrStrideE10TenantAuthorityStale
+	}
 	agent := meetingBrainAgent()
 	return app.runAmbientAgentOnce(agent, ctx, apiKey, responder, agent.minBatch())
 }
 
 func (app *kanbanBoardApp) produceMeetingBrainWriteUp(ctx context.Context, apiKey string, transcripts []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
+	if strideE10TenantCutoverEnabled() {
+		return meetingMemoryEntry{}, ErrStrideE10TenantAuthorityStale
+	}
 	// W4: the runner hands each pass ONE room's window; the room rides the
 	// artifact (cursor partitioning) and the downstream nudges.
 	roomID := ambientWindowRoomID(transcripts)

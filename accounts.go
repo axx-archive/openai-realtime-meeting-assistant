@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -102,14 +103,6 @@ func seededAccountForName(name string) (seededAccount, bool) {
 	return seededAccount{}, false
 }
 
-func seededAccountEmailSet() map[string]struct{} {
-	allowed := make(map[string]struct{}, len(seededAccounts))
-	for _, seed := range seededAccounts {
-		allowed[normalizeAccountEmail(seed.Email)] = struct{}{}
-	}
-	return allowed
-}
-
 func newUserAccountStore(path string) (*userAccountStore, error) {
 	store := &userAccountStore{
 		path:        path,
@@ -123,7 +116,17 @@ func newUserAccountStore(path string) (*userAccountStore, error) {
 			return nil, fmt.Errorf("malformed user store at %s: %w", path, err)
 		}
 		for _, user := range onDisk {
-			store.users[normalizeAccountEmail(user.Email)] = user
+			if user == nil {
+				return nil, fmt.Errorf("malformed user store at %s: nil account", path)
+			}
+			key := normalizeAccountEmail(user.Email)
+			if key == "" {
+				return nil, fmt.Errorf("malformed user store at %s: account has empty email", path)
+			}
+			if _, exists := store.users[key]; exists {
+				return nil, fmt.Errorf("ambiguous user store at %s: duplicate normalized email %q", path, key)
+			}
+			store.users[key] = user
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
@@ -144,14 +147,6 @@ func (s *userAccountStore) seedMissingAccounts() error {
 	defer s.mu.Unlock()
 
 	changed := false
-	allowedEmails := seededAccountEmailSet()
-	for key := range s.users {
-		if _, ok := allowedEmails[normalizeAccountEmail(key)]; !ok {
-			delete(s.users, key)
-			changed = true
-		}
-	}
-
 	for _, seed := range seededAccounts {
 		key := normalizeAccountEmail(seed.Email)
 		if _, exists := s.users[key]; exists {
@@ -183,10 +178,23 @@ func (s *userAccountStore) seedMissingAccounts() error {
 
 func (s *userAccountStore) persistLocked() error {
 	accounts := make([]*userAccount, 0, len(s.users))
+	seen := make(map[string]struct{}, len(seededAccounts))
 	for _, seed := range seededAccounts {
-		if user, ok := s.users[normalizeAccountEmail(seed.Email)]; ok {
+		key := normalizeAccountEmail(seed.Email)
+		if user, ok := s.users[key]; ok {
 			accounts = append(accounts, user)
+			seen[key] = struct{}{}
 		}
+	}
+	extras := make([]string, 0, len(s.users)-len(seen))
+	for key := range s.users {
+		if _, ok := seen[key]; !ok {
+			extras = append(extras, key)
+		}
+	}
+	sort.Strings(extras)
+	for _, key := range extras {
+		accounts = append(accounts, s.users[key])
 	}
 
 	raw, err := json.MarshalIndent(accounts, "", "  ")
@@ -204,10 +212,23 @@ func (s *userAccountStore) accountEmails() []string {
 	defer s.mu.Unlock()
 
 	emails := make([]string, 0, len(s.users))
+	seen := make(map[string]struct{}, len(seededAccounts))
 	for _, seed := range seededAccounts {
-		if user, ok := s.users[normalizeAccountEmail(seed.Email)]; ok {
+		key := normalizeAccountEmail(seed.Email)
+		if user, ok := s.users[key]; ok {
 			emails = append(emails, user.Email)
+			seen[key] = struct{}{}
 		}
+	}
+	extras := make([]string, 0, len(s.users)-len(seen))
+	for key := range s.users {
+		if _, ok := seen[key]; !ok {
+			extras = append(extras, key)
+		}
+	}
+	sort.Strings(extras)
+	for _, key := range extras {
+		emails = append(emails, s.users[key].Email)
 	}
 	return emails
 }

@@ -901,6 +901,12 @@ func main() {
 		}
 		return
 	}
+	restoreStrideE10TenantRuntime, tenantRuntimeErr := installStrideE10TenantProductionRuntimeFromEnvironment()
+	if tenantRuntimeErr != nil {
+		fmt.Fprintf(os.Stderr, "STRIDE tenant runtime startup failed: %v\n", tenantRuntimeErr)
+		os.Exit(2)
+	}
+	defer restoreStrideE10TenantRuntime()
 	// Init other state
 	trackLocals = map[string]*webrtc.TrackLocalStaticRTP{}
 	trackParticipants = map[string]string{}
@@ -1072,6 +1078,7 @@ func main() {
 	http.HandleFunc("/api/admin/ambient-intelligence-replay/execute", ambientReplayExecuteHandler)
 	http.HandleFunc("/api/artifact-dispositions/v1", artifactDispositionHandler)
 	registerSTRIDERuntimeRoutes(http.DefaultServeMux)
+	registerStrideE10ProductLiveRoutes(http.DefaultServeMux)
 	registerMeetingSpecialistProductRoutes(http.DefaultServeMux)
 	registerRoomAgentRoutes(http.DefaultServeMux)
 	http.HandleFunc("/internal/codex/jobs/result", internalCodexRunnerResultHandler)
@@ -1145,6 +1152,7 @@ func main() {
 	// hijacks the connection on upgrade, after which these would not apply anyway).
 	srv := &http.Server{
 		Addr:              *addr,
+		Handler:           strideE10TenantHTTPHandler(http.DefaultServeMux),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
@@ -1616,6 +1624,14 @@ func internalRenderRunnerResultHandler(w http.ResponseWriter, r *http.Request) {
 			"ok":    false,
 			"error": "runner callback not authorized",
 		})
+		return
+	}
+	// Render jobs do not yet carry the W3 tenant authority envelope. Keep this
+	// callback unavailable in local cutover until W4 gives the durable render
+	// root an originating canonical admission; a runner token is transport
+	// authentication, never tenant authority.
+	if strideE10TenantCutoverEnabled() {
+		writeSystemStatusJSON(w, r, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "tenant authority unavailable"})
 		return
 	}
 	if kanbanApp == nil {
@@ -5239,6 +5255,15 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	if strideE10TenantCutoverEnabled() {
+		http.Error(w, "tenant websocket authority is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	tenantLease, tenantErr := strideE10BindTenantWebSocket(r)
+	if tenantErr != nil {
+		writeStrideE10TenantHookError(w, tenantErr, "tenant websocket authority unavailable")
+		return
+	}
 
 	// Missing ?room means office — mid-deploy back-compat for stale tabs; the
 	// version-gated auto-refresh reloads them. Guests have their room FORCED
@@ -5306,7 +5331,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	// arbitrarily large frame and force the server to buffer it before parsing.
 	unsafeConn.SetReadLimit(maxWebsocketMessageBytes)
 
-	c := &threadSafeWriter{Conn: unsafeConn, guest: guest != nil} // nolint
+	c := &threadSafeWriter{Conn: unsafeConn, guest: guest != nil, tenantLease: &tenantLease} // nolint
 	scoutChat := newScoutChatSession(c)
 	// Stop the chat worker and cancel any queued/in-flight model calls as
 	// soon as this connection ends.
@@ -5755,7 +5780,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 
 	message := &websocketMessage{}
 	for {
-		_, raw, err := c.ReadMessage()
+		_, raw, err := c.ReadTenantMessage(r.Context())
 		if err != nil {
 			if isWebsocketReadTimeout(err) {
 				log.Infof("room_ws_read_timeout participant=%s session=%s timeout=%s; cleaning up half-open session", currentParticipantName(), participantSessionID, websocketReadTimeout)
@@ -6779,6 +6804,7 @@ func broadcastManualBoardMutation(c *threadSafeWriter, actor string, action stri
 type threadSafeWriter struct {
 	*websocket.Conn
 	sync.Mutex
+	tenantLease *strideE10TenantWebSocketLease
 	// guest marks the writer's principal class (multi-room §6.2): set once at
 	// connection setup, read by the write-time event allowlist so a guest
 	// socket can only ever receive allowlisted events — whichever broadcast
@@ -6909,14 +6935,7 @@ func (t *threadSafeWriter) WriteJSON(v any) error {
 		return fmt.Errorf("websocket is closed")
 	}
 
-	t.Lock()
-	defer t.Unlock()
-
-	_ = t.Conn.SetWriteDeadline(time.Now().Add(websocketWriteTimeout))
-	err := t.Conn.WriteJSON(v)
-	_ = t.Conn.SetWriteDeadline(time.Time{})
-
-	return err
+	return t.writeJSONWithTenantAuthority(v)
 }
 
 func (t *threadSafeWriter) WriteControl(messageType int, data []byte, deadline time.Time) error {
@@ -6924,8 +6943,5 @@ func (t *threadSafeWriter) WriteControl(messageType int, data []byte, deadline t
 		return fmt.Errorf("websocket is closed")
 	}
 
-	t.Lock()
-	defer t.Unlock()
-
-	return t.Conn.WriteControl(messageType, data, deadline)
+	return t.writeControlWithTenantAuthority(messageType, data, deadline)
 }

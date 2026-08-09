@@ -67,6 +67,35 @@ func TestSTRIDERegistryHasIndependentRollbackSeams(t *testing.T) {
 	}
 }
 
+func TestSTRIDERegistryHasExactDefaultOffW1Seams(t *testing.T) {
+	registry := NewSTRIDERegistry()
+	snapshot, err := registry.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := make(map[STRIDEFeature]bool, len(snapshot.Features))
+	for _, state := range snapshot.Features {
+		if state.Enabled {
+			t.Fatalf("feature %s unexpectedly enabled", state.Feature)
+		}
+		seen[state.Feature] = true
+	}
+	for _, feature := range []STRIDEFeature{
+		STRIDEFeaturePersonProfileAuthority, STRIDEFeatureOrganizationAuthorityWrite, STRIDEFeatureOrganizationAuthorityRead, STRIDEFeatureActiveOrganizationSession,
+		STRIDEFeatureContributionCandidateDetection, STRIDEFeatureContributionReview, STRIDEFeatureWorkRecordPrivate,
+		STRIDEFeatureNetworkProfilePublication, STRIDEFeatureNetworkProjectionShadow, STRIDEFeatureNetworkSearch,
+		STRIDEFeatureNetworkContact, STRIDEFeatureNetworkQueryParserProvider, STRIDEFeatureNetworkSemanticReranker,
+		STRIDEFeaturePersonMyMindContext,
+	} {
+		if !seen[feature] {
+			t.Errorf("missing W1 feature seam %s", feature)
+		}
+		if err := registry.SetFeatureEnabled(feature, true); !errors.Is(err, ErrSTRIDEActivationFenced) {
+			t.Errorf("feature %s escaped activation fence: %v", feature, err)
+		}
+	}
+}
+
 func TestSTRIDERegistryQuarantineAndSnapshotDigest(t *testing.T) {
 	registry := NewSTRIDERegistry()
 	entry := strideTestRegistryEntry()

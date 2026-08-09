@@ -272,13 +272,19 @@ func handlePasskeyLoginFinish(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 
-	token, err := userSessionStore().create(matchedUser.Email)
+	token, err := strideE10CreatePasskeyAuthenticatedSession(matchedUser.Email)
 	if err != nil {
 		writeAuthError(w, http.StatusInternalServerError, "could not start a session")
 		return
 	}
 	setSessionCookie(w, r, token, int(sessionTTL/time.Second))
 	writeAuthJSON(w, http.StatusOK, identityPayloadForRequest(r, matchedUser, token))
+}
+
+// Passkey proof changes only the credential ceremony. Session authority must
+// use the same default-off/canonical cutover seam as password and native login.
+func strideE10CreatePasskeyAuthenticatedSession(email string) (string, error) {
+	return strideE10CreateAuthenticatedSession(email)
 }
 
 func handlePasskeyList(w http.ResponseWriter, r *http.Request) {

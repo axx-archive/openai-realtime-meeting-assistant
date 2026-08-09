@@ -144,12 +144,15 @@ function RoomsSegment() {
 function WorkSegment() {
   const navigation = useNavigation<DeckNav>();
   const destinations: Array<{
-    route: 'Board' | 'Files' | 'AgentTeam' | 'Alerts' | 'Meetings' | 'Memory' | 'Intelligence' | 'Settings';
+    route: 'Board' | 'Files' | 'AgentTeam' | 'Alerts' | 'Meetings' | 'Memory' | 'Intelligence' | 'Settings' | 'Profile' | 'WorkRecord' | 'NetworkPreview';
     label: string;
     hint: string;
     icon: SFSymbol;
   }> = [
     { route: 'Board', label: 'Board', hint: 'Cards and decisions', icon: 'rectangle.3.group.fill' },
+    { route: 'Profile', label: 'Profile', hint: 'Identity and public profile', icon: 'person.crop.circle.fill' },
+    { route: 'WorkRecord', label: 'Work record', hint: 'Verified contributions and organizations', icon: 'checkmark.seal.fill' },
+    { route: 'NetworkPreview', label: 'Network', hint: 'Preview, search, contact, and blocks', icon: 'point.3.connected.trianglepath.dotted' },
     { route: 'Files', label: 'Files', hint: 'Documents and artifacts', icon: 'folder.fill' },
     { route: 'AgentTeam', label: 'Agent team', hint: 'Coworkers and Marketplace', icon: 'person.2.fill' },
     { route: 'Alerts', label: 'Alerts', hint: 'What needs you', icon: 'bell.fill' },

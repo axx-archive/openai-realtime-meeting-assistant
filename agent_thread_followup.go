@@ -238,6 +238,29 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAttachments(artifactID s
 }
 
 func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAuthorizedSnapshot(expected meetingMemoryEntry, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord, attachmentScope *agentThreadFollowUpAttachmentScope) (scoutAgentThread, error) {
+	if strideE10TenantCutoverEnabled() {
+		return scoutAgentThread{}, ErrStrideE10TenantAuthorityStale
+	}
+	return app.launchAgentThreadFollowUpWithTenantAuthoritySnapshot(expected, replyText, requestedBy, teamReplies, attachmentScope, "", nil)
+}
+
+func (app *kanbanBoardApp) launchAgentThreadFollowUpWithTenantAuthority(expected meetingMemoryEntry, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord, attachmentScope *agentThreadFollowUpAttachmentScope, runID string, envelope *StrideE10TenantAuthorityEnvelope) (scoutAgentThread, error) {
+	mode := normalizeAgentThreadMode(firstNonEmptyString(expected.Metadata["mode"], expected.Kind))
+	if mode == "" {
+		mode = "workflow"
+	}
+	query := firstNonEmptyString(expected.Metadata["threadQuery"], expected.Metadata["title"])
+	if !strideE10TenantCutoverEnabled() || envelope == nil || envelope.Purpose != StrideE10TenantAuthorityPurposeForScoutThread(runID, mode, query) || strings.Contains(requestedBy, "@") {
+		return scoutAgentThread{}, ErrStrideE10TenantAuthorityStale
+	}
+	var thread scoutAgentThread
+	err := withStrideE10TenantEnvelopeAuthority(context.Background(), envelope, StrideE10TenantSurfaceScout, time.Now().UTC(), func(principal StrideE10TenantPrincipal) error {
+		return strideE10ScoutCanonicalExecutionUnavailable(principal, envelope)
+	})
+	return thread, err
+}
+
+func (app *kanbanBoardApp) launchAgentThreadFollowUpWithTenantAuthoritySnapshot(expected meetingMemoryEntry, replyText string, requestedBy string, teamReplies []scoutChatMessageRecord, attachmentScope *agentThreadFollowUpAttachmentScope, reservedRunID string, envelope *StrideE10TenantAuthorityEnvelope) (scoutAgentThread, error) {
 	if app == nil || app.memory == nil {
 		return scoutAgentThread{}, fmt.Errorf("assistant is unavailable")
 	}
@@ -285,12 +308,15 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAuthorizedSnapshot(expec
 		version = parsed
 	}
 	nextVersion := version + 1
-	runID := fmt.Sprintf("agent-thread-%s-followup-%d", mode, time.Now().UnixNano())
+	runID := strings.TrimSpace(reservedRunID)
+	if runID == "" {
+		runID = fmt.Sprintf("agent-thread-%s-followup-%d", mode, time.Now().UnixNano())
+	}
 	// The ORIGINAL threadId keeps ref rewrites flipping the existing chat
 	// cards; the fresh runID only records this run.
 	threadID := firstNonEmptyString(strings.TrimSpace(artifact.Metadata["threadId"]), runID)
 	query := firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["title"])
-	thread := scoutAgentThread{ID: threadID, Mode: mode, Query: query, Status: "running", Artifact: artifact}
+	thread := scoutAgentThread{ID: threadID, Mode: mode, Query: query, Status: "running", Artifact: artifact, TenantAuthority: envelope}
 	// Follow-ups are new provider admissions, not authority inherited from v1.
 	// Resolve the current named seat before the visible running transition; the
 	// worker repeats this fence immediately before its provider call.
@@ -327,6 +353,12 @@ func (app *kanbanBoardApp) launchAgentThreadFollowUpWithAuthorizedSnapshot(expec
 		"followUpBy":        requestedByName,
 		"followUpStartedAt": now,
 		"followUpError":     "",
+	}
+	if envelope != nil {
+		if persistErr := app.persistStrideE10ScoutAuthority(runID, envelope); persistErr != nil {
+			return scoutAgentThread{}, persistErr
+		}
+		runningMetadata["tenantAuthorityRef"] = runID
 	}
 	for _, key := range agentThreadProfileMetadataKeys {
 		if value := strings.TrimSpace(thread.Artifact.Metadata[key]); value != "" {
@@ -408,6 +440,21 @@ func (app *kanbanBoardApp) runAgentThreadFollowUp(run agentThreadFollowUpRun) {
 }
 
 func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponder(run agentThreadFollowUpRun, responder openAITextResponder) {
+	if !strideE10TenantCutoverEnabled() {
+		app.runAgentThreadFollowUpWithResponderAuthorized(run, responder)
+		return
+	}
+	envelope, err := app.strideE10ScoutThreadEnvelope(run.thread)
+	if err != nil || envelope.Purpose != StrideE10TenantAuthorityPurposeForScoutThread(run.runID, run.thread.Mode, run.thread.Query) {
+		return
+	}
+	err = withStrideE10TenantEnvelopeAuthority(context.Background(), envelope, StrideE10TenantSurfaceScout, time.Now().UTC(), func(principal StrideE10TenantPrincipal) error {
+		return strideE10ScoutCanonicalExecutionUnavailable(principal, envelope)
+	})
+	_ = err
+}
+
+func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponderAuthorized(run agentThreadFollowUpRun, responder openAITextResponder) {
 	// Always the default text-worker timeout — never codexExecConfigFromEnv():
 	// follow-ups do not consult the configured agent-thread worker mode.
 	ctx, cancel := context.WithTimeout(context.Background(), defaultAgentThreadRequestTimeout)

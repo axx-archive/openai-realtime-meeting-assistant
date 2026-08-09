@@ -37,11 +37,18 @@ const (
 // Kind "" means "user": legacy rows keep resolving as member sessions, so a
 // deploy logs nobody out (§9.4).
 type sessionRecord struct {
-	Email     string    `json:"email"`
-	Expires   time.Time `json:"expires"`
-	Kind      string    `json:"kind,omitempty"`
-	RoomID    string    `json:"roomId,omitempty"`
-	GuestName string    `json:"guestName,omitempty"`
+	Email                        string    `json:"email"`
+	Expires                      time.Time `json:"expires"`
+	Kind                         string    `json:"kind,omitempty"`
+	RoomID                       string    `json:"roomId,omitempty"`
+	GuestName                    string    `json:"guestName,omitempty"`
+	PersonID                     string    `json:"personId,omitempty"`
+	ActiveOrganizationID         string    `json:"activeOrganizationId,omitempty"`
+	OrganizationMembershipID     string    `json:"organizationMembershipId,omitempty"`
+	OrganizationMembershipRev    int64     `json:"organizationMembershipRevision,omitempty"`
+	ActiveOrganizationSessionRev int64     `json:"activeOrganizationSessionRevision,omitempty"`
+	AccountSubjectDigest         string    `json:"accountSubjectDigest,omitempty"`
+	AuthorityGeneration          uint64    `json:"authorityGeneration,omitempty"`
 }
 
 // sessionStore keeps SHA-256 hashes of session tokens (never the tokens
@@ -85,20 +92,124 @@ func (s *sessionStore) persistLocked() {
 }
 
 func (s *sessionStore) create(email string) (string, error) {
+	if strideE10TenantCutoverEnabled() {
+		return "", ErrStrideE10TenantAuthorityStale
+	}
+	return s.createMemberSession(email, "", "", "", 0, 0, nil)
+}
+
+// createMemberSession is the additive W1 session-authority seam. Existing
+// logins continue to call create and therefore persist the legacy email-only
+// representation until the reviewed person/organization migration activates
+// canonical readers. A canonical caller must provide the complete binding;
+// partial person or membership authority fails closed.
+func (s *sessionStore) createMemberSession(email, personID, organizationID, membershipID string, membershipRevision, sessionRevision int64, authorize func(string, string, string, int64) error) (string, error) {
+	email = normalizeAccountEmail(email)
+	canonical := personID != "" || organizationID != "" || membershipID != "" || membershipRevision != 0 || sessionRevision != 0
+	zeroOrganization := canonical && strideIdentifier(personID) && organizationID == "" && membershipID == "" && membershipRevision == 0 && sessionRevision == 0
+	activeOrganization := canonical && strideIdentifier(personID) && strideIdentifier(organizationID) && strideIdentifier(membershipID) && membershipRevision >= 1 && sessionRevision >= 1
+	if email == "" || canonical && (!zeroOrganization && !activeOrganization || authorize == nil) {
+		return "", errors.New("invalid member session authority")
+	}
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
 	}
 	token := hex.EncodeToString(raw)
 
+	devicePushAuthorityMu.Lock()
+	defer devicePushAuthorityMu.Unlock()
+	if canonical {
+		if err := authorize(personID, organizationID, membershipID, membershipRevision); err != nil {
+			return "", errors.New("active organization membership denied")
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	generation := uint64(0)
+	if canonical {
+		generation = 1
+		if sessionRevision > 1 {
+			generation = uint64(sessionRevision)
+		}
+	}
 	s.sessions[hashResetToken(token)] = sessionRecord{
-		Email:   normalizeAccountEmail(email),
-		Expires: time.Now().Add(sessionTTL),
+		Email:                        email,
+		Expires:                      time.Now().Add(sessionTTL),
+		PersonID:                     personID,
+		ActiveOrganizationID:         organizationID,
+		OrganizationMembershipID:     membershipID,
+		OrganizationMembershipRev:    membershipRevision,
+		ActiveOrganizationSessionRev: sessionRevision,
+		AccountSubjectDigest:         sha256Hex([]byte(email)),
+		AuthorityGeneration:          generation,
 	}
 	s.persistLocked()
 	return token, nil
+}
+
+// rebindActiveOrganization changes one exact canonical member session. The
+// expected revisions prevent a stale tab or replay from switching authority
+// after a concurrent membership/session change. Legacy sessions and partial
+// bindings are deliberately ineligible.
+func (s *sessionStore) rebindActiveOrganization(token, personID, organizationID, membershipID string, expectedMembershipRevision, expectedSessionRevision, nextSessionRevision int64, authorize func(string, string, string, int64) error) (sessionRecord, error) {
+	if strings.TrimSpace(token) == "" || !strideIdentifier(personID) || !strideIdentifier(organizationID) || !strideIdentifier(membershipID) || expectedMembershipRevision < 1 || expectedSessionRevision < 0 || nextSessionRevision != expectedSessionRevision+1 || authorize == nil {
+		return sessionRecord{}, errors.New("invalid active organization session binding")
+	}
+	// The session store cannot infer organization authority from caller-supplied
+	// identifiers. Require the organization authority adapter to resolve the
+	// exact current active membership before any session state is changed.
+	devicePushAuthorityMu.Lock()
+	defer devicePushAuthorityMu.Unlock()
+	if err := authorize(personID, organizationID, membershipID, expectedMembershipRevision); err != nil {
+		return sessionRecord{}, errors.New("active organization membership denied")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := hashResetToken(token)
+	record, ok := s.sessions[key]
+	if !ok || record.Kind != "" || time.Now().After(record.Expires) || record.PersonID != personID || record.ActiveOrganizationSessionRev != expectedSessionRevision {
+		return sessionRecord{}, errors.New("active organization session conflict")
+	}
+	if expectedSessionRevision == 0 && (record.ActiveOrganizationID != "" || record.OrganizationMembershipID != "" || record.OrganizationMembershipRev != 0) {
+		return sessionRecord{}, errors.New("active organization session conflict")
+	}
+	record.ActiveOrganizationID = organizationID
+	record.OrganizationMembershipID = membershipID
+	record.OrganizationMembershipRev = expectedMembershipRevision
+	record.ActiveOrganizationSessionRev = nextSessionRevision
+	record.AuthorityGeneration++
+	if record.AuthorityGeneration == 0 {
+		record.AuthorityGeneration = uint64(nextSessionRevision)
+	}
+	s.sessions[key] = record
+	s.persistLocked()
+	return record, nil
+}
+
+// destroyAllForMembershipRevision is the W1 revocation linearization seam for
+// organization-bound sessions and push authority. W3 extends the same
+// generation fence across sockets, caches, Drive, rooms, brain, Scout, and
+// workers before activation.
+func (s *sessionStore) destroyAllForMembershipRevision(personID, organizationID, membershipID string, throughRevision int64) int {
+	if !strideIdentifier(personID) || !strideIdentifier(organizationID) || !strideIdentifier(membershipID) || throughRevision < 1 {
+		return 0
+	}
+	devicePushAuthorityMu.Lock()
+	defer devicePushAuthorityMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	removed := 0
+	for key, record := range s.sessions {
+		if record.Kind == "" && record.PersonID == personID && record.ActiveOrganizationID == organizationID && record.OrganizationMembershipID == membershipID && record.OrganizationMembershipRev <= throughRevision {
+			delete(s.sessions, key)
+			removed++
+		}
+	}
+	if removed > 0 {
+		s.persistLocked()
+	}
+	return removed
 }
 
 func (s *sessionStore) lookup(token string) (string, bool) {
@@ -654,7 +765,7 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := userSessionStore().create(user.Email)
+	token, err := strideE10CreateAuthenticatedSession(user.Email)
 	if err != nil {
 		writeAuthError(w, http.StatusInternalServerError, "could not start a session")
 		return
@@ -921,7 +1032,7 @@ func handleAuthChangePassword(w http.ResponseWriter, r *http.Request) {
 	// Rotate sessions: a password change revokes every other signed-in
 	// device, then re-issues a fresh session for this one.
 	userSessionStore().destroyAllForEmail(user.Email)
-	token, err := userSessionStore().create(user.Email)
+	token, err := strideE10CreateAuthenticatedSession(user.Email)
 	if err != nil {
 		writeAuthError(w, http.StatusInternalServerError, "could not start a new session")
 		return

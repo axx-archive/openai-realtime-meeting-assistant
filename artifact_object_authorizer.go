@@ -36,6 +36,13 @@ type ObjectAuthorizer interface {
 	AuthorizeArtifactHeader(context.Context, *userAccount, ACLAction, ArtifactAuthorizationHeader) bool
 }
 
+// StrideE10PersonArtifactAuthorizer is the only cutover artifact seam. The
+// legacy email principal is deliberately absent; implementations must decide
+// from the server-derived current person and organization capability.
+type StrideE10PersonArtifactAuthorizer interface {
+	AuthorizeArtifactHeaderForStridePrincipal(context.Context, StrideE10TenantPrincipal, ACLAction, ArtifactAuthorizationHeader) bool
+}
+
 // LegacyCompatibleObjectAuthorizer uses canonical ACLs when configured. In
 // shadow mode an explicit organization-visible legacy artifact remains
 // available to signed-in members; private artifacts never use that fallback.
@@ -235,7 +242,25 @@ func artifactAuthorized(ctx context.Context, user *userAccount, action ACLAction
 }
 
 func artifactHeaderAuthorized(ctx context.Context, user *userAccount, action ACLAction, header ArtifactAuthorizationHeader) bool {
-	return artifactObjectAuthorizer != nil && artifactObjectAuthorizer.AuthorizeArtifactHeader(ctx, user, action, header)
+	if artifactObjectAuthorizer == nil {
+		return false
+	}
+	if principal, canonical := strideE10TenantPrincipalFromContext(ctx); canonical {
+		if strings.TrimSpace(header.TenantID) == "" || header.TenantID != principal.TenantID {
+			return false
+		}
+		canonicalAuthorizer, ok := artifactObjectAuthorizer.(StrideE10PersonArtifactAuthorizer)
+		if !ok {
+			return false
+		}
+		return canonicalAuthorizer.AuthorizeArtifactHeaderForStridePrincipal(ctx, principal, action, header)
+	}
+	// A cutover read without the request's live capability must never fall back
+	// to owner email or the process-wide artifact tenant.
+	if strideE10TenantCutoverEnabled() {
+		return false
+	}
+	return artifactObjectAuthorizer.AuthorizeArtifactHeader(ctx, user, action, header)
 }
 
 func artifactAuthorizationHeaderFromEntry(entry meetingMemoryEntry) ArtifactAuthorizationHeader {

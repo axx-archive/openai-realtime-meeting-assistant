@@ -21,38 +21,51 @@ var (
 type STRIDEFeature string
 
 const (
-	STRIDEFeaturePublicProjection       STRIDEFeature = "public_projection"
-	STRIDEFeatureCrossSurfaceRetrieval  STRIDEFeature = "cross_surface_retrieval"
-	STRIDEFeatureScoutFileSearch        STRIDEFeature = "scout_file_search"
-	STRIDEFeatureScoutFileActions       STRIDEFeature = "scout_file_actions"
-	STRIDEFeatureAgentGIFActions        STRIDEFeature = "agent_gif_actions"
-	STRIDEFeatureSuggestedWorkDetection STRIDEFeature = "suggested_work_detection"
-	STRIDEFeatureSuggestedWorkExecution STRIDEFeature = "suggested_work_execution"
-	STRIDEFeatureInsightsWorkflow       STRIDEFeature = "insights_opportunities_v1"
-	STRIDEFeatureMarketplaceDiscovery   STRIDEFeature = "marketplace_discovery"
-	STRIDEFeatureMarketplaceTrial       STRIDEFeature = "marketplace_trial"
-	STRIDEFeatureMarketplaceUpdate      STRIDEFeature = "marketplace_update"
-	STRIDEFeatureRoomVoiceInvocation    STRIDEFeature = "room_voice_invocation"
-	STRIDEFeatureEnrichedScoutRouting   STRIDEFeature = "enriched_scout_routing"
-	STRIDEFeatureRelationshipMemory     STRIDEFeature = "relationship_memory"
-	STRIDEFeatureRichResponseModes      STRIDEFeature = "rich_response_modes"
-	STRIDEFeatureModelRouteCanary       STRIDEFeature = "model_route_canary"
-	STRIDEFeatureCoworkerContext        STRIDEFeature = "coworker_context"
-	STRIDEFeatureCoworkerPersonality    STRIDEFeature = "coworker_personality"
-	STRIDEFeatureCoworkerLearning       STRIDEFeature = "coworker_learning"
-	STRIDEFeatureTeamAgentTrial         STRIDEFeature = "team_agent_trial"
-	STRIDEFeatureTeamAgentHire          STRIDEFeature = "team_agent_hire"
-	STRIDEFeatureTeamAgentUpdate        STRIDEFeature = "team_agent_update"
-	STRIDEFeatureTeamAgentAssignment    STRIDEFeature = "team_agent_assignment"
-	STRIDEFeatureSpecialistTokenMinting STRIDEFeature = "specialist_token_minting"
-	STRIDEFeatureMeetingInvitation      STRIDEFeature = "meeting_specialist_invitation"
-	STRIDEFeatureSpecialistContext      STRIDEFeature = "specialist_context_assembly"
-	STRIDEFeatureSpecialistTools        STRIDEFeature = "specialist_tools"
-	STRIDEFeatureSpecialistAudio        STRIDEFeature = "specialist_audio_publication"
-	STRIDEFeatureVisibleSpecialist      STRIDEFeature = "visible_specialist_profile"
-	STRIDEFeaturePersonMyMindContext    STRIDEFeature = "person_mymind_context"
-	STRIDEFeatureArtifactDisposition    STRIDEFeature = "artifact_disposition"
-	STRIDEFeatureAmbientMindShadow      STRIDEFeature = "ambient_mind_projection_shadow"
+	STRIDEFeaturePublicProjection               STRIDEFeature = "public_projection"
+	STRIDEFeatureCrossSurfaceRetrieval          STRIDEFeature = "cross_surface_retrieval"
+	STRIDEFeatureScoutFileSearch                STRIDEFeature = "scout_file_search"
+	STRIDEFeatureScoutFileActions               STRIDEFeature = "scout_file_actions"
+	STRIDEFeatureAgentGIFActions                STRIDEFeature = "agent_gif_actions"
+	STRIDEFeatureSuggestedWorkDetection         STRIDEFeature = "suggested_work_detection"
+	STRIDEFeatureSuggestedWorkExecution         STRIDEFeature = "suggested_work_execution"
+	STRIDEFeatureInsightsWorkflow               STRIDEFeature = "insights_opportunities_v1"
+	STRIDEFeatureMarketplaceDiscovery           STRIDEFeature = "marketplace_discovery"
+	STRIDEFeatureMarketplaceTrial               STRIDEFeature = "marketplace_trial"
+	STRIDEFeatureMarketplaceUpdate              STRIDEFeature = "marketplace_update"
+	STRIDEFeatureRoomVoiceInvocation            STRIDEFeature = "room_voice_invocation"
+	STRIDEFeatureEnrichedScoutRouting           STRIDEFeature = "enriched_scout_routing"
+	STRIDEFeatureRelationshipMemory             STRIDEFeature = "relationship_memory"
+	STRIDEFeatureRichResponseModes              STRIDEFeature = "rich_response_modes"
+	STRIDEFeatureModelRouteCanary               STRIDEFeature = "model_route_canary"
+	STRIDEFeatureCoworkerContext                STRIDEFeature = "coworker_context"
+	STRIDEFeatureCoworkerPersonality            STRIDEFeature = "coworker_personality"
+	STRIDEFeatureCoworkerLearning               STRIDEFeature = "coworker_learning"
+	STRIDEFeatureTeamAgentTrial                 STRIDEFeature = "team_agent_trial"
+	STRIDEFeatureTeamAgentHire                  STRIDEFeature = "team_agent_hire"
+	STRIDEFeatureTeamAgentUpdate                STRIDEFeature = "team_agent_update"
+	STRIDEFeatureTeamAgentAssignment            STRIDEFeature = "team_agent_assignment"
+	STRIDEFeatureSpecialistTokenMinting         STRIDEFeature = "specialist_token_minting"
+	STRIDEFeatureMeetingInvitation              STRIDEFeature = "meeting_specialist_invitation"
+	STRIDEFeatureSpecialistContext              STRIDEFeature = "specialist_context_assembly"
+	STRIDEFeatureSpecialistTools                STRIDEFeature = "specialist_tools"
+	STRIDEFeatureSpecialistAudio                STRIDEFeature = "specialist_audio_publication"
+	STRIDEFeatureVisibleSpecialist              STRIDEFeature = "visible_specialist_profile"
+	STRIDEFeaturePersonMyMindContext            STRIDEFeature = "person_mymind_context"
+	STRIDEFeatureArtifactDisposition            STRIDEFeature = "artifact_disposition"
+	STRIDEFeatureAmbientMindShadow              STRIDEFeature = "ambient_mind_projection_shadow"
+	STRIDEFeaturePersonProfileAuthority         STRIDEFeature = "person_profile_authority"
+	STRIDEFeatureOrganizationAuthorityWrite     STRIDEFeature = "organization_authority_write"
+	STRIDEFeatureOrganizationAuthorityRead      STRIDEFeature = "organization_authority_read"
+	STRIDEFeatureActiveOrganizationSession      STRIDEFeature = "active_organization_session"
+	STRIDEFeatureContributionCandidateDetection STRIDEFeature = "contribution_candidate_detection"
+	STRIDEFeatureContributionReview             STRIDEFeature = "contribution_review"
+	STRIDEFeatureWorkRecordPrivate              STRIDEFeature = "work_record_private"
+	STRIDEFeatureNetworkProfilePublication      STRIDEFeature = "network_profile_publication"
+	STRIDEFeatureNetworkProjectionShadow        STRIDEFeature = "network_projection_shadow"
+	STRIDEFeatureNetworkSearch                  STRIDEFeature = "network_search"
+	STRIDEFeatureNetworkContact                 STRIDEFeature = "network_contact"
+	STRIDEFeatureNetworkQueryParserProvider     STRIDEFeature = "network_query_parser_provider"
+	STRIDEFeatureNetworkSemanticReranker        STRIDEFeature = "network_semantic_reranker"
 )
 
 var allSTRIDEFeatures = []STRIDEFeature{
@@ -69,6 +82,11 @@ var allSTRIDEFeatures = []STRIDEFeature{
 	STRIDEFeaturePersonMyMindContext,
 	STRIDEFeatureArtifactDisposition,
 	STRIDEFeatureAmbientMindShadow,
+	STRIDEFeaturePersonProfileAuthority,
+	STRIDEFeatureOrganizationAuthorityWrite, STRIDEFeatureOrganizationAuthorityRead, STRIDEFeatureActiveOrganizationSession,
+	STRIDEFeatureContributionCandidateDetection, STRIDEFeatureContributionReview, STRIDEFeatureWorkRecordPrivate,
+	STRIDEFeatureNetworkProfilePublication, STRIDEFeatureNetworkProjectionShadow, STRIDEFeatureNetworkSearch,
+	STRIDEFeatureNetworkContact, STRIDEFeatureNetworkQueryParserProvider, STRIDEFeatureNetworkSemanticReranker,
 }
 
 type STRIDERegistryKind string

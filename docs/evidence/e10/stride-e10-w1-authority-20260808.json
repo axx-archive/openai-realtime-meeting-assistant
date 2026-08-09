@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_w1_canonical_authority",
+  "observedAt": "2026-08-08T22:54:41Z",
+  "status": "deterministic_verified",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "d4c827c2adc7e1c6258f843e20fd4f9256c7310b",
+    "worktreeCheckpointOnly": true,
+    "strideSiteExcludedAndUntouched": true,
+    "gitOrReleaseMutationPerformed": false
+  },
+  "scope": {
+    "contracts": [
+      "PersonPrincipal",
+      "PersonProfile",
+      "OrganizationMemberProfile",
+      "Organization",
+      "OrganizationMembership",
+      "OrganizationJoinRequest",
+      "ActiveOrganizationSession",
+      "OrganizationAuditEvent",
+      "ContributionClaim",
+      "FieldReleaseApproval",
+      "ContributionAttestation",
+      "PublishedContributionClaim",
+      "AgentInfluenceReceipt",
+      "NetworkProfileProjection",
+      "TalentSearchGrant",
+      "NetworkSearchReceipt",
+      "ContactRequest",
+      "NetworkBlock",
+      "DerivedPurgeReceipt"
+    ],
+    "migrationVersions": [14, 15, 16],
+    "newFeatureSwitches": 13,
+    "allNewFeatureSwitchesDefaultFalse": true,
+    "httpRoutesAdded": false,
+    "providerCallsAdded": false
+  },
+  "authorityProofs": {
+    "atomicOrganizationAndOwner": true,
+    "threeActiveOrganizationLimitSerialized": true,
+    "finalOwnerProtected": true,
+    "crossOrganizationTransferRejected": true,
+    "sessionMembershipAndPersonBound": true,
+    "sessionRevocationLinearized": true,
+    "optionalProfileListsAcceptExplicitEmpty": true,
+    "immutableRevisionHistoryAndCurrentPointers": true,
+    "exactSubjectOrganizationAndNamedPartyApproval": true,
+    "staleEvidenceRepublishRejected": true,
+    "publicationAndSearchSynchronouslyFenced": true,
+    "personOrganizationAndGlobalRateLimits": true,
+    "prohibitedPolicyRunsBeforeRetrieval": true,
+    "purgeGenerationMonotonic": true,
+    "networkOffIsNonDestructiveAndUnlisted": true,
+    "allDerivedStoresRepresented": true,
+    "exactDerivedPurgeStoreCount": 13,
+    "currentPointerDeleteDenied": true
+  },
+  "verification": {
+    "focusedNormal": {
+      "result": "PASS",
+      "command": "go test . -run '^(TestPersonProfile|TestOrganization|TestActiveOrganization|TestW1Organization|TestSessionStore|TestContribution|TestNamedParty|TestPublishedClaim|TestAgentInfluence|TestTalentSearch|TestContactBlock|TestNetworkAuthority|TestLoadCanonicalMigrations)' -count=1",
+      "elapsedSeconds": 1.045
+    },
+    "focusedRace": {
+      "result": "PASS",
+      "command": "go test -race . -run '^(TestPersonProfile|TestOrganization|TestActiveOrganization|TestW1Organization|TestSessionStore|TestContribution|TestNamedParty|TestPublishedClaim|TestAgentInfluence|TestTalentSearch|TestContactBlock|TestNetworkAuthority)' -count=1",
+      "elapsedSeconds": 5.859
+    },
+    "disposablePostgres": {
+      "result": "PASS",
+      "command": "go test . -run '^(TestPostgresStridePeopleOrganizationsMigrationEnforcesAuthoritySeams|TestPostgresStrideContributionNetworkMigrationsFenceEligibility|TestPostgresSTRIDEMigrationsRejectNestedBodiesCredentialsAndMalformedReferences|TestPostgresCanonicalMigrationsAreIdempotentAndRefuseDrift)$' -count=1",
+      "elapsedSeconds": 4.425
+    },
+    "goVetAll": {
+      "result": "PASS",
+      "command": "go vet ./..."
+    },
+    "migrationReplay": {
+      "result": "PASS",
+      "loadedMigrations": 16,
+      "newSwitchesObservedFalse": 13
+    },
+    "fullRepositorySuite": {
+      "result": "PASS",
+      "command": "go test ./... -count=1",
+      "rootPackageElapsedSeconds": 443.976
+    },
+    "diffCheck": "PASS"
+  },
+  "independentReview": {
+    "mode": "critic_loop",
+    "verdict": "PASS",
+    "blockersRemaining": 0,
+    "majorFindingsRemaining": 0,
+    "closedClasses": [
+      "cross_tenant_transfer",
+      "session_revocation_race",
+      "stale_evidence_search",
+      "incomplete_approval_set",
+      "mutable_history_aliasing",
+      "forged_terminal_controller",
+      "current_pointer_delete_bypass",
+      "purge_generation_collision"
+    ]
+  },
+  "fileSha256": {
+    "auth_http.go": "e57e47ad2ab6db09240feb06d76e2a6ce977adbb3464c61f3aae2e136c317d25",
+    "canonical_migrations_test.go": "0b548bee0c8aa26bd5b9c7f0af2b2e24668964119a88f6fb1925258219fa3539",
+    "canonical_postgres_test.go": "252de652994a22540a2d59c69a2029e7ada84dd5c72c42763d4368a3244a0ff9",
+    "stride_contracts.go": "30839f60baaf747798693969c261e957f3115ac5b6d34f6ec85cc8c501e91785",
+    "stride_registry.go": "6cd9c1de78910344eef99c08124d7455c0072d017f55651e1c3eeeedd9a3f262",
+    "stride_registry_test.go": "2186c23cea8e4c6167552550004f6e5ed25858e585b9833331947903f7603051",
+    "migrations/0014_stride_people_organizations.sql": "ed9ba57352514fae433e0ea319d33aa125419180a818c9222b2b22aa79c00131",
+    "migrations/0015_stride_contributions.sql": "29ad7cff6b79a823770fae6275f06032cfaa13eb034fd116cb10ba6fd7e970f2",
+    "migrations/0016_stride_network.sql": "8a4dd4f1b735f6faedf07652ee0135edebec9f2aaddd1c90a61b65ac46ca20e9",
+    "stride_identity_organization_contracts.go": "aa57940c511e863ae5f827ae8f230b72a12e2d6ddbfdc87d7f01978a91158cc9",
+    "stride_identity_organization_contracts_test.go": "ada20d185cfca847ff57ff126e1b8844bec3e101e109a77a9709cdb38e9d2bf2",
+    "stride_organization_authority.go": "3e7fa723e640f80adbd1498607aa459fe151a2e50cd7490049ca09688279b4fd",
+    "stride_organization_authority_test.go": "d8b128d868ec3e91266169e5e02a7af984c0daa22f5e02c8b281d77e3d477f2c",
+    "stride_session_authority_test.go": "2dc524b81f233a14bed25a1a048db8161bee7204be666bb13e215ef1598481e3",
+    "stride_contribution_network_contracts.go": "81129fe6db5f497690ca2c34aeb3ab590cb1851044e722dd7d565d0301a45e66",
+    "stride_contribution_network_contracts_test.go": "79c8896ac1bfcff8d38441c595daf9846dadfb8d2506ada626a3f8a9d7147273",
+    "stride_contribution_authority.go": "eebb17084912154abbb136008be18e1911ccffd1cc53b24839049864dfeb893a",
+    "stride_contribution_authority_test.go": "50b133438bcd4b3a4781468ec971a453ab47e33ab9aadf468c4b583300864b20",
+    "stride_network_authority.go": "92311fe4c928d7b4171b32dc043986db1f3d90955480085bf06f8bccade51ddf",
+    "stride_network_authority_test.go": "492de248b117e8d9d99270bad6e709da1c2eb38080792bdc0b96a89ee263a880"
+  },
+  "externalBoundaries": {
+    "productionMigrationAuthorized": false,
+    "canonicalRepairAuthorized": false,
+    "paidProviderAuthorized": false,
+    "testFlightOrPhysicalAcceptancePerformed": false,
+    "gitCommitPushOrDeployAuthorized": false,
+    "cohortActivationAuthorized": false
+  }
+}

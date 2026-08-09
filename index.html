@@ -1039,8 +1039,22 @@
         display: inline-flex;
         align-items: center;
         gap: 9px;
+        min-height: 40px;
+        padding: 4px 8px 4px 4px;
         min-width: 0;
+        border: 0;
+        border-radius: 14px;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+        transition-property: scale, background-color, box-shadow;
+        transition-duration: 150ms;
+        transition-timing-function: ease-out;
       }
+      .topbar__organization:hover { background: var(--surface-3); }
+      .topbar__organization:active { scale: .96; }
+      .topbar__organization:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
       .topbar__organization-mark {
         display: grid;
@@ -1075,6 +1089,8 @@
         letter-spacing: -0.01em;
         white-space: nowrap;
       }
+      .topbar__organization-meta { color: var(--text-3); font: 500 10px/1.2 var(--font-sans); font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .topbar__organization-pending { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 2px; padding: 0 5px; border-radius: 999px; background: var(--text-1); color: var(--surface-1); font: 700 10px/1 var(--font-sans); font-variant-numeric: tabular-nums; }
 
       .topbar__context {
         display: grid;
@@ -27761,6 +27777,128 @@
         .chat-thread-item:hover { transform: none; }
         .scout-chat-send:hover:not([disabled]) { transform: none; }
       }
+      /* W2 contribution network product surfaces — route-aware, body-free,
+         and intentionally unavailable until revision-1 APIs authorize them. */
+      html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+      .stride-w2 { position: fixed; inset: 0; z-index: 46; display: grid; grid-template-columns: 256px minmax(0, 1fr); background: var(--bg-app); color: var(--text-1); overflow: hidden; }
+      .stride-w2[hidden] { display: none; }
+      body.stride-w2-open { overflow: hidden; }
+      .stride-w2 h1, .stride-w2 h2, .stride-w2 h3 { text-wrap: balance; }
+      .stride-w2 p, .stride-w2 li { text-wrap: pretty; }
+      .stride-w2__rail { padding: 24px 16px; background: var(--surface-1); box-shadow: 1px 0 0 var(--line-1), 12px 0 32px rgba(0,0,0,.04); overflow-y: auto; }
+      .stride-w2__brand { display: flex; align-items: center; justify-content: space-between; min-height: 44px; margin: 0 8px 24px; }
+      .stride-w2__brand strong { font-size: 17px; letter-spacing: -.02em; }
+      .stride-w2__close, .stride-w2__nav, .stride-w2__button, .stride-w2__seg button, .stride-w2__person-action { min-width: 40px; min-height: 40px; }
+      .stride-w2__close, .stride-w2__button, .stride-w2__seg button, .stride-w2__person-action { border: 0; color: inherit; font: inherit; cursor: pointer; transition-property: scale, background-color, box-shadow, opacity; transition-duration: 150ms; transition-timing-function: ease-out; }
+      .stride-w2__close:active, .stride-w2__button:active, .stride-w2__seg button:active, .stride-w2__person-action:active { scale: .96; }
+      .stride-w2__close { width: 40px; border-radius: 12px; background: transparent; }
+      .stride-w2__close:hover { background: var(--surface-3); }
+      .stride-w2__group { display: grid; gap: 4px; margin-top: 18px; }
+      .stride-w2__group-label { padding: 0 12px 6px; color: var(--text-3); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+      .stride-w2__nav { display: flex; align-items: center; padding: 0 12px; border-radius: 12px; color: var(--text-2); text-decoration: none; font-size: 14px; font-weight: 600; transition-property: background-color, color, scale; transition-duration: 150ms; }
+      .stride-w2__nav:hover { background: var(--surface-3); color: var(--text-1); }
+      .stride-w2__nav:active { scale: .96; }
+      .stride-w2__nav[aria-current="page"] { background: var(--surface-3); color: var(--text-1); box-shadow: inset 3px 0 0 var(--ember-500); }
+      .stride-w2__main { overflow-y: auto; padding: clamp(24px, 5vw, 64px); }
+      .stride-w2__canvas { width: min(1080px, 100%); margin: 0 auto; }
+      .stride-w2__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
+      .stride-w2__eyebrow { margin: 0 0 8px; color: var(--text-3); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+      .stride-w2__title { margin: 0; max-width: 720px; font-size: clamp(30px, 4vw, 48px); line-height: 1.02; letter-spacing: -.045em; }
+      .stride-w2__lede { max-width: 680px; margin: 12px 0 0; color: var(--text-2); font-size: 16px; line-height: 1.55; }
+      .stride-w2__status { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 12px; border-radius: 999px; background: var(--surface-3); color: var(--text-2); font-size: 12px; font-weight: 700; white-space: nowrap; }
+      .stride-w2__status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--text-disabled); }
+      .stride-w2__grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; }
+      .stride-w2__card { grid-column: span 6; padding: 24px; border-radius: 24px; background: var(--surface-1); box-shadow: 0 0 0 1px rgba(0,0,0,.06), 0 2px 4px rgba(0,0,0,.04), 0 18px 48px rgba(0,0,0,.05); }
+      [data-theme="dark"] .stride-w2__card { box-shadow: 0 0 0 1px rgba(255,255,255,.08); }
+      .stride-w2__card--wide { grid-column: 1 / -1; }
+      .stride-w2__card h2 { margin: 0; font-size: 19px; letter-spacing: -.02em; }
+      .stride-w2__card p { margin: 8px 0 0; color: var(--text-2); line-height: 1.5; }
+      .stride-w2__metric { margin-top: 24px; font-size: 34px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -.04em; }
+      .stride-w2__metric-label { color: var(--text-3); font-size: 12px; }
+      .stride-w2__empty { display: grid; place-items: center; min-height: 240px; margin-top: 16px; padding: 32px; border-radius: 16px; background: var(--surface-3); text-align: center; }
+      .stride-w2__empty-inner { max-width: 460px; }
+      .stride-w2__empty-mark { display: grid; place-items: center; width: 48px; height: 48px; margin: 0 auto 16px; border-radius: 14px; background: var(--surface-1); box-shadow: 0 0 0 1px rgba(0,0,0,.06), 0 4px 12px rgba(0,0,0,.06); font-size: 20px; }
+      .stride-w2__button { display: inline-flex; align-items: center; justify-content: center; margin-top: 18px; padding: 0 16px; border-radius: 12px; background: var(--text-1); color: var(--surface-1); font-weight: 700; }
+      .stride-w2__button[disabled] { cursor: not-allowed; opacity: .5; }
+      .stride-w2__seg { display: inline-grid; grid-auto-flow: column; gap: 4px; padding: 4px; border-radius: 16px; background: var(--surface-3); }
+      .stride-w2__seg button { padding: 0 14px; border-radius: 12px; background: transparent; }
+      .stride-w2__seg button[aria-pressed="true"] { background: var(--surface-1); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+      .stride-w2__profile { display: grid; grid-template-columns: 96px 1fr; gap: 24px; align-items: center; }
+      .stride-w2__avatar { display: grid; place-items: center; width: 96px; height: 96px; border-radius: 28px; background: var(--text-1); color: var(--surface-1); font-size: 28px; font-weight: 700; outline: 1px solid rgba(0,0,0,.1); outline-offset: -1px; }
+      [data-theme="dark"] .stride-w2__avatar { outline-color: rgba(255,255,255,.1); }
+      .stride-w2__fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-top: 20px; }
+      .stride-w2__field { padding: 16px; border-radius: 14px; background: var(--surface-3); }
+      .stride-w2__field span { display: block; color: var(--text-3); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+      .stride-w2__field strong { display: block; margin-top: 6px; font-size: 14px; }
+      .stride-w2__list { display: grid; gap: 1px; margin-top: 18px; overflow: hidden; border-radius: 16px; background: var(--line-1); box-shadow: 0 0 0 1px rgba(0,0,0,.04); }
+      .stride-w2__row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 16px; align-items: center; min-height: 72px; padding: 14px 16px; background: var(--surface-1); }
+      .stride-w2__row strong, .stride-w2__row small { display: block; }
+      .stride-w2__row small { margin-top: 4px; color: var(--text-3); }
+      .stride-w2__person-action { padding: 0 12px; border-radius: 12px; background: var(--surface-3); }
+      .stride-w2__notice { margin-top: 18px; padding: 14px 16px; border-radius: 14px; background: var(--surface-3); color: var(--text-2); font-size: 13px; line-height: 1.5; }
+      .stride-w2__notice strong { color: var(--text-1); }
+      .stride-w2__detail { display: grid; gap: 14px; margin-top: 18px; }
+      .stride-w2__detail-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+      .stride-w2__detail-block { padding: 14px; border-radius: 14px; background: var(--surface-3); box-shadow: inset 0 0 0 1px rgba(0,0,0,.04); }
+      .stride-w2__detail-block > span { display: block; margin-bottom: 5px; color: var(--text-3); font-size: 11px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+      .stride-w2__detail-block strong { font-size: 14px; line-height: 1.4; }
+      .stride-w2__chips { display: flex; flex-wrap: wrap; gap: 7px; }
+      .stride-w2__chip { display: inline-flex; align-items: center; min-height: 28px; padding: 4px 9px; border-radius: 999px; background: var(--surface-3); color: var(--text-2); font-size: 12px; font-weight: 650; }
+      .stride-w2__chip--verified { background: color-mix(in srgb, var(--ember-500) 12%, var(--surface-3)); color: var(--text-1); }
+      .stride-w2__timeline { display: grid; gap: 0; margin: 2px 0 0; padding: 0; list-style: none; }
+      .stride-w2__timeline li { position: relative; padding: 0 0 14px 22px; color: var(--text-2); font-size: 13px; line-height: 1.45; }
+      .stride-w2__timeline li::before { content: ""; position: absolute; top: 5px; left: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--ember-500); }
+      .stride-w2__timeline li:not(:last-child)::after { content: ""; position: absolute; top: 14px; bottom: 2px; left: 7px; width: 1px; background: var(--line-1); }
+      .stride-w2__diff { display: grid; grid-template-columns: minmax(0,.8fr) minmax(0,1fr) 20px minmax(0,1fr); gap: 8px; align-items: center; padding: 12px 0; box-shadow: 0 1px 0 var(--line-1); }
+      .stride-w2__diff:last-child { box-shadow: none; }
+      .stride-w2__diff span { color: var(--text-3); font-size: 12px; font-weight: 700; }
+      .stride-w2__diff del, .stride-w2__diff ins { padding: 7px 9px; border-radius: 9px; text-decoration: none; font-size: 13px; }
+      .stride-w2__diff del { background: color-mix(in srgb, #b42318 9%, var(--surface-3)); }
+      .stride-w2__diff ins { background: color-mix(in srgb, #067647 10%, var(--surface-3)); }
+      .stride-w2__capacity { display: flex; align-items: baseline; gap: 8px; margin-top: 16px; }
+      .stride-w2__capacity strong { font-size: 32px; font-variant-numeric: tabular-nums; letter-spacing: -.04em; }
+      .stride-w2__capacity span { color: var(--text-3); font-size: 13px; }
+      .stride-w2__danger { margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: color-mix(in srgb, #b42318 8%, var(--surface-3)); color: var(--text-2); font-size: 13px; line-height: 1.45; }
+      .stride-w2__empty--compact { min-height: 160px; }
+      .stride-w2__pending { position: fixed; z-index: 120; right: 18px; bottom: 18px; display: grid; grid-template-columns: minmax(0,1fr) auto auto; gap: 12px; align-items: center; width: min(620px, calc(100vw - 36px)); padding: 14px; border-radius: 18px; background: var(--surface-1); box-shadow: 0 18px 48px rgba(0,0,0,.18), 0 0 0 1px var(--line-1); }
+      .stride-w2__pending-copy { min-width: 0; }
+      .stride-w2__pending-copy strong, .stride-w2__pending-copy span { display: block; }
+      .stride-w2__pending-copy span { margin-top: 3px; color: var(--text-2); font-size: 13px; text-wrap: pretty; }
+      .stride-w2__pending button { min-width: 40px; min-height: 40px; margin: 0; }
+      .stride-w2__mobile-head { display: none; }
+      .settings-organizations__grid { display: grid; gap: 12px; margin-top: 18px; }
+      .settings-organizations__card { padding: 18px; border-radius: 18px; background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--line-1); }
+      .settings-organizations__card h3 { margin: 0; text-wrap: balance; }
+      .settings-organizations__card p { margin: 7px 0 0; color: var(--text-2); text-wrap: pretty; }
+      @media (max-width: 760px) {
+        .stride-w2 { display: block; overflow-y: auto; }
+        .stride-w2__rail { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; padding: max(10px, env(safe-area-inset-top)) 12px 10px; overflow-x: auto; box-shadow: 0 1px 0 var(--line-1), 0 8px 24px rgba(0,0,0,.05); }
+        .stride-w2__brand { position: sticky; left: 0; flex: 0 0 auto; min-height: 40px; margin: 0; background: var(--surface-1); }
+        .stride-w2__brand strong { display: none; }
+        .stride-w2__group { display: contents; }
+        .stride-w2__group-label { display: none; }
+        .stride-w2__nav { flex: 0 0 auto; white-space: nowrap; }
+        .stride-w2__main { overflow: visible; padding: 24px 16px calc(48px + env(safe-area-inset-bottom)); }
+        .stride-w2__head { display: block; }
+        .stride-w2__status { margin-top: 16px; }
+        .stride-w2__card { grid-column: 1 / -1; padding: 20px; border-radius: 20px; }
+        .stride-w2__profile { grid-template-columns: 64px 1fr; gap: 16px; }
+        .stride-w2__avatar { width: 64px; height: 64px; border-radius: 20px; font-size: 20px; }
+        .stride-w2__fields { grid-template-columns: 1fr; }
+        .stride-w2__detail-grid { grid-template-columns: 1fr; }
+        .stride-w2__diff { grid-template-columns: 1fr; gap: 5px; }
+        .stride-w2__diff b { display: none; }
+        .stride-w2__row { grid-template-columns: 1fr; }
+        .stride-w2__pending { left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); grid-template-columns: 1fr 1fr; width: auto; }
+        .stride-w2__pending-copy { grid-column: 1 / -1; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .topbar__mark.is-wake .topbar__wordmark,
+        .voice-island.is-wake .bf-wave-bar,
+        .notification-panel { animation: none; }
+        .office-launch__cradle { transform: none; transition: none; }
+        .stride-w2 *, .stride-w2 *::before, .stride-w2 *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+      }
     </style>
   </head>
   <body>
@@ -27885,16 +28023,18 @@
         <button id="topbarBack" class="topbar__back" type="button" aria-label="Back to Stride">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
         </button>
-        <div class="topbar__brand-lockup" aria-label="Stride · Bonfire organization">
+        <div class="topbar__brand-lockup" aria-label="Stride · organization workspace">
           <span class="wordmark topbar__brand-wordmark" role="img" aria-label="Stride"></span>
           <span class="topbar__identity-divider" aria-hidden="true"></span>
-          <span class="topbar__organization">
-            <span class="topbar__organization-mark" aria-hidden="true">B</span>
+          <button id="topbarOrganizationSwitcher" class="topbar__organization" type="button" aria-label="Organizations unavailable · open organization settings">
+            <span id="topbarOrganizationMark" class="topbar__organization-mark" aria-hidden="true">—</span>
             <span class="topbar__organization-copy">
-              <span class="topbar__organization-label">Organization</span>
-              <strong class="topbar__organization-name">Bonfire</strong>
+              <span id="topbarOrganizationRole" class="topbar__organization-label">not loaded</span>
+              <strong id="topbarOrganizationName" class="topbar__organization-name">Organization unavailable</strong>
+              <span id="topbarOrganizationCount" class="topbar__organization-meta">0 of 3 active</span>
             </span>
-          </span>
+            <span id="topbarOrganizationPending" class="topbar__organization-pending" aria-label="0 pending requests" hidden>0</span>
+          </button>
         </div>
         <span class="topbar__context-divider" aria-hidden="true"></span>
         <div class="topbar__context">
@@ -29362,6 +29502,15 @@
         <p id="consentStatus" class="consent-panel__status" role="status" aria-live="polite"></p>
       </section>
     </main>
+    <section id="strideW2Surface" class="stride-w2" aria-label="Contribution network workspace" hidden>
+      <aside class="stride-w2__rail" aria-label="Contribution network navigation">
+        <div class="stride-w2__brand"><strong>Stride network</strong><button id="strideW2Close" class="stride-w2__close" type="button" aria-label="Close contribution network">×</button></div>
+        <div class="stride-w2__group"><span class="stride-w2__group-label">You</span><a class="stride-w2__nav" href="/me" data-stride-w2-route="/me">My profile</a><a class="stride-w2__nav" href="/work-record" data-stride-w2-route="/work-record">Work record</a><a class="stride-w2__nav" href="/network/draft" data-stride-w2-route="/network/draft">Network profile</a></div>
+        <div class="stride-w2__group"><span class="stride-w2__group-label">Organization</span><a class="stride-w2__nav" href="/org/people" data-stride-w2-route="/org/people">People</a><a class="stride-w2__nav" href="/org/requests" data-stride-w2-route="/org/requests">Requests</a><a class="stride-w2__nav" href="/org/contributions" data-stride-w2-route="/org/contributions">Approvals</a><a class="stride-w2__nav" href="/org/recruiting" data-stride-w2-route="/org/recruiting">Recruiting</a></div>
+        <div class="stride-w2__group"><span class="stride-w2__group-label">Network</span><a class="stride-w2__nav" href="/network/preview" data-stride-w2-route="/network/preview">Preview</a><a class="stride-w2__nav" href="/network/recruiter" data-stride-w2-route="/network/recruiter">View as recruiter</a><a class="stride-w2__nav" href="/network/search" data-stride-w2-route="/network/search">Search</a><a class="stride-w2__nav" href="/network/contact" data-stride-w2-route="/network/contact">Contact</a><a class="stride-w2__nav" href="/network/blocks" data-stride-w2-route="/network/blocks">Blocks</a></div>
+      </aside>
+      <main class="stride-w2__main"><div id="strideW2Canvas" class="stride-w2__canvas" aria-live="polite"></div></main>
+    </section>
     <section id="meetingSpecialistsPanel" class="meeting-specialists" role="dialog" aria-modal="true" aria-labelledby="meetingSpecialistsTitle" hidden>
       <div class="meeting-specialists__panel" tabindex="-1">
         <header class="meeting-specialists__head">
@@ -29634,6 +29783,7 @@
             <button type="button" class="settings-nav__item" data-settings-section="notifications" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"></path></svg><span>Notifications</span></button>
             <button type="button" class="settings-nav__item" data-settings-section="appearance" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9c0-1.1-.9-2-2-2h-2.2a2 2 0 0 1-1.8-2.8l.7-1.6A1.8 1.8 0 0 0 14 3.1 9 9 0 0 0 12 3Z"></path><circle cx="7.5" cy="11.5" r=".8" fill="currentColor" stroke="none"></circle><circle cx="10" cy="7.5" r=".8" fill="currentColor" stroke="none"></circle></svg><span>Appearance</span></button>
             <span class="settings-nav__group">Organization</span>
+            <button type="button" class="settings-nav__item" data-settings-section="organizations" data-stride-w2-settings-surface="organizations" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 20V7l8-4 8 4v13M8 20v-5h8v5M8 9h.01M12 9h.01M16 9h.01"></path></svg><span>Organizations</span></button>
             <button type="button" class="settings-nav__item" data-settings-section="dealrooms" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7h16v13H4zM8 7V4h8v3M4 11h16"></path></svg><span>Deal rooms</span></button>
           </nav>
           <div class="settings-body">
@@ -29902,6 +30052,15 @@
               <div class="voice-profile__label">deal rooms</div>
               <p class="deal-room__intro">Read-only shareable exports of an assembled package binder. Request one from a package’s binder; a studio admin approves it into a link and can revoke it here.</p>
               <div id="dealRoomList" class="deal-room-list" aria-live="polite"></div>
+            </section>
+            <section data-settings-section="organizations" hidden aria-label="Organizations">
+              <div class="voice-profile__label">organizations</div>
+              <h3>Where your work belongs</h3>
+              <p class="push-settings__intro">Organization membership and contribution authority stay explicit. Hidden memberships, private source material, and personal contact details never appear here.</p>
+              <div id="settingsOrganizationsProjection" class="settings-organizations__grid">
+                <article class="settings-organizations__card"><h3>Organizations unavailable</h3><p>Checking current organization authority. No membership is assumed from static app markup.</p><button class="btn btn--ghost" type="button" disabled>Checking authority</button></article>
+                <article class="settings-organizations__card"><h3>Join or create</h3><p>Requests are default-off in this build. No invitation or membership change will be sent.</p><button class="btn btn--ghost" type="button" disabled>Not available yet</button></article>
+              </div>
             </section>
             <section data-settings-section="appearance" hidden aria-label="Appearance">
               <fieldset class="noise-mode-group">
@@ -30384,7 +30543,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const intelPulseAxis = document.getElementById('intelPulseAxis')
       const intelPulseGrid = document.getElementById('intelPulseGrid')
       const intelLearnedList = document.getElementById('intelLearnedList')
-      const intelContribList = document.getElementById('intelContribList')
       const intelThemesStamp = document.getElementById('intelThemesStamp')
       const intelThemesEl = document.getElementById('intelThemes')
       const intelQuestionsEl = document.getElementById('intelQuestions')
@@ -30978,7 +31136,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
           }
           relationshipMemoryReconnectFence = null
         }
+        // Every server-authenticated identity refresh advances the W2 request
+        // generation, including a same-email session replacement. Late product
+        // responses from the prior cookie/session can never render afterward.
         authedUser = nextUser || null
+        window.__strideW2FenceAuthority?.(previousIdentity, nextIdentity)
         if (!identityChanged) {
           return
         }
@@ -36812,7 +36974,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       function phoneToolSubtitle(tool) {
         switch (tool) {
           case 'office':
-            return 'Bonfire'
+            return window.__strideCurrentOrganizationLabel || 'Organization unavailable'
           case 'room':
             return appShell.classList.contains('is-in-room')
               ? (roomRecordingEnabled ? 'listening' : 'not listening')
@@ -61896,78 +62058,6 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
-      function intelBreakdownText(person) {
-        const plural = (count, unit) => `${count} ${unit}${count === 1 ? '' : 's'}`
-        const parts = []
-        if (person.spoken) parts.push(`${person.spoken} spoken`)
-        if (person.chat) parts.push(`${person.chat} chat`)
-        if (person.channelMessages) parts.push(`${person.channelMessages} channel`)
-        if (person.threadsStarted) parts.push(plural(person.threadsStarted, 'thread'))
-        if (person.proposalsConfirmed) parts.push(`${person.proposalsConfirmed} confirmed`)
-        if (person.artifactsCreated) parts.push(plural(person.artifactsCreated, 'artifact'))
-        if (person.boardCardsOwned) parts.push(plural(person.boardCardsOwned, 'card'))
-        return parts.length ? parts.join(' · ') : 'no fuel yet'
-      }
-
-      function renderIntelContributions() {
-        if (!intelContribList) {
-          return
-        }
-        const contributions = intelData?.contributions || null
-        const people = Array.isArray(contributions?.people) ? contributions.people : []
-        if (!people.length) {
-          intelContribList.replaceChildren(intelEmptyNode('the brain hasn’t seen enough yet — hold a meeting or drop notes in chat'))
-          return
-        }
-        const fuelMax = Math.max(1, Number(contributions?.fuelMax) || 0)
-        const fuelTotal = Math.max(1, people.reduce((total, person) => total + (Number(person.fuel) || 0), 0))
-        const rows = people.map(person => {
-          const row = document.createElement('div')
-          row.className = 'intel-contrib__row'
-          const avatar = document.createElement('span')
-          avatar.className = 'intel-contrib__avatar'
-          avatar.setAttribute('aria-hidden', 'true')
-          avatar.textContent = initialsForName(person.name)
-          const name = document.createElement('span')
-          name.className = 'intel-contrib__name'
-          name.textContent = person.name
-          // the full mix survives as a tooltip — the row itself reads bar,
-          // share, then lines (delta cell BEFORE the line-count cell, §9.3)
-          row.title = `${person.name} · ${intelBreakdownText(person)}`
-          const lineCount = (Number(person.spoken) || 0) + (Number(person.chat) || 0)
-          const track = document.createElement('span')
-          track.className = 'intel-contrib__track'
-          const fill = document.createElement('span')
-          fill.className = 'intel-contrib__fill'
-          // guard the percentage-of-nothing case: no conversation lines → an
-          // empty track, so a full bar never contradicts "0 lines" (CL-5)
-          fill.style.transform = lineCount === 0
-            ? 'translateX(-100%)'
-            : `translateX(${Math.round(Math.min(1, (Number(person.fuel) || 0) / fuelMax) * 100) - 100}%)`
-          track.appendChild(fill)
-          const delta = document.createElement('span')
-          delta.className = 'intel-contrib__delta'
-          delta.textContent = `${Math.round(((Number(person.fuel) || 0) / fuelTotal) * 100)}%`
-          const count = document.createElement('span')
-          count.className = 'intel-contrib__count'
-          count.textContent = `${lineCount} line${lineCount === 1 ? '' : 's'}`
-          row.append(avatar, name, track, delta, count)
-          return row
-        })
-        // the unattributed row stays visible so the numbers read honest
-        const unattributed = Number(contributions?.unattributed) || 0
-        if (unattributed > 0) {
-          const row = document.createElement('div')
-          row.className = 'intel-contrib__row intel-contrib__row--unattributed'
-          const note = document.createElement('span')
-          note.className = 'intel-contrib__breakdown'
-          note.textContent = `unattributed · ${unattributed} spoken`
-          row.appendChild(note)
-          rows.push(row)
-        }
-        intelContribList.replaceChildren(...rows)
-      }
-
       function intelListItem(glyph, text, variant) {
         const item = document.createElement('div')
         item.className = `intel-item ${variant}`
@@ -69698,6 +69788,663 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
         window.addEventListener('resize', () => closeStrideSelect(false))
         window.addEventListener('scroll', () => closeStrideSelect(false), true)
+      })()
+    </script>
+    <script>
+      /* W2 contribution network route shell. Presentation-only until the
+         revision-1 authority APIs and feature switches are live. */
+      (() => {
+        const surface = document.getElementById('strideW2Surface')
+        const canvas = document.getElementById('strideW2Canvas')
+        const close = document.getElementById('strideW2Close')
+        const organizationSwitcher = document.getElementById('topbarOrganizationSwitcher')
+        const organizationMark = document.getElementById('topbarOrganizationMark')
+        const organizationRole = document.getElementById('topbarOrganizationRole')
+        const organizationName = document.getElementById('topbarOrganizationName')
+        const organizationCount = document.getElementById('topbarOrganizationCount')
+        const organizationPending = document.getElementById('topbarOrganizationPending')
+        const routes = new Set(['/me','/work-record','/org/people','/org/requests','/org/contributions','/org/recruiting','/network/draft','/network/preview','/network/recruiter','/network/search','/network/contact','/network/blocks'])
+        const coworkerRoutePattern = /^\/people\/[a-zA-Z0-9_-]+$/
+        const isStrideRoute = path => routes.has(path) || coworkerRoutePattern.test(path)
+        const routeSurfaces = new Map([['/me','profile'],['/work-record','work-record'],['/org/people','organization-people'],['/org/requests','organization-requests'],['/org/contributions','contribution-approvals'],['/org/recruiting','organization-recruiting'],['/network/draft','network-draft'],['/network/preview','network-preview'],['/network/recruiter','network-recruiter-view'],['/network/search','network-search'],['/network/contact','contact-inbox'],['/network/blocks','network-blocks']])
+        const surfaceForPath = path => coworkerRoutePattern.test(path) ? 'coworker-profile' : routeSurfaces.get(path)
+        const closedSurfaces = new Set(['profile','work-record','organizations','organization-people','organization-requests','contribution-approvals','network-draft','network-preview','network-recruiter-view','network-search','contact-inbox','network-blocks','coworker-profile','organization-recruiting'])
+        const closedActions = new Set(['profile-update','organization-create','organization-join','organization-request-approve','organization-request-deny','organization-switch','organization-leave','organization-member-role-change','organization-member-revoke','organization-ownership-transfer','organization-recruiting-grant-create','organization-recruiting-grant-revoke','network-draft-save','network-publish','network-pause','network-profile-off','network-search-submit','contact-send','contribution-subject-approve','contribution-subject-dispute','contribution-organization-approve','contribution-organization-deny','contribution-named-party-decision','contribution-attestation-revoke','contribution-publish','contribution-withdraw','contribution-correct','contribution-revoke','work-record-export','work-record-delete','network-profile-export','network-profile-delete','network-searchable-fields-update','contact-accept','contact-decline','contact-withdraw','network-block','network-unblock'])
+        const actionSurfaces = new Map([
+          ['profile-update','profile'], ['organization-create','organizations'], ['organization-join','organizations'],
+          ['organization-request-approve','organization-requests'], ['organization-request-deny','organization-requests'],
+          ['organization-switch','organizations'], ['organization-leave','organizations'], ['network-draft-save','network-draft'],
+          ['organization-member-role-change','organization-people'], ['organization-member-revoke','organization-people'], ['organization-ownership-transfer','organization-people'],
+          ['organization-recruiting-grant-create','organization-recruiting'], ['organization-recruiting-grant-revoke','organization-recruiting'],
+          ['network-search-submit','network-search'], ['contact-send','network-search'],
+          ['contribution-subject-approve','work-record'], ['contribution-subject-dispute','work-record'],
+          ['contribution-organization-approve','contribution-approvals'], ['contribution-organization-deny','contribution-approvals'], ['contribution-named-party-decision','contribution-approvals'], ['contribution-attestation-revoke','contribution-approvals'],
+          ['contribution-publish','work-record'], ['contribution-withdraw','work-record'],
+          ['contribution-correct','contribution-approvals'], ['contribution-revoke','contribution-approvals'],
+          ['work-record-export','work-record'], ['work-record-delete','work-record'],
+          ['network-publish','network-preview'], ['network-pause','network-preview'], ['network-profile-off','network-preview'],
+          ['network-profile-export','network-preview'], ['network-profile-delete','network-preview'], ['network-searchable-fields-update','network-preview'],
+          ['contact-accept','contact-inbox'], ['contact-decline','contact-inbox'], ['contact-withdraw','contact-inbox'],
+          ['network-block','network-blocks'], ['network-unblock','network-blocks']
+        ])
+        const actionValueSchemas = new Map([
+          ['profile-update',{ displayName:{max:80}, pronouns:{max:40}, bio:{max:280}, workModes:{max:64,list:true,maxItems:20}, openTo:{max:64,list:true,maxItems:20} }],
+          ['organization-create',{ name:{max:120,required:true}, slug:{max:63,required:true,pattern:'slug'} }],
+          ['organization-join',{ joinCode:{max:128,required:true} }],
+          ['organization-member-role-change',{ role:{max:16,required:true,values:['member','admin']} }],
+          ['organization-recruiting-grant-revoke',{ reason:{max:500} }],
+          ['network-draft-save',{ intro:{max:280}, workModes:{max:64,list:true,maxItems:20}, openTo:{max:64,list:true,maxItems:20} }],
+          ['network-search-submit',{ query:{max:500,required:true} }],
+          ['contact-send',{ purpose:{max:80,required:true}, note:{max:1000}, collaborationType:{max:32,required:true,values:['collaboration','advisory','employment','recruiting','organization_join']} }],
+          ['organization-request-approve',{ reason:{max:500} }], ['organization-request-deny',{ reason:{max:500} }],
+          ['contribution-subject-approve',{ reason:{max:500} }], ['contribution-subject-dispute',{ reason:{max:500} }],
+          ['contribution-organization-approve',{ reason:{max:500} }], ['contribution-organization-deny',{ reason:{max:500} }],
+          ['contribution-named-party-decision',{ decision:{max:8,required:true,values:['approved','denied']}, reason:{max:500} }], ['contribution-attestation-revoke',{ reason:{max:500} }],
+          ['contribution-correct',{ reason:{max:500} }], ['contribution-revoke',{ reason:{max:500} }],
+          ['network-searchable-fields-update',{ fields:{max:64,list:true,maxItems:9,values:['display_name','pronouns','bio','work_modes','open_to','visible_organizations','contribution_problem_classes','contribution_roles','verified_contributions']} }],
+          ['contact-accept',{ reason:{max:500} }], ['contact-decline',{ reason:{max:500} }], ['contact-withdraw',{ reason:{max:500} }]
+        ])
+        let projectionRequest = null
+        let mutationRequest = null
+        let authorityGeneration = 1
+        let pendingActionOperation = null
+        let pendingPersistenceInvalid = false
+        const pendingActionOperationsByAccount = new Map()
+        const pendingStoragePrefix = 'stride.w2.pending.v1.'
+        const pendingStorageKeys = new Set(['version','accountFingerprint','actionId','action','surface','expectedRevision','values','idempotencyKey','origin'])
+        const projectionRequests = new Set()
+        if (!surface || !canvas || !close) return
+        const authoritySnapshot = () => ({ generation: authorityGeneration, accountKey: String(authedUser?.email || '').trim().toLowerCase() })
+        const authorityIsCurrent = snapshot => Boolean(snapshot?.accountKey) && snapshot.generation === authorityGeneration && snapshot.accountKey === String(authedUser?.email || '').trim().toLowerCase()
+        function accountFingerprint(accountKey) {
+          const normalized = String(accountKey || '').trim().toLowerCase()
+          if (!normalized || normalized.length > 320) return ''
+          const seeds = [0x811c9dc5,0x9e3779b9,0x85ebca6b,0xc2b2ae35,0x27d4eb2f,0x165667b1,0xd3a2646c,0xfd7046c5]
+          return seeds.map(seed => {
+            let hash = seed >>> 0
+            for (let index = 0; index < normalized.length; index += 1) { hash ^= normalized.charCodeAt(index); hash = Math.imul(hash, 0x01000193) >>> 0 }
+            return hash.toString(16).padStart(8,'0')
+          }).join('')
+        }
+        const pendingStorageKey = accountKey => { const fingerprint = accountFingerprint(accountKey); return fingerprint ? pendingStoragePrefix + fingerprint : '' }
+        function closedStoredValues(action, candidate) {
+          if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null
+          const schema = actionValueSchemas.get(action) || {}
+          if (Object.keys(candidate).length !== Object.keys(schema).length || !Object.keys(candidate).every(key => Object.prototype.hasOwnProperty.call(schema,key))) return null
+          const values = {}
+          for (const [key,spec] of Object.entries(schema)) {
+            const value = candidate[key]
+            if (spec.list) {
+              if (!Array.isArray(value) || value.length > spec.maxItems || value.some(item => typeof item !== 'string' || item.trim() !== item || !item || item.length > spec.max || spec.values && !spec.values.includes(item)) || new Set(value).size !== value.length) return null
+              values[key] = [...value]
+            } else {
+              if (typeof value !== 'string' || value.trim() !== value || value.length > spec.max || spec.required && !value || spec.pattern === 'slug' && !/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(value) || spec.values && !spec.values.includes(value)) return null
+              values[key] = value
+            }
+          }
+          return values
+        }
+        function validateStoredPending(candidate, accountKey) {
+          const fingerprint = accountFingerprint(accountKey)
+          if (!fingerprint || !exactKeys(candidate,pendingStorageKeys) || candidate.version !== 1 || candidate.accountFingerprint !== fingerprint || !closedActions.has(candidate.action) || !closedSurfaces.has(candidate.surface) || actionSurfaces.get(candidate.action) !== candidate.surface || typeof candidate.actionId !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(candidate.actionId) || !positiveInteger(candidate.expectedRevision) || typeof candidate.idempotencyKey !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/.test(candidate.idempotencyKey)) return null
+          const allowedOrigin = candidate.origin === '/settings/organizations' ? candidate.surface === 'organizations' : isStrideRoute(candidate.origin) && surfaceForPath(candidate.origin) === candidate.surface
+          if (!allowedOrigin) return null
+          const values = closedStoredValues(candidate.action,candidate.values)
+          if (!values) return null
+          const bodyFingerprint = JSON.stringify({ action:candidate.action, expectedRevision:candidate.expectedRevision, surface:candidate.surface, values })
+          return { accountFingerprint:fingerprint, actionId:candidate.actionId, action:candidate.action, surface:candidate.surface, expectedRevision:candidate.expectedRevision, values, bodyFingerprint, idempotencyKey:candidate.idempotencyKey, path:candidate.origin }
+        }
+        function persistPendingActionOperation(accountKey, operation) {
+          const key = pendingStorageKey(accountKey)
+          if (!key || !operation) return false
+          const record = { version:1, accountFingerprint:accountFingerprint(accountKey), actionId:operation.actionId, action:operation.action, surface:operation.surface, expectedRevision:operation.expectedRevision, values:operation.values, idempotencyKey:operation.idempotencyKey, origin:operation.path }
+          try { localStorage.setItem(key,JSON.stringify(record)); return true } catch { return false }
+        }
+        function loadPendingActionOperation(accountKey) {
+          pendingPersistenceInvalid = false
+          const key = pendingStorageKey(accountKey)
+          if (!key) return null
+          let raw = null
+          try { raw = localStorage.getItem(key) } catch { pendingPersistenceInvalid = true; return null }
+          if (!raw) return null
+          try {
+            const operation = validateStoredPending(JSON.parse(raw),accountKey)
+            if (operation) return operation
+          } catch {}
+          pendingPersistenceInvalid = true
+          return null
+        }
+        function removePendingActionOperation(accountKey) {
+          const key = pendingStorageKey(accountKey)
+          if (key) { try { localStorage.removeItem(key) } catch {} }
+          pendingPersistenceInvalid = false
+        }
+        const unavailable = '<div class="stride-w2__notice"><strong>Not available in this build.</strong> No data is read, published, searched, or sent until the exact authority API and feature switch are enabled.</div>'
+        const head = (eyebrow, title, lede) => `<header class="stride-w2__head"><div><p class="stride-w2__eyebrow">${eyebrow}</p><h1 class="stride-w2__title">${title}</h1><p class="stride-w2__lede">${lede}</p></div><span class="stride-w2__status">default off</span></header>`
+        const empty = (mark, title, copy) => `<div class="stride-w2__empty"><div class="stride-w2__empty-inner"><div class="stride-w2__empty-mark" aria-hidden="true">${mark}</div><h2>${title}</h2><p>${copy}</p></div></div>`
+        const card = (title, copy, body = '', wide = false) => `<article class="stride-w2__card${wide ? ' stride-w2__card--wide' : ''}"><h2>${title}</h2><p>${copy}</p>${body}</article>`
+        const metric = (label) => `<div class="stride-w2__metric">0</div><div class="stride-w2__metric-label">${label}</div>`
+        function routeMarkup(path) {
+          if (coworkerRoutePattern.test(path)) return head('Coworker profile','The organization view, and nothing more.','This projection contains only the safe global profile plus the current organization role, title, team, and joined date. Other memberships and private context stay hidden.') + card('Coworker','Only a current shared-organization projection can appear here.',empty('○','Profile unavailable','The server returns the same opaque unavailable state for absent, departed, revoked, or cross-organization people.'),true) + unavailable
+          if (path === '/me') return head('My profile','Your work, with the context you choose.','A person-controlled profile built from public declarations and verified contribution evidence—not private memory, hidden activity, or a score.') + `<div class="stride-w2__grid">${card('Profile','Only publication-safe fields can leave your private workspace.','<div class="stride-w2__profile"><div class="stride-w2__avatar" aria-label="Profile placeholder">You</div><div><h2>Your name</h2><p>Profile details are waiting for person-profile authority.</p></div></div><div class="stride-w2__fields"><div class="stride-w2__field"><span>Work mode</span><strong>Not shared</strong></div><div class="stride-w2__field"><span>Open to</span><strong>Not shared</strong></div></div>',true)}${card('Verified contributions','Nothing is published until you approve exact fields.',metric('published claims'))}${card('Organizations','Only memberships you can see are shown.',metric('available memberships'))}</div>${unavailable}`
+          if (path === '/work-record') return head('Work record','Verified work, under your control.','Review contribution claims, subject decisions, and publication state without exposing private evidence bodies or hidden organization data.') + card('Contribution record','No authorized contribution records are available.',empty('✓','Nothing in your work record yet','Server-authorized claims and exact subject actions will appear here.'),true) + unavailable
+          if (path === '/org/people') return head('Organization · People','People, without the surveillance layer.','A visible roster for explicit memberships. Direct contact details, hidden memberships, personal memory, and behavioral scoring are never roster fields.') + card('People','Membership data is unavailable until organization authority is enabled.',empty('⌁','No authorized roster yet','Current visible memberships will appear here—never inferred or hidden.'),true) + unavailable
+          if (path === '/org/requests') return head('Organization · Requests','Every membership change asks first.','Review explicit join and invitation requests with the exact organization role and current decision authority visible.') + `<div class="stride-w2__grid">${card('Incoming','No requests are available.',metric('pending requests'))}${card('Sent','No invitations have been sent from this build.',metric('open invitations'))}</div>${unavailable}`
+          if (path === '/org/contributions') return head('Organization · Contribution approvals','Approve the field, not a hidden dossier.','Subject approval and organization approval are distinct authorities. Each release names the exact public field, source revision, controller, and every required party.') + card('Organization approval queue','No approval records are available.',empty('✓','Nothing waiting for organization review','Private source bodies stay behind the authority boundary. This queue carries digests and visible release fields only.'),true) + unavailable
+          if (path === '/org/recruiting') return head('Organization · Recruiting','Capability first. Search access never follows a title.','Owners and admins manage separately expiring talent_searcher grants, visible person/organization/global limits, and body-minimized search and contact receipts.') + card('Recruiting governance','No recruiting authority is available.',empty('⌁','No active recruiting grants','Owner and admin membership alone never grants network search. A current separate capability appears here when authorized.'),true) + unavailable
+          if (path === '/network/draft') return head('Network profile · Draft','Make the work legible without making the person measurable.','Choose a small set of public profile fields and verified contributions. Drafts remain private and unsearchable.') + `<div class="stride-w2__grid">${card('Public introduction','Person-controlled and private while drafting.','<div class="stride-w2__fields"><div class="stride-w2__field"><span>Display name</span><strong>Not set</strong></div><div class="stride-w2__field"><span>Work mode</span><strong>Not set</strong></div><div class="stride-w2__field"><span>Problem classes</span><strong>None selected</strong></div><div class="stride-w2__field"><span>Open to</span><strong>Not set</strong></div></div>',true)}${card('Contribution evidence','Add only exact fields from active attestations.',metric('selected attestations'))}${card('Publication','No network projection exists.','<button class="stride-w2__button" type="button" disabled>Publish unavailable</button>')}</div>${unavailable}`
+          if (path === '/network/preview') return head('Network profile · Preview','See exactly what would leave your private workspace.','Preview contains only declared profile fields and explicitly approved attestation fields. Unknown values stay unknown.') + card('Private preview','Nothing is published or discoverable.',empty('◌','Your preview is empty','Complete a private draft and select approved fields to see the publication-shaped result.'),true) + unavailable
+          if (path === '/network/recruiter') return head('View as recruiter','The outside view, without inside information.','This view is limited to an active published projection. It cannot reveal private drafts, source bodies, contact channels, hidden memberships, or ranking scores.') + card('Recruiter view','No active publication is available.',empty('◐','Nothing to show','Recruiters would see only fields you publish, verification labels, and honest unknowns.'),true) + unavailable
+          if (path === '/network/search') return head('Network search','Search for work evidence, not proxies for people.','Queries are structured and confirmed before retrieval. Protected traits, prestige proxies, hidden activity, productivity signals, and opaque scoring are prohibited.') + card('Search the network','Search stays off until a current grant, membership, policy revision, and published projection index are available.','<label class="field"><span>What work are you looking for?</span><input type="search" placeholder="e.g. checkout reliability" disabled></label><button class="stride-w2__button" type="button" disabled>Search unavailable</button>',true) + unavailable
+          if (path === '/network/contact') return head('Contact requests','A request first. A private channel only after acceptance.','Send a visible purpose and collaboration type without exposing either person’s direct address or contact channel.') + `<div class="stride-w2__grid">${card('New request','No request will be sent from this build.','<div class="stride-w2__fields"><div class="stride-w2__field"><span>Recipient</span><strong>Not selected</strong></div><div class="stride-w2__field"><span>Purpose</span><strong>Not set</strong></div></div><button class="stride-w2__button" type="button" disabled>Send unavailable</button>')}${card('Requests','No contact requests are available.',metric('pending requests'))}</div>${unavailable}`
+          return head('Network blocks','Your boundary applies before search or contact.','Blocks are person-controlled and private. They prevent matching and requests without announcing the block or disclosing a reason.') + card('Blocked people and organizations','No block records are available.',empty('—','No visible blocks','When authority is enabled, you can add or withdraw a block here. Bulk actions remain unavailable.'),true) + unavailable
+        }
+        function exactKeys(value, allowed) { return value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).every(key => allowed.has(key)) }
+        const forbiddenProjectionKeys = new Set(['email','email_address','mymind','my_mind','hidden_membership','hidden_memberships','source_body','source_bodies','score','scores'])
+        function projectionIsBodyFree(value) {
+          if (Array.isArray(value)) return value.every(projectionIsBodyFree)
+          if (!value || typeof value !== 'object') return true
+          return Object.entries(value).every(([key,child]) => !forbiddenProjectionKeys.has(key.toLowerCase()) && projectionIsBodyFree(child))
+        }
+        const boundedText = (value, required = true) => typeof value === 'string' && value.length <= 500 && (!required || value.trim().length > 0)
+        const boundedTexts = (value, maximum = 50) => Array.isArray(value) && value.length <= maximum && value.every(entry => boundedText(entry)) && new Set(value).size === value.length
+        const nonnegativeInteger = value => Number.isSafeInteger(value) && value >= 0 && value <= 1000000000
+        const positiveInteger = value => Number.isSafeInteger(value) && value >= 1 && value <= 1000000000
+        const timestamp = value => boundedText(value) && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) && !Number.isNaN(Date.parse(value))
+        const publicReference = value => exactKeys(value,new Set(['id','revision','digest'])) && boundedText(value.id) && positiveInteger(value.revision) && typeof value.digest === 'string' && /^[a-f0-9]{64}$/.test(value.digest)
+        const optionalText = value => value === undefined || value === null || value === '' || boundedText(value)
+        function limitSummary(value) { return exactKeys(value,new Set(['used','limit','windowEndsAt'])) && nonnegativeInteger(value.used) && positiveInteger(value.limit) && value.used <= value.limit && timestamp(value.windowEndsAt) }
+        function receiptSummary(value) { return exactKeys(value,new Set(['kind','verdict','revision','occurredAt'])) && ['search','contact'].includes(value.kind) && ['admitted','denied'].includes(value.verdict) && positiveInteger(value.revision) && timestamp(value.occurredAt) }
+        function auditSummary(value) { return exactKeys(value,new Set(['action','actorRole','revision','occurredAt'])) && boundedText(value.action) && boundedText(value.actorRole) && positiveInteger(value.revision) && timestamp(value.occurredAt) }
+        function safeProjectionDetail(surfaceName, kind, detail) {
+          if (!projectionIsBodyFree(detail) || !detail || detail.kind !== kind) return false
+          const allowedSurface = {
+            'self-profile-detail':['profile'], 'coworker-profile-detail':['coworker-profile'], 'network-profile-detail':['network-preview','network-recruiter-view','network-search'],
+            'work-record-section':['work-record'], 'contribution-evidence':['work-record','network-preview','network-recruiter-view'], 'contribution-review':['contribution-approvals'],
+            'network-state':['network-draft','network-preview'], 'recruiting-governance':['organization-recruiting'], 'organization-summary':['organizations'],
+            'membership-detail':['organization-people'], 'join-request-detail':['organization-requests'], 'network-query-interpretation':['network-search'],
+            'network-search-result':['network-search'], 'contact-request-detail':['contact-inbox'], 'block-detail':['network-blocks'],
+            'export-receipt':['work-record','network-preview'], 'purge-receipt':['work-record','network-preview']
+          }
+          if (!allowedSurface[kind]?.includes(surfaceName)) return false
+          if (kind === 'self-profile-detail') return exactKeys(detail,new Set(['kind','displayName','pronouns','bio','workModes','openTo','openToEnabled','organizationChoices'])) && boundedText(detail.displayName) && optionalText(detail.pronouns) && optionalText(detail.bio) && boundedTexts(detail.workModes,20) && boundedTexts(detail.openTo,20) && typeof detail.openToEnabled === 'boolean' && boundedTexts(detail.organizationChoices,3)
+          if (kind === 'coworker-profile-detail') return exactKeys(detail,new Set(['kind','displayName','role','title','team','joinedAt'])) && boundedText(detail.displayName) && ['owner','admin','member'].includes(detail.role) && optionalText(detail.title) && optionalText(detail.team) && timestamp(detail.joinedAt)
+          if (kind === 'network-profile-detail') return exactKeys(detail,new Set(['kind','displayName','pronouns','bio','visibleOrganizations','workModes','openTo'])) && Object.keys(detail).length > 1 && optionalText(detail.displayName) && optionalText(detail.pronouns) && optionalText(detail.bio) && (detail.visibleOrganizations === undefined || boundedTexts(detail.visibleOrganizations,3)) && (detail.workModes === undefined || boundedTexts(detail.workModes,20)) && (detail.openTo === undefined || boundedTexts(detail.openTo,20))
+          if (kind === 'work-record-section') return exactKeys(detail,new Set(['kind','section','entries','openToEnabled'])) && ['problems-outcomes','how-i-contribute','organizations-roles','work-evidence','people-agents-helped','open-to'].includes(detail.section) && boundedTexts(detail.entries,50) && (detail.section === 'open-to' ? typeof detail.openToEnabled === 'boolean' : detail.openToEnabled === undefined)
+          if (kind === 'contribution-evidence') return exactKeys(detail,new Set(['kind','problem','outcome','contribution','verificationTier','releasedFields','attestation','publishedClaim','artifactAccess','reviewedInfluence'])) && boundedText(detail.problem) && boundedText(detail.outcome) && boundedText(detail.contribution) && ['self_described','organization_verified_opaque','organization_verified_redacted','public_source_verified'].includes(detail.verificationTier) && boundedTexts(detail.releasedFields,30) && publicReference(detail.attestation) && publicReference(detail.publishedClaim) && ['authorized','redacted'].includes(detail.artifactAccess) && optionalText(detail.reviewedInfluence)
+          if (kind === 'contribution-review') return exactKeys(detail,new Set(['kind','claim','sourceRevision','sourceDigest','fieldDiffs','namedPartyStates','auditEntries'])) && publicReference(detail.claim) && positiveInteger(detail.sourceRevision) && /^[a-f0-9]{64}$/.test(detail.sourceDigest || '') && Array.isArray(detail.fieldDiffs) && detail.fieldDiffs.length <= 50 && detail.fieldDiffs.every(diff => exactKeys(diff,new Set(['field','before','after','disclosureTier'])) && boundedText(diff.field) && boundedText(diff.before) && boundedText(diff.after) && ['public','redacted','opaque'].includes(diff.disclosureTier)) && Array.isArray(detail.namedPartyStates) && detail.namedPartyStates.length <= 50 && detail.namedPartyStates.every(party => exactKeys(party,new Set(['partyLabel','state','required'])) && boundedText(party.partyLabel) && boundedText(party.state) && typeof party.required === 'boolean') && Array.isArray(detail.auditEntries) && detail.auditEntries.length <= 100 && detail.auditEntries.every(auditSummary)
+          if (kind === 'network-state') { const searchable = new Set(['display_name','pronouns','bio','work_modes','open_to','visible_organizations','contribution_problem_classes','contribution_roles','verified_contributions']); return exactKeys(detail,new Set(['kind','state','searchableFields'])) && ['off','draft','live','paused'].includes(detail.state) && boundedTexts(detail.searchableFields,9) && detail.searchableFields.every(field => searchable.has(field)) }
+          if (kind === 'recruiting-governance') return exactKeys(detail,new Set(['kind','grantState','grantRevision','expiresAt','capability','personSearchLimit','organizationSearchLimit','globalSearchLimit','personContactLimit','organizationContactLimit','globalContactLimit','receiptSummaries','auditEntries'])) && ['active','revoked','expired'].includes(detail.grantState) && positiveInteger(detail.grantRevision) && timestamp(detail.expiresAt) && detail.capability === 'talent_searcher' && limitSummary(detail.personSearchLimit) && limitSummary(detail.organizationSearchLimit) && limitSummary(detail.globalSearchLimit) && limitSummary(detail.personContactLimit) && limitSummary(detail.organizationContactLimit) && limitSummary(detail.globalContactLimit) && Array.isArray(detail.receiptSummaries) && detail.receiptSummaries.length <= 100 && detail.receiptSummaries.every(receiptSummary) && Array.isArray(detail.auditEntries) && detail.auditEntries.length <= 100 && detail.auditEntries.every(auditSummary)
+          if (kind === 'organization-summary') return exactKeys(detail,new Set(['kind','activeCount','capacity','pendingCount','isCurrent','role'])) && nonnegativeInteger(detail.activeCount) && detail.activeCount <= 3 && detail.capacity === 3 && nonnegativeInteger(detail.pendingCount) && detail.pendingCount <= 3 && typeof detail.isCurrent === 'boolean' && ['owner','admin','member'].includes(detail.role)
+          if (kind === 'membership-detail') return exactKeys(detail,new Set(['kind','role','status','isFinalOwner'])) && ['owner','admin','member'].includes(detail.role) && ['active','departed','revoked'].includes(detail.status) && typeof detail.isFinalOwner === 'boolean'
+          if (kind === 'join-request-detail') return exactKeys(detail,new Set(['kind','status','expiresAt'])) && ['pending','approved','denied','cancelled','expired'].includes(detail.status) && timestamp(detail.expiresAt)
+          if (kind === 'network-query-interpretation') return exactKeys(detail,new Set(['kind','verdict','filters'])) && ['admitted','denied'].includes(detail.verdict) && boundedTexts(detail.filters,30)
+          if (kind === 'network-search-result') return exactKeys(detail,new Set(['kind','why','unknown','verificationLabels','publishedRefs'])) && boundedTexts(detail.why,30) && boundedTexts(detail.unknown,30) && boundedTexts(detail.verificationLabels,30) && Array.isArray(detail.publishedRefs) && detail.publishedRefs.length <= 50 && detail.publishedRefs.every(publicReference)
+          if (kind === 'contact-request-detail') return exactKeys(detail,new Set(['kind','purpose','collaborationType','state','channelRevealed'])) && boundedText(detail.purpose) && ['collaboration','advisory','employment','recruiting','organization_join'].includes(detail.collaborationType) && ['pending','accepted','declined','withdrawn','expired'].includes(detail.state) && typeof detail.channelRevealed === 'boolean' && (detail.state === 'accepted' || detail.channelRevealed === false)
+          if (kind === 'block-detail') return exactKeys(detail,new Set(['kind','state','targetKind'])) && ['active','withdrawn'].includes(detail.state) && ['person','organization'].includes(detail.targetKind)
+          if (kind === 'export-receipt') return exactKeys(detail,new Set(['kind','status','packageDigest','expiresAt'])) && boundedText(detail.status) && /^[a-f0-9]{64}$/.test(detail.packageDigest || '') && timestamp(detail.expiresAt)
+          if (kind === 'purge-receipt') return exactKeys(detail,new Set(['kind','status','receiptId','stores'])) && boundedText(detail.status) && boundedText(detail.receiptId) && boundedTexts(detail.stores,30)
+          return false
+        }
+        function safeProjectionEnvelope(value, expectedSurface) {
+          if (!projectionIsBodyFree(value) || !exactKeys(value, new Set(['availability','surface','revision','items','reason'])) || value.surface !== expectedSurface || !closedSurfaces.has(value.surface)) return false
+          if (value.availability === 'unavailable') return typeof value.reason === 'string' && value.reason.length <= 240 && value.revision === undefined && value.items === undefined
+          if (value.availability !== 'available' || value.reason !== undefined || !Number.isInteger(value.revision) || value.revision < 1 || !Array.isArray(value.items)) return false
+          return value.items.length <= 200 && value.items.every(item => exactKeys(item, new Set(['id','title','summary','status','context','updatedAt','kind','detail','actions'])) && typeof item.id === 'string' && item.id.length > 0 && item.id.length <= 160 && typeof item.title === 'string' && item.title.length > 0 && item.title.length <= 240 && ['summary','status','context','updatedAt'].every(key => item[key] === undefined || typeof item[key] === 'string' && item[key].length <= 500) && ((item.kind === undefined && item.detail === undefined) || typeof item.kind === 'string' && safeProjectionDetail(expectedSurface,item.kind,item.detail)) && (item.actions === undefined || Array.isArray(item.actions) && item.actions.length <= 30 && item.actions.every(action => exactKeys(action, new Set(['id','type','label','expectedRevision'])) && typeof action.id === 'string' && action.id.length > 0 && action.id.length <= 160 && closedActions.has(action.type) && actionSurfaces.get(action.type) === expectedSurface && typeof action.label === 'string' && action.label.length > 0 && action.label.length <= 120 && Number.isInteger(action.expectedRevision) && action.expectedRevision >= 1)))
+        }
+        function projectionUnavailable(target, path, reason = '') {
+          if (target === canvas) {
+            target.innerHTML = routeMarkup(path)
+            const notice = target.querySelector('.stride-w2__notice')
+            if (notice && reason) notice.append(document.createTextNode(` ${reason}`))
+            target.dataset.state = 'unavailable'
+          } else {
+            target.replaceChildren()
+            const card = document.createElement('article')
+            card.className = 'settings-organizations__card'
+            const title = document.createElement('h3'); title.textContent = 'Organizations unavailable'
+            const copy = document.createElement('p'); copy.textContent = reason || 'No organization data is available in this build.'
+            card.append(title, copy); target.append(card); target.dataset.state = 'unavailable'
+          }
+        }
+        const detailLabel = value => String(value || '').replaceAll('_',' ').replaceAll('-',' ')
+        function appendChips(holder, values, verified = false) {
+          if (!values?.length) return
+          const chips = document.createElement('div'); chips.className = 'stride-w2__chips'
+          values.forEach(value => { const chip = document.createElement('span'); chip.className = `stride-w2__chip${verified ? ' stride-w2__chip--verified' : ''}`; chip.textContent = detailLabel(value); chips.append(chip) })
+          holder.append(chips)
+        }
+        function appendDetailBlock(holder, label, value) {
+          const block = document.createElement('div'); block.className = 'stride-w2__detail-block'
+          const caption = document.createElement('span'); caption.textContent = label
+          const content = document.createElement('strong'); content.textContent = String(value || 'Not shared')
+          block.append(caption,content); holder.append(block)
+        }
+        function appendTimeline(holder, entries) {
+          if (!entries?.length) return
+          const list = document.createElement('ol'); list.className = 'stride-w2__timeline'
+          entries.forEach(entry => { const row = document.createElement('li'); row.textContent = typeof entry === 'string' ? entry : `${detailLabel(entry.action || entry.kind)} · ${detailLabel(entry.actorRole || entry.state)} · revision ${entry.revision}`; list.append(row) })
+          holder.append(list)
+        }
+        function appendProjectionDetail(article, item) {
+          const detail = item.detail
+          if (!detail) return
+          const holder = document.createElement('div'); holder.className = 'stride-w2__detail'; holder.dataset.strideW2DetailKind = detail.kind
+          const grid = () => { const value = document.createElement('div'); value.className = 'stride-w2__detail-grid'; holder.append(value); return value }
+          if (detail.kind === 'self-profile-detail' || detail.kind === 'coworker-profile-detail' || detail.kind === 'network-profile-detail') {
+            const fields = grid()
+            appendDetailBlock(fields,'Name',detail.displayName)
+            if (detail.pronouns) appendDetailBlock(fields,'Pronouns',detail.pronouns)
+            if (detail.role) appendDetailBlock(fields,'Organization role',detail.role)
+            if (detail.title) appendDetailBlock(fields,'Title',detail.title)
+            if (detail.team) appendDetailBlock(fields,'Team',detail.team)
+            if (detail.joinedAt) appendDetailBlock(fields,'Joined',new Date(detail.joinedAt).toLocaleDateString())
+            if (detail.bio) appendDetailBlock(fields,'About',detail.bio)
+            appendChips(holder,[...(detail.workModes || []),...(detail.openTo || [])])
+            if (detail.openToEnabled === false) { const note = document.createElement('div'); note.className = 'stride-w2__notice'; note.textContent = 'Open to is off. No collaboration preference is published.'; holder.append(note) }
+          } else if (detail.kind === 'work-record-section') {
+            const label = document.createElement('span'); label.className = 'stride-w2__group-label'; label.textContent = detailLabel(detail.section); holder.append(label)
+            if (detail.section === 'open-to' && !detail.openToEnabled) { const note = document.createElement('div'); note.className = 'stride-w2__notice'; note.innerHTML = '<strong>Off by default.</strong> No open-to preference is visible.'; holder.append(note) }
+            else appendChips(holder,detail.entries,detail.section === 'work-evidence')
+          } else if (detail.kind === 'contribution-evidence') {
+            const fields = grid(); appendDetailBlock(fields,'Problem',detail.problem); appendDetailBlock(fields,'Outcome',detail.outcome); appendDetailBlock(fields,'Contribution',detail.contribution); appendDetailBlock(fields,'Artifact access',detail.artifactAccess)
+            appendChips(holder,[detail.verificationTier,...detail.releasedFields],true)
+            const proof = document.createElement('p'); proof.className = 'stride-w2__metric-label'; proof.textContent = `Attestation r${detail.attestation.revision} · published claim r${detail.publishedClaim.revision}`; holder.append(proof)
+            if (detail.reviewedInfluence) appendDetailBlock(holder,'Reviewed people or agent influence',detail.reviewedInfluence)
+          } else if (detail.kind === 'contribution-review') {
+            const proof = document.createElement('p'); proof.className = 'stride-w2__metric-label'; proof.textContent = `Source revision ${detail.sourceRevision} · digest ${detail.sourceDigest.slice(0,12)}… · claim r${detail.claim.revision}`; holder.append(proof)
+            detail.fieldDiffs.forEach(diff => { const row = document.createElement('div'); row.className = 'stride-w2__diff'; const field = document.createElement('span'); field.textContent = `${detailLabel(diff.field)} · ${detailLabel(diff.disclosureTier)}`; const before = document.createElement('del'); before.textContent = diff.before || 'Not released'; const arrow = document.createElement('b'); arrow.textContent = '→'; arrow.setAttribute('aria-hidden','true'); const after = document.createElement('ins'); after.textContent = diff.after || 'Removed'; row.append(field,before,arrow,after); holder.append(row) })
+            appendChips(holder,detail.namedPartyStates.map(party => `${party.partyLabel}: ${party.state}${party.required ? ' · required' : ''}`))
+            appendTimeline(holder,detail.auditEntries)
+          } else if (detail.kind === 'network-state') {
+            const state = document.createElement('div'); state.className = 'stride-w2__seg'; ['off','draft','live','paused'].forEach(name => { const button = document.createElement('button'); button.type = 'button'; button.disabled = true; button.setAttribute('aria-pressed',String(detail.state === name)); button.textContent = name[0].toUpperCase()+name.slice(1); state.append(button) }); holder.append(state)
+            const label = document.createElement('p'); label.className = 'stride-w2__metric-label'; label.textContent = 'Searchable fields in this exact projection'; holder.append(label); appendChips(holder,detail.searchableFields)
+          } else if (detail.kind === 'recruiting-governance') {
+            appendChips(holder,[detail.capability,detail.grantState],true)
+            const fields = grid(); [['Person searches',detail.personSearchLimit],['Organization searches',detail.organizationSearchLimit],['Global searches',detail.globalSearchLimit],['Person contacts',detail.personContactLimit],['Organization contacts',detail.organizationContactLimit],['Global contacts',detail.globalContactLimit]].forEach(([label,limit]) => appendDetailBlock(fields,label,`${limit.used} of ${limit.limit} · resets ${new Date(limit.windowEndsAt).toLocaleString()}`))
+            appendTimeline(holder,[...detail.receiptSummaries,...detail.auditEntries])
+          } else if (detail.kind === 'organization-summary') {
+            const capacity = document.createElement('div'); capacity.className = 'stride-w2__capacity'; const count = document.createElement('strong'); count.textContent = `${detail.activeCount} of ${detail.capacity}`; const label = document.createElement('span'); label.textContent = detail.activeCount === 0 ? 'No active organizations yet' : detail.activeCount === 3 ? 'Capacity reached' : 'Active organization slots'; capacity.append(count,label); holder.append(capacity)
+            appendChips(holder,[detail.isCurrent ? 'current organization' : 'available organization',detail.role,`${detail.pendingCount} pending`])
+            if (detail.activeCount === 3) { const notice = document.createElement('div'); notice.className = 'stride-w2__notice'; notice.innerHTML = '<strong>3 of 3.</strong> Leave an organization before creating or joining another.'; holder.append(notice) }
+          } else if (detail.kind === 'membership-detail') {
+            appendChips(holder,[detail.role,detail.status])
+            if (detail.isFinalOwner) { const warning = document.createElement('div'); warning.className = 'stride-w2__danger'; warning.textContent = 'Final owner. Transfer ownership before demoting, removing, or leaving.'; holder.append(warning) }
+          } else if (detail.kind === 'join-request-detail') {
+            appendChips(holder,[detail.status]); appendDetailBlock(holder,'Expires',new Date(detail.expiresAt).toLocaleString())
+          } else if (detail.kind === 'network-query-interpretation') {
+            appendChips(holder,[detail.verdict],true); appendChips(holder,detail.filters)
+          } else if (detail.kind === 'network-search-result') {
+            appendDetailBlock(holder,'Why surfaced',detail.why.join(' · ')); appendDetailBlock(holder,'What remains unknown',detail.unknown.join(' · ') || 'Nothing asserted beyond published evidence'); appendChips(holder,detail.verificationLabels,true)
+          } else if (detail.kind === 'contact-request-detail') {
+            const fields = grid(); appendDetailBlock(fields,'Purpose',detail.purpose); appendDetailBlock(fields,'Collaboration type',detailLabel(detail.collaborationType)); appendDetailBlock(fields,'State',detail.state); appendDetailBlock(fields,'Contact channel',detail.channelRevealed ? 'Revealed after exact acceptance' : 'Hidden')
+          } else if (detail.kind === 'block-detail') {
+            appendChips(holder,[detail.targetKind,detail.state]); const note = document.createElement('div'); note.className = 'stride-w2__notice'; note.textContent = 'This private boundary applies before search and contact. No reason is disclosed.'; holder.append(note)
+          } else if (detail.kind === 'export-receipt' || detail.kind === 'purge-receipt') {
+            appendChips(holder,[detail.status],true)
+            if (detail.kind === 'export-receipt') { appendDetailBlock(holder,'Package digest',`${detail.packageDigest.slice(0,16)}…`); appendDetailBlock(holder,'Expires',new Date(detail.expiresAt).toLocaleString()) }
+            else { appendDetailBlock(holder,'Receipt',detail.receiptId); appendChips(holder,detail.stores) }
+          }
+          article.append(holder)
+        }
+        function renderProjectionItems(target, envelope, path) {
+          const shell = document.createElement('div')
+          shell.className = target === canvas ? 'stride-w2__grid' : 'settings-organizations__grid'
+          envelope.items.forEach(item => {
+            const article = document.createElement('article')
+            article.className = target === canvas ? 'stride-w2__card' : 'settings-organizations__card'
+            const title = document.createElement('h2'); title.textContent = item.title
+            article.append(title)
+            if (item.summary) { const summary = document.createElement('p'); summary.textContent = item.summary; article.append(summary) }
+            if (item.status || item.context || item.updatedAt) {
+              const meta = document.createElement('p'); meta.className = 'stride-w2__metric-label'; meta.textContent = [item.status,item.context,item.updatedAt].filter(Boolean).join(' · '); article.append(meta)
+            }
+            appendProjectionDetail(article,item)
+            ;(item.actions || []).forEach(action => {
+              const schema = actionValueSchemas.get(action.type)
+              if (schema) {
+                const fields = document.createElement('div'); fields.className = 'stride-w2__fields'; fields.dataset.strideW2Values = action.id
+                Object.entries(schema).forEach(([key,spec]) => {
+                  const label = document.createElement('label'); label.className = 'field'
+                  const caption = document.createElement('span'); caption.textContent = key.replace(/[A-Z]/g, letter => ` ${letter.toLowerCase()}`)
+                  const control = ['bio','intro','note','reason'].includes(key) ? document.createElement('textarea') : document.createElement('input')
+                  if (control instanceof HTMLInputElement) control.type = key === 'query' ? 'search' : 'text'
+                  control.dataset.strideW2ValueKey = key; control.maxLength = spec.list ? 1299 : spec.max; control.autocomplete = 'off'
+                  if (spec.required) control.required = true
+                  if (spec.list) control.placeholder = 'Separate entries with commas'
+                  if (pendingActionOperation?.actionId === action.id && Object.prototype.hasOwnProperty.call(pendingActionOperation.values,key)) {
+                    const persisted = pendingActionOperation.values[key]
+                    control.value = Array.isArray(persisted) ? persisted.join(', ') : persisted
+                  }
+                  label.append(caption, control); fields.append(label)
+                })
+                article.append(fields)
+              }
+              const button = document.createElement('button')
+              button.className = target === canvas ? 'stride-w2__button' : 'btn btn--ghost'
+              button.type = 'button'; button.textContent = action.label
+              button.dataset.strideW2ActionId = action.id; button.dataset.strideW2ActionType = action.type
+              button.dataset.strideW2ExpectedRevision = String(action.expectedRevision); button.dataset.strideW2Surface = envelope.surface
+              article.append(button)
+            })
+            shell.append(article)
+          })
+          if (target === canvas) target.innerHTML = head(path === '/me' ? 'My profile' : 'Authorized surface', envelope.items.length ? 'Current authorized view' : 'Nothing available yet', 'Rendered from the current server-minted projection. No hidden or optimistic fields are added by the browser.')
+          else target.replaceChildren()
+          if (!envelope.items.length) shell.append(Object.assign(document.createElement('div'),{className:'stride-w2__empty stride-w2__empty--compact',textContent:'No current server-authorized items are available.'}))
+          target.append(shell); target.dataset.state = 'available'; target.dataset.revision = String(envelope.revision)
+          if (pendingActionOperation) {
+            const retryButton = exactPendingRetryButton()
+            showActionError(retryButton?.closest('article'), 'The prior result was not confirmed. Retry the exact operation or discard it.', true)
+            freezeMutationUI(retryButton)
+          }
+        }
+        function collectActionValues(button) {
+          const schema = actionValueSchemas.get(button.dataset.strideW2ActionType)
+          if (!schema) return {}
+          const holder = Array.from(button.closest('article')?.querySelectorAll('[data-stride-w2-values]') || []).find(node => node.dataset.strideW2Values === button.dataset.strideW2ActionId)
+          if (!holder) return null
+          const values = {}
+          for (const control of holder.querySelectorAll('[data-stride-w2-value-key]')) {
+            const key = control.dataset.strideW2ValueKey
+            const spec = schema[key]
+            if (!Object.prototype.hasOwnProperty.call(schema, key) || typeof control.value !== 'string') return null
+            const value = control.value.trim()
+            if (spec.required && !value) return null
+            if (spec.list) {
+              const list = value ? value.split(',').map(item => item.trim()).filter(Boolean) : []
+              if (list.length > spec.maxItems || list.some(item => item.length > spec.max || spec.values && !spec.values.includes(item)) || new Set(list).size !== list.length) return null
+              values[key] = list
+            } else {
+              if (value.length > spec.max || spec.pattern === 'slug' && !/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(value) || spec.values && !spec.values.includes(value)) return null
+              values[key] = value
+            }
+          }
+          return Object.keys(values).length === Object.keys(schema).length ? values : null
+        }
+        function showActionError(article, message, allowDiscard = false) {
+          if (!article) return
+          let error = article.querySelector('[data-stride-w2-action-error]')
+          if (!error) {
+            error = document.createElement('p'); error.dataset.strideW2ActionError = 'true'
+            error.className = 'stride-w2__metric-label'; error.setAttribute('role','alert'); article.append(error)
+          }
+          error.textContent = String(message).slice(0, 180)
+          if (allowDiscard && !article.querySelector('[data-stride-w2-discard-operation]')) {
+            const discard = document.createElement('button')
+            discard.type = 'button'; discard.className = 'stride-w2__button'; discard.dataset.strideW2DiscardOperation = 'true'
+            discard.textContent = 'Discard pending retry'; discard.addEventListener('click', clearPendingActionOperation)
+            article.append(discard)
+          }
+        }
+        function exactPendingRetryButton() {
+          if (!pendingActionOperation) return null
+          return Array.from(document.querySelectorAll('[data-stride-w2-action-id]')).find(candidate =>
+            candidate.dataset.strideW2ActionId === pendingActionOperation.actionId &&
+            candidate.dataset.strideW2Surface === pendingActionOperation.surface &&
+            Number(candidate.dataset.strideW2ExpectedRevision) === pendingActionOperation.expectedRevision) || null
+        }
+        function freezeMutationUI(retryButton = null) {
+          document.querySelectorAll('[data-stride-w2-action-id],[data-stride-w2-value-key]').forEach(control => { control.disabled = true })
+          if (retryButton) retryButton.disabled = false
+          syncPendingActionControl()
+        }
+        function returnToPendingActionOrigin() {
+          if (!pendingActionOperation) return
+          const path = pendingActionOperation.path
+          if (isStrideRoute(path)) {
+            renderRoute(path)
+            return
+          }
+          if (path === '/settings/organizations') {
+            if (typeof openSettings === 'function') openSettings({ section: 'organizations', restoreFocus: false })
+            const target = document.getElementById('settingsOrganizationsProjection')
+            if (target) loadProjection('organizations', target, path)
+          }
+        }
+        function syncPendingActionControl() {
+          let control = document.querySelector('[data-stride-w2-pending-control]')
+          if (!pendingActionOperation && !pendingPersistenceInvalid) { control?.remove(); return }
+          if (!control) {
+            control = document.createElement('aside')
+            control.className = 'stride-w2__pending'
+            control.dataset.strideW2PendingControl = 'true'
+            control.setAttribute('role', 'status')
+            control.setAttribute('aria-live', 'polite')
+            const copy = document.createElement('div'); copy.className = 'stride-w2__pending-copy'
+            const title = document.createElement('strong')
+            const detail = document.createElement('span')
+            copy.append(title, detail)
+            const returnButton = document.createElement('button'); returnButton.type = 'button'; returnButton.className = 'stride-w2__button'
+            returnButton.dataset.strideW2ReturnPending = 'true'; returnButton.textContent = 'Reconcile'; returnButton.addEventListener('click', returnToPendingActionOrigin)
+            const discard = document.createElement('button'); discard.type = 'button'; discard.className = 'stride-w2__button'
+            discard.dataset.strideW2DiscardOperation = 'true'; discard.textContent = 'Discard retry'; discard.addEventListener('click', clearPendingActionOperation)
+            control.append(copy, returnButton, discard); document.body.append(control)
+          }
+          const title = control.querySelector('strong'), detail = control.querySelector('span')
+          const returnButton = control.querySelector('[data-stride-w2-return-pending]')
+          if (pendingPersistenceInvalid) {
+            title.textContent = 'Stored action could not be verified'
+            detail.textContent = 'No request will be sent. Discard the invalid local retry record before making another change.'
+            returnButton.hidden = true
+          } else {
+            title.textContent = 'Action result not confirmed'
+            detail.textContent = 'Reconcile with the current server-minted action, retry that exact operation, or discard it before making another change.'
+            returnButton.hidden = false
+          }
+          control.dataset.strideW2PendingAccount = pendingActionOperation?.accountFingerprint || accountFingerprint(String(authedUser?.email || ''))
+          control.dataset.strideW2PendingPath = pendingActionOperation?.path || ''
+        }
+        function clearPendingActionOperation() {
+          const accountKey = String(authedUser?.email || '').trim().toLowerCase()
+          const fingerprint = accountFingerprint(accountKey)
+          if (fingerprint) pendingActionOperationsByAccount.delete(fingerprint)
+          removePendingActionOperation(accountKey)
+          pendingActionOperation = null
+          document.querySelectorAll('[data-stride-w2-action-id],[data-stride-w2-value-key]').forEach(control => { control.disabled = false })
+          document.querySelectorAll('[data-stride-w2-discard-operation]').forEach(control => control.remove())
+          syncPendingActionControl()
+        }
+        function blockPendingNavigation() {
+          if (!pendingActionOperation && !pendingPersistenceInvalid) return false
+          if (pendingPersistenceInvalid) { freezeMutationUI(); return true }
+          const retryButton = exactPendingRetryButton()
+          showActionError(retryButton?.closest('article'), 'Retry the exact operation or discard it before leaving this view.', true)
+          freezeMutationUI(retryButton)
+          if (pendingActionOperation.path && location.pathname !== pendingActionOperation.path) history.pushState({ strideW2: pendingActionOperation.path }, '', pendingActionOperation.path)
+          return true
+        }
+        function renderOrganizationSwitcher(envelope) {
+          if (!organizationSwitcher) return
+          const items = envelope?.availability === 'available' && envelope.surface === 'organizations' ? envelope.items : []
+          const active = items.filter(item => item.status === 'active' || item.status === 'current')
+          const current = items.find(item => item.status === 'current')
+          const pending = items.filter(item => item.status === 'pending').length
+          if (active.length > 3) return renderOrganizationSwitcher(null)
+          organizationName.textContent = current?.title || (envelope?.availability === 'available' ? (active.length ? 'Choose organization' : 'Choose or create organization') : 'Organization unavailable')
+          organizationRole.textContent = current?.context || (envelope?.availability === 'available' && !active.length ? 'No active organization' : 'role unavailable')
+          organizationMark.textContent = current?.title?.trim().slice(0, 1).toUpperCase() || (envelope?.availability === 'available' && !active.length ? '+' : '—')
+          organizationCount.textContent = `${active.length} of 3 active`
+          organizationPending.textContent = String(pending)
+          organizationPending.hidden = pending === 0
+          organizationPending.setAttribute('aria-label', `${pending} pending request${pending === 1 ? '' : 's'}`)
+          organizationSwitcher.setAttribute('aria-label', `${organizationName.textContent} · ${organizationRole.textContent} · ${active.length} of 3 active · open organization settings`)
+          window.__strideCurrentOrganizationLabel = organizationName.textContent
+          if (typeof phoneLayoutQuery !== 'undefined' && phoneLayoutQuery.matches && appShell?.dataset.tool === 'office' && typeof topbarSubtitleEl !== 'undefined') topbarSubtitleEl.textContent = organizationName.textContent
+        }
+        function strideW2FixtureProjection(surfaceName) {
+          if (!['localhost','127.0.0.1'].includes(location.hostname) || new URLSearchParams(location.search).get('strideW2Fixture') !== '1') return null
+          const digest = 'a'.repeat(64), ref = id => ({id,revision:3,digest})
+          const action = (id,type,label,expectedRevision=3) => ({id,type,label,expectedRevision})
+          const at = '2026-08-08T19:00:00Z', later = '2026-08-09T19:00:00Z'
+          const item = (id,title,detail,actions=[]) => ({id,title,status:'current',kind:detail.kind,detail,actions})
+          const state = new URLSearchParams(location.search).get('strideW2State') || 'capacity'
+          const fixtures = {
+            profile:[item('self','Alex Morgan',{kind:'self-profile-detail',displayName:'Alex Morgan',pronouns:'they/them',bio:'Builds calm systems for high-stakes work.',workModes:['async-first','small-teams'],openTo:['advisory'],openToEnabled:true,organizationChoices:['Bonfire','Northstar']},[action('profile-edit','profile-update','Edit profile')])],
+            organizations:state === 'zero' ? [{id:'organization-onboarding',title:'Start with an organization',summary:'Create a private organization or request to join with an exact code.',status:'zero-organizations',actions:[action('org-create','organization-create','Create organization'),action('org-join','organization-join','Join organization')]}] : [item('org-bonfire','Bonfire',{kind:'organization-summary',activeCount:3,capacity:3,pendingCount:1,isCurrent:true,role:'owner'},[action('org-switch','organization-switch','Switch organization'),action('org-leave','organization-leave','Leave organization')])],
+            'coworker-profile':[item('coworker','Maya Chen',{kind:'coworker-profile-detail',displayName:'Maya Chen',role:'member',title:'Product lead',team:'Checkout',joinedAt:at})],
+            'organization-people':state === 'zero' ? [{id:'organization-onboarding',title:'Start with an organization',summary:'Use the organization chooser to create a private organization or request to join with an exact code.',status:'zero-organizations',actions:[]}] : [item('member-owner','Alex Morgan',{kind:'membership-detail',role:'owner',status:'active',isFinalOwner:true},[action('member-role','organization-member-role-change','Change role'),action('owner-transfer','organization-ownership-transfer','Transfer ownership')]),item('member-maya','Maya Chen',{kind:'membership-detail',role:'member',status:'active',isFinalOwner:false},[action('member-revoke','organization-member-revoke','Remove member')])],
+            'organization-requests':[item('request-one','Jordan Lee',{kind:'join-request-detail',status:'pending',expiresAt:later},[action('request-approve','organization-request-approve','Approve'),action('request-deny','organization-request-deny','Deny')])],
+            'work-record':[
+              item('section-problems','Problems and outcomes',{kind:'work-record-section',section:'problems-outcomes',entries:['Checkout reliability','Faster incident recovery']}),
+              item('section-contribute','How I contribute',{kind:'work-record-section',section:'how-i-contribute',entries:['Builder','Decision owner','Facilitator']}),
+              item('section-orgs','Organizations and roles',{kind:'work-record-section',section:'organizations-roles',entries:['Bonfire · Product systems']}),
+              item('section-evidence','Work evidence',{kind:'work-record-section',section:'work-evidence',entries:['Authorized rollback runbook','Redacted recovery outcome']}),
+              item('section-helped','People and agents I helped',{kind:'work-record-section',section:'people-agents-helped',entries:['Reviewed adoption improved incident triage']}),
+              item('section-open','Open to',{kind:'work-record-section',section:'open-to',entries:[],openToEnabled:false}),
+              item('evidence-one','Reduced checkout recovery time',{kind:'contribution-evidence',problem:'Slow incident recovery',outcome:'Recovery path reduced to minutes',contribution:'Built and rehearsed rollback tooling',verificationTier:'organization_verified_redacted',releasedFields:['category','contribution_role','outcome'],attestation:ref('attestation-one'),publishedClaim:ref('publication-one'),artifactAccess:'redacted',reviewedInfluence:'Human-reviewed adoption improved the team response.'},[action('claim-approve','contribution-subject-approve','Approve exact claim'),action('claim-dispute','contribution-subject-dispute','Dispute'),action('claim-publish','contribution-publish','Publish')]),
+              item('export-one','Work Record export',{kind:'export-receipt',status:'ready',packageDigest:digest,expiresAt:later},[action('work-export','work-record-export','Create new export'),action('work-delete','work-record-delete','Delete portable Work Record')])
+            ],
+            'contribution-approvals':[item('review-one','Checkout recovery claim',{kind:'contribution-review',claim:ref('claim-one'),sourceRevision:7,sourceDigest:digest,fieldDiffs:[{field:'outcome',before:'Recovery improved',after:'Recovery reduced to minutes',disclosureTier:'redacted'},{field:'customer',before:'Named customer',after:'Enterprise customer',disclosureTier:'opaque'}],namedPartyStates:[{partyLabel:'Customer privacy owner',state:'approved',required:true},{partyLabel:'Collaborator',state:'pending',required:true}],auditEntries:[{action:'subject_approved',actorRole:'subject',revision:2,occurredAt:at},{action:'organization_review_opened',actorRole:'organization_reviewer',revision:3,occurredAt:later}]},[action('org-approve','contribution-organization-approve','Approve fields'),action('org-deny','contribution-organization-deny','Deny'),action('named-party-decision','contribution-named-party-decision','Decide named-party approval'),action('attestation-revoke','contribution-attestation-revoke','Revoke attestation'),action('claim-correct','contribution-correct','Request correction'),action('claim-revoke','contribution-revoke','Revoke')])],
+            'network-draft':[item('draft','Private network draft',{kind:'network-state',state:'draft',searchableFields:[]},[action('draft-save','network-draft-save','Save private draft')])],
+            'network-preview':[item('network-state','Network profile',{kind:'network-state',state:'paused',searchableFields:['display_name','work_modes','verified_contributions']},[action('fields-update','network-searchable-fields-update','Choose searchable fields'),action('network-publish','network-publish','Go live'),action('network-pause','network-pause','Pause'),action('network-off','network-profile-off','Turn off'),action('network-export','network-profile-export','Export'),action('network-delete','network-profile-delete','Delete')]),item('network-purge','Latest privacy receipt',{kind:'purge-receipt',status:'completed',receiptId:'purge-network-3',stores:['projection','lexical_index','vector_index','application_cache']})],
+            'network-recruiter-view':[item('public-profile','Alex Morgan',{kind:'network-profile-detail',displayName:'Alex Morgan',bio:'Builds calm systems for high-stakes work.',visibleOrganizations:['Bonfire'],workModes:['async-first'],openTo:['advisory']})],
+            'network-search':[item('interpretation','Visible interpretation',{kind:'network-query-interpretation',verdict:'admitted',filters:['problem class: checkout reliability','evidence: organization verified']}),item('result','Alex Morgan',{kind:'network-search-result',why:['Published checkout reliability contribution','Current redacted attestation'],unknown:['Availability beyond declared advisory preference'],verificationLabels:['organization_verified_redacted'],publishedRefs:[ref('profile-public')]},[action('contact-send','contact-send','Request a conversation')]),item('search-action','Search this evidence network',{kind:'network-query-interpretation',verdict:'denied',filters:[]},[action('search-submit','network-search-submit','Search')])],
+            'contact-inbox':[item('contact-one','Advisory conversation',{kind:'contact-request-detail',purpose:'Review a checkout recovery approach',collaborationType:'advisory',state:'pending',channelRevealed:false},[action('contact-accept','contact-accept','Accept'),action('contact-decline','contact-decline','Decline')])],
+            'network-blocks':[item('block-one','Blocked organization',{kind:'block-detail',state:'active',targetKind:'organization'},[action('block-withdraw','network-unblock','Remove block')])],
+            'organization-recruiting':[item('grant-one','Maya Chen · talent searcher',{kind:'recruiting-governance',grantState:'active',grantRevision:3,expiresAt:later,capability:'talent_searcher',personSearchLimit:{used:3,limit:20,windowEndsAt:later},organizationSearchLimit:{used:14,limit:200,windowEndsAt:later},globalSearchLimit:{used:72,limit:2000,windowEndsAt:later},personContactLimit:{used:1,limit:8,windowEndsAt:later},organizationContactLimit:{used:8,limit:80,windowEndsAt:later},globalContactLimit:{used:38,limit:800,windowEndsAt:later},receiptSummaries:[{kind:'search',verdict:'admitted',revision:3,occurredAt:at},{kind:'contact',verdict:'denied',revision:4,occurredAt:later}],auditEntries:[{action:'grant_created',actorRole:'capability_administrator',revision:3,occurredAt:at}]},[action('grant-create','organization-recruiting-grant-create','Grant talent search'),action('grant-revoke','organization-recruiting-grant-revoke','Revoke grant')])]
+          }
+          return {availability:'available',surface:surfaceName,revision:3,items:fixtures[surfaceName] || []}
+        }
+        async function loadProjection(surfaceName, target, path, options = {}) {
+          if (!closedSurfaces.has(surfaceName)) return projectionUnavailable(target, path)
+          const fixture = strideW2FixtureProjection(surfaceName)
+          if (fixture) {
+            if (!safeProjectionEnvelope(fixture,surfaceName)) return projectionUnavailable(target,path,'Local fixture failed the canonical projection contract.')
+            if (surfaceName === 'organizations') renderOrganizationSwitcher(fixture)
+            return renderProjectionItems(target,fixture,path)
+          }
+          const requestAuthority = authoritySnapshot()
+          if (!requestAuthority.accountKey) return projectionUnavailable(target, path)
+          const controller = new AbortController()
+          projectionRequests.add(controller)
+          if (target === canvas) { projectionRequest?.abort(); projectionRequest = controller }
+          try {
+            const response = await fetch(`/api/stride/v1/mobile/surfaces/${encodeURIComponent(surfaceName)}`, { credentials: 'same-origin', headers: { Accept: 'application/json' }, signal: controller.signal })
+            if (!authorityIsCurrent(requestAuthority)) return
+            if (response.status === 409 && !options.reloaded) return loadProjection(surfaceName, target, path, { reloaded: true })
+            if ([403,404,501,503].includes(response.status)) { if (surfaceName === 'organizations') renderOrganizationSwitcher(null); return projectionUnavailable(target, path) }
+            if (!response.ok) { if (surfaceName === 'organizations') renderOrganizationSwitcher(null); return projectionUnavailable(target, path) }
+            const envelope = await response.json()
+            if (!authorityIsCurrent(requestAuthority)) return
+            if (!safeProjectionEnvelope(envelope, surfaceName)) { if (surfaceName === 'organizations') renderOrganizationSwitcher(null); return projectionUnavailable(target, path) }
+            if (surfaceName === 'organizations') renderOrganizationSwitcher(envelope)
+            if (envelope.availability === 'unavailable') return projectionUnavailable(target, path, envelope.reason)
+            renderProjectionItems(target, envelope, path)
+          } catch (error) {
+            if (error?.name !== 'AbortError' && authorityIsCurrent(requestAuthority)) { if (surfaceName === 'organizations') renderOrganizationSwitcher(null); projectionUnavailable(target, path) }
+          } finally {
+            projectionRequests.delete(controller)
+          }
+        }
+        async function runClosedAction(button) {
+          const actionId = button.dataset.strideW2ActionId
+          const action = button.dataset.strideW2ActionType
+          const surfaceName = button.dataset.strideW2Surface
+          const expectedRevision = Number(button.dataset.strideW2ExpectedRevision)
+          const values = collectActionValues(button)
+          const settingsTarget = button.closest('#settingsOrganizationsProjection')
+          const target = settingsTarget || canvas
+          const path = settingsTarget ? '/settings/organizations' : location.pathname
+          const article = button.closest('article')
+          const requestAuthority = authoritySnapshot()
+          if (!actionId || !closedActions.has(action) || actionSurfaces.get(action) !== surfaceName || !closedSurfaces.has(surfaceName) || !Number.isInteger(expectedRevision) || expectedRevision < 1) return
+          if (!requestAuthority.accountKey) return projectionUnavailable(target, path)
+          if (pendingPersistenceInvalid) { showActionError(article, 'Discard the invalid local retry record before making another change.', true); freezeMutationUI(); return }
+          if (values === null) { showActionError(article, 'Check the required fields and allowed values.'); return }
+          const bodyFingerprint = JSON.stringify({ action, expectedRevision, surface: surfaceName, values })
+          if (pendingActionOperation && (pendingActionOperation.actionId !== actionId || pendingActionOperation.action !== action || pendingActionOperation.surface !== surfaceName || pendingActionOperation.expectedRevision !== expectedRevision || pendingActionOperation.path !== path || pendingActionOperation.bodyFingerprint !== bodyFingerprint)) {
+            showActionError(article, 'Resolve or discard the pending retry before changing another action.', true)
+            freezeMutationUI(exactPendingRetryButton())
+            return
+          }
+          const idempotencyKey = pendingActionOperation?.idempotencyKey || (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`)
+          pendingActionOperation ||= { accountFingerprint:accountFingerprint(requestAuthority.accountKey), actionId, action, surface:surfaceName, expectedRevision, values, bodyFingerprint, idempotencyKey, path }
+          if (!persistPendingActionOperation(requestAuthority.accountKey,pendingActionOperation)) { pendingPersistenceInvalid = true; showActionError(article, 'The retry record could not be stored safely. No request was sent.', true); freezeMutationUI(); return }
+          pendingActionOperationsByAccount.set(pendingActionOperation.accountFingerprint,pendingActionOperation)
+          mutationRequest?.abort(); mutationRequest = new AbortController()
+          const controller = mutationRequest
+          freezeMutationUI(); button.setAttribute('aria-busy', 'true')
+          try {
+            const response = await fetch(`/api/stride/v1/mobile/actions/${encodeURIComponent(actionId)}`, { method: 'POST', credentials: 'same-origin', signal: controller.signal, headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ action, expectedRevision, surface: surfaceName, values }) })
+            if (!authorityIsCurrent(requestAuthority)) return
+            if (response.status === 409) { clearPendingActionOperation(); return loadProjection(surfaceName, target, path) }
+            if ([403,404,501,503].includes(response.status)) { clearPendingActionOperation(); return projectionUnavailable(target, path) }
+            if (response.status === 400) { clearPendingActionOperation(); showActionError(article, 'Check the required fields and allowed values.'); return }
+            if (!response.ok) { showActionError(article, 'The action could not be applied. Retry the exact operation or discard it.', true); return }
+            const envelope = await response.json()
+            if (!authorityIsCurrent(requestAuthority)) return
+            if (!safeProjectionEnvelope(envelope, surfaceName)) { showActionError(article, 'The server response could not be applied safely. Retry the exact operation or discard it.', true); return }
+            if (envelope.availability !== 'available') { clearPendingActionOperation(); return projectionUnavailable(target, path, envelope.reason) }
+            clearPendingActionOperation()
+            if (surfaceName === 'organizations') renderOrganizationSwitcher(envelope)
+            renderProjectionItems(target, envelope, path)
+          } catch (error) {
+            if (error?.name !== 'AbortError' && authorityIsCurrent(requestAuthority)) showActionError(article, 'The result was not confirmed. Retry the exact operation or discard it.', true)
+          } finally {
+            if (mutationRequest === controller) mutationRequest = null
+            button.removeAttribute('aria-busy')
+            if (authorityIsCurrent(requestAuthority)) pendingActionOperation ? freezeMutationUI(exactPendingRetryButton()) : clearPendingActionOperation()
+          }
+        }
+        function renderRoute(path, options = {}) {
+          if (pendingPersistenceInvalid || pendingActionOperation && path !== pendingActionOperation.path) { blockPendingNavigation(); return true }
+          if (!isStrideRoute(path)) return false
+          if (options.push !== false && location.pathname !== path) history.pushState({ strideW2: path }, '', path)
+          canvas.innerHTML = routeMarkup(path)
+          surface.hidden = false
+          document.body.classList.add('stride-w2-open')
+          surface.querySelectorAll('[data-stride-w2-route]').forEach(link => link.setAttribute('aria-current', link.getAttribute('href') === path ? 'page' : 'false'))
+          surface.querySelector('.stride-w2__main')?.scrollTo({ top: 0, behavior: 'auto' })
+          canvas.querySelector('h1')?.setAttribute('tabindex', '-1')
+          canvas.querySelector('h1')?.focus({ preventScroll: true })
+          loadProjection(surfaceForPath(path), canvas, path)
+          return true
+        }
+        function closeRoute(options = {}) {
+          if (blockPendingNavigation()) return
+          surface.hidden = true
+          document.body.classList.remove('stride-w2-open')
+          if (options.push !== false && isStrideRoute(location.pathname)) history.pushState({ view: 'tool', tool: 'office' }, '', '/')
+        }
+        window.__strideW2FenceAuthority = (previousIdentity, nextIdentity) => {
+          authorityGeneration += 1
+          projectionRequests.forEach(controller => controller.abort())
+          projectionRequests.clear(); projectionRequest = null
+          mutationRequest?.abort(); mutationRequest = null
+          const previousFingerprint = accountFingerprint(previousIdentity)
+          if (previousFingerprint && pendingActionOperation) pendingActionOperationsByAccount.set(previousFingerprint, pendingActionOperation)
+          const nextFingerprint = accountFingerprint(nextIdentity)
+          const persistedOperation = nextIdentity ? loadPendingActionOperation(nextIdentity) : null
+          pendingActionOperation = pendingPersistenceInvalid ? null : persistedOperation || pendingActionOperationsByAccount.get(nextFingerprint) || null
+          document.querySelectorAll('[data-stride-w2-action-id],[data-stride-w2-value-key]').forEach(control => { control.disabled = false })
+          renderOrganizationSwitcher(null)
+          if (!surface.hidden && isStrideRoute(location.pathname)) {
+            projectionUnavailable(canvas, location.pathname)
+            if (authedUser) loadProjection(surfaceForPath(location.pathname), canvas, location.pathname)
+          }
+          const settingsProjection = document.getElementById('settingsOrganizationsProjection')
+          if (settingsProjection) projectionUnavailable(settingsProjection, '/settings/organizations')
+          if (pendingActionOperation || pendingPersistenceInvalid) freezeMutationUI(exactPendingRetryButton())
+          else syncPendingActionControl()
+        }
+        document.addEventListener('click', event => {
+          const link = event.target.closest('[data-stride-w2-route]')
+          if (link) { event.preventDefault(); renderRoute(link.getAttribute('href')); return }
+          const opener = event.target.closest('[data-stride-w2-open]')
+          if (opener) { event.preventDefault(); if (typeof closeSettings === 'function') closeSettings({ restoreFocus: false }); renderRoute(opener.dataset.strideW2Open) }
+          const action = event.target.closest('[data-stride-w2-action-id]')
+          if (action) { event.preventDefault(); runClosedAction(action) }
+          const settingsSurface = event.target.closest('[data-stride-w2-settings-surface]')
+          if (settingsSurface && !blockPendingNavigation()) loadProjection(settingsSurface.dataset.strideW2SettingsSurface, document.getElementById('settingsOrganizationsProjection'), '/settings/organizations')
+        })
+        close.addEventListener('click', () => closeRoute())
+        organizationSwitcher?.addEventListener('click', () => { if (blockPendingNavigation()) return; if (typeof openSettings === 'function') openSettings({ section: 'organizations', restoreFocusTo: organizationSwitcher }); loadProjection('organizations', document.getElementById('settingsOrganizationsProjection'), '/settings/organizations') })
+        surface.addEventListener('keydown', event => { if (event.key === 'Escape') closeRoute() })
+        window.addEventListener('popstate', () => { if (!renderRoute(location.pathname, { push: false })) closeRoute({ push: false }) })
+        window.openStrideContributionSurface = path => renderRoute(path)
+        renderRoute(location.pathname, { push: false })
+        loadProjection('organizations', document.getElementById('settingsOrganizationsProjection'), '/settings/organizations')
       })()
     </script>
   </body>

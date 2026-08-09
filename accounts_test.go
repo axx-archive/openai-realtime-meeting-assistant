@@ -115,7 +115,7 @@ func TestUserStorePersistsAcrossReload(t *testing.T) {
 	}
 }
 
-func TestUserStorePrunesNonRosterAccountsOnReload(t *testing.T) {
+func TestUserStorePreservesNonRosterAccountsDeterministically(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "users.json")
 	store, err := newUserAccountStore(path)
 	if err != nil {
@@ -129,7 +129,7 @@ func TestUserStorePrunesNonRosterAccountsOnReload(t *testing.T) {
 		Email:             "jake@shareability.com",
 		Name:              "Jake",
 		PasswordHash:      append([]byte(nil), aj.PasswordHash...),
-		WebAuthnHandle:    append([]byte(nil), aj.WebAuthnHandle...),
+		WebAuthnHandle:    []byte("jake-distinct-webauthn-handle"),
 		PasswordChangedAt: time.Now().UTC(),
 	}
 	records := []*userAccount{extra}
@@ -150,14 +150,55 @@ func TestUserStorePrunesNonRosterAccountsOnReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	if user := reloaded.findUser("jake@shareability.com"); user != nil {
-		t.Fatalf("expected non-roster account to be pruned, got %+v", user)
+	if user := reloaded.findUser("jake@shareability.com"); user == nil {
+		t.Fatal("expected non-roster account to be preserved")
 	}
-	if _, ok := reloaded.authenticate("jake@shareability.com", "B0NFIRE!"); ok {
-		t.Fatal("expected pruned non-roster account to be unable to authenticate")
+	if _, ok := reloaded.authenticate("jake@shareability.com", "B0NFIRE!"); !ok {
+		t.Fatal("expected preserved non-roster account to retain credential behavior")
 	}
-	if emails := reloaded.accountEmails(); len(emails) != len(seededAccounts) {
-		t.Fatalf("expected only %d roster accounts after reload, got %d: %v", len(seededAccounts), len(emails), emails)
+	if emails := reloaded.accountEmails(); len(emails) != len(seededAccounts)+1 || emails[len(emails)-1] != extra.Email {
+		t.Fatalf("expected roster order followed by sorted extras, got %v", emails)
+	}
+	if _, err := reloaded.updateThemePref(extra.Email, "dark"); err != nil {
+		t.Fatalf("persist preserved account: %v", err)
+	}
+	rawAfterFirstPersist, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read first persist: %v", err)
+	}
+	reloadedAgain, err := newUserAccountStore(path)
+	if err != nil {
+		t.Fatalf("second reload: %v", err)
+	}
+	reloadedAgain.mu.Lock()
+	err = reloadedAgain.persistLocked()
+	reloadedAgain.mu.Unlock()
+	if err != nil {
+		t.Fatalf("deterministic persist: %v", err)
+	}
+	rawAfterSecondPersist, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read second persist: %v", err)
+	}
+	if string(rawAfterFirstPersist) != string(rawAfterSecondPersist) {
+		t.Fatal("expected deterministic account persistence across restart")
+	}
+}
+
+func TestUserStoreRejectsDuplicateNormalizedEmails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "users.json")
+	raw, err := json.Marshal([]*userAccount{
+		{Email: " AJ@shareability.com ", Name: "AJ one"},
+		{Email: "aj@shareability.com", Name: "AJ two"},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := newUserAccountStore(path); err == nil {
+		t.Fatal("expected duplicate normalized email to fail closed")
 	}
 }
 

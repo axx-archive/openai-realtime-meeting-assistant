@@ -2,12 +2,72 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-webauthn/webauthn/webauthn"
 )
+
+func TestPasskeySessionMintPreservesOffAndUsesCanonicalZeroOrganizationCutover(t *testing.T) {
+	setupAuthTestEnv(t)
+	now := time.Now().UTC()
+	off, _, _, _ := strideE10TenantTestConverter(now, false, StrideE10TenantConversionCutover)
+	restore := InstallStrideE10TenantRuntimeConverter(off)
+	token, err := strideE10CreatePasskeyAuthenticatedSession("aj@shareability.com")
+	restore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, ok := userSessionStore().lookupRecord(token)
+	if !ok || legacy.Email != "aj@shareability.com" || legacy.PersonID != "" || legacy.AuthorityGeneration != 0 {
+		t.Fatalf("off passkey session drifted: %+v ok=%t", legacy, ok)
+	}
+
+	converter, _, _, _ := strideE10TenantTestConverter(now, true, StrideE10TenantConversionCutover)
+	restore = InstallStrideE10TenantRuntimeConverter(converter)
+	defer restore()
+	runtime := NewStrideE10ProductLiveRuntime(func() time.Time { return now })
+	priorRuntime := strideE10LiveProductRuntime
+	strideE10LiveProductRuntime = runtime
+	defer func() { strideE10LiveProductRuntime = priorRuntime }()
+	email := "passkey-canonical@example.com"
+	countSessions := func() int {
+		store := userSessionStore()
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		return len(store.sessions)
+	}
+	before := countSessions()
+	if _, err := strideE10CreatePasskeyAuthenticatedSession(email); !errors.Is(err, ErrStrideE10TenantAuthorityStale) || countSessions() != before {
+		t.Fatalf("missing person mapping minted passkey session err=%v before=%d after=%d", err, before, countSessions())
+	}
+	person := organizationTestPerson("person-passkey-canonical", '8', now.Add(-time.Hour))
+	person.AccountSubjectDigest = sha256Hex([]byte(strings.ToLower(email)))
+	if err := runtime.organization.RegisterPerson(person); err != nil {
+		t.Fatal(err)
+	}
+	canonicalToken, err := strideE10CreatePasskeyAuthenticatedSession(email)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical, ok := userSessionStore().lookupRecord(canonicalToken)
+	if !ok || canonical.PersonID != person.Header.ID || canonical.AccountSubjectDigest != person.AccountSubjectDigest || canonical.AuthorityGeneration != 1 || canonical.ActiveOrganizationID != "" || canonical.OrganizationMembershipID != "" || canonical.OrganizationMembershipRev != 0 || canonical.ActiveOrganizationSessionRev != 0 {
+		t.Fatalf("canonical zero-org passkey session=%+v ok=%t", canonical, ok)
+	}
+	runtime.organization.mu.Lock()
+	revoked := runtime.organization.persons[person.Header.ID]
+	revoked.Status = "revoked"
+	runtime.organization.persons[person.Header.ID] = revoked
+	runtime.organization.mu.Unlock()
+	before = countSessions()
+	if _, err := strideE10CreatePasskeyAuthenticatedSession(email); !errors.Is(err, ErrStrideE10TenantAuthorityStale) || countSessions() != before {
+		t.Fatalf("revoked person minted passkey session err=%v before=%d after=%d", err, before, countSessions())
+	}
+}
 
 func TestNativePasskeyBeginReturnsOneUseCeremonyHeader(t *testing.T) {
 	setupAuthTestEnv(t)

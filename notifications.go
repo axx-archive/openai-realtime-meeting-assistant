@@ -61,6 +61,10 @@ type notificationRecord struct {
 	// recovered row from being merged into another tenant's notification log.
 	TenantID  string `json:"tenantId,omitempty"`
 	UserEmail string `json:"userEmail,omitempty"`
+	// Canonical cutover authority uses person IDs only. Email fields remain
+	// legacy delivery/display metadata and never authorize canonical reads.
+	PersonID          string   `json:"personId,omitempty"`
+	ExcludedPersonIDs []string `json:"excludedPersonIds,omitempty"`
 	// ExcludedUserEmails keeps a broadcast out of specific accounts' lanes.
 	// Table posts use it for the author and directly-mentioned teammates: the
 	// author must not buzz their own phone, and a mention gets one targeted
@@ -96,15 +100,17 @@ type notificationRecord struct {
 	// ExpiresAt is audit metadata for canonical private catch-up publications.
 	// Their persisted Text is always catchUpNotificationAuditText; private text
 	// is never written here. Generic notifications retain their lifecycle.
-	ExpiresAt  string   `json:"expiresAt,omitempty"`
-	RedactedAt string   `json:"redactedAt,omitempty"`
-	ReadBy     []string `json:"readBy,omitempty"`
+	ExpiresAt       string   `json:"expiresAt,omitempty"`
+	RedactedAt      string   `json:"redactedAt,omitempty"`
+	ReadBy          []string `json:"readBy,omitempty"`
+	ReadByPersonIDs []string `json:"readByPersonIds,omitempty"`
 	// ClearedBy tracks which accounts have dismissed this notification from
 	// their bell. Cleared records are filtered out of every viewer list (the
 	// GET page and the websocket admission backlog) without being deleted —
 	// the store stays a single shared log, so a broadcast one account cleared
 	// still reaches everyone else. The roster is bounded by the 500-record cap.
-	ClearedBy []string `json:"clearedBy,omitempty"`
+	ClearedBy          []string `json:"clearedBy,omitempty"`
+	ClearedByPersonIDs []string `json:"clearedByPersonIds,omitempty"`
 }
 
 type notificationStoreState struct {
@@ -490,6 +496,11 @@ func notificationTenantMatches(record notificationRecord, viewerTenantID string)
 	return recordTenantID == "" || (strings.TrimSpace(viewerTenantID) != "" && recordTenantID == strings.TrimSpace(viewerTenantID))
 }
 
+func notificationTenantMatchesExact(record notificationRecord, viewerTenantID string) bool {
+	recordTenantID := strings.TrimSpace(record.TenantID)
+	return recordTenantID != "" && recordTenantID == strings.TrimSpace(viewerTenantID)
+}
+
 func normalizeNotificationExcludedUsers(emails []string) []string {
 	if len(emails) == 0 {
 		return nil
@@ -524,6 +535,34 @@ func notificationVisibleToTenant(record notificationRecord, viewerTenantID, view
 	return notificationTenantMatches(record, viewerTenantID) &&
 		!notificationExcludedForUser(record, viewerEmail) &&
 		(record.UserEmail == "" || record.UserEmail == viewerEmail)
+}
+
+func notificationVisibleToExactTenant(record notificationRecord, viewerTenantID, viewerPersonID string) bool {
+	if !notificationTenantMatchesExact(record, viewerTenantID) || !strideIdentifier(viewerPersonID) || record.PersonID != "" && record.PersonID != viewerPersonID || record.PersonID == "" && (record.UserEmail != "" || len(record.ExcludedUserEmails) != 0) {
+		return false
+	}
+	for _, excluded := range record.ExcludedPersonIDs {
+		if excluded == viewerPersonID {
+			return false
+		}
+	}
+	return record.PersonID == "" || strideIdentifier(record.PersonID)
+}
+
+func notificationPersonIDListed(values []string, personID string) bool {
+	for _, value := range values {
+		if value == personID {
+			return true
+		}
+	}
+	return false
+}
+
+func notificationForCanonicalViewer(record notificationRecord, viewerPersonID string) map[string]any {
+	payload := notificationForViewer(record, "")
+	delete(payload, "userEmail")
+	payload["read"] = record.ResolvedAt != "" || notificationPersonIDListed(record.ReadByPersonIDs, viewerPersonID)
+	return payload
 }
 
 func notificationVisibleTo(record notificationRecord, viewerEmail string) bool {
@@ -632,11 +671,23 @@ func (app *kanbanBoardApp) notificationsForUserFiltered(viewerEmail string, limi
 }
 
 func (app *kanbanBoardApp) notificationsForTenantUserFiltered(viewerTenantID, viewerEmail string, limit int, unreadOnly bool) []map[string]any {
+	return app.notificationsForTenantUserFilteredMode(viewerTenantID, viewerEmail, limit, unreadOnly, false)
+}
+
+func (app *kanbanBoardApp) notificationsForExactTenantPerson(viewerTenantID, viewerPersonID string, limit int) []map[string]any {
+	return app.notificationsForTenantUserFilteredMode(viewerTenantID, viewerPersonID, limit, false, true)
+}
+
+func (app *kanbanBoardApp) notificationsForTenantUserFilteredMode(viewerTenantID, viewerEmail string, limit int, unreadOnly, exactTenant bool) []map[string]any {
 	if app == nil {
 		return []map[string]any{}
 	}
 	viewerTenantID = strings.TrimSpace(viewerTenantID)
-	viewerEmail = normalizeAccountEmail(viewerEmail)
+	if exactTenant {
+		viewerEmail = strings.TrimSpace(viewerEmail)
+	} else {
+		viewerEmail = normalizeAccountEmail(viewerEmail)
+	}
 	if viewerTenantID == "" || viewerEmail == "" {
 		return []map[string]any{}
 	}
@@ -651,18 +702,34 @@ func (app *kanbanBoardApp) notificationsForTenantUserFiltered(viewerTenantID, vi
 		if record.DeliverAfter != "" {
 			continue
 		}
-		if !notificationVisibleToTenant(record, viewerTenantID, viewerEmail) {
+		visibleToViewer := notificationVisibleToTenant(record, viewerTenantID, viewerEmail)
+		if exactTenant {
+			visibleToViewer = notificationVisibleToExactTenant(record, viewerTenantID, viewerEmail)
+		}
+		if !visibleToViewer {
 			continue
 		}
 		// A record the viewer cleared is hidden from both the GET page and the
 		// websocket admission backlog — this one filter covers both callers.
-		if notificationClearedBy(record, viewerEmail) {
+		cleared := notificationClearedBy(record, viewerEmail)
+		if exactTenant {
+			cleared = notificationPersonIDListed(record.ClearedByPersonIDs, viewerEmail)
+		}
+		if cleared {
 			continue
 		}
-		if unreadOnly && notificationReadFor(record, viewerEmail) {
+		read := notificationReadFor(record, viewerEmail)
+		if exactTenant {
+			read = record.ResolvedAt != "" || notificationPersonIDListed(record.ReadByPersonIDs, viewerEmail)
+		}
+		if unreadOnly && read {
 			continue
 		}
-		visible = append(visible, notificationForViewer(record, viewerEmail))
+		if exactTenant {
+			visible = append(visible, notificationForCanonicalViewer(record, viewerEmail))
+		} else {
+			visible = append(visible, notificationForViewer(record, viewerEmail))
+		}
 		if limit > 0 && len(visible) >= limit {
 			break
 		}
@@ -740,11 +807,23 @@ func (app *kanbanBoardApp) markNotificationsRead(viewerEmail string, ids []strin
 }
 
 func (app *kanbanBoardApp) markNotificationsReadForTenant(viewerTenantID, viewerEmail string, ids []string) (int, error) {
+	return app.markNotificationsReadForTenantMode(viewerTenantID, viewerEmail, ids, false)
+}
+
+func (app *kanbanBoardApp) markNotificationsReadForExactTenantPerson(viewerTenantID, viewerPersonID string, ids []string) (int, error) {
+	return app.markNotificationsReadForTenantMode(viewerTenantID, viewerPersonID, ids, true)
+}
+
+func (app *kanbanBoardApp) markNotificationsReadForTenantMode(viewerTenantID, viewerEmail string, ids []string, exactTenant bool) (int, error) {
 	if app == nil {
 		return 0, fmt.Errorf("notifications are unavailable")
 	}
 	viewerTenantID = strings.TrimSpace(viewerTenantID)
-	viewerEmail = normalizeAccountEmail(viewerEmail)
+	if exactTenant {
+		viewerEmail = strings.TrimSpace(viewerEmail)
+	} else {
+		viewerEmail = normalizeAccountEmail(viewerEmail)
+	}
 	if viewerTenantID == "" || viewerEmail == "" || len(ids) == 0 {
 		return 0, nil
 	}
@@ -765,7 +844,15 @@ func (app *kanbanBoardApp) markNotificationsReadForTenant(viewerTenantID, viewer
 		if _, ok := wanted[record.ID]; !ok {
 			continue
 		}
-		if !notificationVisibleToTenant(*record, viewerTenantID, viewerEmail) || notificationReadFor(*record, viewerEmail) {
+		visibleToViewer := notificationVisibleToTenant(*record, viewerTenantID, viewerEmail)
+		if exactTenant {
+			visibleToViewer = notificationVisibleToExactTenant(*record, viewerTenantID, viewerEmail)
+		}
+		read := notificationReadFor(*record, viewerEmail)
+		if exactTenant {
+			read = notificationPersonIDListed(record.ReadByPersonIDs, viewerEmail)
+		}
+		if !visibleToViewer || read {
 			continue
 		}
 		if record.ProposalID != "" && record.ResolvedAt == "" && app.proposalAwaitingAction(record.ProposalID) {
@@ -773,7 +860,11 @@ func (app *kanbanBoardApp) markNotificationsReadForTenant(viewerTenantID, viewer
 			// confirms or dismisses the proposal itself.
 			continue
 		}
-		record.ReadBy = append(record.ReadBy, viewerEmail)
+		if exactTenant {
+			record.ReadByPersonIDs = append(record.ReadByPersonIDs, viewerEmail)
+		} else {
+			record.ReadBy = append(record.ReadBy, viewerEmail)
+		}
 		marked++
 	}
 	var persistErr error
@@ -833,11 +924,23 @@ func (app *kanbanBoardApp) clearNotifications(viewerEmail string, ids []string) 
 }
 
 func (app *kanbanBoardApp) clearNotificationsForTenant(viewerTenantID, viewerEmail string, ids []string) (int, error) {
+	return app.clearNotificationsForTenantMode(viewerTenantID, viewerEmail, ids, false)
+}
+
+func (app *kanbanBoardApp) clearNotificationsForExactTenantPerson(viewerTenantID, viewerPersonID string, ids []string) (int, error) {
+	return app.clearNotificationsForTenantMode(viewerTenantID, viewerPersonID, ids, true)
+}
+
+func (app *kanbanBoardApp) clearNotificationsForTenantMode(viewerTenantID, viewerEmail string, ids []string, exactTenant bool) (int, error) {
 	if app == nil {
 		return 0, fmt.Errorf("notifications are unavailable")
 	}
 	viewerTenantID = strings.TrimSpace(viewerTenantID)
-	viewerEmail = normalizeAccountEmail(viewerEmail)
+	if exactTenant {
+		viewerEmail = strings.TrimSpace(viewerEmail)
+	} else {
+		viewerEmail = normalizeAccountEmail(viewerEmail)
+	}
 	if viewerTenantID == "" || viewerEmail == "" {
 		return 0, nil
 	}
@@ -867,10 +970,18 @@ func (app *kanbanBoardApp) clearNotificationsForTenant(viewerTenantID, viewerEma
 		// Only records the viewer can actually see are clearable, and a queued
 		// deferred record has not been delivered yet — clearing it before the
 		// flush would swallow it silently.
-		if !notificationVisibleToTenant(*record, viewerTenantID, viewerEmail) || record.DeliverAfter != "" {
+		visibleToViewer := notificationVisibleToTenant(*record, viewerTenantID, viewerEmail)
+		if exactTenant {
+			visibleToViewer = notificationVisibleToExactTenant(*record, viewerTenantID, viewerEmail)
+		}
+		if !visibleToViewer || record.DeliverAfter != "" {
 			continue
 		}
-		if notificationClearedBy(*record, viewerEmail) {
+		clearedAlready := notificationClearedBy(*record, viewerEmail)
+		if exactTenant {
+			clearedAlready = notificationPersonIDListed(record.ClearedByPersonIDs, viewerEmail)
+		}
+		if clearedAlready {
 			continue
 		}
 		if record.ProposalID != "" && record.ResolvedAt == "" && app.proposalAwaitingAction(record.ProposalID) {
@@ -878,7 +989,11 @@ func (app *kanbanBoardApp) clearNotificationsForTenant(viewerTenantID, viewerEma
 			// proposal is confirmed or dismissed, never on a clear sweep.
 			continue
 		}
-		record.ClearedBy = append(record.ClearedBy, viewerEmail)
+		if exactTenant {
+			record.ClearedByPersonIDs = append(record.ClearedByPersonIDs, viewerEmail)
+		} else {
+			record.ClearedBy = append(record.ClearedBy, viewerEmail)
+		}
 		cleared++
 	}
 	var persistErr error
@@ -1004,10 +1119,24 @@ func assistantNotificationsHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusServiceUnavailable, "notifications are unavailable")
 		return
 	}
+	if !strideE10TenantSurfaceUseBound(r.Context(), StrideE10TenantSurfaceNotification) {
+		err := withStrideE10TenantRequestUse(r, StrideE10TenantSurfaceNotification, func(ctx context.Context, _ *StrideE10TenantPrincipal) error {
+			assistantNotificationsHandler(w, r.WithContext(ctx))
+			return nil
+		})
+		if err != nil {
+			writeStrideE10TenantHookError(w, err, "notifications are unavailable")
+		}
+		return
+	}
 
+	notifications := kanbanApp.notificationsForUser(user.Email, notificationListLimit)
+	if principal, canonical := strideE10TenantPrincipalFromContext(r.Context()); canonical {
+		notifications = kanbanApp.notificationsForExactTenantPerson(principal.TenantID, principal.PersonID, notificationListLimit)
+	}
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok":            true,
-		"notifications": kanbanApp.notificationsForUser(user.Email, notificationListLimit),
+		"notifications": notifications,
 	})
 }
 
@@ -1030,6 +1159,16 @@ func assistantNotificationsReadHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusServiceUnavailable, "notifications are unavailable")
 		return
 	}
+	if !strideE10TenantSurfaceUseBound(r.Context(), StrideE10TenantSurfaceNotification) {
+		err := withStrideE10TenantRequestUse(r, StrideE10TenantSurfaceNotification, func(ctx context.Context, _ *StrideE10TenantPrincipal) error {
+			assistantNotificationsReadHandler(w, r.WithContext(ctx))
+			return nil
+		})
+		if err != nil {
+			writeStrideE10TenantHookError(w, err, "notifications are unavailable")
+		}
+		return
+	}
 
 	payload := struct {
 		IDs []string `json:"ids"`
@@ -1038,7 +1177,13 @@ func assistantNotificationsReadHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, "could not read notification ids")
 		return
 	}
-	marked, err := kanbanApp.markNotificationsRead(user.Email, payload.IDs)
+	var marked int
+	var err error
+	if principal, canonical := strideE10TenantPrincipalFromContext(r.Context()); canonical {
+		marked, err = kanbanApp.markNotificationsReadForExactTenantPerson(principal.TenantID, principal.PersonID, payload.IDs)
+	} else {
+		marked, err = kanbanApp.markNotificationsRead(user.Email, payload.IDs)
+	}
 	if err != nil {
 		writeAuthError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1068,6 +1213,16 @@ func assistantNotificationsClearHandler(w http.ResponseWriter, r *http.Request) 
 		writeAuthError(w, http.StatusServiceUnavailable, "notifications are unavailable")
 		return
 	}
+	if !strideE10TenantSurfaceUseBound(r.Context(), StrideE10TenantSurfaceNotification) {
+		err := withStrideE10TenantRequestUse(r, StrideE10TenantSurfaceNotification, func(ctx context.Context, _ *StrideE10TenantPrincipal) error {
+			assistantNotificationsClearHandler(w, r.WithContext(ctx))
+			return nil
+		})
+		if err != nil {
+			writeStrideE10TenantHookError(w, err, "notifications are unavailable")
+		}
+		return
+	}
 
 	payload := struct {
 		IDs []string `json:"ids"`
@@ -1076,7 +1231,13 @@ func assistantNotificationsClearHandler(w http.ResponseWriter, r *http.Request) 
 		writeAuthError(w, http.StatusBadRequest, "could not read notification ids")
 		return
 	}
-	cleared, err := kanbanApp.clearNotifications(user.Email, payload.IDs)
+	var cleared int
+	var err error
+	if principal, canonical := strideE10TenantPrincipalFromContext(r.Context()); canonical {
+		cleared, err = kanbanApp.clearNotificationsForExactTenantPerson(principal.TenantID, principal.PersonID, payload.IDs)
+	} else {
+		cleared, err = kanbanApp.clearNotifications(user.Email, payload.IDs)
+	}
 	if err != nil {
 		writeAuthError(w, http.StatusInternalServerError, err.Error())
 		return

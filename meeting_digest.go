@@ -1002,6 +1002,9 @@ func (app *kanbanBoardApp) meetingRecordTitle(meetingID string) string {
 // brains, so the window re-feeds and retries next tick while the prior digest
 // stays current.
 func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
+	if strideE10TenantCutoverEnabled() {
+		return meetingMemoryEntry{}, ErrStrideE10TenantAuthorityStale
+	}
 	groups := groupBrainsForDigest(inputs)
 	if maxMeetings := meetingDigestMaxMeetingsPerTick(); len(groups) > maxMeetings {
 		// deferred, never dropped: the prefix cursor stops before the first
@@ -1378,6 +1381,9 @@ func rankDayDigestPayload(payload *dayDigestPayload) {
 // produceDayDigestPass is the day-digest agent's pass body; the wall clock is
 // injected via runDayDigestPass so tests pin the day boundaries.
 func (app *kanbanBoardApp) produceDayDigestPass(ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
+	if strideE10TenantCutoverEnabled() {
+		return meetingMemoryEntry{}, ErrStrideE10TenantAuthorityStale
+	}
 	return app.runDayDigestPass(ctx, apiKey, inputs, responder, time.Now().UTC())
 }
 
@@ -1389,6 +1395,9 @@ func (app *kanbanBoardApp) produceDayDigestPass(ctx context.Context, apiKey stri
 // the tick with amendment A3's end-of-day reflection, best-effort AFTER the
 // cursor landed so a reflection failure can never re-feed the fold window.
 func (app *kanbanBoardApp) runDayDigestPass(ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder, now time.Time) (meetingMemoryEntry, error) {
+	if strideE10TenantCutoverEnabled() {
+		return meetingMemoryEntry{}, ErrStrideE10TenantAuthorityStale
+	}
 	if app == nil || app.memory == nil || len(inputs) == 0 {
 		// the runner's minBatch gate makes this unreachable on the ticker
 		// path; direct callers (a future boundary flush) get a safe no-op.
@@ -1525,6 +1534,9 @@ func buildReflectionInput(day string, digests []meetingMemoryEntry, decisions []
 // activity is reflected on the first tick after new material lands — a
 // documented lag, not a scheduler.
 func (app *kanbanBoardApp) maybeEmitDailyReflection(ctx context.Context, apiKey string, responder openAITextResponder, now time.Time) (meetingMemoryEntry, bool, error) {
+	if strideE10TenantCutoverEnabled() {
+		return meetingMemoryEntry{}, false, ErrStrideE10TenantAuthorityStale
+	}
 	if app == nil || app.memory == nil || boolEnv(reflectionDisabledEnv) {
 		return meetingMemoryEntry{}, false, nil
 	}

@@ -74,11 +74,17 @@ func (app *kanbanBoardApp) startMeetingBoardWorker(apiKey string) {
 }
 
 func (app *kanbanBoardApp) runMeetingBoardOnce(ctx context.Context, apiKey string, responder openAITextResponder) (meetingMemoryEntry, error) {
+	if strideE10TenantCutoverEnabled() {
+		return meetingMemoryEntry{}, ErrStrideE10TenantAuthorityStale
+	}
 	agent := meetingBoardAgent()
 	return app.runAmbientAgentOnce(agent, ctx, apiKey, responder, agent.minBatch())
 }
 
 func (app *kanbanBoardApp) produceMeetingBoardUpdate(ctx context.Context, apiKey string, summaries []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
+	if strideE10TenantCutoverEnabled() {
+		return meetingMemoryEntry{}, ErrStrideE10TenantAuthorityStale
+	}
 	roomID := ambientWindowRoomID(summaries)
 	windowLast := summaries[len(summaries)-1]
 	// §7.3 layer 1 (the primary suppression): brains from listen-only sittings

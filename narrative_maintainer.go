@@ -286,6 +286,9 @@ func (app *kanbanBoardApp) buildNarrativeMaintainerInput(inputs []meetingMemoryE
 }
 
 func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
+	if strideE10TenantCutoverEnabled() {
+		return meetingMemoryEntry{}, ErrStrideE10TenantAuthorityStale
+	}
 	contextApp := app.scopedRecallApp(ctx, ambientServicePrincipalForInputs(inputs))
 	input := contextApp.buildNarrativeMaintainerInput(inputs, time.Now().UTC())
 	model := meetingBrainModel()

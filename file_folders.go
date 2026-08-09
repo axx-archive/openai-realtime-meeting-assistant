@@ -45,11 +45,13 @@ var (
 
 // fileFolderRecord is one stored folder, serialized to the client verbatim.
 type fileFolderRecord struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	ParentID  string `json:"parentId,omitempty"`
-	CreatedBy string `json:"createdBy,omitempty"`
-	CreatedAt string `json:"createdAt,omitempty"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	ParentID          string `json:"parentId,omitempty"`
+	CreatedBy         string `json:"createdBy,omitempty"`
+	TenantID          string `json:"tenantId,omitempty"`
+	CreatedByPersonID string `json:"createdByPersonId,omitempty"`
+	CreatedAt         string `json:"createdAt,omitempty"`
 }
 
 // fileFolderStoreState is the on-disk shape of data/file-folders.json.
@@ -165,6 +167,17 @@ func (s *fileFolderStore) create(name string, createdBy string) (fileFolderRecor
 }
 
 func (s *fileFolderStore) createInParent(name string, parentID string, createdBy string) (fileFolderRecord, error) {
+	return s.createInParentBound(name, parentID, createdBy, "", "")
+}
+
+func (s *fileFolderStore) createInParentForPrincipal(name, parentID string, principal StrideE10TenantPrincipal) (fileFolderRecord, error) {
+	if !strideIdentifier(principal.TenantID) || !strideIdentifier(principal.PersonID) {
+		return fileFolderRecord{}, errFileFolderNotFound
+	}
+	return s.createInParentBound(name, parentID, "", principal.TenantID, principal.PersonID)
+}
+
+func (s *fileFolderStore) createInParentBound(name string, parentID string, createdBy string, tenantID string, personID string) (fileFolderRecord, error) {
 	normalized, err := normalizeFileFolderName(name)
 	if err != nil {
 		return fileFolderRecord{}, err
@@ -179,7 +192,8 @@ func (s *fileFolderStore) createInParent(name string, parentID string, createdBy
 	}
 	parentID = strings.TrimSpace(parentID)
 	if parentID != "" {
-		if s.folderIndexLocked(parentID) < 0 {
+		parentIndex := s.folderIndexLocked(parentID)
+		if parentIndex < 0 || tenantID != "" && s.folders[parentIndex].TenantID != tenantID {
 			return fileFolderRecord{}, errFileFolderNotFound
 		}
 		if s.folderDepthLocked(parentID) >= fileFolderMaxDepth {
@@ -194,6 +208,7 @@ func (s *fileFolderStore) createInParent(name string, parentID string, createdBy
 		Name:      normalized,
 		ParentID:  parentID,
 		CreatedBy: strings.TrimSpace(createdBy),
+		TenantID:  strings.TrimSpace(tenantID), CreatedByPersonID: strings.TrimSpace(personID),
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	s.folders = append(s.folders, folder)
@@ -445,9 +460,16 @@ type assistantFileFolderPayload struct {
 // root) and returns every folder with its visible-row count for the GET
 // /assistant/files payload.
 func decorateAssistantFileFolders(rows []assistantFileRecord) []assistantFileFolderPayload {
+	return decorateAssistantFileFoldersForTenant(rows, "")
+}
+
+func decorateAssistantFileFoldersForTenant(rows []assistantFileRecord, tenantID string) []assistantFileFolderPayload {
 	folders, assignments := sharedFileFolderStore().snapshot()
 	counts := make(map[string]int, len(folders))
 	for _, folder := range folders {
+		if tenantID != "" && folder.TenantID != tenantID {
+			continue
+		}
 		counts[folder.ID] = 0
 	}
 	for index := range rows {
@@ -460,6 +482,9 @@ func decorateAssistantFileFolders(rows []assistantFileRecord) []assistantFileFol
 	}
 	payload := make([]assistantFileFolderPayload, 0, len(folders))
 	for _, folder := range folders {
+		if tenantID != "" && folder.TenantID != tenantID {
+			continue
+		}
 		payload = append(payload, assistantFileFolderPayload{ID: folder.ID, Name: folder.Name, ParentID: folder.ParentID, Count: counts[folder.ID]})
 	}
 	return payload
@@ -508,6 +533,17 @@ func assistantFileFoldersHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusUnauthorized, "not signed in")
 		return
 	}
+	if !strideE10TenantSurfaceUseBound(r.Context(), StrideE10TenantSurfaceDrive) {
+		err := withStrideE10TenantRequestUse(r, StrideE10TenantSurfaceDrive, func(ctx context.Context, _ *StrideE10TenantPrincipal) error {
+			assistantFileFoldersHandler(w, r.WithContext(ctx))
+			return nil
+		})
+		if err != nil {
+			writeStrideE10TenantHookError(w, err, "file folders are unavailable")
+		}
+		return
+	}
+	principal, canonical := strideE10TenantPrincipalFromContext(r.Context())
 
 	store := sharedFileFolderStore()
 	switch r.Method {
@@ -521,18 +557,32 @@ func assistantFileFoldersHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		createdBy := normalizeAccountEmail(user.Email)
-		if payload.ParentID != "" && !fileFolderManagedByUser(payload.ParentID, user) {
+		parentAllowed := fileFolderManagedByUser(payload.ParentID, user)
+		if canonical {
+			parentAllowed = fileFolderManagedByPrincipal(payload.ParentID, principal)
+		}
+		if payload.ParentID != "" && !parentAllowed {
 			writeAuthError(w, http.StatusNotFound, "folder not found")
 			return
 		}
-		folder, err := store.createInParent(payload.Name, payload.ParentID, createdBy)
+		var folder fileFolderRecord
+		var err error
+		if canonical {
+			folder, err = store.createInParentForPrincipal(payload.Name, payload.ParentID, principal)
+		} else {
+			folder, err = store.createInParent(payload.Name, payload.ParentID, createdBy)
+		}
 		if err != nil {
 			status, message := fileFolderPublicError(err)
 			writeAuthError(w, status, message)
 			return
 		}
 		broadcastSignedInKanbanEvent("file", map[string]any{"kind": "folders"})
-		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "folder": folder})
+		folderPayload := any(folder)
+		if canonical {
+			folderPayload = assistantFileFolderPayload{ID: folder.ID, Name: folder.Name, ParentID: folder.ParentID}
+		}
+		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "folder": folderPayload})
 	case http.MethodPatch:
 		payload := struct {
 			ID   string `json:"id"`
@@ -542,7 +592,11 @@ func assistantFileFoldersHandler(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, http.StatusBadRequest, "could not read folder request")
 			return
 		}
-		if !fileFolderManagedByUser(payload.ID, user) {
+		managed := fileFolderManagedByUser(payload.ID, user)
+		if canonical {
+			managed = fileFolderManagedByPrincipal(payload.ID, principal)
+		}
+		if !managed {
 			writeAuthError(w, http.StatusNotFound, "folder not found")
 			return
 		}
@@ -553,9 +607,17 @@ func assistantFileFoldersHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		broadcastSignedInKanbanEvent("file", map[string]any{"kind": "folders"})
-		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "folder": folder})
+		folderPayload := any(folder)
+		if canonical {
+			folderPayload = assistantFileFolderPayload{ID: folder.ID, Name: folder.Name, ParentID: folder.ParentID}
+		}
+		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "folder": folderPayload})
 	case http.MethodDelete:
-		if !fileFolderManagedByUser(r.URL.Query().Get("id"), user) {
+		managed := fileFolderManagedByUser(r.URL.Query().Get("id"), user)
+		if canonical {
+			managed = fileFolderManagedByPrincipal(r.URL.Query().Get("id"), principal)
+		}
+		if !managed {
 			writeAuthError(w, http.StatusNotFound, "folder not found")
 			return
 		}
@@ -586,6 +648,17 @@ func assistantFileMoveHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusUnauthorized, "not signed in")
 		return
 	}
+	if !strideE10TenantSurfaceUseBound(r.Context(), StrideE10TenantSurfaceDrive) {
+		err := withStrideE10TenantRequestUse(r, StrideE10TenantSurfaceDrive, func(ctx context.Context, _ *StrideE10TenantPrincipal) error {
+			assistantFileMoveHandler(w, r.WithContext(ctx))
+			return nil
+		})
+		if err != nil {
+			writeStrideE10TenantHookError(w, err, "files are unavailable")
+		}
+		return
+	}
+	principal, canonical := strideE10TenantPrincipalFromContext(r.Context())
 
 	payload := struct {
 		FileID   string `json:"fileId"`
@@ -607,7 +680,11 @@ func assistantFileMoveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if payload.FolderID != "" {
-		if !rowWritable || !fileFolderManagedByUser(payload.FolderID, user) {
+		folderAllowed := fileFolderManagedByUser(payload.FolderID, user)
+		if canonical {
+			folderAllowed = fileFolderManagedByPrincipal(payload.FolderID, principal)
+		}
+		if !rowWritable || !folderAllowed {
 			writeAuthError(w, http.StatusNotFound, "file not found")
 			return
 		}
@@ -652,6 +729,18 @@ func fileFolderManagedByUser(folderID string, user *userAccount) bool {
 	return false
 }
 
+func fileFolderManagedByPrincipal(folderID string, principal StrideE10TenantPrincipal) bool {
+	if !strideIdentifier(principal.TenantID) || !strideIdentifier(principal.PersonID) {
+		return false
+	}
+	for _, folder := range listFileFolders() {
+		if folder.ID == strings.TrimSpace(folderID) {
+			return folder.TenantID == principal.TenantID && folder.CreatedByPersonID == principal.PersonID
+		}
+	}
+	return false
+}
+
 // authorizedFileRowForMove resolves through the exact Files visibility seam.
 // Direct uploads are legacy team-readable but uploader-write; chat files are
 // uploader-write after their thread visibility gate; deliverables additionally
@@ -663,6 +752,7 @@ func authorizedFileRowForMove(ctx context.Context, user *userAccount, fileID str
 		return assistantFileRecord{}, false
 	}
 	fileID = strings.TrimSpace(fileID)
+	principal, canonical := strideE10TenantPrincipalFromContext(ctx)
 
 	// Artifacts have their own exact header/revision authorizer. The body is
 	// only projected into a Files row after both read and write are allowed.
@@ -686,6 +776,10 @@ func authorizedFileRowForMove(ctx context.Context, user *userAccount, fileID str
 			if entry.Kind != meetingMemoryKindFile || entry.ID != fileID {
 				continue
 			}
+			if canonical && strings.TrimSpace(entry.Metadata["tenantId"]) != principal.TenantID {
+				kanbanApp.memory.mu.Unlock()
+				return assistantFileRecord{}, false
+			}
 			metadata := make(map[string]string, len(entry.Metadata))
 			for key, value := range entry.Metadata {
 				metadata[key] = value
@@ -693,7 +787,13 @@ func authorizedFileRowForMove(ctx context.Context, user *userAccount, fileID str
 			header := meetingMemoryEntry{ID: entry.ID, Kind: entry.Kind, CreatedAt: entry.CreatedAt, Metadata: metadata}
 			kanbanApp.memory.mu.Unlock()
 			row := fileRecordFromEntry(header)
-			writable := isArtifactApprovalAdmin(user) || normalizeAccountEmail(row.UploaderEmail) != "" && normalizeAccountEmail(row.UploaderEmail) == normalizeAccountEmail(user.Email)
+			writable := false
+			if canonical {
+				writable = strings.TrimSpace(metadata["uploaderPersonId"]) == principal.PersonID
+				row.UploaderEmail = ""
+			} else {
+				writable = isArtifactApprovalAdmin(user) || normalizeAccountEmail(row.UploaderEmail) != "" && normalizeAccountEmail(row.UploaderEmail) == normalizeAccountEmail(user.Email)
+			}
 			return row, writable
 		}
 		kanbanApp.memory.mu.Unlock()
@@ -703,6 +803,9 @@ func authorizedFileRowForMove(ctx context.Context, user *userAccount, fileID str
 	// authorize its owner/visibility metadata header, and only then decode that
 	// one thread body.
 	threadID, messageID, fileIndex, parsed := parseChatAttachmentFileID(fileID)
+	if canonical {
+		return assistantFileRecord{}, false
+	}
 	if !parsed || kanbanApp.memory == nil {
 		return assistantFileRecord{}, false
 	}

@@ -218,6 +218,9 @@ func (engine *AmbientReplayEngine) now() time.Time {
 }
 
 func (engine *AmbientReplayEngine) Plan(ctx context.Context, request AmbientReplayPlanRequest) (AmbientReplayManifest, error) {
+	if strideE10TenantCutoverEnabled() {
+		return AmbientReplayManifest{}, ErrAmbientReplayUnavailable
+	}
 	if engine == nil || engine.Authority == nil || engine.Store == nil {
 		return AmbientReplayManifest{}, ErrAmbientReplayUnavailable
 	}
@@ -380,6 +383,9 @@ func digestAmbientReplayArtifacts(artifacts []AmbientReplayArtifact) (string, er
 }
 
 func (engine *AmbientReplayEngine) Execute(ctx context.Context, digest, actor string) (AmbientReplayExecution, error) {
+	if strideE10TenantCutoverEnabled() {
+		return AmbientReplayExecution{}, ErrAmbientReplayUnavailable
+	}
 	if engine == nil || engine.Authority == nil || engine.Store == nil || engine.Runner == nil {
 		return AmbientReplayExecution{}, ErrAmbientReplayUnavailable
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -501,6 +502,126 @@ func TestSessionDestroyLinearizesAgainstInFlightPushDelivery(t *testing.T) {
 
 	// After destroy returns the same binding is immediately inert.
 	assertNoDevicePushDeliveryForTest(t, notificationRecord{Kind: notificationKindChat, Text: "after logout"})
+}
+
+func TestStrideE10DevicePushCutoverUsesCanonicalPersonAndLinearizesFinalSend(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("DEVICE_PUSH_TOKENS_PATH", filepath.Join(t.TempDir(), "devices.json"))
+	t.Setenv("PUSH_SUBSCRIPTIONS_PATH", filepath.Join(t.TempDir(), "push.json"))
+	t.Setenv("THREAD_MUTES_PATH", filepath.Join(t.TempDir(), "mutes.json"))
+
+	now := time.Now().UTC()
+	converter, _, resolver, _ := strideE10TenantTestConverter(now, true, StrideE10TenantConversionCutover)
+	snapshot := strideE10TenantTestSnapshot(now)
+	snapshot.SessionHash = strings.Repeat("f", 64)
+	snapshot.ActiveSession.SessionSubjectDigest = snapshot.SessionHash
+	resolver.set(snapshot, nil)
+	restore := InstallStrideE10TenantRuntimeConverter(converter)
+	defer restore()
+
+	record := deviceTokenRecord{
+		TenantID: "org-one", UserEmail: "legacy@example.com", Token: "ExponentPushToken[canonical]",
+		Platform: "ios", SessionHash: snapshot.SessionHash,
+	}
+	if err := upsertDeviceToken(record); err != nil {
+		t.Fatalf("canonical registration: %v", err)
+	}
+	stored := snapshotDeviceTokenStore().Tokens
+	if len(stored) != 1 || stored[0].PersonID != "person-one" {
+		t.Fatalf("registration did not bind canonical person: %+v", stored)
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(started)
+		<-release
+		_, _ = w.Write([]byte(`{"data":[{"status":"ok","id":"sent"}]}`))
+	}))
+	defer server.Close()
+	previous := expoPushSendURL
+	expoPushSendURL = server.URL
+	defer func() { expoPushSendURL = previous }()
+
+	deliveryDone := make(chan struct{})
+	go func() {
+		deliverDevicePushForRecord(notificationRecord{TenantID: "org-one", Kind: notificationKindChat, Text: "canonical broadcast"})
+		close(deliveryDone)
+	}()
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("canonical push did not reach final send")
+	}
+	mutationDone := make(chan struct{})
+	go func() {
+		next := snapshot
+		next.Generation++
+		resolver.set(next, nil)
+		close(mutationDone)
+	}()
+	select {
+	case <-mutationDone:
+		t.Fatal("membership authority changed while Expo send callback was active")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-deliveryDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("canonical push delivery did not finish")
+	}
+	select {
+	case <-mutationDone:
+	case <-time.After(time.Second):
+		t.Fatal("authority mutation remained blocked after send")
+	}
+}
+
+func TestStrideE10DevicePushCutoverRejectsEmailOnlyAndShadowCannotSuppress(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("DEVICE_PUSH_TOKENS_PATH", filepath.Join(t.TempDir(), "devices.json"))
+	t.Setenv("PUSH_SUBSCRIPTIONS_PATH", filepath.Join(t.TempDir(), "push.json"))
+
+	legacySession, legacyRecord := liveDeviceTokenRecordForTest(t, "aj@shareability.com", "ExponentPushToken[legacy]")
+	if err := upsertDeviceToken(legacyRecord); err != nil {
+		t.Fatal(err)
+	}
+	hits := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		_, _ = w.Write([]byte(`{"data":[{"status":"ok","id":"sent"}]}`))
+	}))
+	defer server.Close()
+	previous := expoPushSendURL
+	expoPushSendURL = server.URL
+	defer func() { expoPushSendURL = previous }()
+
+	now := time.Now().UTC()
+	shadow, _, shadowResolver, _ := strideE10TenantTestConverter(now, true, StrideE10TenantConversionShadow)
+	shadowResolver.set(StrideE10TenantAuthoritySnapshot{}, errors.New("observation unavailable"))
+	restore := InstallStrideE10TenantRuntimeConverter(shadow)
+	deliverDevicePushForRecord(notificationRecord{Kind: notificationKindChat, Text: "legacy shadow delivery"})
+	restore()
+	if hits != 1 {
+		t.Fatalf("shadow observation suppressed legacy delivery: hits=%d", hits)
+	}
+
+	cutover, _, cutoverResolver, _ := strideE10TenantTestConverter(now, true, StrideE10TenantConversionCutover)
+	snapshot := strideE10TenantTestSnapshot(now)
+	snapshot.SessionHash = hashResetToken(legacySession)
+	snapshot.ActiveSession.SessionSubjectDigest = snapshot.SessionHash
+	cutoverResolver.set(snapshot, nil)
+	restore = InstallStrideE10TenantRuntimeConverter(cutover)
+	defer restore()
+	deliverDevicePushForRecord(notificationRecord{TenantID: "org-one", Kind: notificationKindChat, Text: "must not use email fallback"})
+	if hits != 1 {
+		t.Fatalf("cutover delivered through an email-only token: hits=%d", hits)
+	}
+	deliverDevicePushForRecord(notificationRecord{UserEmail: "aj@shareability.com", TenantID: "org-one", Kind: notificationKindChat, Text: "targeted legacy record"})
+	if hits != 1 {
+		t.Fatalf("cutover authorized targeted email record: hits=%d", hits)
+	}
 }
 
 func TestDelayedAuthenticatedRegistrationCannotOverwriteCurrentBindingAfterRevocation(t *testing.T) {

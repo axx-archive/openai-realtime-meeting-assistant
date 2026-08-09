@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_w4_intervention_packet",
+  "observedAt": "2026-08-08T22:54:41Z",
+  "status": "blocked_on_explicit_AJ_authority_and_fresh_live_manifest",
+  "requestedDecision": {
+    "owner": "AJ",
+    "scope": "authorize or decline a separately reviewed Bonfire migration, canonical repair/promotion, and private organization/Work Record canary",
+    "authorityGrantedByThisPacket": false
+  },
+  "currentReadOnlyProductionObservation": {
+    "observedOn": "2026-08-08",
+    "activeRelease": "d4c827c2adc7e1c6258f843e20fd4f9256c7310b",
+    "ledgerGeneration": 30,
+    "canonicalDirty": 28626,
+    "canonicalReconciledOrCheckpointed": 8532,
+    "repairCandidateCount": 119,
+    "exactRepairCandidateIdentifiersFrozenHere": false,
+    "freshnessWarning": "live state can drift; the count is not a mutation manifest and exact candidates must be regenerated read-only immediately before approval"
+  },
+  "requiredPreMutationArtifacts": [
+    "fresh exact serving release, ledger, image, health, readiness, and rollback verification",
+    "fresh exact row-level canonical repair manifest with expected preimages and postimages",
+    "private byte-exact source backup and independently identified target before-image",
+    "signed body-minimized public migration receipt contract and private managed-MAC manifest",
+    "exact production high-water and expected delta observation",
+    "quiescence and concurrent-drift fence",
+    "named rollback operator and reviewer"
+  ],
+  "migrationContract": {
+    "organization": "Bonfire",
+    "organizations": 1,
+    "persons": 7,
+    "memberships": 7,
+    "canonicalTargetRowDelta": 15,
+    "soleInitialOwner": "AJ",
+    "stableOpaqueIdentifiersGeneratedPrivately": true,
+    "privateSubjectsOrSessionHashesDisclosedInPacket": false,
+    "productionDeltaMustBeObservedNotSelfAsserted": true
+  },
+  "canaryContract": {
+    "allowedIfAuthorized": [
+      "organization authority",
+      "self profile",
+      "private Work Record draft and preview"
+    ],
+    "mustRemainOff": [
+      "network discovery",
+      "network contact",
+      "semantic reranking",
+      "MyMind",
+      "global tenant cutover"
+    ],
+    "productionBootstrapCurrentLimit": "off_or_shadow_only",
+    "pendingSingletonDependentSurfacesMustRemainUnavailable": true
+  },
+  "rollbackContract": {
+    "sourceAndTargetCoordinated": true,
+    "exactBeforeImageAndHighWaterReadback": true,
+    "durablePhaseJournal": true,
+    "managedKeyIdentityAndVersion": true,
+    "restoreMustBeProvenBeforeCanaryExpansion": true,
+    "retainPriorExactReleaseAndImages": true
+  },
+  "localProofInputs": {
+    "w0": "docs/evidence/e10/stride-e10-w0-freeze-20260808.json",
+    "w1": "docs/evidence/e10/stride-e10-w1-authority-20260808.json",
+    "w2": "docs/evidence/e10/stride-e10-w2-product-20260808.json",
+    "w3": "docs/evidence/e10/stride-e10-w3-tenant-shadow-migration-20260808.json",
+    "allLocalProofsPass": true,
+    "localProofImpliesProductionAuthority": false
+  },
+  "stopBoundary": {
+    "productionDatabaseOrDataMutationPerformed": false,
+    "productionConfigurationOrFeatureActivationPerformed": false,
+    "providerCallPerformed": false,
+    "gitCommitPushOrDeployPerformed": false,
+    "testFlightOrCohortActionPerformed": false
+  }
+}

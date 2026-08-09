@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_w0_authority_freeze",
+  "observedAt": "2026-08-08T15:35:00Z",
+  "status": "deterministic_verified",
+  "independentReview": {
+    "mode": "critic_loop",
+    "rounds": 2,
+    "verdict": "PASS",
+    "blockersRemaining": 0,
+    "majorFindingsRemaining": 0
+  },
+  "localBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "d4c827c2adc7e1c6258f843e20fd4f9256c7310b",
+    "axxMain": "d4c827c2adc7e1c6258f843e20fd4f9256c7310b",
+    "mergeBase": "d4c827c2adc7e1c6258f843e20fd4f9256c7310b",
+    "preExistingModifiedPaths": [
+      "docs/plans/stride-next-evolution-master-plan.md"
+    ],
+    "excludedUntrackedPaths": [
+      "stride-site/"
+    ],
+    "resetCleanForcePushOrOverwritePerformed": false
+  },
+  "canonicalPlan": {
+    "path": "docs/plans/stride-next-evolution-master-plan.md",
+    "freezeRevision": 1,
+    "freezeSectionSha256": "685fd1bed4880294cc84026fc2c9b85ac6e5f015dcc55a7eeb9dc2fd97570ca0",
+    "covers": [
+      "person_and_safe_profile",
+      "organization_membership_join_session_audit",
+      "contribution_claim",
+      "contribution_attestation",
+      "published_contribution_claim",
+      "agent_influence_receipt",
+      "network_profile_projection",
+      "talent_search_grant",
+      "network_search_receipt",
+      "contact_request_and_block",
+      "disclosure_and_verification_tiers",
+      "named_party_field_release",
+      "retention_deletion_index_purge",
+      "prohibited_search_policy",
+      "feature_switches",
+      "seven_person_migration_manifest_contract",
+      "threat_model"
+    ]
+  },
+  "liveRelease": {
+    "ledgerSchemaVersion": 1,
+    "ledgerGeneration": 30,
+    "ledgerUpdatedAt": "2026-08-07T22:34:00.964Z",
+    "releaseCommit": "d4c827c2adc7e1c6258f843e20fd4f9256c7310b",
+    "bundleSha256": "2226f1d3cf5d43c80dd093b11cb21f1938af826122ab40a212b4d57037dccb2d",
+    "applicationImageId": "sha256:de0533e15c8c4da6d729ae406d686ba1e310f6d6f72cd81e83544db44e8135ba",
+    "rendererImageId": "sha256:73f0323d1c6d498973bbfab151d41870a24c181c2441689392ea8dec613fe95c",
+    "rollbackCommit": "cffe16b39c67e89572fb9389fff0b51838f7d995",
+    "rollbackBundleAndImagesRetained": true,
+    "verifier": "verified-local-unsigned",
+    "publicAndContainerHealthAgree": true,
+    "processQualified": true,
+    "qualified": false,
+    "externallyAttested": false,
+    "productionMutationPerformed": false
+  },
+  "canonicalState": {
+    "mode": "shadow",
+    "healthy": false,
+    "dirtyHighWater": 28626,
+    "reconciledHighWater": 8532,
+    "checkpointHighWater": 8532,
+    "checkpointValid": true,
+    "repairCandidates": 119,
+    "pending": 0,
+    "replayEnabled": false,
+    "brainProjectionEnabled": false,
+    "offsiteBackup": "dormant",
+    "restoreVerified": false
+  },
+  "featureState": {
+    "strideRuntimeEnabled": true,
+    "strideRuntimeState": "unavailable",
+    "activationFenced": true,
+    "existingReportedFeatureCount": 32,
+    "existingReportedFeaturesEnabled": 0,
+    "e10OrganizationWorkRecordNetworkSwitchesPresent": false
+  },
+  "nativeRelease": {
+    "currentHistoricalCarrier": "build_49",
+    "easBuildId": "d76f442c-29ee-4f55-b30d-bac0c7cfeeb3",
+    "easSubmissionId": "b8d58ae6-c183-4072-8ee2-a7ef36190344",
+    "gitCommit": "d4c827c2adc7e1c6258f843e20fd4f9256c7310b",
+    "appleBuildId": "9c63cf4a-ef1e-49bd-9110-ea5abbc56b9d",
+    "appleProcessingState": "VALID",
+    "expired": false,
+    "internalBuildState": "IN_BETA_TESTING",
+    "externalBuildState": "IN_BETA_TESTING",
+    "internalTeamExpoContainsBuild": true,
+    "externalBonfireContainsBuild": true,
+    "externalGroupInclusionExpected": false,
+    "physicalIPhoneAccepted": false,
+    "physicalIPadAccepted": false,
+    "distributionMutationPerformed": false
+  },
+  "openDiscrepancies": [
+    "canonical shadow diverges with 119 repair candidates and production repair remains unauthorized",
+    "Build 49 appears in the external Bonfire TestFlight group despite the prior unchanged-external-group claim",
+    "E10 organization Work Record network talent contact and MyMind-specific switches are not implemented in the serving configuration",
+    "physical iPhone and iPad acceptance remains unproven"
+  ],
+  "prohibitedActionsObserved": {
+    "paidProviderCall": false,
+    "productionDataOrConfigurationMutation": false,
+    "canonicalRepairOrPromotion": false,
+    "deployOrRestart": false,
+    "gitCommitPushMergeOrForcePush": false,
+    "cohortActivation": false
+  }
+}
