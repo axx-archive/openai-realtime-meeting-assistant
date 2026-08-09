@@ -955,7 +955,7 @@ func (engine *postgresCanonicalBoardRepairEngine) Observe(ctx context.Context) (
 	}
 	parityRaw, err := canonicalJSON(report.Target)
 	if err != nil {
-		return canonicalBoardRepairProof{}, err
+		return canonicalBoardRepairProof{}, fmt.Errorf("encode canonical parity target: %w", err)
 	}
 	events, err := (canonicalLegacyEventView{CanonicalEventStore: engine.store}).Events(ctx)
 	if err != nil {
@@ -971,22 +971,22 @@ func (engine *postgresCanonicalBoardRepairEngine) Observe(ctx context.Context) (
 	eventCount := int64(len(tenantEvents))
 	eventRaw, err := canonicalJSON(tenantEvents)
 	if err != nil {
-		return canonicalBoardRepairProof{}, err
+		return canonicalBoardRepairProof{}, fmt.Errorf("encode canonical legacy event view: %w", err)
 	}
 	if err := engine.store.pool.QueryRow(ctx, "SELECT COALESCE(max(sequence),0) FROM canonical_events WHERE tenant_id=$1", engine.manifest.TenantID).Scan(&highWater); err != nil {
-		return canonicalBoardRepairProof{}, err
+		return canonicalBoardRepairProof{}, fmt.Errorf("read canonical event high-water: %w", err)
 	}
 	var outboxCount int64
 	if err := engine.store.pool.QueryRow(ctx, `SELECT count(*) FROM outbox o JOIN canonical_events e ON e.event_id=o.event_id WHERE e.tenant_id=$1 AND e.event_type=$2`, engine.manifest.TenantID, canonicalLegacyImportEventType).Scan(&outboxCount); err != nil {
-		return canonicalBoardRepairProof{}, err
+		return canonicalBoardRepairProof{}, fmt.Errorf("read canonical import outbox count: %w", err)
 	}
 	freshVersions, err := OpenFileCanonicalObjectVersionMap(engine.versions.path)
 	if err != nil {
-		return canonicalBoardRepairProof{}, err
+		return canonicalBoardRepairProof{}, fmt.Errorf("reopen canonical object version snapshot: %w", err)
 	}
 	versionSnapshot, err := freshVersions.Snapshot()
 	if err != nil {
-		return canonicalBoardRepairProof{}, err
+		return canonicalBoardRepairProof{}, fmt.Errorf("read canonical object version entries: %w", err)
 	}
 	projection := NewCanonicalProjection()
 	for _, event := range tenantEvents {
@@ -995,15 +995,15 @@ func (engine *postgresCanonicalBoardRepairEngine) Observe(ctx context.Context) (
 		}
 	}
 	if _, err := projection.Checksum(); err != nil {
-		return canonicalBoardRepairProof{}, err
+		return canonicalBoardRepairProof{}, fmt.Errorf("checksum replayed canonical projection: %w", err)
 	}
 	databaseSHA, err := canonicalRepairDatabaseFingerprint(ctx, engine.store, engine.manifest.TenantID)
 	if err != nil {
-		return canonicalBoardRepairProof{}, err
+		return canonicalBoardRepairProof{}, fmt.Errorf("fingerprint canonical database before observation: %w", err)
 	}
 	inputSHA, err := canonicalRepairImportInputFingerprint(paths, engine.usersPath)
 	if err != nil {
-		return canonicalBoardRepairProof{}, err
+		return canonicalBoardRepairProof{}, fmt.Errorf("fingerprint canonical import inputs after observation: %w", err)
 	}
 	boardAfter, boardErr := readRegularNoSymlink(paths.Board)
 	journalAfter, journalErr := readOptionalCanonicalLifecycleJournal(paths.DeletedJournal)
@@ -1033,7 +1033,7 @@ func (engine *postgresCanonicalBoardRepairEngine) Observe(ctx context.Context) (
 		for _, principal := range plan.TestedPrincipals {
 			allowed, resolveErr := resolver.CanReadCanonicalObject(ctx, principal, targetEvent)
 			if resolveErr != nil {
-				return canonicalBoardRepairProof{}, resolveErr
+				return canonicalBoardRepairProof{}, fmt.Errorf("resolve prior principal access for %s: %w", candidate.ObjectID, resolveErr)
 			}
 			if allowed {
 				priorPrincipals[candidate.ObjectID] = append(priorPrincipals[candidate.ObjectID], principal)
@@ -1042,7 +1042,7 @@ func (engine *postgresCanonicalBoardRepairEngine) Observe(ctx context.Context) (
 	}
 	journalRecords, err := readCanonicalLifecycleJournal(paths.DeletedJournal)
 	if err != nil {
-		return canonicalBoardRepairProof{}, err
+		return canonicalBoardRepairProof{}, fmt.Errorf("decode canonical lifecycle journal: %w", err)
 	}
 	return canonicalBoardRepairProof{
 		Candidates: report.Candidates, Diverged: report.Diverged, PrincipalParity: report.PrincipalParityProven,
@@ -1339,7 +1339,7 @@ func runCanonicalBoardNormalizationCLI(ctx context.Context, inputPath, inputSHA,
 	}
 	proof, err := engine.Observe(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("observe canonical repair state: %w", err)
 	}
 	if canonicalRepairProofFingerprint(proof) != input.BeforeFingerprintSHA256 {
 		return errors.New("normalization input no longer matches live state; cold restore required")
@@ -2026,11 +2026,11 @@ func writeCanonicalBoardRepairObservation(ctx context.Context, outputPath string
 	}
 	databaseSHA, err := canonicalRepairDatabaseFingerprint(ctx, store, manifest.TenantID)
 	if err != nil {
-		return err
+		return fmt.Errorf("fingerprint observed canonical database: %w", err)
 	}
 	versionSnapshot, err := versions.Snapshot()
 	if err != nil {
-		return err
+		return fmt.Errorf("snapshot observed canonical object versions: %w", err)
 	}
 	observedTargets := make([]canonicalBoardRepairObservedTarget, 0)
 	for _, candidate := range proof.Candidates {
@@ -2742,7 +2742,7 @@ func canonicalRepairDatabaseFingerprint(ctx context.Context, store *PostgresCano
 	}
 	events, err := store.Events(ctx)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("read events for canonical database fingerprint: %w", err)
 	}
 	eventFingerprints := make([]string, 0)
 	for _, event := range events {
@@ -2751,7 +2751,7 @@ func canonicalRepairDatabaseFingerprint(ctx context.Context, store *PostgresCano
 		}
 		fingerprint, fingerprintErr := canonicalEventFingerprint(event)
 		if fingerprintErr != nil {
-			return "", fingerprintErr
+			return "", fmt.Errorf("fingerprint canonical event %s: %w", event.EventID, fingerprintErr)
 		}
 		eventFingerprints = append(eventFingerprints, fingerprint)
 	}
