@@ -103,6 +103,70 @@ func TestPostgresCanonicalMigrationsRefuseUnknownFutureVersion(t *testing.T) {
 	}
 }
 
+func TestCanonicalMigrationRuntimePolicy(t *testing.T) {
+	t.Setenv(canonicalMigrationMaxVersionEnv, "")
+	t.Setenv(canonicalAllowFutureMigrationsEnv, "")
+	maxVersion, allowFuture, err := canonicalMigrationRuntimePolicy(16)
+	if err != nil || maxVersion != 16 || allowFuture {
+		t.Fatalf("default policy=(%d,%t,%v), want (16,false,nil)", maxVersion, allowFuture, err)
+	}
+	t.Setenv(canonicalMigrationMaxVersionEnv, "13")
+	t.Setenv(canonicalAllowFutureMigrationsEnv, "true")
+	maxVersion, allowFuture, err = canonicalMigrationRuntimePolicy(16)
+	if err != nil || maxVersion != 13 || !allowFuture {
+		t.Fatalf("compatibility policy=(%d,%t,%v), want (13,true,nil)", maxVersion, allowFuture, err)
+	}
+	for _, test := range []struct {
+		name  string
+		max   string
+		allow string
+	}{
+		{name: "zero max", max: "0"},
+		{name: "future max", max: "17"},
+		{name: "malformed max", max: "latest"},
+		{name: "malformed allow", allow: "sometimes"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(canonicalMigrationMaxVersionEnv, test.max)
+			t.Setenv(canonicalAllowFutureMigrationsEnv, test.allow)
+			if _, _, err := canonicalMigrationRuntimePolicy(16); err == nil {
+				t.Fatal("invalid migration policy was accepted")
+			}
+		})
+	}
+}
+
+func TestPostgresCanonicalMigrationCompatibilityCapAndFutureTolerance(t *testing.T) {
+	t.Setenv(canonicalMigrationMaxVersionEnv, "13")
+	t.Setenv(canonicalAllowFutureMigrationsEnv, "true")
+	ctx, pool := startDisposableCanonicalPostgres(t)
+	store := NewPostgresCanonicalStore(pool, testCanonicalRegistry(t))
+	if err := store.ApplyMigrations(ctx); err != nil {
+		t.Fatalf("apply capped canonical migrations: %v", err)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&count); err != nil || count != 13 {
+		t.Fatalf("capped migration rows=%d err=%v, want 13", count, err)
+	}
+	var identityTable *string
+	if err := pool.QueryRow(ctx, "SELECT to_regclass('public.stride_person_profiles')::text").Scan(&identityTable); err != nil {
+		t.Fatalf("inspect capped schema: %v", err)
+	}
+	if identityTable != nil {
+		t.Fatalf("migration 14 table exists under cap: %q", *identityTable)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO schema_migrations(version,sha256) VALUES (17,decode($1,'hex'))", strings.Repeat("f", 64)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ApplyMigrations(ctx); err != nil {
+		t.Fatalf("compatibility binary rejected additive future migration: %v", err)
+	}
+	t.Setenv(canonicalAllowFutureMigrationsEnv, "false")
+	if err := store.ApplyMigrations(ctx); !errors.Is(err, ErrCanonicalUnknownMigration) {
+		t.Fatalf("strict binary future migration error=%v, want ErrCanonicalUnknownMigration", err)
+	}
+}
+
 func TestPostgresSTRIDEMigrationsRejectNestedBodiesCredentialsAndMalformedReferences(t *testing.T) {
 	ctx, store, _ := migratedPostgresCanonicalStore(t)
 	for _, test := range []struct {

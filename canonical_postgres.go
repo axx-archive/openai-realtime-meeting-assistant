@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +21,31 @@ import (
 )
 
 const canonicalMigrationAdvisoryLock int64 = 0x426f6e6669726532 // "Bonfire2"
+
+const (
+	canonicalMigrationMaxVersionEnv   = "BONFIRE_CANONICAL_MIGRATION_MAX_VERSION"
+	canonicalAllowFutureMigrationsEnv = "BONFIRE_CANONICAL_ALLOW_FUTURE_MIGRATIONS"
+)
+
+func canonicalMigrationRuntimePolicy(highestEmbedded int64) (int64, bool, error) {
+	maxVersion := highestEmbedded
+	if raw := strings.TrimSpace(os.Getenv(canonicalMigrationMaxVersionEnv)); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value < 1 || value > highestEmbedded {
+			return 0, false, fmt.Errorf("invalid %s", canonicalMigrationMaxVersionEnv)
+		}
+		maxVersion = value
+	}
+	allowFuture := false
+	if raw := strings.TrimSpace(os.Getenv(canonicalAllowFutureMigrationsEnv)); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return 0, false, fmt.Errorf("invalid %s", canonicalAllowFutureMigrationsEnv)
+		}
+		allowFuture = value
+	}
+	return maxVersion, allowFuture, nil
+}
 
 var (
 	ErrCanonicalMigrationDrift   = errors.New("canonical migration checksum drift")
@@ -81,6 +108,14 @@ func (store *PostgresCanonicalStore) ApplyMigrations(ctx context.Context) error 
 	if err != nil {
 		return err
 	}
+	if len(migrations) == 0 {
+		return errors.New("canonical migration inventory is empty")
+	}
+	highestEmbedded := migrations[len(migrations)-1].Version
+	maxVersion, allowFuture, err := canonicalMigrationRuntimePolicy(highestEmbedded)
+	if err != nil {
+		return err
+	}
 	conn, err := store.pool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("acquire canonical migration connection: %w", err)
@@ -123,11 +158,14 @@ func (store *PostgresCanonicalStore) ApplyMigrations(ctx context.Context) error 
 	}
 	versionRows.Close()
 	for _, version := range appliedVersions {
-		if _, known := embeddedVersions[version]; !known {
+		if _, known := embeddedVersions[version]; !known && !(allowFuture && version > highestEmbedded) {
 			return fmt.Errorf("%w: version %d", ErrCanonicalUnknownMigration, version)
 		}
 	}
 	for _, migration := range migrations {
+		if migration.Version > maxVersion {
+			continue
+		}
 		var stored []byte
 		err := conn.QueryRow(ctx, "SELECT sha256 FROM schema_migrations WHERE version=$1", migration.Version).Scan(&stored)
 		if err == nil {
