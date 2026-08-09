@@ -918,40 +918,40 @@ func (engine *postgresCanonicalBoardRepairEngine) Observe(ctx context.Context) (
 	}
 	boardRaw, err := readRegularNoSymlink(paths.Board)
 	if err != nil {
-		return canonicalBoardRepairProof{}, err
+		return canonicalBoardRepairProof{}, fmt.Errorf("read board snapshot: %w", err)
 	}
 	journalRaw, err := readOptionalCanonicalLifecycleJournal(paths.DeletedJournal)
 	if err != nil {
-		return canonicalBoardRepairProof{}, err
+		return canonicalBoardRepairProof{}, fmt.Errorf("read lifecycle journal snapshot: %w", err)
 	}
 	versionRaw, err := readRegularNoSymlink(engine.versions.path)
 	if err != nil {
-		return canonicalBoardRepairProof{}, err
+		return canonicalBoardRepairProof{}, fmt.Errorf("read object version snapshot: %w", err)
 	}
 	spoolRaw, spoolHighWater, err := inspectCanonicalRepairSpoolFromScratch(engine.spoolPath)
 	if err != nil {
-		return canonicalBoardRepairProof{}, err
+		return canonicalBoardRepairProof{}, fmt.Errorf("inspect canonical spool snapshot: %w", err)
 	}
 	observedPrincipals, err := repairMemberPrincipals(engine.usersPath)
 	if err != nil {
-		return canonicalBoardRepairProof{}, err
+		return canonicalBoardRepairProof{}, fmt.Errorf("resolve repair member principals: %w", err)
 	}
 	if !stringSlicesEqual(observedPrincipals, engine.memberPrincipals) {
 		return canonicalBoardRepairProof{}, errors.New("users.json principal corpus changed before canonical observation")
 	}
 	inputBeforeSHA, err := canonicalRepairImportInputFingerprint(paths, engine.usersPath)
 	if err != nil {
-		return canonicalBoardRepairProof{}, err
+		return canonicalBoardRepairProof{}, fmt.Errorf("fingerprint canonical import inputs: %w", err)
 	}
 	plan, err := engine.buildPlanReadOnly(ctx)
 	if err != nil {
-		return canonicalBoardRepairProof{}, err
+		return canonicalBoardRepairProof{}, fmt.Errorf("build read-only canonical repair plan: %w", err)
 	}
 	report, err := ReconcileCanonicalPlanWithOptions(ctx, plan, canonicalLegacyEventView{CanonicalEventStore: engine.store}, CanonicalReconcileOptions{
 		ACL: NewPostgresCanonicalParityACL(engine.store, engine.manifest.TenantID), TestedPrincipals: plan.TestedPrincipals,
 	})
 	if err != nil {
-		return canonicalBoardRepairProof{}, err
+		return canonicalBoardRepairProof{}, fmt.Errorf("reconcile canonical repair plan: %w", err)
 	}
 	parityRaw, err := canonicalJSON(report.Target)
 	if err != nil {
@@ -959,7 +959,7 @@ func (engine *postgresCanonicalBoardRepairEngine) Observe(ctx context.Context) (
 	}
 	events, err := (canonicalLegacyEventView{CanonicalEventStore: engine.store}).Events(ctx)
 	if err != nil {
-		return canonicalBoardRepairProof{}, err
+		return canonicalBoardRepairProof{}, fmt.Errorf("read canonical legacy event view: %w", err)
 	}
 	tenantEvents := events[:0]
 	var highWater int64
