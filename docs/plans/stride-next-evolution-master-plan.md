@@ -7,22 +7,22 @@ network-draft product is now `production_private_live`. The authenticated W4
 activation binds all seven current people to Bonfire, with seven active
 memberships, AJ as sole owner, all 98 current sessions bound to their canonical
 person and membership, seven private unlisted network drafts, and zero guest
-sessions. The production snapshot is schema v2 generation 48 and descends from
+sessions. The production snapshot is schema v2 generation 91 and descends from
 activation `275d8c25b06c2947ff0e85257f14090ce1fd75a8c045eb1d73c6b96b907719a6`
 and receipt digest
 `fafe4431517126f0807b159b919354ca75c27d8ecd5e7fe7a3514743a83729af`.
 
 The exact application release used for signed-in acceptance at 2026-08-09
-02:38 PT was ledger generation 37, commit
-`cd9566ba32b9c967e59e4c6f8fa40ee2ec10b0d4`, bundle
-`89b1f109129695a7c2a3176d04eaad6993c48c7ec5fb4a1c406525cb81e6a64c`,
+11:36 PT was ledger generation 41, commit
+`32736f14b5945f17b2a122fe164d9bd8d371eee5`, bundle
+`b1c048eb723b12a3854853350b6c0989a6929e0e3ec343e736fb55be9cbba947`,
 application image
-`sha256:005359bb6f43fb774933f750b59c762415f485c6d0fbe2eab34a0bf45062023e`,
+`sha256:04dff5f412438d9d2ddda16da2c27f584c27593b41b8f86c8660c9c95fd0dd4c`,
 and renderer image
-`sha256:685bb0692af2ff2967ec0ad9b70c88b80dca93d8ce5caffe084e8e5b2b597735`.
+`sha256:83b0806e5d2d9a7af73f18250827bfa3a2431dc5ffaf16307f570d48e8012403`.
 The retained verifier, running images, Caddy, `/healthz`, and `/readyz` agreed
 with `verified-local-unsigned`; exact prior release
-`c34118fdcc55635eac073745e35b017fc97392cc` remains intact for rollback.
+`6e40b8288fec1d9a27614ef9170a76a3229f63c7` remains intact for rollback.
 This plan/evidence update is a docs-only successor and deliberately does not
 self-embed its own Git hash. The active-release ledger plus `/healthz` and
 `/readyz` are authoritative for the exact current successor; every docs-only
@@ -48,12 +48,13 @@ contract checks and an actual confined-container ownership/mode test.
 
 The current serving release remains unqualified externally. Production
 `/readyz` truthfully reports the separate canonical shadow unhealthy at
-dirty/high-water 29,094 versus reconciled/checkpoint 8,532 with 119 repair
+dirty/high-water 29,396 versus reconciled/checkpoint 8,532 with 119 repair
 candidates and governed replay off. W4 does not read that shadow as product
 authority. Exactly these W4 features are active: person profile, organization
 read/write, active-organization session, Contribution Review, and private Work
-Record. Public network publication, discovery/search, contact, semantic
-reranking, MyMind context, and global tenant cutover remain deliberately off
+Record. Canonical migration 17 and its six private-custody tables are applied
+with all W5/W6 feature switches false. Public network publication,
+discovery/search, contact, semantic reranking, MyMind context, and global tenant cutover remain deliberately off
 pending W5-W8 qualification rather than being presented as completed. Offsite backup remains dormant. No production replay, MyMind
 body custody/context assembly, AmbientMind compiler/worker or reader, artifact
 disposition action, provider qualification, physical-device acceptance,
@@ -844,8 +845,8 @@ decision is explicitly external rather than silently assumed.
 | E10-W2 | Organization, Work Record, and network product surfaces | web/native self/coworker/network projections; create/join/approve/switch/leave; evidence cards/tiers; organization contribution approvals; network preview/View-as-recruiter/contact/block; no discovery activation | `deterministic_verified` — receipt-bound local/default-off backend, web, native, persistent recovery, critic PASS, and registered-live W1-backed rendered QA; earlier static fixture evidence remains explicitly non-live |
 | E10-W3 | Tenant conversion, network shadow, and migration rehearsal | replace singleton/unconditional org ACL paths; build shadow network projection/index from published fields only; revalidation/revoke/purge parity; idempotent offline seven-person/Bonfire rehearsal with AJ owner; no production mutation | `deterministic_verified` — local/offline migration, shadow, durable purge, restart/rollback, and converted authority-path evidence plus three independent critic PASS verdicts; production cutover remains deliberately disabled and singleton-dependent surfaces are explicitly unavailable/pending |
 | E10-W4 | Authority-gated Bonfire migration and private org/Work Record/network activation; canonical repair remains separately gated | explicit production authority; exact backup/rollback; authenticated activation journal/receipt; seven people and memberships with AJ sole owner; all current sessions bound; cohesive web/native org/profile/private draft/preview while discovery and MyMind remain off | `production_private_live` — exact migration evidence retained without rerun; W4 activation and successor lineage verified; seven people/seven memberships/98 sessions live; registered signed-in desktop/mobile QA PASS; canonical repair/promotion deliberately not performed |
-| E10-W5 | Private MyMind custody and activation | independent encrypted custody/consent; inspect/correct/forget/export; restart/restore; exact disclosure and zero leakage; profiles/orgs do not depend on this wave | `deterministic_verified_external_custody_waiting` — local/default-off encrypted custody, API/web/native controls, migration 17, restart/restore/crypto-erasure, and receipt evidence pass; no production install, managed production keys/high-water, named custody owners, consent approval, or live cohort |
-| E10-W6 | Network, provider, and real-work qualification | privacy/legal/product approval; at least five consenting profile participants and two search reviewers; labeled/adversarial recruiter corpus; explanation/unknown/prohibited-criteria/contact/exfiltration gates; qualify any parser/reranker plus STT, voice, Luna/Terra/Sol, I&O/workforce one variable at a time | `deterministic_verified_external_qualification_waiting` — default-off policy, qualification, shadow, exact-session search/contact, web/native controls, and receipt evidence pass; no real cohort, approver, reviewer, provider, or live activation |
+| E10-W5 | Private MyMind custody and activation | independent encrypted custody/consent; inspect/correct/forget/export; restart/restore; exact disclosure and zero leakage; profiles/orgs do not depend on this wave | `deterministic_verified_external_custody_waiting` — migration 17 and the default-off API/web/native carrier are live; encrypted custody, restart/restore/crypto-erasure, and receipt evidence pass; no production custody install, managed production keys/high-water, named custody owners, consent approval, stored context, or live cohort |
+| E10-W6 | Network, provider, and real-work qualification | privacy/legal/product approval; at least five consenting profile participants and two search reviewers; labeled/adversarial recruiter corpus; explanation/unknown/prohibited-criteria/contact/exfiltration gates; qualify any parser/reranker plus STT, voice, Luna/Terra/Sol, I&O/workforce one variable at a time | `deterministic_verified_external_qualification_waiting` — the default-off policy, qualification, shadow, exact-session search/contact, and web/native carrier are live but unconfigured; no real cohort, approver, reviewer, provider, or feature activation |
 | E10-W7 | Physical, privacy, and resilience acceptance | final exact native build containing org/Work Record/network changes on iPhone/iPad; publish/pause/search/evidence/contact/block/revoke rendered flows; restrictive-network TURN/WebRTC; signed restore; index purge; HA failover; accessibility and privacy/legal sign-off | `deterministic_validator_verified_external_waiting` — immutable-root evidence validators and read-only preflights pass; no Apple, physical-device, privacy/accessibility, restore, restrictive-network, or HA receipt is claimed |
 | E10-W8 | Final activation | final route freeze and exact release/rollback; independently kill-switchable opt-in cohort order `draft/publish -> evidence search -> contact`; 24-hour/ten-sitting soak includes revoke/purge latency and prohibited-leakage audit; W5 must be complete or explicitly deferred by AJ, never silently pending | `deterministic_validator_verified_external_blocked` — ordered cohort/kill-switch/soak validator passes; activation remains blocked on W5-W7 external evidence and the real 24-hour/ten-sitting campaign |
 
@@ -916,6 +917,17 @@ kill-switch cohorts, and finite soak validation. It is validator evidence only:
 Apple/TestFlight, physical iPhone/iPad, privacy/accessibility, restrictive
 network, offsite restore, HA, independent observation, and the real soak remain
 external and no activation is claimed.
+
+The exact live default-off carrier receipt is
+`docs/evidence/e10/stride-e10-w5-w8-live-carrier-20260809.json` (SHA-256
+`c17d731d6af2b7d0a2b1852f4a2798ddd864346f4f2516aee225672c865ea629`).
+It binds ledger generation 41, exact release/images/rollback, the checksum- and
+restore-verified pre-migration backup, applied migration 17, all five W5/W6
+switches false, W4's seven people/seven memberships/98 sessions, signed-in AJ
+browser acceptance, cohesive Work network navigation, and the honest inactive
+Personal context/Search states. It does not claim external attestation,
+production custody, real-corpus qualification, physical devices, offsite
+restore, HA, or cohort soak/activation.
 
 ### Required evidence and human interventions
 
@@ -2675,7 +2687,7 @@ Rate metrics report numerator/denominator and a 95% Wilson interval. Latency rep
 | E7 | `insights_opportunities_v1` and its first named Insights coworker produce repeatedly useful, reviewed outcomes, learn from typed feedback, and seal the first marketplace-ready package | E6 | ten fixed-release pilots, two reviewers, stable attribution, zero invented assertions/unauthorized disclosure, package/eval/rollback receipt | `deterministic_verified` — complete durable fake-stage workflow; ten paid real-input pilots/two reviewers pending E10 |
 | E8 | Curated Agent Marketplace, organization-owned team agents, evidence-backed growth, chief-of-staff coordination, static seat routing, and spend controls are eval-proven | E2-E7 corpora and I&O proof | verified first-party packages one at a time; lifecycle/permission/export/continuity gates; quality non-regression, ledger agreement, and package/profile/route rollback | `deterministic_verified` — internal-preview lifecycle/default-off candidates; live capability/personality/voice/cost admission pending E10 |
 | E9 | HA/DR, security, native devices, operational readiness, and launch-readiness harnesses | token-free E1-E8 engineering | deterministic restore/failover/isolation/native/security evidence; production operations remain fenced | `deterministic_verified` — temp/loopback/local-simulator evidence only; production HA/RPO/RTO, real media, physical devices, release, and soak pending E10 |
-| E10 | Identity/organization/Work Record network productization, paid-provider qualification, integrated acceptance, and launch | E1-E9 engineering plus external E0 recovery/consent/custody/quota gates | W0-W8; cross-tenant identity/org/MyMind and contribution/search corpus; one-seat-at-a-time live canaries; immutable route map; integrated founder flows; production restore/failover/soak; exact-SHA launch and rollback | `production_private_live; external_acceptance_waiting` — exact carrier `cd9566b...` serves W4 person/org/session, Contribution Review, Work Record, and private network drafts for all seven current users. Publication/search/contact/MyMind, canonical promotion, physical acceptance, real-corpus qualification, HA/DR, custody, pilots, and soak remain open. |
+| E10 | Identity/organization/Work Record network productization, paid-provider qualification, integrated acceptance, and launch | E1-E9 engineering plus external E0 recovery/consent/custody/quota gates | W0-W8; cross-tenant identity/org/MyMind and contribution/search corpus; one-seat-at-a-time live canaries; immutable route map; integrated founder flows; production restore/failover/soak; exact-SHA launch and rollback | `production_private_live; external_acceptance_waiting` — exact carrier `32736f1...` serves W4 person/org/session, Contribution Review, Work Record, private network drafts, migration 17, and default-off W5-W8 surfaces for all seven current users. Publication/search/contact/MyMind, canonical promotion, physical acceptance, real-corpus qualification, HA/DR, custody, pilots, and soak remain open. |
 
 ---
 
@@ -3136,9 +3148,11 @@ or a qualifying earlier-wave receipt:
 
 ## 18. Current wave and resume point
 
-**Current wave:** E10-W5/W6 qualification after W4 private production
-activation. E10-W0 through E10-W3 are `deterministic_verified`; W4 is
-`production_private_live`. External substate `external_acceptance_waiting`.
+**Current wave:** E10-W5-W8 external qualification and acceptance after the
+default-off carrier and migration 17 production rollout. E10-W0 through E10-W3
+are `deterministic_verified`; W4 is `production_private_live`; W5-W8
+deterministic implementations are shipped but their external gates remain
+`external_acceptance_waiting`.
 E1-E9 remain
 `deterministic_verified` only for their named local/default-off evidence classes.
 The live product carrier promotes only the receipted W4 person/organization/
@@ -3146,9 +3160,9 @@ session, Contribution Review, Work Record, and private network-draft states. It
 does not promote publication/search/contact/MyMind, provider, real-corpus,
 physical-device, HA, custody, pilot, soak, or later cohort-activation states.
 
-**Current owner and stop:** AJ authorized and completed the W4 implementation,
-migration acceptance, commit, push, and exact VPS activation. The 2026-08-09
-receipt proves the signed-in application-acceptance release `cd9566b...`,
+**Current owner and stop:** AJ authorized and completed the W4-W8 deterministic
+implementation carrier, migration 17, commit, push, and exact VPS activation.
+The 2026-08-09 live carrier receipt proves signed-in release `32736f1...`,
 authenticated activation lineage, seven current Bonfire members, and 98 bound
 sessions. Later docs-only carrier successors are identified by the live ledger
 and must retain the same reviewed application inventory. The canonical shadow's 119 repair candidates remain a

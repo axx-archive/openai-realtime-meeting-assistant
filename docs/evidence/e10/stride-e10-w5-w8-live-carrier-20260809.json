@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_w5_w8_live_carrier_receipt",
+  "observedAt": "2026-08-09T18:36:29Z",
+  "status": "production_default_off_carrier_live_external_acceptance_waiting",
+  "release": {
+    "commit": "32736f14b5945f17b2a122fe164d9bd8d371eee5",
+    "bundleSha256": "b1c048eb723b12a3854853350b6c0989a6929e0e3ec343e736fb55be9cbba947",
+    "applicationImage": "sha256:04dff5f412438d9d2ddda16da2c27f584c27593b41b8f86c8660c9c95fd0dd4c",
+    "rendererImage": "sha256:83b0806e5d2d9a7af73f18250827bfa3a2431dc5ffaf16307f570d48e8012403",
+    "ledgerGeneration": 41,
+    "rollbackCommit": "6e40b8288fec1d9a27614ef9170a76a3229f63c7",
+    "verifier": "verified-local-unsigned",
+    "processQualified": true,
+    "externallyAttested": false,
+    "qualified": false
+  },
+  "migration": {
+    "version": 17,
+    "tableCount": 6,
+    "featureSwitches": {
+      "person_mymind_context": false,
+      "network_profile_publication": false,
+      "network_projection_shadow": false,
+      "network_search": false,
+      "network_contact": false
+    },
+    "preMigrationBackup": "/opt/meetingassist-backups/stride-e10-w5-pre-migration-20260809T182504Z",
+    "backupChecksumsVerified": true,
+    "disposableRestoreVerifiedAtVersion": 16
+  },
+  "w4Authority": {
+    "schemaVersion": 2,
+    "generation": 91,
+    "activationId": "275d8c25b06c2947ff0e85257f14090ce1fd75a8c045eb1d73c6b96b907719a6",
+    "activationReceiptDigest": "fafe4431517126f0807b159b919354ca75c27d8ecd5e7fe7a3514743a83729af",
+    "organizations": 1,
+    "persons": 7,
+    "memberships": 7,
+    "accountPersons": 7,
+    "activeOrganizationSessions": 98,
+    "owners": 1,
+    "members": 6,
+    "ready": true
+  },
+  "runtime": {
+    "w5": {
+      "configured": false,
+      "installed": false,
+      "ready": true
+    },
+    "w6": {
+      "configured": false,
+      "installed": false,
+      "ready": false,
+      "cohortQualified": false,
+      "canonicalBound": false,
+      "purgeQueued": 0,
+      "purgeRunning": 0,
+      "purgeFailed": 0
+    },
+    "canonical": {
+      "mode": "shadow",
+      "required": false,
+      "healthy": false,
+      "dirtyHighWater": 29396,
+      "reconciledHighWater": 8532,
+      "checkpointHighWater": 8532
+    }
+  },
+  "browserAcceptance": {
+    "signedInPerson": "AJ",
+    "organization": "Bonfire",
+    "role": "owner",
+    "profileUpdateAvailable": true,
+    "personalContextVisible": true,
+    "personalContextState": "not active",
+    "personalContextStorageClaim": "Nothing entered here is stored in this release.",
+    "workNetworkRailVisible": true,
+    "workNetworkRoutes": [
+      "Profile",
+      "Work record",
+      "Public profile",
+      "People",
+      "Requests",
+      "Approvals",
+      "Recruiting",
+      "Preview",
+      "Public view",
+      "Find people",
+      "Privacy"
+    ],
+    "searchState": "unavailable_default_off",
+    "applicationConsoleErrors": 0,
+    "externalExtensionErrors": 1
+  },
+  "deterministicReceipts": {
+    "w5Sha256": "30201dc905a7c4a38390978599d529a3ce204e91928aabd3b1d90a6569f8f1ac",
+    "w6Sha256": "b79ed9f36d612810648a3c13b2a3b0b736492b40bd0a374bd1f4a2cf220ae012",
+    "w7W8Sha256": "f3733917fa7c07bb94d8163fd9dacaa89649a6819c7dd3330037d65076d74e26"
+  },
+  "verification": {
+    "fullGoSuite": "pass_454.691s",
+    "focusedNormal": "pass",
+    "focusedRace": "pass",
+    "goVet": "pass",
+    "mobileTypecheck": "pass",
+    "mobileTests": "pass_460_of_460",
+    "nodePreflights": "pass_2_of_2",
+    "independentCritic": "pass"
+  },
+  "externalBoundary": {
+    "w5ProductionCustodyProvisioned": false,
+    "w5NamedCustodyAndPrivacyApproval": false,
+    "w6FivePersonTwoReviewerQualification": false,
+    "w6ProductLegalPrivacyApproval": false,
+    "w7PhysicalIPhoneIPadAcceptance": false,
+    "w7EncryptedOffsiteRestore": false,
+    "w7HAAndRestrictiveTURN": false,
+    "w7IndependentOffHostAttestation": false,
+    "w8TwentyFourHourTenSittingSoak": false,
+    "w8CohortActivation": false
+  }
+}
