@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_w4_live_canary_receipt",
+  "status": "verified_private_canary",
+  "completedAt": "2026-08-09T02:14:00Z",
+  "authorization": {
+    "owner": "AJ",
+    "scope": "W4 implementation, migration, commit, push to main, and exact VPS activation",
+    "received": true
+  },
+  "source": {
+    "releaseCommit": "48c9a84d67f0c428656271b3a4e9894571e027f1",
+    "remote": "axx/main",
+    "fullRepositoryTest": "PASS: go test ./... -count=1; main package 484.735s",
+    "focusedProductNormal": "PASS: 0.631s",
+    "focusedProductRace": "PASS: 2.460s",
+    "goVet": "PASS",
+    "diffCheck": "PASS"
+  },
+  "preMutationRecovery": {
+    "backupDirectory": "/opt/meetingassist-backups/stride-e10-w4-pre-migration-20260809T011531Z",
+    "meetingDataTarSha256": "99a0c845fb38ab0eba9651ed07e8d37bd9b586ea6eb35f841d055dfd4cf57620",
+    "postgresDumpSha256": "db507da8c369bbf550415bc0a4ef468492c36497756ec35cf7b4195d64a2fb48",
+    "restoreProof": {
+      "meetingDataUsersAndSessionsByteEqual": true,
+      "postgresDumpRestoredIntoDisposableDatabase": true,
+      "preMigrationSchemaVersion": 13,
+      "preMigrationCanonicalEventCount": 19784
+    }
+  },
+  "canonicalObservation": {
+    "receiptPath": "/opt/meetingassist-backups/stride-e10-w4-pre-migration-20260809T011531Z/evidence/pre-migration-canonical-observation.json",
+    "sha256": "e7755faae498446f8fa1d42e0b447e610da93ae5eeb1250585e29b57755c8826",
+    "principalParity": true,
+    "projectionReplayValid": true,
+    "eventHighWater": 19784,
+    "eventCount": 19784,
+    "outboxCount": 19784,
+    "candidateCount": 122,
+    "repairApplied": false,
+    "note": "The superseding W4 policy preserves historical Board state; the fresh observation was read-only. Its production-scale database fingerprint was changed from server-side jsonb aggregation to ordered row streaming after the former query OOM-killed a capped PostgreSQL backend. PostgreSQL recovered and the streaming observation completed with parity."
+  },
+  "migration": {
+    "schemaVersions": 16,
+    "persons": 7,
+    "activeAccountPersonMappings": 7,
+    "activeProfiles": 7,
+    "organizations": 1,
+    "activeMemberships": 7,
+    "activeOwners": 1,
+    "soleInitialOwner": "AJ",
+    "targetHighWaterDelta": 15,
+    "existingSessionTokenHashesPreserved": 98,
+    "databaseFeatureSwitchesEnabled": 0,
+    "publicReceiptPath": "/var/lib/docker/volumes/digitalocean_meeting_data/_data/stride-e10/w4/public-receipt.json",
+    "publicReceiptSha256": "b7a98fcd001716274ffb2aeae9a5e45bed9219e50781c2211bcc722a9b23e519"
+  },
+  "canary": {
+    "mode": "bonfire_private_canary",
+    "tenantConversionMode": "shadow",
+    "runtimeFeaturesEnabled": [
+      "person_profile_authority",
+      "organization_authority_read",
+      "organization_authority_write",
+      "active_organization_session",
+      "work_record_private"
+    ],
+    "mustRemainOffVerified": [
+      "network_profile_publication",
+      "network_projection_shadow",
+      "network_search",
+      "network_contact",
+      "semantic_reranking",
+      "person_mymind_context",
+      "global_tenant_cutover"
+    ],
+    "authenticatedRenderedProof": {
+      "profile": "available with server-minted update action and current AJ profile",
+      "workRecord": "available with six closed private sections, Bonfire owner role, and Open to off by default",
+      "networkDraft": "available and empty without invented authority",
+      "networkSearch": "unavailable with no data read, searched, or sent",
+      "applicationConsoleErrors": 0,
+      "applicationConsoleWarnings": 0
+    }
+  },
+  "liveRelease": {
+    "ledgerGeneration": 33,
+    "releaseCommit": "48c9a84d67f0c428656271b3a4e9894571e027f1",
+    "bundleSha256": "b6c2f55c318e56efe384c821d4a49c25a96b2a38314ce8daa00f1685a210f5a0",
+    "meetingassistImageId": "sha256:c4a367149e4e8836f58d7b3152ce026038c68f4c88bf80144f9b4d0ab20fc2b0",
+    "renderRunnerImageId": "sha256:c5859422738866f03e8277c75d2aca8703e7eb585d3850a03fc35b2efeed1c5a",
+    "attestation": "verified-local-unsigned",
+    "health": "PASS",
+    "readiness": "PASS",
+    "retainedImmediateRollbackCommit": "e5a692f8d9186a94673c19620d25db166687bd95",
+    "retainedCompatibilityCommit": "540682dacc267b041e72c8a490684cee7fb57564"
+  },
+  "productionDataBoundary": {
+    "liveVolume": "digitalocean_meeting_data",
+    "staleOptMeetingassistDataUsed": false,
+    "unrelatedStrideSiteIncluded": false,
+    "providerMutationRequiredForW4": false
+  }
+}
