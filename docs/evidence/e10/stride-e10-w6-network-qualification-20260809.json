@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_w6_network_qualification_backend",
+  "observedAt": "2026-08-09T18:01:32Z",
+  "status": "deterministic_verified_external_qualification_waiting",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "01900e68a369646c9f7b5cd58ee44b648b644fd5",
+    "dirtyWorktreeCheckpoint": true,
+    "selectedFileSha256ManifestIsAuthoritative": true,
+    "gitCommitPushDeployProductionProviderOrActivationPerformed": false
+  },
+  "verifiedContracts": {
+    "managedMACRevisionedPolicyDefaultOff": true,
+    "deterministicProposalAndRevisionBoundConfirmation": true,
+    "prohibitedProxyObfuscationInjectionAndExtractionCorpus": true,
+    "policyDerivedPersonOrganizationGlobalSearchContactAndBreadthLimits": true,
+    "qualificationReceiptMinimumProfiles": 5,
+    "qualificationReceiptMinimumReviewers": 2,
+    "restoredShadowBoundToQualifiedPersonProfilePublicationManifest": true,
+    "qualifiedAttestationCountMatchesCurrentAdmissionAndPublication": true,
+    "consentRevisionAuthenticatedEvidenceOnlyNotRuntimeAuthority": true,
+    "extraValidUnqualifiedShadowRecordFailsClosed": true,
+    "postLimitDisclosureOnly": true,
+    "recordedShadowReferencesRevalidatedWithoutQueryRerunOrLiveProfileReread": true,
+    "publicationAttestationSessionMembershipAndGrantHeldThroughFinalCopy": true,
+    "proposalConfirmationAndContactActionsBoundToExactSessionHashAndActiveSessionID": true,
+    "searchSessionMembershipAndGrantHeldThroughShadowCopyAdmissionPersistenceAndReturn": true,
+    "combinedResolverAtomicallyRevalidatesCanonicalPublicationAndAttestationAuthority": true,
+    "terminalAuthoritySynchronouslyFencesAndPurgesWhileOutagePreservesRows": true,
+    "exactLinkContactIndependentOfSearch": true,
+    "contactFinalWriteHeldByCurrentSessionMembershipAndGrantCapability": true,
+    "semanticProviderEnabled": false,
+    "semanticRerankerEnabled": false,
+    "featureDefaultsRemainFalse": true,
+    "closedClientVocabularyChanged": false
+  },
+  "hardNegatives": [
+    "same revision action minted in session A denied in session B",
+    "same session hash with wrong active session ID denied",
+    "session switch after shadow copy is blocked through receipt and disclosure persistence",
+    "signed qualification attestation count mismatch denied",
+    "extra valid restored shadow record outside qualification manifest denied",
+    "two matches with limit one stores and replays one disclosure",
+    "legacy network profile map mutation cannot influence final disclosure",
+    "authority resolver unavailable denies cached disclosure",
+    "paused or withdrawn publication and revoked attestation deny final disclosure",
+    "grant revocation before exact-link contact final write denies issuance",
+    "lag divergence purge backlog wrong key tamper expiry and cohort mismatch remain fail closed"
+  ],
+  "verification": {
+    "focusedNormal": {
+      "command": "go test . -run '^(TestW6|TestNetworkAuthorityW6|TestSTRIDENetworkShadowW6|TestStrideE10ProductLiveW6|TestStrideE10W6|TestStrideE10ProductLiveRegisteredSearchContactAndRecruitingActionMatrix)' -count=1",
+      "result": "PASS"
+    },
+    "focusedRace": {
+      "command": "go test -race . -run '^(TestW6|TestNetworkAuthorityW6|TestSTRIDENetworkShadowW6|TestStrideE10ProductLiveW6|TestStrideE10W6|TestStrideE10ProductLiveRegisteredSearchContactAndRecruitingActionMatrix)' -count=1",
+      "result": "PASS"
+    },
+    "fullNetworkShadowNormal": {"command": "go test . -run '^TestSTRIDENetworkShadow' -count=1", "result": "PASS"},
+    "fullNetworkShadowRace": {"command": "go test -race . -run '^TestSTRIDENetworkShadow' -count=1", "result": "PASS"},
+    "goVetAll": {"command": "go vet ./...", "result": "PASS"},
+    "scopedDiffCheck": {"command": "git diff --check -- <W6 product network files>", "result": "PASS"},
+    "clientFilesHashBoundOnly": true,
+    "clientTestsRerunByThisReceipt": false
+  },
+  "externalQualificationBoundary": {
+    "realConsentedFiveProfileCohortQualified": false,
+    "realIndependentTwoReviewerApproval": false,
+    "legalJudgmentComplete": false,
+    "privacyJudgmentComplete": false,
+    "providerQualificationPerformed": false,
+    "cohortActivated": false,
+    "productionMutated": false,
+    "nextRequiredStatus": "external_signed_qualification_and_explicit_activation_authority"
+  },
+  "fileSha256": {
+    "stride_e10_product_http.go": "cff4a55cd1a70fba7e08c0d846e28e1295c4a5b514f48744d09203000d3fe4aa",
+    "stride_e10_product_http_test.go": "3b7300e8769a4eaf4f52762adb35721e7ba5cfc8530812881af968e41e521fbb",
+    "stride_e10_product_live.go": "59d89d0a9332fce1790c3a23364e2a102f939883cf1e799447b79f3ce8deb34c",
+    "stride_e10_product_live_test.go": "2d7bce959475aa1ba109ea255801471aec0daf7d52bd16a6c750e2e314821c82",
+    "stride_network_authority.go": "b9130e0bda48acb7a59c7d6c2a6126a2a9bde8cfc2fd0e22eeca0ff5c698f855",
+    "stride_network_authority_test.go": "171cb2424975391abf4cd1fac829e8ef01f5a5e5f3356641ca09e33384867620",
+    "stride_network_shadow.go": "0e02d4200c01728b80a6e2d5393d341796ad1435b77bd5a43fcd60bafdaacc20",
+    "stride_network_shadow_test.go": "d17c9a45bc7f0a7bd9b95d1d4f5559b77e32843bd1cd00d083676187525cda63",
+    "stride_e10_w6_policy.go": "a8d0f8286fe07a6ca06ba61c7c5caf5452c6f04b974bede015b34509be0cea4a",
+    "stride_e10_w6_policy_test.go": "184315bb9c42287c9ee95860405bb0796ee71e2409cb08cea47aa8f59b5d50d7",
+    "stride_e10_w6_qualification.go": "835e0e23ea964704d2d7beac98dfc5d946aad20f02e36b26e182b201b737312e",
+    "stride_e10_w6_qualification_test.go": "390607340ac90a2bfb21ba8607bf9c8f78d649f47fa04ef370cc2cc23d6970c3",
+    "stride_e10_w6_runtime.go": "89ff36aa706b8ab41c375ff67a0fc19da7a343fa38939dd99db7bbf1d128d9bc",
+    "stride_e10_w6_runtime_support.go": "5f640b7818e8c2f16cb0e900fbcabc69547085c8a650fc63ef44c82bc56cc561",
+    "stride_e10_w6_runtime_test.go": "9a88d8b8ffe999178ad5f248582f7eb9c4e690c5bb5224e9e38c31e99813d036",
+    "index.html": "366e35dc71f5993c4d6c329fdfe66941b1c0a3b2dc97e97b291647ae0d6b08b0",
+    "mobile/src/stride/models.ts": "fd8e8350fb639a1750c1adaba5fdfdfe52e2cb050016e247d6cc2e327faf50b5",
+    "mobile/src/screens/StrideProductScreens.tsx": "cda8a482a035d05cb4e6c85bf9330c4fb4d4d8de637501f05101334002c316c0",
+    "mobile/src/__tests__/strideProductSurfaces.test.ts": "182a2ae7da1a89056819cfb1dc6295b571157f74fc399ca152fc45bec75ba5c4"
+  }
+}

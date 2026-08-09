@@ -287,7 +287,7 @@ test('lost-response retry reuses one operation key until settlement or discard',
   };
   const action = {
     id: 'action-1',
-    type: 'network-search-submit' as const,
+    type: 'network-search-propose' as const,
     label: 'Search',
     expectedRevision: 4,
   };
@@ -335,7 +335,7 @@ test('unresolved mutation survives app restart without persisting account or ses
   const authority = { sessionToken: 'secret-session-token', accountKey: 'Ada@Example.com' };
   const action = {
     id: 'opaque-action-1',
-    type: 'network-search-submit' as const,
+    type: 'network-search-propose' as const,
     label: 'Search',
     expectedRevision: 7,
   };
@@ -360,7 +360,7 @@ test('unresolved mutation survives app restart without persisting account or ses
   assert.deepEqual(restarted.pendingMutation(), {
     operationKey,
     actionId: 'opaque-action-1',
-    actionType: 'network-search-submit',
+    actionType: 'network-search-propose',
     expectedRevision: 7,
     surface: 'network-search',
     origin: 'network-search',
@@ -385,7 +385,7 @@ test('persisted unresolved mutation isolates accounts and corrupt or unknown sch
   };
   const accountA = { sessionToken: 'a', accountKey: 'a@example.com' };
   const accountB = { sessionToken: 'b', accountKey: 'b@example.com' };
-  const action = { id: 'action-a', type: 'network-search-submit' as const, label: 'Search', expectedRevision: 1 };
+  const action = { id: 'action-a', type: 'network-search-propose' as const, label: 'Search', expectedRevision: 1 };
   const ledgerA = new StrideMutationLedger();
   ledgerA.operationKey(accountA, 'network-search', action, { query: 'systems' }, () => 'key-a');
   await ledgerA.persist(accountA, persistence);
@@ -412,7 +412,7 @@ test('authoritative 400 and 409 settle across restart while a lost response rema
     return { rows, persistence };
   };
   const authority = { sessionToken: 'session', accountKey: 'account@example.com' };
-  const action = { id: 'action', type: 'network-search-submit' as const, label: 'Search', expectedRevision: 4 };
+  const action = { id: 'action', type: 'network-search-propose' as const, label: 'Search', expectedRevision: 4 };
 
   for (const status of [400, 409]) {
     const { persistence } = makePersistence();
@@ -495,7 +495,7 @@ test('account switch fences and aborts an in-flight mutation projection', () => 
 test('ambiguous mutation survives back and destination navigation attempts', () => {
 	const ledger = new StrideMutationLedger();
 	const authority: StrideRequestAuthority = { sessionToken: 'session-a', accountKey: 'account-a' };
-	const action = { id: 'action-a', type: 'network-search-submit' as const, label: 'Search', expectedRevision: 8 };
+	const action = { id: 'action-a', type: 'network-search-propose' as const, label: 'Search', expectedRevision: 8 };
 	let sequence = 0;
 	const first = ledger.operationKey(authority, 'network-search', action, { query: 'systems' }, () => `operation-${++sequence}`);
 	assert.equal(ledger.hasPending(), true);
@@ -521,7 +521,7 @@ test('account-scoped coordinator retains ambiguity through token refresh and A t
 	const accountA = `account-a-${Date.now()}`;
 	const accountB = `account-b-${Date.now()}`;
 	const ledgerA = strideMutationLedgerForAccount(accountA);
-	const actionA = { id: 'action-a', type: 'network-search-submit' as const, label: 'Search', expectedRevision: 3 };
+	const actionA = { id: 'action-a', type: 'network-search-propose' as const, label: 'Search', expectedRevision: 3 };
 	let sequence = 0;
 	const original = ledgerA.operationKey(
 	  { sessionToken: 'old-session', accountKey: accountA },
@@ -633,12 +633,16 @@ test('closed mutation values accept only the exact functional fields', () => {
   assert.deepEqual(parseStrideActionValues('network-draft-save', {
     intro: 'I build reliable systems.', workModes: ['hybrid'], openTo: ['collaboration'],
   }), { intro: 'I build reliable systems.', workModes: ['hybrid'], openTo: ['collaboration'] });
-  assert.deepEqual(parseStrideActionValues('network-search-submit', {
+  assert.deepEqual(parseStrideActionValues('network-search-propose', {
     query: 'distributed systems',
   }), { query: 'distributed systems' });
+  assert.deepEqual(parseStrideActionValues('network-search-confirm', {}), {});
   assert.deepEqual(parseStrideActionValues('contact-send', {
     purpose: 'Discuss a project', note: 'Would you be open to talking?', collaborationType: 'collaboration',
   }), { purpose: 'Discuss a project', note: 'Would you be open to talking?', collaborationType: 'collaboration' });
+  assert.deepEqual(parseStrideActionValues('exact-link-contact-send', {
+    purpose: 'Discuss this exact profile', collaborationType: 'advisory',
+  }), { purpose: 'Discuss this exact profile', collaborationType: 'advisory' });
   assert.deepEqual(parseStrideActionValues('contribution-subject-dispute', {
     reason: 'The dates are incorrect.',
   }), { reason: 'The dates are incorrect.' });
@@ -675,12 +679,17 @@ test('mutation values reject unknown, private, authority, malformed, and oversiz
 	assert.throws(() => parseStrideActionValues('organization-create', { name: 'Stride', slug: '-stride' }));
 	assert.throws(() => parseStrideActionValues('organization-create', { name: 'Stride', slug: 'stride-' }));
 	assert.throws(() => parseStrideActionValues('organization-create', { name: 'Stride', slug: `a${'-'.repeat(62)}b` }));
-  assert.throws(() => parseStrideActionValues('network-search-submit', { query: '' }));
+  assert.throws(() => parseStrideActionValues('network-search-propose', { query: '' }));
+  assert.throws(() => parseStrideActionValues('network-search-propose', { query: 'x'.repeat(241) }));
   assert.throws(() => parseStrideActionValues('contact-send', {
     purpose: 'Hello', collaborationType: 42,
   }));
   assert.throws(() => parseStrideActionValues('contact-send', {
     purpose: 'Hello', collaborationType: 'contract',
+  }));
+  assert.throws(() => parseStrideActionValues('network-search-confirm', { query: 'client-controlled' }));
+  assert.throws(() => parseStrideActionValues('exact-link-contact-send', {
+    purpose: 'Hello', collaborationType: 'advisory', profileId: 'profile-1',
   }));
   assert.throws(() => parseStrideActionValues('network-block', { reason: 'not allowed' }));
   assert.throws(() => parseStrideActionValues('organization-member-role-change', { role: 'owner' }));
@@ -714,8 +723,10 @@ test('closed action vocabulary covers organization, publication, contact, and bl
     'network-publish',
     'network-pause',
 	'network-profile-off',
-    'network-search-submit',
+	'network-search-propose',
+	'network-search-confirm',
     'contact-send',
+	'exact-link-contact-send',
     'contribution-subject-approve',
     'contribution-subject-dispute',
     'contribution-organization-approve',
@@ -884,8 +895,8 @@ test('screens use native-safe scrolling, Pressable, and guarded text rendering',
   assert.match(screens, /actionType === 'organization-create'/);
   assert.match(screens, /actionType === 'organization-join'/);
   assert.match(screens, /actionType === 'network-draft-save'/);
-  assert.match(screens, /actionType === 'network-search-submit'/);
-  assert.match(screens, /actionType === 'contact-send'/);
+  assert.match(screens, /actionType === 'network-search-propose'/);
+  assert.match(screens, /actionType === 'contact-send' \|\| actionType === 'exact-link-contact-send'/);
   assert.match(screens, /actionSupportsReason\(actionType\)/);
   assert.ok(
     screens.indexOf("for (const action of item.actions ?? [])") < screens.indexOf('<ActionRow'),

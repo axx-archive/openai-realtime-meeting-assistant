@@ -11,8 +11,8 @@ func TestLoadCanonicalMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load migrations: %v", err)
 	}
-	if len(migrations) != 16 {
-		t.Fatalf("migration count = %d, want 16", len(migrations))
+	if len(migrations) != 17 {
+		t.Fatalf("migration count = %d, want 17", len(migrations))
 	}
 	migration := migrations[0]
 	if migration.Version != 1 || migration.Name != "0001_canonical.sql" {
@@ -148,6 +148,29 @@ func TestLoadCanonicalMigrations(t *testing.T) {
 		!strings.Contains(migrations[15].SQL, "CREATE TABLE stride_derived_purge_receipts") ||
 		!strings.Contains(migrations[15].SQL, "('network_profile_publication',false,1)") {
 		t.Fatalf("unexpected STRIDE network migration: %+v", migrations[15])
+	}
+	if migrations[16].Version != 17 || migrations[16].Name != "0017_stride_mymind_private_custody.sql" ||
+		migrations[16].SHA256 != sha256.Sum256([]byte(migrations[16].SQL)) ||
+		!strings.Contains(migrations[16].SQL, "CREATE TABLE stride_mymind_private_custody_envelopes") ||
+		!strings.Contains(migrations[16].SQL, "CREATE TABLE stride_mymind_private_operation_receipts") ||
+		!strings.Contains(migrations[16].SQL, "CREATE TABLE stride_mymind_private_deletion_journals") ||
+		!strings.Contains(migrations[16].SQL, "CREATE TABLE stride_mymind_private_key_destruction_receipts") ||
+		!strings.Contains(migrations[16].SQL, "CREATE TABLE stride_mymind_private_source_tombstones") ||
+		!strings.Contains(migrations[16].SQL, "CREATE TABLE stride_mymind_private_state_high_water") ||
+		!strings.Contains(migrations[16].SQL, "stride_mymind_private_mutation_requires_current_authority") ||
+		!strings.Contains(migrations[16].SQL, "UNIQUE (key_id, key_version, nonce)") ||
+		!strings.Contains(migrations[16].SQL, "stride_mymind_private_operation_receipt_immutable") ||
+		!strings.Contains(migrations[16].SQL, "stride_mymind_private_exact_destruction_receipt") ||
+		!strings.Contains(migrations[16].SQL, "stride_mymind_private_destruction_receipt_verified") ||
+		!strings.Contains(migrations[16].SQL, "source_envelope_digest") ||
+		!strings.Contains(migrations[16].SQL, "verification_contract") ||
+		!strings.Contains(migrations[16].SQL, "destruction_operation_id text NOT NULL UNIQUE") ||
+		!strings.Contains(migrations[16].SQL, "receipt.destruction_operation_id <> NEW.destruction_operation_id") ||
+		!strings.Contains(migrations[16].SQL, "stride_mymind_private_high_water_monotonic") ||
+		!strings.Contains(migrations[16].SQL, "source_kind IN ('preference','reflection','correction')") ||
+		!strings.Contains(migrations[16].SQL, "key_refs jsonb NOT NULL") ||
+		!strings.Contains(migrations[16].SQL, "VALUES ('person_mymind_context', false, 1)") {
+		t.Fatalf("unexpected private MyMind custody migration: %+v", migrations[16])
 	}
 	for _, marker := range []string{
 		"CREATE TABLE canonical_events",

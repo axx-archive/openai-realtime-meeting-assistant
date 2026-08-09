@@ -39,6 +39,132 @@ func strideNetworkShadowConfig() STRIDENetworkShadowConfig {
 	return STRIDENetworkShadowConfig{Enabled: true, SearchOrganizationID: "org_recruiter", Now: func() time.Time { return time.Date(2026, 8, 8, 18, 2, 0, 0, time.UTC) }, PurgeAuthority: strideNetworkShadowTestPurgeAuthority{}, AuthorityResolver: strideNetworkShadowTestAuthority{}, SearchAuthority: strideNetworkShadowTestSearchAuthority{}, SnapshotKeys: strideNetworkShadowTestKeys(), MinimumSnapshotGeneration: 1, MinimumSnapshotKeyVersion: 1, PurgeReceipts: newStrideNetworkShadowTestPurgeStore(), PurgeExecutor: &strideNetworkShadowTestPurgeExecutor{}, PurgeMaxAttempts: 3}
 }
 
+func TestSTRIDENetworkShadowW6HealthCapabilityHeldThroughFinalUse(t *testing.T) {
+	config := strideNetworkShadowConfig()
+	store := config.PurgeReceipts.(*strideNetworkShadowTestPurgeStore)
+	service := NewSTRIDENetworkShadowService(config)
+	now := config.Now()
+	policyAuthority, keys, policy := w6TestPolicyAuthority(t, now)
+	qualification, err := SignW6NetworkQualification(context.Background(), keys, policy, w6QualificationFixture(policy, now, 5, 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	qualification.Profiles[0].PersonID = strideNetworkShadowAdmission(t, false).Canonical.SubjectPersonID
+	qualification.Profiles[0].Profile = referenceFromHeader(strideNetworkShadowAdmission(t, false).Canonical.Header)
+	qualification.Profiles[0].Publication = referenceFromHeader(strideNetworkShadowAdmission(t, false).Publication.Header)
+	qualification, err = SignW6NetworkQualification(context.Background(), keys, policy, qualification)
+	if err != nil {
+		t.Fatal(err)
+	}
+	qualificationAuthority := NewW6NetworkQualificationAuthority(keys)
+	if err := qualificationAuthority.Install(context.Background(), policy, qualification, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.BindCurrentW6Policy(context.Background(), policyAuthority, qualificationAuthority, policy.Revision, "cohort_pilot", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.Ingest(strideNetworkShadowAdmission(t, false)); err != nil {
+		t.Fatal(err)
+	}
+	expectation := W6ShadowHealthExpectation{OrganizationID: "org_recruiter", PolicyRevision: policy.Revision}
+	called := false
+	done := make(chan struct{})
+	if err := service.WithHealthyCurrentW6Shadow(context.Background(), expectation, func(snapshot W6ShadowHealthSnapshot) error {
+		called = true
+		if snapshot.SnapshotRevision != snapshot.IndexedRevision || !snapshot.PurgeWorkerHealthy {
+			t.Fatalf("unhealthy snapshot: %+v", snapshot)
+		}
+		// Try to create lag while the capability is held. It must wait until the
+		// final-use callback releases the read lock.
+		go func() { service.mu.Lock(); service.indexedRevision--; service.mu.Unlock(); close(done) }()
+		select {
+		case <-done:
+			t.Fatal("health capability was not held through final use")
+		case <-time.After(10 * time.Millisecond):
+		}
+		return nil
+	}); err != nil || !called {
+		t.Fatalf("health capability: called=%t err=%v", called, err)
+	}
+	<-done
+	if err := service.WithHealthyCurrentW6Shadow(context.Background(), expectation, func(W6ShadowHealthSnapshot) error { return nil }); !errors.Is(err, ErrSTRIDENetworkShadowLagged) {
+		t.Fatalf("lag admitted: %v", err)
+	}
+
+	service.mu.Lock()
+	service.indexedRevision = service.revision
+	service.mu.Unlock()
+	service.w6HealthMu.Lock()
+	service.mu.Lock()
+	for _, record := range service.records {
+		personID := record.admission.Canonical.SubjectPersonID
+		entry := service.w6QualifiedProfiles[personID]
+		entry.AttestationCount++
+		service.w6QualifiedProfiles[personID] = entry
+		break
+	}
+	service.mu.Unlock()
+	service.w6HealthMu.Unlock()
+	if err := service.WithHealthyCurrentW6Shadow(context.Background(), expectation, func(W6ShadowHealthSnapshot) error { return nil }); !errors.Is(err, ErrSTRIDENetworkShadowAuthority) {
+		t.Fatalf("wrong signed attestation count admitted: %v", err)
+	}
+	service.w6HealthMu.Lock()
+	service.mu.Lock()
+	for _, record := range service.records {
+		personID := record.admission.Canonical.SubjectPersonID
+		entry := service.w6QualifiedProfiles[personID]
+		entry.AttestationCount--
+		service.w6QualifiedProfiles[personID] = entry
+		break
+	}
+	service.mu.Unlock()
+	service.w6HealthMu.Unlock()
+	service.w6HealthMu.Lock()
+	service.mu.Lock()
+	var base strideNetworkShadowRecord
+	for _, record := range service.records {
+		base = record
+		break
+	}
+	extra := strideNetworkShadowRecord{admission: cloneContract(base.admission), comparison: base.comparison}
+	extra.admission.Legacy.SubjectPersonID = "person_unqualified"
+	extra.admission.Canonical.SubjectPersonID = "person_unqualified"
+	extra.admission.Publication.SubjectPersonID = "person_unqualified"
+	extra.admission.Legacy.Controller.PrincipalID = "person_unqualified"
+	extra.admission.Canonical.Controller.PrincipalID = "person_unqualified"
+	extra.admission.Publication.Controller.PrincipalID = "person_unqualified"
+	for index := range extra.admission.Attestations {
+		extra.admission.Attestations[index].SubjectPersonID = "person_unqualified"
+	}
+	extra.comparison.SubjectPersonID = "person_unqualified"
+	if _, err := validateSTRIDENetworkShadowAdmission(extra.admission); err != nil {
+		service.mu.Unlock()
+		service.w6HealthMu.Unlock()
+		t.Fatalf("extra qualification-negative record was not otherwise valid: %v", err)
+	}
+	service.records["person_unqualified"] = extra
+	service.mu.Unlock()
+	service.w6HealthMu.Unlock()
+	if err := service.WithHealthyCurrentW6Shadow(context.Background(), expectation, func(W6ShadowHealthSnapshot) error { return nil }); !errors.Is(err, ErrSTRIDENetworkShadowAuthority) {
+		t.Fatalf("extra valid restored shadow record outside qualification manifest admitted: %v", err)
+	}
+	service.w6HealthMu.Lock()
+	service.mu.Lock()
+	delete(service.records, "person_unqualified")
+	service.mu.Unlock()
+	service.w6HealthMu.Unlock()
+	queued := STRIDENetworkShadowPurgeWork{Receipt: DerivedPurgeReceipt{Header: STRIDEContractHeader{ID: "purge_pending"}}, State: strideNetworkShadowPurgeQueued, Version: 1}
+	store.mu.Lock()
+	store.works["purge_pending"] = queued
+	store.mu.Unlock()
+	if err := service.WithHealthyCurrentW6Shadow(context.Background(), expectation, func(W6ShadowHealthSnapshot) error { return nil }); !errors.Is(err, ErrSTRIDENetworkShadowAuthority) {
+		t.Fatalf("queued purge admitted: %v", err)
+	}
+	if err := service.WithHealthyCurrentW6Shadow(context.Background(), W6ShadowHealthExpectation{OrganizationID: "org_recruiter", PolicyRevision: policy.Revision + 1}, func(W6ShadowHealthSnapshot) error { return nil }); !errors.Is(err, ErrSTRIDENetworkShadowAuthority) {
+		t.Fatalf("wrong policy admitted: %v", err)
+	}
+}
+
 type strideNetworkShadowTestSearchAuthority struct {
 	with func(STRIDENetworkShadowSearchAuthorityExpectation, func(STRIDENetworkShadowSearchAuthoritySnapshot) error) error
 }
@@ -227,7 +353,7 @@ func advanceSTRIDENetworkShadowAdmission(admission STRIDENetworkShadowAdmission,
 }
 
 func strideNetworkShadowSearch(revision int64) STRIDENetworkShadowSearchRequest {
-	return STRIDENetworkShadowSearchRequest{OrganizationID: "org_recruiter", SessionHash: strings.Repeat("a", 64), ExpectedSnapshotRevision: revision, Filters: []NetworkSearchFilter{networkFilter("problem_class", "growth")}}
+	return STRIDENetworkShadowSearchRequest{OrganizationID: "org_recruiter", SessionHash: strings.Repeat("a", 64), ActiveOrganizationSessionID: "active_session_recruiter", ExpectedSnapshotRevision: revision, Filters: []NetworkSearchFilter{networkFilter("problem_class", "growth")}}
 }
 
 func TestSTRIDENetworkShadowDefaultOffAndEligibleOnly(t *testing.T) {
@@ -272,6 +398,38 @@ func TestSTRIDENetworkShadowDefaultOffAndEligibleOnly(t *testing.T) {
 	stale.Attestations[0].Header.ContentDigest = sha256Hex([]byte("stale-ref"))
 	if _, _, err := NewSTRIDENetworkShadowService(strideNetworkShadowConfig()).Ingest(stale); !errors.Is(err, ErrSTRIDENetworkShadowInvalid) {
 		t.Fatalf("non-exact attestation admitted: %v", err)
+	}
+}
+
+func TestSTRIDENetworkShadowExactLinkIsCurrentButNeverSearchable(t *testing.T) {
+	admission := strideNetworkShadowAdmission(t, false)
+	admission.Legacy.Discoverability, admission.Canonical.Discoverability, admission.Publication.Visibility = "exact_link", "exact_link", "exact_link"
+	config := strideNetworkShadowConfig()
+	config.AuthorityResolver = strideNetworkShadowTestAuthority{resolve: func(expectation STRIDENetworkShadowAuthorityExpectation) (STRIDENetworkShadowAuthoritySnapshot, error) {
+		attestations := make([]STRIDENetworkShadowAttestationAuthority, len(expectation.Attestations))
+		for index, reference := range expectation.Attestations {
+			attestations[index] = STRIDENetworkShadowAttestationAuthority{Reference: reference, State: "active"}
+		}
+		return STRIDENetworkShadowAuthoritySnapshot{Generation: 1, SubjectPersonID: expectation.SubjectPersonID, Publication: expectation.Publication, PublicationState: "published", PublicationVisibility: "exact_link", Attestations: attestations}, nil
+	}}
+	service := NewSTRIDENetworkShadowService(config)
+	if _, _, err := service.Ingest(admission); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ := service.Snapshot()
+	results, err := service.Search(strideNetworkShadowSearch(snapshot.Revision))
+	if err != nil || len(results) != 0 {
+		t.Fatalf("exact-link profile became searchable: results=%+v err=%v", results, err)
+	}
+	called := false
+	if err := service.WithCurrentExactLinkProjection(referenceFromHeader(admission.Canonical.Header), func(result STRIDENetworkShadowSearchResult) error {
+		called = true
+		if result.Projection != referenceFromHeader(admission.Canonical.Header) || len(result.Fields) == 0 {
+			t.Fatalf("wrong exact-link copy: %+v", result)
+		}
+		return nil
+	}); err != nil || !called {
+		t.Fatalf("exact-link final copy called=%t err=%v", called, err)
 	}
 }
 

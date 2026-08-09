@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_w7_w8_deterministic_validator",
+  "observedAt": "2026-08-09T17:26:38Z",
+  "status": "deterministic_validator_verified_external_acceptance_blocked",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "01900e68a369646c9f7b5cd58ee44b648b644fd5",
+    "dirtyWorktreeCheckpoint": true,
+    "gitStatusPorcelainV1Sha256BeforeReceipt": "13531827d1ebef63722f5aa4a8edc6f83032e5821b7287e71d705a65ad0b3c92",
+    "selectedFileSha256ManifestIsAuthoritative": true,
+    "gitCommitPushDeployOrProductionMutationPerformed": false
+  },
+  "scope": {
+    "files": 8,
+    "w7": "read_only_acceptance_manifest_and_signed_evidence_validator",
+    "w8": "read_only_ordered_cohort_and_soak_manifest_validator",
+    "activationRouteAdded": false,
+    "providerOrAppleCallPerformed": false
+  },
+  "deterministicProofs": {
+    "compiledImmutableTrustRoot": true,
+    "rootSignedPolicyAndManifestBinding": true,
+    "allW7SignerRolesPairwiseUnique": true,
+    "nativeArtifactContinuityBound": true,
+    "nativeAndServerArtifactsDistinct": true,
+    "signedDependencyAndSubreceiptResolution": true,
+    "w8W7DecisionQualificationAndRollbackDependenciesResolved": true,
+    "fiveOrderedKillSwitchableCohortsValidated": true,
+    "soakHoursFiniteAndAtLeast24": true,
+    "sittingCountAtLeast10": true,
+    "missingExternalEvidenceFailsClosed": true
+  },
+  "verification": {
+    "focusedGoNormal": {
+      "command": "go test . -run '^(TestStrideE10W7|TestStrideE10W8)' -count=1",
+      "result": "PASS",
+      "packageElapsedSeconds": 0.451
+    },
+    "focusedGoRace": {
+      "command": "go test . -run '^(TestStrideE10W7|TestStrideE10W8)' -race -count=1",
+      "result": "PASS",
+      "packageElapsedSeconds": 2.435
+    },
+    "nodeSyntax": {
+      "command": "node --check for both W7/W8 preflights and tests",
+      "result": "PASS",
+      "files": 4
+    },
+    "nodePreflight": {
+      "command": "node --test scripts/e10-w7-readonly-preflight.test.mjs scripts/e10-w8-readonly-preflight.test.mjs",
+      "result": "PASS",
+      "tests": 2
+    },
+    "goVet": {
+      "command": "go vet .",
+      "result": "PASS"
+    },
+    "scopedDiffCheck": "PASS"
+  },
+  "fileSha256": {
+    "stride_e10_w7_acceptance.go": "d0894ce4640122471c5bb09691b6782328f3de57028085f804b7c1627a7f2b22",
+    "stride_e10_w7_acceptance_test.go": "b45877f97091e3425a9f10eba431514315021773698dd14de6d781a7af1979c5",
+    "stride_e10_w8_cohort.go": "11711acdabfd2834705d5b9f4e463311f06f02d7241af98dc0da7f3d516dafa3",
+    "stride_e10_w8_cohort_test.go": "f46495ba9376664771803d2330bc05f87ca9596a1d7a9a8ddc6f6d30110c2e63",
+    "scripts/e10-w7-readonly-preflight.mjs": "f354efd5976d37bfe08a30fc64188061ce2ff3c07b60fdafe809ac37e3ee83e9",
+    "scripts/e10-w7-readonly-preflight.test.mjs": "e2102a930d1fc2a59f062977c55268cd8fa0c277a8dba38649de7c93ef223871",
+    "scripts/e10-w8-readonly-preflight.mjs": "6c533a6fc93e310c5a182de92b168d4bcbf9bec84642e42af7148d2e3334f690",
+    "scripts/e10-w8-readonly-preflight.test.mjs": "734554578455d0ae3a5fda6396346ccff8097ead81febec8ea312d8baded69e6"
+  },
+  "waveStatus": {
+    "w7": "external_waiting",
+    "w8": "blocked_on_w7_and_external_acceptance"
+  },
+  "externalGatesNotSatisfied": [
+    "exact final native commit and build distributed to the intended TestFlight group",
+    "physical iPhone acceptance",
+    "physical iPad acceptance",
+    "accessibility and privacy approval",
+    "restrictive-network TURN and WebRTC drill",
+    "encrypted offsite backup restore drill",
+    "PostgreSQL application and TURN failover drills",
+    "independent release attestation",
+    "AJ W5 decision and W6 qualification receipts",
+    "five ordered cohort activation receipts",
+    "24 hour and 10 sitting soak receipt"
+  ],
+  "stopBoundary": {
+    "w7Accepted": false,
+    "w8Accepted": false,
+    "cohortActivated": false,
+    "gitCommitPushOrDeployPerformed": false,
+    "productionMutationPerformed": false,
+    "testFlightOrDeviceOperationPerformed": false
+  }
+}

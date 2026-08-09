@@ -131,8 +131,10 @@ type STRIDENetworkShadowAuthorityResolver interface {
 }
 
 type STRIDENetworkShadowSearchAuthorityExpectation struct {
-	OrganizationID string
-	SessionHash    string
+	OrganizationID              string
+	SessionHash                 string
+	ActiveOrganizationSessionID string
+	Authorities                 []STRIDENetworkShadowAuthoritySnapshot
 }
 
 type STRIDENetworkShadowSearchAuthoritySnapshot struct {
@@ -158,6 +160,11 @@ type STRIDENetworkShadowSearchAuthorityResolver interface {
 	WithCurrentSTRIDENetworkShadowSearchAuthority(context.Context, STRIDENetworkShadowSearchAuthorityExpectation, func(STRIDENetworkShadowSearchAuthoritySnapshot) error) error
 }
 
+type STRIDENetworkShadowCombinedSearchAuthorityResolver interface {
+	STRIDENetworkShadowSearchAuthorityResolver
+	STRIDENetworkShadowCombinedAuthorityValidation()
+}
+
 type STRIDENetworkShadowAdmission struct {
 	Legacy       NetworkProfileProjection
 	Canonical    NetworkProfileProjection
@@ -175,10 +182,29 @@ type STRIDENetworkShadowComparison struct {
 }
 
 type STRIDENetworkShadowSearchRequest struct {
-	OrganizationID           string
-	SessionHash              string
-	ExpectedSnapshotRevision int64
-	Filters                  []NetworkSearchFilter
+	OrganizationID              string
+	SessionHash                 string
+	ActiveOrganizationSessionID string
+	ExpectedSnapshotRevision    int64
+	Filters                     []NetworkSearchFilter
+}
+
+// STRIDENetworkShadowDisclosureRequest revalidates an already-authorized,
+// post-limit disclosure set. It deliberately contains no query or filters, so
+// a final copy cannot silently broaden or rerun the original search.
+type STRIDENetworkShadowDisclosureRequest struct {
+	OrganizationID              string
+	SessionHash                 string
+	ActiveOrganizationSessionID string
+	ExpectedSnapshotRevision    int64
+	Results                     []STRIDENetworkShadowSearchResult
+}
+
+type STRIDENetworkShadowContactAuthorityExpectation struct {
+	OrganizationID              string
+	SessionHash                 string
+	ActiveOrganizationSessionID string
+	Grant                       STRIDEReference
 }
 
 type STRIDENetworkShadowSearchResult struct {
@@ -231,22 +257,211 @@ type strideNetworkShadowRecord struct {
 }
 
 type STRIDENetworkShadowService struct {
-	mu                   sync.RWMutex
-	config               STRIDENetworkShadowConfig
-	revision             int64
-	indexedRevision      int64
-	records              map[string]strideNetworkShadowRecord
-	index                map[string]map[string]bool
-	publicationHighWater map[string]STRIDEReference
-	attestationHighWater map[string]STRIDEReference
-	publicationFence     map[string]strideNetworkShadowFencedAuthority
-	attestationFence     map[string]strideNetworkShadowFencedAuthority
-	purgeHighWater       map[string]int64
-	purges               map[string]DerivedPurgeReceipt
+	mu                     sync.RWMutex
+	w6HealthMu             sync.RWMutex
+	w6HealthPolicyRevision int64
+	w6QualifiedProfiles    map[string]W6ConsentedProfileQualification
+	config                 STRIDENetworkShadowConfig
+	revision               int64
+	indexedRevision        int64
+	records                map[string]strideNetworkShadowRecord
+	index                  map[string]map[string]bool
+	publicationHighWater   map[string]STRIDEReference
+	attestationHighWater   map[string]STRIDEReference
+	publicationFence       map[string]strideNetworkShadowFencedAuthority
+	attestationFence       map[string]strideNetworkShadowFencedAuthority
+	purgeHighWater         map[string]int64
+	purges                 map[string]DerivedPurgeReceipt
+}
+
+// BindCurrentW6Policy advances the health capability only from an exact
+// managed-MAC policy authority. Construction leaves the revision at zero.
+func (s *STRIDENetworkShadowService) BindCurrentW6Policy(ctx context.Context, policy *W6NetworkPolicyAuthority, qualification *W6NetworkQualificationAuthority, revision int64, cohortID string, at time.Time) error {
+	if s == nil || policy == nil || qualification == nil {
+		return ErrSTRIDENetworkShadowAuthority
+	}
+	return policy.WithCurrentW6Policy(ctx, revision, cohortID, at, func(current W6NetworkPolicyRevision) error {
+		return qualification.WithCurrentW6Qualification(ctx, current, cohortID, at, func(receipt W6NetworkQualificationReceipt) error {
+			manifest := make(map[string]W6ConsentedProfileQualification, len(receipt.Profiles))
+			for _, profile := range receipt.Profiles {
+				manifest[profile.PersonID] = cloneContract(profile)
+			}
+			s.w6HealthMu.Lock()
+			defer s.w6HealthMu.Unlock()
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			if current.Revision <= s.w6HealthPolicyRevision {
+				return ErrSTRIDENetworkShadowConflict
+			}
+			s.w6HealthPolicyRevision = current.Revision
+			s.w6QualifiedProfiles = manifest
+			return nil
+		})
+	})
 }
 
 func NewSTRIDENetworkShadowService(config STRIDENetworkShadowConfig) *STRIDENetworkShadowService {
-	return &STRIDENetworkShadowService{config: config, records: map[string]strideNetworkShadowRecord{}, index: map[string]map[string]bool{}, publicationHighWater: map[string]STRIDEReference{}, attestationHighWater: map[string]STRIDEReference{}, publicationFence: map[string]strideNetworkShadowFencedAuthority{}, attestationFence: map[string]strideNetworkShadowFencedAuthority{}, purgeHighWater: map[string]int64{}, purges: map[string]DerivedPurgeReceipt{}}
+	return &STRIDENetworkShadowService{config: config, records: map[string]strideNetworkShadowRecord{}, index: map[string]map[string]bool{}, w6QualifiedProfiles: map[string]W6ConsentedProfileQualification{}, publicationHighWater: map[string]STRIDEReference{}, attestationHighWater: map[string]STRIDEReference{}, publicationFence: map[string]strideNetworkShadowFencedAuthority{}, attestationFence: map[string]strideNetworkShadowFencedAuthority{}, purgeHighWater: map[string]int64{}, purges: map[string]DerivedPurgeReceipt{}}
+}
+
+// WithHealthyCurrentW6Shadow is the W6 search capability. It holds the shadow
+// generation/currentness read lock through final result use and refuses lag,
+// divergence, an unconfigured purge worker, or any unfinished/failed durable
+// purge work. A zero policy revision never authorizes.
+func (s *STRIDENetworkShadowService) WithHealthyCurrentW6Shadow(ctx context.Context, expectation W6ShadowHealthExpectation, use func(W6ShadowHealthSnapshot) error) error {
+	if s == nil || !s.config.Enabled || use == nil || !strideIdentifier(expectation.OrganizationID) || expectation.PolicyRevision < 1 ||
+		expectation.OrganizationID != s.config.SearchOrganizationID || expectation.PolicyRevision != s.w6HealthPolicyRevision || !s.purgeWorkerConfigured() {
+		return ErrSTRIDENetworkShadowAuthority
+	}
+	s.w6HealthMu.RLock()
+	defer s.w6HealthMu.RUnlock()
+	work, err := s.config.PurgeReceipts.ListSTRIDENetworkShadowPurgeWork(ctx)
+	if err != nil {
+		return ErrSTRIDENetworkShadowAuthority
+	}
+	for _, item := range work {
+		if item.State != strideNetworkShadowPurgeCompleted {
+			return ErrSTRIDENetworkShadowAuthority
+		}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.revision < 1 || s.indexedRevision != s.revision {
+		return ErrSTRIDENetworkShadowLagged
+	}
+	if len(s.records) == 0 || len(s.w6QualifiedProfiles) == 0 {
+		return ErrSTRIDENetworkShadowAuthority
+	}
+	for _, record := range s.records {
+		if !record.comparison.Equivalent {
+			return ErrSTRIDENetworkShadowDiverged
+		}
+		qualified, ok := s.w6QualifiedProfiles[record.admission.Canonical.SubjectPersonID]
+		if !ok || qualified.PersonID != record.admission.Canonical.SubjectPersonID || qualified.Profile != referenceFromHeader(record.admission.Canonical.Header) || qualified.Publication != referenceFromHeader(record.admission.Publication.Header) ||
+			qualified.AttestationCount != len(record.admission.Attestations) || qualified.AttestationCount != len(record.admission.Publication.Attestations) {
+			return ErrSTRIDENetworkShadowAuthority
+		}
+	}
+	var purgeGeneration int64
+	var lastCompleted time.Time
+	for _, receipt := range s.purges {
+		if receipt.PurgeGeneration > purgeGeneration {
+			purgeGeneration = receipt.PurgeGeneration
+		}
+		if receipt.State == "completed" && receipt.RecordedAt.After(lastCompleted) {
+			lastCompleted = receipt.RecordedAt
+		}
+	}
+	snapshot := W6ShadowHealthSnapshot{OrganizationID: expectation.OrganizationID, PolicyRevision: expectation.PolicyRevision, Generation: uint64(s.revision), SnapshotRevision: s.revision, IndexedRevision: s.indexedRevision, PurgeGeneration: purgeGeneration, LastCompletedPurge: lastCompleted, PurgeWorkerHealthy: true}
+	if !snapshot.valid(expectation) {
+		return ErrSTRIDENetworkShadowAuthority
+	}
+	return use(snapshot)
+}
+
+// WithCurrentSearchDisclosures copies only the exact post-limit projections
+// recorded by the search receipt. Current session/grant and publication/
+// attestation capabilities are held through the caller's final use.
+func (s *STRIDENetworkShadowService) WithCurrentSearchDisclosures(ctx context.Context, request STRIDENetworkShadowDisclosureRequest, use func([]STRIDENetworkShadowSearchResult) error) error {
+	if s == nil || !s.config.Enabled || ctx == nil || use == nil || request.OrganizationID != s.config.SearchOrganizationID ||
+		!strideIdentifier(request.OrganizationID) || !validStrideE10SessionHash(request.SessionHash) || !strideIdentifier(request.ActiveOrganizationSessionID) || request.ExpectedSnapshotRevision < 1 || len(request.Results) == 0 || s.config.AuthorityResolver == nil || s.config.SearchAuthority == nil {
+		return ErrSTRIDENetworkShadowInvalid
+	}
+	s.mu.RLock()
+	if request.ExpectedSnapshotRevision != s.revision || s.indexedRevision != s.revision {
+		s.mu.RUnlock()
+		return ErrSTRIDENetworkShadowLagged
+	}
+	records := make([]strideNetworkShadowRecord, 0, len(request.Results))
+	for _, wanted := range request.Results {
+		record, ok := s.recordsByProjectionLocked(wanted.Projection)
+		if !ok || !record.comparison.Equivalent || record.admission.Canonical.State != "published" || record.admission.Canonical.Discoverability != "signed_in_network" || !sameNetworkPublishedFields(networkVisiblePublishedFields(record.admission.Canonical.Fields), wanted.Fields) {
+			s.mu.RUnlock()
+			return ErrSTRIDENetworkShadowAuthority
+		}
+		records = append(records, strideNetworkShadowRecord{admission: cloneContract(record.admission), comparison: record.comparison})
+	}
+	s.mu.RUnlock()
+	snapshots := make([]STRIDENetworkShadowAuthoritySnapshot, 0, len(records))
+	for _, record := range records {
+		expected := shadowAuthorityExpectation(record.admission)
+		current, err := s.config.AuthorityResolver.ResolveCurrentSTRIDENetworkShadowAuthority(expected)
+		if err != nil {
+			return ErrSTRIDENetworkShadowAuthority
+		}
+		if !validCurrentShadowAuthority(expected, current) {
+			if validTerminalShadowAuthority(expected, current) {
+				_, _ = s.fenceResolvedAuthority(record.admission.Canonical.SubjectPersonID, current.ResolvedTerminalTarget, "revalidation", current.ResolvedAt.UTC())
+			}
+			return ErrSTRIDENetworkShadowAuthority
+		}
+		snapshots = append(snapshots, current)
+	}
+	expectation := STRIDENetworkShadowSearchAuthorityExpectation{OrganizationID: request.OrganizationID, SessionHash: request.SessionHash, ActiveOrganizationSessionID: request.ActiveOrganizationSessionID, Authorities: snapshots}
+	err := s.config.SearchAuthority.WithCurrentSTRIDENetworkShadowSearchAuthority(ctx, expectation, func(search STRIDENetworkShadowSearchAuthoritySnapshot) error {
+		if !validSTRIDENetworkShadowSearchAuthority(expectation, search) {
+			return ErrSTRIDENetworkShadowAuthority
+		}
+		finalUse := func() error {
+			s.mu.RLock()
+			defer s.mu.RUnlock()
+			if request.ExpectedSnapshotRevision != s.revision || s.indexedRevision != s.revision {
+				return ErrSTRIDENetworkShadowLagged
+			}
+			copied := make([]STRIDENetworkShadowSearchResult, 0, len(request.Results))
+			for _, wanted := range request.Results {
+				record, ok := s.recordsByProjectionLocked(wanted.Projection)
+				if !ok || !record.comparison.Equivalent || record.admission.Canonical.State != "published" || record.admission.Canonical.Discoverability != "signed_in_network" {
+					return ErrSTRIDENetworkShadowAuthority
+				}
+				fields := networkVisiblePublishedFields(record.admission.Canonical.Fields)
+				if !sameNetworkPublishedFields(fields, wanted.Fields) {
+					return ErrSTRIDENetworkShadowAuthority
+				}
+				copied = append(copied, STRIDENetworkShadowSearchResult{Projection: wanted.Projection, Fields: fields})
+			}
+			return use(copied)
+		}
+		if _, combined := s.config.SearchAuthority.(STRIDENetworkShadowCombinedSearchAuthorityResolver); combined {
+			return finalUse()
+		}
+		return s.config.AuthorityResolver.WithCurrentSTRIDENetworkShadowAuthorities(snapshots, finalUse)
+	})
+	if err != nil {
+		byPerson := make(map[string]strideNetworkShadowRecord, len(records))
+		for _, record := range records {
+			byPerson[record.admission.Canonical.SubjectPersonID] = record
+		}
+		s.reconcileFailedSearchAuthorities(byPerson)
+		if !errors.Is(err, ErrSTRIDENetworkShadowLagged) && !errors.Is(err, ErrSTRIDENetworkShadowDiverged) {
+			return ErrSTRIDENetworkShadowAuthority
+		}
+	}
+	return err
+}
+
+// WithCurrentContactAuthority holds the exact session, membership and grant
+// capability through the contact writer callback.
+func (s *STRIDENetworkShadowService) WithCurrentContactAuthority(ctx context.Context, expectation STRIDENetworkShadowContactAuthorityExpectation, use func() error) error {
+	if s == nil || ctx == nil || use == nil || !strideIdentifier(expectation.OrganizationID) || !validStrideE10SessionHash(expectation.SessionHash) || !strideIdentifier(expectation.ActiveOrganizationSessionID) || expectation.Grant.Validate() != nil || s.config.SearchAuthority == nil {
+		return ErrSTRIDENetworkShadowInvalid
+	}
+	searchExpectation := STRIDENetworkShadowSearchAuthorityExpectation{OrganizationID: expectation.OrganizationID, SessionHash: expectation.SessionHash, ActiveOrganizationSessionID: expectation.ActiveOrganizationSessionID}
+	return s.config.SearchAuthority.WithCurrentSTRIDENetworkShadowSearchAuthority(ctx, searchExpectation, func(snapshot STRIDENetworkShadowSearchAuthoritySnapshot) error {
+		if !validSTRIDENetworkShadowSearchAuthority(searchExpectation, snapshot) || snapshot.ActiveOrganizationSessionID != expectation.ActiveOrganizationSessionID || snapshot.Grant != expectation.Grant {
+			return ErrSTRIDENetworkShadowAuthority
+		}
+		return use()
+	})
+}
+
+func (s *STRIDENetworkShadowService) recordsByProjectionLocked(reference STRIDEReference) (strideNetworkShadowRecord, bool) {
+	for _, record := range s.records {
+		if referenceFromHeader(record.admission.Canonical.Header) == reference {
+			return record, true
+		}
+	}
+	return strideNetworkShadowRecord{}, false
 }
 
 func (s *STRIDENetworkShadowService) purgeWorkerConfigured() bool {
@@ -297,7 +512,7 @@ func (s *STRIDENetworkShadowService) Ingest(admission STRIDENetworkShadowAdmissi
 
 func validateSTRIDENetworkShadowAdmission(admission STRIDENetworkShadowAdmission) (STRIDENetworkShadowComparison, error) {
 	legacy, canonical, publication := admission.Legacy, admission.Canonical, admission.Publication
-	if legacy.Validate() != nil || canonical.Validate() != nil || publication.Validate() != nil || legacy.State != "published" || canonical.State != "published" || legacy.Discoverability != "signed_in_network" || canonical.Discoverability != "signed_in_network" || publication.State != "published" || publication.Visibility != "signed_in_network" || legacy.SubjectPersonID != canonical.SubjectPersonID || canonical.SubjectPersonID != publication.SubjectPersonID {
+	if legacy.Validate() != nil || canonical.Validate() != nil || publication.Validate() != nil || legacy.State != "published" || canonical.State != "published" || !oneOf(legacy.Discoverability, "signed_in_network", "exact_link") || canonical.Discoverability != legacy.Discoverability || publication.State != "published" || !oneOf(publication.Visibility, "signed_in_network", "exact_link") || legacy.Discoverability != publication.Visibility || legacy.SubjectPersonID != canonical.SubjectPersonID || canonical.SubjectPersonID != publication.SubjectPersonID {
 		return STRIDENetworkShadowComparison{}, ErrSTRIDENetworkShadowInvalid
 	}
 	publicationRef := referenceFromHeader(publication.Header)
@@ -329,6 +544,42 @@ func validateSTRIDENetworkShadowAdmission(admission STRIDENetworkShadowAdmission
 	legacyDigest := shadowVisibleProjectionDigest(legacy)
 	canonicalDigest := shadowVisibleProjectionDigest(canonical)
 	return STRIDENetworkShadowComparison{SubjectPersonID: canonical.SubjectPersonID, Legacy: referenceFromHeader(legacy.Header), Canonical: referenceFromHeader(canonical.Header), LegacyDigest: legacyDigest, CanonicalDigest: canonicalDigest, Equivalent: legacyDigest == canonicalDigest}, nil
+}
+
+// WithCurrentExactLinkProjection admits one exact-link target without making
+// it searchable. Publication and attestation authority remain held through the
+// final copied disclosure.
+func (s *STRIDENetworkShadowService) WithCurrentExactLinkProjection(reference STRIDEReference, use func(STRIDENetworkShadowSearchResult) error) error {
+	if s == nil || !s.config.Enabled || reference.Validate() != nil || reference.ContractType != STRIDEContractNetworkProfileProjection || use == nil || s.config.AuthorityResolver == nil {
+		return ErrSTRIDENetworkShadowInvalid
+	}
+	s.mu.RLock()
+	var record strideNetworkShadowRecord
+	found := false
+	for _, candidate := range s.records {
+		if referenceFromHeader(candidate.admission.Canonical.Header) == reference {
+			record, found = candidate, true
+			break
+		}
+	}
+	s.mu.RUnlock()
+	if !found || !record.comparison.Equivalent || record.admission.Canonical.Discoverability != "exact_link" {
+		return ErrSTRIDENetworkShadowAuthority
+	}
+	expectation := shadowAuthorityExpectation(record.admission)
+	snapshot, err := s.config.AuthorityResolver.ResolveCurrentSTRIDENetworkShadowAuthority(expectation)
+	if err != nil || !validCurrentShadowAuthority(expectation, snapshot) {
+		return ErrSTRIDENetworkShadowAuthority
+	}
+	return s.config.AuthorityResolver.WithCurrentSTRIDENetworkShadowAuthorities([]STRIDENetworkShadowAuthoritySnapshot{snapshot}, func() error {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		current, ok := s.records[record.admission.Canonical.SubjectPersonID]
+		if !ok || referenceFromHeader(current.admission.Canonical.Header) != reference || !current.comparison.Equivalent || current.admission.Canonical.Discoverability != "exact_link" {
+			return ErrSTRIDENetworkShadowAuthority
+		}
+		return use(STRIDENetworkShadowSearchResult{Projection: reference, Fields: networkVisiblePublishedFields(current.admission.Canonical.Fields)})
+	})
 }
 
 func shadowProjectionEvidenceEligible(profile NetworkProfileProjection, publication STRIDEReference, attestations map[string]ContributionAttestation) bool {
@@ -421,54 +672,161 @@ func (s *STRIDENetworkShadowService) updateHighWatersLocked(admission STRIDENetw
 }
 
 func (s *STRIDENetworkShadowService) Search(request STRIDENetworkShadowSearchRequest) ([]STRIDENetworkShadowSearchResult, error) {
+	var results []STRIDENetworkShadowSearchResult
+	err := s.WithCurrentSearchAdmission(context.Background(), request, func(current []STRIDENetworkShadowSearchResult) error {
+		results = cloneContract(current)
+		return nil
+	})
+	return results, err
+}
+
+// WithCurrentSearchAdmission holds the exact session, active-session,
+// membership and grant capability through policy admission and receipt use.
+func (s *STRIDENetworkShadowService) WithCurrentSearchAdmission(ctx context.Context, request STRIDENetworkShadowSearchRequest, use func([]STRIDENetworkShadowSearchResult) error) error {
 	if s == nil || !s.config.Enabled {
-		return nil, ErrSTRIDENetworkShadowDisabled
+		return ErrSTRIDENetworkShadowDisabled
 	}
 	if request.OrganizationID != s.config.SearchOrganizationID {
-		return nil, ErrSTRIDENetworkShadowCrossTenant
+		return ErrSTRIDENetworkShadowCrossTenant
 	}
-	if !strideIdentifier(request.OrganizationID) || !validStrideE10SessionHash(request.SessionHash) || request.ExpectedSnapshotRevision < 1 || len(request.Filters) == 0 || s.config.Now == nil {
-		return nil, ErrSTRIDENetworkShadowInvalid
+	if ctx == nil || use == nil || !strideIdentifier(request.OrganizationID) || !validStrideE10SessionHash(request.SessionHash) || !strideIdentifier(request.ActiveOrganizationSessionID) || request.ExpectedSnapshotRevision < 1 || len(request.Filters) == 0 || s.config.Now == nil {
+		return ErrSTRIDENetworkShadowInvalid
 	}
 	at := s.config.Now().UTC()
 	if at.IsZero() {
-		return nil, ErrSTRIDENetworkShadowInvalid
+		return ErrSTRIDENetworkShadowInvalid
 	}
 	for _, filter := range request.Filters {
 		if filter.Validate() != nil {
-			return nil, ErrSTRIDENetworkShadowInvalid
+			return ErrSTRIDENetworkShadowInvalid
 		}
 	}
 	if s.config.AuthorityResolver == nil || s.config.SearchAuthority == nil {
-		return nil, ErrSTRIDENetworkShadowAuthority
+		return ErrSTRIDENetworkShadowAuthority
 	}
-	var results []STRIDENetworkShadowSearchResult
-	var searchErr error
-	expectation := STRIDENetworkShadowSearchAuthorityExpectation{OrganizationID: request.OrganizationID, SessionHash: request.SessionHash}
-	authorityErr := s.config.SearchAuthority.WithCurrentSTRIDENetworkShadowSearchAuthority(context.Background(), expectation, func(snapshot STRIDENetworkShadowSearchAuthoritySnapshot) error {
+	records, authorities, err := s.prepareCurrentSearchRecords(request.ExpectedSnapshotRevision)
+	if err != nil {
+		return err
+	}
+	expectation := STRIDENetworkShadowSearchAuthorityExpectation{OrganizationID: request.OrganizationID, SessionHash: request.SessionHash, ActiveOrganizationSessionID: request.ActiveOrganizationSessionID, Authorities: authorities}
+	err = s.config.SearchAuthority.WithCurrentSTRIDENetworkShadowSearchAuthority(ctx, expectation, func(snapshot STRIDENetworkShadowSearchAuthoritySnapshot) error {
 		if !validSTRIDENetworkShadowSearchAuthority(expectation, snapshot) {
-			searchErr = ErrSTRIDENetworkShadowAuthority
-			return searchErr
+			return ErrSTRIDENetworkShadowAuthority
 		}
-		results, searchErr = s.searchWithCurrentAuthority(request, at)
-		return searchErr
+		finalUse := func() error {
+			s.mu.RLock()
+			defer s.mu.RUnlock()
+			if request.ExpectedSnapshotRevision != s.revision || s.indexedRevision != s.revision {
+				return ErrSTRIDENetworkShadowLagged
+			}
+			results := s.searchRecordsLocked(records, request.Filters, at)
+			return use(results)
+		}
+		if _, combined := s.config.SearchAuthority.(STRIDENetworkShadowCombinedSearchAuthorityResolver); combined {
+			return finalUse()
+		}
+		return s.config.AuthorityResolver.WithCurrentSTRIDENetworkShadowAuthorities(authorities, finalUse)
 	})
-	if authorityErr != nil {
-		if searchErr != nil {
-			return nil, searchErr
+	if err != nil {
+		s.reconcileFailedSearchAuthorities(records)
+		if !errors.Is(err, ErrSTRIDENetworkShadowLagged) && !errors.Is(err, ErrSTRIDENetworkShadowDiverged) {
+			return ErrSTRIDENetworkShadowAuthority
 		}
-		return nil, ErrSTRIDENetworkShadowAuthority
 	}
-	return results, nil
+	return err
 }
 
 func validSTRIDENetworkShadowSearchAuthority(expectation STRIDENetworkShadowSearchAuthorityExpectation, snapshot STRIDENetworkShadowSearchAuthoritySnapshot) bool {
-	return snapshot.Generation > 0 && snapshot.SessionHash == expectation.SessionHash && snapshot.OrganizationID == expectation.OrganizationID &&
+	return snapshot.Generation > 0 && snapshot.SessionHash == expectation.SessionHash && snapshot.OrganizationID == expectation.OrganizationID && snapshot.ActiveOrganizationSessionID == expectation.ActiveOrganizationSessionID &&
 		strideIdentifier(snapshot.PersonID) && strideIdentifier(snapshot.MembershipID) && snapshot.MembershipRevision > 0 &&
 		strideIdentifier(snapshot.ActiveOrganizationSessionID) && snapshot.ActiveOrganizationSessionRev > 0 && snapshot.Grant.Validate() == nil &&
 		snapshot.Grant.ContractType == STRIDEContractTalentSearchGrant && snapshot.GrantState == "active" &&
 		snapshot.GrantOrganizationID == snapshot.OrganizationID && snapshot.GrantSearcherPersonID == snapshot.PersonID &&
 		snapshot.GrantMembershipID == snapshot.MembershipID && snapshot.GrantMembershipRevision == snapshot.MembershipRevision
+}
+
+func (s *STRIDENetworkShadowService) prepareCurrentSearchRecords(expectedRevision int64) (map[string]strideNetworkShadowRecord, []STRIDENetworkShadowAuthoritySnapshot, error) {
+	s.mu.RLock()
+	if expectedRevision != s.revision || s.indexedRevision != s.revision {
+		s.mu.RUnlock()
+		return nil, nil, ErrSTRIDENetworkShadowLagged
+	}
+	records := make(map[string]strideNetworkShadowRecord, len(s.records))
+	for personID, record := range s.records {
+		if !record.comparison.Equivalent {
+			s.mu.RUnlock()
+			return nil, nil, ErrSTRIDENetworkShadowDiverged
+		}
+		records[personID] = strideNetworkShadowRecord{admission: cloneContract(record.admission), comparison: record.comparison}
+	}
+	s.mu.RUnlock()
+	people := make([]string, 0, len(records))
+	for personID := range records {
+		people = append(people, personID)
+	}
+	sort.Strings(people)
+	authorities := make([]STRIDENetworkShadowAuthoritySnapshot, 0, len(people))
+	for _, personID := range people {
+		expected := shadowAuthorityExpectation(records[personID].admission)
+		current, err := s.config.AuthorityResolver.ResolveCurrentSTRIDENetworkShadowAuthority(expected)
+		if err != nil {
+			return nil, nil, ErrSTRIDENetworkShadowAuthority
+		}
+		if !validCurrentShadowAuthority(expected, current) {
+			if validTerminalShadowAuthority(expected, current) {
+				_, _ = s.fenceResolvedAuthority(personID, current.ResolvedTerminalTarget, "revalidation", current.ResolvedAt.UTC())
+			}
+			return nil, nil, ErrSTRIDENetworkShadowAuthority
+		}
+		authorities = append(authorities, current)
+	}
+	return records, authorities, nil
+}
+
+func (s *STRIDENetworkShadowService) reconcileFailedSearchAuthorities(records map[string]strideNetworkShadowRecord) {
+	for personID, record := range records {
+		expected := shadowAuthorityExpectation(record.admission)
+		current, err := s.config.AuthorityResolver.ResolveCurrentSTRIDENetworkShadowAuthority(expected)
+		if err != nil || validCurrentShadowAuthority(expected, current) {
+			continue
+		}
+		if validTerminalShadowAuthority(expected, current) {
+			_, _ = s.fenceResolvedAuthority(personID, current.ResolvedTerminalTarget, "revalidation", current.ResolvedAt.UTC())
+		}
+	}
+}
+
+func (s *STRIDENetworkShadowService) searchRecordsLocked(records map[string]strideNetworkShadowRecord, filters []NetworkSearchFilter, at time.Time) []STRIDENetworkShadowSearchResult {
+	people := make([]string, 0, len(records))
+	for personID, record := range records {
+		if record.admission.Canonical.Discoverability != "signed_in_network" || record.admission.Canonical.State != "published" {
+			continue
+		}
+		matched := true
+		for _, filter := range filters {
+			found := false
+			for _, field := range networkVisiblePublishedFields(record.admission.Canonical.Fields) {
+				if networkFieldMatchesFilter(field, record.admission.Canonical, filter, at) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			people = append(people, personID)
+		}
+	}
+	sort.Strings(people)
+	results := make([]STRIDENetworkShadowSearchResult, 0, len(people))
+	for _, personID := range people {
+		profile := records[personID].admission.Canonical
+		results = append(results, STRIDENetworkShadowSearchResult{Projection: referenceFromHeader(profile.Header), Fields: networkVisiblePublishedFields(profile.Fields)})
+	}
+	return results
 }
 
 func (s *STRIDENetworkShadowService) searchWithCurrentAuthority(request STRIDENetworkShadowSearchRequest, at time.Time) ([]STRIDENetworkShadowSearchResult, error) {
@@ -593,7 +951,7 @@ func shadowAuthorityExpectation(admission STRIDENetworkShadowAdmission) STRIDENe
 }
 
 func validCurrentShadowAuthority(expectation STRIDENetworkShadowAuthorityExpectation, snapshot STRIDENetworkShadowAuthoritySnapshot) bool {
-	if snapshot.Generation == 0 || snapshot.SubjectPersonID != expectation.SubjectPersonID || snapshot.Publication != expectation.Publication || snapshot.PublicationState != "published" || snapshot.PublicationVisibility != "signed_in_network" || len(snapshot.Attestations) != len(expectation.Attestations) {
+	if snapshot.Generation == 0 || snapshot.SubjectPersonID != expectation.SubjectPersonID || snapshot.Publication != expectation.Publication || snapshot.PublicationState != "published" || !oneOf(snapshot.PublicationVisibility, "signed_in_network", "exact_link") || len(snapshot.Attestations) != len(expectation.Attestations) {
 		return false
 	}
 	actual := append([]STRIDENetworkShadowAttestationAuthority(nil), snapshot.Attestations...)
@@ -635,6 +993,9 @@ func cloneShadowSet(value map[string]bool) map[string]bool {
 func (s *STRIDENetworkShadowService) rebuildIndexLocked() {
 	s.index = map[string]map[string]bool{}
 	for personID, record := range s.records {
+		if record.admission.Canonical.Discoverability != "signed_in_network" {
+			continue
+		}
 		for _, field := range networkVisiblePublishedFields(record.admission.Canonical.Fields) {
 			for _, key := range networkFieldStaticIndexKeys(field) {
 				if s.index[key] == nil {
@@ -659,6 +1020,8 @@ func (s *STRIDENetworkShadowService) fenceResolvedAuthority(subjectPersonID stri
 	if !s.purgeWorkerConfigured() {
 		return DerivedPurgeReceipt{}, ErrSTRIDENetworkShadowInvalid
 	}
+	s.w6HealthMu.Lock()
+	defer s.w6HealthMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record, ok := s.records[subjectPersonID]
@@ -697,6 +1060,8 @@ func (s *STRIDENetworkShadowService) ApplyPurge(receipt DerivedPurgeReceipt) (bo
 	if !s.purgeWorkerConfigured() {
 		return false, ErrSTRIDENetworkShadowInvalid
 	}
+	s.w6HealthMu.Lock()
+	defer s.w6HealthMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if receipt.PurgeGeneration == s.purgeHighWater[receipt.SubjectPersonID] {
@@ -809,6 +1174,8 @@ func (s *STRIDENetworkShadowService) ProcessPurgeWork(ctx context.Context, now t
 	if ctx == nil || now.IsZero() || !s.purgeWorkerConfigured() {
 		return STRIDENetworkShadowPurgeWork{}, false, ErrSTRIDENetworkShadowInvalid
 	}
+	s.w6HealthMu.Lock()
+	defer s.w6HealthMu.Unlock()
 	works, err := s.config.PurgeReceipts.ListSTRIDENetworkShadowPurgeWork(ctx)
 	if err != nil {
 		return STRIDENetworkShadowPurgeWork{}, false, err

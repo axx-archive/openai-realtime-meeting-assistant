@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_w5_private_mymind_custody",
+  "observedAt": "2026-08-09T17:31:21Z",
+  "status": "deterministic_verified_external_custody_waiting",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "01900e68a369646c9f7b5cd58ee44b648b644fd5",
+    "dirtyWorktreeCheckpoint": true,
+    "selectedFileSha256ManifestIsAuthoritative": true,
+    "gitStatusPorcelainV1Sha256BeforeReceipt": "35017e13b03f715eb93a813064130b77da68a8f931bf7edf2440717fc416c9e9",
+    "trackedBinaryDiffSha256BeforeReceipt": "8012ecbfd2db8b49fd41ef633fab97a8ea54606b983993aa269e09716edbab25",
+    "untrackedPathListSha256BeforeReceipt": "871d90d558c6a887dae5ae9843c479b6b173f0f2d57b06c33b2e6bc91ae73091",
+    "gitCommitPushDeployOrProductionMutationPerformed": false
+  },
+  "scope": {
+    "featureSwitch": "person_mymind_context",
+    "featureSwitchDefaultFalse": true,
+    "privatePerPersonAEADEnvelopes": true,
+    "managedCustodyStateAndDestructionKeyInterfaces": true,
+    "externalMonotonicHighWaterRequired": true,
+    "currentOrganizationMembershipAndSessionAuthorityHeldThroughFinalEffect": true,
+    "operations": ["inspect", "put", "correct", "forget", "export", "rotate", "delete_person"],
+    "webAndNativePrivateSettingsSurfaces": true,
+    "automaticImport": false,
+    "sharedOrCitableDisclosure": false,
+    "profilesOrganizationsWorkRecordOrNetworkDependOnMyMind": false,
+    "migrationVersions": [10, 17],
+    "canonicalMigrationCount": 17,
+    "drRegistryIncludesPrivateCustodyTables": 6
+  },
+  "durabilityAndPrivacyProofs": {
+    "ciphertextOnlyCanonicalRows": true,
+    "nonceReuseRejected": true,
+    "personAndSourceKeySeparation": true,
+    "sourceAndPersonCryptoErasure": true,
+    "journalBoundDestructionOperationID": true,
+    "lostDestructionResponseReplaysSameVerifiedReceipt": true,
+    "bootstrapResumesSourceAndPersonDeletionJournals": true,
+    "statePublicationCrashRecovery": true,
+    "managedStateMACRotationAndRetiredKeyRecovery": true,
+    "externalHighWaterAntiRollback": true,
+    "wrongPersonWrongKeyTamperAndRestoreDenied": true,
+    "lowEntropyBodiesAbsentFromRecoverableOperationFingerprints": true,
+    "webAndNativeClientPersistenceOfPrivateBodies": false
+  },
+  "verification": {
+    "focusedNormal": {
+      "result": "PASS",
+      "command": "go test . -run '^(TestMyMindPrivateCustody|TestPersonMyMind|TestResolveMyMindPrivateAuthority|TestStrideE10W5)' -count=1",
+      "packageElapsedSeconds": 1.709
+    },
+    "focusedRace": {
+      "result": "PASS",
+      "command": "go test -race . -run '^(TestMyMindPrivateCustody|TestPersonMyMind|TestResolveMyMindPrivateAuthority|TestStrideE10W5)' -count=1",
+      "packageElapsedSeconds": 3.302
+    },
+    "disposablePostgres": {
+      "result": "PASS",
+      "command": "go test . -run '^(TestPostgresMyMindPrivateCustodyMigrationIsCiphertextOnlyAndDefaultOff|TestPostgresPersonMyMindMigrationIsDefaultOffAndRejectsWidening|TestPostgresCanonicalMigrationsAreIdempotentAndRefuseDrift)$' -count=1",
+      "skipped": false,
+      "packageElapsedSeconds": 2.644
+    },
+    "drRegistryParity": {
+      "result": "PASS",
+      "command": "go test ./internal/dr -run '^TestCanonicalAndTenantTableRegistriesMatchMigrations$' -count=1",
+      "packageElapsedSeconds": 0.189
+    },
+    "nativePersonalContext": {
+      "result": "PASS",
+      "command": "node --import tsx --test src/__tests__/personalContext.test.ts",
+      "workingDirectory": "mobile",
+      "tests": 3
+    },
+    "nativeTypecheck": {
+      "result": "PASS",
+      "command": "npm run typecheck",
+      "workingDirectory": "mobile"
+    },
+    "goVetAll": {
+      "result": "PASS",
+      "command": "go vet ./..."
+    },
+    "diffCheck": "PASS"
+  },
+  "externalBoundary": {
+    "productionRuntimeInstalled": false,
+    "productionCustodyKeysInstalled": false,
+    "productionStateMACKeysInstalled": false,
+    "productionMonotonicHighWaterInstalled": false,
+    "productionDestructionVerifierInstalled": false,
+    "namedExternalCustodyOwnersApproved": false,
+    "privacySecurityConsentApprovalCompleted": false,
+    "liveMyMindCohortActivated": false,
+    "productionDataImported": false,
+    "gitCommitPushDeployPerformed": false,
+    "remainingState": "external_custody_consent_and_activation_waiting"
+  },
+  "fileSha256": {
+    "stride_person_mymind.go": "fe9e6a72d6370fdc73068f43940d71e687e3a16873753ee3e9e416518e81b828",
+    "stride_person_mymind_test.go": "c390db36b814bab338ea4c316986085ae87cfbed8e2a2aa71dbace391b82f222",
+    "stride_mymind_custody.go": "6a67f645290af7bd7734cd44bff4fbe0da189cf6f646ffcea7286c6bead58836",
+    "stride_mymind_custody_test.go": "7adea1ca2d1bba74a87ec3d7747f1e351acd22833d1af9cc323e640212b7d582",
+    "stride_e10_w5_http.go": "a698b2a66c03287f44f620c14356649375d7c6f71447bf1aa2f33098bc927c6c",
+    "stride_e10_w5_http_test.go": "eefb7d14f453cf57e5f13dd122e629d63f10ac2950da1c9244ab247407603efb",
+    "stride_e10_w5_runtime.go": "059dcf2502e5516ccd1a1149500123029d904508b2c308ea61daf087308f3ae3",
+    "migrations/0010_stride_person_mymind.sql": "dbca6d8ff6802e8c54a459c73f86ef50ea6ead5239096e59cb79158b51e2684d",
+    "migrations/0017_stride_mymind_private_custody.sql": "7a096a534b9008320883704356c9fbd00aecf34b4f4d5451104c7d378e11370a",
+    "canonical_migrations.go": "b120f5f5933d264a5e5fe8b9d9c7044b01042f17bba7cef037899d75b467426b",
+    "canonical_migrations_test.go": "48d9198a44bcefc602d3b3a5c817a2beeb9263f2460824fcf7fb0b555dab6545",
+    "canonical_postgres_test.go": "cee139b9a1adb500276578f4194f55c81875705ad877e99fe6893cfa20f40983",
+    "stride_registry.go": "6cd9c1de78910344eef99c08124d7455c0072d017f55651e1c3eeeedd9a3f262",
+    "stride_registry_test.go": "2186c23cea8e4c6167552550004f6e5ed25858e585b9833331947903f7603051",
+    "main.go": "e30c45c795100f82502f4c33d942abcf429349297575650fda5fd471a7a70832",
+    "internal/dr/postgres.go": "08f18be2588434cb48b6e1c6e9c674af36f8482d14da993dc0215804bc9ab53d",
+    "index.html": "366e35dc71f5993c4d6c329fdfe66941b1c0a3b2dc97e97b291647ae0d6b08b0",
+    "frontend_stride_w5_personal_context_test.go": "a9bf32a0f4989ec11ba2206feea0c1709d9d0ce0d0beaf280b76f93995396597",
+    "mobile/src/api/client.ts": "b470f0c2c921fa7a0d1312e603fe23849d00cee7dd20788b72d7728dd7e02a7f",
+    "mobile/src/api/types.ts": "c344bd09839ec4a6203ba235fd38fd9736e1631cff2cc8a0da70f4132b9aa471",
+    "mobile/src/screens/SettingsScreen.tsx": "e51cee8f52a7dcbbe390958be7607856409559739f7c5841c9418d051d574fed",
+    "mobile/src/components/PersonalContextSettings.tsx": "80cc6fd931cc9dee01692cb0edbb695fe59ed5b99fe87a77001c9a1a5b3a1af7",
+    "mobile/src/personalContext/parser.ts": "4289336d6f975e59c7c7ea0da73effa1ceb7bae581c5dba09f30538f33e5e63b",
+    "mobile/src/__tests__/personalContext.test.ts": "69880490501ac8b07863c6e9d0f56b6f7e2f2504f068bcb12aa196b9fc5875a7"
+  }
+}

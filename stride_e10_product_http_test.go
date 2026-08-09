@@ -226,9 +226,9 @@ func strideE10MobileTestValues(action string) map[string]any {
 		return map[string]any{"joinCode": "join-code"}
 	case "network-draft-save":
 		return map[string]any{"intro": "Builder"}
-	case "network-search-submit":
+	case "network-search-propose":
 		return map[string]any{"query": "systems lead"}
-	case "contact-send":
+	case "contact-send", "exact-link-contact-send":
 		return map[string]any{"purpose": "discuss_work", "note": "Hello", "collaborationType": "collaboration"}
 	case "organization-member-role-change":
 		return map[string]any{"role": "member"}
@@ -294,7 +294,7 @@ func TestStrideE10ProductHTTPMobileClosedActionParity(t *testing.T) {
 		"contribution-organization-approve": "contribution-approvals", "contribution-organization-deny": "contribution-approvals",
 		"contribution-named-party-decision": "contribution-approvals", "contribution-attestation-revoke": "contribution-approvals",
 		"contribution-publish": "work-record", "contribution-withdraw": "work-record",
-		"network-search-submit": "network-search", "contact-send": "network-search",
+		"network-search-propose": "network-search", "network-search-confirm": "network-search", "contact-send": "network-search", "exact-link-contact-send": "network-recruiter-view",
 	}
 	backend := strideE10BackendFunc(func(_ context.Context, p StrideE10ProductPrincipal, c StrideE10ProductCommand) (any, bool, error) {
 		if p.ActiveOrganizationID != "org-1" || c.OrganizationID != "org-1" || c.ExpectedRevision != 3 || c.IdempotencyKey == "" {
@@ -443,6 +443,36 @@ func TestStrideE10ProductHTTPContributionPublishRequiresPublicationButWithdrawal
 	}
 }
 
+func TestStrideE10ProductHTTPExactLinkContactIsIndependentOfSearchAndConfirmIsClosed(t *testing.T) {
+	features := strideE10TestFeatures{STRIDEFeatureNetworkProfilePublication: true, STRIDEFeatureNetworkProjectionShadow: true, STRIDEFeatureNetworkContact: true}
+	var calls atomic.Int64
+	h := strideE10TestHandler(features, strideE10BackendFunc(func(_ context.Context, _ StrideE10ProductPrincipal, command StrideE10ProductCommand) (any, bool, error) {
+		calls.Add(1)
+		return strideE10MobileProjection("network-recruiter-view"), false, nil
+	}))
+	exact := httptest.NewRecorder()
+	h.ServeHTTP(exact, strideE10Request(http.MethodPost, "/api/stride/v1/mobile/actions/exact-link-action", "exact-link-key", map[string]any{"action": "exact-link-contact-send", "expectedRevision": 1, "surface": "network-recruiter-view", "values": strideE10MobileTestValues("exact-link-contact-send")}))
+	if exact.Code != http.StatusOK || calls.Load() != 1 {
+		t.Fatalf("exact-link contact depended on search: status=%d calls=%d body=%s", exact.Code, calls.Load(), exact.Body.String())
+	}
+	searchContact := httptest.NewRecorder()
+	h.ServeHTTP(searchContact, strideE10Request(http.MethodPost, "/api/stride/v1/mobile/actions/search-contact-action", "search-contact-key", map[string]any{"action": "contact-send", "expectedRevision": 1, "surface": "network-search", "values": strideE10MobileTestValues("contact-send")}))
+	if searchContact.Code != http.StatusServiceUnavailable || calls.Load() != 1 {
+		t.Fatalf("search-result contact bypassed search gate: status=%d calls=%d", searchContact.Code, calls.Load())
+	}
+	closedConfirm := httptest.NewRecorder()
+	h.ServeHTTP(closedConfirm, strideE10Request(http.MethodPost, "/api/stride/v1/mobile/actions/confirm-action", "confirm-key", map[string]any{"action": "network-search-confirm", "expectedRevision": 1, "surface": "network-search", "values": map[string]any{"filters": []any{}}}))
+	if closedConfirm.Code != http.StatusBadRequest || calls.Load() != 1 {
+		t.Fatalf("closed confirm body must fail before feature admission: status=%d calls=%d", closedConfirm.Code, calls.Load())
+	}
+	features[STRIDEFeatureNetworkSearch] = true
+	closedConfirm = httptest.NewRecorder()
+	h.ServeHTTP(closedConfirm, strideE10Request(http.MethodPost, "/api/stride/v1/mobile/actions/confirm-action", "confirm-key", map[string]any{"action": "network-search-confirm", "expectedRevision": 1, "surface": "network-search", "values": map[string]any{"filters": []any{}}}))
+	if closedConfirm.Code != http.StatusBadRequest || calls.Load() != 1 {
+		t.Fatalf("client filters reached confirm: status=%d calls=%d", closedConfirm.Code, calls.Load())
+	}
+}
+
 func TestStrideE10ProductHTTPMobileHardNegatives(t *testing.T) {
 	all := strideE10TestFeatures{
 		STRIDEFeatureOrganizationAuthorityWrite: true,
@@ -468,7 +498,7 @@ func TestStrideE10ProductHTTPMobileHardNegatives(t *testing.T) {
 		{"missing key", "/api/stride/v1/mobile/actions/a1", "", map[string]any{"action": "organization-create", "expectedRevision": 1, "surface": "organizations", "values": strideE10MobileTestValues("organization-create")}, http.StatusBadRequest},
 		{"unknown value", "/api/stride/v1/mobile/actions/a1", "key", map[string]any{"action": "profile-update", "expectedRevision": 1, "surface": "profile", "values": map[string]any{"displayName": "Ada", "email": "private@example.com"}}, http.StatusBadRequest},
 		{"nested authority", "/api/stride/v1/mobile/actions/a1", "key", map[string]any{"action": "contribution-subject-dispute", "expectedRevision": 1, "surface": "work-record", "values": map[string]any{"reason": map[string]any{"personId": "attacker"}}}, http.StatusBadRequest},
-		{"oversized value", "/api/stride/v1/mobile/actions/a1", "key", map[string]any{"action": "network-search-submit", "expectedRevision": 1, "surface": "network-search", "values": map[string]any{"query": string(make([]byte, 501))}}, http.StatusBadRequest},
+		{"oversized value", "/api/stride/v1/mobile/actions/a1", "key", map[string]any{"action": "network-search-propose", "expectedRevision": 1, "surface": "network-search", "values": map[string]any{"query": string(make([]byte, 501))}}, http.StatusBadRequest},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

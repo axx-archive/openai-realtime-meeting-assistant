@@ -1125,6 +1125,7 @@ func main() {
 	http.HandleFunc("/api/artifact-dispositions/v1", artifactDispositionHandler)
 	registerSTRIDERuntimeRoutes(http.DefaultServeMux)
 	registerStrideE10ProductLiveRoutes(http.DefaultServeMux)
+	registerStrideE10W5ProductRoutes(http.DefaultServeMux)
 	registerMeetingSpecialistProductRoutes(http.DefaultServeMux)
 	registerRoomAgentRoutes(http.DefaultServeMux)
 	http.HandleFunc("/internal/codex/jobs/result", internalCodexRunnerResultHandler)
@@ -1335,6 +1336,22 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 		ready = false
 	}
 	strideRuntime := strideRuntimeCapabilitySnapshot(kanbanApp)
+	strideE10W4 := strideE10W4ReadinessSnapshot()
+	strideE10W5 := strideE10W5RuntimeReadinessSnapshot()
+	strideE10W6 := strideE10W6RuntimeReadinessSnapshot()
+	if mode, _ := strideE10W4["mode"].(string); mode != "" {
+		if current, _ := strideE10W4["ready"].(bool); !current {
+			ready = false
+		}
+	}
+	if configured, _ := strideE10W5["configured"].(bool); configured {
+		if current, _ := strideE10W5["ready"].(bool); !current {
+			ready = false
+		}
+	}
+	if strideE10W6NetworkFeaturesEnabled() && !strideE10W6.Ready {
+		ready = false
+	}
 	ambientReplay := ambientReplayRuntimeSnapshot()
 	status := http.StatusOK
 	if !ready {
@@ -1372,6 +1389,24 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 	if ambientReplay.Enabled && !ambientReplay.Ready {
 		degraded = append(degraded, "ambient_intelligence_replay_degraded")
 	}
+	if mode, _ := strideE10W4["mode"].(string); mode != "" {
+		if current, _ := strideE10W4["ready"].(bool); !current {
+			reason, _ := strideE10W4["reason"].(string)
+			if reason == "persistence_failed" {
+				degraded = append(degraded, "stride_e10_w4_persistence_failed")
+			} else {
+				degraded = append(degraded, "stride_e10_w4_runtime_unavailable")
+			}
+		}
+	}
+	if configured, _ := strideE10W5["configured"].(bool); configured {
+		if current, _ := strideE10W5["ready"].(bool); !current {
+			degraded = append(degraded, "stride_e10_w5_custody_unavailable")
+		}
+	}
+	if strideE10W6NetworkFeaturesEnabled() && !strideE10W6.Ready {
+		degraded = append(degraded, "stride_e10_w6_runtime_unavailable")
+	}
 
 	writeSystemStatusJSON(w, r, status, map[string]any{
 		"ok":           ready,
@@ -1392,6 +1427,9 @@ func readinessHandler(w http.ResponseWriter, r *http.Request) {
 			"boardFile":        boardCheck,
 			"boardLifecycle":   boardLifecycle,
 			"strideRuntime":    strideRuntime,
+			"strideE10W4":      strideE10W4,
+			"strideE10W5":      strideE10W5,
+			"strideE10W6":      strideE10W6,
 			"ambientReplay":    ambientReplay,
 			"realtime":         realtime,
 			"backup":           readinessBackupSnapshot(),

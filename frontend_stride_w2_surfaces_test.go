@@ -158,7 +158,7 @@ func TestStrideW2ActionValuesAreExactAndBounded(t *testing.T) {
 		`displayName:{max:80}`, `pronouns:{max:40}`, `bio:{max:280}`,
 		`workModes:{max:64,list:true,maxItems:20}`, `openTo:{max:64,list:true,maxItems:20}`,
 		`name:{max:120,required:true}`, `slug:{max:63,required:true,pattern:'slug'}`,
-		`joinCode:{max:128,required:true}`, `intro:{max:280}`, `query:{max:500,required:true}`,
+		`joinCode:{max:128,required:true}`, `intro:{max:280}`, `query:{max:240,required:true}`,
 		`purpose:{max:80,required:true}`, `note:{max:1000}`,
 		`collaborationType:{max:32,required:true,values:['collaboration','advisory','employment','recruiting','organization_join']}`,
 		`decision:{max:8,required:true,values:['approved','denied']}`,
@@ -272,7 +272,7 @@ func TestStrideW2RouteShellPreservesHistoryAndUsesNoProviderCalls(t *testing.T) 
 	if !strings.Contains(js, `['/work-record','work-record']`) {
 		t.Fatal("work record must have its own route and server projection")
 	}
-	for _, actionType := range []string{"profile-update", "organization-create", "organization-join", "organization-request-approve", "organization-request-deny", "organization-switch", "organization-leave", "organization-member-role-change", "organization-member-revoke", "organization-ownership-transfer", "organization-recruiting-grant-create", "organization-recruiting-grant-revoke", "network-draft-save", "network-search-submit", "contribution-subject-approve", "contribution-subject-dispute", "contribution-organization-approve", "contribution-organization-deny", "contribution-named-party-decision", "contribution-attestation-revoke", "contribution-publish", "contribution-withdraw", "contribution-correct", "contribution-revoke", "work-record-export", "work-record-delete", "network-publish", "network-pause", "network-profile-off", "network-profile-export", "network-profile-delete", "network-searchable-fields-update", "contact-send", "contact-accept", "contact-decline", "contact-withdraw", "network-block", "network-unblock"} {
+	for _, actionType := range []string{"profile-update", "organization-create", "organization-join", "organization-request-approve", "organization-request-deny", "organization-switch", "organization-leave", "organization-member-role-change", "organization-member-revoke", "organization-ownership-transfer", "organization-recruiting-grant-create", "organization-recruiting-grant-revoke", "network-draft-save", "network-search-propose", "network-search-confirm", "contribution-subject-approve", "contribution-subject-dispute", "contribution-organization-approve", "contribution-organization-deny", "contribution-named-party-decision", "contribution-attestation-revoke", "contribution-publish", "contribution-withdraw", "contribution-correct", "contribution-revoke", "work-record-export", "work-record-delete", "network-publish", "network-pause", "network-profile-off", "network-profile-export", "network-profile-delete", "network-searchable-fields-update", "contact-send", "exact-link-contact-send", "contact-accept", "contact-decline", "contact-withdraw", "network-block", "network-unblock"} {
 		if !strings.Contains(js, actionType) {
 			t.Errorf("W2 route shell missing closed action type %q", actionType)
 		}

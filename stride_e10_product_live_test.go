@@ -76,7 +76,9 @@ func TestStrideE10ProductLiveRegisteredRuntimeMintsAndHydratesZeroOrganizationAc
 		store := userSessionStore()
 		store.mu.Lock()
 		email := personID + "@example.com"
-		store.sessions[hashResetToken(token)] = sessionRecord{Email: email, PersonID: personID, AccountSubjectDigest: sha256Hex([]byte(email)), AuthorityGeneration: 1, Expires: now.Add(24 * time.Hour)}
+		// The session store deliberately evaluates expiry against the real clock;
+		// keep this harness session live independently of its frozen contract time.
+		store.sessions[hashResetToken(token)] = sessionRecord{Email: email, PersonID: personID, AccountSubjectDigest: sha256Hex([]byte(email)), AuthorityGeneration: 1, Expires: time.Now().UTC().Add(24 * time.Hour)}
 		store.mu.Unlock()
 	}
 	tokenZero, tokenJoin := strings.Repeat("a", 64), strings.Repeat("b", 64)
@@ -924,6 +926,17 @@ func TestStrideE10ProductLiveRegisteredSearchContactAndRecruitingActionMatrix(t 
 		fixture := newNetworkAuthorityFixture(t)
 		runtime := NewStrideE10ProductLiveRuntime(func() time.Time { return fixture.now.Add(5 * time.Minute) })
 		runtime.network = fixture.service
+		policyAuthority, keys, policy := w6TestPolicyAuthority(t, fixture.now.Add(5*time.Minute))
+		policy.Revision = fixture.grant.PolicyRevision
+		policy, _ = SignW6NetworkPolicy(context.Background(), keys, policy)
+		policyAuthority = NewW6NetworkPolicyAuthority(keys)
+		if err := policyAuthority.Install(context.Background(), policy); err != nil {
+			t.Fatal(err)
+		}
+		qualification := w6TestQualificationAuthority(t, keys, policy, fixture.now.Add(5*time.Minute))
+		if err := fixture.service.ConfigureW6Qualification(policyAuthority, qualification, w6TestShadowForFixture(fixture), "cohort_pilot"); err != nil {
+			t.Fatal(err)
+		}
 		personID, organizationID, membershipID, revision := fixture.grant.SearcherPersonID, fixture.grant.OrganizationID, fixture.grant.MembershipID, fixture.grant.MembershipRevision
 		runtime.organization.memberships[membershipID] = OrganizationMembership{Header: STRIDEContractHeader{ID: membershipID, Revision: revision}, PersonID: personID, OrganizationID: organizationID, Role: "member", Status: "active"}
 		for _, feature := range []STRIDEFeature{STRIDEFeatureNetworkProfilePublication, STRIDEFeatureNetworkProjectionShadow, STRIDEFeatureNetworkSearch, STRIDEFeatureNetworkContact} {
@@ -931,8 +944,8 @@ func TestStrideE10ProductLiveRegisteredSearchContactAndRecruitingActionMatrix(t 
 		}
 		call := strideE10MountRegisteredRuntime(t, runtime, personID, organizationID, membershipID, revision)
 		projection := call(http.MethodGet, "/api/stride/v1/mobile/surfaces/network-search", "", nil)
-		searchID, searchRevision := strideE10ActionRevisionFromProjection(t, projection, "network-search-submit")
-		searchPayload := map[string]any{"action": "network-search-submit", "surface": "network-search", "expectedRevision": searchRevision, "values": map[string]any{"query": "growth"}}
+		searchID, searchRevision := strideE10ActionRevisionFromProjection(t, projection, "network-search-propose")
+		searchPayload := map[string]any{"action": "network-search-propose", "surface": "network-search", "expectedRevision": searchRevision, "values": map[string]any{"query": "problem_class:growth"}}
 		runtime.setFeatureForTest(STRIDEFeatureNetworkSearch, false)
 		if rr := call(http.MethodPost, "/api/stride/v1/mobile/actions/"+searchID, "search-key", searchPayload); rr.Code != http.StatusServiceUnavailable {
 			t.Fatalf("search parent-off status=%d body=%s", rr.Code, rr.Body.String())
@@ -945,6 +958,15 @@ func TestStrideE10ProductLiveRegisteredSearchContactAndRecruitingActionMatrix(t 
 			t.Fatalf("search replay status=%d body=%s", rr.Code, rr.Body.String())
 		}
 		projection = call(http.MethodGet, "/api/stride/v1/mobile/surfaces/network-search", "", nil)
+		confirmID, confirmRevision := strideE10ActionRevisionFromProjection(t, projection, "network-search-confirm")
+		confirmPayload := map[string]any{"action": "network-search-confirm", "surface": "network-search", "expectedRevision": confirmRevision, "values": map[string]any{}}
+		if rr := call(http.MethodPost, "/api/stride/v1/mobile/actions/"+confirmID, "confirm-key", confirmPayload); rr.Code != http.StatusOK {
+			t.Fatalf("confirm status=%d body=%s", rr.Code, rr.Body.String())
+		}
+		if rr := call(http.MethodPost, "/api/stride/v1/mobile/actions/"+confirmID, "confirm-key", confirmPayload); rr.Code != http.StatusOK || rr.Header().Get("Idempotency-Replayed") != "true" {
+			t.Fatalf("confirm replay status=%d replay=%q body=%s", rr.Code, rr.Header().Get("Idempotency-Replayed"), rr.Body.String())
+		}
+		projection = call(http.MethodGet, "/api/stride/v1/mobile/surfaces/network-search", "", nil)
 		contactID, contactRevision := strideE10ActionRevisionFromProjection(t, projection, "contact-send")
 		contactPayload := map[string]any{"action": "contact-send", "surface": "network-search", "expectedRevision": contactRevision, "values": map[string]any{"purpose": "Discuss growth work", "note": "Would you be open to comparing approaches?", "collaborationType": "collaboration"}}
 		if rr := call(http.MethodPost, "/api/stride/v1/mobile/actions/"+contactID, "contact-send-key", contactPayload); rr.Code != http.StatusOK {
@@ -952,6 +974,14 @@ func TestStrideE10ProductLiveRegisteredSearchContactAndRecruitingActionMatrix(t 
 		}
 		if rr := call(http.MethodPost, "/api/stride/v1/mobile/actions/"+contactID, "contact-send-key", contactPayload); rr.Code != http.StatusOK || rr.Header().Get("Idempotency-Replayed") != "true" {
 			t.Fatalf("contact send replay status=%d body=%s", rr.Code, rr.Body.String())
+		}
+		fixture.service.mu.Lock()
+		withdrawn := fixture.service.publications[fixture.publication.Header.ID]
+		withdrawn.State, withdrawn.Visibility = "withdrawn", "private"
+		fixture.service.publications[withdrawn.Header.ID] = withdrawn
+		fixture.service.mu.Unlock()
+		if rr := call(http.MethodPost, "/api/stride/v1/mobile/actions/"+confirmID, "confirm-key", confirmPayload); rr.Code != http.StatusNotFound {
+			t.Fatalf("revoked publication leaked completed search replay: status=%d body=%s", rr.Code, rr.Body.String())
 		}
 	})
 
@@ -1623,6 +1653,9 @@ func strideE10MountRegisteredRuntime(t *testing.T, runtime *StrideE10ProductLive
 	record := sessionRecord{Email: sha256Hex([]byte(personID))[:12] + "@example.com", PersonID: personID, Expires: runtime.now().Add(24 * time.Hour)}
 	if organizationID != "" {
 		record.ActiveOrganizationID, record.OrganizationMembershipID, record.OrganizationMembershipRev, record.ActiveOrganizationSessionRev = organizationID, membershipID, membershipRevision, 1
+		sessionHash := hashResetToken(token)
+		expires := runtime.now().Add(24 * time.Hour)
+		runtime.organization.sessions[sessionHash] = ActiveOrganizationSession{Header: strideE10LiveHeader(STRIDEContractActiveOrganizationSession, STRIDEGlobalPersonTenant, "active_session_"+sessionHash[:24], 1, sessionHash+"\x00test", runtime.now()), SessionSubjectDigest: sessionHash, PersonID: personID, OrganizationID: organizationID, MembershipID: membershipID, MembershipRevision: membershipRevision, SessionRevision: 1, Status: "active", BoundAt: runtime.now(), ExpiresAt: expires}
 	}
 	userSessionStore().mu.Lock()
 	userSessionStore().sessions[hashResetToken(token)] = record
@@ -1672,6 +1705,23 @@ func strideE10ActionRevisionFromProjection(t *testing.T, response *httptest.Resp
 	}
 	t.Fatalf("missing %s action: %s", actionType, response.Body.String())
 	return "", 0
+}
+
+func TestStrideE10ProductLiveW6ActionBoundToExactSessionIdentity(t *testing.T) {
+	now := time.Date(2026, 8, 9, 20, 0, 0, 0, time.UTC)
+	runtime := NewStrideE10ProductLiveRuntime(func() time.Time { return now })
+	grant := strideTestRef(STRIDEContractTalentSearchGrant, "grant_session_bound")
+	sessionA, sessionB := sha256Hex([]byte("session-a")), sha256Hex([]byte("session-b"))
+	binding := StrideE10LiveActionBinding{ID: "action_session_bound", Type: "network-search-propose", Surface: "network-search", PersonID: "person_searcher", OrganizationID: "organization_search", ExpectedRevision: grant.Revision, ExpiresAt: now.Add(time.Minute), Target: grant, MembershipRevision: 4, SessionRevision: 7, SessionHash: sessionA, ActiveSessionID: "active_session_a"}
+	if err := runtime.BindAction(binding); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{"action": binding.Type, "surface": binding.Surface, "expectedRevision": binding.ExpectedRevision, "values": map[string]any{"query": "problem_class:growth"}})
+	principalB := StrideE10ProductPrincipal{PersonID: binding.PersonID, ActiveOrganizationID: binding.OrganizationID, OrganizationMembershipID: "membership_searcher", OrganizationMembershipRev: binding.MembershipRevision, ActiveOrganizationSessionRev: binding.SessionRevision, SessionHash: sessionB, ActiveOrganizationSessionID: "active_session_b"}
+	_, _, err := runtime.Execute(context.Background(), principalB, StrideE10ProductCommand{Operation: "network.search", Method: http.MethodPost, Path: "/api/stride/v1/mobile/actions/" + binding.ID, OrganizationID: binding.OrganizationID, ResourceID: binding.ID, ExpectedRevision: binding.ExpectedRevision, IdempotencyKey: "same-revision-other-session", Body: body})
+	if !errors.Is(err, ErrStrideE10NotFound) {
+		t.Fatalf("session B used session A action at same revision: %v", err)
+	}
 }
 
 func TestStrideE10ProductLiveResolverAllowsCanonicalPersonWithoutOrganization(t *testing.T) {
@@ -1897,9 +1947,8 @@ func TestStrideE10ProductLiveTypedAuthorityProjections(t *testing.T) {
 	runtime.network = networkFixture.service
 	searcher := StrideE10ProductPrincipal{PersonID: networkFixture.grant.SearcherPersonID, ActiveOrganizationID: networkFixture.grant.OrganizationID, OrganizationMembershipID: networkFixture.grant.MembershipID, OrganizationMembershipRev: networkFixture.grant.MembershipRevision, ActiveOrganizationSessionRev: 1}
 	search, err := runtime.project(searcher, "network-search")
-	if err != nil || strideE10ValidateMobileProjection(search, "network-search") != nil {
-		encoded, _ := json.Marshal(search)
-		t.Fatalf("network search projection err=%v value=%s", err, encoded)
+	if !errors.Is(err, ErrStrideE10NotFound) || search != nil {
+		t.Fatalf("legacy receipt without a W6 final-copy disclosure remained renderable: err=%v value=%+v", err, search)
 	}
 }
 

@@ -395,6 +395,24 @@ export type StrideRelationshipMemoryResponse = {
 	alreadyPresentCount?: number;
 };
 
+export type StridePersonalContextSource = {
+  personId: string;
+  sourceId: string;
+  revision: number;
+  kind: 'preference' | 'reflection' | 'correction';
+  body: string;
+  bodyDigest: string;
+  consentRevision: number;
+  updatedAt: string;
+};
+
+export type StridePersonalContextExport = {
+  personId: string;
+  exportedAt: string;
+  sources: StridePersonalContextSource[];
+  manifestDigest: string;
+};
+
 export type StrideRuntimeCapability = {
   capability: string;
   state: string;

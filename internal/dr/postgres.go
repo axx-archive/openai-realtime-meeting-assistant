@@ -71,6 +71,9 @@ var canonicalTables = []string{
 	"stride_feature_switches", "stride_mymind_authority_grants",
 	"stride_mymind_custody_deletion_items", "stride_mymind_custody_deletion_receipts",
 	"stride_mymind_disclosure_grants", "stride_mymind_export_receipts",
+	"stride_mymind_private_custody_envelopes", "stride_mymind_private_deletion_journals",
+	"stride_mymind_private_key_destruction_receipts", "stride_mymind_private_operation_receipts",
+	"stride_mymind_private_source_tombstones", "stride_mymind_private_state_high_water",
 	"stride_mymind_sources", "stride_person_principals", "stride_registry_revisions",
 	"stride_source_derived_edges", "stride_workspace_memberships",
 }

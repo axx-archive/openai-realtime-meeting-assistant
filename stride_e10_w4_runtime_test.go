@@ -29,6 +29,70 @@ func strideE10W4TestKeyring() *strideE10W4Keyring {
 	return &strideE10W4Keyring{key: StrideE10MigrationMACKey{ID: "w4-test-key", Version: 1, Secret: []byte(strings.Repeat("k", 32))}}
 }
 
+func isolateStrideE10W4ReadinessForTest(t *testing.T) {
+	t.Helper()
+	prior := strideE10W4ReadinessSnapshot()
+	t.Cleanup(func() {
+		strideE10W4RuntimeState.Lock()
+		strideE10W4RuntimeState.ready = prior["ready"].(bool)
+		strideE10W4RuntimeState.mode = prior["mode"].(string)
+		strideE10W4RuntimeState.generation = prior["generation"].(uint64)
+		strideE10W4RuntimeState.schemaVersion = prior["schemaVersion"].(uint64)
+		strideE10W4RuntimeState.activationID = prior["activationId"].(string)
+		strideE10W4RuntimeState.activationReceiptDigest = prior["activationReceiptDigest"].(string)
+		strideE10W4RuntimeState.enabledFeatures = append([]string(nil), prior["enabledFeatures"].([]string)...)
+		strideE10W4RuntimeState.reason = prior["reason"].(string)
+		strideE10W4RuntimeState.Unlock()
+	})
+	strideE10W4RuntimeState.Lock()
+	strideE10W4RuntimeState.ready = false
+	strideE10W4RuntimeState.mode = ""
+	strideE10W4RuntimeState.generation = 0
+	strideE10W4RuntimeState.schemaVersion = 0
+	strideE10W4RuntimeState.activationID = ""
+	strideE10W4RuntimeState.activationReceiptDigest = ""
+	strideE10W4RuntimeState.enabledFeatures = nil
+	strideE10W4RuntimeState.reason = ""
+	strideE10W4RuntimeState.Unlock()
+}
+
+func TestStrideE10W4ReadinessTracksOnlyDurableGenerations(t *testing.T) {
+	isolateStrideE10W4ReadinessForTest(t)
+	features := []STRIDEFeature{STRIDEFeatureWorkRecordPrivate, STRIDEFeaturePersonProfileAuthority}
+	updateStrideE10W4RuntimeReadiness(strideE10W4CanaryMode, 41, 2, "activation-one", "receipt-one", features)
+	snapshot := strideE10W4ReadinessSnapshot()
+	if snapshot["ready"] != true || snapshot["mode"] != strideE10W4CanaryMode || snapshot["generation"] != uint64(41) || snapshot["schemaVersion"] != uint64(2) || snapshot["activationId"] != "activation-one" || snapshot["activationReceiptDigest"] != "receipt-one" {
+		t.Fatalf("readiness=%+v", snapshot)
+	}
+	gotFeatures := snapshot["enabledFeatures"].([]string)
+	if len(gotFeatures) != 2 || gotFeatures[0] != string(STRIDEFeaturePersonProfileAuthority) || gotFeatures[1] != string(STRIDEFeatureWorkRecordPrivate) {
+		t.Fatalf("features=%v", gotFeatures)
+	}
+	generation := uint64(41)
+	published := uint64(0)
+	if err := persistStrideE10W4RuntimeGeneration(&generation, func(uint64) error { return errors.New("disk unavailable") }, func(next uint64) { published = next }, markStrideE10W4RuntimePersistenceFailed); err == nil {
+		t.Fatal("failed persistence advanced readiness")
+	}
+	failedSnapshot := strideE10W4ReadinessSnapshot()
+	if generation != 41 || published != 0 || failedSnapshot["generation"] != uint64(41) || failedSnapshot["ready"] != false || failedSnapshot["reason"] != "persistence_failed" {
+		t.Fatalf("failed persistence generation=%d published=%d readiness=%+v", generation, published, strideE10W4ReadinessSnapshot())
+	}
+	if err := persistStrideE10W4RuntimeGeneration(&generation, func(next uint64) error {
+		if next != 42 {
+			t.Fatalf("next=%d", next)
+		}
+		return nil
+	}, func(next uint64) {
+		published = next
+		updateStrideE10W4RuntimeReadiness(strideE10W4CanaryMode, next, 2, "activation-one", "receipt-one", features)
+	}, markStrideE10W4RuntimePersistenceFailed); err != nil {
+		t.Fatal(err)
+	}
+	if generation != 42 || published != 42 || strideE10W4ReadinessSnapshot()["generation"] != uint64(42) {
+		t.Fatalf("successful persistence generation=%d published=%d readiness=%+v", generation, published, strideE10W4ReadinessSnapshot())
+	}
+}
+
 func strideE10W4TestManifest() StrideE10PrivateMigrationManifest {
 	manifest := StrideE10PrivateMigrationManifest{Version: 1, OrganizationID: "organization_w4_bonfire", OrganizationName: "Bonfire", OrganizationSlug: "bonfire", TargetDigest: strings.Repeat("a", 64)}
 	for index, account := range seededAccounts {
@@ -117,16 +181,10 @@ func TestStrideE10W4ProductionInstallUsesOnlyClosedCanaryFeatures(t *testing.T) 
 	t.Setenv(strideE10W4KeyIDEnv, keys.key.ID)
 	t.Setenv(strideE10W4KeyVersionEnv, "1")
 	t.Setenv(strideE10W4KeySecretEnv, base64.StdEncoding.EncodeToString(keys.key.Secret))
+	isolateStrideE10W4ReadinessForTest(t)
 	prior := strideE10LiveProductRuntime
-	priorReady := strideE10W4ProductionRuntimeReady()
-	strideE10W4RuntimeState.Lock()
-	strideE10W4RuntimeState.ready = false
-	strideE10W4RuntimeState.Unlock()
 	t.Cleanup(func() {
 		strideE10LiveProductRuntime = prior
-		strideE10W4RuntimeState.Lock()
-		strideE10W4RuntimeState.ready = priorReady
-		strideE10W4RuntimeState.Unlock()
 	})
 	if err := installStrideE10W4ProductionRuntimeFromEnvironment(); err != nil {
 		t.Fatal(err)
@@ -296,13 +354,10 @@ func TestStrideE10W4NetworkLiveStartupUsesLineageAndCurrentSessionSemantics(t *t
 		t.Fatalf("successor runtime verification envelope=%+v journal=%+v err=%v", verifiedEnvelope, verifiedJournal, err)
 	}
 	strideE10W4SetRuntimeTestEnvironment(t, paths, keys, filepath.Join(t.TempDir(), "operations.json"))
+	isolateStrideE10W4ReadinessForTest(t)
 	prior := strideE10LiveProductRuntime
-	priorReady := strideE10W4ProductionRuntimeReady()
 	t.Cleanup(func() {
 		strideE10LiveProductRuntime = prior
-		strideE10W4RuntimeState.Lock()
-		strideE10W4RuntimeState.ready = priorReady
-		strideE10W4RuntimeState.Unlock()
 	})
 	// An explicit live-to-canary downgrade authenticates the evolved lineage but
 	// never runs rollback: member, profile, organization, and session evolution
@@ -413,13 +468,10 @@ func TestStrideE10W4CanaryLoadsV1SnapshotWithoutMutationAndRestarts(t *testing.T
 	paths := strideE10W4ActivationPaths{Snapshot: path, Sessions: filepath.Join(dir, "sessions.json"), BackupDir: filepath.Join(dir, "backup"), Receipt: filepath.Join(dir, "receipt.json"), Journal: filepath.Join(dir, "backup", "activation.journal.json")}
 	t.Setenv(strideE10W4ModeEnv, strideE10W4CanaryMode)
 	strideE10W4SetRuntimeTestEnvironment(t, paths, keys, filepath.Join(dir, "operations.json"))
+	isolateStrideE10W4ReadinessForTest(t)
 	prior := strideE10LiveProductRuntime
-	priorReady := strideE10W4ProductionRuntimeReady()
 	t.Cleanup(func() {
 		strideE10LiveProductRuntime = prior
-		strideE10W4RuntimeState.Lock()
-		strideE10W4RuntimeState.ready = priorReady
-		strideE10W4RuntimeState.Unlock()
 	})
 	if err := installStrideE10W4ProductionRuntimeFromEnvironment(); err != nil {
 		t.Fatal(err)

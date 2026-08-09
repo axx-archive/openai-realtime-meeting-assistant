@@ -6,6 +6,7 @@ package main
 // HTTP route, worker, provider, projection, or index.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -85,10 +86,16 @@ type NetworkSearchRequest struct {
 	OrganizationID          string
 	MembershipID            string
 	MembershipRevision      int64
+	SessionHash             string
+	ActiveSessionID         string
 	HumanQuery              string
 	OriginalQueryDigest     string
 	StructuredFilters       []NetworkSearchFilter
 	InterpretationConfirmed bool
+	PolicyRevision          int64
+	CohortID                string
+	Interpretation          *W6NetworkInterpretationProposal
+	Confirmation            *W6NetworkInterpretationConfirmation
 	Limit                   int
 	IdempotencyKeyDigest    string
 	At                      time.Time
@@ -107,6 +114,10 @@ type NetworkContactAdmission struct {
 	ExpiresAt            time.Time
 	IdempotencyKeyDigest string
 	At                   time.Time
+	PolicyRevision       int64
+	CohortID             string
+	SessionHash          string
+	ActiveSessionID      string
 }
 
 type networkIdempotencyRecord struct {
@@ -120,6 +131,13 @@ type networkIdempotencyRecord struct {
 type networkTimedSearch struct {
 	At         time.Time
 	Candidates []string
+}
+
+type networkSearchDisclosureRecord struct {
+	SessionHash, ActiveSessionID, SearcherPersonID, OrganizationID string
+	PolicyRevision                                                 int64
+	SnapshotRevision                                               int64
+	Results                                                        []STRIDENetworkShadowSearchResult
 }
 
 type NetworkAuthority struct {
@@ -146,6 +164,12 @@ type NetworkAuthority struct {
 	grantVersions         map[string]TalentSearchGrant
 	blockVersions         map[string]NetworkBlock
 	contactVersions       map[string]ContactRequest
+	w6Policy              *W6NetworkPolicyAuthority
+	w6Qualification       *W6NetworkQualificationAuthority
+	w6Shadow              W6ShadowHealthAuthority
+	w6ProductShadow       W6NetworkProductShadowAuthority
+	searchDisclosures     map[string]networkSearchDisclosureRecord
+	w6CohortID            string
 }
 
 func NewNetworkAuthority(now func() time.Time) *NetworkAuthority {
@@ -158,8 +182,70 @@ func NewNetworkAuthority(now func() time.Time) *NetworkAuthority {
 		membershipAuthorities: map[string]NetworkMembershipAuthority{}, publications: map[string]PublishedContributionClaim{}, claims: map[string]ContributionClaim{}, approvals: map[string]FieldReleaseApproval{}, attestations: map[string]ContributionAttestation{}, expiryAuthorities: map[string]NetworkContactExpiryAuthority{},
 		blocks: map[string]NetworkBlock{}, contacts: map[string]ContactRequest{}, purges: map[string]DerivedPurgeReceipt{},
 		idempotency: map[string]networkIdempotencyRecord{}, searchWindows: map[string][]networkTimedSearch{},
-		contactWindows: map[string][]time.Time{}, purgeGenerations: map[string]int64{}, profileVersions: map[string]NetworkProfileProjection{}, grantVersions: map[string]TalentSearchGrant{}, blockVersions: map[string]NetworkBlock{}, contactVersions: map[string]ContactRequest{},
+		contactWindows: map[string][]time.Time{}, purgeGenerations: map[string]int64{}, profileVersions: map[string]NetworkProfileProjection{}, grantVersions: map[string]TalentSearchGrant{}, blockVersions: map[string]NetworkBlock{}, contactVersions: map[string]ContactRequest{}, searchDisclosures: map[string]networkSearchDisclosureRecord{},
 	}
+}
+
+// ConfigureW6Qualification installs fail-closed W6 seams without enabling any
+// HTTP route. Both authenticated policy and current healthy shadow capability
+// are mandatory. The cohort is server configuration, never request authority.
+func (s *NetworkAuthority) ConfigureW6Qualification(policy *W6NetworkPolicyAuthority, qualification *W6NetworkQualificationAuthority, shadow W6ShadowHealthAuthority, cohortID string) error {
+	if s == nil || policy == nil || qualification == nil || shadow == nil || !strideIdentifier(cohortID) {
+		return ErrNetworkAuthorityInvalid
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	productShadow, ok := shadow.(W6NetworkProductShadowAuthority)
+	if !ok {
+		return ErrNetworkAuthorityInvalid
+	}
+	s.w6Policy, s.w6Qualification, s.w6Shadow, s.w6ProductShadow, s.w6CohortID = policy, qualification, shadow, productShadow, cohortID
+	return nil
+}
+
+type W6NetworkProductShadowAuthority interface {
+	W6ShadowHealthAuthority
+	Search(STRIDENetworkShadowSearchRequest) ([]STRIDENetworkShadowSearchResult, error)
+	WithCurrentSearchAdmission(context.Context, STRIDENetworkShadowSearchRequest, func([]STRIDENetworkShadowSearchResult) error) error
+	WithCurrentSearchDisclosures(context.Context, STRIDENetworkShadowDisclosureRequest, func([]STRIDENetworkShadowSearchResult) error) error
+	WithCurrentContactAuthority(context.Context, STRIDENetworkShadowContactAuthorityExpectation, func() error) error
+	WithCurrentExactLinkProjection(STRIDEReference, func(STRIDENetworkShadowSearchResult) error) error
+}
+
+func (s *NetworkAuthority) currentW6Cohort() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.w6CohortID
+}
+
+func (s *NetworkAuthority) ProposeW6Search(ctx context.Context, grantRef STRIDEReference, personID, organizationID, membershipID string, membershipRevision int64, query string, at time.Time) (W6NetworkInterpretationProposal, error) {
+	if s == nil || ctx == nil {
+		return W6NetworkInterpretationProposal{}, ErrNetworkAuthorityInvalid
+	}
+	s.mu.Lock()
+	grant, err := s.currentGrantLocked(grantRef, personID, organizationID, membershipID, membershipRevision, at)
+	policyAuthority, qualificationAuthority, shadow, cohort := s.w6Policy, s.w6Qualification, s.w6Shadow, s.w6CohortID
+	s.mu.Unlock()
+	if err != nil || policyAuthority == nil || qualificationAuthority == nil || shadow == nil || grant.PolicyRevision < 1 {
+		return W6NetworkInterpretationProposal{}, ErrNetworkAuthorityDenied
+	}
+	var proposal W6NetworkInterpretationProposal
+	err = policyAuthority.WithCurrentW6Policy(ctx, grant.PolicyRevision, cohort, at, func(policy W6NetworkPolicyRevision) error {
+		return qualificationAuthority.WithCurrentW6Qualification(ctx, policy, cohort, at, func(W6NetworkQualificationReceipt) error {
+			return shadow.WithHealthyCurrentW6Shadow(ctx, W6ShadowHealthExpectation{OrganizationID: organizationID, PolicyRevision: policy.Revision}, func(snapshot W6ShadowHealthSnapshot) error {
+				if !snapshot.valid(W6ShadowHealthExpectation{OrganizationID: organizationID, PolicyRevision: policy.Revision}) {
+					return ErrNetworkAuthorityDenied
+				}
+				var proposeErr error
+				proposal, proposeErr = ProposeW6NetworkInterpretation(policy, query)
+				return proposeErr
+			})
+		})
+	})
+	if err != nil {
+		return proposal, err
+	}
+	return proposal, nil
 }
 
 func (s *NetworkAuthority) InstallMembershipAuthority(authority NetworkMembershipAuthority) error {
@@ -540,17 +626,82 @@ func talentGrantTransitionAllowed(from, to string) bool {
 }
 
 func (s *NetworkAuthority) Search(request NetworkSearchRequest) (NetworkSearchReceipt, bool, error) {
-	if s == nil || request.GrantRef.Validate() != nil || request.GrantRef.ContractType != STRIDEContractTalentSearchGrant ||
-		!strideIdentifier(request.SearcherPersonID) || !strideIdentifier(request.OrganizationID) || !strideIdentifier(request.MembershipID) || request.MembershipRevision < 1 ||
-		!isHexDigest(request.OriginalQueryDigest) || sha256Hex([]byte(request.HumanQuery)) != request.OriginalQueryDigest || !isHexDigest(request.IdempotencyKeyDigest) || request.At.IsZero() ||
-		request.Limit < 1 || request.Limit > networkResultsPerSearch {
+	if s == nil {
 		return NetworkSearchReceipt{}, false, ErrNetworkAuthorityInvalid
 	}
 	s.mu.Lock()
+	policyAuthority, qualificationAuthority, shadowAuthority, productShadow, cohortID := s.w6Policy, s.w6Qualification, s.w6Shadow, s.w6ProductShadow, s.w6CohortID
+	s.mu.Unlock()
+	if policyAuthority == nil && qualificationAuthority == nil && shadowAuthority == nil && cohortID == "" {
+		return s.searchWithPolicy(request, W6NetworkPolicyRevision{Revision: defaultNetworkPolicyRevision, Limits: W6NetworkPolicyLimits{
+			PersonSearchesPerHour: networkSearchesPerHour, OrganizationSearchesPerHour: networkSearchesPerHour * 10, GlobalSearchesPerHour: networkSearchesPerHour * 100,
+			ResultsPerSearch: networkResultsPerSearch, PersonDistinctResultsPerHour: networkDistinctResultsPerHour, OrganizationDistinctPerHour: networkDistinctResultsPerHour * 10,
+			GlobalDistinctResultsPerHour: networkDistinctResultsPerHour * 100, PersonContactsPerDay: networkContactsPerDay, OrganizationContactsPerDay: networkContactsPerDay * 10, GlobalContactsPerDay: networkContactsPerDay * 100,
+		}}, false, nil, 0)
+	}
+	if policyAuthority == nil || qualificationAuthority == nil || shadowAuthority == nil || productShadow == nil || request.PolicyRevision < 1 || request.CohortID != cohortID || !validStrideE10SessionHash(request.SessionHash) || !strideIdentifier(request.ActiveSessionID) {
+		return NetworkSearchReceipt{}, false, ErrNetworkAuthorityDenied
+	}
+	var receipt NetworkSearchReceipt
+	var replayed bool
+	var searchErr error
+	err := policyAuthority.WithCurrentW6Policy(context.Background(), request.PolicyRevision, cohortID, request.At, func(policy W6NetworkPolicyRevision) error {
+		return qualificationAuthority.WithCurrentW6Qualification(context.Background(), policy, cohortID, request.At, func(W6NetworkQualificationReceipt) error {
+			return shadowAuthority.WithHealthyCurrentW6Shadow(context.Background(), W6ShadowHealthExpectation{OrganizationID: request.OrganizationID, PolicyRevision: policy.Revision}, func(snapshot W6ShadowHealthSnapshot) error {
+				if !snapshot.valid(W6ShadowHealthExpectation{OrganizationID: request.OrganizationID, PolicyRevision: policy.Revision}) {
+					return ErrNetworkAuthorityDenied
+				}
+				return productShadow.WithCurrentSearchAdmission(context.Background(), STRIDENetworkShadowSearchRequest{OrganizationID: request.OrganizationID, SessionHash: request.SessionHash, ActiveOrganizationSessionID: request.ActiveSessionID, ExpectedSnapshotRevision: snapshot.SnapshotRevision, Filters: append([]NetworkSearchFilter(nil), request.StructuredFilters...)}, func(shadowResults []STRIDENetworkShadowSearchResult) error {
+					receipt, replayed, searchErr = s.searchWithPolicyLocked(request, policy, true, shadowResults, snapshot.SnapshotRevision)
+					return searchErr
+				})
+			})
+		})
+	})
+	if err != nil {
+		if searchErr != nil {
+			return receipt, replayed, searchErr
+		}
+		return NetworkSearchReceipt{}, false, ErrNetworkAuthorityDenied
+	}
+	return receipt, replayed, nil
+}
+
+func (s *NetworkAuthority) searchWithPolicy(request NetworkSearchRequest, policy W6NetworkPolicyRevision, requireW6 bool, shadowResults []STRIDENetworkShadowSearchResult, snapshotRevision int64) (NetworkSearchReceipt, bool, error) {
+	if err := validateNetworkSearchAdmission(s, request, policy, requireW6); err != nil {
+		return NetworkSearchReceipt{}, false, err
+	}
+	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.searchWithPolicyLocked(request, policy, requireW6, shadowResults, snapshotRevision)
+}
+
+func validateNetworkSearchAdmission(s *NetworkAuthority, request NetworkSearchRequest, policy W6NetworkPolicyRevision, requireW6 bool) error {
+	if s == nil || request.GrantRef.Validate() != nil || request.GrantRef.ContractType != STRIDEContractTalentSearchGrant ||
+		!strideIdentifier(request.SearcherPersonID) || !strideIdentifier(request.OrganizationID) || !strideIdentifier(request.MembershipID) || request.MembershipRevision < 1 ||
+		!isHexDigest(request.OriginalQueryDigest) || (!requireW6 && sha256Hex([]byte(request.HumanQuery)) != request.OriginalQueryDigest) || !isHexDigest(request.IdempotencyKeyDigest) || request.At.IsZero() ||
+		request.Limit < 1 || request.Limit > policy.Limits.ResultsPerSearch || requireW6 && (!validStrideE10SessionHash(request.SessionHash) || !strideIdentifier(request.ActiveSessionID)) {
+		return ErrNetworkAuthorityInvalid
+	}
+	return nil
+}
+
+func (s *NetworkAuthority) searchWithPolicyLocked(request NetworkSearchRequest, policy W6NetworkPolicyRevision, requireW6 bool, shadowResults []STRIDENetworkShadowSearchResult, snapshotRevision int64) (NetworkSearchReceipt, bool, error) {
+	if err := validateNetworkSearchAdmission(s, request, policy, requireW6); err != nil {
+		return NetworkSearchReceipt{}, false, err
+	}
 	grant, err := s.currentGrantLocked(request.GrantRef, request.SearcherPersonID, request.OrganizationID, request.MembershipID, request.MembershipRevision, request.At)
 	if err != nil {
 		return NetworkSearchReceipt{}, false, err
+	}
+	if requireW6 {
+		if grant.PolicyRevision != policy.Revision || request.Interpretation == nil || request.Confirmation == nil {
+			return NetworkSearchReceipt{}, false, ErrNetworkAuthorityDenied
+		}
+		filters, confirmErr := ConfirmW6NetworkInterpretation(policy, *request.Interpretation, *request.Confirmation)
+		if confirmErr != nil || !sameNetworkSearchFilters(filters, request.StructuredFilters) {
+			return NetworkSearchReceipt{}, false, ErrNetworkConfirmationRequired
+		}
 	}
 	requestDigest, _ := STRIDEContractDigest(request)
 	key := networkIdempotencyKey("search", request.SearcherPersonID, request.IdempotencyKeyDigest)
@@ -561,13 +712,16 @@ func (s *NetworkAuthority) Search(request NetworkSearchRequest) (NetworkSearchRe
 		return cloneNetworkSearchReceipt(s.searchReceipts[record.ID]), true, nil
 	}
 	if !validSearchFilters(request.StructuredFilters) {
-		receipt := s.newSearchReceiptLocked(request, grant, "reject", []string{"invalid_or_prohibited_filter"}, nil)
+		receipt := s.newSearchReceiptLocked(request, grant, policy.Revision, "reject", []string{"invalid_or_prohibited_filter"}, nil)
 		s.recordSearchReceiptLocked(key, requestDigest, receipt)
 		return receipt, false, ErrNetworkAuthorityDenied
 	}
 	verdict, reasons := deterministicNetworkPolicy(request.HumanQuery, request.StructuredFilters, request.InterpretationConfirmed)
+	if requireW6 {
+		verdict, reasons = "allow", []string{"revision_bound_interpretation_confirmed"}
+	}
 	if verdict != "allow" {
-		receipt := s.newSearchReceiptLocked(request, grant, verdict, reasons, nil)
+		receipt := s.newSearchReceiptLocked(request, grant, policy.Revision, verdict, reasons, nil)
 		s.recordSearchReceiptLocked(key, requestDigest, receipt)
 		if verdict == "abstain" && containsSTRIDEString(reasons, "safe_interpretation_confirmation_required") {
 			return receipt, false, ErrNetworkConfirmationRequired
@@ -579,14 +733,35 @@ func (s *NetworkAuthority) Search(request NetworkSearchRequest) (NetworkSearchRe
 	for _, searchKey := range searchKeys {
 		windows[searchKey] = pruneSearchWindow(s.searchWindows[searchKey], request.At.Add(-time.Hour))
 	}
-	if len(windows[searchKeys[0]]) >= networkSearchesPerHour || len(windows[searchKeys[1]]) >= networkSearchesPerHour*10 || len(windows[searchKeys[2]]) >= networkSearchesPerHour*100 {
-		receipt := s.newSearchReceiptLocked(request, grant, "abstain", []string{"search_rate_limit"}, nil)
+	if len(windows[searchKeys[0]]) >= policy.Limits.PersonSearchesPerHour || len(windows[searchKeys[1]]) >= policy.Limits.OrganizationSearchesPerHour || len(windows[searchKeys[2]]) >= policy.Limits.GlobalSearchesPerHour {
+		receipt := s.newSearchReceiptLocked(request, grant, policy.Revision, "abstain", []string{"search_rate_limit"}, nil)
 		s.recordSearchReceiptLocked(key, requestDigest, receipt)
 		return receipt, false, ErrNetworkRateLimited
 	}
 	results := s.matchPublishedProfilesLocked(request)
+	if requireW6 {
+		var parityErr error
+		results, parityErr = s.admitShadowResultsLocked(request, results, shadowResults)
+		if parityErr != nil {
+			return NetworkSearchReceipt{}, false, parityErr
+		}
+	}
 	if len(results) > request.Limit {
 		results = results[:request.Limit]
+	}
+	authorizedShadow := make([]STRIDENetworkShadowSearchResult, 0, len(results))
+	if requireW6 {
+		byProjection := make(map[STRIDEReference]STRIDENetworkShadowSearchResult, len(shadowResults))
+		for _, candidate := range shadowResults {
+			byProjection[candidate.Projection] = candidate
+		}
+		for _, result := range results {
+			candidate, ok := byProjection[result.Projection]
+			if !ok {
+				return NetworkSearchReceipt{}, false, ErrNetworkAuthorityDenied
+			}
+			authorizedShadow = append(authorizedShadow, cloneContract(candidate))
+		}
 	}
 	bulkContained := false
 	for index, searchKey := range searchKeys {
@@ -599,17 +774,20 @@ func (s *NetworkAuthority) Search(request NetworkSearchRequest) (NetworkSearchRe
 		for _, result := range results {
 			seen[result.Projection.ID] = true
 		}
-		multipliers := []int{1, 10, 100}
-		if len(seen) > networkDistinctResultsPerHour*multipliers[index] {
+		limits := []int{policy.Limits.PersonDistinctResultsPerHour, policy.Limits.OrganizationDistinctPerHour, policy.Limits.GlobalDistinctResultsPerHour}
+		if len(seen) > limits[index] {
 			bulkContained = true
 		}
 	}
 	if bulkContained {
-		receipt := s.newSearchReceiptLocked(request, grant, "abstain", []string{"bulk_extraction_contained"}, nil)
+		receipt := s.newSearchReceiptLocked(request, grant, policy.Revision, "abstain", []string{"bulk_extraction_contained"}, nil)
 		s.recordSearchReceiptLocked(key, requestDigest, receipt)
 		return receipt, false, ErrNetworkBulkExtraction
 	}
-	receipt := s.newSearchReceiptLocked(request, grant, "allow", []string{"structured_policy_allowed"}, results)
+	receipt := s.newSearchReceiptLocked(request, grant, policy.Revision, "allow", []string{"structured_policy_allowed"}, results)
+	if requireW6 {
+		s.searchDisclosures[receipt.Header.ID] = networkSearchDisclosureRecord{SessionHash: request.SessionHash, ActiveSessionID: request.ActiveSessionID, SearcherPersonID: request.SearcherPersonID, OrganizationID: request.OrganizationID, PolicyRevision: policy.Revision, SnapshotRevision: snapshotRevision, Results: cloneContract(authorizedShadow)}
+	}
 	s.recordSearchReceiptLocked(key, requestDigest, receipt)
 	ids := make([]string, 0, len(results))
 	for _, result := range results {
@@ -638,10 +816,22 @@ func deterministicNetworkPolicy(query string, filters []NetworkSearchFilter, con
 		}
 		lower = strings.ReplaceAll(lower, "personality", "work mode")
 	}
-	if containsProhibitedSearchTerm(lower) {
+	if containsProhibitedSearchTerm(lower) || W6QueryProhibited(lower) {
 		return "reject", []string{"prohibited_criterion"}
 	}
 	return "allow", []string{"structured_policy_allowed"}
+}
+
+func sameNetworkSearchFilters(left, right []NetworkSearchFilter) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *NetworkAuthority) PutBlock(actor STRIDEControllerRevision, next NetworkBlock, expectedRevision int64, idempotencyKeyDigest string) (NetworkBlock, *DerivedPurgeReceipt, bool, error) {
@@ -683,21 +873,112 @@ func (s *NetworkAuthority) PutBlock(actor STRIDEControllerRevision, next Network
 }
 
 func (s *NetworkAuthority) CreateContact(admission NetworkContactAdmission) (ContactRequest, bool, error) {
-	if s == nil || admission.GrantRef.Validate() != nil || admission.GrantRef.ContractType != STRIDEContractTalentSearchGrant ||
+	return s.createContact(admission, false)
+}
+
+func (s *NetworkAuthority) createContact(admission NetworkContactAdmission, exactLink bool) (ContactRequest, bool, error) {
+	if s == nil {
+		return ContactRequest{}, false, ErrNetworkAuthorityInvalid
+	}
+	s.mu.Lock()
+	policyAuthority, qualificationAuthority, shadow, cohortID := s.w6Policy, s.w6Qualification, s.w6ProductShadow, s.w6CohortID
+	s.mu.Unlock()
+	if policyAuthority == nil && qualificationAuthority == nil && cohortID == "" {
+		return s.createContactWithPolicy(admission, W6NetworkPolicyRevision{Revision: defaultNetworkPolicyRevision, Limits: W6NetworkPolicyLimits{
+			PersonContactsPerDay: networkContactsPerDay, OrganizationContactsPerDay: networkContactsPerDay * 10, GlobalContactsPerDay: networkContactsPerDay * 100,
+		}}, false, exactLink)
+	}
+	if policyAuthority == nil || qualificationAuthority == nil || shadow == nil || admission.PolicyRevision < 1 || admission.CohortID != cohortID || !validStrideE10SessionHash(admission.SessionHash) || !strideIdentifier(admission.ActiveSessionID) {
+		return ContactRequest{}, false, ErrNetworkAuthorityDenied
+	}
+	var contact ContactRequest
+	var replayed bool
+	var contactErr error
+	err := policyAuthority.WithCurrentW6Policy(context.Background(), admission.PolicyRevision, cohortID, admission.At, func(policy W6NetworkPolicyRevision) error {
+		return qualificationAuthority.WithCurrentW6Qualification(context.Background(), policy, cohortID, admission.At, func(W6NetworkQualificationReceipt) error {
+			return shadow.WithCurrentContactAuthority(context.Background(), STRIDENetworkShadowContactAuthorityExpectation{OrganizationID: admission.SenderOrganizationID, SessionHash: admission.SessionHash, ActiveOrganizationSessionID: admission.ActiveSessionID, Grant: admission.GrantRef}, func() error {
+				contact, replayed, contactErr = s.createContactWithPolicyLocked(admission, policy, true, exactLink)
+				return contactErr
+			})
+		})
+	})
+	if err != nil {
+		if contactErr != nil {
+			return contact, replayed, contactErr
+		}
+		return ContactRequest{}, false, ErrNetworkAuthorityDenied
+	}
+	return contact, replayed, nil
+}
+
+// CreateExactLinkContact is deliberately search-independent. The caller must
+// provide the exact current published projection reference; no search receipt,
+// query, result rank, or hidden contact channel is accepted as authority.
+func (s *NetworkAuthority) CreateExactLinkContact(admission NetworkContactAdmission) (ContactRequest, bool, error) {
+	if s == nil {
+		return ContactRequest{}, false, ErrNetworkAuthorityInvalid
+	}
+	s.mu.Lock()
+	shadow := s.w6ProductShadow
+	s.mu.Unlock()
+	if shadow == nil {
+		return ContactRequest{}, false, ErrNetworkAuthorityDenied
+	}
+	called := false
+	err := shadow.WithCurrentExactLinkProjection(admission.RecipientProjection, func(copied STRIDENetworkShadowSearchResult) error {
+		called = true
+		if copied.Projection != admission.RecipientProjection {
+			return ErrNetworkAuthorityDenied
+		}
+		return nil
+	})
+	if err != nil || !called {
+		return ContactRequest{}, false, ErrNetworkAuthorityDenied
+	}
+	// The shadow callback establishes exact-link parity. The final W1 evidence
+	// and grant checks are then linearized with the contact write below, so a
+	// publication/attestation/grant revocation between those two capabilities
+	// still denies rather than issuing from stale copied data.
+	return s.createContact(admission, true)
+}
+
+func (s *NetworkAuthority) createContactWithPolicy(admission NetworkContactAdmission, policy W6NetworkPolicyRevision, requireW6, exactLink bool) (ContactRequest, bool, error) {
+	if err := validateNetworkContactAdmission(admission); err != nil {
+		return ContactRequest{}, false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.createContactWithPolicyLocked(admission, policy, requireW6, exactLink)
+}
+
+func validateNetworkContactAdmission(admission NetworkContactAdmission) error {
+	if admission.GrantRef.Validate() != nil || admission.GrantRef.ContractType != STRIDEContractTalentSearchGrant ||
 		!strideIdentifier(admission.SenderPersonID) || !strideIdentifier(admission.SenderOrganizationID) || !strideIdentifier(admission.MembershipID) || admission.MembershipRevision < 1 ||
 		admission.RecipientProjection.Validate() != nil || admission.RecipientProjection.ContractType != STRIDEContractNetworkProfileProjection ||
 		!strideIdentifier(admission.Purpose) || !isHexDigest(admission.NoteDigest) || !oneOf(admission.CollaborationType, "collaboration", "advisory", "employment", "recruiting", "organization_join") ||
 		!admission.ExpiresAt.After(admission.At) || !isHexDigest(admission.IdempotencyKeyDigest) || admission.At.IsZero() {
+		return ErrNetworkAuthorityInvalid
+	}
+	return nil
+}
+
+func (s *NetworkAuthority) createContactWithPolicyLocked(admission NetworkContactAdmission, policy W6NetworkPolicyRevision, requireW6, exactLink bool) (ContactRequest, bool, error) {
+	if s == nil || validateNetworkContactAdmission(admission) != nil {
 		return ContactRequest{}, false, ErrNetworkAuthorityInvalid
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, err := s.currentGrantLocked(admission.GrantRef, admission.SenderPersonID, admission.SenderOrganizationID, admission.MembershipID, admission.MembershipRevision, admission.At)
+	grant, err := s.currentGrantLocked(admission.GrantRef, admission.SenderPersonID, admission.SenderOrganizationID, admission.MembershipID, admission.MembershipRevision, admission.At)
 	if err != nil {
 		return ContactRequest{}, false, err
 	}
+	if requireW6 && grant.PolicyRevision != policy.Revision {
+		return ContactRequest{}, false, ErrNetworkAuthorityDenied
+	}
 	projection, ok := s.profiles[admission.RecipientProjection.ID]
-	if !ok || projection.Header.Revision != admission.RecipientProjection.Revision || projection.Header.ContentDigest != admission.RecipientProjection.Digest || projection.State != "published" || projection.Discoverability != "signed_in_network" {
+	wantDiscoverability := "signed_in_network"
+	if exactLink {
+		wantDiscoverability = "exact_link"
+	}
+	if !ok || projection.Header.Revision != admission.RecipientProjection.Revision || projection.Header.ContentDigest != admission.RecipientProjection.Digest || projection.State != "published" || projection.Discoverability != wantDiscoverability || s.validateProfileEvidenceLocked(projection) != nil {
 		return ContactRequest{}, false, ErrNetworkAuthorityNotFound
 	}
 	if s.blockedLocked(admission.SenderPersonID, admission.SenderOrganizationID, projection.SubjectPersonID) {
@@ -716,7 +997,7 @@ func (s *NetworkAuthority) CreateContact(admission NetworkContactAdmission) (Con
 	for _, contactKey := range contactKeys {
 		windows[contactKey] = pruneTimes(s.contactWindows[contactKey], admission.At.Add(-24*time.Hour))
 	}
-	if len(windows[contactKeys[0]]) >= networkContactsPerDay || len(windows[contactKeys[1]]) >= networkContactsPerDay*10 || len(windows[contactKeys[2]]) >= networkContactsPerDay*100 {
+	if len(windows[contactKeys[0]]) >= policy.Limits.PersonContactsPerDay || len(windows[contactKeys[1]]) >= policy.Limits.OrganizationContactsPerDay || len(windows[contactKeys[2]]) >= policy.Limits.GlobalContactsPerDay {
 		return ContactRequest{}, false, ErrNetworkRateLimited
 	}
 	id := "contact_" + admission.IdempotencyKeyDigest[:24]
@@ -837,6 +1118,91 @@ func (s *NetworkAuthority) matchPublishedProfilesLocked(request NetworkSearchReq
 	return results
 }
 
+func (s *NetworkAuthority) admitShadowResultsLocked(request NetworkSearchRequest, legacy []NetworkSearchResultReason, shadow []STRIDENetworkShadowSearchResult) ([]NetworkSearchResultReason, error) {
+	legacyByID := make(map[string]NetworkSearchResultReason, len(legacy))
+	for _, result := range legacy {
+		legacyByID[result.Projection.ID] = result
+	}
+	if len(legacyByID) != len(shadow) {
+		return nil, ErrNetworkAuthorityDenied
+	}
+	out := make([]NetworkSearchResultReason, 0, len(shadow))
+	for _, copied := range shadow {
+		prior, ok := legacyByID[copied.Projection.ID]
+		profile, profileOK := s.profiles[copied.Projection.ID]
+		if !ok || !profileOK || prior.Projection != copied.Projection || referenceFromHeader(profile.Header) != copied.Projection || !sameNetworkPublishedFields(networkVisiblePublishedFields(profile.Fields), copied.Fields) {
+			return nil, ErrNetworkAuthorityDenied
+		}
+		out = append(out, prior)
+	}
+	return out, nil
+}
+
+func sameNetworkPublishedFields(left, right []NetworkPublishedField) bool {
+	leftDigest, leftErr := STRIDEContractDigest(left)
+	rightDigest, rightErr := STRIDEContractDigest(right)
+	return leftErr == nil && rightErr == nil && leftDigest == rightDigest
+}
+
+func (s *NetworkAuthority) CurrentW6SearchDisclosures(receipt NetworkSearchReceipt) ([]STRIDENetworkShadowSearchResult, error) {
+	if s == nil {
+		return nil, ErrNetworkAuthorityInvalid
+	}
+	s.mu.Lock()
+	current, ok := s.searchReceipts[receipt.Header.ID]
+	record, disclosed := s.searchDisclosures[receipt.Header.ID]
+	shadow := s.w6ProductShadow
+	s.mu.Unlock()
+	if !ok || !disclosed || shadow == nil || current.Header != receipt.Header || len(record.Results) != len(receipt.Results) {
+		return nil, ErrNetworkAuthorityDenied
+	}
+	var copied []STRIDENetworkShadowSearchResult
+	err := shadow.WithCurrentSearchDisclosures(context.Background(), STRIDENetworkShadowDisclosureRequest{OrganizationID: record.OrganizationID, SessionHash: record.SessionHash, ActiveOrganizationSessionID: record.ActiveSessionID, ExpectedSnapshotRevision: record.SnapshotRevision, Results: cloneContract(record.Results)}, func(current []STRIDENetworkShadowSearchResult) error {
+		copied = cloneContract(current)
+		return nil
+	})
+	if err != nil || len(copied) != len(receipt.Results) {
+		if err != nil {
+			return nil, err
+		}
+		return nil, ErrNetworkAuthorityDenied
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok = s.searchReceipts[receipt.Header.ID]
+	if !ok || current.Header != receipt.Header {
+		return nil, ErrNetworkAuthorityDenied
+	}
+	for i := range copied {
+		if copied[i].Projection != receipt.Results[i].Projection || !sameNetworkPublishedFields(copied[i].Fields, record.Results[i].Fields) {
+			return nil, ErrNetworkAuthorityDenied
+		}
+	}
+	return cloneContract(copied), nil
+}
+
+// CurrentW6SearchReceipt resolves the exact idempotent receipt for a bound
+// server search request and revalidates its final-copy disclosures. Product
+// operation replay must use this seam instead of returning a cached response
+// after publication, attestation, session, membership, or grant authority has
+// changed.
+func (s *NetworkAuthority) CurrentW6SearchReceipt(request NetworkSearchRequest) (NetworkSearchReceipt, error) {
+	if s == nil || !strideIdentifier(request.SearcherPersonID) || !isHexDigest(request.IdempotencyKeyDigest) {
+		return NetworkSearchReceipt{}, ErrNetworkAuthorityInvalid
+	}
+	s.mu.Lock()
+	record, ok := s.idempotency[networkIdempotencyKey("search", request.SearcherPersonID, request.IdempotencyKeyDigest)]
+	receipt := cloneNetworkSearchReceipt(s.searchReceipts[record.ID])
+	s.mu.Unlock()
+	if !ok || record.Kind != "search" || receipt.Header.ID == "" {
+		return NetworkSearchReceipt{}, ErrNetworkAuthorityDenied
+	}
+	if _, err := s.CurrentW6SearchDisclosures(receipt); err != nil {
+		return NetworkSearchReceipt{}, err
+	}
+	return receipt, nil
+}
+
 // networkVisiblePublishedFields is the single disclosure projection shared by
 // W1 authority and W3 shadow semantics. A nil VisibleValue is a private
 // commitment: it cannot affect evidence admission, matching, parity, indexing,
@@ -922,12 +1288,12 @@ func (s *NetworkAuthority) blockedLocked(searcherPersonID, searcherOrganizationI
 	return false
 }
 
-func (s *NetworkAuthority) newSearchReceiptLocked(request NetworkSearchRequest, grant TalentSearchGrant, verdict string, reasons []string, results []NetworkSearchResultReason) NetworkSearchReceipt {
+func (s *NetworkAuthority) newSearchReceiptLocked(request NetworkSearchRequest, grant TalentSearchGrant, policyRevision int64, verdict string, reasons []string, results []NetworkSearchResultReason) NetworkSearchReceipt {
 	idDigest := sha256Hex([]byte(request.IdempotencyKeyDigest + "\x00" + request.OriginalQueryDigest))
 	receipt := NetworkSearchReceipt{
 		Header:         STRIDEContractHeader{TenantID: request.OrganizationID, ID: "search_" + idDigest[:24], Revision: 1, SchemaVersion: STRIDEContractSchemaVersion, ContractType: STRIDEContractNetworkSearchReceipt, ContentDigest: idDigest, CreatedAt: request.At.UTC()},
 		OrganizationID: request.OrganizationID, Grant: referenceFromHeader(grant.Header), OriginalQueryDigest: request.OriginalQueryDigest,
-		PolicyRevision: defaultNetworkPolicyRevision, PolicyVerdict: verdict, PolicyReasonCodes: append([]string(nil), reasons...), Ordering: []string{"declared_query_match", "privacy_shuffle"}, SearchedAt: request.At.UTC(),
+		PolicyRevision: policyRevision, PolicyVerdict: verdict, PolicyReasonCodes: append([]string(nil), reasons...), Ordering: []string{"declared_query_match", "privacy_shuffle"}, SearchedAt: request.At.UTC(),
 	}
 	if verdict == "allow" {
 		receipt.StructuredFilters = append([]NetworkSearchFilter(nil), request.StructuredFilters...)

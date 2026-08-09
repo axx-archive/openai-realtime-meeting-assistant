@@ -229,6 +229,34 @@ type MyMindContextSelection struct {
 	ExcludedCount  int               `json:"excludedCount"`
 }
 
+// MyMindPrivateAuthority binds a private custody operation to the canonical
+// W1 organization membership and active-session revisions. It deliberately
+// does not accept WorkspaceMembership: the legacy E10-R3 membership proof is
+// not an authority source for W5 custody.
+type MyMindPrivateAuthority struct {
+	PersonID             string
+	OrganizationID       string
+	MembershipID         string
+	MembershipRevision   int64
+	SessionSubjectDigest string
+	SessionRevision      int64
+	At                   time.Time
+}
+
+func ResolveMyMindPrivateAuthority(person PersonPrincipal, membership OrganizationMembership, session ActiveOrganizationSession, at time.Time) (MyMindPrivateAuthority, error) {
+	if person.Validate() != nil || person.Status != "active" || membership.Validate() != nil || session.Validate() != nil || at.IsZero() || membership.Status != "active" || session.Status != "active" ||
+		membership.PersonID != person.Header.ID ||
+		at.Before(membership.GrantedAt) || at.Before(session.BoundAt) || !at.Before(session.ExpiresAt) || session.PersonID != membership.PersonID || session.OrganizationID != membership.OrganizationID ||
+		session.MembershipID != membership.Header.ID || session.MembershipRevision != membership.Header.Revision {
+		return MyMindPrivateAuthority{}, ErrMyMindDenied
+	}
+	return MyMindPrivateAuthority{
+		PersonID: membership.PersonID, OrganizationID: membership.OrganizationID, MembershipID: membership.Header.ID,
+		MembershipRevision: membership.Header.Revision, SessionSubjectDigest: session.SessionSubjectDigest,
+		SessionRevision: session.SessionRevision, At: at.UTC(),
+	}, nil
+}
+
 type MyMindExportReceipt struct {
 	ID                string            `json:"id"`
 	PersonID          string            `json:"personId"`

@@ -29790,6 +29790,7 @@
             <button type="button" class="settings-nav__item" data-settings-section="profile" aria-current="true"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4.5 21a7.5 7.5 0 0 1 15 0"></path></svg><span>Profile</span></button>
             <button type="button" class="settings-nav__item" data-settings-section="account" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"></rect><path d="M7 9h10M7 13h6"></path></svg><span>Account &amp; security</span></button>
             <button type="button" class="settings-nav__item" data-settings-section="scout-memory" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M9.5 4.5A3.5 3.5 0 0 0 6 8v1a3 3 0 0 0 0 6v1a3.5 3.5 0 0 0 3.5 3.5M14.5 4.5A3.5 3.5 0 0 1 18 8v1a3 3 0 0 1 0 6v1a3.5 3.5 0 0 1-3.5 3.5M12 3v18"></path></svg><span>Memory</span></button>
+            <button type="button" class="settings-nav__item" data-settings-section="personal-context" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3 4 7v5c0 5 3.4 8.1 8 9 4.6-.9 8-4 8-9V7l-8-4Z"></path><path d="M9 12l2 2 4-4"></path></svg><span>Personal context</span></button>
             <span class="settings-nav__group">Experience</span>
             <button type="button" class="settings-nav__item" data-settings-section="devices" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3"></path></svg><span>Audio &amp; video</span></button>
             <button type="button" class="settings-nav__item" data-settings-section="notifications" aria-current="false"><svg class="settings-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"></path></svg><span>Notifications</span></button>
@@ -29918,6 +29919,33 @@
                   <div id="relationshipMemoryList" class="relationship-memory__list"></div>
                 </div>
                 <p id="relationshipMemoryStatus" class="account-menu__status" aria-live="polite"></p>
+              </div>
+            </section>
+            <section data-settings-section="personal-context" hidden aria-label="Personal context">
+              <div class="relationship-memory" id="personalContextSettings">
+                <div class="relationship-memory__head">
+                  <div>
+                    <div class="voice-profile__label">personal context</div>
+                    <h3>Private context you control</h3>
+                  </div>
+                  <span id="personalContextState" class="relationship-memory__state">checking</span>
+                </div>
+                <p class="relationship-memory__intro">Only context you add here is stored. Each source is encrypted separately and can be inspected, corrected, exported, or permanently forgotten without changing your profile, organization, or Work record.</p>
+                <div id="personalContextUnavailable" class="relationship-memory__notice" hidden>
+                  <strong>private custody is not active</strong>
+                  <span>Nothing entered here is stored in this release.</span>
+                </div>
+                <div id="personalContextControls" class="relationship-memory__controls" hidden>
+                  <form id="personalContextForm" class="relationship-memory__form">
+                    <label class="field"><span>type</span><select id="personalContextKind"><option value="preference">preference</option><option value="reflection">reflection</option></select></label>
+                    <label class="field"><span>private context</span><textarea id="personalContextBody" maxlength="16384" rows="4" placeholder="Add context that helps a trusted coworker work well with you."></textarea></label>
+                    <button id="personalContextSave" class="btn btn--primary" type="submit">save privately</button>
+                  </form>
+                  <div class="relationship-memory__saved-head"><div class="voice-profile__label">saved privately</div><span id="personalContextCount">0</span></div>
+                  <div id="personalContextList" class="relationship-memory__list"></div>
+                  <div class="voice-profile__actions"><button id="personalContextExport" class="btn btn--ghost" type="button">copy private export</button></div>
+                </div>
+                <p id="personalContextStatus" class="account-menu__status" aria-live="polite"></p>
               </div>
             </section>
             <section data-settings-section="devices" hidden aria-label="Audio &amp; video">
@@ -30427,6 +30455,17 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const relationshipMemoryList = document.getElementById('relationshipMemoryList')
       const relationshipMemoryStatus = document.getElementById('relationshipMemoryStatus')
       const relationshipMemoryImportStart = document.getElementById('relationshipMemoryImportStart')
+      const personalContextState = document.getElementById('personalContextState')
+      const personalContextUnavailable = document.getElementById('personalContextUnavailable')
+      const personalContextControls = document.getElementById('personalContextControls')
+      const personalContextForm = document.getElementById('personalContextForm')
+      const personalContextKind = document.getElementById('personalContextKind')
+      const personalContextBody = document.getElementById('personalContextBody')
+      const personalContextSave = document.getElementById('personalContextSave')
+      const personalContextCount = document.getElementById('personalContextCount')
+      const personalContextList = document.getElementById('personalContextList')
+      const personalContextExport = document.getElementById('personalContextExport')
+      const personalContextStatus = document.getElementById('personalContextStatus')
       const memoryImportDialog = document.getElementById('memoryImportDialog')
       const memoryImportClose = document.getElementById('memoryImportClose')
       const memoryImportCancel = document.getElementById('memoryImportCancel')
@@ -31128,6 +31167,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
       let relationshipMemoryBusy = false
 	  let relationshipMemoryLoadEpoch = 0
 	  let relationshipMemoryReconnectFence = null
+      let personalContextSources = []
+      let personalContextLoadEpoch = 0
+      let personalContextBusy = false
+      let personalContextMode = 'signed-out'
 
       function setAuthenticatedUser(nextUser) {
         const previousIdentity = String(authedUser?.email || '').trim().toLowerCase()
@@ -31163,6 +31206,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
         relationshipMemorySnapshot = null
         relationshipMemoryBusy = false
         renderRelationshipMemory()
+        personalContextLoadEpoch += 1
+        personalContextSources = []
+        personalContextBusy = false
+        personalContextMode = nextIdentity ? 'idle' : 'signed-out'
+        renderPersonalContext()
       }
       let roomRecordingUpdatedAt = ''
       let roomRecordingUpdatedBy = ''
@@ -34922,6 +34970,154 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
       })
       memoryImportSave.addEventListener('click', importSTRIDEMemories)
+
+      /* ---------- private personal context custody ----------
+         Source bodies exist only in this in-memory Settings projection. They
+         never enter browser persistence, the generic W2 mutation ledger, search,
+         profile, Work record, or organization projections. */
+      const personalContextSourceKeys = new Set(['personId','sourceId','revision','kind','body','bodyDigest','consentRevision','updatedAt'])
+      const personalContextExportKeys = new Set(['personId','exportedAt','sources','manifestDigest'])
+      const personalContextIdentifier = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}$/
+      const personalContextDigest = /^[a-f0-9]{64}$/
+      const personalContextID = prefix => `${prefix}_${(crypto.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`).replaceAll('-','_')}`
+      const personalContextCurrentIdentity = () => String(authedUser?.email || '').trim().toLowerCase()
+      const personalContextExactKeys = (value, keys) => Object.keys(value).length === keys.size && Object.keys(value).every(key => keys.has(key))
+
+      function parsePersonalContextSource(value) {
+        if (!value || typeof value !== 'object' || Array.isArray(value) || !personalContextExactKeys(value, personalContextSourceKeys) ||
+          typeof value.personId !== 'string' || !personalContextIdentifier.test(value.personId) ||
+          typeof value.sourceId !== 'string' || !personalContextIdentifier.test(value.sourceId) ||
+          !Number.isSafeInteger(value.revision) || value.revision < 1 ||
+          !['preference','reflection','correction'].includes(value.kind) || typeof value.body !== 'string' || new TextEncoder().encode(value.body).byteLength > 16384 ||
+          typeof value.bodyDigest !== 'string' || !personalContextDigest.test(value.bodyDigest) ||
+          !Number.isSafeInteger(value.consentRevision) || value.consentRevision < 1 || typeof value.updatedAt !== 'string' || Number.isNaN(Date.parse(value.updatedAt))) return null
+        return { personId:value.personId, sourceId:value.sourceId, revision:value.revision, kind:value.kind, body:value.body, bodyDigest:value.bodyDigest, consentRevision:value.consentRevision, updatedAt:value.updatedAt }
+      }
+
+      function renderPersonalContext() {
+        if (!personalContextState || !personalContextList) return
+        const available = personalContextMode === 'available'
+        personalContextState.textContent = personalContextMode === 'loading' ? 'checking' : available ? 'private' : personalContextMode === 'unavailable' ? 'not active' : personalContextMode === 'error' ? 'unavailable' : 'signed out'
+        personalContextUnavailable.hidden = personalContextMode !== 'unavailable'
+        personalContextControls.hidden = !available
+        personalContextSave.disabled = personalContextBusy
+        personalContextExport.disabled = personalContextBusy
+        personalContextCount.textContent = String(personalContextSources.length)
+        personalContextList.replaceChildren()
+        personalContextSources.forEach(source => {
+          const card = document.createElement('article')
+          card.className = 'relationship-memory__item'
+          const heading = document.createElement('div')
+          heading.className = 'relationship-memory__item-head'
+          const label = document.createElement('strong'); label.textContent = source.kind
+          const revision = document.createElement('span'); revision.textContent = `revision ${source.revision}`
+          heading.append(label, revision)
+          const editor = document.createElement('textarea')
+          editor.className = 'relationship-memory__edit'; editor.maxLength = 16384; editor.rows = 3; editor.value = source.body
+          editor.setAttribute('aria-label', `Correct ${source.kind}`)
+          const actions = document.createElement('div'); actions.className = 'relationship-memory__item-actions'
+          const correct = document.createElement('button'); correct.type = 'button'; correct.className = 'login-textlink'; correct.textContent = 'save correction'
+          correct.disabled = personalContextBusy
+          correct.addEventListener('click', () => correctPersonalContext(source, editor.value))
+          const forget = document.createElement('button'); forget.type = 'button'; forget.className = 'login-textlink relationship-memory__danger'; forget.textContent = 'forget permanently'
+          forget.disabled = personalContextBusy
+          forget.addEventListener('click', () => forgetPersonalContext(source))
+          actions.append(correct, forget); card.append(heading, editor, actions); personalContextList.append(card)
+        })
+      }
+
+      async function loadPersonalContext() {
+        const epoch = ++personalContextLoadEpoch
+        const identity = personalContextCurrentIdentity()
+        personalContextSources = []
+        personalContextMode = identity ? 'loading' : 'signed-out'
+        personalContextStatus.textContent = ''
+        renderPersonalContext()
+        if (!identity) return
+        try {
+          const response = await fetch('/api/mymind/v1/sources', { headers: { 'Accept':'application/json' }, cache:'no-store' })
+          const payload = await response.json().catch(() => null)
+          if (epoch !== personalContextLoadEpoch || identity !== personalContextCurrentIdentity()) return
+          if (response.status === 503) { personalContextMode = 'unavailable'; renderPersonalContext(); return }
+          if (!response.ok || !Array.isArray(payload) || payload.length > 200) throw new Error('unavailable')
+          const sources = payload.map(parsePersonalContextSource)
+          if (sources.some(source => !source) || new Set(sources.map(source => source.sourceId)).size !== sources.length) throw new Error('invalid')
+          personalContextSources = sources
+          personalContextMode = 'available'
+        } catch {
+          if (epoch !== personalContextLoadEpoch || identity !== personalContextCurrentIdentity()) return
+          personalContextSources = []
+          personalContextMode = 'error'
+          personalContextStatus.textContent = 'Private context could not be loaded.'
+        }
+        renderPersonalContext()
+      }
+
+      async function mutatePersonalContext(path, body, success) {
+        if (personalContextBusy || personalContextMode !== 'available') return null
+        const epoch = personalContextLoadEpoch
+        const identity = personalContextCurrentIdentity()
+        personalContextBusy = true; personalContextStatus.textContent = ''; renderPersonalContext()
+        try {
+          const result = await postAuthJSON(path, body)
+          if (epoch !== personalContextLoadEpoch || identity !== personalContextCurrentIdentity()) return null
+          if (!result.ok) throw new Error(result.status === 409 ? 'That context changed. Reloading the current version.' : 'The private update was not confirmed.')
+          personalContextStatus.textContent = success
+          return result.data
+        } catch (error) {
+          if (epoch === personalContextLoadEpoch && identity === personalContextCurrentIdentity()) {
+            personalContextStatus.textContent = error.message
+            await loadPersonalContext()
+          }
+          return null
+        } finally {
+          if (identity === personalContextCurrentIdentity()) { personalContextBusy = false; renderPersonalContext() }
+        }
+      }
+
+      async function correctPersonalContext(source, body) {
+        const normalized = String(body || '').trim()
+        if (!normalized) return
+        const updated = parsePersonalContextSource(await mutatePersonalContext(`/api/mymind/v1/sources/${encodeURIComponent(source.sourceId)}/correct`, { idempotencyKey:personalContextID('context_correct'), body:normalized, expectedRevision:source.revision }, 'Correction saved privately.'))
+        if (!updated) { personalContextStatus.textContent = 'The private response could not be applied safely.'; await loadPersonalContext(); return }
+        personalContextSources = personalContextSources.map(candidate => candidate.sourceId === updated.sourceId ? updated : candidate)
+        renderPersonalContext()
+      }
+
+      async function forgetPersonalContext(source) {
+        if (!window.confirm('Permanently forget this context and destroy its source encryption key? It cannot be recovered from an older backup.')) return
+        const result = await mutatePersonalContext(`/api/mymind/v1/sources/${encodeURIComponent(source.sourceId)}/forget`, { idempotencyKey:personalContextID('context_forget'), expectedRevision:source.revision }, 'Context forgotten and its source key destroyed.')
+        if (!result?.forgotten) return
+        personalContextSources = personalContextSources.filter(candidate => candidate.sourceId !== source.sourceId)
+        renderPersonalContext()
+      }
+
+      personalContextForm.addEventListener('submit', async event => {
+        event.preventDefault()
+        const body = personalContextBody.value.trim()
+        if (!body) { personalContextBody.focus(); return }
+        const saved = parsePersonalContextSource(await mutatePersonalContext('/api/mymind/v1/sources', { idempotencyKey:personalContextID('context_add'), sourceId:personalContextID('context'), kind:personalContextKind.value, body, expectedRevision:0 }, 'Saved privately.'))
+        if (!saved) { personalContextStatus.textContent = 'The private response could not be applied safely.'; await loadPersonalContext(); return }
+        personalContextSources = [...personalContextSources, saved].sort((left,right) => left.sourceId.localeCompare(right.sourceId))
+        personalContextBody.value = ''; renderPersonalContext()
+      })
+      personalContextExport.addEventListener('click', async () => {
+        if (personalContextBusy || personalContextMode !== 'available') return
+        personalContextBusy = true; renderPersonalContext()
+        try {
+          const response = await fetch('/api/mymind/v1/export', { headers:{'Accept':'application/json'}, cache:'no-store' })
+          const payload = await response.json()
+          const parsedSources = Array.isArray(payload?.sources) ? payload.sources.map(parsePersonalContextSource) : []
+          if (!response.ok || !payload || typeof payload !== 'object' || Array.isArray(payload) || !personalContextExactKeys(payload, personalContextExportKeys) ||
+            typeof payload.personId !== 'string' || !personalContextIdentifier.test(payload.personId) || typeof payload.exportedAt !== 'string' || Number.isNaN(Date.parse(payload.exportedAt)) ||
+            !Array.isArray(payload.sources) || payload.sources.length > 200 || parsedSources.some(source => !source || source.personId !== payload.personId) || new Set(parsedSources.map(source => source.sourceId)).size !== parsedSources.length ||
+            !personalContextDigest.test(String(payload.manifestDigest || ''))) throw new Error('invalid')
+          await navigator.clipboard.writeText(JSON.stringify(payload, null, 2))
+          personalContextStatus.textContent = 'A private copy was placed on your clipboard.'
+        } catch { personalContextStatus.textContent = 'The private export could not be created.' }
+        finally { personalContextBusy = false; renderPersonalContext() }
+      })
+      settingsRegion.querySelector('[data-settings-section="personal-context"]')?.addEventListener('click', () => loadPersonalContext())
 
       /* ---------- account settings (inside the settings dialog) ---------- */
       const accountIdentityEl = document.getElementById('accountIdentity')
@@ -69838,14 +70034,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const routeSurfaces = new Map([['/me','profile'],['/work-record','work-record'],['/org/people','organization-people'],['/org/requests','organization-requests'],['/org/contributions','contribution-approvals'],['/org/recruiting','organization-recruiting'],['/network/draft','network-draft'],['/network/preview','network-preview'],['/network/recruiter','network-recruiter-view'],['/network/search','network-search'],['/network/contact','contact-inbox'],['/network/blocks','network-blocks']])
         const surfaceForPath = path => coworkerRoutePattern.test(path) ? 'coworker-profile' : routeSurfaces.get(path)
         const closedSurfaces = new Set(['profile','work-record','organizations','organization-people','organization-requests','contribution-approvals','network-draft','network-preview','network-recruiter-view','network-search','contact-inbox','network-blocks','coworker-profile','organization-recruiting'])
-        const closedActions = new Set(['profile-update','organization-create','organization-join','organization-request-approve','organization-request-deny','organization-switch','organization-leave','organization-member-role-change','organization-member-revoke','organization-ownership-transfer','organization-recruiting-grant-create','organization-recruiting-grant-revoke','network-draft-save','network-publish','network-pause','network-profile-off','network-search-submit','contact-send','contribution-subject-approve','contribution-subject-dispute','contribution-organization-approve','contribution-organization-deny','contribution-named-party-decision','contribution-attestation-revoke','contribution-publish','contribution-withdraw','contribution-correct','contribution-revoke','work-record-export','work-record-delete','network-profile-export','network-profile-delete','network-searchable-fields-update','contact-accept','contact-decline','contact-withdraw','network-block','network-unblock'])
+        const closedActions = new Set(['profile-update','organization-create','organization-join','organization-request-approve','organization-request-deny','organization-switch','organization-leave','organization-member-role-change','organization-member-revoke','organization-ownership-transfer','organization-recruiting-grant-create','organization-recruiting-grant-revoke','network-draft-save','network-publish','network-pause','network-profile-off','network-search-propose','network-search-confirm','contact-send','exact-link-contact-send','contribution-subject-approve','contribution-subject-dispute','contribution-organization-approve','contribution-organization-deny','contribution-named-party-decision','contribution-attestation-revoke','contribution-publish','contribution-withdraw','contribution-correct','contribution-revoke','work-record-export','work-record-delete','network-profile-export','network-profile-delete','network-searchable-fields-update','contact-accept','contact-decline','contact-withdraw','network-block','network-unblock'])
         const actionSurfaces = new Map([
           ['profile-update','profile'], ['organization-create','organizations'], ['organization-join','organizations'],
           ['organization-request-approve','organization-requests'], ['organization-request-deny','organization-requests'],
           ['organization-switch','organizations'], ['organization-leave','organizations'], ['network-draft-save','network-draft'],
           ['organization-member-role-change','organization-people'], ['organization-member-revoke','organization-people'], ['organization-ownership-transfer','organization-people'],
           ['organization-recruiting-grant-create','organization-recruiting'], ['organization-recruiting-grant-revoke','organization-recruiting'],
-          ['network-search-submit','network-search'], ['contact-send','network-search'],
+          ['network-search-propose','network-search'], ['network-search-confirm','network-search'], ['contact-send','network-search'], ['exact-link-contact-send','network-recruiter-view'],
           ['contribution-subject-approve','work-record'], ['contribution-subject-dispute','work-record'],
           ['contribution-organization-approve','contribution-approvals'], ['contribution-organization-deny','contribution-approvals'], ['contribution-named-party-decision','contribution-approvals'], ['contribution-attestation-revoke','contribution-approvals'],
           ['contribution-publish','work-record'], ['contribution-withdraw','work-record'],
@@ -69863,8 +70059,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           ['organization-member-role-change',{ role:{max:16,required:true,values:['member','admin']} }],
           ['organization-recruiting-grant-revoke',{ reason:{max:500} }],
           ['network-draft-save',{ intro:{max:280}, workModes:{max:64,list:true,maxItems:20}, openTo:{max:64,list:true,maxItems:20} }],
-          ['network-search-submit',{ query:{max:500,required:true} }],
+          ['network-search-propose',{ query:{max:240,required:true} }],
           ['contact-send',{ purpose:{max:80,required:true}, note:{max:1000}, collaborationType:{max:32,required:true,values:['collaboration','advisory','employment','recruiting','organization_join']} }],
+          ['exact-link-contact-send',{ purpose:{max:80,required:true}, note:{max:1000}, collaborationType:{max:32,required:true,values:['collaboration','advisory','employment','recruiting','organization_join']} }],
           ['organization-request-approve',{ reason:{max:500} }], ['organization-request-deny',{ reason:{max:500} }],
           ['contribution-subject-approve',{ reason:{max:500} }], ['contribution-subject-dispute',{ reason:{max:500} }],
           ['contribution-organization-approve',{ reason:{max:500} }], ['contribution-organization-deny',{ reason:{max:500} }],
@@ -70354,8 +70551,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             'contribution-approvals':[item('review-one','Checkout recovery claim',{kind:'contribution-review',claim:ref('claim-one'),sourceRevision:7,sourceDigest:digest,fieldDiffs:[{field:'outcome',before:'Recovery improved',after:'Recovery reduced to minutes',disclosureTier:'redacted'},{field:'customer',before:'Named customer',after:'Enterprise customer',disclosureTier:'opaque'}],namedPartyStates:[{partyLabel:'Customer privacy owner',state:'approved',required:true},{partyLabel:'Collaborator',state:'pending',required:true}],auditEntries:[{action:'subject_approved',actorRole:'subject',revision:2,occurredAt:at},{action:'organization_review_opened',actorRole:'organization_reviewer',revision:3,occurredAt:later}]},[action('org-approve','contribution-organization-approve','Approve fields'),action('org-deny','contribution-organization-deny','Deny'),action('named-party-decision','contribution-named-party-decision','Decide named-party approval'),action('attestation-revoke','contribution-attestation-revoke','Revoke attestation'),action('claim-correct','contribution-correct','Request correction'),action('claim-revoke','contribution-revoke','Revoke')])],
             'network-draft':[item('draft','Private network draft',{kind:'network-state',state:'draft',searchableFields:[]},[action('draft-save','network-draft-save','Save private draft')])],
             'network-preview':[item('network-state','Network profile',{kind:'network-state',state:'paused',searchableFields:['display_name','work_modes','verified_contributions']},[action('fields-update','network-searchable-fields-update','Choose searchable fields'),action('network-publish','network-publish','Go live'),action('network-pause','network-pause','Pause'),action('network-off','network-profile-off','Turn off'),action('network-export','network-profile-export','Export'),action('network-delete','network-profile-delete','Delete')]),item('network-purge','Latest privacy receipt',{kind:'purge-receipt',status:'completed',receiptId:'purge-network-3',stores:['projection','lexical_index','vector_index','application_cache']})],
-            'network-recruiter-view':[item('public-profile','Alex Morgan',{kind:'network-profile-detail',displayName:'Alex Morgan',bio:'Builds calm systems for high-stakes work.',visibleOrganizations:['Bonfire'],workModes:['async-first'],openTo:['advisory']})],
-            'network-search':[item('interpretation','Visible interpretation',{kind:'network-query-interpretation',verdict:'admitted',filters:['problem class: checkout reliability','evidence: organization verified']}),item('result','Alex Morgan',{kind:'network-search-result',why:['Published checkout reliability contribution','Current redacted attestation'],unknown:['Availability beyond declared advisory preference'],verificationLabels:['organization_verified_redacted'],publishedRefs:[ref('profile-public')]},[action('contact-send','contact-send','Request a conversation')]),item('search-action','Search this evidence network',{kind:'network-query-interpretation',verdict:'denied',filters:[]},[action('search-submit','network-search-submit','Search')])],
+            'network-recruiter-view':[item('public-profile','Alex Morgan',{kind:'network-profile-detail',displayName:'Alex Morgan',bio:'Builds calm systems for high-stakes work.',visibleOrganizations:['Bonfire'],workModes:['async-first'],openTo:['advisory']},[action('exact-contact','exact-link-contact-send','Request a conversation')])],
+            'network-search':[item('interpretation','Visible interpretation',{kind:'network-query-interpretation',verdict:'admitted',filters:['problem class: checkout reliability','evidence: organization verified']}),item('result','Alex Morgan',{kind:'network-search-result',why:['Published checkout reliability contribution','Current redacted attestation'],unknown:['Availability beyond declared advisory preference'],verificationLabels:['organization_verified_redacted'],publishedRefs:[ref('profile-public')]},[action('contact-send','contact-send','Request a conversation')]),item('search-action','Describe the work you need',{kind:'network-query-interpretation',verdict:'denied',filters:[]},[action('search-propose','network-search-propose','Review search')])],
             'contact-inbox':[item('contact-one','Advisory conversation',{kind:'contact-request-detail',purpose:'Review a checkout recovery approach',collaborationType:'advisory',state:'pending',channelRevealed:false},[action('contact-accept','contact-accept','Accept'),action('contact-decline','contact-decline','Decline')])],
             'network-blocks':[item('block-one','Blocked organization',{kind:'block-detail',state:'active',targetKind:'organization'},[action('block-withdraw','network-unblock','Remove block')])],
             'organization-recruiting':[item('grant-one','Maya Chen · talent searcher',{kind:'recruiting-governance',grantState:'active',grantRevision:3,expiresAt:later,capability:'talent_searcher',personSearchLimit:{used:3,limit:20,windowEndsAt:later},organizationSearchLimit:{used:14,limit:200,windowEndsAt:later},globalSearchLimit:{used:72,limit:2000,windowEndsAt:later},personContactLimit:{used:1,limit:8,windowEndsAt:later},organizationContactLimit:{used:8,limit:80,windowEndsAt:later},globalContactLimit:{used:38,limit:800,windowEndsAt:later},receiptSummaries:[{kind:'search',verdict:'admitted',revision:3,occurredAt:at},{kind:'contact',verdict:'denied',revision:4,occurredAt:later}],auditEntries:[{action:'grant_created',actorRole:'capability_administrator',revision:3,occurredAt:at}]},[action('grant-create','organization-recruiting-grant-create','Grant talent search'),action('grant-revoke','organization-recruiting-grant-revoke','Revoke grant')])]

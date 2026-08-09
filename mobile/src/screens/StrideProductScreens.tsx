@@ -259,9 +259,10 @@ const ActionRow = memo(function ActionRow({
         return { fields: splitList(fields) } as StrideActionValues;
       case 'network-draft-save':
         return { intro, workModes: splitList(workModes), openTo: splitList(openTo) } as StrideActionValues;
-      case 'network-search-submit':
+      case 'network-search-propose':
         return { query } as StrideActionValues;
       case 'contact-send':
+      case 'exact-link-contact-send':
         return { purpose, note, collaborationType } as StrideActionValues;
       case 'contribution-named-party-decision':
         return reason.trim() ? { decision, reason } : { decision };
@@ -324,10 +325,10 @@ const ActionRow = memo(function ActionRow({
 		  <FormField disabled={ambiguityFrozen} label="Open to" hint="Separate entries with commas" value={openTo} onChangeText={setOpenTo} maxLength={1299} />
         </>
       ) : null}
-      {actionType === 'network-search-submit' ? (
-		<FormField disabled={ambiguityFrozen} label="Search" value={query} onChangeText={setQuery} maxLength={500} />
+      {actionType === 'network-search-propose' ? (
+		<FormField disabled={ambiguityFrozen} label="What kind of work do you need help with?" value={query} onChangeText={setQuery} maxLength={240} multiline />
       ) : null}
-      {actionType === 'contact-send' ? (
+      {actionType === 'contact-send' || actionType === 'exact-link-contact-send' ? (
         <>
 		  <FormField disabled={ambiguityFrozen} label="Purpose" value={purpose} onChangeText={setPurpose} maxLength={80} />
 		  <FormField disabled={ambiguityFrozen} label="Collaboration type" hint="collaboration, advisory, employment, recruiting, or organization_join" value={collaborationType} onChangeText={setCollaborationType} maxLength={32} autoCapitalize="none" />

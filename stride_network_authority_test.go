@@ -1,12 +1,101 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
+
+type w6TestShadowHealth struct {
+	healthy   bool
+	beforeUse func()
+	results   []STRIDENetworkShadowSearchResult
+	authority *NetworkAuthority
+}
+
+func (v *w6TestShadowHealth) WithHealthyCurrentW6Shadow(_ context.Context, expectation W6ShadowHealthExpectation, use func(W6ShadowHealthSnapshot) error) error {
+	if !v.healthy {
+		return ErrSTRIDENetworkShadowAuthority
+	}
+	if v.beforeUse != nil {
+		v.beforeUse()
+	}
+	return use(W6ShadowHealthSnapshot{OrganizationID: expectation.OrganizationID, PolicyRevision: expectation.PolicyRevision, Generation: 1, SnapshotRevision: 1, IndexedRevision: 1, PurgeWorkerHealthy: true})
+}
+
+func (v *w6TestShadowHealth) Search(STRIDENetworkShadowSearchRequest) ([]STRIDENetworkShadowSearchResult, error) {
+	if !v.healthy {
+		return nil, ErrSTRIDENetworkShadowAuthority
+	}
+	return cloneContract(v.results), nil
+}
+
+func (v *w6TestShadowHealth) WithCurrentSearchAdmission(_ context.Context, request STRIDENetworkShadowSearchRequest, use func([]STRIDENetworkShadowSearchResult) error) error {
+	if !v.healthy || !validStrideE10SessionHash(request.SessionHash) || !strideIdentifier(request.ActiveOrganizationSessionID) {
+		return ErrSTRIDENetworkShadowAuthority
+	}
+	if v.beforeUse != nil {
+		v.beforeUse()
+	}
+	if v.authority != nil {
+		v.authority.mu.Lock()
+		defer v.authority.mu.Unlock()
+	}
+	return use(cloneContract(v.results))
+}
+
+func (v *w6TestShadowHealth) WithCurrentSearchDisclosures(_ context.Context, request STRIDENetworkShadowDisclosureRequest, use func([]STRIDENetworkShadowSearchResult) error) error {
+	if !v.healthy || len(request.Results) == 0 {
+		return ErrSTRIDENetworkShadowAuthority
+	}
+	if v.authority != nil {
+		v.authority.mu.Lock()
+		defer v.authority.mu.Unlock()
+		for _, result := range request.Results {
+			for _, field := range result.Fields {
+				if field.Claim == nil {
+					continue
+				}
+				publication, ok := v.authority.publications[field.Claim.ID]
+				if !ok || referenceFromHeader(publication.Header) != *field.Claim || publication.State != "published" {
+					return ErrSTRIDENetworkShadowAuthority
+				}
+			}
+		}
+	}
+	return use(cloneContract(request.Results))
+}
+
+func (v *w6TestShadowHealth) WithCurrentContactAuthority(_ context.Context, expectation STRIDENetworkShadowContactAuthorityExpectation, use func() error) error {
+	if !v.healthy || !validStrideE10SessionHash(expectation.SessionHash) || !strideIdentifier(expectation.ActiveOrganizationSessionID) {
+		return ErrSTRIDENetworkShadowAuthority
+	}
+	if v.beforeUse != nil {
+		v.beforeUse()
+	}
+	if v.authority != nil {
+		v.authority.mu.Lock()
+		defer v.authority.mu.Unlock()
+	}
+	return use()
+}
+
+func (v *w6TestShadowHealth) WithCurrentExactLinkProjection(reference STRIDEReference, use func(STRIDENetworkShadowSearchResult) error) error {
+	for _, result := range v.results {
+		if result.Projection == reference {
+			return use(cloneContract(result))
+		}
+	}
+	return ErrSTRIDENetworkShadowAuthority
+}
+
+func w6TestShadowForFixture(f networkAuthorityFixture) *w6TestShadowHealth {
+	return &w6TestShadowHealth{healthy: true, authority: f.service, results: []STRIDENetworkShadowSearchResult{{Projection: referenceFromHeader(f.profile.Header), Fields: networkVisiblePublishedFields(f.profile.Fields)}}}
+}
 
 type networkAuthorityFixture struct {
 	service             *NetworkAuthority
@@ -119,7 +208,7 @@ func newNetworkAuthorityFixture(t *testing.T) networkAuthorityFixture {
 func (f networkAuthorityFixture) searchRequest(seed, query string, filters ...NetworkSearchFilter) NetworkSearchRequest {
 	return NetworkSearchRequest{
 		GrantRef: referenceFromHeader(f.grant.Header), SearcherPersonID: f.grant.SearcherPersonID, OrganizationID: f.grant.OrganizationID,
-		MembershipID: f.grant.MembershipID, MembershipRevision: f.grant.MembershipRevision, HumanQuery: query,
+		MembershipID: f.grant.MembershipID, MembershipRevision: f.grant.MembershipRevision, SessionHash: sha256Hex([]byte("current recruiter session")), ActiveSessionID: "active_session_recruiter", HumanQuery: query,
 		OriginalQueryDigest: sha256Hex([]byte(query)), StructuredFilters: filters, InterpretationConfirmed: true, Limit: 10,
 		IdempotencyKeyDigest: sha256Hex([]byte("search-" + seed)), At: f.now.Add(2 * time.Minute),
 	}
@@ -156,6 +245,276 @@ func TestNetworkAuthorityPublishedOnlyPolicyAndIdempotency(t *testing.T) {
 	abstained, _, err := fixture.service.Search(confirmation)
 	if !errors.Is(err, ErrNetworkConfirmationRequired) || abstained.PolicyVerdict != "abstain" || len(abstained.Results) != 0 {
 		t.Fatalf("unconfirmed personality transform: receipt=%+v err=%v", abstained, err)
+	}
+}
+
+func TestNetworkAuthorityW6PolicyLimitsConfirmationShadowAndIndependentContact(t *testing.T) {
+	fixture := newNetworkAuthorityFixture(t)
+	keys := &w6TestKeyring{current: 1, keys: map[uint64]W6ManagedMACKey{1: {ID: "w6_key", Version: 1, Secret: []byte("01234567890123456789012345678901")}}}
+	policyValue := w6TestPolicy(fixture.now)
+	policyValue.Revision = fixture.grant.PolicyRevision
+	policyValue.Limits.PersonSearchesPerHour = 1
+	policyValue.Limits.ResultsPerSearch = 3
+	policy, err := SignW6NetworkPolicy(context.Background(), keys, policyValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policyAuthority := NewW6NetworkPolicyAuthority(keys)
+	if err := policyAuthority.Install(context.Background(), policy); err != nil {
+		t.Fatal(err)
+	}
+	qualificationAuthority := w6TestQualificationAuthority(t, keys, policy, fixture.now)
+	health := w6TestShadowForFixture(fixture)
+	if err := fixture.service.ConfigureW6Qualification(policyAuthority, qualificationAuthority, health, "cohort_pilot"); err != nil {
+		t.Fatal(err)
+	}
+
+	query := "problem_class:growth"
+	proposal, err := ProposeW6NetworkInterpretation(policy, query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmation := W6NetworkInterpretationConfirmation{ProposalID: proposal.ProposalID, Revision: proposal.Revision, PolicyRevision: policy.Revision, ProposalDigest: proposal.Digest}
+	request := fixture.searchRequest("w6-one", query, proposal.Filters...)
+	request.Limit, request.PolicyRevision, request.CohortID, request.Interpretation, request.Confirmation = 3, policy.Revision, "cohort_pilot", &proposal, &confirmation
+	if receipt, _, err := fixture.service.Search(request); err != nil || receipt.PolicyVerdict != W6PolicyVerdictAllow || receipt.PolicyRevision != policy.Revision {
+		t.Fatalf("w6 search: %+v %v", receipt, err)
+	}
+	request.IdempotencyKeyDigest = sha256Hex([]byte("w6-two"))
+	if receipt, _, err := fixture.service.Search(request); !errors.Is(err, ErrNetworkRateLimited) || receipt.PolicyVerdict != W6PolicyVerdictAbstain {
+		t.Fatalf("policy limit not applied: %+v %v", receipt, err)
+	}
+
+	health.healthy = false
+	request.IdempotencyKeyDigest = sha256Hex([]byte("w6-unhealthy"))
+	if _, _, err := fixture.service.Search(request); !errors.Is(err, ErrNetworkAuthorityDenied) {
+		t.Fatalf("unhealthy shadow searched: %v", err)
+	}
+	health.healthy = true
+
+	// Contact admission is policy-bound but search-independent: no receipt or
+	// query is supplied, only the exact current projection reference.
+	fixture.service.mu.Lock()
+	exactProfile := fixture.service.profiles[fixture.profile.Header.ID]
+	exactProfile.Discoverability = "exact_link"
+	fixture.service.profiles[exactProfile.Header.ID] = exactProfile
+	fixture.service.mu.Unlock()
+	health.results = []STRIDENetworkShadowSearchResult{{Projection: referenceFromHeader(exactProfile.Header), Fields: networkVisiblePublishedFields(exactProfile.Fields)}}
+	admission := NetworkContactAdmission{GrantRef: referenceFromHeader(fixture.grant.Header), SenderPersonID: fixture.grant.SearcherPersonID, SenderOrganizationID: fixture.grant.OrganizationID,
+		MembershipID: fixture.grant.MembershipID, MembershipRevision: fixture.grant.MembershipRevision, RecipientProjection: referenceFromHeader(fixture.profile.Header), Purpose: "discuss_growth_work",
+		NoteDigest: sha256Hex([]byte("w6-note")), CollaborationType: "collaboration", ExpiresAt: fixture.now.Add(12 * time.Hour), IdempotencyKeyDigest: sha256Hex([]byte("w6-contact")), At: fixture.now.Add(3 * time.Minute), PolicyRevision: policy.Revision, CohortID: "cohort_pilot", SessionHash: sha256Hex([]byte("current recruiter session")), ActiveSessionID: "active_session_recruiter"}
+	if contact, _, err := fixture.service.CreateExactLinkContact(admission); err != nil || contact.State != "pending" {
+		t.Fatalf("independent contact: %+v %v", contact, err)
+	}
+	admission.IdempotencyKeyDigest = sha256Hex([]byte("w6-contact-limit"))
+	if _, _, err := fixture.service.CreateExactLinkContact(admission); !errors.Is(err, ErrNetworkRateLimited) {
+		t.Fatalf("contact policy limit not applied: %v", err)
+	}
+}
+
+func TestNetworkAuthorityW6FinalCapabilityInterleavingFailsClosed(t *testing.T) {
+	fixture := newNetworkAuthorityFixture(t)
+	keys := &w6TestKeyring{current: 1, keys: map[uint64]W6ManagedMACKey{1: {ID: "w6_key", Version: 1, Secret: []byte("01234567890123456789012345678901")}}}
+	value := w6TestPolicy(fixture.now)
+	value.Revision = 1
+	policy, _ := SignW6NetworkPolicy(context.Background(), keys, value)
+	authority := NewW6NetworkPolicyAuthority(keys)
+	if err := authority.Install(context.Background(), policy); err != nil {
+		t.Fatal(err)
+	}
+	qualificationAuthority := w6TestQualificationAuthority(t, keys, policy, fixture.now)
+	health := w6TestShadowForFixture(fixture)
+	if err := fixture.service.ConfigureW6Qualification(authority, qualificationAuthority, health, "cohort_pilot"); err != nil {
+		t.Fatal(err)
+	}
+	health.beforeUse = func() {
+		fixture.service.mu.Lock()
+		grant := fixture.service.grants[fixture.grant.Header.ID]
+		grant.State = "revoked"
+		revoked := fixture.now
+		grant.RevokedAt = &revoked
+		fixture.service.grants[grant.Header.ID] = grant
+		fixture.service.mu.Unlock()
+	}
+	proposal, _ := ProposeW6NetworkInterpretation(policy, "problem_class:growth")
+	confirm := W6NetworkInterpretationConfirmation{ProposalID: proposal.ProposalID, Revision: 1, PolicyRevision: 1, ProposalDigest: proposal.Digest}
+	request := fixture.searchRequest("w6-race", "problem_class:growth", proposal.Filters...)
+	request.Limit = 3
+	request.PolicyRevision = 1
+	request.CohortID = "cohort_pilot"
+	request.Interpretation = &proposal
+	request.Confirmation = &confirm
+	if _, _, err := fixture.service.Search(request); !errors.Is(err, ErrNetworkAuthorityDenied) {
+		t.Fatalf("revoked final capability searched: %v", err)
+	}
+}
+
+func TestNetworkAuthorityW6SearchUsesActualShadowCopiedResultsAndFailsLagRevocation(t *testing.T) {
+	fixture := newNetworkAuthorityFixture(t)
+	keys := strideNetworkShadowTestKeys()
+	policyValue := w6TestPolicy(fixture.now)
+	policyValue.Revision = fixture.grant.PolicyRevision
+	policy, err := SignW6NetworkPolicy(context.Background(), &w6TestKeyring{current: 1, keys: map[uint64]W6ManagedMACKey{1: {ID: "shadow_key", Version: 1, Secret: []byte(strings.Repeat("s", 32))}}}, policyValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Use one key authority for policy/qualification and the shadow's managed
+	// snapshot key independently, matching production composition domains.
+	policyKeys := &w6TestKeyring{current: 1, keys: map[uint64]W6ManagedMACKey{1: {ID: policy.KeyID, Version: policy.KeyVersion, Secret: []byte(strings.Repeat("s", 32))}}}
+	policyAuthority := NewW6NetworkPolicyAuthority(policyKeys)
+	if err := policyAuthority.Install(context.Background(), policy); err != nil {
+		t.Fatal(err)
+	}
+	qualificationValue := w6QualificationFixture(policy, fixture.now, 5, 2)
+	qualificationValue.Profiles[0].PersonID = fixture.profile.SubjectPersonID
+	qualificationValue.Profiles[0].Profile = referenceFromHeader(fixture.profile.Header)
+	qualificationValue.Profiles[0].Publication = referenceFromHeader(fixture.publication.Header)
+	qualificationReceipt, err := SignW6NetworkQualification(context.Background(), policyKeys, policy, qualificationValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	qualification := NewW6NetworkQualificationAuthority(policyKeys)
+	if err := qualification.Install(context.Background(), policy, qualificationReceipt, fixture.now); err != nil {
+		t.Fatal(err)
+	}
+	resolver := &strideE10W6LiveAuthorityResolver{network: fixture.service}
+	config := strideNetworkShadowConfig()
+	config.AuthorityResolver, config.PurgeAuthority, config.SnapshotKeys = resolver, resolver, keys
+	config.SearchAuthority = strideNetworkShadowTestSearchAuthority{with: func(expectation STRIDENetworkShadowSearchAuthorityExpectation, use func(STRIDENetworkShadowSearchAuthoritySnapshot) error) error {
+		return use(STRIDENetworkShadowSearchAuthoritySnapshot{Generation: 1, SessionHash: expectation.SessionHash, PersonID: fixture.grant.SearcherPersonID, OrganizationID: fixture.grant.OrganizationID, MembershipID: fixture.grant.MembershipID, MembershipRevision: fixture.grant.MembershipRevision, ActiveOrganizationSessionID: "active_session_recruiter", ActiveOrganizationSessionRev: 1, Grant: referenceFromHeader(fixture.grant.Header), GrantOrganizationID: fixture.grant.OrganizationID, GrantSearcherPersonID: fixture.grant.SearcherPersonID, GrantMembershipID: fixture.grant.MembershipID, GrantMembershipRevision: fixture.grant.MembershipRevision, GrantState: "active"})
+	}}
+	shadow := NewSTRIDENetworkShadowService(config)
+	if err := shadow.BindCurrentW6Policy(context.Background(), policyAuthority, qualification, policy.Revision, "cohort_pilot", fixture.now); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := shadow.Ingest(strideNetworkShadowAdmission(t, false)); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.ConfigureW6Qualification(policyAuthority, qualification, shadow, "cohort_pilot"); err != nil {
+		t.Fatal(err)
+	}
+	proposal, _ := ProposeW6NetworkInterpretation(policy, "problem_class:growth")
+	confirmation := W6NetworkInterpretationConfirmation{ProposalID: proposal.ProposalID, Revision: proposal.Revision, PolicyRevision: policy.Revision, ProposalDigest: proposal.Digest}
+	request := fixture.searchRequest("actual-shadow", "problem_class:growth", proposal.Filters...)
+	request.PolicyRevision, request.CohortID, request.Interpretation, request.Confirmation, request.Limit = policy.Revision, "cohort_pilot", &proposal, &confirmation, policy.Limits.ResultsPerSearch
+	receipt, _, err := fixture.service.Search(request)
+	if err != nil || len(receipt.Results) != 1 {
+		t.Fatalf("actual shadow search: %+v err=%v", receipt, err)
+	}
+	disclosed, err := fixture.service.CurrentW6SearchDisclosures(receipt)
+	if err != nil || len(disclosed) != 1 || len(disclosed[0].Fields) == 0 {
+		t.Fatalf("copied disclosure: %+v err=%v", disclosed, err)
+	}
+	fixture.service.mu.Lock()
+	delete(fixture.service.profiles, fixture.profile.Header.ID)
+	fixture.service.mu.Unlock()
+	if copied, err := fixture.service.CurrentW6SearchDisclosures(receipt); err != nil || len(copied) != 1 {
+		t.Fatalf("legacy profile-map mutation influenced disclosure: %+v err=%v", copied, err)
+	}
+	originalResolver := shadow.config.AuthorityResolver
+	shadow.config.AuthorityResolver = nil
+	if _, err := fixture.service.CurrentW6SearchDisclosures(receipt); err == nil {
+		t.Fatal("unavailable current authority disclosed cached result")
+	}
+	shadow.config.AuthorityResolver = originalResolver
+	shadow.mu.Lock()
+	stored := shadow.records[fixture.profile.SubjectPersonID]
+	stored.admission.Canonical.State = "paused"
+	shadow.records[fixture.profile.SubjectPersonID] = stored
+	shadow.mu.Unlock()
+	if _, err := fixture.service.CurrentW6SearchDisclosures(receipt); err == nil {
+		t.Fatal("paused shadow projection disclosed cached result")
+	}
+	shadow.mu.Lock()
+	stored.admission.Canonical.State = "published"
+	shadow.records[fixture.profile.SubjectPersonID] = stored
+	shadow.mu.Unlock()
+	shadow.mu.Lock()
+	shadow.indexedRevision--
+	shadow.mu.Unlock()
+	if _, err := fixture.service.CurrentW6SearchDisclosures(receipt); err == nil {
+		t.Fatal("lagged shadow rendered cached result")
+	}
+	shadow.mu.Lock()
+	shadow.indexedRevision = shadow.revision
+	shadow.mu.Unlock()
+	fixture.service.mu.Lock()
+	publication := fixture.service.publications[fixture.publication.Header.ID]
+	publication.State, publication.Visibility = "withdrawn", "private"
+	fixture.service.publications[publication.Header.ID] = publication
+	fixture.service.mu.Unlock()
+	if _, err := fixture.service.CurrentW6SearchDisclosures(receipt); err == nil {
+		t.Fatal("withdrawn publication rendered cached result")
+	}
+}
+
+func TestNetworkAuthorityW6ContactRevocationBeforeFinalWriteFailsClosed(t *testing.T) {
+	fixture := newNetworkAuthorityFixture(t)
+	keys := &w6TestKeyring{current: 1, keys: map[uint64]W6ManagedMACKey{1: {ID: "w6_key", Version: 1, Secret: []byte("01234567890123456789012345678901")}}}
+	value := w6TestPolicy(fixture.now)
+	value.Revision = fixture.grant.PolicyRevision
+	policy, _ := SignW6NetworkPolicy(context.Background(), keys, value)
+	authority := NewW6NetworkPolicyAuthority(keys)
+	if err := authority.Install(context.Background(), policy); err != nil {
+		t.Fatal(err)
+	}
+	health := w6TestShadowForFixture(fixture)
+	if err := fixture.service.ConfigureW6Qualification(authority, w6TestQualificationAuthority(t, keys, policy, fixture.now), health, "cohort_pilot"); err != nil {
+		t.Fatal(err)
+	}
+	fixture.service.mu.Lock()
+	exact := fixture.service.profiles[fixture.profile.Header.ID]
+	exact.Discoverability = "exact_link"
+	fixture.service.profiles[exact.Header.ID] = exact
+	fixture.service.mu.Unlock()
+	health.results = []STRIDENetworkShadowSearchResult{{Projection: referenceFromHeader(exact.Header), Fields: networkVisiblePublishedFields(exact.Fields)}}
+	health.beforeUse = func() {
+		fixture.service.mu.Lock()
+		defer fixture.service.mu.Unlock()
+		grant := fixture.service.grants[fixture.grant.Header.ID]
+		grant.State = "revoked"
+		revoked := fixture.now
+		grant.RevokedAt = &revoked
+		fixture.service.grants[grant.Header.ID] = grant
+	}
+	admission := NetworkContactAdmission{GrantRef: referenceFromHeader(fixture.grant.Header), SenderPersonID: fixture.grant.SearcherPersonID, SenderOrganizationID: fixture.grant.OrganizationID, MembershipID: fixture.grant.MembershipID, MembershipRevision: fixture.grant.MembershipRevision, RecipientProjection: referenceFromHeader(exact.Header), Purpose: "contact_race", NoteDigest: sha256Hex([]byte("contact-race")), CollaborationType: "collaboration", ExpiresAt: fixture.now.Add(time.Hour), IdempotencyKeyDigest: sha256Hex([]byte("contact-race-key")), At: fixture.now.Add(time.Minute), PolicyRevision: policy.Revision, CohortID: "cohort_pilot", SessionHash: sha256Hex([]byte("session-a")), ActiveSessionID: "active_session_a"}
+	if _, _, err := fixture.service.CreateExactLinkContact(admission); !errors.Is(err, ErrNetworkAuthorityDenied) {
+		t.Fatalf("grant revoke before final contact write admitted: %v", err)
+	}
+}
+
+func TestNetworkAuthorityW6StoresOnlyPostLimitDisclosure(t *testing.T) {
+	fixture := newNetworkAuthorityFixture(t)
+	second := cloneNetworkProjection(fixture.profile)
+	second.Header.ID = "network_profile_candidate_second"
+	second.Header.ContentDigest = sha256Hex([]byte("second-profile"))
+	fixture.service.mu.Lock()
+	fixture.service.profiles[second.Header.ID] = second
+	fixture.service.mu.Unlock()
+	policyValue := w6TestPolicy(fixture.now)
+	policyValue.Revision = fixture.grant.PolicyRevision
+	keys := &w6TestKeyring{current: 1, keys: map[uint64]W6ManagedMACKey{1: {ID: "w6_key", Version: 1, Secret: []byte("01234567890123456789012345678901")}}}
+	policy, err := SignW6NetworkPolicy(context.Background(), keys, policyValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := ProposeW6NetworkInterpretation(policy, "problem_class:growth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmation := W6NetworkInterpretationConfirmation{ProposalID: proposal.ProposalID, Revision: proposal.Revision, PolicyRevision: policy.Revision, ProposalDigest: proposal.Digest}
+	request := fixture.searchRequest("post-limit", "problem_class:growth", proposal.Filters...)
+	request.Limit, request.PolicyRevision, request.CohortID, request.Interpretation, request.Confirmation = 1, policy.Revision, "cohort_pilot", &proposal, &confirmation
+	shadowResults := []STRIDENetworkShadowSearchResult{{Projection: referenceFromHeader(fixture.profile.Header), Fields: networkVisiblePublishedFields(fixture.profile.Fields)}, {Projection: referenceFromHeader(second.Header), Fields: networkVisiblePublishedFields(second.Fields)}}
+	receipt, _, err := fixture.service.searchWithPolicy(request, policy, true, shadowResults, 9)
+	if err != nil || len(receipt.Results) != 1 {
+		t.Fatalf("two-match limit-one search: %+v err=%v", receipt, err)
+	}
+	fixture.service.mu.Lock()
+	record := fixture.service.searchDisclosures[receipt.Header.ID]
+	fixture.service.mu.Unlock()
+	if len(record.Results) != 1 || record.Results[0].Projection != receipt.Results[0].Projection || record.SnapshotRevision != 9 {
+		t.Fatalf("pre-limit disclosure retained: %+v", record)
 	}
 }
 

@@ -82,8 +82,8 @@ func TestPostgresCanonicalMigrationsAreIdempotentAndRefuseDrift(t *testing.T) {
 		t.Fatalf("second migration apply: %v", err)
 	}
 	var count int
-	if err := store.pool.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&count); err != nil || count != 16 {
-		t.Fatalf("migration rows=%d err=%v, want 16", count, err)
+	if err := store.pool.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&count); err != nil || count != 17 {
+		t.Fatalf("migration rows=%d err=%v, want 17", count, err)
 	}
 	if _, err := store.pool.Exec(ctx, "UPDATE schema_migrations SET sha256=decode($1,'hex') WHERE version=1", strings.Repeat("0", 64)); err != nil {
 		t.Fatal(err)
@@ -106,13 +106,13 @@ func TestPostgresCanonicalMigrationsRefuseUnknownFutureVersion(t *testing.T) {
 func TestCanonicalMigrationRuntimePolicy(t *testing.T) {
 	t.Setenv(canonicalMigrationMaxVersionEnv, "")
 	t.Setenv(canonicalAllowFutureMigrationsEnv, "")
-	maxVersion, allowFuture, err := canonicalMigrationRuntimePolicy(16)
-	if err != nil || maxVersion != 16 || allowFuture {
-		t.Fatalf("default policy=(%d,%t,%v), want (16,false,nil)", maxVersion, allowFuture, err)
+	maxVersion, allowFuture, err := canonicalMigrationRuntimePolicy(17)
+	if err != nil || maxVersion != 17 || allowFuture {
+		t.Fatalf("default policy=(%d,%t,%v), want (17,false,nil)", maxVersion, allowFuture, err)
 	}
 	t.Setenv(canonicalMigrationMaxVersionEnv, "13")
 	t.Setenv(canonicalAllowFutureMigrationsEnv, "true")
-	maxVersion, allowFuture, err = canonicalMigrationRuntimePolicy(16)
+	maxVersion, allowFuture, err = canonicalMigrationRuntimePolicy(17)
 	if err != nil || maxVersion != 13 || !allowFuture {
 		t.Fatalf("compatibility policy=(%d,%t,%v), want (13,true,nil)", maxVersion, allowFuture, err)
 	}
@@ -122,14 +122,14 @@ func TestCanonicalMigrationRuntimePolicy(t *testing.T) {
 		allow string
 	}{
 		{name: "zero max", max: "0"},
-		{name: "future max", max: "17"},
+		{name: "future max", max: "18"},
 		{name: "malformed max", max: "latest"},
 		{name: "malformed allow", allow: "sometimes"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv(canonicalMigrationMaxVersionEnv, test.max)
 			t.Setenv(canonicalAllowFutureMigrationsEnv, test.allow)
-			if _, _, err := canonicalMigrationRuntimePolicy(16); err == nil {
+			if _, _, err := canonicalMigrationRuntimePolicy(17); err == nil {
 				t.Fatal("invalid migration policy was accepted")
 			}
 		})
@@ -155,7 +155,7 @@ func TestPostgresCanonicalMigrationCompatibilityCapAndFutureTolerance(t *testing
 	if identityTable != nil {
 		t.Fatalf("migration 14 table exists under cap: %q", *identityTable)
 	}
-	if _, err := pool.Exec(ctx, "INSERT INTO schema_migrations(version,sha256) VALUES (17,decode($1,'hex'))", strings.Repeat("f", 64)); err != nil {
+	if _, err := pool.Exec(ctx, "INSERT INTO schema_migrations(version,sha256) VALUES (18,decode($1,'hex'))", strings.Repeat("f", 64)); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.ApplyMigrations(ctx); err != nil {

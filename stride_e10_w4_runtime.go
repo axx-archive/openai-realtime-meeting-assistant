@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,13 +30,72 @@ const (
 
 var strideE10W4RuntimeState struct {
 	sync.RWMutex
-	ready bool
+	ready                   bool
+	mode                    string
+	generation              uint64
+	schemaVersion           uint64
+	activationID            string
+	activationReceiptDigest string
+	enabledFeatures         []string
+	reason                  string
 }
 
 func strideE10W4ProductionRuntimeReady() bool {
 	strideE10W4RuntimeState.RLock()
 	defer strideE10W4RuntimeState.RUnlock()
 	return strideE10W4RuntimeState.ready
+}
+
+func strideE10W4ReadinessSnapshot() map[string]any {
+	strideE10W4RuntimeState.RLock()
+	defer strideE10W4RuntimeState.RUnlock()
+	features := append(make([]string, 0, len(strideE10W4RuntimeState.enabledFeatures)), strideE10W4RuntimeState.enabledFeatures...)
+	return map[string]any{
+		"ready":                   strideE10W4RuntimeState.ready,
+		"mode":                    strideE10W4RuntimeState.mode,
+		"generation":              strideE10W4RuntimeState.generation,
+		"schemaVersion":           strideE10W4RuntimeState.schemaVersion,
+		"activationId":            strideE10W4RuntimeState.activationID,
+		"activationReceiptDigest": strideE10W4RuntimeState.activationReceiptDigest,
+		"enabledFeatures":         features,
+		"reason":                  strideE10W4RuntimeState.reason,
+	}
+}
+
+func updateStrideE10W4RuntimeReadiness(mode string, generation, schemaVersion uint64, activationID, activationReceiptDigest string, features []STRIDEFeature) {
+	enabled := make([]string, 0, len(features))
+	for _, feature := range features {
+		enabled = append(enabled, string(feature))
+	}
+	sort.Strings(enabled)
+	strideE10W4RuntimeState.Lock()
+	strideE10W4RuntimeState.ready = true
+	strideE10W4RuntimeState.mode = mode
+	strideE10W4RuntimeState.generation = generation
+	strideE10W4RuntimeState.schemaVersion = schemaVersion
+	strideE10W4RuntimeState.activationID = activationID
+	strideE10W4RuntimeState.activationReceiptDigest = activationReceiptDigest
+	strideE10W4RuntimeState.enabledFeatures = enabled
+	strideE10W4RuntimeState.reason = ""
+	strideE10W4RuntimeState.Unlock()
+}
+
+func markStrideE10W4RuntimePersistenceFailed() {
+	strideE10W4RuntimeState.Lock()
+	strideE10W4RuntimeState.ready = false
+	strideE10W4RuntimeState.reason = "persistence_failed"
+	strideE10W4RuntimeState.Unlock()
+}
+
+func persistStrideE10W4RuntimeGeneration(generation *uint64, write func(uint64) error, publish func(uint64), fail func()) error {
+	nextGeneration := *generation + 1
+	if err := write(nextGeneration); err != nil {
+		fail()
+		return err
+	}
+	*generation = nextGeneration
+	publish(nextGeneration)
+	return nil
 }
 
 type strideE10W4Keyring struct{ key StrideE10MigrationMACKey }
@@ -483,16 +543,17 @@ func installStrideE10W4ProductionRuntimeFromEnvironment() error {
 	runtime.persistRuntime = func(current *StrideE10ProductLiveRuntime) error {
 		persistMu.Lock()
 		defer persistMu.Unlock()
-		generation++
-		if mode == strideE10W4CanaryMode && loadedEnvelope.SchemaVersion == 1 {
-			return writeStrideE10W4RuntimeSnapshotV1(snapshotPath, generation, keyring, current)
-		}
-		return writeStrideE10W4RuntimeSnapshotWithLineage(snapshotPath, generation, keyring, current, loadedEnvelope.ActivationID, loadedEnvelope.ActivationReceiptDigest)
+		return persistStrideE10W4RuntimeGeneration(&generation, func(nextGeneration uint64) error {
+			if mode == strideE10W4CanaryMode && loadedEnvelope.SchemaVersion == 1 {
+				return writeStrideE10W4RuntimeSnapshotV1(snapshotPath, nextGeneration, keyring, current)
+			}
+			return writeStrideE10W4RuntimeSnapshotWithLineage(snapshotPath, nextGeneration, keyring, current, loadedEnvelope.ActivationID, loadedEnvelope.ActivationReceiptDigest)
+		}, func(persistedGeneration uint64) {
+			updateStrideE10W4RuntimeReadiness(mode, persistedGeneration, loadedEnvelope.SchemaVersion, loadedEnvelope.ActivationID, loadedEnvelope.ActivationReceiptDigest, features)
+		}, markStrideE10W4RuntimePersistenceFailed)
 	}
 	strideE10LiveProductRuntime = runtime
-	strideE10W4RuntimeState.Lock()
-	strideE10W4RuntimeState.ready = true
-	strideE10W4RuntimeState.Unlock()
+	updateStrideE10W4RuntimeReadiness(mode, generation, loadedEnvelope.SchemaVersion, loadedEnvelope.ActivationID, loadedEnvelope.ActivationReceiptDigest, features)
 	return nil
 }
 

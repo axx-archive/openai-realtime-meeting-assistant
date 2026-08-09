@@ -29,6 +29,10 @@ type StrideE10ProductPrincipal struct {
 	OrganizationMembershipID     string
 	OrganizationMembershipRev    int64
 	ActiveOrganizationSessionRev int64
+	// SessionHash and ActiveOrganizationSessionID are server-only action
+	// capability binders. They are never accepted from an HTTP body.
+	SessionHash                 string
+	ActiveOrganizationSessionID string
 }
 
 type StrideE10ProductPrincipalResolver func(*http.Request) (StrideE10ProductPrincipal, error)
@@ -203,8 +207,10 @@ var strideE10MobileActions = map[string]strideE10MobileActionSpec{
 	"contribution-attestation-revoke":      {op: "contributions.revoke_attestation", features: []STRIDEFeature{STRIDEFeatureContributionReview}},
 	"contribution-publish":                 {op: "contributions.publish", features: []STRIDEFeature{STRIDEFeatureWorkRecordPrivate, STRIDEFeatureNetworkProfilePublication}},
 	"contribution-withdraw":                {op: "contributions.withdraw", features: []STRIDEFeature{STRIDEFeatureWorkRecordPrivate}},
-	"network-search-submit":                {op: "network.search", features: []STRIDEFeature{STRIDEFeatureNetworkProfilePublication, STRIDEFeatureNetworkProjectionShadow, STRIDEFeatureNetworkSearch}, requireOrg: true},
+	"network-search-propose":               {op: "network.search", features: []STRIDEFeature{STRIDEFeatureNetworkProfilePublication, STRIDEFeatureNetworkProjectionShadow, STRIDEFeatureNetworkSearch}, requireOrg: true},
+	"network-search-confirm":               {op: "network.search", features: []STRIDEFeature{STRIDEFeatureNetworkProfilePublication, STRIDEFeatureNetworkProjectionShadow, STRIDEFeatureNetworkSearch}, requireOrg: true},
 	"contact-send":                         {op: "network.contacts", features: []STRIDEFeature{STRIDEFeatureNetworkProfilePublication, STRIDEFeatureNetworkProjectionShadow, STRIDEFeatureNetworkSearch, STRIDEFeatureNetworkContact}, requireOrg: true},
+	"exact-link-contact-send":              {op: "network.contacts", features: []STRIDEFeature{STRIDEFeatureNetworkProfilePublication, STRIDEFeatureNetworkProjectionShadow, STRIDEFeatureNetworkContact}, requireOrg: true},
 	"organization-member-role-change":      {op: "organizations.change_member_role", features: []STRIDEFeature{STRIDEFeatureOrganizationAuthorityRead, STRIDEFeatureOrganizationAuthorityWrite}, requireOrg: true},
 	"organization-ownership-transfer":      {op: "organizations.transfer_ownership", features: []STRIDEFeature{STRIDEFeatureOrganizationAuthorityRead, STRIDEFeatureOrganizationAuthorityWrite}, requireOrg: true},
 	"organization-recruiting-grant-create": {op: "network.recruiting_grant", features: []STRIDEFeature{STRIDEFeatureOrganizationAuthorityRead, STRIDEFeatureOrganizationAuthorityWrite}, requireOrg: true},
@@ -244,8 +250,10 @@ var strideE10MobileActionSurfaces = map[string]string{
 	"contribution-attestation-revoke":      "contribution-approvals",
 	"contribution-publish":                 "work-record",
 	"contribution-withdraw":                "work-record",
-	"network-search-submit":                "network-search",
+	"network-search-propose":               "network-search",
+	"network-search-confirm":               "network-search",
 	"contact-send":                         "network-search",
+	"exact-link-contact-send":              "network-recruiter-view",
 	"organization-member-role-change":      "organization-people",
 	"organization-ownership-transfer":      "organization-people",
 	"organization-recruiting-grant-create": "organization-recruiting",
@@ -476,9 +484,9 @@ func strideE10ValidMobileActionValues(action string, values map[string]any) bool
 			seen[field] = true
 		}
 		return true
-	case "network-search-submit":
-		return allowed("query") && stringValue("query", 500, true)
-	case "contact-send":
+	case "network-search-propose":
+		return allowed("query") && stringValue("query", 240, true)
+	case "contact-send", "exact-link-contact-send":
 		if !allowed("purpose", "note", "collaborationType") || !stringValue("purpose", 80, true) || !stringValue("note", 1000, false) || !stringValue("collaborationType", 32, true) {
 			return false
 		}

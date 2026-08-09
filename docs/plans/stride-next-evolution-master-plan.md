@@ -844,10 +844,10 @@ decision is explicitly external rather than silently assumed.
 | E10-W2 | Organization, Work Record, and network product surfaces | web/native self/coworker/network projections; create/join/approve/switch/leave; evidence cards/tiers; organization contribution approvals; network preview/View-as-recruiter/contact/block; no discovery activation | `deterministic_verified` — receipt-bound local/default-off backend, web, native, persistent recovery, critic PASS, and registered-live W1-backed rendered QA; earlier static fixture evidence remains explicitly non-live |
 | E10-W3 | Tenant conversion, network shadow, and migration rehearsal | replace singleton/unconditional org ACL paths; build shadow network projection/index from published fields only; revalidation/revoke/purge parity; idempotent offline seven-person/Bonfire rehearsal with AJ owner; no production mutation | `deterministic_verified` — local/offline migration, shadow, durable purge, restart/rollback, and converted authority-path evidence plus three independent critic PASS verdicts; production cutover remains deliberately disabled and singleton-dependent surfaces are explicitly unavailable/pending |
 | E10-W4 | Authority-gated Bonfire migration and private org/Work Record/network activation; canonical repair remains separately gated | explicit production authority; exact backup/rollback; authenticated activation journal/receipt; seven people and memberships with AJ sole owner; all current sessions bound; cohesive web/native org/profile/private draft/preview while discovery and MyMind remain off | `production_private_live` — exact migration evidence retained without rerun; W4 activation and successor lineage verified; seven people/seven memberships/98 sessions live; registered signed-in desktop/mobile QA PASS; canonical repair/promotion deliberately not performed |
-| E10-W5 | Private MyMind custody and activation | independent encrypted custody/consent; inspect/correct/forget/export; restart/restore; exact disclosure and zero leakage; profiles/orgs do not depend on this wave | `external_waiting` |
-| E10-W6 | Network, provider, and real-work qualification | privacy/legal/product approval; at least five consenting profile participants and two search reviewers; labeled/adversarial recruiter corpus; explanation/unknown/prohibited-criteria/contact/exfiltration gates; qualify any parser/reranker plus STT, voice, Luna/Terra/Sol, I&O/workforce one variable at a time | `external_waiting` |
-| E10-W7 | Physical, privacy, and resilience acceptance | final exact native build containing org/Work Record/network changes on iPhone/iPad; publish/pause/search/evidence/contact/block/revoke rendered flows; restrictive-network TURN/WebRTC; signed restore; index purge; HA failover; accessibility and privacy/legal sign-off | `external_waiting` |
-| E10-W8 | Final activation | final route freeze and exact release/rollback; independently kill-switchable opt-in cohort order `draft/publish -> evidence search -> contact`; 24-hour/ten-sitting soak includes revoke/purge latency and prohibited-leakage audit; W5 must be complete or explicitly deferred by AJ, never silently pending | `blocked` on W0-W7 |
+| E10-W5 | Private MyMind custody and activation | independent encrypted custody/consent; inspect/correct/forget/export; restart/restore; exact disclosure and zero leakage; profiles/orgs do not depend on this wave | `deterministic_verified_external_custody_waiting` — local/default-off encrypted custody, API/web/native controls, migration 17, restart/restore/crypto-erasure, and receipt evidence pass; no production install, managed production keys/high-water, named custody owners, consent approval, or live cohort |
+| E10-W6 | Network, provider, and real-work qualification | privacy/legal/product approval; at least five consenting profile participants and two search reviewers; labeled/adversarial recruiter corpus; explanation/unknown/prohibited-criteria/contact/exfiltration gates; qualify any parser/reranker plus STT, voice, Luna/Terra/Sol, I&O/workforce one variable at a time | `deterministic_verified_external_qualification_waiting` — default-off policy, qualification, shadow, exact-session search/contact, web/native controls, and receipt evidence pass; no real cohort, approver, reviewer, provider, or live activation |
+| E10-W7 | Physical, privacy, and resilience acceptance | final exact native build containing org/Work Record/network changes on iPhone/iPad; publish/pause/search/evidence/contact/block/revoke rendered flows; restrictive-network TURN/WebRTC; signed restore; index purge; HA failover; accessibility and privacy/legal sign-off | `deterministic_validator_verified_external_waiting` — immutable-root evidence validators and read-only preflights pass; no Apple, physical-device, privacy/accessibility, restore, restrictive-network, or HA receipt is claimed |
+| E10-W8 | Final activation | final route freeze and exact release/rollback; independently kill-switchable opt-in cohort order `draft/publish -> evidence search -> contact`; 24-hour/ten-sitting soak includes revoke/purge latency and prohibited-leakage audit; W5 must be complete or explicitly deferred by AJ, never silently pending | `deterministic_validator_verified_external_blocked` — ordered cohort/kill-switch/soak validator passes; activation remains blocked on W5-W7 external evidence and the real 24-hour/ten-sitting campaign |
 
 The body-minimized W1 authority receipt is
 `docs/evidence/e10/stride-e10-w1-authority-20260808.json` (SHA-256
@@ -884,6 +884,38 @@ The W4 intervention packet is
 required authority, backup, delta, canary, and rollback contract and explicitly
 refuses to treat the W0 count of 119 repair candidates as a fresh exact mutation
 manifest.
+
+The body-minimized W5 private MyMind custody receipt is
+`docs/evidence/e10/stride-e10-w5-mymind-custody-20260809.json` (SHA-256
+`30201dc905a7c4a38390978599d529a3ce204e91928aabd3b1d90a6569f8f1ac`).
+It binds the default-off encrypted custody implementation, web/native controls,
+migration 17 and DR registry parity, focused normal/race/disposable-PostgreSQL,
+native, vet, and diff-check passes. Its status remains
+`deterministic_verified_external_custody_waiting`: no production adapter, keys,
+external monotonic high-water, named custody owners, consent approval, import,
+live cohort, Git action, release, or production mutation is claimed.
+
+The body-minimized W6 network qualification receipt is
+`docs/evidence/e10/stride-e10-w6-network-qualification-20260809.json`
+(SHA-256
+`b79ed9f36d612810648a3c13b2a3b0b736492b40bd0a374bd1f4a2cf220ae012`).
+It binds the default-off policy and signed qualification contracts, exact
+qualified shadow manifest, recorded post-limit disclosure, exact-session
+proposal/search/contact authority through final persistence, web/native
+controls, focused normal/race, vet, and diff-check passes. Its status remains
+`deterministic_verified_external_qualification_waiting`: no real five-profile
+cohort, two reviewers, privacy/legal/product approval, provider call, switch
+activation, Git action, release, or production mutation is claimed.
+
+The body-minimized W7/W8 validator receipt is
+`docs/evidence/e10/stride-e10-w7-w8-validator-20260809.json` (SHA-256
+`f3733917fa7c07bb94d8163fd9dacaa89649a6819c7dd3330037d65076d74e26`).
+It binds immutable compiled trust roots, pairwise signer-role separation,
+native/server artifact continuity, signed restore/HA dependencies, ordered
+kill-switch cohorts, and finite soak validation. It is validator evidence only:
+Apple/TestFlight, physical iPhone/iPad, privacy/accessibility, restrictive
+network, offsite restore, HA, independent observation, and the real soak remain
+external and no activation is claimed.
 
 ### Required evidence and human interventions
 

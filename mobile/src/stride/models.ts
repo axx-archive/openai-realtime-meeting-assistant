@@ -76,8 +76,10 @@ export type StrideProjectionActionType =
   | 'network-publish'
   | 'network-pause'
   | 'network-profile-off'
-  | 'network-search-submit'
+  | 'network-search-propose'
+  | 'network-search-confirm'
   | 'contact-send'
+  | 'exact-link-contact-send'
   | 'contribution-subject-approve'
   | 'contribution-subject-dispute'
   | 'contribution-organization-approve'
@@ -151,8 +153,10 @@ const ACTION_TYPES = new Set<StrideProjectionActionType>([
   'network-publish',
   'network-pause',
   'network-profile-off',
-  'network-search-submit',
+  'network-search-propose',
+  'network-search-confirm',
   'contact-send',
+  'exact-link-contact-send',
   'contribution-subject-approve',
   'contribution-subject-dispute',
   'contribution-organization-approve',
@@ -191,8 +195,10 @@ const ACTION_SURFACES: Record<StrideProjectionActionType, StrideSurfaceName> = {
   'network-publish': 'network-preview',
   'network-pause': 'network-preview',
   'network-profile-off': 'network-preview',
-  'network-search-submit': 'network-search',
+  'network-search-propose': 'network-search',
+  'network-search-confirm': 'network-search',
   'contact-send': 'network-search',
+  'exact-link-contact-send': 'network-recruiter-view',
   'contribution-subject-approve': 'work-record',
   'contribution-subject-dispute': 'work-record',
   'contribution-organization-approve': 'contribution-approvals',
@@ -232,8 +238,9 @@ const ACTION_VALUE_KEYS: Partial<Record<StrideProjectionActionType, ReadonlySet<
   'organization-member-role-change': new Set(['role']),
   'organization-recruiting-grant-revoke': new Set(['reason']),
   'network-draft-save': new Set(['intro', 'workModes', 'openTo']),
-  'network-search-submit': new Set(['query']),
+  'network-search-propose': new Set(['query']),
   'contact-send': new Set(['purpose', 'note', 'collaborationType']),
+  'exact-link-contact-send': new Set(['purpose', 'note', 'collaborationType']),
   'organization-request-approve': new Set(['reason']),
   'organization-request-deny': new Set(['reason']),
   'contribution-subject-approve': new Set(['reason']),
@@ -329,10 +336,11 @@ export function parseStrideActionValues(
       add('workModes', closedStringList(values.workModes, 'workModes'));
       add('openTo', closedStringList(values.openTo, 'openTo'));
       break;
-    case 'network-search-submit':
-      add('query', closedString(values.query, 'query', 500, true));
+    case 'network-search-propose':
+      add('query', closedString(values.query, 'query', 240, true));
       break;
     case 'contact-send':
+    case 'exact-link-contact-send':
       add('purpose', closedString(values.purpose, 'purpose', 80, true));
       add('note', closedString(values.note, 'note', 1_000));
       add('collaborationType', closedString(values.collaborationType, 'collaborationType', 32, true));

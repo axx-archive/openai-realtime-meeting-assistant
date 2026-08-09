@@ -32,6 +32,8 @@ import type {
   RoomAgentsResponse,
   StridePrivateAgentTemplateInput,
   StrideRelationshipMemoryResponse,
+  StridePersonalContextSource,
+  StridePersonalContextExport,
   ArtifactDispositionReceipt,
   ArtifactDispositionRef,
   ArtifactResponse,
@@ -46,6 +48,7 @@ import {
   fenceUnauthorizedResponse,
   readTextAfterUnauthorizedFence,
 } from './unauthorizedBoundary';
+import { parseStridePersonalContextExport, parseStridePersonalContextSource, parseStridePersonalContextSources } from '../personalContext/parser';
 
 export { setUnauthorizedHandler } from './unauthorizedBoundary';
 
@@ -977,6 +980,37 @@ export const api = {
 
   strideRelationshipMemory(sessionToken: string): Promise<StrideRelationshipMemoryResponse> {
     return request('/api/stride/v1/coworker/relationships', { sessionToken });
+  },
+
+  stridePersonalContextSources(sessionToken: string): Promise<StridePersonalContextSource[]> {
+    return request<unknown>('/api/mymind/v1/sources', { sessionToken }).then(parseStridePersonalContextSources);
+  },
+
+  stridePutPersonalContext(
+    sessionToken: string,
+    body: { idempotencyKey: string; sourceId: string; kind: 'preference' | 'reflection'; body: string; expectedRevision: number },
+  ): Promise<StridePersonalContextSource> {
+    return request<unknown>('/api/mymind/v1/sources', { method: 'POST', body, sessionToken }).then(parseStridePersonalContextSource);
+  },
+
+  strideCorrectPersonalContext(
+    sessionToken: string,
+    sourceId: string,
+    body: { idempotencyKey: string; body: string; expectedRevision: number },
+  ): Promise<StridePersonalContextSource> {
+    return request<unknown>(`/api/mymind/v1/sources/${encodeURIComponent(sourceId)}/correct`, { method: 'POST', body, sessionToken }).then(parseStridePersonalContextSource);
+  },
+
+  strideForgetPersonalContext(
+    sessionToken: string,
+    sourceId: string,
+    body: { idempotencyKey: string; expectedRevision: number },
+  ): Promise<{ forgotten: boolean }> {
+    return request(`/api/mymind/v1/sources/${encodeURIComponent(sourceId)}/forget`, { method: 'POST', body, sessionToken });
+  },
+
+  strideExportPersonalContext(sessionToken: string): Promise<StridePersonalContextExport> {
+    return request<unknown>('/api/mymind/v1/export', { sessionToken }).then(parseStridePersonalContextExport);
   },
 
   strideSetRelationshipConsent(

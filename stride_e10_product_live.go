@@ -49,6 +49,8 @@ type StrideE10LiveActionBinding struct {
 	Target                STRIDEReference
 	MembershipRevision    int64
 	SessionRevision       int64
+	SessionHash           string
+	ActiveSessionID       string
 	TargetMembershipID    string
 	Profile               *PersonProfile
 	MemberProfile         *OrganizationMemberProfile
@@ -65,6 +67,8 @@ type StrideE10LiveActionBinding struct {
 	Attestation           *ContributionAttestation
 	Publication           *PublishedContributionClaim
 	NetworkSearch         *NetworkSearchRequest
+	NetworkProposal       *W6NetworkInterpretationProposal
+	SearchReceipt         *NetworkSearchReceipt
 	ContactAdmission      *NetworkContactAdmission
 	ContactActor          *STRIDEControllerRevision
 	AcceptedChannelDigest string
@@ -171,7 +175,8 @@ func (r *StrideE10ProductLiveRuntime) BindAction(binding StrideE10LiveActionBind
 	if r == nil || !strideIdentifier(binding.ID) || binding.ExpectedRevision < 1 || !strideIdentifier(binding.PersonID) ||
 		!validStrideE10LiveAction(binding.Type, binding.Surface) || binding.ExpiresAt.IsZero() || !r.now().Before(binding.ExpiresAt) ||
 		(binding.Target.ID != "" && (binding.Target.Validate() != nil || binding.Target.Revision != binding.ExpectedRevision)) ||
-		(requiresOrganization && (!strideIdentifier(binding.OrganizationID) || binding.MembershipRevision < 1 || binding.SessionRevision < 1)) {
+		(requiresOrganization && (!strideIdentifier(binding.OrganizationID) || binding.MembershipRevision < 1 || binding.SessionRevision < 1)) ||
+		(strideE10W6SessionBoundAction(binding.Type) && (!validStrideE10SessionHash(binding.SessionHash) || !strideIdentifier(binding.ActiveSessionID))) {
 		return ErrStrideE10Invalid
 	}
 	r.mu.Lock()
@@ -184,6 +189,10 @@ func (r *StrideE10ProductLiveRuntime) BindAction(binding StrideE10LiveActionBind
 	}
 	r.actions[binding.ID] = cloneStrideE10LiveActionBinding(binding)
 	return nil
+}
+
+func strideE10W6SessionBoundAction(action string) bool {
+	return containsSTRIDEString([]string{"network-search-propose", "network-search-confirm", "contact-send", "exact-link-contact-send"}, action)
 }
 
 func strideE10DirectBindingRequiresOrganization(action string) bool {
@@ -262,6 +271,14 @@ func cloneStrideE10LiveActionBinding(value StrideE10LiveActionBinding) StrideE10
 		clone := *value.NetworkSearch
 		clone.StructuredFilters = append([]NetworkSearchFilter(nil), value.NetworkSearch.StructuredFilters...)
 		result.NetworkSearch = &clone
+	}
+	if value.NetworkProposal != nil {
+		clone := cloneContract(*value.NetworkProposal)
+		result.NetworkProposal = &clone
+	}
+	if value.SearchReceipt != nil {
+		clone := cloneNetworkSearchReceipt(*value.SearchReceipt)
+		result.SearchReceipt = &clone
 	}
 	if value.ContactAdmission != nil {
 		clone := *value.ContactAdmission
@@ -380,7 +397,15 @@ func (r *StrideE10ProductLiveRuntime) ResolvePrincipal(request *http.Request) (S
 	if err != nil || membership.Status != "active" || membership.PersonID != record.PersonID || membership.OrganizationID != record.ActiveOrganizationID || membership.Header.Revision != record.OrganizationMembershipRev {
 		return StrideE10ProductPrincipal{}, ErrStrideE10Denied
 	}
-	return StrideE10ProductPrincipal{PersonID: record.PersonID, ActiveOrganizationID: record.ActiveOrganizationID, OrganizationMembershipID: record.OrganizationMembershipID, OrganizationMembershipRev: record.OrganizationMembershipRev, ActiveOrganizationSessionRev: record.ActiveOrganizationSessionRev}, nil
+	sessionHash := hashResetToken(token)
+	r.organization.mu.RLock()
+	active := r.organization.sessions[sessionHash]
+	r.organization.mu.RUnlock()
+	principal := StrideE10ProductPrincipal{PersonID: record.PersonID, ActiveOrganizationID: record.ActiveOrganizationID, OrganizationMembershipID: record.OrganizationMembershipID, OrganizationMembershipRev: record.OrganizationMembershipRev, ActiveOrganizationSessionRev: record.ActiveOrganizationSessionRev}
+	if active.Validate() == nil && active.Status == "active" && active.PersonID == record.PersonID && active.OrganizationID == record.ActiveOrganizationID && active.MembershipID == record.OrganizationMembershipID && active.MembershipRevision == record.OrganizationMembershipRev && active.SessionRevision == record.ActiveOrganizationSessionRev {
+		principal.SessionHash, principal.ActiveOrganizationSessionID = sessionHash, active.Header.ID
+	}
+	return principal, nil
 }
 
 func (r *StrideE10ProductLiveRuntime) Execute(ctx context.Context, principal StrideE10ProductPrincipal, command StrideE10ProductCommand) (any, bool, error) {
@@ -460,7 +485,8 @@ func (r *StrideE10ProductLiveRuntime) Execute(ctx context.Context, principal Str
 	}
 	binding, ok := r.lookupLiveAction(principal.PersonID, command.ResourceID)
 	if !ok || !r.now().Before(binding.ExpiresAt) || binding.ID != command.ResourceID || binding.Type != envelope.Action || binding.Surface != envelope.Surface || binding.PersonID != principal.PersonID || binding.ExpectedRevision != command.ExpectedRevision || binding.OrganizationID != "" && binding.OrganizationID != command.OrganizationID ||
-		(binding.MembershipRevision != 0 && binding.MembershipRevision != principal.OrganizationMembershipRev) || (binding.SessionRevision != 0 && binding.SessionRevision != principal.ActiveOrganizationSessionRev) {
+		(binding.MembershipRevision != 0 && binding.MembershipRevision != principal.OrganizationMembershipRev) || (binding.SessionRevision != 0 && binding.SessionRevision != principal.ActiveOrganizationSessionRev) ||
+		(strideE10W6SessionBoundAction(binding.Type) && (binding.SessionHash != principal.SessionHash || binding.ActiveSessionID != principal.ActiveOrganizationSessionID)) {
 		return nil, false, ErrStrideE10NotFound
 	}
 	r.mutationMu.Lock()
@@ -493,6 +519,14 @@ func (r *StrideE10ProductLiveRuntime) Execute(ctx context.Context, principal Str
 			}
 		}
 		if operation.State == strideE10OperationCompleted {
+			if binding.Type == "network-search-confirm" {
+				if binding.NetworkSearch == nil {
+					return nil, true, ErrStrideE10NotFound
+				}
+				if _, currentErr := r.network.CurrentW6SearchReceipt(*binding.NetworkSearch); currentErr != nil {
+					return nil, true, ErrStrideE10NotFound
+				}
+			}
 			var value any
 			if json.Unmarshal(operation.Response, &value) != nil {
 				return nil, true, ErrStrideE10Invalid
@@ -637,7 +671,7 @@ func strideE10DirectOperationAllows(operation, action string) bool {
 		"contributions.correct": {"contribution-correct"}, "contributions.revoke": {"contribution-revoke"}, "contributions.named_party_decision": {"contribution-named-party-decision"}, "contributions.revoke_attestation": {"contribution-attestation-revoke"},
 		"network.profile_draft": {"network-draft-save"}, "network.profile": {"network-publish", "network-pause"},
 		"network.profile_publish": {"network-publish"}, "network.profile_pause": {"network-pause"}, "network.profile_off": {"network-profile-off"}, "network.profile_delete": {"network-profile-delete"}, "network.searchable_fields": {"network-searchable-fields-update"},
-		"network.search": {"network-search-submit"}, "network.contacts": {"contact-send"}, "network.decide_contact": {"contact-accept", "contact-decline", "contact-withdraw"},
+		"network.search": {"network-search-propose", "network-search-confirm"}, "network.contacts": {"contact-send", "exact-link-contact-send"}, "network.decide_contact": {"contact-accept", "contact-decline", "contact-withdraw"},
 		"network.block": {"network-block", "network-unblock"}, "network.recruiting_grants": {"organization-recruiting-grant-create"},
 		"network.recruiting_grant_revoke": {"organization-recruiting-grant-revoke"}, "work_record.export": {"work-record-export"},
 		"work_record.delete": {"work-record-delete"}, "network.profile_export": {"network-profile-export"},
@@ -896,7 +930,7 @@ func (r *StrideE10ProductLiveRuntime) hydrateLiveActionBinding(ctx context.Conte
 			return StrideE10LiveActionBinding{}, ErrStrideE10Invalid
 		}
 		binding.NetworkProfile = &next
-	case "network-search-submit":
+	case "network-search-propose":
 		if binding.TalentGrant == nil || binding.Target.ContractType != STRIDEContractTalentSearchGrant {
 			return StrideE10LiveActionBinding{}, ErrStrideE10Invalid
 		}
@@ -905,11 +939,43 @@ func (r *StrideE10ProductLiveRuntime) hydrateLiveActionBinding(ctx context.Conte
 			return StrideE10LiveActionBinding{}, err
 		}
 		query, _ := values["query"].(string)
-		filter := NetworkSearchFilter{Field: "problem_class", Operation: "contains", VisibleValue: query, ValueDigest: sha256Hex([]byte(query))}
-		binding.NetworkSearch = &NetworkSearchRequest{GrantRef: refForHeader(binding.TalentGrant.Header), SearcherPersonID: principal.PersonID, OrganizationID: principal.ActiveOrganizationID, MembershipID: principal.OrganizationMembershipID, MembershipRevision: principal.OrganizationMembershipRev, HumanQuery: query, OriginalQueryDigest: sha256Hex([]byte(query)), StructuredFilters: []NetworkSearchFilter{filter}, InterpretationConfirmed: true, Limit: networkResultsPerSearch, IdempotencyKeyDigest: sha256Hex([]byte(command.IdempotencyKey)), At: at}
-	case "contact-send":
+		proposal, err := r.network.ProposeW6Search(ctx, refForHeader(binding.TalentGrant.Header), principal.PersonID, principal.ActiveOrganizationID, principal.OrganizationMembershipID, principal.OrganizationMembershipRev, query, at)
+		if err != nil {
+			return StrideE10LiveActionBinding{}, strideE10LiveError(err)
+		}
+		binding.NetworkProposal = &proposal
+	case "network-search-confirm":
+		if binding.TalentGrant == nil || binding.NetworkProposal == nil || binding.Target.ContractType != STRIDEContractTalentSearchGrant {
+			return StrideE10LiveActionBinding{}, ErrStrideE10Invalid
+		}
+		filters := append([]NetworkSearchFilter(nil), binding.NetworkProposal.Filters...)
+		confirmation := W6NetworkInterpretationConfirmation{ProposalID: binding.NetworkProposal.ProposalID, Revision: binding.NetworkProposal.Revision, PolicyRevision: binding.NetworkProposal.PolicyRevision, ProposalDigest: binding.NetworkProposal.Digest}
+		if !validStrideE10SessionHash(binding.SessionHash) || !strideIdentifier(binding.ActiveSessionID) {
+			return StrideE10LiveActionBinding{}, ErrStrideE10Denied
+		}
+		binding.NetworkSearch = &NetworkSearchRequest{GrantRef: refForHeader(binding.TalentGrant.Header), SearcherPersonID: principal.PersonID, OrganizationID: principal.ActiveOrganizationID, MembershipID: principal.OrganizationMembershipID, MembershipRevision: principal.OrganizationMembershipRev, SessionHash: binding.SessionHash, ActiveSessionID: binding.ActiveSessionID, OriginalQueryDigest: binding.NetworkProposal.OriginalQueryDigest, StructuredFilters: filters, InterpretationConfirmed: true, PolicyRevision: binding.NetworkProposal.PolicyRevision, CohortID: r.network.currentW6Cohort(), Interpretation: binding.NetworkProposal, Confirmation: &confirmation, Limit: 1, IdempotencyKeyDigest: sha256Hex([]byte(command.IdempotencyKey)), At: at}
+	case "contact-send", "exact-link-contact-send":
 		if binding.TalentGrant == nil || binding.Target.ContractType != STRIDEContractNetworkProfileProjection {
 			return StrideE10LiveActionBinding{}, ErrStrideE10Invalid
+		}
+		if binding.Type == "contact-send" {
+			if binding.SearchReceipt == nil {
+				return StrideE10LiveActionBinding{}, ErrStrideE10NotFound
+			}
+			disclosures, err := r.network.CurrentW6SearchDisclosures(*binding.SearchReceipt)
+			if err != nil {
+				return StrideE10LiveActionBinding{}, ErrStrideE10NotFound
+			}
+			found := false
+			for _, disclosed := range disclosures {
+				if disclosed.Projection == binding.Target {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return StrideE10LiveActionBinding{}, ErrStrideE10NotFound
+			}
 		}
 		values, err := strideE10LiveCommandValues(command)
 		if err != nil {
@@ -924,7 +990,7 @@ func (r *StrideE10ProductLiveRuntime) hydrateLiveActionBinding(ctx context.Conte
 		purpose, _ := values["purpose"].(string)
 		note, _ := values["note"].(string)
 		collaboration, _ := values["collaborationType"].(string)
-		binding.ContactAdmission = &NetworkContactAdmission{GrantRef: refForHeader(binding.TalentGrant.Header), SenderPersonID: principal.PersonID, SenderOrganizationID: principal.ActiveOrganizationID, MembershipID: principal.OrganizationMembershipID, MembershipRevision: principal.OrganizationMembershipRev, RecipientProjection: binding.Target, Purpose: "purpose_" + sha256Hex([]byte(purpose))[:24], NoteDigest: sha256Hex([]byte(note)), CollaborationType: collaboration, ExpiresAt: at.Add(14 * 24 * time.Hour), IdempotencyKeyDigest: sha256Hex([]byte(command.IdempotencyKey)), At: at}
+		binding.ContactAdmission = &NetworkContactAdmission{GrantRef: refForHeader(binding.TalentGrant.Header), SenderPersonID: principal.PersonID, SenderOrganizationID: principal.ActiveOrganizationID, MembershipID: principal.OrganizationMembershipID, MembershipRevision: principal.OrganizationMembershipRev, RecipientProjection: binding.Target, Purpose: "purpose_" + sha256Hex([]byte(purpose))[:24], NoteDigest: sha256Hex([]byte(note)), CollaborationType: collaboration, PolicyRevision: binding.TalentGrant.PolicyRevision, CohortID: r.network.currentW6Cohort(), SessionHash: binding.SessionHash, ActiveSessionID: binding.ActiveSessionID, ExpiresAt: at.Add(14 * 24 * time.Hour), IdempotencyKeyDigest: sha256Hex([]byte(command.IdempotencyKey)), At: at}
 	case "organization-recruiting-grant-create":
 		if binding.TalentAssertion == nil || binding.Target.ContractType != STRIDEContractOrganizationMembership {
 			return StrideE10LiveActionBinding{}, ErrStrideE10Invalid
@@ -1715,7 +1781,25 @@ func (r *StrideE10ProductLiveRuntime) executeBoundAction(ctx context.Context, pr
 		}
 		_, _, replayed, err := r.network.PutProfile(*binding.NetworkActor, *binding.NetworkProfile, binding.NetworkProfile.Header.Revision-1, sha256Hex([]byte(command.IdempotencyKey)))
 		return replayed, strideE10LiveError(err)
-	case "network-search-submit":
+	case "network-search-propose":
+		if binding.NetworkProposal == nil || binding.TalentGrant == nil {
+			return false, ErrStrideE10Invalid
+		}
+		// Preserve only the server-derived interpretation (never the raw query)
+		// so reject/abstain proposals remain renderable without minting a
+		// confirmation capability.
+		r.mu.Lock()
+		r.actions[binding.ID] = cloneStrideE10LiveActionBinding(binding)
+		r.mu.Unlock()
+		if binding.NetworkProposal.Verdict == W6PolicyVerdictTransformWithConfirmation {
+			seed := binding.ID + "\x00confirm\x00" + binding.NetworkProposal.Digest
+			confirm := StrideE10LiveActionBinding{ID: "action_" + sha256Hex([]byte(seed))[:24], Type: "network-search-confirm", Surface: "network-search", PersonID: principal.PersonID, OrganizationID: principal.ActiveOrganizationID, ExpectedRevision: binding.TalentGrant.Header.Revision, ExpiresAt: binding.ExpiresAt, Target: refForHeader(binding.TalentGrant.Header), MembershipRevision: principal.OrganizationMembershipRev, SessionRevision: principal.ActiveOrganizationSessionRev, SessionHash: binding.SessionHash, ActiveSessionID: binding.ActiveSessionID, TalentGrant: binding.TalentGrant, NetworkProposal: binding.NetworkProposal}
+			if err := r.BindAction(confirm); err != nil {
+				return false, err
+			}
+		}
+		return false, nil
+	case "network-search-confirm":
 		if binding.NetworkSearch == nil {
 			return false, ErrStrideE10Invalid
 		}
@@ -1724,14 +1808,20 @@ func (r *StrideE10ProductLiveRuntime) executeBoundAction(ctx context.Context, pr
 		request.At = now
 		_, replayed, err := r.network.Search(request)
 		return replayed, strideE10LiveError(err)
-	case "contact-send":
+	case "contact-send", "exact-link-contact-send":
 		if binding.ContactAdmission == nil {
 			return false, ErrStrideE10Invalid
 		}
 		admission := *binding.ContactAdmission
 		admission.IdempotencyKeyDigest = sha256Hex([]byte(command.IdempotencyKey))
 		admission.At = now
-		_, replayed, err := r.network.CreateContact(admission)
+		var replayed bool
+		var err error
+		if binding.Type == "exact-link-contact-send" {
+			_, replayed, err = r.network.CreateExactLinkContact(admission)
+		} else {
+			_, replayed, err = r.network.CreateContact(admission)
+		}
 		return replayed, strideE10LiveError(err)
 	case "contact-accept", "contact-decline", "contact-withdraw":
 		if binding.ContactActor == nil || binding.Target.ID == "" {
@@ -2203,6 +2293,9 @@ func (r *StrideE10ProductLiveRuntime) mintProjectionActions(principal StrideE10P
 		binding.ID, binding.Type, binding.Surface, binding.PersonID = "action_"+sha256Hex([]byte(seed))[:24], action, surface, principal.PersonID
 		binding.OrganizationID, binding.ExpectedRevision, binding.ExpiresAt, binding.Target = principal.ActiveOrganizationID, revision, expires, target
 		binding.MembershipRevision, binding.SessionRevision = principal.OrganizationMembershipRev, principal.ActiveOrganizationSessionRev
+		if strideE10W6SessionBoundAction(action) {
+			binding.SessionHash, binding.ActiveSessionID = principal.SessionHash, principal.ActiveOrganizationSessionID
+		}
 		if !strideE10MobileActions[action].requireOrg {
 			binding.OrganizationID, binding.MembershipRevision, binding.SessionRevision = "", 0, 0
 		}
@@ -2433,12 +2526,13 @@ func (r *StrideE10ProductLiveRuntime) mintProjectionActions(principal StrideE10P
 		}
 		for _, grant := range view.Grants {
 			if grant.State == "active" && now.Before(grant.ExpiresAt) {
-				issueBinding("network-search-submit", grant.Header.Revision, refForHeader(grant.Header), StrideE10LiveActionBinding{TalentGrant: &grant})
+				issueBinding("network-search-propose", grant.Header.Revision, refForHeader(grant.Header), StrideE10LiveActionBinding{TalentGrant: &grant})
 			}
 		}
 		for _, receipt := range view.SearchReceipts {
 			for _, result := range receipt.Results {
-				issueBinding("contact-send", result.Projection.Revision, result.Projection, StrideE10LiveActionBinding{TalentGrant: findStrideE10Grant(view.Grants, receipt.Grant.ID)})
+				copyReceipt := cloneNetworkSearchReceipt(receipt)
+				issueBinding("contact-send", result.Projection.Revision, result.Projection, StrideE10LiveActionBinding{TalentGrant: findStrideE10Grant(view.Grants, receipt.Grant.ID), SearchReceipt: &copyReceipt})
 			}
 		}
 	case "contact-inbox":
@@ -2526,6 +2620,35 @@ func (r *StrideE10ProductLiveRuntime) mintProjectionActions(principal StrideE10P
 	}
 }
 
+func (r *StrideE10ProductLiveRuntime) mintExactLinkContactAction(principal StrideE10ProductPrincipal, targetPersonID string) {
+	if r == nil || !strideIdentifier(targetPersonID) || targetPersonID == principal.PersonID || !strideIdentifier(principal.ActiveOrganizationID) {
+		return
+	}
+	viewer := StrideE10AuthorityViewer{PersonID: principal.PersonID, OrganizationID: principal.ActiveOrganizationID, MembershipID: principal.OrganizationMembershipID, MembershipRevision: principal.OrganizationMembershipRev}
+	organizationView, err := r.network.ReadStrideE10NetworkOrganizationView(viewer)
+	if err != nil {
+		return
+	}
+	targetView, err := r.network.ReadStrideE10NetworkPersonView(targetPersonID)
+	if err != nil {
+		return
+	}
+	now := r.now().UTC()
+	for _, grant := range organizationView.Grants {
+		if grant.State != "active" || !now.Before(grant.ExpiresAt) {
+			continue
+		}
+		for _, profile := range targetView.Profiles {
+			if profile.State != "published" || profile.Discoverability != "exact_link" {
+				continue
+			}
+			expires := now.Truncate(5 * time.Minute).Add(5 * time.Minute)
+			seed := principal.PersonID + "\x00network-recruiter-view\x00exact-link-contact-send\x00" + profile.Header.ID + "\x00" + fmt.Sprint(profile.Header.Revision) + "\x00" + fmt.Sprint(principal.OrganizationMembershipRev) + "\x00" + fmt.Sprint(principal.ActiveOrganizationSessionRev) + "\x00" + fmt.Sprint(expires.Unix())
+			_ = r.BindAction(StrideE10LiveActionBinding{ID: "action_" + sha256Hex([]byte(seed))[:24], Type: "exact-link-contact-send", Surface: "network-recruiter-view", PersonID: principal.PersonID, OrganizationID: principal.ActiveOrganizationID, ExpectedRevision: profile.Header.Revision, ExpiresAt: expires, Target: refForHeader(profile.Header), MembershipRevision: principal.OrganizationMembershipRev, SessionRevision: principal.ActiveOrganizationSessionRev, SessionHash: principal.SessionHash, ActiveSessionID: principal.ActiveOrganizationSessionID, TalentGrant: &grant})
+		}
+	}
+}
+
 func (r *StrideE10ProductLiveRuntime) projectTarget(principal StrideE10ProductPrincipal, surface, targetID string) (map[string]any, error) {
 	items := make([]map[string]any, 0)
 	authorityItems, err := r.authorityProjectionItems(principal, surface, targetID)
@@ -2534,6 +2657,9 @@ func (r *StrideE10ProductLiveRuntime) projectTarget(principal StrideE10ProductPr
 	}
 	items = append(items, authorityItems...)
 	r.mintProjectionActions(principal, surface)
+	if surface == "network-recruiter-view" {
+		r.mintExactLinkContactAction(principal, targetID)
+	}
 	r.mu.RLock()
 	_, portableDeleted := r.portableStore.Load(principal.PersonID)
 	for _, binding := range r.actions {
@@ -2548,7 +2674,8 @@ func (r *StrideE10ProductLiveRuntime) projectTarget(principal StrideE10ProductPr
 		}
 		if binding.PersonID != principal.PersonID || binding.Surface != surface || !r.now().Before(binding.ExpiresAt) ||
 			binding.OrganizationID != "" && binding.OrganizationID != principal.ActiveOrganizationID ||
-			binding.MembershipRevision != 0 && binding.MembershipRevision != principal.OrganizationMembershipRev || binding.SessionRevision != 0 && binding.SessionRevision != principal.ActiveOrganizationSessionRev || !r.bindingCurrent(binding) {
+			binding.MembershipRevision != 0 && binding.MembershipRevision != principal.OrganizationMembershipRev || binding.SessionRevision != 0 && binding.SessionRevision != principal.ActiveOrganizationSessionRev ||
+			strideE10W6SessionBoundAction(binding.Type) && (binding.SessionHash != principal.SessionHash || binding.ActiveSessionID != principal.ActiveOrganizationSessionID) || !r.bindingCurrent(binding) {
 			continue
 		}
 		if _, mobileAction := strideE10MobileActions[binding.Type]; !mobileAction {
@@ -2692,7 +2819,14 @@ func (r *StrideE10ProductLiveRuntime) authorityProjectionItems(principal StrideE
 			}
 		}
 	case "network-draft", "network-preview", "network-recruiter-view", "contact-inbox", "network-blocks":
-		view, err := r.network.ReadStrideE10NetworkPersonView(principal.PersonID)
+		viewPersonID := principal.PersonID
+		if surface == "network-recruiter-view" && targetID != "" {
+			if !strideIdentifier(targetID) {
+				return nil, ErrStrideE10NotFound
+			}
+			viewPersonID = targetID
+		}
+		view, err := r.network.ReadStrideE10NetworkPersonView(viewPersonID)
 		if err != nil {
 			return nil, strideE10LiveError(err)
 		}
@@ -2763,7 +2897,7 @@ func (r *StrideE10ProductLiveRuntime) authorityProjectionItems(principal StrideE
 			receipts := make([]map[string]any, 0)
 			for _, receipt := range view.SearchReceipts {
 				verdict := "denied"
-				if receipt.PolicyVerdict == "admitted" {
+				if receipt.PolicyVerdict == "allow" {
 					verdict = "admitted"
 				}
 				receipts = append(receipts, map[string]any{"kind": "search", "verdict": verdict, "revision": receipt.Revision, "occurredAt": receipt.SearchedAt})
@@ -2787,13 +2921,35 @@ func (r *StrideE10ProductLiveRuntime) authorityProjectionItems(principal StrideE
 		if err != nil {
 			return nil, ErrStrideE10NotFound
 		}
+		r.mu.RLock()
+		seenProposals := map[string]bool{}
+		for _, action := range r.actions {
+			if action.PersonID != principal.PersonID || action.Surface != "network-search" || action.NetworkProposal == nil {
+				continue
+			}
+			proposal := cloneContract(*action.NetworkProposal)
+			if seenProposals[proposal.ProposalID] {
+				continue
+			}
+			seenProposals[proposal.ProposalID] = true
+			verdict := "denied"
+			if proposal.Verdict == W6PolicyVerdictTransformWithConfirmation {
+				verdict = "admitted"
+			}
+			filters := make([]string, 0, len(proposal.Filters))
+			for _, filter := range proposal.Filters {
+				filters = append(filters, filter.Field+" "+filter.Operation+" "+filter.VisibleValue)
+			}
+			items = append(items, map[string]any{"id": proposal.ProposalID, "title": "Search interpretation", "status": verdict, "kind": "network-query-interpretation", "detail": map[string]any{"kind": "network-query-interpretation", "verdict": verdict, "filters": filters}})
+		}
+		r.mu.RUnlock()
 		for _, receipt := range view.SearchReceipts {
 			filters := make([]string, 0, len(receipt.StructuredFilters))
 			for _, filter := range receipt.StructuredFilters {
 				filters = append(filters, filter.Field+" "+filter.Operation+" "+filter.VisibleValue)
 			}
 			verdict := "denied"
-			if receipt.PolicyVerdict == "admitted" {
+			if receipt.PolicyVerdict == "allow" {
 				verdict = "admitted"
 			}
 			items = append(items, map[string]any{"id": receipt.Header.ID + "-interpretation", "title": "Search interpretation", "status": verdict, "kind": "network-query-interpretation", "detail": map[string]any{"kind": "network-query-interpretation", "verdict": verdict, "filters": filters}})
@@ -3175,25 +3331,24 @@ func strideE10NetworkProfileDetail(profile NetworkProfileProjection) (map[string
 }
 
 func (r *StrideE10ProductLiveRuntime) currentNetworkSearchResults(receipt NetworkSearchReceipt) ([]map[string]any, bool) {
-	r.network.mu.Lock()
-	defer r.network.mu.Unlock()
-	current, ok := r.network.searchReceipts[receipt.Header.ID]
-	if !ok || current.Header.Revision != receipt.Header.Revision || current.Header.ContentDigest != receipt.Header.ContentDigest {
+	disclosures, err := r.network.CurrentW6SearchDisclosures(receipt)
+	if err != nil {
 		return nil, false
 	}
 	items := make([]map[string]any, 0, len(receipt.Results))
-	for _, result := range receipt.Results {
-		profile, ok := r.network.profiles[result.Projection.ID]
-		if !ok || profile.Header.Revision != result.Projection.Revision || profile.Header.ContentDigest != result.Projection.Digest || profile.State != "published" {
-			return nil, false
-		}
-		labels := make([]string, 0, len(profile.Fields))
-		for _, field := range profile.Fields {
+	for index, result := range receipt.Results {
+		copied := disclosures[index]
+		labels := make([]string, 0, len(copied.Fields))
+		publishedRefs := make([]map[string]any, 0)
+		for _, field := range copied.Fields {
 			if !containsSTRIDEString(labels, field.EvidenceLabel) {
 				labels = append(labels, field.EvidenceLabel)
 			}
+			if field.Claim != nil {
+				publishedRefs = append(publishedRefs, strideE10LiveReference(*field.Claim))
+			}
 		}
-		items = append(items, map[string]any{"id": receipt.Header.ID + "-" + profile.Header.ID, "title": "Network search result", "kind": "network-search-result", "detail": map[string]any{"kind": "network-search-result", "why": append([]string(nil), result.Why...), "unknown": append([]string(nil), result.Unknown...), "verificationLabels": labels, "publishedRefs": []map[string]any{strideE10LiveReference(profile.Publication)}}})
+		items = append(items, map[string]any{"id": receipt.Header.ID + "-" + copied.Projection.ID, "title": "Network search result", "kind": "network-search-result", "detail": map[string]any{"kind": "network-search-result", "why": append([]string(nil), result.Why...), "unknown": append([]string(nil), result.Unknown...), "verificationLabels": labels, "publishedRefs": publishedRefs}})
 	}
 	return items, true
 }
@@ -3222,7 +3377,7 @@ func strideE10LiveActionLabel(action string) string {
 		"organization-member-role-change": "Change role", "organization-ownership-transfer": "Transfer ownership", "organization-member-revoke": "Remove member",
 		"organization-recruiting-grant-create": "Create recruiting grant", "organization-recruiting-grant-revoke": "Revoke recruiting grant",
 		"network-draft-save": "Save private draft", "network-publish": "Publish network profile", "network-pause": "Pause network profile", "network-profile-off": "Turn network profile off",
-		"network-search-submit": "Search network", "contact-send": "Send contact request",
+		"network-search-propose": "Review search", "network-search-confirm": "Confirm search", "contact-send": "Send contact request", "exact-link-contact-send": "Send contact request",
 		"contribution-subject-approve": "Approve contribution", "contribution-subject-dispute": "Dispute contribution",
 		"contribution-organization-approve": "Approve as organization", "contribution-organization-deny": "Deny as organization",
 		"contribution-named-party-decision": "Decide as named party", "contribution-attestation-revoke": "Revoke issued attestation",

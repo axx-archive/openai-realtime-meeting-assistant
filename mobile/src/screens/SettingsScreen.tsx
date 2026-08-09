@@ -18,6 +18,7 @@ import { useAuth } from '../auth/AuthContext';
 import { passkeyErrorMessage } from '../auth/passkeyError';
 import { Screen } from '../components/Screen';
 import { ScoutMemorySettings } from '../components/ScoutMemorySettings';
+import { PersonalContextSettings } from '../components/PersonalContextSettings';
 import { useShowPreviews } from '../canvas/previewPreference';
 import { prepareAvatarDataURL } from '../profile/prepareAvatar';
 import {
@@ -322,6 +323,7 @@ export function SettingsScreen() {
       </View>
 
       <ScoutMemorySettings sessionToken={sessionToken} />
+      <PersonalContextSettings sessionToken={sessionToken} />
 
       <Text style={styles.sectionTitle}>Password</Text>
       <View style={[styles.section, shadow[1]]}>
