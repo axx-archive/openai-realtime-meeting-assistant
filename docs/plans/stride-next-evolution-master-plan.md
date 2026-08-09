@@ -7,7 +7,9 @@ network-draft product is now `production_private_live`. The authenticated W4
 activation binds all seven current people to Bonfire, with seven active
 memberships, AJ as sole owner, all 98 current sessions bound to their canonical
 person and membership, seven private unlisted network drafts, and zero guest
-sessions. The production snapshot is schema v2 generation 91 and descends from
+sessions. Signed-in application acceptance observed schema v2 generation 91;
+later exact docs-only restarts may advance that durable generation without
+changing the authority shape, so current `/readyz` remains authoritative. It descends from
 activation `275d8c25b06c2947ff0e85257f14090ce1fd75a8c045eb1d73c6b96b907719a6`
 and receipt digest
 `fafe4431517126f0807b159b919354ca75c27d8ecd5e7fe7a3514743a83729af`.
