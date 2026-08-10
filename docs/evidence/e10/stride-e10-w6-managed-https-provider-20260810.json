@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_w6_managed_https_provider",
+  "observedAt": "2026-08-10T12:19:27Z",
+  "status": "deterministic_compiled_mtls_provider_verified_external_service_and_qualification_waiting",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "265696555feef0503cb1b895828b07c02c92bb3e",
+    "dirtyWorktreeCheckpoint": true,
+    "selectedFileSha256ManifestIsAuthoritative": true,
+    "gitStatusPorcelainV1Sha256BeforeReceipt": "fc50a47f4efd1dc1c720282ddc677d5852d7382cc8e1b93f05487ceaa393c80e",
+    "unrelatedUntrackedPathsExcluded": ["stride-site/"],
+    "gitCommitPushDeployOrProductionMutationPerformed": false
+  },
+  "scope": {
+    "featureSwitchesRemainFalse": true,
+    "compiledProductionProviderClient": true,
+    "transport": "tls_1_3_mutual_authentication",
+    "operatorBoundClientLeafSPKISHA256": true,
+    "operatorBoundServerLeafSPKISHA256": true,
+    "closedRPCSchema": "stride.e10.w6.managed-https-rpc.v1",
+    "closedOperations": ["preflight", "purge_store"],
+    "sessionAuthorityLocation": "local_session_then_organization_lock_held_through_final_use",
+    "rawBearerTokensSentToManagedService": false,
+    "proxyOrRedirectFallback": false,
+    "responseBodyLimitBytes": 262144,
+    "externalCalls": 0,
+    "testProvider": "loopback_mtls_only"
+  },
+  "authorityAndFailureProofs": {
+    "fullOperatorExpectationBoundToEveryRPC": true,
+    "exactPreflightAttestationAndManagedKeyRefsRequired": true,
+    "clientAndServerSPKIPinsRequired": true,
+    "credentialPathAndContentStabilityInheritedFromReviewedW5Reader": true,
+    "exactParameterFreeApplicationJSONRequired": true,
+    "unknownTrailingOversizedAndOperationInapplicablePayloadsRejected": true,
+    "purgeOperationIDDomainSeparatedReceiptAndStoreBound": true,
+    "purgeResponseMustEchoExactOperationReceiptAndStore": true,
+    "sessionPersonAccountMembershipAndActiveSessionRevalidated": true,
+    "sessionAndOrganizationMutationBlockedThroughFinalCallback": true,
+    "staleSessionRevisionRejected": true,
+    "compiledFallbackInstallsOnlyAfterExistingFullW6Preflight": true,
+    "bootstrapKeepsAllW6SwitchesFalse": true
+  },
+  "verification": {
+    "fullGo": {
+      "result": "PASS",
+      "command": "go test ./... -count=1",
+      "mainPackageElapsedSeconds": 474.835
+    },
+    "focusedNormal": {
+      "result": "PASS",
+      "command": "go test . -run '^(TestStrideE10W6|TestW6|TestSTRIDENetworkShadow)' -count=1",
+      "packageElapsedSeconds": 2.732
+    },
+    "focusedRace": {
+      "result": "PASS",
+      "command": "go test -race . -run '^TestStrideE10W6(ManagedHTTPS|MainSession)' -count=1",
+      "packageElapsedSeconds": 2.308
+    },
+    "goVetAll": {"result": "PASS", "command": "go vet ./..."},
+    "diffCheck": "PASS",
+    "independentCritic": {
+      "identity": "/root/w0_code_inventory",
+      "result": "PASS",
+      "normalPackageElapsedSeconds": 1.301,
+      "racePackageElapsedSeconds": 2.792,
+      "evidence": "closed_exact_media_and_response_shapes; bounded_body; dual_SPKI_mTLS; stable_credentials; exact_attestation_key_and_purge_identity; lock_held_current_session_authority; all_switches_off; no_blocker_or_major"
+    }
+  },
+  "externalBoundary": {
+    "productionManagedHTTPSServiceConfigured": false,
+    "productionRuntimeInstalled": false,
+    "productionManagedKeysInstalled": false,
+    "productionPurgeExecutorInstalled": false,
+    "externalServiceDurableIdempotencyObserved": false,
+    "realFiveProfileCohortQualified": false,
+    "realTwoReviewerQualificationCompleted": false,
+    "legalPrivacyProductApprovalCompleted": false,
+    "providerSpendAuthorized": false,
+    "networkPublicationSearchOrContactActivated": false,
+    "gitCommitPushDeployPerformed": false,
+    "remainingState": "external_managed_service_real_cohort_review_approval_and_activation_waiting"
+  },
+  "selectedFileSha256": {
+    "stride_e10_w6_managed_https_provider.go": "176a1ce1c61e95855393943fa83fcf681035b6872c2bfa18d308d2e911b4106d",
+    "stride_e10_w6_managed_https_provider_test.go": "2f1054a7a50b9dab5c1f720086b3e57adc175ccec3380675d372bb93d3d2c7bb",
+    "stride_e10_w6_production_adapter.go": "e27a9c69f4dff036b85af26148751394eb9f849be5ecca0d4a0fe0a6b2f1b8ee",
+    "stride_e10_w6_runtime.go": "d5a7efa8500b95158ee3989ab4d6117b8b8511a23f0d69932abf86e2ad329d43",
+    "stride_e10_w6_runtime_support.go": "a62adede2d519e348ed8c58dd781970271c1d93ac53d2383737556649eae53bc",
+    "stride_e10_w5_managed_https_provider.go": "88bc21359d7cd760a47fa53e99cb46b9a7caa1af0e443586a4b5569ebded093a",
+    "main.go": "758a0819a7cb17d9789d53af6dd91ef5d6aef1cd10323a90d80acb12967a79bf"
+  }
+}

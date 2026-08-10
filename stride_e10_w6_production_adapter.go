@@ -525,12 +525,19 @@ func installStrideE10W6ProductionRuntimeFromEnvironment(ctx context.Context) err
 	if strideE10W6AnySwitchEnabled() {
 		return ErrStrideE10W6RuntimeUnavailable
 	}
+	provider := strideE10W6ManagedProductionProvider()
+	if provider == nil {
+		provider, err = strideE10W6ManagedHTTPSProviderFromEnvironment()
+		if err != nil {
+			return err
+		}
+	}
 	releaseWorkerClaim, err := claimStrideE10W6ProductionWorker()
 	if err != nil {
 		return err
 	}
 	defer releaseWorkerClaim()
-	config, sessions, err := PreflightStrideE10W6ProductionRuntime(ctx, expectation, strideE10W6ManagedProductionProvider(), strideE10W6ProductionClock().UTC())
+	config, sessions, err := PreflightStrideE10W6ProductionRuntime(ctx, expectation, provider, strideE10W6ProductionClock().UTC())
 	if err != nil {
 		return err
 	}
