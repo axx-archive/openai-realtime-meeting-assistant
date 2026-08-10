@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -394,8 +395,9 @@ func TestScoutChatChannelScoutAnswersOnlyWhenMentioned(t *testing.T) {
 	if modelCalls != 1 {
 		t.Fatalf("modelCalls=%d, want only the earlier conversational @scout answer", modelCalls)
 	}
-	if _, replayErr := kanbanApp.resolveScoutChatProposal(context.Background(), user, channel.ID, scoutChatProposalAction{Action: "accepted", MessageID: researchCardID}); replayErr == nil || !strings.Contains(replayErr.Error(), "already") || launches != 1 {
-		t.Fatalf("public proposal replay error=%v launches=%d, want rejection with exactly one launch", replayErr, launches)
+	replayed, replayErr := kanbanApp.resolveScoutChatProposal(context.Background(), user, channel.ID, scoutChatProposalAction{Action: "accepted", MessageID: researchCardID})
+	if replayErr != nil || replayed["reconciled"] != true || launches != 1 {
+		t.Fatalf("public proposal replay response=%v error=%v launches=%d, want exact reconciliation with one launch", replayed, replayErr, launches)
 	}
 
 	// Private threads keep always-answer behavior with no mention.
@@ -1561,7 +1563,7 @@ func TestScoutChatProposalAcceptToolRunRecordsSignalOnly(t *testing.T) {
 		Action:    "accepted",
 		MessageID: messageID,
 	}); err == nil || !strings.Contains(err.Error(), "already") {
-		t.Fatalf("replayed accept err=%v, want already-resolved rejection", err)
+		t.Fatalf("replayed tool accept err=%v, want already-resolved rejection", err)
 	}
 }
 
@@ -1610,6 +1612,23 @@ func TestScoutChatProposalAcceptWorkstreamLaunches(t *testing.T) {
 	if agentThread.Query != "the rodeo creator market" {
 		t.Fatalf("agent thread query=%q, want the stored objective", agentThread.Query)
 	}
+	metadata := agentThread.Artifact.Metadata
+	if metadata["originSurface"] != "chat:"+private.ID ||
+		metadata["requestedBy"] != normalizeAccountEmail(user.Email) ||
+		metadata["visibility"] != scoutChatVisibilityPrivate ||
+		metadata["ownerEmail"] != normalizeAccountEmail(user.Email) {
+		t.Fatalf("private workstream custody=%#v, want exact chat origin, current owner, and private visibility", metadata)
+	}
+	teammateCookies := loginAs(t, "tim@shareability.com", "B0NFIRE!")
+	for name, denial := range map[string]*httptest.ResponseRecorder{
+		"get":       artifactAuthorizationRequest(t, http.MethodGet, "/artifacts?id="+url.QueryEscape(agentThread.Artifact.ID), "", teammateCookies, artifactsHandler),
+		"save":      artifactAuthorizationRequest(t, http.MethodPost, "/assistant/files/save", fmt.Sprintf(`{"artifactId":%q}`, agentThread.Artifact.ID), teammateCookies, assistantFileSaveHandler),
+		"follow-up": artifactAuthorizationRequest(t, http.MethodPost, "/assistant/threads/follow-up", fmt.Sprintf(`{"artifactId":%q,"text":"show me the private report"}`, agentThread.Artifact.ID), teammateCookies, assistantThreadFollowUpHandler),
+	} {
+		if denial.Code != http.StatusNotFound || strings.Contains(denial.Body.String(), agentThread.Artifact.ID) || strings.Contains(denial.Body.String(), "the rodeo creator market") {
+			t.Fatalf("teammate %s denial status=%d body=%s, want opaque 404", name, denial.Code, denial.Body.String())
+		}
+	}
 	saved := response["thread"].(scoutChatThreadRecord)
 	if !scoutChatThreadHasAgentRef(saved, agentThread.ID) {
 		t.Fatalf("persisted thread carries no ref to agent thread %s — status flips cannot land", agentThread.ID)
@@ -1619,11 +1638,12 @@ func TestScoutChatProposalAcceptWorkstreamLaunches(t *testing.T) {
 	// A replayed accept never launches a duplicate workstream.
 	launches := 0
 	startAgentThreadAsync = func(_ *kanbanBoardApp, _ scoutAgentThread) { launches++ }
-	if _, err := kanbanApp.resolveScoutChatProposal(context.Background(), user, private.ID, scoutChatProposalAction{
+	replayed, err := kanbanApp.resolveScoutChatProposal(context.Background(), user, private.ID, scoutChatProposalAction{
 		Action:    "accepted",
 		MessageID: messageID,
-	}); err == nil || !strings.Contains(err.Error(), "already") {
-		t.Fatalf("replayed accept err=%v, want already-resolved rejection", err)
+	})
+	if err != nil || replayed["reconciled"] != true {
+		t.Fatalf("replayed workstream response=%v err=%v, want exact idempotent reconciliation", replayed, err)
 	}
 	if launches != 0 {
 		t.Fatalf("replayed accept launched %d workstreams, want 0", launches)

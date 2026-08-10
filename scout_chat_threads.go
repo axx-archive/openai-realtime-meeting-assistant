@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -700,6 +701,42 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			"ok":      true,
 			"thread":  kanbanApp.projectScoutChatThreadForViewer(user.Email, thread),
 			"message": kanbanApp.projectScoutChatMessageForViewer(user.Email, thread, message),
+		})
+		return
+	}
+
+	if len(parts) == 4 && parts[1] == "messages" && parts[3] == "reconcile-terminal" && r.Method == http.MethodPost {
+		if !isArtifactApprovalAdmin(user) {
+			writeAuthError(w, http.StatusForbidden, "terminal projection reconciliation is admin-only")
+			return
+		}
+		payload := struct {
+			ArtifactID              string `json:"artifactId"`
+			ExpectedArtifactVersion int    `json:"expectedArtifactVersion"`
+			ExpectedContentDigest   string `json:"expectedContentDigest"`
+			ExpectedStatus          string `json:"expectedStatus"`
+		}{}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&payload); err != nil {
+			writeAuthError(w, http.StatusBadRequest, "could not read terminal projection reconciliation request")
+			return
+		}
+		var trailing any
+		if err := decoder.Decode(&trailing); err != io.EOF {
+			writeAuthError(w, http.StatusBadRequest, "terminal projection reconciliation request must contain exactly one JSON object")
+			return
+		}
+		thread, message, changed, err := kanbanApp.reconcileScoutChatTerminalProjection(user, threadID, parts[2], payload.ArtifactID, payload.ExpectedArtifactVersion, payload.ExpectedContentDigest, payload.ExpectedStatus)
+		if err != nil {
+			writeScoutChatThreadError(w, err)
+			return
+		}
+		writeAuthJSON(w, http.StatusOK, map[string]any{
+			"ok":         true,
+			"reconciled": changed,
+			"thread":     kanbanApp.projectScoutChatThreadForViewer(user.Email, thread),
+			"message":    kanbanApp.projectScoutChatMessageForViewer(user.Email, thread, message),
 		})
 		return
 	}
@@ -2108,6 +2145,62 @@ type scoutChatProposalAction struct {
 // effect the verdict earns. A dismissal re-asks the STORED query through the
 // normal Q&A path and commits only the scout answer — the user already said
 // it once.
+// reconcileAcceptedScoutChatProposal is the idempotent recovery leg for an
+// accepted workstream whose provider was already launched and whose work card
+// was durably appended, but whose current status projection failed to persist.
+// The proposal verdict plus CausedByMessageID form the durable launch ledger:
+// a retry can repair the exact existing card but can never launch a second
+// provider run.
+func (app *kanbanBoardApp) reconcileAcceptedScoutChatProposal(user *userAccount, threadID, proposalMessageID string) (map[string]any, bool, error) {
+	if app == nil || user == nil {
+		return nil, false, nil
+	}
+	thread, _, err := app.scoutChatThreadByID(user.Email, threadID)
+	if err != nil {
+		return nil, false, nil
+	}
+	accepted := false
+	var workMessage scoutChatMessageRecord
+	workMatches := 0
+	for _, message := range thread.Messages {
+		if message.ID == proposalMessageID && message.Proposal != nil && message.Proposal.Status == "accepted" {
+			if !strings.EqualFold(strings.TrimSpace(message.Proposal.Kind), scoutRouterProposalKindWorkstream) {
+				return nil, false, nil
+			}
+			accepted = true
+		}
+		if message.CausedByMessageID == proposalMessageID && message.Kind == "thread" && message.Thread != nil {
+			workMessage = message
+			workMatches++
+		}
+	}
+	if !accepted {
+		return nil, false, nil
+	}
+	if workMatches != 1 || workMessage.Thread == nil {
+		return nil, true, fmt.Errorf("accepted work projection is unavailable")
+	}
+	current, reconcileErr := app.reconcileScoutChatThreadRefAfterCommit(user.Email, threadID, workMessage.Thread.ID, workMessage.Thread.ArtifactID)
+	if reconcileErr != nil {
+		return nil, true, fmt.Errorf("accepted work projection reconciliation failed: %w", reconcileErr)
+	}
+	for _, message := range current.Messages {
+		if message.ID == workMessage.ID {
+			workMessage = message
+			break
+		}
+	}
+	artifact, ok := app.osArtifactByID(workMessage.Thread.ArtifactID)
+	if !ok {
+		return nil, true, fmt.Errorf("accepted work artifact is unavailable")
+	}
+	return map[string]any{
+		"ok": true, "answer": workMessage, "thread": current, "artifact": artifact,
+		"actions":    app.osAssistantActions(firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["title"]), firstNonEmptyString(artifact.Metadata["mode"], artifact.Kind), artifact),
+		"reconciled": true,
+	}, true, nil
+}
+
 func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *userAccount, threadID string, action scoutChatProposalAction) (map[string]any, error) {
 	verb := strings.ToLower(strings.TrimSpace(action.Action))
 	switch verb {
@@ -2124,6 +2217,11 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 	// proposal pending so the user can restore the source and retry.
 	pending, proposalReplyTo, proposalSource, err := app.pendingScoutChatProposalContext(threadID, user.Email, messageID)
 	if err != nil {
+		if verb == "accepted" {
+			if response, handled, reconcileErr := app.reconcileAcceptedScoutChatProposal(user, threadID, messageID); handled {
+				return response, reconcileErr
+			}
+		}
 		return nil, err
 	}
 	if verb == "accepted" && !app.assistantContextRefsReadable(ctx, user, pending.ContextRefs) {
@@ -2252,6 +2350,16 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 					spec = identity
 				}
 			}
+			// A private-chat confirmation is source authority for a private
+			// deliverable, not merely a return address. Stamp the exact persisted
+			// thread and its current owner after any delegated-agent identity copy so
+			// the artifact authorizer can re-resolve that private topology. Public
+			// channels retain their existing organization/member semantics.
+			if originKind == agentThreadOriginPrivateThread {
+				spec.OriginSurface = "chat:" + thread.ID
+				spec.RequestedBy = normalizeAccountEmail(user.Email)
+				spec.Visibility = scoutChatVisibilityPrivate
+			}
 			agentThread, err := app.launchAgentThreadWithSpec(mode, objective, user.Name, map[string]string{
 				"originKind":  originKind,
 				"originId":    threadID,
@@ -2261,12 +2369,13 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 				return nil, err
 			}
 			assistantMessage := scoutChatMessageRecord{
-				ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
-				Kind:      "thread",
-				Role:      "scout",
-				Text:      assistantToolLabel(mode) + " workstream confirmed — running now",
-				CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
-				ReplyTo:   proposalReplyTo,
+				ID:                fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
+				Kind:              "thread",
+				Role:              "scout",
+				Text:              assistantToolLabel(mode) + " workstream confirmed — running now",
+				CreatedAt:         time.Now().UTC().Format(time.RFC3339Nano),
+				CausedByMessageID: messageID,
+				ReplyTo:           proposalReplyTo,
 				Thread: &scoutChatThreadRef{
 					ID:         agentThread.ID,
 					Mode:       agentThread.Mode,
@@ -2288,6 +2397,22 @@ func (app *kanbanBoardApp) resolveScoutChatProposal(ctx context.Context, user *u
 			saved, err := app.commitScoutChatThreadMessages(user.Email, threadID, assistantMessage)
 			if err != nil {
 				return nil, err
+			}
+			// The worker starts before this card commit. It may already have
+			// persisted a newer running/terminal postimage, so reconcile from the
+			// current artifact rather than leaving the launch snapshot stranded.
+			current, reconcileErr := app.reconcileScoutChatThreadRefAfterCommit(user.Email, threadID, agentThread.ID, agentThread.Artifact.ID)
+			if reconcileErr != nil {
+				return nil, fmt.Errorf("work launched but its chat projection needs reconciliation: %w", reconcileErr)
+			}
+			if current.ID != "" {
+				saved = current
+				for _, currentMessage := range saved.Messages {
+					if currentMessage.ID == assistantMessage.ID {
+						assistantMessage = currentMessage
+						break
+					}
+				}
 			}
 			response["answer"] = assistantMessage
 			response["thread"] = saved
@@ -2716,6 +2841,28 @@ func (app *kanbanBoardApp) updateScoutChatThreadRefs(agentThreadID string, statu
 	}
 }
 
+// reconcileScoutChatThreadRefAfterCommit closes the launch/card ordering race:
+// a fast worker can reach a terminal artifact postimage before its chat card is
+// durably appended. Once the card exists, re-read only the server-owned current
+// artifact state and project that exact status; never replay the launch-time
+// snapshot supplied by the caller.
+func (app *kanbanBoardApp) reconcileScoutChatThreadRefAfterCommit(ownerEmail, threadID, agentThreadID, artifactID string) (scoutChatThreadRecord, error) {
+	artifact, ok := app.osArtifactByID(strings.TrimSpace(artifactID))
+	if ok {
+		status := strings.ToLower(strings.TrimSpace(agentThreadStatusValue(artifact)))
+		if status != "" {
+			if err := app.commitScoutChatThreadRefStatus(threadID, ownerEmail, agentThreadID, status, artifact.ID); err != nil {
+				return scoutChatThreadRecord{}, err
+			}
+		}
+	}
+	thread, _, err := app.scoutChatThreadByID(ownerEmail, threadID)
+	if err != nil {
+		return scoutChatThreadRecord{}, err
+	}
+	return thread, nil
+}
+
 func scoutChatThreadHasAgentRef(thread scoutChatThreadRecord, agentThreadID string) bool {
 	for _, message := range thread.Messages {
 		if message.Thread != nil && message.Thread.ID == agentThreadID {
@@ -2735,6 +2882,92 @@ func scoutChatThreadHasArtifactRef(thread scoutChatThreadRecord, artifactID stri
 		}
 	}
 	return false
+}
+
+func scoutChatWorkLabel(metadata map[string]string) string {
+	label := "Work"
+	switch strings.ToLower(strings.TrimSpace(metadata["mode"])) {
+	case "research":
+		label = "Research"
+	case "design":
+		label = "Design studio"
+	case "grill":
+		label = "Grill mode"
+	case "workflow":
+		label = "Goal workflow"
+	}
+	return label
+}
+
+// scoutChatTerminalWorkCopy projects only bounded terminal lifecycle truth.
+// The report body and provider error remain behind their authorized surfaces.
+func scoutChatTerminalWorkCopy(artifact meetingMemoryEntry, agentThreadID string, status string) (string, bool) {
+	status = strings.ToLower(strings.TrimSpace(status))
+	if status != "complete" && status != "published" && status != "error" && status != "failed" {
+		return "", false
+	}
+	metadata := artifact.Metadata
+	if strings.TrimSpace(artifact.ID) == "" ||
+		strings.TrimSpace(metadata["threadId"]) != strings.TrimSpace(agentThreadID) ||
+		strings.ToLower(strings.TrimSpace(firstNonEmptyString(metadata["threadStatus"], metadata["status"]))) != status {
+		return "", false
+	}
+	label := scoutChatWorkLabel(metadata)
+	if status == "error" || status == "failed" {
+		return label + " needs attention", true
+	}
+	copy := label + " delivered"
+	if label == "Research" {
+		citations, citationErr := strconv.Atoi(strings.TrimSpace(metadata["researchCitationCount"]))
+		domains, domainErr := strconv.Atoi(strings.TrimSpace(metadata["researchSourceDomainCount"]))
+		receiptDigest := strings.ToLower(strings.TrimSpace(metadata["researchSourceWindowDigest"]))
+		_, receiptDigestErr := hex.DecodeString(receiptDigest)
+		verified := strings.EqualFold(strings.TrimSpace(metadata["researchQualityGate"]), "passed") &&
+			len(receiptDigest) == 64 && receiptDigest != strings.Repeat("0", 64) && receiptDigestErr == nil
+		if verified && citationErr == nil && domainErr == nil && citations > 0 && citations <= 10000 && domains > 0 && domains <= 10000 {
+			citationNoun := "cited source link"
+			if citations != 1 {
+				citationNoun += "s"
+			}
+			domainNoun := "domain"
+			if domains != 1 {
+				domainNoun += "s"
+			}
+			copy += fmt.Sprintf(" · %d %s · %d %s", citations, citationNoun, domains, domainNoun)
+		}
+	}
+	return copy, true
+}
+
+// scoutChatWorkStatusCopy is the normal status-transition projection. Active
+// states get closed body-free copy too, so a legitimate follow-up cannot leave
+// a durable "delivered" message or preview while the exact current run is
+// queued, running, waiting for input, parked, or stopped.
+func scoutChatWorkStatusCopy(artifact meetingMemoryEntry, agentThreadID string, status string) (string, bool) {
+	if terminal, ok := scoutChatTerminalWorkCopy(artifact, agentThreadID, status); ok {
+		return terminal, true
+	}
+	status = strings.ToLower(strings.TrimSpace(status))
+	metadata := artifact.Metadata
+	if strings.TrimSpace(artifact.ID) == "" || strings.TrimSpace(metadata["threadId"]) != strings.TrimSpace(agentThreadID) ||
+		strings.ToLower(strings.TrimSpace(firstNonEmptyString(metadata["threadStatus"], metadata["status"]))) != status {
+		return "", false
+	}
+	label := scoutChatWorkLabel(metadata)
+	switch status {
+	case "queued":
+		return label + " queued", true
+	case "running":
+		return label + " in progress", true
+	case "approval_required", "needs_input", "needs-input":
+		return label + " needs input", true
+	case "parked":
+		return label + " is parked", true
+	case "cancelled", "canceled":
+		return label + " stopped", true
+	default:
+		return "", false
+	}
 }
 
 // scoutChatRepliesSince collects the human messages posted after the given
@@ -2765,6 +2998,129 @@ func scoutChatRepliesSince(thread scoutChatThreadRecord, since string) []scoutCh
 	return replies
 }
 
+func (store *meetingMemoryStore) scoutTerminalArtifactSnapshot(id string) (meetingMemoryEntry, ArtifactAuthorizationHeader, bool) {
+	if store == nil {
+		return meetingMemoryEntry{}, ArtifactAuthorizationHeader{}, false
+	}
+	id = strings.TrimSpace(id)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for _, entry := range store.entries {
+		if entry.Kind != meetingMemoryKindOSArtifact || entry.ID != id || memoryEntryHiddenFromRecall(entry) {
+			continue
+		}
+		artifact := cloneMemoryEntry(entry)
+		header := store.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(artifact))
+		return artifact, header, true
+	}
+	return meetingMemoryEntry{}, ArtifactAuthorizationHeader{}, false
+}
+
+// saveScoutChatThreadIfArtifactCurrent holds the shared memory-store lock from
+// exact artifact postimage revalidation through the durable chat rewrite. The
+// artifact and chat live in this one store, so this closes the status/copy
+// check-to-save race without a second lock order or a stale snapshot window.
+func (store *meetingMemoryStore) saveScoutChatThreadIfArtifactCurrent(thread scoutChatThreadRecord, expectedArtifact meetingMemoryEntry, expectedHeader ArtifactAuthorizationHeader) (bool, error) {
+	if store == nil {
+		return false, fmt.Errorf("memory store is unavailable")
+	}
+	encoded, err := encodeScoutChatThread(thread)
+	if err != nil {
+		return false, err
+	}
+	expectedDigest, err := scoutChatWorkArtifactDigest(expectedArtifact)
+	if err != nil {
+		return false, err
+	}
+	metadataUpdates := scoutChatThreadMetadata(thread)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	artifactMatched := false
+	for _, entry := range store.entries {
+		if entry.Kind != meetingMemoryKindOSArtifact || entry.ID != expectedArtifact.ID || memoryEntryHiddenFromRecall(entry) {
+			continue
+		}
+		currentHeader := store.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(entry))
+		currentDigest, digestErr := scoutChatWorkArtifactDigest(entry)
+		if digestErr != nil || !artifactAuthorizationHeaderEqual(expectedHeader, currentHeader) || currentDigest != expectedDigest {
+			return false, nil
+		}
+		artifactMatched = true
+		break
+	}
+	if !artifactMatched {
+		return false, nil
+	}
+	threadIndex := -1
+	for index, entry := range store.entries {
+		if entry.Kind == meetingMemoryKindScoutChat && entry.ID == thread.ID {
+			threadIndex = index
+			break
+		}
+	}
+	if threadIndex < 0 {
+		return false, fmt.Errorf("chat thread not found")
+	}
+	previous := store.entries[threadIndex]
+	next := cloneMemoryEntry(previous)
+	next.Text = normalizeMemoryEntryText(meetingMemoryKindScoutChat, encoded)
+	if next.Metadata == nil {
+		next.Metadata = map[string]string{}
+	}
+	changed := next.Text != previous.Text
+	for key, value := range metadataUpdates {
+		key, value = strings.TrimSpace(key), strings.TrimSpace(value)
+		if key == "" {
+			continue
+		}
+		if next.Metadata[key] != value {
+			changed = true
+			next.Metadata[key] = value
+		}
+	}
+	if !changed {
+		return true, nil
+	}
+	store.entries[threadIndex] = next
+	if err := store.rewriteLocked(false); err != nil {
+		store.entries[threadIndex] = previous
+		return false, err
+	}
+	return true, nil
+}
+
+var scoutTerminalProjectionBeforeSaveProbe func()
+
+func scoutChatTerminalArtifactMatchesThread(artifact meetingMemoryEntry, thread scoutChatThreadRecord, agentThreadID, status, artifactID string) bool {
+	wantOrigin := agentThreadOriginPrivateThread
+	if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+		wantOrigin = agentThreadOriginChannel
+	}
+	return strings.TrimSpace(artifactID) != "" && strings.TrimSpace(artifact.ID) == strings.TrimSpace(artifactID) &&
+		strings.TrimSpace(artifact.Metadata["threadId"]) == strings.TrimSpace(agentThreadID) &&
+		strings.TrimSpace(artifact.Metadata["originKind"]) == wantOrigin && strings.TrimSpace(artifact.Metadata["originId"]) == thread.ID &&
+		strings.ToLower(strings.TrimSpace(firstNonEmptyString(artifact.Metadata["threadStatus"], artifact.Metadata["status"]))) == strings.ToLower(strings.TrimSpace(status))
+}
+
+// scoutChatArtifactMatchesDurableProjection admits a secondary chat card only
+// when the card itself is an exact server-persisted projection of the current
+// artifact/thread tuple. Artifacts have one canonical origin, but an
+// authorized deliverable drop can deliberately project that same artifact into
+// another thread. Requiring the durable ref, current artifact id/thread id,
+// source, and exact current status keeps that projection fail-closed without
+// pretending the secondary thread is the artifact's canonical origin.
+func scoutChatArtifactMatchesDurableProjection(artifact meetingMemoryEntry, ref *scoutChatThreadRef, agentThreadID, status, artifactID string) bool {
+	if ref == nil {
+		return false
+	}
+	return strings.TrimSpace(artifact.ID) == strings.TrimSpace(artifactID) &&
+		strings.TrimSpace(artifact.Metadata["source"]) == "scout_thread" &&
+		strings.TrimSpace(artifact.Metadata["threadId"]) == strings.TrimSpace(agentThreadID) &&
+		strings.ToLower(strings.TrimSpace(firstNonEmptyString(artifact.Metadata["threadStatus"], artifact.Metadata["status"]))) == strings.ToLower(strings.TrimSpace(status)) &&
+		strings.TrimSpace(ref.ID) == strings.TrimSpace(agentThreadID) &&
+		strings.TrimSpace(ref.ArtifactID) == strings.TrimSpace(artifactID)
+}
+
 // commitScoutChatThreadRefStatus applies one agent-thread status onto every
 // matching message ref in one chat thread through the same lock + re-read +
 // save path as commitScoutChatThreadMessages.
@@ -2777,32 +3133,51 @@ func (app *kanbanBoardApp) commitScoutChatThreadRefStatus(threadID string, owner
 	if err != nil {
 		return err
 	}
-	artifact, artifactFound := app.osArtifactByID(artifactID)
-	changed := make([]scoutChatMessageRecord, 0, 1)
+	artifact, artifactHeader, artifactFound := app.memory.scoutTerminalArtifactSnapshot(artifactID)
+	if !artifactFound {
+		return nil
+	}
+	matching := make([]int, 0, 1)
+	projectionMatched := false
 	for index := range thread.Messages {
 		ref := thread.Messages[index].Thread
 		if ref == nil || ref.ID != agentThreadID {
 			continue
 		}
-		before := *ref
-		ref.Status = status
-		if artifactID != "" {
-			ref.ArtifactID = artifactID
+		if strings.TrimSpace(ref.ArtifactID) != strings.TrimSpace(artifactID) {
+			return nil
 		}
-		if artifactFound {
-			ref.AgentID = firstNonBlank(artifact.Metadata["agentId"], ref.AgentID)
-			ref.AgentName = firstNonBlank(artifact.Metadata["agentName"], ref.AgentName)
-			ref.DelegatedBy = firstNonBlank(artifact.Metadata["delegatedBy"], ref.DelegatedBy)
-			ref.CurrentStage = artifact.Metadata["currentStage"]
-			ref.ProgressNote = artifact.Metadata["progressNote"]
-			ref.FollowUpStatus = artifact.Metadata["followUpStatus"]
-			ref.AttentionReason = scoutChatThreadAttentionReason(artifact.Metadata)
-			ref.StartedAt = firstNonBlank(artifact.Metadata["startedAt"], ref.StartedAt)
-			if progress, parseErr := strconv.ParseFloat(strings.TrimSpace(artifact.Metadata["progressPercent"]), 64); parseErr == nil {
-				ref.ProgressPercent = progress
+		if scoutChatArtifactMatchesDurableProjection(artifact, ref, agentThreadID, status, artifactID) {
+			projectionMatched = true
+		}
+		matching = append(matching, index)
+	}
+	if len(matching) == 0 || (!scoutChatTerminalArtifactMatchesThread(artifact, thread, agentThreadID, status, artifactID) && !projectionMatched) {
+		return nil
+	}
+	changed := make([]scoutChatMessageRecord, 0, 1)
+	for _, index := range matching {
+		ref := thread.Messages[index].Thread
+		before := *ref
+		beforeText := thread.Messages[index].Text
+		ref.Status = status
+		ref.AgentID = firstNonBlank(artifact.Metadata["agentId"], ref.AgentID)
+		ref.AgentName = firstNonBlank(artifact.Metadata["agentName"], ref.AgentName)
+		ref.DelegatedBy = firstNonBlank(artifact.Metadata["delegatedBy"], ref.DelegatedBy)
+		ref.CurrentStage = artifact.Metadata["currentStage"]
+		ref.ProgressNote = artifact.Metadata["progressNote"]
+		ref.FollowUpStatus = artifact.Metadata["followUpStatus"]
+		ref.AttentionReason = scoutChatThreadAttentionReason(artifact.Metadata)
+		ref.StartedAt = firstNonBlank(artifact.Metadata["startedAt"], ref.StartedAt)
+		if progress, parseErr := strconv.ParseFloat(strings.TrimSpace(artifact.Metadata["progressPercent"]), 64); parseErr == nil {
+			ref.ProgressPercent = progress
+		}
+		if thread.Messages[index].Kind == "thread" {
+			if statusCopy, ok := scoutChatWorkStatusCopy(artifact, agentThreadID, status); ok {
+				thread.Messages[index].Text = statusCopy
 			}
 		}
-		if *ref == before {
+		if *ref == before && thread.Messages[index].Text == beforeText {
 			continue
 		}
 		changed = append(changed, thread.Messages[index])
@@ -2810,14 +3185,122 @@ func (app *kanbanBoardApp) commitScoutChatThreadRefStatus(threadID string, owner
 	if len(changed) == 0 {
 		return nil
 	}
+	// A ref-status commit can replace the text of the latest work card. Keep
+	// the list/sidebar projection in the same durable commit as that card so
+	// clients never retain the prior "running" preview after terminal state.
+	thread.Preview = scoutChatThreadPreview(thread)
 	thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	if err := app.saveScoutChatThread(thread); err != nil {
+	if scoutTerminalProjectionBeforeSaveProbe != nil {
+		scoutTerminalProjectionBeforeSaveProbe()
+	}
+	matched, err := app.memory.saveScoutChatThreadIfArtifactCurrent(thread, artifact, artifactHeader)
+	if err != nil {
 		return err
+	}
+	if !matched {
+		return nil
 	}
 	for _, message := range changed {
 		deliverScoutChatThreadUpdate(thread, message)
 	}
 	return nil
+}
+
+// reconcileScoutChatTerminalProjection is the deliberately narrow live repair
+// seam for a terminal artifact whose already-committed chat ref retained its
+// old launch copy. The caller selects an exact existing message and artifact;
+// terminal state, generation, origin, and replacement copy all come from the
+// current server-owned artifact postimage while the thread lock is held.
+func (app *kanbanBoardApp) reconcileScoutChatTerminalProjection(user *userAccount, threadID string, messageID string, artifactID string, expectedArtifactVersion int, expectedContentDigest string, expectedStatus string) (scoutChatThreadRecord, scoutChatMessageRecord, bool, error) {
+	if user == nil || !isArtifactApprovalAdmin(user) {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, false, fmt.Errorf("terminal projection reconciliation is admin-only")
+	}
+	threadID = strings.TrimSpace(threadID)
+	messageID = strings.TrimSpace(messageID)
+	artifactID = strings.TrimSpace(artifactID)
+	expectedContentDigest = strings.ToLower(strings.TrimSpace(expectedContentDigest))
+	expectedStatus = strings.ToLower(strings.TrimSpace(expectedStatus))
+	if threadID == "" || messageID == "" || artifactID == "" || expectedArtifactVersion < 1 || len(expectedContentDigest) != 64 || !oneOf(expectedStatus, "complete", "error") {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, false, fmt.Errorf("terminal projection not found")
+	}
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	thread, _, err := app.scoutChatThreadByID(user.Email, threadID)
+	if err != nil {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, false, fmt.Errorf("terminal projection not found")
+	}
+	messageIndex := -1
+	for index := range thread.Messages {
+		if thread.Messages[index].ID != messageID {
+			continue
+		}
+		if messageIndex >= 0 {
+			return scoutChatThreadRecord{}, scoutChatMessageRecord{}, false, fmt.Errorf("terminal projection not found")
+		}
+		messageIndex = index
+	}
+	if messageIndex < 0 {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, false, fmt.Errorf("terminal projection not found")
+	}
+	message := &thread.Messages[messageIndex]
+	ref := message.Thread
+	artifact, artifactHeader, found := app.memory.scoutTerminalArtifactSnapshot(artifactID)
+	if message.Kind != "thread" || ref == nil || !found || strings.TrimSpace(ref.ArtifactID) != artifactID ||
+		artifactHeader.ContentRevision != int64(expectedArtifactVersion) || strings.ToLower(strings.TrimSpace(artifactHeader.ContentDigest)) != expectedContentDigest {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, false, fmt.Errorf("terminal projection not found")
+	}
+	status := strings.ToLower(strings.TrimSpace(firstNonEmptyString(artifact.Metadata["threadStatus"], artifact.Metadata["status"])))
+	if status != expectedStatus || !scoutChatTerminalArtifactMatchesThread(artifact, thread, ref.ID, status, artifactID) {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, false, fmt.Errorf("terminal projection not found")
+	}
+	terminalCopy, ok := scoutChatTerminalWorkCopy(artifact, ref.ID, status)
+	if !ok {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, false, fmt.Errorf("terminal projection not found")
+	}
+	before := *ref
+	beforeText := message.Text
+	ref.Status = status
+	ref.AgentID = firstNonBlank(artifact.Metadata["agentId"], ref.AgentID)
+	ref.AgentName = firstNonBlank(artifact.Metadata["agentName"], ref.AgentName)
+	ref.DelegatedBy = firstNonBlank(artifact.Metadata["delegatedBy"], ref.DelegatedBy)
+	ref.CurrentStage = artifact.Metadata["currentStage"]
+	ref.ProgressNote = artifact.Metadata["progressNote"]
+	ref.FollowUpStatus = artifact.Metadata["followUpStatus"]
+	ref.AttentionReason = scoutChatThreadAttentionReason(artifact.Metadata)
+	ref.StartedAt = firstNonBlank(artifact.Metadata["startedAt"], ref.StartedAt)
+	if progress, parseErr := strconv.ParseFloat(strings.TrimSpace(artifact.Metadata["progressPercent"]), 64); parseErr == nil {
+		ref.ProgressPercent = progress
+	}
+	message.Text = terminalCopy
+	if *ref == before && message.Text == beforeText {
+		if scoutTerminalProjectionBeforeSaveProbe != nil {
+			scoutTerminalProjectionBeforeSaveProbe()
+		}
+		matched, verifyErr := app.memory.saveScoutChatThreadIfArtifactCurrent(thread, artifact, artifactHeader)
+		if verifyErr != nil {
+			return scoutChatThreadRecord{}, scoutChatMessageRecord{}, false, verifyErr
+		}
+		if !matched {
+			return scoutChatThreadRecord{}, scoutChatMessageRecord{}, false, fmt.Errorf("terminal projection not found")
+		}
+		return thread, *message, false, nil
+	}
+	thread.Preview = scoutChatThreadPreview(thread)
+	thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	if scoutTerminalProjectionBeforeSaveProbe != nil {
+		scoutTerminalProjectionBeforeSaveProbe()
+	}
+	matched, err := app.memory.saveScoutChatThreadIfArtifactCurrent(thread, artifact, artifactHeader)
+	if err != nil {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, false, err
+	}
+	if !matched {
+		return scoutChatThreadRecord{}, scoutChatMessageRecord{}, false, fmt.Errorf("terminal projection not found")
+	}
+	deliverScoutChatThreadUpdate(thread, *message)
+	return thread, *message, true, nil
 }
 
 // scoutChatArtifactRefMessage builds the Kind "thread" card a dropped

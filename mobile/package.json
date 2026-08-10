@@ -47,6 +47,8 @@
     "@bacons/apple-targets": "5.0.0",
     "@types/node": "^26.1.1",
     "@types/react": "~19.2.2",
+    "@types/react-test-renderer": "^19.1.0",
+    "react-test-renderer": "^19.2.3",
     "tsx": "^4.23.1",
     "typescript": "~5.9.3"
   },

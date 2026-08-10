@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Animated, StyleSheet, View, useColorScheme } from 'react-native';
+import { AccessibilityInfo, Animated, StyleSheet, View, useColorScheme } from 'react-native';
 import {
   NavigationContainer,
   DefaultTheme,
@@ -27,14 +27,9 @@ import {
 } from '../screens/LibraryScreens';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import {
-  ContactInboxScreen,
   ContributionApprovalsScreen,
   CoworkerProfileScreen,
-  NetworkBlocksScreen,
   NetworkDraftScreen,
-  NetworkPreviewScreen,
-  NetworkRecruiterViewScreen,
-  NetworkSearchScreen,
   OrganizationPeopleScreen,
   OrganizationRecruitingScreen,
   OrganizationRequestsScreen,
@@ -46,15 +41,30 @@ import { LaunchCradle } from '../components/CanvasCradleComposition';
 import { duration, ease, useReduceMotion } from '../theme/motion';
 import { colors } from '../theme/tokens';
 import type { RootStackParamList } from './types';
+import { NativeUniversalShell } from './NativeUniversalShell';
+import {
+  nativeShellDestinationForRoute,
+  createNativeShellSelectionCoordinator,
+  nativeShellDestinations,
+  nativeShellVisibleForRoute,
+} from './nativeShellModel';
+import {
+  NetworkHomeScreen,
+  WorkHomeScreen,
+  WorkSearchHomeScreen,
+  YouHomeScreen,
+} from '../screens/NativeShellScreens';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 /**
  * The voice-first shell — design §4.
  *
- * There is no tab navigator. The Canvas is the root, and the Deck is a native
- * form sheet pulled over it. Everything the old tab bar held is now either a
- * Deck segment or a Deck destination.
+ * The Canvas remains the voice-first Home root. PD1 adds one universal,
+ * semantic destination shell around this stack: a compact iPhone rail and an
+ * adaptive iPad sidebar. The Deck remains a native form sheet for the existing
+ * Threads / Rooms / Work conversation model; it is not duplicated as another
+ * nested navigator.
  *
  * The detents are real `UISheetPresentationController` detents rather than a
  * hand-rolled pan sheet, which buys correct rubber-banding, interactive
@@ -92,6 +102,11 @@ export function RootNavigator() {
   const [launchVisible, setLaunchVisible] = useState(true);
   const pendingPushTargetRef = useRef<PendingPushTarget | null>(null);
   const [pendingPushVersion, setPendingPushVersion] = useState(0);
+  const [activeRoute, setActiveRoute] = useState<keyof RootStackParamList | undefined>('Canvas');
+  const [activeShellDestination, setActiveShellDestination] = useState(nativeShellDestinationForRoute('Canvas'));
+  const shellSelectionRef = useRef(createNativeShellSelectionCoordinator(
+    (message) => AccessibilityInfo.announceForAccessibility(message),
+  ));
   const committedPushAccountRef = useRef<string | null>(accountKey);
 
   useLayoutEffect(() => {
@@ -189,17 +204,42 @@ export function RootNavigator() {
     },
   };
 
+  const selectShellDestination = useCallback((destination: (typeof nativeShellDestinations)[number]) => {
+    if (!navigationRef.isReady()) return;
+    shellSelectionRef.current.select(destination, (route) => navigationRef.navigate(route as never));
+  }, []);
+
+  const syncActiveRoute = useCallback(() => {
+    const route = navigationRef.getCurrentRoute()?.name as keyof RootStackParamList | undefined;
+    setActiveShellDestination(shellSelectionRef.current.commit(route));
+    setActiveRoute(route);
+  }, []);
+
   if (bootstrapping) {
     return <LaunchCradle />;
   }
 
   return (
     <View style={styles.root}>
-      <NavigationContainer ref={navigationRef} theme={navTheme} onReady={flushPendingPushTarget}>
+      <NativeUniversalShell
+        active={activeShellDestination}
+        visible={Boolean(user && sessionToken && nativeShellVisibleForRoute(activeRoute))}
+        onSelect={selectShellDestination}
+      >
+      <NavigationContainer
+        ref={navigationRef}
+        theme={navTheme}
+        onReady={() => { syncActiveRoute(); flushPendingPushTarget(); }}
+        onStateChange={syncActiveRoute}
+      >
         <Stack.Navigator screenOptions={{ headerShown: false }}>
         {user && sessionToken ? (
           <>
             <Stack.Screen name="Canvas" component={CanvasScreen} />
+            <Stack.Screen name="WorkHome" component={WorkHomeScreen} />
+            <Stack.Screen name="NetworkHome" component={NetworkHomeScreen} />
+            <Stack.Screen name="WorkSearchHome" component={WorkSearchHomeScreen} />
+            <Stack.Screen name="YouHome" component={YouHomeScreen} />
             <Stack.Screen
               name="Deck"
               component={DeckScreen}
@@ -255,17 +295,21 @@ export function RootNavigator() {
             <Stack.Screen name="OrganizationRecruiting" component={OrganizationRecruitingScreen} />
             <Stack.Screen name="ContributionApprovals" component={ContributionApprovalsScreen} />
             <Stack.Screen name="NetworkDraft" component={NetworkDraftScreen} />
-            <Stack.Screen name="NetworkPreview" component={NetworkPreviewScreen} />
-            <Stack.Screen name="NetworkRecruiterView" component={NetworkRecruiterViewScreen} />
-            <Stack.Screen name="NetworkSearch" component={NetworkSearchScreen} />
-            <Stack.Screen name="ContactInbox" component={ContactInboxScreen} />
-            <Stack.Screen name="NetworkBlocks" component={NetworkBlocksScreen} />
+            <Stack.Screen name="NetworkPreview" component={NetworkHomeScreen} />
+            {/* Parent-off routes resolve to shell-owned opaque state. Their data
+                components are deliberately not mounted until their server
+                parents are qualified and the native carrier is revised. */}
+            <Stack.Screen name="NetworkRecruiterView" component={NetworkHomeScreen} />
+            <Stack.Screen name="NetworkSearch" component={WorkSearchHomeScreen} />
+            <Stack.Screen name="ContactInbox" component={WorkSearchHomeScreen} />
+            <Stack.Screen name="NetworkBlocks" component={NetworkHomeScreen} />
           </>
         ) : (
           <Stack.Screen name="Login" component={LoginScreen} />
         )}
         </Stack.Navigator>
       </NavigationContainer>
+      </NativeUniversalShell>
       {launchVisible ? (
         <Animated.View
           pointerEvents="none"

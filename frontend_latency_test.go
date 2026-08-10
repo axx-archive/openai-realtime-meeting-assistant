@@ -440,7 +440,7 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 
 	html := string(rawHTML)
 	for _, want := range []string{
-		`<main id="appShell" data-tool="office">`,
+		`<main id="appShell" data-tool="office" data-pd1-destination="Home">`,
 		`data-tool="office" aria-label="Stride home" aria-pressed="true"`,
 		`data-tool="room" aria-label="The room" aria-pressed="false"`,
 		`data-tool="chat" aria-label="Chat" aria-pressed="false"`,
@@ -572,7 +572,7 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"goal workflow",
 		"#appShell.is-in-room ~ .os-assistant",
 		"--shell-topbar-height: 0px;",
-		`id="toolRail" class="tool-rail" aria-label="Tools"`,
+		`id="toolRail" class="tool-rail" aria-label="Work tools" aria-hidden="true" inert hidden`,
 		`id="brandMark" class="topbar__mark" role="img" aria-label="Stride"`,
 		".tool-rail:hover,",
 		".tool-rail__label",
@@ -641,7 +641,7 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 	if strings.Contains(html, `data-office-tool="dashboard"`) || strings.Contains(html, `id="dashboardTool"`) {
 		t.Fatal("waveform home must not retain a separate dashboard route or CTA")
 	}
-	setActiveToolBody := functionBody(html, "function setActiveTool(tool)")
+	setActiveToolBody := functionBodyAfterSignature(html, "function setActiveTool(tool, options = {})")
 	if setActiveToolBody == "" {
 		t.Fatal("index.html missing setActiveTool")
 	}
@@ -913,7 +913,7 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 
 	html := string(rawHTML)
 	for _, want := range []string{
-		`id="toolRail" class="tool-rail" aria-label="Tools"`,
+		`id="toolRail" class="tool-rail" aria-label="Work tools" aria-hidden="true" inert hidden`,
 		`id="brandMark" class="topbar__mark" role="img" aria-label="Stride"`,
 		"top: 50%;",
 		"inset: 0 auto 0 0;",
@@ -1005,7 +1005,7 @@ func TestToolRailFloatingIslandAnchorsStayViewportSafe(t *testing.T) {
 
 	html := string(rawHTML)
 	for _, want := range []string{
-		`id="toolRail" class="tool-rail" aria-label="Tools"`,
+		`id="toolRail" class="tool-rail" aria-label="Work tools" aria-hidden="true" inert hidden`,
 		"inset: 0 auto 0 0;",
 		"width: 60px;",
 		"inset: auto auto max(16px, env(safe-area-inset-bottom)) 50%;",
@@ -2447,7 +2447,7 @@ func TestIndexAuditFixWiring(t *testing.T) {
 	}
 
 	// switching tools dismisses the notifications window
-	toolBody := functionBody(html, "function setActiveTool(tool)")
+	toolBody := functionBodyAfterSignature(html, "function setActiveTool(tool, options = {})")
 	if !strings.Contains(toolBody, "setNotificationPanelOpen(false)") {
 		t.Fatal("setActiveTool must close the notifications panel")
 	}
@@ -2635,7 +2635,7 @@ func TestIndexStrideRenameAndAgentToken(t *testing.T) {
 
 	// The `office` data-tool KEY is load-bearing and must never be renamed.
 	for _, key := range []string{
-		`<main id="appShell" data-tool="office">`,
+		`<main id="appShell" data-tool="office" data-pd1-destination="Home">`,
 		`data-tool="office"`,
 		"const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory', 'files', 'network', 'team']",
 	} {

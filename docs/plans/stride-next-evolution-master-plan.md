@@ -182,8 +182,8 @@ The goal is complete only when evidence proves:
 | E10-W7 physical/privacy/resilience | immutable-root validators and read-only reports | `deterministic_validator_verified` | exact current native build, intended groups, real iPhone+iPad, accessibility/privacy, TURN, offsite restore, HA, independent attestation |
 | E10-W8 final cohorts/soak | ordered-cohort and soak validator | `deterministic_validator_verified` | signed W5/W6/W7/rollback dependencies, actual kill-switch cohorts, unchanged-release >=24h and >=10 sittings |
 | Public-network constitution | exact source path/size/digest receipt and source critic PASS | `design_source_verified` | this exact revision-2 integration, contract freeze, impacted-test inventory, and fresh E10 critic PASS |
-| Platform Design Unification | current-product three-platform audit, primary-source research, governed semantic system, and J1-J13 interactive-reference contract; bounded independent critic PASS | `design_contract_verified`; PD0 remains incomplete | executable fixture, high-fidelity rendered interaction, complete migration inventory, accessibility/performance proof, implementation, real iPhone+iPad and desktop acceptance |
-| Proof & Instrumentation | founder memo plus decision-complete PI0-A event/trace/privacy/metric/recovery contract; bounded independent critic PASS | `design_contract_verified`; implementation/baseline/PI0-B not complete | implement trace schema and crash-safe journal, synthetic verifier, metric manifest and frozen prior baseline before PN1 data migration; PI0-B dashboards/receipts/research protocol before pilot collection |
+| Platform Design Unification | current-product three-platform audit, primary-source research, governed semantic system, J1-J13 interactive-reference contract, and the bounded PD1 desktop/native shell plus Scout status/reconciliation checkpoint | `deterministic_web_component_and_native_renderer_verified_physical_device_and_live_repair_pending`; PD0/PD1 remain incomplete | complete governed product migration, accessibility/performance proof, real iPhone+iPad and desktop acceptance, and the separately authorized live repair |
+| Proof & Instrumentation | founder memo, decision-complete PI0-A contract, route-free carrier, and default-off synthetic runtime/privacy lifecycle | `synthetic_deterministic_safe_local_runtime_verified_no_collection`; PI0-A baseline/installation and PI0-B not complete | keep collection off; bind any future production installation and emitters, freeze the prior baseline before PN1 migration, then complete PI0-B dashboards/receipts/research protocol before pilot collection |
 | PN1 safe public projections | constitution only | `not_started` | default-off contracts, migrations, authority, purge, deterministic fixtures, critic |
 | PN2 signed-in human pilot | none | `blocked_on_PN1_PD1pilot_PI0B_and_external_authority` | PN1 deterministic successor receipts; accepted desktop web/iPhone/iPad PD1 pilot subset; PI0-B collection gate; >=5 consenting profiles; 2 human-owned workspaces; named moderator plus legal/privacy/product approvals |
 | PN3 Explore | constitution only | `not_started` | PN2 evidence plus object-only policy/diversity/provenance/revocation proof; all people intent routes to Work Search |
@@ -440,9 +440,10 @@ expressions or their interaction/accessibility evidence.
 | W8 | Ordered activation and soak | W8 activation operator only | per-cohort kill + rollback; >=24h/10 sittings | AJ exact activation + independent observer | `blocked_on_W5_W6_W7` |
 | PN0 | Adopt revision 2, exact diff/test inventory, contract freeze, threat/policy/switch owners | this canonical plan and PN0 evidence only | exact source receipt + fresh independent plan critic; no runtime rollback needed | plan integration authorized; external policy roles still unassigned; activation not authorized | `in_progress_external_policy_owners_waiting`; reconciliation critic PASS |
 | PD0 | Full-product audit/research/thesis/IA/system/parity/reference flows | design evidence and this plan; no production behavior | contracts and deterministic browser reference passed independent critics; product migration plus native/accessibility/performance/device acceptance remain | safe local design/reference implementation authorized; activation absent | `deterministic_browser_reference_verified_product_migration_and_device_acceptance_pending` |
-| PI0-A | Freeze and implement event taxonomy, trace identity, consent/privacy contract, compound recovery, and pre-migration baseline | telemetry schema/journal/metric/evidence files only; no collection | contract and route-free deterministic carrier passed independent critics; runtime emitters, privacy lifecycle, migration and baseline remain | safe local implementation authorized; real collection not authorized | `deterministic_route_free_carrier_verified_runtime_and_baseline_pending` |
+| PI0-A | Freeze and implement event taxonomy, trace identity, consent/privacy contract, compound recovery, and pre-migration baseline | telemetry schema/journal/metric/evidence files only; no collection | contract, route-free carrier, and default-off synthetic runtime/privacy lifecycle passed bounded critics; production installation/emitters and frozen baseline remain | safe local implementation authorized; real collection not authorized | `synthetic_deterministic_safe_local_runtime_verified_no_collection` |
 | PN1 | Safe public projections/controls default off | new PN authority/storage/runtime/test files; no broad UI activation | normal/race/PG/restore/purge/render; revision-1 inheritance plus PN successor receipts; all PN switches false | local implementation after PN0+PD0+PI0-A PASS | `blocked_on_PN0_PD0_PI0A` |
-| PD1 pilot subset | Migrate exact PN2 journeys across web/iPhone/iPad using the unified system | `index.html`, `mobile/src`, shared semantic design contracts, owned tests | parity, rendered interaction, accessibility/performance, real-device gate remains external; rollback to prior shell by release | local implementation after PD0 and PN1 contracts | `blocked_on_PD0_PN1` |
+| PD1 pilot subset | Migrate exact PN2 journeys across web/iPhone/iPad using the unified system | `index.html`, `mobile/src`, shared semantic design contracts, owned tests | bounded desktop web and native renderer shell plus Scout delivery/status/reconciliation are locally verified; remaining journeys, accessibility/performance, real-device and live-repair gates stay open; rollback to prior shell by release | shell work authorized locally; PN-dependent pilot journeys still require PN1 contracts | `deterministic_web_component_and_native_renderer_verified_physical_device_and_live_repair_pending` |
+| PD1-AJA private-chat acceptance | Prove the exact AJA private-chat matrix for research, slides, images, spreadsheets, documents, and mixed artifacts across selected agents, previews/status, privacy, Drive, desktop web, native iPhone, and native iPad | post-deploy acceptance evidence only; product changes return to the owning PD1/Scout scopes and require a new checkpoint | exact reviewed release first; authenticated real runs and readback for every matrix cell; body-minimized receipts bind agent, artifact kind, preview/status, destination/privacy and current release; rollback is the retained exact release and no evidence may be reconstructed locally | AJ authorizes production runs and judges acceptance; Apple devices and Drive session remain external inputs | `blocked_on_reviewed_release_deploy_and_AJA_postdeploy_acceptance` |
 | PI0-B | Private dashboards, case receipts, qualitative research protocol, collection gate | private telemetry/evidence/DR/operator surfaces only | consented synthetic/dogfood-safe trace, privacy/purge/restore, research-protocol critic | real collection requires participant consent | `blocked_on_PI0A_PN1_PD1_pilot` |
 | PD1 remainder | Migrate every remaining legacy/planned surface across web/iPhone/iPad | same exclusive platform owners after pilot subset | full parity matrix, interactive/device/accessibility/performance acceptance | local implementation authorized; Apple/device/release external | `blocked_on_PD0`; may run after pilot subset without delaying PN2 unless it is a named pilot dependency |
 | PN2 | Signed-in human pilot | PN cohort config plus accepted pilot surfaces | >=5 people, 2 workspaces, typed objects, chronology, pause/block/dispute/purge, PI0-B receipts | participants, moderators, product/legal/privacy, deploy/activation | `blocked_on_PN1_PD1pilot_PI0B_and_external_authority` |
@@ -455,21 +456,25 @@ expressions or their interaction/accessibility evidence.
 **Safe local queue:** PN0 reconciliation/critic is complete. PD0 audit,
 primary-source research, three-platform parity, semantic-system, reference
 contracts, and the exact deterministic browser harness have independent critic
-PASS; migrate the governed shell and journeys into desktop web, native iPhone,
-and native iPad, then produce rendered interaction, accessibility/performance,
-and device evidence. PI0-A's contract and route-free deterministic carrier have
-independent critic PASS; install no collection yet, but implement the durable
-runtime/emitters, privacy lifecycle, synthetic migration/restore verification,
-and frozen pre-migration baseline. Maintain W5-W8 default-off operator tests. Do not select cohort
-participants or create external signatures as local fixtures for production
-acceptance.
+PASS. The bounded desktop web/native shell and Scout delivery/status/
+reconciliation checkpoint is also locally verified; complete only the remaining
+governed PD1 journeys and reproducible accessibility/performance evidence, while
+keeping PN-dependent journeys behind PN1 and real-device/live-repair evidence in
+their separate queues. PI0-A's contract, route-free carrier, and default-off
+synthetic runtime/privacy lifecycle are locally verified with collection absent;
+next freeze the pre-migration baseline and design any production installation/
+emitter seam without enabling collection. Maintain W5-W8 default-off operator
+tests. Do not select cohort participants or create external signatures as local
+fixtures for production acceptance.
 
 **Externally blocked queue:** real W5 custody provider/owners/consent; W6 five
 participants, two reviewers, legal/privacy/product approvals and corpus; exact
 current EAS build and intentional TestFlight groups; real iPhone and real iPad;
 accessibility/privacy; restrictive TURN/WebRTC; encrypted offsite four-root
 restore; PostgreSQL/app/TURN/traffic HA; independent attestation; PI0 pilot
-consent/interviews; PN moderators/retention/rate/appeal owners; final soak.
+consent/interviews; PN moderators/retention/rate/appeal owners; the real AJA
+private-chat desktop/iPhone/iPad artifact matrix after an exact reviewed deploy;
+final soak.
 
 **Provider/spend queue:** no new paid call. Any parser/reranker, STT, voice,
 Responses, embedding, image, or external service requires exact project,
@@ -479,7 +484,22 @@ billing owner, price/budget, route/corpus, and one-at-a-time authorization.
 default-off operator carrier and this plan reconciliation through the exact VPS
 release process. Later PN/PD/PI implementation requires a fresh reviewed tree
 and release evidence; this authorization does not activate a cohort or publish
-content.
+content. The current PD1/Scout and PI0-A synthetic-runtime checkpoints are dirty
+local selected-file manifests only: neither is committed, released, deployed,
+live, or covered by the earlier carrier authorization. Scout live reconciliation
+requires a separate reviewed exact release and an authorized invocation of its
+bounded repair route.
+
+**Post-deploy acceptance queue:** PD1-AJA remains evidence-free until an exact
+reviewed release is serving. Run only after separate deploy and production-run
+authorization. The matrix must cover research, slides, images, spreadsheets,
+documents, and mixed artifacts; selected agent identity; active and terminal
+status; inline preview and source/file preservation; private-thread isolation;
+Drive export/readback where applicable; desktop web; physical iPhone; and
+physical iPad. Each cell needs current-release, requester, agent, artifact,
+destination/privacy, result-status, and rendered/readback evidence. Missing,
+failed, substituted, browser-only, simulator-only, or pre-deploy evidence keeps
+that cell open; no local fixture can satisfy it.
 
 **Production/publication queue:** W4 private authority remains on. W5 MyMind,
 W6 publication/search/contact, every PN switch, open-web rendering, pilot data
@@ -538,9 +558,31 @@ and the W7/W8 successor prerequisite validator
 (`docs/evidence/e10/stride-e10-w7-w8-successor-20260809.json`, SHA-256
 `3ce541cac0d50af861e27ae7c4b998bb61300754980dff16ac7cea890023243e`).
 These do not complete PD0, PI0-A, W6 qualification, W7 physical acceptance, or
-W8 activation. The next safe actions are the PI0-A runtime/baseline and the PD0
-web/iPhone/iPad product migration; no production user-data collection or public
+W8 activation. The next safe local actions are the PI0-A frozen baseline and
+no-collection installation boundary plus the remaining governed PD1
+web/iPhone/iPad migration; no production user-data collection or public
 activation is the next action.
+
+The next dirty local checkpoint is selected-file-bound at HEAD
+`b4bcc7e5fa7325c5b308af08e46f562154500248`; unrelated untracked
+`stride-site/` remains excluded. Its PI0-A synthetic runtime receipt is
+`docs/evidence/e10/stride-e10-pi0-a-synthetic-runtime-20260809.json`, SHA-256
+`9ac6fda3ad5f85008c3ac7833b47ac8a7dc3dbcca6a13189dc859c4fa1a50471`,
+status `synthetic_deterministic_safe_local_runtime_verified_no_collection`.
+Its PD1 desktop/native shell plus Scout delivery/status/reconciliation receipt
+is `docs/evidence/e10/stride-e10-pd1-shell-scout-local-20260809.json`, SHA-256
+`e5098a97febbb617e91295b28d3dc739b9dbdcfe5086522b3f8504bc97415950`,
+status
+`deterministic_web_component_and_native_renderer_verified_physical_device_and_live_repair_pending`.
+The selected-file manifests, not the dirty tree as a whole, define these
+checkpoints. No Git, release, deployment, production repair, collection, cohort,
+or public activation action occurred. Production therefore remains exact
+`b070e67f27a16afd0d96da97ac065144ebf78d9e`, ledger generation 51, with
+the W5/W6/public switches off. The immediate next action is an independent
+critic of these receipts and this reconciliation patch. After PASS, PI0-A may
+continue only with the no-collection baseline/installation boundary; PD1 may
+continue locally, while any exact release, Scout live repair, physical-device
+acceptance, collection, or activation stays separately gated.
 
 #### Reconciliation Critic Loop — PASS
 

@@ -309,12 +309,19 @@ func TestPrivateChatThreadUpdatesReachOwnerOfficeSocketOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create private thread: %v", err)
 	}
+	artifact, _, err := kanbanApp.createOSArtifactWithMetadata("research", "creator market", "bounded report", scoutParticipantName, map[string]string{
+		"source": "scout_thread", "threadId": "agent-thread-1", "status": "running", "threadStatus": "running",
+		"originKind": agentThreadOriginPrivateThread, "originId": thread.ID,
+	})
+	if err != nil {
+		t.Fatalf("create bound artifact: %v", err)
+	}
 	ref := scoutChatMessageRecord{
 		ID:        "msg-ref-1",
 		Kind:      "thread",
 		Role:      "scout",
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
-		Thread:    &scoutChatThreadRef{ID: "agent-thread-1", Mode: "research", Query: "creator market", Status: "running"},
+		Thread:    &scoutChatThreadRef{ID: "agent-thread-1", Mode: "research", Query: "creator market", Status: "running", ArtifactID: artifact.ID},
 	}
 	if _, err := kanbanApp.commitScoutChatThreadMessages("tim@shareability.com", thread.ID, ref); err != nil {
 		t.Fatalf("commit private ref message: %v", err)
@@ -327,11 +334,17 @@ func TestPrivateChatThreadUpdatesReachOwnerOfficeSocketOnly(t *testing.T) {
 	// The worker finishing flips the persisted ref; pre-fix this flip had NO
 	// live path for private threads (public-only broadcast + gated poll), so
 	// the run card froze at "running" until a reload.
-	if err := kanbanApp.commitScoutChatThreadRefStatus(thread.ID, "tim@shareability.com", "agent-thread-1", "complete", "artifact-9"); err != nil {
+	artifact, _, err = kanbanApp.memory.updateOSArtifactWithMetadata(artifact.ID, "", artifact.Text, scoutParticipantName, map[string]string{
+		"status": "complete", "threadStatus": "complete", "progressPercent": "100", "reviewGate": "passed",
+	})
+	if err != nil {
+		t.Fatalf("persist terminal artifact: %v", err)
+	}
+	if err := kanbanApp.commitScoutChatThreadRefStatus(thread.ID, "tim@shareability.com", "agent-thread-1", "complete", artifact.ID); err != nil {
 		t.Fatalf("commit ref status flip: %v", err)
 	}
 	raw = waitForKanbanEvent(t, timConn, "chat_thread", 5*time.Second)
-	if !strings.Contains(string(raw), `"complete"`) || !strings.Contains(string(raw), "artifact-9") {
+	if !strings.Contains(string(raw), `"complete"`) || !strings.Contains(string(raw), artifact.ID) {
 		t.Fatalf("owner office socket missed the private ref status flip: %s", raw)
 	}
 

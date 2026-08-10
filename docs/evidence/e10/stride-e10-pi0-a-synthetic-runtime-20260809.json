@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_pi0_a_synthetic_runtime_checkpoint",
+  "observedAt": "2026-08-10T06:20:23Z",
+  "status": "synthetic_deterministic_safe_local_runtime_verified_no_collection",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "b4bcc7e5fa7325c5b308af08e46f562154500248",
+    "dirtyWorktreeCheckpoint": true,
+    "selectedFileSha256ManifestIsAuthoritative": true,
+    "worktreeStatusSha256": "5b11f55addc8965bf8d36c1b82f57bc053952ae88748faf4f788bfba5bef7961",
+    "unrelatedUntrackedStrideSiteExcluded": true,
+    "gitCommitPushDeployActivationPerformed": false
+  },
+  "verifiedBoundary": {
+    "routeFreeSyntheticRuntimeOnly": true,
+    "defaultOffAndUninstalledByProduction": true,
+    "realCollectionInstalled": false,
+    "providerOrNetworkCallPresent": false,
+    "authorityAndConsentHeldThroughFinalAppendAndGovernanceCAS": true,
+    "durableAppendJournalReceiptAndRestartReplay": true,
+    "tenantAndTombstoneBoundedExportMaximumSevenDays": true,
+    "correctionRetentionDeleteAndMeasuredPurge": true,
+    "pendingTombstoneBlocksExport": true,
+    "finalExportSweepAndReceiptAreOneAuthenticatedGeneration": true,
+    "backupAntiResurrectionVerified": true,
+    "syntheticBaselineOnly": true
+  },
+  "verification": {
+    "focusedNormal": {
+      "command": "go test . -run '^(TestPD1|TestScoutTerminalProjection|TestStridePI0Synthetic)' -count=1",
+      "result": "PASS",
+      "elapsed": "5.987s"
+    },
+    "focusedRace": {
+      "command": "go test -race . -run '^(TestPD1|TestScoutTerminalProjection|TestStridePI0Synthetic)' -count=1",
+      "result": "PASS",
+      "elapsed": "11.997s"
+    },
+    "goVetAll": {
+      "command": "go vet ./...",
+      "result": "PASS"
+    },
+    "scopedDiffCheck": {
+      "command": "git diff --check -- stride_e10_pi0_runtime.go stride_e10_pi0_runtime_test.go",
+      "result": "PASS"
+    },
+    "independentRuntimeCritic": {
+      "identity": "/root/w0_code_inventory",
+      "verdict": "PASS",
+      "evidence": "focused_normal_10_of_10_PASS_2.224s; focused_race_PASS_4.424s; go_vet_all_PASS; scoped_diff_check_PASS",
+      "acceptedBoundary": "route_free_default_off_synthetic_runtime_and_privacy_lifecycle_only"
+    }
+  },
+  "fileSha256": {
+    "stride_e10_pi0_runtime.go": "0b6ac741d346ea7978bbae1dbf96d74683afc985274ce6b8681114f97781b830",
+    "stride_e10_pi0_runtime_test.go": "251e95d0004af08884663df83276522387954bf61929c9213880dd06e09beec7"
+  },
+  "excludedClaims": {
+    "productionRuntimeInstalled": false,
+    "realUserOrProductionDataCollected": false,
+    "preMigrationBaselineAccepted": false,
+    "pi0BComplete": false,
+    "publicDashboardOrTelemetryEnabled": false,
+    "w5ThroughW8Complete": false
+  }
+}

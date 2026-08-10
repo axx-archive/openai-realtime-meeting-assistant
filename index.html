@@ -9414,6 +9414,14 @@
       .scout-chat-thread > .scout-chat-research,
       .scout-chat-thread > .scout-proposal-card,
       .scout-chat-thread > .returncard { margin-top: 6px; }
+      /* A completed report card is a durable transcript object, not flexible
+         spacer material. Direct flex children must retain their intrinsic
+         card body/actions instead of shrinking to the thread's 2px remainder. */
+      .scout-chat-thread > .scout-chat-research[data-state="complete"],
+      .scout-chat-thread > .scout-chat-research[data-state="published"] {
+        flex: 0 0 auto;
+        min-height: min-content;
+      }
       .scout-chat-thread > :first-child { margin-top: 0; }
 
       /* sheet 2f/3a time marker — "sunday · jul 5" as a quiet centered
@@ -27876,7 +27884,107 @@
       .settings-organizations__card { padding: 18px; border-radius: 18px; background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--line-1); }
       .settings-organizations__card h3 { margin: 0; text-wrap: balance; }
       .settings-organizations__card p { margin: 7px 0 0; color: var(--text-2); text-wrap: pretty; }
+
+      /* PD1: one governed top-level IA. The icon rail remains a contextual
+         Work tool switcher; planned Network/Search children do not enter it. */
+      .pd1-primary-nav {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-1);
+        min-width: 0;
+        padding: var(--sp-1);
+        overflow-x: auto;
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--surface-2);
+        scrollbar-width: none;
+      }
+      .pd1-primary-nav::-webkit-scrollbar { display: none; }
+      .pd1-primary-nav__item {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 40px;
+        min-height: 40px;
+        padding: 0 var(--sp-3);
+        border-radius: var(--r-full);
+        color: var(--text-2);
+        font: var(--type-caption-medium);
+        white-space: nowrap;
+        transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+      .pd1-primary-nav__item:hover { background: var(--surface-3); color: var(--text-1); }
+      .pd1-primary-nav__item:active { transform: scale(var(--press-scale)); }
+      .pd1-primary-nav__item[aria-current="page"] { background: var(--text-1); color: var(--surface-1); }
+
+      .pd1-destination-surface {
+        grid-area: workspace;
+        display: none;
+        place-items: center;
+        min-width: 0;
+        min-height: 0;
+        padding: clamp(var(--sp-4), 5vw, var(--sp-8));
+        overflow: auto;
+      }
+      #appShell[data-pd1-surface] .workspace { display: none !important; }
+      #appShell[data-pd1-surface] .pd1-destination-surface { display: grid; }
+      #appShell:not([data-pd1-destination="Work"]) .tool-rail { display: none !important; }
+      .pd1-destination-state {
+        display: none;
+        width: min(100%, 660px);
+        padding: clamp(var(--sp-5), 6vw, var(--sp-8));
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-xl);
+        background: var(--surface-1);
+        box-shadow: var(--glass-shadow);
+      }
+      #appShell[data-pd1-surface="network-off"] [data-pd1-state="network-off"],
+      #appShell[data-pd1-surface="work-search-off"] [data-pd1-state="work-search-off"],
+      #appShell[data-pd1-surface="you"] [data-pd1-state="you"] { display: block; }
+      .pd1-destination-state__eyebrow {
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-transform: uppercase;
+      }
+      .pd1-destination-state h2 {
+        max-width: 18ch;
+        margin-top: var(--sp-2);
+        font: var(--type-title);
+        letter-spacing: var(--track-title);
+        text-wrap: balance;
+      }
+      .pd1-destination-state p {
+        max-width: 56ch;
+        margin-top: var(--sp-3);
+        color: var(--text-2);
+        text-wrap: pretty;
+      }
+      .pd1-destination-state__status {
+        display: inline-flex;
+        align-items: center;
+        min-height: 40px;
+        margin-top: var(--sp-5);
+        padding: 0 var(--sp-3);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: var(--surface-2);
+        color: var(--text-2);
+        font: var(--type-caption-medium);
+      }
+      .pd1-destination-state__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-5); }
+      .pd1-destination-state__action { min-width: 44px; min-height: 44px; padding: 0 var(--sp-4); border-radius: var(--r-full); background: var(--text-1); color: var(--surface-1); font: var(--type-caption-medium); }
+
+      /* Network is now a primary destination, not a contextual Work tool.
+         Its legacy route remains deep-link compatible and server-gated. */
+      .tool-rail__slot:has(.tool-rail__tool[data-tool="network"]) { display: none; }
       @media (max-width: 760px) {
+        #appShell.is-authed { --shell-topbar-height: calc(112px + env(safe-area-inset-top, 0px)); }
+        #appShell.is-authed .topbar { flex-wrap: wrap; align-content: center; }
+        .pd1-primary-nav { order: 20; flex: 1 0 100%; justify-content: flex-start; }
+        .pd1-primary-nav__item { min-height: 44px; padding-inline: var(--sp-3); }
+        .pd1-destination-surface { padding: var(--sp-4); padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
+        .pd1-destination-state { padding: var(--sp-5); border-radius: var(--r-lg); }
         .stride-w2 { inset: 60px 0 0; display: block; overflow-y: auto; padding-bottom: calc(82px + env(safe-area-inset-bottom)); }
         .stride-w2__rail { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; padding: 10px 12px; overflow-x: auto; box-shadow: 0 1px 0 var(--line-1), 0 8px 24px rgba(0,0,0,.05); }
         .stride-w2__brand { position: sticky; left: 0; flex: 0 0 auto; min-height: 40px; margin: 0; background: var(--surface-1); }
@@ -27906,12 +28014,13 @@
         .notification-panel { animation: none; }
         .office-launch__cradle { transform: none; transition: none; }
         .stride-w2 *, .stride-w2 *::before, .stride-w2 *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+        .pd1-primary-nav *, .pd1-destination-surface * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
       }
     </style>
   </head>
   <body>
-    <main id="appShell" data-tool="office">
-      <nav id="toolRail" class="tool-rail" aria-label="Tools">
+    <main id="appShell" data-tool="office" data-pd1-destination="Home">
+      <nav id="toolRail" class="tool-rail" aria-label="Work tools" aria-hidden="true" inert hidden>
         <span id="brandMark" class="topbar__mark" role="img" aria-label="Stride">
           <span class="wordmark topbar__wordmark" aria-hidden="true"></span>
         </span>
@@ -28055,6 +28164,13 @@
           <h1 class="topbar__heading"><span id="topbarProject">meeting</span><span id="topbarToolTitle" hidden></span></h1>
           <span id="topbarSubtitle" class="topbar__subtitle"></span>
         </div>
+        <nav id="pd1PrimaryNav" class="pd1-primary-nav" aria-label="Primary">
+          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Home" aria-current="page" tabindex="0">Home</button>
+          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Work" aria-current="false" tabindex="-1">Work</button>
+          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Network" aria-current="false" tabindex="-1">Network</button>
+          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Work Search" aria-current="false" tabindex="-1">Work Search</button>
+          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="You" aria-current="false" tabindex="-1">You</button>
+        </nav>
         <div id="topbarMeta" class="topbar__meta" aria-label="Meeting context">
           <span class="topbar__meta-item" id="topbarDate">—</span>
           <span class="topbar__meta-sep" aria-hidden="true">·</span>
@@ -28086,6 +28202,29 @@
           <span id="statusText">not connected</span>
         </span>
       </header>
+
+      <section id="pd1DestinationSurface" class="pd1-destination-surface" aria-live="polite" aria-label="Primary destination status">
+        <article class="pd1-destination-state" data-pd1-state="network-off">
+          <span class="pd1-destination-state__eyebrow">Network</span>
+          <h2 tabindex="-1">The public network is off.</h2>
+          <p>Public workspaces, profiles, workstreams, moderation, and consensus stay unavailable until their parent policies and protections are activated.</p>
+          <span class="pd1-destination-state__status">Feature off · no public projection loaded</span>
+        </article>
+        <article class="pd1-destination-state" data-pd1-state="work-search-off">
+          <span class="pd1-destination-state__eyebrow">Work Search</span>
+          <h2 tabindex="-1">Work Search is off.</h2>
+          <p>No query, interpretation, result, or contact projection is requested while qualification and search policy remain inactive.</p>
+          <span class="pd1-destination-state__status">Feature off · no search performed</span>
+        </article>
+        <article class="pd1-destination-state" data-pd1-state="you">
+          <span class="pd1-destination-state__eyebrow">You</span>
+          <h2 tabindex="-1">Your private account controls.</h2>
+          <p>Open the existing private profile and account settings. Public-presence and MyMind children remain outside this destination while their parents are off.</p>
+          <div class="pd1-destination-state__actions">
+            <button id="pd1OpenProfileSettings" class="pd1-destination-state__action" type="button">Open profile settings</button>
+          </div>
+        </article>
+      </section>
 
       <div class="workspace">
         <section id="officeTool" class="office-tool" aria-label="Stride">
@@ -30211,6 +30350,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const identityStorageKey = 'bonfire.identity.v1'
       const sessionPasswordKey = 'bonfire.session.v1'
       const artifactAdminEmail = 'aj@shareability.com'
+      const PD1_DESTINATIONS = Object.freeze(['Home', 'Work', 'Network', 'Work Search', 'You'])
+      const PD1_PATHS = Object.freeze({ Home: '/', Work: '/work', Network: '/network', 'Work Search': '/work-search', You: '/you' })
       /* auth state — the session itself lives in an HttpOnly cookie the
          server owns; authedUser mirrors GET /auth/me for UI decisions. */
       let authedUser = null
@@ -30394,6 +30535,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const appShell = document.getElementById('appShell')
       const toolRail = document.getElementById('toolRail')
       const toolButtons = Array.from(toolRail.querySelectorAll('button[data-tool]'))
+      const pd1PrimaryNav = document.getElementById('pd1PrimaryNav')
+      const pd1DestinationButtons = Array.from(pd1PrimaryNav.querySelectorAll('[data-pd1-destination]'))
+      const pd1DestinationSurface = document.getElementById('pd1DestinationSurface')
+      const pd1OpenProfileSettings = document.getElementById('pd1OpenProfileSettings')
       const adminArtifactNodes = Array.from(document.querySelectorAll('[data-admin-artifacts]'))
       const themeToggleButton = document.getElementById('themeToggle')
       const boardEl = document.getElementById('board')
@@ -32019,6 +32164,23 @@ Wrap the entire export in one code block. After the code block, say whether the 
       toolButtons.forEach(button => {
         button.addEventListener('click', () => setActiveTool(button.dataset.tool))
       })
+      pd1DestinationButtons.forEach(button => {
+        button.addEventListener('click', () => selectPD1Destination(button.dataset.pd1Destination))
+      })
+      pd1PrimaryNav.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+        event.preventDefault()
+        const current = Math.max(0, pd1DestinationButtons.indexOf(document.activeElement))
+        const next = event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+            ? pd1DestinationButtons.length - 1
+            : (current + (event.key === 'ArrowRight' ? 1 : -1) + pd1DestinationButtons.length) % pd1DestinationButtons.length
+        const button = pd1DestinationButtons[next]
+        selectPD1Destination(button.dataset.pd1Destination, { focus: false })
+        button.focus()
+      })
+      pd1OpenProfileSettings.addEventListener('click', () => openSettings({ section: 'profile', restoreFocusTo: pd1OpenProfileSettings, allowLocked: true }))
       officeToolButtons.forEach(button => {
         button.addEventListener('click', () => openOfficeTool(button.dataset.officeTool))
       })
@@ -34144,6 +34306,17 @@ Wrap the entire export in one code block. After the code block, say whether the 
       function syncAuthenticatedShell() {
         const authed = Boolean(authedUser)
         appShell.classList.toggle('is-authed', authed)
+        if (authed) {
+          const destination = pd1DestinationForPath(location.pathname)
+          if (destination && PD1_PATHS[destination] === location.pathname) {
+            selectPD1Destination(destination, { push: false, focus: false })
+          } else {
+            syncPD1Destination(destination || ((appShell.dataset.tool || 'office') === 'office' ? 'Home' : 'Work'))
+          }
+        } else {
+          syncPD1Destination('Home')
+          clearPD1DestinationSurface()
+        }
         syncOSAssistantAvailability()
         syncArtifactLibraryAccess()
         syncAccountChrome()
@@ -37029,8 +37202,94 @@ Wrap the entire export in one code block. After the code block, say whether the 
          meeting state machine (is-in-room / is-board-expanded / stage modes):
          the Board tool delegates to setBoardExpanded, and every existing
          expand/collapse path syncs the rail through applyToolState. */
+      function pd1DestinationForPath(path) {
+        const exact = Object.entries(PD1_PATHS).find(([, candidate]) => candidate === path)
+        if (exact) return exact[0]
+        if (path === '/me' || path === '/work-record' || path.startsWith('/people/') || path.startsWith('/org/')) return 'You'
+        if (path === '/network/search' || path === '/network/contact') return 'Work Search'
+        if (path.startsWith('/network/')) return 'Network'
+        return ''
+      }
+
+      function syncPD1Destination(destination) {
+        const next = PD1_DESTINATIONS.includes(destination) ? destination : 'Home'
+        appShell.dataset.pd1Destination = next
+        const workContext = next === 'Work'
+        toolRail.hidden = !workContext
+        toolRail.inert = !workContext
+        toolRail.setAttribute('aria-hidden', workContext ? 'false' : 'true')
+        pd1DestinationButtons.forEach(button => {
+          const current = button.dataset.pd1Destination === next
+          button.setAttribute('aria-current', current ? 'page' : 'false')
+          button.tabIndex = current ? 0 : -1
+        })
+      }
+
+      function clearPD1DestinationSurface() {
+        delete appShell.dataset.pd1Surface
+      }
+
+      function showPD1DestinationSurface(surface, destination, focus = true) {
+        appShell.dataset.pd1Surface = surface
+        syncPD1Destination(destination)
+        if (focus) {
+          requestAnimationFrame(() => pd1DestinationSurface.querySelector(`[data-pd1-state="${surface}"] h2`)?.focus({ preventScroll: true }))
+        }
+      }
+
+      function closePD1OverlaysForNavigation() {
+        if (window.closeStrideContributionSurface?.() === false) return false
+        if (typeof closeSettings === 'function') closeSettings({ restoreFocus: false })
+        return true
+      }
+
+      function selectPD1Destination(destination, options = {}) {
+        if (!PD1_DESTINATIONS.includes(destination) || guestMode || !appShell.classList.contains('is-authed')) return false
+        if (!closePD1OverlaysForNavigation()) return false
+        const path = PD1_PATHS[destination]
+        if (options.push !== false && location.pathname !== path) {
+          history.pushState({ view: 'pd1', destination }, '', path)
+        }
+        if (destination === 'Home') {
+          clearPD1DestinationSurface()
+          setActiveTool('office', { history: false })
+          syncPD1Destination('Home')
+          return true
+        }
+        if (destination === 'Work') {
+          clearPD1DestinationSurface()
+          setActiveTool('chat', { history: false })
+          syncPD1Destination('Work')
+          return true
+        }
+        if (destination === 'Network') {
+          showPD1DestinationSurface('network-off', destination, options.focus !== false)
+          return true
+        }
+        if (destination === 'Work Search') {
+          showPD1DestinationSurface('work-search-off', destination, options.focus !== false)
+          return true
+        }
+        showPD1DestinationSurface('you', 'You', options.focus !== false)
+        return true
+      }
+      window.selectPD1Destination = selectPD1Destination
+
+      function syncPD1DestinationForTool(tool) {
+        clearPD1DestinationSurface()
+        syncPD1Destination(pd1DestinationForPath(location.pathname) || (tool === 'office' ? 'Home' : 'Work'))
+      }
+
+      window.addEventListener('popstate', () => {
+        const destination = pd1DestinationForPath(location.pathname)
+        if (destination && PD1_PATHS[destination] === location.pathname) {
+          selectPD1Destination(destination, { push: false, focus: true })
+        }
+      })
+
       function applyToolState(tool) {
         appShell.dataset.tool = tool
+        syncPD1DestinationForTool(tool)
         if (tool !== 'board') {
           lastNonBoardTool = tool
         }
@@ -37280,7 +37539,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         }
       }
 
-      function setActiveTool(tool) {
+      function setActiveTool(tool, options = {}) {
         if (guestMode) {
           // guests own exactly one surface: the room. No rail, no office,
           // no back-stack pushState — the OS shell does not exist here.
@@ -37310,7 +37569,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // P2-3: on the phone, drilling from the office home into a tool pushes a
         // history entry so the OS back / edge-swipe returns to the office rather
         // than exiting the app. Guarded against popstate-driven re-entry.
-        if (!chatHistoryPopping && phoneLayoutQuery.matches && prevTool === 'office' && next !== 'office') {
+        if (options.history !== false && !chatHistoryPopping && phoneLayoutQuery.matches && prevTool === 'office' && next !== 'office') {
           try { history.pushState({ view: 'tool', tool: next }, '') } catch (_) {}
         }
         applyToolState(next)
@@ -38107,6 +38366,29 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
       function researchArtifactSources(entry) {
         return artifactSources(entry)
+      }
+
+      function researchArtifactCurrentSourceSummary(entry) {
+        const metadata = entry?.metadata || {}
+        const citations = Number(metadata.researchCitationCount)
+        const domains = Number(metadata.researchSourceDomainCount)
+        const verified = String(metadata.researchQualityGate || '').trim().toLowerCase() === 'passed'
+          && /^[a-f0-9]{64}$/i.test(String(metadata.researchSourceWindowDigest || '').trim())
+        if (verified && Number.isSafeInteger(citations) && citations > 0 && citations <= 10000 && Number.isSafeInteger(domains) && domains > 0 && domains <= 10000) {
+          const label = `${citations} cited source link${citations === 1 ? '' : 's'} · ${domains} domain${domains === 1 ? '' : 's'}`
+          return {
+            count: citations,
+            label,
+            preview: label,
+            authority: 'verified_current_metadata'
+          }
+        }
+        return {
+          count: 0,
+          label: '',
+          preview: '',
+          authority: 'unverified'
+        }
       }
 
       const ARTIFACT_SECTION_LABELS = new Set([
@@ -39617,8 +39899,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
         pill.innerHTML = `<span class="pill__dot" aria-hidden="true"></span>${error ? 'needs attention' : 'complete'}`
         counts.appendChild(pill)
         const meta = document.createElement('span')
-        const sourceCount = sources.length
-        meta.textContent = `${artifactWorkerLabel(entry)} · ${sourceCount} source${sourceCount === 1 ? '' : 's'}`
+        const sourceSummary = researchArtifactCurrentSourceSummary(entry)
+        meta.textContent = `${artifactWorkerLabel(entry)} · ${sourceSummary.label}`
         counts.appendChild(meta)
         const titleEl = document.createElement('h3')
         titleEl.className = 'research-complete__title'
@@ -54669,7 +54951,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          if (!message?.thread) continue
 	          const artifactId = String(message.thread.artifactId || '')
 	          const artifact = artifactEntries.find(entry => String(entry?.id || '') === artifactId) || scoutThreadFromChatMessage(message).artifact
-	          const status = String(message.thread.status || artifactStatusValue(artifact) || '').toLowerCase()
+	          // A durable artifact is newer authority than the launch message's
+	          // captured `running` state. Prefer it so a completed replacement
+	          // cannot leave the channel row falsely active.
+	          const status = String(artifactStatusValue(artifact) || message.thread.status || '').toLowerCase()
 	          if (!chatActiveWorkStatuses.has(status)) continue
 	          return {
 	            message,
@@ -54853,7 +55138,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        const previewEl = document.createElement('span')
 	        previewEl.className = 'chat-thread-item__preview'
-	        previewEl.textContent = preview
+	        // A current running ref owns the row lifecycle. The durable thread
+	        // preview can intentionally retain the prior terminal card until the
+	        // follow-up itself reaches a terminal postimage; never pair that stale
+	        // copy with a live timer.
+	        previewEl.textContent = activeWork ? 'Scout is working' : preview
 	        body.append(row, previewEl)
 
 	        item.append(icon, body)
@@ -58504,8 +58793,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      const meta = artifact?.metadata || {}
 	      const model = String(meta.model || meta.orchestratorModel || '').trim()
 	      const effort = String(meta.reasoningEffort || '').trim()
-	      const sourceCount = researchArtifactSources(artifact).length
-	      const bits = [model, effort ? `${effort} reasoning` : '', sourceCount ? `${sourceCount} source${sourceCount === 1 ? '' : 's'}` : ''].filter(Boolean)
+	      const sourceSummary = researchArtifactCurrentSourceSummary(artifact)
+	      const bits = [model, effort ? `${effort} reasoning` : '', sourceSummary.count ? sourceSummary.label : ''].filter(Boolean)
 	      provenance.hidden = !done || !bits.length
 	      provenance.textContent = bits.join(' · ')
 	    }
@@ -58571,7 +58860,45 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            renderDesktopWorkContext(message, entry || artifact)
 	          }
 	        }
+	        syncScoutThreadTerminalPreview(card, value, artifact)
 	        syncDesktopActiveWorkIndicator()
+      }
+
+      function scoutResearchTerminalPreview(status, artifact) {
+        const value = String(status || '').toLowerCase()
+        if (value === 'complete') {
+          const sourceSummary = researchArtifactCurrentSourceSummary(artifact).preview
+          return sourceSummary ? `Research delivered · ${sourceSummary}` : 'Research delivered'
+        }
+        if (value === 'error') {
+          return 'Needs attention'
+        }
+        return ''
+      }
+
+      function syncScoutThreadTerminalPreview(card, status, artifact) {
+        const preview = scoutResearchTerminalPreview(status, artifact)
+        if (!preview) return false
+        const artifactId = String(card?.dataset?.threadArtifactId || '').trim()
+        const runId = String(card?.dataset?.threadRunId || '').trim()
+        const artifactMetadata = artifact?.metadata || {}
+        const artifactStatus = String(artifactMetadata.threadStatus || artifactMetadata.status || '').trim().toLowerCase()
+        const requestedStatus = String(status || '').trim().toLowerCase()
+        if (!artifactId || !runId || String(artifact?.id || '').trim() !== artifactId || artifactStatus !== requestedStatus || String(artifactMetadata.threadId || '').trim() !== runId || String(artifactMetadata.originKind || '').trim() !== 'channel') return false
+        const thread = scoutChatThreads.find(candidate => (candidate?.messages || []).some(message => {
+          const ref = message?.thread || {}
+          return String(message?.kind || '').trim() === 'thread' && String(ref.artifactId || '').trim() === artifactId && String(ref.id || '').trim() === runId && String(artifactMetadata.originId || '').trim() === String(candidate?.id || '').trim()
+        }))
+        if (!thread) return false
+        thread.preview = preview
+        thread.updatedAt = String(artifact?.updatedAt || thread.updatedAt || '')
+        thread.messages = (thread.messages || []).map(message => {
+          const ref = message?.thread || {}
+          const matches = String(message?.kind || '').trim() === 'thread' && String(ref.artifactId || '').trim() === artifactId && String(ref.id || '').trim() === runId
+          return matches ? { ...message, thread: { ...ref, status: String(status || '') } } : message
+        })
+        upsertScoutChatThread(thread, { select: false })
+        return true
       }
 
       // Flip any rendered research cards to match their artifact's live status
@@ -70055,9 +70382,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const organizationCount = document.getElementById('topbarOrganizationCount')
         const organizationPending = document.getElementById('topbarOrganizationPending')
         const organizationSwitcherProjection = document.createElement('div')
-        const routes = new Set(['/me','/work-record','/org/people','/org/requests','/org/contributions','/org/recruiting','/network/draft','/network/preview','/network/recruiter','/network/search','/network/contact','/network/blocks'])
+        const routes = new Set(['/me','/work-record','/org/people','/org/requests','/org/contributions','/org/recruiting','/network/draft'])
         const coworkerRoutePattern = /^\/people\/[a-zA-Z0-9_-]+$/
-        const isStrideRoute = path => routes.has(path) || coworkerRoutePattern.test(path)
+        const opaqueNetworkParentRoute = path => path.startsWith('/network/') && path !== '/network/draft'
+        const isStrideRoute = path => routes.has(path) || opaqueNetworkParentRoute(path) || coworkerRoutePattern.test(path)
         const routeSurfaces = new Map([['/me','profile'],['/work-record','work-record'],['/org/people','organization-people'],['/org/requests','organization-requests'],['/org/contributions','contribution-approvals'],['/org/recruiting','organization-recruiting'],['/network/draft','network-draft'],['/network/preview','network-preview'],['/network/recruiter','network-recruiter-view'],['/network/search','network-search'],['/network/contact','contact-inbox'],['/network/blocks','network-blocks']])
         const surfaceForPath = path => coworkerRoutePattern.test(path) ? 'coworker-profile' : routeSurfaces.get(path)
         const closedSurfaces = new Set(['profile','work-record','organizations','organization-people','organization-requests','contribution-approvals','network-draft','network-preview','network-recruiter-view','network-search','contact-inbox','network-blocks','coworker-profile','organization-recruiting'])
@@ -70671,6 +70999,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (pendingPersistenceInvalid || pendingActionOperation && path !== pendingActionOperation.path) { blockPendingNavigation(); return true }
           if (!isStrideRoute(path)) return false
           if (options.push !== false && location.pathname !== path) history.pushState({ strideW2: path }, '', path)
+          if (opaqueNetworkParentRoute(path)) {
+            projectionRequests.forEach(controller => controller.abort())
+            projectionRequests.clear()
+            projectionRequest = null
+            canvas.replaceChildren()
+            surface.hidden = true
+            document.body.classList.remove('stride-w2-open')
+            const destination = path === '/network/search' || path === '/network/contact' ? 'Work Search' : 'Network'
+            showPD1DestinationSurface(destination === 'Work Search' ? 'work-search-off' : 'network-off', destination, options.focus !== false)
+            return true
+          }
           canvas.innerHTML = routeMarkup(path)
           surface.hidden = false
           document.body.classList.add('stride-w2-open')

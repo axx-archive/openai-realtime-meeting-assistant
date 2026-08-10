@@ -96,7 +96,7 @@ func TestIndexRouterHistoryAndBackTarget(t *testing.T) {
 	}
 
 	// drilling into a tool from the office pushes an entry too
-	tool := functionBody(html, "function setActiveTool(tool)")
+	tool := functionBodyAfterSignature(html, "function setActiveTool(tool, options = {})")
 	if !strings.Contains(tool, "history.pushState({ view: 'tool'") {
 		t.Error("setActiveTool must history.pushState a tool entry on the office->tool drill-in")
 	}

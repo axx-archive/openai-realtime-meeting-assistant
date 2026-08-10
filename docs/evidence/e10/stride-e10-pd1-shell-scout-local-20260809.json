@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_pd1_shell_and_scout_local_checkpoint",
+  "observedAt": "2026-08-10T06:20:23Z",
+  "status": "deterministic_web_component_and_native_renderer_verified_physical_device_and_live_repair_pending",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "b4bcc7e5fa7325c5b308af08e46f562154500248",
+    "dirtyWorktreeCheckpoint": true,
+    "selectedFileSha256ManifestIsAuthoritative": true,
+    "worktreeStatusSha256": "5b11f55addc8965bf8d36c1b82f57bc053952ae88748faf4f788bfba5bef7961",
+    "unrelatedUntrackedStrideSiteExcluded": true,
+    "gitCommitPushDeployActivationPerformed": false
+  },
+  "verifiedBoundary": {
+    "desktopFiveDestinationIA": true,
+    "desktopRenderedPlaywrightHistoryFocusResponsiveAndParentOff": true,
+    "desktopNetworkChildrenOpaqueWithPrivateDraftSeparate": true,
+    "nativeUniversalIPhoneAndIPadWidthComposition": true,
+    "nativeActualReactRendererMounted": true,
+    "nativeNavigationChildStackAndDraftPreservedAcrossFullscreenAndResize": true,
+    "nativeParentOffChildrenNotMounted": true,
+    "scoutExactArtifactThreadOriginAndStatusBinding": true,
+    "scoutAtomicArtifactRevalidationThroughFinalChatSave": true,
+    "scoutQueuedRunningNeedsInputParkedStoppedAndTerminalCopyBodyMinimized": true,
+    "scoutVerifiedCitationAndDomainCopyOnly": true,
+    "scoutAdminRepairRouteClosedIdempotentAndTerminalOnly": true,
+    "scoutAcceptedWorkstreamReplayRepairsWithoutProviderRelaunch": true,
+    "scoutToolRunReplayRetainsAlreadyResolvedBehavior": true,
+    "privateWorkstreamExactChatOwnerAndVisibilityBound": true,
+    "privateArtifactCrossMemberGetSaveAndFollowUpOpaque": true,
+    "productionLiveRepairApplied": false,
+    "physicalIPhoneOrIPadAccepted": false
+  },
+  "verification": {
+    "focusedGoNormal": {
+      "command": "go test . -run '^(TestPD1|TestScoutTerminalProjection|TestStridePI0Synthetic)' -count=1",
+      "result": "PASS",
+      "elapsed": "5.987s"
+    },
+    "focusedGoRace": {
+      "command": "go test -race . -run '^(TestPD1|TestScoutTerminalProjection|TestStridePI0Synthetic)' -count=1",
+      "result": "PASS",
+      "elapsed": "11.997s"
+    },
+    "mobileFull": {
+      "command": "cd mobile && npm test",
+      "result": "PASS_480_of_480"
+    },
+    "mobileTypecheck": {
+      "command": "cd mobile && npm run typecheck",
+      "result": "PASS"
+    },
+    "legacyFrontendIntegrationNormal": {
+      "command": "go test . -run '^(TestIndexGuestLeaveIsTerminal|TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant|TestIndexAccountMenuAndFloatingRailInteractionsAreWired|TestToolRailFloatingIslandAnchorsStayViewportSafe|TestIndexAuditFixWiring|TestIndexStrideRenameAndAgentToken|TestIndexRouterHistoryAndBackTarget|TestPD1|TestStrideE10ProductHTTP|TestStrideE10ProductLive)' -count=1",
+      "result": "PASS",
+      "elapsed": "4.643s"
+    },
+    "legacyFrontendIntegrationRace": {
+      "command": "go test -race . -run '^(TestIndexGuestLeaveIsTerminal|TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant|TestIndexAccountMenuAndFloatingRailInteractionsAreWired|TestToolRailFloatingIslandAnchorsStayViewportSafe|TestIndexAuditFixWiring|TestIndexStrideRenameAndAgentToken|TestIndexRouterHistoryAndBackTarget|TestPD1|TestStrideE10ProductHTTP|TestStrideE10ProductLive)' -count=1",
+      "result": "PASS",
+      "elapsed": "5.971s"
+    },
+    "goVetAll": {
+      "command": "go vet ./...",
+      "result": "PASS"
+    },
+    "scopedDiffCheck": {
+      "command": "git diff --check over the selected PD1 and Scout files",
+      "result": "PASS"
+    },
+    "independentCritics": {
+      "desktopWeb": "PASS",
+      "nativeRendererFinding": "closed_with_react_test_renderer_19_2_3",
+      "scoutDurability": {
+        "identity": "/root/w0_code_inventory_and_/root/w0_live_evidence",
+        "verdict": "PASS",
+        "evidence": "full_TestScout_normal_PASS_35.886s; full_TestScout_race_PASS_330.179s; targeted_private_custody_normal_PASS_2.455s; targeted_private_custody_race_PASS_18.056s; go_vet_all_PASS; scoped_diff_check_PASS"
+      },
+      "receiptCheckpointCritic": "pending_final_refreshed_receipt_recritic"
+    }
+  },
+  "fileSha256": {
+    "index.html": "1a3bec7654f1dc87d4d47fc11a877353f61efd0ef9463486626e988994148a57",
+    "frontend_pd1_top_level_ia_test.go": "10a4dfbeeb0f370662d5064ac5cafc369459b4087e435dc6b01f5b42b3fe35e7",
+    "frontend_guest_test.go": "e537fe00137bfe4e61fab6cb24adf3d28e4c6af85a6ccaa899a64641d4388ec7",
+    "frontend_latency_test.go": "c1e1ca1ff5fd0bc9f935fb2199790f5121ce202ad90305759b3cef41b902568d",
+    "frontend_router_test.go": "919d13392e4ad6d22cbeb2f086f3c9239262479b4592be9ffc3bb9a60c443c79",
+    "mobile/package.json": "ad44eddcca535054ea4a3b3261ed420d54e4b81026bea8a57cc06ba03c6632b8",
+    "mobile/package-lock.json": "beda783d5aaab66fb5381e94090440b6a320096369a47972a9048b0e6b9a0e0e",
+    "mobile/src/navigation/RootNavigator.tsx": "9e9427c80d8075f5e5ee7fa8e85f913847c48f7742da018d7d83441a548558f3",
+    "mobile/src/navigation/types.ts": "74be13c18b2fa9d32bdb040162a41f22f1f2755b40cec4fe32253acf19ce668a",
+    "mobile/src/navigation/NativeUniversalShell.tsx": "90a16187185bf3788fbf4eed7aaf1ad7edc4d6a90507fa43c0dae4cb3efb0a2f",
+    "mobile/src/navigation/nativeShellModel.ts": "4f19c85a9ce7d50a54055f4f072994b7fe6c0f98ebb1633e29a4196519c4a874",
+    "mobile/src/screens/NativeShellScreens.tsx": "b2eec90cae0ab134a5a5e3b6069ec95d6d995ca976bcc89d833898ace6f904ce",
+    "mobile/src/__tests__/nativeUniversalShell.test.ts": "5942f0a601f86f000d7a1e532cd2d525ddbe980c51cc6382d3afc1778d94435a",
+    "mobile/src/messaging/ChannelList.tsx": "9574f574c89845ded156f116361fa03031d11526966255f977087c317e353e31",
+    "mobile/src/__tests__/channelTerminalPreview.test.ts": "0d84a072e8fa4ecab7b8738e2c2f4211dab4dda1fba55817acaf83bb0ad67cb9",
+    "scout_chat_threads.go": "43578f9bfc8625511d1b86e43bf5fdc663407ca8e379429125465dc0017c8066",
+    "scout_chat_threads_test.go": "19ce55724aedf0c2efbdb05e6d1fffd45eef5c32de1c7b7047f5194ae348b435",
+    "scout_chat_terminal_projection_test.go": "4b4ae32b89f13b89d920b97d227fb02008b753591e862bbc94d96f2eb6825ad7",
+    "scout_chat_agent_bridge_test.go": "155a1d39bf3e106d7c12e178e25c3a6dc49b91e88ac42924d93e6ca35ee3122e",
+    "office_socket_test.go": "d672ef10fc9cd86d55c8faa27f414fd73948b4a99fdb9468db3c9ea51caca152"
+  },
+  "excludedClaims": {
+    "productionDeployed": false,
+    "liveScoutRepairApplied": false,
+    "physicalIPhoneAccepted": false,
+    "physicalIPadAccepted": false,
+    "testFlightOrAppleGroupAccepted": false,
+    "pd1PilotSubsetComplete": false,
+    "publicNetworkOrSearchActivated": false,
+    "realTelemetryCollectionEnabled": false,
+    "w5ThroughW8Complete": false
+  }
+}

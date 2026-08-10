@@ -8,6 +8,10 @@ export type DeckSegment = 'threads' | 'rooms' | 'work';
 
 export type RootStackParamList = {
   Canvas: undefined;
+  WorkHome: undefined;
+  NetworkHome: undefined;
+  WorkSearchHome: undefined;
+  YouHome: undefined;
   Deck: { segment?: DeckSegment } | undefined;
   Login: undefined;
   OSWeb: { path?: string; title?: string } | undefined;

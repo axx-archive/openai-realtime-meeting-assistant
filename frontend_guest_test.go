@@ -230,7 +230,7 @@ func TestIndexGuestLeaveIsTerminal(t *testing.T) {
 		t.Error("setRoomView must not bounce a leaving member to the office — the lobby is the landing (§3.8)")
 	}
 
-	toolBody := functionBody(html, "function setActiveTool(tool)")
+	toolBody := functionBodyAfterSignature(html, "function setActiveTool(tool, options = {})")
 	if toolBody == "" {
 		t.Fatal("could not extract setActiveTool body")
 	}

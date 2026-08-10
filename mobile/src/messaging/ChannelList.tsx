@@ -22,7 +22,8 @@ import { channelDisplayName, isBonfireChat, pinBonfireChatFirst } from './channe
 
 type ChannelNav = NativeStackNavigationProp<RootStackParamList>;
 
-function preview(thread: ScoutThread): string {
+/* channel-terminal-preview-contract:start */
+function ordinaryPreview(thread: ScoutThread): string {
   const last = thread.lastMessage?.text || thread.preview || '';
   return String(last).replace(/\s+/g, ' ').trim();
 }
@@ -52,6 +53,48 @@ function activeWork(thread: ScoutThread): ActiveWork | null {
   }
   return null;
 }
+
+function boundedResearchSourceSummary(raw: unknown): string | null {
+  const value = String(raw ?? '').replace(/\s+/g, ' ').trim();
+  const match = /^Research delivered · ([1-9][0-9]{0,4}) cited source (link|links) · ([1-9][0-9]{0,4}) (domain|domains)$/u.exec(value);
+  if (!match) return null;
+  const citations = Number(match[1]);
+  const domains = Number(match[3]);
+  if (!Number.isInteger(citations) || citations < 1 || citations > 10_000 || !Number.isInteger(domains) || domains < 1 || domains > 10_000) return null;
+  if ((citations === 1) !== (match[2] === 'link') || (domains === 1) !== (match[4] === 'domain')) return null;
+  return value;
+}
+
+export function channelTerminalPreview(thread: ScoutThread): string {
+  const fallback = ordinaryPreview(thread);
+  // Concurrent work is real state. A completed historical card must never
+  // replace the timer/copy for any work item the server still marks active.
+  if (activeWork(thread)) return 'Scout is working';
+
+  const messages = Array.isArray(thread.messages) ? thread.messages : [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    const work = message?.thread;
+    if (!work) continue;
+    const status = String(work.status ?? '').trim().toLowerCase();
+    const exactBinding = String(message.kind ?? '').trim().toLowerCase() === 'thread'
+      && Boolean(String(work.id ?? '').trim() && String(work.artifactId ?? '').trim());
+    const research = String(work.mode ?? '').trim().toLowerCase() === 'research';
+    if (!exactBinding || !research) return fallback;
+    if (status === 'error') return 'Needs attention';
+    if (status !== 'complete') return fallback;
+
+    // The list response's preview is the server-projected, body-minimized
+    // current artifact postimage. Source provenance is optional and is shown
+    // only when that closed copy is exact; message/report bodies are never
+    // parsed for counts. A stale launch/lastMessage preview cannot win.
+    const sourceSummary = boundedResearchSourceSummary(thread.preview);
+    const terminalCardCopy = String(message.text ?? '').replace(/\s+/g, ' ').trim();
+    return sourceSummary && terminalCardCopy === sourceSummary ? sourceSummary : 'Research delivered';
+  }
+  return fallback;
+}
+/* channel-terminal-preview-contract:end */
 
 const ActiveWorkTimer = React.memo(function ActiveWorkTimer({ active }: { active: ActiveWork }) {
   const [clock, setClock] = useState(() => Date.now());
@@ -186,7 +229,7 @@ export function ChannelList() {
         <View key={section.label} style={styles.section}>
           <Text accessibilityRole="header" style={styles.sectionLabel}>{section.label}</Text>
           {section.threads.map((thread) => {
-            const body = preview(thread);
+            const body = channelTerminalPreview(thread);
             const unread = Math.max(0, Number(thread.unreadCount ?? 0));
             const threadID = String(thread.id);
             const editing = editingThreadID === threadID;

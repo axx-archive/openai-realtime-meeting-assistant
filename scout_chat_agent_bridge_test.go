@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -111,9 +112,22 @@ func TestPublicAgentMentionRequiresExplicitWorkAndConfirmation(t *testing.T) {
 	previousRunner := startAgentThreadAsync
 	var launches atomic.Int64
 	var launched scoutAgentThread
-	startAgentThreadAsync = func(_ *kanbanBoardApp, thread scoutAgentThread) {
+	var terminalBeforeCardErr error
+	startAgentThreadAsync = func(runApp *kanbanBoardApp, thread scoutAgentThread) {
 		launches.Add(1)
 		launched = thread
+		// Simulate the production ordering edge: the worker persists terminal
+		// state and emits its callback before resolveScoutChatProposal has
+		// appended the work card. The post-commit reconciliation must recover
+		// this exact current postimage.
+		terminal, _, err := runApp.memory.updateOSArtifactWithMetadata(thread.Artifact.ID, "", thread.Artifact.Text, scoutParticipantName, map[string]string{
+			"status": "complete", "threadStatus": "complete", "goalStatus": "verified", "progressPercent": "100", "reviewGate": "passed",
+		})
+		if err != nil {
+			terminalBeforeCardErr = err
+			return
+		}
+		runApp.updateScoutChatThreadRefs(thread.ID, "complete", terminal.ID)
 	}
 	t.Cleanup(func() { startAgentThreadAsync = previousRunner })
 
@@ -156,17 +170,50 @@ func TestPublicAgentMentionRequiresExplicitWorkAndConfirmation(t *testing.T) {
 		t.Fatalf("persisted targeted card=%+v", card)
 	}
 
+	originalMemoryPath := fixture.app.memory.path
+	blockingParent := originalMemoryPath + ".blocking-file"
+	if err := os.WriteFile(blockingParent, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	scoutTerminalProjectionBeforeSaveProbe = func() {
+		scoutTerminalProjectionBeforeSaveProbe = nil
+		fixture.app.memory.path = blockingParent + "/rewrite.jsonl"
+	}
+	t.Cleanup(func() {
+		scoutTerminalProjectionBeforeSaveProbe = nil
+		fixture.app.memory.path = originalMemoryPath
+	})
+	if _, err := fixture.app.resolveScoutChatProposal(context.Background(), fixture.user, table.ID, scoutChatProposalAction{Action: "accepted", MessageID: card.ID}); err == nil || !strings.Contains(err.Error(), "projection needs reconciliation") {
+		t.Fatalf("terminal-before-card projection failure err=%v", err)
+	}
+	if terminalBeforeCardErr != nil {
+		t.Fatalf("terminal-before-card simulation: %v", terminalBeforeCardErr)
+	}
+	if launches.Load() != 1 {
+		t.Fatalf("projection failure launched providers=%d, want exactly one", launches.Load())
+	}
+	fixture.app.memory.path = originalMemoryPath
+	restartedMemory, err := newMeetingMemoryStore(originalMemoryPath)
+	if err != nil {
+		t.Fatalf("restart memory: %v", err)
+	}
+	fixture.app.memory = restartedMemory
 	accepted, err := fixture.app.resolveScoutChatProposal(context.Background(), fixture.user, table.ID, scoutChatProposalAction{Action: "accepted", MessageID: card.ID})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("idempotent projection retry: %v", err)
+	}
+	if accepted["reconciled"] != true || launches.Load() != 1 {
+		t.Fatalf("retry response=%v launches=%d, want reconciled without relaunch", accepted, launches.Load())
 	}
 	if launches.Load() != 1 || !strings.Contains(launched.Query, root.Text) || launched.Artifact.Metadata["agentId"] != hired.ID || launched.Artifact.Metadata["agentName"] != hired.DisplayName || launched.Artifact.Metadata["delegatedBy"] != "" {
 		t.Fatalf("targeted launch=%+v metadata=%v launches=%d", launched, launched.Artifact.Metadata, launches.Load())
 	}
 	answer := accepted["answer"].(scoutChatMessageRecord)
-	if answer.AuthorName != hired.DisplayName || answer.ReplyTo == nil || answer.ReplyTo.MessageID != root.ID || answer.Thread == nil || answer.Thread.AgentID != hired.ID || answer.Thread.AgentName != hired.DisplayName || answer.Thread.DelegatedBy != "" {
+	if answer.AuthorName != hired.DisplayName || answer.ReplyTo == nil || answer.ReplyTo.MessageID != root.ID || answer.Thread == nil || answer.Thread.AgentID != hired.ID || answer.Thread.AgentName != hired.DisplayName || answer.Thread.DelegatedBy != "" || answer.Thread.Status != "complete" {
 		t.Fatalf("targeted attribution=%+v", answer)
 	}
+	// Replayed terminal callbacks remain idempotent and still derive their
+	// state from the durable artifact, not from callback arguments.
 	fixture.app.updateScoutChatThreadRefs(launched.ID, "complete", launched.Artifact.ID)
 	reloaded, _, err := fixture.app.scoutChatThreadByID(fixture.user.Email, table.ID)
 	if err != nil {
@@ -185,11 +232,9 @@ func TestPublicAgentMentionRequiresExplicitWorkAndConfirmation(t *testing.T) {
 	if workCards != 1 {
 		t.Fatalf("reply-local completion produced %d work cards, want exactly one", workCards)
 	}
-	if _, err := fixture.app.resolveScoutChatProposal(context.Background(), fixture.user, table.ID, scoutChatProposalAction{Action: "accepted", MessageID: card.ID}); err == nil || !strings.Contains(err.Error(), "already") {
-		t.Fatalf("duplicate accept err=%v", err)
-	}
-	if launches.Load() != 1 {
-		t.Fatalf("duplicate accept launched %d workstreams, want exactly one", launches.Load())
+	replayed, err := fixture.app.resolveScoutChatProposal(context.Background(), fixture.user, table.ID, scoutChatProposalAction{Action: "accepted", MessageID: card.ID})
+	if err != nil || replayed["reconciled"] != true || launches.Load() != 1 {
+		t.Fatalf("duplicate accepted retry response=%v err=%v launches=%d", replayed, err, launches.Load())
 	}
 }
 
