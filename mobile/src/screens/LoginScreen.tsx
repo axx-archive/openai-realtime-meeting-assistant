@@ -22,6 +22,7 @@ import { passkeyErrorMessage } from '../auth/passkeyError';
 import { BrandMark, StrideWordmark } from '../components/BrandMark';
 import { API_BASE_URL } from '../config';
 import { colors, hitMin, product, radius, shadow, space, type } from '../theme/tokens';
+import { loginCredentialError } from './loginValidation';
 
 const teamAccounts = ['Joel', 'Caitlyn', 'Tyler', 'AJ', 'Tim', 'Erick', 'Tom'] as const;
 
@@ -59,8 +60,9 @@ export function LoginScreen() {
   }, [incomingURL]);
 
   async function onSubmit() {
-    if (!name.trim() || !password) {
-      setError('Select your account and enter your password.');
+    const credentialError = loginCredentialError(name, password);
+    if (credentialError) {
+      setError(credentialError);
       return;
     }
     setBusy(true);

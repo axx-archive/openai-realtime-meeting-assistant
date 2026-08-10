@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "local_unsigned_ios_simulator_release_launch_and_login_validation_only",
+  "observedAt": "2026-08-10T13:07:14Z",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "27ad258c2f24b617445277bdd19084b60cd94880",
+    "worktreeDirty": true,
+    "preReceiptPorcelainSha256": "267c9ff6e926a0703699a9dcaf55c2ab2753b674621e094bf925bc2fc0bb01e0",
+    "porcelainCalculation": "git status --porcelain=v1 with this receipt, its sidecar, and unrelated stride-site/ excluded before SHA-256"
+  },
+  "build": {
+    "command": "xcodebuild -workspace mobile/ios/Stride.xcworkspace -scheme Stride -configuration Release -sdk iphonesimulator -derivedDataPath /tmp/stride-w7-simulator-release-derived CODE_SIGNING_ALLOWED=NO build",
+    "result": "PASS",
+    "xcode": "26.6 (17F113)",
+    "bundleIdentifier": "xyz.thebonfire.app",
+    "shortVersion": "1.0.0",
+    "buildNumber": "52",
+    "generatedParentAndBroadcastExtensionBuildNumbersMatch": true,
+    "generatedIOSProjectTracked": false,
+    "mainExecutableSha256": "894f6f83f17f1673c0d4e989066e0f17cc6a85c5d64225ff8450bd6e58fc83a7",
+    "embeddedJavaScriptBundleSha256": "43453cc98815b5547c328fdfd14db3c091837af2fa565ca0407b40657e23a892",
+    "architectures": ["arm64", "x86_64"]
+  },
+  "simulators": [
+    {
+      "device": "iPhone 17 Pro",
+      "os": "iOS 26.5",
+      "udid": "EE7DD6DF-0F68-475B-B439-AF49BB80CCE3",
+      "standaloneLaunch": "PASS",
+      "loginSurfaceRendered": "PASS",
+      "accountPickerIncludesAJ": "PASS",
+      "ajSelectedEmptyPasswordValidation": "Enter your password.",
+      "launchScreenshotSha256": "56acc322ac41ab42aae039353697dfeffce4662f68810ac4cd06a6d969b12111",
+      "ajValidationScreenshotSha256": "5d2fb79e1b1f0dc3f648fbf8c459e5b5ca10dc11cc8b9c5e9ca8950c114a6a6f"
+    },
+    {
+      "device": "iPad Pro 13-inch (M5)",
+      "os": "iOS 26.5",
+      "udid": "8DF72850-970B-480F-A2CB-4FC0BA46BB85",
+      "standaloneLaunch": "PASS",
+      "loginSurfaceRendered": "PASS",
+      "launchScreenshotSha256": "643af5548cbfa236e441e98e37742ea7eba82f9203563c22c0927152db46267e"
+    }
+  ],
+  "visualReview": {
+    "iphone": "full-height centered sign-in composition, readable controls, no clipping or overflow",
+    "ipad": "compact centered sign-in panel with large surrounding field, no clipping or overflow",
+    "accessibilityTree": "account selector, password, recovery, primary sign-in, passkey, and host label exposed with bounded descriptions"
+  },
+  "runtimeObservations": {
+    "appCrash": false,
+    "debugBuildExcluded": "Debug expects Metro at localhost:8081 and was not accepted as standalone evidence",
+    "unsignedSimulatorOnlyWarnings": [
+      "App Group entitlement unavailable under unsigned simulator install",
+      "Expo Notifications keychain registration lookup unavailable under unsigned simulator install"
+    ],
+    "futureCompatibilityWarning": "UIKit reports that UIScene lifecycle will become required; this did not fail the current launch and remains follow-up work"
+  },
+  "verification": {
+    "targetedTests": "PASS 2/2",
+    "mobileSuite": "PASS 483/483",
+    "typescript": "PASS",
+    "diffCheck": "PASS",
+    "sourceHashes": {
+      "mobile/src/screens/LoginScreen.tsx": "0cd1d6af8b2b8fe70db3179c2afbb38240a4e48d2f35ecb5c7ec5122ba16dff6",
+      "mobile/src/screens/loginValidation.ts": "86373f7023615e95c0ee4115c200cf246b5f5a3f37659321a91d96f0aded2888",
+      "mobile/src/__tests__/loginCredentialValidation.test.ts": "2a2a9414e58536159977d772f84f66b71d7db433f5a79b7c696979aea6ebee49"
+    }
+  },
+  "acceptance": {
+    "localSimulatorBoundary": "PASS",
+    "authenticatedAJAProductFlows": false,
+    "signedIPAOrTestFlightBuild": false,
+    "physicalIPhone": false,
+    "physicalIPad": false,
+    "nativeVoiceOver": false,
+    "pushBackgroundLockedRecovery": false,
+    "w7Ready": false
+  },
+  "exclusions": [
+    "No password or passkey was entered or stored.",
+    "The ignored generated mobile/ios tree is build input evidence, not a checked-in source change; mobile/app.config.ts remains the tracked Build 52 authority.",
+    "No production message, artifact, file, network publication, or provider request was created.",
+    "No simulator result is treated as TestFlight or physical-device acceptance.",
+    "No W5, W6, public-network, W7, or W8 switch was enabled."
+  ]
+}

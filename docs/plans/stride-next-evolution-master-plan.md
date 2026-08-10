@@ -486,9 +486,9 @@ Responses, embedding, image, or external service requires exact project,
 billing owner, price/budget, route/corpus, and one-at-a-time authorization.
 
 **Git/release/deploy queue:** production is exact
-`2f8f62d20a47482c12329f1d434c99ccb911eb6f`, ledger generation 57, bundle
-`99a93ab20aaf282ad13be0f320fa648eeeefcb66697c9095416af6fd2353f79a`,
-with retained rollback `2af28696637a524d2a0c44aaac527202b19d7e82`.
+`261aced8c7491b4b7a2ab5416a00838e3c43ae18`, ledger generation 58, bundle
+`8649f0f09e4a47af9f9859c1be9eb42edd30ca5a0d3871ac9aa862dd6ed60178`,
+with retained rollback `2f8f62d20a47482c12329f1d434c99ccb911eb6f`.
 Public health and readiness return 200 and the retained verifier reports
 `verified-local-unsigned`; external attestation remains false. Build 52 is
 Apple `VALID`, approved, and `IN_BETA_TESTING` for both Team (Expo) and Bonfire.
@@ -514,6 +514,17 @@ inviting. Native generic Drive Save remains correctly default-off and needs a
 separate activation receipt. No browser, simulator, or source test may replace
 the remaining device cells.
 
+The local unsigned Build 52 Release simulator carrier now launches standalone
+on iPhone 17 Pro and iPad Pro 13-inch (M5), both on iOS 26.5. The generated app
+and broadcast-extension simulator targets were aligned to Build 52, the full
+native suite passes 483/483, and the AJ account picker plus exact empty-password
+validation were rendered and exercised. This is bounded local layout and login-
+gate evidence only: no credential was entered, no authenticated AJA workflow
+ran, and it does not replace the signed IPA, TestFlight, real iPhone, real iPad,
+VoiceOver, push/background, or locked-recovery cells. Evidence:
+`docs/evidence/e10/stride-e10-w7-ios-simulator-release-20260810.json`, SHA-256
+`298c44eb3349d8e2fe0c8fd922e8741c511fd4972d50743aeb206bb842556962`.
+
 **Production/publication queue:** W4 private authority remains on. W5 MyMind,
 W6 publication/search/contact, every PN switch, open-web rendering, pilot data
 collection, and public agent participation stay off until their exact signed
@@ -532,9 +543,9 @@ Reconciliation parent revision is `31a5792` (the fail-closed W5-W8 operator
 carrier); the critic-passed plan and carrier first shipped together as exact
 commit `84bc0cc6b99ea89dcc0cbdcad00c3d06d4dd3cb0`. Unrelated `stride-site/`
 remains untracked and excluded. The current production boundary is exact commit
-`2f8f62d20a47482c12329f1d434c99ccb911eb6f`, ledger generation 57, with
-retained rollback `2af28696637a524d2a0c44aaac527202b19d7e82`. W4 private
-authority is live at schema 2/generation 156; W5, W6, and every public network
+`261aced8c7491b4b7a2ab5416a00838e3c43ae18`, ledger generation 58, with
+retained rollback `2f8f62d20a47482c12329f1d434c99ccb911eb6f`. W4 private
+authority is live at schema 2/generation 157; W5, W6, and every public network
 path remain off. The earlier body-minimized deployment observation
 `docs/evidence/e10/stride-e10-default-off-carriers-live-20260809.json`, SHA-256
 `ebf6363c22469e9802cba1c64702feea3308c5d3b91058ad11fc9d5c46b4affa`,
