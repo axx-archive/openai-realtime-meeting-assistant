@@ -33,34 +33,32 @@ the same release verifier before serving.
 The carrier remains `qualified=false` and `externallyAttested=false` because
 independent signing/off-host attestation is still a separate gate.
 
-Native Build 49, not Build 48, is the newest exact mobile carrier. EAS build
-`d76f442c-29ee-4f55-b30d-bac0c7cfeeb3` and submission
-`b8d58ae6-c183-4072-8ee2-a7ef36190344` are `FINISHED` from exact commit
-`d4c827c...`; Apple build `9c63cf4a-ef1e-49bd-9110-ea5abbc56b9d` was freshly
-observed `VALID`, unexpired, and `IN_BETA_TESTING` at 2026-08-08 08:34 PT.
-Unexpectedly, both internal `Team (Expo)` and external `Bonfire` contain Build
-49, contradicting the prior “external testers unchanged” report and requiring
-provenance review before any further TestFlight action. Build 48 remains valid
-historical evidence only. No physical iPhone/iPad acceptance is proven.
+Native Build 52 is the newest exact mobile carrier. EAS build
+`57806440-454d-41e6-949a-67aee7ef108e` and submission
+`a0324ccd-cda2-439e-acf6-5901044972ca` are `FINISHED` from exact commit
+`c2e6dfed4160ac42775f1f7ca9be90b6801bde53`; Apple build
+`eeb85eea-d721-4021-b01b-51b47896e665` is `VALID`, approved, unexpired, and
+`IN_BETA_TESTING` for internal `Team (Expo)` and external `Bonfire`. Build 49
+and earlier builds remain historical evidence only. No physical iPhone/iPad
+acceptance is proven, and Tyler has no verified tester record.
 The integrated Go suite, required ConversationContinuity/AgentMind/proactivity/
 web-scroll race gate, `go vet`, native readiness contract checks, client tests,
 `git diff --check`, and independent critic all passed before release. The later
 exact-release-only queue migration was additionally proven by the 34 release
 contract checks and an actual confined-container ownership/mode test.
 
-The current serving release remains unqualified externally. The post-release
-observation below records exact current release
-`84bc0cc6b99ea89dcc0cbdcad00c3d06d4dd3cb0`, bundle
-`9ebd486f38cce682a56647afb444d79803e09399affc4dc7a7ca9fc08f010e40`,
-ledger generation 44, and W4 generation 106. Production `/readyz` truthfully
-reports the separate canonical shadow unhealthy at dirty/high-water 29,488
-versus reconciled/checkpoint 8,532
-with governed replay off. The earlier 119-candidate count is historical and
-must be refreshed before any repair authority is considered. W4 does not read
-that shadow as product authority. Exactly these W4 features are active: person profile, organization
-read/write, active-organization session, Contribution Review, and private Work
-Record. Canonical migration 17 and its six private-custody tables are applied
-with all W5/W6 feature switches false. Public network publication,
+The current serving release remains unqualified externally. The current
+post-release observation records exact release
+`c2e6dfed4160ac42775f1f7ca9be90b6801bde53`, bundle
+`614e0925060284d9e817f20ddd1c04e82df42b041c2b27a101e9b2de8af4909d`,
+ledger generation 55, and W4 generation 154. Production `/readyz` truthfully
+reports the separate canonical shadow unhealthy at dirty/high-water 30,416
+versus reconciled/checkpoint 8,532, with 119 current repair candidates and
+governed replay off. W4 does not read that shadow as product authority. Exactly
+six W4 features are active: person profile, organization read/write,
+active-organization session, Contribution Review, and private Work Record.
+Canonical migration 17 and its six private-custody tables are applied with all
+W5/W6 feature switches false. Public network publication,
 discovery/search, contact, semantic reranking, MyMind context, and global tenant cutover remain deliberately off
 pending W5-W8 qualification rather than being presented as completed. Offsite backup remains dormant. No production replay, MyMind
 body custody/context assembly, AmbientMind compiler/worker or reader, artifact
@@ -443,7 +441,7 @@ expressions or their interaction/accessibility evidence.
 | PI0-A | Freeze and implement event taxonomy, trace identity, consent/privacy contract, compound recovery, and pre-migration baseline | telemetry schema/journal/metric/evidence files only; no collection | contract, route-free carrier, and default-off synthetic runtime/privacy lifecycle passed bounded critics; production installation/emitters and frozen baseline remain | safe local implementation authorized; real collection not authorized | `synthetic_deterministic_safe_local_runtime_verified_no_collection` |
 | PN1 | Safe public projections/controls default off | new PN authority/storage/runtime/test files; no broad UI activation | normal/race/PG/restore/purge/render; revision-1 inheritance plus PN successor receipts; all PN switches false | local implementation after PN0+PD0+PI0-A PASS | `blocked_on_PN0_PD0_PI0A` |
 | PD1 pilot subset | Migrate exact PN2 journeys across web/iPhone/iPad using the unified system | `index.html`, `mobile/src`, shared semantic design contracts, owned tests | bounded desktop web and native renderer shell plus Scout delivery/status/reconciliation are locally verified; remaining journeys, accessibility/performance, real-device and live-repair gates stay open; rollback to prior shell by release | shell work authorized locally; PN-dependent pilot journeys still require PN1 contracts | `deterministic_web_component_and_native_renderer_verified_physical_device_and_live_repair_pending` |
-| PD1-AJA private-chat acceptance | Prove the exact AJA private-chat matrix for research, slides, images, spreadsheets, documents, and mixed artifacts across selected agents, previews/status, privacy, Drive, desktop web, native iPhone, and native iPad | candidate source and pre-release observations are recorded; post-deploy acceptance evidence remains separate, and product changes return to the owning PD1/Scout scopes | exact reviewed release first; authenticated post-release runs and readback for every matrix cell; body-minimized receipts bind agent, artifact kind, preview/status, destination/privacy and current release; rollback is the retained exact release and no evidence may be reconstructed locally | AJ authorizes production runs and judges acceptance; Apple devices, provider credit, and Drive session remain external inputs | `in_progress_prerelease_partial_reviewed_release_pending_postdeploy_matrix_open` |
+| PD1-AJA private-chat acceptance | Prove the exact AJA private-chat matrix for research, slides, images, spreadsheets, documents, and mixed artifacts across selected agents, previews/status, privacy, Drive, desktop web, native iPhone, and native iPad | the reviewed release, desktop private research/image/workbook surfaces, Drive readback, and Build 52 distribution are verified; documents/slides/mixed, physical devices, native Save activation, and remaining network gates stay separate | body-minimized receipt binds exact serving release, artifacts, previews/status, privacy/Drive postimages, IPA/ASC build, and explicit failed/open cells; rollback is the retained exact release | AJ authorizes production runs and judges acceptance; Apple devices, Anthropic credit, Tyler enrollment, and native Save activation remain external inputs | `bounded_postrelease_desktop_research_image_workbook_and_drive_verified_documents_slides_devices_and_network_gates_open` |
 | PI0-B | Private dashboards, case receipts, qualitative research protocol, collection gate | private telemetry/evidence/DR/operator surfaces only | consented synthetic/dogfood-safe trace, privacy/purge/restore, research-protocol critic | real collection requires participant consent | `blocked_on_PI0A_PN1_PD1_pilot` |
 | PD1 remainder | Migrate every remaining legacy/planned surface across web/iPhone/iPad | same exclusive platform owners after pilot subset | full parity matrix, interactive/device/accessibility/performance acceptance | local implementation authorized; Apple/device/release external | `blocked_on_PD0`; may run after pilot subset without delaying PN2 unless it is a named pilot dependency |
 | PN2 | Signed-in human pilot | PN cohort config plus accepted pilot surfaces | >=5 people, 2 workspaces, typed objects, chronology, pause/block/dispute/purge, PI0-B receipts | participants, moderators, product/legal/privacy, deploy/activation | `blocked_on_PN1_PD1pilot_PI0B_and_external_authority` |
@@ -463,17 +461,18 @@ keeping PN-dependent journeys behind PN1 and real-device/live-repair evidence in
 their separate queues. PI0-A's contract, route-free carrier, and default-off
 synthetic runtime/privacy lifecycle are locally verified with collection absent;
 next freeze the pre-migration baseline and design any production installation/
-emitter seam without enabling collection. The current candidate adds a real,
-providerless private XLSX workbook path, the research-source terminal-delimiter
-repair, and a separate default-off native save-only capability with corrected
-authorization registration; these are locally verified candidate sources, not
-post-release AJA or physical-device acceptance. Maintain W5-W8 default-off operator
-tests. Do not select cohort participants or create external signatures as local
-fixtures for production acceptance.
+emitter seam without enabling collection. The reviewed release now includes a
+real providerless private XLSX workbook, the research-source terminal-delimiter
+repair, unmistakable private/no-publish workbook controls, and a separate
+default-off native save-only capability with corrected authorization. Desktop
+AJA research, image, workbook, rich-preview, and Drive postimages are bounded
+post-release evidence; physical-device and native Save activation are not.
+Maintain W5-W8 default-off operator tests. Do not select cohort participants or
+create external signatures as local fixtures for production acceptance.
 
 **Externally blocked queue:** real W5 custody provider/owners/consent; W6 five
-participants, two reviewers, legal/privacy/product approvals and corpus; exact
-current EAS build and intentional TestFlight groups; real iPhone and real iPad;
+participants, two reviewers, legal/privacy/product approvals and corpus; Tyler's
+exact Apple Account enrollment; real iPhone and real iPad;
 accessibility/privacy; restrictive TURN/WebRTC; encrypted offsite four-root
 restore; PostgreSQL/app/TURN/traffic HA; independent attestation; PI0 pilot
 consent/interviews; PN moderators/retention/rate/appeal owners; the real AJA
@@ -484,34 +483,34 @@ final soak.
 Responses, embedding, image, or external service requires exact project,
 billing owner, price/budget, route/corpus, and one-at-a-time authorization.
 
-**Git/release/deploy queue:** production starts this checkpoint at exact
-`6ec475f4e54d003647f13694a40560a5f4f50895`, ledger generation 52. The
-candidate workbook, research-source, native save-only, authorization, receipt,
-and plan bytes are not yet an exact reviewed release and have not been
-committed, pushed, deployed, or activated by this checkpoint. A later exact
-release requires a fresh reviewed selected-file manifest and the retained VPS
-activation procedure. This queue does not authorize native save activation, a
-cohort, provider spend, public content, or a production AJA run. Scout live
-reconciliation likewise requires its separate reviewed release and authorized
-bounded invocation.
+**Git/release/deploy queue:** production is exact
+`c2e6dfed4160ac42775f1f7ca9be90b6801bde53`, ledger generation 55, bundle
+`614e0925060284d9e817f20ddd1c04e82df42b041c2b27a101e9b2de8af4909d`,
+with retained rollback `c948daef25c94dec8ddb9690d3cb6017dbb9cddd`.
+Public health and readiness return 200 and the retained verifier reports
+`verified-local-unsigned`; external attestation remains false. Build 52 is
+Apple `VALID`, approved, and `IN_BETA_TESTING` for both Team (Expo) and Bonfire.
+This does not authorize native Save activation, a cohort, more provider spend,
+public content, canonical repair, or any W5-W8 activation.
 
-**Post-deploy acceptance queue:** PD1-AJA is partial/in progress, not complete.
-Pre-release production observations exist for private OpenAI research and image
-work: research first failed its quality gate, then v2 reached the recorded
-decision-grade boundary (16 cited links, 9 domains, 13 searches) and was saved
-to Drive; one 1536x1024 image was generated and saved to Drive. Private
-Anthropic One-Pager and deck attempts stopped on the exact provider 400
-low-credit response. Those observations predate the candidate release and do
-not satisfy a post-release cell. The reviewed release is still pending. After
-separate deploy and production-run authorization, rerun the matrix for
-research, slides, images, spreadsheets, documents, and mixed artifacts;
-selected agent identity; active and terminal status; inline preview and
-source/file preservation; private-thread isolation; Drive export/readback;
-desktop web; physical iPhone; and physical iPad. Each accepted cell needs
-current-release, requester, agent, artifact, destination/privacy, result-status,
-and rendered/readback evidence. Missing, failed, substituted, browser-only,
-simulator-only, or pre-deploy evidence keeps that cell open; no local fixture
-can satisfy it.
+**Post-deploy acceptance queue:** PD1-AJA is materially advanced but incomplete.
+The exact current release re-read the private decision-grade research artifact
+(16 cited links, 9 domains, 13 searches) with rich source rendering and zero
+malformed backtick URLs, the private 1536x1024 image, and their Drive files.
+The providerless private venture workbook was created with 5 sheets and 63
+formulas and saved to Drive before the final current release; that exact release
+then rendered its typed rich preview and read the content-addressed XLSX back.
+Its UI now says `Private · cannot publish` and is disabled. Research, image, and
+workbook generation preceded the final current release, so the receipt classifies
+them as current-release readback rather than inventing a new run. Private
+Anthropic One-Pager and Packaging Studio
+stopped on exact HTTP 400 `low_credit`; documents, slides, and mixed artifacts
+remain failed/open. Native Build 52 is distributed, but no physical iPhone or
+iPad acceptance exists. Tyler's iPhone 13 Pro on iOS 26.5.2 is compatible, but
+no Tyler tester record is verified; obtain the exact Apple Account email before
+inviting. Native generic Drive Save remains correctly default-off and needs a
+separate activation receipt. No browser, simulator, or source test may replace
+the remaining device cells.
 
 **Production/publication queue:** W4 private authority remains on. W5 MyMind,
 W6 publication/search/contact, every PN switch, open-web rendering, pilot data
@@ -530,11 +529,11 @@ evidence wherever the public-network or unified-platform claim is new.
 Reconciliation parent revision is `31a5792` (the fail-closed W5-W8 operator
 carrier); the critic-passed plan and carrier first shipped together as exact
 commit `84bc0cc6b99ea89dcc0cbdcad00c3d06d4dd3cb0`. Unrelated `stride-site/`
-remains untracked and excluded. The current pre-release starting production
-boundary is exact commit `6ec475f4e54d003647f13694a40560a5f4f50895`,
-ledger generation 52. W4 private authority is live; W5, W6, and every public
-network path remain off. The candidate scope described below has not been
-released. The earlier body-minimized deployment observation
+remains untracked and excluded. The current production boundary is exact commit
+`c2e6dfed4160ac42775f1f7ca9be90b6801bde53`, ledger generation 55, with
+retained rollback `c948daef25c94dec8ddb9690d3cb6017dbb9cddd`. W4 private
+authority is live at schema 2/generation 154; W5, W6, and every public network
+path remain off. The earlier body-minimized deployment observation
 `docs/evidence/e10/stride-e10-default-off-carriers-live-20260809.json`, SHA-256
 `ebf6363c22469e9802cba1c64702feea3308c5d3b91058ad11fc9d5c46b4affa`,
 is retained as historical evidence and is not proof of this newer generation.
@@ -609,14 +608,22 @@ exact prior receipt SHA-256
 is independent `/root/w0_live_evidence` critic **PASS** for sidecar, JSON, all
 21 selected hashes, plan diff, non-self-reference, and exclusions; the current
 receipt is the one-way record of that verdict.
-Production remains
-exact `6ec475f4e54d003647f13694a40560a5f4f50895`, ledger generation 52,
-with W4 private authority live and W5/W6/public paths off. The immediate next
-action is preparation of one exact reviewed release. Only after that separately
-authorized deploy may PD1-AJA run
-the still-open workbook/link/native-device and remaining artifact cells. Native
-save activation, physical-device acceptance, production collection, and public
-activation stay separately gated.
+
+That pre-release receipt remains historical. The current body-minimized
+post-release matrix is
+`docs/evidence/e10/stride-e10-pd1-aja-postrelease-matrix-20260810.json`, SHA-256
+`ac2b6f03f7e0f238247745a41126ae93311df3c8a1fdf0cdd9e79ddc22e025c4`. It binds
+exact production commit
+`c2e6dfed4160ac42775f1f7ca9be90b6801bde53`, ledger generation 55,
+retained rollback `c948daef25c94dec8ddb9690d3cb6017dbb9cddd`, desktop AJA
+research/image/workbook and Drive evidence, Build 52 EAS/ASC/IPA evidence, and
+the explicit failed/open cells. W4 private authority is live; W5/W6/public paths
+remain off. The immediate next product actions are: fund or deliberately reroute
+the Anthropic document/deck lane under separate spend authority; enroll Tyler
+using his exact Apple Account email and run physical iPhone plus iPad acceptance;
+and separately decide whether to activate the receipt-backed native Save-only
+capability. Production collection, canonical repair, W5-W8, and public network
+activation stay gated.
 
 #### Reconciliation Critic Loop — PASS
 
@@ -750,16 +757,16 @@ complete only at the scope named; local implementation is not release proof.
   Build 48 is `VALID`, unexpired through 2026-11-05, and available to internal
   `Team (Expo)`; the exact Apple build ID is
   `2ce3d1b3-a21a-4700-9c20-fce1d5377450`.
-- [x] Freshly observed Build 49 as the newer exact `d4c827c...` native carrier:
+- [x] Historically observed Build 49 as the then-newer exact `d4c827c...` native carrier:
   EAS build `d76f442c-29ee-4f55-b30d-bac0c7cfeeb3`, EAS submission
   `b8d58ae6-c183-4072-8ee2-a7ef36190344`, and Apple build
   `9c63cf4a-ef1e-49bd-9110-ea5abbc56b9d` are complete/`VALID`.
-- [ ] Investigate, without mutating distribution, why Build 49 is currently in
-  both internal `Team (Expo)` and external `Bonfire`; this contradicts the prior
-  external-group baseline and is not accepted as intentional cohort activation.
-- [ ] Neither Build 48 nor Build 49 was physically accepted for this program.
-  Preserve their processing receipts as historical evidence, but run the
-  complete physical matrix on the final exact native build containing the new
+- [x] The later Build 52 distribution intentionally includes internal
+  `Team (Expo)` and external `Bonfire`; Build 49 group provenance is now only a
+  historical observation, not the current distribution decision.
+- [ ] Builds 48/49 were not physically accepted for this program, and Build 52
+  physical acceptance remains open. Preserve the older processing receipts as
+  historical evidence, but run the complete physical matrix on Build 52 containing the new
   organization/Work Record/network behavior, including generated-image Open,
   Save to Drive, and editable Regenerate.
 - [x] Activated the exact reviewed `axx/main` HEAD through
@@ -815,14 +822,11 @@ complete only at the scope named; local implementation is not release proof.
   backed browser QA pass. Earlier static fixture screenshots remain labeled
   static; the canonical receipt binds the later registered-live captures.
 
-**Exact resume point:** request and, only if separately granted, execute
-**E10-W4** against the independently verified W0 freeze and W1-W3 receipts
-below. Before any mutation, regenerate the exact read-only production repair
-manifest; the W0 count of 119 candidates is an observation, not a current
-row-level mutation manifest.
-The private release proof is current for generation 30 and exact `d4c827c...`.
-Build 48 is historical; Build 49 is the newer exact carrier, but its unexpected
-external `Bonfire` group inclusion requires provenance review and physical-device
+**Historical exact resume point — superseded by Resume Here above:** before W4,
+the next instruction was to request and, only if separately granted, execute
+**E10-W4** against the independently verified W0 freeze and W1-W3 receipts.
+The generation-30 `d4c827c...` private proof and Builds 48/49 are retained only
+as historical evidence; Build 52 is the current exact carrier, and physical-device
 acceptance is still open. Do not mutate production
 chat merely to prove image analysis or TL;DR sharing; do not begin paid calls,
 canonical repair/promotion, production data/config changes, deployment, or the
@@ -3735,9 +3739,9 @@ only with their separately named product/privacy/custody authority. No further p
 qualification retry, canonical production repair/promotion, production data or
 configuration mutation, Git shipping/deployment, active specialist route,
 repository rename, or cohort activation is authorized by this plan alone.
-Build 49 is the current exact historical native carrier and is unexpectedly in
-external `Bonfire`; its provenance review plus physical iPhone and iPad
-acceptance remain open. Build 48 and older Build 39/47 notes are historical. Do
+Build 52 is the current exact native carrier and is intentionally in internal
+`Team (Expo)` and external `Bonfire`; Tyler enrollment plus physical iPhone and
+iPad acceptance remain open. Build 49, Build 48, and older Build 39/47 notes are historical. Do
 not claim provider-quality, restore, physical-device, HA, MyMind,
 or multi-organization acceptance without its separate evidence.
 
