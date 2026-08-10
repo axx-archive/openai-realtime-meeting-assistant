@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "apple_valid_internal_external_in_beta_testing_intended_groups_verified",
+  "observedAt": "2026-08-10T13:46:52.327Z",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "evidenceHeadBeforeReceipt": "5a871f869397b550c051a58089595db86a80b515",
+    "nativeBuildSourceCommit": "5a3d449d6272474d8fff070184e965571a15864e",
+    "unrelatedExcludedPath": "stride-site/"
+  },
+  "build": {
+    "appStoreConnectAppId": "6794029943",
+    "appStoreConnectBuildId": "d99d6cbd-c156-4239-86bd-49c071c6f7d8",
+    "version": "1.0.0",
+    "buildNumber": "53",
+    "uploadedDate": "2026-08-10T06:22:54-07:00",
+    "expirationDate": "2026-11-08T05:22:54-08:00",
+    "expired": false,
+    "processingState": "VALID",
+    "minimumOSVersion": "16.4",
+    "usesNonExemptEncryption": false,
+    "ipaSha256": "7115181df3d024e547eb46927ebc113cefd14c95eec8bea5a0e7accf42e2c91b"
+  },
+  "distribution": {
+    "initialReadbackAt": "2026-08-10T13:45:15.119Z",
+    "initialInternalBuildState": "IN_BETA_TESTING",
+    "initialExternalBuildState": "READY_FOR_BETA_SUBMISSION",
+    "groupsBefore": [
+      {"name": "Team (Expo)", "internal": true}
+    ],
+    "bonfireAssignment": {
+      "target": "existing external Bonfire group",
+      "relationshipPostStatus": 204,
+      "actedAt": "2026-08-10T13:45:53.416Z"
+    },
+    "betaAppReviewSubmission": {
+      "httpStatus": 201,
+      "initialState": "WAITING_FOR_REVIEW",
+      "readbackState": "APPROVED",
+      "readbackAt": "2026-08-10T13:46:52.327Z"
+    },
+    "finalReadbackAt": "2026-08-10T13:46:31.039Z",
+    "internalBuildState": "IN_BETA_TESTING",
+    "externalBuildState": "IN_BETA_TESTING",
+    "groups": [
+      {"name": "Bonfire", "internal": false},
+      {"name": "Team (Expo)", "internal": true}
+    ]
+  },
+  "testerReadback": {
+    "bonfireGroupTesterCount": 7,
+    "tylerNamedTesterPresent": false,
+    "bodyMinimized": true,
+    "emailsReturnedOrRecorded": false
+  },
+  "authenticationBoundary": {
+    "method": "existing Expo session retrieved one EAS-managed App Store Connect key into process memory and minted a short-lived ES256 JWT",
+    "localPrivateKeyFileUsed": false,
+    "credentialOrTokenPrinted": false,
+    "credentialOrTokenPersisted": false,
+    "appleAccountAnswerInvented": false
+  },
+  "verification": {
+    "appStoreConnectBuildReadback": "PASS",
+    "groupRelationshipReadback": "PASS",
+    "betaReviewReadback": "PASS",
+    "selectedFileSha256": {
+      "mobile/app.config.ts": "8e782cedd68d5fbef0d6f84ef44d37cac3bb5b5b35a45b5aae6e3c80442483f3",
+      "docs/evidence/e10/stride-e10-w7-ios-build53-upload-20260810.json": "1482b59113b5e7a3b6bf09edb5bd1826b50659ec904cb724243c293f35fd0c36"
+    }
+  },
+  "acceptance": {
+    "exactStoreBuildFinished": true,
+    "appleProcessingValid": true,
+    "internalTestFlightAvailable": true,
+    "externalTestFlightAvailable": true,
+    "intendedGroupsVerified": true,
+    "tylerEnrollmentVerified": false,
+    "authenticatedAJAProductFlows": false,
+    "physicalIPhone": false,
+    "physicalIPad": false,
+    "nativeVoiceOver": false,
+    "pushBackgroundLockedRecovery": false,
+    "w7Ready": false
+  },
+  "exclusions": [
+    "No tester identity, email, role, or Apple Account was added, removed, or modified.",
+    "The existing external Bonfire group was assigned only to exact Build 53; no public link or new group was created.",
+    "Existing export-compliance and beta-review metadata were reused; no human answer or contact detail was invented.",
+    "TestFlight availability is not physical-device acceptance.",
+    "No production chat, artifact, Drive file, public-network feature, W5, W6, W7, or W8 switch was modified."
+  ]
+}
