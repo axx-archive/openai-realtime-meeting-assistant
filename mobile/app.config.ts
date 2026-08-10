@@ -40,11 +40,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and remain the fallback if this bundle is ever rejected.
       // Regenerate both with `npm run brand:regen` from the repo root.
       icon: './assets/Stride.icon',
-      // Build 51 keeps Open read-only, makes Scout research progress and
-      // recovery explicit, and retains the generated-image topology fixes.
-      // Save remains a separately disposition-gated mutation.
+      // Build 52 carries the unified STRIDE shell, truthful Scout work states,
+      // private research/image/workbook delivery surfaces, and the separate
+      // save-only Drive capability. Save remains independently default-off
+      // until its exact activation receipt is installed.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '51',
+      buildNumber: '52',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',
