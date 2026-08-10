@@ -484,9 +484,13 @@ billing owner, price/budget, route/corpus, and one-at-a-time authorization.
 default-off operator carrier and this plan reconciliation through the exact VPS
 release process. Later PN/PD/PI implementation requires a fresh reviewed tree
 and release evidence; this authorization does not activate a cohort or publish
-content. The current PD1/Scout and PI0-A synthetic-runtime checkpoints are dirty
-local selected-file manifests only: neither is committed, released, deployed,
-live, or covered by the earlier carrier authorization. Scout live reconciliation
+content. The PD1/Scout and PI0-A synthetic-runtime source checkpoint is now
+committed locally as exact `c6741976bbe0f2f7b8a700d6aba12652618f2622`;
+that commit includes the original PI0 and PD1 receipt/sidecar bytes and is
+pushed to `axx/main`. At the refreshed receipt's recorded observation boundary,
+only the refreshed PD1 receipt/sidecar and this plan reconciliation were
+uncommitted; nothing was released, deployed, activated, or repaired live.
+Scout live reconciliation
 requires a separate reviewed exact release and an authorized invocation of its
 bounded repair route.
 
@@ -563,20 +567,24 @@ no-collection installation boundary plus the remaining governed PD1
 web/iPhone/iPad migration; no production user-data collection or public
 activation is the next action.
 
-The next dirty local checkpoint is selected-file-bound at HEAD
-`b4bcc7e5fa7325c5b308af08e46f562154500248`; unrelated untracked
+The next local source checkpoint is exact commit
+`c6741976bbe0f2f7b8a700d6aba12652618f2622`; it includes the original PI0 and
+PD1 receipt/sidecar bytes and is pushed to `axx/main`. At the refreshed
+receipt's `2026-08-10T07:21:36Z` observation boundary, the refreshed PD1
+receipt/sidecar and this plan reconciliation were uncommitted, and unrelated untracked
 `stride-site/` remains excluded. Its PI0-A synthetic runtime receipt is
 `docs/evidence/e10/stride-e10-pi0-a-synthetic-runtime-20260809.json`, SHA-256
 `9ac6fda3ad5f85008c3ac7833b47ac8a7dc3dbcca6a13189dc859c4fa1a50471`,
 status `synthetic_deterministic_safe_local_runtime_verified_no_collection`.
 Its PD1 desktop/native shell plus Scout delivery/status/reconciliation receipt
 is `docs/evidence/e10/stride-e10-pd1-shell-scout-local-20260809.json`, SHA-256
-`e5098a97febbb617e91295b28d3dc739b9dbdcfe5086522b3f8504bc97415950`,
+`6a18271865f43becc22e11474cd4ef91e071d26cc2f40db4ade259ae4655a32e`,
 status
 `deterministic_web_component_and_native_renderer_verified_physical_device_and_live_repair_pending`.
-The selected-file manifests, not the dirty tree as a whole, define these
-checkpoints. No Git, release, deployment, production repair, collection, cohort,
-or public activation action occurred. Production therefore remains exact
+The selected-file manifests and exact local commit, not unrelated worktree
+state, define these checkpoints. The local commit and push occurred, but no
+release, deployment, production repair, collection, cohort, or public activation
+action occurred. Production therefore remains exact
 `b070e67f27a16afd0d96da97ac065144ebf78d9e`, ledger generation 51, with
 the W5/W6/public switches off. The immediate next action is an independent
 critic of these receipts and this reconciliation patch. After PASS, PI0-A may

@@ -1,16 +1,20 @@
 {
   "schemaVersion": 1,
   "kind": "stride_e10_pd1_shell_and_scout_local_checkpoint",
-  "observedAt": "2026-08-10T06:20:23Z",
+  "observedAt": "2026-08-10T07:21:36Z",
   "status": "deterministic_web_component_and_native_renderer_verified_physical_device_and_live_repair_pending",
   "sourceBoundary": {
     "branch": "codex/country-golf-stride",
-    "head": "b4bcc7e5fa7325c5b308af08e46f562154500248",
-    "dirtyWorktreeCheckpoint": true,
+    "head": "c6741976bbe0f2f7b8a700d6aba12652618f2622",
+    "sourceFilesCommittedAtHead": true,
+    "originalReceiptAndSidecarCommittedAtHead": true,
+    "refreshedReceiptSidecarAndPlanReconciliationUncommitted": true,
     "selectedFileSha256ManifestIsAuthoritative": true,
-    "worktreeStatusSha256": "5b11f55addc8965bf8d36c1b82f57bc053952ae88748faf4f788bfba5bef7961",
+    "worktreeStatusSha256": "98e4e4ae58a9f990c4de39c163fd07471fb9b82b4a190ac6b32079cac71913e8",
     "unrelatedUntrackedStrideSiteExcluded": true,
-    "gitCommitPushDeployActivationPerformed": false
+    "gitCommitPerformed": true,
+    "gitPushPerformed": true,
+    "deployOrActivationPerformed": false
   },
   "verifiedBoundary": {
     "desktopFiveDestinationIA": true,
@@ -70,14 +74,28 @@
       "result": "PASS"
     },
     "independentCritics": {
-      "desktopWeb": "PASS",
-      "nativeRendererFinding": "closed_with_react_test_renderer_19_2_3",
+      "desktopWeb": {
+        "identity": "/root/w0_plan_audit",
+        "verdict": "PASS",
+        "evidence": "focused_TestPD1_normal_PASS; focused_TestPD1_race_PASS; go_vet_all_PASS; scoped_diff_check_PASS; rendered_Chromium_top_level_route_back_reload_pending_navigation_fence_Work_only_rail_focus_320px_no_overflow_and_terminal_preview_PASS"
+      },
+      "nativeRenderer": {
+        "identity": "/root/w0_live_evidence",
+        "verdict": "PASS",
+        "evidence": "React_19.2.3_react_test_renderer_mounted_Pressable_navigation_announcement_and_state_preservation_PASS; mobile_480_of_480_PASS; typecheck_PASS; scoped_diff_check_PASS; physical_devices_excluded"
+      },
       "scoutDurability": {
         "identity": "/root/w0_code_inventory_and_/root/w0_live_evidence",
         "verdict": "PASS",
         "evidence": "full_TestScout_normal_PASS_35.886s; full_TestScout_race_PASS_330.179s; targeted_private_custody_normal_PASS_2.455s; targeted_private_custody_race_PASS_18.056s; go_vet_all_PASS; scoped_diff_check_PASS"
       },
-      "receiptCheckpointCritic": "pending_final_refreshed_receipt_recritic"
+      "receiptCheckpointCritic": {
+        "identity": "/root/w0_live_evidence",
+        "verdict": "PASS",
+        "reviewedReceiptSha256": "7dd87d5d03201c9399fd9597fae049c406b0f5f507723f621ec7f4bd992adef6",
+        "evidence": "sidecar_exact; JSON_parse_PASS; all_20_selected_file_sha256_values_match; HEAD_c6741976bbe0f2f7b8a700d6aba12652618f2622; porcelain_98e4e4ae58a9f990c4de39c163fd07471fb9b82b4a190ac6b32079cac71913e8_exact; original_committed_vs_refreshed_uncommitted_boundary_exact; plan_refs_exact; git_diff_check_PASS",
+        "findingHistory": "initial_attribution_and_later_committed_boundary_findings_closed"
+      }
     }
   },
   "fileSha256": {
