@@ -49,9 +49,9 @@ contract checks and an actual confined-container ownership/mode test.
 
 The current serving release remains unqualified externally. The current
 post-release observation records exact release
-`c2e6dfed4160ac42775f1f7ca9be90b6801bde53`, bundle
-`614e0925060284d9e817f20ddd1c04e82df42b041c2b27a101e9b2de8af4909d`,
-ledger generation 55, and W4 generation 154. Production `/readyz` truthfully
+`2af28696637a524d2a0c44aaac527202b19d7e82`, bundle
+`b708ddcf3cc49a20bcb192ea7daf512a9bacc43df5c334d6c30e65c6e1a6659c`,
+ledger generation 56, and W4 generation 155. Production `/readyz` truthfully
 reports the separate canonical shadow unhealthy at dirty/high-water 30,416
 versus reconciled/checkpoint 8,532, with 119 current repair candidates and
 governed replay off. W4 does not read that shadow as product authority. Exactly
@@ -175,7 +175,7 @@ The goal is complete only when evidence proves:
 | E0-E9 original foundations | historical receipts and full-suite gates in §§13-18 | `deterministic_verified` only for named local/default-off classes | provider, physical, HA/DR, pilot, and production claims remain separate |
 | E10-W0-W3 authority/product/shadow/migration | W0-W3 receipts and independent critics | `deterministic_verified_revision1_foundation` | identity, ACL, session, CAS/idempotency, opaque-denial, current-authority, synchronous-fence, purge, restore, and default-off guarantees remain inherited; every new PN object/action/store/switch needs a PN1 successor receipt |
 | E10-W4 private Bonfire authority | authenticated activation lineage; 1 org, 7 people, 7 memberships, 98 sessions; AJ sole owner | `production_private_live` | canonical global promotion remains separately blocked |
-| E10-W5 MyMind custody | migration 17, file/SQL custody, crypto-erasure and restart tests, default-off carrier, compiled mTLS custody-service client | `deterministic_compiled_mtls_provider_verified_external_service_and_activation_waiting`; the prior default-off carrier is deployed, while this compiled client is local/unreleased and production custody is not installed | real independently operated service, state/custody keys, external CAS high-water, destruction evidence, owners, consent, restore, live cohort |
+| E10-W5 MyMind custody | migration 17, file/SQL custody, crypto-erasure and restart tests, default-off carrier, compiled mTLS custody-service client | `compiled_client_deployed_default_off_external_service_and_activation_waiting`; the compiled client is deployed but unconfigured/uninstalled and production custody is not installed | real independently operated service, state/custody keys, external CAS high-water, destruction evidence, owners, consent, restore, live cohort |
 | E10-W6 Work Search/contact qualification | policy, exact-session search/contact, shadow/purge, sealed operator and adversarial tests | `deterministic_verified`; carrier deployed; operator locally verified | real five-person cohort, two reviewers, three independent approvers, sealed signer registry, current health/rollback receipt, activation authority |
 | E10-W7 physical/privacy/resilience | immutable-root validators and read-only reports | `deterministic_validator_verified` | exact current native build, intended groups, real iPhone+iPad, accessibility/privacy, TURN, offsite restore, HA, independent attestation |
 | E10-W8 final cohorts/soak | ordered-cohort and soak validator | `deterministic_validator_verified` | signed W5/W6/W7/rollback dependencies, actual kill-switch cohorts, unchanged-release >=24h and >=10 sittings |
@@ -432,7 +432,7 @@ expressions or their interaction/accessibility evidence.
 |---|---|---|---|---|---|
 | W0-W3 | Frozen revision-1 authority, product, tenant/shadow, migration foundation | historical E10 owners; named receipt files | existing receipts/critics; switches off; PN1 successor receipts for new contracts | already exercised local authority | `deterministic_verified_revision1_foundation` |
 | W4 | Private Bonfire person/org/session/Contribution Review/Work Record | W4 runtime + release operator | authenticated lineage, exact release and retained rollback | AJ production authority used | `production_private_live` |
-| W5 | Install real private custody and consent | W5 custody/runtime only | managed preflight, crypto-erasure, restart/restore, switch kill | named custody/privacy owners + AJ cohort | `deterministic_compiled_mtls_provider_verified_external_service_and_activation_waiting`; compiled client is local/default-off, independently operated service and authority remain absent |
+| W5 | Install real private custody and consent | W5 custody/runtime only | managed preflight, crypto-erasure, restart/restore, switch kill | named custody/privacy owners + AJ cohort | `compiled_client_deployed_default_off_external_service_and_activation_waiting`; compiled client is deployed but unconfigured/uninstalled, and the independently operated service and authority remain absent |
 | W6 | Qualify Work Search/contact and any paid routes | W6 policy/qualification/shadow/search operator only | sealed signer/current-state receipt; publication/search/contact kill switches | 5 participants, 2 reviewers, legal/privacy/product, provider/spend if used | `deterministic_default_off_composition_verified_external_provider_and_qualification_waiting` |
 | W7 | Physical/privacy/resilience proof | W7 validator/operator, Apple proofpack, DR evidence only | immutable-root receipt and retained release | Apple/device/privacy/DR/attestation owners | `successor_prerequisites_verified_external_final_fixture_and_physical_acceptance_waiting` |
 | W8 | Ordered activation and soak | W8 activation operator only | per-cohort kill + rollback; >=24h/10 sittings | AJ exact activation + independent observer | `blocked_on_W5_W6_W7` |
@@ -486,9 +486,9 @@ Responses, embedding, image, or external service requires exact project,
 billing owner, price/budget, route/corpus, and one-at-a-time authorization.
 
 **Git/release/deploy queue:** production is exact
-`c2e6dfed4160ac42775f1f7ca9be90b6801bde53`, ledger generation 55, bundle
-`614e0925060284d9e817f20ddd1c04e82df42b041c2b27a101e9b2de8af4909d`,
-with retained rollback `c948daef25c94dec8ddb9690d3cb6017dbb9cddd`.
+`2af28696637a524d2a0c44aaac527202b19d7e82`, ledger generation 56, bundle
+`b708ddcf3cc49a20bcb192ea7daf512a9bacc43df5c334d6c30e65c6e1a6659c`,
+with retained rollback `c2e6dfed4160ac42775f1f7ca9be90b6801bde53`.
 Public health and readiness return 200 and the retained verifier reports
 `verified-local-unsigned`; external attestation remains false. Build 52 is
 Apple `VALID`, approved, and `IN_BETA_TESTING` for both Team (Expo) and Bonfire.
@@ -532,9 +532,9 @@ Reconciliation parent revision is `31a5792` (the fail-closed W5-W8 operator
 carrier); the critic-passed plan and carrier first shipped together as exact
 commit `84bc0cc6b99ea89dcc0cbdcad00c3d06d4dd3cb0`. Unrelated `stride-site/`
 remains untracked and excluded. The current production boundary is exact commit
-`c2e6dfed4160ac42775f1f7ca9be90b6801bde53`, ledger generation 55, with
-retained rollback `c948daef25c94dec8ddb9690d3cb6017dbb9cddd`. W4 private
-authority is live at schema 2/generation 154; W5, W6, and every public network
+`2af28696637a524d2a0c44aaac527202b19d7e82`, ledger generation 56, with
+retained rollback `c2e6dfed4160ac42775f1f7ca9be90b6801bde53`. W4 private
+authority is live at schema 2/generation 155; W5, W6, and every public network
 path remain off. The earlier body-minimized deployment observation
 `docs/evidence/e10/stride-e10-default-off-carriers-live-20260809.json`, SHA-256
 `ebf6363c22469e9802cba1c64702feea3308c5d3b91058ad11fc9d5c46b4affa`,
@@ -611,8 +611,9 @@ is independent `/root/w0_live_evidence` critic **PASS** for sidecar, JSON, all
 21 selected hashes, plan diff, non-self-reference, and exclusions; the current
 receipt is the one-way record of that verdict.
 
-That pre-release receipt remains historical. The current body-minimized
-post-release matrix is
+That pre-release receipt remains historical. The latest completed
+body-minimized AJA post-release matrix is also historical evidence against the
+prior release:
 `docs/evidence/e10/stride-e10-pd1-aja-postrelease-matrix-20260810.json`, SHA-256
 `ac2b6f03f7e0f238247745a41126ae93311df3c8a1fdf0cdd9e79ddc22e025c4`. It binds
 exact production commit
@@ -1409,7 +1410,7 @@ decision is explicitly external rather than silently assumed.
 | E10-W2 | Organization, Work Record, and network product surfaces | web/native self/coworker/network projections; create/join/approve/switch/leave; evidence cards/tiers; organization contribution approvals; network preview/View-as-recruiter/contact/block; no discovery activation | `deterministic_verified` — receipt-bound local/default-off backend, web, native, persistent recovery, critic PASS, and registered-live W1-backed rendered QA; earlier static fixture evidence remains explicitly non-live |
 | E10-W3 | Tenant conversion, network shadow, and migration rehearsal | replace singleton/unconditional org ACL paths; build shadow network projection/index from published fields only; revalidation/revoke/purge parity; idempotent offline seven-person/Bonfire rehearsal with AJ owner; no production mutation | `deterministic_verified` — local/offline migration, shadow, durable purge, restart/rollback, and converted authority-path evidence plus three independent critic PASS verdicts; production cutover remains deliberately disabled and singleton-dependent surfaces are explicitly unavailable/pending |
 | E10-W4 | Authority-gated Bonfire migration and private org/Work Record/network activation; canonical repair remains separately gated | explicit production authority; exact backup/rollback; authenticated activation journal/receipt; seven people and memberships with AJ sole owner; all current sessions bound; cohesive web/native org/profile/private draft/preview while discovery and MyMind remain off | `production_private_live` — exact migration evidence retained without rerun; W4 activation and successor lineage verified; seven people/seven memberships/98 sessions live; registered signed-in desktop/mobile QA PASS; canonical repair/promotion deliberately not performed |
-| E10-W5 | Private MyMind custody and activation | independent encrypted custody/consent; inspect/correct/forget/export; restart/restore; exact disclosure and zero leakage; profiles/orgs do not depend on this wave | `deterministic_compiled_mtls_provider_verified_external_service_and_activation_waiting` — migration 17 and the default-off API/web/native carrier are live; encrypted custody, restart/restore/crypto-erasure, and a compiled operator-pinned mTLS custody-service client pass; no independently operated service, production custody install, managed production keys/high-water, named custody owners, consent approval, stored context, or live cohort |
+| E10-W5 | Private MyMind custody and activation | independent encrypted custody/consent; inspect/correct/forget/export; restart/restore; exact disclosure and zero leakage; profiles/orgs do not depend on this wave | `compiled_client_deployed_default_off_external_service_and_activation_waiting` — migration 17, the default-off API/web/native carrier, and the operator-pinned mTLS custody-service client are deployed; encrypted custody, restart/restore/crypto-erasure, and client receipt evidence pass; no independently operated service, production custody install, managed production keys/high-water, named custody owners, consent approval, stored context, or live cohort |
 | E10-W6 | Network, provider, and real-work qualification | privacy/legal/product approval; at least five consenting profile participants and two search reviewers; labeled/adversarial recruiter corpus; explanation/unknown/prohibited-criteria/contact/exfiltration gates; qualify any parser/reranker plus STT, voice, Luna/Terra/Sol, I&O/workforce one variable at a time | `deterministic_verified_external_qualification_waiting` — the default-off policy, qualification, shadow, exact-session search/contact, and web/native carrier are live but unconfigured; no real cohort, approver, reviewer, provider, or feature activation |
 | E10-W7 | Physical, privacy, and resilience acceptance | final exact native build containing org/Work Record/network changes on iPhone/iPad; publish/pause/search/evidence/contact/block/revoke rendered flows; restrictive-network TURN/WebRTC; signed restore; index purge; HA failover; accessibility and privacy/legal sign-off | `deterministic_validator_verified_external_waiting` — immutable-root evidence validators and read-only preflights pass; no Apple, physical-device, privacy/accessibility, restore, restrictive-network, or HA receipt is claimed |
 | E10-W8 | Final activation | final route freeze and exact release/rollback; independently kill-switchable opt-in cohort order `draft/publish -> evidence search -> contact`; 24-hour/ten-sitting soak includes revoke/purge latency and prohibited-leakage audit; W5 must be complete or explicitly deferred by AJ, never silently pending | `deterministic_validator_verified_external_blocked` — ordered cohort/kill-switch/soak validator passes; activation remains blocked on W5-W7 external evidence and the real 24-hour/ten-sitting campaign |
@@ -1472,7 +1473,20 @@ full repository plus focused normal/race/vet/diff evidence, and an independent
 critic PASS. This
 closes the prior missing compiled-client gap only. It does not establish an
 independently operated production custody service, real managed keys or
-high-water, owners, consent, cohort, release, deployment, or feature activation.
+high-water, owners, consent, cohort, release, deployment, or feature activation
+at that sealed pre-deploy source boundary.
+
+The body-minimized W5 live-release receipt is
+`docs/evidence/e10/stride-e10-w5-managed-https-provider-live-20260810.json`
+(SHA-256
+`2cc42abcc09eefdb02d4660151ea283befe3bbc99abcd9aacbf96622a7e5abd8`). It
+binds exact commit `2af28696637a524d2a0c44aaac527202b19d7e82`, ledger generation
+56, bundle and image identities, retained `c2e6dfed...` rollback, public
+health/readiness 200, the retained verifier's `verified-local-unsigned`
+disposition, W4 schema 2/generation 155, and W5 configured/installed false.
+Deployment changed application bytes only: no provider configuration, managed
+keys/high-water, custody owner, consent, cohort, MyMind data, or feature
+activation was supplied.
 
 The body-minimized W6 network qualification receipt is
 `docs/evidence/e10/stride-e10-w6-network-qualification-20260809.json`

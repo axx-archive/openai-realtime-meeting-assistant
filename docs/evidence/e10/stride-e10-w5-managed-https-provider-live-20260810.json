@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_w5_managed_https_provider_live_release",
+  "snapshotObservedAt": "2026-08-10T11:22:59Z",
+  "ledgerUpdatedAt": "2026-08-10T11:21:03.977Z",
+  "status": "compiled_client_deployed_default_off_external_service_and_activation_waiting",
+  "source": {
+    "branch": "codex/country-golf-stride",
+    "releaseCommit": "2af28696637a524d2a0c44aaac527202b19d7e82",
+    "pushedTo": "axx/main",
+    "implementationReceipt": "docs/evidence/e10/stride-e10-w5-managed-https-provider-20260810.json",
+    "implementationReceiptSha256": "63bb94c0abaa329bac8b546cba66ab317082910747c6e2a3743d03c50a76c7c1",
+    "sourceArchiveSha256": "e534f5d98b369fa626d35c85d7936e726935a10d34ad73b8b99057720f11abb8",
+    "sourceReceiptSha256": "1714607b9d30e0c9416d57bb0cae5bbb671720185eec799310a222ff2e475945"
+  },
+  "release": {
+    "ledgerGeneration": 56,
+    "bundleSha256": "b708ddcf3cc49a20bcb192ea7daf512a9bacc43df5c334d6c30e65c6e1a6659c",
+    "buildManifestSha256": "47a1e17fc04573e9fd0cf6a4e0ec34af6f417bd1709d3699ebae9b061a588edd",
+    "releaseReceiptSha256": "756174b857e4c01ec9a5ab3632722c07b8525c18464dba1600ca87167c54fb6e",
+    "runtimeEnvSha256": "5fc8f9fdd3b242166cd21442c2b48dea4c51ccfaa3f787e81ea0df19d5c3b9e7",
+    "meetingassistImageId": "sha256:8ad7d6c21007268b2983d9bd9cf6ee4694689f927967ab0690fe8c8811be55a6",
+    "renderRunnerImageId": "sha256:2a21c30877743d8171fa6341b9dfb21431205874fe4dfcce468c872d3ec00fce",
+    "binarySha256": "44d3d898282db8b29bb76c61c3ee5d7867095006c321f0e9dbc11be8a5e7df8f",
+    "verified": true,
+    "verifierDisposition": "verified-local-unsigned",
+    "publicHealthHTTP": 200,
+    "publicReadyHTTP": 200,
+    "processQualified": true,
+    "qualified": false,
+    "externallyAttested": false,
+    "attestationReason": "unsigned_external_verification_required"
+  },
+  "rollback": {
+    "releaseCommit": "c2e6dfed4160ac42775f1f7ca9be90b6801bde53",
+    "bundleSha256": "614e0925060284d9e817f20ddd1c04e82df42b041c2b27a101e9b2de8af4909d",
+    "meetingassistImageId": "sha256:940dd9c5a04b55a69c1c596996094fc4e3a347c274639a24849fa559e515dcc7",
+    "renderRunnerImageId": "sha256:41c13ecb9130061a0d24be25a11cc5169234bed4584bd3ce5d3b2a577f1d5ea7",
+    "retainedAndReadable": true
+  },
+  "runtime": {
+    "w4Ready": true,
+    "w4Mode": "bonfire_network_live",
+    "w4SchemaVersion": 2,
+    "w4Generation": 155,
+    "w4EnabledFeatureCount": 6,
+    "w5Configured": false,
+    "w5Installed": false,
+    "w5ReadyBecauseSafelyAbsent": true,
+    "personMyMindContextEnabled": false,
+    "managedProviderEnvironmentPresent": false,
+    "w6Configured": false,
+    "w6Installed": false,
+    "w6CohortQualified": false,
+    "publicNetworkActivated": false
+  },
+  "authorityBoundary": {
+    "gitCommitPerformed": true,
+    "gitPushPerformed": true,
+    "exactReleaseDeploymentPerformed": true,
+    "productionFeatureConfigurationChanged": false,
+    "productionDataMutatedByOperator": false,
+    "w5ServiceProvisioned": false,
+    "w5ManagedKeysOrHighWaterProvisioned": false,
+    "w5OwnersConsentOrCohortApproved": false,
+    "w5FeatureActivated": false,
+    "remainingState": "external_managed_service_custody_consent_cohort_and_activation_waiting"
+  }
+}
