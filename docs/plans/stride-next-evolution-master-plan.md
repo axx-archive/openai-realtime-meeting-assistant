@@ -435,12 +435,12 @@ expressions or their interaction/accessibility evidence.
 | W0-W3 | Frozen revision-1 authority, product, tenant/shadow, migration foundation | historical E10 owners; named receipt files | existing receipts/critics; switches off; PN1 successor receipts for new contracts | already exercised local authority | `deterministic_verified_revision1_foundation` |
 | W4 | Private Bonfire person/org/session/Contribution Review/Work Record | W4 runtime + release operator | authenticated lineage, exact release and retained rollback | AJ production authority used | `production_private_live` |
 | W5 | Install real private custody and consent | W5 custody/runtime only | managed preflight, crypto-erasure, restart/restore, switch kill | named custody/privacy owners + AJ cohort | `external_waiting`; adapter locally verified, provider absent |
-| W6 | Qualify Work Search/contact and any paid routes | W6 policy/qualification/shadow/search operator only | sealed signer/current-state receipt; publication/search/contact kill switches | 5 participants, 2 reviewers, legal/privacy/product, provider/spend if used | `external_waiting`; deterministic carrier verified |
-| W7 | Physical/privacy/resilience proof | W7 validator/operator, Apple proofpack, DR evidence only | immutable-root receipt and retained release | Apple/device/privacy/DR/attestation owners | `external_waiting` |
+| W6 | Qualify Work Search/contact and any paid routes | W6 policy/qualification/shadow/search operator only | sealed signer/current-state receipt; publication/search/contact kill switches | 5 participants, 2 reviewers, legal/privacy/product, provider/spend if used | `deterministic_default_off_composition_verified_external_provider_and_qualification_waiting` |
+| W7 | Physical/privacy/resilience proof | W7 validator/operator, Apple proofpack, DR evidence only | immutable-root receipt and retained release | Apple/device/privacy/DR/attestation owners | `successor_prerequisites_verified_external_final_fixture_and_physical_acceptance_waiting` |
 | W8 | Ordered activation and soak | W8 activation operator only | per-cohort kill + rollback; >=24h/10 sittings | AJ exact activation + independent observer | `blocked_on_W5_W6_W7` |
 | PN0 | Adopt revision 2, exact diff/test inventory, contract freeze, threat/policy/switch owners | this canonical plan and PN0 evidence only | exact source receipt + fresh independent plan critic; no runtime rollback needed | plan integration authorized; external policy roles still unassigned; activation not authorized | `in_progress_external_policy_owners_waiting`; reconciliation critic PASS |
-| PD0 | Full-product audit/research/thesis/IA/system/parity/reference flows | design evidence and this plan; no production behavior | contracts passed bounded critic; remaining interactive render/accessibility/performance/device QA + final PD0 critic | safe local design/reference implementation authorized; activation absent | `design_contract_verified_interactive_acceptance_in_progress` |
-| PI0-A | Freeze and implement event taxonomy, trace identity, consent/privacy contract, compound recovery, and pre-migration baseline | telemetry schema/journal/metric/evidence files only; no collection | contract critic PASS; remaining implementation, synthetic crash/purge/restore, baseline freeze and independent implementation critic | safe local implementation authorized; real collection not authorized | `design_contract_verified_implementation_pending` |
+| PD0 | Full-product audit/research/thesis/IA/system/parity/reference flows | design evidence and this plan; no production behavior | contracts and deterministic browser reference passed independent critics; product migration plus native/accessibility/performance/device acceptance remain | safe local design/reference implementation authorized; activation absent | `deterministic_browser_reference_verified_product_migration_and_device_acceptance_pending` |
+| PI0-A | Freeze and implement event taxonomy, trace identity, consent/privacy contract, compound recovery, and pre-migration baseline | telemetry schema/journal/metric/evidence files only; no collection | contract and route-free deterministic carrier passed independent critics; runtime emitters, privacy lifecycle, migration and baseline remain | safe local implementation authorized; real collection not authorized | `deterministic_route_free_carrier_verified_runtime_and_baseline_pending` |
 | PN1 | Safe public projections/controls default off | new PN authority/storage/runtime/test files; no broad UI activation | normal/race/PG/restore/purge/render; revision-1 inheritance plus PN successor receipts; all PN switches false | local implementation after PN0+PD0+PI0-A PASS | `blocked_on_PN0_PD0_PI0A` |
 | PD1 pilot subset | Migrate exact PN2 journeys across web/iPhone/iPad using the unified system | `index.html`, `mobile/src`, shared semantic design contracts, owned tests | parity, rendered interaction, accessibility/performance, real-device gate remains external; rollback to prior shell by release | local implementation after PD0 and PN1 contracts | `blocked_on_PD0_PN1` |
 | PI0-B | Private dashboards, case receipts, qualitative research protocol, collection gate | private telemetry/evidence/DR/operator surfaces only | consented synthetic/dogfood-safe trace, privacy/purge/restore, research-protocol critic | real collection requires participant consent | `blocked_on_PI0A_PN1_PD1_pilot` |
@@ -453,13 +453,14 @@ expressions or their interaction/accessibility evidence.
 ### Operations and authority queues
 
 **Safe local queue:** PN0 reconciliation/critic is complete. PD0 audit,
-primary-source research, three-platform parity, semantic-system, and interactive-
-reference contracts have bounded critic PASS; build their executable fixture,
-rendered interaction evidence, migration inventory, and accessibility/
-performance proofs. PI0-A's taxonomy, metric/privacy, compound-recovery, and
-baseline contract has bounded critic PASS; implement the schema, journal,
-synthetic verifier, purge/restore tests, and frozen pre-migration baseline
-without collecting real-user data. Maintain W5-W8 default-off operator tests. Do not select cohort
+primary-source research, three-platform parity, semantic-system, reference
+contracts, and the exact deterministic browser harness have independent critic
+PASS; migrate the governed shell and journeys into desktop web, native iPhone,
+and native iPad, then produce rendered interaction, accessibility/performance,
+and device evidence. PI0-A's contract and route-free deterministic carrier have
+independent critic PASS; install no collection yet, but implement the durable
+runtime/emitters, privacy lifecycle, synthetic migration/restore verification,
+and frozen pre-migration baseline. Maintain W5-W8 default-off operator tests. Do not select cohort
 participants or create external signatures as local fixtures for production
 acceptance.
 
@@ -520,13 +521,23 @@ Its independently reviewed contract set includes the 28-row three-platform
 audit, primary-source product thesis/IA, governed tokens/domain components,
 J1-J13 platform and PN/default-off flows, reproducible performance protocol,
 and body-minimized PI0-A trace/privacy/metric/compound-recovery contract. This
-is not native/device acceptance or production instrumentation. The bounded PD0
-browser harness and PI0-A carrier/state-machine implementation now exist
-locally and pass their focused gates, but remain untracked and cannot count as
-accepted implementation until their exact bytes receive fresh independent
-critics and body-minimized receipts. Those reviews, followed by the frozen
-PI0-A baseline and the remaining PD0 rendered/native/device evidence, are the
-next safe actions before PN1. No production user-data collection or public
+is not native/device acceptance or production instrumentation. Exact local
+checkpoint `2fdb876` now contains four independently critic-passed, body-
+minimized evidence classes: the PD0 deterministic browser reference
+(`docs/evidence/e10/stride-e10-pd0-browser-reference-20260809.json`, SHA-256
+`296801bedfacfa1457ee8b030a42455e1408d039e0632f7dcb36a3d5df354343`),
+the route-free PI0-A carrier
+(`docs/evidence/e10/stride-e10-pi0-a-carrier-20260809.json`, SHA-256
+`26b77433826898ae94d2e4cb5ae5bc201b28deff316aa0f4bf6a7be66647964c`),
+the W6 default-off production composition
+(`docs/evidence/e10/stride-e10-w6-production-composition-20260809.json`,
+SHA-256 `b99f1b16ca4c214b81e1a93b554faf2cb64ecbd6e9c2e73d1f92c1359553368e`),
+and the W7/W8 successor prerequisite validator
+(`docs/evidence/e10/stride-e10-w7-w8-successor-20260809.json`, SHA-256
+`3ce541cac0d50af861e27ae7c4b998bb61300754980dff16ac7cea890023243e`).
+These do not complete PD0, PI0-A, W6 qualification, W7 physical acceptance, or
+W8 activation. The next safe actions are the PI0-A runtime/baseline and the PD0
+web/iPhone/iPad product migration; no production user-data collection or public
 activation is the next action.
 
 #### Reconciliation Critic Loop — PASS
