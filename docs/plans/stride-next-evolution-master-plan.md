@@ -498,22 +498,24 @@ evidence wherever the public-network or unified-platform claim is new.
 Reconciliation parent revision is `31a5792` (the fail-closed W5-W8 operator
 carrier); the critic-passed plan and carrier first shipped together as exact
 commit `84bc0cc6b99ea89dcc0cbdcad00c3d06d4dd3cb0`. Unrelated `stride-site/`
-remains untracked and excluded. At the 2026-08-09 20:44 PDT refresh, current
-production is exact commit `8781d6cbcee567c1f36f488d1a6447587fdcba9b`,
-bundle `5de3fc8b7a20f3d404eac3cf43700dcd20a3718cf0bb366c0fb6fee27d76bfef`,
-ledger generation 50, with retained rollback commit
-`5cd428598994cafaa226b1612f706200f02beb90`. W4 is ready at schema 2,
-generation 135, with the exact six private features enabled; W5 remains
+remains untracked and excluded. The production snapshot was observed at
+2026-08-09 21:59 PDT and independently audited through 22:04 PDT. Current
+production is exact commit `b070e67f27a16afd0d96da97ac065144ebf78d9e`,
+bundle `8f2c3fae135e094874c9b50ba2f27018d392a1507f8367b3a6b0457912c657a3`,
+ledger generation 51, with retained rollback commit
+`8781d6cbcee567c1f36f488d1a6447587fdcba9b`. W4 is ready at schema 2,
+generation 141, with the exact six private features enabled; W5 remains
 configured/installed false; W6 remains configured/installed/qualified false;
 and all W5/W6/public switches remain off. The exact release verifier returned
 `verified-local-unsigned`; independent external attestation remains false.
-The prior body-minimized generation-44 release observation remains
-`docs/evidence/e10/stride-e10-w5-w8-operator-live-20260809.json`, SHA-256
-`bc758fc7802db6a2d4a8f82342d0d9208ee96a5e3892f5cfa60792837eae7d7b`.
-Canonical shadow remains non-authoritative/unhealthy at 29,996 versus 8,532
-with 119 repair candidates; the latest local backup is healthy with ring count
-seven, while offsite remains `dormant` and external restore acceptance remains
-open. The reconciliation independent critic
+The current body-minimized deployment observation is
+`docs/evidence/e10/stride-e10-default-off-carriers-live-20260809.json`, SHA-256
+`ebf6363c22469e9802cba1c64702feea3308c5d3b91058ad11fc9d5c46b4affa`.
+Canonical shadow remains non-authoritative/unhealthy at 30,140 versus 8,532,
+with failure high-water 30,132 and 119 repair candidates; the latest local
+backup is healthy with ring count seven, while encryption is false, offsite
+remains `dormant`, and external restore acceptance remains open. The
+reconciliation independent critic
 PASS is recorded below. The first safe-local PD0/PI0-A contract checkpoint is
 `docs/evidence/e10/stride-e10-pd0-pi0-contracts-20260809.json`, SHA-256
 `d966d745b801b7b537451cbc91e8f3ee49cd9b0a166b48e678a3e769ea83a680`.

@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_default_off_carrier_release_live",
+  "snapshotObservedAt": "2026-08-10T04:59:42Z",
+  "independentAuditCompletedAt": "2026-08-10T05:04:34Z",
+  "status": "production_default_off_carriers_live_external_acceptance_waiting",
+  "release": {
+    "commit": "b070e67f27a16afd0d96da97ac065144ebf78d9e",
+    "bundleSha256": "8f2c3fae135e094874c9b50ba2f27018d392a1507f8367b3a6b0457912c657a3",
+    "meetingassistImageId": "sha256:0311ba8703b598c0597f8127785f3856613854b887610b3d0dd6420a258e380d",
+    "renderRunnerImageId": "sha256:0716e13da4ca0ebd974ae0d54cac253b11fbbe3eb9a300bc618a023c9d63dc79",
+    "ledgerGeneration": 51,
+    "verifier": "verified-local-unsigned",
+    "processQualified": true,
+    "externallyAttested": false,
+    "externalAttestationReason": "unsigned_external_verification_required",
+    "publicHealthHTTP": 200,
+    "publicReadyHTTP": 200,
+    "publicHealthOK": true,
+    "publicReadyOK": true
+  },
+  "rollback": {
+    "commit": "8781d6cbcee567c1f36f488d1a6447587fdcba9b",
+    "bundleSha256": "5de3fc8b7a20f3d404eac3cf43700dcd20a3718cf0bb366c0fb6fee27d76bfef",
+    "meetingassistImageId": "sha256:601dcf44357f06b23bcf8418a316ed97efc0965556f2171ab47645540c2b57f8",
+    "renderRunnerImageId": "sha256:4b5ee3161ef3c17eb5dc608d2eb545d6efe162e0533b881b3e3f289d3cf88c0e",
+    "releaseDirectoryPresent": true,
+    "imagesPresent": true
+  },
+  "runtime": {
+    "migrationHead": 17,
+    "migrationVersionsExactOneThroughSeventeen": true,
+    "w4": {
+      "ready": true,
+      "mode": "bonfire_network_live",
+      "schemaVersion": 2,
+      "generation": 141,
+      "enabledFeatures": [
+        "active_organization_session",
+        "contribution_review",
+        "organization_authority_read",
+        "organization_authority_write",
+        "person_profile_authority",
+        "work_record_private"
+      ]
+    },
+    "w5": {
+      "configured": false,
+      "installed": false,
+      "activated": false
+    },
+    "w6": {
+      "configured": false,
+      "installed": false,
+      "cohortQualified": false,
+      "canonicalBound": false,
+      "queryParserProviderEnabled": false,
+      "semanticRerankerEnabled": false,
+      "activated": false
+    },
+    "publicNetworkSwitchesActivated": false,
+    "pi0CollectionActivated": false,
+    "w7W8OperatorRegisteredInProductionCLI": false
+  },
+  "degradedAndExternalGates": {
+    "canonicalMode": "shadow",
+    "canonicalHealthy": false,
+    "canonicalDirtyHighWater": 30140,
+    "canonicalReconciledHighWater": 8532,
+    "canonicalFailureHighWater": 30132,
+    "canonicalRepairCandidates": 119,
+    "latestLocalBackupAt": "2026-08-10T04:59:23.142211553Z",
+    "latestLocalBackupBytes": 155019186,
+    "localBackupRingCount": 7,
+    "backupEncrypted": false,
+    "offsiteConfigured": false,
+    "offsiteStatus": "dormant",
+    "restoreVerified": false,
+    "readinessDegradedNonBlocking": true,
+    "realW5CustodyAndConsent": false,
+    "realW6Qualification": false,
+    "externalReleaseAttestation": false,
+    "physicalIPhoneIPadAcceptance": false,
+    "w8ActivationAndSoak": false
+  },
+  "claimsExplicitlyExcluded": {
+    "pd0NativeOrDeviceAcceptance": false,
+    "pi0RuntimeCollectionOrBaseline": false,
+    "w5Activation": false,
+    "w6Activation": false,
+    "w7PhysicalAcceptance": false,
+    "w8FinalReady": false,
+    "publicNetworkPublication": false,
+    "canonicalPromotion": false
+  },
+  "independentReadOnlyAudit": "PASS"
+}
