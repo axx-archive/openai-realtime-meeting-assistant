@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_w7_w8_successor_read_only_cli_live_release",
+  "snapshotObservedAt": "2026-08-10T11:59:27Z",
+  "ledgerUpdatedAt": "2026-08-10T11:57:59.637Z",
+  "status": "read_only_cli_deployed_external_final_fixture_and_acceptance_waiting",
+  "source": {
+    "branch": "codex/country-golf-stride",
+    "releaseCommit": "2f8f62d20a47482c12329f1d434c99ccb911eb6f",
+    "pushedTo": "axx/main",
+    "implementationReceipt": "docs/evidence/e10/stride-e10-w7-w8-read-only-cli-20260810.json",
+    "implementationReceiptSha256": "bd2ec5fae58bc2412da43cffb0367dbeb5c75ca00999d427908a8f2bf9293d3e",
+    "sourceArchiveSha256": "3ad3544279041bc8ebf86787b4723b62c899e16815d80c264da7ebfec755e274",
+    "sourceReceiptSha256": "ed2052f733b668aab67a089ddc8d3d0d2a2e7f7db116baccd6a316e1f3709501"
+  },
+  "release": {
+    "ledgerGeneration": 57,
+    "bundleSha256": "99a93ab20aaf282ad13be0f320fa648eeeefcb66697c9095416af6fd2353f79a",
+    "buildManifestSha256": "25233df6dedd8e75712396ae3b8a0c0662473dfb7d630508f380ff3b92cce44a",
+    "releaseReceiptSha256": "6296fe79e33238d35adaf6ed21cd77f290d101fccb2f025b2f3b5f967e93019b",
+    "runtimeEnvSha256": "2e03be881d983307fd981e1b0038e99692e0b4d8929c980c95755aaa7be51239",
+    "meetingassistImageId": "sha256:2ce30c7c2dd08720dc06357cfee9955906e977df8d3d82c0465a156f80c62acd",
+    "renderRunnerImageId": "sha256:c1570dd95cd10d796108baf18324b3cbc6ad868958051e977f22c6eab7c7cc1f",
+    "binarySha256": "333817a94b97e27e8c32aa099a5c479565143f5a24f4aa614738ea7319c89df7f",
+    "verified": true,
+    "verifierDisposition": "verified-local-unsigned",
+    "publicHealthHTTP": 200,
+    "publicReadyHTTP": 200,
+    "processQualified": true,
+    "qualified": false,
+    "externallyAttested": false,
+    "attestationReason": "unsigned_external_verification_required"
+  },
+  "rollback": {
+    "releaseCommit": "2af28696637a524d2a0c44aaac527202b19d7e82",
+    "bundleSha256": "b708ddcf3cc49a20bcb192ea7daf512a9bacc43df5c334d6c30e65c6e1a6659c",
+    "meetingassistImageId": "sha256:8ad7d6c21007268b2983d9bd9cf6ee4694689f927967ab0690fe8c8811be55a6",
+    "renderRunnerImageId": "sha256:2a21c30877743d8171fa6341b9dfb21431205874fe4dfcce468c872d3ec00fce",
+    "retainedAndReadable": true
+  },
+  "operatorCommand": {
+    "name": "stride-w7-w8-successor-read-only",
+    "containerizedCandidateSmoke": "PASS",
+    "readOnly": true,
+    "activationCapable": false,
+    "providerCapable": false,
+    "switchCapable": false,
+    "mutationCallbackPresent": false
+  },
+  "runtime": {
+    "w4Ready": true,
+    "w4SchemaVersion": 2,
+    "w4Generation": 156,
+    "w4EnabledFeatureCount": 6,
+    "w5Configured": false,
+    "w5Installed": false,
+    "w6Configured": false,
+    "w6Installed": false,
+    "w6CohortQualified": false,
+    "publicNetworkActivated": false
+  },
+  "externalBoundary": {
+    "compiledRootSignedFinalW8LineageFixtureAvailable": false,
+    "finalReady": false,
+    "physicalIPhoneAcceptance": false,
+    "physicalIPadAcceptance": false,
+    "privacyAccessibilityAcceptance": false,
+    "restrictiveNetworkAcceptance": false,
+    "offsiteRestoreAcceptance": false,
+    "highAvailabilityAcceptance": false,
+    "soakCompleted": false,
+    "productionActivationAuthorized": false,
+    "remainingState": "external_final_fixture_physical_privacy_network_restore_ha_and_soak_waiting"
+  }
+}
