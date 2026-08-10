@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "eas_store_build_finished_submission_success_apple_beta_state_and_groups_pending",
+  "observedAt": "2026-08-10T13:28:15Z",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "5a3d449d6272474d8fff070184e965571a15864e",
+    "sourceTreeAtBuildClean": true,
+    "buildWorktree": "clean detached temporary worktree at the exact head",
+    "unrelatedExcludedPath": "stride-site/"
+  },
+  "easBuild": {
+    "id": "47877cb2-9e02-4645-936f-de17e065242f",
+    "platform": "IOS",
+    "profile": "production",
+    "distribution": "STORE",
+    "status": "FINISHED",
+    "appVersion": "1.0.0",
+    "buildNumber": "53",
+    "sdkVersion": "57.0.0",
+    "gitCommitHash": "5a3d449d6272474d8fff070184e965571a15864e",
+    "fingerprint": "462f552353b61e79349e14ef17c768be2861d063",
+    "createdAt": "2026-08-10T13:15:27.394Z",
+    "completedAt": "2026-08-10T13:20:41.346Z",
+    "artifactUrl": "https://expo.dev/artifacts/eas/mlX5qqRLKE-EqkYzB1hOGIzzda4g3zGWcRwr7QLxuic.ipa"
+  },
+  "ipa": {
+    "sha256": "7115181df3d024e547eb46927ebc113cefd14c95eec8bea5a0e7accf42e2c91b",
+    "bundleIdentifier": "xyz.thebonfire.app",
+    "shortVersion": "1.0.0",
+    "buildNumber": "53",
+    "minimumOSVersion": "16.4",
+    "deviceFamily": [1, 2]
+  },
+  "easSubmission": {
+    "id": "386ade15-8934-48c2-8fb8-32a4e7726d5d",
+    "status": "FINISHED",
+    "uiDisposition": "Success",
+    "appStoreConnectAppId": "6794029943",
+    "appStoreConnectBuildUploadId": "d99d6cbd-c156-4239-86bd-49c071c6f7d8",
+    "uploadComplete": true
+  },
+  "appleReadback": {
+    "authenticatedPortalAvailable": false,
+    "blocker": "App Store Connect session requires physical passkey approval that was not available in this run",
+    "processingStateVerified": false,
+    "betaReviewStateVerified": false,
+    "internalTestingStateVerified": false,
+    "externalTestingStateVerified": false,
+    "teamExpoGroupVerified": false,
+    "bonfireGroupVerified": false,
+    "latestFullyGroupVerifiedCarrier": "Build 52"
+  },
+  "billingObservation": {
+    "includedBuildAllowanceExceededBy": 54,
+    "existingCurrentBillingPeriodOveragesUSD": 63.0,
+    "classification": "EAS displayed existing pay-as-you-go build overages during this build; no additional provider workflow was authorized by this receipt"
+  },
+  "verification": {
+    "expoBuildReadback": "PASS",
+    "expoSubmissionReadback": "PASS",
+    "ipaMetadataReadback": "PASS",
+    "ipaDigestReadback": "PASS",
+    "selectedFileSha256": {
+      "mobile/app.config.ts": "8e782cedd68d5fbef0d6f84ef44d37cac3bb5b5b35a45b5aae6e3c80442483f3",
+      "mobile/src/screens/LoginScreen.tsx": "0cd1d6af8b2b8fe70db3179c2afbb38240a4e48d2f35ecb5c7ec5122ba16dff6",
+      "mobile/src/screens/loginValidation.ts": "86373f7023615e95c0ee4115c200cf246b5f5a3f37659321a91d96f0aded2888",
+      "mobile/src/__tests__/loginCredentialValidation.test.ts": "2a2a9414e58536159977d772f84f66b71d7db433f5a79b7c696979aea6ebee49"
+    }
+  },
+  "acceptance": {
+    "exactStoreBuildFinished": true,
+    "appleUploadSucceeded": true,
+    "appleProcessingValid": false,
+    "intendedTestFlightGroupsVerified": false,
+    "authenticatedAJAProductFlows": false,
+    "physicalIPhone": false,
+    "physicalIPad": false,
+    "nativeVoiceOver": false,
+    "pushBackgroundLockedRecovery": false,
+    "w7Ready": false
+  },
+  "exclusions": [
+    "A successful EAS submission is not evidence that Apple processing is VALID or that any TestFlight group contains Build 53.",
+    "Build 52 remains the latest carrier independently verified as Apple VALID and assigned to both Team (Expo) and Bonfire.",
+    "No Apple tester was invited, removed, or modified in this run.",
+    "No password, passkey credential, production chat, artifact, Drive file, or network publication was created.",
+    "No simulator or uploaded IPA result is treated as physical-device acceptance.",
+    "No W5, W6, public-network, W7, or W8 switch was enabled."
+  ]
+}

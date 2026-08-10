@@ -33,14 +33,19 @@ the same release verifier before serving.
 The carrier remains `qualified=false` and `externallyAttested=false` because
 independent signing/off-host attestation is still a separate gate.
 
-Native Build 52 is the newest exact mobile carrier. EAS build
-`57806440-454d-41e6-949a-67aee7ef108e` and submission
-`a0324ccd-cda2-439e-acf6-5901044972ca` are `FINISHED` from exact commit
-`c2e6dfed4160ac42775f1f7ca9be90b6801bde53`; Apple build
-`eeb85eea-d721-4021-b01b-51b47896e665` is `VALID`, approved, unexpired, and
-`IN_BETA_TESTING` for internal `Team (Expo)` and external `Bonfire`. Build 49
-and earlier builds remain historical evidence only. No physical iPhone/iPad
-acceptance is proven, and Tyler has no verified tester record.
+Native Build 53 is the newest exact built-and-submitted mobile carrier. EAS
+build `47877cb2-9e02-4645-936f-de17e065242f` is `FINISHED` from exact commit
+`5a3d449d6272474d8fff070184e965571a15864e`; its exact IPA SHA-256 is
+`7115181df3d024e547eb46927ebc113cefd14c95eec8bea5a0e7accf42e2c91b`.
+EAS submission `386ade15-8934-48c2-8fb8-32a4e7726d5d` finished successfully
+and uploaded to App Store Connect app `6794029943`. Apple processing state and
+the intended TestFlight groups are not yet independently verified because the
+current App Store Connect browser session requires physical passkey approval.
+Build 52 remains the newest carrier independently verified as Apple `VALID`,
+approved, unexpired, and `IN_BETA_TESTING` for internal `Team (Expo)` and
+external `Bonfire`. Build 49 and earlier builds remain historical evidence
+only. No physical iPhone/iPad acceptance is proven, and Tyler has no verified
+tester record.
 The integrated Go suite, required ConversationContinuity/AgentMind/proactivity/
 web-scroll race gate, `go vet`, native readiness contract checks, client tests,
 `git diff --check`, and independent critic all passed before release. The later
@@ -490,10 +495,13 @@ billing owner, price/budget, route/corpus, and one-at-a-time authorization.
 `8649f0f09e4a47af9f9859c1be9eb42edd30ca5a0d3871ac9aa862dd6ed60178`,
 with retained rollback `2f8f62d20a47482c12329f1d434c99ccb911eb6f`.
 Public health and readiness return 200 and the retained verifier reports
-`verified-local-unsigned`; external attestation remains false. Build 52 is
-Apple `VALID`, approved, and `IN_BETA_TESTING` for both Team (Expo) and Bonfire.
-This does not authorize native Save activation, a cohort, more provider spend,
-public content, canonical repair, or any W5-W8 activation.
+`verified-local-unsigned`; external attestation remains false. Build 53 is the
+newest exact EAS-finished and Apple-uploaded carrier, but its Apple processing
+state and TestFlight groups remain pending independent readback. Build 52 is
+still the newest carrier verified Apple `VALID`, approved, and
+`IN_BETA_TESTING` for both Team (Expo) and Bonfire. This does not authorize
+native Save activation, a cohort, more provider spend, public content,
+canonical repair, or any W5-W8 activation.
 
 **Post-deploy acceptance queue:** PD1-AJA is materially advanced but incomplete.
 The exact current release re-read the private decision-grade research artifact
@@ -507,8 +515,10 @@ workbook generation preceded the final current release, so the receipt classifie
 them as current-release readback rather than inventing a new run. Private
 Anthropic One-Pager and Packaging Studio
 stopped on exact HTTP 400 `low_credit`; documents, slides, and mixed artifacts
-remain failed/open. Native Build 52 is distributed, but no physical iPhone or
-iPad acceptance exists. Tyler's iPhone 13 Pro on iOS 26.5.2 is compatible, but
+remain failed/open. Native Build 53 is built and uploaded, while its Apple
+processing/group readback and all physical iPhone/iPad acceptance remain open.
+Build 52 remains the latest Apple/group-verified TestFlight carrier. Tyler's
+iPhone 13 Pro on iOS 26.5.2 is compatible, but
 no Tyler tester record is verified; obtain the exact Apple Account email before
 inviting. Native generic Drive Save remains correctly default-off and needs a
 separate activation receipt. No browser, simulator, or source test may replace
@@ -524,6 +534,17 @@ ran, and it does not replace the signed IPA, TestFlight, real iPhone, real iPad,
 VoiceOver, push/background, or locked-recovery cells. Evidence:
 `docs/evidence/e10/stride-e10-w7-ios-simulator-release-20260810.json`, SHA-256
 `298c44eb3349d8e2fe0c8fd922e8741c511fd4972d50743aeb206bb842556962`.
+
+The exact signed Build 53 store carrier was then built from clean commit
+`5a3d449d6272474d8fff070184e965571a15864e`, uploaded successfully through
+EAS to App Store Connect, and verified locally against IPA SHA-256
+`7115181df3d024e547eb46927ebc113cefd14c95eec8bea5a0e7accf42e2c91b`.
+The browser could not complete App Store Connect passkey authentication, so no
+Apple `VALID`, beta-state, or intended-group claim is made for Build 53. The
+EAS build also disclosed 54 builds beyond the included allowance and $63.00 in
+existing current-period overages. Evidence:
+`docs/evidence/e10/stride-e10-w7-ios-build53-upload-20260810.json`, SHA-256
+`1482b59113b5e7a3b6bf09edb5bd1826b50659ec904cb724243c293f35fd0c36`.
 
 **Production/publication queue:** W4 private authority remains on. W5 MyMind,
 W6 publication/search/contact, every PN switch, open-web rendering, pilot data
@@ -778,9 +799,10 @@ complete only at the scope named; local implementation is not release proof.
 - [x] The later Build 52 distribution intentionally includes internal
   `Team (Expo)` and external `Bonfire`; Build 49 group provenance is now only a
   historical observation, not the current distribution decision.
-- [ ] Builds 48/49 were not physically accepted for this program, and Build 52
-  physical acceptance remains open. Preserve the older processing receipts as
-  historical evidence, but run the complete physical matrix on Build 52 containing the new
+- [ ] Builds 48/49/52 were not physically accepted for this program, and Build
+  53 physical acceptance remains open after Apple processing/group readback.
+  Preserve the older processing receipts as historical evidence, but run the
+  complete physical matrix on the latest Apple-verified build containing the new
   organization/Work Record/network behavior, including generated-image Open,
   Save to Drive, and editable Regenerate.
 - [x] Activated the exact reviewed `axx/main` HEAD through
@@ -840,7 +862,8 @@ complete only at the scope named; local implementation is not release proof.
 the next instruction was to request and, only if separately granted, execute
 **E10-W4** against the independently verified W0 freeze and W1-W3 receipts.
 The generation-30 `d4c827c...` private proof and Builds 48/49 are retained only
-as historical evidence; Build 52 is the current exact carrier, and physical-device
+as historical evidence; Build 53 is the newest exact built/uploaded carrier,
+Build 52 is the latest Apple/group-verified carrier, and physical-device
 acceptance is still open. Do not mutate production
 chat merely to prove image analysis or TL;DR sharing; do not begin paid calls,
 canonical repair/promotion, production data/config changes, deployment, or the
@@ -3829,9 +3852,11 @@ only with their separately named product/privacy/custody authority. No further p
 qualification retry, canonical production repair/promotion, production data or
 configuration mutation, Git shipping/deployment, active specialist route,
 repository rename, or cohort activation is authorized by this plan alone.
-Build 52 is the current exact native carrier and is intentionally in internal
-`Team (Expo)` and external `Bonfire`; Tyler enrollment plus physical iPhone and
-iPad acceptance remain open. Build 49, Build 48, and older Build 39/47 notes are historical. Do
+Build 53 is the newest exact native carrier built and uploaded, but its Apple
+processing/group state remains pending readback. Build 52 remains intentionally
+verified in internal `Team (Expo)` and external `Bonfire`; Tyler enrollment plus
+physical iPhone and iPad acceptance remain open. Build 49, Build 48, and older
+Build 39/47 notes are historical. Do
 not claim provider-quality, restore, physical-device, HA, MyMind,
 or multi-organization acceptance without its separate evidence.
 
