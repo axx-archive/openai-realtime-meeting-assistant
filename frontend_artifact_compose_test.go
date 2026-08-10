@@ -59,3 +59,21 @@ func TestArtifactComposeHeroAndSectionGuards(t *testing.T) {
 		t.Error("renderArtifactRead must build the title-echo set from artifactStageTitle/artifactDisplayTitle")
 	}
 }
+
+func TestResearchCompleteStageSkipsEmptyStructuralSections(t *testing.T) {
+	html := readIndexForArtifactCompose(t)
+	body := functionBodyAfterSignature(html, "function researchCompleteStage(entry, options = {})")
+	if body == "" {
+		t.Fatal("could not extract researchCompleteStage body")
+	}
+
+	if !strings.Contains(body, "const visibleSections = sections.filter(section => String(section?.body || '').trim())") {
+		t.Error("researchCompleteStage must remove empty structural sections before rendering")
+	}
+	if !strings.Contains(body, "for (const section of visibleSections) {") {
+		t.Error("researchCompleteStage must render only non-empty report sections")
+	}
+	if !strings.Contains(body, "if (!objective && !visibleSections.length) {") {
+		t.Error("researchCompleteStage fallback must use the filtered section collection")
+	}
+}

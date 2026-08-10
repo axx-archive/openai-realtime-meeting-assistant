@@ -39599,6 +39599,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const error = Boolean(options.error)
         const title = artifactDisplayTitle(entry)
         const { objective, sections } = researchArtifactSections(entry)
+        const visibleSections = sections.filter(section => String(section?.body || '').trim())
         const sources = researchArtifactSources(entry)
 
         const wrap = document.createElement('div')
@@ -39665,10 +39666,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
         if (objective) {
           main.appendChild(researchSection('Objective', objective))
         }
-        for (const section of sections) {
+        for (const section of visibleSections) {
           main.appendChild(researchSection(section.h, section.body))
         }
-        if (!objective && !sections.length) {
+        if (!objective && !visibleSections.length) {
           main.appendChild(researchSection('Brief', String(entry?.text || '')))
         }
         cols.appendChild(main)
