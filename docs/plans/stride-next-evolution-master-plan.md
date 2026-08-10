@@ -495,17 +495,24 @@ validator semantics. It does require successor design/render/device/activation
 evidence wherever the public-network or unified-platform claim is new.
 
 Reconciliation parent revision is `31a5792` (the fail-closed W5-W8 operator
-carrier); the critic-passed plan and carrier shipped together as exact commit
-`84bc0cc6b99ea89dcc0cbdcad00c3d06d4dd3cb0`. Unrelated `stride-site/` remains
-untracked and excluded. At 2026-08-09 current production is that exact commit,
-bundle `9ebd486f38cce682a56647afb444d79803e09399affc4dc7a7ca9fc08f010e40`,
-ledger generation 44, W4 schema 2 generation 106 and ready, W5 configured/installed false, W6
-configured/installed/qualified false, and all W5/W6/public switches off.
-The body-minimized release observation is
+carrier); the critic-passed plan and carrier first shipped together as exact
+commit `84bc0cc6b99ea89dcc0cbdcad00c3d06d4dd3cb0`. Unrelated `stride-site/`
+remains untracked and excluded. At the 2026-08-09 20:44 PDT refresh, current
+production is exact commit `8781d6cbcee567c1f36f488d1a6447587fdcba9b`,
+bundle `5de3fc8b7a20f3d404eac3cf43700dcd20a3718cf0bb366c0fb6fee27d76bfef`,
+ledger generation 50, with retained rollback commit
+`5cd428598994cafaa226b1612f706200f02beb90`. W4 is ready at schema 2,
+generation 135, with the exact six private features enabled; W5 remains
+configured/installed false; W6 remains configured/installed/qualified false;
+and all W5/W6/public switches remain off. The exact release verifier returned
+`verified-local-unsigned`; independent external attestation remains false.
+The prior body-minimized generation-44 release observation remains
 `docs/evidence/e10/stride-e10-w5-w8-operator-live-20260809.json`, SHA-256
 `bc758fc7802db6a2d4a8f82342d0d9208ee96a5e3892f5cfa60792837eae7d7b`.
-Canonical shadow remains non-authoritative/unhealthy at 29,488 versus 8,532;
-backup is local with offsite `dormant`. The reconciliation independent critic
+Canonical shadow remains non-authoritative/unhealthy at 29,996 versus 8,532
+with 119 repair candidates; the latest local backup is healthy with ring count
+seven, while offsite remains `dormant` and external restore acceptance remains
+open. The reconciliation independent critic
 PASS is recorded below. The first safe-local PD0/PI0-A contract checkpoint is
 `docs/evidence/e10/stride-e10-pd0-pi0-contracts-20260809.json`, SHA-256
 `d966d745b801b7b537451cbc91e8f3ee49cd9b0a166b48e678a3e769ea83a680`.
@@ -513,10 +520,14 @@ Its independently reviewed contract set includes the 28-row three-platform
 audit, primary-source product thesis/IA, governed tokens/domain components,
 J1-J13 platform and PN/default-off flows, reproducible performance protocol,
 and body-minimized PI0-A trace/privacy/metric/compound-recovery contract. This
-is not rendered/device acceptance or instrumentation implementation. The next
-ready actions are the executable PD0 fixture/interaction harness and PI0-A
-schema/journal/synthetic baseline implementation in parallel. No production
-mutation, user-data collection, or public activation is the next action.
+is not native/device acceptance or production instrumentation. The bounded PD0
+browser harness and PI0-A carrier/state-machine implementation now exist
+locally and pass their focused gates, but remain untracked and cannot count as
+accepted implementation until their exact bytes receive fresh independent
+critics and body-minimized receipts. Those reviews, followed by the frozen
+PI0-A baseline and the remaining PD0 rendered/native/device evidence, are the
+next safe actions before PN1. No production user-data collection or public
+activation is the next action.
 
 #### Reconciliation Critic Loop — PASS
 
