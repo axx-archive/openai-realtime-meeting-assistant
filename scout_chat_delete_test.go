@@ -534,6 +534,251 @@ func TestScoutChatAdminModerationRuntimeUnavailableLeavesSourceIntact(t *testing
 	}
 }
 
+func invalidateSTRIDERegistryWithAuthenticatedEnvelopeForTest(t *testing.T, config STRIDERuntimeConfig) {
+	t.Helper()
+	envelope, err := readSTRIDERuntimeSnapshot(config.SnapshotPath)
+	if err != nil {
+		t.Fatalf("read STRIDE snapshot: %v", err)
+	}
+	envelope.Payload.Registry.Digest = strings.Repeat("0", 64)
+	envelope.Digest, err = STRIDEContractDigest(envelope.Payload)
+	if err != nil {
+		t.Fatalf("digest invalid-registry snapshot: %v", err)
+	}
+	envelope.Signature, err = strideSnapshotMAC(config.Authority, strideRuntimeSnapshotDomain, envelope.Payload.Generation, envelope.Digest)
+	if err != nil {
+		t.Fatalf("sign invalid-registry snapshot: %v", err)
+	}
+	rawEnvelope, err := canonicalJSON(envelope)
+	if err != nil {
+		t.Fatalf("write invalid-registry snapshot: %v", err)
+	}
+	if err := writeFileAtomicallyDurable(config.SnapshotPath, append(rawEnvelope, '\n'), 0o600); err != nil {
+		t.Fatalf("write invalid-registry snapshot: %v", err)
+	}
+	generation, err := readSTRIDERuntimeGeneration(config.GenerationPath)
+	if err != nil {
+		t.Fatalf("read STRIDE generation: %v", err)
+	}
+	generation.Payload.SnapshotDigest = envelope.Digest
+	generation.Digest, err = STRIDEContractDigest(generation.Payload)
+	if err != nil {
+		t.Fatalf("digest invalid-registry generation: %v", err)
+	}
+	generation.Signature, err = strideSnapshotMAC(config.Authority, strideRuntimeGenerationDomain, generation.Payload.Generation, generation.Digest)
+	if err != nil {
+		t.Fatalf("sign invalid-registry generation: %v", err)
+	}
+	rawGeneration, err := canonicalJSON(generation)
+	if err != nil {
+		t.Fatalf("write invalid-registry generation: %v", err)
+	}
+	if err := writeFileAtomicallyDurable(config.GenerationPath, append(rawGeneration, '\n'), 0o600); err != nil {
+		t.Fatalf("write invalid-registry generation: %v", err)
+	}
+}
+
+func TestScoutChatAdminSupersessionCompletesFromAuthenticatedConversationAbsence(t *testing.T) {
+	setupAuthTestEnv(t)
+	_ = loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	channel, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Bonfire Chat", "public")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	runtimeConfig := strideIntegratedRuntimeConfig(t.TempDir())
+	healthyRuntime, err := NewSTRIDERuntime(runtimeConfig)
+	if err != nil {
+		t.Fatalf("create initial STRIDE runtime: %v", err)
+	}
+	if err := healthyRuntime.Save(); err != nil {
+		t.Fatalf("persist initial STRIDE runtime: %v", err)
+	}
+	if err := healthyRuntime.Close(); err != nil {
+		t.Fatalf("close initial STRIDE runtime: %v", err)
+	}
+	invalidateSTRIDERegistryWithAuthenticatedEnvelopeForTest(t, runtimeConfig)
+	degradedRuntime, err := NewSTRIDERuntime(runtimeConfig)
+	if err == nil || degradedRuntime.Health().State != STRIDERuntimeUnavailable {
+		t.Fatalf("invalid registry runtime state=%s err=%v, want unavailable", degradedRuntime.Health().State, err)
+	}
+	kanbanApp.strideRuntime = degradedRuntime
+	admin := accountStore().findUser("aj@shareability.com")
+	metadata := func(threadID, status string) map[string]string {
+		return map[string]string{
+			"threadId": threadID, "mode": "research", "status": status, "threadStatus": status,
+			"originKind": agentThreadOriginChannel, "originId": channel.ID, "requestedBy": admin.Email,
+		}
+	}
+	targetMetadata := metadata("disabled-target-run", "error")
+	targetMetadata["currentStage"] = "gate_before_shipping"
+	targetMetadata["reviewGate"] = "blocked"
+	targetMetadata["progressPercent"] = "72"
+	targetMetadata["error"] = "max_output_truncation"
+	replacementMetadata := metadata("disabled-replacement-run", "complete")
+	replacementMetadata["currentStage"] = "verify_goal_completed"
+	replacementMetadata["reviewGate"] = "passed"
+	replacementMetadata["progressPercent"] = "100"
+	if _, _, err := kanbanApp.memory.appendOSArtifact("disabled-target-artifact", "failed result", targetMetadata); err != nil {
+		t.Fatalf("append target artifact: %v", err)
+	}
+	if _, _, err := kanbanApp.memory.appendOSArtifact("disabled-replacement-artifact", "verified report", replacementMetadata); err != nil {
+		t.Fatalf("append replacement artifact: %v", err)
+	}
+	if _, err := kanbanApp.commitScoutChatThreadMessages(admin.Email, channel.ID,
+		scoutChatMessageRecord{ID: "disabled-target-work", Kind: "thread", Role: "scout", CreatedAt: time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano), Thread: &scoutChatThreadRef{ID: "disabled-target-run", Mode: "research", Status: "error", ArtifactID: "disabled-target-artifact"}},
+		scoutChatMessageRecord{ID: "disabled-replacement-work", Kind: "thread", Role: "scout", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Thread: &scoutChatThreadRef{ID: "disabled-replacement-run", Mode: "research", Status: "complete", ArtifactID: "disabled-replacement-artifact"}},
+	); err != nil {
+		t.Fatalf("seed work cards: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+channel.ID+"/messages/disabled-target-work/supersede", strings.NewReader(`{"replacementMessageId":"disabled-replacement-work","reason":"superseded by verified replacement"}`))
+	request.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginAs(t, admin.Email, "B0NFIRE!") {
+		request.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+	assistantChatThreadHandler(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("authenticated-absence supersession route status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		OK      bool                           `json:"ok"`
+		Receipt scoutChatModerationReceiptView `json:"receipt"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil || !response.OK || response.Receipt.ProjectionState != scoutChatModerationComplete {
+		t.Fatalf("authenticated-absence supersession response=%+v err=%v", response, err)
+	}
+	thread, _, err := kanbanApp.scoutChatThreadByID(admin.Email, channel.ID)
+	if err != nil {
+		t.Fatalf("read superseded thread: %v", err)
+	}
+	if scoutChatMessageIndex(thread, "disabled-target-work") >= 0 || scoutChatMessageIndex(thread, "disabled-replacement-work") < 0 || len(thread.ModerationReceipts) != 1 || thread.ModerationReceipts[0].ProjectionState != scoutChatModerationComplete {
+		t.Fatalf("authenticated-absence supersession thread=%+v", thread)
+	}
+	if _, ok := kanbanApp.osArtifactByID("disabled-target-artifact"); !ok {
+		t.Fatal("target artifact was removed")
+	}
+	if _, ok := kanbanApp.osArtifactByID("disabled-replacement-artifact"); !ok {
+		t.Fatal("replacement artifact was removed")
+	}
+	if event, found, err := kanbanApp.latestSTRIDETeamChatEvent(channel.ID, "disabled-target-work"); err != nil || found || event.SourceID != "" {
+		t.Fatalf("disabled projection falsely produced canonical event=%+v found=%v err=%v", event, found, err)
+	}
+}
+
+func TestScoutChatAuthenticatedConversationProofDoesNotHideProjectedSource(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	channel, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Bonfire Chat", "public")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	config := strideIntegratedRuntimeConfig(t.TempDir())
+	config.RecallThreadIDs = []string{channel.ID}
+	runtime, err := NewSTRIDERuntime(config)
+	if err != nil {
+		t.Fatalf("create enabled runtime: %v", err)
+	}
+	kanbanApp.strideRuntime = runtime
+	message := scoutChatMessageRecord{ID: "projected-source", Kind: "message", Role: "user", Text: "projected", AuthorEmail: "aj@shareability.com", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	if err := runtime.WithTenantDomains(canonicalTenantID(), func(domains STRIDERuntimeDomains) error {
+		appendRecord := strideConversationAppend("event_projected_source", message.ID, "message", 1, STRIDEAudience{Visibility: "channel", Principals: []string{"member_aj"}})
+		appendRecord.Event.Header.TenantID = canonicalTenantID()
+		appendRecord.Event.ThreadID = channel.ID
+		_, appendErr := domains.ConversationLedger.Append(appendRecord)
+		return appendErr
+	}); err != nil {
+		t.Fatalf("append projected source: %v", err)
+	}
+	if err := runtime.Save(); err != nil {
+		t.Fatalf("persist projected source: %v", err)
+	}
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("close enabled runtime: %v", err)
+	}
+	invalidateSTRIDERegistryWithAuthenticatedEnvelopeForTest(t, config)
+	degradedRuntime, err := NewSTRIDERuntime(config)
+	if err == nil || degradedRuntime.Health().State != STRIDERuntimeUnavailable {
+		t.Fatalf("invalid registry runtime state=%s err=%v, want unavailable", degradedRuntime.Health().State, err)
+	}
+	kanbanApp.strideRuntime = degradedRuntime
+	latest, found, err := kanbanApp.latestSTRIDETeamChatEvent(channel.ID, message.ID)
+	if err != nil || !found || latest.SourceID != message.ID || latest.EventType == "delete" {
+		t.Fatalf("authenticated projected source latest=%+v found=%v err=%v", latest, found, err)
+	}
+}
+
+func TestScoutChatLegacyProjectionAbsenceProofRejectsRestoredAndUnavailableRuntime(t *testing.T) {
+	dir := t.TempDir()
+	config := strideIntegratedRuntimeConfig(dir)
+	runtime, err := NewSTRIDERuntime(config)
+	if err != nil {
+		t.Fatalf("create enabled runtime: %v", err)
+	}
+	if err := runtime.Save(); err != nil {
+		t.Fatalf("persist enabled runtime: %v", err)
+	}
+	if runtime.legacyTeamChatProjectionProvablyAbsent() {
+		t.Fatal("enabled runtime falsely proved projection absence")
+	}
+	runtime.config.Enabled = false
+	if runtime.legacyTeamChatProjectionProvablyAbsent() {
+		t.Fatal("mutated enabled bit falsely proved projection absence")
+	}
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("close enabled runtime: %v", err)
+	}
+	restoredRuntime, err := NewSTRIDERuntime(config)
+	if err != nil {
+		t.Fatalf("restore healthy runtime: %v", err)
+	}
+	if err := restoredRuntime.WithTenantDomains(canonicalTenantID(), func(domains STRIDERuntimeDomains) error {
+		appendRecord := strideConversationAppend("event_after_restore", "source_after_restore", "message", 1, STRIDEAudience{Visibility: "channel", Principals: []string{"member_aj"}})
+		appendRecord.Event.Header.TenantID = canonicalTenantID()
+		appendRecord.Event.ThreadID = "thread_after_restore"
+		_, appendErr := domains.ConversationLedger.Append(appendRecord)
+		return appendErr
+	}); err != nil {
+		t.Fatalf("append after healthy restore: %v", err)
+	}
+	restoredRuntime.mu.Lock()
+	restoredRuntime.failClosedLocked(errors.New("forced post-restore failure"))
+	restoredRuntime.mu.Unlock()
+	app := &kanbanBoardApp{strideRuntime: restoredRuntime}
+	if _, _, err := app.latestSTRIDETeamChatEvent("thread_after_restore", "source_after_restore"); !errors.Is(err, ErrSTRIDERuntimeUnavailable) {
+		t.Fatalf("post-restore unavailable runtime err=%v, want unavailable rather than stale absence", err)
+	}
+
+	disabledConfig := config
+	disabledConfig.Enabled = false
+	restoredFilesPresent, err := NewSTRIDERuntime(disabledConfig)
+	if err != nil {
+		t.Fatalf("create disabled runtime over restored files: %v", err)
+	}
+	if restoredFilesPresent.legacyTeamChatProjectionProvablyAbsent() {
+		t.Fatal("disabled runtime over durable history falsely proved projection absence")
+	}
+	app = &kanbanBoardApp{strideRuntime: restoredFilesPresent}
+	if _, _, err := app.latestSTRIDETeamChatEvent("thread", "message"); !errors.Is(err, ErrSTRIDERuntimeUnavailable) {
+		t.Fatalf("disabled runtime with history err=%v, want unavailable", err)
+	}
+
+	unavailable := &STRIDERuntime{config: disabledConfig, state: STRIDERuntimeUnavailable}
+	if unavailable.legacyTeamChatProjectionProvablyAbsent() {
+		t.Fatal("unavailable runtime falsely proved projection absence")
+	}
+	app.strideRuntime = unavailable
+	if _, _, err := app.latestSTRIDETeamChatEvent("thread", "message"); !errors.Is(err, ErrSTRIDERuntimeUnavailable) {
+		t.Fatalf("unavailable runtime err=%v, want unavailable", err)
+	}
+}
+
 func TestScoutChatAdminModerationHumanRetryOutboxSurvivesSaveFailureResponseLossAndRestart(t *testing.T) {
 	setupAuthTestEnv(t)
 	_ = loginAs(t, "aj@shareability.com", "B0NFIRE!")

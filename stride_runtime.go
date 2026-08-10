@@ -162,16 +162,18 @@ type strideRuntimeTenantState struct {
 }
 
 type STRIDERuntime struct {
-	mu              sync.Mutex
-	config          STRIDERuntimeConfig
-	state           STRIDERuntimeState
-	domains         *strideRuntimeTenantState
-	generation      uint64
-	restored        bool
-	lastPersistedAt time.Time
-	healthErr       error
-	closeOnce       sync.Once
-	closeErr        error
+	mu                               sync.Mutex
+	config                           STRIDERuntimeConfig
+	state                            STRIDERuntimeState
+	domains                          *strideRuntimeTenantState
+	generation                       uint64
+	restored                         bool
+	legacyProjectionNeverInitialized bool
+	legacyConversationProof          *STRIDEConversationLedger
+	lastPersistedAt                  time.Time
+	healthErr                        error
+	closeOnce                        sync.Once
+	closeErr                         error
 
 	// meetingSpecialistObserver is runtime-only. Durable Product/Workforce
 	// state remains the authority; the callback merely makes revocation of an
@@ -187,6 +189,9 @@ func NewSTRIDERuntime(config STRIDERuntimeConfig) (*STRIDERuntime, error) {
 	config.RecallThreadIDs = append([]string(nil), config.RecallThreadIDs...)
 	runtime := &STRIDERuntime{config: config, state: STRIDERuntimeDisabled}
 	if !config.Enabled {
+		snapshotExists, snapshotErr := strideRuntimeFileExists(config.SnapshotPath)
+		generationExists, generationErr := strideRuntimeFileExists(config.GenerationPath)
+		runtime.legacyProjectionNeverInitialized = snapshotErr == nil && generationErr == nil && !snapshotExists && !generationExists
 		return runtime, nil
 	}
 	if err := validateSTRIDERuntimeConfig(config); err != nil {
@@ -240,8 +245,18 @@ func NewSTRIDERuntime(config STRIDERuntimeConfig) (*STRIDERuntime, error) {
 		runtime.failClosedLocked(err)
 		return runtime, err
 	}
+	// Preserve a separately validated, authenticated conversation subset even
+	// when a later unrelated domain (for example an obsolete registry entry)
+	// makes the compound legacy runtime unavailable. The subset is read-only and
+	// can prove only exact absence or an already-recorded delete; it never grants
+	// authority to append while the compound runtime is unavailable.
+	conversationProof, _ := RestoreSTRIDEConversationLedger(STRIDEConversationLedgerConfig{RecallThreadIDs: config.RecallThreadIDs}, envelope.Payload.Conversation)
 	domains, err := restoreSTRIDERuntimeTenantState(config, envelope.Payload)
 	if err != nil {
+		// This proof exists only for an authenticated constructor failure before
+		// the runtime can enter standby or accept a post-restore mutation. A
+		// healthy runtime never retains a stale startup copy.
+		runtime.legacyConversationProof = conversationProof
 		runtime.failClosedLocked(err)
 		return runtime, err
 	}
@@ -251,6 +266,42 @@ func NewSTRIDERuntime(config STRIDERuntimeConfig) (*STRIDERuntime, error) {
 	runtime.lastPersistedAt = envelope.Payload.CreatedAt.UTC()
 	runtime.state = STRIDERuntimeStandby
 	return runtime, nil
+}
+
+func (runtime *STRIDERuntime) legacyTeamChatProjectionProvablyAbsent() bool {
+	if runtime == nil {
+		return false
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	return runtime.legacyProjectionNeverInitialized && runtime.state == STRIDERuntimeDisabled && runtime.domains == nil && runtime.generation == 0 && !runtime.restored
+}
+
+func (runtime *STRIDERuntime) authenticatedLegacyTeamChatEvent(threadID, messageID string) (ConversationEvent, bool, bool) {
+	if runtime == nil || strings.TrimSpace(threadID) == "" || strings.TrimSpace(messageID) == "" {
+		return ConversationEvent{}, false, false
+	}
+	runtime.mu.Lock()
+	proof := runtime.legacyConversationProof
+	tenantID := runtime.config.TenantID
+	runtime.mu.Unlock()
+	if proof == nil {
+		return ConversationEvent{}, false, false
+	}
+	snapshot, err := proof.Snapshot()
+	if err != nil {
+		return ConversationEvent{}, false, false
+	}
+	var latest ConversationEvent
+	var sequence uint64
+	found := false
+	for _, record := range snapshot.Events {
+		event := record.Append.Event
+		if event.Header.TenantID == tenantID && event.SourceType == "channel_message" && event.ThreadID == threadID && event.SourceID == messageID && (!found || record.Sequence > sequence) {
+			latest, sequence, found = event, record.Sequence, true
+		}
+	}
+	return latest, found, true
 }
 
 func validateSTRIDERuntimeConfig(config STRIDERuntimeConfig) error {

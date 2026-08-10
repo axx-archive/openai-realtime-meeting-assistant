@@ -211,7 +211,19 @@ func (app *kanbanBoardApp) projectSTRIDETeamChatMessageWithStructuredRefs(thread
 }
 
 func (app *kanbanBoardApp) latestSTRIDETeamChatEvent(threadID string, messageID string) (ConversationEvent, bool, error) {
-	if app == nil || app.strideRuntime == nil || app.strideRuntime.Health().State != STRIDERuntimeStandby {
+	if app != nil && app.strideRuntime.legacyTeamChatProjectionProvablyAbsent() {
+		// A constructor-verified disabled runtime with no snapshot or generation
+		// files has never admitted a canonical chat event. The durable, body-free
+		// chat moderation receipt is therefore the complete audit record.
+		return ConversationEvent{}, false, nil
+	}
+	if app == nil || app.strideRuntime == nil {
+		return ConversationEvent{}, false, ErrSTRIDERuntimeUnavailable
+	}
+	if app.strideRuntime.Health().State != STRIDERuntimeStandby {
+		if latest, found, authenticated := app.strideRuntime.authenticatedLegacyTeamChatEvent(threadID, messageID); authenticated {
+			return latest, found, nil
+		}
 		return ConversationEvent{}, false, ErrSTRIDERuntimeUnavailable
 	}
 	var latest ConversationEvent
@@ -277,12 +289,25 @@ func (app *kanbanBoardApp) retractSTRIDETeamChatModeration(thread scoutChatThrea
 	if err != nil {
 		return err
 	}
+	if app != nil && app.strideRuntime.legacyTeamChatProjectionProvablyAbsent() {
+		// No projection exists to retract when the legacy runtime is explicitly
+		// disabled. The exact local moderation receipt remains durable in the
+		// chat record and is sufficient proof of the projection-only removal.
+		return nil
+	}
 	latest, found, err := app.latestSTRIDETeamChatEvent(thread.ID, receipt.MessageID)
 	if err != nil {
 		return err
 	}
+	standby := app.strideRuntime != nil && app.strideRuntime.Health().State == STRIDERuntimeStandby
 	if !found || latest.EventType == "delete" && strideConversationEventHasReference(latest, ref) {
+		if !standby {
+			return nil
+		}
 		return app.strideRuntime.Save()
+	}
+	if !standby {
+		return ErrSTRIDERuntimeUnavailable
 	}
 	if receipt.TargetEventID != "" && (latest.Header.ID != receipt.TargetEventID || latest.ContentRevision != receipt.TargetEventRevision) {
 		return ErrSTRIDEConversationConflict
