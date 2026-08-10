@@ -45,7 +45,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // save-only Drive capability. Save remains independently default-off
       // until its exact activation receipt is installed.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '52',
+      buildNumber: '53',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',
