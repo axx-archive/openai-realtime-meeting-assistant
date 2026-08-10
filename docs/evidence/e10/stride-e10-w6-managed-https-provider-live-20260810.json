@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_w6_managed_https_provider_live_release",
+  "independentAuditCompletedAt": "2026-08-10T12:37:00Z",
+  "status": "compiled_client_deployed_default_off_external_service_and_qualification_waiting",
+  "release": {
+    "commit": "261aced8c7491b4b7a2ab5416a00838e3c43ae18",
+    "ledgerGeneration": 58,
+    "bundleSha256": "8649f0f09e4a47af9f9859c1be9eb42edd30ca5a0d3871ac9aa862dd6ed60178",
+    "applicationImageId": "sha256:89c53b8fe55950ae92a336371f64cf70c5fabf8e8d6675da9eb66dc64372f465",
+    "renderRunnerImageId": "sha256:b943c4d245dbbe965eaba65d804d96db9da065984b4c4eb1d73c2f06c75b1e55",
+    "healthHTTPStatus": 200,
+    "readyHTTPStatus": 200,
+    "retainedVerifierDisposition": "verified-local-unsigned",
+    "processQualified": true,
+    "qualified": false,
+    "externallyAttested": false
+  },
+  "rollback": {
+    "commit": "2f8f62d20a47482c12329f1d434c99ccb911eb6f",
+    "bundleSha256": "99a93ab20aaf282ad13be0f320fa648eeeefcb66697c9095416af6fd2353f79a",
+    "applicationImageId": "sha256:2ce30c7c2dd08720dc06357cfee9955906e977df8d3d82c0465a156f80c62acd",
+    "renderRunnerImageId": "sha256:c1570dd95cd10d796108baf18324b3cbc6ad868958051e977f22c6eab7c7cc1f",
+    "releaseReceiptReadable": true,
+    "imagesReadable": true
+  },
+  "runtime": {
+    "w4Ready": true,
+    "w4Mode": "bonfire_network_live",
+    "w4SchemaVersion": 2,
+    "w4Generation": 157,
+    "w4EnabledFeatures": [
+      "active_organization_session",
+      "contribution_review",
+      "organization_authority_read",
+      "organization_authority_write",
+      "person_profile_authority",
+      "work_record_private"
+    ],
+    "w5Configured": false,
+    "w5Installed": false,
+    "w6Configured": false,
+    "w6Installed": false,
+    "w6Ready": false,
+    "w6CohortQualified": false,
+    "w6CanonicalBound": false,
+    "w6QueryParserProviderEnabled": false,
+    "w6SemanticRerankerEnabled": false,
+    "w6PurgeQueued": 0,
+    "w6PurgeRunning": 0,
+    "w6PurgeFailed": 0,
+    "w6PurgeCompleted": 0,
+    "w5W6ManagedEnvironmentPresent": false,
+    "publicNetworkSwitchesEnabled": false,
+    "managedServiceConfigured": false,
+    "managedKeysInstalled": false,
+    "realCohortActivated": false
+  },
+  "knownOpenGates": {
+    "canonicalShadowHealthy": false,
+    "canonicalShadowRequired": false,
+    "externalAttestationPresent": false,
+    "offsiteBackupActive": false,
+    "restoreVerified": false,
+    "productionManagedServiceInstalled": false,
+    "realFiveProfileTwoReviewerQualification": false,
+    "legalPrivacyProductApproval": false,
+    "publicationSearchContactActivated": false
+  },
+  "verification": {
+    "independentCritic": {
+      "identity": "/root/w0_live_evidence",
+      "result": "PASS",
+      "evidence": "ledger_receipt_running_images_health_ready_verifier_rollback_W4_W5_W6_switches_environment_canonical_backup_external_attestation_read_only"
+    },
+    "productionDataMutationPerformed": false,
+    "featureActivationPerformed": false,
+    "serviceOrKeyConfigurationPerformed": false
+  }
+}
