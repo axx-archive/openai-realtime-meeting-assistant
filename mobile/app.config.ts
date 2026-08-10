@@ -40,11 +40,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and remain the fallback if this bundle is ever rejected.
       // Regenerate both with `npm run brand:regen` from the repo root.
       icon: './assets/Stride.icon',
-      // Build 50 opens an already-authorized Scout deliverable without making
-      // a second, disposition-gated mutation. Save remains separately gated.
-      // It also retains the generated-image topology and recovery fixes.
+      // Build 51 keeps Open read-only, makes Scout research progress and
+      // recovery explicit, and retains the generated-image topology fixes.
+      // Save remains a separately disposition-gated mutation.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '50',
+      buildNumber: '51',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',
