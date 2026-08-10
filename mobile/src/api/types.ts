@@ -113,6 +113,7 @@ export type ScoutWorkThreadRef = {
   progressPercent?: number;
   progressNote?: string;
   followUpStatus?: string;
+  attentionReason?: 'output_truncated' | 'quality_gate_failed' | 'provider_unavailable' | 'work_failed';
   startedAt?: string;
   resultTitle?: string;
   resultPreview?: string;

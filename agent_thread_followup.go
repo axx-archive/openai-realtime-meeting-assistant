@@ -523,7 +523,7 @@ func (app *kanbanBoardApp) runAgentThreadFollowUpWithResponderAuthorized(run age
 				Input:           run.input,
 				ReasoningEffort: agentThreadTextReasoningEffort(run.thread),
 				Verbosity:       "medium",
-				MaxOutputTokens: agentThreadMaxOutputTokens(),
+				MaxOutputTokens: agentThreadMaxOutputTokensForThread(run.thread),
 				EnableWebSearch: liveWebSearch,
 				ValidateOutput: func(text string) error {
 					return validateAgentThreadTerminalArtifact(run.thread, text)

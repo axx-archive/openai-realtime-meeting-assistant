@@ -173,7 +173,24 @@ type scoutChatThreadRef struct {
 	ProgressPercent float64 `json:"progressPercent,omitempty"`
 	ProgressNote    string  `json:"progressNote,omitempty"`
 	FollowUpStatus  string  `json:"followUpStatus,omitempty"`
+	AttentionReason string  `json:"attentionReason,omitempty"`
 	StartedAt       string  `json:"startedAt,omitempty"`
+}
+
+func scoutChatThreadAttentionReason(metadata map[string]string) string {
+	value := strings.ToLower(strings.TrimSpace(metadata["error"]))
+	switch {
+	case strings.Contains(value, "max_output_truncation"):
+		return "output_truncated"
+	case strings.Contains(value, "output_validation_error"):
+		return "quality_gate_failed"
+	case strings.Contains(value, "transport_error"), strings.Contains(value, "timeout"), strings.Contains(value, "unavailable"):
+		return "provider_unavailable"
+	case value != "":
+		return "work_failed"
+	default:
+		return ""
+	}
 }
 
 func agentThreadGoalSpecForProfile(profile STRIDEProductAgentContextProfile, delegatedBy string) agentThreadGoalSpec {
@@ -266,7 +283,7 @@ func scoutChatThreadRefForAgent(thread scoutAgentThread, profile STRIDEProductAg
 		ID: thread.ID, Mode: thread.Mode, Query: thread.Query, Status: thread.Status, ArtifactID: thread.Artifact.ID,
 		AgentID: profile.AgentID, AgentName: profile.DisplayName, DelegatedBy: strings.TrimSpace(delegatedBy),
 		CurrentStage: thread.Artifact.Metadata["currentStage"], ProgressPercent: progress,
-		ProgressNote: thread.Artifact.Metadata["progressNote"], StartedAt: thread.Artifact.Metadata["startedAt"],
+		ProgressNote: thread.Artifact.Metadata["progressNote"], AttentionReason: scoutChatThreadAttentionReason(thread.Artifact.Metadata), StartedAt: thread.Artifact.Metadata["startedAt"],
 	}
 }
 
@@ -2720,6 +2737,7 @@ func (app *kanbanBoardApp) commitScoutChatThreadRefStatus(threadID string, owner
 			ref.CurrentStage = artifact.Metadata["currentStage"]
 			ref.ProgressNote = artifact.Metadata["progressNote"]
 			ref.FollowUpStatus = artifact.Metadata["followUpStatus"]
+			ref.AttentionReason = scoutChatThreadAttentionReason(artifact.Metadata)
 			ref.StartedAt = firstNonBlank(artifact.Metadata["startedAt"], ref.StartedAt)
 			if progress, parseErr := strconv.ParseFloat(strings.TrimSpace(artifact.Metadata["progressPercent"]), 64); parseErr == nil {
 				ref.ProgressPercent = progress

@@ -1409,7 +1409,7 @@ func (app *kanbanBoardApp) produceAgentThreadArtifactForJob(ctx context.Context,
 		Input:           buildAgentThreadInput(thread, job.Context.Board, job.Context.Memory, time.Now()),
 		ReasoningEffort: agentThreadTextReasoningEffort(thread),
 		Verbosity:       "medium",
-		MaxOutputTokens: agentThreadMaxOutputTokens(),
+		MaxOutputTokens: agentThreadMaxOutputTokensForThread(thread),
 		EnableWebSearch: liveWebSearch,
 		ValidateOutput: func(text string) error {
 			return validateAgentThreadTerminalArtifact(thread, text)
@@ -1466,7 +1466,10 @@ func agentThreadUsesLiveWebSearch(thread scoutAgentThread) bool {
 	return normalizeAgentThreadMode(thread.Mode) == "research" || strings.EqualFold(strings.TrimSpace(thread.Artifact.Metadata["toolTemplate"]), "deep_research")
 }
 
-const defaultAgentThreadMaxOutputTokens = 8000
+const (
+	defaultAgentThreadMaxOutputTokens         = 8000
+	defaultResearchAgentThreadMaxOutputTokens = 24000
+)
 
 func agentThreadMaxOutputTokens() int {
 	value := positiveIntEnv("BONFIRE_AGENT_THREAD_MAX_OUTPUT_TOKENS", defaultAgentThreadMaxOutputTokens)
@@ -1475,6 +1478,20 @@ func agentThreadMaxOutputTokens() int {
 	}
 	if value > 12000 {
 		return 12000
+	}
+	return value
+}
+
+func agentThreadMaxOutputTokensForThread(thread scoutAgentThread) int {
+	if !agentThreadUsesLiveWebSearch(thread) {
+		return agentThreadMaxOutputTokens()
+	}
+	value := positiveIntEnv("BONFIRE_RESEARCH_MAX_OUTPUT_TOKENS", defaultResearchAgentThreadMaxOutputTokens)
+	if value < 12000 {
+		return 12000
+	}
+	if value > 32000 {
+		return 32000
 	}
 	return value
 }

@@ -162,8 +162,8 @@ func TestAgentThreadProducesStructuredArtifactWithResponder(t *testing.T) {
 	if !strings.Contains(captured.Input, thread.Query) || !strings.Contains(captured.Input, "Board and memory context") {
 		t.Fatalf("input=%q, want thread query and context", captured.Input)
 	}
-	if captured.MaxOutputTokens != defaultAgentThreadMaxOutputTokens {
-		t.Fatalf("MaxOutputTokens=%d, want durable artifact headroom %d", captured.MaxOutputTokens, defaultAgentThreadMaxOutputTokens)
+	if captured.MaxOutputTokens != defaultResearchAgentThreadMaxOutputTokens {
+		t.Fatalf("MaxOutputTokens=%d, want research artifact headroom %d", captured.MaxOutputTokens, defaultResearchAgentThreadMaxOutputTokens)
 	}
 	if !captured.EnableWebSearch {
 		t.Fatal("research thread did not receive the hosted web-search tool")
@@ -223,6 +223,33 @@ func TestAgentThreadMaxOutputTokensIsBounded(t *testing.T) {
 	t.Setenv("BONFIRE_AGENT_THREAD_MAX_OUTPUT_TOKENS", "999999")
 	if got := agentThreadMaxOutputTokens(); got != 12000 {
 		t.Fatalf("high budget=%d, want 12000", got)
+	}
+
+	research := scoutAgentThread{Mode: "research"}
+	t.Setenv("BONFIRE_RESEARCH_MAX_OUTPUT_TOKENS", "1")
+	if got := agentThreadMaxOutputTokensForThread(research); got != 12000 {
+		t.Fatalf("low research budget=%d, want 12000", got)
+	}
+	t.Setenv("BONFIRE_RESEARCH_MAX_OUTPUT_TOKENS", "999999")
+	if got := agentThreadMaxOutputTokensForThread(research); got != 32000 {
+		t.Fatalf("high research budget=%d, want 32000", got)
+	}
+}
+
+func TestScoutChatThreadAttentionReasonIsClosedAndActionable(t *testing.T) {
+	for _, test := range []struct {
+		error string
+		want  string
+	}{
+		{error: "OpenAI output rejected: max_output_truncation", want: "output_truncated"},
+		{error: "OpenAI output rejected: output_validation_error: missing sources", want: "quality_gate_failed"},
+		{error: "provider transport_error", want: "provider_unavailable"},
+		{error: "unexpected provider failure", want: "work_failed"},
+		{error: "", want: ""},
+	} {
+		if got := scoutChatThreadAttentionReason(map[string]string{"error": test.error}); got != test.want {
+			t.Fatalf("attention reason for %q=%q, want %q", test.error, got, test.want)
+		}
 	}
 }
 

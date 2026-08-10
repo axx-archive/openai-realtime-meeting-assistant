@@ -11333,7 +11333,9 @@
         display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
       }
       .scout-chat-research__preview[hidden],
+	  .scout-chat-research__attention[hidden],
       .scout-chat-research__provenance[hidden] { display: none; }
+	  .scout-chat-research__attention { margin: 0; color: var(--text-2); font: var(--type-body-sm); line-height: 1.45; }
       .scout-chat-research__provenance { color: var(--text-3); font: var(--type-label); letter-spacing: var(--track-label); }
       .scout-chat-research__live-line { display: flex; align-items: center; gap: 8px; color: var(--text-3); font: var(--type-label); letter-spacing: var(--track-label); }
       .scout-chat-research__live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ember); animation: bf-think var(--pulse-cycle) var(--ease) infinite; }
@@ -56351,6 +56353,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return String(message?.thread?.agentName || meta.agentName || meta.agentDisplayName || meta.workerName || 'Scout').trim() || 'Scout'
 	      }
 
+	      function desktopWorkAttentionCopy(reason, agentName = 'Scout') {
+	        const value = String(reason || '').toLowerCase()
+	        if (value === 'output_truncated') return `${agentName} reached the final report, but the response was cut off before a deliverable could be accepted.`
+	        if (value === 'quality_gate_failed') return `${agentName} finished a draft, but it did not meet the evidence and quality bar.`
+	        if (value === 'provider_unavailable') return 'The research provider became unavailable before the work could finish.'
+	        return `${agentName}'s run stopped before delivery.`
+	      }
+
 	      function desktopSaveToDriveControl(artifact, className = 'chat-context-action') {
 	        return artifactSaveToFilesControl(artifact, {
 	          className,
@@ -56371,7 +56381,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const terminalError = ['error', 'failed', 'rejected'].includes(status)
 	        const terminalComplete = ['complete', 'published'].includes(status)
 	        const note = terminalError
-	          ? String(artifact?.metadata?.error || artifact?.metadata?.blocker || `${agentName}'s run stopped before delivery.`)
+	          ? desktopWorkAttentionCopy(ref.attentionReason, agentName)
 	          : terminalComplete
 	            ? compactArtifactPreview(String(artifact?.text || `${agentName} delivered this work.`))
 	            : String(artifact?.metadata?.progressNote || ref.progressNote || '').trim() || `${agentName} is working on it.`
@@ -58329,6 +58339,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (thread?.id) {
             existing.dataset.threadRunId = String(thread.id)
           }
+	      existing.dataset.attentionReason = String(thread?.attentionReason || '')
           updateScoutChatResearchNode(existing, String(thread?.status || artifactStatusValue(artifact) || 'running'), artifact)
           return existing
         }
@@ -58354,6 +58365,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (thread?.id) {
           card.dataset.threadRunId = String(thread.id)
         }
+	    card.dataset.attentionReason = String(thread?.attentionReason || '')
         const mode = String(thread?.mode || 'research')
         card.dataset.threadMode = mode
         const title = `${assistantModeTitle(mode)} · ${String(thread?.query || '').trim() || 'Scout work thread'}`
@@ -58374,6 +58386,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           <div class="scout-chat-research__body">
 	        <p class="scout-chat-research__preview" data-research-preview hidden></p>
 	        <div class="scout-chat-research__live-line"><span class="scout-chat-research__live-dot" aria-hidden="true"></span><span data-research-agents></span></div>
+	        <p class="scout-chat-research__attention" data-research-attention hidden></p>
 	        <span class="scout-chat-research__provenance" data-research-provenance hidden></span>
             <div class="scout-chat-research__actions">
               <button class="scout-chat-research__action" type="button" data-research-activity>view activity</button>
@@ -58449,6 +58462,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const statusText = card.querySelector('[data-research-status]')
         const agents = card.querySelector('[data-research-agents]')
 	    const preview = card.querySelector('[data-research-preview]')
+	    const attention = card.querySelector('[data-research-attention]')
 	    const provenance = card.querySelector('[data-research-provenance]')
 	    const terminalActions = card.querySelector('[data-research-terminal-actions]')
         const artifactButton = card.querySelector('[data-research-artifact]')
@@ -58477,6 +58491,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      const body = compactArtifactPreview(String(artifact?.text || ''))
 	      preview.hidden = !done || !body
 	      preview.textContent = body
+	    }
+	    if (attention) {
+	      const attentionReason = String(card.dataset.attentionReason || '').toLowerCase()
+	      const copy = !error ? ''
+	        : `${desktopWorkAttentionCopy(attentionReason)} Inspect the failure or retry the research.`
+	      attention.hidden = !copy
+	      attention.textContent = copy
 	    }
 	    if (provenance) {
 	      const meta = artifact?.metadata || {}

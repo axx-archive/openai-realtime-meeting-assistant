@@ -82,6 +82,8 @@ function workThreadPresentation(message: ScoutMessage) {
   const failed = status === 'failed' || status === 'error' || status === 'needs_attention' || status === 'rejected';
   const needsInput = status === 'approval_required' || status === 'needs_input' || status === 'parked';
   const stage = String(message.thread.currentStage ?? '').toLowerCase();
+  const progressPercent = Math.max(0, Math.min(100, Math.round(Number(message.thread.progressPercent ?? 0))));
+  const attentionReason = String(message.thread.attentionReason ?? '').toLowerCase();
   const phase = complete
     ? revisionNeedsAttention ? 'Delivered · revision needs attention' : 'Delivered'
     : needsInput
@@ -108,6 +110,17 @@ function workThreadPresentation(message: ScoutMessage) {
     phase,
     mode: String(message.thread.mode ?? 'work').trim() || 'work',
     query: String(message.thread.query ?? '').trim() || 'Scout workstream',
+    progressPercent,
+    attentionReason,
+    attentionCopy: attentionReason === 'output_truncated'
+      ? 'Scout reached the final report, but the response was cut off before a deliverable could be accepted.'
+      : attentionReason === 'quality_gate_failed'
+        ? 'Scout finished a draft, but it did not meet the evidence and quality bar.'
+        : attentionReason === 'provider_unavailable'
+          ? 'The research provider became unavailable before Scout could finish.'
+          : failed
+            ? 'Scout could not finish this work. View the failure details or try again.'
+            : '',
     label: status === 'queued'
       ? 'Queued'
       : status === 'running'
@@ -231,7 +244,6 @@ export const MessageBubble = React.memo(function MessageBubble({
   }), [timestampReveal]);
   const timestampOpacity = useMemo(() => ({ opacity: timestampReveal }), [timestampReveal]);
 
-  if (workThread?.active) return null;
   if (!body && files.length === 0 && !lifecycle && !workThread && !generatedImage) return null;
 
   return (
@@ -249,7 +261,7 @@ export const MessageBubble = React.memo(function MessageBubble({
       ) : null}
       <Animated.View style={[styles.stack, (workThread || workProposal) && styles.stackWork, own && styles.stackOwn, translated]}>
         <Pressable
-          accessible={!(workProposal || workThread?.complete)}
+          accessible={!(workProposal || workThread)}
           accessibilityRole="button"
           accessibilityLabel={`${own ? 'You' : authorName}: ${body || lifecycle?.label || workThread?.label || `${files.length} attachment${files.length === 1 ? '' : 's'}`}. ${message.editedAt ? 'Edited. ' : ''}${timeLabel}`}
           accessibilityHint={workThread ? 'Opens live work details or the completed deliverable' : longMessage ? 'Opens the full message. Touch and hold for message actions' : 'Touch and hold for message actions'}
@@ -313,7 +325,16 @@ export const MessageBubble = React.memo(function MessageBubble({
             </View>
           ) : null}
 
-          {workProposal ? (
+          {workProposal && !proposalPending ? (
+            <View accessibilityLabel={`${proposal?.agentName || 'Scout'} work ${proposalStatus === 'accepted' ? 'launched' : 'dismissed'}`} style={styles.proposalCompact}>
+              <View style={styles.proposalHead}>
+                <View style={styles.workIcon}>
+                  <SymbolView name={proposalStatus === 'accepted' ? 'checkmark.circle.fill' : 'xmark.circle'} tintColor={proposalStatus === 'accepted' ? colors.success : colors.text3} size={13} />
+                </View>
+                <Text style={styles.proposalCompactText}>{proposalStatus === 'accepted' ? `${proposal?.agentName || 'Scout'} started this research` : 'Proposed work dismissed'}</Text>
+              </View>
+            </View>
+          ) : workProposal ? (
             <View accessibilityLabel={`${proposal?.agentName || 'Agent'} proposed work. ${proposalObjective || proposal?.objective || proposal?.summary || body}`} style={styles.proposalCard}>
               <View style={styles.proposalHead}>
                 <View style={styles.workIcon}>
@@ -338,9 +359,7 @@ export const MessageBubble = React.memo(function MessageBubble({
               ) : (
                 <Text style={styles.proposalSummary}>{proposalObjective || proposal?.objective || proposal?.summary || body}</Text>
               )}
-              <Text style={styles.proposalSafety}>
-                {proposalPending ? 'Nothing runs until you confirm.' : proposalStatus === 'accepted' ? 'Confirmed · launched once' : 'Dismissed'}
-              </Text>
+              <Text style={styles.proposalSafety}>Nothing runs until you confirm.</Text>
               {proposalPending ? (
                 <View style={styles.proposalActions}>
                   <Pressable
@@ -394,6 +413,12 @@ export const MessageBubble = React.memo(function MessageBubble({
                 </View>
               </View>
               <Text numberOfLines={2} style={styles.workQuery}>{String(message.thread?.resultTitle ?? '').trim() || workThread.query}</Text>
+              {workThread.active ? (
+                <Text style={styles.workProgressCopy}>
+                  {workThread.phase}{workThread.progressPercent > 0 ? ` · ${workThread.progressPercent}%` : ''}
+                </Text>
+              ) : null}
+              {workThread.failed && workThread.attentionCopy ? <Text style={styles.workAttentionCopy}>{workThread.attentionCopy}</Text> : null}
               {String(message.thread?.resultPreview ?? '').trim() ? <Text numberOfLines={3} style={styles.workPreview}>{String(message.thread?.resultPreview)}</Text> : null}
               {String(message.thread?.provenance ?? '').trim() ? <Text numberOfLines={2} style={styles.workProvenance}>{String(message.thread?.provenance)}</Text> : null}
               {workThread.complete ? (
@@ -411,11 +436,27 @@ export const MessageBubble = React.memo(function MessageBubble({
                     <Text style={styles.workResultActionText}>{regeneratingWork ? 'Starting…' : 'Regenerate'}</Text>
                   </Pressable>
                 </View>
-              ) : (
-                <View style={styles.workFoot}>
-                  <Text style={styles.workFootText}>Open work details</Text>
-                  <SymbolView name="chevron.right" tintColor={colors.text3} size={12} />
+              ) : workThread.failed ? (
+                <View style={styles.workResultActions}>
+                  <Pressable accessibilityRole="button" accessibilityLabel="View research failure details" onPress={() => onOpenWorkArtifact?.(message)} style={({ pressed }) => [styles.workResultPrimary, pressed && styles.workResultPressed]}>
+                    <SymbolView name="info.circle.fill" tintColor={colors.onAccent} size={14} />
+                    <Text style={styles.workResultPrimaryText}>View details</Text>
+                  </Pressable>
+                  <Pressable accessibilityRole="button" accessibilityLabel="Retry research" accessibilityState={{ disabled: regeneratingWork }} disabled={regeneratingWork} onPress={() => onRegenerateWorkArtifact?.(message)} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed, regeneratingWork && styles.workResultDisabled]}>
+                    {regeneratingWork ? <ActivityIndicator color={colors.emberText} size="small" /> : <SymbolView name="arrow.clockwise" tintColor={colors.emberText} size={14} />}
+                    <Text style={styles.workResultActionText}>{regeneratingWork ? 'Starting…' : 'Retry research'}</Text>
+                  </Pressable>
                 </View>
+              ) : (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open live work details. ${workThread.phase}${workThread.progressPercent > 0 ? `, ${workThread.progressPercent}% complete` : ''}`}
+                  onPress={() => onOpenWorkArtifact?.(message)}
+                  style={({ pressed }) => [styles.workFoot, pressed && styles.workResultPressed]}
+                >
+                  <Text style={styles.workFootText}>{workThread.progressPercent > 0 ? `${workThread.progressPercent}% complete` : 'Research in progress'}</Text>
+                  <SymbolView name="chevron.right" tintColor={colors.text3} size={12} />
+                </Pressable>
               )}
             </View>
           ) : null}
@@ -710,6 +751,8 @@ const styles = StyleSheet.create({
   lifecycleRetryText: { ...type.captionMedium, color: colors.emberText },
   workCard: { width: '100%', minWidth: 0, maxWidth: 340, alignSelf: 'stretch', gap: space[3], paddingVertical: 5 },
   proposalCard: { width: '100%', minWidth: 0, alignSelf: 'stretch', gap: space[3], paddingVertical: 5 },
+  proposalCompact: { width: '100%', minWidth: 0, alignSelf: 'stretch', paddingVertical: space[1] },
+  proposalCompactText: { ...type.captionMedium, color: colors.text2, flex: 1 },
   proposalHead: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   proposalKicker: { ...type.captionMedium, color: colors.emberText, flex: 1 },
   proposalLabel: { ...type.label, color: colors.text3, letterSpacing: 0.5 },
@@ -734,6 +777,8 @@ const styles = StyleSheet.create({
 	workStatusTextNeedsInput: { color: colors.emberText },
   workStatusTextFailed: { color: colors.danger },
   workQuery: { ...type.bodyMedium, color: colors.text1, fontSize: 16, lineHeight: 22 },
+  workProgressCopy: { ...type.captionMedium, color: colors.emberText },
+  workAttentionCopy: { ...type.bodySm, color: colors.text2, lineHeight: 19 },
   workPreview: { ...type.bodySm, color: colors.text2 },
   workProvenance: { ...type.caption, color: colors.text3 },
   workResultActions: { flexDirection: 'row', flexWrap: 'wrap', gap: space[2], paddingTop: space[1] },

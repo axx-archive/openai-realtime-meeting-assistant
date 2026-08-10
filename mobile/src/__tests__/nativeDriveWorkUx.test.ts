@@ -29,7 +29,21 @@ test('terminal work opens from the authorized read and receipts only mutating Sa
   assert.match(screen, /fileName: normalizedName/);
   assert.match(client, /assistant\/threads\/follow-up/);
   assert.doesNotMatch(screen, /## Work log|Source trail and review receipts|progressPercent/);
-  assert.doesNotMatch(bubble, /workProgress|progressPercent/);
+  assert.match(bubble, /workProgressCopy/);
+  assert.match(bubble, /progressPercent/);
+});
+
+test('running and failed research expose honest progress and recovery actions', () => {
+  assert.doesNotMatch(bubble, /if \(workThread\?\.active\) return null/);
+  assert.match(bubble, /output_truncated/);
+  assert.match(bubble, /before a deliverable could be accepted/);
+  assert.match(bubble, /View details/);
+  assert.match(bubble, /Retry research/);
+	assert.doesNotMatch(bubble, /review the draft|partial draft/iu);
+  assert.match(bubble, /accessible=\{!\(workProposal \|\| workThread\)\}/);
+  assert.match(bubble, /Open live work details/);
+  assert.match(bubble, /started this research/);
+  assert.doesNotMatch(bubble, /Confirmed · launched once/);
 });
 
 test('a failed revision stays openable but is labeled honestly', () => {
