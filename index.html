@@ -63992,7 +63992,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         artifactTitleInput.disabled = disabled || !artifactEditMode
         artifactBodyInput.disabled = disabled || !artifactEditMode
         artifactCopyButton.disabled = disabled
-        artifactPublishButton.disabled = disabled
+        const publicationLocked = artifactPublicationLocked(artifact)
+        artifactPublishButton.disabled = disabled || publicationLocked
+        artifactPublishButton.title = publicationLocked
+          ? 'This private artifact cannot be published, shared, or sent.'
+          : ''
         artifactSaveButton.hidden = disabled || !artifactEditMode
         artifactSaveButton.disabled = disabled || !artifactEditMode
         if (artifactEditButton) {
@@ -64051,9 +64055,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         renderArtifactRead(artifactReadPane, artifact)
         artifactBodyInput.value = artifact?.text || ''
         // canon publish affordance — primary when unpublished, secondary when live
-        artifactPublishButton.textContent = published ? 'Published ✓' : 'Publish to team'
-        artifactPublishButton.classList.toggle('btn--primary', !published)
-        artifactPublishButton.classList.toggle('btn--secondary', published)
+        artifactPublishButton.textContent = publicationLocked
+          ? 'Private · cannot publish'
+          : (published ? 'Published ✓' : 'Publish to team')
+        artifactPublishButton.classList.toggle('btn--primary', !published && !publicationLocked)
+        artifactPublishButton.classList.toggle('btn--secondary', published || publicationLocked)
       }
 
       function setArtifactDetailStatus(text, transient = false) {
@@ -64076,6 +64082,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         const humanApproved = String(entry?.metadata?.humanApprovedAt || '').trim() !== ''
         return humanApproved && (status === 'complete' || status === 'published')
+      }
+
+      function artifactPublicationLocked(entry) {
+        return String(entry?.metadata?.publicationPolicy || '').trim().toLowerCase() === 'private_no_publish_no_send'
       }
 
       /* Render sidecar capability probe: one /readyz fetch per page load reads
@@ -64315,6 +64325,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!artifact) {
           return
         }
+        if (artifactPublicationLocked(artifact)) {
+          setArtifactDetailStatus('private · cannot publish', true)
+          showToast({ text: 'This private artifact cannot be published, shared, or sent.', kind: 'error' })
+          renderArtifactDetail()
+          return
+        }
         const published = !artifactPublished(artifact)
         artifactPublishButton.disabled = true
         setArtifactDetailStatus(published ? 'publishing' : 'unpublishing')
@@ -64342,7 +64358,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           setArtifactDetailStatus('publish failed', true)
           showToast({ text: error.message || 'artifact publish failed', kind: 'error' })
         } finally {
-          artifactPublishButton.disabled = !selectedArtifact()
+          const currentArtifact = selectedArtifact()
+          artifactPublishButton.disabled = !currentArtifact || artifactPublicationLocked(currentArtifact)
         }
       }
 
