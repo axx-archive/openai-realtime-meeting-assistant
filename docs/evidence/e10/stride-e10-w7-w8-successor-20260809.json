@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_w7_w8_successor_prerequisite_validator",
+  "observedAt": "2026-08-10T04:21:38Z",
+  "status": "deterministic_prerequisites_verified_external_final_fixture_waiting",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "6c3fd884c65447ee80b86fa351a142e66f5e8d0c",
+    "dirtyWorktreeCheckpoint": true,
+    "selectedFileSha256ManifestIsAuthoritative": true,
+    "gitCommitPushDeployActivationPerformed": false
+  },
+  "verifiedContracts": {
+    "prerequisiteAndFinalReadinessAreDistinct": true,
+    "currentCompiledRootFixturePrerequisitesReady": true,
+    "currentCompiledRootFixtureFinalReady": false,
+    "readyNeverAliasesPrerequisiteOnlyState": true,
+    "postFreezeEvidenceUsesBoundedCurrentFreshness": true,
+    "futureAndOlderThanThirtyDaysEvidenceDenied": true,
+    "finalW8BindsExactSignedW7ManifestAndResult": true,
+    "finalW8BindsExactSignedRollbackManifestAndResult": true,
+    "finalW8BindsDomainSeparatedDependencyEnvelopeDigest": true,
+    "prerequisiteDigestExcludesMalformedOrDuplicateFinalEvidence": true,
+    "immutableCompiledTrustRootHasNoReplacementSeam": true,
+    "privateAcceptanceEnvironmentRequired": true,
+    "publicActivationCircularityDenied": true,
+    "readOnlyDispatcherHasNoActivationCommand": true,
+    "privateManifestRejectsSymlinkHardlinkPermissionAndPathSwap": true,
+    "productionMainRegistrationClaimed": false
+  },
+  "externalFinalBoundary": {
+    "compiledRootSignedFinalW8LineageFixtureAvailable": false,
+    "finalReady": false,
+    "productionActivationAuthorized": false,
+    "nextRequiredStatus": "externally_sealed_compiled_root_w8_lineage_fixture"
+  },
+  "verification": {
+    "focusedNormal": {
+      "command": "go test . -run '^TestStrideE10W7W8Successor' -count=1",
+      "result": "PASS"
+    },
+    "focusedRace": {
+      "command": "go test -race . -run '^TestStrideE10W7W8Successor' -count=1",
+      "result": "PASS"
+    },
+    "goVetAll": {
+      "command": "go vet ./...",
+      "result": "PASS"
+    },
+    "scopedDiffCheck": {
+      "command": "git diff --check plus no-index checks for both new files",
+      "result": "PASS"
+    },
+    "independentCritic": "PASS"
+  },
+  "fileSha256": {
+    "stride_e10_w7_w8_successor.go": "2c250a70c854b1296f236772767515af5197be77f44eb849206e2393a7d2569d",
+    "stride_e10_w7_w8_successor_test.go": "b9246d012083389ac35f86fac767fc868f68a90aeeea548b6b2f2d4b432f4bed"
+  }
+}

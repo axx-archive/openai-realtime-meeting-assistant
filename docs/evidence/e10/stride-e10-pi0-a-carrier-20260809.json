@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_pi0_a_route_free_deterministic_carrier",
+  "observedAt": "2026-08-10T04:38:33Z",
+  "status": "deterministic_carrier_verified_baseline_runtime_and_collection_waiting",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "6c3fd884c65447ee80b86fa351a142e66f5e8d0c",
+    "dirtyWorktreeCheckpoint": true,
+    "selectedFileSha256ManifestIsAuthoritative": true,
+    "gitCommitPushDeployRuntimeInstallOrCollectionPerformed": false
+  },
+  "dependencyEvidence": {
+    "instrumentationContract": "docs/evidence/e10/stride-pi0-a-instrumentation-contract-20260809.md",
+    "instrumentationContractSha256": "befaaae01884791e200c79c32bd387c95d837f4d3b8d7643b43b1d6a64593877"
+  },
+  "verifiedContracts": {
+    "bodyMinimizedLifecycleEnvelope": true,
+    "closedFiftySevenEventTaxonomy": true,
+    "independentEventRuleOracle": true,
+    "requiredOneOfAndCardinalityRules": true,
+    "eventSpecificSubjectAndConsentApplicability": true,
+    "distinctStatePrivateCommitmentAndPublicTraceKeyRoles": true,
+    "pairwiseKeyIDAndSecretSeparationAtArtifactVersion": true,
+    "historicalRoleCollisionsFailClosedDuringRotation": true,
+    "plainSHAAndDomainSubstitutionDenied": true,
+    "currentAuthorityHeldThroughFinalAppend": true,
+    "eventPrincipalOrganizationTenantTraceAndAggregateBoundBeforeReplay": true,
+    "crossPrincipalReceiptReplayDeniedByteUnchanged": true,
+    "durableCASJournalAndAppendReceiptCarrier": true,
+    "committedEffectPostimageBound": true,
+    "appliedEffectCannotRetry": true,
+    "notAppliedRetryRequiresCurrentAuthority": true,
+    "ambiguousOrTamperedRecoveryQuarantines": true,
+    "authenticatedMetricFixtureAndEligibilityPolicyResolution": true,
+    "routeRegistered": false,
+    "runtimeInstalled": false,
+    "collectionEnabled": false
+  },
+  "hardNegatives": [
+    "cross person organization tenant trace and aggregate append or replay",
+    "state private and public key same ID or same secret across current and retained versions",
+    "plain SHA and wrong commitment domain",
+    "provider effect applied then crash and revoked caller recovery",
+    "applied effect routed back to execution",
+    "tampered postimage receipt and event-store readback",
+    "missing required event references and forbidden references",
+    "unauthenticated metric fixture or eligibility-policy comparison binding"
+  ],
+  "verification": {
+    "focusedNormal": {
+      "command": "go test . -run '^TestStridePI0' -count=1",
+      "result": "PASS"
+    },
+    "focusedRace": {
+      "command": "go test -race . -run '^TestStridePI0' -count=1",
+      "result": "PASS"
+    },
+    "goVetAll": {
+      "command": "go vet ./...",
+      "result": "PASS"
+    },
+    "scopedDiffCheck": {
+      "command": "git diff --check plus no-index checks for both new files",
+      "result": "PASS"
+    },
+    "independentCritic": "PASS"
+  },
+  "unverifiedBoundary": {
+    "durableProductionEventStoreInstalled": false,
+    "runtimeEmittersInstalled": false,
+    "preMigrationBaselineFrozen": false,
+    "SQLMigrationImplemented": false,
+    "exportRetentionCorrectionDeleteAndPurgeRuntimeImplemented": false,
+    "pilotDashboardImplemented": false,
+    "realUserCollectionAuthorized": false,
+    "nextRequiredStatus": "pi0_a_runtime_baseline_and_privacy_lifecycle_implementation"
+  },
+  "fileSha256": {
+    "stride_e10_pi0_instrumentation.go": "9b2499aeee9792e2d49e6747f26bf1561a28e6b13d72634bd40b35c627dc0705",
+    "stride_e10_pi0_instrumentation_test.go": "07d3faf02cfaa0f5c813b88240833170f76526f89ec8f2fcb67e2efdf151de07"
+  }
+}

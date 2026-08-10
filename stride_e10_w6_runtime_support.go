@@ -35,7 +35,7 @@ type strideE10W6FilePurgeStore struct {
 var errStrideE10W6NoPurgeMutation = errors.New("no purge mutation")
 
 func newStrideE10W6FilePurgeStore(path string, keys *strideE10W6ManagedKeyring) (*strideE10W6FilePurgeStore, error) {
-	if !filepath.IsAbs(path) || filepath.Clean(path) != path || keys == nil || !validStrideE10W6ManagedKey(keys.key) {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path || keys == nil || !validStrideE10W6ManagedKey(keys.current) {
 		return nil, ErrStrideE10W6RuntimeInvalid
 	}
 	s := &strideE10W6FilePurgeStore{path: path, lockPath: path + ".lock", keys: keys}
@@ -110,11 +110,16 @@ func (s *strideE10W6FilePurgeStore) write(v strideE10W6PurgeStoreEnvelope) error
 func (s *strideE10W6FilePurgeStore) locked(write bool, use func(*strideE10W6PurgeStoreEnvelope) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	lock, err := os.OpenFile(s.lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	lock, err := os.OpenFile(s.lockPath, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return ErrStrideE10W6RuntimeUnavailable
 	}
 	defer lock.Close()
+	lockInfo, err := lock.Stat()
+	lockStat, ok := lockInfo.Sys().(*syscall.Stat_t)
+	if err != nil || !ok || !lockInfo.Mode().IsRegular() || lockInfo.Mode().Perm() != 0o600 || lockStat.Nlink != 1 || int(lockStat.Uid) != os.Geteuid() {
+		return ErrStrideE10W6RuntimeUnavailable
+	}
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
 		return ErrStrideE10W6RuntimeUnavailable
 	}

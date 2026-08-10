@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_w6_default_off_production_composition",
+  "observedAt": "2026-08-10T04:28:50Z",
+  "status": "deterministic_composition_verified_external_provider_and_qualification_waiting",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "6c3fd884c65447ee80b86fa351a142e66f5e8d0c",
+    "dirtyWorktreeCheckpoint": true,
+    "selectedFileSha256ManifestIsAuthoritative": true,
+    "gitCommitPushDeployProviderInstallOrActivationPerformed": false
+  },
+  "dependencyEvidence": {
+    "qualificationBackendReceipt": "docs/evidence/e10/stride-e10-w6-network-qualification-20260809.json",
+    "qualificationBackendReceiptSha256": "b79ed9f36d612810648a3c13b2a3b0b736492b40bd0a374bd1f4a2cf220ae012"
+  },
+  "verifiedContracts": {
+    "offModeParity": true,
+    "managedProviderAbsentByDefault": true,
+    "rawEnvironmentSecretAuthorityRejected": true,
+    "workerClaimPrecedesProviderAndCanonicalMutation": true,
+    "secondInstallConflictMutatesNoProviderAuthorityReadinessOrDurableBytes": true,
+    "retainedRuntimeWorkerPersistsShadowChanges": true,
+    "retainedRuntimeWorkerProcessesDurablePurgeWork": true,
+    "policySemanticIDRevisionAndDigestAttested": true,
+    "qualificationReceiptIDRevisionAndDigestAttested": true,
+    "bindingTenantCohortAndDigestAttested": true,
+    "releaseAndW4LineageRevalidatedAtFinalUse": true,
+    "w4ReadinessLockHeldThroughCanonicalBinding": true,
+    "stableDeviceInodeSizeAndContentIdentityRequired": true,
+    "sameInodeSemanticSubstitutionDenied": true,
+    "symlinkHardlinkPermissionOwnerAndSwapDefenses": true,
+    "retainedManagedKeysRestoreOldState": true,
+    "currentManagedKeyResealsMutableState": true,
+    "retiredAndWrongKeysFailClosed": true,
+    "publicationSearchContactProviderAndRerankerSwitchesRemainFalse": true
+  },
+  "externalBoundary": {
+    "productionManagedProviderImplemented": false,
+    "realFiveProfileTwoReviewerQualificationPresent": false,
+    "productLegalPrivacyApprovalPresent": false,
+    "canonicalShadowQualifiedAndHealthy": false,
+    "providerOrRerankerAuthorized": false,
+    "featureSwitchActivated": false,
+    "productionInstalled": false,
+    "nextRequiredStatus": "compiled_managed_provider_and_signed_external_qualification"
+  },
+  "verification": {
+    "focusedNormal": {
+      "command": "go test . -run '^(TestStrideE10W6|TestW6|TestSTRIDENetworkShadow|TestNetworkAuthorityW6)' -count=1",
+      "result": "PASS"
+    },
+    "focusedRace": {
+      "command": "go test -race . -run '^(TestStrideE10W6Production|TestStrideE10W6Runtime|TestStrideE10W6ManagedKeyRotation)' -count=1",
+      "result": "PASS"
+    },
+    "goVetAll": {
+      "command": "go vet ./...",
+      "result": "PASS"
+    },
+    "scopedDiffCheck": {
+      "command": "git diff --check plus no-index checks for new files",
+      "result": "PASS"
+    },
+    "independentCritic": "PASS",
+    "fullGoSuite": "attempted for 144 seconds without observed W6 failure; not claimed complete"
+  },
+  "fileSha256": {
+    "main.go": "3fe021684751f2b4c5e7809551622bbc74c8c1ecef5e14f0f30ce0a23b9e5d39",
+    "stride_e10_w6_runtime.go": "d5a7efa8500b95158ee3989ab4d6117b8b8511a23f0d69932abf86e2ad329d43",
+    "stride_e10_w6_runtime_support.go": "a62adede2d519e348ed8c58dd781970271c1d93ac53d2383737556649eae53bc",
+    "stride_e10_w6_runtime_test.go": "6f27cc8bddcd59fcb9083152bbea52eaf24a183524727adb1ba15ac8a5502841",
+    "stride_e10_w6_production_adapter.go": "c6b989d9f9fc76b090b1fdb90f2ccc4d8adc7b8e40f980a185cd0aa8e2c42b10",
+    "stride_e10_w6_production_adapter_test.go": "2c3a1d996dd79b7a0caa91587417190497aec7822b7871d262a467a65bb06e5e"
+  }
+}

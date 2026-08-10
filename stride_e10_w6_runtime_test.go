@@ -48,14 +48,23 @@ func newStrideE10W6RuntimeFixture(t *testing.T) strideE10W6RuntimeFixture {
 	networkFixture := newNetworkAuthorityFixture(t)
 	live := NewStrideE10ProductLiveRuntime(func() time.Time { return networkFixture.now.Add(2 * time.Minute) })
 	live.network = networkFixture.service
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	key := W6ManagedMACKey{ID: "w6_runtime_key", Version: 3, Secret: []byte(strings.Repeat("r", 32))}
-	keys := &strideE10W6ManagedKeyring{key: key}
+	keys, err := newStrideE10W6ManagedKeyring(key, nil)
+	if err != nil {
+		t.Fatalf("managed keyring: %v", err)
+	}
 	policyValue := w6TestPolicy(networkFixture.now)
 	policyValue.Revision = networkFixture.grant.PolicyRevision
 	policy, err := SignW6NetworkPolicy(context.Background(), keys, policyValue)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("sign policy: %v", err)
 	}
 	qualificationValue := w6QualificationFixture(policy, networkFixture.now, 5, 2)
 	qualificationValue.Profiles[0].PersonID = networkFixture.profile.SubjectPersonID
@@ -63,43 +72,43 @@ func newStrideE10W6RuntimeFixture(t *testing.T) strideE10W6RuntimeFixture {
 	qualificationValue.Profiles[0].Publication = referenceFromHeader(networkFixture.publication.Header)
 	qualification, err := SignW6NetworkQualification(context.Background(), keys, policy, qualificationValue)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("sign qualification: %v", err)
 	}
 	qd, _ := STRIDEContractDigest(qualification)
 	binding, err := SignStrideE10W6RuntimeBinding(key, StrideE10W6RuntimeBinding{TenantID: networkFixture.grant.OrganizationID, CohortID: "cohort_pilot", PolicyID: policy.PolicyID, PolicyRevision: policy.Revision, QualificationReceiptID: qualification.ReceiptID, QualificationRevision: qualification.Revision, QualificationDigest: qd, Enabled: true, BoundAt: networkFixture.now.Add(-time.Minute), ExpiresAt: networkFixture.now.Add(30 * time.Minute)})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("sign binding: %v", err)
 	}
-	config := StrideE10W6RuntimeConfig{PolicyPath: filepath.Join(root, "policy.json"), QualificationPath: filepath.Join(root, "qualification.json"), BindingPath: filepath.Join(root, "binding.json"), ShadowSnapshotPath: filepath.Join(root, "shadow.json"), PurgeStorePath: filepath.Join(root, "purges.json"), Key: key, PurgeExecutor: strideE10W6TestPurgeExecutor{}, MinimumGeneration: 1, Now: func() time.Time { return networkFixture.now.Add(2 * time.Minute) }}
+	config := StrideE10W6RuntimeConfig{PolicyPath: filepath.Join(root, "policy.json"), QualificationPath: filepath.Join(root, "qualification.json"), BindingPath: filepath.Join(root, "binding.json"), ShadowSnapshotPath: filepath.Join(root, "shadow.json"), PurgeStorePath: filepath.Join(root, "purges.json"), Key: key, MinimumKeyVersion: key.Version, PurgeExecutor: strideE10W6TestPurgeExecutor{}, MinimumGeneration: 1, Now: func() time.Time { return networkFixture.now.Add(2 * time.Minute) }}
 	store, err := newStrideE10W6FilePurgeStore(config.PurgeStorePath, keys)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("purge store: %v", err)
 	}
 	resolver := &strideE10W6LiveAuthorityResolver{network: live.network}
 	sessions := &strideE10W6TestSessions{active: true, current: StrideE10W6CurrentSession{SessionHash: sha256Hex([]byte("session_hash_current")), PersonID: networkFixture.grant.SearcherPersonID, OrganizationID: networkFixture.grant.OrganizationID, MembershipID: networkFixture.grant.MembershipID, MembershipRevision: networkFixture.grant.MembershipRevision, ActiveOrganizationSessionID: "active_session_recruiter", ActiveOrganizationSessionRev: 4}}
 	shadow := NewSTRIDENetworkShadowService(STRIDENetworkShadowConfig{Enabled: true, SearchOrganizationID: binding.TenantID, Now: config.Now, PurgeAuthority: resolver, AuthorityResolver: resolver, SearchAuthority: &strideE10W6LiveSearchAuthorityResolver{network: live.network, sessions: sessions}, SnapshotKeys: keys, MinimumSnapshotGeneration: 1, MinimumSnapshotKeyVersion: key.Version, PurgeReceipts: store, PurgeExecutor: config.PurgeExecutor, PurgeMaxAttempts: 3})
 	policyAuthority := NewW6NetworkPolicyAuthority(keys)
 	if err := policyAuthority.Install(context.Background(), policy); err != nil {
-		t.Fatal(err)
+		t.Fatalf("install policy: %v", err)
 	}
 	qualificationAuthority := NewW6NetworkQualificationAuthority(keys)
 	if err := qualificationAuthority.Install(context.Background(), policy, qualification, config.Now()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("install qualification: %v", err)
 	}
 	if err := shadow.BindCurrentW6Policy(context.Background(), policyAuthority, qualificationAuthority, policy.Revision, binding.CohortID, config.Now()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("bind shadow policy: %v", err)
 	}
 	admission := strideNetworkShadowAdmission(t, false)
 	if _, _, err := shadow.Ingest(admission); err != nil {
-		t.Fatal(err)
+		t.Fatalf("ingest shadow admission: %v", err)
 	}
 	snapshot, err := shadow.Snapshot()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("snapshot shadow: %v", err)
 	}
 	for path, value := range map[string]any{config.PolicyPath: policy, config.QualificationPath: qualification, config.BindingPath: binding, config.ShadowSnapshotPath: snapshot} {
 		if err := writeStrideE10W6JSON(path, value); err != nil {
-			t.Fatal(err)
+			t.Fatalf("write %s: %v", path, err)
 		}
 	}
 	return strideE10W6RuntimeFixture{config: config, live: live, sessions: sessions, policy: policy, qual: qualification, binding: binding, snapshot: snapshot}
@@ -223,7 +232,11 @@ func resignStrideE10W6Snapshot(t *testing.T, key W6ManagedMACKey, snapshot *STRI
 func TestStrideE10W6RuntimePurgeBacklogAndCurrentAuthorityFailClosed(t *testing.T) {
 	t.Run("purge backlog", func(t *testing.T) {
 		fixture := newStrideE10W6RuntimeFixture(t)
-		store, err := newStrideE10W6FilePurgeStore(fixture.config.PurgeStorePath, &strideE10W6ManagedKeyring{key: fixture.config.Key})
+		keys, keyErr := newStrideE10W6ManagedKeyring(fixture.config.Key, fixture.config.RetainedKeys)
+		if keyErr != nil {
+			t.Fatal(keyErr)
+		}
+		store, err := newStrideE10W6FilePurgeStore(fixture.config.PurgeStorePath, keys)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -392,7 +405,10 @@ func TestStrideE10W6SearchAuthorityRejectsRevokedMembershipAndGrant(t *testing.T
 
 func TestStrideE10W6DurablePurgeStoreRestartTamperAndIdempotency(t *testing.T) {
 	fixture := newStrideE10W6RuntimeFixture(t)
-	keys := &strideE10W6ManagedKeyring{key: fixture.config.Key}
+	keys, err := newStrideE10W6ManagedKeyring(fixture.config.Key, fixture.config.RetainedKeys)
+	if err != nil {
+		t.Fatal(err)
+	}
 	store, err := newStrideE10W6FilePurgeStore(fixture.config.PurgeStorePath, keys)
 	if err != nil {
 		t.Fatal(err)

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>STRIDE PD0 Reference Workbench</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#reference-canvas">Skip to reference canvas</a>
+  <main class="reference-shell" id="app" aria-busy="true">
+    <header class="masthead">
+      <div class="brand-lockup" aria-label="STRIDE reference workbench">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span><strong>STRIDE</strong><small>PD0 reference workbench</small></span>
+      </div>
+      <p class="reference-notice"><span aria-hidden="true">◇</span> Fictional local fixture · no live authority</p>
+      <button class="quiet-button" id="shortcuts-button" type="button" aria-haspopup="dialog">Keyboard</button>
+    </header>
+
+    <section class="control-deck" aria-label="Reference controls">
+      <div class="control-group">
+        <span class="control-label" id="platform-label">Platform expression</span>
+        <div class="segmented" id="platform-switcher" role="radiogroup" aria-labelledby="platform-label"></div>
+      </div>
+      <div class="control-group state-control">
+        <label class="control-label" for="state-switcher">Representative state</label>
+        <select id="state-switcher"></select>
+      </div>
+      <div class="control-group state-control">
+        <label class="control-label" for="concurrent-state-switcher">Concurrent state</label>
+        <select id="concurrent-state-switcher"></select>
+      </div>
+      <div class="gate-summary" id="gate-summary" aria-live="polite"></div>
+      <button class="preview-toggle" id="preview-toggle" type="button" aria-pressed="false" hidden>Show layout preview</button>
+    </section>
+
+    <nav class="destination-nav" id="destination-nav" aria-label="STRIDE information architecture"></nav>
+
+    <div class="workbench platform-desktop" id="workbench">
+      <nav class="journey-rail" aria-label="J1 through J13 journeys">
+        <div class="rail-heading"><span>Reference journeys</span><span class="count" id="journey-count">13</span></div>
+        <div id="journey-list"></div>
+      </nav>
+
+      <section class="canvas" id="reference-canvas" tabindex="-1" aria-live="polite">
+        <div class="canvas-heading" id="canvas-heading"></div>
+        <div class="stepper" id="stepper" aria-label="Journey progress"></div>
+        <p class="flow-status" id="flow-status" role="status" tabindex="-1" aria-live="polite"></p>
+        <div class="state-panel" id="state-panel" hidden></div>
+        <div class="semantic-grid" id="semantic-grid"></div>
+        <details class="mobile-inspector" id="mobile-inspector">
+          <summary>Journey context and hard states</summary>
+          <div id="mobile-inspector-content"></div>
+        </details>
+        <div class="action-dock" id="action-dock"></div>
+      </section>
+
+      <aside class="inspector" id="inspector" aria-label="Journey context"></aside>
+    </div>
+  </main>
+
+  <dialog id="shortcuts-dialog" aria-labelledby="shortcuts-title">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">Reference controls</p><h2 id="shortcuts-title">Keyboard map</h2></div>
+        <button class="icon-button" value="close" aria-label="Close keyboard map">×</button>
+      </div>
+      <dl class="shortcut-list">
+        <div><dt><kbd>J</kbd> / <kbd>K</kbd></dt><dd>Next / previous journey</dd></div>
+        <div><dt><kbd>1</kbd>–<kbd>3</kbd></dt><dd>Desktop / iPhone / iPad expression</dd></div>
+        <div><dt><kbd>S</kbd></dt><dd>Focus the state switcher</dd></div>
+        <div><dt><kbd>?</kbd></dt><dd>Open this keyboard map</dd></div>
+        <div><dt><kbd>Esc</kbd></dt><dd>Close a dialog and restore focus</dd></div>
+      </dl>
+      <p class="dialog-note">All controls use visible focus. Touch and pointer targets remain at least 40×40 CSS pixels; the native references model 44-point targets.</p>
+    </form>
+  </dialog>
+
+  <noscript>This reference harness requires JavaScript. It makes no network calls beyond loading its local fixture.</noscript>
+</body>
+</html>

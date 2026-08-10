@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_pd0_deterministic_browser_reference",
+  "observedAt": "2026-08-10T04:43:17Z",
+  "status": "deterministic_browser_reference_verified_native_device_and_product_migration_waiting",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "6c3fd884c65447ee80b86fa351a142e66f5e8d0c",
+    "dirtyWorktreeCheckpoint": true,
+    "selectedFileSha256ManifestIsAuthoritative": true,
+    "gitCommitPushDeployProductMigrationOrActivationPerformed": false
+  },
+  "verifiedContracts": {
+    "exactFiveDestinationInformationArchitecture": ["Home", "Work", "Network", "Work Search", "You"],
+    "exactJ1ThroughJ13JourneyContracts": true,
+    "journeySpecificScreensActionsTransitionsAndTerminalOutcomes": true,
+    "desktopIPhoneAndIPadBrowserReferenceCompositions": true,
+    "exactNineteenStateVocabularyAndPrecedence": true,
+    "exactTwentyThreeSemanticComponentTypes": true,
+    "distinctSemanticRendererFamilies": true,
+    "prohibitedSemanticCollapseNegatives": true,
+    "authoritativePD0ArtifactDigestBindings": 5,
+    "allTenParentGatesDefaultFalse": true,
+    "gatedJourneysOpaqueWithZeroChildProjection": true,
+    "nonauthoritativePreviewFieldShapesOnly": true,
+    "fixtureSchemaFieldsValuesAndRostersClosed": true,
+    "bodyContactMarkupAndInjectionNegatives": true,
+    "exactGovernedTokenMap": true,
+    "directSpacingRadiusElevationMotionPositionInsetAndGradientLiteralsDenied": true,
+    "focusLiveStatusKeyboardAndResponsiveReferenceBehavior": true,
+    "externalCalls": 0
+  },
+  "verification": {
+    "staticValidator": {
+      "command": "node docs/design/pd0-reference/validate.mjs",
+      "result": "PASS",
+      "journeys": 13,
+      "destinations": 5,
+      "states": 19,
+      "componentTypes": 23,
+      "falseGates": 10,
+      "mutationNegatives": 40,
+      "boundArtifacts": 5,
+      "externalCalls": 0
+    },
+    "javascriptSyntax": {
+      "command": "node --check app.js and validate.mjs",
+      "result": "PASS"
+    },
+    "browserReference": {
+      "result": "PASS",
+      "desktopAndPhoneNoHorizontalOverflow": true,
+      "gatedOpacityAndPreviewHonesty": true,
+      "focusAndLiveStatus": true,
+      "applicationConsoleErrors": 0
+    },
+    "scopedDiffCheck": {
+      "command": "git diff --check plus six no-index checks",
+      "result": "PASS"
+    },
+    "independentCritic": "PASS"
+  },
+  "unverifiedBoundary": {
+    "nativeIPhoneImplementation": false,
+    "nativeIPadImplementation": false,
+    "realIPhoneAcceptance": false,
+    "realIPadAcceptance": false,
+    "desktopProductMigration": false,
+    "fullSurfaceParityMigration": false,
+    "VoiceOverDynamicTypeStageManagerAndSplitViewAcceptance": false,
+    "measuredAccessibilityAndPerformanceAcceptance": false,
+    "fullPD0Accepted": false,
+    "productionActivationAuthorized": false,
+    "nextRequiredStatus": "pd0_product_migration_rendered_accessibility_performance_and_device_acceptance"
+  },
+  "fileSha256": {
+    "docs/design/pd0-reference/README.md": "0a2a8efb061e90e4fe8327226407882f835aaf6c6bc1c4a12a13964c3140d2bd",
+    "docs/design/pd0-reference/app.js": "7e7e19e0e815f8e865bcf24a2834090dfbc1788bdc279db7c1064576643aa2d4",
+    "docs/design/pd0-reference/fixture.json": "b9d0875e15a0466ed508019122182211626403c85a18934b784d73778de67c6d",
+    "docs/design/pd0-reference/index.html": "325c84565fe531ff056d5b1501bcb6fb539add4f65c66b7d9f9c2a87f6a0e65d",
+    "docs/design/pd0-reference/styles.css": "bb5a318d304bc95bb7cc35b5a153642c257bdb8ea374854bba07faaa20be8f82",
+    "docs/design/pd0-reference/validate.mjs": "6e1da879cbc89cf52d91209cccf6665d6e8781eb55925fc5dba680743c77b5a8"
+  }
+}

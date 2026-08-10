@@ -17,7 +17,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -60,25 +62,54 @@ func (v StrideE10W6RuntimeBinding) valid(policy W6NetworkPolicyRevision, qualifi
 		strideIdentifier(v.KeyID) && v.KeyVersion > 0 && isHexDigest(v.MAC)
 }
 
-type strideE10W6ManagedKeyring struct{ key W6ManagedMACKey }
+type strideE10W6ManagedKeyring struct {
+	current W6ManagedMACKey
+	keys    map[string]W6ManagedMACKey
+}
+
+func strideE10W6ManagedKeyRef(id string, version uint64) string {
+	return fmt.Sprintf("%s\x00%d", id, version)
+}
+
+func newStrideE10W6ManagedKeyring(current W6ManagedMACKey, retained []W6ManagedMACKey) (*strideE10W6ManagedKeyring, error) {
+	if !validStrideE10W6ManagedKey(current) {
+		return nil, ErrStrideE10W6RuntimeInvalid
+	}
+	keyring := &strideE10W6ManagedKeyring{current: cloneStrideE10W6ManagedKey(current), keys: map[string]W6ManagedMACKey{}}
+	for _, key := range append([]W6ManagedMACKey{current}, retained...) {
+		if !validStrideE10W6ManagedKey(key) || key.ID != current.ID || key.Version > current.Version {
+			return nil, ErrStrideE10W6RuntimeInvalid
+		}
+		ref := strideE10W6ManagedKeyRef(key.ID, key.Version)
+		if _, exists := keyring.keys[ref]; exists {
+			return nil, ErrStrideE10W6RuntimeInvalid
+		}
+		keyring.keys[ref] = cloneStrideE10W6ManagedKey(key)
+	}
+	return keyring, nil
+}
 
 func (k *strideE10W6ManagedKeyring) CurrentW6ManagedMACKey(context.Context) (W6ManagedMACKey, error) {
-	if k == nil || !validStrideE10W6ManagedKey(k.key) {
+	if k == nil || !validStrideE10W6ManagedKey(k.current) {
 		return W6ManagedMACKey{}, ErrStrideE10W6RuntimeUnavailable
 	}
-	return cloneStrideE10W6ManagedKey(k.key), nil
+	return cloneStrideE10W6ManagedKey(k.current), nil
 }
 func (k *strideE10W6ManagedKeyring) ResolveW6ManagedMACKey(_ context.Context, id string, version uint64) (W6ManagedMACKey, error) {
-	if k == nil || !validStrideE10W6ManagedKey(k.key) || id != k.key.ID || version != k.key.Version {
+	if k == nil {
 		return W6ManagedMACKey{}, ErrStrideE10W6RuntimeUnavailable
 	}
-	return cloneStrideE10W6ManagedKey(k.key), nil
+	key, ok := k.keys[strideE10W6ManagedKeyRef(id, version)]
+	if !ok || !validStrideE10W6ManagedKey(key) {
+		return W6ManagedMACKey{}, ErrStrideE10W6RuntimeUnavailable
+	}
+	return cloneStrideE10W6ManagedKey(key), nil
 }
 func (k *strideE10W6ManagedKeyring) CurrentSTRIDENetworkShadowSnapshotKey() (STRIDENetworkShadowSnapshotKey, error) {
-	if k == nil || !validStrideE10W6ManagedKey(k.key) {
+	if k == nil || !validStrideE10W6ManagedKey(k.current) {
 		return STRIDENetworkShadowSnapshotKey{}, ErrStrideE10W6RuntimeUnavailable
 	}
-	return STRIDENetworkShadowSnapshotKey{KeyID: k.key.ID, Version: k.key.Version, Key: append([]byte(nil), k.key.Secret...)}, nil
+	return STRIDENetworkShadowSnapshotKey{KeyID: k.current.ID, Version: k.current.Version, Key: append([]byte(nil), k.current.Secret...)}, nil
 }
 func (k *strideE10W6ManagedKeyring) ResolveSTRIDENetworkShadowSnapshotKey(id string, version uint64) (STRIDENetworkShadowSnapshotKey, error) {
 	key, err := k.ResolveW6ManagedMACKey(context.Background(), id, version)
@@ -94,6 +125,14 @@ func validStrideE10W6ManagedKey(key W6ManagedMACKey) bool {
 func cloneStrideE10W6ManagedKey(key W6ManagedMACKey) W6ManagedMACKey {
 	key.Secret = append([]byte(nil), key.Secret...)
 	return key
+}
+
+func cloneStrideE10W6ManagedKeys(keys []W6ManagedMACKey) []W6ManagedMACKey {
+	out := make([]W6ManagedMACKey, len(keys))
+	for i, key := range keys {
+		out[i] = cloneStrideE10W6ManagedKey(key)
+	}
+	return out
 }
 
 type StrideE10W6CurrentSession struct {
@@ -117,9 +156,12 @@ type StrideE10W6RuntimeConfig struct {
 	ShadowSnapshotPath string
 	PurgeStorePath     string
 	Key                W6ManagedMACKey
+	RetainedKeys       []W6ManagedMACKey
+	MinimumKeyVersion  uint64
 	PurgeExecutor      STRIDENetworkShadowPurgeExecutor
 	MinimumGeneration  uint64
 	Now                func() time.Time
+	FinalAdmission     func(func() error) error
 }
 
 func (c StrideE10W6RuntimeConfig) validate() error {
@@ -131,7 +173,7 @@ func (c StrideE10W6RuntimeConfig) validate() error {
 		}
 		seen[path] = true
 	}
-	if !validStrideE10W6ManagedKey(c.Key) || c.PurgeExecutor == nil || c.MinimumGeneration < 1 || c.Now == nil || c.Now().UTC().IsZero() {
+	if _, err := newStrideE10W6ManagedKeyring(c.Key, c.RetainedKeys); err != nil || c.MinimumKeyVersion < 1 || c.MinimumKeyVersion > c.Key.Version || c.PurgeExecutor == nil || c.MinimumGeneration < 1 || c.Now == nil || c.Now().UTC().IsZero() {
 		return ErrStrideE10W6RuntimeInvalid
 	}
 	return nil
@@ -211,7 +253,11 @@ func InstallStrideE10W6ProductionRuntime(ctx context.Context, live *StrideE10Pro
 	if ctx == nil || live == nil || live.network == nil || sessions == nil || config.validate() != nil {
 		return nil, ErrStrideE10W6RuntimeInvalid
 	}
-	runtime := &StrideE10W6Runtime{config: config, keys: &strideE10W6ManagedKeyring{key: cloneStrideE10W6ManagedKey(config.Key)}, live: live, reason: "restoring"}
+	keys, err := newStrideE10W6ManagedKeyring(config.Key, config.RetainedKeys)
+	if err != nil {
+		return nil, err
+	}
+	runtime := &StrideE10W6Runtime{config: config, keys: keys, live: live, reason: "restoring"}
 	policy, qualification, binding, err := runtime.loadAuthorities(ctx)
 	if err != nil {
 		runtime.reason = "authority_restore_failed"
@@ -225,7 +271,7 @@ func InstallStrideE10W6ProductionRuntime(ctx context.Context, live *StrideE10Pro
 	}
 	resolver := &strideE10W6LiveAuthorityResolver{network: live.network}
 	searchResolver := &strideE10W6LiveSearchAuthorityResolver{network: live.network, sessions: sessions}
-	shadowConfig := STRIDENetworkShadowConfig{Enabled: true, SearchOrganizationID: binding.TenantID, Now: config.Now, PurgeAuthority: resolver, AuthorityResolver: resolver, SearchAuthority: searchResolver, SnapshotKeys: runtime.keys, MinimumSnapshotGeneration: config.MinimumGeneration, MinimumSnapshotKeyVersion: config.Key.Version, PurgeReceipts: store, PurgeExecutor: config.PurgeExecutor, PurgeMaxAttempts: 3}
+	shadowConfig := STRIDENetworkShadowConfig{Enabled: true, SearchOrganizationID: binding.TenantID, Now: config.Now, PurgeAuthority: resolver, AuthorityResolver: resolver, SearchAuthority: searchResolver, SnapshotKeys: runtime.keys, MinimumSnapshotGeneration: config.MinimumGeneration, MinimumSnapshotKeyVersion: config.MinimumKeyVersion, PurgeReceipts: store, PurgeExecutor: config.PurgeExecutor, PurgeMaxAttempts: 3}
 	snapshot, err := loadStrideE10W6JSON[STRIDENetworkShadowSnapshot](config.ShadowSnapshotPath)
 	if err != nil {
 		runtime.reason = "shadow_snapshot_missing_or_invalid"
@@ -242,6 +288,10 @@ func InstallStrideE10W6ProductionRuntime(ctx context.Context, live *StrideE10Pro
 		return nil, err
 	}
 	runtime.shadow, runtime.purgeStore = shadow, store
+	if err := runtime.reconcileDurablePurgeState(ctx); err != nil {
+		runtime.reason = "purge_reconcile_failed"
+		return nil, err
+	}
 	// Preflight every readiness condition before touching the live authority.
 	// The provisional installed bit is local to this unpublished runtime.
 	runtime.installed, runtime.reason = true, ""
@@ -256,9 +306,17 @@ func InstallStrideE10W6ProductionRuntime(ctx context.Context, live *StrideE10Pro
 		return nil, ErrStrideE10W6RuntimeUnavailable
 	}
 	// Final mutation: everything above has authenticated and restored.
-	if err := live.network.ConfigureW6Qualification(policy, qualification, shadow, binding.CohortID); err != nil {
+	bind := func() error {
+		return live.network.ConfigureW6Qualification(policy, qualification, shadow, binding.CohortID)
+	}
+	if config.FinalAdmission != nil {
+		err = config.FinalAdmission(bind)
+	} else {
+		err = bind()
+	}
+	if err != nil {
 		runtime.installed = false
-		runtime.reason = "canonical_bind_failed"
+		runtime.reason = "final_admission_or_canonical_bind_failed"
 		return nil, err
 	}
 	runtime.canonicalBound, runtime.reason = true, ""
@@ -290,7 +348,8 @@ func (r *StrideE10W6Runtime) loadAuthorities(ctx context.Context) (*W6NetworkPol
 		return nil, nil, StrideE10W6RuntimeBinding{}, ErrStrideE10W6RuntimeUnavailable
 	}
 	binding, err := loadStrideE10W6JSON[StrideE10W6RuntimeBinding](r.config.BindingPath)
-	if err != nil || !verifyStrideE10W6Binding(r.keys.key, binding) || !binding.valid(policyValue, qualificationValue, now) {
+	key, keyErr := r.keys.ResolveW6ManagedMACKey(ctx, binding.KeyID, binding.KeyVersion)
+	if err != nil || keyErr != nil || !verifyStrideE10W6Binding(key, binding) || !binding.valid(policyValue, qualificationValue, now) {
 		return nil, nil, StrideE10W6RuntimeBinding{}, ErrStrideE10W6RuntimeUnavailable
 	}
 	return policy, qualification, binding, nil
@@ -312,6 +371,100 @@ func (r *StrideE10W6Runtime) PersistShadow() error {
 		return err
 	}
 	return nil
+}
+
+func (r *StrideE10W6Runtime) PersistShadowIfChanged() error {
+	if r == nil || !r.installed || r.shadow == nil {
+		return ErrStrideE10W6RuntimeUnavailable
+	}
+	snapshot, err := r.shadow.Snapshot()
+	if err != nil {
+		return err
+	}
+	prior, priorErr := loadStrideE10W6JSON[STRIDENetworkShadowSnapshot](r.config.ShadowSnapshotPath)
+	if priorErr == nil && prior.KeyID == snapshot.KeyID && prior.KeyVersion == snapshot.KeyVersion && prior.Generation == snapshot.Generation && prior.Digest == snapshot.Digest && prior.Signature == snapshot.Signature {
+		return nil
+	}
+	if err := writeStrideE10W6JSON(r.config.ShadowSnapshotPath, snapshot); err != nil {
+		r.mu.Lock()
+		r.reason = "shadow_persist_failed"
+		r.mu.Unlock()
+		publishStrideE10W6RuntimeReadiness(r.Readiness(context.Background()))
+		return err
+	}
+	return nil
+}
+
+// reconcileDurablePurgeState closes the only crash window between the purge
+// receipt CAS and the shadow snapshot write. The authenticated purge store is
+// the recovery journal; no provider call is made here.
+func (r *StrideE10W6Runtime) reconcileDurablePurgeState(ctx context.Context) error {
+	if r == nil || r.shadow == nil || r.purgeStore == nil {
+		return ErrStrideE10W6RuntimeUnavailable
+	}
+	works, err := r.purgeStore.ListSTRIDENetworkShadowPurgeWork(ctx)
+	if err != nil {
+		return err
+	}
+	sort.Slice(works, func(i, j int) bool {
+		if works[i].Receipt.PurgeGeneration == works[j].Receipt.PurgeGeneration {
+			return works[i].Receipt.Header.ID < works[j].Receipt.Header.ID
+		}
+		return works[i].Receipt.PurgeGeneration < works[j].Receipt.PurgeGeneration
+	})
+	changed := false
+	r.shadow.w6HealthMu.Lock()
+	r.shadow.mu.Lock()
+	for _, work := range works {
+		if !validSTRIDENetworkShadowPurgeWork(work) {
+			r.shadow.mu.Unlock()
+			r.shadow.w6HealthMu.Unlock()
+			return ErrStrideE10W6RuntimeUnavailable
+		}
+		receipt := work.Receipt
+		high := r.shadow.purgeHighWater[receipt.SubjectPersonID]
+		if receipt.PurgeGeneration < high {
+			r.shadow.mu.Unlock()
+			r.shadow.w6HealthMu.Unlock()
+			return ErrStrideE10W6RuntimeConflict
+		}
+		if receipt.PurgeGeneration == high {
+			prior, ok := r.shadow.purges[receipt.Header.ID]
+			if !ok || !sameSTRIDENetworkShadowPurgeIdentity(prior, receipt) {
+				r.shadow.mu.Unlock()
+				r.shadow.w6HealthMu.Unlock()
+				return ErrStrideE10W6RuntimeConflict
+			}
+			if prior.State != receipt.State {
+				r.shadow.purges[receipt.Header.ID] = cloneContract(receipt)
+				r.shadow.revision++
+				r.shadow.indexedRevision = r.shadow.revision
+				changed = true
+			}
+			continue
+		}
+		if record, ok := r.shadow.records[receipt.SubjectPersonID]; ok && !shadowTriggerMatches(record.admission, receipt.Trigger) {
+			r.shadow.mu.Unlock()
+			r.shadow.w6HealthMu.Unlock()
+			return ErrStrideE10W6RuntimeConflict
+		}
+		if err := r.shadow.applyPurgeLocked(receipt); err != nil {
+			r.shadow.mu.Unlock()
+			r.shadow.w6HealthMu.Unlock()
+			return err
+		}
+		changed = true
+	}
+	r.shadow.mu.Unlock()
+	r.shadow.w6HealthMu.Unlock()
+	if !changed {
+		return nil
+	}
+	snapshot, err := r.shadow.Snapshot()
+	if err != nil {
+		return err
+	}
+	return writeStrideE10W6JSON(r.config.ShadowSnapshotPath, snapshot)
 }
 
 func (r *StrideE10W6Runtime) ProcessPurgeWork(ctx context.Context) (STRIDENetworkShadowPurgeWork, bool, error) {
@@ -346,9 +499,18 @@ func (r *StrideE10W6Runtime) tryBindCanonical(ctx context.Context) error {
 		r.mu.Unlock()
 		return ErrStrideE10W6RuntimeUnavailable
 	}
-	if err := r.live.network.ConfigureW6Qualification(r.policy, r.qualification, r.shadow, r.binding.CohortID); err != nil {
+	bind := func() error {
+		return r.live.network.ConfigureW6Qualification(r.policy, r.qualification, r.shadow, r.binding.CohortID)
+	}
+	var err error
+	if r.config.FinalAdmission != nil {
+		err = r.config.FinalAdmission(bind)
+	} else {
+		err = bind()
+	}
+	if err != nil {
 		r.mu.Lock()
-		r.reason = "canonical_bind_failed"
+		r.reason = "final_admission_or_canonical_bind_failed"
 		r.mu.Unlock()
 		return err
 	}
@@ -451,8 +613,23 @@ func strideE10W6MAC(secret []byte, domain string, payload []byte) string {
 
 func loadStrideE10W6JSON[T any](path string) (T, error) {
 	var value T
-	body, err := os.ReadFile(path)
-	if err != nil || len(body) == 0 {
+	identity, err := preflightStrideE10W6Path(path)
+	if err != nil {
+		return value, ErrStrideE10W6RuntimeUnavailable
+	}
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return value, ErrStrideE10W6RuntimeUnavailable
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if err != nil || !ok || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || stat.Nlink != 1 || int(stat.Uid) != os.Geteuid() || uint64(stat.Dev) != identity.FileDev || uint64(stat.Ino) != identity.FileIno || info.Size() != identity.FileSize {
+		return value, ErrStrideE10W6RuntimeUnavailable
+	}
+	body, err := io.ReadAll(file)
+	current, currentErr := preflightStrideE10W6Path(path)
+	if err != nil || len(body) == 0 || currentErr != nil || current != identity || sha256Hex(body) != identity.ContentDigest {
 		return value, ErrStrideE10W6RuntimeUnavailable
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
