@@ -12,6 +12,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -823,7 +824,14 @@ func setSubscriberLayerTier(sessionID string, tier layerTier) bool {
 	return true
 }
 
+func handleMeetingAssistReadOnlyCommand(args []string, stdout, stderr io.Writer) (bool, int) {
+	return HandleStrideE10W7W8SuccessorReadOnlyCLI(args, stdout, stderr)
+}
+
 func main() {
+	if handled, exit := handleMeetingAssistReadOnlyCommand(os.Args[1:], os.Stdout, os.Stderr); handled {
+		os.Exit(exit)
+	}
 	// Parse the flags passed to program
 	flag.Parse()
 	if err := validateRequiredReleaseIdentity(); err != nil {

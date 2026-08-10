@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_w7_w8_successor_read_only_cli_registration",
+  "observedAt": "2026-08-10T11:50:53Z",
+  "status": "deterministic_read_only_cli_registered_external_final_fixture_and_acceptance_waiting",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "f67587ec51e5f6cd8d91c91fcdfdd2c43863e2a9",
+    "dirtyWorktreeCheckpoint": true,
+    "selectedFileSha256ManifestIsAuthoritative": true,
+    "gitStatusPorcelainV1Sha256BeforeReceipt": "326b0f61e49ccdab79bf7df6f99bdb34e02a74841745dd9bc6db639691112bdb",
+    "unrelatedUntrackedPathsExcluded": ["stride-site/"],
+    "gitCommitPushDeployActivationPerformed": false
+  },
+  "command": {
+    "name": "stride-w7-w8-successor-read-only",
+    "exactArguments": ["--manifest", "<absolute-private-json-path>"],
+    "dispatchedBeforeFlagParsing": true,
+    "dispatchedBeforeReleaseValidation": true,
+    "dispatchedBeforeMigrationOrServerStartup": true,
+    "unrelatedArgumentsFallThrough": true,
+    "activationLikeArgumentsRejected": true,
+    "readOnly": true,
+    "activationCapable": false,
+    "providerCapable": false,
+    "switchCapable": false,
+    "mutationCallbackPresent": false,
+    "privateManifestLinkPermissionAndPathSwapDefensesPreserved": true
+  },
+  "verification": {
+    "fullGo": {
+      "result": "PASS",
+      "command": "go test ./... -count=1",
+      "mainPackageElapsedSeconds": 471.484
+    },
+    "focusedNormal": {
+      "result": "PASS",
+      "command": "go test . -run '^TestStrideE10W7W8Successor' -count=1",
+      "packageElapsedSeconds": 0.584
+    },
+    "focusedRace": {
+      "result": "PASS",
+      "command": "go test -race . -run '^TestStrideE10W7W8Successor' -count=1",
+      "packageElapsedSeconds": 2.160
+    },
+    "compiledBinarySmoke": {
+      "result": "PASS",
+      "input": "stride-w7-w8-successor-read-only --manifest /tmp/does-not-exist",
+      "exitCode": 2,
+      "exactOutput": "{\"ready\":false,\"readOnly\":true,\"activationCapable\":false,\"reasons\":[\"unsafe_manifest_file\"]}"
+    },
+    "goVetAll": {
+      "result": "PASS",
+      "command": "go vet ./..."
+    },
+    "diffCheck": "PASS",
+    "independentCritic": {
+      "identity": "/root/w0_code_inventory",
+      "result": "PASS",
+      "normalPackageElapsedSeconds": 0.533,
+      "racePackageElapsedSeconds": 2.016,
+      "evidence": "pre_flag_release_migration_server_dispatch; closed_command_and_argument_grammar; unrelated_fallthrough; activation_like_rejection; no_activation_provider_switch_callback_or_write_surface; private_manifest_nonmutation_defenses; no_blocker_or_major"
+    }
+  },
+  "externalBoundary": {
+    "compiledRootSignedFinalW8LineageFixtureAvailable": false,
+    "finalReady": false,
+    "physicalIPhoneAcceptance": false,
+    "physicalIPadAcceptance": false,
+    "privacyAccessibilityAcceptance": false,
+    "restrictiveNetworkAcceptance": false,
+    "offsiteRestoreAcceptance": false,
+    "highAvailabilityAcceptance": false,
+    "productionActivationAuthorized": false,
+    "remainingState": "external_final_fixture_physical_privacy_network_restore_ha_and_soak_waiting"
+  },
+  "selectedFileSha256": {
+    "main.go": "758a0819a7cb17d9789d53af6dd91ef5d6aef1cd10323a90d80acb12967a79bf",
+    "stride_e10_w7_w8_successor.go": "2c250a70c854b1296f236772767515af5197be77f44eb849206e2393a7d2569d",
+    "stride_e10_w7_w8_successor_test.go": "a2eef40e6441462fe5f23c426c24259f120584450372078ac61d0242ff283e0e"
+  }
+}

@@ -347,3 +347,42 @@ func TestStrideE10W7W8SuccessorReadOnlyCLIRejectsLinkAndPermissionAmbiguity(t *t
 		}
 	})
 }
+
+func TestStrideE10W7W8SuccessorReadOnlyCLIIsRegisteredBeforeServerStartup(t *testing.T) {
+	dir := t.TempDir()
+	canonicalDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(canonicalDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(canonicalDir, "successor.json")
+	if err := os.WriteFile(path, []byte(strideE10W7W8SuccessorSealedFixture), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	handled, exit := handleMeetingAssistReadOnlyCommand([]string{strideE10W7W8SuccessorCLICommand, "--manifest", path}, &stdout, &stderr)
+	if !handled || exit != 1 || stderr.Len() != 0 {
+		t.Fatalf("registered command handled=%t exit=%d stdout=%s stderr=%s", handled, exit, stdout.String(), stderr.String())
+	}
+	var report StrideE10W7W8SuccessorOperatorReport
+	if json.Unmarshal(stdout.Bytes(), &report) != nil || !report.PrerequisitesReady || report.Ready || !report.ReadOnly || report.ActivationCapable {
+		t.Fatalf("registered report=%+v", report)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if handled, exit := handleMeetingAssistReadOnlyCommand([]string{"serve", "--manifest", path}, &stdout, &stderr); handled || exit != 0 || stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("unrelated command intercepted handled=%t exit=%d", handled, exit)
+	}
+	mainSource, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration := bytes.Index(mainSource, []byte("handleMeetingAssistReadOnlyCommand(os.Args[1:], os.Stdout, os.Stderr)"))
+	flagParse := bytes.Index(mainSource, []byte("flag.Parse()"))
+	releaseValidation := bytes.Index(mainSource, []byte("validateRequiredReleaseIdentity()"))
+	if registration < 0 || flagParse < 0 || releaseValidation < 0 || registration > flagParse || registration > releaseValidation {
+		t.Fatalf("read-only registration is not before server startup: registration=%d flag=%d release=%d", registration, flagParse, releaseValidation)
+	}
+}
