@@ -36,6 +36,7 @@ import type {
   StridePersonalContextExport,
   ArtifactDispositionReceipt,
   ArtifactDispositionRef,
+  ArtifactDriveSaveCapability,
   ArtifactResponse,
 } from './types';
 import {
@@ -421,6 +422,24 @@ export const api = {
     },
   ): Promise<{ ok: boolean; receipt: ArtifactDispositionReceipt }> {
     return request('/api/artifact-dispositions/v1', {
+      method: 'POST', body, sessionToken,
+    });
+  },
+
+  artifactDriveSaveCapability(sessionToken: string): Promise<ArtifactDriveSaveCapability> {
+    return request('/api/artifact-drive-saves/v1', { sessionToken });
+  },
+
+  saveArtifactToDrive(
+    sessionToken: string,
+    body: {
+      operationId: string;
+      artifact: ArtifactDispositionRef;
+      folderId?: string;
+      fileName?: string;
+    },
+  ): Promise<{ ok: boolean; receipt: ArtifactDispositionReceipt }> {
+    return request('/api/artifact-drive-saves/v1', {
       method: 'POST', body, sessionToken,
     });
   },

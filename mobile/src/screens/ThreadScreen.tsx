@@ -103,6 +103,16 @@ function workThreadPhase(message: ScoutMessage): string {
   return 'Understanding';
 }
 
+function sameDispositionRef(left: unknown, right: unknown): boolean {
+  if (!validDispositionRef(left) || !validDispositionRef(right)) return false;
+  return left.tenantId === right.tenantId
+    && left.artifactId === right.artifactId
+    && left.contentRevision === right.contentRevision
+    && left.contentDigest === right.contentDigest
+    && left.aclVersion === right.aclVersion
+    && left.audienceDigest === right.audienceDigest;
+}
+
 type ThreadMessageRowProps = {
   item: ThreadRow;
   sessionToken: string;
@@ -117,6 +127,7 @@ type ThreadMessageRowProps = {
   savingWork: boolean;
   regeneratingWork: boolean;
   workSaved: boolean;
+  workDriveSaveAvailability: 'checking' | 'available' | 'unavailable';
   onOpenSource: (messageId: string) => void;
   onOpenAttachment: (file: ScoutFileAttachment) => void;
   onLongPress: (message: ScoutMessage, own: boolean, attachment?: { file: ScoutFileAttachment; index: number }) => void;
@@ -148,6 +159,7 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
   savingWork,
   regeneratingWork,
   workSaved,
+  workDriveSaveAvailability,
   onOpenSource,
   onOpenAttachment,
   onLongPress,
@@ -227,6 +239,7 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
         savingWork={savingWork}
         regeneratingWork={regeneratingWork}
         workSaved={workSaved}
+        workDriveSaveAvailability={workDriveSaveAvailability}
       />
     </>
   );
@@ -244,6 +257,7 @@ const ThreadMessageRow = React.memo(function ThreadMessageRow({
   && previous.savingWork === next.savingWork
   && previous.regeneratingWork === next.regeneratingWork
   && previous.workSaved === next.workSaved
+  && previous.workDriveSaveAvailability === next.workDriveSaveAvailability
   && previous.onOpenSource === next.onOpenSource
   && previous.onOpenAttachment === next.onOpenAttachment
   && previous.onLongPress === next.onLongPress
@@ -326,6 +340,7 @@ export function ThreadScreen({ route, navigation }: Props) {
   const [savingWorkID, setSavingWorkID] = useState<string | null>(null);
   const [savedWorkIDs, setSavedWorkIDs] = useState<Set<string>>(() => new Set());
   const [workSaveError, setWorkSaveError] = useState('');
+  const [workDriveSaveAvailability, setWorkDriveSaveAvailability] = useState<'checking' | 'available' | 'unavailable'>('checking');
   const [attachmentSaveTarget, setAttachmentSaveTarget] = useState<{
     message: ScoutMessage;
     file: ScoutFileAttachment;
@@ -378,6 +393,25 @@ export function ThreadScreen({ route, navigation }: Props) {
   const transcriptGenerationRef = useRef(0);
   const transcriptEventJournalRef = useRef<SequencedChatThreadEvent[]>([]);
   const workSaveAttemptRef = useRef<{ artifactId: string; fileName: string; folderId: string; operationId: string } | null>(null);
+
+  useEffect(() => {
+    let current = true;
+    if (!sessionToken) {
+      setWorkDriveSaveAvailability('unavailable');
+      return () => { current = false; };
+    }
+    setWorkDriveSaveAvailability('checking');
+    void api.artifactDriveSaveCapability(sessionToken)
+      .then((capability) => {
+        if (!current) return;
+        const available = capability?.available === true && capability.action === 'save' && capability.receiptBacked === true;
+        setWorkDriveSaveAvailability(available ? 'available' : 'unavailable');
+      })
+      .catch(() => {
+        if (current) setWorkDriveSaveAvailability('unavailable');
+      });
+    return () => { current = false; };
+  }, [sessionToken]);
   const applyTranscriptSnapshot = useCallback((generationAtRequest: number, next: ScoutMessage[]) => {
     const currentGeneration = transcriptGenerationRef.current;
     const journal = [...transcriptEventJournalRef.current];
@@ -1384,6 +1418,7 @@ export function ThreadScreen({ route, navigation }: Props) {
   }, [sessionToken]);
 
   const beginSaveWorkArtifact = useCallback((message: ScoutMessage) => {
+    if (workDriveSaveAvailability !== 'available') return;
     if (!String(message.thread?.artifactId ?? '').trim()) {
       setError('This deliverable is not available to save yet.');
       return;
@@ -1391,7 +1426,7 @@ export function ThreadScreen({ route, navigation }: Props) {
     setWorkSaveError('');
     workSaveAttemptRef.current = null;
     setWorkSaveTarget(message);
-  }, []);
+  }, [workDriveSaveAvailability]);
 
   const beginSaveChatAttachment = useCallback(() => {
     const target = actionMessage?.attachment;
@@ -1435,14 +1470,20 @@ export function ThreadScreen({ route, navigation }: Props) {
     try {
       const artifact = await api.artifact(sessionToken, artifactId);
       if (!validDispositionRef(artifact.dispositionRef)) throw new Error('The deliverable authority changed. Refresh and try again.');
-      const response = await api.artifactDisposition(sessionToken, {
+      const response = await api.saveArtifactToDrive(sessionToken, {
         operationId: attempt.operationId,
-        action: 'save',
         artifact: artifact.dispositionRef,
         folderId,
         fileName: normalizedName,
       });
-      if (response.receipt.outcome !== 'saved') throw new Error('Drive did not confirm the save.');
+      const receipt = response.receipt;
+      if (response.ok !== true || receipt?.operationId !== attempt.operationId || receipt.action !== 'save' || receipt.outcome !== 'saved'
+        || !sameDispositionRef(receipt.artifact, artifact.dispositionRef) || !receipt.drive
+        || receipt.drive.id !== artifactId || receipt.drive.sourceArtifactId !== artifactId
+        || receipt.drive.name !== normalizedName || (receipt.drive.folderId ?? '') !== folderId
+        || !sameDispositionRef(receipt.drive.artifact, artifact.dispositionRef)) {
+        throw new Error('Drive did not confirm the exact save.');
+      }
       setSavedWorkIDs((current) => new Set(current).add(messageID));
       setWorkSaveTarget(null);
       workSaveAttemptRef.current = null;
@@ -1502,6 +1543,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       savingWork={savingWorkID === String(item.message.id)}
       regeneratingWork={regeneratingWorkID === String(item.message.id)}
       workSaved={savedWorkIDs.has(String(item.message.id))}
+      workDriveSaveAvailability={workDriveSaveAvailability}
       onOpenSource={scrollToMessage}
       onOpenAttachment={openAttachment}
       onLongPress={openMessageActions}
@@ -1541,6 +1583,7 @@ export function ThreadScreen({ route, navigation }: Props) {
     savingImageID,
     savingWorkID,
     savedWorkIDs,
+    workDriveSaveAvailability,
     proposalObjectives,
     scrollToMessage,
     sessionToken,
@@ -1723,6 +1766,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         savingWorkID={savingWorkID}
         regeneratingWorkID={regeneratingWorkID}
         savedWorkIDs={savedWorkIDs}
+        workDriveSaveAvailability={workDriveSaveAvailability}
         actionOverlay={(
           <>
             {renderLongMessageSheet(true)}

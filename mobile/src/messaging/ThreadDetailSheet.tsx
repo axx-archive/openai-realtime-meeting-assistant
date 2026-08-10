@@ -61,6 +61,7 @@ type Props = {
   savingWorkID?: string | null;
   regeneratingWorkID?: string | null;
   savedWorkIDs: ReadonlySet<string>;
+  workDriveSaveAvailability: 'checking' | 'available' | 'unavailable';
   actionOverlay?: React.ReactNode;
 };
 
@@ -102,6 +103,7 @@ export function ThreadDetailSheet({
   savingWorkID,
   regeneratingWorkID,
   savedWorkIDs,
+  workDriveSaveAvailability,
   actionOverlay,
 }: Props) {
   const [draft, setDraft] = useState('');
@@ -258,6 +260,7 @@ export function ThreadDetailSheet({
                       savingWork={savingWorkID === String(message.id)}
                       regeneratingWork={regeneratingWorkID === String(message.id)}
                       workSaved={savedWorkIDs.has(String(message.id))}
+                      workDriveSaveAvailability={workDriveSaveAvailability}
                     />
                   </View>
                 </React.Fragment>

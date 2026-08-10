@@ -131,11 +131,18 @@ export type ArtifactDispositionRef = {
 
 export type ArtifactDriveReference = {
   id: string;
+  name?: string;
   artifact: ArtifactDispositionRef;
   createdAt: string;
   createdBy: string;
   folderId?: string;
   sourceArtifactId: string;
+};
+
+export type ArtifactDriveSaveCapability = {
+  available: boolean;
+  action: 'save';
+  receiptBacked: boolean;
 };
 
 export type ArtifactDispositionReceipt = {

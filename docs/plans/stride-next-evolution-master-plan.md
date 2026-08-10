@@ -443,7 +443,7 @@ expressions or their interaction/accessibility evidence.
 | PI0-A | Freeze and implement event taxonomy, trace identity, consent/privacy contract, compound recovery, and pre-migration baseline | telemetry schema/journal/metric/evidence files only; no collection | contract, route-free carrier, and default-off synthetic runtime/privacy lifecycle passed bounded critics; production installation/emitters and frozen baseline remain | safe local implementation authorized; real collection not authorized | `synthetic_deterministic_safe_local_runtime_verified_no_collection` |
 | PN1 | Safe public projections/controls default off | new PN authority/storage/runtime/test files; no broad UI activation | normal/race/PG/restore/purge/render; revision-1 inheritance plus PN successor receipts; all PN switches false | local implementation after PN0+PD0+PI0-A PASS | `blocked_on_PN0_PD0_PI0A` |
 | PD1 pilot subset | Migrate exact PN2 journeys across web/iPhone/iPad using the unified system | `index.html`, `mobile/src`, shared semantic design contracts, owned tests | bounded desktop web and native renderer shell plus Scout delivery/status/reconciliation are locally verified; remaining journeys, accessibility/performance, real-device and live-repair gates stay open; rollback to prior shell by release | shell work authorized locally; PN-dependent pilot journeys still require PN1 contracts | `deterministic_web_component_and_native_renderer_verified_physical_device_and_live_repair_pending` |
-| PD1-AJA private-chat acceptance | Prove the exact AJA private-chat matrix for research, slides, images, spreadsheets, documents, and mixed artifacts across selected agents, previews/status, privacy, Drive, desktop web, native iPhone, and native iPad | post-deploy acceptance evidence only; product changes return to the owning PD1/Scout scopes and require a new checkpoint | exact reviewed release first; authenticated real runs and readback for every matrix cell; body-minimized receipts bind agent, artifact kind, preview/status, destination/privacy and current release; rollback is the retained exact release and no evidence may be reconstructed locally | AJ authorizes production runs and judges acceptance; Apple devices and Drive session remain external inputs | `blocked_on_reviewed_release_deploy_and_AJA_postdeploy_acceptance` |
+| PD1-AJA private-chat acceptance | Prove the exact AJA private-chat matrix for research, slides, images, spreadsheets, documents, and mixed artifacts across selected agents, previews/status, privacy, Drive, desktop web, native iPhone, and native iPad | candidate source and pre-release observations are recorded; post-deploy acceptance evidence remains separate, and product changes return to the owning PD1/Scout scopes | exact reviewed release first; authenticated post-release runs and readback for every matrix cell; body-minimized receipts bind agent, artifact kind, preview/status, destination/privacy and current release; rollback is the retained exact release and no evidence may be reconstructed locally | AJ authorizes production runs and judges acceptance; Apple devices, provider credit, and Drive session remain external inputs | `in_progress_prerelease_partial_reviewed_release_pending_postdeploy_matrix_open` |
 | PI0-B | Private dashboards, case receipts, qualitative research protocol, collection gate | private telemetry/evidence/DR/operator surfaces only | consented synthetic/dogfood-safe trace, privacy/purge/restore, research-protocol critic | real collection requires participant consent | `blocked_on_PI0A_PN1_PD1_pilot` |
 | PD1 remainder | Migrate every remaining legacy/planned surface across web/iPhone/iPad | same exclusive platform owners after pilot subset | full parity matrix, interactive/device/accessibility/performance acceptance | local implementation authorized; Apple/device/release external | `blocked_on_PD0`; may run after pilot subset without delaying PN2 unless it is a named pilot dependency |
 | PN2 | Signed-in human pilot | PN cohort config plus accepted pilot surfaces | >=5 people, 2 workspaces, typed objects, chronology, pause/block/dispute/purge, PI0-B receipts | participants, moderators, product/legal/privacy, deploy/activation | `blocked_on_PN1_PD1pilot_PI0B_and_external_authority` |
@@ -463,7 +463,11 @@ keeping PN-dependent journeys behind PN1 and real-device/live-repair evidence in
 their separate queues. PI0-A's contract, route-free carrier, and default-off
 synthetic runtime/privacy lifecycle are locally verified with collection absent;
 next freeze the pre-migration baseline and design any production installation/
-emitter seam without enabling collection. Maintain W5-W8 default-off operator
+emitter seam without enabling collection. The current candidate adds a real,
+providerless private XLSX workbook path, the research-source terminal-delimiter
+repair, and a separate default-off native save-only capability with corrected
+authorization registration; these are locally verified candidate sources, not
+post-release AJA or physical-device acceptance. Maintain W5-W8 default-off operator
 tests. Do not select cohort participants or create external signatures as local
 fixtures for production acceptance.
 
@@ -480,30 +484,34 @@ final soak.
 Responses, embedding, image, or external service requires exact project,
 billing owner, price/budget, route/corpus, and one-at-a-time authorization.
 
-**Git/release/deploy queue:** the user authorized shipping the already-reviewed
-default-off operator carrier and this plan reconciliation through the exact VPS
-release process. Later PN/PD/PI implementation requires a fresh reviewed tree
-and release evidence; this authorization does not activate a cohort or publish
-content. The PD1/Scout and PI0-A synthetic-runtime source checkpoint is now
-committed locally as exact `c6741976bbe0f2f7b8a700d6aba12652618f2622`;
-that commit includes the original PI0 and PD1 receipt/sidecar bytes and is
-pushed to `axx/main`. At the refreshed receipt's recorded observation boundary,
-only the refreshed PD1 receipt/sidecar and this plan reconciliation were
-uncommitted; nothing was released, deployed, activated, or repaired live.
-Scout live reconciliation
-requires a separate reviewed exact release and an authorized invocation of its
-bounded repair route.
+**Git/release/deploy queue:** production starts this checkpoint at exact
+`6ec475f4e54d003647f13694a40560a5f4f50895`, ledger generation 52. The
+candidate workbook, research-source, native save-only, authorization, receipt,
+and plan bytes are not yet an exact reviewed release and have not been
+committed, pushed, deployed, or activated by this checkpoint. A later exact
+release requires a fresh reviewed selected-file manifest and the retained VPS
+activation procedure. This queue does not authorize native save activation, a
+cohort, provider spend, public content, or a production AJA run. Scout live
+reconciliation likewise requires its separate reviewed release and authorized
+bounded invocation.
 
-**Post-deploy acceptance queue:** PD1-AJA remains evidence-free until an exact
-reviewed release is serving. Run only after separate deploy and production-run
-authorization. The matrix must cover research, slides, images, spreadsheets,
-documents, and mixed artifacts; selected agent identity; active and terminal
-status; inline preview and source/file preservation; private-thread isolation;
-Drive export/readback where applicable; desktop web; physical iPhone; and
-physical iPad. Each cell needs current-release, requester, agent, artifact,
-destination/privacy, result-status, and rendered/readback evidence. Missing,
-failed, substituted, browser-only, simulator-only, or pre-deploy evidence keeps
-that cell open; no local fixture can satisfy it.
+**Post-deploy acceptance queue:** PD1-AJA is partial/in progress, not complete.
+Pre-release production observations exist for private OpenAI research and image
+work: research first failed its quality gate, then v2 reached the recorded
+decision-grade boundary (16 cited links, 9 domains, 13 searches) and was saved
+to Drive; one 1536x1024 image was generated and saved to Drive. Private
+Anthropic One-Pager and deck attempts stopped on the exact provider 400
+low-credit response. Those observations predate the candidate release and do
+not satisfy a post-release cell. The reviewed release is still pending. After
+separate deploy and production-run authorization, rerun the matrix for
+research, slides, images, spreadsheets, documents, and mixed artifacts;
+selected agent identity; active and terminal status; inline preview and
+source/file preservation; private-thread isolation; Drive export/readback;
+desktop web; physical iPhone; and physical iPad. Each accepted cell needs
+current-release, requester, agent, artifact, destination/privacy, result-status,
+and rendered/readback evidence. Missing, failed, substituted, browser-only,
+simulator-only, or pre-deploy evidence keeps that cell open; no local fixture
+can satisfy it.
 
 **Production/publication queue:** W4 private authority remains on. W5 MyMind,
 W6 publication/search/contact, every PN switch, open-web rendering, pilot data
@@ -522,24 +530,16 @@ evidence wherever the public-network or unified-platform claim is new.
 Reconciliation parent revision is `31a5792` (the fail-closed W5-W8 operator
 carrier); the critic-passed plan and carrier first shipped together as exact
 commit `84bc0cc6b99ea89dcc0cbdcad00c3d06d4dd3cb0`. Unrelated `stride-site/`
-remains untracked and excluded. The production snapshot was observed at
-2026-08-09 21:59 PDT and independently audited through 22:04 PDT. Current
-production is exact commit `b070e67f27a16afd0d96da97ac065144ebf78d9e`,
-bundle `8f2c3fae135e094874c9b50ba2f27018d392a1507f8367b3a6b0457912c657a3`,
-ledger generation 51, with retained rollback commit
-`8781d6cbcee567c1f36f488d1a6447587fdcba9b`. W4 is ready at schema 2,
-generation 141, with the exact six private features enabled; W5 remains
-configured/installed false; W6 remains configured/installed/qualified false;
-and all W5/W6/public switches remain off. The exact release verifier returned
-`verified-local-unsigned`; independent external attestation remains false.
-The current body-minimized deployment observation is
+remains untracked and excluded. The current pre-release starting production
+boundary is exact commit `6ec475f4e54d003647f13694a40560a5f4f50895`,
+ledger generation 52. W4 private authority is live; W5, W6, and every public
+network path remain off. The candidate scope described below has not been
+released. The earlier body-minimized deployment observation
 `docs/evidence/e10/stride-e10-default-off-carriers-live-20260809.json`, SHA-256
-`ebf6363c22469e9802cba1c64702feea3308c5d3b91058ad11fc9d5c46b4affa`.
-Canonical shadow remains non-authoritative/unhealthy at 30,140 versus 8,532,
-with failure high-water 30,132 and 119 repair candidates; the latest local
-backup is healthy with ring count seven, while encryption is false, offsite
-remains `dormant`, and external restore acceptance remains open. The
-reconciliation independent critic
+`ebf6363c22469e9802cba1c64702feea3308c5d3b91058ad11fc9d5c46b4affa`,
+is retained as historical evidence and is not proof of this newer generation.
+Independent external attestation, encrypted offsite restore, HA, and final
+physical-device acceptance remain open. The reconciliation independent critic
 PASS is recorded below. The first safe-local PD0/PI0-A contract checkpoint is
 `docs/evidence/e10/stride-e10-pd0-pi0-contracts-20260809.json`, SHA-256
 `d966d745b801b7b537451cbc91e8f3ee49cd9b0a166b48e678a3e769ea83a680`.
@@ -567,7 +567,7 @@ no-collection installation boundary plus the remaining governed PD1
 web/iPhone/iPad migration; no production user-data collection or public
 activation is the next action.
 
-The next local source checkpoint is exact commit
+The prior local source checkpoint is exact commit
 `c6741976bbe0f2f7b8a700d6aba12652618f2622`; it includes the original PI0 and
 PD1 receipt/sidecar bytes and is pushed to `axx/main`. At the refreshed
 receipt's `2026-08-10T07:21:36Z` observation boundary, the refreshed PD1
@@ -582,15 +582,41 @@ is `docs/evidence/e10/stride-e10-pd1-shell-scout-local-20260809.json`, SHA-256
 status
 `deterministic_web_component_and_native_renderer_verified_physical_device_and_live_repair_pending`.
 The selected-file manifests and exact local commit, not unrelated worktree
-state, define these checkpoints. The local commit and push occurred, but no
-release, deployment, production repair, collection, cohort, or public activation
-action occurred. Production therefore remains exact
-`b070e67f27a16afd0d96da97ac065144ebf78d9e`, ledger generation 51, with
-the W5/W6/public switches off. The immediate next action is an independent
-critic of these receipts and this reconciliation patch. After PASS, PI0-A may
-continue only with the no-collection baseline/installation boundary; PD1 may
-continue locally, while any exact release, Scout live repair, physical-device
-acceptance, collection, or activation stays separately gated.
+state, define those checkpoints.
+
+The current pre-release PD1-AJA candidate receipt is
+`docs/evidence/e10/stride-e10-pd1-aja-prerelease-matrix-20260810.json`,
+SHA-256 `1a52a0e7a84ba00049d8062ffb33737b73ae2735541ebc274f97c255f3a78642`,
+status
+`prerelease_deterministic_scope_verified_AJA_matrix_partial_reviewed_release_and_postdeploy_acceptance_pending`.
+It binds the selected source files for the providerless private XLSX workbook,
+research-source delimiter repair, default-off native save-only capability, and
+authorization registration corrections. Full Go (484.190s), combined
+normal/race, mobile 482/482, typecheck, vet, diff checks, broad Scout
+race (`go test -race . -run '^TestScout' -count=1`, 327.635s), and focused
+workbook normal/race (2.472s/16.734s) pass at the receipt boundary. The
+receipt also records the pre-release AJA research/image/Drive observations and
+Anthropic low-credit stops, but marks every one ineligible for post-release
+acceptance. Independent `/root/w0_live_evidence` critic **PASS** reviewed exact
+prior receipt SHA-256
+`6adbd369a7af8500a5c17c45d87b6e6d3e1f19331c40dac51b4d5e0d91f7b3de`;
+that verdict remains the historical one-way review of its exact evidence
+boundary. Independent `/root/w0_code_inventory` critic **PASS** covers the
+current frozen code, including the per-thread bounded lifecycle lock; its prior
+stale selected-hash finding is closed by this reseal. Integrity review of the
+exact prior receipt SHA-256
+`6c8367715f7a09ed7e0367d3e4155f4a50e444057ea3bf181182a65bc25b6438`
+is independent `/root/w0_live_evidence` critic **PASS** for sidecar, JSON, all
+21 selected hashes, plan diff, non-self-reference, and exclusions; the current
+receipt is the one-way record of that verdict.
+Production remains
+exact `6ec475f4e54d003647f13694a40560a5f4f50895`, ledger generation 52,
+with W4 private authority live and W5/W6/public paths off. The immediate next
+action is preparation of one exact reviewed release. Only after that separately
+authorized deploy may PD1-AJA run
+the still-open workbook/link/native-device and remaining artifact cells. Native
+save activation, physical-device acceptance, production collection, and public
+activation stay separately gated.
 
 #### Reconciliation Critic Loop — PASS
 

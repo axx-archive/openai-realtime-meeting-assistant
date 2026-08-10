@@ -1,0 +1,179 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_pd1_aja_private_chat_prerelease_matrix",
+  "observedAt": "2026-08-10T09:20:18Z",
+  "status": "prerelease_deterministic_scope_verified_AJA_matrix_partial_reviewed_release_and_postdeploy_acceptance_pending",
+  "productionStartingBoundary": {
+    "commit": "6ec475f4e54d003647f13694a40560a5f4f50895",
+    "ledgerGeneration": 52,
+    "w4PrivateAuthorityLive": true,
+    "w5Enabled": false,
+    "w6Enabled": false,
+    "publicNetworkEnabled": false,
+    "candidateScopeDeployed": false
+  },
+  "candidateScope": {
+    "reviewedReleasePrepared": false,
+    "realPrivateProviderlessXlsxWorkbook": true,
+    "researchUrlTerminalMarkdownDelimiterRepair": true,
+    "nativeSaveOnlyCapabilityEndpointDefaultOff": true,
+    "authorizationRegistryAndTestsCorrected": true,
+    "providerCallAdded": false,
+    "publicationOrSendAdded": false,
+    "nativeSaveCapabilityActivated": false
+  },
+  "preReleaseAjaObservations": [
+    {
+      "cell": "private_openai_research_v1",
+      "result": "quality_gate_failed",
+      "savedToDrive": false,
+      "postReleaseAcceptanceEligible": false
+    },
+    {
+      "cell": "private_openai_research_v2",
+      "result": "decision_grade",
+      "citedLinks": 16,
+      "domains": 9,
+      "searches": 13,
+      "savedToDrive": true,
+      "postReleaseAcceptanceEligible": false
+    },
+    {
+      "cell": "private_openai_image",
+      "result": "generated",
+      "dimensions": "1536x1024",
+      "savedToDrive": true,
+      "postReleaseAcceptanceEligible": false
+    },
+    {
+      "cell": "private_anthropic_one_pager",
+      "result": "blocked",
+      "providerStatus": 400,
+      "reason": "low_credit",
+      "postReleaseAcceptanceEligible": false
+    },
+    {
+      "cell": "private_anthropic_deck",
+      "result": "blocked",
+      "providerStatus": 400,
+      "reason": "low_credit",
+      "postReleaseAcceptanceEligible": false
+    }
+  ],
+  "acceptanceMatrix": {
+    "research": "partial_prerelease_observation_postdeploy_rerun_required",
+    "slides": "blocked_provider_low_credit_postdeploy_open",
+    "images": "prerelease_observation_postdeploy_rerun_required",
+    "spreadsheets": "local_real_xlsx_verified_postdeploy_run_open",
+    "documents": "not_run",
+    "mixedArtifacts": "not_run",
+    "desktopWeb": "postdeploy_candidate_acceptance_open",
+    "nativeIPhone": "physical_device_open",
+    "nativeIPad": "physical_device_open",
+    "nativeSaveOnly": "default_off_not_activated",
+    "privacyAndCustody": "local_deterministic_and_prerelease_observed_postdeploy_readback_open"
+  },
+  "verification": {
+    "fullGoSuite": {
+      "command": "go test ./... -count=1",
+      "result": "PASS",
+      "elapsed": "484.190s"
+    },
+    "combinedNormal": {
+      "result": "PASS",
+      "elapsed": "12.358s",
+      "commandReconstructed": false
+    },
+    "combinedRace": {
+      "result": "PASS",
+      "elapsed": "81.949s",
+      "commandReconstructed": false
+    },
+    "mobileTests": "PASS_482_of_482",
+    "mobileTypecheck": "PASS",
+    "goVetAll": "PASS",
+    "gitDiffCheck": "PASS",
+    "broadScoutRace": {
+      "command": "go test -race . -run '^TestScout' -count=1",
+      "result": "PASS",
+      "elapsed": "327.635s"
+    },
+    "ventureWorkbookNormal": {
+      "command": "go test . -run 'TestVentureWorkbook' -count=1",
+      "result": "PASS",
+      "elapsed": "2.472s"
+    },
+    "ventureWorkbookRace": {
+      "command": "go test -race . -run 'TestVentureWorkbook' -count=1",
+      "result": "PASS",
+      "elapsed": "16.734s"
+    },
+    "workbookIndependentCritic": {
+      "identity": "/root/w0_live_evidence",
+      "verdict": "PASS",
+      "evidence": "shared_publication_guard; exact_operation_replay_restart_and_concurrency; LibreOffice_open; private_ACL; Drive_binary; no_provider"
+    },
+    "priorReceiptCheckpointCritic": {
+      "identity": "/root/w0_live_evidence",
+      "verdict": "PASS",
+      "reviewedReceiptSha256": "6adbd369a7af8500a5c17c45d87b6e6d3e1f19331c40dac51b4d5e0d91f7b3de",
+      "evidence": "sidecar_JSON_and_closed_assertions_exact; all_21_source_hashes_exact; HEAD_6ec475f4e54d003647f13694a40560a5f4f50895; live_read_only_health_ready_and_ledger_generation_52_with_b070_retained; W4_generation_145_private; W5_W6_and_public_off; mobile_482_of_482; test_evidence_honest; prerelease_observations_ineligible; release_device_native_save_and_W5_W8_gates_open"
+    },
+    "currentCodeCritic": {
+      "identity": "/root/w0_code_inventory",
+      "verdict": "PASS",
+      "focusedNormal": "PASS_4.212s",
+      "focusedRace": "PASS_21.042s",
+      "boundedLockNormal": "PASS_1.721s",
+      "boundedLockRace": "PASS_13.499s",
+      "native": "PASS_8_of_8",
+      "mobileTypecheck": "PASS",
+      "goVetAll": "PASS",
+      "gitDiffCheck": "PASS",
+      "priorReceiptFinding": "selected_hash_drift_closed_by_current_refresh"
+    },
+    "receiptCheckpointCritic": {
+      "identity": "/root/w0_live_evidence",
+      "verdict": "PASS",
+      "reviewedReceiptSha256": "6c8367715f7a09ed7e0367d3e4155f4a50e444057ea3bf181182a65bc25b6438",
+      "evidence": "sidecar_JSON_21_hashes_plan_diff_nonselfref_exclusions_PASS"
+    }
+  },
+  "selectedFileSha256": {
+    "authorization_surfaces.go": "718577577437c4beac7de0745c29b69eba45702a23c0c9960f2c3a194595004c",
+    "files.go": "c919549c69163d9cc98e270d852207b720cb49aafa15bacb91f9c4007960885d",
+    "frontend_research_sources_test.go": "988aa242a706969602f82f7ee5470762cf4b268cd8d6e352bf8312abe5dcbd69",
+    "guest_allowlist_test.go": "295cddf26b74f7cd9e5e4d4e8086c839545c50a1769a8675c8ca3a549118032e",
+    "index.html": "1452de01cdb7e5d7179d1f3dfb82d1b058df689e93ccd6ddefa9df6f812da795",
+    "main.go": "14b5e7cb6ca44a1b7154346729a6ba34b36c43df828bca1ee1a08bb519e151d2",
+    "memory_query.go": "3733ba719204f0a3588dc5b551db0ad5725a51a149a52fbe211852b858027ca0",
+    "mobile/src/__tests__/artifactDriveSave.test.ts": "147b26476e239dae0aaaccf61cbdf8fa386b26717a0e2eea989e4d1f777cbcb1",
+    "mobile/src/__tests__/nativeDriveWorkUx.test.ts": "2fda02736da7bf984295abc99ce428c35ad313d4f84d785ee9b5e822782169d7",
+    "mobile/src/api/client.ts": "a899478b1a363c6cc684217297f7484837ebf9eb148b29e783aa28158302ca55",
+    "mobile/src/api/types.ts": "3e8b9e712ed518d68354fb92c1d04181aa4ddb7ffa47dfd84ff414d4d75575ff",
+    "mobile/src/messaging/MessageBubble.tsx": "c82e8ed9a6a3d4c99091d468cd6ef89993a38985a182b48eb60fe42313cfaf30",
+    "mobile/src/messaging/ThreadDetailSheet.tsx": "bb911af7858745a650efb9d1210923a30cb69f680a0e7f007b91e2ddb30bb471",
+    "mobile/src/screens/ThreadScreen.tsx": "d10f3c7ef37f1f0fee55c5652b99bd9798010c791851f6bbaf84b2c0258c4d63",
+    "scout_chat_threads.go": "179c9fc65b1be0f0be370a0e4542dd5bcc358fadaceabd5cb561681e317d8f5e",
+    "scout_venture_workbook.go": "41efa6dcd5ec862f5565e3fa4ce2e432dc09c9ea6db4ed854244afb717f9beed",
+    "scout_venture_workbook_test.go": "6eeb87ee88a1d8f90b2010f98d4313326018bcd3a83005bf5e1ff9936a2b86b7",
+    "stride_artifact_drive_save.go": "6e733c1a0f71a17fde814ac0dbade4211f847a40295f5c5e0dfc9bd97c8c61e2",
+    "stride_artifact_drive_save_test.go": "cdba3eedb240e12ed36917c61866cc2accbf4d8d86583d4e89867c77815fbba4",
+    "tool_registry.go": "70abddb8c3fe60f00c9001f5745e8f994845f6125a8142adaf0f55742e4bfaba",
+    "wave11_palette_test.go": "5e480dcb80b301f073d0c89a9733d2b2d9d2032220f86f6acc8370aafe429844"
+  },
+  "excludedClaims": {
+    "reviewedReleasePrepared": false,
+    "candidateDeployed": false,
+    "postReleaseAjaAcceptanceComplete": false,
+    "physicalIPhoneAccepted": false,
+    "physicalIPadAccepted": false,
+    "nativeSaveActivated": false,
+    "w5Complete": false,
+    "w6Complete": false,
+    "w7Complete": false,
+    "w8Complete": false,
+    "publicNetworkActivated": false,
+    "providerCreditResolved": false
+  }
+}

@@ -216,6 +216,7 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 		"/api/admin/ambient-intelligence-replay/plan":    {handler: ambientReplayPlanHandler, memberGated: true},
 		"/api/admin/ambient-intelligence-replay/execute": {handler: ambientReplayExecuteHandler, memberGated: true},
 		"/api/artifact-dispositions/v1":                  {handler: artifactDispositionHandler, memberGated: true},
+		artifactDriveSavePath:                            {handler: artifactDriveSaveHandler, memberGated: true},
 		"/assistant/realtime-offer":                      {handler: assistantRealtimeOfferHandler, memberGated: true},
 		"/assistant/realtime-tool":                       {handler: assistantRealtimeToolHandler, memberGated: true},
 		"/assistant/realtime/usage":                      {handler: assistantRealtimeUsageHandler, memberGated: true},

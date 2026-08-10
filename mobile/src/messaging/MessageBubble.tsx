@@ -54,6 +54,7 @@ export type MessageBubbleProps = {
   savingWork?: boolean;
   regeneratingWork?: boolean;
   workSaved?: boolean;
+  workDriveSaveAvailability?: 'checking' | 'available' | 'unavailable';
 };
 
 function isScout(message: ScoutMessage): boolean {
@@ -193,6 +194,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   savingWork = false,
   regeneratingWork = false,
   workSaved = false,
+  workDriveSaveAvailability = 'checking',
 }: MessageBubbleProps) {
   const lifecycle = scoutReplyLifecyclePresentation(message);
   const workThread = workThreadPresentation(message);
@@ -427,9 +429,9 @@ export const MessageBubble = React.memo(function MessageBubble({
                     <SymbolView name="doc.text.fill" tintColor={colors.onAccent} size={14} />
                     <Text style={styles.workResultPrimaryText}>Open</Text>
                   </Pressable>
-                  <Pressable accessibilityRole="button" accessibilityLabel={workSaved ? 'Deliverable saved to Drive' : 'Save deliverable to Drive'} accessibilityState={{ disabled: savingWork || workSaved }} disabled={savingWork || workSaved} onPress={() => onSaveWorkArtifact?.(message)} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed, (savingWork || workSaved) && styles.workResultDisabled]}>
+                  <Pressable accessibilityRole="button" accessibilityLabel={workSaved ? 'Deliverable saved to Drive' : workDriveSaveAvailability === 'available' ? 'Save deliverable to Drive' : workDriveSaveAvailability === 'checking' ? 'Checking Save to Drive availability' : 'Save to Drive unavailable'} accessibilityState={{ disabled: savingWork || workSaved || workDriveSaveAvailability !== 'available' }} disabled={savingWork || workSaved || workDriveSaveAvailability !== 'available'} onPress={() => onSaveWorkArtifact?.(message)} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed, (savingWork || workSaved || workDriveSaveAvailability !== 'available') && styles.workResultDisabled]}>
                     {savingWork ? <ActivityIndicator color={colors.emberText} size="small" /> : <SymbolView name="externaldrive.fill" tintColor={colors.emberText} size={14} />}
-                    <Text style={styles.workResultActionText}>{workSaved ? 'Saved' : savingWork ? 'Saving…' : 'Save'}</Text>
+                    <Text style={styles.workResultActionText}>{workSaved ? 'Saved' : savingWork ? 'Saving…' : workDriveSaveAvailability === 'checking' ? 'Checking…' : workDriveSaveAvailability === 'unavailable' ? 'Unavailable' : 'Save'}</Text>
                   </Pressable>
                   <Pressable accessibilityRole="button" accessibilityLabel="Edit prompt and regenerate deliverable" accessibilityState={{ disabled: regeneratingWork }} disabled={regeneratingWork} onPress={() => onRegenerateWorkArtifact?.(message)} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed, regeneratingWork && styles.workResultDisabled]}>
                     {regeneratingWork ? <ActivityIndicator color={colors.emberText} size="small" /> : <SymbolView name="arrow.clockwise" tintColor={colors.emberText} size={14} />}

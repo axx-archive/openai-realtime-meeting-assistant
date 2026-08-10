@@ -634,6 +634,9 @@ func (app *kanbanBoardApp) publishOSArtifact(id string, published bool, updatedB
 	if !exists {
 		return meetingMemoryEntry{}, false, fmt.Errorf("artifact not found")
 	}
+	if published && artifactPublicationDisabled(existing) {
+		return meetingMemoryEntry{}, false, fmt.Errorf("this private workbook cannot be published")
+	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	metadata := map[string]string{}
 	if published {
@@ -837,6 +840,7 @@ const (
 	artifactTypePDF      = "pdf"
 	artifactTypeImage    = "image"
 	artifactTypeBundle   = "bundle"
+	artifactTypeWorkbook = "workbook"
 )
 
 // artifactType resolves an artifact's render type: the declared metadata type
@@ -845,7 +849,7 @@ const (
 // never disagree about what is a deck), else markdown.
 func artifactType(entry meetingMemoryEntry) string {
 	switch declared := strings.ToLower(strings.TrimSpace(entry.Metadata["type"])); declared {
-	case artifactTypeMarkdown, artifactTypeHTMLDeck, artifactTypePDF, artifactTypeImage, artifactTypeBundle:
+	case artifactTypeMarkdown, artifactTypeHTMLDeck, artifactTypePDF, artifactTypeImage, artifactTypeBundle, artifactTypeWorkbook:
 		return declared
 	}
 	if artifactIsHTMLDocument(entry) {

@@ -37703,7 +37703,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // file-format word ("markdown"/"md"/"text") is never shown to the
         // reader — it reads "document"
         const rawKind = String(m.type || '').trim().toLowerCase()
-        const kindMap = { markdown: 'document', md: 'document', text: 'document', doc: 'document', pdf: 'pdf', html_deck: 'deck', deck: 'deck' }
+        const kindMap = { markdown: 'document', md: 'document', text: 'document', doc: 'document', pdf: 'pdf', html_deck: 'deck', deck: 'deck', workbook: 'workbook' }
         const sniffed = artifactIsHTMLDeck(entry) ? 'deck' : (kindMap[rawKind] || artifactModeLabel(entry) || 'artifact')
         const bits = [sniffed]
         const plan = isGoalArtifact(entry) ? goalPlanFromArtifact(entry) : null
@@ -38022,7 +38022,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // threadStatus/status reader every library row uses — offers the PDF;
         // a queued/running/error scaffold never does.
         const stagePdfStatus = artifactStatusValue(entry)
-        if (!deckContext && !artifactIsHTMLDeck(entry) && String(entry.text || '').trim()
+        if (!deckContext && !artifactIsHTMLDeck(entry) && String(entry?.metadata?.type || '').trim() !== 'workbook' && String(entry.text || '').trim()
             && (stagePdfStatus === 'complete' || stagePdfStatus === 'published')) {
           const pdfControl = artifactPdfControl(entry, {
             onLanded: (fresh) => {
@@ -38328,6 +38328,23 @@ Wrap the entire export in one code block. After the code block, say whether the 
         return artifacts[0] || null
       }
 
+      function normalizeArtifactSourceURL(rawUrl) {
+        // Model-authored Markdown sometimes closes an inline-code span directly
+        // after a bare citation. A backtick is Markdown syntax, never part of
+        // the cited URL. Strip only terminal presentation delimiters, then keep
+        // the original URL spelling after an exact http(s) parse succeeds.
+        const candidate = String(rawUrl || '').trim().replace(/[.,;`]+$/g, '')
+        if (!candidate) return ''
+        try {
+          const parsed = new URL(candidate)
+          if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return ''
+          if (parsed.username || parsed.password) return ''
+          return candidate
+        } catch {
+          return ''
+        }
+      }
+
       function artifactSources(entry) {
         // The backend stores artifact bodies as plain text; there is no structured
         // sources field. Honestly surface only links the worker actually wrote
@@ -38336,7 +38353,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const seen = new Set()
         const sources = []
         const addSource = (rawUrl, label = '') => {
-          const url = String(rawUrl || '').replace(/[.,;]+$/, '')
+          const url = normalizeArtifactSourceURL(rawUrl)
           if (!url || seen.has(url)) {
             return
           }
@@ -38349,13 +38366,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
           }
           sources.push({ url, name: String(label || host).trim() || host })
         }
-        const markdownLinks = text.matchAll(/\[([^\]\n]{2,140})\]\((https?:\/\/[^\s)]+)\)/g)
+        const markdownLinks = text.matchAll(/\[([^\]\n]{2,140})\]\((https?:\/\/[^\s)`]+)\)/g)
         for (const match of markdownLinks) {
           addSource(match[2], match[1])
         }
-        const matches = text.match(/https?:\/\/[^\s)>\]]+/g) || []
+        const matches = text.match(/https?:\/\/[^\s)>\]`]+/g) || []
         for (const raw of matches) {
-          const url = raw.replace(/[.,;]+$/, '')
+          const url = normalizeArtifactSourceURL(raw)
           if (seen.has(url)) {
             continue
           }
@@ -50735,14 +50752,25 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            : toolTemplate
 	              ? { text, files, toolTemplate }
 	              : { text, files }
+	          if (toolTemplate === 'economics_waterfall') {
+	            messagePayload.operationId = globalThis.crypto?.randomUUID?.() || `workbook-${Date.now()}-${Math.random().toString(16).slice(2)}`
+	          }
 	          if (replyTarget?.messageId) {
 	            messagePayload.replyToMessageId = replyTarget.messageId
 	          }
-	          const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(thread.id)}/messages`, {
+	          const requestBody = JSON.stringify(messagePayload)
+	          const postMessage = () => fetch(`/assistant/chat-threads/${encodeURIComponent(thread.id)}/messages`, {
 	            method: 'POST',
 	            headers: { 'Content-Type': 'application/json' },
-	            body: JSON.stringify(messagePayload)
+	            body: requestBody
 	          })
+	          let response
+	          try {
+	            response = await postMessage()
+	          } catch (error) {
+	            if (toolTemplate !== 'economics_waterfall') throw error
+	            response = await postMessage()
+	          }
 	          const payload = await response.json().catch(() => ({}))
 	          if (!response.ok) {
 	            throw new Error(payload.error || 'assistant query failed')

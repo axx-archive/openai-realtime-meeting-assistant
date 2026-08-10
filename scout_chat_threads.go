@@ -677,12 +677,22 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 			ReplyToMessageID   string                    `json:"replyToMessageId"`
 			FollowUpArtifactId string                    `json:"followUpArtifactId"`
 			ToolTemplate       string                    `json:"toolTemplate"`
+			OperationID        string                    `json:"operationId"`
 		}{}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, scoutChatThreadRequestLimit)).Decode(&payload); err != nil {
 			writeAuthError(w, http.StatusBadRequest, "could not read chat message")
 			return
 		}
-		response, err := kanbanApp.appendScoutChatThreadMessageWithReplyAndTool(r.Context(), user, threadID, payload.Text, payload.Files, payload.FollowUpArtifactId, payload.ReplyToMessageID, payload.ToolTemplate)
+		ctx := r.Context()
+		if strings.TrimSpace(payload.ToolTemplate) == ventureWorkbookToolID {
+			operationID, operationErr := normalizeVentureWorkbookOperationID(payload.OperationID)
+			if operationErr != nil {
+				writeAuthError(w, http.StatusBadRequest, operationErr.Error())
+				return
+			}
+			ctx = context.WithValue(ctx, ventureWorkbookOperationContextKey{}, operationID)
+		}
+		response, err := kanbanApp.appendScoutChatThreadMessageWithReplyAndTool(ctx, user, threadID, payload.Text, payload.Files, payload.FollowUpArtifactId, payload.ReplyToMessageID, payload.ToolTemplate)
 		if err != nil {
 			writeScoutChatThreadError(w, err)
 			return
@@ -1117,6 +1127,25 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 
 	now := time.Now().UTC()
 	messageID := fmt.Sprintf("scout-chat-message-%d", now.UnixNano())
+	if strings.TrimSpace(toolTemplate) == ventureWorkbookToolID {
+		operationID := ventureWorkbookOperationIDFromContext(ctx)
+		if operationID == "" {
+			return nil, fmt.Errorf("venture workbook operationId is required")
+		}
+		messageID = ventureWorkbookSourceMessageID(threadID, normalizeAccountEmail(user.Email), operationID)
+		// Serialize file-or-find for all workbook operations in one durable
+		// thread without retaining one mutex per globally unique operation ID.
+		operationLock := app.scoutChatThreadLock("venture-workbook-file-" + threadID)
+		operationLock.Lock()
+		defer operationLock.Unlock()
+		thread, _, err = app.scoutChatThreadByID(user.Email, threadID)
+		if err != nil {
+			return nil, err
+		}
+		if existing := scoutChatMessageIndex(thread, messageID); existing >= 0 {
+			return app.replayPrivateVentureWorkbook(ctx, thread, messageID, strings.TrimSpace(text), user)
+		}
+	}
 	attachmentReservationID := "attachment-reservation-" + messageID
 	files, err = app.sanitizeScoutChatFiles(ctx, user, thread, files, attachmentReservationID)
 	if err != nil {
@@ -1546,6 +1575,39 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			return nil, fmt.Errorf("unknown tool template %q", toolTemplate)
 		}
 		objective := firstNonBlank(text, tool.Name)
+		if tool.ID == ventureWorkbookToolID {
+			if scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic {
+				return nil, fmt.Errorf("venture workbooks are available only in a private Scout chat")
+			}
+			agentThread, err := app.createPrivateVentureWorkbook(threadID, userMessage.ID, objective, user)
+			if err != nil {
+				return nil, err
+			}
+			assistantMessage := scoutChatMessageRecord{
+				ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: "thread", Role: "scout", AuthorName: scoutParticipantName,
+				Text:      "Workbook delivered · 5 sheets · 63 formulas · no financial facts inferred",
+				CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+				Thread:    &scoutChatThreadRef{ID: agentThread.ID, Mode: agentThread.Mode, Query: agentThread.Query, Status: agentThread.Status, ArtifactID: agentThread.Artifact.ID, ProgressPercent: 100},
+			}
+			if ventureWorkbookBeforeChatCommitProbe != nil {
+				if err := ventureWorkbookBeforeChatCommitProbe(); err != nil {
+					return nil, fmt.Errorf("workbook created but chat delivery needs reconciliation: %w", err)
+				}
+			}
+			saved, err := commitUserMessage(userMessage, assistantMessage)
+			if err != nil {
+				return nil, fmt.Errorf("workbook created but chat delivery needs reconciliation: %w", err)
+			}
+			response["answer"] = assistantMessage
+			response["thread"] = saved
+			response["agentThread"] = agentThread
+			response["artifact"] = agentThread.Artifact
+			response["actions"] = agentThread.Actions
+			response["providerCalls"] = 0
+			response["providerExecutionFenced"] = true
+			response["executionBridge"] = "deterministic_private_venture_workbook_v1"
+			return response, nil
+		}
 		spec := agentThreadGoalSpec{
 			Objective:     objective,
 			ToolTemplate:  tool.ID,

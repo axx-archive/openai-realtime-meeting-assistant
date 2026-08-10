@@ -1136,6 +1136,7 @@ func main() {
 	http.HandleFunc("/api/admin/ambient-intelligence-replay/plan", ambientReplayPlanHandler)
 	http.HandleFunc("/api/admin/ambient-intelligence-replay/execute", ambientReplayExecuteHandler)
 	http.HandleFunc("/api/artifact-dispositions/v1", artifactDispositionHandler)
+	http.HandleFunc("/api/artifact-drive-saves/v1", artifactDriveSaveHandler)
 	registerSTRIDERuntimeRoutes(http.DefaultServeMux)
 	registerStrideE10ProductLiveRoutes(http.DefaultServeMux)
 	registerStrideE10W5ProductRoutes(http.DefaultServeMux)
@@ -2676,6 +2677,10 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 		prior, hadPrior := authorizedArtifactByID(r.Context(), user, ACLWrite, strings.TrimSpace(payload.ID))
 		if !hadPrior {
 			writeAuthError(w, http.StatusNotFound, "artifact not found")
+			return
+		}
+		if payload.Published != nil && *payload.Published && artifactPublicationDisabled(prior) {
+			writeAuthError(w, http.StatusConflict, "this private workbook cannot be published")
 			return
 		}
 		metadata := map[string]string{}

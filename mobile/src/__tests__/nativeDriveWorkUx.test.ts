@@ -25,7 +25,10 @@ test('terminal work opens from the authorized read and receipts only mutating Sa
   assert.match(bubble, /Edit prompt and regenerate deliverable/);
   assert.doesNotMatch(screen, /action: 'open'/);
   assert.match(screen, /const response = await api\.artifact\(sessionToken, artifactId\)/);
-  assert.match(screen, /action: 'save'/);
+  assert.match(screen, /api\.saveArtifactToDrive\(sessionToken/);
+  assert.doesNotMatch(screen, /action: 'save'/);
+  assert.match(screen, /artifactDriveSaveCapability/);
+  assert.match(bubble, /Save to Drive unavailable/);
   assert.match(screen, /fileName: normalizedName/);
   assert.match(client, /assistant\/threads\/follow-up/);
   assert.doesNotMatch(screen, /## Work log|Source trail and review receipts|progressPercent/);

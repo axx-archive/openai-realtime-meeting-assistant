@@ -421,7 +421,7 @@ func TestPaletteConversationalHandoffCarriesToolTemplate(t *testing.T) {
 	if office == "" {
 		t.Fatal("index.html missing sendScoutChatViaOffice(text, files, toolTemplate)")
 	}
-	for _, want := range []string{"? { text, files, toolTemplate }", "body: JSON.stringify(messagePayload)", "Boolean(toolTemplate)"} {
+	for _, want := range []string{"? { text, files, toolTemplate }", "const requestBody = JSON.stringify(messagePayload)", "body: requestBody", "Boolean(toolTemplate)"} {
 		if !strings.Contains(office, want) {
 			t.Errorf("sendScoutChatViaOffice missing %q — toolTemplate does not reach the messages POST", want)
 		}

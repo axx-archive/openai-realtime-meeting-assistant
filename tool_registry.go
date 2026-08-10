@@ -327,17 +327,12 @@ func packagingTools() []packagingTool {
 		{
 			ID:        "economics_waterfall",
 			Group:     toolGroupMarket,
-			Name:      "Economics / Waterfall",
-			Promise:   "Where does the money go, and does the deal work for us?",
+			Name:      "Venture Workbook",
+			Promise:   "A real, formula-driven workbook with blank inputs and an evidence register.",
 			Stages:    []string{"pitch", "grill"},
 			Mode:      "artifacts",
 			Contract:  "economics_scan_v1",
-			InputMode: toolInputForm,
-			FormFields: []toolFormField{
-				{Key: "structure", Label: "Deal structure", Placeholder: "how the deal is shaped", Required: true},
-				{Key: "assumptions", Label: "Cost / revenue assumptions (optional)", Placeholder: "the numbers you have", Required: false},
-				{Key: "ask", Label: "The ask (optional)", Placeholder: "what you're raising / seeking", Required: false},
-			},
+			InputMode: toolInputConversational,
 			Authority: toolAuthorityWorkspaceWrite,
 			Rubric: toolRubric{
 				Ref: "economics_scan_gate_v1",

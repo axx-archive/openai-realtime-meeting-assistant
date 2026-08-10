@@ -322,6 +322,22 @@ func fileDeliverableRecord(entry meetingMemoryEntry) (assistantFileRecord, bool)
 	if artifactType(entry) == artifactTypeHTMLDeck {
 		deliverableMime = "text/html"
 	}
+	var workbookAsset *artifactAsset
+	if artifactType(entry) == artifactTypeWorkbook {
+		assets := artifactAssets(entry)
+		for index := range assets {
+			asset := assets[index]
+			if asset.Kind == "export" && strings.EqualFold(strings.TrimSpace(asset.Mime), ventureWorkbookMime) && validBlobRef(asset.Ref) {
+				workbookAsset = &asset
+				break
+			}
+		}
+		if workbookAsset == nil {
+			return assistantFileRecord{}, false
+		}
+		name = firstNonEmptyString(strings.TrimSpace(metadata["driveFileName"]), strings.TrimSpace(workbookAsset.Name), name)
+		deliverableMime = ventureWorkbookMime
+	}
 	var imageAsset *artifactAsset
 	if strings.TrimSpace(metadata["source"]) == "chat_image" {
 		assets := artifactAssets(entry)
@@ -357,6 +373,10 @@ func fileDeliverableRecord(entry meetingMemoryEntry) (assistantFileRecord, bool)
 	if imageAsset != nil {
 		row.DownloadURL = fileBlobDownloadURL(imageAsset.Ref, name)
 		row.Previewable = blobInlineSafeMimes[deliverableMime]
+	}
+	if workbookAsset != nil {
+		row.DownloadURL = fileBlobDownloadURL(workbookAsset.Ref, name)
+		row.Previewable = false
 	}
 	return row, true
 }
