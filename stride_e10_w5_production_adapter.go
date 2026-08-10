@@ -24,16 +24,16 @@ const (
 // digests only; raw custody, state-MAC, or destruction-evidence keys must never
 // enter the application environment.
 type StrideE10W5ManagedProductionExpectation struct {
-	StatePath                  string
-	AdapterID                  string
-	CustodyKeyNamespace        string
-	StateKeyID                 string
-	StateKeyVersion            int64
-	HighWaterStoreID           string
-	DestructionEvidenceKeyID   string
-	DestructionEvidenceVersion int64
-	CustodyPolicyDigest        string
-	NamedCustodyOwnersDigest   string
+	StatePath                  string `json:"statePath"`
+	AdapterID                  string `json:"adapterId"`
+	CustodyKeyNamespace        string `json:"custodyKeyNamespace"`
+	StateKeyID                 string `json:"stateKeyId"`
+	StateKeyVersion            int64  `json:"stateKeyVersion"`
+	HighWaterStoreID           string `json:"highWaterStoreId"`
+	DestructionEvidenceKeyID   string `json:"destructionEvidenceKeyId"`
+	DestructionEvidenceVersion int64  `json:"destructionEvidenceVersion"`
+	CustodyPolicyDigest        string `json:"custodyPolicyDigest"`
+	NamedCustodyOwnersDigest   string `json:"namedCustodyOwnersDigest"`
 }
 
 func (e StrideE10W5ManagedProductionExpectation) valid() bool {
@@ -49,23 +49,23 @@ func (e StrideE10W5ManagedProductionExpectation) valid() bool {
 // adapter after a read-only provider preflight. The application requires exact
 // equality with the operator expectation and closed capability contracts.
 type StrideE10W5ManagedProductionAttestation struct {
-	Contract                   string
-	AdapterID                  string
-	CustodyKeyNamespace        string
-	StateKeyID                 string
-	StateKeyVersion            int64
-	HighWaterStoreID           string
-	DestructionEvidenceKeyID   string
-	DestructionEvidenceVersion int64
-	CustodyPolicyDigest        string
-	NamedCustodyOwnersDigest   string
-	StateMACContract           string
-	CustodyKeyContract         string
-	HighWaterContract          string
-	DestructionContract        string
-	OwnershipContract          string
-	ObservedAt                 time.Time
-	ExpiresAt                  time.Time
+	Contract                   string    `json:"contract"`
+	AdapterID                  string    `json:"adapterId"`
+	CustodyKeyNamespace        string    `json:"custodyKeyNamespace"`
+	StateKeyID                 string    `json:"stateKeyId"`
+	StateKeyVersion            int64     `json:"stateKeyVersion"`
+	HighWaterStoreID           string    `json:"highWaterStoreId"`
+	DestructionEvidenceKeyID   string    `json:"destructionEvidenceKeyId"`
+	DestructionEvidenceVersion int64     `json:"destructionEvidenceVersion"`
+	CustodyPolicyDigest        string    `json:"custodyPolicyDigest"`
+	NamedCustodyOwnersDigest   string    `json:"namedCustodyOwnersDigest"`
+	StateMACContract           string    `json:"stateMacContract"`
+	CustodyKeyContract         string    `json:"custodyKeyContract"`
+	HighWaterContract          string    `json:"highWaterContract"`
+	DestructionContract        string    `json:"destructionContract"`
+	OwnershipContract          string    `json:"ownershipContract"`
+	ObservedAt                 time.Time `json:"observedAt"`
+	ExpiresAt                  time.Time `json:"expiresAt"`
 }
 
 type StrideE10W5ManagedProductionAdapters struct {
@@ -76,8 +76,8 @@ type StrideE10W5ManagedProductionAdapters struct {
 
 // StrideE10W5ManagedProductionProvider is the external trust boundary. Its
 // preflight must be read-only and must authenticate the attestation against the
-// independently managed provider. This repository intentionally supplies no
-// local or environment-key implementation of this interface.
+// independently managed provider. The compiled mTLS client is the only
+// production implementation; raw custody keys are never accepted from env.
 type StrideE10W5ManagedProductionProvider interface {
 	PreflightStrideE10W5ManagedProduction(context.Context, StrideE10W5ManagedProductionExpectation) (StrideE10W5ManagedProductionAdapters, StrideE10W5ManagedProductionAttestation, error)
 }
@@ -205,7 +205,14 @@ func installStrideE10W5ProductionRuntimeFromEnvironment(ctx context.Context) err
 		}
 		return nil
 	}
-	config, err := PreflightStrideE10W5ProductionRuntime(ctx, expectation, strideE10W5ManagedProductionProvider(), time.Now().UTC())
+	provider := strideE10W5ManagedProductionProvider()
+	if provider == nil {
+		provider, err = strideE10W5ManagedHTTPSProviderFromEnvironment()
+		if err != nil {
+			return err
+		}
+	}
+	config, err := PreflightStrideE10W5ProductionRuntime(ctx, expectation, provider, time.Now().UTC())
 	if err != nil {
 		return err
 	}

@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "kind": "stride_e10_w5_managed_https_provider",
+  "observedAt": "2026-08-10T11:04:27Z",
+  "status": "deterministic_compiled_mtls_provider_verified_external_service_and_activation_waiting",
+  "sourceBoundary": {
+    "branch": "codex/country-golf-stride",
+    "head": "410851f0036559437ab31158271b5fb06bad8677",
+    "dirtyWorktreeCheckpoint": true,
+    "selectedFileSha256ManifestIsAuthoritative": true,
+    "gitStatusPorcelainV1Sha256BeforeReceipt": "3b19e894d95279a61e262a2c46485433e1c96a1e28e881eda6a1048e7d3e03c9",
+    "unrelatedUntrackedPathsExcluded": ["stride-site/"],
+    "gitCommitPushDeployOrProductionMutationPerformed": false
+  },
+  "scope": {
+    "featureSwitch": "person_mymind_context",
+    "featureSwitchDefaultFalse": true,
+    "compiledProductionProviderClient": true,
+    "rawCustodyOrStateKeysAcceptedFromEnvironment": false,
+    "transport": "tls_1_3_mutual_authentication",
+    "operatorBoundClientLeafSPKISHA256": true,
+    "operatorBoundServerLeafSPKISHA256": true,
+    "closedRPCSchema": "stride.mymind.managed-https-rpc.v1",
+    "closedOperations": [
+      "preflight",
+      "state_key_current",
+      "state_key_resolve",
+      "high_water_read",
+      "high_water_advance",
+      "custody_key_current",
+      "custody_key_resolve",
+      "destroy_source",
+      "destroy_person",
+      "verify_destruction"
+    ],
+    "proxyOrRedirectFallback": false,
+    "responseBodyLimitBytes": 262144,
+    "credentialFileLimitBytes": 1048576,
+    "externalCalls": 0,
+    "testProvider": "loopback_mtls_only"
+  },
+  "authorityAndFailureProofs": {
+    "fullOperatorExpectationBoundToEveryRPC": true,
+    "exactPreflightAttestationRequiredBeforeInstall": true,
+    "clientCertificateSPKIPinVerifiedBeforeTransportConstruction": true,
+    "validButUnpinnedClientCertificateRotationRejected": true,
+    "explicitlyRepinnedClientCertificateRestartAccepted": true,
+    "serverCertificateSPKIPinVerified": true,
+    "credentialPathAbsoluteCanonicalRegularSingleLink": true,
+    "credentialOwnerAndModeRevalidatedPreOpenAndPostRead": true,
+    "credentialDeviceInodeSizeModeOwnerAndModtimeStable": true,
+    "credentialContentDoubleReadStable": true,
+    "sameInodePermissionRaceRejected": true,
+    "sameInodeEqualSizeContentRewriteRejected": true,
+    "crossPathHighWaterRejectedBeforeNetwork": true,
+    "nonConsecutiveHighWaterCASRejectedBeforeNetwork": true,
+    "duplicateDestructionRefsRejectedBeforeNetwork": true,
+    "providerCASConflictPreserved": true,
+    "unknownTrailingMultiPayloadAndOversizedResponsesRejected": true,
+    "bootstrapKeepsFeatureFalse": true,
+    "bootstrapCreatesNoCustodyStateWhenEmpty": true
+  },
+  "verification": {
+    "fullGo": {
+      "result": "PASS",
+      "command": "go test ./... -count=1",
+      "mainPackageElapsedSeconds": 471.866
+    },
+    "focusedNormal": {
+      "result": "PASS",
+      "command": "go test . -run '^TestStrideE10W5|^TestFileMyMind|^TestMyMind' -count=1",
+      "packageElapsedSeconds": 1.671
+    },
+    "focusedRace": {
+      "result": "PASS",
+      "command": "go test -race . -run '^TestStrideE10W5ManagedHTTPS|^TestStrideE10W5Production' -count=1",
+      "packageElapsedSeconds": 2.322
+    },
+    "goVetAll": {
+      "result": "PASS",
+      "command": "go vet ./..."
+    },
+    "diffCheck": "PASS",
+    "independentCritic": {
+      "identity": "/root/w0_code_inventory",
+      "result": "PASS",
+      "normalPackageElapsedSeconds": 0.525,
+      "racePackageElapsedSeconds": 2.070,
+      "evidence": "exact_client_SPKI_operator_binding; unpinned_rotation_denied; explicitly_repinned_restart_authenticated; credential_identity_owner_mode_metadata_and_content_stability; same_inode_chmod_and_equal_size_rewrite_denied; default_off_no_state_bootstrap; no_blocker_or_major"
+    }
+  },
+  "externalBoundary": {
+    "productionManagedHTTPSServiceConfigured": false,
+    "productionRuntimeInstalled": false,
+    "productionCustodyKeysInstalled": false,
+    "productionStateMACKeysInstalled": false,
+    "productionMonotonicHighWaterInstalled": false,
+    "productionDestructionVerifierInstalled": false,
+    "namedExternalCustodyOwnersApproved": false,
+    "privacySecurityConsentApprovalCompleted": false,
+    "liveMyMindCohortActivated": false,
+    "productionDataImported": false,
+    "featureActivated": false,
+    "gitCommitPushDeployPerformed": false,
+    "remainingState": "external_managed_service_custody_consent_cohort_and_activation_waiting"
+  },
+  "selectedFileSha256": {
+    "stride_e10_w5_production_adapter.go": "ab238ff2b05339c3ccb9dc96ae7b56891b0f08a2089e3abdd131df63e993980b",
+    "stride_e10_w5_production_adapter_test.go": "19c2c3abfb7d462177a4a74d9d508610ad393cce68599c2e8e81918e1b80f9b8",
+    "stride_e10_w5_managed_https_provider.go": "88bc21359d7cd760a47fa53e99cb46b9a7caa1af0e443586a4b5569ebded093a",
+    "stride_e10_w5_managed_https_provider_test.go": "84a8c3a4fa865d5baf3458b37eba2ed2a6a0f26ce35adb04c275cbe5b68dba08",
+    "stride_e10_w5_runtime.go": "360f566dba859c7e88a7dfd82a4f76d5688fcc88c051a3a627395db619a0a1b8",
+    "main.go": "14b5e7cb6ca44a1b7154346729a6ba34b36c43df828bca1ee1a08bb519e151d2"
+  }
+}
