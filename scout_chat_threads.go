@@ -737,6 +737,45 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(parts) == 4 && parts[1] == "messages" && parts[3] == "supersede" && r.Method == http.MethodPost {
+		if !isArtifactApprovalAdmin(user) {
+			writeAuthError(w, http.StatusForbidden, "terminal work supersession is admin-only")
+			return
+		}
+		payload := struct {
+			ReplacementMessageID string `json:"replacementMessageId"`
+			Reason               string `json:"reason"`
+		}{}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&payload); err != nil {
+			writeAuthError(w, http.StatusBadRequest, "could not read terminal work supersession request")
+			return
+		}
+		var trailing any
+		if err := decoder.Decode(&trailing); err != io.EOF {
+			writeAuthError(w, http.StatusBadRequest, "terminal work supersession request must contain exactly one JSON object")
+			return
+		}
+		thread, receipt, err := kanbanApp.supersedeScoutChatTerminalWork(user, threadID, parts[2], payload.ReplacementMessageID, payload.Reason)
+		if err != nil {
+			writeScoutChatThreadError(w, err)
+			return
+		}
+		status := http.StatusAccepted
+		complete := receipt.ProjectionState == scoutChatModerationComplete
+		if complete {
+			status = http.StatusOK
+		}
+		writeAuthJSON(w, status, map[string]any{
+			"ok":       complete,
+			"accepted": true,
+			"thread":   kanbanApp.projectScoutChatThreadForViewer(user.Email, thread),
+			"receipt":  projectScoutChatModerationReceipt(receipt),
+		})
+		return
+	}
+
 	if len(parts) == 3 && parts[1] == "messages" && r.Method == http.MethodDelete {
 		thread, err := kanbanApp.deleteScoutChatThreadMessage(user.Email, threadID, parts[2])
 		if err != nil {
@@ -818,32 +857,47 @@ func writeScoutChatThreadError(w http.ResponseWriter, err error) {
 }
 
 type scoutChatModerationReceipt struct {
-	OperationID         string                 `json:"operationId"`
-	ThreadID            string                 `json:"threadId"`
-	MessageID           string                 `json:"messageId"`
-	ActorEmail          string                 `json:"actorEmail"`
-	ReasonDigest        string                 `json:"reasonDigest"`
-	TargetContentDigest string                 `json:"targetContentDigest"`
-	TargetEventID       string                 `json:"targetEventId,omitempty"`
-	TargetEventRevision int64                  `json:"targetEventRevision,omitempty"`
-	DeletedAt           string                 `json:"deletedAt"`
-	ProjectionState     string                 `json:"projectionState"`
-	AttemptCount        int                    `json:"attemptCount,omitempty"`
-	LastAttemptAt       string                 `json:"lastAttemptAt,omitempty"`
-	CompletedAt         string                 `json:"completedAt,omitempty"`
-	Target              scoutChatMessageRecord `json:"target"`
+	OperationID         string                          `json:"operationId"`
+	ThreadID            string                          `json:"threadId"`
+	MessageID           string                          `json:"messageId"`
+	ActorEmail          string                          `json:"actorEmail"`
+	ReasonDigest        string                          `json:"reasonDigest"`
+	TargetContentDigest string                          `json:"targetContentDigest"`
+	TargetEventID       string                          `json:"targetEventId,omitempty"`
+	TargetEventRevision int64                           `json:"targetEventRevision,omitempty"`
+	DeletedAt           string                          `json:"deletedAt"`
+	ProjectionState     string                          `json:"projectionState"`
+	AttemptCount        int                             `json:"attemptCount,omitempty"`
+	LastAttemptAt       string                          `json:"lastAttemptAt,omitempty"`
+	CompletedAt         string                          `json:"completedAt,omitempty"`
+	Target              scoutChatMessageRecord          `json:"target"`
+	TargetWork          *scoutChatWorkModerationBinding `json:"targetWork,omitempty"`
+	ReplacementWork     *scoutChatWorkModerationBinding `json:"replacementWork,omitempty"`
+}
+
+// scoutChatWorkModerationBinding is the body-free exact authority image for
+// removing one superseded terminal work card from chat. The underlying target
+// and replacement artifacts remain durable; their digests prove which current
+// terminal runs authorized this projection-only mutation.
+type scoutChatWorkModerationBinding struct {
+	MessageID      string `json:"messageId"`
+	ThreadID       string `json:"threadId"`
+	ArtifactID     string `json:"artifactId"`
+	Status         string `json:"status"`
+	ArtifactDigest string `json:"artifactDigest"`
 }
 
 type scoutChatModerationReceiptView struct {
-	OperationID     string `json:"operationId"`
-	ThreadID        string `json:"threadId"`
-	MessageID       string `json:"messageId"`
-	ActorEmail      string `json:"actorEmail"`
-	ReasonDigest    string `json:"reasonDigest"`
-	ProjectionState string `json:"projectionState"`
-	AttemptCount    int    `json:"attemptCount"`
-	DeletedAt       string `json:"deletedAt"`
-	CompletedAt     string `json:"completedAt,omitempty"`
+	OperationID          string `json:"operationId"`
+	ThreadID             string `json:"threadId"`
+	MessageID            string `json:"messageId"`
+	ActorEmail           string `json:"actorEmail"`
+	ReasonDigest         string `json:"reasonDigest"`
+	ProjectionState      string `json:"projectionState"`
+	AttemptCount         int    `json:"attemptCount"`
+	DeletedAt            string `json:"deletedAt"`
+	CompletedAt          string `json:"completedAt,omitempty"`
+	ReplacementMessageID string `json:"replacementMessageId,omitempty"`
 }
 
 const (
@@ -852,10 +906,15 @@ const (
 )
 
 func projectScoutChatModerationReceipt(receipt scoutChatModerationReceipt) scoutChatModerationReceiptView {
+	replacementMessageID := ""
+	if receipt.ReplacementWork != nil {
+		replacementMessageID = receipt.ReplacementWork.MessageID
+	}
 	return scoutChatModerationReceiptView{
 		OperationID: receipt.OperationID, ThreadID: receipt.ThreadID, MessageID: receipt.MessageID,
 		ActorEmail: receipt.ActorEmail, ReasonDigest: receipt.ReasonDigest, ProjectionState: receipt.ProjectionState,
 		AttemptCount: receipt.AttemptCount, DeletedAt: receipt.DeletedAt, CompletedAt: receipt.CompletedAt,
+		ReplacementMessageID: replacementMessageID,
 	}
 }
 
@@ -3388,6 +3447,221 @@ func (app *kanbanBoardApp) moderateScoutChatThreadMessage(user *userAccount, thr
 		OperationID: "chat_moderation_" + operationDigest[:24], ThreadID: thread.ID, MessageID: messageID,
 		ActorEmail: normalizeAccountEmail(user.Email), ReasonDigest: reasonDigest, TargetContentDigest: contentDigest,
 		DeletedAt: deletedAt.Format(time.RFC3339Nano), ProjectionState: scoutChatModerationPending, Target: target,
+	}
+	if projected {
+		receipt.TargetEventID = latest.Header.ID
+		receipt.TargetEventRevision = latest.ContentRevision
+	}
+	thread.ModerationReceipts = append(thread.ModerationReceipts, receipt)
+	if err := app.saveScoutChatThread(thread); err != nil {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, err
+	}
+	deliverScoutChatThreadDeletion(thread, messageID)
+	receiptIndex := len(thread.ModerationReceipts) - 1
+	updated, err := app.reconcileScoutChatModerationLocked(thread, receiptIndex)
+	if err != nil {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, err
+	}
+	return updated, updated.ModerationReceipts[receiptIndex], nil
+}
+
+func scoutChatWorkArtifactDigest(artifact meetingMemoryEntry) (string, error) {
+	return STRIDEContractDigest(struct {
+		ID        string            `json:"id"`
+		Kind      string            `json:"kind"`
+		Text      string            `json:"text"`
+		CreatedAt time.Time         `json:"createdAt"`
+		Metadata  map[string]string `json:"metadata"`
+	}{artifact.ID, artifact.Kind, artifact.Text, artifact.CreatedAt, artifact.Metadata})
+}
+
+func (app *kanbanBoardApp) scoutChatTerminalWorkBinding(thread scoutChatThreadRecord, message scoutChatMessageRecord, actorEmail string, requireVerifiedReplacement bool) (scoutChatWorkModerationBinding, error) {
+	if message.Kind != "thread" || !strings.EqualFold(message.Role, "scout") || message.Thread == nil ||
+		strings.TrimSpace(message.Thread.ID) == "" || strings.TrimSpace(message.Thread.ArtifactID) == "" {
+		return scoutChatWorkModerationBinding{}, fmt.Errorf("terminal work requires exact message, thread, and artifact bindings")
+	}
+	artifact, found := app.osArtifactByID(message.Thread.ArtifactID)
+	if !found {
+		return scoutChatWorkModerationBinding{}, fmt.Errorf("terminal work artifact not found")
+	}
+	status := agentThreadStatusValue(artifact)
+	if status != strings.ToLower(strings.TrimSpace(message.Thread.Status)) || !oneOf(status, "complete", "error") {
+		return scoutChatWorkModerationBinding{}, fmt.Errorf("terminal work status is stale or not terminal")
+	}
+	if strings.TrimSpace(artifact.Metadata["threadId"]) != strings.TrimSpace(message.Thread.ID) ||
+		strings.TrimSpace(artifact.Metadata["originKind"]) != agentThreadOriginChannel ||
+		strings.TrimSpace(artifact.Metadata["originId"]) != thread.ID ||
+		normalizeAccountEmail(artifact.Metadata["requestedBy"]) != normalizeAccountEmail(actorEmail) {
+		return scoutChatWorkModerationBinding{}, fmt.Errorf("terminal work authority does not match this channel and requester")
+	}
+	if requireVerifiedReplacement && (status != "complete" || strings.TrimSpace(artifact.Metadata["currentStage"]) != "verify_goal_completed" ||
+		strings.TrimSpace(artifact.Metadata["reviewGate"]) != "passed" || strings.TrimSpace(artifact.Metadata["progressPercent"]) != "100" ||
+		strings.TrimSpace(artifact.Metadata["error"]) != "" || strings.TrimSpace(artifact.Text) == "") {
+		return scoutChatWorkModerationBinding{}, fmt.Errorf("replacement work is not a verified complete deliverable")
+	}
+	digest, err := scoutChatWorkArtifactDigest(artifact)
+	if err != nil {
+		return scoutChatWorkModerationBinding{}, err
+	}
+	return scoutChatWorkModerationBinding{
+		MessageID: message.ID, ThreadID: message.Thread.ID, ArtifactID: message.Thread.ArtifactID,
+		Status: status, ArtifactDigest: digest,
+	}, nil
+}
+
+// supersedeScoutChatTerminalWork removes one obsolete terminal work card only
+// after a later, same-mode, verified-complete replacement in the same channel
+// is resolved from current durable artifacts. Agent-run locks are acquired
+// before the chat lock, matching the run -> projection order used by workers,
+// so a follow-up cannot reopen either artifact between validation and removal.
+// The artifacts themselves are never mutated or deleted.
+func (app *kanbanBoardApp) supersedeScoutChatTerminalWork(user *userAccount, threadID string, messageID string, replacementMessageID string, reason string) (scoutChatThreadRecord, scoutChatModerationReceipt, error) {
+	if !isArtifactApprovalAdmin(user) {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, fmt.Errorf("terminal work supersession is admin-only")
+	}
+	messageID = strings.TrimSpace(messageID)
+	replacementMessageID = strings.TrimSpace(replacementMessageID)
+	reason = strings.Join(strings.Fields(reason), " ")
+	if messageID == "" || replacementMessageID == "" || messageID == replacementMessageID {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, fmt.Errorf("distinct target and replacement message ids are required")
+	}
+	if reason == "" || utf8.RuneCountInString(reason) > 500 {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, fmt.Errorf("a supersession reason of 1-500 characters is required")
+	}
+
+	preflight, _, err := app.scoutChatThreadByID(user.Email, threadID)
+	if err != nil {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, err
+	}
+	if scoutChatThreadVisibility(preflight) != scoutChatVisibilityPublic {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, fmt.Errorf("terminal work supersession is limited to public channels")
+	}
+	reasonDigest := sha256Hex([]byte(reason))
+	for _, receipt := range preflight.ModerationReceipts {
+		if receipt.MessageID != messageID {
+			continue
+		}
+		if receipt.ActorEmail != normalizeAccountEmail(user.Email) || receipt.ReasonDigest != reasonDigest || receipt.TargetWork == nil || receipt.ReplacementWork == nil ||
+			receipt.ReplacementWork.MessageID != replacementMessageID {
+			return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, fmt.Errorf("that supersession operation already exists with different authority")
+		}
+		if receipt.ProjectionState == scoutChatModerationComplete {
+			return preflight, receipt, nil
+		}
+		return preflight, receipt, fmt.Errorf("terminal work supersession reconciliation is pending")
+	}
+	targetIndex := scoutChatMessageIndex(preflight, messageID)
+	replacementIndex := scoutChatMessageIndex(preflight, replacementMessageID)
+	if targetIndex < 0 || replacementIndex < 0 {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, fmt.Errorf("target or replacement chat message not found")
+	}
+	targetPreflight := preflight.Messages[targetIndex]
+	replacementPreflight := preflight.Messages[replacementIndex]
+	if targetPreflight.Thread == nil || replacementPreflight.Thread == nil {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, fmt.Errorf("target and replacement must both be work cards")
+	}
+	artifactIDs := []string{strings.TrimSpace(targetPreflight.Thread.ArtifactID), strings.TrimSpace(replacementPreflight.Thread.ArtifactID)}
+	if artifactIDs[0] == "" || artifactIDs[1] == "" || artifactIDs[0] == artifactIDs[1] {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, fmt.Errorf("target and replacement require distinct durable artifacts")
+	}
+	sort.Strings(artifactIDs)
+	runLocks := []*sync.Mutex{app.agentThreadRunLock(artifactIDs[0]), app.agentThreadRunLock(artifactIDs[1])}
+	for _, runLock := range runLocks {
+		runLock.Lock()
+	}
+	defer func() {
+		for index := len(runLocks) - 1; index >= 0; index-- {
+			runLocks[index].Unlock()
+		}
+	}()
+
+	chatLock := app.scoutChatThreadLock(threadID)
+	chatLock.Lock()
+	defer chatLock.Unlock()
+	thread, _, err := app.scoutChatThreadByID(user.Email, threadID)
+	if err != nil {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, err
+	}
+	targetIndex = scoutChatMessageIndex(thread, messageID)
+	replacementIndex = scoutChatMessageIndex(thread, replacementMessageID)
+	if targetIndex < 0 || replacementIndex < 0 {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, ErrSTRIDEConversationConflict
+	}
+	target := thread.Messages[targetIndex]
+	replacement := thread.Messages[replacementIndex]
+	if target.Thread == nil || replacement.Thread == nil || target.Thread.ArtifactID != targetPreflight.Thread.ArtifactID ||
+		replacement.Thread.ArtifactID != replacementPreflight.Thread.ArtifactID || target.Thread.ID != targetPreflight.Thread.ID ||
+		replacement.Thread.ID != replacementPreflight.Thread.ID {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, ErrSTRIDEConversationConflict
+	}
+	targetBinding, err := app.scoutChatTerminalWorkBinding(thread, target, user.Email, false)
+	if err != nil {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, err
+	}
+	replacementBinding, err := app.scoutChatTerminalWorkBinding(thread, replacement, user.Email, true)
+	if err != nil {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, err
+	}
+	if !strings.EqualFold(strings.TrimSpace(target.Thread.Mode), strings.TrimSpace(replacement.Thread.Mode)) {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, fmt.Errorf("replacement work mode does not match the superseded work")
+	}
+	targetCreatedAt, targetTimeErr := time.Parse(time.RFC3339Nano, target.CreatedAt)
+	replacementCreatedAt, replacementTimeErr := time.Parse(time.RFC3339Nano, replacement.CreatedAt)
+	if targetTimeErr != nil || replacementTimeErr != nil || !replacementCreatedAt.After(targetCreatedAt) {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, fmt.Errorf("replacement work must be newer than the superseded work")
+	}
+
+	for receiptIndex := range thread.ModerationReceipts {
+		receipt := thread.ModerationReceipts[receiptIndex]
+		if receipt.MessageID != messageID {
+			continue
+		}
+		if receipt.ActorEmail != normalizeAccountEmail(user.Email) || receipt.ReasonDigest != reasonDigest || receipt.TargetWork == nil || receipt.ReplacementWork == nil ||
+			*receipt.TargetWork != targetBinding || *receipt.ReplacementWork != replacementBinding {
+			return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, fmt.Errorf("that supersession operation already exists with different authority")
+		}
+		if receipt.ProjectionState == scoutChatModerationComplete {
+			return thread, receipt, nil
+		}
+		updated, reconcileErr := app.reconcileScoutChatModerationLocked(thread, receiptIndex)
+		if reconcileErr != nil {
+			return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, reconcileErr
+		}
+		return updated, updated.ModerationReceipts[receiptIndex], nil
+	}
+
+	contentDigest, err := strideChatMessageContentDigest(false, target)
+	if err != nil {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, err
+	}
+	latest, projected, err := app.latestSTRIDETeamChatEvent(thread.ID, messageID)
+	if err != nil {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, err
+	}
+	if projected && latest.EventType != "delete" && latest.ContentDigest != contentDigest {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, ErrSTRIDEConversationConflict
+	}
+
+	thread.Messages = append(thread.Messages[:targetIndex], thread.Messages[targetIndex+1:]...)
+	deletedAt := time.Now().UTC()
+	thread.UpdatedAt = deletedAt.Format(time.RFC3339Nano)
+	thread.Preview = scoutChatThreadPreview(thread)
+	operationDigest, err := STRIDEContractDigest(struct {
+		ThreadID, MessageID, ActorEmail, ReasonDigest string
+		Target, Replacement                           scoutChatWorkModerationBinding
+	}{thread.ID, messageID, normalizeAccountEmail(user.Email), reasonDigest, targetBinding, replacementBinding})
+	if err != nil {
+		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, err
+	}
+	targetReceiptRecord := scoutChatMessageRecord{
+		ID: target.ID, Kind: target.Kind, Role: target.Role, CreatedAt: target.CreatedAt,
+		AuthorName: target.AuthorName, AuthorEmail: target.AuthorEmail,
+	}
+	receipt := scoutChatModerationReceipt{
+		OperationID: "chat_work_supersession_" + operationDigest[:24], ThreadID: thread.ID, MessageID: messageID,
+		ActorEmail: normalizeAccountEmail(user.Email), ReasonDigest: reasonDigest, TargetContentDigest: contentDigest,
+		DeletedAt: deletedAt.Format(time.RFC3339Nano), ProjectionState: scoutChatModerationPending, Target: targetReceiptRecord,
+		TargetWork: &targetBinding, ReplacementWork: &replacementBinding,
 	}
 	if projected {
 		receipt.TargetEventID = latest.Header.ID

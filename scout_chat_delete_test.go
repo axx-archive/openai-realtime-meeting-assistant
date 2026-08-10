@@ -122,7 +122,7 @@ func TestScoutChatAdminModeratesOnlyOrdinaryPublicAgentReplies(t *testing.T) {
 	if _, err := kanbanApp.commitScoutChatThreadMessages("tim@shareability.com", channel.ID,
 		scoutChatMessageRecord{ID: "agent-answer", Kind: "message", Role: "scout", Text: "incorrect answer", CreatedAt: createdAt},
 		scoutChatMessageRecord{ID: "human-message", Kind: "message", Role: "user", Text: "keep my words", CreatedAt: createdAt, AuthorEmail: "tim@shareability.com"},
-		scoutChatMessageRecord{ID: "agent-work", Kind: "message", Role: "scout", Text: "research running", CreatedAt: createdAt, Thread: &scoutChatThreadRef{ID: "work-1"}},
+		scoutChatMessageRecord{ID: "agent-work", Kind: "message", Role: "scout", Text: "research running", CreatedAt: createdAt, Thread: &scoutChatThreadRef{ID: "work-1", Status: "running"}},
 	); err != nil {
 		t.Fatalf("seed channel: %v", err)
 	}
@@ -186,6 +186,198 @@ func TestScoutChatAdminModeratesOnlyOrdinaryPublicAgentReplies(t *testing.T) {
 	}
 	if _, _, err := kanbanApp.moderateScoutChatThreadMessage(admin, private.ID, "private-agent", "bad routing incident"); err == nil || !strings.Contains(err.Error(), "public agent replies") {
 		t.Fatalf("private moderation err=%v, want public-only refusal", err)
+	}
+}
+
+func TestScoutChatAdminSupersedesOnlyWithExactVerifiedReplacementAndPreservesArtifacts(t *testing.T) {
+	setupAuthTestEnv(t)
+	_ = loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	channel, err := kanbanApp.createScoutChatThread("tim@shareability.com", "Tim", "Bonfire Chat", "public")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	config := strideIntegratedRuntimeConfig(t.TempDir())
+	config.RecallThreadIDs = []string{channel.ID}
+	runtime, err := NewSTRIDERuntime(config)
+	if err != nil {
+		t.Fatalf("create STRIDE runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = runtime.Close() })
+	kanbanApp.strideRuntime = runtime
+	admin := accountStore().findUser("aj@shareability.com")
+
+	artifactMetadata := func(threadID, status string) map[string]string {
+		return map[string]string{
+			"threadId": threadID, "mode": "research", "status": status, "threadStatus": status,
+			"originKind": agentThreadOriginChannel, "originId": channel.ID, "requestedBy": admin.Email,
+		}
+	}
+	targetMetadata := artifactMetadata("target-run", "error")
+	targetMetadata["currentStage"] = "gate_before_shipping"
+	targetMetadata["reviewGate"] = "blocked"
+	targetMetadata["progressPercent"] = "72"
+	targetMetadata["error"] = "max_output_truncation"
+	replacementMetadata := artifactMetadata("replacement-run", "complete")
+	replacementMetadata["currentStage"] = "verify_goal_completed"
+	replacementMetadata["reviewGate"] = "passed"
+	replacementMetadata["progressPercent"] = "100"
+	if _, _, err := kanbanApp.memory.appendOSArtifact("target-artifact", "bounded failed result", targetMetadata); err != nil {
+		t.Fatalf("append target artifact: %v", err)
+	}
+	if _, _, err := kanbanApp.memory.appendOSArtifact("replacement-artifact", "decision-grade verified report", replacementMetadata); err != nil {
+		t.Fatalf("append replacement artifact: %v", err)
+	}
+	targetCreatedAt := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano)
+	replacementCreatedAt := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := kanbanApp.commitScoutChatThreadMessages(admin.Email, channel.ID,
+		scoutChatMessageRecord{ID: "target-work", Kind: "thread", Role: "scout", Text: "old work", CreatedAt: targetCreatedAt, Thread: &scoutChatThreadRef{ID: "target-run", Mode: "research", Status: "error", ArtifactID: "target-artifact"}},
+		scoutChatMessageRecord{ID: "replacement-work", Kind: "thread", Role: "scout", Text: "new work", CreatedAt: replacementCreatedAt, Thread: &scoutChatThreadRef{ID: "replacement-run", Mode: "research", Status: "complete", ArtifactID: "replacement-artifact"}},
+	); err != nil {
+		t.Fatalf("seed work cards: %v", err)
+	}
+
+	beforeTarget, ok := kanbanApp.osArtifactByID("target-artifact")
+	if !ok {
+		t.Fatal("target artifact missing before supersession")
+	}
+	beforeReplacement, ok := kanbanApp.osArtifactByID("replacement-artifact")
+	if !ok {
+		t.Fatal("replacement artifact missing before supersession")
+	}
+	beforeReplacementDigest, _ := scoutChatWorkArtifactDigest(beforeReplacement)
+
+	// A stale chat ref cannot authorize removal when the durable target is active.
+	activeTarget := beforeTarget
+	activeTarget.Metadata = cloneStringMap(beforeTarget.Metadata)
+	activeTarget.Metadata["status"] = "running"
+	activeTarget.Metadata["threadStatus"] = "running"
+	if _, _, err := kanbanApp.updateOSArtifactWithMetadata(activeTarget.ID, "", activeTarget.Text, "test", activeTarget.Metadata); err != nil {
+		t.Fatalf("make target active: %v", err)
+	}
+	if _, _, err := kanbanApp.supersedeScoutChatTerminalWork(admin, channel.ID, "target-work", "replacement-work", "superseded by verified replacement"); err == nil || !strings.Contains(err.Error(), "stale") {
+		t.Fatalf("stale terminal status err=%v, want refusal", err)
+	}
+	activeTarget.Metadata["status"] = "error"
+	activeTarget.Metadata["threadStatus"] = "error"
+	if _, _, err := kanbanApp.updateOSArtifactWithMetadata(activeTarget.ID, "", activeTarget.Text, "test", activeTarget.Metadata); err != nil {
+		t.Fatalf("restore terminal target: %v", err)
+	}
+	terminalTarget, ok := kanbanApp.osArtifactByID("target-artifact")
+	if !ok {
+		t.Fatal("terminal target missing before supersession")
+	}
+	terminalTargetDigest, _ := scoutChatWorkArtifactDigest(terminalTarget)
+
+	supersedeAs := func(email, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+channel.ID+"/messages/target-work/supersede", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		for _, cookie := range loginAs(t, email, "B0NFIRE!") {
+			req.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		assistantChatThreadHandler(recorder, req)
+		return recorder
+	}
+	requestBody := `{"replacementMessageId":"replacement-work","reason":"superseded by verified replacement"}`
+	if recorder := supersedeAs("tim@shareability.com", requestBody); recorder.Code != http.StatusForbidden {
+		t.Fatalf("non-admin supersession status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := supersedeAs(admin.Email, `{"replacementMessageId":"replacement-work","reason":"superseded","extra":true}`); recorder.Code != http.StatusBadRequest {
+		t.Fatalf("unknown-field supersession status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := supersedeAs(admin.Email, requestBody+` {}`); recorder.Code != http.StatusBadRequest {
+		t.Fatalf("trailing-json supersession status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	stableSnapshotPath := runtime.config.SnapshotPath
+	runtime.config.SnapshotPath = t.TempDir()
+	recorder := supersedeAs(admin.Email, requestBody)
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("pending supersede route status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	thread, _, err := kanbanApp.scoutChatThreadByID(admin.Email, channel.ID)
+	if err != nil {
+		t.Fatalf("read superseded thread: %v", err)
+	}
+	if len(thread.ModerationReceipts) != 1 {
+		t.Fatalf("moderation receipts=%d, want one", len(thread.ModerationReceipts))
+	}
+	receipt := thread.ModerationReceipts[0]
+	if receipt.ProjectionState != scoutChatModerationPending {
+		t.Fatalf("supersession receipt state=%q, want pending before recovery", receipt.ProjectionState)
+	}
+	_ = runtime.Close()
+	config.SnapshotPath = stableSnapshotPath
+	runtime, err = NewSTRIDERuntime(config)
+	if err != nil {
+		t.Fatalf("restart STRIDE runtime for supersession recovery: %v", err)
+	}
+	kanbanApp.strideRuntime = runtime
+	kanbanApp.recoverScoutChatModerations()
+	thread, _, err = kanbanApp.scoutChatThreadByID(admin.Email, channel.ID)
+	if err != nil || len(thread.ModerationReceipts) != 1 {
+		t.Fatalf("read recovered supersession thread receipts=%d err=%v", len(thread.ModerationReceipts), err)
+	}
+	receipt = thread.ModerationReceipts[0]
+	if scoutChatMessageIndex(thread, "target-work") >= 0 || scoutChatMessageIndex(thread, "replacement-work") < 0 {
+		t.Fatalf("supersession removed the wrong card: %+v", thread.Messages)
+	}
+	if receipt.ProjectionState != scoutChatModerationComplete || receipt.TargetWork == nil || receipt.ReplacementWork == nil ||
+		receipt.TargetWork.ArtifactID != "target-artifact" || receipt.ReplacementWork.ArtifactID != "replacement-artifact" {
+		t.Fatalf("work supersession receipt=%+v", receipt)
+	}
+	exactReference, err := scoutChatModerationReference(receipt)
+	if err != nil {
+		t.Fatalf("derive exact supersession reference: %v", err)
+	}
+	latest, found, err := kanbanApp.latestSTRIDETeamChatEvent(channel.ID, "target-work")
+	if err != nil || !found || latest.EventType != "delete" || !strideConversationEventHasReference(latest, exactReference) {
+		t.Fatalf("canonical supersession event=%+v found=%v err=%v", latest, found, err)
+	}
+	serializedReceipt, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatalf("marshal work supersession receipt: %v", err)
+	}
+	for _, forbidden := range []string{"old work", "bounded failed result", "gate_before_shipping", "max_output_truncation"} {
+		if strings.Contains(string(serializedReceipt), forbidden) {
+			t.Fatalf("body/progress value %q leaked into body-free receipt: %s", forbidden, serializedReceipt)
+		}
+	}
+	afterTarget, targetFound := kanbanApp.osArtifactByID("target-artifact")
+	afterReplacement, replacementFound := kanbanApp.osArtifactByID("replacement-artifact")
+	afterTargetDigest, _ := scoutChatWorkArtifactDigest(afterTarget)
+	afterReplacementDigest, _ := scoutChatWorkArtifactDigest(afterReplacement)
+	if !targetFound || !replacementFound || beforeReplacementDigest != afterReplacementDigest || afterTargetDigest == "" {
+		t.Fatalf("artifacts changed or disappeared: target=%v replacement=%v", targetFound, replacementFound)
+	}
+	// The successful supersession must preserve the exact current terminal
+	// artifact image established immediately before the projection mutation.
+	if terminalTargetDigest != afterTargetDigest {
+		t.Fatalf("target preservation digest terminal=%s after=%s", terminalTargetDigest, afterTargetDigest)
+	}
+	replayedThread, replayedReceipt, err := kanbanApp.supersedeScoutChatTerminalWork(admin, channel.ID, "target-work", "replacement-work", "superseded by verified replacement")
+	if err != nil || replayedReceipt.OperationID != receipt.OperationID || scoutChatMessageIndex(replayedThread, "target-work") >= 0 {
+		t.Fatalf("lost-response replay thread=%+v receipt=%+v err=%v", replayedThread, replayedReceipt, err)
+	}
+
+	// Restart from the same durable memory file: the replacement card and both
+	// artifacts survive while the superseded chat projection stays absent.
+	restarted := newKanbanBoardApp()
+	restartedThread, _, err := restarted.scoutChatThreadByID(admin.Email, channel.ID)
+	if err != nil {
+		t.Fatalf("restart thread read: %v", err)
+	}
+	if scoutChatMessageIndex(restartedThread, "target-work") >= 0 || scoutChatMessageIndex(restartedThread, "replacement-work") < 0 {
+		t.Fatalf("restart resurrected superseded work or lost replacement: %+v", restartedThread.Messages)
+	}
+	if _, ok := restarted.osArtifactByID("target-artifact"); !ok {
+		t.Fatal("restart lost superseded target artifact")
+	}
+	if _, ok := restarted.osArtifactByID("replacement-artifact"); !ok {
+		t.Fatal("restart lost replacement artifact")
 	}
 }
 
@@ -266,6 +458,52 @@ func TestScoutChatAdminModerationRouteRequiresAdminAndReason(t *testing.T) {
 	}
 	if pendingPayload.OK || !pendingPayload.Accepted || pendingPayload.Receipt.ProjectionState != scoutChatModerationPending {
 		t.Fatalf("pending moderation falsely reported complete: %+v", pendingPayload)
+	}
+}
+
+func TestScoutChatSupersessionDoesNotAcceptCanonicalDeleteWithoutExactReference(t *testing.T) {
+	setupAuthTestEnv(t)
+	_ = loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	_ = loginAs(t, "tim@shareability.com", "B0NFIRE!")
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	channel, err := kanbanApp.createScoutChatThread("tim@shareability.com", "Tim", "Bonfire Chat", "public")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	config := strideIntegratedRuntimeConfig(t.TempDir())
+	config.RecallThreadIDs = []string{channel.ID}
+	runtime, err := NewSTRIDERuntime(config)
+	if err != nil {
+		t.Fatalf("create STRIDE runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = runtime.Close() })
+	kanbanApp.strideRuntime = runtime
+	message := scoutChatMessageRecord{ID: "target-work", Kind: "message", Role: "scout", Text: "old work", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	channel, err = kanbanApp.commitScoutChatThreadMessages("tim@shareability.com", channel.ID, message)
+	if err != nil {
+		t.Fatalf("commit source: %v", err)
+	}
+	prior, found, err := kanbanApp.latestSTRIDETeamChatEvent(channel.ID, message.ID)
+	if err != nil || !found {
+		t.Fatalf("read projected source found=%v err=%v", found, err)
+	}
+	if _, err := kanbanApp.projectSTRIDETeamChatMessage(channel, message, "delete", "aj@shareability.com"); err != nil {
+		t.Fatalf("project unrelated delete: %v", err)
+	}
+	contentDigest, _ := strideChatMessageContentDigest(false, message)
+	receipt := scoutChatModerationReceipt{
+		OperationID: "chat_work_supersession_exact_ref", ThreadID: channel.ID, MessageID: message.ID,
+		ActorEmail: "aj@shareability.com", ReasonDigest: sha256Hex([]byte("superseded")), TargetContentDigest: contentDigest,
+		TargetEventID: prior.Header.ID, TargetEventRevision: prior.ContentRevision, DeletedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		ProjectionState: scoutChatModerationPending, Target: scoutChatMessageRecord{ID: message.ID, Kind: message.Kind, Role: message.Role, CreatedAt: message.CreatedAt},
+		TargetWork:      &scoutChatWorkModerationBinding{MessageID: message.ID, ThreadID: "run-old", ArtifactID: "artifact-old", Status: "error", ArtifactDigest: strings.Repeat("a", 64)},
+		ReplacementWork: &scoutChatWorkModerationBinding{MessageID: "replacement-work", ThreadID: "run-new", ArtifactID: "artifact-new", Status: "complete", ArtifactDigest: strings.Repeat("b", 64)},
+	}
+	if err := kanbanApp.retractSTRIDETeamChatModeration(channel, receipt); !errors.Is(err, ErrSTRIDEConversationConflict) {
+		t.Fatalf("wrong-reference canonical delete err=%v, want conflict", err)
 	}
 }
 

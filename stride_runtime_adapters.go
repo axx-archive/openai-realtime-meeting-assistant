@@ -235,15 +235,17 @@ func (app *kanbanBoardApp) latestSTRIDETeamChatEvent(threadID string, messageID 
 
 func scoutChatModerationReference(receipt scoutChatModerationReceipt) (STRIDEReference, error) {
 	digest, err := STRIDEContractDigest(struct {
-		OperationID         string `json:"operationId"`
-		ThreadID            string `json:"threadId"`
-		MessageID           string `json:"messageId"`
-		ActorEmail          string `json:"actorEmail"`
-		ReasonDigest        string `json:"reasonDigest"`
-		TargetContentDigest string `json:"targetContentDigest"`
-		TargetEventID       string `json:"targetEventId,omitempty"`
-		TargetEventRevision int64  `json:"targetEventRevision,omitempty"`
-	}{receipt.OperationID, receipt.ThreadID, receipt.MessageID, receipt.ActorEmail, receipt.ReasonDigest, receipt.TargetContentDigest, receipt.TargetEventID, receipt.TargetEventRevision})
+		OperationID         string                          `json:"operationId"`
+		ThreadID            string                          `json:"threadId"`
+		MessageID           string                          `json:"messageId"`
+		ActorEmail          string                          `json:"actorEmail"`
+		ReasonDigest        string                          `json:"reasonDigest"`
+		TargetContentDigest string                          `json:"targetContentDigest"`
+		TargetEventID       string                          `json:"targetEventId,omitempty"`
+		TargetEventRevision int64                           `json:"targetEventRevision,omitempty"`
+		TargetWork          *scoutChatWorkModerationBinding `json:"targetWork,omitempty"`
+		ReplacementWork     *scoutChatWorkModerationBinding `json:"replacementWork,omitempty"`
+	}{receipt.OperationID, receipt.ThreadID, receipt.MessageID, receipt.ActorEmail, receipt.ReasonDigest, receipt.TargetContentDigest, receipt.TargetEventID, receipt.TargetEventRevision, receipt.TargetWork, receipt.ReplacementWork})
 	if err != nil {
 		return STRIDEReference{}, err
 	}
@@ -279,7 +281,7 @@ func (app *kanbanBoardApp) retractSTRIDETeamChatModeration(thread scoutChatThrea
 	if err != nil {
 		return err
 	}
-	if !found || latest.EventType == "delete" && (strideConversationEventHasReference(latest, ref) || latest.SourceID == receipt.MessageID) {
+	if !found || latest.EventType == "delete" && strideConversationEventHasReference(latest, ref) {
 		return app.strideRuntime.Save()
 	}
 	if receipt.TargetEventID != "" && (latest.Header.ID != receipt.TargetEventID || latest.ContentRevision != receipt.TargetEventRevision) {
